@@ -1,0 +1,32 @@
+{
+  "name": "smart-editor-v9.9-يتعدل",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "@tiptap/starter-kit": "^3.7.2",
+    "@tiptap/react": "^3.7.2",
+    "@tiptap/extension-highlight": "^3.7.2",
+    "@tiptap/extension-table": "^3.7.2",
+    "@tiptap/extension-table-row": "^3.7.2",
+    "@tiptap/extension-table-header": "^3.7.2",
+    "@tiptap/extension-table-cell": "^3.7.2",
+    "@tiptap/extension-text-align": "^3.7.2",
+    "lucide-react": "^0.546.0",
+    "@tiptap/core": "^3.7.2",
+    "@google/genai": "^1.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

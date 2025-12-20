@@ -1,0 +1,13 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+
+html {
+  font-size: 14px;
+}
+body {
+  font-family: 'Cairo', sans-serif;
+  background-color: #FAFAFA;
+  overflow-x: hidden;
+}
+.dark body {
+  background-color: #181818; /* gray-900 */
+}
