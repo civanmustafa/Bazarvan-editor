@@ -36,10 +36,10 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // Fix: Using gemini-3-pro-preview for complex SEO tasks
+    // Use the current Gemini Pro preview model for complex SEO tasks.
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: prompt,
     });
     

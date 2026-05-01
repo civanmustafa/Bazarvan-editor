@@ -1,5 +1,6 @@
 
 import React, { useState, useCallback, createContext, useContext, useEffect, useRef } from 'react';
+import { GoogleGenAI } from '@google/genai';
 import { useUser } from './UserContext';
 import { useEditor } from './EditorContext';
 import { useModal } from './ModalContext';
@@ -7,26 +8,38 @@ import type { CheckResult, HeadingAnalysisResult, AIHistoryItem } from '../types
 import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { FIXABLE_RULES } from '../constants';
 
+const GEMINI_MODEL = 'gemini-3.1-pro-preview';
+
 const callGeminiAnalysis = async (prompt: string, userKey?: string): Promise<string> => {
     try {
-      // Route AI requests through the Vercel function instead of the browser.
       const trimmedUserKey = userKey?.trim();
+      if (trimmedUserKey) {
+        const ai = new GoogleGenAI({ apiKey: trimmedUserKey });
+        const response = await ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: prompt,
+        });
+        return typeof response.text === 'string' ? response.text : '';
+      }
+
       const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          apiKey: trimmedUserKey || undefined,
-        }),
+        body: JSON.stringify({ prompt }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      const isJson = response.headers.get('content-type')?.includes('application/json');
+      const data = isJson ? await response.json().catch(() => ({})) : {};
 
       if (!response.ok) {
           throw new Error(data.error || `Gemini request failed with status ${response.status}`);
       }
 
-      return typeof data.text === 'string' ? data.text : '';
+      if (typeof data.text !== 'string') {
+          throw new Error('Gemini server route did not return a valid text response.');
+      }
+
+      return data.text;
     } catch (error) {
       console.error("Error calling Gemini API:", error);
       const errorMessage = error instanceof Error ? error.message : "خطأ غير معروف";
