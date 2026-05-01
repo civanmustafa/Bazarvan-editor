@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X } from 'lucide-react';
 import { useInteraction } from '../contexts/InteractionContext';
@@ -67,7 +67,7 @@ const SpotlightSearch: React.FC = () => {
                     {query && (
                         <button 
                             onClick={() => setQuery('')}
-                            className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-[#3C3C3C] text-gray-400 transition-colors"
+                            className="p-1 rounded-full hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 text-gray-400 transition-colors"
                         >
                             <X size={18} />
                         </button>

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+﻿import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { DuplicateAnalysis, DuplicateStats, DuplicatePhrase } from '../types';
 import { ChevronDown, Eye, Copy, FileText, Sparkles, CopyX, Repeat, Key } from 'lucide-react';
 import { SECONDARY_COLORS } from '../constants';
@@ -9,7 +9,7 @@ import { useInteraction } from '../contexts/InteractionContext';
 
 const StatDisplay: React.FC<{ icon: React.ReactNode; value: number | string; label: string }> = ({ icon, value, label }) => (
     <div title={label} className="flex-1 flex items-center justify-center gap-2 p-2 text-center flex-col cursor-help">
-      <div className="p-2 bg-[#00778e]/10 dark:bg-[#00778e]/20 text-[#00778e] rounded-full">
+      <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
         {icon}
       </div>
       <div className="font-bold text-base text-[#333333] dark:text-[#b7b7b7]">{value}</div>
@@ -136,7 +136,7 @@ const DuplicatesTab: React.FC = () => {
                 <li
                     key={phrase.text}
                     onClick={() => handlePhraseClick(phrase, accentColor)}
-                    className={`group relative flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${uiLanguage === 'ar' ? 'pr-5' : 'pl-5'} ${isHighlighted ? 'bg-[#00778e]/10 dark:bg-[#00778e]/30' : 'bg-gray-50 dark:bg-[#2A2A2A] hover:bg-gray-100 dark:hover:bg-[#3C3C3C]'}`}
+                    className={`group relative flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${uiLanguage === 'ar' ? 'pr-5' : 'pl-5'} ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/30' : 'bg-gray-50 dark:bg-[#2A2A2A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
                 >
                     <div 
                         className={`absolute top-0 h-full w-1.5 ${uiLanguage === 'ar' ? 'right-0 rounded-r-md' : 'left-0 rounded-l-md'}`}
@@ -146,7 +146,7 @@ const DuplicatesTab: React.FC = () => {
                     <span className="text-[#333333] dark:text-[#8d8d8d] text-sm font-medium flex-grow">{phrase.text}</span>
                     
                     <div className="flex items-center gap-3 ps-1 flex-shrink-0">
-                        <span className="text-xs font-semibold bg-[#00778e]/10 text-[#005f73] dark:bg-[#00778e]/20 dark:text-[#94d2bd] rounded-full px-2.5 py-0.5">
+                        <span className="text-xs font-semibold bg-[#d4af37]/10 text-[#b8922e] dark:bg-[#d4af37]/20 dark:text-[#f2d675] rounded-full px-2.5 py-0.5">
                             {phrase.count}
                         </span>
                         <button
@@ -154,7 +154,7 @@ const DuplicatesTab: React.FC = () => {
                                 e.stopPropagation();
                                 navigator.clipboard.writeText(phrase.text);
                             }}
-                            className="p-1.5 rounded-full text-[#00778e] hover:bg-gray-200 dark:hover:bg-[#3C3C3C] transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            className="p-1.5 rounded-full text-[#d4af37] hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                             title={t.copyAll}
                             aria-label="Copy phrase"
                         >
@@ -200,21 +200,21 @@ const DuplicatesTab: React.FC = () => {
                 <div key={key} className="mb-2 bg-white dark:bg-[#2A2A2A] border border-gray-200 dark:border-[#3C3C3C] rounded-lg overflow-hidden transition-all duration-300">
                     <div
                         onClick={() => toggleSection(key)}
-                        className="w-full p-3 transition cursor-pointer hover:bg-gray-50 dark:hover:bg-[#3C3C3C]"
+                        className="w-full p-3 transition cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
                     >
                         <div className="flex justify-between items-center">
                             <span className="font-bold text-sm text-[#333333] dark:text-[#C7C7C7]">{`${t.phrases} ${nGramMap[key]}`}</span>
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={(e) => { e.stopPropagation(); handleHighlightAll(phrases); }}
-                                    className="p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-blue-100 dark:hover:bg-[#00778e]/20"
+                                    className="p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
                                     title={isThisCategoryHighlighted ? t.unhighlightAll : tLeftSidebar.highlightAll}
                                 >
-                                    <Eye size={16} className={isThisCategoryHighlighted ? "text-[#00778e]" : ""} />
+                                    <Eye size={16} className={isThisCategoryHighlighted ? "text-[#d4af37]" : ""} />
                                 </button>
                                 <button
                                     onClick={(e) => { e.stopPropagation(); copyAll(phrases); }}
-                                    className="p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-blue-100 dark:hover:bg-[#00778e]/20"
+                                    className="p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
                                     title={t.copyAll}
                                 >
                                     <Copy size={16} />
@@ -225,12 +225,12 @@ const DuplicatesTab: React.FC = () => {
                         <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 flex justify-between items-center">
                             <div className="flex gap-4">
                                 <span><span className="font-bold text-[#333] dark:text-gray-300">{totalPhrases}</span> {t.phrases}</span>
-                                <span className="text-blue-600 dark:text-blue-400"><span className="font-bold">{keywordPhrasesCount}</span> {t.keyword}</span>
+                                <span className="text-[#d4af37] dark:text-[#f2d675]"><span className="font-bold">{keywordPhrasesCount}</span> {t.keyword}</span>
                                 <span className="text-gray-600 dark:text-gray-300"><span className="font-bold">{commonPhrasesCount}</span> {t.common}</span>
                             </div>
                         </div>
                         <div className="w-full bg-gray-200 dark:bg-[#1F1F1F] rounded-full h-1.5 mt-2 flex overflow-hidden">
-                            <div className="bg-blue-500 h-full" style={{ width: `${keywordPercentage}%` }} title={`${t.keyword}: ${keywordPercentage.toFixed(1)}%`}></div>
+                            <div className="bg-[#d4af37]/100 h-full" style={{ width: `${keywordPercentage}%` }} title={`${t.keyword}: ${keywordPercentage.toFixed(1)}%`}></div>
                             <div className="bg-gray-400 dark:bg-gray-500 h-full" style={{ width: `${commonPercentage}%` }} title={`${t.common}: ${commonPercentage.toFixed(1)}%`}></div>
                         </div>
                     </div>

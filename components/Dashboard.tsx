@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, ChevronRight, FileDown, Filter, X, Calendar, Settings, Languages } from 'lucide-react';
 import { getActivityData, UserActivity, ArticleActivity, deleteArticleActivity, renameArticleActivity, clearUserActivity } from '../hooks/useUserActivity';
@@ -23,7 +23,7 @@ const formatSeconds = (seconds: number, t: typeof translations.ar): string => {
 
 const SummaryStat: React.FC<{ icon: React.ReactNode; label: string; value: string | number }> = ({ icon, label, value }) => (
   <div className="flex items-center gap-4 p-4 bg-white dark:bg-[#2A2A2A] rounded-lg border border-gray-200 dark:border-[#3C3C3C]">
-    <div className="p-3 bg-[#00778e]/10 dark:bg-[#00778e]/20 text-[#00778e] rounded-lg">
+    <div className="p-3 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-lg">
       {icon}
     </div>
     <div className="text-start">
@@ -109,7 +109,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
 
     if (isRenaming) {
       return (
-          <li className="p-3 bg-gray-100 dark:bg-[#3C3C3C] rounded-lg ring-2 ring-[#00778e]">
+          <li className="p-3 bg-gray-100 dark:bg-[#3C3C3C] rounded-lg ring-2 ring-[#d4af37]">
               <form onSubmit={handleRenameSubmit}>
                   <input
                       ref={inputRef}
@@ -117,14 +117,14 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
                       value={newTitle}
                       onChange={(e) => setNewTitle(e.target.value)}
                       onClick={(e) => e.stopPropagation()}
-                      className="w-full p-2 text-sm font-bold bg-white dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#4A4A4A] focus:ring-1 focus:ring-[#00778e] focus:border-[#00778e] text-[#333333] dark:text-gray-200"
+                      className="w-full p-2 text-sm font-bold bg-white dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#4A4A4A] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-[#333333] dark:text-gray-200"
                       aria-label="New article title"
                   />
                   <div className="flex justify-end gap-2 mt-2">
-                      <button type="button" onClick={(e)=>{e.stopPropagation(); handleCancelRename();}} className="px-3 py-1 text-xs font-semibold text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 dark:bg-[#4A4A4A] dark:text-gray-200 dark:hover:bg-[#5A5A5A]">
+                      <button type="button" onClick={(e)=>{e.stopPropagation(); handleCancelRename();}} className="px-3 py-1 text-xs font-semibold text-gray-700 bg-gray-200 rounded-md hover:bg-[#d4af37]/20 dark:bg-[#4A4A4A] dark:text-gray-200 dark:hover:bg-[#d4af37]/25">
                           {t.cancel}
                       </button>
-                      <button type="submit" className="px-3 py-1 text-xs font-semibold text-white bg-[#00778e] rounded-md hover:bg-[#005f73]">
+                      <button type="submit" className="px-3 py-1 text-xs font-semibold text-white bg-[#d4af37] rounded-md hover:bg-[#b8922e]">
                           {t.save}
                       </button>
                   </div>
@@ -171,7 +171,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
                         <span>{activity.stats?.violatingCriteriaCount ?? 0}</span>
                     </span>
                     <span className="flex items-center gap-1.5" title={t.totalDuplicates}>
-                        <Repeat size={12} className="text-blue-500" />
+                        <Repeat size={12} className="text-[#d4af37]" />
                         <span>{activity.stats?.totalDuplicates ?? 0}</span>
                     </span>
                 </div>
@@ -179,14 +179,14 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex-shrink-0">
                  <button
                     onClick={handleStartRename}
-                    className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-gray-100 hover:text-blue-600 dark:hover:bg-[#3C3C3C] dark:hover:text-blue-400"
+                    className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
                     title={t.renameArticle}
                 >
                     <Edit size={16} />
                 </button>
                 <button
                     onClick={handleDelete}
-                    className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-gray-100 hover:text-red-600 dark:hover:bg-[#3C3C3C] dark:hover:text-red-400"
+                    className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-red-600 dark:hover:bg-[#d4af37]/20 dark:hover:text-red-400"
                     title={t.deleteArticle}
                 >
                     <Trash2 size={16} />
@@ -324,13 +324,13 @@ const Dashboard: React.FC = () => {
             <style>
                 body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f9f9f9; margin: 0; padding: 20px; }
                 .container { max-width: 1200px; margin: auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                h1, h2 { color: #005f73; border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; }
+                h1, h2 { color: #b8922e; border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; }
                 h1 { font-size: 2em; }
                 h2 { font-size: 1.5em; margin-top: 30px; }
                 p { color: #666; }
                 .summary-table, .articles-table { width: 100%; border-collapse: collapse; margin-top: 15px; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'}; }
                 .summary-table th, .summary-table td, .articles-table th, .articles-table td { padding: 12px; border: 1px solid #ddd; }
-                .summary-table th { background-color: #f2f2f2; font-weight: bold; color: #005f73; }
+                .summary-table th { background-color: #f2f2f2; font-weight: bold; color: #b8922e; }
                 .summary-table th { width: 30%; }
                 .summary-table tr:nth-child(even), .articles-table tr:nth-child(even) { background-color: #f9f9f9; }
                 .articles-table { font-size: 0.9em; table-layout: fixed; }
@@ -430,13 +430,13 @@ const Dashboard: React.FC = () => {
   }, [currentUserData, filters]);
   
   const styleButtonClass = (isActive: boolean) =>
-    `flex-1 flex items-center justify-center gap-2 p-2 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-100 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#00778e] ${
+    `flex-1 flex items-center justify-center gap-2 p-2 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-100 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#d4af37] ${
       isActive
-        ? 'bg-[#00778e] text-white shadow-sm'
-        : 'bg-white hover:bg-gray-200 dark:bg-[#2A2A2A] dark:hover:bg-[#3C3C3C] text-[#333333] dark:text-[#8d8d8d]'
+        ? 'bg-[#d4af37] text-white shadow-sm'
+        : 'bg-white hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 text-[#333333] dark:text-[#8d8d8d]'
     }`;
 
-  const inputClass = "w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#00778e] focus:border-[#00778e] text-sm text-[#333333] dark:text-[#e0e0e0]";
+  const inputClass = "w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0]";
 
   return (
     <div className={`min-h-screen ${isDarkMode ? 'dark' : ''} bg-gray-50 dark:bg-[#181818]`}>
@@ -444,26 +444,26 @@ const Dashboard: React.FC = () => {
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-bold text-[#333333] dark:text-gray-100">{t.dashboardTitle}</h1>
-            <p className="mt-1 text-gray-500 dark:text-gray-400">{t.welcomeBack}, <span className="font-bold text-[#00778e]">{currentUser}</span>!</p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">{t.welcomeBack}, <span className="font-bold text-[#d4af37]">{currentUser}</span>!</p>
           </div>
            <div className="flex items-center gap-2">
             <button
               onClick={onNewArticle}
-              className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-gray-100 dark:hover:bg-[#3C3C3C] transition-colors"
+              className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
             >
               <PlusSquare size={18} />
               <span>{t.newArticle}</span>
             </button>
             <button
               onClick={onGoToEditor}
-              className="flex items-center gap-2 px-4 py-2 font-bold text-white bg-[#00778e] rounded-lg hover:bg-[#005f73] transition-colors"
+              className="flex items-center gap-2 px-4 py-2 font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] transition-colors"
             >
               <Edit size={18} />
               <span>{t.goToEditor}</span>
             </button>
             <button
               onClick={handleExportHtml}
-              className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-gray-100 dark:hover:bg-[#3C3C3C] transition-colors"
+              className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
             >
               <FileDown size={18} />
               <span>{t.exportHtml}</span>
@@ -478,7 +478,7 @@ const Dashboard: React.FC = () => {
             </button>
             <button
               onClick={onLogout}
-              className="p-2.5 border rounded-lg transition-colors text-gray-500 dark:text-[#8d8d8d] border-gray-300 dark:border-[#3C3C3C] bg-white hover:bg-gray-100 dark:bg-[#2A2A2A] dark:hover:bg-[#3C3C3C]"
+              className="p-2.5 border rounded-lg transition-colors text-gray-500 dark:text-[#8d8d8d] border-gray-300 dark:border-[#3C3C3C] bg-white hover:bg-[#d4af37]/10 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20"
               title={t.logout}
             >
               <LogOut size={18} />
@@ -493,7 +493,7 @@ const Dashboard: React.FC = () => {
                     <div className="flex items-center gap-4">
                         <button
                             onClick={() => setIsFilterVisible(!isFilterVisible)}
-                            className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-[#00778e] dark:hover:text-[#94d2bd]"
+                            className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-[#d4af37] dark:hover:text-[#f2d675]"
                             title={isFilterVisible ? t.hideFilters : t.showFilters}
                         >
                             <Filter size={14} />
@@ -501,7 +501,7 @@ const Dashboard: React.FC = () => {
                         </button>
                         <button
                             onClick={refreshData}
-                            className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-[#00778e] dark:hover:text-[#94d2bd]"
+                            className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-[#d4af37] dark:hover:text-[#f2d675]"
                             title={t.refreshData}
                         >
                             <RefreshCw size={14} />
@@ -514,7 +514,7 @@ const Dashboard: React.FC = () => {
                     <div className="p-4 mb-6 bg-white/50 dark:bg-[#2A2A2A]/50 rounded-xl border border-gray-200 dark:border-[#3C3C3C] backdrop-blur-sm">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold text-gray-700 dark:text-gray-200">{t.filterOptions}</h3>
-                            <button onClick={handleResetFilters} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 bg-gray-100/50 dark:bg-[#3C3C3C]/50 rounded-md hover:bg-gray-200/70 dark:hover:bg-[#4A4A4A]/70 transition-colors">
+                            <button onClick={handleResetFilters} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 bg-gray-100/50 dark:bg-[#3C3C3C]/50 rounded-md hover:bg-[#d4af37]/20 dark:hover:bg-[#d4af37]/25 transition-colors">
                                 <X size={14} />
                                 <span>{t.reset}</span>
                             </button>
@@ -522,7 +522,7 @@ const Dashboard: React.FC = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
                             <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
-                                    <Calendar size={16} className="text-[#00778e]" />
+                                    <Calendar size={16} className="text-[#d4af37]" />
                                     <span>{t.saveDate}</span>
                                 </label>
                                 <div className="flex items-center gap-2">
@@ -533,7 +533,7 @@ const Dashboard: React.FC = () => {
                             </div>
                              <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
-                                    <FileText size={16} className="text-[#00778e]" />
+                                    <FileText size={16} className="text-[#d4af37]" />
                                     <span>{t.wordCount}</span>
                                 </label>
                                 <div className="flex items-center gap-2">
@@ -544,7 +544,7 @@ const Dashboard: React.FC = () => {
                             </div>
                              <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
-                                    <Clock size={16} className="text-[#00778e]" />
+                                    <Clock size={16} className="text-[#d4af37]" />
                                     <span>{t.timeSpent} ({t.minutes})</span>
                                 </label>
                                 <div className="flex items-center gap-2">
@@ -555,7 +555,7 @@ const Dashboard: React.FC = () => {
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
-                                    <Languages size={16} className="text-[#00778e]" />
+                                    <Languages size={16} className="text-[#d4af37]" />
                                     <span>{t.language}</span>
                                 </label>
                                 <select name="language" value={filters.language} onChange={handleFilterChange} className={inputClass}>
@@ -611,7 +611,7 @@ const Dashboard: React.FC = () => {
                     <div className="p-4 bg-white dark:bg-[#2A2A2A] rounded-lg border border-gray-200 dark:border-[#3C3C3C] space-y-4">
                          <button
                             onClick={() => openModal('apiKeys')}
-                            className="w-full flex items-center justify-center gap-2 p-2 bg-[#00778e]/10 text-[#00778e] dark:bg-[#00778e]/20 dark:text-teal-300 font-bold rounded-lg hover:bg-[#00778e]/20 transition-colors"
+                            className="w-full flex items-center justify-center gap-2 p-2 bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675] font-bold rounded-lg hover:bg-[#d4af37]/20 transition-colors"
                         >
                             <Key size={18} />
                             <span>{t.manageApiKeys}</span>
@@ -692,7 +692,7 @@ const Dashboard: React.FC = () => {
                     </button>
                     <button
                         type="button"
-                        className="mt-3 inline-flex w-full justify-center rounded-md bg-white dark:bg-[#3C3C3C] px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-200 shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-[#4A4A4A] hover:bg-gray-50 dark:hover:bg-[#4A4A4A] sm:mt-0 sm:w-auto"
+                        className="mt-3 inline-flex w-full justify-center rounded-md bg-white dark:bg-[#3C3C3C] px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-200 shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-[#4A4A4A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/25 sm:mt-0 sm:w-auto"
                         onClick={() => setIsConfirmModalOpen(false)}
                     >
                         {t.cancel}

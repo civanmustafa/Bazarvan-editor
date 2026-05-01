@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -62,10 +62,10 @@ const SuggestionModal: React.FC = () => {
       >
         <div className="flex justify-between items-center p-3 border-b border-gray-200 dark:border-[#3C3C3C] flex-shrink-0">
           <h3 className="text-base font-bold text-[#333333] dark:text-gray-100 flex items-center gap-2">
-            <Sparkles size={16} className="text-[#00778e]" />
+            <Sparkles size={16} className="text-[#d4af37]" />
             <span>{t.suggestion}</span>
           </h3>
-          <button onClick={handleCancel} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-[#3C3C3C]" aria-label={t.close}>
+          <button onClick={handleCancel} className="p-1 rounded-full hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20" aria-label={t.close}>
             <X size={16} className="text-gray-500 dark:text-gray-400" />
           </button>
         </div>
@@ -85,12 +85,12 @@ const SuggestionModal: React.FC = () => {
               <div
                 key={index}
                 onClick={() => handleAccept(suggestionText)}
-                className="flex-1 p-3 bg-[#00778e]/10 dark:bg-[#00778e]/20 rounded-md text-sm text-[#005f73] dark:text-[#94d2bd] cursor-pointer transition-colors hover:bg-[#00778e]/20 dark:hover:bg-[#00778e]/30"
+                className="flex-1 p-3 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 rounded-md text-sm text-[#b8922e] dark:text-[#f2d675] cursor-pointer transition-colors hover:bg-[#d4af37]/20 dark:hover:bg-[#d4af37]/30"
                 role="button"
                 tabIndex={0}
                 title={t.acceptSuggestion.replace('{number}', String(index + 1))}
               >
-                <h4 className="font-semibold text-xs text-[#005f73] dark:text-teal-300 mb-1.5">
+                <h4 className="font-semibold text-xs text-[#b8922e] dark:text-[#f2d675] mb-1.5">
                   {t.suggestion} {index + 1} ({t.clickToAccept})
                 </h4>
                 <div

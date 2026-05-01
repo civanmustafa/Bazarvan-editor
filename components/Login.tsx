@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { LogIn } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -36,7 +36,7 @@ const Login: React.FC = () => {
                 type="text"
                 autoComplete="username"
                 required
-                className="relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-[#00778e] focus:border-[#00778e] focus:z-10 sm:text-sm dark:bg-[#2A2A2A] dark:border-[#3C3C3C] dark:placeholder-gray-400 dark:text-gray-100"
+                className="relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-[#d4af37] focus:border-[#d4af37] focus:z-10 sm:text-sm dark:bg-[#2A2A2A] dark:border-[#3C3C3C] dark:placeholder-gray-400 dark:text-gray-100"
                 placeholder={t.username}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -50,7 +50,7 @@ const Login: React.FC = () => {
                 type="password"
                 autoComplete="current-password"
                 required
-                className="relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-[#00778e] focus:border-[#00778e] focus:z-10 sm:text-sm dark:bg-[#2A2A2A] dark:border-[#3C3C3C] dark:placeholder-gray-400 dark:text-gray-100"
+                className="relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-[#d4af37] focus:border-[#d4af37] focus:z-10 sm:text-sm dark:bg-[#2A2A2A] dark:border-[#3C3C3C] dark:placeholder-gray-400 dark:text-gray-100"
                 placeholder={t.password}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -67,10 +67,10 @@ const Login: React.FC = () => {
           <div>
             <button
               type="submit"
-              className="group relative flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-[#00778e] border border-transparent rounded-md hover:bg-[#005f73] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#00778e] dark:focus:ring-offset-gray-800"
+              className="group relative flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-[#d4af37] border border-transparent rounded-md hover:bg-[#b8922e] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#d4af37] dark:focus:ring-offset-gray-800"
             >
               <span className="absolute inset-y-0 start-0 flex items-center ps-3">
-                <LogIn className="w-5 h-5 text-teal-300 group-hover:text-teal-200" aria-hidden="true" />
+                <LogIn className="w-5 h-5 text-[#f2d675] group-hover:text-white" aria-hidden="true" />
               </span>
               {t.loginButton}
             </button>

@@ -1,12 +1,12 @@
-import React from 'react';
+﻿import React from 'react';
 
 export const ToolbarButton: React.FC<{ onClick: () => void; title: string; isActive?: boolean; disabled?: boolean; children: React.ReactNode }> = ({ onClick, title, isActive = false, disabled = false, children }) => {
-  const baseClasses = "p-1.5 rounded-md transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#00778e]";
+  const baseClasses = "p-1.5 rounded-md transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#d4af37]";
   const stateClasses = isActive
-    ? 'bg-[#00778e]/10 text-[#00778e] dark:bg-[#0078d4]/20 dark:text-[#94d2bd]'
+    ? 'bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
     : disabled
     ? 'text-gray-400 dark:text-gray-600 bg-transparent cursor-not-allowed'
-    : 'text-gray-600 dark:text-gray-300 bg-transparent hover:bg-gray-200 dark:hover:bg-[#3C3C3C]';
+    : 'text-gray-600 dark:text-gray-300 bg-transparent hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20';
 
   return (
     <button onClick={onClick} title={title} disabled={disabled} className={`${baseClasses} ${stateClasses}`}>

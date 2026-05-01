@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { useAI } from '../contexts/AIContext';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
@@ -34,7 +34,7 @@ const AIHistoryTab: React.FC = () => {
                     <div className="p-3 border-b border-gray-200 dark:border-[#3C3C3C]">
                         <div className="flex justify-between items-start gap-2">
                             <div>
-                                <h4 className="text-xs font-bold text-[#00778e] dark:text-teal-400 uppercase tracking-wider">
+                                <h4 className="text-xs font-bold text-[#d4af37] dark:text-[#f2d675] uppercase tracking-wider">
                                     {item.type === 'fix-violation' ? t.aiHistory.violationFix : t.aiHistory.userCommand}
                                 </h4>
                                 {item.ruleTitle && (
@@ -51,7 +51,7 @@ const AIHistoryTab: React.FC = () => {
                         </div>
                         <p 
                             onClick={() => handleOriginalTextClick(item.from, item.to)}
-                            className="mt-2 text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#1F1F1F] p-2 rounded-md line-clamp-2 cursor-pointer hover:bg-gray-200 dark:hover:bg-[#3C3C3C] transition-colors"
+                            className="mt-2 text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#1F1F1F] p-2 rounded-md line-clamp-2 cursor-pointer hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 transition-colors"
                             title={t.aiHistory.original}
                         >
                             <span className="font-semibold">{t.aiHistory.original}: </span><span className="ai-history-content-text">{item.originalText}</span>
@@ -77,7 +77,7 @@ const AIHistoryTab: React.FC = () => {
                                             ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-700/50 border'
                                             : isDisabled
                                                 ? 'bg-gray-100 dark:bg-[#1F1F1F] opacity-50 cursor-not-allowed'
-                                                : 'cursor-pointer bg-white dark:bg-[#1F1F1F] border border-gray-200 dark:border-[#3C3C3C] hover:bg-gray-100 dark:hover:bg-[#3C3C3C]'
+                                                : 'cursor-pointer bg-white dark:bg-[#1F1F1F] border border-gray-200 dark:border-[#3C3C3C] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'
                                     }`}
                                 >
                                     {isApplied && (

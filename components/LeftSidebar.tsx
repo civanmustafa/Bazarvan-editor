@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check } from 'lucide-react';
 import DuplicatesTab from './DuplicatesTab';
 import { SECONDARY_COLORS } from '../constants';
@@ -10,7 +10,7 @@ import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, Duplicate
 
 const getProgressBarColor = (status: AnalysisStatus) => {
     switch (status) {
-        case 'pass': return '#00778e';
+        case 'pass': return '#d4af37';
         case 'warn': return '#F59E0B';
         case 'fail': return '#810701';
         default: return '#6B7280';
@@ -90,7 +90,7 @@ const ModernProgressBar: React.FC<{ analysis: KeywordStats, isCompact?: boolean,
 
 const ModernSection: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode; onClick?: () => void; }> = ({ icon, title, children, onClick }) => (
     <div 
-        className={`bg-white dark:bg-[#2A2A2A] rounded-xl shadow-sm border border-gray-300 dark:border-[#3C3C3C] p-2 transition-all duration-200 ${onClick ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#3C3C3C]' : ''}`}
+        className={`bg-white dark:bg-[#2A2A2A] rounded-xl shadow-sm border border-gray-300 dark:border-[#3C3C3C] p-2 transition-all duration-200 ${onClick ? 'cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20' : ''}`}
         onClick={onClick}
     >
         <h3 className="flex items-center gap-2 text-sm font-bold text-[#333333] dark:text-[#C7C7C7] mb-2">
@@ -129,14 +129,14 @@ const AdvancedKeywordCard: React.FC<{
 
   return (
     <div 
-      className={`relative bg-white dark:bg-[#2A2A2A] rounded-xl p-2 space-y-1 transition-all duration-300 border border-gray-300 dark:border-[#3C3C3C] ${onClick ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#3C3C3C]' : ''}`}
+      className={`relative bg-white dark:bg-[#2A2A2A] rounded-xl p-2 space-y-1 transition-all duration-300 border border-gray-300 dark:border-[#3C3C3C] ${onClick ? 'cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20' : ''}`}
       onClick={onClick}
     >
       <div className="flex justify-between items-center gap-3">
         {/* Main Content */}
         <div className="flex-grow space-y-1">
             <div className="flex items-center gap-2">
-                <span className="text-[#00778e]">{icon}</span>
+                <span className="text-[#d4af37]">{icon}</span>
                 <h4 className="text-lg font-bold text-[#333333] dark:text-[#C7C7C7]">{title}</h4>
             </div>
              <div className="text-sm text-gray-500 dark:text-gray-400 pt-2 space-y-1">
@@ -182,7 +182,7 @@ const CopyButton: React.FC<{ onCopy: () => void; t: typeof translations.ar.leftS
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1500);
             }}
-            className="p-1 rounded-full text-gray-400 hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/50 dark:hover:text-blue-400"
+            className="p-1 rounded-full text-gray-400 hover:bg-[#d4af37]/15 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
             title={copied ? t.copied : t.copy}
         >
             {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
@@ -211,7 +211,7 @@ const KeywordInput: React.FC<{
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       onClick={(e) => e.stopPropagation()}
-      className={`w-full py-2 ps-3 pe-14 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#00778e] focus:border-[#00778e] text-sm text-[#333333] dark:text-[#e0e0e0] ${isHighlighted ? 'ring-2 ring-offset-1 dark:ring-offset-[#181818] ring-[#00778e]' : ''} ${className}`}
+      className={`w-full py-2 ps-3 pe-14 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0] ${isHighlighted ? 'ring-2 ring-offset-1 dark:ring-offset-[#181818] ring-[#d4af37]' : ''} ${className}`}
     />
     <div className="absolute end-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
         {onCopy && value && <CopyButton onCopy={onCopy} t={t} />}
@@ -245,7 +245,7 @@ const LeftSidebar: React.FC = () => {
     const isActive = activeTab === tabName;
     return `flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${
       isActive
-        ? 'border-[#00778e] text-[#00778e] dark:text-white'
+        ? 'border-[#d4af37] text-[#d4af37] dark:text-white'
         : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white'
     }`;
   };
@@ -456,7 +456,7 @@ const LeftSidebar: React.FC = () => {
                 value={autoDistributeText}
                 onChange={(e) => setAutoDistributeText(e.target.value)}
                 onPaste={handlePasteAndDistribute}
-                className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#00778e] focus:border-[#00778e] text-sm text-[#333333] dark:text-[#e0e0e0] custom-scrollbar"
+                className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0] custom-scrollbar"
                 placeholder={tLk.pasteToDistribute}
             />
         </div>
@@ -526,7 +526,7 @@ const LeftSidebar: React.FC = () => {
                             )}
                         </div>
                     ))}
-                    <button onClick={handleAddSecondary} className="w-full flex items-center justify-center gap-2 py-2 text-sm font-semibold text-[#00778e] dark:text-[#94d2bd] bg-gray-100 dark:bg-[#3C3C3C] rounded-md hover:bg-gray-200 dark:hover:bg-[#4A4A4A]">
+                    <button onClick={handleAddSecondary} className="w-full flex items-center justify-center gap-2 py-2 text-sm font-semibold text-[#d4af37] dark:text-[#f2d675] bg-gray-100 dark:bg-[#3C3C3C] rounded-md hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25">
                         <Plus size={16} /> {tLk.addSynonym}
                     </button>
                     {enteredSynonymsCount > 0 && (
@@ -567,11 +567,11 @@ const LeftSidebar: React.FC = () => {
                         onKeyDown={handleLsiKeyDown}
                         onPaste={handleLsiPaste}
                         rows={2}
-                        className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#00778e] focus:border-[#00778e] text-sm text-[#333333] dark:text-[#e0e0e0] custom-scrollbar"
+                        className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0] custom-scrollbar"
                         placeholder={tLk.addLsiPlaceholder}
                     />
                     <div className="flex items-center gap-2">
-                        <button onClick={handleToggleAllLsiHighlights} disabled={keywords.lsi.length === 0} className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-[#3C3C3C] rounded-md hover:bg-gray-200 dark:hover:bg-[#4A4A4A] disabled:opacity-50 disabled:cursor-not-allowed">
+                        <button onClick={handleToggleAllLsiHighlights} disabled={keywords.lsi.length === 0} className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-[#3C3C3C] rounded-md hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 disabled:opacity-50 disabled:cursor-not-allowed">
                             <Eye size={14} /> <span>{tLk.highlightAll}</span>
                         </button>
                         <button onClick={handleClearLsi} disabled={keywords.lsi.length === 0} className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-md hover:bg-red-100 dark:hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -599,10 +599,10 @@ const LeftSidebar: React.FC = () => {
                                     <div
                                         key={kw}
                                         onClick={() => handleLsiHighlight(kw)}
-                                        className={`group flex items-center gap-2 rounded-lg border bg-white px-3 py-1.5 shadow-sm transition-all hover:shadow-md dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:hover:bg-[#3C3C3C] ${isKwHighlighted ? 'border-violet-400 ring-2 ring-violet-400/50' : 'border-gray-200'}`}
+                                        className={`group flex items-center gap-2 rounded-lg border bg-white px-3 py-1.5 shadow-sm transition-all hover:shadow-md dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 ${isKwHighlighted ? 'border-violet-400 ring-2 ring-violet-400/50' : 'border-gray-200'}`}
                                     >
                                         <span className="cursor-pointer text-sm font-medium text-gray-800 dark:text-gray-200">{kw}</span>
-                                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#00778e]/10 text-xs font-bold text-[#00778e] dark:bg-[#00778e]/20 dark:text-[#94d2bd]">
+                                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#d4af37]/10 text-xs font-bold text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
                                             {count}
                                         </span>
                                         <button
@@ -629,25 +629,25 @@ const LeftSidebar: React.FC = () => {
              <div className="px-1 py-1">
                 <div className="flex bg-white dark:bg-gradient-to-r from-[#2A2A2A] via-[#222222] to-[#1F1F1F] rounded-lg border border-gray-300 dark:border-[#3C3C3C] divide-x divide-gray-200 dark:divide-[#3C3C3C] cursor-help">
                     <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title={tLk.primary}>
-                        <div className="p-2 bg-[#00778e]/10 dark:bg-[#00778e]/20 text-[#00778e] rounded-full">
+                        <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
                             <KeyRound size={16} />
                         </div>
                         <div className="font-bold text-base text-[#333333] dark:text-gray-200">{`${keywordAnalysis.primary.count}/${keywordAnalysis.primary.requiredCount[1] || '-'}`}</div>
                     </div>
                     <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title={tLk.synonyms}>
-                        <div className="p-2 bg-[#00778e]/10 dark:bg-[#00778e]/20 text-[#00778e] rounded-full">
+                        <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
                             <ListChecks size={16} />
                         </div>
                         <div className="font-bold text-base text-[#333333] dark:text-gray-200">{`${keywordAnalysis.secondariesDistribution.count}/${keywordAnalysis.secondariesDistribution.requiredCount[1] || '-'}`}</div>
                     </div>
                     <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title={tLk.company}>
-                        <div className="p-2 bg-[#00778e]/10 dark:bg-[#00778e]/20 text-[#00778e] rounded-full">
+                        <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
                             <Users size={16} />
                         </div>
                         <div className="font-bold text-base text-[#333333] dark:text-gray-200">{`${keywordAnalysis.company.count}/${keywordAnalysis.company.requiredCount[1] || '-'}`}</div>
                     </div>
                     <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title="LSI">
-                        <div className="p-2 bg-[#00778e]/10 dark:bg-[#00778e]/20 text-[#00778e] rounded-full">
+                        <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
                             <Repeat size={16} />
                         </div>
                         <div className="font-bold text-base text-[#333333] dark:text-gray-200">{`${keywordAnalysis.lsi.distribution.count}/${keywordAnalysis.lsi.distribution.requiredCount[1] || '-'}`}</div>
@@ -714,7 +714,7 @@ const LeftSidebar: React.FC = () => {
                            )}
                         </div>
                     ))}
-                    <button onClick={handleAddSecondary} className="w-full flex items-center justify-center gap-2 py-2 text-sm font-semibold text-[#00778e] dark:text-[#94d2bd] bg-gray-100 dark:bg-[#3C3C3C] rounded-md hover:bg-gray-200 dark:hover:bg-[#4A4A4A]">
+                    <button onClick={handleAddSecondary} className="w-full flex items-center justify-center gap-2 py-2 text-sm font-semibold text-[#d4af37] dark:text-[#f2d675] bg-gray-100 dark:bg-[#3C3C3C] rounded-md hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25">
                         <Plus size={16} /> {tLk.addSynonym}
                     </button>
                 </div>
@@ -738,10 +738,10 @@ const LeftSidebar: React.FC = () => {
                             </button>
                              <button
                                 onClick={(e) => { e.stopPropagation(); handleToggleAllLsiHighlights(); }}
-                                className={`p-1.5 rounded-full transition-colors ${highlightedItem === '__ALL_LSI__' ? 'bg-blue-100 dark:bg-blue-900/50' : 'hover:bg-gray-100 dark:hover:bg-[#3C3C3C]'}`}
+                                className={`p-1.5 rounded-full transition-colors ${highlightedItem === '__ALL_LSI__' ? 'bg-[#d4af37]/15 dark:bg-[#d4af37]/20' : 'hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
                                 title={highlightedItem === '__ALL_LSI__' ? t.duplicatesTab.unhighlightAll : tLk.highlightAll}
                             >
-                                <Eye size={16} className={highlightedItem === '__ALL_LSI__' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'} />
+                                <Eye size={16} className={highlightedItem === '__ALL_LSI__' ? 'text-[#d4af37] dark:text-[#f2d675]' : 'text-gray-500 dark:text-gray-400'} />
                             </button>
                         </div>
                     ) : undefined
@@ -754,7 +754,7 @@ const LeftSidebar: React.FC = () => {
                         onKeyDown={handleLsiKeyDown}
                         onPaste={handleLsiPaste}
                         rows={2}
-                        className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#00778e] focus:border-[#00778e] text-sm text-[#333333] dark:text-[#e0e0e0] custom-scrollbar"
+                        className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0] custom-scrollbar"
                         placeholder={tLk.addLsiPlaceholder}
                     />
                     
@@ -780,10 +780,10 @@ const LeftSidebar: React.FC = () => {
                                         <div
                                             key={kw}
                                             onClick={() => handleLsiHighlight(kw)}
-                                            className={`group flex items-center gap-2 rounded-lg border bg-white px-3 py-1.5 shadow-sm transition-all hover:shadow-md dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:hover:bg-[#3C3C3C] ${isKwHighlighted ? 'border-violet-400 ring-2 ring-violet-400/50' : 'border-gray-200'}`}
+                                            className={`group flex items-center gap-2 rounded-lg border bg-white px-3 py-1.5 shadow-sm transition-all hover:shadow-md dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 ${isKwHighlighted ? 'border-violet-400 ring-2 ring-violet-400/50' : 'border-gray-200'}`}
                                         >
                                             <span className="cursor-pointer text-sm font-medium text-gray-800 dark:text-gray-200">{kw}</span>
-                                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#00778e]/10 text-xs font-bold text-[#00778e] dark:bg-[#00778e]/20 dark:text-[#94d2bd]">
+                                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#d4af37]/10 text-xs font-bold text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
                                                 {count}
                                             </span>
                                             <button
@@ -803,11 +803,11 @@ const LeftSidebar: React.FC = () => {
             </AdvancedKeywordCard>
             
              <div 
-               className="bg-white dark:bg-[#2A2A2A] rounded-xl p-2 space-y-2 transition-all duration-300 border border-gray-300 dark:border-[#3C3C3C] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#3C3C3C]"
+               className="bg-white dark:bg-[#2A2A2A] rounded-xl p-2 space-y-2 transition-all duration-300 border border-gray-300 dark:border-[#3C3C3C] cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
                onClick={() => handleHighlightToggle(keywords.company, 'company')}
              >
                 <div className="flex items-center gap-2">
-                    <span className="text-[#00778e]"><Users size={20} /></span>
+                    <span className="text-[#d4af37]"><Users size={20} /></span>
                     <h4 className="text-sm font-bold text-[#333333] dark:text-[#C7C7C7]">{tLk.companyName}</h4>
                 </div>
                 <div onClick={(e) => e.stopPropagation()}>

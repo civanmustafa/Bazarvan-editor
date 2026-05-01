@@ -106,6 +106,7 @@ export interface StructureAnalysis {
     sentenceBeginnings: CheckResult;
     warningWords: CheckResult;
     spacing: CheckResult;
+    punctuationSpacing: CheckResult;
     repeatedBigrams: CheckResult;
     slowWords: CheckResult;
     wordConsistency: CheckResult;

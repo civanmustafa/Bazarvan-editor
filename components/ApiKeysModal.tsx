@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState } from 'react';
 import { Key, X, Plus, Trash2 } from 'lucide-react';
 import { translations } from './translations';
@@ -54,7 +54,7 @@ const ApiKeysModal: React.FC = () => {
             <Key size={20} />
             <span>{t.manageApiKeys}</span>
           </h3>
-          <button onClick={handleClose} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-[#3C3C3C]" aria-label={t.close}>
+          <button onClick={handleClose} className="p-1 rounded-full hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20" aria-label={t.close}>
             <X size={20} className="text-gray-500 dark:text-gray-400" />
           </button>
         </div>
@@ -70,7 +70,7 @@ const ApiKeysModal: React.FC = () => {
               type="password"
               value={keys.gemini}
               onChange={handleGeminiChange}
-              className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#00778e] focus:border-[#00778e] text-start text-sm text-[#333333] dark:text-[#e0e0e0]"
+              className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-start text-sm text-[#333333] dark:text-[#e0e0e0]"
               placeholder={t.enterGeminiKey}
             />
           </div>
@@ -87,7 +87,7 @@ const ApiKeysModal: React.FC = () => {
                     type="password"
                     value={key}
                     onChange={(e) => handlePerplexityChange(index, e.target.value)}
-                    className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#00778e] focus:border-[#00778e] text-start text-sm text-[#333333] dark:text-[#e0e0e0]"
+                    className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-start text-sm text-[#333333] dark:text-[#e0e0e0]"
                     placeholder={`${t.key} #${index + 1}`}
                   />
                   <button
@@ -104,7 +104,7 @@ const ApiKeysModal: React.FC = () => {
             <button
               type="button"
               onClick={addPerplexityKey}
-              className="mt-2 flex items-center gap-1.5 text-sm text-[#00778e] font-semibold hover:underline"
+              className="mt-2 flex items-center gap-1.5 text-sm text-[#d4af37] font-semibold hover:underline"
             >
               <Plus size={14} />
               {t.addAnotherKey}
@@ -115,13 +115,13 @@ const ApiKeysModal: React.FC = () => {
         <div className={`mt-6 flex ${uiLanguage === 'ar' ? 'justify-end' : 'justify-start'} gap-3`}>
           <button
             onClick={handleClose}
-            className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 dark:bg-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#4A4A4A]"
+            className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 rounded-md hover:bg-[#d4af37]/15 dark:bg-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#d4af37]/25"
           >
             {t.cancel}
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 text-sm font-semibold text-white bg-[#00778e] rounded-md hover:bg-[#005f73]"
+            className="px-4 py-2 text-sm font-semibold text-white bg-[#d4af37] rounded-md hover:bg-[#b8922e]"
           >
             {t.saveKeys}
           </button>

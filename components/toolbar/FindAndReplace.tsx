@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+﻿import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Editor } from '@tiptap/core';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
@@ -113,13 +113,13 @@ const FindAndReplace: React.FC<FindAndReplaceProps> = ({ editor, t, clearAllHigh
 
     return (
         <div className="flex items-center gap-2 p-1.5 bg-gray-200 dark:bg-[#2A2A2A] rounded-md">
-            <input ref={findInputRef} type="text" placeholder={`${t.find}...`} value={findValue} onChange={e => { setFindValue(e.target.value); findAndHighlight(e.target.value); }} className="p-1 w-32 text-xs bg-white dark:bg-[#1F1F1F] rounded-md border-gray-300 dark:border-[#3C3C3C] focus:ring-0 focus:border-[#00778e]" />
+            <input ref={findInputRef} type="text" placeholder={`${t.find}...`} value={findValue} onChange={e => { setFindValue(e.target.value); findAndHighlight(e.target.value); }} className="p-1 w-32 text-xs bg-white dark:bg-[#1F1F1F] rounded-md border-gray-300 dark:border-[#3C3C3C] focus:ring-0 focus:border-[#d4af37]" />
             <span className="text-xs text-gray-500 dark:text-gray-400">{matches.length > 0 ? `${currentMatchIndex + 1}/${matches.length}` : '0/0'}</span>
             <ToolbarButton onClick={goToPrev} title={t.previous} disabled={matches.length < 2}><ChevronUp size={16} /></ToolbarButton>
             <ToolbarButton onClick={goToNext} title={t.next} disabled={matches.length < 2}><ChevronDown size={16} /></ToolbarButton>
-            <input type="text" placeholder={`${t.replaceWith}...`} value={replaceValue} onChange={e => setReplaceValue(e.target.value)} className="p-1 w-32 text-xs bg-white dark:bg-[#1F1F1F] rounded-md border-gray-300 dark:border-[#3C3C3C] focus:ring-0 focus:border-[#00778e]" />
-            <button onClick={handleReplace} disabled={matches.length === 0} className="px-2 py-1 text-xs font-semibold text-white bg-[#00778e] rounded-md hover:bg-[#005f73] disabled:bg-gray-400 dark:disabled:bg-gray-600">{t.replace}</button>
-            <button onClick={handleReplaceAll} disabled={matches.length === 0} className="px-2 py-1 text-xs font-semibold text-white bg-[#00778e] rounded-md hover:bg-[#005f73] disabled:bg-gray-400 dark:disabled:bg-gray-600">{t.replaceAll}</button>
+            <input type="text" placeholder={`${t.replaceWith}...`} value={replaceValue} onChange={e => setReplaceValue(e.target.value)} className="p-1 w-32 text-xs bg-white dark:bg-[#1F1F1F] rounded-md border-gray-300 dark:border-[#3C3C3C] focus:ring-0 focus:border-[#d4af37]" />
+            <button onClick={handleReplace} disabled={matches.length === 0} className="px-2 py-1 text-xs font-semibold text-white bg-[#d4af37] rounded-md hover:bg-[#b8922e] disabled:bg-gray-400 dark:disabled:bg-gray-600">{t.replace}</button>
+            <button onClick={handleReplaceAll} disabled={matches.length === 0} className="px-2 py-1 text-xs font-semibold text-white bg-[#d4af37] rounded-md hover:bg-[#b8922e] disabled:bg-gray-400 dark:disabled:bg-gray-600">{t.replaceAll}</button>
         </div>
     );
 };

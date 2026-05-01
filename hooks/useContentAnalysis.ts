@@ -40,6 +40,7 @@ import { checkConclusion } from '../utils/analysis/rules/checkConclusion';
 import { checkSentenceBeginnings } from '../utils/analysis/rules/checkSentenceBeginnings';
 import { checkWarningWords } from '../utils/analysis/rules/checkWarningWords';
 import { checkSpacing } from '../utils/analysis/rules/checkSpacing';
+import { checkPunctuationSpacing } from '../utils/analysis/rules/checkPunctuationSpacing';
 import { checkRepeatedBigrams } from '../utils/analysis/rules/checkRepeatedBigrams';
 import { checkSlowWords } from '../utils/analysis/rules/checkSlowWords';
 import { checkWordConsistency } from '../utils/analysis/rules/checkWordConsistency';
@@ -187,6 +188,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
         sentenceBeginnings: checkSentenceBeginnings(analysisContext),
         warningWords: checkWarningWords(analysisContext),
         spacing: checkSpacing(analysisContext),
+        punctuationSpacing: checkPunctuationSpacing(analysisContext),
         repeatedBigrams: checkRepeatedBigrams(analysisContext),
         slowWords: checkSlowWords(analysisContext),
         wordConsistency: checkWordConsistency(analysisContext),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PenLine, Wand2, Zap, Expand, BookText, ListChecks, HelpCircle, Loader2 } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -119,7 +119,7 @@ const SelectionToolbar: React.FC = () => {
           onClick={() => handleCommand(command.id, command.prompt)}
           disabled={isAiCommandLoading || !!localLoadingAction}
           title={command.label}
-          className="p-2 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3C3C3C] disabled:text-gray-400 dark:disabled:text-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#00778e]"
+          className="p-2 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 disabled:text-gray-400 dark:disabled:text-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37]"
         >
           {localLoadingAction === command.id ? (
             <Loader2 size={16} className="animate-spin" />

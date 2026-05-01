@@ -1,4 +1,4 @@
-
+﻿
 import React from 'react';
 import { EditorContent } from '@tiptap/react';
 import { ArrowUp, Sparkles } from 'lucide-react';
@@ -55,7 +55,7 @@ const EditorView: React.FC = () => {
                     </div>
                     <button
                         onClick={handleScrollToTop}
-                        className="absolute bottom-4 end-4 z-40 p-2 bg-[#00778e] text-white rounded-full shadow-lg hover:bg-[#005f73] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#00778e] dark:focus:ring-offset-gray-800 transition-opacity duration-300"
+                        className="absolute bottom-4 end-4 z-40 p-2 bg-[#d4af37] text-white rounded-full shadow-lg hover:bg-[#b8922e] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#d4af37] dark:focus:ring-offset-gray-800 transition-opacity duration-300"
                         title={t.scrollToTop}
                         aria-label={t.scrollToTop}
                     >
@@ -85,7 +85,7 @@ const EditorView: React.FC = () => {
                             openModal('headingsAnalysis');
                         }}
                     >
-                        <button className="flex items-center gap-2 px-4 py-2 bg-[#00778e] text-white rounded-full shadow-lg hover:bg-[#005f73] focus:outline-none focus:ring-2 ring-offset-2 ring-[#00778e] dark:ring-offset-gray-800">
+                        <button className="flex items-center gap-2 px-4 py-2 bg-[#d4af37] text-white rounded-full shadow-lg hover:bg-[#b8922e] focus:outline-none focus:ring-2 ring-offset-2 ring-[#d4af37] dark:ring-offset-gray-800">
                         <Sparkles size={16} />
                         <span>{`${t.headingsAnalysis} (${headingsAnalysis?.length || 0})`}</span>
                         </button>

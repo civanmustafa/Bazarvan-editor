@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { X, ThumbsDown, Lightbulb, Minus, FileSignature } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -68,10 +68,10 @@ const HeadingsAnalysisModal: React.FC = () => {
             <span>{t.headingsAnalysis} ({analysis.length})</span>
           </h3>
           <div className="flex items-center">
-            <button onClick={handleMinimize} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-[#3C3C3C]" aria-label={t.minimize}>
+            <button onClick={handleMinimize} className="p-1 rounded-full hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20" aria-label={t.minimize}>
                 <Minus size={16} className="text-gray-500 dark:text-gray-400" />
             </button>
-            <button onClick={handleClose} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-[#3C3C3C]" aria-label={t.close}>
+            <button onClick={handleClose} className="p-1 rounded-full hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20" aria-label={t.close}>
                 <X size={16} className="text-gray-500 dark:text-gray-400" />
             </button>
           </div>
@@ -105,7 +105,7 @@ const HeadingsAnalysisModal: React.FC = () => {
                             <button
                                 key={sugIndex}
                                 onClick={() => handleSuggestionClick(item.from, suggestion)}
-                                className="w-full text-start p-2 text-sm font-medium text-[#005f73] dark:text-[#94d2bd] bg-[#00778e]/10 dark:bg-[#00778e]/20 rounded-md hover:bg-[#00778e]/20 dark:hover:bg-[#00778e]/30 transition-colors"
+                                className="w-full text-start p-2 text-sm font-medium text-[#b8922e] dark:text-[#f2d675] bg-[#d4af37]/10 dark:bg-[#d4af37]/20 rounded-md hover:bg-[#d4af37]/20 dark:hover:bg-[#d4af37]/30 transition-colors"
                             >
                                 {suggestion}
                             </button>

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import { Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight } from 'lucide-react';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
@@ -19,7 +19,7 @@ const AiMenuItem: React.FC<{ onClick: () => void; disabled: boolean; children: R
         disabled={disabled}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
-        className="w-full text-start flex items-center gap-3 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#3C3C3C] disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full text-start flex items-center gap-3 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 disabled:opacity-50 disabled:cursor-not-allowed"
     >
         {children}
     </button>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
 import type { CheckResult, AnalysisStatus } from '../types';
 import { Pilcrow, Heading, AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, ShieldAlert, Wand2, Loader2, CheckSquare, Square } from 'lucide-react';
 import { translations } from './translations';
@@ -51,7 +51,7 @@ const InfoModal: React.FC<{ item: CheckResult; onClose: () => void, t: typeof tr
             </div>
             <h3 className="text-xl font-bold text-[#333333] dark:text-gray-100">{item.title}</h3>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-[#3C3C3C] transition-colors" aria-label={t.close}>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors" aria-label={t.close}>
             <X size={20} className="text-gray-500 dark:text-gray-400" />
           </button>
         </div>
@@ -65,7 +65,7 @@ const InfoModal: React.FC<{ item: CheckResult; onClose: () => void, t: typeof tr
           )}
           
           <div className="bg-gray-50 dark:bg-[#1F1F1F] p-5 rounded-2xl border border-gray-100 dark:border-[#3C3C3C]">
-              <h4 className="font-bold text-[#00778e] dark:text-[#94d2bd] mb-4 flex items-center gap-2 text-sm">
+              <h4 className="font-bold text-[#d4af37] dark:text-[#f2d675] mb-4 flex items-center gap-2 text-sm">
                 <ListTree size={18} />
                 {t.availableConditions}
               </h4>
@@ -76,7 +76,7 @@ const InfoModal: React.FC<{ item: CheckResult; onClose: () => void, t: typeof tr
 
           <div className="flex justify-between items-center bg-gray-100/50 dark:bg-[#333] p-3 rounded-xl text-xs font-bold">
               <div className="flex gap-6">
-                  <span className="flex items-center gap-2"><span className="text-gray-400 font-normal">{document.documentElement.lang === 'ar' ? 'المطلوب:' : 'Required:'}</span> <span className="text-[#00778e]">{item.required}</span></span>
+                  <span className="flex items-center gap-2"><span className="text-gray-400 font-normal">{document.documentElement.lang === 'ar' ? 'المطلوب:' : 'Required:'}</span> <span className="text-[#d4af37]">{item.required}</span></span>
                   <span className="flex items-center gap-2"><span className="text-gray-400 font-normal">{document.documentElement.lang === 'ar' ? 'الحالي:' : 'Current:'}</span> <span className={item.status === 'fail' ? 'text-red-500' : 'text-emerald-500'}>{item.current}</span></span>
               </div>
           </div>
@@ -122,14 +122,14 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
     <>
         <div
             ref={cardRef}
-            className={`group relative rounded-xl transition-all duration-200 cursor-pointer bg-white hover:bg-gray-50 dark:bg-[#2A2A2A] dark:hover:bg-[#3C3C3C] h-14 flex flex-col justify-between border border-gray-100 dark:border-[#3C3C3C] hover:border-[#00778e]/30 dark:hover:border-[#00778e]/30 shadow-sm`}
+            className={`group relative rounded-xl transition-all duration-200 cursor-pointer bg-white hover:bg-[#d4af37]/10 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 h-14 flex flex-col justify-between border border-gray-100 dark:border-[#3C3C3C] hover:border-[#d4af37]/30 dark:hover:border-[#d4af37]/30 shadow-sm`}
             onClick={onClick}
             onMouseEnter={() => setHoverRect(cardRef.current?.getBoundingClientRect() || null)}
             onMouseLeave={() => setHoverRect(null)}
         >
             {isHighlighted && (
                 <div className="absolute top-0 end-0 w-8 h-8" aria-hidden="true">
-                <div className={`absolute inset-0 ${item.status === 'fail' ? 'bg-[#810701]' : item.status === 'warn' ? 'bg-amber-500' : 'bg-[#00778E]'} [clip-path:polygon(0_0,100%_0,0_100%)] rounded-tl-lg`}></div>
+                <div className={`absolute inset-0 ${item.status === 'fail' ? 'bg-[#810701]' : item.status === 'warn' ? 'bg-amber-500' : 'bg-[#d4af37]'} [clip-path:polygon(0_0,100%_0,0_100%)] rounded-tl-lg`}></div>
                 <Star size={10} className="absolute top-1.5 end-1.5 text-white -rotate-45" fill="white" />
                 </div>
             )}
@@ -150,7 +150,7 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
                             e.stopPropagation();
                             onInfoClick(item);
                         }}
-                        className="p-1 rounded-md text-gray-400 hover:bg-gray-200 dark:hover:bg-[#3C3C3C]/80 hover:text-[#00778e] transition-all"
+                        className="p-1 rounded-md text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 hover:text-[#d4af37] transition-all"
                         aria-label={t.structureTab.showDetails}
                     >
                         <AlertCircleIcon size={14} />
@@ -168,7 +168,7 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
                         ? '#810701' 
                         : item.status === 'warn'
                         ? '#F59E0B'
-                        : '#00778e',
+                        : '#d4af37',
                 }}
                 ></div>
             </div>
@@ -198,7 +198,7 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
             onClick={onClick}
             onMouseEnter={() => setHoverRect(rowRef.current?.getBoundingClientRect() || null)}
             onMouseLeave={() => setHoverRect(null)}
-            className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all border border-transparent ${isHighlighted ? 'bg-blue-50/50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800/20' : 'hover:bg-gray-50 dark:hover:bg-[#3C3C3C]'}`}
+            className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all border border-transparent ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/10 border-[#d4af37]/20 dark:border-[#d4af37]/20' : 'hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
         >
             <div className="flex items-center gap-3">
                 <span className={`w-2 h-2 rounded-full ${statusColor} flex-shrink-0 shadow-sm`}></span>
@@ -210,7 +210,7 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
                 ) : null}
                 <button
                 onClick={(e) => { e.stopPropagation(); onInfoClick(item); }}
-                className="p-1 rounded-md text-gray-400 hover:bg-gray-200 dark:hover:bg-[#4A4A4A] hover:text-[#00778e]"
+                className="p-1 rounded-md text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 hover:text-[#d4af37]"
                 >
                 <AlertCircleIcon size={14} />
                 </button>
@@ -223,7 +223,7 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
 
 const StatDisplay: React.FC<{ icon: React.ReactNode; value: number; label: string }> = ({ icon, value, label }) => (
   <div title={label} className="flex-1 flex items-center justify-center gap-3 p-2 cursor-help group">
-    <div className="p-2 bg-[#00778e]/10 dark:bg-[#00778e]/20 text-[#00778e] rounded-full group-hover:scale-110 transition-transform">
+    <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full group-hover:scale-110 transition-transform">
       {icon}
     </div>
     <div className={document.documentElement.dir === 'rtl' ? "text-right" : "text-left"}>
@@ -261,36 +261,36 @@ const FixAllModal: React.FC<{
             <div className="bg-white dark:bg-[#2A2A2A] rounded-2xl shadow-2xl w-full max-w-md p-6 border dark:border-[#3C3C3C]" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-6">
                     <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">{t.fixAllModalTitle}</h3>
-                    <button onClick={onClose} className="p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-[#3C3C3C]">
+                    <button onClick={onClose} className="p-1 rounded-full text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20">
                         <X size={20} />
                     </button>
                 </div>
                 <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
                     <div
-                        className="flex items-center gap-3 p-3 cursor-pointer rounded-lg hover:bg-gray-50 dark:hover:bg-[#3C3C3C] border border-transparent hover:border-gray-100 dark:hover:border-[#444]"
+                        className="flex items-center gap-3 p-3 cursor-pointer rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 border border-transparent hover:border-gray-100 dark:hover:border-[#444]"
                         onClick={handleToggleAll}
                     >
-                        {selectedRules.length === Object.keys(groups).length ? <CheckSquare size={20} className="text-[#00778e]" /> : <Square size={20} className="text-gray-300" />}
+                        {selectedRules.length === Object.keys(groups).length ? <CheckSquare size={20} className="text-[#d4af37]" /> : <Square size={20} className="text-gray-300" />}
                         <span className="font-bold text-sm text-gray-800 dark:text-gray-200">{t.all}</span>
                     </div>
                     <div className="h-px bg-gray-100 dark:bg-[#3C3C3C] my-2"></div>
                     {Object.entries(groups).map(([title, count]) => (
                         <div
                             key={title}
-                            className="flex items-center gap-3 p-2.5 cursor-pointer rounded-lg hover:bg-gray-50 dark:hover:bg-[#3C3C3C]"
+                            className="flex items-center gap-3 p-2.5 cursor-pointer rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
                             onClick={() => handleToggleRule(title)}
                         >
-                            {selectedRules.includes(title) ? <CheckSquare size={20} className="text-[#00778e]" /> : <Square size={20} className="text-gray-300" />}
+                            {selectedRules.includes(title) ? <CheckSquare size={20} className="text-[#d4af37]" /> : <Square size={20} className="text-gray-300" />}
                             <span className="flex-grow text-sm text-gray-700 dark:text-gray-300">{title}</span>
                             <span className="text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 px-2 py-0.5 rounded-full">{count}</span>
                         </div>
                     ))}
                 </div>
                 <div className="mt-8 flex justify-end gap-3">
-                    <button onClick={onClose} className="px-5 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 dark:bg-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#4A4A4A] transition-colors">
+                    <button onClick={onClose} className="px-5 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 rounded-lg hover:bg-[#d4af37]/15 dark:bg-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#d4af37]/25 transition-colors">
                         {t.cancel}
                     </button>
-                    <button onClick={() => onConfirm(selectedRules)} disabled={selectedRules.length === 0} className="px-5 py-2.5 text-sm font-bold text-white bg-[#00778e] rounded-lg hover:bg-[#005f73] disabled:bg-gray-300 shadow-md shadow-[#00778e]/20 transition-all">
+                    <button onClick={() => onConfirm(selectedRules)} disabled={selectedRules.length === 0} className="px-5 py-2.5 text-sm font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] disabled:bg-gray-300 shadow-md shadow-[#d4af37]/20 transition-all">
                         {t.startFix} ({selectedRules.length})
                     </button>
                 </div>
@@ -350,7 +350,7 @@ const StructureTab: React.FC = () => {
     const analysisGroups = [
       {
           name: tSt.basicStructure,
-          icon: <LayoutTemplate size={16} className="text-[#00778e]" />,
+          icon: <LayoutTemplate size={16} className="text-[#d4af37]" />,
           items: [
               analysis.wordCount,
               analysis.summaryParagraph,
@@ -364,7 +364,7 @@ const StructureTab: React.FC = () => {
       },
       {
           name: tSt.headingsSequence,
-          icon: <ListTree size={16} className="text-[#00778e]" />,
+          icon: <ListTree size={16} className="text-[#d4af37]" />,
           items: [
               analysis.h2Structure,
               analysis.h2Count,
@@ -379,7 +379,7 @@ const StructureTab: React.FC = () => {
       },
       {
           name: tSt.languageQuality,
-          icon: <SpellCheck size={16} className="text-[#00778e]" />,
+          icon: <SpellCheck size={16} className="text-[#d4af37]" />,
           items: [
               analysis.punctuation,
               analysis.paragraphEndings,
@@ -388,6 +388,7 @@ const StructureTab: React.FC = () => {
               analysis.duplicateWordsInHeading,
               analysis.sentenceBeginnings,
               analysis.arabicOnly,
+              analysis.punctuationSpacing,
               analysis.spacing,
               analysis.repeatedBigrams,
               analysis.wordConsistency,
@@ -396,7 +397,7 @@ const StructureTab: React.FC = () => {
       },
       {
           name: tSt.interactionCta,
-          icon: <MousePointerClick size={16} className="text-[#00778e]" />,
+          icon: <MousePointerClick size={16} className="text-[#d4af37]" />,
           items: [
               analysis.ctaWords,
               analysis.interactiveLanguage,
@@ -407,7 +408,7 @@ const StructureTab: React.FC = () => {
       },
       {
           name: tSt.conclusion,
-          icon: <Flag size={16} className="text-[#00778e]" />,
+          icon: <Flag size={16} className="text-[#d4af37]" />,
           items: [
               analysis.lastH2IsConclusion,
               analysis.conclusionParagraph,
@@ -432,7 +433,7 @@ const StructureTab: React.FC = () => {
           <button
               onClick={() => setIsFixModalOpen(true)}
               disabled={fixAllProgress.running || fixableViolationsCount === 0}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 text-xs font-black uppercase tracking-widest text-white bg-gradient-to-r from-[#00778e] to-[#005f73] rounded-2xl hover:shadow-lg disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 text-xs font-black uppercase tracking-widest text-white bg-gradient-to-r from-[#d4af37] to-[#b8922e] rounded-2xl hover:shadow-lg disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all"
           >
               {fixAllProgress.running ? (
                   <>

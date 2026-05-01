@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+﻿import React, { useEffect, useState, useCallback } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
@@ -163,7 +163,7 @@ const EditorToolbar: React.FC = () => {
               <button
                 onClick={handleLanguageToggle}
                 title={t.toggleArticleLanguage}
-                className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 bg-transparent hover:bg-gray-200 dark:hover:bg-[#3C3C3C]"
+                className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 bg-transparent hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
               >
                 <div className="flex items-center gap-1.5 px-1">
                   <Languages size={16} />

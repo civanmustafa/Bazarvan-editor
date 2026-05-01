@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useRef, useEffect } from 'react';
 import { LayoutTemplate, Target, Sparkles, ChevronDown, ExternalLink, Search, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command } from 'lucide-react';
 import StructureTab from './StructureTab';
@@ -79,10 +79,10 @@ const RightSidebar: React.FC = () => {
 
     const getCommandIcon = (index: number) => {
         switch (index) {
-            case 1: return <FileSearch size={16} className="text-blue-500" />;
-            case 2: return <ShieldAlert size={16} className="text-amber-500" />;
-            case 3: return <Lightbulb size={16} className="text-yellow-500" />;
-            case 4: return <Users size={16} className="text-green-500" />;
+            case 1: return <FileSearch size={16} className="text-[#d4af37]" />;
+            case 2: return <ShieldAlert size={16} className="text-[#d4af37]" />;
+            case 3: return <Lightbulb size={16} className="text-[#d4af37]" />;
+            case 4: return <Users size={16} className="text-[#d4af37]" />;
             default: return <Command size={16} className="text-gray-400" />;
         }
     };
@@ -105,8 +105,8 @@ const RightSidebar: React.FC = () => {
     const renderAiTab = () => (
         <div className="flex flex-col h-full">
             <div className="flex p-2 mx-2 mt-2 mb-1 bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
-                <button onClick={() => setAiSubTab('new')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'new' ? 'bg-white dark:bg-[#1F1F1F] text-[#00778e] shadow-sm' : 'text-gray-500'}`}>{tRs.newAnalysis}</button>
-                <button onClick={() => setAiSubTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'history' ? 'bg-white dark:bg-[#1F1F1F] text-[#00778e] shadow-sm' : 'text-gray-500'}`}>{t.aiHistory.title}</button>
+                <button onClick={() => setAiSubTab('new')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'new' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{tRs.newAnalysis}</button>
+                <button onClick={() => setAiSubTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'history' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.aiHistory.title}</button>
             </div>
 
             <div className="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-4">
@@ -117,7 +117,7 @@ const RightSidebar: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={() => setIsCommandsMenuOpen(!isCommandsMenuOpen)}
-                                className="w-full flex items-center justify-between p-2.5 bg-white dark:bg-[#1F1F1F] border border-gray-300 dark:border-[#3C3C3C] rounded-lg text-sm text-start focus:outline-none focus:ring-1 focus:ring-[#00778e] shadow-sm transition-all"
+                                className="w-full flex items-center justify-between p-2.5 bg-white dark:bg-[#1F1F1F] border border-gray-300 dark:border-[#3C3C3C] rounded-lg text-sm text-start focus:outline-none focus:ring-1 focus:ring-[#d4af37] shadow-sm transition-all"
                             >
                                 <span className="truncate text-gray-700 dark:text-gray-200 font-medium flex items-center gap-2">
                                     {selectedReadyCommand ? (
@@ -144,7 +144,7 @@ const RightSidebar: React.FC = () => {
                                         <button
                                             key={idx}
                                             onClick={() => handleCommandSelect(cmd.value)}
-                                            className="w-full text-start px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#3C3C3C] transition-colors flex items-center gap-3 border-b border-gray-50 dark:border-[#333] last:border-0"
+                                            className="w-full text-start px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors flex items-center gap-3 border-b border-gray-50 dark:border-[#333] last:border-0"
                                         >
                                             {getCommandIcon(idx + 1)}
                                             <span>{cmd.label}</span>
@@ -162,7 +162,7 @@ const RightSidebar: React.FC = () => {
                         <div className="grid grid-cols-2 gap-2">
                             {Object.keys(aiOptions).map((opt) => (
                                 <label key={opt} className="flex items-center gap-2 text-xs cursor-pointer text-gray-600 dark:text-gray-400">
-                                    <input type="checkbox" checked={(aiOptions as any)[opt]} onChange={() => handleOptionChange(opt as any)} className="rounded text-[#00778e]" />
+                                    <input type="checkbox" checked={(aiOptions as any)[opt]} onChange={() => handleOptionChange(opt as any)} className="rounded text-[#d4af37]" />
                                     {(tRs as any)[opt] || opt}
                                 </label>
                             ))}
@@ -178,11 +178,11 @@ const RightSidebar: React.FC = () => {
 
                         <div className="flex flex-col gap-2">
                             <div className="flex gap-2">
-                                <button onClick={() => handleAiAnalyze(aiCommand, aiOptions)} disabled={isAiLoading.gemini} className="flex-1 flex items-center justify-center gap-2 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                                <button onClick={() => handleAiAnalyze(aiCommand, aiOptions)} disabled={isAiLoading.gemini} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                     <span className="text-xs font-bold">Gemini</span>
                                 </button>
-                                <button onClick={() => handlePerplexitySearch(aiCommand, aiOptions, perplexityModel)} disabled={isAiLoading.perplexity} className="flex-1 flex items-center justify-center gap-2 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50">
+                                <button onClick={() => handlePerplexitySearch(aiCommand, aiOptions, perplexityModel)} disabled={isAiLoading.perplexity} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.perplexity ? <Wand2 size={16} className="animate-spin" /> : <Search size={16} />}
                                     <span className="text-xs font-bold">بحث ويب</span>
                                 </button>
@@ -194,27 +194,27 @@ const RightSidebar: React.FC = () => {
 
                         <div className="space-y-3 pt-4 border-t border-gray-200 dark:border-[#3C3C3C]">
                             {/* Results Gemini */}
-                            <div className="bg-blue-50 dark:bg-blue-900/10 rounded-lg overflow-hidden border border-blue-100 dark:border-blue-800/30">
-                                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 flex justify-between cursor-pointer" onClick={() => setIsGeminiExpanded(!isGeminiExpanded)}>
-                                    <span className="text-xs font-bold text-blue-800 dark:text-blue-300">نتائج Gemini</span>
+                            <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-lg overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
+                                <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsGeminiExpanded(!isGeminiExpanded)}>
+                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج Gemini</span>
                                     <ChevronDown size={14} className={isGeminiExpanded ? 'rotate-180' : ''} />
                                 </div>
                                 {isGeminiExpanded && (
                                     <div className="p-3 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {isAiLoading.gemini ? <div className="flex gap-2 animate-pulse text-blue-500"><Wand2 size={14} /> جاري التفكير...</div> : 
+                                        {isAiLoading.gemini ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div> :
                                          aiResults.gemini ? <div dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(aiResults.gemini) }} /> : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
                             </div>
                             {/* Results Perplexity */}
-                            <div className="bg-teal-50 dark:bg-teal-900/10 rounded-lg overflow-hidden border border-teal-100 dark:border-teal-800/30">
-                                <div className="p-2 bg-teal-100 dark:bg-teal-900/30 flex justify-between cursor-pointer" onClick={() => setIsPerplexityExpanded(!isPerplexityExpanded)}>
-                                    <span className="text-xs font-bold text-teal-800 dark:text-teal-300">نتائج بحث الويب</span>
+                            <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-lg overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
+                                <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsPerplexityExpanded(!isPerplexityExpanded)}>
+                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج بحث الويب</span>
                                     <ChevronDown size={14} className={isPerplexityExpanded ? 'rotate-180' : ''} />
                                 </div>
                                 {isPerplexityExpanded && (
                                     <div className="p-3 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {isAiLoading.perplexity ? <div className="flex gap-2 animate-pulse text-teal-500"><Search size={14} /> جاري الاتصال بـ Perplexity...</div> : 
+                                        {isAiLoading.perplexity ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Search size={14} /> جاري الاتصال بـ Perplexity...</div> :
                                          aiResults.perplexity ? <div dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(aiResults.perplexity) }} /> : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
@@ -230,7 +230,7 @@ const RightSidebar: React.FC = () => {
         <aside className="basis-[17%] flex flex-col h-full min-w-0 bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg overflow-hidden border-s border-gray-300 dark:border-[#333]">
             <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
                 {(['structure', 'goal', 'ai'] as const).map(tab => (
-                    <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#00778e] border-b-2 border-[#00778e] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-[#2A2A2A]'}`}>
+                    <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15'}`}>
                         {tab === 'structure' ? <LayoutTemplate size={18} /> : tab === 'goal' ? <Target size={18} /> : <BrainCircuit size={18} />}
                     </button>
                 ))}

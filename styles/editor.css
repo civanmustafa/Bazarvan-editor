@@ -1,4 +1,4 @@
-/* Tiptap Editor Base Styles */
+﻿/* Tiptap Editor Base Styles */
 .ProseMirror {
   outline: none;
   padding: 1.5rem;
@@ -76,7 +76,7 @@ html[dir="ltr"] .ProseMirror th {
   background-color: #343a40;
 }
 .ProseMirror .selectedCell:after {
-  background: rgba(0, 119, 142, 0.2);
+  background: rgba(212, 175, 55, 0.22);
   content: "";
   left: 0;
   right: 0;
@@ -87,7 +87,7 @@ html[dir="ltr"] .ProseMirror th {
   z-index: 2;
 }
 .ProseMirror .column-resize-handle {
-  background-color: #00778e;
+  background-color: #d4af37;
   bottom: -2px;
   position: absolute;
   right: -2px;

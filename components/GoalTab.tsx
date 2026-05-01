@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import type { StructureAnalysis, CheckResult, AnalysisStatus } from '../types';
 import { Info, ShoppingCart, GitCompare, ChevronDown, BookOpen, Map, Star, AlertCircle, Smartphone } from 'lucide-react';
 import { translations } from './translations';
@@ -43,7 +43,7 @@ const GoalConditionCard: React.FC<{
   return (
     <div className="relative">
       <div
-        className={`group relative rounded-lg transition-all duration-200 cursor-pointer bg-white hover:bg-gray-50 dark:bg-[#2A2A2A] dark:hover:bg-[#3C3C3C] ${cardHeightClass} flex flex-col justify-between p-3 pt-2 shadow-sm`}
+        className={`group relative rounded-lg transition-all duration-200 cursor-pointer bg-white hover:bg-[#d4af37]/10 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 ${cardHeightClass} flex flex-col justify-between p-3 pt-2 shadow-sm`}
         onClick={onClick}
       >
         <div className="absolute -top-9 end-1/2 translate-x-1/2 w-max max-w-xs bg-gray-900 text-white text-xs rounded-md py-1.5 px-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-20 whitespace-nowrap">
@@ -53,7 +53,7 @@ const GoalConditionCard: React.FC<{
         
         {isHighlighted && (
           <div className="absolute top-0 end-0 w-8 h-8" aria-hidden="true">
-            <div className={`absolute inset-0 ${item.status === 'fail' ? 'bg-[#810701]' : 'bg-[#00778E]'} [clip-path:polygon(0_0,100%_0,0_100%)] rounded-tl-lg`}></div>
+            <div className={`absolute inset-0 ${item.status === 'fail' ? 'bg-[#810701]' : 'bg-[#d4af37]'} [clip-path:polygon(0_0,100%_0,0_100%)] rounded-tl-lg`}></div>
             <Star size={10} className="absolute top-1.5 end-1.5 text-white -rotate-45" fill="white" />
           </div>
         )}
@@ -79,7 +79,7 @@ const GoalConditionCard: React.FC<{
                     e.stopPropagation();
                     setIsInfoOpen(prev => !prev);
                 }}
-                className="p-1 rounded-full text-gray-400 hover:bg-gray-100 dark:hover:bg-[#3C3C3C]/50"
+                className="p-1 rounded-full text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
                 aria-label={t.structureTab.showDetails}
             >
                 <AlertCircle size={16} />
@@ -99,7 +99,7 @@ const GoalConditionCard: React.FC<{
                   ? '#810701' 
                   : item.status === 'warn'
                   ? '#F59E0B'
-                  : '#00778e',
+                  : '#d4af37',
             }}
           ></div>
         </div>
@@ -168,13 +168,13 @@ const GoalTab: React.FC = () => {
                 <button
                     id="ai-goal-button"
                     type="button"
-                    className="relative w-full cursor-pointer rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] py-2 ps-3 pe-10 text-start shadow-sm focus:border-[#00778e] focus:outline-none focus:ring-1 focus:ring-[#00778e] sm:text-sm"
+                    className="relative w-full cursor-pointer rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] py-2 ps-3 pe-10 text-start shadow-sm focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37] sm:text-sm"
                     aria-haspopup="listbox"
                     aria-expanded={isGoalOpen}
                     onClick={() => setIsGoalOpen(!isGoalOpen)}
                 >
                     <span className="flex items-center gap-3">
-                        <span className="text-[#00778e]">{selectedGoal.icon}</span>
+                        <span className="text-[#d4af37]">{selectedGoal.icon}</span>
                         <span className="block truncate text-[#333333] dark:text-[#e0e0e0]">{selectedGoal.label}</span>
                     </span>
                     <span className="pointer-events-none absolute inset-y-0 end-0 flex items-center pe-2">
@@ -192,7 +192,7 @@ const GoalTab: React.FC = () => {
                     {goalOptions.map((option) => (
                         <li
                         key={option.value}
-                        className="group relative cursor-pointer select-none py-2 ps-3 pe-9 text-gray-900 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#2A2A2A]"
+                        className="group relative cursor-pointer select-none py-2 ps-3 pe-9 text-gray-900 dark:text-gray-200 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15"
                         role="option"
                         aria-selected={option.value === aiGoal}
                         onClick={() => {
@@ -201,7 +201,7 @@ const GoalTab: React.FC = () => {
                         }}
                         >
                         <div className="flex items-center gap-3">
-                            <span className="text-[#00778e] group-hover:text-[#005f73] dark:group-hover:text-[#94d2bd]">{option.icon}</span>
+                            <span className="text-[#d4af37] group-hover:text-[#b8922e] dark:group-hover:text-[#f2d675]">{option.icon}</span>
                             <span className={`block truncate ${option.value === aiGoal ? 'font-semibold' : 'font-normal'}`}>{option.label}</span>
                         </div>
                         </li>

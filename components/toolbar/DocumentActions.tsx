@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { translations } from '../translations';
 import { ToolbarButton, Separator } from './ToolbarItems';
 import { History, Save, PlusSquare, LayoutDashboard, LogOut, Sun, Moon } from 'lucide-react';
@@ -33,7 +33,7 @@ const DocumentActions: React.FC<DocumentActionsProps> = ({
     return (
         <>
             <ToolbarButton onClick={onRestoreDraft} title={restoreStatus === 'restored' ? t.restored : t.restore} disabled={!draftExists || restoreStatus === 'restored'}>
-                <History size={16} className={restoreStatus === 'restored' ? 'text-blue-500' : ''} />
+                <History size={16} className={restoreStatus === 'restored' ? 'text-[#d4af37]' : ''} />
             </ToolbarButton>
             <ToolbarButton onClick={onSaveDraft} title={saveStatus === 'saved' ? t.saved : t.saveDraft} disabled={saveStatus === 'saved'}>
                 <Save size={16} className={saveStatus === 'saved' ? 'text-green-500' : ''} />
