@@ -10,8 +10,19 @@ const ApiKeysModal: React.FC = () => {
   const { closeModal } = useModal();
   const [keys, setKeys] = useState(apiKeys);
 
-  const handleGeminiChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setKeys(prev => ({ ...prev, gemini: e.target.value }));
+  const handleGeminiChange = (index: number, value: string) => {
+    const newGeminiKeys = [...keys.gemini];
+    newGeminiKeys[index] = value;
+    setKeys(prev => ({ ...prev, gemini: newGeminiKeys }));
+  };
+
+  const addGeminiKey = () => {
+    setKeys(prev => ({ ...prev, gemini: [...prev.gemini, ''] }));
+  };
+
+  const removeGeminiKey = (index: number) => {
+    const newGeminiKeys = keys.gemini.filter((_, i) => i !== index);
+    setKeys(prev => ({ ...prev, gemini: newGeminiKeys.length > 0 ? newGeminiKeys : [''] }));
   };
 
   const handlePerplexityChange = (index: number, value: string) => {
@@ -61,18 +72,40 @@ const ApiKeysModal: React.FC = () => {
         
         <div className="space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar px-1">
           <div>
-            <label htmlFor="gemini-key" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               {t.geminiApiKey}
             </label>
-            <input
-              id="gemini-key"
-              name="gemini"
-              type="password"
-              value={keys.gemini}
-              onChange={handleGeminiChange}
-              className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-start text-sm text-[#333333] dark:text-[#e0e0e0]"
-              placeholder={t.enterGeminiKey}
-            />
+            <div className="space-y-2">
+              {keys.gemini.map((key, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <input
+                    aria-label={`Gemini API Key ${index + 1}`}
+                    name={`gemini-${index}`}
+                    type="password"
+                    value={key}
+                    onChange={(e) => handleGeminiChange(index, e.target.value)}
+                    className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-start text-sm text-[#333333] dark:text-[#e0e0e0]"
+                    placeholder={`${t.enterGeminiKey} #${index + 1}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeGeminiKey(index)}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-md"
+                    title={t.removeKey}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addGeminiKey}
+              className="mt-2 flex items-center gap-1.5 text-sm text-[#d4af37] font-semibold hover:underline"
+            >
+              <Plus size={14} />
+              {t.addAnotherKey}
+            </button>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

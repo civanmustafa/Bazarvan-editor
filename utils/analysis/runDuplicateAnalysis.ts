@@ -44,6 +44,8 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
       const allKeywordsForDupCheck = [
           keywords.primary,
           ...keywords.secondaries,
+          ...keywords.lsi,
+          keywords.company,
       ].filter(Boolean).map(kw => articleLanguage === 'ar' ? normalizeArabicText(kw.toLowerCase()) : kw.toLowerCase());
 
       for (let n = 2; n <= 8; n++) {

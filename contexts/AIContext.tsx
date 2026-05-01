@@ -40,18 +40,39 @@ const getGeminiErrorMessage = (error: unknown): string => {
     return rawMessage;
 };
 
-const callGeminiAnalysis = async (prompt: string, userKey?: string): Promise<string> => {
-    try {
-      const trimmedUserKey = userKey?.trim();
-      if (trimmedUserKey) {
-        const ai = new GoogleGenAI({ apiKey: trimmedUserKey });
-        const response = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: prompt,
-        });
-        return typeof response.text === 'string' ? response.text : '';
-      }
+const normalizeGeminiKeys = (keys?: string | string[]): string[] => {
+    const keyList = Array.isArray(keys) ? keys : keys ? [keys] : [];
+    return keyList.map(key => key.trim()).filter(Boolean);
+};
 
+const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
+    const trimmedUserKeys = normalizeGeminiKeys(userKeys);
+
+    if (trimmedUserKeys.length > 0) {
+        const errors: string[] = [];
+
+        for (const [index, apiKey] of trimmedUserKeys.entries()) {
+            try {
+                const ai = new GoogleGenAI({ apiKey });
+                const response = await ai.models.generateContent({
+                    model: GEMINI_MODEL,
+                    contents: prompt,
+                });
+                return typeof response.text === 'string' ? response.text : '';
+            } catch (error) {
+                console.error(`Gemini API key #${index + 1} failed:`, error);
+                errors.push(getGeminiErrorMessage(error));
+            }
+        }
+
+        const lastError = errors[errors.length - 1] || 'فشلت كل مفاتيح Gemini.';
+        const prefix = trimmedUserKeys.length > 1
+            ? `فشلت كل مفاتيح Gemini (${trimmedUserKeys.length}). آخر خطأ: `
+            : '';
+        return `حدث خطأ أثناء الاتصال بـ Gemini: ${prefix}${lastError}`;
+    }
+
+    try {
       const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

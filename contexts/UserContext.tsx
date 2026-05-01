@@ -4,6 +4,9 @@ import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys } fro
 import { translations } from '../components/translations';
 import { USERS } from '../constants';
 
+type ApiKeys = { gemini: string[]; perplexity: string[] };
+type StoredApiKeys = { gemini?: string | string[]; perplexity?: string[] };
+
 interface UserContextType {
     currentUser: string | null;
     currentView: 'login' | 'dashboard' | 'editor';
@@ -14,7 +17,7 @@ interface UserContextType {
     structureViewMode: 'grid' | 'list';
     preferredLanguage: 'ar' | 'en';
     uiLanguage: 'ar' | 'en';
-    apiKeys: { gemini: string; perplexity: string[] };
+    apiKeys: ApiKeys;
     t: typeof translations.ar;
     isIdle: boolean;
     handleLogin: (username: string, password: string) => boolean;
@@ -25,7 +28,7 @@ interface UserContextType {
     handleStructureViewModeChange: (mode: 'grid' | 'list') => void;
     handlePreferredLanguageChange: (lang: 'ar' | 'en') => void;
     handleUiLanguageChange: (lang: 'ar' | 'en') => void;
-    handleSaveApiKeys: (keys: { gemini: string; perplexity: string[] }) => void;
+    handleSaveApiKeys: (keys: ApiKeys) => void;
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -54,6 +57,21 @@ const getInitialTheme = () => {
     }
 };
 
+const normalizeApiKeys = (keys?: StoredApiKeys): ApiKeys => {
+    const geminiKeys = Array.isArray(keys?.gemini)
+        ? keys.gemini
+        : typeof keys?.gemini === 'string'
+          ? [keys.gemini]
+          : [''];
+
+    const perplexityKeys = Array.isArray(keys?.perplexity) ? keys.perplexity : [''];
+
+    return {
+        gemini: geminiKeys.length > 0 ? geminiKeys : [''],
+        perplexity: perplexityKeys.length > 0 ? perplexityKeys : [''],
+    };
+};
+
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [currentUser, setCurrentUser] = useState<string | null>(() => sessionStorage.getItem('currentUser'));
     const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'editor'>(
@@ -65,7 +83,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [structureViewMode, setStructureViewMode] = useState<'grid' | 'list'>('grid');
     const [preferredLanguage, setPreferredLanguage] = useState<'ar' | 'en'>('ar');
     const [uiLanguage, setUiLanguage] = useState<'ar' | 'en'>('ar');
-    const [apiKeys, setApiKeys] = useState<{ gemini: string; perplexity: string[] }>({ gemini: '', perplexity: [''] });
+    const [apiKeys, setApiKeys] = useState<ApiKeys>(() => normalizeApiKeys());
     
     const [isIdle, setIsIdle] = useState(false);
     const idleTimerRef = useRef<number | null>(null);
@@ -150,7 +168,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setStructureViewMode(userPrefs?.preferredStructureViewMode || 'grid');
             setPreferredLanguage(userPrefs?.preferredLanguage || 'ar');
             setUiLanguage(userPrefs?.preferredUILanguage || 'ar');
-            if (userPrefs?.apiKeys) setApiKeys(userPrefs.apiKeys);
+            if (userPrefs?.apiKeys) setApiKeys(normalizeApiKeys(userPrefs.apiKeys as StoredApiKeys));
             if (userPrefs?.preferredTheme) setIsDarkMode(userPrefs.preferredTheme === 'dark');
         }
     }, [currentUser]);
@@ -208,9 +226,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (currentUser) saveUserPreference(currentUser, { preferredUILanguage: lang });
     };
 
-    const handleSaveApiKeys = (keys: { gemini: string; perplexity: string[] }) => {
-        setApiKeys(keys);
-        if (currentUser) saveUserApiKeys(currentUser, keys);
+    const handleSaveApiKeys = (keys: ApiKeys) => {
+        const normalizedKeys = normalizeApiKeys(keys);
+        setApiKeys(normalizedKeys);
+        if (currentUser) saveUserApiKeys(currentUser, normalizedKeys);
     };
 
     const value = {

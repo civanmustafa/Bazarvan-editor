@@ -35,7 +35,7 @@ export type ArticleActivity = {
 export type UserActivity = {
   logins: string[];
   apiKeys: {
-    gemini: string;
+    gemini: string[];
     perplexity: string[];
   };
   articles: {
@@ -56,7 +56,7 @@ type ActivityData = {
 const getDefaultUserActivity = (): UserActivity => ({
   logins: [],
   apiKeys: {
-    gemini: '',
+    gemini: [''],
     perplexity: [''],
   },
   articles: {},
