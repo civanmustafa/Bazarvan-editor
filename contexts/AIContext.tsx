@@ -8,7 +8,37 @@ import type { CheckResult, HeadingAnalysisResult, AIHistoryItem } from '../types
 import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { FIXABLE_RULES } from '../constants';
 
-const GEMINI_MODEL = 'gemini-3.1-pro-preview';
+const GEMINI_MODEL = 'gemini-3-flash-preview';
+
+const getGeminiErrorMessage = (error: unknown): string => {
+    const rawMessage = error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : 'خطأ غير معروف';
+
+    const jsonStart = rawMessage.indexOf('{');
+    if (jsonStart !== -1) {
+        try {
+            const parsed = JSON.parse(rawMessage.slice(jsonStart));
+            const apiError = parsed?.error;
+            if (apiError?.code === 429 || apiError?.status === 'RESOURCE_EXHAUSTED') {
+                return `تم تجاوز حصة Gemini أو لا توجد حصة متاحة للنموذج الحالي (${GEMINI_MODEL}). انتظر قليلا ثم أعد المحاولة، أو استخدم مفتاحا من مشروع Google مختلف لديه حصة متاحة.`;
+            }
+            if (typeof apiError?.message === 'string') {
+                return apiError.message;
+            }
+        } catch {
+            // Keep the original message if Google did not return JSON.
+        }
+    }
+
+    if (/429|quota|RESOURCE_EXHAUSTED/i.test(rawMessage)) {
+        return `تم تجاوز حصة Gemini أو لا توجد حصة متاحة للنموذج الحالي (${GEMINI_MODEL}). انتظر قليلا ثم أعد المحاولة، أو استخدم مفتاحا من مشروع Google مختلف لديه حصة متاحة.`;
+    }
+
+    return rawMessage;
+};
 
 const callGeminiAnalysis = async (prompt: string, userKey?: string): Promise<string> => {
     try {
@@ -42,7 +72,7 @@ const callGeminiAnalysis = async (prompt: string, userKey?: string): Promise<str
       return data.text;
     } catch (error) {
       console.error("Error calling Gemini API:", error);
-      const errorMessage = error instanceof Error ? error.message : "خطأ غير معروف";
+      const errorMessage = getGeminiErrorMessage(error);
       return `حدث خطأ أثناء الاتصال بـ Gemini: ${errorMessage}`;
     }
 };
