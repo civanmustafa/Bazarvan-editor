@@ -20,7 +20,9 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
         2: new Map(), 3: new Map(), 4: new Map(), 5: new Map(), 6: new Map(), 7: new Map(), 8: new Map()
       };
 
-      const originalWords = textContent.split(/\s+/).filter(Boolean);
+      const originalWordsWithLocations = [...textContent.matchAll(/\S+/g)]
+        .map(match => ({ text: match[0], index: match.index ?? 0 }));
+      const originalWords = originalWordsWithLocations.map(word => word.text);
       for (let n = 2; n <= 8; n++) {
           if (originalWords.length < n) continue;
 
@@ -34,7 +36,7 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
               if (!nGrams[n].has(normalizedNgramKey)) {
                   nGrams[n].set(normalizedNgramKey, { locations: [], text: originalNgramText });
               }
-              const charIndex = textContent.indexOf(originalNgramText);
+              const charIndex = originalWordsWithLocations[i]?.index ?? 0;
               nGrams[n].get(normalizedNgramKey)!.locations.push(charIndex);
           }
       }

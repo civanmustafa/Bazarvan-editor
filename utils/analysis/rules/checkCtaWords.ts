@@ -8,7 +8,7 @@ export const checkCtaWords = (context: AnalysisContext): CheckResult => {
     const tRule = t.structureAnalysis['كلمات الحث'];
     const title = tRule.title;
     const description = tRule.description;
-    const requiredText = t.common.moreThan(1);
+    const requiredText = tRule.required;
     const ENGLISH_CTA_WORDS = ['start now', 'try now', 'sign up', 'book your spot', 'get', 'order now', 'contact us', 'join us', 'discover more', 'learn more', 'benefit now', 'subscribe', 'download', 'buy', 'shop', 'explore', 'request a quote', 'click here', 'submit', 'register', 'claim your', 'get started', 'find out more'];
     const L_CTA_WORDS = articleLanguage === 'ar' ? CTA_WORDS : ENGLISH_CTA_WORDS;
 

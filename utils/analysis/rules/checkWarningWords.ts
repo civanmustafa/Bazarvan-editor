@@ -8,7 +8,7 @@ export const checkWarningWords = (context: AnalysisContext): CheckResult => {
     const tRule = t.structureAnalysis['كلمات تحذيرية'];
     const title = tRule.title;
     const description = tRule.description;
-    const requiredText = t.common.moreThan(1);
+    const requiredText = tRule.required;
     const ENGLISH_WARNING_ADVICE_WORDS = ['warning', 'caution', 'be careful', 'note', 'important', 'recommendation', 'it is recommended', 'it is important', 'avoid', 'make sure', 'be aware', 'beware', 'take note', 'heads up', 'it is crucial', 'you should', 'remember to', 'pro tip', 'keep in mind'];
     const L_WARNING_ADVICE_WORDS = articleLanguage === 'ar' ? WARNING_ADVICE_WORDS : ENGLISH_WARNING_ADVICE_WORDS;
 

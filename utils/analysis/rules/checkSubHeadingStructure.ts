@@ -16,17 +16,17 @@ export const checkSubHeadingStructure = (context: AnalysisContext, level: 3 | 4)
     const details = uiLanguage === 'ar'
         ? (level === 3 
             ? "• ينطبق على العناوين من المستوى H3 خارج قسم الأسئلة الشائعة.\n• يجب أن يحتوي القسم على 2 إلى 4 جمل.\n• إجمالي عدد الكلمات المطلوب: 35 إلى 70 كلمة.\n• الهدف: تقديم معلومات مركزة ومفيدة تحت كل عنوان فرعي."
-            : "• ينطبق على العناوين من المستوى H4 خارج قسم الأسئلة الشائعة.\n• يجب أن يتكون القسم من فقرة واحدة فقط.\n• إجمالي عدد الكلمات المطلوب: 20 إلى 60 كلمة.\n• الهدف: إضافة تفاصيل دقيقة ومختصرة جداً.")
+            : "• ينطبق على العناوين من المستوى H4 خارج قسم الأسئلة الشائعة.\n• يجب أن يتكون القسم من فقرة واحدة فقط.\n• إجمالي عدد الكلمات المطلوب: 30 إلى 60 كلمة.\n• الهدف: إضافة تفاصيل دقيقة ومختصرة يمكن اقتباسها بسهولة.")
         : (level === 3
             ? "• Applies to H3 headings outside the FAQ section.\n• Section must contain 2 to 4 sentences.\n• Word count requirement: 35 to 70 words.\n• Goal: Provide focused and useful information under subheadings."
-            : "• Applies to H4 headings outside the FAQ section.\n• Section must consist of exactly one paragraph.\n• Word count requirement: 20 to 60 words.\n• Goal: Add precise and very brief details.");
+            : "• Applies to H4 headings outside the FAQ section.\n• Section must consist of exactly one paragraph.\n• Word count requirement: 30 to 60 words.\n• Goal: Add precise, quotable details.");
 
     if (level === 3) {
         minWords = 35; maxWords = 70;
         minSentences = 2; maxSentences = 4;
         requiredText = tRule.required;
     } else { // level === 4
-        minWords = 20; maxWords = 60;
+        minWords = 30; maxWords = 60;
         minParas = 1; maxParas = 1;
         requiredText = tRule.required;
     }

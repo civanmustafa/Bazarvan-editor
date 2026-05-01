@@ -52,25 +52,46 @@ export const MANUAL_DRAFT_KEY = 'editor-manual-draft-content';
 export const MANUAL_DRAFT_TITLE_KEY = 'editor-manual-draft-title';
 export const MANUAL_DRAFT_KEYWORDS_KEY = 'editor-manual-draft-keywords';
 export const MANUAL_DRAFT_LANGUAGE_KEY = 'editor-manual-draft-language';
+export const AUTO_DRAFT_KEY = 'editor-draft-content';
+export const AUTO_DRAFT_TITLE_KEY = 'editor-draft-title';
+export const AUTO_DRAFT_KEYWORDS_KEY = 'editor-draft-keywords';
+export const AUTO_DRAFT_LANGUAGE_KEY = 'editor-draft-language';
 
 export const VIOLATION_PRIORITY: { [key: string]: number } = {
   'قسم H2': 1,
+  'H2 Section': 1,
   'بين H2-H3': 2,
+  'Between H2-H3': 2,
   'قسم H3': 3,
+  'H3 Section': 3,
   'قسم H4': 4,
+  'H4 Section': 4,
   'طول الفقرات': 5,
+  'Paragraph Length': 5,
   'طول الجمل': 6,
+  'Sentence Length': 6,
   'تكرار بالفقرة': 7,
+  'Repetition in Paragraph': 7,
   'تكرار بالعنوان': 8,
+  'Repetition in Heading': 8,
   'بدايات الجمل': 9,
+  'Sentence Beginnings': 9,
   'نهايات الفقرات': 10,
+  'Paragraph Endings': 10,
   'ثنائيات مكررة': 11,
+  'Repeated Bigrams': 11,
   'علامات الترقيم': 12,
+  'Punctuation': 12,
   'الفراغات': 13,
+  'Spacing': 13,
   'كلمات لاتينية': 14,
+  'Latin Words': 14,
   'الفقرة التلخيصية': 15,
+  'Summary Paragraph': 15,
   'الفقرة الثانية': 16,
+  'Second Paragraph': 16,
   'حشو استهداف': 17,
+  'Keyword Stuffing': 17,
 };
 export const DEFAULT_PRIORITY = 99;
 
@@ -78,5 +99,9 @@ export const FIXABLE_RULES = new Set([
   'طول الفقرات', 'طول الجمل', 'تكرار بالفقرة', 'تكرار بالعنوان',
   'بدايات الجمل', 'نهايات الفقرات', 'علامات الترقيم', 'الفراغات',
   'الفقرة التلخيصية', 'الفقرة الثانية', 'قسم H2', 'قسم H3', 'قسم H4',
-  'تمهيد خطوات', 'فقرة الأجوبة', 'كلمات بطيئة', 'كلمات للحذف', 'حشو استهداف'
+  'تمهيد خطوات', 'فقرة الأجوبة', 'كلمات بطيئة', 'كلمات للحذف', 'حشو استهداف',
+  'Paragraph Length', 'Sentence Length', 'Repetition in Paragraph', 'Repetition in Heading',
+  'Sentence Beginnings', 'Paragraph Endings', 'Punctuation', 'Spacing',
+  'Summary Paragraph', 'Second Paragraph', 'H2 Section', 'H3 Section', 'H4 Section',
+  'Steps Introduction', 'Answer Paragraph', 'Slow Words', 'Words to Delete', 'Keyword Stuffing'
 ]);

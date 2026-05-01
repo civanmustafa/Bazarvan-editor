@@ -10,7 +10,7 @@ import { parseMarkdownToHtml } from '../utils/editorUtils';
 const SuggestionModal: React.FC = () => {
   const { uiLanguage, t } = useUser();
   const { editor, setTitle } = useEditor();
-  const { suggestion, setSuggestion } = useAI();
+  const { suggestion, setSuggestion, markHistorySuggestionApplied } = useAI();
   const { closeModal } = useModal();
 
   const handleCancel = () => {
@@ -39,6 +39,9 @@ const SuggestionModal: React.FC = () => {
           navigator.clipboard.writeText(acceptedSuggestion);
           break;
       }
+    }
+    if (suggestion?.historyItemId) {
+      markHistorySuggestionApplied(suggestion.historyItemId, acceptedSuggestion);
     }
     setSuggestion(null);
     closeModal();

@@ -446,6 +446,16 @@ const StructureTab: React.FC = () => {
                   </>
               )}
           </button>
+          {fixAllProgress.failed > 0 && !fixAllProgress.running && (
+              <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+                  <p className="font-bold">
+                      {uiLanguage === 'ar' ? 'تعذر إصلاح بعض العناصر.' : 'Some fixes could not be applied.'}
+                  </p>
+                  {fixAllProgress.errors.slice(0, 2).map((error, index) => (
+                      <p key={index} className="mt-1 break-words">{error}</p>
+                  ))}
+              </div>
+          )}
        </div>
 
       {viewMode === 'grid' ? (

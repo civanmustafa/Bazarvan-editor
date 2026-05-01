@@ -22,6 +22,8 @@ const AIHistoryTab: React.FC = () => {
 
     const handleOriginalTextClick = (from: number, to: number) => {
         if (!editor) return;
+        const docSize = editor.state.doc.content.size;
+        if (from < 0 || to > docSize || from >= to) return;
         editor.chain().focus().setTextSelection({ from, to }).scrollIntoView().run();
     };
 
@@ -54,6 +56,11 @@ const AIHistoryTab: React.FC = () => {
                         >
                             <span className="font-semibold">{t.aiHistory.original}: </span><span className="ai-history-content-text">{item.originalText}</span>
                         </p>
+                        {item.applyError && (
+                            <p className="mt-2 text-xs font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 p-2 rounded-md">
+                                {item.applyError}
+                            </p>
+                        )}
                     </div>
 
                     <div className="p-3 space-y-2 bg-gray-50/50 dark:bg-[#2A2A2A]/50">

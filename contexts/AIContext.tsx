@@ -1,6 +1,5 @@
 
 import React, { useState, useCallback, createContext, useContext, useEffect, useRef } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { useUser } from './UserContext';
 import { useEditor } from './EditorContext';
 import { useModal } from './ModalContext';
@@ -10,21 +9,24 @@ import { FIXABLE_RULES } from '../constants';
 
 const callGeminiAnalysis = async (prompt: string, userKey?: string): Promise<string> => {
     try {
-      // Prioritize the user key from dashboard settings
-      const apiKey = (userKey && userKey.trim().length > 0) ? userKey : process.env.API_KEY;
+      // Route AI requests through the Vercel function instead of the browser.
+      const trimmedUserKey = userKey?.trim();
+      const response = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          apiKey: trimmedUserKey || undefined,
+        }),
+      });
 
-      if (!apiKey) {
-          return "مفتاح API غير موجود. يرجى إدخال مفتاح Gemini الخاص بك في لوحة التحكم > الإعدادات > إدارة مفاتيح API.";
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+          throw new Error(data.error || `Gemini request failed with status ${response.status}`);
       }
 
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: prompt,
-      });
-      
-      const text = response.text;
-      return text || '';
+      return typeof data.text === 'string' ? data.text : '';
     } catch (error) {
       console.error("Error calling Gemini API:", error);
       const errorMessage = error instanceof Error ? error.message : "خطأ غير معروف";
@@ -54,12 +56,15 @@ type SuggestionState = {
   action: 'replace-text' | 'replace-title' | 'copy-meta';
   from?: number;
   to?: number;
+  historyItemId?: string;
 };
 
 type FixAllProgress = {
     current: number;
     total: number;
     running: boolean;
+    failed: number;
+    errors: string[];
 };
 
 interface AIContextType {
@@ -82,6 +87,7 @@ interface AIContextType {
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[]) => Promise<void>;
     applySuggestionFromHistory: (historyItemId: string, suggestionText: string) => void;
+    markHistorySuggestionApplied: (historyItemId: string, suggestionText: string) => void;
     removeFromAiHistory: (historyItemId: string) => void;
     generateContextAwarePrompt: (userPrompt: string, options: any) => string;
     openGoogleSearch: (query: string) => void;
@@ -108,7 +114,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized] = useState(false);
     const [aiFixingInfo, setAiFixingInfo] = useState<{ title: string; from: number } | null>(null);
     const [aiHistory, setAiHistory] = useState<AIHistoryItem[]>([]);
-    const [fixAllProgress, setFixAllProgress] = useState<FixAllProgress>({ current: 0, total: 0, running: false });
+    const [fixAllProgress, setFixAllProgress] = useState<FixAllProgress>({ current: 0, total: 0, running: false, failed: 0, errors: [] });
     
     const isInitialMount = useRef(true);
 
@@ -118,13 +124,25 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return;
         }
         setAiHistory([]);
-        setFixAllProgress({ current: 0, total: 0, running: false });
+        setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
     }, [articleKey]);
 
-    const logToAiHistory = (item: Omit<AIHistoryItem, 'id'>) => {
+    const logToAiHistory = useCallback((item: Omit<AIHistoryItem, 'id'>) => {
         const newItem: AIHistoryItem = { ...item, id: `${Date.now()}-${Math.random()}` };
         setAiHistory(prev => [newItem, ...prev]);
-    };
+        return newItem.id;
+    }, []);
+
+    const normalizeRangeText = useCallback((value: string) => value.replace(/\s+/g, ' ').trim(), []);
+
+    const getSafeRangeText = useCallback((from: number, to: number): string | null => {
+        if (!editor) return null;
+        const docSize = editor.state.doc.content.size;
+        if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to > docSize || from >= to) {
+            return null;
+        }
+        return editor.state.doc.textBetween(from, to, ' ');
+    }, [editor]);
 
     useEffect(() => {
         if (suggestion) openModal('suggestion');
@@ -154,9 +172,56 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (targetKeywords) {
             parts.push(`**الكلمات المستهدفة:** الأساسية: ${keywords.primary}, المرادفات: ${keywords.secondaries.filter(Boolean).join(', ')}`);
         }
+        if (keywordCriteria) {
+            const keywordSummary: string[] = [];
+            const kw = analysisResults.keywordAnalysis;
+            keywordSummary.push(`- الأساسية: الحالي ${kw.primary.count}، المطلوب ${kw.primary.requiredCount.join('-')}، الحالة ${kw.primary.status}.`);
+            const unmetPrimaryChecks = kw.primary.checks.filter(check => !check.isMet).map(check => check.text);
+            if (unmetPrimaryChecks.length) keywordSummary.push(`- شروط أساسية غير محققة: ${unmetPrimaryChecks.join('، ')}.`);
+            if (kw.secondariesDistribution.status !== 'info') {
+                keywordSummary.push(`- المرادفات إجمالاً: الحالي ${kw.secondariesDistribution.count}، المطلوب ${kw.secondariesDistribution.requiredCount.join('-')}، الحالة ${kw.secondariesDistribution.status}.`);
+            }
+            kw.secondaries.forEach((secondary, index) => {
+                const term = keywords.secondaries[index]?.trim();
+                if (!term) return;
+                const unmetChecks = secondary.checks.filter(check => !check.isMet).map(check => check.text);
+                keywordSummary.push(`- المرادف "${term}": الحالي ${secondary.count}، المطلوب ${secondary.requiredCount.join('-')}، الحالة ${secondary.status}${unmetChecks.length ? `، غير محقق: ${unmetChecks.join('، ')}` : ''}.`);
+            });
+            if (kw.company.status !== 'info') {
+                keywordSummary.push(`- اسم الشركة: الحالي ${kw.company.count}، المطلوب ${kw.company.requiredCount.join('-')}، الحالة ${kw.company.status}.`);
+            }
+            if (kw.lsi.distribution.status !== 'info') {
+                keywordSummary.push(`- LSI: الحالي ${kw.lsi.distribution.count}، المطلوب ${kw.lsi.distribution.requiredCount.join('-')}، الحالة ${kw.lsi.distribution.status}.`);
+                keywordSummary.push(`- توازن LSI: ${kw.lsi.balance.current}، المطلوب ${kw.lsi.balance.required}.`);
+            }
+            parts.push(`**معايير الكلمات الحالية:**\n${keywordSummary.join('\n') || '- لا توجد كلمات مستهدفة مدخلة.'}`);
+        }
         if (editorText) {
             const truncatedText = text.length > 6000 ? text.substring(text.length - 6000) : text;
             parts.push(`**سياق من نص المقال الحالي:**\n---\n${truncatedText}\n---`);
+        }
+        if (structureCriteria) {
+            const problematicRules = (Object.values(analysisResults.structureAnalysis) as CheckResult[])
+                .filter(rule => rule.status === 'fail' || rule.status === 'warn')
+                .slice(0, 25)
+                .map(rule => {
+                    const firstMessages = rule.violatingItems?.slice(0, 3).map(item => item.message).filter(Boolean).join(' | ');
+                    return `- ${rule.title}: الحالة ${rule.status}، الحالي ${rule.current}، المطلوب ${rule.required}${firstMessages ? `، أمثلة: ${firstMessages}` : ''}.`;
+                });
+            parts.push(`**معايير البنية والجودة المخالفة:**\n${problematicRules.length ? problematicRules.join('\n') : '- لا توجد مخالفات بنيوية حالية.'}`);
+        }
+        if (goalCriteria) {
+            const goalRules = (() => {
+                const s = analysisResults.structureAnalysis;
+                if (aiGoal === 'برنامج سياحي') {
+                    return [s.firstTitle, s.secondTitle, s.includesExcludes, s.preTravelH2, s.pricingH2, s.whoIsItForH2];
+                }
+                if (aiGoal === 'بيع جهاز') {
+                    return [s.mandatoryH2Sections, s.supportingH2Sections, s.tablesCount];
+                }
+                return [s.wordCount, s.summaryParagraph, s.faqSection, s.lastH2IsConclusion, s.conclusionWordCount];
+            })();
+            parts.push(`**معايير الهدف المختار:**\n${goalRules.map(rule => `- ${rule.title}: الحالة ${rule.status}، الحالي ${rule.current}، المطلوب ${rule.required}.`).join('\n')}`);
         }
         if (manualCommand && userPrompt.trim()) {
             parts.push(`**الأمر المطلوب:**\n${userPrompt}`);
@@ -164,7 +229,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
              parts.push(userPrompt);
         }
         return parts.join('\n\n');
-    }, [keywords, text, aiGoal]);
+    }, [keywords, text, aiGoal, analysisResults]);
     
     const handleAiAnalyze = useCallback(async (userPrompt: string, options: any) => {
         if (!editor) return;
@@ -191,42 +256,30 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         try {
             const finalPrompt = generateContextAwarePrompt(userPrompt, options);
             
-            // 1. Get API Key
+            // Route Perplexity through the Vercel function.
             const userKey = apiKeys.perplexity?.find(k => k && k.trim() !== '');
-            const apiKey = userKey || process.env.PERPLEXITY_API_KEY;
+            const apiKey = userKey?.trim();
 
-            if (!apiKey) {
-                throw new Error("لم يتم العثور على مفتاح API. يرجى إضافته من الإعدادات أو التأكد من متغيرات البيئة.");
-            }
-
-            // 2. Direct Fetch (Bypassing local proxy to ensure connectivity)
-            const response = await fetch("https://api.perplexity.ai/chat/completions", {
+            const response = await fetch('/api/perplexity', {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
-                },
-                body: JSON.stringify({ 
-                    model: model, 
-                    messages: [
-                        { role: "system", content: "كن دقيقاً ومحايداً. أجب باللغة العربية." },
-                        { role: "user", content: finalPrompt }
-                    ],
-                    stream: false 
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: finalPrompt,
+                    model,
+                    apiKey: apiKey || undefined,
                 }),
                 signal: controller.signal,
             });
-            
+
             clearTimeout(timeoutId);
-            
+
+            const data = await response.json().catch(() => ({}));
+
             if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.error?.message || `خطأ من الخادم: ${response.status}`);
+                throw new Error(data.error?.message || data.error || `Perplexity request failed with status ${response.status}`);
             }
 
-            const data = await response.json();
-            const text = data.choices?.[0]?.message?.content || "لا توجد نتائج.";
-            setAiResults(prev => ({ ...prev, perplexity: text }));
+            setAiResults(prev => ({ ...prev, perplexity: data.text || "No results." }));
 
         } catch (error) {
             clearTimeout(timeoutId);
@@ -263,14 +316,27 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const resultJson = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
-                setSuggestion({ original: originalText, suggestions: parsed.suggestions, action, from, to });
+                const suggestions = parsed.suggestions.filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0);
+                if (suggestions.length > 0) {
+                    let historyItemId: string | undefined;
+                    if (action === 'replace-text' && from != null && to != null) {
+                        historyItemId = logToAiHistory({
+                            type: 'user-command',
+                            originalText,
+                            suggestions,
+                            from,
+                            to,
+                        });
+                    }
+                    setSuggestion({ original: originalText, suggestions, action, from, to, historyItemId });
+                }
             }
         } catch (e) {
             console.error(e);
         } finally {
             setIsAiCommandLoading(false);
         }
-    }, [editor, title, text, buildComprehensivePrompt, apiKeys.gemini]);
+    }, [editor, title, text, buildComprehensivePrompt, apiKeys.gemini, logToAiHistory]);
 
     const handleAnalyzeHeadings = useCallback(async () => {
         if (isAiLoading.gemini || !editor) return;
@@ -303,16 +369,27 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
-                setSuggestion({ original: originalText, suggestions: parsed.suggestions, action: 'replace-text', from: item.from, to: item.to });
+                const suggestions = parsed.suggestions.filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0);
+                if (suggestions.length > 0) {
+                    const historyItemId = logToAiHistory({
+                        type: 'fix-violation',
+                        ruleTitle: rule.title,
+                        originalText,
+                        suggestions,
+                        from: item.from,
+                        to: item.to,
+                    });
+                    setSuggestion({ original: originalText, suggestions, action: 'replace-text', from: item.from, to: item.to, historyItemId });
+                }
             }
         } finally {
             setAiFixingInfo(null);
         }
-    }, [editor, buildComprehensivePrompt, apiKeys.gemini]);
+    }, [editor, buildComprehensivePrompt, apiKeys.gemini, logToAiHistory]);
 
     const handleFixAllViolations = useCallback(async (rulesToFix: string[]) => {
         if (!editor || !analysisResults.structureAnalysis) return;
-        setFixAllProgress({ current: 0, total: 0, running: true });
+        setFixAllProgress({ current: 0, total: 0, running: true, failed: 0, errors: [] });
         const allViolations: any[] = [];
         Object.values(analysisResults.structureAnalysis).forEach((rule: any) => {
             if (rulesToFix.includes(rule.title) && FIXABLE_RULES.has(rule.title) && rule.violatingItems) {
@@ -325,20 +402,52 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const { rule, item } = allViolations[i];
             setFixAllProgress(p => ({ ...p, current: i + 1 }));
             try {
-                const prompt = `${buildComprehensivePrompt(`أصلح هذا النص لمشكلة ${rule.title}`)}\nالنص: "${editor.state.doc.textBetween(item.from, item.to)}"\nأرجع JSON: { "fixedText": "..." }`;
+                const targetText = getSafeRangeText(item.from, item.to);
+                if (targetText === null) {
+                    throw new Error('Target range is no longer valid.');
+                }
+                const prompt = `${buildComprehensivePrompt(`أصلح هذا النص لمشكلة ${rule.title}`)}\nالنص: "${targetText}"\nأرجع JSON: { "fixedText": "..." }`;
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
                 if (parsed?.fixedText) {
                     editor.chain().focus().insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(parsed.fixedText)).run();
+                } else {
+                    throw new Error('AI did not return fixedText.');
                 }
-            } catch (e) {}
+            } catch (e) {
+                const message = e instanceof Error ? e.message : 'Unknown fix error';
+                console.error('Fix all item failed:', rule.title, e);
+                setFixAllProgress(p => ({
+                    ...p,
+                    failed: p.failed + 1,
+                    errors: [...p.errors, `${rule.title}: ${message}`].slice(-3),
+                }));
+            }
         }
-        setFixAllProgress({ current: 0, total: 0, running: false });
-    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini]);
+        setFixAllProgress(p => ({ ...p, running: false }));
+    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText]);
+
+    const markHistorySuggestionApplied = (id: string, text: string) => {
+        setAiHistory(history => history.map(historyItem => (
+            historyItem.id === id ? { ...historyItem, appliedSuggestion: text, applyError: undefined } : historyItem
+        )));
+    };
 
     const applySuggestionFromHistory = (id: string, text: string) => {
         if (!editor) return;
-        editor.chain().focus().insertContent(parseMarkdownToHtml(text)).run();
+        const item = aiHistory.find(historyItem => historyItem.id === id);
+        if (!item || item.appliedSuggestion) return;
+        const currentText = getSafeRangeText(item.from, item.to);
+        if (currentText === null || normalizeRangeText(currentText) !== normalizeRangeText(item.originalText)) {
+            setAiHistory(history => history.map(historyItem => (
+                historyItem.id === id
+                    ? { ...historyItem, applyError: 'Original text changed. Recreate this suggestion before applying it.' }
+                    : historyItem
+            )));
+            return;
+        }
+        editor.chain().focus().insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(text)).run();
+        markHistorySuggestionApplied(id, text);
     };
 
     const openGoogleSearch = (query: string) => {
@@ -350,6 +459,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         handlePerplexitySearch, handleAiFix, handleFixAllViolations, applySuggestionFromHistory,
+        markHistorySuggestionApplied,
         removeFromAiHistory: (id: string) => setAiHistory(h => h.filter(x => x.id !== id)),
         generateContextAwarePrompt, openGoogleSearch
     };

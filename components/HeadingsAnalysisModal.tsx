@@ -25,9 +25,13 @@ const HeadingsAnalysisModal: React.FC = () => {
     if (!analysis) return;
     const itemToUpdate = analysis.find(a => a.from === originalFrom);
     if (editor && itemToUpdate) {
-        const newHeadingHtml = `<h${itemToUpdate.level}>${suggestion}</h${itemToUpdate.level}>`;
+        const newHeadingContent = {
+            type: 'heading',
+            attrs: { level: itemToUpdate.level },
+            content: suggestion.trim() ? [{ type: 'text', text: suggestion }] : [],
+        };
         editor.chain().focus()
-            .insertContentAt({ from: itemToUpdate.from, to: itemToUpdate.to }, newHeadingHtml, {
+            .insertContentAt({ from: itemToUpdate.from, to: itemToUpdate.to }, newHeadingContent, {
                 updateSelection: true,
                 parseOptions: {
                     preserveWhitespace: false,

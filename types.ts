@@ -175,4 +175,5 @@ export interface AIHistoryItem {
   from: number;
   to: number;
   appliedSuggestion?: string;
+  applyError?: string;
 }

@@ -4,7 +4,7 @@ import type { AnalysisContext } from '../analysisUtils';
 import { WORDS_TO_DELETE } from '../../../constants';
 
 export const checkWordsToDelete = (context: AnalysisContext): CheckResult => {
-    const { textContent, t, articleLanguage, uiLanguage } = context;
+    const { nodes, t, articleLanguage, uiLanguage } = context;
     const tRule = t.structureAnalysis['كلمات للحذف'];
     const title = tRule.title;
     const description = tRule.description;
@@ -16,15 +16,20 @@ export const checkWordsToDelete = (context: AnalysisContext): CheckResult => {
         ? `• قائمة بكلمات تسويقية مفرطة أو "كليشيهات" يفضل حذفها.\n• أمثلة: ${L_WORDS_TO_DELETE.slice(0, 10).join('، ')}.\n• الهدف: تقليل الحشو اللغوي الذي يفتقر للقيمة الحقيقية ويفقده القارئ الثقة.`
         : `• A list of overused marketing terms or clichés to be removed.\n• Examples: ${L_WORDS_TO_DELETE.slice(0, 10).join(', ')}.\n• Goal: Reduce linguistic filler that lacks real value and diminishes reader trust.`;
     
+    const searchableNodes = nodes.filter(node => (node.type === 'paragraph' || node.type === 'heading') && node.text.trim().length > 0);
     const violations: {from: number, to: number, message: string}[] = [];
-    L_WORDS_TO_DELETE.forEach(word => {
-        const regex = new RegExp(word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
-        let match;
-        while((match = regex.exec(textContent)) !== null) {
-            violations.push({
-                from: match.index, to: match.index + word.length, message: t.violationMessages.avoidWord(word)
-            });
-        }
+    searchableNodes.forEach(node => {
+        L_WORDS_TO_DELETE.forEach(word => {
+            const regex = new RegExp(word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
+            let match;
+            while((match = regex.exec(node.text)) !== null) {
+                violations.push({
+                    from: node.pos + 1 + match.index,
+                    to: node.pos + 1 + match.index + match[0].length,
+                    message: t.violationMessages.avoidWord(word)
+                });
+            }
+        });
     });
     
     if (violations.length === 0) {

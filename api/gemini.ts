@@ -17,7 +17,10 @@ export default async function handler(req: Request): Promise<Response> {
         });
     }
 
-    const GEMINI_API_KEY = process.env.API_KEY;
+    const { prompt, apiKey } = await req.json();
+    const GEMINI_API_KEY = typeof apiKey === 'string' && apiKey.trim()
+      ? apiKey.trim()
+      : process.env.GEMINI_API_KEY || process.env.API_KEY;
 
     if (!GEMINI_API_KEY) {
       return new Response(JSON.stringify({ error: "لم يتم تكوين مفتاح Gemini API على الخادم." }), {
@@ -26,8 +29,6 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
     
-    const { prompt } = await req.json();
-
     if (!prompt) {
       return new Response(JSON.stringify({ error: "الموجه مطلوب" }), {
         status: 400,

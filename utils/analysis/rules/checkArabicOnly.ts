@@ -4,7 +4,7 @@ import { createCheckResult, getStatus } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkArabicOnly = (context: AnalysisContext): CheckResult => {
-    const { textContent, totalWordCount, keywords, t, uiLanguage } = context;
+    const { textContent, totalWordCount, keywords, t, uiLanguage, articleLanguage } = context;
     const tRule = t.structureAnalysis['كلمات لاتينية'];
     const title = tRule.title;
     const description = tRule.description;
@@ -13,6 +13,10 @@ export const checkArabicOnly = (context: AnalysisContext): CheckResult => {
     const details = uiLanguage === 'ar'
         ? "• يمنع استخدام كلمات لاتينية (إنجليزية مثلاً) داخل النص العربي إلا للضرورة القصوى.\n• يتم استثناء الكلمات المفتاحية المعرفة من هذا الفحص.\n• النسبة المسموح بها: أقل من 0.5% من إجمالي النص.\n• الهدف: الحفاظ على هوية النص العربي ونقاء اللغة."
         : "• Use of Latin characters within Arabic text is discouraged unless necessary.\n• Target keywords are excluded from this check.\n• Allowed threshold: Less than 0.5% of total word count.\n• Goal: Maintain the linguistic purity and flow of the Arabic text.";
+
+    if (articleLanguage !== 'ar') {
+        return createCheckResult(title, 'pass', t.common.notApplicable, requiredText, 1, description, details);
+    }
     
     // Fix: Explicitly type latinWords as string[] to prevent 'never[]' inference
     // which was causing the 'word' variable in the filter on line 26 to be typed as 'never'.

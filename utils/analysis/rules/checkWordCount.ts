@@ -39,7 +39,7 @@ export const checkWordCount = (context: AnalysisContext): CheckResult => {
         description = uiLanguage === 'ar' 
           ? `لبرنامج سياحي، عدد الكلمات الأدنى هو ${minWords} بناءً على ${numberOfDays > 0 ? `${numberOfDays} يوم/أيام تم اكتشافها` : 'قاعدة عامة'}. المعادلة: عدد الأيام * 200 + 900.`
           : `For a tourism program, the minimum word count is ${minWords} based on ${numberOfDays > 0 ? `${numberOfDays} day(s) detected` : 'a general rule'}. Formula: # of days * 200 + 900.`;
-        requiredText = t.common.moreThan(minWords);
+        requiredText = `≥ ${minWords}`;
     }
 
     return createCheckResult(

@@ -8,7 +8,7 @@ export const checkInterrogativeH2 = (context: AnalysisContext): CheckResult => {
     const tRule = t.structureAnalysis['عناوين H2 استفهامية'];
     const title = tRule.title;
     const description = tRule.description;
-    const requiredText = t.common.moreThan(3);
+    const requiredText = tRule.required;
     const L_INTERROGATIVE_H2_KEYWORDS = articleLanguage === 'ar' ? INTERROGATIVE_H2_KEYWORDS : ['what', 'who', 'when', 'where', 'how', 'why', 'is', 'are', 'do', 'does', 'can', 'will', 'should'];
 
     const details = uiLanguage === 'ar'

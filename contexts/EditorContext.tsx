@@ -12,7 +12,7 @@ import { Extension, Editor } from '@tiptap/core';
 import { useContentAnalysis } from '../hooks/useContentAnalysis';
 import { recordArticleSave, recordTimeSpentOnArticle, ArticleActivity, renameArticleActivity } from '../hooks/useUserActivity';
 import type { Keywords, FullAnalysis } from '../types';
-import { INITIAL_CONTENT, INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAFT_KEYWORDS_KEY, MANUAL_DRAFT_LANGUAGE_KEY } from '../constants';
+import { INITIAL_CONTENT, INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAFT_KEYWORDS_KEY, MANUAL_DRAFT_LANGUAGE_KEY, AUTO_DRAFT_KEY, AUTO_DRAFT_TITLE_KEY, AUTO_DRAFT_KEYWORDS_KEY, AUTO_DRAFT_LANGUAGE_KEY } from '../constants';
 import { useUser } from './UserContext';
 
 // --- Helper Hooks ---
@@ -31,20 +31,25 @@ function useDebounce<T>(value: T, delay: number): T {
 
 const getInitialContent = () => {
   try {
-    const savedContent = localStorage.getItem('editor-draft-content');
+    const savedContent = localStorage.getItem(AUTO_DRAFT_KEY);
     if (savedContent) return JSON.parse(savedContent);
   } catch (error) {
     console.error("Failed to parse saved content from localStorage:", error);
-    localStorage.removeItem('editor-draft-content');
+    localStorage.removeItem(AUTO_DRAFT_KEY);
   }
   return INITIAL_CONTENT;
+};
+
+const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
+    const saved = localStorage.getItem(key);
+    return saved === 'ar' || saved === 'en' ? saved : null;
 };
 
 const ViolationHighlight = Highlight.extend({
     addAttributes() {
         return {
             ...this.parent?.(),
-            color: { default: this.options.color, parseHTML: e => e.style.backgroundColor, renderHTML: a => !a.color || a.highlightStyle === 'underline' ? {} : { style: `background-color: ${a.color}; color: #1e293b;` } },
+            color: { default: (this.options as any).color, parseHTML: e => e.style.backgroundColor, renderHTML: a => !a.color || a.highlightStyle === 'underline' ? {} : { style: `background-color: ${a.color}; color: #1e293b;` } },
             violation: { default: null, parseHTML: e => e.getAttribute('data-violation'), renderHTML: a => a.violation ? { 'data-violation': a.violation } : {} },
             from: { default: null, parseHTML: e => e.getAttribute('data-from'), renderHTML: a => a.from === null ? {} : { 'data-from': a.from } },
             isViolation: { default: false, parseHTML: e => e.getAttribute('data-is-violation') === 'true', renderHTML: a => a.isViolation ? { 'data-is-violation': 'true' } : {} },
@@ -153,13 +158,13 @@ export const useEditor = () => {
 
 export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { currentUser, currentView, setCurrentView, preferredLanguage, uiLanguage, isIdle } = useUser();
-    const [title, setTitle] = useState<string>(() => localStorage.getItem('editor-draft-title') || '');
-    const [articleKey, setArticleKey] = useState<string>(() => localStorage.getItem('editor-draft-title') || '');
+    const [title, setTitle] = useState<string>(() => localStorage.getItem(AUTO_DRAFT_TITLE_KEY) || '');
+    const [articleKey, setArticleKey] = useState<string>(() => localStorage.getItem(AUTO_DRAFT_TITLE_KEY) || '');
     const [editorState, setEditorState] = useState<any | null>(null);
     const [text, setText] = useState<string>('');
     const [keywords, setKeywords] = useState<Keywords>(() => {
         try {
-          const saved = localStorage.getItem('editor-draft-keywords');
+          const saved = localStorage.getItem(AUTO_DRAFT_KEYWORDS_KEY);
           return saved ? JSON.parse(saved) : INITIAL_KEYWORDS;
         } catch { return INITIAL_KEYWORDS; }
     });
@@ -197,12 +202,12 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const contentJSON = editor.getJSON();
             setEditorState(contentJSON);
             setText(editor.getText());
-            localStorage.setItem('editor-draft-content', JSON.stringify(contentJSON));
+            localStorage.setItem(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
         },
         onCreate: ({ editor }) => {
             setEditorState(editor.getJSON());
             setText(editor.getText());
-            const savedLang = localStorage.getItem(MANUAL_DRAFT_LANGUAGE_KEY) as 'ar' | 'en' | null;
+            const savedLang = getStoredLanguage(AUTO_DRAFT_LANGUAGE_KEY) || getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
             const targetLang = savedLang || preferredLanguage || 'ar';
             setArticleLanguage(targetLang);
             
@@ -220,9 +225,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [currentView]);
 
     useEffect(() => {
-        localStorage.setItem('editor-draft-title', title);
-        localStorage.setItem('editor-draft-keywords', JSON.stringify(keywords));
-        localStorage.setItem('editor-draft-language', articleLanguage);
+        localStorage.setItem(AUTO_DRAFT_TITLE_KEY, title);
+        localStorage.setItem(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
+        localStorage.setItem(AUTO_DRAFT_LANGUAGE_KEY, articleLanguage);
     }, [title, keywords, articleLanguage]);
 
     const handleLanguageChange = useCallback((lang: 'ar' | 'en') => {
@@ -295,7 +300,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const content = localStorage.getItem(MANUAL_DRAFT_KEY);
         const titleStr = localStorage.getItem(MANUAL_DRAFT_TITLE_KEY);
         const keywordsStr = localStorage.getItem(MANUAL_DRAFT_KEYWORDS_KEY);
-        const lang = localStorage.getItem(MANUAL_DRAFT_LANGUAGE_KEY) as 'ar' | 'en' | null;
+        const lang = getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
         if (content) editor.commands.setContent(JSON.parse(content));
         if (titleStr) {
             setTitle(titleStr);

@@ -1,5 +1,15 @@
 
 import type { FullAnalysis, Keywords } from '../types';
+import {
+  AUTO_DRAFT_KEY,
+  AUTO_DRAFT_TITLE_KEY,
+  AUTO_DRAFT_KEYWORDS_KEY,
+  AUTO_DRAFT_LANGUAGE_KEY,
+  MANUAL_DRAFT_KEY,
+  MANUAL_DRAFT_TITLE_KEY,
+  MANUAL_DRAFT_KEYWORDS_KEY,
+  MANUAL_DRAFT_LANGUAGE_KEY,
+} from '../constants';
 
 const ACTIVITY_KEY = 'smartEditorUserActivity';
 
@@ -247,12 +257,14 @@ export const clearUserActivity = (username: string) => {
   });
   // Also clear any lingering draft data from localStorage
   try {
-    localStorage.removeItem('editor-draft-content');
-    localStorage.removeItem('editor-draft-title');
-    localStorage.removeItem('editor-draft-keywords');
-    localStorage.removeItem('editor-manual-draft-content');
-    localStorage.removeItem('editor-manual-draft-title');
-    localStorage.removeItem('editor-manual-draft-keywords');
+    localStorage.removeItem(AUTO_DRAFT_KEY);
+    localStorage.removeItem(AUTO_DRAFT_TITLE_KEY);
+    localStorage.removeItem(AUTO_DRAFT_KEYWORDS_KEY);
+    localStorage.removeItem(AUTO_DRAFT_LANGUAGE_KEY);
+    localStorage.removeItem(MANUAL_DRAFT_KEY);
+    localStorage.removeItem(MANUAL_DRAFT_TITLE_KEY);
+    localStorage.removeItem(MANUAL_DRAFT_KEYWORDS_KEY);
+    localStorage.removeItem(MANUAL_DRAFT_LANGUAGE_KEY);
   } catch (error) {
     console.error("Failed to clear draft data from localStorage:", error);
   }

@@ -5,6 +5,12 @@ import type { AnalysisContext } from './analysisUtils';
 export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis => {
     const { keywords, totalWordCount, aiGoal, textContent, headings, paragraphs, articleLanguage, t } = context;
     const tKwChecks = t.keywordChecks;
+    const getRequiredCount = (requiredPercentage: [number, number], isActive: boolean): [number, number] => {
+      if (!isActive || totalWordCount === 0) return [0, 0];
+      const min = Math.max(1, Math.floor(totalWordCount * requiredPercentage[0]));
+      const max = Math.max(min, Math.ceil(totalWordCount * requiredPercentage[1]));
+      return [min, max];
+    };
 
     const primaryAnalysis: PrimaryKeywordAnalysis = (() => {
       const p = keywords.primary;
@@ -22,10 +28,7 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
           requiredPercentage = [0.005, 0.01];
       }
       
-      const requiredCount: [number, number] = [
-        Math.floor(totalWordCount * requiredPercentage[0]),
-        Math.ceil(totalWordCount * requiredPercentage[1])
-      ];
+      const requiredCount = getRequiredCount(requiredPercentage, Boolean(p && p.trim()));
 
       const firstH2 = headings.find(h => h.level === 2);
       const h2Headings = headings.filter(h => h.level === 2);
@@ -61,9 +64,9 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
       return {
         count,
         percentage,
-        requiredPercentage: requiredPercentage,
+        requiredPercentage: p && p.trim() ? requiredPercentage : [0, 0] as [number, number],
         requiredCount: requiredCount,
-        status: getStatus(count, requiredCount[0], requiredCount[1]),
+        status: p && p.trim() ? getStatus(count, requiredCount[0], requiredCount[1]) : 'info',
         checks: checks
       };
     })();
@@ -89,10 +92,7 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
       const percentage = totalWordCount > 0 ? count / totalWordCount : 0;
       
       const requiredPercentage = individualSecondaryRequiredPercentage;
-      const requiredCount: [number, number] = [
-          Math.floor(totalWordCount * requiredPercentage[0]), 
-          Math.ceil(totalWordCount * requiredPercentage[1])
-      ];
+      const requiredCount = getRequiredCount(requiredPercentage, true);
       
       const h2s = headings.filter(h => h.level === 2);
       const h2sWithSynonym = h2s.filter(h => countOccurrences(h.text, s, articleLanguage) > 0);
@@ -134,13 +134,13 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
     });
 
     const secondariesDistribution: KeywordStats = (() => {
+        if (activeSecondariesCount === 0) {
+            return { count: 0, percentage: 0, requiredPercentage: [0, 0] as [number, number], requiredCount: [0, 0] as [number, number], status: 'info' };
+        }
         const totalCount = secondariesAnalysis.reduce((sum, s) => sum + s.count, 0);
         const percentage = totalWordCount > 0 ? totalCount / totalWordCount : 0;
         const requiredPercentage = totalSecondariesRequiredPercentage;
-        const requiredCount: [number, number] = [
-            Math.floor(totalWordCount * requiredPercentage[0]), 
-            Math.ceil(totalWordCount * requiredPercentage[1])
-        ];
+        const requiredCount = getRequiredCount(requiredPercentage, true);
         return { count: totalCount, percentage, requiredPercentage, requiredCount, status: getStatus(totalCount, requiredCount[0], requiredCount[1]) };
     })();
 
@@ -149,8 +149,8 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
         const count = c ? countOccurrences(textContent, c, articleLanguage) : 0;
         const percentage = totalWordCount > 0 ? count / totalWordCount : 0;
         const requiredPercentage: [number, number] = [0.001, 0.002];
-        const requiredCount: [number, number] = [Math.floor(totalWordCount * requiredPercentage[0]), Math.ceil(totalWordCount * requiredPercentage[1])];
-        return { count, percentage, requiredPercentage, requiredCount, status: getStatus(count, requiredCount[0], requiredCount[1]) };
+        const requiredCount = getRequiredCount(requiredPercentage, Boolean(c && c.trim()));
+        return { count, percentage, requiredPercentage: c && c.trim() ? requiredPercentage : [0, 0] as [number, number], requiredCount, status: c && c.trim() ? getStatus(count, requiredCount[0], requiredCount[1]) : 'info' };
     })();
 
     const lsiAnalysis = ((): LsiKeywordAnalysis => {
@@ -166,12 +166,11 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
             case 'مدونة': requiredPercentage = [0.02, 0.03]; break;
             default: requiredPercentage = [0.015, 0.025];
         }
-        const requiredCount: [number, number] = [Math.floor(totalWordCount * requiredPercentage[0]), Math.ceil(totalWordCount * requiredPercentage[1])];
+        const requiredCount = getRequiredCount(requiredPercentage, lsiKeywords.length > 0);
 
         if (lsiKeywords.length === 0) {
             result.distribution.requiredCount = requiredCount;
-            result.distribution.requiredPercentage = requiredPercentage;
-            if (requiredCount[0] > 0) result.distribution.status = 'fail';
+            result.distribution.status = 'info';
             return result;
         }
 

@@ -1,4 +1,16 @@
 
+export const escapeHtml = (value: string): string => {
+    const replacements: Record<string, string> = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    };
+
+    return value.replace(/[&<>"']/g, char => replacements[char]);
+};
+
 export const parseMarkdownToHtml = (markdown: string): string => {
     if (!markdown) return '';
 
@@ -8,7 +20,7 @@ export const parseMarkdownToHtml = (markdown: string): string => {
     let listType = ''; // 'ul' or 'ol'
 
     const processInlineFormatting = (text: string): string => {
-        return text
+        return escapeHtml(text)
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.*?)\*/g, '<em>$1</em>');
     };
