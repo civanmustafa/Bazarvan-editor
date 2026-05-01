@@ -1,6 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check } from 'lucide-react';
 import DuplicatesTab from './DuplicatesTab';
+import GoalTab from './GoalTab';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -465,6 +466,7 @@ const LeftSidebar: React.FC = () => {
         return (
           <div className="p-2 space-y-3">
             {autoDistributeSection}
+            <GoalTab embedded />
             <ModernSection 
                 icon={<KeyRound size={20} />} 
                 title={tLk.primaryKeyword}
@@ -626,6 +628,7 @@ const LeftSidebar: React.FC = () => {
     return (
         <div className="p-1 space-y-3">
             {autoDistributeSection}
+            <GoalTab embedded />
              <div className="px-1 py-1">
                 <div className="flex bg-white dark:bg-gradient-to-r from-[#2A2A2A] via-[#222222] to-[#1F1F1F] rounded-lg border border-gray-300 dark:border-[#3C3C3C] divide-x divide-gray-200 dark:divide-[#3C3C3C] cursor-help">
                     <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title={tLk.primary}>

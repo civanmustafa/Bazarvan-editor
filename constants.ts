@@ -48,14 +48,29 @@ export const INITIAL_KEYWORDS: Keywords = {
   lsi: [],
 };
 
+export const INITIAL_GOAL_CONTEXT = {
+  pageType: 'article',
+  objective: 'educate',
+  audienceAwareness: 'solution-aware',
+  audienceScope: 'local',
+  targetCountry: '',
+  targetAudience: '',
+  searchIntent: 'informational',
+  funnelStage: 'consideration',
+};
+
 export const MANUAL_DRAFT_KEY = 'editor-manual-draft-content';
 export const MANUAL_DRAFT_TITLE_KEY = 'editor-manual-draft-title';
 export const MANUAL_DRAFT_KEYWORDS_KEY = 'editor-manual-draft-keywords';
 export const MANUAL_DRAFT_LANGUAGE_KEY = 'editor-manual-draft-language';
+export const MANUAL_DRAFT_GOAL_CONTEXT_KEY = 'editor-manual-draft-goal-context';
+export const MANUAL_DRAFT_AI_GOAL_KEY = 'editor-manual-draft-ai-goal';
 export const AUTO_DRAFT_KEY = 'editor-draft-content';
 export const AUTO_DRAFT_TITLE_KEY = 'editor-draft-title';
 export const AUTO_DRAFT_KEYWORDS_KEY = 'editor-draft-keywords';
 export const AUTO_DRAFT_LANGUAGE_KEY = 'editor-draft-language';
+export const AUTO_DRAFT_GOAL_CONTEXT_KEY = 'editor-draft-goal-context';
+export const AUTO_DRAFT_AI_GOAL_KEY = 'editor-draft-ai-goal';
 
 export const VIOLATION_PRIORITY: { [key: string]: number } = {
   'قسم H2': 1,
@@ -70,12 +85,16 @@ export const VIOLATION_PRIORITY: { [key: string]: number } = {
   'Paragraph Length': 5,
   'طول الجمل': 6,
   'Sentence Length': 6,
+  'جداول وقوائم': 7,
+  'Tables and Lists': 7,
   'تكرار بالفقرة': 7,
   'Repetition in Paragraph': 7,
   'تكرار بالعنوان': 8,
   'Repetition in Heading': 8,
   'بدايات الجمل': 9,
   'Sentence Beginnings': 9,
+  'إحالات غامضة': 10,
+  'Ambiguous References': 10,
   'نهايات الفقرات': 10,
   'Paragraph Endings': 10,
   'ثنائيات مكررة': 11,

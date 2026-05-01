@@ -11,8 +11,8 @@ import TextAlign from '@tiptap/extension-text-align';
 import { Extension, Editor } from '@tiptap/core';
 import { useContentAnalysis } from '../hooks/useContentAnalysis';
 import { recordArticleSave, recordTimeSpentOnArticle, ArticleActivity, renameArticleActivity } from '../hooks/useUserActivity';
-import type { Keywords, FullAnalysis } from '../types';
-import { INITIAL_CONTENT, INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAFT_KEYWORDS_KEY, MANUAL_DRAFT_LANGUAGE_KEY, AUTO_DRAFT_KEY, AUTO_DRAFT_TITLE_KEY, AUTO_DRAFT_KEYWORDS_KEY, AUTO_DRAFT_LANGUAGE_KEY } from '../constants';
+import type { Keywords, FullAnalysis, GoalContext } from '../types';
+import { INITIAL_CONTENT, INITIAL_KEYWORDS, INITIAL_GOAL_CONTEXT, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAFT_KEYWORDS_KEY, MANUAL_DRAFT_LANGUAGE_KEY, MANUAL_DRAFT_GOAL_CONTEXT_KEY, MANUAL_DRAFT_AI_GOAL_KEY, AUTO_DRAFT_KEY, AUTO_DRAFT_TITLE_KEY, AUTO_DRAFT_KEYWORDS_KEY, AUTO_DRAFT_LANGUAGE_KEY, AUTO_DRAFT_GOAL_CONTEXT_KEY, AUTO_DRAFT_AI_GOAL_KEY } from '../constants';
 import { useUser } from './UserContext';
 
 // --- Helper Hooks ---
@@ -43,6 +43,20 @@ const getInitialContent = () => {
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
     const saved = localStorage.getItem(key);
     return saved === 'ar' || saved === 'en' ? saved : null;
+};
+
+const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalContext => ({
+    ...INITIAL_GOAL_CONTEXT,
+    ...(value || {}),
+});
+
+const getStoredGoalContext = (key: string): GoalContext => {
+    try {
+        const saved = localStorage.getItem(key);
+        return saved ? normalizeGoalContext(JSON.parse(saved)) : normalizeGoalContext();
+    } catch {
+        return normalizeGoalContext();
+    }
 };
 
 const ViolationHighlight = Highlight.extend({
@@ -135,6 +149,8 @@ interface EditorContextType {
     articleLanguage: 'ar' | 'en';
     aiGoal: string;
     setAiGoal: React.Dispatch<React.SetStateAction<string>>;
+    goalContext: GoalContext;
+    setGoalContext: React.Dispatch<React.SetStateAction<GoalContext>>;
     analysisResults: FullAnalysis;
     saveStatus: 'idle' | 'saved';
     restoreStatus: 'idle' | 'restored';
@@ -169,7 +185,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         } catch { return INITIAL_KEYWORDS; }
     });
     const [articleLanguage, setArticleLanguage] = useState<'ar' | 'en'>('ar');
-    const [aiGoal, setAiGoal] = useState('البيع');
+    const [aiGoal, setAiGoal] = useState(() => localStorage.getItem(AUTO_DRAFT_AI_GOAL_KEY) || 'البيع');
+    const [goalContext, setGoalContext] = useState<GoalContext>(() => getStoredGoalContext(AUTO_DRAFT_GOAL_CONTEXT_KEY));
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
     const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restored'>('idle');
     const [draftExists, setDraftExists] = useState(false);
@@ -228,7 +245,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         localStorage.setItem(AUTO_DRAFT_TITLE_KEY, title);
         localStorage.setItem(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
         localStorage.setItem(AUTO_DRAFT_LANGUAGE_KEY, articleLanguage);
-    }, [title, keywords, articleLanguage]);
+        localStorage.setItem(AUTO_DRAFT_AI_GOAL_KEY, aiGoal);
+        localStorage.setItem(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
+    }, [title, keywords, articleLanguage, aiGoal, goalContext]);
 
     const handleLanguageChange = useCallback((lang: 'ar' | 'en') => {
         if (!editor) return;
@@ -273,15 +292,17 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 finalTitleToSave = currentKey;
             }
         }
-        recordArticleSave(currentUser, finalTitleToSave, contentJSON, keywords, analysisResults, articleLanguage);
+        recordArticleSave(currentUser, finalTitleToSave, contentJSON, keywords, analysisResults, articleLanguage, aiGoal, goalContext);
         localStorage.setItem(MANUAL_DRAFT_KEY, JSON.stringify(contentJSON));
         localStorage.setItem(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
         localStorage.setItem(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
         localStorage.setItem(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
+        localStorage.setItem(MANUAL_DRAFT_AI_GOAL_KEY, aiGoal);
+        localStorage.setItem(MANUAL_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
         setDraftExists(true);
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2000);
-    }, [editor, currentUser, title, articleKey, keywords, analysisResults, articleLanguage]);
+    }, [editor, currentUser, title, articleKey, keywords, analysisResults, articleLanguage, aiGoal, goalContext]);
     
     const handleSaveDraftRef = useRef(handleSaveDraft);
     useEffect(() => {
@@ -300,6 +321,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const content = localStorage.getItem(MANUAL_DRAFT_KEY);
         const titleStr = localStorage.getItem(MANUAL_DRAFT_TITLE_KEY);
         const keywordsStr = localStorage.getItem(MANUAL_DRAFT_KEYWORDS_KEY);
+        const aiGoalStr = localStorage.getItem(MANUAL_DRAFT_AI_GOAL_KEY);
         const lang = getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
         if (content) editor.commands.setContent(JSON.parse(content));
         if (titleStr) {
@@ -307,6 +329,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleKey(titleStr);
         }
         if (keywordsStr) setKeywords(JSON.parse(keywordsStr));
+        if (aiGoalStr) setAiGoal(aiGoalStr);
+        setGoalContext(getStoredGoalContext(MANUAL_DRAFT_GOAL_CONTEXT_KEY));
         if (lang) handleLanguageChange(lang);
         setRestoreStatus('restored');
         setTimeout(() => setRestoreStatus('idle'), 2000);
@@ -318,6 +342,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setTitle('');
             setArticleKey('');
             setKeywords(INITIAL_KEYWORDS);
+            setAiGoal('البيع');
+            setGoalContext(normalizeGoalContext());
             editor.commands.setContent(INITIAL_CONTENT);
             handleLanguageChange(preferredLanguage);
             setCurrentView('editor');
@@ -330,6 +356,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setTitle(titleStr);
             setArticleKey(titleStr);
             setKeywords(article.keywords || INITIAL_KEYWORDS);
+            setAiGoal(article.aiGoal || 'البيع');
+            setGoalContext(normalizeGoalContext(article.goalContext));
             editor.commands.setContent(article.content || INITIAL_CONTENT);
             handleLanguageChange(lang);
             setCurrentView('editor');
@@ -347,6 +375,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         articleLanguage,
         aiGoal,
         setAiGoal,
+        goalContext,
+        setGoalContext,
         analysisResults,
         saveStatus,
         restoreStatus,

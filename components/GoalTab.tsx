@@ -114,12 +114,34 @@ const GoalConditionCard: React.FC<{
   );
 };
 
-const GoalTab: React.FC = () => {
+const GoalContextSelect: React.FC<{
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}> = ({ label, value, options, onChange }) => (
+  <label className="block">
+    <span className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">{label}</span>
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] px-2 py-2 text-sm text-[#333333] dark:text-[#e0e0e0] focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]"
+    >
+      {options.map(option => (
+        <option key={option.value} value={option.value}>{option.label}</option>
+      ))}
+    </select>
+  </label>
+);
+
+const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     const { uiLanguage } = useUser();
     const { 
         analysisResults,
         aiGoal,
         setAiGoal,
+        goalContext,
+        setGoalContext,
     } = useEditor();
     const { 
         highlightedItem,
@@ -129,6 +151,7 @@ const GoalTab: React.FC = () => {
     const { structureAnalysis } = analysisResults;
 
   const t = translations[uiLanguage].goalTab;
+  const contextOptions = t.contextOptions;
 
   const goalOptions = [
     { value: 'اكاديمية', label: t.academy, icon: <Info size={18} /> },
@@ -141,6 +164,53 @@ const GoalTab: React.FC = () => {
 
   const [isGoalOpen, setIsGoalOpen] = React.useState(false);
   const selectedGoal = goalOptions.find(opt => opt.value === aiGoal) || goalOptions[0];
+  const updateGoalContext = (key: keyof typeof goalContext, value: string) => {
+    setGoalContext(prev => ({ ...prev, [key]: value }));
+  };
+  const pageTypeOptions = [
+    { value: 'article', label: contextOptions.article },
+    { value: 'news', label: contextOptions.news },
+    { value: 'service', label: contextOptions.service },
+    { value: 'comparison', label: contextOptions.comparisonPage },
+    { value: 'product', label: contextOptions.product },
+    { value: 'landing', label: contextOptions.landing },
+    { value: 'guide', label: contextOptions.guide },
+    { value: 'faq', label: contextOptions.faq },
+  ];
+  const objectiveOptions = [
+    { value: 'educate', label: contextOptions.educate },
+    { value: 'sell', label: contextOptions.sell },
+    { value: 'bookings', label: contextOptions.bookings },
+    { value: 'leads', label: contextOptions.leads },
+    { value: 'trust', label: contextOptions.trust },
+    { value: 'retention', label: contextOptions.retention },
+  ];
+  const awarenessOptions = [
+    { value: 'unaware', label: contextOptions.unaware },
+    { value: 'problem-aware', label: contextOptions.problemAware },
+    { value: 'solution-aware', label: contextOptions.solutionAware },
+    { value: 'product-aware', label: contextOptions.productAware },
+    { value: 'ready-to-buy', label: contextOptions.readyToBuy },
+  ];
+  const scopeOptions = [
+    { value: 'local', label: contextOptions.local },
+    { value: 'country', label: contextOptions.country },
+    { value: 'regional', label: contextOptions.regional },
+    { value: 'global', label: contextOptions.global },
+  ];
+  const intentOptions = [
+    { value: 'informational', label: contextOptions.informational },
+    { value: 'commercial', label: contextOptions.commercial },
+    { value: 'transactional', label: contextOptions.transactional },
+    { value: 'navigational', label: contextOptions.navigational },
+    { value: 'local-intent', label: contextOptions.localIntent },
+  ];
+  const funnelOptions = [
+    { value: 'awareness', label: contextOptions.awareness },
+    { value: 'consideration', label: contextOptions.consideration },
+    { value: 'decision', label: contextOptions.decision },
+    { value: 'loyalty', label: contextOptions.loyalty },
+  ];
   
   const touristProgramChecks = [
       structureAnalysis.firstTitle,
@@ -158,7 +228,7 @@ const GoalTab: React.FC = () => {
   ].filter(check => check && check.current !== 'غير مطبق' && check.current !== 'Not applicable');
 
   return (
-    <div className="p-4 space-y-4">
+    <div className={`${embedded ? 'p-0' : 'p-4'} space-y-4`}>
       <div className="bg-white dark:bg-[#2A2A2A] rounded-xl shadow-sm border dark:border-[#3C3C3C] p-4 space-y-4 transition-all duration-300 border-gray-200 dark:border-transparent">
         <div>
             <label htmlFor="ai-goal-button" className="block text-sm font-semibold text-[#333333] dark:text-[#C7C7C7] mb-2">
@@ -208,6 +278,39 @@ const GoalTab: React.FC = () => {
                     ))}
                     </ul>
                 )}
+            </div>
+        </div>
+
+        <div className="space-y-3 border-t border-gray-200 dark:border-[#3C3C3C] pt-4">
+            <div>
+                <h4 className="text-sm font-bold text-[#333333] dark:text-gray-100">{t.contextTitle}</h4>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t.contextDescription}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+                <GoalContextSelect label={t.pageType} value={goalContext.pageType} options={pageTypeOptions} onChange={(value) => updateGoalContext('pageType', value)} />
+                <GoalContextSelect label={t.objective} value={goalContext.objective} options={objectiveOptions} onChange={(value) => updateGoalContext('objective', value)} />
+                <GoalContextSelect label={t.audienceAwareness} value={goalContext.audienceAwareness} options={awarenessOptions} onChange={(value) => updateGoalContext('audienceAwareness', value)} />
+                <GoalContextSelect label={t.audienceScope} value={goalContext.audienceScope} options={scopeOptions} onChange={(value) => updateGoalContext('audienceScope', value)} />
+                <label className="block">
+                    <span className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">{t.targetCountry}</span>
+                    <input
+                        value={goalContext.targetCountry}
+                        onChange={(event) => updateGoalContext('targetCountry', event.target.value)}
+                        className="w-full rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] px-2 py-2 text-sm text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]"
+                        placeholder={t.targetCountryPlaceholder}
+                    />
+                </label>
+                <label className="block">
+                    <span className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">{t.targetAudience}</span>
+                    <input
+                        value={goalContext.targetAudience}
+                        onChange={(event) => updateGoalContext('targetAudience', event.target.value)}
+                        className="w-full rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] px-2 py-2 text-sm text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]"
+                        placeholder={t.targetAudiencePlaceholder}
+                    />
+                </label>
+                <GoalContextSelect label={t.searchIntent} value={goalContext.searchIntent} options={intentOptions} onChange={(value) => updateGoalContext('searchIntent', value)} />
+                <GoalContextSelect label={t.funnelStage} value={goalContext.funnelStage} options={funnelOptions} onChange={(value) => updateGoalContext('funnelStage', value)} />
             </div>
         </div>
 

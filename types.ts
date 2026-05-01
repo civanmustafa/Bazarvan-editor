@@ -9,6 +9,17 @@ export interface Keywords {
   lsi: string[];
 }
 
+export interface GoalContext {
+  pageType: string;
+  objective: string;
+  audienceAwareness: string;
+  audienceScope: string;
+  targetCountry: string;
+  targetAudience: string;
+  searchIntent: string;
+  funnelStage: string;
+}
+
 export interface KeywordCheck {
   text: string;
   isMet: boolean;
@@ -78,6 +89,7 @@ export interface StructureAnalysis {
     summaryParagraph: CheckResult;
     secondParagraph: CheckResult;
     paragraphLength: CheckResult;
+    tableListOpportunities: CheckResult;
     h2Structure: CheckResult;
     h2Count: CheckResult;
     h3Structure: CheckResult;
@@ -86,6 +98,7 @@ export interface StructureAnalysis {
     faqSection: CheckResult;
     answerParagraph: CheckResult;
     ambiguousHeadings: CheckResult;
+    ambiguousParagraphReferences: CheckResult;
     punctuation: CheckResult;
     paragraphEndings: CheckResult;
     interrogativeH2: CheckResult;

@@ -4,11 +4,64 @@ import { GoogleGenAI } from '@google/genai';
 import { useUser } from './UserContext';
 import { useEditor } from './EditorContext';
 import { useModal } from './ModalContext';
-import type { CheckResult, HeadingAnalysisResult, AIHistoryItem } from '../types';
+import type { CheckResult, HeadingAnalysisResult, AIHistoryItem, GoalContext } from '../types';
 import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { FIXABLE_RULES } from '../constants';
 
 const GEMINI_MODEL = 'gemini-3-flash-preview';
+
+const GOAL_CONTEXT_LABELS: Record<string, string> = {
+    pageType: 'نوع الصفحة',
+    objective: 'هدف الصفحة',
+    audienceAwareness: 'مستوى وعي الجمهور',
+    audienceScope: 'نطاق الجمهور',
+    targetCountry: 'الدولة/السوق المستهدف',
+    targetAudience: 'الجمهور المستهدف',
+    searchIntent: 'نية البحث',
+    funnelStage: 'مرحلة القارئ',
+};
+
+const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
+    article: 'مقالة',
+    news: 'خبر',
+    service: 'صفحة خدمة',
+    comparison: 'مقارنة',
+    product: 'منتج',
+    landing: 'صفحة هبوط',
+    guide: 'دليل',
+    faq: 'أسئلة وأجوبة',
+    educate: 'تثقيف',
+    sell: 'بيع',
+    bookings: 'حجوزات',
+    leads: 'جمع عملاء محتملين',
+    trust: 'بناء الثقة',
+    retention: 'احتفاظ/ولاء',
+    unaware: 'غير واع بالمشكلة',
+    'problem-aware': 'واع بالمشكلة',
+    'solution-aware': 'واع بالحل',
+    'product-aware': 'واع بالمنتج/الخدمة',
+    'ready-to-buy': 'جاهز للشراء',
+    local: 'محلي',
+    global: 'عالمي',
+    country: 'دولة محددة',
+    regional: 'إقليمي',
+    informational: 'معلوماتية',
+    commercial: 'تجارية/مقارنة',
+    transactional: 'شرائية',
+    navigational: 'تنقلية/علامة تجارية',
+    'local-intent': 'محلية',
+    awareness: 'وعي',
+    consideration: 'مقارنة وتقييم',
+    decision: 'قرار',
+    loyalty: 'ولاء',
+};
+
+const formatGoalContext = (goalContext: GoalContext): string => {
+    return Object.entries(goalContext)
+        .filter(([, value]) => value.trim().length > 0)
+        .map(([key, value]) => `- ${GOAL_CONTEXT_LABELS[key] || key}: ${GOAL_CONTEXT_VALUE_LABELS[value] || value}`)
+        .join('\n');
+};
 
 const getGeminiErrorMessage = (error: unknown): string => {
     const rawMessage = error instanceof Error
@@ -167,7 +220,7 @@ export const useAI = () => {
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { t, uiLanguage, apiKeys } = useUser();
-    const { editor, title, text, keywords, analysisResults, aiGoal, articleKey } = useEditor();
+    const { editor, title, text, keywords, analysisResults, aiGoal, goalContext, articleLanguage, articleKey } = useEditor();
     const { openModal } = useModal();
     
     const [aiResults, setAiResults] = useState({ gemini: '', perplexity: '' });
@@ -219,10 +272,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const buildComprehensivePrompt = (basePrompt: string, sectionHeading?: string) => {
         const professionalRoleAndGoal = `أنت كاتب محتوى خبير في موضوع "${keywords.primary || 'المحتوى العام'}". هدفك إنتاج محتوى متوافق مع SEO و AEO و GEO.`;
         let contextParts: string[] = [];
-        let kwContext = "**الكلمات المستهدفة:**\n";
-        kwContext += `- الأساسية: ${keywords.primary || 'لم تحدد'}\n`;
-        kwContext += `- المرادفة: ${keywords.secondaries.filter(Boolean).join(', ') || 'لم تحدد'}\n`;
-        contextParts.push(kwContext);
+        if (title.trim()) contextParts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
+        contextParts.push(`**لغة المقال:** ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`);
+        const keywordContext = [
+            `- الأساسية: ${keywords.primary || 'لم تحدد'}`,
+            `- المرادفة: ${keywords.secondaries.filter(Boolean).join(', ') || 'لم تحدد'}`,
+            `- العلامة التجارية: ${keywords.company || 'لم تحدد'}`,
+            `- LSI: ${keywords.lsi.filter(Boolean).join(', ') || 'لم تحدد'}`,
+        ].join('\n');
+        contextParts.push(`**الكلمات والعلامة المستهدفة:**\n${keywordContext}`);
+        const goalContextText = formatGoalContext(goalContext);
+        if (goalContextText) contextParts.push(`**سياق الهدف والجمهور:**\n- الهدف العام: ${aiGoal}\n${goalContextText}`);
         if (sectionHeading) contextParts.push(`**سياق العنوان:** "${sectionHeading}"`);
         const tocString = generateToc(editor);
         if (tocString) contextParts.push(`**هيكل المقال:**\n${tocString}`);
@@ -233,8 +293,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const { manualCommand, editorText, targetKeywords, keywordCriteria, structureCriteria, goalCriteria } = options;
         let parts: string[] = [];
         parts.push(`أنت خبير SEO وكاتب محتوى محترف. الهدف الحالي للمقال هو "${aiGoal}".`);
+        if (title.trim()) {
+            parts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
+        }
+        parts.push(`**لغة المقال:** ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`);
+        const goalContextText = formatGoalContext(goalContext);
+        if (goalContextText) {
+            parts.push(`**سياق الهدف والجمهور لاستخدامه في التقييم والتحليل:**\n- الهدف العام: ${aiGoal}\n${goalContextText}`);
+        }
         if (targetKeywords) {
-            parts.push(`**الكلمات المستهدفة:** الأساسية: ${keywords.primary}, المرادفات: ${keywords.secondaries.filter(Boolean).join(', ')}`);
+            parts.push(`**الكلمات والعلامة المستهدفة:** الأساسية: ${keywords.primary || 'لم تحدد'}، المرادفات: ${keywords.secondaries.filter(Boolean).join(', ') || 'لم تحدد'}، العلامة التجارية: ${keywords.company || 'لم تحدد'}، LSI: ${keywords.lsi.filter(Boolean).join(', ') || 'لم تحدد'}`);
         }
         if (keywordCriteria) {
             const keywordSummary: string[] = [];
@@ -261,8 +329,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             parts.push(`**معايير الكلمات الحالية:**\n${keywordSummary.join('\n') || '- لا توجد كلمات مستهدفة مدخلة.'}`);
         }
         if (editorText) {
-            const truncatedText = text.length > 6000 ? text.substring(text.length - 6000) : text;
-            parts.push(`**سياق من نص المقال الحالي:**\n---\n${truncatedText}\n---`);
+            parts.push(`**نص المقال الحالي من المحرر:**\n---\n${text}\n---`);
         }
         if (structureCriteria) {
             const problematicRules = (Object.values(analysisResults.structureAnalysis) as CheckResult[])
@@ -293,7 +360,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
              parts.push(userPrompt);
         }
         return parts.join('\n\n');
-    }, [keywords, text, aiGoal, analysisResults]);
+    }, [title, keywords, text, aiGoal, goalContext, articleLanguage, analysisResults]);
     
     const handleAiAnalyze = useCallback(async (userPrompt: string, options: any) => {
         if (!editor) return;

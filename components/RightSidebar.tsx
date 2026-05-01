@@ -1,20 +1,93 @@
 ﻿
 import React, { useState, useRef, useEffect } from 'react';
-import { LayoutTemplate, Target, Sparkles, ChevronDown, ExternalLink, Search, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command } from 'lucide-react';
+import { LayoutTemplate, Sparkles, ChevronDown, ExternalLink, Search, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command } from 'lucide-react';
 import StructureTab from './StructureTab';
-import GoalTab from './GoalTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
 import { useAI } from '../contexts/AIContext';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
 
+const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO/LLM SEO. افحص المحتوى التالي بعمق ولكن باختصار، وقيّمه من حيث مطابقته لنية البحث، كفاية الإجابة، قابلية الاقتباس في AI Overviews، الفجوات المعرفية، الأسئلة الناقصة، الادعاءات غير المدعومة، الكيانات الناقصة، البنية، وقوة التحويل.
+
+بيانات الصفحة:
+- الكلمة المفتاحية الأساسية: استخدم الكلمة الأساسية المرفقة تلقائيًا مع الطلب.
+- الكلمات الثانوية: استخدم الكلمات الثانوية المرفقة تلقائيًا مع الطلب.
+- نوع الصفحة: استخدم نوع الصفحة المرفق تلقائيًا مع الطلب.
+- هدف الصفحة: استخدم هدف الصفحة المرفق تلقائيًا مع الطلب.
+- الجمهور المستهدف: استخدم الجمهور المستهدف المرفق تلقائيًا مع الطلب.
+- العلامة التجارية: استخدم اسم العلامة التجارية المرفق تلقائيًا مع الطلب.
+
+المحتوى:
+استخدم نص المحرر المرفق تلقائيًا مع الطلب. إذا كانت هناك معلومات أخرى مرفقة مثل معايير الكلمات أو البنية أو الهدف، فاستفد منها أيضًا.
+
+المطلوب:
+
+أخرج التحليل بالعربية وفق هذا التنسيق فقط:
+
+1. ملخص سريع:
+- التقييم العام من 100:
+- أقوى نقطة في المحتوى:
+- أخطر ضعف:
+- هل المحتوى مناسب لنية البحث؟ نعم/جزئيًا/لا، مع السبب.
+
+2. نية البحث والفجوات:
+- نية البحث الأساسية:
+- نوايا فرعية ناقصة:
+- 5 أسئلة مهمة يجب إضافتها مع مكان إضافتها.
+
+3. جاهزية AEO/GEO/LLM:
+- هل توجد إجابات قابلة للاقتباس؟
+- أفضل 3 جمل قابلة للاقتباس من النص.
+- 3 جمل جديدة مقترحة أقوى للاقتباس.
+- جواب محتمل قد يستخرجه Google AI Overview من المحتوى.
+
+4. الادعاءات والكيانات:
+- أهم الادعاءات التي تحتاج دعمًا أو تخفيفًا.
+- أهم الكيانات الناقصة التي يجب إضافتها.
+- أين تُضاف هذه الكيانات داخل المحتوى؟
+
+5. البنية والتحويل:
+- مشاكل العناوين والترتيب.
+- الفقرات التي تحتاج تقسيمًا أو توضيحًا.
+- مدى قوة CTA.
+
+6. إعادة صياغة:
+اختر أضعف فقرة وأعد كتابتها لتصبح أوضح، أقوى، أكثر إقناعًا، وأكثر قابلية للاقتباس.
+
+7. توصيات عملية:
+قدّم 7 توصيات فقط. لكل توصية اذكر:
+- ماذا أفعل؟
+- أين أطبقه؟
+- لماذا مهم؟
+- مثال قصير.
+
+قيود الإخراج:
+- اجعل الإجابات شديدة التركيز.
+- لا تكرر نفس الملاحظة.
+- لا تقدم نصائح عامة.
+- لا تقترح صورًا أو فيديوهات أو Schema.
+- اجعل الإجابة عملية ومباشرة.`;
+
+type AiAnalysisOptions = {
+    manualCommand: boolean;
+    editorText: boolean;
+    targetKeywords: boolean;
+    keywordCriteria: boolean;
+    structureCriteria: boolean;
+    goalCriteria: boolean;
+};
+
+type ReadyCommand = {
+    label: string;
+    value: string;
+    options?: Partial<AiAnalysisOptions>;
+};
+
 const RightSidebar: React.FC = () => {
     const { uiLanguage, t } = useUser();
-    const { keywords } = useEditor();
     const { handleAiAnalyze, handlePerplexitySearch, aiResults, isAiLoading, generateContextAwarePrompt } = useAI();
     
-    const [activeTab, setActiveTab] = useState<'structure' | 'goal' | 'ai'>('structure');
+    const [activeTab, setActiveTab] = useState<'structure' | 'ai'>('structure');
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history'>('new');
     const [aiCommand, setAiCommand] = useState('');
     const [selectedReadyCommand, setSelectedReadyCommand] = useState('');
@@ -26,7 +99,7 @@ const RightSidebar: React.FC = () => {
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
     const commandsMenuRef = useRef<HTMLDivElement>(null);
 
-    const [aiOptions, setAiOptions] = useState({
+    const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>({
         manualCommand: true,
         editorText: true,
         targetKeywords: true,
@@ -49,32 +122,76 @@ const RightSidebar: React.FC = () => {
         };
     }, []);
 
-    const readyCommands = [
+    const readyCommands: ReadyCommand[] = [
         { label: tRs.selectCommand, value: '' },
         { 
             label: tRs.analyzeFull, 
-            value: `اعتبر نفسك كاتب محتوى محترف وخبير في موضوع وتخصص "${keywords.primary || 'الكلمات المفتاحية الأساسية'}" المرفقة مع هذا الأمر.
-أرغب في تحليل محتوى هذا ليكون محسّن لـ SEO التقليدي وميزات الذكاء الاصطناعي (AEO, GEO, LLM SEO).
-أرغب في انشاء محتوى يتفوق على المواقع المتصدرة والمنافسة في النتائج الاولى من البحث عبر كتابة محتوى متعدد الأبعاد يخدم: SEO التقليدي + AEO + GEO + LLM SEO وأن يكون المحتوى قابلاً للفهرسة والاستخلاص من Google وميزات AI Overviews/AI Mode للاقتباس والتلخيص بواسطة نماذج اللغة الكبيرة ولإقناع وكلاء الذكاء (AI Agents) والمستخدمين البشر.
-قم فقط بالتركيز على نقاط الضعف الموجودة في المحتوى مع اقتراحات محتوى جاهزة مكتوب ومعدل.
-لا تقم بذكر اقتراحات حول الصور وبيانات المنظمة والروابط الداخلية، قم بالتركيز على المحتوى فقط.
-بناء على ذلك قم بالتحليل بشكل كامل.` 
+            value: FULL_ARTICLE_SEO_AI_AUDIT_PROMPT,
+            options: {
+                manualCommand: true,
+                editorText: true,
+                targetKeywords: true,
+                keywordCriteria: true,
+                structureCriteria: true,
+                goalCriteria: true,
+            },
         },
         { 
             label: tRs.improveWeakest, 
-            value: `اعتبر نفسك محرر ومدقق محتوى محترف وخبير في السيو وخبير في "${keywords.primary || 'موضوع الكلمة المفتاحية الأساسية'}"
-الهدف: أرغب بتدقيق المحتوى هذا ومعرفة هل هو محسّن لـ SEO التقليدي وميزات الذكاء الاصطناعي (AEO, GEO, LLM SEO) والهدف هو إنتاج محتوى متعدد الأبعاد يخدم: SEO التقليدي + AEO + GEO + LLM SEO وأن يكون المحتوى قابلاً للفهرسة والاستخلاص من Google وميزات AI Overviews/AI Mode للاقتباس والتلخيص بواسطة نماذج اللغة الكبيرة ولإقناع وكلاء الذكاء (AI Agents) والمستخدمين البشر.
-قم بالبحث عن أضعف قسم في المقالة متعارض او غير متطابق مع الهدف وقم بتحسينه.
-قم بالتركيز على الأمر فقط وقدم إجابة مباشرة دون توضيحات ونصائح.` 
+            value: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، معايير التحليل، ونص المحرر المرفقة تلقائيًا:
+حدّد أضعف قسم أو فقرة في المقال من حيث SEO/AEO/GEO/LLM SEO ومطابقة هدف الصفحة.
+أخرج فقط:
+1. اسم القسم أو بداية الفقرة الضعيفة.
+2. سبب الضعف باختصار.
+3. نسخة محسنة جاهزة للاستبدال.
+4. لماذا النسخة الجديدة أفضل.
+لا تقدّم نصائح عامة ولا تقترح صورًا أو فيديوهات أو Schema.`,
+            options: {
+                manualCommand: true,
+                editorText: true,
+                targetKeywords: true,
+                keywordCriteria: true,
+                structureCriteria: true,
+                goalCriteria: true,
+            },
         },
         { 
             label: tRs.suggestNew, 
-            value: `اعتبر نفسك محرر ومدقق محتوى محترف وخبير في السيو وخبير في "${keywords.primary || 'موضوع الكلمة المفتاحية الأساسية'}"
-الهدف: أرغب بتدقيق المحتوى هذا ومعرفة هل هو محسّن لـ SEO التقليدي وميزات الذكاء الاصطناعي (AEO, GEO, LLM SEO) والهدف هو إنتاج محتوى متعدد الأبعاد يخدم: SEO التقليدي + AEO + GEO + LLM SEO وأن يكون المحتوى قابلاً للفهرسة والاستخلاص من Google وميزات AI Overviews/AI Mode للاقتباس والتلخيص بواسطة نماذج اللغة الكبيرة ولإقناع وكلاء الذكاء (AI Agents) والمستخدمين البشر.
-اقترح فقرة فكرة جديدة لم تذكر في المقال وتضيف قيمة عالية.
-قم بالتركيز على الأمر فقط وقدم إجابة مباشرة دون توضيحات ونصائح.` 
+            value: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، ومعايير الهدف المرفقة تلقائيًا:
+اقترح فكرة أو فقرة جديدة غير مذكورة في المقال وتضيف قيمة واضحة للقارئ وتزيد قابلية الاقتباس في AI Overviews.
+أخرج فقط:
+1. مكان الإضافة المقترح داخل المقال.
+2. عنوان فرعي مناسب إن لزم.
+3. الفقرة المقترحة جاهزة للإضافة.
+4. سبب أهميتها للبحث والقرار والتحويل.
+لا تقدّم أكثر من فكرة واحدة ولا تقترح صورًا أو فيديوهات أو Schema.`,
+            options: {
+                manualCommand: true,
+                editorText: true,
+                targetKeywords: true,
+                keywordCriteria: true,
+                structureCriteria: true,
+                goalCriteria: true,
+            },
         },
-        { label: tRs.peopleQuestions, value: `استخرج أهم الأسئلة التي يطرحها الناس حول الكلمة المفتاحية.` },
+        {
+            label: tRs.peopleQuestions,
+            value: `استخرج أهم أسئلة الباحثين المرتبطة بالكلمة المفتاحية ونية البحث والجمهور المستهدف المرفقين تلقائيًا.
+أخرج 10 أسئلة فقط، مع تقسيمها إلى:
+- أسئلة قبل القرار.
+- أسئلة مقارنة أو اختيار.
+- أسئلة تكلفة أو سعر.
+- أسئلة اعتراضات أو مخاطر.
+لكل سؤال اذكر أين يمكن إضافته داخل المقال باختصار.`,
+            options: {
+                manualCommand: true,
+                editorText: true,
+                targetKeywords: true,
+                keywordCriteria: false,
+                structureCriteria: false,
+                goalCriteria: true,
+            },
+        },
     ];
 
     const getCommandIcon = (index: number) => {
@@ -87,9 +204,12 @@ const RightSidebar: React.FC = () => {
         }
     };
 
-    const handleCommandSelect = (value: string) => {
-        setSelectedReadyCommand(value);
-        if (value) setAiCommand(value);
+    const handleCommandSelect = (command: ReadyCommand) => {
+        setSelectedReadyCommand(command.value);
+        if (command.value) setAiCommand(command.value);
+        if (command.options) {
+            setAiOptions(prev => ({ ...prev, ...command.options }));
+        }
         setIsCommandsMenuOpen(false);
     };
 
@@ -143,7 +263,7 @@ const RightSidebar: React.FC = () => {
                                     {readyCommands.slice(1).map((cmd, idx) => (
                                         <button
                                             key={idx}
-                                            onClick={() => handleCommandSelect(cmd.value)}
+                                            onClick={() => handleCommandSelect(cmd)}
                                             className="w-full text-start px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors flex items-center gap-3 border-b border-gray-50 dark:border-[#333] last:border-0"
                                         >
                                             {getCommandIcon(idx + 1)}
@@ -229,13 +349,13 @@ const RightSidebar: React.FC = () => {
     return (
         <aside className="basis-[17%] flex flex-col h-full min-w-0 bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg overflow-hidden border-s border-gray-300 dark:border-[#333]">
             <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
-                {(['structure', 'goal', 'ai'] as const).map(tab => (
+                {(['structure', 'ai'] as const).map(tab => (
                     <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15'}`}>
-                        {tab === 'structure' ? <LayoutTemplate size={18} /> : tab === 'goal' ? <Target size={18} /> : <BrainCircuit size={18} />}
+                        {tab === 'structure' ? <LayoutTemplate size={18} /> : <BrainCircuit size={18} />}
                     </button>
                 ))}
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar">{activeTab === 'structure' ? <StructureTab /> : activeTab === 'goal' ? <GoalTab /> : renderAiTab()}</div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar">{activeTab === 'structure' ? <StructureTab /> : renderAiTab()}</div>
         </aside>
     );
 };
