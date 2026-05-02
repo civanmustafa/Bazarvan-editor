@@ -11,7 +11,7 @@ export interface AnalysisContext {
     textContent: string;
     totalWordCount: number;
     keywords: Keywords;
-    aiGoal: string;
+    analysisGoal: string;
     articleLanguage: 'ar' | 'en';
     uiLanguage: 'ar' | 'en';
     t: typeof translations.ar;

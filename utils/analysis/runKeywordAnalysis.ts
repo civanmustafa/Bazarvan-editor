@@ -3,7 +3,7 @@ import { countOccurrences, getStatus, createCheckResult } from './analysisUtils'
 import type { AnalysisContext } from './analysisUtils';
 
 export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis => {
-    const { keywords, totalWordCount, aiGoal, textContent, headings, paragraphs, articleLanguage, t } = context;
+    const { keywords, totalWordCount, analysisGoal, textContent, headings, paragraphs, articleLanguage, t } = context;
     const tKwChecks = t.keywordChecks;
     const getRequiredCount = (requiredPercentage: [number, number], isActive: boolean): [number, number] => {
       if (!isActive || totalWordCount === 0) return [0, 0];
@@ -18,11 +18,11 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
       const percentage = totalWordCount > 0 ? count / totalWordCount : 0;
       
       let requiredPercentage: [number, number];
-      if (aiGoal === 'اكاديمية') {
+      if (analysisGoal === 'اكاديمية') {
           requiredPercentage = [0.008, 0.009];
-      } else if (aiGoal === 'البيع' || aiGoal === 'بيع جهاز') {
+      } else if (analysisGoal === 'البيع' || analysisGoal === 'بيع جهاز') {
           requiredPercentage = [0.005, 0.008];
-      } else if (aiGoal === 'مدونة' || aiGoal === 'برنامج سياحي') {
+      } else if (analysisGoal === 'مدونة' || analysisGoal === 'برنامج سياحي') {
           requiredPercentage = [0.009, 0.011];
       } else {
           requiredPercentage = [0.005, 0.01];
@@ -72,7 +72,7 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
     })();
 
     let totalSecondariesRequiredPercentage: [number, number];
-    if (aiGoal === 'البيع' || aiGoal === 'بيع جهاز') {
+    if (analysisGoal === 'البيع' || analysisGoal === 'بيع جهاز') {
         totalSecondariesRequiredPercentage = [0.003, 0.005];
     } else {
         totalSecondariesRequiredPercentage = [0.005, 0.01];
@@ -162,7 +162,7 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
         };
         
         let requiredPercentage: [number, number];
-        switch(aiGoal) {
+        switch(analysisGoal) {
             case 'مدونة': requiredPercentage = [0.02, 0.03]; break;
             default: requiredPercentage = [0.015, 0.025];
         }

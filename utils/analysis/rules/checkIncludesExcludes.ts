@@ -3,7 +3,7 @@ import { createCheckResult, countOccurrences, getNodeSizeFromJSON } from '../ana
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkIncludesExcludes = (context: AnalysisContext): CheckResult => {
-    const { aiGoal, headings, nodes, t, articleLanguage } = context;
+    const { analysisGoal, headings, nodes, t, articleLanguage } = context;
     const tRule = t.structureAnalysis['يشمل/لايشمل'];
     const title = tRule.title;
     const description = tRule.description;
@@ -12,7 +12,7 @@ export const checkIncludesExcludes = (context: AnalysisContext): CheckResult => 
     const includesKeywords = articleLanguage === 'ar' ? ['يشمل'] : ['includes', "what's included"];
     const excludesKeywords = articleLanguage === 'ar' ? ['لا يشمل'] : ['excludes', 'does not include', "what's not included"];
 
-    if (aiGoal !== 'برنامج سياحي') {
+    if (analysisGoal !== 'برنامج سياحي') {
         return createCheckResult(title, 'pass', t.common.notApplicable, requiredText, 1, description);
     }
 

@@ -3,14 +3,14 @@ import { createCheckResult, countOccurrences, getNodeSizeFromJSON } from '../ana
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkWhoIsItForH2 = (context: AnalysisContext): CheckResult => {
-    const { aiGoal, headings, t, articleLanguage } = context;
+    const { analysisGoal, headings, t, articleLanguage } = context;
     const tRule = t.structureAnalysis['H2 المرشح'];
     const title = tRule.title;
     const description = tRule.description;
     const keywords = articleLanguage === 'ar' ? ["مناسب", "مرشح", "يناسب"] : ["suitable for", "who is this for", "ideal for"];
     const requiredText = tRule.required;
 
-    if (aiGoal !== 'برنامج سياحي') {
+    if (analysisGoal !== 'برنامج سياحي') {
         return createCheckResult(title, 'pass', t.common.notApplicable, requiredText, 1, description);
     }
     

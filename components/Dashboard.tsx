@@ -6,6 +6,7 @@ import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useModal } from '../contexts/ModalContext';
+import ClientGoalSettings from './ClientGoalSettings';
 
 type ActivityData = {
   [username: string]: UserActivity;
@@ -609,6 +610,7 @@ const Dashboard: React.FC = () => {
                 <div>
                     <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center gap-2"><Settings size={20} /><span>{t.settings}</span></h2>
                     <div className="p-4 bg-white dark:bg-[#2A2A2A] rounded-lg border border-gray-200 dark:border-[#3C3C3C] space-y-4">
+                        <ClientGoalSettings />
                          <button
                             onClick={() => openModal('apiKeys')}
                             className="w-full flex items-center justify-center gap-2 p-2 bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675] font-bold rounded-lg hover:bg-[#d4af37]/20 transition-colors"

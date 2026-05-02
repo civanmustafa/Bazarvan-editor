@@ -1,6 +1,6 @@
 
 import { useMemo } from 'react';
-import type { Keywords, FullAnalysis, StructureAnalysis } from '../types';
+import type { Keywords, FullAnalysis, StructureAnalysis, GoalContext } from '../types';
 import { translations } from '../components/translations';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 import { runKeywordAnalysis } from '../utils/analysis/runKeywordAnalysis';
@@ -54,11 +54,25 @@ import { checkHeadingLength } from '../utils/analysis/rules/checkHeadingLength';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../constants';
 
 
+const getAnalysisGoal = (goalContext: GoalContext): string => {
+  switch (goalContext.objective) {
+    case 'educate':
+      return 'اكاديمية';
+    case 'compare':
+      return 'مقارنة';
+    case 'convert':
+      return 'البيع';
+    default:
+      return 'مدونة';
+  }
+};
+
 // --- Main Hook ---
 
-export const useContentAnalysis = (editorState: any, textContent: string, keywords: Keywords, aiGoal: string, articleLanguage: 'ar' | 'en', uiLanguage: 'ar' | 'en'): FullAnalysis => {
+export const useContentAnalysis = (editorState: any, textContent: string, keywords: Keywords, goalContext: GoalContext, articleLanguage: 'ar' | 'en', uiLanguage: 'ar' | 'en'): FullAnalysis => {
   return useMemo(() => {
     const t = translations[uiLanguage];
+    const analysisGoal = getAnalysisGoal(goalContext);
     
     // --- 1. Prepare Analysis Context ---
     const totalWordCount = textContent.trim().split(/\s+/).filter(Boolean).length;
@@ -134,7 +148,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
       textContent,
       totalWordCount,
       keywords,
-      aiGoal,
+      analysisGoal,
       articleLanguage,
       uiLanguage,
       t,
@@ -220,5 +234,5 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
       duplicateStats,
       wordCount: totalWordCount,
     };
-  }, [editorState, textContent, keywords, aiGoal, articleLanguage, uiLanguage]);
+  }, [editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage]);
 };

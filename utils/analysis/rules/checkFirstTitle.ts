@@ -3,13 +3,13 @@ import { createCheckResult, getStatus, getWordCount, getNodeSizeFromJSON } from 
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkFirstTitle = (context: AnalysisContext): CheckResult => {
-    const { aiGoal, nodes, t } = context;
+    const { analysisGoal, nodes, t } = context;
     const tRule = t.structureAnalysis['العنوان الاول'];
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
 
-    if (aiGoal !== 'برنامج سياحي') {
+    if (analysisGoal !== 'برنامج سياحي') {
         return createCheckResult(title, 'pass', t.common.notApplicable, requiredText, 1, description);
     }
     

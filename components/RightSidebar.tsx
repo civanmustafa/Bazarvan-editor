@@ -18,7 +18,7 @@ const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO
 - العلامة التجارية: استخدم اسم العلامة التجارية المرفق تلقائيًا مع الطلب.
 
 المحتوى:
-استخدم نص المحرر المرفق تلقائيًا مع الطلب. إذا كانت هناك معلومات أخرى مرفقة مثل معايير الكلمات أو البنية أو الهدف، فاستفد منها أيضًا.
+استخدم نص المحرر المرفق تلقائيًا مع الطلب. إذا كانت هناك معلومات أخرى مرفقة مثل معايير الكلمات أو البنية أو هدف الصفحة، فاستفد منها أيضًا.
 
 المطلوب:
 
@@ -72,6 +72,7 @@ type AiAnalysisOptions = {
     manualCommand: boolean;
     editorText: boolean;
     targetKeywords: boolean;
+    goalContext: boolean;
     keywordCriteria: boolean;
     structureCriteria: boolean;
     goalCriteria: boolean;
@@ -103,6 +104,7 @@ const RightSidebar: React.FC = () => {
         manualCommand: true,
         editorText: true,
         targetKeywords: true,
+        goalContext: true,
         keywordCriteria: false,
         structureCriteria: false,
         goalCriteria: false,
@@ -131,6 +133,7 @@ const RightSidebar: React.FC = () => {
                 manualCommand: true,
                 editorText: true,
                 targetKeywords: true,
+                goalContext: true,
                 keywordCriteria: true,
                 structureCriteria: true,
                 goalCriteria: true,
@@ -150,6 +153,7 @@ const RightSidebar: React.FC = () => {
                 manualCommand: true,
                 editorText: true,
                 targetKeywords: true,
+                goalContext: true,
                 keywordCriteria: true,
                 structureCriteria: true,
                 goalCriteria: true,
@@ -157,7 +161,7 @@ const RightSidebar: React.FC = () => {
         },
         { 
             label: tRs.suggestNew, 
-            value: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، ومعايير الهدف المرفقة تلقائيًا:
+            value: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، ومعايير هدف الصفحة المرفقة تلقائيًا:
 اقترح فكرة أو فقرة جديدة غير مذكورة في المقال وتضيف قيمة واضحة للقارئ وتزيد قابلية الاقتباس في AI Overviews.
 أخرج فقط:
 1. مكان الإضافة المقترح داخل المقال.
@@ -169,6 +173,7 @@ const RightSidebar: React.FC = () => {
                 manualCommand: true,
                 editorText: true,
                 targetKeywords: true,
+                goalContext: true,
                 keywordCriteria: true,
                 structureCriteria: true,
                 goalCriteria: true,
@@ -187,6 +192,7 @@ const RightSidebar: React.FC = () => {
                 manualCommand: true,
                 editorText: true,
                 targetKeywords: true,
+                goalContext: true,
                 keywordCriteria: false,
                 structureCriteria: false,
                 goalCriteria: true,

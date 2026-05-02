@@ -3,7 +3,7 @@ import { createCheckResult, getStatus } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkWordCount = (context: AnalysisContext): CheckResult => {
-    const { totalWordCount, aiGoal, t, uiLanguage } = context;
+    const { totalWordCount, analysisGoal, t, uiLanguage } = context;
     const tRule = t.structureAnalysis['عدد الكلمات'];
     const title = tRule.title;
     let description = tRule.description;
@@ -11,7 +11,7 @@ export const checkWordCount = (context: AnalysisContext): CheckResult => {
     let minWords = 800;
     let warnMin = 600;
 
-    if (aiGoal === 'برنامج سياحي') {
+    if (analysisGoal === 'برنامج سياحي') {
         let numberOfDays = 0;
         const dayKeywords = context.articleLanguage === 'ar' ? ['يوم', 'أيام'] : ['day', 'days'];
         const durationRegex = new RegExp(`(\\d+)\\s+(${dayKeywords.join('|')})`);

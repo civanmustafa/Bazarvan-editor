@@ -1,15 +1,13 @@
 
-import type { FullAnalysis, GoalContext, Keywords } from '../types';
+import type { ClientGoalContexts, FullAnalysis, GoalContext, Keywords } from '../types';
 import {
   AUTO_DRAFT_KEY,
-  AUTO_DRAFT_AI_GOAL_KEY,
   AUTO_DRAFT_GOAL_CONTEXT_KEY,
   AUTO_DRAFT_TITLE_KEY,
   AUTO_DRAFT_KEYWORDS_KEY,
   AUTO_DRAFT_LANGUAGE_KEY,
   INITIAL_GOAL_CONTEXT,
   MANUAL_DRAFT_KEY,
-  MANUAL_DRAFT_AI_GOAL_KEY,
   MANUAL_DRAFT_GOAL_CONTEXT_KEY,
   MANUAL_DRAFT_TITLE_KEY,
   MANUAL_DRAFT_KEYWORDS_KEY,
@@ -24,7 +22,6 @@ export type ArticleActivity = {
   lastSaved: string;
   content: any;
   keywords: Keywords;
-  aiGoal?: string;
   goalContext?: GoalContext;
   articleLanguage: 'ar' | 'en';
   stats?: {
@@ -54,6 +51,7 @@ export type UserActivity = {
   preferredTheme?: 'dark' | 'light';
   preferredLanguage?: 'ar' | 'en';
   preferredUILanguage?: 'ar' | 'en';
+  clientGoalContexts?: ClientGoalContexts;
 };
 
 type ActivityData = {
@@ -73,6 +71,7 @@ const getDefaultUserActivity = (): UserActivity => ({
   preferredTheme: 'dark',
   preferredLanguage: 'ar',
   preferredUILanguage: 'ar',
+  clientGoalContexts: {},
 });
 
 const getDefaultArticleActivity = (): ArticleActivity => ({
@@ -87,7 +86,6 @@ const getDefaultArticleActivity = (): ArticleActivity => ({
     company: '',
     lsi: [],
   },
-  aiGoal: 'البيع',
   goalContext: INITIAL_GOAL_CONTEXT,
   stats: {
     wordCount: 0,
@@ -174,7 +172,7 @@ export const recordTimeSpentOnArticle = (username: string, title: string, second
   });
 };
 
-export const recordArticleSave = (username: string, title: string, content: any, keywords: Keywords, analysis: FullAnalysis, articleLanguage: 'ar' | 'en', aiGoal?: string, goalContext?: GoalContext) => {
+export const recordArticleSave = (username: string, title: string, content: any, keywords: Keywords, analysis: FullAnalysis, articleLanguage: 'ar' | 'en', goalContext?: GoalContext) => {
   modifyUserData(username, user => {
     const article = findOrCreateArticle(user, title);
     article.saveCount += 1;
@@ -182,7 +180,6 @@ export const recordArticleSave = (username: string, title: string, content: any,
     article.content = content;
     article.keywords = keywords;
     article.articleLanguage = articleLanguage;
-    article.aiGoal = aiGoal;
     article.goalContext = goalContext;
 
     const kwAnalysis = analysis.keywordAnalysis;
@@ -262,6 +259,12 @@ export const saveUserApiKeys = (username: string, apiKeys: UserActivity['apiKeys
   });
 };
 
+export const saveUserClientGoalContexts = (username: string, clientGoalContexts: ClientGoalContexts) => {
+  modifyUserData(username, user => {
+    user.clientGoalContexts = clientGoalContexts;
+  });
+};
+
 export const clearUserActivity = (username: string) => {
   modifyUserData(username, user => {
     user.articles = {};
@@ -273,13 +276,11 @@ export const clearUserActivity = (username: string) => {
     localStorage.removeItem(AUTO_DRAFT_KEYWORDS_KEY);
     localStorage.removeItem(AUTO_DRAFT_LANGUAGE_KEY);
     localStorage.removeItem(AUTO_DRAFT_GOAL_CONTEXT_KEY);
-    localStorage.removeItem(AUTO_DRAFT_AI_GOAL_KEY);
     localStorage.removeItem(MANUAL_DRAFT_KEY);
     localStorage.removeItem(MANUAL_DRAFT_TITLE_KEY);
     localStorage.removeItem(MANUAL_DRAFT_KEYWORDS_KEY);
     localStorage.removeItem(MANUAL_DRAFT_LANGUAGE_KEY);
     localStorage.removeItem(MANUAL_DRAFT_GOAL_CONTEXT_KEY);
-    localStorage.removeItem(MANUAL_DRAFT_AI_GOAL_KEY);
   } catch (error) {
     console.error("Failed to clear draft data from localStorage:", error);
   }

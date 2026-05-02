@@ -64,13 +64,11 @@ export const MANUAL_DRAFT_TITLE_KEY = 'editor-manual-draft-title';
 export const MANUAL_DRAFT_KEYWORDS_KEY = 'editor-manual-draft-keywords';
 export const MANUAL_DRAFT_LANGUAGE_KEY = 'editor-manual-draft-language';
 export const MANUAL_DRAFT_GOAL_CONTEXT_KEY = 'editor-manual-draft-goal-context';
-export const MANUAL_DRAFT_AI_GOAL_KEY = 'editor-manual-draft-ai-goal';
 export const AUTO_DRAFT_KEY = 'editor-draft-content';
 export const AUTO_DRAFT_TITLE_KEY = 'editor-draft-title';
 export const AUTO_DRAFT_KEYWORDS_KEY = 'editor-draft-keywords';
 export const AUTO_DRAFT_LANGUAGE_KEY = 'editor-draft-language';
 export const AUTO_DRAFT_GOAL_CONTEXT_KEY = 'editor-draft-goal-context';
-export const AUTO_DRAFT_AI_GOAL_KEY = 'editor-draft-ai-goal';
 
 export const VIOLATION_PRIORITY: { [key: string]: number } = {
   'قسم H2': 1,

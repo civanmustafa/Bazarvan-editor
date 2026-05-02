@@ -45,12 +45,12 @@ const createH2KeywordAndWordCountCheck = (
 };
 
 export const checkPreTravelH2 = (context: AnalysisContext): CheckResult => {
-    const { aiGoal, t } = context;
+    const { analysisGoal, t } = context;
     const originalTitleKey = "H2 قبل السفر";
     const tRule = t.structureAnalysis[originalTitleKey];
     const keywords = context.articleLanguage === 'ar' ? ["معلومات", "ما قبل السفر", "ما عليك معرفته"] : ["information", "before you travel", "what to know"];
     
-    if (aiGoal !== 'برنامج سياحي') {
+    if (analysisGoal !== 'برنامج سياحي') {
         return createCheckResult(tRule.title, 'pass', t.common.notApplicable, tRule.required, 1, tRule.description);
     }
     

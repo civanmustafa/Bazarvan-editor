@@ -231,8 +231,8 @@ const KeywordInput: React.FC<{
 
 
 const LeftSidebar: React.FC = () => {
-  const { keywordViewMode, uiLanguage, t } = useUser();
-  const { keywords, setKeywords, analysisResults } = useEditor();
+  const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
+  const { keywords, setKeywords, setGoalContext, analysisResults } = useEditor();
   const { applyHighlights, clearAllHighlights, highlightedItem, setHighlightedItem } = useInteraction();
   
   const { keywordAnalysis, duplicateAnalysis, duplicateStats } = analysisResults;
@@ -241,6 +241,10 @@ const LeftSidebar: React.FC = () => {
   const [lsiInputValue, setLsiInputValue] = React.useState('');
   const [autoDistributeText, setAutoDistributeText] = React.useState('');
   const tLk = t.leftSidebar;
+  const savedCompanyNames = React.useMemo(
+    () => Object.keys(clientGoalContexts).sort((a, b) => a.localeCompare(b)),
+    [clientGoalContexts],
+  );
 
   const getTabClass = (tabName: 'keywords' | 'duplicates') => {
     const isActive = activeTab === tabName;
@@ -272,6 +276,36 @@ const LeftSidebar: React.FC = () => {
       applyHighlights([{ text: term, color: color }]);
       setHighlightedItem(term);
     }
+  };
+
+  const applyCompanyGoalContext = React.useCallback((companyName: string) => {
+    const preset = clientGoalContexts[companyName.trim()];
+    if (preset) {
+      setGoalContext(preset);
+    }
+  }, [clientGoalContexts, setGoalContext]);
+
+  const handleCompanyChange = React.useCallback((companyName: string) => {
+    setKeywords(k => ({ ...k, company: companyName }));
+    applyCompanyGoalContext(companyName);
+  }, [applyCompanyGoalContext, setKeywords]);
+
+  const renderSavedCompanySelect = () => {
+    if (savedCompanyNames.length === 0) return null;
+
+    const selectedCompany = keywords.company.trim();
+    return (
+      <select
+        value={clientGoalContexts[selectedCompany] ? selectedCompany : ''}
+        onChange={(event) => handleCompanyChange(event.target.value)}
+        className="w-full mb-2 rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] px-2 py-2 text-sm text-[#333333] dark:text-[#e0e0e0] focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]"
+      >
+        <option value="">{tLk.chooseSavedCompany}</option>
+        {savedCompanyNames.map(companyName => (
+          <option key={companyName} value={companyName}>{companyName}</option>
+        ))}
+      </select>
+    );
   };
 
   const handleSecondaryHighlightToggle = (term: string, index: number) => {
@@ -435,6 +469,7 @@ const LeftSidebar: React.FC = () => {
             lsi: newLsi,
             company: newCompany,
         });
+        applyCompanyGoalContext(newCompany);
     };
 
     const handlePasteAndDistribute = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -466,7 +501,6 @@ const LeftSidebar: React.FC = () => {
         return (
           <div className="p-2 space-y-3">
             {autoDistributeSection}
-            <GoalTab embedded />
             <ModernSection 
                 icon={<KeyRound size={20} />} 
                 title={tLk.primaryKeyword}
@@ -545,9 +579,10 @@ const LeftSidebar: React.FC = () => {
                 onClick={() => handleHighlightToggle(keywords.company, 'company')}
             >
                 <div onClick={e => e.stopPropagation()}>
+                    {renderSavedCompanySelect()}
                     <KeywordInput 
                         value={keywords.company}
-                        onChange={(val) => setKeywords(k => ({...k, company: val}))}
+                        onChange={handleCompanyChange}
                         placeholder={tLk.enterCompany}
                         onHighlight={() => handleHighlightToggle(keywords.company, 'company')}
                         isHighlighted={highlightedItem === keywords.company}
@@ -557,6 +592,7 @@ const LeftSidebar: React.FC = () => {
                     <ModernProgressBar analysis={keywordAnalysis.company} t={tLk} />
                 </div>
             </ModernSection>
+            <GoalTab embedded />
             <ModernSection 
                 icon={<Repeat size={20} />} 
                 title={tLk.lsiKeywords}
@@ -628,7 +664,6 @@ const LeftSidebar: React.FC = () => {
     return (
         <div className="p-1 space-y-3">
             {autoDistributeSection}
-            <GoalTab embedded />
              <div className="px-1 py-1">
                 <div className="flex bg-white dark:bg-gradient-to-r from-[#2A2A2A] via-[#222222] to-[#1F1F1F] rounded-lg border border-gray-300 dark:border-[#3C3C3C] divide-x divide-gray-200 dark:divide-[#3C3C3C] cursor-help">
                     <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title={tLk.primary}>
@@ -814,9 +849,10 @@ const LeftSidebar: React.FC = () => {
                     <h4 className="text-sm font-bold text-[#333333] dark:text-[#C7C7C7]">{tLk.companyName}</h4>
                 </div>
                 <div onClick={(e) => e.stopPropagation()}>
+                    {renderSavedCompanySelect()}
                     <KeywordInput 
                         value={keywords.company}
-                        onChange={(val) => setKeywords(k => ({...k, company: val}))}
+                        onChange={handleCompanyChange}
                         placeholder={tLk.enterCompany}
                         onHighlight={() => handleHighlightToggle(keywords.company, 'company')}
                         isHighlighted={highlightedItem === keywords.company}
@@ -826,7 +862,8 @@ const LeftSidebar: React.FC = () => {
                     />
                     <ModernProgressBar analysis={keywordAnalysis.company} t={tLk} />
                 </div>
-             </div>
+              </div>
+              <GoalTab embedded />
         </div>
     );
   };

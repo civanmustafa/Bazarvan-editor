@@ -1,8 +1,10 @@
 
 import React, { useState, useCallback, useEffect, createContext, useContext, useRef } from 'react';
-import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys } from '../hooks/useUserActivity';
+import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
 import { USERS } from '../constants';
+import type { ClientGoalContexts, GoalContext } from '../types';
+import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 
 type ApiKeys = { gemini: string[]; perplexity: string[] };
 type StoredApiKeys = { gemini?: string | string[]; perplexity?: string[] };
@@ -18,6 +20,7 @@ interface UserContextType {
     preferredLanguage: 'ar' | 'en';
     uiLanguage: 'ar' | 'en';
     apiKeys: ApiKeys;
+    clientGoalContexts: ClientGoalContexts;
     t: typeof translations.ar;
     isIdle: boolean;
     handleLogin: (username: string, password: string) => boolean;
@@ -29,6 +32,9 @@ interface UserContextType {
     handlePreferredLanguageChange: (lang: 'ar' | 'en') => void;
     handleUiLanguageChange: (lang: 'ar' | 'en') => void;
     handleSaveApiKeys: (keys: ApiKeys) => void;
+    handleSaveClientGoalContext: (companyName: string, goalContext: GoalContext) => void;
+    handleDeleteClientGoalContext: (companyName: string) => void;
+    handleMergeClientGoalContexts: (contexts: ClientGoalContexts) => void;
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -84,6 +90,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [preferredLanguage, setPreferredLanguage] = useState<'ar' | 'en'>('ar');
     const [uiLanguage, setUiLanguage] = useState<'ar' | 'en'>('ar');
     const [apiKeys, setApiKeys] = useState<ApiKeys>(() => normalizeApiKeys());
+    const [clientGoalContexts, setClientGoalContexts] = useState<ClientGoalContexts>({});
     
     const [isIdle, setIsIdle] = useState(false);
     const idleTimerRef = useRef<number | null>(null);
@@ -169,6 +176,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setPreferredLanguage(userPrefs?.preferredLanguage || 'ar');
             setUiLanguage(userPrefs?.preferredUILanguage || 'ar');
             if (userPrefs?.apiKeys) setApiKeys(normalizeApiKeys(userPrefs.apiKeys as StoredApiKeys));
+            setClientGoalContexts(normalizeClientGoalContexts(userPrefs?.clientGoalContexts));
             if (userPrefs?.preferredTheme) setIsDarkMode(userPrefs.preferredTheme === 'dark');
         }
     }, [currentUser]);
@@ -193,6 +201,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const handleLogout = useCallback(() => {
         setCurrentUser(null);
+        setClientGoalContexts({});
         try {
             sessionStorage.removeItem('currentUser');
         } catch (error) {
@@ -232,6 +241,36 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (currentUser) saveUserApiKeys(currentUser, normalizedKeys);
     };
 
+    const persistClientGoalContexts = useCallback((nextContexts: ClientGoalContexts) => {
+        const normalizedContexts = normalizeClientGoalContexts(nextContexts);
+        setClientGoalContexts(normalizedContexts);
+        if (currentUser) saveUserClientGoalContexts(currentUser, normalizedContexts);
+    }, [currentUser]);
+
+    const handleSaveClientGoalContext = useCallback((companyName: string, context: GoalContext) => {
+        const normalizedCompanyName = companyName.trim();
+        if (!normalizedCompanyName) return;
+        persistClientGoalContexts({
+            ...clientGoalContexts,
+            [normalizedCompanyName]: normalizeGoalContext(context),
+        });
+    }, [clientGoalContexts, persistClientGoalContexts]);
+
+    const handleDeleteClientGoalContext = useCallback((companyName: string) => {
+        const normalizedCompanyName = companyName.trim();
+        if (!normalizedCompanyName || !clientGoalContexts[normalizedCompanyName]) return;
+        const nextContexts = { ...clientGoalContexts };
+        delete nextContexts[normalizedCompanyName];
+        persistClientGoalContexts(nextContexts);
+    }, [clientGoalContexts, persistClientGoalContexts]);
+
+    const handleMergeClientGoalContexts = useCallback((contexts: ClientGoalContexts) => {
+        persistClientGoalContexts({
+            ...clientGoalContexts,
+            ...normalizeClientGoalContexts(contexts),
+        });
+    }, [clientGoalContexts, persistClientGoalContexts]);
+
     const value = {
         currentUser,
         currentView,
@@ -243,6 +282,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         preferredLanguage,
         uiLanguage,
         apiKeys,
+        clientGoalContexts,
         t,
         isIdle,
         handleLogin,
@@ -254,6 +294,9 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handlePreferredLanguageChange,
         handleUiLanguageChange,
         handleSaveApiKeys,
+        handleSaveClientGoalContext,
+        handleDeleteClientGoalContext,
+        handleMergeClientGoalContexts,
     };
 
     return <UserContext.Provider value={value}>{children}</UserContext.Provider>;

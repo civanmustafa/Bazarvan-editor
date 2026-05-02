@@ -20,6 +20,8 @@ export interface GoalContext {
   funnelStage: string;
 }
 
+export type ClientGoalContexts = Record<string, GoalContext>;
+
 export interface KeywordCheck {
   text: string;
   isMet: boolean;

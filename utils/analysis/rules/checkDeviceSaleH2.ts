@@ -8,13 +8,13 @@ const createDeviceSaleH2Check = (
     requiredHeadingsForAnalysis: string[],
     minPercentage: number,
 ): CheckResult => {
-    const { aiGoal, headings, t } = context;
+    const { analysisGoal, headings, t } = context;
     const tRule = t.structureAnalysis[originalTitleKey as keyof typeof t.structureAnalysis];
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required.replace('{PERCENT}', String(minPercentage * 100));
 
-    if (aiGoal !== 'بيع جهاز') {
+    if (analysisGoal !== 'بيع جهاز') {
         return createCheckResult(title, 'pass', t.common.notApplicable, requiredText, 1, description);
     }
     const h2Texts = headings.filter(h => h.level === 2).map(h => h.text.toLowerCase());

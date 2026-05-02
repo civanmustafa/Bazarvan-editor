@@ -30,30 +30,35 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     landing: 'صفحة هبوط',
     guide: 'دليل',
     faq: 'أسئلة وأجوبة',
-    educate: 'تثقيف',
-    sell: 'بيع',
-    bookings: 'حجوزات',
-    leads: 'جمع عملاء محتملين',
-    trust: 'بناء الثقة',
-    retention: 'احتفاظ/ولاء',
-    unaware: 'غير واع بالمشكلة',
-    'problem-aware': 'واع بالمشكلة',
-    'solution-aware': 'واع بالحل',
-    'product-aware': 'واع بالمنتج/الخدمة',
-    'ready-to-buy': 'جاهز للشراء',
-    local: 'محلي',
-    global: 'عالمي',
-    country: 'دولة محددة',
-    regional: 'إقليمي',
-    informational: 'معلوماتية',
-    commercial: 'تجارية/مقارنة',
-    transactional: 'شرائية',
-    navigational: 'تنقلية/علامة تجارية',
-    'local-intent': 'محلية',
-    awareness: 'وعي',
-    consideration: 'مقارنة وتقييم',
-    decision: 'قرار',
-    loyalty: 'ولاء',
+    educate: 'شرح وتثقيف',
+    compare: 'مقارنة ومساعدة على الاختيار',
+    convert: 'تحويل مباشر: شراء/حجز/تواصل',
+    trust: 'بناء الثقة وتقليل الاعتراضات',
+    support: 'دعم بعد القرار أو الاستخدام',
+    sell: 'تحويل مباشر: شراء/حجز/تواصل',
+    bookings: 'تحويل مباشر: شراء/حجز/تواصل',
+    leads: 'تحويل مباشر: شراء/حجز/تواصل',
+    retention: 'دعم بعد القرار أو الاستخدام',
+    unaware: 'لا يعرف المشكلة بعد',
+    'problem-aware': 'يعرف المشكلة ويبحث عن فهمها',
+    'solution-aware': 'يعرف نوع الحل ويقارن الطرق',
+    'product-aware': 'يعرف العلامة أو الخدمة ويحتاج إثباتًا',
+    'decision-ready': 'جاهز لاتخاذ القرار ويحتاج تفاصيل نهائية',
+    'ready-to-buy': 'جاهز لاتخاذ القرار ويحتاج تفاصيل نهائية',
+    local: 'مدينة أو منطقة محلية',
+    global: 'عالمي دون سوق محدد',
+    country: 'دولة واحدة محددة',
+    regional: 'عدة دول أو إقليم',
+    informational: 'فهم وتعلّم',
+    commercial: 'مقارنة واختيار',
+    transactional: 'تنفيذ إجراء',
+    navigational: 'الوصول إلى علامة أو صفحة محددة',
+    'support-intent': 'حل مشكلة أو معرفة طريقة الاستخدام',
+    'local-intent': 'فهم وتعلّم',
+    awareness: 'اكتشاف الحاجة',
+    consideration: 'تقييم الخيارات',
+    decision: 'تنفيذ القرار',
+    loyalty: 'استخدام واحتفاظ بعد القرار',
 };
 
 const formatGoalContext = (goalContext: GoalContext): string => {
@@ -220,7 +225,7 @@ export const useAI = () => {
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { t, uiLanguage, apiKeys } = useUser();
-    const { editor, title, text, keywords, analysisResults, aiGoal, goalContext, articleLanguage, articleKey } = useEditor();
+    const { editor, title, text, keywords, analysisResults, goalContext, articleLanguage, articleKey } = useEditor();
     const { openModal } = useModal();
     
     const [aiResults, setAiResults] = useState({ gemini: '', perplexity: '' });
@@ -282,7 +287,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         ].join('\n');
         contextParts.push(`**الكلمات والعلامة المستهدفة:**\n${keywordContext}`);
         const goalContextText = formatGoalContext(goalContext);
-        if (goalContextText) contextParts.push(`**سياق الهدف والجمهور:**\n- الهدف العام: ${aiGoal}\n${goalContextText}`);
+        if (goalContextText) contextParts.push(`**سياق هدف الصفحة والجمهور:**\n${goalContextText}`);
         if (sectionHeading) contextParts.push(`**سياق العنوان:** "${sectionHeading}"`);
         const tocString = generateToc(editor);
         if (tocString) contextParts.push(`**هيكل المقال:**\n${tocString}`);
@@ -290,16 +295,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     };
 
     const generateContextAwarePrompt = useCallback((userPrompt: string, options: any) => {
-        const { manualCommand, editorText, targetKeywords, keywordCriteria, structureCriteria, goalCriteria } = options;
+        const { manualCommand, editorText, targetKeywords, goalContext: includeGoalContext, keywordCriteria, structureCriteria, goalCriteria } = options;
         let parts: string[] = [];
-        parts.push(`أنت خبير SEO وكاتب محتوى محترف. الهدف الحالي للمقال هو "${aiGoal}".`);
+        const pageObjective = GOAL_CONTEXT_VALUE_LABELS[goalContext.objective] || goalContext.objective || 'لم يحدد';
+        parts.push(includeGoalContext
+            ? `أنت خبير SEO وكاتب محتوى محترف. هدف الصفحة هو "${pageObjective}".`
+            : 'أنت خبير SEO وكاتب محتوى محترف.'
+        );
         if (title.trim()) {
             parts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
         }
         parts.push(`**لغة المقال:** ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`);
         const goalContextText = formatGoalContext(goalContext);
-        if (goalContextText) {
-            parts.push(`**سياق الهدف والجمهور لاستخدامه في التقييم والتحليل:**\n- الهدف العام: ${aiGoal}\n${goalContextText}`);
+        if (includeGoalContext && goalContextText) {
+            parts.push(`**سياق هدف الصفحة والجمهور لاستخدامه في التقييم والتحليل:**\n${goalContextText}`);
         }
         if (targetKeywords) {
             parts.push(`**الكلمات والعلامة المستهدفة:** الأساسية: ${keywords.primary || 'لم تحدد'}، المرادفات: ${keywords.secondaries.filter(Boolean).join(', ') || 'لم تحدد'}، العلامة التجارية: ${keywords.company || 'لم تحدد'}، LSI: ${keywords.lsi.filter(Boolean).join(', ') || 'لم تحدد'}`);
@@ -344,15 +353,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (goalCriteria) {
             const goalRules = (() => {
                 const s = analysisResults.structureAnalysis;
-                if (aiGoal === 'برنامج سياحي') {
-                    return [s.firstTitle, s.secondTitle, s.includesExcludes, s.preTravelH2, s.pricingH2, s.whoIsItForH2];
+                if (goalContext.objective === 'compare') {
+                    return [s.wordCount, s.summaryParagraph, s.tableListOpportunities, s.interrogativeH2, s.faqSection, s.conclusionHasList];
                 }
-                if (aiGoal === 'بيع جهاز') {
-                    return [s.mandatoryH2Sections, s.supportingH2Sections, s.tablesCount];
+                if (goalContext.objective === 'convert') {
+                    return [s.summaryParagraph, s.ctaWords, s.interactiveLanguage, s.warningWords, s.conclusionParagraph];
+                }
+                if (goalContext.objective === 'trust') {
+                    return [s.warningWords, s.wordsToDelete, s.faqSection, s.answerParagraph, s.conclusionHasNumber];
+                }
+                if (goalContext.objective === 'support') {
+                    return [s.faqSection, s.answerParagraph, s.stepsIntroduction, s.automaticLists, s.sentenceLength];
                 }
                 return [s.wordCount, s.summaryParagraph, s.faqSection, s.lastH2IsConclusion, s.conclusionWordCount];
             })();
-            parts.push(`**معايير الهدف المختار:**\n${goalRules.map(rule => `- ${rule.title}: الحالة ${rule.status}، الحالي ${rule.current}، المطلوب ${rule.required}.`).join('\n')}`);
+            const goalCriteriaTitle = includeGoalContext ? `**معايير هدف الصفحة (${pageObjective}):**` : '**معايير هدف الصفحة:**';
+            parts.push(`${goalCriteriaTitle}\n${goalRules.map(rule => `- ${rule.title}: الحالة ${rule.status}، الحالي ${rule.current}، المطلوب ${rule.required}.`).join('\n')}`);
         }
         if (manualCommand && userPrompt.trim()) {
             parts.push(`**الأمر المطلوب:**\n${userPrompt}`);
@@ -360,7 +376,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
              parts.push(userPrompt);
         }
         return parts.join('\n\n');
-    }, [title, keywords, text, aiGoal, goalContext, articleLanguage, analysisResults]);
+    }, [title, keywords, text, goalContext, articleLanguage, analysisResults]);
     
     const handleAiAnalyze = useCallback(async (userPrompt: string, options: any) => {
         if (!editor) return;

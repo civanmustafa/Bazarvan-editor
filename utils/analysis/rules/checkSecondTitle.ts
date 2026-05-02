@@ -3,14 +3,14 @@ import { createCheckResult, countOccurrences, getNodeSizeFromJSON } from '../ana
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkSecondTitle = (context: AnalysisContext): CheckResult => {
-    const { aiGoal, nodes, t, articleLanguage } = context;
+    const { analysisGoal, nodes, t, articleLanguage } = context;
     const tRule = t.structureAnalysis['H2 الثاني'];
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
     const dayNightKeywords = articleLanguage === 'ar' ? ['أيام', 'ليالي'] : ['days', 'nights'];
 
-    if (aiGoal !== 'برنامج سياحي') {
+    if (analysisGoal !== 'برنامج سياحي') {
         return createCheckResult(title, 'pass', t.common.notApplicable, requiredText, 1, description);
     }
     
