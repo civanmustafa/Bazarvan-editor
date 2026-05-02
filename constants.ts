@@ -51,12 +51,10 @@ export const INITIAL_KEYWORDS: Keywords = {
 export const INITIAL_GOAL_CONTEXT = {
   pageType: 'article',
   objective: 'educate',
-  audienceAwareness: 'solution-aware',
   audienceScope: 'local',
   targetCountry: '',
   targetAudience: '',
   searchIntent: 'informational',
-  funnelStage: 'consideration',
 };
 
 export const MANUAL_DRAFT_KEY = 'editor-manual-draft-content';

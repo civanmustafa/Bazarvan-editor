@@ -12,12 +12,10 @@ export interface Keywords {
 export interface GoalContext {
   pageType: string;
   objective: string;
-  audienceAwareness: string;
   audienceScope: string;
   targetCountry: string;
   targetAudience: string;
   searchIntent: string;
-  funnelStage: string;
 }
 
 export type ClientGoalContexts = Record<string, GoalContext>;

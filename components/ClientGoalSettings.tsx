@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Save, Trash2, Upload, Users } from 'lucide-react';
+import { Edit3, Save, Trash2, Upload, Users } from 'lucide-react';
 import { INITIAL_GOAL_CONTEXT } from '../constants';
 import { useUser } from '../contexts/UserContext';
 import type { GoalContext } from '../types';
 import GoalContextFields from './GoalContextFields';
-import { normalizeGoalContext, parseClientGoalContextBulk } from '../utils/goalContext';
+import { getGoalContextFields, normalizeGoalContext, parseClientGoalContextBulk } from '../utils/goalContext';
 
 const inputClass = 'w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500';
 
@@ -18,6 +18,7 @@ const ClientGoalSettings: React.FC = () => {
   } = useUser();
 
   const clientNames = useMemo(() => Object.keys(clientGoalContexts).sort((a, b) => a.localeCompare(b)), [clientGoalContexts]);
+  const contextFields = useMemo(() => getGoalContextFields(t.goalTab), [t.goalTab]);
   const [companyName, setCompanyName] = useState('');
   const [draftContext, setDraftContext] = useState<GoalContext>(() => normalizeGoalContext());
   const [bulkText, setBulkText] = useState('');
@@ -60,12 +61,52 @@ const ClientGoalSettings: React.FC = () => {
     setStatusText(t.clientBulkImported.replace('{count}', String(importedCount)));
   };
 
+  const formatFieldValue = (field: (typeof contextFields)[number], context: GoalContext) => {
+    const value = context[field.key];
+    if (!value) return '-';
+    if (field.kind === 'text') return value;
+    return field.options.find(option => option.value === value)?.label || value;
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <Users size={18} className="text-[#d4af37]" />
         <h4 className="font-bold text-sm text-gray-600 dark:text-gray-300">{t.clientGoalSettings}</h4>
       </div>
+
+      {clientNames.length > 0 && (
+        <div className="space-y-2">
+          <h5 className="text-xs font-bold text-gray-500 dark:text-gray-400">{t.savedClients}</h5>
+          <div className="max-h-64 overflow-y-auto custom-scrollbar rounded-lg border border-gray-200 dark:border-[#3C3C3C] divide-y divide-gray-200 dark:divide-[#3C3C3C]">
+            {clientNames.map(name => {
+              const context = normalizeGoalContext(clientGoalContexts[name]);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => handleSelectClient(name)}
+                  className="w-full p-3 text-start bg-white hover:bg-[#d4af37]/10 dark:bg-[#1F1F1F] dark:hover:bg-[#d4af37]/20 transition-colors"
+                  title={t.editClientPreset}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-bold text-sm text-[#333333] dark:text-gray-100 truncate">{name}</span>
+                    <Edit3 size={14} className="text-[#d4af37] flex-shrink-0" />
+                  </div>
+                  <div className="mt-2 grid grid-cols-1 gap-1">
+                    {contextFields.map(field => (
+                      <div key={field.key} className="flex items-start gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+                        <span className="font-bold text-gray-600 dark:text-gray-300 flex-shrink-0">{field.label}:</span>
+                        <span className="truncate">{formatFieldValue(field, context)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {clientNames.length > 0 && (
         <select

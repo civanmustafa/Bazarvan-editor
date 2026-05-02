@@ -68,10 +68,63 @@ const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO
 - لا تقترح صورًا أو فيديوهات أو Schema.
 - اجعل الإجابة عملية ومباشرة.`;
 
+const ENTITY_MAP_SEO_PROMPT = `حلّل المقال من منظور خريطة الكيانات الدلالية SEO / AEO / GEO / LLM SEO، وليس من منظور تكرار الكلمات المفتاحية فقط.
+
+استخدم المرفقات التي اختارها المستخدم فقط من قائمة المرفقات. إذا لم تكن بعض البيانات مرفقة، لا تفترضها، واكتفِ بتحليل ما هو متاح.
+
+المطلوب:
+
+1. استخرج خريطة الكيانات الحالية في المقال، وقسّمها إلى:
+- كيانات الخدمة أو المنتج
+- كيانات المكان والسوق
+- كيانات الجمهور والمشكلة
+- كيانات الحلول والميزات
+- كيانات الثقة والخبرة والإثبات
+- كيانات السعر أو التكلفة إن وجدت
+- كيانات الاعتراضات والمخاطر
+- كيانات المقارنة والبدائل
+- كيانات الأسئلة والنية البحثية
+
+2. لكل كيان اذكر:
+- هل هو مذكور أم ناقص؟
+- هل ذُكر بشكل كافٍ أم سطحي؟
+- أين ظهر داخل المقال إن كان موجودًا؟
+- لماذا مهم لمحركات البحث أو للاقتباس من الذكاء الاصطناعي؟
+
+3. استخرج أهم الكيانات الناقصة التي يجب إضافتها، مع ترتيبها حسب الأولوية:
+- أولوية عالية
+- أولوية متوسطة
+- أولوية منخفضة
+
+4. اقترح مكان إضافة كل كيان ناقص داخل المقال:
+- بعد أي عنوان؟
+- داخل أي فقرة؟
+- هل يحتاج جملة فقط أم فقرة قصيرة أم قسم H2/H3 جديد؟
+
+5. اقترح صياغات جاهزة للإضافة:
+- 5 جمل قصيرة قابلة للإدراج مباشرة
+- 3 فقرات قصيرة قابلة للاقتباس في AI Overviews أو إجابات الذكاء الاصطناعي
+- 5 أسئلة FAQ مبنية على الكيانات الناقصة
+
+6. قيّم جاهزية المقال دلاليًا:
+- درجة تغطية الكيانات من 100
+- أقوى كيان مغطى
+- أخطر كيان ناقص
+- هل المقال واضح بما يكفي لمحركات البحث ونماذج الذكاء الاصطناعي؟ نعم/جزئيًا/لا، مع السبب
+
+قيود مهمة:
+- لا تكرر نصائح عامة.
+- لا تقترح كيانات خارج موضوع المقال أو خارج سياق الشركة.
+- لا تحشو الكلمات المفتاحية.
+- اجعل الإضافات طبيعية ومفيدة للقارئ.
+- ركّز على تحسين الفهم، الثقة، الاكتمال، وقابلية الاقتباس.
+- أخرج النتيجة بالعربية وبشكل منظم ومباشر.`;
+
 type AiAnalysisOptions = {
     manualCommand: boolean;
     editorText: boolean;
     targetKeywords: boolean;
+    companyName: boolean;
     goalContext: boolean;
     keywordCriteria: boolean;
     structureCriteria: boolean;
@@ -104,6 +157,7 @@ const RightSidebar: React.FC = () => {
         manualCommand: true,
         editorText: true,
         targetKeywords: true,
+        companyName: true,
         goalContext: true,
         keywordCriteria: false,
         structureCriteria: false,
@@ -126,6 +180,20 @@ const RightSidebar: React.FC = () => {
 
     const readyCommands: ReadyCommand[] = [
         { label: tRs.selectCommand, value: '' },
+        {
+            label: tRs.entityMap,
+            value: ENTITY_MAP_SEO_PROMPT,
+            options: {
+                manualCommand: true,
+                editorText: true,
+                targetKeywords: true,
+                companyName: true,
+                goalContext: true,
+                keywordCriteria: false,
+                structureCriteria: false,
+                goalCriteria: false,
+            },
+        },
         { 
             label: tRs.analyzeFull, 
             value: FULL_ARTICLE_SEO_AI_AUDIT_PROMPT,
@@ -202,10 +270,11 @@ const RightSidebar: React.FC = () => {
 
     const getCommandIcon = (index: number) => {
         switch (index) {
-            case 1: return <FileSearch size={16} className="text-[#d4af37]" />;
-            case 2: return <ShieldAlert size={16} className="text-[#d4af37]" />;
-            case 3: return <Lightbulb size={16} className="text-[#d4af37]" />;
-            case 4: return <Users size={16} className="text-[#d4af37]" />;
+            case 1: return <BrainCircuit size={16} className="text-[#d4af37]" />;
+            case 2: return <FileSearch size={16} className="text-[#d4af37]" />;
+            case 3: return <ShieldAlert size={16} className="text-[#d4af37]" />;
+            case 4: return <Lightbulb size={16} className="text-[#d4af37]" />;
+            case 5: return <Users size={16} className="text-[#d4af37]" />;
             default: return <Command size={16} className="text-gray-400" />;
         }
     };

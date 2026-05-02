@@ -13,12 +13,10 @@ const GEMINI_MODEL = 'gemini-3-flash-preview';
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
     pageType: 'نوع الصفحة',
     objective: 'هدف الصفحة',
-    audienceAwareness: 'مستوى وعي الجمهور',
     audienceScope: 'نطاق الجمهور',
     targetCountry: 'الدولة/السوق المستهدف',
     targetAudience: 'الجمهور المستهدف',
     searchIntent: 'نية البحث',
-    funnelStage: 'مرحلة القارئ',
 };
 
 const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
@@ -39,12 +37,6 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     bookings: 'تحويل مباشر: شراء/حجز/تواصل',
     leads: 'تحويل مباشر: شراء/حجز/تواصل',
     retention: 'دعم بعد القرار أو الاستخدام',
-    unaware: 'لا يعرف المشكلة بعد',
-    'problem-aware': 'يعرف المشكلة ويبحث عن فهمها',
-    'solution-aware': 'يعرف نوع الحل ويقارن الطرق',
-    'product-aware': 'يعرف العلامة أو الخدمة ويحتاج إثباتًا',
-    'decision-ready': 'جاهز لاتخاذ القرار ويحتاج تفاصيل نهائية',
-    'ready-to-buy': 'جاهز لاتخاذ القرار ويحتاج تفاصيل نهائية',
     local: 'مدينة أو منطقة محلية',
     global: 'عالمي دون سوق محدد',
     country: 'دولة واحدة محددة',
@@ -55,10 +47,6 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     navigational: 'الوصول إلى علامة أو صفحة محددة',
     'support-intent': 'حل مشكلة أو معرفة طريقة الاستخدام',
     'local-intent': 'فهم وتعلّم',
-    awareness: 'اكتشاف الحاجة',
-    consideration: 'تقييم الخيارات',
-    decision: 'تنفيذ القرار',
-    loyalty: 'استخدام واحتفاظ بعد القرار',
 };
 
 const formatGoalContext = (goalContext: GoalContext): string => {
@@ -295,7 +283,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     };
 
     const generateContextAwarePrompt = useCallback((userPrompt: string, options: any) => {
-        const { manualCommand, editorText, targetKeywords, goalContext: includeGoalContext, keywordCriteria, structureCriteria, goalCriteria } = options;
+        const { manualCommand, editorText, targetKeywords, companyName, goalContext: includeGoalContext, keywordCriteria, structureCriteria, goalCriteria } = options;
         let parts: string[] = [];
         const pageObjective = GOAL_CONTEXT_VALUE_LABELS[goalContext.objective] || goalContext.objective || 'لم يحدد';
         parts.push(includeGoalContext
@@ -311,7 +299,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             parts.push(`**سياق هدف الصفحة والجمهور لاستخدامه في التقييم والتحليل:**\n${goalContextText}`);
         }
         if (targetKeywords) {
-            parts.push(`**الكلمات والعلامة المستهدفة:** الأساسية: ${keywords.primary || 'لم تحدد'}، المرادفات: ${keywords.secondaries.filter(Boolean).join(', ') || 'لم تحدد'}، العلامة التجارية: ${keywords.company || 'لم تحدد'}، LSI: ${keywords.lsi.filter(Boolean).join(', ') || 'لم تحدد'}`);
+            parts.push(`**الكلمات المستهدفة:** الأساسية: ${keywords.primary || 'لم تحدد'}، المرادفات: ${keywords.secondaries.filter(Boolean).join(', ') || 'لم تحدد'}، LSI: ${keywords.lsi.filter(Boolean).join(', ') || 'لم تحدد'}`);
+        }
+        if (companyName) {
+            parts.push(`**اسم الشركة / العلامة التجارية:** ${keywords.company || 'لم تحدد'}`);
         }
         if (keywordCriteria) {
             const keywordSummary: string[] = [];

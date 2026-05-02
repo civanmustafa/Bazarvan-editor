@@ -35,17 +35,16 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
     leads: 'convert',
     retention: 'support',
   };
-  const awarenessMap: Record<string, string> = {
-    'ready-to-buy': 'decision-ready',
-  };
   const intentMap: Record<string, string> = {
     'local-intent': 'informational',
   };
 
   return {
-    ...normalized,
+    pageType: normalized.pageType,
     objective: objectiveMap[normalized.objective] || normalized.objective,
-    audienceAwareness: awarenessMap[normalized.audienceAwareness] || normalized.audienceAwareness,
+    audienceScope: normalized.audienceScope,
+    targetCountry: normalized.targetCountry,
+    targetAudience: normalized.targetAudience,
     searchIntent: intentMap[normalized.searchIntent] || normalized.searchIntent,
   };
 };
@@ -94,18 +93,6 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
       ],
     },
     {
-      key: 'audienceAwareness',
-      label: t.audienceAwareness,
-      kind: 'select',
-      options: [
-        { value: 'unaware', label: contextOptions.unaware },
-        { value: 'problem-aware', label: contextOptions.problemAware },
-        { value: 'solution-aware', label: contextOptions.solutionAware },
-        { value: 'product-aware', label: contextOptions.productAware },
-        { value: 'decision-ready', label: contextOptions.decisionReady },
-      ],
-    },
-    {
       key: 'audienceScope',
       label: t.audienceScope,
       kind: 'select',
@@ -138,17 +125,6 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
         { value: 'transactional', label: contextOptions.transactional },
         { value: 'navigational', label: contextOptions.navigational },
         { value: 'support-intent', label: contextOptions.supportIntent },
-      ],
-    },
-    {
-      key: 'funnelStage',
-      label: t.funnelStage,
-      kind: 'select',
-      options: [
-        { value: 'awareness', label: contextOptions.awareness },
-        { value: 'consideration', label: contextOptions.consideration },
-        { value: 'decision', label: contextOptions.decision },
-        { value: 'loyalty', label: contextOptions.loyalty },
       ],
     },
   ];
