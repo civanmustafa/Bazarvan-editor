@@ -40,7 +40,7 @@ export type UserActivity = {
   logins: string[];
   apiKeys: {
     gemini: string[];
-    perplexity: string[];
+    chatgpt: string[];
   };
   articles: {
     [title: string]: ArticleActivity;
@@ -62,7 +62,7 @@ const getDefaultUserActivity = (): UserActivity => ({
   logins: [],
   apiKeys: {
     gemini: [''],
-    perplexity: [''],
+    chatgpt: [''],
   },
   articles: {},
   preferredHighlightStyle: 'background',

@@ -9,6 +9,7 @@ import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { FIXABLE_RULES } from '../constants';
 
 const GEMINI_MODEL = 'gemini-3-flash-preview';
+const OPENAI_MODEL = 'gpt-5-mini';
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
     pageType: 'نوع الصفحة',
@@ -144,6 +145,53 @@ const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]):
     }
 };
 
+const normalizeChatGptKeys = (keys?: string | string[]): string[] => {
+    const keyList = Array.isArray(keys) ? keys : keys ? [keys] : [];
+    return keyList.map(key => key.trim()).filter(Boolean);
+};
+
+const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
+    const trimmedUserKeys = normalizeChatGptKeys(userKeys);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 60000);
+
+    try {
+        const response = await fetch('/api/chatgpt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt,
+                model: OPENAI_MODEL,
+                apiKeys: trimmedUserKeys.length > 0 ? trimmedUserKeys : undefined,
+            }),
+            signal: controller.signal,
+        });
+
+        window.clearTimeout(timeoutId);
+
+        const isJson = response.headers.get('content-type')?.includes('application/json');
+        const data = isJson ? await response.json().catch(() => ({})) : {};
+
+        if (!response.ok) {
+            throw new Error(data.error?.message || data.error || `ChatGPT request failed with status ${response.status}`);
+        }
+
+        if (typeof data.text !== 'string') {
+            throw new Error('ChatGPT server route did not return a valid text response.');
+        }
+
+        return data.text;
+    } catch (error) {
+        window.clearTimeout(timeoutId);
+        console.error("Error calling ChatGPT API:", error);
+        if (error instanceof Error && error.name === 'AbortError') {
+            return "انتهت مهلة الاتصال بـ ChatGPT (60 ثانية).";
+        }
+        const message = error instanceof Error ? error.message : 'خطأ غير معروف';
+        return `حدث خطأ أثناء الاتصال بـ ChatGPT: ${message}`;
+    }
+};
+
 const extractJson = (text: string): any | null => {
     if (!text) return null;
     try {
@@ -178,8 +226,8 @@ type FixAllProgress = {
 };
 
 interface AIContextType {
-    aiResults: { gemini: string; perplexity: string };
-    isAiLoading: { gemini: boolean; perplexity: boolean };
+    aiResults: { gemini: string; chatgpt: string };
+    isAiLoading: { gemini: boolean; chatgpt: boolean };
     isAiCommandLoading: boolean;
     aiFixingInfo: { title: string; from: number } | null;
     suggestion: SuggestionState | null;
@@ -193,7 +241,7 @@ interface AIContextType {
     handleAiRequest: (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => Promise<void>;
     handleAnalyzeHeadings: () => Promise<void>;
     handleAiAnalyze: (userPrompt: string, options: any) => Promise<void>;
-    handlePerplexitySearch: (userPrompt: string, options: any, model?: 'sonar' | 'sonar-pro') => Promise<void>;
+    handleChatGptAnalyze: (userPrompt: string, options: any) => Promise<void>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[]) => Promise<void>;
     applySuggestionFromHistory: (historyItemId: string, suggestionText: string) => void;
@@ -216,8 +264,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const { editor, title, text, keywords, analysisResults, goalContext, articleLanguage, articleKey } = useEditor();
     const { openModal } = useModal();
     
-    const [aiResults, setAiResults] = useState({ gemini: '', perplexity: '' });
-    const [isAiLoading, setIsAiLoading] = useState({ gemini: false, perplexity: false });
+    const [aiResults, setAiResults] = useState({ gemini: '', chatgpt: '' });
+    const [isAiLoading, setIsAiLoading] = useState({ gemini: false, chatgpt: false });
     const [isAiCommandLoading, setIsAiCommandLoading] = useState(false);
     const [suggestion, setSuggestion] = useState<SuggestionState | null>(null);
     const [headingsAnalysis, setHeadingsAnalysis] = useState<HeadingAnalysisResult[] | null>(null);
@@ -283,7 +331,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     };
 
     const generateContextAwarePrompt = useCallback((userPrompt: string, options: any) => {
-        const { manualCommand, editorText, targetKeywords, companyName, goalContext: includeGoalContext, keywordCriteria, structureCriteria, goalCriteria } = options;
+        const { manualCommand, editorText, targetKeywords, companyName, goalContext: includeGoalContext, keywordCriteria, structureCriteria } = options;
         let parts: string[] = [];
         const pageObjective = GOAL_CONTEXT_VALUE_LABELS[goalContext.objective] || goalContext.objective || 'لم يحدد';
         parts.push(includeGoalContext
@@ -341,26 +389,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 });
             parts.push(`**معايير البنية والجودة المخالفة:**\n${problematicRules.length ? problematicRules.join('\n') : '- لا توجد مخالفات بنيوية حالية.'}`);
         }
-        if (goalCriteria) {
-            const goalRules = (() => {
-                const s = analysisResults.structureAnalysis;
-                if (goalContext.objective === 'compare') {
-                    return [s.wordCount, s.summaryParagraph, s.tableListOpportunities, s.interrogativeH2, s.faqSection, s.conclusionHasList];
-                }
-                if (goalContext.objective === 'convert') {
-                    return [s.summaryParagraph, s.ctaWords, s.interactiveLanguage, s.warningWords, s.conclusionParagraph];
-                }
-                if (goalContext.objective === 'trust') {
-                    return [s.warningWords, s.wordsToDelete, s.faqSection, s.answerParagraph, s.conclusionHasNumber];
-                }
-                if (goalContext.objective === 'support') {
-                    return [s.faqSection, s.answerParagraph, s.stepsIntroduction, s.automaticLists, s.sentenceLength];
-                }
-                return [s.wordCount, s.summaryParagraph, s.faqSection, s.lastH2IsConclusion, s.conclusionWordCount];
-            })();
-            const goalCriteriaTitle = includeGoalContext ? `**معايير هدف الصفحة (${pageObjective}):**` : '**معايير هدف الصفحة:**';
-            parts.push(`${goalCriteriaTitle}\n${goalRules.map(rule => `- ${rule.title}: الحالة ${rule.status}، الحالي ${rule.current}، المطلوب ${rule.required}.`).join('\n')}`);
-        }
         if (manualCommand && userPrompt.trim()) {
             parts.push(`**الأمر المطلوب:**\n${userPrompt}`);
         } else if (userPrompt.trim()) {
@@ -383,55 +411,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
     }, [generateContextAwarePrompt, apiKeys.gemini, editor]);
 
-    const handlePerplexitySearch = useCallback(async (userPrompt: string, options: any, model: 'sonar' | 'sonar-pro' = 'sonar') => {
-        setIsAiLoading(prev => ({ ...prev, perplexity: true }));
-        setAiResults(prev => ({ ...prev, perplexity: '' }));
-
-        // Timeout safety
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
-
+    const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any) => {
+        if (!editor) return;
+        setIsAiLoading(prev => ({ ...prev, chatgpt: true }));
+        setAiResults(prev => ({ ...prev, chatgpt: '' }));
         try {
             const finalPrompt = generateContextAwarePrompt(userPrompt, options);
-            
-            // Route Perplexity through the Vercel function.
-            const userKey = apiKeys.perplexity?.find(k => k && k.trim() !== '');
-            const apiKey = userKey?.trim();
-
-            const response = await fetch('/api/perplexity', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    prompt: finalPrompt,
-                    model,
-                    apiKey: apiKey || undefined,
-                }),
-                signal: controller.signal,
-            });
-
-            clearTimeout(timeoutId);
-
-            const data = await response.json().catch(() => ({}));
-
-            if (!response.ok) {
-                throw new Error(data.error?.message || data.error || `Perplexity request failed with status ${response.status}`);
-            }
-
-            setAiResults(prev => ({ ...prev, perplexity: data.text || "No results." }));
-
-        } catch (error) {
-            clearTimeout(timeoutId);
-            console.error("Perplexity Search Error:", error);
-            let msg = "حدث خطأ غير متوقع.";
-            if (error instanceof Error) {
-                if (error.name === 'AbortError') msg = "انتهت مهلة البحث (60 ثانية).";
-                else msg = `خطأ: ${error.message}`;
-            }
-            setAiResults(prev => ({ ...prev, perplexity: msg }));
+            const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt);
+            setAiResults(prev => ({ ...prev, chatgpt: result }));
+        } catch (e) {
+            setAiResults(prev => ({ ...prev, chatgpt: "فشل تحليل ChatGPT." }));
         } finally {
-            setIsAiLoading(prev => ({ ...prev, perplexity: false }));
+            setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.perplexity]);
+    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         if (isAiCommandLoading || isAiLoading.gemini || !editor) return;
@@ -596,7 +589,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         aiResults, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
-        handlePerplexitySearch, handleAiFix, handleFixAllViolations, applySuggestionFromHistory,
+        handleChatGptAnalyze, handleAiFix, handleFixAllViolations, applySuggestionFromHistory,
         markHistorySuggestionApplied,
         removeFromAiHistory: (id: string) => setAiHistory(h => h.filter(x => x.id !== id)),
         generateContextAwarePrompt, openGoogleSearch

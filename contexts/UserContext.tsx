@@ -6,8 +6,8 @@ import { USERS } from '../constants';
 import type { ClientGoalContexts, GoalContext } from '../types';
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 
-type ApiKeys = { gemini: string[]; perplexity: string[] };
-type StoredApiKeys = { gemini?: string | string[]; perplexity?: string[] };
+type ApiKeys = { gemini: string[]; chatgpt: string[] };
+type StoredApiKeys = { gemini?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
 
 interface UserContextType {
     currentUser: string | null;
@@ -70,11 +70,19 @@ const normalizeApiKeys = (keys?: StoredApiKeys): ApiKeys => {
           ? [keys.gemini]
           : [''];
 
-    const perplexityKeys = Array.isArray(keys?.perplexity) ? keys.perplexity : [''];
+    const chatGptKeys = Array.isArray(keys?.chatgpt)
+        ? keys.chatgpt
+        : typeof keys?.chatgpt === 'string'
+          ? [keys.chatgpt]
+          : Array.isArray(keys?.openai)
+            ? keys.openai
+            : typeof keys?.openai === 'string'
+              ? [keys.openai]
+              : [''];
 
     return {
         gemini: geminiKeys.length > 0 ? geminiKeys : [''],
-        perplexity: perplexityKeys.length > 0 ? perplexityKeys : [''],
+        chatgpt: chatGptKeys.length > 0 ? chatGptKeys : [''],
     };
 };
 
@@ -175,7 +183,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setStructureViewMode(userPrefs?.preferredStructureViewMode || 'grid');
             setPreferredLanguage(userPrefs?.preferredLanguage || 'ar');
             setUiLanguage(userPrefs?.preferredUILanguage || 'ar');
-            if (userPrefs?.apiKeys) setApiKeys(normalizeApiKeys(userPrefs.apiKeys as StoredApiKeys));
+            if (userPrefs?.apiKeys) {
+                const normalizedKeys = normalizeApiKeys(userPrefs.apiKeys as StoredApiKeys);
+                setApiKeys(normalizedKeys);
+                saveUserApiKeys(currentUser, normalizedKeys);
+            }
             setClientGoalContexts(normalizeClientGoalContexts(userPrefs?.clientGoalContexts));
             if (userPrefs?.preferredTheme) setIsDarkMode(userPrefs.preferredTheme === 'dark');
         }

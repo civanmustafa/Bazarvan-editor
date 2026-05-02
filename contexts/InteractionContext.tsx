@@ -5,7 +5,7 @@ import type { Editor as EditorClass } from '@tiptap/core';
 import { useUser } from './UserContext';
 import { useEditor } from './EditorContext';
 import { useAI } from './AIContext';
-import type { CheckResult } from '../types';
+import type { CheckResult, StructureAnalysis } from '../types';
 import { SECONDARY_COLORS, VIOLATION_PRIORITY, DEFAULT_PRIORITY, FIXABLE_RULES } from '../constants';
 
 
@@ -40,6 +40,13 @@ interface InteractionContextType {
 
 const InteractionContext = createContext<InteractionContextType | null>(null);
 
+const ARTICLE_WIDE_TOOLTIP_EXCLUDED_RULES = new Set<keyof StructureAnalysis>([
+    'wordCount',
+    'h2Count',
+    'interrogativeH2',
+    'automaticLists',
+]);
+
 export const useInteraction = () => {
   const context = useContext(InteractionContext);
   if (!context) throw new Error("useInteraction must be used within an InteractionProvider");
@@ -67,7 +74,8 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const violations: ({ rule: CheckResult } & NonNullable<CheckResult['violatingItems']>[0])[] = [];
         if (!analysisResults?.structureAnalysis) return [];
         
-        for (const rule of Object.values(analysisResults.structureAnalysis)) {
+        for (const [ruleKey, rule] of Object.entries(analysisResults.structureAnalysis) as [keyof StructureAnalysis, CheckResult][]) {
+            if (ARTICLE_WIDE_TOOLTIP_EXCLUDED_RULES.has(ruleKey)) continue;
             const typedRule = rule as CheckResult;
             if (typedRule && typedRule.violatingItems) {
                 for (const item of typedRule.violatingItems) {

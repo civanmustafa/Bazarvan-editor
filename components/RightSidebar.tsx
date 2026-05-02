@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect } from 'react';
-import { LayoutTemplate, Sparkles, ChevronDown, ExternalLink, Search, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command } from 'lucide-react';
+import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
@@ -18,7 +18,7 @@ const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO
 - العلامة التجارية: استخدم اسم العلامة التجارية المرفق تلقائيًا مع الطلب.
 
 المحتوى:
-استخدم نص المحرر المرفق تلقائيًا مع الطلب. إذا كانت هناك معلومات أخرى مرفقة مثل معايير الكلمات أو البنية أو هدف الصفحة، فاستفد منها أيضًا.
+استخدم نص المحرر المرفق تلقائيًا مع الطلب. إذا كانت هناك معلومات أخرى مرفقة مثل معايير الكلمات أو البنية، فاستفد منها أيضًا.
 
 المطلوب:
 
@@ -128,7 +128,6 @@ type AiAnalysisOptions = {
     goalContext: boolean;
     keywordCriteria: boolean;
     structureCriteria: boolean;
-    goalCriteria: boolean;
 };
 
 type ReadyCommand = {
@@ -138,16 +137,15 @@ type ReadyCommand = {
 };
 
 const RightSidebar: React.FC = () => {
-    const { uiLanguage, t } = useUser();
-    const { handleAiAnalyze, handlePerplexitySearch, aiResults, isAiLoading, generateContextAwarePrompt } = useAI();
+    const { t } = useUser();
+    const { handleAiAnalyze, handleChatGptAnalyze, aiResults, isAiLoading } = useAI();
     
     const [activeTab, setActiveTab] = useState<'structure' | 'ai'>('structure');
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history'>('new');
     const [aiCommand, setAiCommand] = useState('');
     const [selectedReadyCommand, setSelectedReadyCommand] = useState('');
-    const [perplexityModel, setPerplexityModel] = useState<'sonar' | 'sonar-pro'>('sonar');
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
-    const [isPerplexityExpanded, setIsPerplexityExpanded] = useState(true);
+    const [isChatGptExpanded, setIsChatGptExpanded] = useState(true);
     
     // Custom Dropdown State
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
@@ -161,7 +159,6 @@ const RightSidebar: React.FC = () => {
         goalContext: true,
         keywordCriteria: false,
         structureCriteria: false,
-        goalCriteria: false,
     });
 
     const tRs = t.rightSidebar;
@@ -191,7 +188,6 @@ const RightSidebar: React.FC = () => {
                 goalContext: true,
                 keywordCriteria: false,
                 structureCriteria: false,
-                goalCriteria: false,
             },
         },
         { 
@@ -204,7 +200,6 @@ const RightSidebar: React.FC = () => {
                 goalContext: true,
                 keywordCriteria: true,
                 structureCriteria: true,
-                goalCriteria: true,
             },
         },
         { 
@@ -224,12 +219,11 @@ const RightSidebar: React.FC = () => {
                 goalContext: true,
                 keywordCriteria: true,
                 structureCriteria: true,
-                goalCriteria: true,
             },
         },
         { 
             label: tRs.suggestNew, 
-            value: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، ومعايير هدف الصفحة المرفقة تلقائيًا:
+            value: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، وسياق الهدف والجمهور المرفق تلقائيًا:
 اقترح فكرة أو فقرة جديدة غير مذكورة في المقال وتضيف قيمة واضحة للقارئ وتزيد قابلية الاقتباس في AI Overviews.
 أخرج فقط:
 1. مكان الإضافة المقترح داخل المقال.
@@ -244,7 +238,6 @@ const RightSidebar: React.FC = () => {
                 goalContext: true,
                 keywordCriteria: true,
                 structureCriteria: true,
-                goalCriteria: true,
             },
         },
         {
@@ -263,7 +256,6 @@ const RightSidebar: React.FC = () => {
                 goalContext: true,
                 keywordCriteria: false,
                 structureCriteria: false,
-                goalCriteria: true,
             },
         },
     ];
@@ -290,11 +282,6 @@ const RightSidebar: React.FC = () => {
 
     const handleOptionChange = (key: keyof typeof aiOptions) => {
         setAiOptions(prev => ({ ...prev, [key]: !prev[key] }));
-    };
-
-    const handleOpenPerplexityWeb = () => {
-        const fullPrompt = generateContextAwarePrompt(aiCommand, aiOptions);
-        window.open(`https://www.perplexity.ai/search?q=${encodeURIComponent(fullPrompt)}`, '_blank');
     };
 
     const renderAiTab = () => (
@@ -363,28 +350,17 @@ const RightSidebar: React.FC = () => {
                             ))}
                         </div>
 
-                        <div className="flex items-center justify-between border-t pt-3 dark:border-[#333]">
-                            <label className="text-xs font-bold text-gray-700 dark:text-gray-300">نموذج البحث:</label>
-                            <div className="flex bg-gray-100 dark:bg-[#333] p-1 rounded-md">
-                                <button onClick={() => setPerplexityModel('sonar')} className={`px-2 py-1 text-[10px] rounded ${perplexityModel === 'sonar' ? 'bg-white dark:bg-[#111] shadow-xs' : ''}`}>Sonar (سريع)</button>
-                                <button onClick={() => setPerplexityModel('sonar-pro')} className={`px-2 py-1 text-[10px] rounded ${perplexityModel === 'sonar-pro' ? 'bg-white dark:bg-[#111] shadow-xs' : ''}`}>Pro (متعمق)</button>
-                            </div>
-                        </div>
-
                         <div className="flex flex-col gap-2">
                             <div className="flex gap-2">
                                 <button onClick={() => handleAiAnalyze(aiCommand, aiOptions)} disabled={isAiLoading.gemini} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                     <span className="text-xs font-bold">Gemini</span>
                                 </button>
-                                <button onClick={() => handlePerplexitySearch(aiCommand, aiOptions, perplexityModel)} disabled={isAiLoading.perplexity} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
-                                    {isAiLoading.perplexity ? <Wand2 size={16} className="animate-spin" /> : <Search size={16} />}
-                                    <span className="text-xs font-bold">بحث ويب</span>
+                                <button onClick={() => handleChatGptAnalyze(aiCommand, aiOptions)} disabled={isAiLoading.chatgpt} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
+                                    {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
+                                    <span className="text-xs font-bold">ChatGPT</span>
                                 </button>
                             </div>
-                            <button onClick={handleOpenPerplexityWeb} className="flex items-center justify-center gap-2 py-2 bg-gray-100 dark:bg-[#2A2A2A] text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-[#444] rounded-lg">
-                                <ExternalLink size={16} /> <span className="text-xs font-bold">فتح Perplexity في نافذة جديدة</span>
-                            </button>
                         </div>
 
                         <div className="space-y-3 pt-4 border-t border-gray-200 dark:border-[#3C3C3C]">
@@ -401,16 +377,16 @@ const RightSidebar: React.FC = () => {
                                     </div>
                                 )}
                             </div>
-                            {/* Results Perplexity */}
+                            {/* Results ChatGPT */}
                             <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-lg overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
-                                <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsPerplexityExpanded(!isPerplexityExpanded)}>
-                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج بحث الويب</span>
-                                    <ChevronDown size={14} className={isPerplexityExpanded ? 'rotate-180' : ''} />
+                                <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsChatGptExpanded(!isChatGptExpanded)}>
+                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج ChatGPT</span>
+                                    <ChevronDown size={14} className={isChatGptExpanded ? 'rotate-180' : ''} />
                                 </div>
-                                {isPerplexityExpanded && (
+                                {isChatGptExpanded && (
                                     <div className="p-3 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {isAiLoading.perplexity ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Search size={14} /> جاري الاتصال بـ Perplexity...</div> :
-                                         aiResults.perplexity ? <div dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(aiResults.perplexity) }} /> : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
+                                        {isAiLoading.chatgpt ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري الاتصال بـ ChatGPT...</div> :
+                                         aiResults.chatgpt ? <div dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(aiResults.chatgpt) }} /> : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
                             </div>

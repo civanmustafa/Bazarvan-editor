@@ -25,19 +25,19 @@ const ApiKeysModal: React.FC = () => {
     setKeys(prev => ({ ...prev, gemini: newGeminiKeys.length > 0 ? newGeminiKeys : [''] }));
   };
 
-  const handlePerplexityChange = (index: number, value: string) => {
-    const newPerplexityKeys = [...keys.perplexity];
-    newPerplexityKeys[index] = value;
-    setKeys(prev => ({ ...prev, perplexity: newPerplexityKeys }));
+  const handleChatGptChange = (index: number, value: string) => {
+    const newChatGptKeys = [...keys.chatgpt];
+    newChatGptKeys[index] = value;
+    setKeys(prev => ({ ...prev, chatgpt: newChatGptKeys }));
   };
 
-  const addPerplexityKey = () => {
-    setKeys(prev => ({ ...prev, perplexity: [...prev.perplexity, ''] }));
+  const addChatGptKey = () => {
+    setKeys(prev => ({ ...prev, chatgpt: [...prev.chatgpt, ''] }));
   };
 
-  const removePerplexityKey = (index: number) => {
-    const newPerplexityKeys = keys.perplexity.filter((_, i) => i !== index);
-    setKeys(prev => ({ ...prev, perplexity: newPerplexityKeys.length > 0 ? newPerplexityKeys : [''] }));
+  const removeChatGptKey = (index: number) => {
+    const newChatGptKeys = keys.chatgpt.filter((_, i) => i !== index);
+    setKeys(prev => ({ ...prev, chatgpt: newChatGptKeys.length > 0 ? newChatGptKeys : [''] }));
   };
 
   const handleSave = () => {
@@ -109,23 +109,23 @@ const ApiKeysModal: React.FC = () => {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t.perplexityApiKeys}
+              {t.chatGptApiKeys}
             </label>
             <div className="space-y-2">
-              {keys.perplexity.map((key, index) => (
+              {keys.chatgpt.map((key, index) => (
                 <div key={index} className="flex items-center gap-2">
                   <input
-                    aria-label={`Perplexity API Key ${index + 1}`}
-                    name={`perplexity-${index}`}
+                    aria-label={`ChatGPT API Key ${index + 1}`}
+                    name={`chatgpt-${index}`}
                     type="password"
                     value={key}
-                    onChange={(e) => handlePerplexityChange(index, e.target.value)}
+                    onChange={(e) => handleChatGptChange(index, e.target.value)}
                     className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-start text-sm text-[#333333] dark:text-[#e0e0e0]"
-                    placeholder={`${t.key} #${index + 1}`}
+                    placeholder={`${t.enterChatGptKey} #${index + 1}`}
                   />
                   <button
                     type="button"
-                    onClick={() => removePerplexityKey(index)}
+                    onClick={() => removeChatGptKey(index)}
                     className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-md"
                     title={t.removeKey}
                   >
@@ -136,7 +136,7 @@ const ApiKeysModal: React.FC = () => {
             </div>
             <button
               type="button"
-              onClick={addPerplexityKey}
+              onClick={addChatGptKey}
               className="mt-2 flex items-center gap-1.5 text-sm text-[#d4af37] font-semibold hover:underline"
             >
               <Plus size={14} />
