@@ -1,12 +1,12 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
-import type { AiAnalysisOptions, AiPatchProvider } from '../types';
+import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider } from '../types';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
@@ -25,7 +25,6 @@ const RightSidebar: React.FC = () => {
         aiInsertionPatches,
         isAiLoading,
         applyAiInsertionPatch,
-        applyAllAiInsertionPatches,
         selectAiInsertionPatchTarget,
     } = useAI();
     
@@ -35,6 +34,7 @@ const RightSidebar: React.FC = () => {
     const [selectedReadyCommandId, setSelectedReadyCommandId] = useState('');
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(true);
+    const [copiedPatchId, setCopiedPatchId] = useState('');
     
     // Custom Dropdown State
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
@@ -97,89 +97,136 @@ const RightSidebar: React.FC = () => {
         setAiOptions(prev => ({ ...prev, [key]: !prev[key] }));
     };
 
-    const renderPatchActions = (provider: AiPatchProvider) => {
-        const patches = aiInsertionPatches[provider];
-        if (!patches.length) return null;
+    const handleCopyPatch = async (patchId: string, content: string) => {
+        try {
+            await navigator.clipboard.writeText(content);
+            setCopiedPatchId(patchId);
+            window.setTimeout(() => {
+                setCopiedPatchId(current => current === patchId ? '' : current);
+            }, 1500);
+        } catch (error) {
+            console.error('Could not copy AI patch:', error);
+        }
+    };
 
-        const pendingCount = patches.filter(patch => patch.status === 'pending').length;
+    const getPatchActionLabel = (operation: string) => (
+        operation === 'replace_block' || operation === 'replace_text' ? 'استبدال' : 'إضافة'
+    );
+
+    const renderPatchCard = (provider: AiPatchProvider, patch: AiContentPatch) => {
+        const actionLabel = getPatchActionLabel(patch.operation);
+        const isCopied = copiedPatchId === patch.id;
 
         return (
-            <div className="mt-3 border-t border-[#d4af37]/20 dark:border-[#d4af37]/25 pt-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">
-                        <FilePlus2 size={14} />
-                        <span>تعديلات قابلة للتطبيق ({patches.length})</span>
+            <div key={patch.id} className="my-3 border border-[#d4af37]/25 dark:border-[#d4af37]/30 rounded-md bg-white/80 dark:bg-[#1F1F1F]/80 p-2 not-prose">
+                <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                            <span className="rounded bg-[#d4af37]/15 px-1.5 py-0.5 text-[11px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">{actionLabel}</span>
+                            <div className="text-xs font-bold text-[#333333] dark:text-gray-100 line-clamp-2">{patch.title}</div>
+                        </div>
+                        {(patch.placementLabel || patch.anchorText || patch.targetText) && (
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                                {patch.placementLabel || patch.anchorText || patch.targetText}
+                            </div>
+                        )}
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => applyAllAiInsertionPatches(provider)}
-                        disabled={pendingCount === 0}
-                        className="px-2 py-1 rounded-md text-xs font-bold bg-[#d4af37] text-white hover:bg-[#b8922e] disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        تطبيق الكل
-                    </button>
+                    {patch.status === 'applied' && (
+                        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                            <CheckCircle2 size={13} />
+                            تم
+                        </span>
+                    )}
+                    {patch.status === 'failed' && (
+                        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-red-600 dark:text-red-400">
+                            <AlertTriangle size={13} />
+                            تعذر
+                        </span>
+                    )}
                 </div>
 
-                <div className="space-y-2">
-                    {patches.map((patch) => (
-                        <div key={patch.id} className="border border-[#d4af37]/20 dark:border-[#d4af37]/25 rounded-md bg-white/70 dark:bg-[#1F1F1F]/70 p-2">
-                            <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                    <div className="text-xs font-bold text-[#333333] dark:text-gray-100 line-clamp-2">{patch.title}</div>
-                                    {(patch.placementLabel || patch.anchorText) && (
-                                        <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
-                                            {patch.placementLabel || patch.anchorText}
-                                        </div>
-                                    )}
-                                </div>
-                                {patch.status === 'applied' && (
-                                    <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                                        <CheckCircle2 size={13} />
-                                        تم
-                                    </span>
-                                )}
-                                {patch.status === 'failed' && (
-                                    <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-red-600 dark:text-red-400">
-                                        <AlertTriangle size={13} />
-                                        تعذر
-                                    </span>
-                                )}
-                            </div>
+                <div className="mt-2 text-xs text-gray-700 dark:text-gray-300 ai-output line-clamp-4" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }} />
 
-                            <div className="mt-2 text-xs text-gray-700 dark:text-gray-300 ai-output line-clamp-3" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }} />
+                {patch.reason && (
+                    <div className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2">{patch.reason}</div>
+                )}
 
-                            {patch.reason && (
-                                <div className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2">{patch.reason}</div>
-                            )}
+                {patch.applyError && (
+                    <div className="mt-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 rounded px-2 py-1">{patch.applyError}</div>
+                )}
 
-                            {patch.applyError && (
-                                <div className="mt-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 rounded px-2 py-1">{patch.applyError}</div>
-                            )}
-
-                            <div className="mt-2 flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => selectAiInsertionPatchTarget(provider, patch.id)}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-gray-100 dark:bg-[#2A2A2A] text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
-                                >
-                                    <LocateFixed size={13} />
-                                    الموضع
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => applyAiInsertionPatch(provider, patch.id)}
-                                    disabled={patch.status !== 'pending'}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold bg-[#d4af37] text-white hover:bg-[#b8922e] disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <FilePlus2 size={13} />
-                                    تطبيق
-                                </button>
-                            </div>
-                        </div>
-                    ))}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => selectAiInsertionPatchTarget(provider, patch.id)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-gray-100 dark:bg-[#2A2A2A] text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
+                    >
+                        <LocateFixed size={13} />
+                        الموضع
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleCopyPatch(patch.id, patch.contentMarkdown)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-gray-100 dark:bg-[#2A2A2A] text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
+                    >
+                        <Copy size={13} />
+                        {isCopied ? 'تم النسخ' : 'نسخ'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => applyAiInsertionPatch(provider, patch.id)}
+                        disabled={patch.status !== 'pending'}
+                        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold bg-[#d4af37] text-white hover:bg-[#b8922e] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <FilePlus2 size={13} />
+                        {actionLabel}
+                    </button>
                 </div>
             </div>
         );
+    };
+
+    const renderAnalysisResult = (provider: AiPatchProvider, result: string) => {
+        const patches = aiInsertionPatches[provider];
+        if (!patches.length) {
+            return <div dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(result) }} />;
+        }
+
+        const usedPatchIds = new Set<string>();
+        const markerPattern = /\[\[PATCH:([^\]]+)\]\]/g;
+        const parts: React.ReactNode[] = [];
+        let lastIndex = 0;
+        let match: RegExpExecArray | null;
+
+        while ((match = markerPattern.exec(result)) !== null) {
+            const textChunk = result.slice(lastIndex, match.index);
+            const marker = match[1].trim();
+            if (textChunk.trim()) {
+                parts.push(
+                    <div key={`text-${lastIndex}`} dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(textChunk) }} />
+                );
+            }
+
+            const patch = patches.find(item => item.marker === marker || item.title === marker);
+            if (patch) {
+                usedPatchIds.add(patch.id);
+                parts.push(renderPatchCard(provider, patch));
+            }
+            lastIndex = markerPattern.lastIndex;
+        }
+
+        const tail = result.slice(lastIndex);
+        if (tail.trim()) {
+            parts.push(
+                <div key="text-tail" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(tail) }} />
+            );
+        }
+
+        patches
+            .filter(patch => !usedPatchIds.has(patch.id))
+            .forEach(patch => parts.push(renderPatchCard(provider, patch)));
+
+        return <>{parts}</>;
     };
 
     const renderAiTab = () => (
@@ -271,8 +318,7 @@ const RightSidebar: React.FC = () => {
                                 {isGeminiExpanded && (
                                     <div className="p-3 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
                                         {isAiLoading.gemini ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div> :
-                                         aiResults.gemini ? <div dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(aiResults.gemini) }} /> : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
-                                        {renderPatchActions('gemini')}
+                                         aiResults.gemini ? renderAnalysisResult('gemini', aiResults.gemini) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
                             </div>
@@ -285,8 +331,7 @@ const RightSidebar: React.FC = () => {
                                 {isChatGptExpanded && (
                                     <div className="p-3 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
                                         {isAiLoading.chatgpt ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري الاتصال بـ ChatGPT...</div> :
-                                         aiResults.chatgpt ? <div dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(aiResults.chatgpt) }} /> : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
-                                        {renderPatchActions('chatgpt')}
+                                         aiResults.chatgpt ? renderAnalysisResult('chatgpt', aiResults.chatgpt) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
                             </div>

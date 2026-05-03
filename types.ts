@@ -209,6 +209,8 @@ export interface HeadingAnalysisResult {
 export type AiPatchProvider = 'gemini' | 'chatgpt';
 
 export type AiContentPatchOperation =
+  | 'replace_block'
+  | 'replace_text'
   | 'insert_after_heading'
   | 'insert_before_heading'
   | 'append_to_section'
@@ -223,7 +225,9 @@ export interface AiContentPatch {
   provider: AiPatchProvider;
   operation: AiContentPatchOperation;
   title: string;
+  marker?: string;
   anchorText?: string;
+  targetText?: string;
   placementLabel?: string;
   contentMarkdown: string;
   reason?: string;

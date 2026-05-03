@@ -348,7 +348,37 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 
 اجعل patches تشمل فقط النصوص المقترحة الجاهزة للإضافة أو الاستبدال الجزئي المذكورة في التحليل. لا تضف patches إذا لم يكن هناك نص جاهز قابل للتطبيق داخل المقال. لا تخترع معلومات جديدة.`;
 
+const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
+
+تعليمات أحدث لبطاقات التنفيذ داخل التقرير:
+يجب أن يظهر خيار التنفيذ داخل analysisMarkdown نفسه، وليس في قسم منفصل في آخر التقرير.
+لكل نص جاهز قابل للتطبيق، أنشئ patch واحداً فقط، ثم ضع داخل analysisMarkdown علامة مكانها بالضبط بهذا الشكل:
+[[PATCH:patch_1]]
+[[PATCH:patch_2]]
+
+لكل patch استخدم marker مطابقاً للعلامة، مثل "patch_1". لا تكتب النص الجاهز داخل analysisMarkdown.
+
+إذا كان المطلوب تعديل فقرة موجودة، استخدم operation بقيمة "replace_block"، وضع في targetText نص الفقرة الحالية المراد استبدالها من المقال قدر الإمكان، وضع النص الجديد في contentMarkdown.
+إذا كان المطلوب إضافة فقرة أو سؤال أو جملة جديدة، استخدم عمليات الإضافة المناسبة مثل insert_after_heading أو insert_before_faq أو insert_before_conclusion أو append_to_section أو append_to_article.
+
+الشكل المطلوب لكل patch:
+{
+  "marker": "patch_1",
+  "operation": "replace_block",
+  "title": "عنوان قصير للتنفيذ",
+  "targetText": "النص الحالي المراد استبداله عند وجود تعديل",
+  "anchorText": "عنوان أو فقرة مرجعية عند وجود إضافة",
+  "placementLabel": "مكان التنفيذ المختصر",
+  "contentMarkdown": "النص الجاهز للتطبيق فقط",
+  "reason": "سبب مختصر",
+  "confidence": 0.85
+}
+
+لا تستخدم عبارة "قسم التعديلات القابلة للتطبيق". استخدم فقط علامة [[PATCH:...]] في موضع التنفيذ داخل التقرير.`;
+
 const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
+    'replace_block',
+    'replace_text',
     'insert_after_heading',
     'insert_before_heading',
     'append_to_section',
@@ -361,6 +391,8 @@ const asTrimmedString = (value: unknown): string => typeof value === 'string' ? 
 
 const normalizePatchOperation = (value: unknown): AiContentPatchOperation => {
     const operation = asTrimmedString(value) as AiContentPatchOperation;
+    if (operation === 'replace_text' || operation === 'replace_block') return operation;
+    if (['replace', 'replace_paragraph', 'update_paragraph', 'rewrite_paragraph'].includes(operation)) return 'replace_block';
     return ALLOWED_PATCH_OPERATIONS.has(operation) ? operation : 'append_to_article';
 };
 
@@ -385,7 +417,9 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
                 provider,
                 operation: normalizePatchOperation(record.operation || record.type),
                 title: asTrimmedString(record.title) || `تعديل ${index + 1}`,
+                marker: asTrimmedString(record.marker) || `patch_${index + 1}`,
                 anchorText: asTrimmedString(record.anchorText || record.anchor || record.target),
+                targetText: asTrimmedString(record.targetText || record.originalText || record.currentText || record.original || record.replaceTarget),
                 placementLabel: asTrimmedString(record.placementLabel || record.placement || record.place),
                 contentMarkdown,
                 reason: asTrimmedString(record.reason),
@@ -403,7 +437,7 @@ const stripDuplicatePatchTextFromAnalysis = (analysisMarkdown: string, patches: 
     patches.forEach((patch) => {
         const content = patch.contentMarkdown.trim();
         if (content.length < 20) return;
-        cleaned = cleaned.split(content).join(`النص الجاهز متاح في قسم التعديلات القابلة للتطبيق بعنوان: ${patch.title}`);
+        cleaned = cleaned.split(content).join(`[[PATCH:${patch.marker || patch.title}]]`);
     });
 
     return cleaned
@@ -509,6 +543,49 @@ const findHeadingByKeywords = (editor: any, keywords: string[]): HeadingMatch | 
     return match;
 };
 
+const REPLACEABLE_BLOCK_TYPES = new Set(['paragraph', 'listItem']);
+
+const scoreTextBlockMatch = (blockText: string, targetText: string): number => {
+    const block = normalizeAnchorText(blockText);
+    const target = normalizeAnchorText(targetText);
+    if (!block || !target) return 0;
+    if (block === target) return 4;
+    if (block.includes(target) || target.includes(block)) return 3;
+
+    const targetWords = target.split(' ').filter(word => word.length > 2);
+    if (targetWords.length === 0) return 0;
+    const overlap = targetWords.filter(word => block.includes(word)).length / targetWords.length;
+    return overlap >= 0.75 ? overlap : 0;
+};
+
+type TextBlockMatch = {
+    from: number;
+    to: number;
+    score: number;
+};
+
+const findTextBlockMatch = (editor: any, targetText: string): TextBlockMatch | null => {
+    if (!editor || !targetText.trim()) return null;
+    let bestMatch: TextBlockMatch | null = null;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (!REPLACEABLE_BLOCK_TYPES.has(node.type.name)) return true;
+        const textContent = node.textContent || '';
+        if (!textContent.trim()) return true;
+        const score = scoreTextBlockMatch(textContent, targetText);
+        if (score > 0 && (!bestMatch || score > bestMatch.score)) {
+            bestMatch = {
+                from: pos,
+                to: pos + node.nodeSize,
+                score,
+            };
+        }
+        return true;
+    });
+
+    return bestMatch;
+};
+
 const findSectionEnd = (editor: any, heading: HeadingMatch): number => {
     let sectionEnd = editor.state.doc.content.size;
 
@@ -525,31 +602,41 @@ const findSectionEnd = (editor: any, heading: HeadingMatch): number => {
 };
 
 type PatchTarget = {
-    insertAt: number;
+    from: number;
+    to: number;
     selectFrom: number;
     selectTo: number;
+    mode: 'insert' | 'replace';
 };
 
 const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget | { error: string } => {
     if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
     const docEnd = editor.state.doc.content.size;
 
+    if (patch.operation === 'replace_block' || patch.operation === 'replace_text') {
+        const match = findTextBlockMatch(editor, patch.targetText || patch.anchorText || '');
+        if (!match) {
+            return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
+        }
+        return { from: match.from, to: match.to, selectFrom: match.from, selectTo: match.to, mode: 'replace' };
+    }
+
     if (patch.operation === 'append_to_article') {
-        return { insertAt: docEnd, selectFrom: docEnd, selectTo: docEnd };
+        return { from: docEnd, to: docEnd, selectFrom: docEnd, selectTo: docEnd, mode: 'insert' };
     }
 
     if (patch.operation === 'insert_before_faq') {
         const faqHeading = findHeadingByKeywords(editor, ['الأسئلة الشائعة', 'اسئلة شائعة', 'faq']);
         return faqHeading
-            ? { insertAt: faqHeading.pos, selectFrom: faqHeading.pos, selectTo: faqHeading.to }
-            : { insertAt: docEnd, selectFrom: docEnd, selectTo: docEnd };
+            ? { from: faqHeading.pos, to: faqHeading.pos, selectFrom: faqHeading.pos, selectTo: faqHeading.to, mode: 'insert' }
+            : { from: docEnd, to: docEnd, selectFrom: docEnd, selectTo: docEnd, mode: 'insert' };
     }
 
     if (patch.operation === 'insert_before_conclusion') {
         const conclusionHeading = findHeadingByKeywords(editor, ['الخاتمة', 'الخلاصة', 'في الختام', 'ختام']);
         return conclusionHeading
-            ? { insertAt: conclusionHeading.pos, selectFrom: conclusionHeading.pos, selectTo: conclusionHeading.to }
-            : { insertAt: docEnd, selectFrom: docEnd, selectTo: docEnd };
+            ? { from: conclusionHeading.pos, to: conclusionHeading.pos, selectFrom: conclusionHeading.pos, selectTo: conclusionHeading.to, mode: 'insert' }
+            : { from: docEnd, to: docEnd, selectFrom: docEnd, selectTo: docEnd, mode: 'insert' };
     }
 
     const heading = findHeadingMatch(editor, patch.anchorText || '');
@@ -558,14 +645,15 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
     }
 
     if (patch.operation === 'insert_before_heading') {
-        return { insertAt: heading.pos, selectFrom: heading.pos, selectTo: heading.to };
+        return { from: heading.pos, to: heading.pos, selectFrom: heading.pos, selectTo: heading.to, mode: 'insert' };
     }
 
     if (patch.operation === 'append_to_section') {
-        return { insertAt: findSectionEnd(editor, heading), selectFrom: heading.pos, selectTo: heading.to };
+        const sectionEnd = findSectionEnd(editor, heading);
+        return { from: sectionEnd, to: sectionEnd, selectFrom: heading.pos, selectTo: heading.to, mode: 'insert' };
     }
 
-    return { insertAt: heading.to, selectFrom: heading.pos, selectTo: heading.to };
+    return { from: heading.to, to: heading.to, selectFrom: heading.pos, selectTo: heading.to, mode: 'insert' };
 };
 
 type SuggestionState = {
@@ -776,7 +864,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setIsAiLoading(prev => ({ ...prev, gemini: true }));
         setAiInsertionPatches(prev => ({ ...prev, gemini: [] }));
         try {
-            const finalPrompt = `${generateContextAwarePrompt(userPrompt, options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}`;
+            const finalPrompt = `${generateContextAwarePrompt(userPrompt, options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
             const result = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
             const parsedResult = parseSmartAnalysisResponse(result, 'gemini');
             setAiResults(prev => ({ ...prev, gemini: parsedResult.displayText }));
@@ -794,7 +882,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setAiResults(prev => ({ ...prev, chatgpt: '' }));
         setAiInsertionPatches(prev => ({ ...prev, chatgpt: [] }));
         try {
-            const finalPrompt = `${generateContextAwarePrompt(userPrompt, options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}`;
+            const finalPrompt = `${generateContextAwarePrompt(userPrompt, options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
             const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt);
             const parsedResult = parseSmartAnalysisResponse(result, 'chatgpt');
             setAiResults(prev => ({ ...prev, chatgpt: parsedResult.displayText }));
@@ -965,7 +1053,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         editor
             .chain()
             .focus()
-            .setTextSelection(target.selectFrom === target.selectTo ? target.insertAt : { from: target.selectFrom, to: target.selectTo })
+            .setTextSelection(target.selectFrom === target.selectTo ? target.from : { from: target.selectFrom, to: target.selectTo })
             .scrollIntoView()
             .run();
     }, [aiInsertionPatches, editor, updateAiInsertionPatch]);
@@ -985,7 +1073,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             editor
                 .chain()
                 .focus()
-                .insertContentAt(target.insertAt, parseMarkdownToHtml(patch.contentMarkdown), { updateSelection: true })
+                .insertContentAt(
+                    target.mode === 'replace' ? { from: target.from, to: target.to } : target.from,
+                    parseMarkdownToHtml(patch.contentMarkdown),
+                    { updateSelection: true }
+                )
                 .scrollIntoView()
                 .run();
             updateAiInsertionPatch(provider, patchId, { status: 'applied', applyError: undefined });
