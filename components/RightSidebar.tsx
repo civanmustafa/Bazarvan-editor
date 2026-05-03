@@ -7,7 +7,7 @@ import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
 import type { AiAnalysisOptions } from '../types';
-import { ENGINEERING_PROMPT_DEFINITIONS, getEngineeringPrompt } from '../constants/engineeringPrompts';
+import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
     id: string;
@@ -31,15 +31,7 @@ const RightSidebar: React.FC = () => {
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
     const commandsMenuRef = useRef<HTMLDivElement>(null);
 
-    const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>({
-        manualCommand: true,
-        editorText: true,
-        targetKeywords: true,
-        companyName: true,
-        goalContext: true,
-        keywordCriteria: false,
-        structureCriteria: false,
-    });
+    const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
     const tRs = t.rightSidebar;
 
@@ -88,9 +80,7 @@ const RightSidebar: React.FC = () => {
     const handleCommandSelect = (command: ReadyCommand) => {
         setSelectedReadyCommandId(command.id);
         if (command.value) setAiCommand(command.value);
-        if (command.options) {
-            setAiOptions(prev => ({ ...prev, ...command.options }));
-        }
+        setAiOptions({ ...DEFAULT_SMART_ANALYSIS_OPTIONS, ...(command.options || {}) });
         setIsCommandsMenuOpen(false);
     };
 

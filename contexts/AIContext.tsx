@@ -4,7 +4,7 @@ import { GoogleGenAI } from '@google/genai';
 import { useUser } from './UserContext';
 import { useEditor } from './EditorContext';
 import { useModal } from './ModalContext';
-import type { CheckResult, HeadingAnalysisResult, AIHistoryItem, GoalContext } from '../types';
+import type { AiAnalysisOptions, CheckResult, HeadingAnalysisResult, AIHistoryItem, GoalContext, StructureAnalysis } from '../types';
 import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { FIXABLE_RULES } from '../constants';
 import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
@@ -57,6 +57,95 @@ const formatGoalContext = (goalContext: GoalContext): string => {
         .filter(([, value]) => value.trim().length > 0)
         .map(([key, value]) => `- ${GOAL_CONTEXT_LABELS[key] || key}: ${GOAL_CONTEXT_VALUE_LABELS[value] || value}`)
         .join('\n');
+};
+
+type StructureCriteriaAttachment = {
+    optionKey: keyof Pick<
+        AiAnalysisOptions,
+        'basicStructureCriteria' | 'headingsSequenceCriteria' | 'interactionCtaCriteria' | 'conclusionCriteria'
+    >;
+    labelKey: 'basicStructure' | 'headingsSequence' | 'interactionCta' | 'conclusion';
+    ruleKeys: (keyof StructureAnalysis)[];
+};
+
+const STRUCTURE_CRITERIA_ATTACHMENTS: StructureCriteriaAttachment[] = [
+    {
+        optionKey: 'basicStructureCriteria',
+        labelKey: 'basicStructure',
+        ruleKeys: [
+            'wordCount',
+            'summaryParagraph',
+            'secondParagraph',
+            'paragraphLength',
+            'sentenceLength',
+            'tableListOpportunities',
+            'stepsIntroduction',
+            'keywordStuffing',
+            'automaticLists',
+        ],
+    },
+    {
+        optionKey: 'headingsSequenceCriteria',
+        labelKey: 'headingsSequence',
+        ruleKeys: [
+            'h2Structure',
+            'h2Count',
+            'h3Structure',
+            'h4Structure',
+            'betweenH2H3',
+            'faqSection',
+            'answerParagraph',
+            'ambiguousHeadings',
+            'headingLength',
+        ],
+    },
+    {
+        optionKey: 'interactionCtaCriteria',
+        labelKey: 'interactionCta',
+        ruleKeys: [
+            'ctaWords',
+            'interactiveLanguage',
+            'warningWords',
+            'differentTransitionalWords',
+            'slowWords',
+        ],
+    },
+    {
+        optionKey: 'conclusionCriteria',
+        labelKey: 'conclusion',
+        ruleKeys: [
+            'lastH2IsConclusion',
+            'conclusionParagraph',
+            'conclusionWordCount',
+            'conclusionHasNumber',
+            'conclusionHasList',
+        ],
+    },
+];
+
+const formatStructureCriteriaRules = (sectionTitle: string, rules: CheckResult[]): string => {
+    const formattedRules = rules
+        .filter(Boolean)
+        .map((rule) => {
+            const violationExamples = rule.violatingItems
+                ?.slice(0, 3)
+                .map(item => item.message)
+                .filter(Boolean)
+                .join(' | ');
+
+            return [
+                `### ${rule.title}`,
+                `- الحالة الحالية: ${rule.status}`,
+                `- القيمة الحالية: ${rule.current}`,
+                `- المطلوب: ${rule.required}`,
+                rule.description ? `- القاعدة: ${rule.description}` : '',
+                rule.details ? `- الشروط والتفاصيل:\n${rule.details}` : '',
+                violationExamples ? `- أمثلة من المخالفات الحالية: ${violationExamples}` : '',
+            ].filter(Boolean).join('\n');
+        })
+        .join('\n\n');
+
+    return `**${sectionTitle} وشروطها وقواعدها:**\n${formattedRules || '- لا توجد معايير متاحة لهذه المجموعة.'}`;
 };
 
 const getGeminiErrorMessage = (error: unknown): string => {
@@ -337,7 +426,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     };
 
     const generateContextAwarePrompt = useCallback((userPrompt: string, options: any) => {
-        const { manualCommand, editorText, targetKeywords, companyName, goalContext: includeGoalContext, keywordCriteria, structureCriteria } = options;
+        const {
+            manualCommand,
+            editorText,
+            targetKeywords,
+            companyName,
+            goalContext: includeGoalContext,
+            keywordCriteria,
+        } = options;
         let parts: string[] = [];
         const pageObjective = GOAL_CONTEXT_VALUE_LABELS[goalContext.objective] || goalContext.objective || 'لم يحدد';
         parts.push(includeGoalContext
@@ -385,23 +481,24 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (editorText) {
             parts.push(`**نص المقال الحالي من المحرر:**\n---\n${text}\n---`);
         }
-        if (structureCriteria) {
-            const problematicRules = (Object.values(analysisResults.structureAnalysis) as CheckResult[])
-                .filter(rule => rule.status === 'fail' || rule.status === 'warn')
-                .slice(0, 25)
-                .map(rule => {
-                    const firstMessages = rule.violatingItems?.slice(0, 3).map(item => item.message).filter(Boolean).join(' | ');
-                    return `- ${rule.title}: الحالة ${rule.status}، الحالي ${rule.current}، المطلوب ${rule.required}${firstMessages ? `، أمثلة: ${firstMessages}` : ''}.`;
-                });
-            parts.push(`**معايير البنية والجودة المخالفة:**\n${problematicRules.length ? problematicRules.join('\n') : '- لا توجد مخالفات بنيوية حالية.'}`);
-        }
+        STRUCTURE_CRITERIA_ATTACHMENTS.forEach((attachment) => {
+            if (!options[attachment.optionKey]) return;
+
+            const sectionTitle = t.structureTab[attachment.labelKey];
+            const rules = attachment.ruleKeys
+                .map(ruleKey => analysisResults.structureAnalysis[ruleKey])
+                .filter(Boolean) as CheckResult[];
+
+            parts.push(formatStructureCriteriaRules(sectionTitle, rules));
+        });
+
         if (manualCommand && userPrompt.trim()) {
             parts.push(`**الأمر المطلوب:**\n${userPrompt}`);
         } else if (userPrompt.trim()) {
              parts.push(userPrompt);
         }
         return parts.join('\n\n');
-    }, [title, keywords, text, goalContext, articleLanguage, analysisResults]);
+    }, [title, keywords, text, goalContext, articleLanguage, analysisResults, t]);
     
     const handleAiAnalyze = useCallback(async (userPrompt: string, options: any) => {
         if (!editor) return;

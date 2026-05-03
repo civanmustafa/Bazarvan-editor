@@ -229,6 +229,15 @@ const KeywordInput: React.FC<{
   </div>
 );
 
+const stripKeywordDots = (value: string): string => value.replace(/\./g, '').trim();
+
+const splitDistributedTerms = (value: string, separator: RegExp): string[] => {
+    return value
+        .split(separator)
+        .map(stripKeywordDots)
+        .filter(Boolean);
+};
+
 
 const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
@@ -396,7 +405,7 @@ const LeftSidebar: React.FC = () => {
   // LSI Handlers
     const handleLsiAdd = () => {
         if (!lsiInputValue.trim()) return;
-        const newKeywords = lsiInputValue.split(/[\n,،.*\/#]+/).map(k => k.trim()).filter(k => k && !keywords.lsi.includes(k));
+        const newKeywords = splitDistributedTerms(lsiInputValue, /[\n,،*\/#]+/).filter(k => !keywords.lsi.includes(k));
         if (newKeywords.length > 0) {
             setKeywords(prev => ({ ...prev, lsi: [...prev.lsi, ...newKeywords] }));
         }
@@ -412,7 +421,7 @@ const LeftSidebar: React.FC = () => {
         e.preventDefault();
         const pastedText = e.clipboardData.getData('text');
         if (!pastedText.trim()) return;
-        const newKeywords = pastedText.split(/[\n,،.*\/#]+/).map(k => k.trim()).filter(k => k && !keywords.lsi.includes(k));
+        const newKeywords = splitDistributedTerms(pastedText, /[\n,،*\/#]+/).filter(k => !keywords.lsi.includes(k));
         if (newKeywords.length > 0) {
             setKeywords(prev => ({ ...prev, lsi: [...prev.lsi, ...newKeywords] }));
         }
@@ -454,13 +463,13 @@ const LeftSidebar: React.FC = () => {
         const lsiPart = (parts[1] || '').trim();
         const companyPart = (parts[2] || '').trim();
     
-        const primaryAndSynonymsLines = primaryAndSynonymsPart.split(/[\n,،]+/).map(line => line.trim()).filter(Boolean);
+        const primaryAndSynonymsLines = splitDistributedTerms(primaryAndSynonymsPart, /[\n,،]+/);
         const newPrimary = primaryAndSynonymsLines[0] || keywords.primary;
         const newSecondaries = primaryAndSynonymsLines.length > 1 ? primaryAndSynonymsLines.slice(1) : keywords.secondaries;
     
-        const newLsi = lsiPart ? lsiPart.split(/[\n,،.*\/#]+/).map(line => line.trim()).filter(Boolean) : keywords.lsi;
+        const newLsi = lsiPart ? splitDistributedTerms(lsiPart, /[\n,،*\/#]+/) : keywords.lsi;
     
-        const companyLines = companyPart.split(/[\n,،]+/).map(line => line.trim()).filter(Boolean);
+        const companyLines = splitDistributedTerms(companyPart, /[\n,،]+/);
         const newCompany = companyLines[0] || keywords.company;
     
         setKeywords({

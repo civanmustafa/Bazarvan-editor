@@ -1,5 +1,5 @@
 import { AI_PROMPTS } from './aiPrompts';
-import type { EngineeringPromptDefinition, EngineeringPromptId, EngineeringPrompts } from '../types';
+import type { AiAnalysisOptions, EngineeringPromptDefinition, EngineeringPromptId, EngineeringPrompts } from '../types';
 
 export const ENGINEERING_PROMPT_PASSWORD = 'Rezan90';
 
@@ -30,6 +30,19 @@ export const ENGINEERING_PROMPT_IDS = {
     changeTone: 'toolbar.changeTone',
   },
 } as const;
+
+export const DEFAULT_SMART_ANALYSIS_OPTIONS: AiAnalysisOptions = {
+  manualCommand: true,
+  editorText: true,
+  targetKeywords: true,
+  goalContext: true,
+  companyName: false,
+  keywordCriteria: false,
+  basicStructureCriteria: false,
+  headingsSequenceCriteria: false,
+  interactionCtaCriteria: false,
+  conclusionCriteria: false,
+};
 
 const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO/LLM SEO. افحص المحتوى التالي بعمق ولكن باختصار، وقيّمه من حيث مطابقته لنية البحث، كفاية الإجابة، قابلية الاقتباس في AI Overviews، الفجوات المعرفية، الأسئلة الناقصة، الادعاءات غير المدعومة، الكيانات الناقصة، البنية، وقوة التحويل.
 
@@ -150,29 +163,14 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     source: 'smartAnalysis',
     labelKey: 'entityMap',
     defaultValue: ENTITY_MAP_SEO_PROMPT,
-    options: {
-      manualCommand: true,
-      editorText: true,
-      targetKeywords: true,
-      companyName: true,
-      goalContext: true,
-      keywordCriteria: false,
-      structureCriteria: false,
-    },
+    options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.fullArticleAudit,
     source: 'smartAnalysis',
     labelKey: 'analyzeFull',
     defaultValue: FULL_ARTICLE_SEO_AI_AUDIT_PROMPT,
-    options: {
-      manualCommand: true,
-      editorText: true,
-      targetKeywords: true,
-      goalContext: true,
-      keywordCriteria: true,
-      structureCriteria: true,
-    },
+    options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.improveWeakest,
@@ -186,14 +184,7 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
 3. نسخة محسنة جاهزة للاستبدال.
 4. لماذا النسخة الجديدة أفضل.
 لا تقدّم نصائح عامة ولا تقترح صورًا أو فيديوهات أو Schema.`,
-    options: {
-      manualCommand: true,
-      editorText: true,
-      targetKeywords: true,
-      goalContext: true,
-      keywordCriteria: true,
-      structureCriteria: true,
-    },
+    options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.suggestNewIdea,
@@ -207,14 +198,7 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
 3. الفقرة المقترحة جاهزة للإضافة.
 4. سبب أهميتها للبحث والقرار والتحويل.
 لا تقدّم أكثر من فكرة واحدة ولا تقترح صورًا أو فيديوهات أو Schema.`,
-    options: {
-      manualCommand: true,
-      editorText: true,
-      targetKeywords: true,
-      goalContext: true,
-      keywordCriteria: true,
-      structureCriteria: true,
-    },
+    options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.peopleQuestions,
@@ -227,14 +211,7 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
 - أسئلة تكلفة أو سعر.
 - أسئلة اعتراضات أو مخاطر.
 لكل سؤال اذكر أين يمكن إضافته داخل المقال باختصار.`,
-    options: {
-      manualCommand: true,
-      editorText: true,
-      targetKeywords: true,
-      goalContext: true,
-      keywordCriteria: false,
-      structureCriteria: false,
-    },
+    options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {
     id: ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings,

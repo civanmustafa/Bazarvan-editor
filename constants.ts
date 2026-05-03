@@ -49,12 +49,12 @@ export const INITIAL_KEYWORDS: Keywords = {
 };
 
 export const INITIAL_GOAL_CONTEXT = {
-  pageType: 'article',
-  objective: 'educate',
-  audienceScope: 'local',
+  pageType: 'service',
+  objective: 'convert',
+  audienceScope: 'global',
   targetCountry: '',
   targetAudience: '',
-  searchIntent: 'informational',
+  searchIntent: 'transactional',
 };
 
 export const MANUAL_DRAFT_KEY = 'editor-manual-draft-content';

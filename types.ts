@@ -27,7 +27,10 @@ export interface AiAnalysisOptions {
   companyName: boolean;
   goalContext: boolean;
   keywordCriteria: boolean;
-  structureCriteria: boolean;
+  basicStructureCriteria: boolean;
+  headingsSequenceCriteria: boolean;
+  interactionCtaCriteria: boolean;
+  conclusionCriteria: boolean;
 }
 
 export type EngineeringPromptSource = 'smartAnalysis' | 'toolbar';

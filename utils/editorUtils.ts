@@ -11,22 +11,139 @@ export const escapeHtml = (value: string): string => {
     return value.replace(/[&<>"']/g, char => replacements[char]);
 };
 
+const stripWrappingCodeFence = (value: string): string => {
+    const trimmed = value.trim();
+    const match = trimmed.match(/^```(?:html|markdown|md)?\s*([\s\S]*?)\s*```$/i);
+    return match ? match[1].trim() : value;
+};
+
+const processInlineFormatting = (text: string): string => {
+    return escapeHtml(text)
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>');
+};
+
+const sanitizeTableAttributeValue = (value: string | null): string | null => {
+    if (!value) return null;
+    const normalized = value.trim();
+    return /^\d{1,2}$/.test(normalized) ? normalized : null;
+};
+
+const sanitizeHtmlTable = (html: string): string | null => {
+    if (typeof DOMParser === 'undefined') return null;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const table = doc.querySelector('table');
+    if (!table) return null;
+
+    const allowedTags = new Set([
+        'table',
+        'thead',
+        'tbody',
+        'tfoot',
+        'tr',
+        'th',
+        'td',
+        'caption',
+        'colgroup',
+        'col',
+        'p',
+        'strong',
+        'em',
+        'b',
+        'i',
+        'br',
+    ]);
+
+    const sanitizeNode = (node: Node): string => {
+        if (node.nodeType === 3) return escapeHtml(node.textContent || '');
+        if (node.nodeType !== 1) return '';
+
+        const element = node as Element;
+        const tag = element.tagName.toLowerCase();
+        const children = Array.from(element.childNodes).map(sanitizeNode).join('');
+
+        if (!allowedTags.has(tag)) return children;
+
+        const attrs: string[] = [];
+        if (tag === 'td' || tag === 'th') {
+            const colspan = sanitizeTableAttributeValue(element.getAttribute('colspan'));
+            const rowspan = sanitizeTableAttributeValue(element.getAttribute('rowspan'));
+            if (colspan) attrs.push(` colspan="${colspan}"`);
+            if (rowspan) attrs.push(` rowspan="${rowspan}"`);
+        }
+
+        if (tag === 'br' || tag === 'col') return `<${tag}${attrs.join('')}>`;
+        return `<${tag}${attrs.join('')}>${children}</${tag}>`;
+    };
+
+    return sanitizeNode(table);
+};
+
+const splitMarkdownTableRow = (row: string): string[] => {
+    return row
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map(cell => cell.trim());
+};
+
+const isMarkdownTableSeparator = (row: string): boolean => {
+    const cells = splitMarkdownTableRow(row);
+    return cells.length > 1 && cells.every(cell => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, '')));
+};
+
 export const parseMarkdownToHtml = (markdown: string): string => {
     if (!markdown) return '';
 
-    const lines = markdown.split('\n');
+    const normalizedMarkdown = stripWrappingCodeFence(markdown);
+    const trimmedMarkdown = normalizedMarkdown.trim();
+    if (/^<table[\s\S]*<\/table>$/i.test(trimmedMarkdown)) {
+        const sanitizedTable = sanitizeHtmlTable(trimmedMarkdown);
+        if (sanitizedTable) return sanitizedTable;
+    }
+
+    const lines = normalizedMarkdown.split('\n');
     const htmlLines: string[] = [];
     let inList = false;
     let listType = ''; // 'ul' or 'ol'
 
-    const processInlineFormatting = (text: string): string => {
-        return escapeHtml(text)
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\*(.*?)\*/g, '<em>$1</em>');
-    };
-
-    for (const line of lines) {
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
         const trimmedLine = line.trim();
+
+        if (
+            trimmedLine.includes('|') &&
+            index + 1 < lines.length &&
+            isMarkdownTableSeparator(lines[index + 1])
+        ) {
+            if (inList) {
+                htmlLines.push(`</${listType}>`);
+                inList = false;
+            }
+
+            const headers = splitMarkdownTableRow(trimmedLine);
+            const bodyRows: string[][] = [];
+            let rowIndex = index + 2;
+
+            while (rowIndex < lines.length && lines[rowIndex].trim().includes('|')) {
+                const row = lines[rowIndex].trim();
+                if (!row || isMarkdownTableSeparator(row)) break;
+                bodyRows.push(splitMarkdownTableRow(row));
+                rowIndex += 1;
+            }
+
+            const headerHtml = headers.map(cell => `<th>${processInlineFormatting(cell)}</th>`).join('');
+            const bodyHtml = bodyRows
+                .map(row => `<tr>${row.map(cell => `<td>${processInlineFormatting(cell)}</td>`).join('')}</tr>`)
+                .join('');
+
+            htmlLines.push(`<table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`);
+            index = rowIndex - 1;
+            continue;
+        }
 
         // Handle headings
         if (trimmedLine.startsWith('#')) {
