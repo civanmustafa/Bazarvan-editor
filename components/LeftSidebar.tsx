@@ -869,7 +869,7 @@ const LeftSidebar: React.FC = () => {
   };
   
   return (
-    <aside className="relative z-30 basis-[17%] bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg flex flex-col h-full min-w-0">
+    <aside className="relative z-30 basis-[18.7%] bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg flex flex-col h-full min-w-0">
         <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
             <button onClick={() => setActiveTab('keywords')} className={getTabClass('keywords')}>
                 <KeyRound size={16} />

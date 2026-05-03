@@ -44,7 +44,7 @@ const EditorView: React.FC = () => {
         <div className={`h-screen overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
             <main className="flex h-full p-2 gap-2 bg-[#FAFAFA] dark:bg-[#181818]">
                 <LeftSidebar />
-                <div className="relative basis-[66%] flex flex-col h-full min-w-0">
+                <div className="relative basis-[62.6%] flex flex-col h-full min-w-0">
                     <TipsCarousel />
                     <EditorToolbar />
                     <div ref={scrollContainerRef} className="relative flex-grow overflow-y-auto custom-scrollbar border-t border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F]">
