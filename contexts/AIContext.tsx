@@ -317,6 +317,11 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 
 تعليمات تنفيذية للمحرر:
 أرجع الرد بصيغة JSON فقط دون أي نص خارج JSON. يجب أن يكون محتوى التقرير العربي داخل analysisMarkdown، ويجب أن تكون أي إضافات جاهزة للتطبيق داخل patches.
+هذه التعليمات لها أولوية على أي طلب سابق يطلب كتابة النصوص الجاهزة داخل التقرير نفسه.
+مهم جداً: لا تكرر أي نص جاهز للإضافة داخل analysisMarkdown وداخل patches في الوقت نفسه.
+اجعل analysisMarkdown للتشخيص المختصر، الحكم، الفجوة، سببها، ومكانها فقط.
+اجعل patches هي المكان الوحيد الذي يحتوي النصوص الجاهزة للنسخ أو الإدراج داخل المقال.
+إذا كان بند في التقرير يحتاج "الحل العملي الجاهز" أو "الإجابة المقترحة" أو "الجملة المقترحة"، فاكتب في analysisMarkdown عبارة قصيرة مثل: النص الجاهز متاح في قسم التعديلات القابلة للتطبيق بعنوان: [عنوان التعديل].
 استخدم هذا الشكل حصراً:
 {
   "analysisMarkdown": "اكتب هنا التحليل العربي بنفس ترتيب الأمر المطلوب.",
@@ -392,6 +397,20 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
         .slice(0, 20);
 };
 
+const stripDuplicatePatchTextFromAnalysis = (analysisMarkdown: string, patches: AiContentPatch[]): string => {
+    let cleaned = analysisMarkdown;
+
+    patches.forEach((patch) => {
+        const content = patch.contentMarkdown.trim();
+        if (content.length < 20) return;
+        cleaned = cleaned.split(content).join(`النص الجاهز متاح في قسم التعديلات القابلة للتطبيق بعنوان: ${patch.title}`);
+    });
+
+    return cleaned
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
 const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvider): { displayText: string; patches: AiContentPatch[] } => {
     const parsed = extractJson(rawResponse);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -412,7 +431,7 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
         return { displayText: rawResponse, patches: [] };
     }
 
-    return { displayText: displayText || rawResponse, patches };
+    return { displayText: patches.length ? stripDuplicatePatchTextFromAnalysis(displayText || rawResponse, patches) : displayText || rawResponse, patches };
 };
 
 const normalizeAnchorText = (value: string): string => value
