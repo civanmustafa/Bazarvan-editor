@@ -1,7 +1,9 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus } from '../analysisUtils';
+import { createCheckResult, getSentenceCount, getStatus } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { CONCLUSION_KEYWORDS, CONCLUSION_INDICATOR_WORDS } from '../../../constants';
+
+type AnalysisNode = { type: string; level?: number; text: string; node: any; pos: number };
 
 export const checkConclusion = (context: AnalysisContext): {
     lastH2IsConclusion: CheckResult;
@@ -38,9 +40,43 @@ export const checkConclusion = (context: AnalysisContext): {
         };
     }
     
-    const wcStatus = getStatus(conclusionSection.wordCount, 50, 100);
+    const wcStatus = getStatus(conclusionSection.wordCount, 70, 120);
     const firstPara = conclusionSection.paragraphs[0];
     const firstParaStartsWithIndicator = firstPara && L_CONCLUSION_INDICATOR_WORDS.some(w => firstPara.text.trim().toLowerCase().startsWith(w.toLowerCase()));
+    const listIntroViolations: { from: number; to: number; message: string }[] = [];
+    const listIntroMessage = t.violationMessages.conclusionListIntro;
+
+    const getNodeRange = (node: AnalysisNode) => ({
+        from: node.pos + 1,
+        to: node.pos + 1 + Math.max(node.text.length, 1),
+    });
+
+    const getPreviousMeaningfulNode = (listIndex: number): AnalysisNode | null => {
+        for (let index = listIndex - 1; index >= 0; index--) {
+            const node = conclusionSection.nodes[index];
+            if (node.text.trim().length > 0) return node;
+        }
+        return null;
+    };
+
+    conclusionSection.nodes.forEach((node, index) => {
+        if (node.type !== 'bulletList' && node.type !== 'orderedList') return;
+
+        const introNode = getPreviousMeaningfulNode(index);
+        const introText = introNode?.text.trim() || '';
+        const hasValidIntro =
+            introNode?.type === 'paragraph' &&
+            getSentenceCount(introText) === 1 &&
+            /[:：]\s*$/.test(introText);
+
+        if (!hasValidIntro) {
+            const targetNode = introNode?.type === 'paragraph' ? introNode : node;
+            listIntroViolations.push({
+                ...getNodeRange(targetNode),
+                message: listIntroMessage,
+            });
+        }
+    });
 
     const lastH2Result = createCheckResult(tRuleTitle.title, 'pass', t.common.found, tRuleTitle.required, 1, tRuleTitle.description);
     lastH2Result.details = L_CONCLUSION_KEYWORDS.join(', ');
@@ -48,11 +84,23 @@ export const checkConclusion = (context: AnalysisContext): {
     const paraResult = createCheckResult(tRulePara.title, firstParaStartsWithIndicator ? 'pass' : 'fail', firstParaStartsWithIndicator ? t.common.yes : t.common.no, tRulePara.required, firstParaStartsWithIndicator ? 1 : 0, tRulePara.description);
     paraResult.details = L_CONCLUSION_INDICATOR_WORDS.join(', ');
 
+    const listStatus = conclusionSection.hasList && listIntroViolations.length === 0 ? 'pass' : 'fail';
+    const listCurrent = !conclusionSection.hasList
+        ? t.common.no
+        : listIntroViolations.length > 0
+            ? `${listIntroViolations.length} ${t.common.violations}`
+            : t.common.yes;
+    const listProgress = listStatus === 'pass' ? 1 : conclusionSection.hasList ? 0.5 : 0;
+    const conclusionHasList = createCheckResult(tRuleList.title, listStatus, listCurrent, tRuleList.required, listProgress, tRuleList.description);
+    if (listIntroViolations.length > 0) {
+        conclusionHasList.violatingItems = listIntroViolations;
+    }
+
     return {
         lastH2IsConclusion: lastH2Result,
         conclusionParagraph: paraResult,
         conclusionWordCount: createCheckResult(tRuleLength.title, wcStatus, conclusionSection.wordCount, tRuleLength.required, wcStatus === 'pass' ? 1 : 0, tRuleLength.description),
         conclusionHasNumber: createCheckResult(tRuleNum.title, conclusionSection.hasNumber ? 'pass' : 'fail', conclusionSection.hasNumber ? t.common.yes : t.common.no, tRuleNum.required, conclusionSection.hasNumber ? 1 : 0, tRuleNum.description),
-        conclusionHasList: createCheckResult(tRuleList.title, conclusionSection.hasList ? 'pass' : 'fail', conclusionSection.hasList ? t.common.yes : t.common.no, tRuleList.required, conclusionSection.hasList ? 1 : 0, tRuleList.description),
+        conclusionHasList,
     };
 };

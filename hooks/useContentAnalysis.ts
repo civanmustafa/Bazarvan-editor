@@ -41,7 +41,6 @@ import { checkArabicOnly } from '../utils/analysis/rules/checkArabicOnly';
 import { checkConclusion } from '../utils/analysis/rules/checkConclusion';
 import { checkSentenceBeginnings } from '../utils/analysis/rules/checkSentenceBeginnings';
 import { checkWarningWords } from '../utils/analysis/rules/checkWarningWords';
-import { checkSpacing } from '../utils/analysis/rules/checkSpacing';
 import { checkPunctuationSpacing } from '../utils/analysis/rules/checkPunctuationSpacing';
 import { checkRepeatedBigrams } from '../utils/analysis/rules/checkRepeatedBigrams';
 import { checkSlowWords } from '../utils/analysis/rules/checkSlowWords';
@@ -133,7 +132,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
         const sectionParagraphs = sectionNodes.filter(n => n.type === 'paragraph' && n.text.trim().length > 0);
         const hasList = sectionNodes.some(n => n.type === 'bulletList' || n.type === 'orderedList');
         const hasNumber = /\d/.test(sectionText);
-        return { text: sectionText, paragraphs: sectionParagraphs, hasList, hasNumber, wordCount: sectionText.trim().split(/\s+/).filter(Boolean).length };
+        return { text: sectionText, nodes: sectionNodes, paragraphs: sectionParagraphs, hasList, hasNumber, wordCount: sectionText.trim().split(/\s+/).filter(Boolean).length };
     })();
 
     // --- 2. Run Prerequisite Analyses ---
@@ -205,7 +204,6 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
         conclusionHasList: conclusionChecks.conclusionHasList,
         sentenceBeginnings: checkSentenceBeginnings(analysisContext),
         warningWords: checkWarningWords(analysisContext),
-        spacing: checkSpacing(analysisContext),
         punctuationSpacing: checkPunctuationSpacing(analysisContext),
         repeatedBigrams: checkRepeatedBigrams(analysisContext),
         slowWords: checkSlowWords(analysisContext),

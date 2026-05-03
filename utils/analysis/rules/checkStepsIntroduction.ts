@@ -34,8 +34,8 @@ export const checkStepsIntroduction = (context: AnalysisContext): CheckResult =>
         const wordCount = getWordCount(introNode.text);
         const sentenceCount = getSentenceCount(introNode.text);
         
-        const wordsMet = wordCount >= 25 && wordCount <= 60;
-        const sentencesMet = sentenceCount >= 1 && sentenceCount <= 3;
+        const wordsMet = wordCount >= 15 && wordCount <= 40;
+        const sentencesMet = sentenceCount >= 1 && sentenceCount <= 2;
 
         if (!wordsMet || !sentencesMet) {
              violations.push({

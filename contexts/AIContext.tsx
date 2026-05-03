@@ -7,9 +7,11 @@ import { useModal } from './ModalContext';
 import type { CheckResult, HeadingAnalysisResult, AIHistoryItem, GoalContext } from '../types';
 import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { FIXABLE_RULES } from '../constants';
+import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 
 const GEMINI_MODEL = 'gemini-3-flash-preview';
-const OPENAI_MODEL = 'gpt-5-mini';
+const OPENAI_MODEL = 'gpt-4.1-mini';
+const CHATGPT_TIMEOUT_MS = 180000;
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
     pageType: 'نوع الصفحة',
@@ -153,7 +155,7 @@ const normalizeChatGptKeys = (keys?: string | string[]): string[] => {
 const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
     const trimmedUserKeys = normalizeChatGptKeys(userKeys);
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 60000);
+    const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
 
     try {
         const response = await fetch('/api/chatgpt', {
@@ -172,6 +174,10 @@ const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[])
         const isJson = response.headers.get('content-type')?.includes('application/json');
         const data = isJson ? await response.json().catch(() => ({})) : {};
 
+        if (response.status === 404) {
+            throw new Error('مسار ChatGPT API غير مفعّل محليًا. أعد تشغيل خادم التطوير حتى يقرأ إعدادات Vite الجديدة.');
+        }
+
         if (!response.ok) {
             throw new Error(data.error?.message || data.error || `ChatGPT request failed with status ${response.status}`);
         }
@@ -185,7 +191,7 @@ const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[])
         window.clearTimeout(timeoutId);
         console.error("Error calling ChatGPT API:", error);
         if (error instanceof Error && error.name === 'AbortError') {
-            return "انتهت مهلة الاتصال بـ ChatGPT (60 ثانية).";
+            return "انتهت مهلة الاتصال بـ ChatGPT (180 ثانية). إذا لم يظهر طلب في لوحة OpenAI فهذا يعني أن الخادم المحلي لم يصل إلى OpenAI.";
         }
         const message = error instanceof Error ? error.message : 'خطأ غير معروف';
         return `حدث خطأ أثناء الاتصال بـ ChatGPT: ${message}`;
@@ -260,7 +266,7 @@ export const useAI = () => {
 };
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { t, uiLanguage, apiKeys } = useUser();
+    const { t, uiLanguage, apiKeys, engineeringPrompts } = useUser();
     const { editor, title, text, keywords, analysisResults, goalContext, articleLanguage, articleKey } = useEditor();
     const { openModal } = useModal();
     
@@ -442,7 +448,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 textToProcess = text;
                 originalText = action === 'replace-title' ? title : 'Meta Description';
             }
-            const prompt = promptTemplate.replace('${selectedText}', textToProcess).replace('${fullArticleText}', textToProcess);
+            const prompt = renderEngineeringPrompt(promptTemplate, {
+                selectedText: textToProcess,
+                fullArticleText: textToProcess,
+            });
             const finalPrompt = `${buildComprehensivePrompt(prompt)}\n\nأرجع النتيجة بتنسيق JSON حصراً: { "suggestions": ["..."] }`;
             const resultJson = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
@@ -478,7 +487,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 if (node.type.name === 'heading') headings.push({ level: node.attrs.level, text: node.textContent, from: pos, to: pos + node.nodeSize });
             });
             const headingsText = headings.map(h => `[H${h.level}] ${h.text}`).join('\n');
-            const prompt = `${buildComprehensivePrompt("حلل العناوين التالية وقدم 3 بدائل لكل منها.")}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
+            const promptTemplate = getEngineeringPrompt(engineeringPrompts, ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings);
+            const prompt = `${buildComprehensivePrompt(promptTemplate)}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
             const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (Array.isArray(parsed)) {
@@ -489,7 +499,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, gemini: false }));
         }
-    }, [editor, buildComprehensivePrompt, apiKeys.gemini]);
+    }, [editor, buildComprehensivePrompt, apiKeys.gemini, engineeringPrompts]);
 
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
         if (!editor) return;

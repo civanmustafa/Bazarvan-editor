@@ -1,4 +1,5 @@
-const OPENAI_MODEL = "gpt-5-mini";
+const OPENAI_MODEL = "gpt-4.1-mini";
+const OPENAI_TIMEOUT_MS = 120000;
 
 const normalizeKeys = (apiKey?: unknown, apiKeys?: unknown): string[] => {
   const rawKeys = Array.isArray(apiKeys)
@@ -91,6 +92,9 @@ export default async function handler(req: Request): Promise<Response> {
 
     let lastError: unknown = null;
     for (const openAiKey of openAiKeys) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+
       try {
         const response = await fetch("https://api.openai.com/v1/responses", {
           method: "POST",
@@ -102,7 +106,9 @@ export default async function handler(req: Request): Promise<Response> {
             model: selectedModel,
             instructions: "أنت خبير SEO وAEO وGEO وLLM SEO. أجب بالعربية بشكل عملي ومنظم.",
             input: prompt,
+            max_output_tokens: 3000,
           }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -123,7 +129,11 @@ export default async function handler(req: Request): Promise<Response> {
           },
         });
       } catch (error) {
-        lastError = error;
+        lastError = error instanceof Error && error.name === "AbortError"
+          ? new Error("انتهت مهلة اتصال الخادم بـ OpenAI قبل وصول رد.")
+          : error;
+      } finally {
+        clearTimeout(timeoutId);
       }
     }
 

@@ -39,7 +39,7 @@ export const checkAnswerParagraph = (context: AnalysisContext): CheckResult => {
     const violations = faqParagraphs.filter(p => {
         const wc = getWordCount(p.text);
         const sc = getSentenceCount(p.text);
-        return !(wc >= 35 && wc <= 70 && sc >= 2 && sc <= 3);
+        return !(wc >= 35 && wc <= 75 && sc >= 2 && sc <= 3);
     });
 
     const progress = (faqParagraphs.length - violations.length) / faqParagraphs.length;

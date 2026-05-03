@@ -18,7 +18,14 @@ export interface AnalysisContext {
     totalDocSize: number;
     faqSections: { startPos: number; endPos: number }[];
     isPosInFaqSection: (pos: number) => boolean;
-    conclusionSection: { text: string; paragraphs: any[]; hasList: boolean; hasNumber: boolean; wordCount: number } | null;
+    conclusionSection: {
+        text: string;
+        nodes: { type: string; level?: number; text: string; node: any; pos: number }[];
+        paragraphs: any[];
+        hasList: boolean;
+        hasNumber: boolean;
+        wordCount: number;
+    } | null;
     duplicateAnalysis: DuplicateAnalysis;
 }
 

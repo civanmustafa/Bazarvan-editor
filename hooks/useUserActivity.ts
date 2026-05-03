@@ -1,5 +1,5 @@
 
-import type { ClientGoalContexts, FullAnalysis, GoalContext, Keywords } from '../types';
+import type { ClientGoalContexts, EngineeringPrompts, FullAnalysis, GoalContext, Keywords } from '../types';
 import {
   AUTO_DRAFT_KEY,
   AUTO_DRAFT_GOAL_CONTEXT_KEY,
@@ -13,6 +13,7 @@ import {
   MANUAL_DRAFT_KEYWORDS_KEY,
   MANUAL_DRAFT_LANGUAGE_KEY,
 } from '../constants';
+import { DEFAULT_ENGINEERING_PROMPTS } from '../constants/engineeringPrompts';
 
 const ACTIVITY_KEY = 'smartEditorUserActivity';
 
@@ -52,6 +53,7 @@ export type UserActivity = {
   preferredLanguage?: 'ar' | 'en';
   preferredUILanguage?: 'ar' | 'en';
   clientGoalContexts?: ClientGoalContexts;
+  engineeringPrompts?: EngineeringPrompts;
 };
 
 type ActivityData = {
@@ -72,6 +74,7 @@ const getDefaultUserActivity = (): UserActivity => ({
   preferredLanguage: 'ar',
   preferredUILanguage: 'ar',
   clientGoalContexts: {},
+  engineeringPrompts: DEFAULT_ENGINEERING_PROMPTS,
 });
 
 const getDefaultArticleActivity = (): ArticleActivity => ({
@@ -262,6 +265,12 @@ export const saveUserApiKeys = (username: string, apiKeys: UserActivity['apiKeys
 export const saveUserClientGoalContexts = (username: string, clientGoalContexts: ClientGoalContexts) => {
   modifyUserData(username, user => {
     user.clientGoalContexts = clientGoalContexts;
+  });
+};
+
+export const saveUserEngineeringPrompts = (username: string, engineeringPrompts: EngineeringPrompts) => {
+  modifyUserData(username, user => {
+    user.engineeringPrompts = engineeringPrompts;
   });
 };
 

@@ -1,149 +1,29 @@
 ﻿
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
-
-const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO/LLM SEO. افحص المحتوى التالي بعمق ولكن باختصار، وقيّمه من حيث مطابقته لنية البحث، كفاية الإجابة، قابلية الاقتباس في AI Overviews، الفجوات المعرفية، الأسئلة الناقصة، الادعاءات غير المدعومة، الكيانات الناقصة، البنية، وقوة التحويل.
-
-بيانات الصفحة:
-- الكلمة المفتاحية الأساسية: استخدم الكلمة الأساسية المرفقة تلقائيًا مع الطلب.
-- الكلمات الثانوية: استخدم الكلمات الثانوية المرفقة تلقائيًا مع الطلب.
-- نوع الصفحة: استخدم نوع الصفحة المرفق تلقائيًا مع الطلب.
-- هدف الصفحة: استخدم هدف الصفحة المرفق تلقائيًا مع الطلب.
-- الجمهور المستهدف: استخدم الجمهور المستهدف المرفق تلقائيًا مع الطلب.
-- العلامة التجارية: استخدم اسم العلامة التجارية المرفق تلقائيًا مع الطلب.
-
-المحتوى:
-استخدم نص المحرر المرفق تلقائيًا مع الطلب. إذا كانت هناك معلومات أخرى مرفقة مثل معايير الكلمات أو البنية، فاستفد منها أيضًا.
-
-المطلوب:
-
-أخرج التحليل بالعربية وفق هذا التنسيق فقط:
-
-1. ملخص سريع:
-- التقييم العام من 100:
-- أقوى نقطة في المحتوى:
-- أخطر ضعف:
-- هل المحتوى مناسب لنية البحث؟ نعم/جزئيًا/لا، مع السبب.
-
-2. نية البحث والفجوات:
-- نية البحث الأساسية:
-- نوايا فرعية ناقصة:
-- 5 أسئلة مهمة يجب إضافتها مع مكان إضافتها.
-
-3. جاهزية AEO/GEO/LLM:
-- هل توجد إجابات قابلة للاقتباس؟
-- أفضل 3 جمل قابلة للاقتباس من النص.
-- 3 جمل جديدة مقترحة أقوى للاقتباس.
-- جواب محتمل قد يستخرجه Google AI Overview من المحتوى.
-
-4. الادعاءات والكيانات:
-- أهم الادعاءات التي تحتاج دعمًا أو تخفيفًا.
-- أهم الكيانات الناقصة التي يجب إضافتها.
-- أين تُضاف هذه الكيانات داخل المحتوى؟
-
-5. البنية والتحويل:
-- مشاكل العناوين والترتيب.
-- الفقرات التي تحتاج تقسيمًا أو توضيحًا.
-- مدى قوة CTA.
-
-6. إعادة صياغة:
-اختر أضعف فقرة وأعد كتابتها لتصبح أوضح، أقوى، أكثر إقناعًا، وأكثر قابلية للاقتباس.
-
-7. توصيات عملية:
-قدّم 7 توصيات فقط. لكل توصية اذكر:
-- ماذا أفعل؟
-- أين أطبقه؟
-- لماذا مهم؟
-- مثال قصير.
-
-قيود الإخراج:
-- اجعل الإجابات شديدة التركيز.
-- لا تكرر نفس الملاحظة.
-- لا تقدم نصائح عامة.
-- لا تقترح صورًا أو فيديوهات أو Schema.
-- اجعل الإجابة عملية ومباشرة.`;
-
-const ENTITY_MAP_SEO_PROMPT = `حلّل المقال من منظور خريطة الكيانات الدلالية SEO / AEO / GEO / LLM SEO، وليس من منظور تكرار الكلمات المفتاحية فقط.
-
-استخدم المرفقات التي اختارها المستخدم فقط من قائمة المرفقات. إذا لم تكن بعض البيانات مرفقة، لا تفترضها، واكتفِ بتحليل ما هو متاح.
-
-المطلوب:
-
-1. استخرج خريطة الكيانات الحالية في المقال، وقسّمها إلى:
-- كيانات الخدمة أو المنتج
-- كيانات المكان والسوق
-- كيانات الجمهور والمشكلة
-- كيانات الحلول والميزات
-- كيانات الثقة والخبرة والإثبات
-- كيانات السعر أو التكلفة إن وجدت
-- كيانات الاعتراضات والمخاطر
-- كيانات المقارنة والبدائل
-- كيانات الأسئلة والنية البحثية
-
-2. لكل كيان اذكر:
-- هل هو مذكور أم ناقص؟
-- هل ذُكر بشكل كافٍ أم سطحي؟
-- أين ظهر داخل المقال إن كان موجودًا؟
-- لماذا مهم لمحركات البحث أو للاقتباس من الذكاء الاصطناعي؟
-
-3. استخرج أهم الكيانات الناقصة التي يجب إضافتها، مع ترتيبها حسب الأولوية:
-- أولوية عالية
-- أولوية متوسطة
-- أولوية منخفضة
-
-4. اقترح مكان إضافة كل كيان ناقص داخل المقال:
-- بعد أي عنوان؟
-- داخل أي فقرة؟
-- هل يحتاج جملة فقط أم فقرة قصيرة أم قسم H2/H3 جديد؟
-
-5. اقترح صياغات جاهزة للإضافة:
-- 5 جمل قصيرة قابلة للإدراج مباشرة
-- 3 فقرات قصيرة قابلة للاقتباس في AI Overviews أو إجابات الذكاء الاصطناعي
-- 5 أسئلة FAQ مبنية على الكيانات الناقصة
-
-6. قيّم جاهزية المقال دلاليًا:
-- درجة تغطية الكيانات من 100
-- أقوى كيان مغطى
-- أخطر كيان ناقص
-- هل المقال واضح بما يكفي لمحركات البحث ونماذج الذكاء الاصطناعي؟ نعم/جزئيًا/لا، مع السبب
-
-قيود مهمة:
-- لا تكرر نصائح عامة.
-- لا تقترح كيانات خارج موضوع المقال أو خارج سياق الشركة.
-- لا تحشو الكلمات المفتاحية.
-- اجعل الإضافات طبيعية ومفيدة للقارئ.
-- ركّز على تحسين الفهم، الثقة، الاكتمال، وقابلية الاقتباس.
-- أخرج النتيجة بالعربية وبشكل منظم ومباشر.`;
-
-type AiAnalysisOptions = {
-    manualCommand: boolean;
-    editorText: boolean;
-    targetKeywords: boolean;
-    companyName: boolean;
-    goalContext: boolean;
-    keywordCriteria: boolean;
-    structureCriteria: boolean;
-};
+import type { AiAnalysisOptions } from '../types';
+import { ENGINEERING_PROMPT_DEFINITIONS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
+    id: string;
     label: string;
     value: string;
     options?: Partial<AiAnalysisOptions>;
 };
 
 const RightSidebar: React.FC = () => {
-    const { t } = useUser();
+    const { t, engineeringPrompts } = useUser();
     const { handleAiAnalyze, handleChatGptAnalyze, aiResults, isAiLoading } = useAI();
     
     const [activeTab, setActiveTab] = useState<'structure' | 'ai'>('structure');
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history'>('new');
     const [aiCommand, setAiCommand] = useState('');
-    const [selectedReadyCommand, setSelectedReadyCommand] = useState('');
+    const [selectedReadyCommandId, setSelectedReadyCommandId] = useState('');
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(true);
     
@@ -175,90 +55,24 @@ const RightSidebar: React.FC = () => {
         };
     }, []);
 
-    const readyCommands: ReadyCommand[] = [
-        { label: tRs.selectCommand, value: '' },
-        {
-            label: tRs.entityMap,
-            value: ENTITY_MAP_SEO_PROMPT,
-            options: {
-                manualCommand: true,
-                editorText: true,
-                targetKeywords: true,
-                companyName: true,
-                goalContext: true,
-                keywordCriteria: false,
-                structureCriteria: false,
-            },
-        },
-        { 
-            label: tRs.analyzeFull, 
-            value: FULL_ARTICLE_SEO_AI_AUDIT_PROMPT,
-            options: {
-                manualCommand: true,
-                editorText: true,
-                targetKeywords: true,
-                goalContext: true,
-                keywordCriteria: true,
-                structureCriteria: true,
-            },
-        },
-        { 
-            label: tRs.improveWeakest, 
-            value: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، معايير التحليل، ونص المحرر المرفقة تلقائيًا:
-حدّد أضعف قسم أو فقرة في المقال من حيث SEO/AEO/GEO/LLM SEO ومطابقة هدف الصفحة.
-أخرج فقط:
-1. اسم القسم أو بداية الفقرة الضعيفة.
-2. سبب الضعف باختصار.
-3. نسخة محسنة جاهزة للاستبدال.
-4. لماذا النسخة الجديدة أفضل.
-لا تقدّم نصائح عامة ولا تقترح صورًا أو فيديوهات أو Schema.`,
-            options: {
-                manualCommand: true,
-                editorText: true,
-                targetKeywords: true,
-                goalContext: true,
-                keywordCriteria: true,
-                structureCriteria: true,
-            },
-        },
-        { 
-            label: tRs.suggestNew, 
-            value: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، وسياق الهدف والجمهور المرفق تلقائيًا:
-اقترح فكرة أو فقرة جديدة غير مذكورة في المقال وتضيف قيمة واضحة للقارئ وتزيد قابلية الاقتباس في AI Overviews.
-أخرج فقط:
-1. مكان الإضافة المقترح داخل المقال.
-2. عنوان فرعي مناسب إن لزم.
-3. الفقرة المقترحة جاهزة للإضافة.
-4. سبب أهميتها للبحث والقرار والتحويل.
-لا تقدّم أكثر من فكرة واحدة ولا تقترح صورًا أو فيديوهات أو Schema.`,
-            options: {
-                manualCommand: true,
-                editorText: true,
-                targetKeywords: true,
-                goalContext: true,
-                keywordCriteria: true,
-                structureCriteria: true,
-            },
-        },
-        {
-            label: tRs.peopleQuestions,
-            value: `استخرج أهم أسئلة الباحثين المرتبطة بالكلمة المفتاحية ونية البحث والجمهور المستهدف المرفقين تلقائيًا.
-أخرج 10 أسئلة فقط، مع تقسيمها إلى:
-- أسئلة قبل القرار.
-- أسئلة مقارنة أو اختيار.
-- أسئلة تكلفة أو سعر.
-- أسئلة اعتراضات أو مخاطر.
-لكل سؤال اذكر أين يمكن إضافته داخل المقال باختصار.`,
-            options: {
-                manualCommand: true,
-                editorText: true,
-                targetKeywords: true,
-                goalContext: true,
-                keywordCriteria: false,
-                structureCriteria: false,
-            },
-        },
-    ];
+    const readyCommands: ReadyCommand[] = useMemo(() => {
+        return ENGINEERING_PROMPT_DEFINITIONS
+            .filter(definition => definition.source === 'smartAnalysis')
+            .map(definition => ({
+                id: definition.id,
+                label: (tRs as any)[definition.labelKey] || definition.labelKey,
+                value: getEngineeringPrompt(engineeringPrompts, definition.id),
+                options: definition.options,
+            }));
+    }, [engineeringPrompts, tRs]);
+
+    useEffect(() => {
+        if (!selectedReadyCommandId) return;
+        const selectedCommand = readyCommands.find(command => command.id === selectedReadyCommandId);
+        if (selectedCommand) {
+            setAiCommand(selectedCommand.value);
+        }
+    }, [readyCommands, selectedReadyCommandId]);
 
     const getCommandIcon = (index: number) => {
         switch (index) {
@@ -272,7 +86,7 @@ const RightSidebar: React.FC = () => {
     };
 
     const handleCommandSelect = (command: ReadyCommand) => {
-        setSelectedReadyCommand(command.value);
+        setSelectedReadyCommandId(command.id);
         if (command.value) setAiCommand(command.value);
         if (command.options) {
             setAiOptions(prev => ({ ...prev, ...command.options }));
@@ -302,13 +116,13 @@ const RightSidebar: React.FC = () => {
                                 className="w-full flex items-center justify-between p-2.5 bg-white dark:bg-[#1F1F1F] border border-gray-300 dark:border-[#3C3C3C] rounded-lg text-sm text-start focus:outline-none focus:ring-1 focus:ring-[#d4af37] shadow-sm transition-all"
                             >
                                 <span className="truncate text-gray-700 dark:text-gray-200 font-medium flex items-center gap-2">
-                                    {selectedReadyCommand ? (
+                                    {selectedReadyCommandId ? (
                                         (() => {
-                                            const cmdIndex = readyCommands.findIndex(c => c.value === selectedReadyCommand);
+                                            const cmdIndex = readyCommands.findIndex(c => c.id === selectedReadyCommandId);
                                             const cmd = readyCommands[cmdIndex];
                                             return (
                                                 <>
-                                                    {cmdIndex > 0 && getCommandIcon(cmdIndex)}
+                                                    {cmdIndex >= 0 && getCommandIcon(cmdIndex + 1)}
                                                     <span>{cmd ? cmd.label : tRs.selectCommand}</span>
                                                 </>
                                             );
@@ -322,9 +136,9 @@ const RightSidebar: React.FC = () => {
 
                             {isCommandsMenuOpen && (
                                 <div className="absolute z-20 mt-2 w-full bg-white dark:bg-[#2A2A2A] border border-gray-200 dark:border-[#3C3C3C] rounded-lg shadow-xl max-h-60 overflow-y-auto custom-scrollbar ring-1 ring-black ring-opacity-5">
-                                    {readyCommands.slice(1).map((cmd, idx) => (
+                                    {readyCommands.map((cmd, idx) => (
                                         <button
-                                            key={idx}
+                                            key={cmd.id}
                                             onClick={() => handleCommandSelect(cmd)}
                                             className="w-full text-start px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors flex items-center gap-3 border-b border-gray-50 dark:border-[#333] last:border-0"
                                         >

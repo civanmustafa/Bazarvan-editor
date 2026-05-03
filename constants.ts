@@ -99,8 +99,6 @@ export const VIOLATION_PRIORITY: { [key: string]: number } = {
   'Punctuation': 12,
   'فراغات الترقيم': 13,
   'Punctuation Spacing': 13,
-  'الفراغات': 14,
-  'Spacing': 14,
   'كلمات لاتينية': 15,
   'Latin Words': 15,
   'الفقرة التلخيصية': 15,
@@ -114,11 +112,11 @@ export const DEFAULT_PRIORITY = 99;
 
 export const FIXABLE_RULES = new Set([
   'طول الفقرات', 'طول الجمل', 'تكرار بالفقرة', 'تكرار بالعنوان',
-  'بدايات الجمل', 'نهايات الفقرات', 'علامات الترقيم', 'الفراغات',
+  'بدايات الجمل', 'نهايات الفقرات', 'علامات الترقيم', 'فراغات الترقيم',
   'الفقرة التلخيصية', 'الفقرة الثانية', 'قسم H2', 'قسم H3', 'قسم H4',
   'تمهيد خطوات', 'فقرة الأجوبة', 'كلمات بطيئة', 'كلمات للحذف', 'حشو استهداف',
   'Paragraph Length', 'Sentence Length', 'Repetition in Paragraph', 'Repetition in Heading',
-  'Sentence Beginnings', 'Paragraph Endings', 'Punctuation', 'Spacing',
+  'Sentence Beginnings', 'Paragraph Endings', 'Punctuation', 'Punctuation Spacing',
   'Summary Paragraph', 'Second Paragraph', 'H2 Section', 'H3 Section', 'H4 Section',
   'Steps Introduction', 'Answer Paragraph', 'Slow Words', 'Words to Delete', 'Keyword Stuffing'
 ]);

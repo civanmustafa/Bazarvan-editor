@@ -7,6 +7,7 @@ const requireSpaceBeforeMarks = new Set(['"', '/', '(', '*', '-', '&', '%']);
 const requireSpaceAfterMarks = new Set(['-', '%', '&', ')', '!']);
 const punctuationAfterClosingParen = new Set(['،', ',', '.', '!']);
 const whitespaceRegex = /[\s\u00A0]/u;
+const extraSpacesRegex = / {2,}/g;
 const digitRegex = /\p{N}/u;
 const letterRegex = /\p{L}/u;
 
@@ -86,6 +87,29 @@ export const checkPunctuationSpacing = (context: AnalysisContext): CheckResult =
 
     textNodes.forEach(node => {
         const text = node.text;
+
+        extraSpacesRegex.lastIndex = 0;
+        let extraSpaceMatch: RegExpExecArray | null;
+        while ((extraSpaceMatch = extraSpacesRegex.exec(text)) !== null) {
+            const runStart = extraSpaceMatch.index;
+            const runEnd = runStart + extraSpaceMatch[0].length;
+            const previousChar = text[runStart - 1];
+            const nextChar = text[runEnd];
+
+            if (
+                (nextChar && noSpaceBeforeMarks.has(nextChar)) ||
+                (previousChar && requireSpaceAfterMarks.has(previousChar))
+            ) {
+                continue;
+            }
+
+            addViolation(
+                node.pos,
+                runStart,
+                runEnd,
+                t.violationMessages.extraSpaces,
+            );
+        }
 
         for (let index = 0; index < text.length; index++) {
             const mark = text[index];

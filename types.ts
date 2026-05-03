@@ -20,6 +20,29 @@ export interface GoalContext {
 
 export type ClientGoalContexts = Record<string, GoalContext>;
 
+export interface AiAnalysisOptions {
+  manualCommand: boolean;
+  editorText: boolean;
+  targetKeywords: boolean;
+  companyName: boolean;
+  goalContext: boolean;
+  keywordCriteria: boolean;
+  structureCriteria: boolean;
+}
+
+export type EngineeringPromptSource = 'smartAnalysis' | 'toolbar';
+export type EngineeringPromptId = string;
+export type EngineeringPrompts = Record<EngineeringPromptId, string>;
+
+export interface EngineeringPromptDefinition {
+  id: EngineeringPromptId;
+  source: EngineeringPromptSource;
+  labelKey: string;
+  defaultValue: string;
+  variables?: string[];
+  options?: Partial<AiAnalysisOptions>;
+}
+
 export interface KeywordCheck {
   text: string;
   isMet: boolean;
@@ -118,7 +141,6 @@ export interface StructureAnalysis {
     conclusionHasNumber: CheckResult;
     sentenceBeginnings: CheckResult;
     warningWords: CheckResult;
-    spacing: CheckResult;
     punctuationSpacing: CheckResult;
     repeatedBigrams: CheckResult;
     slowWords: CheckResult;

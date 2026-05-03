@@ -7,16 +7,19 @@ export const checkSentenceLength = (context: AnalysisContext): CheckResult => {
     const tRule = t.structureAnalysis['طول الجمل'];
     const title = tRule.title;
     const description = tRule.description;
+    const MIN_WORDS = 6;
     const MAX_WORDS = 20;
-    const requiredText = tRule.required.replace('{MAX_WORDS}', String(MAX_WORDS));
+    const requiredText = tRule.required
+        .replace('{MIN_WORDS}', String(MIN_WORDS))
+        .replace('{MAX_WORDS}', String(MAX_WORDS));
 
     const details = uiLanguage === 'ar'
-        ? "• يجب ألا يتجاوز طول الجملة الواحدة 20 كلمة.\n• يتم التسامح مع نسبة بسيطة (أقل من 20%) من الجمل الطويلة في المقال.\n• الجمل الطويلة تجعل النص صعب الفهم وتؤثر سلباً على تجربة المستخدم (UX)."
-        : "• Each sentence should not exceed 20 words.\n• A small tolerance (less than 20%) of long sentences is allowed across the article.\n• Long sentences make text hard to process and negatively impact UX.";
+        ? "• يجب أن يكون طول الجملة الواحدة بين 6 و20 كلمة.\n• يتم التنبيه على الجمل القصيرة جدًا أو الطويلة جدًا.\n• ضبط طول الجمل يحسن الوضوح وسهولة القراءة وتجربة المستخدم (UX)."
+        : "• Each sentence should be between 6 and 20 words.\n• Very short or overly long sentences are flagged.\n• Balanced sentence length improves clarity, readability, and UX.";
 
     const violations: { from: number; to: number; message: string }[] = [];
     let totalSentences = 0;
-    let longSentencesCount = 0;
+    let invalidSentencesCount = 0;
 
     nonEmptyParagraphs.forEach(p => {
         const text = getNodeContentAsText(p.node);
@@ -34,8 +37,8 @@ export const checkSentenceLength = (context: AnalysisContext): CheckResult => {
             }
 
             const wordCount = getWordCount(sentenceContent);
-            if (wordCount > MAX_WORDS) {
-                longSentencesCount++;
+            if (wordCount < MIN_WORDS || wordCount > MAX_WORDS) {
+                invalidSentencesCount++;
                 const from = p.pos + 1 + (match.index || 0);
                 const to = from + sentenceContent.length;
                 violations.push({ from, to, message: t.violationMessages.currentWords(wordCount) });
@@ -47,14 +50,16 @@ export const checkSentenceLength = (context: AnalysisContext): CheckResult => {
         return createCheckResult(title, 'pass', t.common.noSentences, requiredText, 1, description, details);
     }
 
-    const longSentencesPercentage = longSentencesCount / totalSentences;
-    const currentText = uiLanguage === 'ar' ? `${(longSentencesPercentage * 100).toFixed(0)}% من الجمل طويلة` : `${(longSentencesPercentage * 100).toFixed(0)}% of sentences are long`;
+    const invalidSentencesPercentage = invalidSentencesCount / totalSentences;
+    const currentText = uiLanguage === 'ar'
+        ? `${(invalidSentencesPercentage * 100).toFixed(0)}% من الجمل خارج النطاق`
+        : `${(invalidSentencesPercentage * 100).toFixed(0)}% of sentences are outside range`;
     
     let status: AnalysisStatus;
-    const progress = (totalSentences - longSentencesCount) / totalSentences;
+    const progress = (totalSentences - invalidSentencesCount) / totalSentences;
 
-    if (longSentencesPercentage > 0.19) status = 'fail';
-    else if (longSentencesPercentage > 0) status = 'warn';
+    if (invalidSentencesPercentage > 0.19) status = 'fail';
+    else if (invalidSentencesPercentage > 0) status = 'warn';
     else status = 'pass';
     
     const result = createCheckResult(title, status, currentText, requiredText, progress, description, details);

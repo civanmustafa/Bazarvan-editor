@@ -391,7 +391,6 @@ const StructureTab: React.FC = () => {
               analysis.ambiguousParagraphReferences,
               analysis.arabicOnly,
               analysis.punctuationSpacing,
-              analysis.spacing,
               analysis.repeatedBigrams,
               analysis.wordConsistency,
               analysis.wordsToDelete,

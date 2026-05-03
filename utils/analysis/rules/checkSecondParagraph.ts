@@ -10,8 +10,8 @@ export const checkSecondParagraph = (context: AnalysisContext): CheckResult => {
     const requiredText = tRule.required;
 
     const details = uiLanguage === 'ar'
-        ? "• تقع هذه الفقرة في المقدمة مباشرة بعد الفقرة التلخيصية.\n• يجب أن تتكون من 30 إلى 60 كلمة.\n• يجب أن تحتوي على 2 إلى 3 جمل.\n• الهدف: التمهيد للمحتوى الأساسي بشكل مباشر."
-        : "• This paragraph sits in the intro right after the summary.\n• Must be between 30 and 60 words.\n• Must contain 2 to 3 sentences.\n• Goal: Transition directly to the main content.";
+        ? "• تقع هذه الفقرة في المقدمة مباشرة بعد الفقرة التلخيصية.\n• يجب أن تتكون من 40 إلى 80 كلمة.\n• يجب أن تحتوي على 2 إلى 4 جمل.\n• الهدف: التمهيد للمحتوى الأساسي بشكل مباشر."
+        : "• This paragraph sits in the intro right after the summary.\n• Must be between 40 and 80 words.\n• Must contain 2 to 4 sentences.\n• Goal: Transition directly to the main content.";
 
     const firstHeadingIndex = nodes.findIndex(n => n.type === 'heading');
     const introductionNodes = firstHeadingIndex === -1 ? nodes : nodes.slice(0, firstHeadingIndex);
@@ -25,8 +25,8 @@ export const checkSecondParagraph = (context: AnalysisContext): CheckResult => {
     const wc = getWordCount(p.text);
     const sc = getSentenceCount(p.text);
     
-    const wcStatus = getStatus(wc, 30, 60, 25, 65);
-    const scMet = sc >= 2 && sc <= 3;
+    const wcStatus = getStatus(wc, 40, 80, 35, 85);
+    const scMet = sc >= 2 && sc <= 4;
 
     let finalStatus: AnalysisStatus;
     if (!scMet) {

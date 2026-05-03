@@ -1,9 +1,10 @@
 
 import React, { useState, useCallback, useEffect, createContext, useContext, useRef } from 'react';
-import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts } from '../hooks/useUserActivity';
+import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
 import { USERS } from '../constants';
-import type { ClientGoalContexts, GoalContext } from '../types';
+import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
+import type { ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 
 type ApiKeys = { gemini: string[]; chatgpt: string[] };
@@ -21,6 +22,7 @@ interface UserContextType {
     uiLanguage: 'ar' | 'en';
     apiKeys: ApiKeys;
     clientGoalContexts: ClientGoalContexts;
+    engineeringPrompts: EngineeringPrompts;
     t: typeof translations.ar;
     isIdle: boolean;
     handleLogin: (username: string, password: string) => boolean;
@@ -35,6 +37,7 @@ interface UserContextType {
     handleSaveClientGoalContext: (companyName: string, goalContext: GoalContext) => void;
     handleDeleteClientGoalContext: (companyName: string) => void;
     handleMergeClientGoalContexts: (contexts: ClientGoalContexts) => void;
+    handleSaveEngineeringPrompts: (prompts: EngineeringPrompts) => void;
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -99,6 +102,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [uiLanguage, setUiLanguage] = useState<'ar' | 'en'>('ar');
     const [apiKeys, setApiKeys] = useState<ApiKeys>(() => normalizeApiKeys());
     const [clientGoalContexts, setClientGoalContexts] = useState<ClientGoalContexts>({});
+    const [engineeringPrompts, setEngineeringPrompts] = useState<EngineeringPrompts>(() => normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
     
     const [isIdle, setIsIdle] = useState(false);
     const idleTimerRef = useRef<number | null>(null);
@@ -189,6 +193,9 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 saveUserApiKeys(currentUser, normalizedKeys);
             }
             setClientGoalContexts(normalizeClientGoalContexts(userPrefs?.clientGoalContexts));
+            const normalizedPrompts = normalizeEngineeringPrompts(userPrefs?.engineeringPrompts);
+            setEngineeringPrompts(normalizedPrompts);
+            saveUserEngineeringPrompts(currentUser, normalizedPrompts);
             if (userPrefs?.preferredTheme) setIsDarkMode(userPrefs.preferredTheme === 'dark');
         }
     }, [currentUser]);
@@ -214,6 +221,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const handleLogout = useCallback(() => {
         setCurrentUser(null);
         setClientGoalContexts({});
+        setEngineeringPrompts(normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
         try {
             sessionStorage.removeItem('currentUser');
         } catch (error) {
@@ -283,6 +291,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
     }, [clientGoalContexts, persistClientGoalContexts]);
 
+    const handleSaveEngineeringPrompts = useCallback((prompts: EngineeringPrompts) => {
+        const normalizedPrompts = normalizeEngineeringPrompts(prompts);
+        setEngineeringPrompts(normalizedPrompts);
+        if (currentUser) saveUserEngineeringPrompts(currentUser, normalizedPrompts);
+    }, [currentUser]);
+
     const value = {
         currentUser,
         currentView,
@@ -295,6 +309,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         uiLanguage,
         apiKeys,
         clientGoalContexts,
+        engineeringPrompts,
         t,
         isIdle,
         handleLogin,
@@ -309,6 +324,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleSaveClientGoalContext,
         handleDeleteClientGoalContext,
         handleMergeClientGoalContexts,
+        handleSaveEngineeringPrompts,
     };
 
     return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
