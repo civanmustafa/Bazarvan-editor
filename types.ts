@@ -205,6 +205,33 @@ export interface HeadingAnalysisResult {
   flaws: string[];
   suggestions: string[];
 }
+
+export type AiPatchProvider = 'gemini' | 'chatgpt';
+
+export type AiContentPatchOperation =
+  | 'insert_after_heading'
+  | 'insert_before_heading'
+  | 'append_to_section'
+  | 'insert_before_faq'
+  | 'insert_before_conclusion'
+  | 'append_to_article';
+
+export type AiContentPatchStatus = 'pending' | 'applied' | 'failed';
+
+export interface AiContentPatch {
+  id: string;
+  provider: AiPatchProvider;
+  operation: AiContentPatchOperation;
+  title: string;
+  anchorText?: string;
+  placementLabel?: string;
+  contentMarkdown: string;
+  reason?: string;
+  confidence?: number;
+  status: AiContentPatchStatus;
+  applyError?: string;
+}
+
 export interface AIHistoryItem {
   id: string;
   type: 'fix-violation' | 'user-command';

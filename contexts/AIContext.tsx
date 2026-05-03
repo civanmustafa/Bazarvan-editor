@@ -4,7 +4,17 @@ import { GoogleGenAI } from '@google/genai';
 import { useUser } from './UserContext';
 import { useEditor } from './EditorContext';
 import { useModal } from './ModalContext';
-import type { AiAnalysisOptions, CheckResult, HeadingAnalysisResult, AIHistoryItem, GoalContext, StructureAnalysis } from '../types';
+import type {
+    AiAnalysisOptions,
+    AiContentPatch,
+    AiContentPatchOperation,
+    AiPatchProvider,
+    CheckResult,
+    HeadingAnalysisResult,
+    AIHistoryItem,
+    GoalContext,
+    StructureAnalysis,
+} from '../types';
 import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { FIXABLE_RULES } from '../constants';
 import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
@@ -303,6 +313,242 @@ const extractJson = (text: string): any | null => {
     }
 };
 
+const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
+
+تعليمات تنفيذية للمحرر:
+أرجع الرد بصيغة JSON فقط دون أي نص خارج JSON. يجب أن يكون محتوى التقرير العربي داخل analysisMarkdown، ويجب أن تكون أي إضافات جاهزة للتطبيق داخل patches.
+استخدم هذا الشكل حصراً:
+{
+  "analysisMarkdown": "اكتب هنا التحليل العربي بنفس ترتيب الأمر المطلوب.",
+  "patches": [
+    {
+      "operation": "insert_after_heading",
+      "title": "عنوان قصير للتعديل",
+      "anchorText": "العنوان أو الفقرة المرجعية داخل المقال",
+      "placementLabel": "بعد قسم كذا",
+      "contentMarkdown": "النص المقترح الجاهز للإضافة فقط",
+      "reason": "سبب مختصر",
+      "confidence": 0.85
+    }
+  ]
+}
+
+القيم المسموحة لـ operation:
+- insert_after_heading
+- insert_before_heading
+- append_to_section
+- insert_before_faq
+- insert_before_conclusion
+- append_to_article
+
+اجعل patches تشمل فقط النصوص المقترحة الجاهزة للإضافة أو الاستبدال الجزئي المذكورة في التحليل. لا تضف patches إذا لم يكن هناك نص جاهز قابل للتطبيق داخل المقال. لا تخترع معلومات جديدة.`;
+
+const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
+    'insert_after_heading',
+    'insert_before_heading',
+    'append_to_section',
+    'insert_before_faq',
+    'insert_before_conclusion',
+    'append_to_article',
+]);
+
+const asTrimmedString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const normalizePatchOperation = (value: unknown): AiContentPatchOperation => {
+    const operation = asTrimmedString(value) as AiContentPatchOperation;
+    return ALLOWED_PATCH_OPERATIONS.has(operation) ? operation : 'append_to_article';
+};
+
+const normalizeConfidence = (value: unknown): number | undefined => {
+    const confidence = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(confidence)) return undefined;
+    return Math.min(1, Math.max(0, confidence));
+};
+
+const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiContentPatch[] => {
+    if (!Array.isArray(rawPatches)) return [];
+
+    return rawPatches
+        .map((patch, index): AiContentPatch | null => {
+            if (!patch || typeof patch !== 'object') return null;
+            const record = patch as Record<string, unknown>;
+            const contentMarkdown = asTrimmedString(record.contentMarkdown || record.content || record.text);
+            if (!contentMarkdown) return null;
+
+            return {
+                id: `${provider}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+                provider,
+                operation: normalizePatchOperation(record.operation || record.type),
+                title: asTrimmedString(record.title) || `تعديل ${index + 1}`,
+                anchorText: asTrimmedString(record.anchorText || record.anchor || record.target),
+                placementLabel: asTrimmedString(record.placementLabel || record.placement || record.place),
+                contentMarkdown,
+                reason: asTrimmedString(record.reason),
+                confidence: normalizeConfidence(record.confidence),
+                status: 'pending',
+            };
+        })
+        .filter((patch): patch is AiContentPatch => Boolean(patch))
+        .slice(0, 20);
+};
+
+const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvider): { displayText: string; patches: AiContentPatch[] } => {
+    const parsed = extractJson(rawResponse);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { displayText: rawResponse, patches: [] };
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const displayText = asTrimmedString(
+        record.analysisMarkdown ||
+        record.analysis ||
+        record.reportMarkdown ||
+        record.report ||
+        record.markdown
+    );
+
+    const patches = normalizeAiPatches(record.patches || record.insertions || record.contentPatches, provider);
+    if (!displayText && patches.length === 0) {
+        return { displayText: rawResponse, patches: [] };
+    }
+
+    return { displayText: displayText || rawResponse, patches };
+};
+
+const normalizeAnchorText = (value: string): string => value
+    .normalize('NFKC')
+    .replace(/[ًٌٍَُِّْـ]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+type HeadingMatch = {
+    pos: number;
+    to: number;
+    level: number;
+    text: string;
+    score: number;
+};
+
+const scoreHeadingMatch = (headingText: string, anchorText: string): number => {
+    const heading = normalizeAnchorText(headingText);
+    const anchor = normalizeAnchorText(anchorText);
+    if (!heading || !anchor) return 0;
+    if (heading === anchor) return 3;
+    if (heading.includes(anchor) || anchor.includes(heading)) return 2;
+
+    const anchorWords = anchor.split(' ').filter(word => word.length > 2);
+    if (anchorWords.length === 0) return 0;
+    const overlap = anchorWords.filter(word => heading.includes(word)).length / anchorWords.length;
+    return overlap >= 0.6 ? overlap : 0;
+};
+
+const findHeadingMatch = (editor: any, anchorText: string): HeadingMatch | null => {
+    if (!editor || !anchorText.trim()) return null;
+    let bestMatch: HeadingMatch | null = null;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (node.type.name !== 'heading') return true;
+        const score = scoreHeadingMatch(node.textContent, anchorText);
+        if (score > 0 && (!bestMatch || score > bestMatch.score)) {
+            bestMatch = {
+                pos,
+                to: pos + node.nodeSize,
+                level: node.attrs.level || 2,
+                text: node.textContent,
+                score,
+            };
+        }
+        return true;
+    });
+
+    return bestMatch;
+};
+
+const findHeadingByKeywords = (editor: any, keywords: string[]): HeadingMatch | null => {
+    if (!editor) return null;
+    let match: HeadingMatch | null = null;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (node.type.name !== 'heading') return true;
+        const heading = normalizeAnchorText(node.textContent);
+        const found = keywords.some(keyword => heading.includes(normalizeAnchorText(keyword)));
+        if (found) {
+            match = {
+                pos,
+                to: pos + node.nodeSize,
+                level: node.attrs.level || 2,
+                text: node.textContent,
+                score: 2,
+            };
+            return false;
+        }
+        return true;
+    });
+
+    return match;
+};
+
+const findSectionEnd = (editor: any, heading: HeadingMatch): number => {
+    let sectionEnd = editor.state.doc.content.size;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (pos <= heading.pos) return true;
+        if (node.type.name === 'heading' && (node.attrs.level || 2) <= heading.level) {
+            sectionEnd = pos;
+            return false;
+        }
+        return true;
+    });
+
+    return sectionEnd;
+};
+
+type PatchTarget = {
+    insertAt: number;
+    selectFrom: number;
+    selectTo: number;
+};
+
+const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget | { error: string } => {
+    if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
+    const docEnd = editor.state.doc.content.size;
+
+    if (patch.operation === 'append_to_article') {
+        return { insertAt: docEnd, selectFrom: docEnd, selectTo: docEnd };
+    }
+
+    if (patch.operation === 'insert_before_faq') {
+        const faqHeading = findHeadingByKeywords(editor, ['الأسئلة الشائعة', 'اسئلة شائعة', 'faq']);
+        return faqHeading
+            ? { insertAt: faqHeading.pos, selectFrom: faqHeading.pos, selectTo: faqHeading.to }
+            : { insertAt: docEnd, selectFrom: docEnd, selectTo: docEnd };
+    }
+
+    if (patch.operation === 'insert_before_conclusion') {
+        const conclusionHeading = findHeadingByKeywords(editor, ['الخاتمة', 'الخلاصة', 'في الختام', 'ختام']);
+        return conclusionHeading
+            ? { insertAt: conclusionHeading.pos, selectFrom: conclusionHeading.pos, selectTo: conclusionHeading.to }
+            : { insertAt: docEnd, selectFrom: docEnd, selectTo: docEnd };
+    }
+
+    const heading = findHeadingMatch(editor, patch.anchorText || '');
+    if (!heading) {
+        return { error: `لم يتم العثور على الموضع المرجعي: ${patch.anchorText || patch.placementLabel || patch.title}` };
+    }
+
+    if (patch.operation === 'insert_before_heading') {
+        return { insertAt: heading.pos, selectFrom: heading.pos, selectTo: heading.to };
+    }
+
+    if (patch.operation === 'append_to_section') {
+        return { insertAt: findSectionEnd(editor, heading), selectFrom: heading.pos, selectTo: heading.to };
+    }
+
+    return { insertAt: heading.to, selectFrom: heading.pos, selectTo: heading.to };
+};
+
 type SuggestionState = {
   original?: string;
   suggestions: string[];
@@ -322,6 +568,7 @@ type FixAllProgress = {
 
 interface AIContextType {
     aiResults: { gemini: string; chatgpt: string };
+    aiInsertionPatches: Record<AiPatchProvider, AiContentPatch[]>;
     isAiLoading: { gemini: boolean; chatgpt: boolean };
     isAiCommandLoading: boolean;
     aiFixingInfo: { title: string; from: number } | null;
@@ -340,6 +587,9 @@ interface AIContextType {
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[]) => Promise<void>;
     applySuggestionFromHistory: (historyItemId: string, suggestionText: string) => void;
+    applyAiInsertionPatch: (provider: AiPatchProvider, patchId: string) => void;
+    applyAllAiInsertionPatches: (provider: AiPatchProvider) => void;
+    selectAiInsertionPatchTarget: (provider: AiPatchProvider, patchId: string) => void;
     markHistorySuggestionApplied: (historyItemId: string, suggestionText: string) => void;
     removeFromAiHistory: (historyItemId: string) => void;
     generateContextAwarePrompt: (userPrompt: string, options: any) => string;
@@ -360,6 +610,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const { openModal } = useModal();
     
     const [aiResults, setAiResults] = useState({ gemini: '', chatgpt: '' });
+    const [aiInsertionPatches, setAiInsertionPatches] = useState<Record<AiPatchProvider, AiContentPatch[]>>({ gemini: [], chatgpt: [] });
     const [isAiLoading, setIsAiLoading] = useState({ gemini: false, chatgpt: false });
     const [isAiCommandLoading, setIsAiCommandLoading] = useState(false);
     const [suggestion, setSuggestion] = useState<SuggestionState | null>(null);
@@ -377,6 +628,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return;
         }
         setAiHistory([]);
+        setAiInsertionPatches({ gemini: [], chatgpt: [] });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
     }, [articleKey]);
 
@@ -503,10 +755,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const handleAiAnalyze = useCallback(async (userPrompt: string, options: any) => {
         if (!editor) return;
         setIsAiLoading(prev => ({ ...prev, gemini: true }));
+        setAiInsertionPatches(prev => ({ ...prev, gemini: [] }));
         try {
-            const finalPrompt = generateContextAwarePrompt(userPrompt, options);
+            const finalPrompt = `${generateContextAwarePrompt(userPrompt, options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}`;
             const result = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
-            setAiResults(prev => ({ ...prev, gemini: result }));
+            const parsedResult = parseSmartAnalysisResponse(result, 'gemini');
+            setAiResults(prev => ({ ...prev, gemini: parsedResult.displayText }));
+            setAiInsertionPatches(prev => ({ ...prev, gemini: parsedResult.patches }));
         } catch (e) {
             setAiResults(prev => ({ ...prev, gemini: "فشل التحليل." }));
         } finally {
@@ -518,10 +773,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (!editor) return;
         setIsAiLoading(prev => ({ ...prev, chatgpt: true }));
         setAiResults(prev => ({ ...prev, chatgpt: '' }));
+        setAiInsertionPatches(prev => ({ ...prev, chatgpt: [] }));
         try {
-            const finalPrompt = generateContextAwarePrompt(userPrompt, options);
+            const finalPrompt = `${generateContextAwarePrompt(userPrompt, options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}`;
             const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt);
-            setAiResults(prev => ({ ...prev, chatgpt: result }));
+            const parsedResult = parseSmartAnalysisResponse(result, 'chatgpt');
+            setAiResults(prev => ({ ...prev, chatgpt: parsedResult.displayText }));
+            setAiInsertionPatches(prev => ({ ...prev, chatgpt: parsedResult.patches }));
         } catch (e) {
             setAiResults(prev => ({ ...prev, chatgpt: "فشل تحليل ChatGPT." }));
         } finally {
@@ -665,6 +923,65 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setFixAllProgress(p => ({ ...p, running: false }));
     }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText]);
 
+    const updateAiInsertionPatch = useCallback((provider: AiPatchProvider, patchId: string, updates: Partial<AiContentPatch>) => {
+        setAiInsertionPatches(prev => ({
+            ...prev,
+            [provider]: prev[provider].map(patch => (
+                patch.id === patchId ? { ...patch, ...updates } : patch
+            )),
+        }));
+    }, []);
+
+    const selectAiInsertionPatchTarget = useCallback((provider: AiPatchProvider, patchId: string) => {
+        if (!editor) return;
+        const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
+        if (!patch) return;
+
+        const target = resolveAiPatchTarget(editor, patch);
+        if ('error' in target) {
+            updateAiInsertionPatch(provider, patchId, { status: 'failed', applyError: target.error });
+            return;
+        }
+
+        editor
+            .chain()
+            .focus()
+            .setTextSelection(target.selectFrom === target.selectTo ? target.insertAt : { from: target.selectFrom, to: target.selectTo })
+            .scrollIntoView()
+            .run();
+    }, [aiInsertionPatches, editor, updateAiInsertionPatch]);
+
+    const applyAiInsertionPatch = useCallback((provider: AiPatchProvider, patchId: string) => {
+        if (!editor) return;
+        const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
+        if (!patch || patch.status !== 'pending') return;
+
+        const target = resolveAiPatchTarget(editor, patch);
+        if ('error' in target) {
+            updateAiInsertionPatch(provider, patchId, { status: 'failed', applyError: target.error });
+            return;
+        }
+
+        try {
+            editor
+                .chain()
+                .focus()
+                .insertContentAt(target.insertAt, parseMarkdownToHtml(patch.contentMarkdown), { updateSelection: true })
+                .scrollIntoView()
+                .run();
+            updateAiInsertionPatch(provider, patchId, { status: 'applied', applyError: undefined });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'تعذر تطبيق التعديل داخل المحرر.';
+            updateAiInsertionPatch(provider, patchId, { status: 'failed', applyError: message });
+        }
+    }, [aiInsertionPatches, editor, updateAiInsertionPatch]);
+
+    const applyAllAiInsertionPatches = useCallback((provider: AiPatchProvider) => {
+        aiInsertionPatches[provider]
+            .filter(patch => patch.status === 'pending')
+            .forEach(patch => applyAiInsertionPatch(provider, patch.id));
+    }, [aiInsertionPatches, applyAiInsertionPatch]);
+
     const markHistorySuggestionApplied = (id: string, text: string) => {
         setAiHistory(history => history.map(historyItem => (
             historyItem.id === id ? { ...historyItem, appliedSuggestion: text, applyError: undefined } : historyItem
@@ -693,10 +1010,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     };
 
     const value = {
-        aiResults, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
+        aiResults, aiInsertionPatches, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         handleChatGptAnalyze, handleAiFix, handleFixAllViolations, applySuggestionFromHistory,
+        applyAiInsertionPatch, applyAllAiInsertionPatches, selectAiInsertionPatchTarget,
         markHistorySuggestionApplied,
         removeFromAiHistory: (id: string) => setAiHistory(h => h.filter(x => x.id !== id)),
         generateContextAwarePrompt, openGoogleSearch
