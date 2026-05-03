@@ -358,7 +358,8 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 
 لكل patch استخدم marker مطابقاً للعلامة، مثل "patch_1". لا تكتب النص الجاهز داخل analysisMarkdown.
 
-إذا كان المطلوب تعديل فقرة موجودة، استخدم operation بقيمة "replace_block"، وضع في targetText نص الفقرة الحالية المراد استبدالها من المقال قدر الإمكان، وضع النص الجديد في contentMarkdown.
+إذا كان المطلوب تعديل فقرة موجودة، استخدم operation بقيمة "replace_block"، ويجب أن يكون targetText نسخة حرفية من الفقرة الحالية داخل المقال لا تلخيصاً لها. ضع النص الجديد فقط في contentMarkdown.
+إذا لم تستطع نسخ الفقرة الحالية حرفياً، فلا تستخدم replace_block، واستخدم عملية إضافة مناسبة بدلاً من ذلك.
 إذا كان المطلوب إضافة فقرة أو سؤال أو جملة جديدة، استخدم عمليات الإضافة المناسبة مثل insert_after_heading أو insert_before_faq أو insert_before_conclusion أو append_to_section أو append_to_article.
 
 الشكل المطلوب لكل patch:
@@ -471,6 +472,10 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
 const normalizeAnchorText = (value: string): string => value
     .normalize('NFKC')
     .replace(/[ًٌٍَُِّْـ]/g, '')
+    .replace(/[\u200c\u200d\u200e\u200f]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -555,7 +560,8 @@ const scoreTextBlockMatch = (blockText: string, targetText: string): number => {
     const targetWords = target.split(' ').filter(word => word.length > 2);
     if (targetWords.length === 0) return 0;
     const overlap = targetWords.filter(word => block.includes(word)).length / targetWords.length;
-    return overlap >= 0.75 ? overlap : 0;
+    const requiredOverlap = targetWords.length >= 14 ? 0.45 : targetWords.length >= 8 ? 0.55 : 0.7;
+    return overlap >= requiredOverlap ? overlap : 0;
 };
 
 type TextBlockMatch = {
@@ -582,6 +588,22 @@ const findTextBlockMatch = (editor: any, targetText: string): TextBlockMatch | n
         }
         return true;
     });
+
+    return bestMatch;
+};
+
+const findBestTextBlockMatch = (editor: any, candidates: string[]): TextBlockMatch | null => {
+    let bestMatch: TextBlockMatch | null = null;
+
+    candidates
+        .map(candidate => candidate.trim())
+        .filter(candidate => candidate.length > 0)
+        .forEach(candidate => {
+            const match = findTextBlockMatch(editor, candidate);
+            if (match && (!bestMatch || match.score > bestMatch.score)) {
+                bestMatch = match;
+            }
+        });
 
     return bestMatch;
 };
@@ -614,7 +636,11 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
     const docEnd = editor.state.doc.content.size;
 
     if (patch.operation === 'replace_block' || patch.operation === 'replace_text') {
-        const match = findTextBlockMatch(editor, patch.targetText || patch.anchorText || '');
+        const match = findBestTextBlockMatch(editor, [
+            patch.targetText || '',
+            patch.anchorText || '',
+            patch.contentMarkdown || '',
+        ]);
         if (!match) {
             return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
         }

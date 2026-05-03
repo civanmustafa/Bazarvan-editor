@@ -15,7 +15,7 @@ const SuggestionModal: React.FC = () => {
   const { closeModal } = useModal();
 
   const [position, setPosition] = useState({ x: 12, y: 72 });
-  const [panelWidth, setPanelWidth] = useState(320);
+  const [panelWidth, setPanelWidth] = useState(300);
   const [panelMaxHeight, setPanelMaxHeight] = useState(620);
   const [isDragging, setIsDragging] = useState(false);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
@@ -30,7 +30,7 @@ const SuggestionModal: React.FC = () => {
 
     const leftSidebar = document.querySelector('main > aside') as HTMLElement | null;
     const sidebarRect = leftSidebar?.getBoundingClientRect();
-    const nextWidth = Math.max(280, Math.min(sidebarRect ? sidebarRect.width - 16 : 360, 420, window.innerWidth - 24));
+    const nextWidth = Math.max(220, Math.min(sidebarRect ? sidebarRect.width - 16 : 320, 360, window.innerWidth - 24));
     const nextX = sidebarRect ? sidebarRect.left + 8 : 12;
     const nextY = sidebarRect ? sidebarRect.top + 56 : 72;
 
@@ -72,6 +72,7 @@ const SuggestionModal: React.FC = () => {
 
   const handleDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
     dragOffsetRef.current = {
       x: event.clientX - position.x,
       y: event.clientY - position.y,
@@ -127,7 +128,7 @@ const SuggestionModal: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-50 pointer-events-none"
+      className="fixed inset-0 z-[9999] pointer-events-none"
       aria-modal="true"
       role="dialog"
     >
