@@ -128,13 +128,15 @@ const SuggestionModal: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[9999] pointer-events-none"
+      className="fixed inset-0 pointer-events-none"
+      style={{ zIndex: 9999 }}
       aria-modal="true"
       role="dialog"
     >
       <div
         className="fixed pointer-events-auto bg-white dark:bg-[#2A2A2A] rounded-lg shadow-2xl border border-gray-300 dark:border-[#3C3C3C] flex flex-col"
-        style={{ left: position.x, top: position.y, width: panelWidth, maxHeight: panelMaxHeight }}
+        data-toolbar-ai-suggestion-panel="true"
+        style={{ left: position.x, top: position.y, width: panelWidth, maxHeight: panelMaxHeight, zIndex: 10000 }}
       >
         <div
           className={`flex justify-between items-center p-3 border-b border-gray-200 dark:border-[#3C3C3C] flex-shrink-0 cursor-move select-none ${isDragging ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/20' : ''}`}
