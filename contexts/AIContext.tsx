@@ -587,7 +587,7 @@ const inferBulkFixCriterionCheck = (
 
     return {
         criterionTitle: criterion.title,
-        before: `${String(criterion.current)}؛ ${summarizeBulkFixMeasuredState(originalText, criterionText)}`,
+        before: String(criterion.current),
         after: summarizeBulkFixMeasuredState(fixedText, criterionText),
         required: String(criterion.required),
         status: checks.length === 0 ? 'unknown' : checks.every(Boolean) ? 'pass' : 'fail',

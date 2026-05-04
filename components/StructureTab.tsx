@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
-import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewStats, BulkFixReviewVariant, CheckResult } from '../types';
+import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewVariant, CheckResult } from '../types';
 import { Pilcrow, Heading, AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, ShieldAlert, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2 } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -370,26 +370,6 @@ const BulkFixReviewPanel: React.FC<{
     const copyText = (text: string) => {
         void navigator.clipboard?.writeText(text);
     };
-    const renderStats = (before: BulkFixReviewStats, after: BulkFixReviewStats) => {
-        const items = [
-            [isArabic ? 'الكلمات' : 'Words', before.words, after.words],
-            [isArabic ? 'الجمل' : 'Sentences', before.sentences, after.sentences],
-            [isArabic ? 'الفقرات' : 'Paragraphs', before.paragraphs, after.paragraphs],
-        ];
-
-        return (
-            <div className="grid grid-cols-3 gap-1.5">
-                {items.map(([label, beforeValue, afterValue]) => (
-                    <div key={String(label)} className="rounded-md bg-white/80 px-2 py-1 text-[9px] font-bold text-gray-500 border border-[#d4af37]/10 dark:bg-[#1F1F1F]/70 dark:text-gray-300 dark:border-[#3C3C3C]">
-                        <span className="block text-gray-400">{label}</span>
-                        <span className="text-gray-700 dark:text-gray-100">{beforeValue}</span>
-                        <span className="mx-1 text-[#d4af37]">→</span>
-                        <span className="text-[#b8922e] dark:text-[#f2d675]">{afterValue}</span>
-                    </div>
-                ))}
-            </div>
-        );
-    };
     const criterionStatusClass = (status?: string) => {
         if (status === 'pass') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300';
         if (status === 'fail') return 'bg-red-100 text-red-700 dark:bg-red-900/25 dark:text-red-300';
@@ -461,27 +441,6 @@ const BulkFixReviewPanel: React.FC<{
                                     {isSelected && isPending ? <CheckSquare size={16} className="text-[#d4af37]" /> : <Square size={16} />}
                                 </button>
                                 <div className="min-w-0 flex-1">
-                                    {item.criteria && item.criteria.length > 0 && (
-                                        <div className="rounded-lg border border-[#d4af37]/15 bg-white/70 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/70">
-                                            <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
-                                                {isArabic ? 'المعايير المخالفة' : 'Violated criteria'}
-                                            </div>
-                                            <div className="space-y-1">
-                                                {item.criteria.map((criterion) => (
-                                                    <div key={criterion.title} className="rounded-md bg-gray-50 p-1.5 text-[10px] leading-relaxed text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">
-                                                        <div className="font-black text-gray-800 dark:text-gray-100">{criterion.title}</div>
-                                                        <div className="mt-1 grid grid-cols-1 gap-1 sm:grid-cols-2">
-                                                            <span>{isArabic ? 'الحالي' : 'Current'}: <b>{criterion.current}</b></span>
-                                                            <span>{isArabic ? 'المطلوب' : 'Required'}: <b>{criterion.required}</b></span>
-                                                        </div>
-                                                        {criterion.message && (
-                                                            <div className="mt-1 text-[9px] text-gray-400 dark:text-gray-500">{criterion.message}</div>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
                                     <div className="mt-2">
                                         <button
                                             onClick={() => onLocateItem(item.id)}
@@ -538,11 +497,6 @@ const BulkFixReviewPanel: React.FC<{
                                                     </span>
                                                 )}
                                             </div>
-                                            {variant.statsBefore.words > 0 || variant.statsAfter.words > 0 ? (
-                                                <div className="mb-2">
-                                                    {renderStats(variant.statsBefore, variant.statsAfter)}
-                                                </div>
-                                            ) : null}
                                             {variant.criteriaChecks && variant.criteriaChecks.length > 0 && (
                                                 <div className="mb-2 rounded-lg border border-white/60 bg-white/75 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/80">
                                                     <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
@@ -558,9 +512,9 @@ const BulkFixReviewPanel: React.FC<{
                                                                     </span>
                                                                 </div>
                                                                 <div className="mt-1 grid grid-cols-1 gap-1">
-                                                                    <span>{isArabic ? 'قبل الإصلاح' : 'Before'}: <b>{check.before}</b></span>
-                                                                    <span>{isArabic ? 'بعد التعديل' : 'After'}: <b>{check.after}</b></span>
+                                                                    <span>{isArabic ? 'الحالي' : 'Current'}: <b>{check.before}</b></span>
                                                                     <span>{isArabic ? 'المطلوب' : 'Required'}: <b>{check.required}</b></span>
+                                                                    <span>{isArabic ? 'المستخرج' : 'Extracted'}: <b>{check.after}</b></span>
                                                                 </div>
                                                             </div>
                                                         ))}
