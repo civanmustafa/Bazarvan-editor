@@ -209,6 +209,27 @@ type BulkFixTargetGroup = BulkFixTextUnit & {
     violations: BulkFixViolationContext[];
 };
 
+const BULK_FIX_PROTECTION_RULE_KEYS: (keyof StructureAnalysis)[] = [
+    'sentenceLength',
+    'paragraphLength',
+    'punctuation',
+    'duplicateWordsInParagraph',
+    'ambiguousParagraphReferences',
+    'wordsToDelete',
+    'stepsIntroduction',
+    'paragraphEndings',
+    'sentenceBeginnings',
+    'arabicOnly',
+    'punctuationSpacing',
+    'repeatedBigrams',
+    'wordConsistency',
+    'ctaWords',
+    'interactiveLanguage',
+    'warningWords',
+    'differentTransitionalWords',
+    'slowWords',
+];
+
 const countWords = (value: string): number => value.trim().split(/\s+/).filter(Boolean).length;
 
 const countSentences = (value: string): number => {
@@ -401,13 +422,15 @@ const summarizeRelatedBulkFixRules = (
     return Array.from(summary.values()).sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
 };
 
-const formatBulkFixGroupPrompt = (group: BulkFixTargetGroup, targetText: string): string => {
-    const uniqueRules = group.violations.reduce<CheckResult[]>((acc, violation) => {
+const getUniqueBulkFixRules = (violations: BulkFixViolationContext[]): CheckResult[] => (
+    violations.reduce<CheckResult[]>((acc, violation) => {
         if (!acc.some(rule => rule.title === violation.rule.title)) acc.push(violation.rule);
         return acc;
-    }, []);
+    }, [])
+);
 
-    const ruleCards = uniqueRules.map((rule) => {
+const formatBulkFixRuleCards = (rules: CheckResult[], group: BulkFixTargetGroup): string => (
+    rules.map((rule) => {
         const messages = group.violations
             .filter(violation => violation.rule.title === rule.title)
             .map(violation => violation.item.message)
@@ -422,7 +445,44 @@ const formatBulkFixGroupPrompt = (group: BulkFixTargetGroup, targetText: string)
             rule.details ? `- الشروط التفصيلية:\n${rule.details}` : '',
             messages.length ? `- رسائل المخالفات في هذه الوحدة:\n${messages.map(message => `  - ${message}`).join('\n')}` : '',
         ].filter(Boolean).join('\n');
-    }).join('\n\n');
+    }).join('\n\n')
+);
+
+const getBulkFixProtectionRules = (
+    structureAnalysis: StructureAnalysis,
+    group: BulkFixTargetGroup,
+    selectedRuleTitles: Set<string>
+): CheckResult[] => {
+    const protectionRules = new Map<string, CheckResult>();
+
+    BULK_FIX_PROTECTION_RULE_KEYS.forEach((ruleKey) => {
+        const rule = structureAnalysis[ruleKey];
+        if (!rule || selectedRuleTitles.has(rule.title)) return;
+        protectionRules.set(rule.title, rule);
+    });
+
+    group.violations.forEach((violation) => {
+        if (selectedRuleTitles.has(violation.rule.title)) return;
+        protectionRules.set(violation.rule.title, violation.rule);
+    });
+
+    return Array.from(protectionRules.values());
+};
+
+const formatBulkFixGroupPrompt = (
+    group: BulkFixTargetGroup,
+    targetText: string,
+    selectedRuleTitles: Set<string>,
+    protectionRules: CheckResult[]
+): string => {
+    const uniqueRules = getUniqueBulkFixRules(group.violations);
+    const targetRules = uniqueRules.filter(rule => selectedRuleTitles.has(rule.title));
+    const fallbackTargetRules = targetRules.length > 0 ? targetRules : uniqueRules.slice(0, 1);
+    const targetRuleCards = formatBulkFixRuleCards(fallbackTargetRules, group);
+    const protectionRuleCards = formatBulkFixRuleCards(
+        protectionRules.filter(rule => !fallbackTargetRules.some(targetRule => targetRule.title === rule.title)),
+        group
+    );
 
     const unitLabel = group.unitType === 'section'
         ? 'قسم كامل'
@@ -433,24 +493,31 @@ const formatBulkFixGroupPrompt = (group: BulkFixTargetGroup, targetText: string)
                 : 'وحدة نصية';
 
     return [
-        `هذه ${unitLabel} واحدة عليها عدة مخالفات مترابطة. المطلوب إنتاج بدائل محسنة تعالج كل المعايير معاً، لا إصلاحاً منفصلاً لكل معيار.`,
+        `هذه ${unitLabel} واحدة تحتاج إصلاحاً موجهاً دون كسر المعايير المرتبطة بها.`,
         '',
-        '**المعايير والمخالفات المرتبطة بهذه الوحدة:**',
-        ruleCards,
+        '**أهداف الإصلاح الأساسية:**',
+        targetRuleCards || '- لا توجد أهداف إصلاح محددة بوضوح.',
+        '',
+        '**قيود الحماية التي يجب عدم كسرها أثناء الإصلاح:**',
+        protectionRuleCards || '- لا توجد قيود حماية إضافية متاحة.',
         '',
         '**النص المراد استبداله كوحدة واحدة:**',
         `"""${targetText}"""`,
         '',
         '**تعليمات مهمة:**',
-        '- ارفق في تفكيرك قواعد وشروط كل معيار أعلاه عند صياغة البدائل.',
+        '- أصلح أهداف الإصلاح الأساسية فقط، واجعل قيود الحماية شروطاً ملزمة لا تكسرها أثناء التعديل.',
+        '- لا تحول قيود الحماية إلى هدف توسعة أو إعادة كتابة زائدة؛ دورها منع ظهور مخالفات جديدة.',
+        '- ارفق في تفكيرك قواعد وشروط أهداف الإصلاح وقيود الحماية عند صياغة البدائل.',
         '- قدم اقتراحين فقط مختلفين قابلين للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
-        '- عالج المخالفات المتداخلة معاً: الطول، الجمل، التكرار، الترقيم، الإحالات الغامضة، الكلمات المطلوب حذفها، أو أي معيار مذكور في البطاقة.',
+        '- إذا كان هدف الإصلاح هو تقصير فقرة أو ضبط طولها، فلا تطل الجمل ولا تضف شرحاً غير ضروري.',
+        '- حافظ خصوصاً على قيود: طول الجمل، طول الفقرات، علامات الترقيم، تكرار الفقرة، الإحالات الغامضة، كلمات للحذف، تمهيد الخطوات، نهايات الفقرات، بدايات الجمل، الكلمات اللاتينية، فراغات الترقيم، الثنائيات المكررة، تناسق الكلمات، كلمات الحث، اللغة التفاعلية، الكلمات التحذيرية، الكلمات الانتقالية، والكلمات البطيئة.',
         '- حافظ على المعنى الأصلي وسياق الصفحة ولا تضف معلومات أو ادعاءات جديدة.',
         '- إذا كان النص يحتوي عناوين، فاستخدم Markdown للحفاظ على مستويات العناوين قدر الإمكان.',
         '- لا تكتب تسميات داخل fixedText مثل "النص المقترح" أو "الإجابة".',
         '- يجب أن يكون الرد JSON صالحاً فقط، دون Markdown fences ودون شرح خارج JSON.',
         '- المفتاح suggestions إلزامي، وكل عنصر داخله يجب أن يحتوي fixedText نصياً غير فارغ.',
-        '- داخل كل اقتراح أضف criteriaChecks، وفيه تدقيق لكل معيار: الحالة قبل الإصلاح، الحالة بعد التعديل، المطلوب، و status بقيمة pass أو warn أو fail أو unknown.',
+        '- داخل كل اقتراح أضف criteriaChecks لكل هدف إصلاح ولكل قيد حماية، وفيه: criterionTitle، before، after، required، و status بقيمة pass أو warn أو fail أو unknown.',
+        '- إذا أصلح الاقتراح هدف الإصلاح لكنه كسر قيد حماية، فاعتبر status الخاص بهذا القيد fail ولا تعرضه كأنه ضمن الحد.',
         '',
         'أرجع JSON حصراً بهذا الشكل:',
         '{ "suggestions": [ { "label": "اقتراح 1", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] }, { "label": "اقتراح 2", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] } ] }',
@@ -1663,14 +1730,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 if (targetText === null) {
                     throw new Error('Target range is no longer valid.');
                 }
-                const prompt = buildComprehensivePrompt(formatBulkFixGroupPrompt(group, targetText));
+                const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles);
+                const prompt = buildComprehensivePrompt(formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules));
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
-                const uniqueRules = group.violations.reduce<CheckResult[]>((acc, violation) => {
-                    if (!acc.some(rule => rule.title === violation.rule.title)) acc.push(violation.rule);
-                    return acc;
-                }, []);
-                const criteria: BulkFixCriterionSummary[] = uniqueRules.map((rule) => ({
+                const uniqueRules = getUniqueBulkFixRules(group.violations);
+                const targetRules = uniqueRules.filter(rule => selectedRuleTitles.has(rule.title));
+                const fallbackTargetRules = targetRules.length > 0 ? targetRules : uniqueRules.slice(0, 1);
+                const criteriaRules = [
+                    ...fallbackTargetRules,
+                    ...protectionRules.filter(rule => !fallbackTargetRules.some(targetRule => targetRule.title === rule.title)),
+                ];
+                const criteria: BulkFixCriterionSummary[] = criteriaRules.map((rule) => ({
                     title: rule.title,
                     current: rule.current,
                     required: rule.required,
@@ -1686,7 +1757,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     variants = normalizeBulkFixVariants(res, targetText, criteria);
                 }
                 const primaryVariant = variants[0];
-                const ruleTitles = uniqueRules.map(rule => rule.title);
+                const ruleTitles = fallbackTargetRules.map(rule => rule.title);
                 if (primaryVariant) {
                     proposedItems.push({
                         id: `bulk-fix-${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`,
