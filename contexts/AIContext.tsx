@@ -23,6 +23,8 @@ import type {
 } from '../types';
 import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
+import { CTA_WORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
+import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 
 const GEMINI_MODEL = 'gemini-3-flash-preview';
 const OPENAI_MODEL = 'gpt-4.1-mini';
@@ -228,6 +230,34 @@ const BULK_FIX_PROTECTION_RULE_KEYS: (keyof StructureAnalysis)[] = [
     'warningWords',
     'differentTransitionalWords',
     'slowWords',
+];
+
+const ENGLISH_TRANSITIONAL_WORDS = ['firstly', 'secondly', 'finally', 'in addition', 'furthermore', 'therefore', 'consequently', 'on the other hand', 'in contrast', 'also', 'as well as', 'moreover', 'in fact', 'actually', 'in other words', 'for example', 'specifically', 'in general', 'however', 'although', 'while', 'in summary', 'in conclusion'];
+const ENGLISH_CTA_WORDS = ['start now', 'try now', 'sign up', 'book your spot', 'get', 'order now', 'contact us', 'join us', 'discover more', 'learn more', 'benefit now', 'subscribe', 'download', 'buy', 'shop', 'explore', 'request a quote', 'click here', 'submit', 'register', 'claim your', 'get started', 'find out more'];
+const ENGLISH_INTERACTIVE_WORDS = ['you can', 'you will find', 'you need', 'you want', 'discover', 'learn', 'try', 'choose', 'use', 'start', 'get', 'benefit', 'enjoy', 'read', 'watch', 'compare', 'check', 'did you know', 'have you ever', 'imagine', 'think about', 'explore', 'see how', 'your', 'unlock', 'uncover', 'consider', 'you', "let's"];
+const ENGLISH_WARNING_ADVICE_WORDS = ['warning', 'caution', 'be careful', 'note', 'important', 'recommendation', 'it is recommended', 'it is important', 'avoid', 'make sure', 'be aware', 'beware', 'take note', 'heads up', 'it is crucial', 'you should', 'remember to', 'pro tip', 'keep in mind'];
+const ENGLISH_SLOW_WORDS = ['actually', 'basically', 'literally', 'in fact', 'in order to', 'just', 'really', 'very', 'quite', 'somewhat', 'in a way', 'so to speak', 'of course', 'as you know', 'essentially', 'practically', 'generally', 'in essence', 'regarding', 'in relation to', 'it seems that', 'apparently', 'it is considered', 'needless to say', 'it goes without saying', 'for the most part', 'it is important to note', 'in this context', 'furthermore', 'additionally'];
+const ENGLISH_WORDS_TO_DELETE = ['synergy', 'leverage', 'paradigm shift', 'game-changer', 'out of the box', 'low-hanging fruit', 'circle back', 'deep dive', 'win-win', 'thought leader', 'value-added', 'next-gen', 'cutting-edge', 'robust', 'scalable', 'disrupt', 'pivot', 'actionable insights', 'growth hacking', 'core competency', 'ideation', 'seamless integration'];
+const ARABIC_AMBIGUOUS_STARTS = [
+    'كما ذكرنا سابقا', 'كما سبق', 'كما أشرنا', 'المذكور أعلاه', 'المذكور سابقا',
+    'بناء على ذلك', 'وبناء على ذلك', 'نتيجة لذلك', 'بسبب ذلك', 'رغم ذلك',
+    'مع ذلك', 'في هذا السياق', 'في هذا الصدد', 'ضمن هذا الإطار', 'لهذا السبب',
+    'ولهذا السبب', 'لهذا', 'لذلك', 'لذا', 'من هنا', 'ومن هنا', 'وبهذا',
+    'وبذلك', 'هذا الأمر', 'هذه المشكلة', 'هذه الطريقة', 'هذا الخيار',
+    'هذه النتيجة', 'هذه الفكرة', 'هذه النقطة', 'هذا الحل', 'ذلك يعني',
+    'هذا يعني', 'وهذا يعني', 'وبهذا الشكل', 'بهذه الطريقة', 'في هذه الحالة',
+    'وهذا', 'فهذه', 'وذلك', 'فذلك', 'هذا', 'هذه', 'ذلك', 'تلك', 'هؤلاء',
+    'هو', 'هي', 'هم', 'له', 'لها', 'فيه', 'فيها', 'به', 'بها', 'عليه',
+    'عليها', 'منه', 'منها', 'إليه', 'إليها',
+];
+const ENGLISH_AMBIGUOUS_STARTS = [
+    'as mentioned earlier', 'as mentioned above', 'as noted earlier', 'as discussed',
+    'the above', 'the aforementioned', 'previously mentioned', 'in this context',
+    'for this reason', 'because of this', 'based on this', 'as a result',
+    'therefore', 'thus', 'despite that', 'even so', 'this means', 'that means',
+    'this approach', 'this method', 'this option', 'this problem', 'this issue',
+    'this result', 'this service', 'this product', 'this process', 'this solution',
+    'this', 'that', 'these', 'those', 'it', 'they', 'he', 'she', 'here', 'there',
 ];
 
 const countWords = (value: string): number => value.trim().split(/\s+/).filter(Boolean).length;
@@ -594,6 +624,270 @@ const isWithinBulkFixRange = (values: number[], range: { min: number; max: numbe
     return values.every(value => value >= range.min && value <= range.max);
 };
 
+const getBulkFixLanguage = (value: string): 'ar' | 'en' => /[\u0600-\u06FF]/.test(value) ? 'ar' : 'en';
+
+const countBulkFixTerms = (textValue: string, arabicTerms: string[], englishTerms: string[] = []): { term: string; count: number }[] => {
+    const language = getBulkFixLanguage(textValue);
+    const terms = language === 'ar' ? arabicTerms : englishTerms;
+    return terms
+        .map(term => ({ term, count: countOccurrences(textValue, term, language) }))
+        .filter(item => item.count > 0);
+};
+
+const formatBulkFixMatchedTerms = (matches: { term: string; count: number }[], emptyLabel: string, foundLabel: string): string => {
+    if (matches.length === 0) return emptyLabel;
+    const total = matches.reduce((sum, item) => sum + item.count, 0);
+    const examples = matches.slice(0, 5).map(item => `${item.term}${item.count > 1 ? ` (${item.count})` : ''}`).join('، ');
+    return `${foundLabel}: ${total}${examples ? ` - ${examples}` : ''}`;
+};
+
+const getBulkFixTransitionStats = (textValue: string): { count: number; total: number; percentage: number } => {
+    const language = getBulkFixLanguage(textValue);
+    const words = language === 'ar' ? TRANSITIONAL_WORDS : ENGLISH_TRANSITIONAL_WORDS;
+    const sentences = splitBulkFixSentences(textValue);
+    const count = sentences.filter(sentence => words.some(word => sentence.trim().toLowerCase().startsWith(word.toLowerCase()))).length;
+    return {
+        count,
+        total: sentences.length,
+        percentage: sentences.length > 0 ? count / sentences.length : 0,
+    };
+};
+
+const getBulkFixRepeatedBigrams = (textValue: string): { term: string; count: number }[] => {
+    const tokens = textValue.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+    const counts = new Map<string, number>();
+    for (let index = 0; index < tokens.length - 1; index++) {
+        const bigram = `${tokens[index]} ${tokens[index + 1]}`;
+        counts.set(bigram, (counts.get(bigram) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+        .filter(([, count]) => count > 2)
+        .map(([term, count]) => ({ term, count }))
+        .sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
+};
+
+const normalizeBulkFixToken = (token: string, language: 'ar' | 'en'): string => (
+    language === 'ar' ? normalizeArabicText(token.toLowerCase()) : token.toLowerCase()
+);
+
+const getBulkFixRepeatedWords = (textValue: string): { term: string; count: number }[] => {
+    const language = getBulkFixLanguage(textValue);
+    const exclusionSet = language === 'ar' ? DUPLICATE_WORDS_EXCLUSION_LIST : new Set<string>();
+    const tokens = textValue.match(language === 'ar' ? /\p{L}{3,}/gu : /[a-zA-Z]{3,}/g) || [];
+    const counts = new Map<string, number>();
+
+    tokens.forEach((token) => {
+        const normalized = normalizeBulkFixToken(token, language);
+        if (exclusionSet.has(normalized)) return;
+        counts.set(normalized, (counts.get(normalized) || 0) + 1);
+    });
+
+    return Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([term, count]) => ({ term, count }))
+        .sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
+};
+
+const getBulkFixSentenceBeginningRepeats = (textValue: string): { term: string; count: number }[] => {
+    const language = getBulkFixLanguage(textValue);
+    const sentences = splitBulkFixSentences(textValue);
+    const counts = new Map<string, number>();
+
+    for (let index = 0; index < sentences.length - 1; index++) {
+        const first = normalizeBulkFixToken(sentences[index].trim().split(/\s+/)[0] || '', language);
+        const next = normalizeBulkFixToken(sentences[index + 1].trim().split(/\s+/)[0] || '', language);
+        if (!first || !next || first !== next) continue;
+        counts.set(first, (counts.get(first) || 0) + 1);
+    }
+
+    return Array.from(counts.entries()).map(([term, count]) => ({ term, count }));
+};
+
+const getBulkFixParagraphEndingRepeats = (textValue: string): { term: string; count: number }[] => {
+    const language = getBulkFixLanguage(textValue);
+    const endings = splitBulkFixParagraphs(textValue)
+        .map(paragraph => paragraph.trim().split(/\s+/).pop()?.replace(/[.!?\u061F:]+$/g, '') || '')
+        .map(term => normalizeBulkFixToken(term, language))
+        .filter(Boolean);
+    const counts = new Map<string, number>();
+
+    for (let index = 0; index < endings.length - 1; index++) {
+        if (endings[index] !== endings[index + 1]) continue;
+        counts.set(endings[index], (counts.get(endings[index]) || 0) + 1);
+    }
+
+    return Array.from(counts.entries()).map(([term, count]) => ({ term, count }));
+};
+
+const getBulkFixLatinWordStats = (textValue: string): { count: number; percentage: number; words: string[] } => {
+    const latinWords = textValue.match(/[a-zA-Z]+/g) || [];
+    const uniqueWords = Array.from(new Set(latinWords.map(word => word.toLowerCase()))).slice(0, 5);
+    const wordCount = countWords(textValue);
+    return {
+        count: latinWords.length,
+        percentage: wordCount > 0 ? latinWords.length / wordCount : 0,
+        words: uniqueWords,
+    };
+};
+
+const getBulkFixPunctuationSpacingIssues = (textValue: string): { label: string; count: number }[] => {
+    const issues = [
+        { label: 'فراغات زائدة', count: textValue.match(/ {2,}/g)?.length || 0 },
+        { label: 'فراغ قبل علامة ترقيم', count: textValue.match(/\s+[.,!?\u061F\u060C]/g)?.length || 0 },
+        { label: 'علامة ترقيم بلا فراغ بعدها', count: textValue.match(/[.,!?\u061F\u060C](?=\p{L}|\p{N})/gu)?.length || 0 },
+        { label: 'رقم ملاصق لحرف', count: textValue.match(/(?:\p{L}\p{N}|\p{N}\p{L})/gu)?.length || 0 },
+    ];
+    return issues.filter(issue => issue.count > 0);
+};
+
+const escapeBulkFixRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const getBulkFixAmbiguousStarts = (textValue: string): { term: string; count: number }[] => {
+    const language = getBulkFixLanguage(textValue);
+    const phrases = language === 'ar' ? ARABIC_AMBIGUOUS_STARTS : ENGLISH_AMBIGUOUS_STARTS;
+    const counts = new Map<string, number>();
+
+    splitBulkFixParagraphs(textValue).forEach((paragraph) => {
+        const prefixMatch = paragraph.match(/^\s*["'“”«»()[\]{}]?\s*/u);
+        const textAfterPrefix = paragraph.slice(prefixMatch?.[0].length ?? 0);
+        const phrase = [...phrases]
+            .sort((a, b) => b.length - a.length)
+            .find(item => new RegExp(`^${escapeBulkFixRegex(item)}(?=$|[\\s\u060C,\u061B;:.!\u061F?])`, 'iu').test(textAfterPrefix));
+        if (!phrase) return;
+        counts.set(phrase, (counts.get(phrase) || 0) + 1);
+    });
+
+    return Array.from(counts.entries()).map(([term, count]) => ({ term, count }));
+};
+
+const getBulkFixTextualAudit = (textValue: string, criterionText: string): { summary: string; passed: boolean } | null => {
+    const haystack = criterionText.toLowerCase();
+    const wordCount = countWords(textValue);
+
+    if (haystack.includes('تكرار بالفقرة') || haystack.includes('repetition in paragraph')) {
+        const repeated = getBulkFixRepeatedWords(textValue);
+        return {
+            summary: repeated.length === 0
+                ? 'لا توجد كلمات مكررة مؤثرة داخل الفقرة'
+                : `كلمات مكررة: ${repeated.slice(0, 5).map(item => `${item.term} (${item.count})`).join('، ')}`,
+            passed: repeated.length === 0,
+        };
+    }
+
+    if (haystack.includes('بدايات الجمل') || haystack.includes('sentence beginnings')) {
+        const repeated = getBulkFixSentenceBeginningRepeats(textValue);
+        return {
+            summary: repeated.length === 0
+                ? 'لا توجد جمل متتالية تبدأ بالكلمة نفسها'
+                : `بدايات متكررة: ${repeated.map(item => `${item.term} (${item.count})`).join('، ')}`,
+            passed: repeated.length === 0,
+        };
+    }
+
+    if (haystack.includes('نهايات الفقرات') || haystack.includes('paragraph endings')) {
+        const repeated = getBulkFixParagraphEndingRepeats(textValue);
+        return {
+            summary: repeated.length === 0
+                ? 'لا توجد نهايات فقرات متتالية بالكلمة نفسها'
+                : `نهايات متكررة: ${repeated.map(item => `${item.term} (${item.count})`).join('، ')}`,
+            passed: repeated.length === 0,
+        };
+    }
+
+    if (haystack.includes('إحالات غامضة') || haystack.includes('ambiguous references')) {
+        const ambiguousStarts = getBulkFixAmbiguousStarts(textValue);
+        return {
+            summary: ambiguousStarts.length === 0
+                ? 'لا توجد بدايات فقرة بإحالة غامضة'
+                : `إحالات غامضة في بداية الفقرة: ${ambiguousStarts.map(item => `${item.term} (${item.count})`).join('، ')}`,
+            passed: ambiguousStarts.length === 0,
+        };
+    }
+
+    if (haystack.includes('كلمات لاتينية') || haystack.includes('latin words')) {
+        const stats = getBulkFixLatinWordStats(textValue);
+        return {
+            summary: `${stats.count} كلمة لاتينية من ${wordCount} كلمة (${(stats.percentage * 100).toFixed(2)}%)${stats.words.length ? ` - ${stats.words.join('، ')}` : ''}`,
+            passed: stats.percentage <= 0.005,
+        };
+    }
+
+    if (haystack.includes('فراغات الترقيم') || haystack.includes('punctuation spacing')) {
+        const issues = getBulkFixPunctuationSpacingIssues(textValue);
+        return {
+            summary: issues.length === 0
+                ? 'لا توجد مشاكل واضحة في فراغات الترقيم'
+                : `مشاكل فراغات الترقيم: ${issues.map(issue => `${issue.label} (${issue.count})`).join('، ')}`,
+            passed: issues.length === 0,
+        };
+    }
+
+    if (haystack.includes('كلمات للحذف') || haystack.includes('words to delete')) {
+        const matches = countBulkFixTerms(textValue, WORDS_TO_DELETE, ENGLISH_WORDS_TO_DELETE);
+        return {
+            summary: formatBulkFixMatchedTerms(matches, 'لا توجد كلمات للحذف', 'كلمات للحذف موجودة'),
+            passed: matches.length === 0,
+        };
+    }
+
+    if (haystack.includes('كلمات بطيئة') || haystack.includes('slow words')) {
+        const matches = countBulkFixTerms(textValue, SLOW_WORDS, ENGLISH_SLOW_WORDS);
+        const total = matches.reduce((sum, item) => sum + item.count, 0);
+        const percentage = wordCount > 0 ? total / wordCount : 0;
+        const examples = matches.slice(0, 5).map(item => item.term).join('، ');
+        return {
+            summary: `${total} كلمة بطيئة من ${wordCount} كلمة (${(percentage * 100).toFixed(1)}%)${examples ? ` - ${examples}` : ''}`,
+            passed: percentage <= 0.02,
+        };
+    }
+
+    if (haystack.includes('كلمات تحذيرية') || haystack.includes('warning words')) {
+        const matches = countBulkFixTerms(textValue, WARNING_ADVICE_WORDS, ENGLISH_WARNING_ADVICE_WORDS);
+        return {
+            summary: formatBulkFixMatchedTerms(matches, 'لا توجد كلمات تحذيرية', 'كلمات تحذيرية موجودة'),
+            passed: matches.reduce((sum, item) => sum + item.count, 0) >= 1,
+        };
+    }
+
+    if (haystack.includes('كلمات الحث') || haystack.includes('cta words')) {
+        const matches = countBulkFixTerms(textValue, CTA_WORDS, ENGLISH_CTA_WORDS);
+        return {
+            summary: formatBulkFixMatchedTerms(matches, 'لا توجد كلمات حث', 'كلمات حث موجودة'),
+            passed: matches.reduce((sum, item) => sum + item.count, 0) >= 1,
+        };
+    }
+
+    if (haystack.includes('لغة تفاعلية') || haystack.includes('interactive language')) {
+        const matches = countBulkFixTerms(textValue, INTERACTIVE_WORDS, ENGLISH_INTERACTIVE_WORDS);
+        const total = matches.reduce((sum, item) => sum + item.count, 0);
+        const percentage = wordCount > 0 ? total / wordCount : 0;
+        return {
+            summary: `${total} كلمة تفاعلية من ${wordCount} كلمة (${(percentage * 100).toFixed(3)}%)`,
+            passed: percentage >= 0.0002,
+        };
+    }
+
+    if (haystack.includes('كلمات إنتقالية') || haystack.includes('كلمات انتقالية') || haystack.includes('transitional words')) {
+        const stats = getBulkFixTransitionStats(textValue);
+        return {
+            summary: `${stats.count}/${stats.total} جملة تبدأ بكلمة انتقالية (${(stats.percentage * 100).toFixed(0)}%)`,
+            passed: stats.total > 0 && stats.percentage >= 0.3,
+        };
+    }
+
+    if (haystack.includes('ثنائيات مكررة') || haystack.includes('repeated bigrams')) {
+        const repeated = getBulkFixRepeatedBigrams(textValue);
+        return {
+            summary: repeated.length === 0
+                ? 'لا توجد ثنائيات مكررة أكثر من مرتين'
+                : `ثنائيات مكررة: ${repeated.slice(0, 5).map(item => `${item.term} (${item.count})`).join('، ')}`,
+            passed: repeated.length === 0,
+        };
+    }
+
+    return null;
+};
+
 const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): string => {
     const stats = getBulkFixStats(textValue);
     const paragraphs = splitBulkFixParagraphs(textValue);
@@ -601,6 +895,8 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): s
     const paragraphWords = paragraphs.map(countWords);
     const sentenceWords = sentences.map(countWords);
     const haystack = criterionText.toLowerCase();
+    const isPunctuationSpacingCriterion = haystack.includes('فراغات الترقيم') || haystack.includes('punctuation spacing');
+    const isPunctuationCriterion = (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) && !isPunctuationSpacingCriterion;
     if (haystack.includes('طول الجمل') || haystack.includes('sentence length')) {
         const min = sentenceWords.length ? Math.min(...sentenceWords) : 0;
         const max = sentenceWords.length ? Math.max(...sentenceWords) : 0;
@@ -609,8 +905,17 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): s
     if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
         return `${stats.words} كلمة، ${stats.sentences} جملة، ${stats.paragraphs} فقرة`;
     }
-    if (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) {
+    if (isPunctuationCriterion) {
         return /[.!؟?:]\s*$/.test(textValue.trim()) ? 'علامة النهاية موجودة' : 'علامة النهاية غير موجودة';
+    }
+    if (haystack.includes('تمهيد خطوات') || haystack.includes('steps introduction')) {
+        const colonState = /[:：]\s*$/.test(textValue.trim()) ? 'تنتهي بنقطتين' : 'لا تنتهي بنقطتين';
+        return `${stats.words} كلمة، ${stats.sentences} جملة، ${colonState}`;
+    }
+
+    const textualAudit = getBulkFixTextualAudit(textValue, criterionText);
+    if (textualAudit) {
+        return textualAudit.summary;
     }
 
     const parts: string[] = [];
@@ -640,6 +945,8 @@ const inferBulkFixCriterionCheck = (
     const sentences = splitBulkFixSentences(fixedText);
     const afterStats = getBulkFixStats(fixedText);
     const checks: boolean[] = [];
+    const isPunctuationSpacingCriterion = haystack.includes('فراغات الترقيم') || haystack.includes('punctuation spacing');
+    const isPunctuationCriterion = (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) && !isPunctuationSpacingCriterion;
 
     if (haystack.includes('طول الجمل') || haystack.includes('sentence length')) {
         const targetRange = wordRange || { min: 6, max: 20 };
@@ -656,8 +963,15 @@ const inferBulkFixCriterionCheck = (
         });
     }
 
-    if (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) {
+    if (isPunctuationCriterion) {
         checks.push(/[.!؟?:]\s*$/.test(fixedText.trim()));
+    }
+    if (haystack.includes('تمهيد خطوات') || haystack.includes('steps introduction')) {
+        checks.push(/[:：]\s*$/.test(fixedText.trim()));
+    }
+    const textualAudit = getBulkFixTextualAudit(fixedText, criterionText);
+    if (textualAudit) {
+        checks.push(textualAudit.passed);
     }
 
     return {
@@ -684,9 +998,10 @@ const buildBulkFixCriteriaChecks = (
             check.criterionTitle.includes(criterion.title) ||
             criterion.title.includes(check.criterionTitle)
         ));
+        const shouldUseAiAfter = inferred.status === 'unknown' && matchingAiCheck?.after && inferred.after.includes('غير قابل للقياس');
         return {
             ...inferred,
-            after: inferred.after || matchingAiCheck?.after || 'غير متاح',
+            after: shouldUseAiAfter ? matchingAiCheck.after : inferred.after || matchingAiCheck?.after || 'غير متاح',
             status: inferred.status !== 'unknown' ? inferred.status : matchingAiCheck?.status || 'unknown',
         };
     });
