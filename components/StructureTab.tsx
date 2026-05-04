@@ -465,8 +465,32 @@ const BulkFixReviewPanel: React.FC<{
                                     <div className="flex flex-wrap items-center gap-2">
                                         <span className="text-[10px] font-black text-gray-400">#{index + 1}</span>
                                         <span className="text-[11px] font-black text-gray-800 dark:text-gray-100">{item.ruleTitle}</span>
+                                        {item.ruleTitles && item.ruleTitles.length > 1 && (
+                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-[#d4af37]/15 text-[#8a6a12] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
+                                                {isArabic ? `بطاقة مركبة: ${item.ruleTitles.length} معايير` : `Combined: ${item.ruleTitles.length} criteria`}
+                                            </span>
+                                        )}
+                                        {item.variants && item.variants.length > 1 && (
+                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-100 text-blue-700 dark:bg-blue-900/25 dark:text-blue-300">
+                                                {isArabic ? `${item.variants.length} بدائل` : `${item.variants.length} variants`}
+                                            </span>
+                                        )}
                                         <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${statusClass(item)}`}>{statusLabel(item)}</span>
                                     </div>
+                                    {item.ruleTitles && item.ruleTitles.length > 1 && (
+                                        <div className="mt-2 flex flex-wrap gap-1">
+                                            {item.ruleTitles.slice(0, 6).map((ruleTitle) => (
+                                                <span key={ruleTitle} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                                                    {ruleTitle}
+                                                </span>
+                                            ))}
+                                            {item.ruleTitles.length > 6 && (
+                                                <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                                                    +{item.ruleTitles.length - 6}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
                                     {item.message && (
                                         <p className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{item.message}</p>
                                     )}
@@ -478,6 +502,16 @@ const BulkFixReviewPanel: React.FC<{
                                     <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-gray-400">{isArabic ? 'قبل' : 'Before'}</div>
                                     <div className="max-h-24 overflow-y-auto custom-scrollbar rounded-lg border border-gray-100 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-600 whitespace-pre-wrap dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300">
                                         {item.originalText}
+                                    </div>
+                                </div>
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
+                                        {isArabic ? 'بدائل التطبيق' : 'Application variants'}
+                                    </div>
+                                    <div className="text-[9px] font-black text-gray-400">
+                                        {isArabic
+                                            ? `${item.variants?.length || 1} من 3`
+                                            : `${item.variants?.length || 1} of 3`}
                                     </div>
                                 </div>
                                 {(item.variants?.length ? item.variants : [{
