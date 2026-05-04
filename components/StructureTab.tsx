@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
 import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewVariant, CheckResult } from '../types';
-import { Pilcrow, Heading, AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, ShieldAlert, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2 } from 'lucide-react';
+import { Pilcrow, Heading, AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, ShieldAlert, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
@@ -247,12 +247,12 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
 };
 
 const StatDisplay: React.FC<{ icon: React.ReactNode; value: number; label: string }> = ({ icon, value, label }) => (
-  <div title={label} className="flex-1 flex items-center justify-center gap-3 p-2 cursor-help group">
-    <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full group-hover:scale-110 transition-transform">
+  <div title={label} className="min-w-0 flex items-center justify-center gap-1 px-1 py-2 cursor-help group sm:gap-1.5">
+    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#d4af37]/10 text-[#d4af37] transition-transform group-hover:scale-105 dark:bg-[#d4af37]/20">
       {icon}
     </div>
-    <div className={document.documentElement.dir === 'rtl' ? "text-right" : "text-left"}>
-      <div className="text-lg font-bold text-[#333333] dark:text-[#b7b7b7] leading-none">{value}</div>
+    <div className={`min-w-0 ${document.documentElement.dir === 'rtl' ? "text-right" : "text-left"}`}>
+      <div className="truncate text-sm font-bold leading-none text-[#333333] dark:text-[#b7b7b7] sm:text-base">{value}</div>
     </div>
   </div>
 );
@@ -387,8 +387,6 @@ const BulkFixReviewPanel: React.FC<{
     onClose,
     uiLanguage,
 }) => {
-    if (items.length === 0) return null;
-
     const isArabic = uiLanguage === 'ar';
     const pendingItems = items.filter(item => item.status === 'pending');
     const selectedPendingCount = selectedIds.filter(id => pendingItems.some(item => item.id === id)).length;
@@ -408,6 +406,13 @@ const BulkFixReviewPanel: React.FC<{
         if (status === 'warn') return isArabic ? 'يحتاج مراجعة' : 'Review';
         return isArabic ? 'غير مؤكد' : 'Unknown';
     };
+    const [expandedCriteriaKeys, setExpandedCriteriaKeys] = useState<Record<string, boolean>>({});
+    const toggleCriteria = (key: string) => {
+        setExpandedCriteriaKeys(prev => ({ ...prev, [key]: !prev[key] }));
+    };
+    const iconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-600 bg-white/80 border border-gray-100 hover:border-[#d4af37]/45 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F]/80 dark:text-gray-200 dark:border-[#3C3C3C] dark:hover:bg-[#d4af37]/20';
+
+    if (items.length === 0) return null;
 
     return (
         <div className="mt-3 rounded-2xl border border-[#d4af37]/25 bg-[#d4af37]/5 dark:bg-[#d4af37]/10 dark:border-[#d4af37]/20 overflow-hidden">
@@ -456,7 +461,7 @@ const BulkFixReviewPanel: React.FC<{
                     const isPending = item.status === 'pending';
                     const isSelected = selectedIds.includes(item.id);
                     return (
-                        <div key={item.id} className="p-3 bg-white/70 dark:bg-[#242424]/70">
+                        <div key={item.id} className="p-2.5 bg-white/70 dark:bg-[#242424]/70">
                             <div className="flex items-start gap-2">
                                 <button
                                     onClick={() => onToggleItem(item.id)}
@@ -467,14 +472,19 @@ const BulkFixReviewPanel: React.FC<{
                                     {isSelected && isPending ? <CheckSquare size={16} className="text-[#d4af37]" /> : <Square size={16} />}
                                 </button>
                                 <div className="min-w-0 flex-1">
-                                    <div className="mt-2">
-                                        <button
-                                            onClick={() => onLocateItem(item.id)}
-                                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#333] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
-                                        >
-                                            <MapPin size={13} />
-                                            <span>{isArabic ? 'تحديد الموضع' : 'Locate'}</span>
-                                        </button>
+                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                        <span className="min-w-0 flex-1 truncate text-[11px] font-black text-gray-800 dark:text-gray-100">
+                                            {item.ruleTitle}
+                                        </span>
+                                        {item.status !== 'pending' && (
+                                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[8px] font-black text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                                                {item.status === 'applied'
+                                                    ? (isArabic ? 'مطبق' : 'Applied')
+                                                    : item.status === 'skipped'
+                                                        ? (isArabic ? 'متجاهل' : 'Skipped')
+                                                        : (isArabic ? 'متعذر' : 'Failed')}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -513,30 +523,70 @@ const BulkFixReviewPanel: React.FC<{
                                 } as BulkFixReviewVariant]).map((variant, variantIndex) => {
                                     const isAppliedVariant = item.appliedVariantId === variant.id || (item.status === 'applied' && !item.appliedVariantId && variantIndex === 0);
                                     const criteriaStatusCounts = getCriteriaStatusCounts(variant.criteriaChecks);
+                                    const criteriaKey = `${item.id}:${variant.id}`;
+                                    const hasCriteriaChecks = Boolean(variant.criteriaChecks && variant.criteriaChecks.length > 0);
+                                    const isCriteriaExpanded = Boolean(expandedCriteriaKeys[criteriaKey]);
                                     return (
                                         <div key={variant.id} className={`rounded-xl border p-2 ${isAppliedVariant ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-900/40 dark:bg-emerald-900/15' : 'border-[#d4af37]/25 bg-[#d4af37]/5 dark:bg-[#d4af37]/10'}`}>
-                                            <div className="mb-2 flex items-center justify-between gap-2">
-                                                <div className="text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
+                                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                                <div className="min-w-0 flex-1 truncate text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
                                                     {variant.label || `${isArabic ? 'اقتراح' : 'Suggestion'} ${variantIndex + 1}`}
                                                 </div>
-                                                <div className="flex shrink-0 items-center gap-2">
-                                                    {variant.criteriaChecks && variant.criteriaChecks.length > 0 && (
-                                                        <span className="inline-flex items-center gap-1 rounded-md bg-white/70 px-1.5 py-0.5 text-[9px] font-black tabular-nums dark:bg-[#1F1F1F]/70" title={isArabic ? 'ضمن الحد / خارج الحد / غير مؤكد' : 'Pass / Fail / Unknown'}>
+                                                <div className="flex shrink-0 items-center gap-1.5">
+                                                    {hasCriteriaChecks && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleCriteria(criteriaKey)}
+                                                            className="inline-flex h-7 items-center gap-1 rounded-lg border border-gray-100 bg-white/80 px-1.5 text-[9px] font-black tabular-nums text-gray-600 hover:border-[#d4af37]/45 hover:bg-[#d4af37]/15 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/80 dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                                                            title={isArabic ? 'ضمن الحد / خارج الحد / غير مؤكد' : 'Pass / Fail / Unknown'}
+                                                            aria-label={isArabic ? 'فتح أو إغلاق تدقيق المعايير' : 'Toggle criteria audit'}
+                                                            aria-expanded={isCriteriaExpanded}
+                                                        >
                                                             <span className="text-emerald-600 dark:text-emerald-400">{criteriaStatusCounts.pass}</span>
                                                             <span className="text-gray-300 dark:text-gray-600">/</span>
                                                             <span className="text-red-700 dark:text-red-400">{criteriaStatusCounts.fail}</span>
                                                             <span className="text-gray-300 dark:text-gray-600">/</span>
                                                             <span className="text-gray-950 dark:text-gray-100">{criteriaStatusCounts.unknown}</span>
-                                                        </span>
+                                                            <ChevronDown size={12} className={`text-gray-400 transition-transform ${isCriteriaExpanded ? 'rotate-180' : ''}`} />
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onLocateItem(item.id)}
+                                                        className={iconButtonClass}
+                                                        title={isArabic ? 'تحديد الموضع' : 'Locate'}
+                                                        aria-label={isArabic ? 'تحديد الموضع' : 'Locate'}
+                                                    >
+                                                        <MapPin size={13} />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => copyText(variant.fixedText)}
+                                                        className={iconButtonClass}
+                                                        title={isArabic ? 'نسخ الاقتراح' : 'Copy suggestion'}
+                                                        aria-label={isArabic ? 'نسخ الاقتراح' : 'Copy suggestion'}
+                                                    >
+                                                        <Copy size={13} />
+                                                    </button>
+                                                    {isPending && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onApplyItem(item.id, variant.id)}
+                                                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#d4af37] text-white hover:bg-[#b8922e]"
+                                                            title={isArabic ? 'تطبيق الاقتراح' : 'Apply suggestion'}
+                                                            aria-label={isArabic ? 'تطبيق الاقتراح' : 'Apply suggestion'}
+                                                        >
+                                                            <Check size={13} />
+                                                        </button>
                                                     )}
                                                     {isAppliedVariant && (
-                                                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[8px] font-black text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                                                            {isArabic ? 'المطبق' : 'Applied'}
+                                                        <span className="inline-flex h-7 items-center rounded-lg bg-emerald-100 px-2 text-[8px] font-black text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                                            {isArabic ? 'مطبق' : 'Applied'}
                                                         </span>
                                                     )}
                                                 </div>
                                             </div>
-                                            {variant.criteriaChecks && variant.criteriaChecks.length > 0 && (
+                                            {hasCriteriaChecks && isCriteriaExpanded && (
                                                 <div className="mb-2 rounded-lg border border-white/60 bg-white/75 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/80">
                                                     <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
                                                         {isArabic ? 'تدقيق المعايير' : 'Criteria audit'}
@@ -554,13 +604,6 @@ const BulkFixReviewPanel: React.FC<{
                                                                     <span>{check.source === 'article' ? (isArabic ? 'الحالي العام' : 'Overall current') : (isArabic ? 'الحالي' : 'Current')}: <b>{check.before}</b></span>
                                                                     <span>{isArabic ? 'المطلوب' : 'Required'}: <b>{check.required}</b></span>
                                                                     <span>{isArabic ? 'المستخرج' : 'Extracted'}: <b>{check.after}</b></span>
-                                                                    {check.source === 'article' && (
-                                                                        <span className="text-gray-400 dark:text-gray-500">
-                                                                            {isArabic
-                                                                                ? 'التقييم هنا مبني على النص المقترح فقط؛ أما الوضع العام فهو مذكور في سطر الحالي.'
-                                                                                : 'This status is based on the proposed text only; the overall article state is shown in the current line.'}
-                                                                        </span>
-                                                                    )}
                                                                 </div>
                                                             </div>
                                                         ))}
@@ -573,24 +616,6 @@ const BulkFixReviewPanel: React.FC<{
                                             <div className="overflow-y-auto custom-scrollbar rounded-lg border border-white/60 bg-white/80 p-2 text-[11px] leading-relaxed text-gray-800 whitespace-pre-wrap break-words dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100" style={{ maxHeight: 'min(42vh, 24rem)' }}>
                                                 {variant.fixedText}
                                             </div>
-                                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                <button
-                                                    onClick={() => copyText(variant.fixedText)}
-                                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#333] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
-                                                >
-                                                    <Copy size={13} />
-                                                    <span>{isArabic ? 'نسخ الاقتراح' : 'Copy'}</span>
-                                                </button>
-                                                {isPending && (
-                                                    <button
-                                                        onClick={() => onApplyItem(item.id, variant.id)}
-                                                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-black bg-[#d4af37] text-white hover:bg-[#b8922e]"
-                                                    >
-                                                        <Check size={13} />
-                                                        <span>{isArabic ? 'تطبيق هذا الاقتراح' : 'Apply this'}</span>
-                                                    </button>
-                                                )}
-                                            </div>
                                         </div>
                                     );
                                 })}
@@ -602,24 +627,16 @@ const BulkFixReviewPanel: React.FC<{
                                 </p>
                             )}
 
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <div className="mt-2 flex justify-end">
                                 {isPending && (
-                                    <>
-                                        <button
-                                            onClick={() => onApplyItem(item.id)}
-                                            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-black bg-[#d4af37] text-white hover:bg-[#b8922e]"
-                                        >
-                                            <Check size={13} />
-                                            <span>{isArabic ? 'تطبيق الأول' : 'Apply first'}</span>
-                                        </button>
-                                        <button
-                                            onClick={() => onSkipItem(item.id)}
-                                            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-700 dark:bg-[#333] dark:text-gray-300 dark:hover:bg-red-900/20 dark:hover:text-red-300"
-                                        >
-                                            <Trash2 size={13} />
-                                            <span>{isArabic ? 'تجاهل' : 'Skip'}</span>
-                                        </button>
-                                    </>
+                                    <button
+                                        onClick={() => onSkipItem(item.id)}
+                                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-700 dark:bg-[#333] dark:text-gray-300 dark:hover:bg-red-900/20 dark:hover:text-red-300"
+                                        title={isArabic ? 'تجاهل الاقتراح' : 'Skip proposal'}
+                                        aria-label={isArabic ? 'تجاهل الاقتراح' : 'Skip proposal'}
+                                    >
+                                        <Trash2 size={13} />
+                                    </button>
                                 )}
                             </div>
                         </div>
@@ -802,13 +819,13 @@ const StructureTab: React.FC = () => {
     ];
 
   return (
-    <div className="p-2 space-y-3">
+    <div className="min-w-0 overflow-x-hidden p-2 space-y-3">
        <div className="px-1 py-1">
-         <div className="flex bg-white dark:bg-gradient-to-r from-[#2A2A2A] via-[#222222] to-[#1F1F1F] rounded-2xl border border-gray-200 dark:border-[#3C3C3C] divide-x divide-gray-100 dark:divide-[#3C3C3C] shadow-sm">
-            <StatDisplay icon={<ShieldAlert size={16} />} value={stats.violatingCriteriaCount} label={tSt.violatingCriteria} />
-            <StatDisplay icon={<AlertCircleIcon size={16} />} value={stats.totalErrorsCount} label={tSt.totalErrors} />
-            <StatDisplay icon={<Pilcrow size={16} />} value={stats.paragraphCount} label={tSt.paragraph} />
-            <StatDisplay icon={<Heading size={16} />} value={stats.headingCount} label={tSt.heading} />
+         <div className="grid min-w-0 grid-cols-4 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm divide-x divide-gray-100 dark:divide-[#3C3C3C] dark:border-[#3C3C3C] dark:bg-gradient-to-r dark:from-[#2A2A2A] dark:via-[#222222] dark:to-[#1F1F1F]">
+            <StatDisplay icon={<ShieldAlert size={14} />} value={stats.violatingCriteriaCount} label={tSt.violatingCriteria} />
+            <StatDisplay icon={<AlertCircleIcon size={14} />} value={stats.totalErrorsCount} label={tSt.totalErrors} />
+            <StatDisplay icon={<Pilcrow size={14} />} value={stats.paragraphCount} label={tSt.paragraph} />
+            <StatDisplay icon={<Heading size={14} />} value={stats.headingCount} label={tSt.heading} />
           </div>
        </div>
        <div className="px-1">

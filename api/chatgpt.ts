@@ -13,6 +13,15 @@ const normalizeKeys = (apiKey?: unknown, apiKeys?: unknown): string[] => {
     .filter(Boolean);
 };
 
+const randomizeKeyOrder = (keys: string[]): string[] => {
+  const shuffled = [...keys];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+};
+
 const extractResponseText = (data: any): string => {
   if (typeof data?.output_text === "string") {
     return data.output_text;
@@ -91,7 +100,7 @@ export default async function handler(req: Request): Promise<Response> {
       : OPENAI_MODEL;
 
     let lastError: unknown = null;
-    for (const openAiKey of openAiKeys) {
+    for (const openAiKey of randomizeKeyOrder(openAiKeys)) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
 

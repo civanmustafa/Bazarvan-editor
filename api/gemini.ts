@@ -1,6 +1,15 @@
 
 import { GoogleGenAI } from "@google/genai";
 
+const randomizeKeyOrder = (keys: string[]): string[] => {
+  const shuffled = [...keys];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+};
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "الطريقة غير مسموح بها" }), {
@@ -47,7 +56,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     // Flash has a free-tier quota, while Pro can return limit 0 on unpaid projects.
     let lastError: unknown = null;
-    for (const GEMINI_API_KEY of GEMINI_API_KEYS) {
+    for (const GEMINI_API_KEY of randomizeKeyOrder(GEMINI_API_KEYS)) {
       try {
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
         const response = await ai.models.generateContent({

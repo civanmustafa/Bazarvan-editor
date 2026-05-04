@@ -1458,13 +1458,23 @@ const normalizeGeminiKeys = (keys?: string | string[]): string[] => {
     return keyList.map(key => key.trim()).filter(Boolean);
 };
 
+const randomizeApiKeyOrder = (keys: string[]): string[] => {
+    const shuffled = [...keys];
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+};
+
 const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
     const trimmedUserKeys = normalizeGeminiKeys(userKeys);
 
     if (trimmedUserKeys.length > 0) {
         const errors: string[] = [];
+        const randomizedUserKeys = randomizeApiKeyOrder(trimmedUserKeys);
 
-        for (const [index, apiKey] of trimmedUserKeys.entries()) {
+        for (const [index, apiKey] of randomizedUserKeys.entries()) {
             try {
                 const ai = new GoogleGenAI({ apiKey });
                 const response = await ai.models.generateContent({
@@ -1528,7 +1538,7 @@ const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[])
             body: JSON.stringify({
                 prompt,
                 model: OPENAI_MODEL,
-                apiKeys: trimmedUserKeys.length > 0 ? trimmedUserKeys : undefined,
+                apiKeys: trimmedUserKeys.length > 0 ? randomizeApiKeyOrder(trimmedUserKeys) : undefined,
             }),
             signal: controller.signal,
         });
