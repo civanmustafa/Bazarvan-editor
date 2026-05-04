@@ -118,6 +118,18 @@ const orderCriteriaChecksForDisplay = (checks?: BulkFixReviewVariant['criteriaCh
     .map(({ check }) => check)
 );
 
+const getCriteriaStatusCounts = (checks?: BulkFixReviewVariant['criteriaChecks']) => (
+  (checks || []).reduce(
+    (counts, check) => {
+      if (check.status === 'pass') counts.pass += 1;
+      else if (check.status === 'unknown') counts.unknown += 1;
+      else counts.fail += 1;
+      return counts;
+    },
+    { pass: 0, fail: 0, unknown: 0 }
+  )
+);
+
 const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighlighted?: boolean; onInfoClick: (item: CheckResult) => void; uiLanguage: 'ar' | 'en'; }> = ({ item, onClick, isHighlighted, onInfoClick, uiLanguage }) => {
   const t = translations[uiLanguage];
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
@@ -500,17 +512,29 @@ const BulkFixReviewPanel: React.FC<{
                                     })),
                                 } as BulkFixReviewVariant]).map((variant, variantIndex) => {
                                     const isAppliedVariant = item.appliedVariantId === variant.id || (item.status === 'applied' && !item.appliedVariantId && variantIndex === 0);
+                                    const criteriaStatusCounts = getCriteriaStatusCounts(variant.criteriaChecks);
                                     return (
                                         <div key={variant.id} className={`rounded-xl border p-2 ${isAppliedVariant ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-900/40 dark:bg-emerald-900/15' : 'border-[#d4af37]/25 bg-[#d4af37]/5 dark:bg-[#d4af37]/10'}`}>
                                             <div className="mb-2 flex items-center justify-between gap-2">
                                                 <div className="text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
                                                     {variant.label || `${isArabic ? 'اقتراح' : 'Suggestion'} ${variantIndex + 1}`}
                                                 </div>
-                                                {isAppliedVariant && (
-                                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[8px] font-black text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                                                        {isArabic ? 'المطبق' : 'Applied'}
-                                                    </span>
-                                                )}
+                                                <div className="flex shrink-0 items-center gap-2">
+                                                    {variant.criteriaChecks && variant.criteriaChecks.length > 0 && (
+                                                        <span className="inline-flex items-center gap-1 rounded-md bg-white/70 px-1.5 py-0.5 text-[9px] font-black tabular-nums dark:bg-[#1F1F1F]/70" title={isArabic ? 'ضمن الحد / خارج الحد / غير مؤكد' : 'Pass / Fail / Unknown'}>
+                                                            <span className="text-emerald-600 dark:text-emerald-400">{criteriaStatusCounts.pass}</span>
+                                                            <span className="text-gray-300 dark:text-gray-600">/</span>
+                                                            <span className="text-red-700 dark:text-red-400">{criteriaStatusCounts.fail}</span>
+                                                            <span className="text-gray-300 dark:text-gray-600">/</span>
+                                                            <span className="text-gray-950 dark:text-gray-100">{criteriaStatusCounts.unknown}</span>
+                                                        </span>
+                                                    )}
+                                                    {isAppliedVariant && (
+                                                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[8px] font-black text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                                            {isArabic ? 'المطبق' : 'Applied'}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                             {variant.criteriaChecks && variant.criteriaChecks.length > 0 && (
                                                 <div className="mb-2 rounded-lg border border-white/60 bg-white/75 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/80">

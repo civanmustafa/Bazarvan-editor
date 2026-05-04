@@ -170,10 +170,13 @@ const formatStructureCriteriaRules = (sectionTitle: string, rules: CheckResult[]
 const formatBulkFixViolationPrompt = (
     rule: CheckResult,
     item: NonNullable<CheckResult['violatingItems']>[number],
-    targetText: string
+    targetText: string,
+    localContext?: Partial<BulkFixTargetContext>
 ): string => {
     return [
         'أصلح النص المحدد بناءً على بطاقة المعيار والمخالفة التالية.',
+        '',
+        formatAiReadOnlyLocalContext(localContext),
         '',
         '**بطاقة المعيار المخالف:**',
         `- اسم المعيار: ${rule.title}`,
@@ -190,11 +193,13 @@ const formatBulkFixViolationPrompt = (
         '**تعليمات الإصلاح:**',
         '- أصلح سبب المخالفة المذكور فقط مع الحفاظ على معنى النص وسياقه.',
         '- اجعل النص الجديد مناسباً للقيمة المطلوبة والشروط التفصيلية إن وجدت.',
+        '- لا تبدأ النص كأنه فقرة مستقلة إذا كان السياق السابق يمهد له، ولا تختمه كأنه نهاية قسم إذا كان النص اللاحق يكمل الفكرة.',
+        '- تجنب تكرار المعلومات أو الكلمات المحورية الموجودة في النص السابق أو اللاحق، واجعل الربط طبيعياً ومختصراً.',
         '- لا تضف شرحاً، ولا تسميات مثل "النص المقترح" أو "الإجابة".',
         '- لا تعدّل خارج النص المحدد، ولا تضف معلومات غير موجودة في السياق.',
         '',
         'أرجع JSON حصراً بهذا الشكل:',
-        '{ "fixedText": "النص البديل الجاهز فقط" }',
+        '{ "suggestions": ["النص البديل الجاهز فقط"] }',
     ].filter(Boolean).join('\n');
 };
 
@@ -220,6 +225,10 @@ type BulkFixTargetContext = {
     nextBlockType?: string;
     articleTextBefore?: string;
     articleTextAfter?: string;
+    sectionHeading?: string;
+    previousTexts?: string[];
+    nextTexts?: string[];
+    targetRole?: string;
 };
 
 const BULK_FIX_PROTECTION_RULE_KEYS: (keyof StructureAnalysis)[] = [
@@ -378,8 +387,10 @@ const groupBulkFixViolationsByTextUnit = (
         .sort((a, b) => a.from - b.from);
 };
 
-const getBulkFixTopLevelBlocks = (editor: any): { from: number; to: number; type: string; text: string }[] => {
-    const blocks: { from: number; to: number; type: string; text: string }[] = [];
+type AiContextBlock = { from: number; to: number; type: string; text: string; level?: number };
+
+const getBulkFixTopLevelBlocks = (editor: any): AiContextBlock[] => {
+    const blocks: AiContextBlock[] = [];
     if (!editor?.state?.doc?.forEach) return blocks;
 
     editor.state.doc.forEach((node: any, offset: number) => {
@@ -388,21 +399,71 @@ const getBulkFixTopLevelBlocks = (editor: any): { from: number; to: number; type
             to: offset + node.nodeSize,
             type: node.type.name,
             text: node.textContent || '',
+            level: node.attrs?.level,
         });
     });
 
     return blocks;
 };
 
-const getBulkFixTargetContext = (editor: any, group: BulkFixTargetGroup): BulkFixTargetContext => {
+const trimAiContextText = (value: string, maxLength = 520): string => {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, Math.max(maxLength - 3, 0)).trim()}...`;
+};
+
+const getMeaningfulContextBlocks = (blocks: AiContextBlock[], startIndex: number, direction: 'before' | 'after', limit = 2): AiContextBlock[] => {
+    const result: AiContextBlock[] = [];
+    const step = direction === 'before' ? -1 : 1;
+    for (let index = startIndex; index >= 0 && index < blocks.length && result.length < limit; index += step) {
+        const block = blocks[index];
+        if (!block?.text?.trim()) continue;
+        if (block.type === 'heading') continue;
+        result.push(block);
+    }
+    return direction === 'before' ? result.reverse() : result;
+};
+
+const inferAiTargetRole = (
+    currentBlock: AiContextBlock | undefined,
+    previousBlocks: AiContextBlock[],
+    nextBlocks: AiContextBlock[],
+    sectionHeading?: string
+): string | undefined => {
+    if (!currentBlock) return undefined;
+    if (currentBlock.type === 'heading') return 'عنوان داخل بنية المقال؛ يجب أن ينسجم مع ما قبله وما بعده.';
+    if (currentBlock.type === 'paragraph' && (nextBlocks[0]?.type === 'bulletList' || nextBlocks[0]?.type === 'orderedList')) {
+        return 'فقرة تمهيدية لقائمة؛ يجب أن تفتح القائمة دون تكرار عناصرها.';
+    }
+    if (previousBlocks.length === 0 && sectionHeading) {
+        return 'افتتاح القسم؛ يجب أن يعرّف الفكرة دون إعادة صياغة العنوان حرفياً.';
+    }
+    if (nextBlocks.length === 0) {
+        return 'خاتمة جزئية أو انتقال قبل نهاية القسم؛ يجب أن تغلق الفكرة دون إضافة موضوع جديد.';
+    }
+    return 'فقرة وسطية داخل القسم؛ يجب أن تكمل التدفق بين النص السابق واللاحق دون تكرار.';
+};
+
+const getAiLocalTextContext = (editor: any, from: number, to: number): BulkFixTargetContext => {
     const blocks = getBulkFixTopLevelBlocks(editor);
     const docSize = editor?.state?.doc?.content?.size || 0;
-    const currentIndex = blocks.findIndex(block => (
-        block.from <= group.from &&
-        block.to >= group.to
-    ));
-    const currentBlock = currentIndex >= 0 ? blocks[currentIndex] : undefined;
-    const nextBlock = currentIndex >= 0 ? blocks[currentIndex + 1] : undefined;
+    const overlappingIndexes = blocks
+        .map((block, index) => (block.to > from && block.from < to ? index : -1))
+        .filter(index => index !== -1);
+    const fallbackIndex = blocks.findIndex(block => block.from <= from && block.to >= from);
+    const firstIndex = overlappingIndexes[0] ?? (fallbackIndex >= 0 ? fallbackIndex : 0);
+    const lastIndex = overlappingIndexes[overlappingIndexes.length - 1] ?? firstIndex;
+    const currentBlock = blocks[firstIndex];
+    const nextBlock = blocks[lastIndex + 1];
+    const sectionHeadingBlock = blocks
+        .slice(0, firstIndex + 1)
+        .reverse()
+        .find(block => block.type === 'heading' && block.text.trim().length > 0);
+    const previousBlocks = getMeaningfulContextBlocks(blocks, firstIndex - 1, 'before');
+    const nextBlocks = getMeaningfulContextBlocks(blocks, lastIndex + 1, 'after');
+    const sectionHeading = sectionHeadingBlock
+        ? `H${sectionHeadingBlock.level || 2}: ${trimAiContextText(sectionHeadingBlock.text, 180)}`
+        : undefined;
     const isListIntro = currentBlock?.type === 'paragraph' && (
         nextBlock?.type === 'bulletList' ||
         nextBlock?.type === 'orderedList'
@@ -412,9 +473,34 @@ const getBulkFixTargetContext = (editor: any, group: BulkFixTargetGroup): BulkFi
         isListIntro,
         currentBlockType: currentBlock?.type,
         nextBlockType: nextBlock?.type,
-        articleTextBefore: docSize > 0 ? editor.state.doc.textBetween(0, group.from, ' ') : '',
-        articleTextAfter: docSize > 0 ? editor.state.doc.textBetween(group.to, docSize, ' ') : '',
+        articleTextBefore: docSize > 0 ? editor.state.doc.textBetween(0, from, ' ') : '',
+        articleTextAfter: docSize > 0 ? editor.state.doc.textBetween(to, docSize, ' ') : '',
+        sectionHeading,
+        previousTexts: previousBlocks.map(block => trimAiContextText(block.text)),
+        nextTexts: nextBlocks.map(block => trimAiContextText(block.text)),
+        targetRole: inferAiTargetRole(currentBlock, previousBlocks, nextBlocks, sectionHeading),
     };
+};
+
+const formatAiReadOnlyLocalContext = (context?: Partial<BulkFixTargetContext>): string => {
+    if (!context) return '';
+    const lines = [
+        '**سياق موضع التعديل للقراءة فقط:**',
+        context.sectionHeading ? `- عنوان القسم الحالي: ${context.sectionHeading}` : '',
+        context.targetRole ? `- دور النص المستهدف داخل القسم: ${context.targetRole}` : '',
+        ...(context.previousTexts || []).map((textValue, index) => `- النص السابق ${index + 1}: """${textValue}"""`),
+        ...(context.nextTexts || []).map((textValue, index) => `- النص اللاحق ${index + 1}: """${textValue}"""`),
+        '',
+        '**تعليمات استخدام السياق:**',
+        '- استخدم السياق لفهم التدفق ومنع التكرار والركاكة فقط.',
+        '- لا تكرر معلومة مذكورة في النص السابق أو اللاحق إلا عند الحاجة لجملة ربط قصيرة.',
+        '- لا تعدل السياق السابق أو اللاحق ولا تدمجه داخل الإجابة؛ أعد النص المستهدف فقط.',
+    ].filter(Boolean);
+    return lines.length > 4 ? lines.join('\n') : '';
+};
+
+const getBulkFixTargetContext = (editor: any, group: BulkFixTargetGroup): BulkFixTargetContext => {
+    return getAiLocalTextContext(editor, group.from, group.to);
 };
 
 const collectBulkFixViolations = (structureAnalysis: StructureAnalysis): BulkFixViolationContext[] => {
@@ -615,6 +701,8 @@ const formatBulkFixGroupPrompt = (
         `هذه ${unitLabel} واحدة تحتاج إصلاحاً موجهاً دون كسر المعايير المرتبطة بها.`,
         contextLine,
         '',
+        formatAiReadOnlyLocalContext(targetContext),
+        '',
         '**أهداف الإصلاح الأساسية:**',
         targetRuleCards || '- لا توجد أهداف إصلاح محددة بوضوح.',
         '',
@@ -631,6 +719,8 @@ const formatBulkFixGroupPrompt = (
         '- أصلح أهداف الإصلاح الأساسية فقط، واجعل قيود الحماية شروطاً ملزمة لا تكسرها أثناء التعديل.',
         '- لا تحول قيود الحماية إلى هدف توسعة أو إعادة كتابة زائدة؛ دورها منع ظهور مخالفات جديدة.',
         '- ارفق في تفكيرك قواعد وشروط أهداف الإصلاح وقيود الحماية عند صياغة البدائل.',
+        '- حافظ على وظيفة النص داخل القسم كما يوضح سياق الموضع، ولا تجعله يكرر ما قبله أو يقفز فوق ما بعده.',
+        '- لا تبدأ الاقتراح بمقدمة عامة إذا كان النص السابق بدأ الفكرة، ولا تعيد شرح معلومة ستأتي مباشرة في النص اللاحق.',
         '- قدم اقتراحين فقط مختلفين قابلين للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
         '- رتّب الاقتراحات بحيث يأتي أولاً الاقتراح الذي يجعل أكبر عدد من تدقيقات criteriaChecks بحالة pass، ثم الأقل كسراً للقيود.',
         '- إذا كان هدف الإصلاح هو تقصير فقرة أو ضبط طولها، فلا تطل الجمل ولا تضف شرحاً غير ضروري.',
@@ -2239,21 +2329,38 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         try {
             let textToProcess = "";
             let originalText = "";
+            let localContext: BulkFixTargetContext | undefined;
             let from, to;
             if (action === 'replace-text') {
                 const { from: f, to: t } = editor.state.selection;
                 from = f; to = t;
                 textToProcess = editor.state.doc.textBetween(f, t, ' ');
                 originalText = textToProcess;
+                localContext = getAiLocalTextContext(editor, f, t);
             } else {
                 textToProcess = text;
                 originalText = action === 'replace-title' ? title : 'Meta Description';
             }
             const prompt = renderEngineeringPrompt(promptTemplate, {
                 selectedText: textToProcess,
-                fullArticleText: textToProcess,
+                fullArticleText: text,
             });
-            const finalPrompt = `${buildComprehensivePrompt(prompt)}\n\nأرجع النتيجة بتنسيق JSON حصراً: { "suggestions": ["..."] }`;
+            const boundedPrompt = action === 'replace-text'
+                ? [
+                    formatAiReadOnlyLocalContext(localContext),
+                    '**الأمر المطلوب على النص المستهدف فقط:**',
+                    prompt,
+                    '',
+                    '**النص المستهدف المسموح باستبداله فقط:**',
+                    `"""${textToProcess}"""`,
+                    '',
+                    '**قواعد الحفاظ على السياق:**',
+                    '- أعد النص المستهدف فقط، ولا تكتب النص السابق أو اللاحق ضمن الاقتراح.',
+                    '- حافظ على اتصال الفقرة بما قبلها وما بعدها، وتجنب إعادة المعلومة نفسها أو افتتاح الموضوع من جديد بلا حاجة.',
+                    '- إذا كان النص السابق يمهد للفكرة، ابدأ مباشرة بالتكملة. وإذا كان النص اللاحق يكمل الفكرة، لا تختم الاقتراح كأنه نهاية القسم.',
+                ].filter(Boolean).join('\n\n')
+                : prompt;
+            const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading)}\n\nأرجع النتيجة بتنسيق JSON حصراً: { "suggestions": ["..."] }`;
             const resultJson = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
@@ -2307,7 +2414,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setAiFixingInfo({ title: rule.title, from: item.from });
         try {
             const originalText = editor.state.doc.textBetween(item.from, item.to, ' ');
-            const prompt = `${buildComprehensivePrompt(`أصلح النص التالي لحل مشكلة: ${rule.title}`)}\nالنص: "${originalText}"\nأرجع JSON: { "suggestions": ["..."] }`;
+            const localContext = getAiLocalTextContext(editor, item.from, item.to);
+            const prompt = buildComprehensivePrompt(
+                formatBulkFixViolationPrompt(rule, item, originalText, localContext),
+                localContext.sectionHeading
+            );
             const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
@@ -2361,7 +2472,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const targetContext = getBulkFixTargetContext(editor, group);
                 const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
                 const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
-                const prompt = buildComprehensivePrompt(formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules, targetContext, articleLevelRules));
+                const prompt = buildComprehensivePrompt(
+                    formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules, targetContext, articleLevelRules),
+                    targetContext.sectionHeading
+                );
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
                 const uniqueRules = getUniqueBulkFixRules(group.violations);
