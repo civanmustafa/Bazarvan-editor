@@ -13,6 +13,8 @@ import type {
     HeadingAnalysisResult,
     AIHistoryItem,
     BulkFixReviewItem,
+    BulkFixReviewStats,
+    BulkFixReviewVariant,
     GoalContext,
     StructureAnalysis,
 } from '../types';
@@ -187,6 +189,209 @@ const formatBulkFixViolationPrompt = (
         'أرجع JSON حصراً بهذا الشكل:',
         '{ "fixedText": "النص البديل الجاهز فقط" }',
     ].filter(Boolean).join('\n');
+};
+
+type BulkFixViolationContext = {
+    rule: CheckResult;
+    item: NonNullable<CheckResult['violatingItems']>[number];
+};
+
+type BulkFixTextUnit = {
+    from: number;
+    to: number;
+    unitType: 'paragraph' | 'heading' | 'section' | 'block';
+};
+
+type BulkFixTargetGroup = BulkFixTextUnit & {
+    id: string;
+    violations: BulkFixViolationContext[];
+};
+
+const countWords = (value: string): number => value.trim().split(/\s+/).filter(Boolean).length;
+
+const countSentences = (value: string): number => {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (!normalized) return 0;
+    const matches = normalized.match(/[^.!؟?؛;:]+[.!؟?؛;:]*/g);
+    return matches?.map(sentence => sentence.trim()).filter(Boolean).length || 1;
+};
+
+const getBulkFixStats = (value: string): BulkFixReviewStats => ({
+    words: countWords(value),
+    sentences: countSentences(value),
+    paragraphs: value.split(/\n{2,}|\r?\n/).map(part => part.trim()).filter(Boolean).length || (value.trim() ? 1 : 0),
+    characters: value.trim().length,
+});
+
+const getBulkFixTextUnit = (
+    editor: any,
+    item: NonNullable<CheckResult['violatingItems']>[number]
+): BulkFixTextUnit | null => {
+    if (!editor) return null;
+    const docSize = editor.state.doc.content.size;
+    const sectionFrom = item.sectionFrom;
+    const sectionTo = item.sectionTo;
+    if (
+        Number.isFinite(sectionFrom) &&
+        Number.isFinite(sectionTo) &&
+        typeof sectionFrom === 'number' &&
+        typeof sectionTo === 'number' &&
+        sectionFrom >= 0 &&
+        sectionTo <= docSize &&
+        sectionTo > sectionFrom
+    ) {
+        return { from: sectionFrom, to: sectionTo, unitType: 'section' };
+    }
+
+    let bestMatch: BulkFixTextUnit | null = null;
+    editor.state.doc.descendants((node: any, pos: number) => {
+        const nodeTo = pos + node.nodeSize;
+        if (pos > item.from || nodeTo < item.to) return true;
+        if (!node.isBlock || !node.textContent?.trim()) return true;
+        if (!['paragraph', 'heading', 'listItem'].includes(node.type.name)) return true;
+
+        if (!bestMatch || (nodeTo - pos) < (bestMatch.to - bestMatch.from)) {
+            bestMatch = {
+                from: pos,
+                to: nodeTo,
+                unitType: node.type.name === 'heading' ? 'heading' : node.type.name === 'paragraph' ? 'paragraph' : 'block',
+            };
+        }
+        return true;
+    });
+
+    if (bestMatch) return bestMatch;
+    if (item.from >= 0 && item.to <= docSize && item.to > item.from) {
+        return { from: item.from, to: item.to, unitType: 'block' };
+    }
+    return null;
+};
+
+const groupBulkFixViolationsByTextUnit = (
+    editor: any,
+    violations: BulkFixViolationContext[]
+): BulkFixTargetGroup[] => {
+    const groupMap = new Map<string, BulkFixTargetGroup>();
+
+    violations.forEach((violation) => {
+        const unit = getBulkFixTextUnit(editor, violation.item);
+        if (!unit) return;
+        const key = `${unit.from}:${unit.to}`;
+        const existing = groupMap.get(key);
+        if (existing) {
+            existing.violations.push(violation);
+            return;
+        }
+
+        groupMap.set(key, {
+            ...unit,
+            id: `bulk-group-${unit.from}-${unit.to}`,
+            violations: [violation],
+        });
+    });
+
+    const groups = Array.from(groupMap.values()).sort((a, b) => (b.to - b.from) - (a.to - a.from));
+    const absorbedGroupIds = new Set<string>();
+
+    groups.forEach((container) => {
+        if (absorbedGroupIds.has(container.id)) return;
+        groups.forEach((child) => {
+            if (container.id === child.id || absorbedGroupIds.has(child.id)) return;
+            const containsChild = container.from <= child.from && container.to >= child.to;
+            if (!containsChild) return;
+            container.violations.push(...child.violations);
+            absorbedGroupIds.add(child.id);
+        });
+    });
+
+    return groups
+        .filter(group => !absorbedGroupIds.has(group.id))
+        .sort((a, b) => a.from - b.from);
+};
+
+const formatBulkFixGroupPrompt = (group: BulkFixTargetGroup, targetText: string): string => {
+    const uniqueRules = group.violations.reduce<CheckResult[]>((acc, violation) => {
+        if (!acc.some(rule => rule.title === violation.rule.title)) acc.push(violation.rule);
+        return acc;
+    }, []);
+
+    const ruleCards = uniqueRules.map((rule) => {
+        const messages = group.violations
+            .filter(violation => violation.rule.title === rule.title)
+            .map(violation => violation.item.message)
+            .filter(Boolean);
+
+        return [
+            `### ${rule.title}`,
+            `- حالة المعيار: ${rule.status}`,
+            `- القيمة الحالية: ${rule.current}`,
+            `- القيمة المطلوبة: ${rule.required}`,
+            rule.description ? `- وصف المعيار: ${rule.description}` : '',
+            rule.details ? `- الشروط التفصيلية:\n${rule.details}` : '',
+            messages.length ? `- رسائل المخالفات في هذه الوحدة:\n${messages.map(message => `  - ${message}`).join('\n')}` : '',
+        ].filter(Boolean).join('\n');
+    }).join('\n\n');
+
+    const unitLabel = group.unitType === 'section'
+        ? 'قسم كامل'
+        : group.unitType === 'heading'
+            ? 'عنوان'
+            : group.unitType === 'paragraph'
+                ? 'فقرة'
+                : 'وحدة نصية';
+
+    return [
+        `هذه ${unitLabel} واحدة عليها عدة مخالفات مترابطة. المطلوب إنتاج بدائل محسنة تعالج كل المعايير معاً، لا إصلاحاً منفصلاً لكل معيار.`,
+        '',
+        '**المعايير والمخالفات المرتبطة بهذه الوحدة:**',
+        ruleCards,
+        '',
+        '**النص المراد استبداله كوحدة واحدة:**',
+        `"""${targetText}"""`,
+        '',
+        '**تعليمات مهمة:**',
+        '- ارفق في تفكيرك قواعد وشروط كل معيار أعلاه عند صياغة البدائل.',
+        '- قدم 3 اقتراحات مختلفة قابلة للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
+        '- عالج المخالفات المتداخلة معاً: الطول، الجمل، التكرار، الترقيم، الإحالات الغامضة، الكلمات المطلوب حذفها، أو أي معيار مذكور في البطاقة.',
+        '- حافظ على المعنى الأصلي وسياق الصفحة ولا تضف معلومات أو ادعاءات جديدة.',
+        '- إذا كان النص يحتوي عناوين، فاستخدم Markdown للحفاظ على مستويات العناوين قدر الإمكان.',
+        '- لا تكتب تسميات داخل fixedText مثل "النص المقترح" أو "الإجابة".',
+        '',
+        'أرجع JSON حصراً بهذا الشكل:',
+        '{ "suggestions": [ { "label": "اقتراح 1", "fixedText": "..." }, { "label": "اقتراح 2", "fixedText": "..." }, { "label": "اقتراح 3", "fixedText": "..." } ] }',
+    ].filter(Boolean).join('\n');
+};
+
+const normalizeBulkFixVariants = (raw: unknown, originalText: string): BulkFixReviewVariant[] => {
+    const record = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    const rawSuggestions = Array.isArray(record.suggestions)
+        ? record.suggestions
+        : Array.isArray(record.variants)
+            ? record.variants
+            : record.fixedText
+                ? [{ label: 'اقتراح 1', fixedText: record.fixedText }]
+                : [];
+
+    const statsBefore = getBulkFixStats(originalText);
+    return rawSuggestions
+        .map((suggestion, index): BulkFixReviewVariant | null => {
+            const suggestionRecord = suggestion && typeof suggestion === 'object'
+                ? suggestion as Record<string, unknown>
+                : { fixedText: suggestion };
+            const fixedText = cleanAiPatchContentMarkdown(asTrimmedString(
+                suggestionRecord.fixedText || suggestionRecord.text || suggestionRecord.content
+            ));
+            if (!fixedText) return null;
+            return {
+                id: `variant-${index + 1}-${Math.random().toString(36).slice(2)}`,
+                label: asTrimmedString(suggestionRecord.label) || `اقتراح ${index + 1}`,
+                fixedText,
+                statsBefore,
+                statsAfter: getBulkFixStats(fixedText),
+            };
+        })
+        .filter((variant): variant is BulkFixReviewVariant => Boolean(variant))
+        .slice(0, 3);
 };
 
 const getGeminiErrorMessage = (error: unknown): string => {
@@ -806,7 +1011,7 @@ interface AIContextType {
     handleChatGptAnalyze: (userPrompt: string, options: any) => Promise<void>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[]) => Promise<void>;
-    applyBulkFixReviewItem: (itemId: string) => void;
+    applyBulkFixReviewItem: (itemId: string, variantId?: string) => void;
     applySelectedBulkFixReviewItems: (itemIds: string[]) => void;
     selectBulkFixReviewItemTarget: (itemId: string) => void;
     skipBulkFixReviewItem: (itemId: string) => void;
@@ -1123,42 +1328,50 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 rule.violatingItems.forEach((item) => allViolations.push({ rule, item }));
             }
         });
-        setFixAllProgress(p => ({ ...p, total: allViolations.length }));
+        const groupedViolations = groupBulkFixViolationsByTextUnit(editor, allViolations);
+        setFixAllProgress(p => ({ ...p, total: groupedViolations.length }));
 
         const proposedItems: BulkFixReviewItem[] = [];
-        for (let i = 0; i < allViolations.length; i++) {
-            const { rule, item } = allViolations[i];
+        for (let i = 0; i < groupedViolations.length; i++) {
+            const group = groupedViolations[i];
             setFixAllProgress(p => ({ ...p, current: i + 1 }));
             try {
-                const targetText = getSafeRangeText(item.from, item.to);
+                const targetText = getSafeRangeText(group.from, group.to);
                 if (targetText === null) {
                     throw new Error('Target range is no longer valid.');
                 }
-                const prompt = buildComprehensivePrompt(formatBulkFixViolationPrompt(rule, item, targetText));
+                const prompt = buildComprehensivePrompt(formatBulkFixGroupPrompt(group, targetText));
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
-                const fixedText = cleanAiPatchContentMarkdown(asTrimmedString(parsed?.fixedText));
-                if (fixedText) {
+                const variants = normalizeBulkFixVariants(parsed, targetText);
+                const primaryVariant = variants[0];
+                const ruleTitles = Array.from(new Set(group.violations.map(violation => violation.rule.title)));
+                if (primaryVariant) {
                     proposedItems.push({
                         id: `bulk-fix-${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`,
-                        ruleTitle: rule.title,
+                        ruleTitle: ruleTitles.length > 1 ? `${ruleTitles.length} معايير: ${ruleTitles.join('، ')}` : ruleTitles[0],
+                        ruleTitles,
                         originalText: targetText,
-                        fixedText,
-                        from: item.from,
-                        to: item.to,
-                        message: item.message,
+                        fixedText: primaryVariant.fixedText,
+                        variants,
+                        from: group.from,
+                        to: group.to,
+                        message: group.violations
+                            .map(violation => `${violation.rule.title}: ${violation.item.message}`)
+                            .filter(Boolean)
+                            .join(' | '),
                         status: 'pending',
                     });
                 } else {
-                    throw new Error('AI did not return fixedText.');
+                    throw new Error('AI did not return usable suggestions.');
                 }
             } catch (e) {
                 const message = e instanceof Error ? e.message : 'Unknown fix error';
-                console.error('Fix all proposal failed:', rule.title, e);
+                console.error('Fix all proposal failed:', group.id, e);
                 setFixAllProgress(p => ({
                     ...p,
                     failed: p.failed + 1,
-                    errors: [...p.errors, `${rule.title}: ${message}`].slice(-3),
+                    errors: [...p.errors, `${group.violations.map(violation => violation.rule.title).join(', ')}: ${message}`].slice(-3),
                 }));
             }
         }
@@ -1172,15 +1385,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         )));
     }, []);
 
-    const markBulkFixAppliedAndShiftRanges = useCallback((appliedItem: BulkFixReviewItem, delta: number) => {
+    const markBulkFixAppliedAndShiftRanges = useCallback((appliedItem: BulkFixReviewItem, delta: number, appliedText: string, appliedVariantId?: string) => {
         setBulkFixReviewItems(items => items.map(item => {
             if (item.id === appliedItem.id) {
                 return {
                     ...item,
                     from: appliedItem.from,
                     to: appliedItem.to + delta,
+                    fixedText: appliedText,
                     status: 'applied',
                     applyError: undefined,
+                    appliedVariantId,
                 };
             }
 
@@ -1220,7 +1435,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         editor.chain().focus().setTextSelection({ from: item.from, to: item.to }).scrollIntoView().run();
     }, [bulkFixReviewItems, editor, getSafeRangeText, updateBulkFixReviewItem]);
 
-    const applySelectedBulkFixReviewItems = useCallback((itemIds: string[]) => {
+    const applySelectedBulkFixReviewItems = useCallback((itemIds: string[], variantSelections: Record<string, string> = {}) => {
         if (!editor) return;
         const selectedIds = new Set(itemIds);
         const itemsToApply = bulkFixReviewItems
@@ -1228,6 +1443,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             .sort((a, b) => b.from - a.from);
 
         itemsToApply.forEach(item => {
+            const selectedVariantId = variantSelections[item.id];
+            const selectedVariant = selectedVariantId
+                ? item.variants?.find(variant => variant.id === selectedVariantId)
+                : item.variants?.[0];
+            const fixedText = selectedVariant?.fixedText || item.fixedText;
             const currentText = getSafeRangeText(item.from, item.to);
             if (currentText === null || normalizeRangeText(currentText) !== normalizeRangeText(item.originalText)) {
                 updateBulkFixReviewItem(item.id, {
@@ -1242,14 +1462,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const applied = editor
                     .chain()
                     .focus()
-                    .insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(item.fixedText), { updateSelection: true })
+                    .insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(fixedText), { updateSelection: true })
                     .scrollIntoView()
                     .run();
                 if (!applied) {
                     throw new Error('تعذر تطبيق التعديل داخل المحرر.');
                 }
                 const delta = editor.state.doc.content.size - beforeDocSize;
-                markBulkFixAppliedAndShiftRanges(item, delta);
+                markBulkFixAppliedAndShiftRanges(item, delta, fixedText, selectedVariant?.id);
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'تعذر تطبيق التعديل داخل المحرر.';
                 updateBulkFixReviewItem(item.id, { status: 'failed', applyError: message });
@@ -1257,8 +1477,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         });
     }, [bulkFixReviewItems, editor, getSafeRangeText, markBulkFixAppliedAndShiftRanges, normalizeRangeText, updateBulkFixReviewItem]);
 
-    const applyBulkFixReviewItem = useCallback((itemId: string) => {
-        applySelectedBulkFixReviewItems([itemId]);
+    const applyBulkFixReviewItem = useCallback((itemId: string, variantId?: string) => {
+        applySelectedBulkFixReviewItems([itemId], variantId ? { [itemId]: variantId } : {});
     }, [applySelectedBulkFixReviewItems]);
 
     const skipBulkFixReviewItem = useCallback((itemId: string) => {

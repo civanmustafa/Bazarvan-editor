@@ -250,14 +250,32 @@ export interface AIHistoryItem {
 
 export type BulkFixReviewStatus = 'pending' | 'applied' | 'failed' | 'skipped';
 
+export interface BulkFixReviewStats {
+  words: number;
+  sentences: number;
+  paragraphs: number;
+  characters: number;
+}
+
+export interface BulkFixReviewVariant {
+  id: string;
+  label: string;
+  fixedText: string;
+  statsBefore: BulkFixReviewStats;
+  statsAfter: BulkFixReviewStats;
+}
+
 export interface BulkFixReviewItem {
   id: string;
   ruleTitle: string;
+  ruleTitles?: string[];
   originalText: string;
   fixedText: string;
+  variants?: BulkFixReviewVariant[];
   from: number;
   to: number;
   message?: string;
   status: BulkFixReviewStatus;
   applyError?: string;
+  appliedVariantId?: string;
 }
