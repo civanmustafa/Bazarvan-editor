@@ -6,7 +6,6 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
-import { FIXABLE_RULES } from '../constants';
 
 // Internal component for the floating tooltip to ensure it's never clipped
 const FloatingTooltip: React.FC<{ content: string; targetRect: DOMRect | null }> = ({ content, targetRect }) => {
@@ -509,7 +508,7 @@ const StructureTab: React.FC = () => {
     const fixableViolationGroups = useMemo(() => {
         const groups: { [title: string]: number } = {};
         Object.values(analysis)
-            .filter((rule: any) => rule && FIXABLE_RULES.has(rule.title) && rule.violatingItems && rule.violatingItems.length > 0)
+            .filter((rule: any) => rule && rule.violatingItems && rule.violatingItems.length > 0)
             .forEach((rule: any) => {
                 groups[rule.title] = (groups[rule.title] || 0) + rule.violatingItems!.length;
             });

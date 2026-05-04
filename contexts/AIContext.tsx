@@ -17,7 +17,6 @@ import type {
     StructureAnalysis,
 } from '../types';
 import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
-import { FIXABLE_RULES } from '../constants';
 import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 
 const GEMINI_MODEL = 'gemini-3-flash-preview';
@@ -157,6 +156,37 @@ const formatStructureCriteriaRules = (sectionTitle: string, rules: CheckResult[]
         .join('\n\n');
 
     return `**${sectionTitle} وشروطها وقواعدها:**\n${formattedRules || '- لا توجد معايير متاحة لهذه المجموعة.'}`;
+};
+
+const formatBulkFixViolationPrompt = (
+    rule: CheckResult,
+    item: NonNullable<CheckResult['violatingItems']>[number],
+    targetText: string
+): string => {
+    return [
+        'أصلح النص المحدد بناءً على بطاقة المعيار والمخالفة التالية.',
+        '',
+        '**بطاقة المعيار المخالف:**',
+        `- اسم المعيار: ${rule.title}`,
+        `- حالة المعيار: ${rule.status}`,
+        `- رسالة المخالفة: ${item.message || 'غير محددة'}`,
+        `- القيمة الحالية: ${rule.current}`,
+        `- القيمة المطلوبة: ${rule.required}`,
+        rule.description ? `- وصف المعيار: ${rule.description}` : '',
+        rule.details ? `- الشروط التفصيلية:\n${rule.details}` : '',
+        '',
+        '**النص المراد إصلاحه فقط:**',
+        `"""${targetText}"""`,
+        '',
+        '**تعليمات الإصلاح:**',
+        '- أصلح سبب المخالفة المذكور فقط مع الحفاظ على معنى النص وسياقه.',
+        '- اجعل النص الجديد مناسباً للقيمة المطلوبة والشروط التفصيلية إن وجدت.',
+        '- لا تضف شرحاً، ولا تسميات مثل "النص المقترح" أو "الإجابة".',
+        '- لا تعدّل خارج النص المحدد، ولا تضف معلومات غير موجودة في السياق.',
+        '',
+        'أرجع JSON حصراً بهذا الشكل:',
+        '{ "fixedText": "النص البديل الجاهز فقط" }',
+    ].filter(Boolean).join('\n');
 };
 
 const getGeminiErrorMessage = (error: unknown): string => {
@@ -1084,10 +1114,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (!editor || !analysisResults.structureAnalysis) return;
         setBulkFixReviewItems([]);
         setFixAllProgress({ current: 0, total: 0, running: true, failed: 0, errors: [] });
-        const allViolations: any[] = [];
-        Object.values(analysisResults.structureAnalysis).forEach((rule: any) => {
-            if (rulesToFix.includes(rule.title) && FIXABLE_RULES.has(rule.title) && rule.violatingItems) {
-                rule.violatingItems.forEach((item: any) => allViolations.push({ rule, item }));
+        const allViolations: {
+            rule: CheckResult;
+            item: NonNullable<CheckResult['violatingItems']>[number];
+        }[] = [];
+        Object.values(analysisResults.structureAnalysis).forEach((rule) => {
+            if (rulesToFix.includes(rule.title) && rule.violatingItems?.length) {
+                rule.violatingItems.forEach((item) => allViolations.push({ rule, item }));
             }
         });
         setFixAllProgress(p => ({ ...p, total: allViolations.length }));
@@ -1101,7 +1134,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 if (targetText === null) {
                     throw new Error('Target range is no longer valid.');
                 }
-                const prompt = `${buildComprehensivePrompt(`أصلح هذا النص لمشكلة ${rule.title}`)}\nالنص: "${targetText}"\nأرجع JSON حصراً: { "fixedText": "..." } بدون أي شرح إضافي.`;
+                const prompt = buildComprehensivePrompt(formatBulkFixViolationPrompt(rule, item, targetText));
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
                 const fixedText = cleanAiPatchContentMarkdown(asTrimmedString(parsed?.fixedText));
@@ -1139,6 +1172,42 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         )));
     }, []);
 
+    const markBulkFixAppliedAndShiftRanges = useCallback((appliedItem: BulkFixReviewItem, delta: number) => {
+        setBulkFixReviewItems(items => items.map(item => {
+            if (item.id === appliedItem.id) {
+                return {
+                    ...item,
+                    from: appliedItem.from,
+                    to: appliedItem.to + delta,
+                    status: 'applied',
+                    applyError: undefined,
+                };
+            }
+
+            if (item.to <= appliedItem.from) {
+                return item;
+            }
+
+            if (item.from >= appliedItem.to) {
+                return {
+                    ...item,
+                    from: item.from + delta,
+                    to: item.to + delta,
+                };
+            }
+
+            if (item.status !== 'pending') {
+                return item;
+            }
+
+            return {
+                ...item,
+                status: 'failed',
+                applyError: 'يتداخل هذا الاقتراح مع تعديل تم تطبيقه سابقاً. أعد إنشاء قائمة الإصلاحات لمراجعته من جديد.',
+            };
+        }));
+    }, []);
+
     const selectBulkFixReviewItemTarget = useCallback((itemId: string) => {
         if (!editor) return;
         const item = bulkFixReviewItems.find(reviewItem => reviewItem.id === itemId);
@@ -1169,19 +1238,24 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
 
             try {
-                editor
+                const beforeDocSize = editor.state.doc.content.size;
+                const applied = editor
                     .chain()
                     .focus()
                     .insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(item.fixedText), { updateSelection: true })
                     .scrollIntoView()
                     .run();
-                updateBulkFixReviewItem(item.id, { status: 'applied', applyError: undefined });
+                if (!applied) {
+                    throw new Error('تعذر تطبيق التعديل داخل المحرر.');
+                }
+                const delta = editor.state.doc.content.size - beforeDocSize;
+                markBulkFixAppliedAndShiftRanges(item, delta);
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'تعذر تطبيق التعديل داخل المحرر.';
                 updateBulkFixReviewItem(item.id, { status: 'failed', applyError: message });
             }
         });
-    }, [bulkFixReviewItems, editor, getSafeRangeText, normalizeRangeText, updateBulkFixReviewItem]);
+    }, [bulkFixReviewItems, editor, getSafeRangeText, markBulkFixAppliedAndShiftRanges, normalizeRangeText, updateBulkFixReviewItem]);
 
     const applyBulkFixReviewItem = useCallback((itemId: string) => {
         applySelectedBulkFixReviewItems([itemId]);
