@@ -245,6 +245,7 @@ export interface AIHistoryItem {
   to: number;
   appliedSuggestion?: string;
   applyError?: string;
+  bulkFixReviewItem?: BulkFixReviewItem;
 }
 
 export type BulkFixReviewStatus = 'pending' | 'applied' | 'failed' | 'skipped';

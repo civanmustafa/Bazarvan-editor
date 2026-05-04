@@ -533,22 +533,30 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): s
     const sentences = splitBulkFixSentences(textValue);
     const paragraphWords = paragraphs.map(countWords);
     const sentenceWords = sentences.map(countWords);
-    const suffixParts: string[] = [];
     const haystack = criterionText.toLowerCase();
     if (haystack.includes('طول الجمل') || haystack.includes('sentence length')) {
         const min = sentenceWords.length ? Math.min(...sentenceWords) : 0;
         const max = sentenceWords.length ? Math.max(...sentenceWords) : 0;
-        suffixParts.push(`أطوال الجمل ${min}-${max} كلمة`);
+        return sentenceWords.length ? `أطوال الجمل: ${min}-${max} كلمة` : 'لا توجد جمل قابلة للقياس';
     }
     if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
-        const min = paragraphWords.length ? Math.min(...paragraphWords) : 0;
-        const max = paragraphWords.length ? Math.max(...paragraphWords) : 0;
-        suffixParts.push(`أطوال الفقرات ${min}-${max} كلمة`);
+        return `${stats.words} كلمة، ${stats.sentences} جملة، ${stats.paragraphs} فقرة`;
     }
     if (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) {
-        suffixParts.push(/[.!؟?:]\s*$/.test(textValue.trim()) ? 'علامة النهاية موجودة' : 'علامة النهاية غير موجودة');
+        return /[.!؟?:]\s*$/.test(textValue.trim()) ? 'علامة النهاية موجودة' : 'علامة النهاية غير موجودة';
     }
-    return `${stats.words} كلمة، ${stats.sentences} جملة، ${stats.paragraphs} فقرة${suffixParts.length ? `؛ ${suffixParts.join('، ')}` : ''}`;
+
+    const parts: string[] = [];
+    if (extractBulkFixRange(criterionText, 'كلمة|كلمات|word|words')) {
+        parts.push(`${stats.words} كلمة`);
+    }
+    if (extractBulkFixRange(criterionText, 'جملة|جمل|sentence|sentences')) {
+        parts.push(`${stats.sentences} جملة`);
+    }
+    if (extractBulkFixRange(criterionText, 'فقرة|فقرات|paragraph|paragraphs')) {
+        parts.push(`${stats.paragraphs} فقرة`);
+    }
+    return parts.length > 0 ? parts.join('، ') : 'غير قابل للقياس الرقمي من النص المقترح';
 };
 
 const inferBulkFixCriterionCheck = (
@@ -1721,6 +1729,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 ).filter(Boolean),
                 from: item.from,
                 to: item.to,
+                bulkFixReviewItem: item,
             });
         });
         setFixAllProgress(p => ({ ...p, running: false }));
