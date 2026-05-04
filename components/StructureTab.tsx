@@ -387,11 +387,10 @@ const BulkFixReviewPanel: React.FC<{
             [isArabic ? 'الكلمات' : 'Words', before.words, after.words],
             [isArabic ? 'الجمل' : 'Sentences', before.sentences, after.sentences],
             [isArabic ? 'الفقرات' : 'Paragraphs', before.paragraphs, after.paragraphs],
-            [isArabic ? 'الأحرف' : 'Chars', before.characters, after.characters],
         ];
 
         return (
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
                 {items.map(([label, beforeValue, afterValue]) => (
                     <div key={String(label)} className="rounded-md bg-white/80 px-2 py-1 text-[9px] font-bold text-gray-500 border border-[#d4af37]/10 dark:bg-[#1F1F1F]/70 dark:text-gray-300 dark:border-[#3C3C3C]">
                         <span className="block text-gray-400">{label}</span>
@@ -402,6 +401,18 @@ const BulkFixReviewPanel: React.FC<{
                 ))}
             </div>
         );
+    };
+    const criterionStatusClass = (status?: string) => {
+        if (status === 'pass') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300';
+        if (status === 'fail') return 'bg-red-100 text-red-700 dark:bg-red-900/25 dark:text-red-300';
+        if (status === 'warn') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/25 dark:text-amber-300';
+        return 'bg-gray-100 text-gray-600 dark:bg-[#333] dark:text-gray-300';
+    };
+    const criterionStatusLabel = (status?: string) => {
+        if (status === 'pass') return isArabic ? 'ضمن الحد' : 'Pass';
+        if (status === 'fail') return isArabic ? 'خارج الحد' : 'Fail';
+        if (status === 'warn') return isArabic ? 'يحتاج مراجعة' : 'Review';
+        return isArabic ? 'غير مؤكد' : 'Unknown';
     };
 
     return (
@@ -494,6 +505,36 @@ const BulkFixReviewPanel: React.FC<{
                                     {item.message && (
                                         <p className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{item.message}</p>
                                     )}
+                                    {item.criteria && item.criteria.length > 1 && (
+                                        <div className="mt-2 rounded-lg border border-[#d4af37]/15 bg-white/70 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/70">
+                                            <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
+                                                {isArabic ? 'المعايير المخالفة' : 'Violated criteria'}
+                                            </div>
+                                            <div className="space-y-1">
+                                                {item.criteria.map((criterion) => (
+                                                    <div key={criterion.title} className="rounded-md bg-gray-50 p-1.5 text-[10px] leading-relaxed text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">
+                                                        <div className="font-black text-gray-800 dark:text-gray-100">{criterion.title}</div>
+                                                        <div className="mt-1 grid grid-cols-1 gap-1 sm:grid-cols-2">
+                                                            <span>{isArabic ? 'الحالي' : 'Current'}: <b>{criterion.current}</b></span>
+                                                            <span>{isArabic ? 'المطلوب' : 'Required'}: <b>{criterion.required}</b></span>
+                                                        </div>
+                                                        {criterion.message && (
+                                                            <div className="mt-1 text-[9px] text-gray-400 dark:text-gray-500">{criterion.message}</div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="mt-2">
+                                        <button
+                                            onClick={() => onLocateItem(item.id)}
+                                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#333] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                                        >
+                                            <MapPin size={13} />
+                                            <span>{isArabic ? 'تحديد الموضع' : 'Locate'}</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -510,8 +551,8 @@ const BulkFixReviewPanel: React.FC<{
                                     </div>
                                     <div className="text-[9px] font-black text-gray-400">
                                         {isArabic
-                                            ? `${item.variants?.length || 1} من 3`
-                                            : `${item.variants?.length || 1} of 3`}
+                                            ? `${item.variants?.length || 1} من 2`
+                                            : `${item.variants?.length || 1} of 2`}
                                     </div>
                                 </div>
                                 {(item.variants?.length ? item.variants : [{
@@ -520,6 +561,13 @@ const BulkFixReviewPanel: React.FC<{
                                     fixedText: item.fixedText,
                                     statsBefore: { words: 0, sentences: 0, paragraphs: 0, characters: 0 },
                                     statsAfter: { words: 0, sentences: 0, paragraphs: 0, characters: 0 },
+                                    criteriaChecks: item.criteria?.map((criterion) => ({
+                                        criterionTitle: criterion.title,
+                                        before: String(criterion.current),
+                                        after: isArabic ? 'غير متاح' : 'Unavailable',
+                                        required: String(criterion.required),
+                                        status: 'unknown',
+                                    })),
                                 } as BulkFixReviewVariant]).map((variant, variantIndex) => {
                                     const isAppliedVariant = item.appliedVariantId === variant.id || (item.status === 'applied' && !item.appliedVariantId && variantIndex === 0);
                                     return (
@@ -539,6 +587,30 @@ const BulkFixReviewPanel: React.FC<{
                                                     {renderStats(variant.statsBefore, variant.statsAfter)}
                                                 </div>
                                             ) : null}
+                                            {variant.criteriaChecks && variant.criteriaChecks.length > 0 && (
+                                                <div className="mb-2 rounded-lg border border-white/60 bg-white/75 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/80">
+                                                    <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
+                                                        {isArabic ? 'تدقيق المعايير' : 'Criteria audit'}
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {variant.criteriaChecks.map((check, checkIndex) => (
+                                                            <div key={`${check.criterionTitle}-${checkIndex}`} className="rounded-md bg-gray-50 p-1.5 text-[9px] leading-relaxed text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">
+                                                                <div className="flex flex-wrap items-center justify-between gap-1">
+                                                                    <span className="font-black text-gray-800 dark:text-gray-100">{check.criterionTitle}</span>
+                                                                    <span className={`rounded-full px-1.5 py-0.5 font-black ${criterionStatusClass(check.status)}`}>
+                                                                        {criterionStatusLabel(check.status)}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="mt-1 grid grid-cols-1 gap-1">
+                                                                    <span>{isArabic ? 'قبل الإصلاح' : 'Before'}: <b>{check.before}</b></span>
+                                                                    <span>{isArabic ? 'بعد التعديل' : 'After'}: <b>{check.after}</b></span>
+                                                                    <span>{isArabic ? 'المطلوب' : 'Required'}: <b>{check.required}</b></span>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div className="max-h-28 overflow-y-auto custom-scrollbar rounded-lg border border-white/60 bg-white/80 p-2 text-[11px] leading-relaxed text-gray-800 whitespace-pre-wrap dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
                                                 {variant.fixedText}
                                             </div>
@@ -572,13 +644,6 @@ const BulkFixReviewPanel: React.FC<{
                             )}
 
                             <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <button
-                                    onClick={() => onLocateItem(item.id)}
-                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#333] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
-                                >
-                                    <MapPin size={13} />
-                                    <span>{isArabic ? 'تحديد الموضع' : 'Locate'}</span>
-                                </button>
                                 {isPending && (
                                     <>
                                         <button

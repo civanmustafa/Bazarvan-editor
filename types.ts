@@ -257,12 +257,29 @@ export interface BulkFixReviewStats {
   characters: number;
 }
 
+export interface BulkFixCriterionSummary {
+  title: string;
+  current: string | number;
+  required: string | number;
+  status?: string;
+  message?: string;
+}
+
+export interface BulkFixCriterionCheck {
+  criterionTitle: string;
+  before: string;
+  after: string;
+  required: string;
+  status: 'pass' | 'warn' | 'fail' | 'unknown';
+}
+
 export interface BulkFixReviewVariant {
   id: string;
   label: string;
   fixedText: string;
   statsBefore: BulkFixReviewStats;
   statsAfter: BulkFixReviewStats;
+  criteriaChecks?: BulkFixCriterionCheck[];
 }
 
 export interface BulkFixRelatedRule {
@@ -275,6 +292,7 @@ export interface BulkFixReviewItem {
   id: string;
   ruleTitle: string;
   ruleTitles?: string[];
+  criteria?: BulkFixCriterionSummary[];
   originalText: string;
   fixedText: string;
   variants?: BulkFixReviewVariant[];

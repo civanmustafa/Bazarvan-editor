@@ -12,6 +12,8 @@ import type {
     CheckResult,
     HeadingAnalysisResult,
     AIHistoryItem,
+    BulkFixCriterionCheck,
+    BulkFixCriterionSummary,
     BulkFixRelatedRule,
     BulkFixReviewItem,
     BulkFixReviewStats,
@@ -442,20 +444,181 @@ const formatBulkFixGroupPrompt = (group: BulkFixTargetGroup, targetText: string)
         '',
         '**تعليمات مهمة:**',
         '- ارفق في تفكيرك قواعد وشروط كل معيار أعلاه عند صياغة البدائل.',
-        '- قدم 3 اقتراحات مختلفة قابلة للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
+        '- قدم اقتراحين فقط مختلفين قابلين للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
         '- عالج المخالفات المتداخلة معاً: الطول، الجمل، التكرار، الترقيم، الإحالات الغامضة، الكلمات المطلوب حذفها، أو أي معيار مذكور في البطاقة.',
         '- حافظ على المعنى الأصلي وسياق الصفحة ولا تضف معلومات أو ادعاءات جديدة.',
         '- إذا كان النص يحتوي عناوين، فاستخدم Markdown للحفاظ على مستويات العناوين قدر الإمكان.',
         '- لا تكتب تسميات داخل fixedText مثل "النص المقترح" أو "الإجابة".',
         '- يجب أن يكون الرد JSON صالحاً فقط، دون Markdown fences ودون شرح خارج JSON.',
         '- المفتاح suggestions إلزامي، وكل عنصر داخله يجب أن يحتوي fixedText نصياً غير فارغ.',
+        '- داخل كل اقتراح أضف criteriaChecks، وفيه تدقيق لكل معيار: الحالة قبل الإصلاح، الحالة بعد التعديل، المطلوب، و status بقيمة pass أو warn أو fail أو unknown.',
         '',
         'أرجع JSON حصراً بهذا الشكل:',
-        '{ "suggestions": [ { "label": "اقتراح 1", "fixedText": "..." }, { "label": "اقتراح 2", "fixedText": "..." }, { "label": "اقتراح 3", "fixedText": "..." } ] }',
+        '{ "suggestions": [ { "label": "اقتراح 1", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] }, { "label": "اقتراح 2", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] } ] }',
     ].filter(Boolean).join('\n');
 };
 
-const normalizeBulkFixVariants = (raw: unknown, originalText: string): BulkFixReviewVariant[] => {
+const normalizeCriteriaCheckStatus = (value: unknown): BulkFixCriterionCheck['status'] => {
+    const status = asTrimmedString(value).toLowerCase();
+    return status === 'pass' || status === 'warn' || status === 'fail' || status === 'unknown' ? status : 'unknown';
+};
+
+const normalizeBulkFixCriteriaChecks = (rawChecks: unknown, criteria: BulkFixCriterionSummary[]): BulkFixCriterionCheck[] => {
+    const checksArray = Array.isArray(rawChecks)
+        ? rawChecks
+        : rawChecks && typeof rawChecks === 'object'
+            ? Object.values(rawChecks as Record<string, unknown>)
+            : [];
+
+    const normalized = checksArray
+        .map((check): BulkFixCriterionCheck | null => {
+            const record = check && typeof check === 'object' ? check as Record<string, unknown> : {};
+            const criterionTitle = asTrimmedString(record.criterionTitle || record.criterion || record.title || record.name || record['المعيار'] || record['اسم المعيار']);
+            if (!criterionTitle) return null;
+            return {
+                criterionTitle,
+                before: asTrimmedString(record.before || record.beforeStatus || record.current || record['قبل'] || record['الحالة قبل الإصلاح']) || 'غير متاح',
+                after: asTrimmedString(record.after || record.afterStatus || record.result || record['بعد'] || record['الحالة بعد التعديل']) || 'غير متاح',
+                required: asTrimmedString(record.required || record.target || record['المطلوب'] || record['الحالة المطلوبة']) || 'غير متاح',
+                status: normalizeCriteriaCheckStatus(record.status || record['الحالة']),
+            };
+        })
+        .filter((check): check is BulkFixCriterionCheck => Boolean(check));
+
+    if (normalized.length > 0) return normalized;
+
+    return criteria.map((criterion) => ({
+        criterionTitle: criterion.title,
+        before: String(criterion.current),
+        after: 'غير متاح',
+        required: String(criterion.required),
+        status: 'unknown',
+    }));
+};
+
+const splitBulkFixParagraphs = (value: string): string[] => (
+    value.split(/\n{2,}|\r?\n/).map(part => part.trim()).filter(Boolean)
+);
+
+const splitBulkFixSentences = (value: string): string[] => (
+    value.replace(/\s+/g, ' ').trim().match(/[^.!؟?؛;:]+[.!؟?؛;:]*/g)?.map(sentence => sentence.trim()).filter(Boolean) || []
+);
+
+const toWesternDigits = (value: string): string => value.replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
+
+const extractBulkFixRange = (value: string, unitPattern: string): { min: number; max: number } | null => {
+    const normalized = toWesternDigits(value);
+    const rangeRegex = new RegExp(`(\\d+)\\s*(?:-|–|—|إلى|الى|to)\\s*(\\d+)\\s*(?:${unitPattern})`, 'i');
+    const rangeMatch = normalized.match(rangeRegex);
+    if (rangeMatch) {
+        return { min: Number(rangeMatch[1]), max: Number(rangeMatch[2]) };
+    }
+    const exactRegex = new RegExp(`(?:^|\\D)(\\d+)\\s*(?:${unitPattern})`, 'i');
+    const exactMatch = normalized.match(exactRegex);
+    if (exactMatch) {
+        const exact = Number(exactMatch[1]);
+        return { min: exact, max: exact };
+    }
+    return null;
+};
+
+const isWithinBulkFixRange = (values: number[], range: { min: number; max: number } | null): boolean | null => {
+    if (!range) return null;
+    if (values.length === 0) return false;
+    return values.every(value => value >= range.min && value <= range.max);
+};
+
+const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): string => {
+    const stats = getBulkFixStats(textValue);
+    const paragraphs = splitBulkFixParagraphs(textValue);
+    const sentences = splitBulkFixSentences(textValue);
+    const paragraphWords = paragraphs.map(countWords);
+    const sentenceWords = sentences.map(countWords);
+    const suffixParts: string[] = [];
+    const haystack = criterionText.toLowerCase();
+    if (haystack.includes('طول الجمل') || haystack.includes('sentence length')) {
+        const min = sentenceWords.length ? Math.min(...sentenceWords) : 0;
+        const max = sentenceWords.length ? Math.max(...sentenceWords) : 0;
+        suffixParts.push(`أطوال الجمل ${min}-${max} كلمة`);
+    }
+    if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
+        const min = paragraphWords.length ? Math.min(...paragraphWords) : 0;
+        const max = paragraphWords.length ? Math.max(...paragraphWords) : 0;
+        suffixParts.push(`أطوال الفقرات ${min}-${max} كلمة`);
+    }
+    if (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) {
+        suffixParts.push(/[.!؟?:]\s*$/.test(textValue.trim()) ? 'علامة النهاية موجودة' : 'علامة النهاية غير موجودة');
+    }
+    return `${stats.words} كلمة، ${stats.sentences} جملة، ${stats.paragraphs} فقرة${suffixParts.length ? `؛ ${suffixParts.join('، ')}` : ''}`;
+};
+
+const inferBulkFixCriterionCheck = (
+    criterion: BulkFixCriterionSummary,
+    originalText: string,
+    fixedText: string
+): BulkFixCriterionCheck => {
+    const criterionText = `${criterion.title} ${criterion.required} ${criterion.message || ''}`;
+    const haystack = criterionText.toLowerCase();
+    const wordRange = extractBulkFixRange(criterionText, 'كلمة|كلمات|word|words');
+    const sentenceRange = extractBulkFixRange(criterionText, 'جملة|جمل|sentence|sentences');
+    const paragraphRange = extractBulkFixRange(criterionText, 'فقرة|فقرات|paragraph|paragraphs');
+    const paragraphs = splitBulkFixParagraphs(fixedText);
+    const sentences = splitBulkFixSentences(fixedText);
+    const afterStats = getBulkFixStats(fixedText);
+    const checks: boolean[] = [];
+
+    if (haystack.includes('طول الجمل') || haystack.includes('sentence length')) {
+        const targetRange = wordRange || { min: 6, max: 20 };
+        checks.push(isWithinBulkFixRange(sentences.map(countWords), targetRange) === true);
+    } else if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
+        checks.push(isWithinBulkFixRange(paragraphs.map(countWords), wordRange || { min: 30, max: 100 }) === true);
+        checks.push(isWithinBulkFixRange(paragraphs.map(countSentences), sentenceRange || { min: 1, max: 4 }) === true);
+    } else {
+        const wordStatus = isWithinBulkFixRange([afterStats.words], wordRange);
+        const sentenceStatus = isWithinBulkFixRange([afterStats.sentences], sentenceRange);
+        const paragraphStatus = isWithinBulkFixRange([afterStats.paragraphs], paragraphRange);
+        [wordStatus, sentenceStatus, paragraphStatus].forEach(status => {
+            if (status !== null) checks.push(status);
+        });
+    }
+
+    if (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) {
+        checks.push(/[.!؟?:]\s*$/.test(fixedText.trim()));
+    }
+
+    return {
+        criterionTitle: criterion.title,
+        before: `${String(criterion.current)}؛ ${summarizeBulkFixMeasuredState(originalText, criterionText)}`,
+        after: summarizeBulkFixMeasuredState(fixedText, criterionText),
+        required: String(criterion.required),
+        status: checks.length === 0 ? 'unknown' : checks.every(Boolean) ? 'pass' : 'fail',
+    };
+};
+
+const buildBulkFixCriteriaChecks = (
+    rawChecks: unknown,
+    criteria: BulkFixCriterionSummary[],
+    originalText: string,
+    fixedText: string
+): BulkFixCriterionCheck[] => {
+    const aiChecks = normalizeBulkFixCriteriaChecks(rawChecks, criteria);
+    if (criteria.length === 0) return aiChecks;
+    return criteria.map((criterion) => {
+        const inferred = inferBulkFixCriterionCheck(criterion, originalText, fixedText);
+        const matchingAiCheck = aiChecks.find(check => (
+            check.criterionTitle === criterion.title ||
+            check.criterionTitle.includes(criterion.title) ||
+            criterion.title.includes(check.criterionTitle)
+        ));
+        return {
+            ...inferred,
+            after: inferred.after || matchingAiCheck?.after || 'غير متاح',
+            status: inferred.status !== 'unknown' ? inferred.status : matchingAiCheck?.status || 'unknown',
+        };
+    });
+};
+
+const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: BulkFixCriterionSummary[]): BulkFixReviewVariant[] => {
     const parsedRaw = typeof raw === 'string' ? (extractJson(raw) || raw) : raw;
     const record = parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)
         ? parsedRaw as Record<string, unknown>
@@ -509,10 +672,16 @@ const normalizeBulkFixVariants = (raw: unknown, originalText: string): BulkFixRe
                 fixedText,
                 statsBefore,
                 statsAfter: getBulkFixStats(fixedText),
+                criteriaChecks: buildBulkFixCriteriaChecks(
+                    suggestionRecord.criteriaChecks || suggestionRecord.criteria || suggestionRecord.checks || suggestionRecord['تدقيق المعايير'] || suggestionRecord['المعايير'],
+                    criteria,
+                    originalText,
+                    fixedText
+                ),
             };
         })
         .filter((variant): variant is BulkFixReviewVariant => Boolean(variant))
-        .slice(0, 3);
+        .slice(0, 2);
 };
 
 const getGeminiErrorMessage = (error: unknown): string => {
@@ -1490,14 +1659,33 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const prompt = buildComprehensivePrompt(formatBulkFixGroupPrompt(group, targetText));
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
-                const variants = normalizeBulkFixVariants(parsed || res, targetText);
+                const uniqueRules = group.violations.reduce<CheckResult[]>((acc, violation) => {
+                    if (!acc.some(rule => rule.title === violation.rule.title)) acc.push(violation.rule);
+                    return acc;
+                }, []);
+                const criteria: BulkFixCriterionSummary[] = uniqueRules.map((rule) => ({
+                    title: rule.title,
+                    current: rule.current,
+                    required: rule.required,
+                    status: rule.status,
+                    message: group.violations
+                        .filter(violation => violation.rule.title === rule.title)
+                        .map(violation => violation.item.message)
+                        .filter(Boolean)
+                        .join(' | '),
+                }));
+                let variants = normalizeBulkFixVariants(parsed, targetText, criteria);
+                if (variants.length === 0) {
+                    variants = normalizeBulkFixVariants(res, targetText, criteria);
+                }
                 const primaryVariant = variants[0];
-                const ruleTitles = Array.from(new Set(group.violations.map(violation => violation.rule.title)));
+                const ruleTitles = uniqueRules.map(rule => rule.title);
                 if (primaryVariant) {
                     proposedItems.push({
                         id: `bulk-fix-${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`,
                         ruleTitle: ruleTitles.length > 1 ? `${ruleTitles.length} معايير: ${ruleTitles.join('، ')}` : ruleTitles[0],
                         ruleTitles,
+                        criteria,
                         originalText: targetText,
                         fixedText: primaryVariant.fixedText,
                         variants,
