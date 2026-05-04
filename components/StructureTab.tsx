@@ -424,8 +424,8 @@ const BulkFixReviewPanel: React.FC<{
                         </h3>
                         <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
                             {isArabic
-                                ? 'راجع النص قبل وبعد، واختر أحد البدائل أو طبق الاقتراح الأول للعناصر المحددة.'
-                                : 'Review the before and after text, choose a variant, or apply the first suggestion for selected items.'}
+                                ? 'راجع الاقتراحات واختر البديل المناسب أو طبق العناصر المحددة.'
+                                : 'Review proposals, choose a variant, or apply selected items.'}
                         </p>
                     </div>
                     <button
@@ -460,8 +460,16 @@ const BulkFixReviewPanel: React.FC<{
                 {items.map((item) => {
                     const isPending = item.status === 'pending';
                     const isSelected = selectedIds.includes(item.id);
+                    const isAppliedItem = item.status === 'applied';
+                    const itemClassName = isAppliedItem
+                        ? 'p-2.5 bg-gray-100/80 dark:bg-[#1F1F1F]/80'
+                        : item.status === 'skipped'
+                            ? 'p-2.5 bg-gray-50/80 dark:bg-[#1F1F1F]/70'
+                            : item.status === 'failed'
+                                ? 'p-2.5 bg-red-50/60 dark:bg-red-900/10'
+                                : 'p-2.5 bg-white/70 dark:bg-[#242424]/70';
                     return (
-                        <div key={item.id} className="p-2.5 bg-white/70 dark:bg-[#242424]/70">
+                        <div key={item.id} className={itemClassName}>
                             <div className="flex items-start gap-2">
                                 <button
                                     onClick={() => onToggleItem(item.id)}
@@ -491,20 +499,17 @@ const BulkFixReviewPanel: React.FC<{
 
                             <div className="mt-3 grid grid-cols-1 gap-2">
                                 <div>
-                                    <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-gray-400">{isArabic ? 'قبل' : 'Before'}</div>
-                                    <div className="overflow-y-auto custom-scrollbar rounded-lg border border-gray-100 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-600 whitespace-pre-wrap break-words dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300" style={{ maxHeight: 'min(42vh, 24rem)' }}>
+                                    <div
+                                        onClick={() => onLocateItem(item.id)}
+                                        className="cursor-pointer overflow-y-auto custom-scrollbar rounded-lg border border-gray-100 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-600 whitespace-pre-wrap break-words transition-colors hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300 dark:hover:bg-[#d4af37]/15"
+                                        style={{ maxHeight: 'min(42vh, 24rem)' }}
+                                        title={isArabic ? 'انتقال إلى النص داخل المحرر' : 'Go to text in editor'}
+                                    >
                                         {item.originalText}
                                     </div>
                                 </div>
-                                <div className="flex items-center justify-between gap-2">
-                                    <div className="text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
-                                        {isArabic ? 'بدائل التطبيق' : 'Application variants'}
-                                    </div>
-                                    <div className="text-[9px] font-black text-gray-400">
-                                        {isArabic
-                                            ? `${item.variants?.length || 1} من 2`
-                                            : `${item.variants?.length || 1} of 2`}
-                                    </div>
+                                <div className="text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
+                                    {isArabic ? 'الاقتراحات' : 'Suggestions'}
                                 </div>
                                 {(item.variants?.length ? item.variants : [{
                                     id: 'default',
@@ -522,12 +527,13 @@ const BulkFixReviewPanel: React.FC<{
                                     })),
                                 } as BulkFixReviewVariant]).map((variant, variantIndex) => {
                                     const isAppliedVariant = item.appliedVariantId === variant.id || (item.status === 'applied' && !item.appliedVariantId && variantIndex === 0);
+                                    const isRejectedVariant = isAppliedItem && !isAppliedVariant;
                                     const criteriaStatusCounts = getCriteriaStatusCounts(variant.criteriaChecks);
                                     const criteriaKey = `${item.id}:${variant.id}`;
                                     const hasCriteriaChecks = Boolean(variant.criteriaChecks && variant.criteriaChecks.length > 0);
                                     const isCriteriaExpanded = Boolean(expandedCriteriaKeys[criteriaKey]);
                                     return (
-                                        <div key={variant.id} className={`rounded-xl border p-2 ${isAppliedVariant ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-900/40 dark:bg-emerald-900/15' : 'border-[#d4af37]/25 bg-[#d4af37]/5 dark:bg-[#d4af37]/10'}`}>
+                                        <div key={variant.id} className={`rounded-xl border p-2 transition-all duration-200 ${isAppliedVariant ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-900/40 dark:bg-emerald-900/15' : isRejectedVariant ? 'border-gray-200 bg-gray-100/80 opacity-60 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/80' : 'border-[#d4af37]/25 bg-[#d4af37]/5 dark:bg-[#d4af37]/10'}`}>
                                             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                                                 <div className="min-w-0 flex-1 truncate text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
                                                     {variant.label || `${isArabic ? 'اقتراح' : 'Suggestion'} ${variantIndex + 1}`}
@@ -610,9 +616,6 @@ const BulkFixReviewPanel: React.FC<{
                                                     </div>
                                                 </div>
                                             )}
-                                            <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
-                                                {isArabic ? 'النص المقترح' : 'Suggested text'}
-                                            </div>
                                             <div className="overflow-y-auto custom-scrollbar rounded-lg border border-white/60 bg-white/80 p-2 text-[11px] leading-relaxed text-gray-800 whitespace-pre-wrap break-words dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100" style={{ maxHeight: 'min(42vh, 24rem)' }}>
                                                 {variant.fixedText}
                                             </div>
@@ -674,7 +677,9 @@ const StructureTab: React.FC = () => {
 
     const fixableViolationGroups = useMemo(() => {
         const groups: { [title: string]: number } = {};
-        Object.values(analysis)
+        Object.entries(analysis)
+            .filter(([key]) => key !== 'paragraphPair')
+            .map(([, rule]) => rule)
             .filter((rule: any) => rule && rule.violatingItems && rule.violatingItems.length > 0)
             .forEach((rule: any) => {
                 groups[rule.title] = (groups[rule.title] || 0) + rule.violatingItems!.length;

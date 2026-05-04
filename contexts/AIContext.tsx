@@ -505,7 +505,8 @@ const getBulkFixTargetContext = (editor: any, group: BulkFixTargetGroup): BulkFi
 
 const collectBulkFixViolations = (structureAnalysis: StructureAnalysis): BulkFixViolationContext[] => {
     const violations: BulkFixViolationContext[] = [];
-    Object.values(structureAnalysis).forEach((rule) => {
+    Object.entries(structureAnalysis).forEach(([key, rule]) => {
+        if (key === 'paragraphPair') return;
         if (rule.violatingItems?.length) {
             rule.violatingItems.forEach((item) => violations.push({ rule, item }));
         }
