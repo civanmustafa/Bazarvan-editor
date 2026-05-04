@@ -12,6 +12,7 @@ import type {
     CheckResult,
     HeadingAnalysisResult,
     AIHistoryItem,
+    BulkFixReviewItem,
     GoalContext,
     StructureAnalysis,
 } from '../types';
@@ -361,6 +362,8 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 إذا كان المطلوب تعديل فقرة موجودة، استخدم operation بقيمة "replace_block"، ويجب أن يكون targetText نسخة حرفية من الفقرة الحالية داخل المقال لا تلخيصاً لها. ضع النص الجديد فقط في contentMarkdown.
 إذا لم تستطع نسخ الفقرة الحالية حرفياً، فلا تستخدم replace_block، واستخدم عملية إضافة مناسبة بدلاً من ذلك.
 إذا كان المطلوب إضافة فقرة أو سؤال أو جملة جديدة، استخدم عمليات الإضافة المناسبة مثل insert_after_heading أو insert_before_faq أو insert_before_conclusion أو append_to_section أو append_to_article.
+مهم جداً: يجب أن يكون contentMarkdown محتوى نهائياً جاهزاً للإدراج في المقال فقط، دون أي تسميات تفسيرية مثل "السؤال:" أو "الإجابة:" أو "النص المقترح:" أو "الحل العملي الجاهز:" أو "مكان الإضافة:".
+إذا كان المحتوى سؤالاً وجواباً، فاكتب السؤال كسطر عنوان Markdown مناسب ثم الجواب مباشرة تحته، دون كتابة كلمتي "السؤال" أو "الإجابة".
 
 الشكل المطلوب لكل patch:
 {
@@ -390,6 +393,59 @@ const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
 
 const asTrimmedString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
+const AI_PATCH_LABEL_PATTERN = /^(?:[-*]\s*)?(?:السؤال(?:\s+المقترح)?|الإجابة|الاجابة|الإجابة\s+المقترحة(?:\s+الجاهزة)?|الاجابة\s+المقترحة(?:\s+الجاهزة)?|الجملة\s+المقترحة|جمل\s+مقترحة\s+للإضافة\s+للنص|النص\s+المقترح(?:\s+لإضافة\s+الكيان)?|الصياغة\s+المقترحة(?:\s+بعد\s+التخفيف\s+أو\s+التوضيح)?|الحل\s+العملي\s+الجاهز(?:\s+[^:]*)?|مكان\s+الإضافة|مكان\s+إضافتها\s+المقترح|مكان\s+تطبيقه|الموضع\s+المقترح)\s*[:：]\s*/i;
+
+const stripAiPatchLabelsFromLine = (line: string): string => line.replace(AI_PATCH_LABEL_PATTERN, '').trim();
+
+const extractLabeledValue = (lines: string[], labels: RegExp[]): string => {
+    for (const line of lines) {
+        const trimmed = line.trim();
+        for (const label of labels) {
+            const match = trimmed.match(label);
+            if (match?.[1]?.trim()) return match[1].trim();
+        }
+    }
+    return '';
+};
+
+const cleanAiPatchContentMarkdown = (value: string): string => {
+    const rawLines = value
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    if (rawLines.length === 0) return '';
+
+    const question = extractLabeledValue(rawLines, [
+        /^(?:[-*]\s*)?السؤال(?:\s+المقترح)?\s*[:：]\s*(.+)$/i,
+    ]);
+    const answer = extractLabeledValue(rawLines, [
+        /^(?:[-*]\s*)?(?:الإجابة|الاجابة)(?:\s+المقترحة(?:\s+الجاهزة)?)?\s*[:：]\s*(.+)$/i,
+    ]);
+
+    if (question && answer) {
+        return `### ${question}\n${answer}`;
+    }
+
+    return rawLines
+        .map(stripAiPatchLabelsFromLine)
+        .filter(line => {
+            const normalized = normalizeAnchorText(line);
+            return normalized && ![
+                'السؤال',
+                'الاجابه',
+                'الاجابة',
+                'النص المقترح',
+                'الحل العملي الجاهز',
+                'مكان الاضافه',
+                'مكان الاضافة',
+            ].includes(normalized);
+        })
+        .join('\n')
+        .trim();
+};
+
 const normalizePatchOperation = (value: unknown): AiContentPatchOperation => {
     const operation = asTrimmedString(value) as AiContentPatchOperation;
     if (operation === 'replace_text' || operation === 'replace_block') return operation;
@@ -410,7 +466,7 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
         .map((patch, index): AiContentPatch | null => {
             if (!patch || typeof patch !== 'object') return null;
             const record = patch as Record<string, unknown>;
-            const contentMarkdown = asTrimmedString(record.contentMarkdown || record.content || record.text);
+            const contentMarkdown = cleanAiPatchContentMarkdown(asTrimmedString(record.contentMarkdown || record.content || record.text));
             if (!contentMarkdown) return null;
 
             return {
@@ -712,6 +768,7 @@ interface AIContextType {
     isHeadingsAnalysisMinimized: boolean;
     setIsHeadingsAnalysisMinimized: React.Dispatch<React.SetStateAction<boolean>>;
     aiHistory: AIHistoryItem[];
+    bulkFixReviewItems: BulkFixReviewItem[];
     fixAllProgress: FixAllProgress;
     handleAiRequest: (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => Promise<void>;
     handleAnalyzeHeadings: () => Promise<void>;
@@ -719,6 +776,11 @@ interface AIContextType {
     handleChatGptAnalyze: (userPrompt: string, options: any) => Promise<void>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[]) => Promise<void>;
+    applyBulkFixReviewItem: (itemId: string) => void;
+    applySelectedBulkFixReviewItems: (itemIds: string[]) => void;
+    selectBulkFixReviewItemTarget: (itemId: string) => void;
+    skipBulkFixReviewItem: (itemId: string) => void;
+    clearBulkFixReviewItems: () => void;
     applySuggestionFromHistory: (historyItemId: string, suggestionText: string) => void;
     applyAiInsertionPatch: (provider: AiPatchProvider, patchId: string) => void;
     applyAllAiInsertionPatches: (provider: AiPatchProvider) => void;
@@ -751,6 +813,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized] = useState(false);
     const [aiFixingInfo, setAiFixingInfo] = useState<{ title: string; from: number } | null>(null);
     const [aiHistory, setAiHistory] = useState<AIHistoryItem[]>([]);
+    const [bulkFixReviewItems, setBulkFixReviewItems] = useState<BulkFixReviewItem[]>([]);
     const [fixAllProgress, setFixAllProgress] = useState<FixAllProgress>({ current: 0, total: 0, running: false, failed: 0, errors: [] });
     
     const isInitialMount = useRef(true);
@@ -761,6 +824,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return;
         }
         setAiHistory([]);
+        setBulkFixReviewItems([]);
         setAiInsertionPatches({ gemini: [], chatgpt: [] });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
     }, [articleKey]);
@@ -1018,6 +1082,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleFixAllViolations = useCallback(async (rulesToFix: string[]) => {
         if (!editor || !analysisResults.structureAnalysis) return;
+        setBulkFixReviewItems([]);
         setFixAllProgress({ current: 0, total: 0, running: true, failed: 0, errors: [] });
         const allViolations: any[] = [];
         Object.values(analysisResults.structureAnalysis).forEach((rule: any) => {
@@ -1026,7 +1091,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
         });
         setFixAllProgress(p => ({ ...p, total: allViolations.length }));
-        allViolations.sort((a, b) => b.item.from - a.item.from);
+
+        const proposedItems: BulkFixReviewItem[] = [];
         for (let i = 0; i < allViolations.length; i++) {
             const { rule, item } = allViolations[i];
             setFixAllProgress(p => ({ ...p, current: i + 1 }));
@@ -1035,17 +1101,27 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 if (targetText === null) {
                     throw new Error('Target range is no longer valid.');
                 }
-                const prompt = `${buildComprehensivePrompt(`أصلح هذا النص لمشكلة ${rule.title}`)}\nالنص: "${targetText}"\nأرجع JSON: { "fixedText": "..." }`;
+                const prompt = `${buildComprehensivePrompt(`أصلح هذا النص لمشكلة ${rule.title}`)}\nالنص: "${targetText}"\nأرجع JSON حصراً: { "fixedText": "..." } بدون أي شرح إضافي.`;
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
-                if (parsed?.fixedText) {
-                    editor.chain().focus().insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(parsed.fixedText)).run();
+                const fixedText = cleanAiPatchContentMarkdown(asTrimmedString(parsed?.fixedText));
+                if (fixedText) {
+                    proposedItems.push({
+                        id: `bulk-fix-${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`,
+                        ruleTitle: rule.title,
+                        originalText: targetText,
+                        fixedText,
+                        from: item.from,
+                        to: item.to,
+                        message: item.message,
+                        status: 'pending',
+                    });
                 } else {
                     throw new Error('AI did not return fixedText.');
                 }
             } catch (e) {
                 const message = e instanceof Error ? e.message : 'Unknown fix error';
-                console.error('Fix all item failed:', rule.title, e);
+                console.error('Fix all proposal failed:', rule.title, e);
                 setFixAllProgress(p => ({
                     ...p,
                     failed: p.failed + 1,
@@ -1053,8 +1129,72 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }));
             }
         }
+        setBulkFixReviewItems(proposedItems);
         setFixAllProgress(p => ({ ...p, running: false }));
     }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText]);
+
+    const updateBulkFixReviewItem = useCallback((itemId: string, updates: Partial<BulkFixReviewItem>) => {
+        setBulkFixReviewItems(items => items.map(item => (
+            item.id === itemId ? { ...item, ...updates } : item
+        )));
+    }, []);
+
+    const selectBulkFixReviewItemTarget = useCallback((itemId: string) => {
+        if (!editor) return;
+        const item = bulkFixReviewItems.find(reviewItem => reviewItem.id === itemId);
+        if (!item) return;
+        const currentText = getSafeRangeText(item.from, item.to);
+        if (currentText === null) {
+            updateBulkFixReviewItem(itemId, { status: 'failed', applyError: 'تعذر تحديد الموضع لأن نطاق النص لم يعد صالحاً.' });
+            return;
+        }
+        editor.chain().focus().setTextSelection({ from: item.from, to: item.to }).scrollIntoView().run();
+    }, [bulkFixReviewItems, editor, getSafeRangeText, updateBulkFixReviewItem]);
+
+    const applySelectedBulkFixReviewItems = useCallback((itemIds: string[]) => {
+        if (!editor) return;
+        const selectedIds = new Set(itemIds);
+        const itemsToApply = bulkFixReviewItems
+            .filter(item => selectedIds.has(item.id) && item.status === 'pending')
+            .sort((a, b) => b.from - a.from);
+
+        itemsToApply.forEach(item => {
+            const currentText = getSafeRangeText(item.from, item.to);
+            if (currentText === null || normalizeRangeText(currentText) !== normalizeRangeText(item.originalText)) {
+                updateBulkFixReviewItem(item.id, {
+                    status: 'failed',
+                    applyError: 'النص الأصلي تغير داخل المحرر. أعد إنشاء قائمة الإصلاحات قبل تطبيق هذا الاقتراح.',
+                });
+                return;
+            }
+
+            try {
+                editor
+                    .chain()
+                    .focus()
+                    .insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(item.fixedText), { updateSelection: true })
+                    .scrollIntoView()
+                    .run();
+                updateBulkFixReviewItem(item.id, { status: 'applied', applyError: undefined });
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'تعذر تطبيق التعديل داخل المحرر.';
+                updateBulkFixReviewItem(item.id, { status: 'failed', applyError: message });
+            }
+        });
+    }, [bulkFixReviewItems, editor, getSafeRangeText, normalizeRangeText, updateBulkFixReviewItem]);
+
+    const applyBulkFixReviewItem = useCallback((itemId: string) => {
+        applySelectedBulkFixReviewItems([itemId]);
+    }, [applySelectedBulkFixReviewItems]);
+
+    const skipBulkFixReviewItem = useCallback((itemId: string) => {
+        updateBulkFixReviewItem(itemId, { status: 'skipped', applyError: undefined });
+    }, [updateBulkFixReviewItem]);
+
+    const clearBulkFixReviewItems = useCallback(() => {
+        setBulkFixReviewItems([]);
+        setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
+    }, []);
 
     const updateAiInsertionPatch = useCallback((provider: AiPatchProvider, patchId: string, updates: Partial<AiContentPatch>) => {
         setAiInsertionPatches(prev => ({
@@ -1149,8 +1289,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const value = {
         aiResults, aiInsertionPatches, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
-        aiHistory, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
-        handleChatGptAnalyze, handleAiFix, handleFixAllViolations, applySuggestionFromHistory,
+        aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
+        handleChatGptAnalyze, handleAiFix, handleFixAllViolations, applyBulkFixReviewItem,
+        applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
+        clearBulkFixReviewItems, applySuggestionFromHistory,
         applyAiInsertionPatch, applyAllAiInsertionPatches, selectAiInsertionPatchTarget,
         markHistorySuggestionApplied,
         removeFromAiHistory: (id: string) => setAiHistory(h => h.filter(x => x.id !== id)),

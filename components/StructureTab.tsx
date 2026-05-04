@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
-import type { CheckResult, AnalysisStatus } from '../types';
-import { Pilcrow, Heading, AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, ShieldAlert, Wand2, Loader2, CheckSquare, Square } from 'lucide-react';
+import type { BulkFixReviewItem, CheckResult } from '../types';
+import { Pilcrow, Heading, AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, ShieldAlert, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2 } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
@@ -236,9 +236,11 @@ const FixAllModal: React.FC<{
     groups: { [title: string]: number };
     onClose: () => void;
     onConfirm: (selectedRules: string[]) => void;
+    uiLanguage: 'ar' | 'en';
     t: typeof translations.ar;
-}> = ({ groups, onClose, onConfirm, t }) => {
+}> = ({ groups, onClose, onConfirm, uiLanguage, t }) => {
     const [selectedRules, setSelectedRules] = useState<string[]>(() => Object.keys(groups));
+    const isArabic = uiLanguage === 'ar';
 
     const handleToggleRule = (ruleTitle: string) => {
         setSelectedRules(prev =>
@@ -265,6 +267,11 @@ const FixAllModal: React.FC<{
                         <X size={20} />
                     </button>
                 </div>
+                <p className="mb-4 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                    {isArabic
+                        ? 'سيتم إنشاء قائمة إصلاحات مقترحة للمراجعة فقط. لن يتم تعديل النص قبل أن تطبق الاقتراحات بنفسك.'
+                        : 'This creates reviewable fix proposals only. The editor text will not change until you apply them.'}
+                </p>
                 <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
                     <div
                         className="flex items-center gap-3 p-3 cursor-pointer rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 border border-transparent hover:border-gray-100 dark:hover:border-[#444]"
@@ -291,9 +298,186 @@ const FixAllModal: React.FC<{
                         {t.cancel}
                     </button>
                     <button onClick={() => onConfirm(selectedRules)} disabled={selectedRules.length === 0} className="px-5 py-2.5 text-sm font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] disabled:bg-gray-300 shadow-md shadow-[#d4af37]/20 transition-all">
-                        {t.startFix} ({selectedRules.length})
+                        {isArabic ? 'إنشاء الاقتراحات' : 'Create Proposals'} ({selectedRules.length})
                     </button>
                 </div>
+            </div>
+        </div>
+    );
+};
+
+const BulkFixReviewPanel: React.FC<{
+    items: BulkFixReviewItem[];
+    selectedIds: string[];
+    onToggleItem: (itemId: string) => void;
+    onToggleAll: () => void;
+    onApplyItem: (itemId: string) => void;
+    onApplySelected: () => void;
+    onLocateItem: (itemId: string) => void;
+    onSkipItem: (itemId: string) => void;
+    onClear: () => void;
+    uiLanguage: 'ar' | 'en';
+}> = ({
+    items,
+    selectedIds,
+    onToggleItem,
+    onToggleAll,
+    onApplyItem,
+    onApplySelected,
+    onLocateItem,
+    onSkipItem,
+    onClear,
+    uiLanguage,
+}) => {
+    if (items.length === 0) return null;
+
+    const isArabic = uiLanguage === 'ar';
+    const pendingItems = items.filter(item => item.status === 'pending');
+    const selectedPendingCount = selectedIds.filter(id => pendingItems.some(item => item.id === id)).length;
+    const allPendingSelected = pendingItems.length > 0 && selectedPendingCount === pendingItems.length;
+    const statusLabel = (item: BulkFixReviewItem) => {
+        if (item.status === 'applied') return isArabic ? 'تم التطبيق' : 'Applied';
+        if (item.status === 'failed') return isArabic ? 'تعذر التطبيق' : 'Failed';
+        if (item.status === 'skipped') return isArabic ? 'تم التجاهل' : 'Skipped';
+        return isArabic ? 'بانتظار المراجعة' : 'Pending review';
+    };
+    const statusClass = (item: BulkFixReviewItem) => {
+        if (item.status === 'applied') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300';
+        if (item.status === 'failed') return 'bg-red-100 text-red-700 dark:bg-red-900/25 dark:text-red-300';
+        if (item.status === 'skipped') return 'bg-gray-100 text-gray-600 dark:bg-[#333] dark:text-gray-300';
+        return 'bg-amber-100 text-amber-700 dark:bg-amber-900/25 dark:text-amber-300';
+    };
+    const copyText = (text: string) => {
+        void navigator.clipboard?.writeText(text);
+    };
+
+    return (
+        <div className="mt-3 rounded-2xl border border-[#d4af37]/25 bg-[#d4af37]/5 dark:bg-[#d4af37]/10 dark:border-[#d4af37]/20 overflow-hidden">
+            <div className="p-3 border-b border-[#d4af37]/15 dark:border-[#d4af37]/20">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-xs font-black text-gray-800 dark:text-gray-100">
+                            {isArabic ? 'قائمة إصلاحات مقترحة' : 'Proposed Fix Review'}
+                        </h3>
+                        <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                            {isArabic
+                                ? 'راجع النص قبل وبعد، ثم طبق العناصر المحددة أو طبق كل عنصر بمفرده.'
+                                : 'Review the before and after text, then apply selected items or apply each one separately.'}
+                        </p>
+                    </div>
+                    <button
+                        onClick={onClear}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        title={isArabic ? 'مسح القائمة' : 'Clear list'}
+                    >
+                        <X size={15} />
+                    </button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                        onClick={onToggleAll}
+                        disabled={pendingItems.length === 0}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white text-gray-700 border border-gray-200 hover:border-[#d4af37]/50 disabled:opacity-50 dark:bg-[#2A2A2A] dark:text-gray-200 dark:border-[#3C3C3C]"
+                    >
+                        {allPendingSelected ? <CheckSquare size={14} className="text-[#d4af37]" /> : <Square size={14} />}
+                        <span>{isArabic ? 'تحديد الكل' : 'Select all'}</span>
+                    </button>
+                    <button
+                        onClick={onApplySelected}
+                        disabled={selectedPendingCount === 0}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-[#d4af37] text-white hover:bg-[#b8922e] disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <Check size={14} />
+                        <span>{isArabic ? `تطبيق المحدد (${selectedPendingCount})` : `Apply selected (${selectedPendingCount})`}</span>
+                    </button>
+                </div>
+            </div>
+
+            <div className="divide-y divide-[#d4af37]/15 dark:divide-[#d4af37]/20 max-h-[560px] overflow-y-auto custom-scrollbar">
+                {items.map((item, index) => {
+                    const isPending = item.status === 'pending';
+                    const isSelected = selectedIds.includes(item.id);
+                    return (
+                        <div key={item.id} className="p-3 bg-white/70 dark:bg-[#242424]/70">
+                            <div className="flex items-start justify-between gap-2">
+                                <button
+                                    onClick={() => onToggleItem(item.id)}
+                                    disabled={!isPending}
+                                    className="mt-0.5 p-1 rounded-md text-gray-400 hover:text-[#d4af37] disabled:opacity-40"
+                                    title={isArabic ? 'تحديد الاقتراح' : 'Select proposal'}
+                                >
+                                    {isSelected && isPending ? <CheckSquare size={16} className="text-[#d4af37]" /> : <Square size={16} />}
+                                </button>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="text-[10px] font-black text-gray-400">#{index + 1}</span>
+                                        <span className="text-[11px] font-black text-gray-800 dark:text-gray-100">{item.ruleTitle}</span>
+                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${statusClass(item)}`}>{statusLabel(item)}</span>
+                                    </div>
+                                    {item.message && (
+                                        <p className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{item.message}</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-1 gap-2">
+                                <div>
+                                    <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-gray-400">{isArabic ? 'قبل' : 'Before'}</div>
+                                    <div className="max-h-24 overflow-y-auto custom-scrollbar rounded-lg border border-gray-100 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-600 whitespace-pre-wrap dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300">
+                                        {item.originalText}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">{isArabic ? 'بعد' : 'After'}</div>
+                                    <div className="max-h-28 overflow-y-auto custom-scrollbar rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/5 p-2 text-[11px] leading-relaxed text-gray-800 whitespace-pre-wrap dark:bg-[#d4af37]/10 dark:text-gray-100">
+                                        {item.fixedText}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {item.applyError && (
+                                <p className="mt-2 rounded-lg bg-red-50 p-2 text-[10px] leading-relaxed text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                                    {item.applyError}
+                                </p>
+                            )}
+
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <button
+                                    onClick={() => onLocateItem(item.id)}
+                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#333] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                                >
+                                    <MapPin size={13} />
+                                    <span>{isArabic ? 'تحديد الموضع' : 'Locate'}</span>
+                                </button>
+                                <button
+                                    onClick={() => copyText(item.fixedText)}
+                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#333] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                                >
+                                    <Copy size={13} />
+                                    <span>{isArabic ? 'نسخ' : 'Copy'}</span>
+                                </button>
+                                {isPending && (
+                                    <>
+                                        <button
+                                            onClick={() => onApplyItem(item.id)}
+                                            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-black bg-[#d4af37] text-white hover:bg-[#b8922e]"
+                                        >
+                                            <Check size={13} />
+                                            <span>{isArabic ? 'تطبيق' : 'Apply'}</span>
+                                        </button>
+                                        <button
+                                            onClick={() => onSkipItem(item.id)}
+                                            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-700 dark:bg-[#333] dark:text-gray-300 dark:hover:bg-red-900/20 dark:hover:text-red-300"
+                                        >
+                                            <Trash2 size={13} />
+                                            <span>{isArabic ? 'تجاهل' : 'Skip'}</span>
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );
@@ -304,14 +488,23 @@ const StructureTab: React.FC = () => {
     const { structureViewMode: viewMode, uiLanguage } = useUser();
     const { analysisResults } = useEditor();
     const { highlightedItem, handleHighlightStructureItem: onHighlightStructureItem } = useInteraction();
-    const { handleFixAllViolations, fixAllProgress } = useAI();
+    const {
+        handleFixAllViolations,
+        fixAllProgress,
+        bulkFixReviewItems,
+        applyBulkFixReviewItem,
+        applySelectedBulkFixReviewItems,
+        selectBulkFixReviewItemTarget,
+        skipBulkFixReviewItem,
+        clearBulkFixReviewItems,
+    } = useAI();
     
     const { structureAnalysis: analysis, structureStats: stats } = analysisResults;
     const [modalContent, setModalContent] = useState<CheckResult | null>(null);
     const [isFixModalOpen, setIsFixModalOpen] = useState(false);
+    const [selectedBulkFixIds, setSelectedBulkFixIds] = useState<string[]>([]);
     const t = translations[uiLanguage];
     const tSt = t.structureTab;
-    const tAi = t.aiHistory;
 
     const fixableViolationGroups = useMemo(() => {
         const groups: { [title: string]: number } = {};
@@ -324,10 +517,46 @@ const StructureTab: React.FC = () => {
     }, [analysis]);
     
     const fixableViolationsCount = Object.values(fixableViolationGroups).reduce((sum: number, count: number) => sum + count, 0);
+    const pendingBulkFixIds = useMemo(() => bulkFixReviewItems.filter(item => item.status === 'pending').map(item => item.id), [bulkFixReviewItems]);
+    const bulkFixReviewIdsKey = useMemo(() => bulkFixReviewItems.map(item => item.id).join('|'), [bulkFixReviewItems]);
 
     const handleStartFixing = (selectedRules: string[]) => {
         handleFixAllViolations(selectedRules);
         setIsFixModalOpen(false);
+    };
+
+    useEffect(() => {
+        setSelectedBulkFixIds(bulkFixReviewItems.filter(item => item.status === 'pending').map(item => item.id));
+    }, [bulkFixReviewIdsKey]);
+
+    const handleToggleBulkFixItem = (itemId: string) => {
+        setSelectedBulkFixIds(prev => (
+            prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]
+        ));
+    };
+
+    const handleToggleAllBulkFixItems = () => {
+        setSelectedBulkFixIds(prev => (
+            pendingBulkFixIds.length > 0 && pendingBulkFixIds.every(id => prev.includes(id))
+                ? prev.filter(id => !pendingBulkFixIds.includes(id))
+                : Array.from(new Set([...prev, ...pendingBulkFixIds]))
+        ));
+    };
+
+    const handleApplySelectedBulkFixes = () => {
+        const idsToApply = selectedBulkFixIds.filter(id => pendingBulkFixIds.includes(id));
+        applySelectedBulkFixReviewItems(idsToApply);
+        setSelectedBulkFixIds(prev => prev.filter(id => !idsToApply.includes(id)));
+    };
+
+    const handleApplyBulkFixItem = (itemId: string) => {
+        applyBulkFixReviewItem(itemId);
+        setSelectedBulkFixIds(prev => prev.filter(id => id !== itemId));
+    };
+
+    const handleSkipBulkFixItem = (itemId: string) => {
+        skipBulkFixReviewItem(itemId);
+        setSelectedBulkFixIds(prev => prev.filter(id => id !== itemId));
     };
     
     useEffect(() => {
@@ -439,25 +668,45 @@ const StructureTab: React.FC = () => {
               {fixAllProgress.running ? (
                   <>
                       <Loader2 size={16} className="animate-spin" />
-                      <span>{tAi.fixingInProgress.replace('{current}', String(fixAllProgress.current)).replace('{total}', String(fixAllProgress.total))}</span>
+                      <span>
+                          {uiLanguage === 'ar'
+                              ? `جاري إنشاء الاقتراحات ${fixAllProgress.current}/${fixAllProgress.total}`
+                              : `Creating proposals ${fixAllProgress.current}/${fixAllProgress.total}`}
+                      </span>
                   </>
               ) : (
                   <>
                       <Wand2 size={16} />
-                      <span>{tAi.fixAll.replace('{count}', String(fixableViolationsCount))}</span>
+                      <span>
+                          {uiLanguage === 'ar'
+                              ? `إنشاء قائمة إصلاحات مقترحة (${fixableViolationsCount})`
+                              : `Create proposed fixes (${fixableViolationsCount})`}
+                      </span>
                   </>
               )}
           </button>
           {fixAllProgress.failed > 0 && !fixAllProgress.running && (
               <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
                   <p className="font-bold">
-                      {uiLanguage === 'ar' ? 'تعذر إصلاح بعض العناصر.' : 'Some fixes could not be applied.'}
+                      {uiLanguage === 'ar' ? 'تعذر إنشاء بعض الاقتراحات.' : 'Some proposals could not be created.'}
                   </p>
                   {fixAllProgress.errors.slice(0, 2).map((error, index) => (
                       <p key={index} className="mt-1 break-words">{error}</p>
                   ))}
               </div>
           )}
+          <BulkFixReviewPanel
+              items={bulkFixReviewItems}
+              selectedIds={selectedBulkFixIds}
+              onToggleItem={handleToggleBulkFixItem}
+              onToggleAll={handleToggleAllBulkFixItems}
+              onApplyItem={handleApplyBulkFixItem}
+              onApplySelected={handleApplySelectedBulkFixes}
+              onLocateItem={selectBulkFixReviewItemTarget}
+              onSkipItem={handleSkipBulkFixItem}
+              onClear={clearBulkFixReviewItems}
+              uiLanguage={uiLanguage}
+          />
        </div>
 
       {viewMode === 'grid' ? (
@@ -524,6 +773,7 @@ const StructureTab: React.FC = () => {
           groups={fixableViolationGroups}
           onClose={() => setIsFixModalOpen(false)}
           onConfirm={handleStartFixing}
+          uiLanguage={uiLanguage}
           t={t}
         />
       )}

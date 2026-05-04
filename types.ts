@@ -247,3 +247,17 @@ export interface AIHistoryItem {
   appliedSuggestion?: string;
   applyError?: string;
 }
+
+export type BulkFixReviewStatus = 'pending' | 'applied' | 'failed' | 'skipped';
+
+export interface BulkFixReviewItem {
+  id: string;
+  ruleTitle: string;
+  originalText: string;
+  fixedText: string;
+  from: number;
+  to: number;
+  message?: string;
+  status: BulkFixReviewStatus;
+  applyError?: string;
+}
