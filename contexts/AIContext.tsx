@@ -447,6 +447,8 @@ const formatBulkFixGroupPrompt = (group: BulkFixTargetGroup, targetText: string)
         '- حافظ على المعنى الأصلي وسياق الصفحة ولا تضف معلومات أو ادعاءات جديدة.',
         '- إذا كان النص يحتوي عناوين، فاستخدم Markdown للحفاظ على مستويات العناوين قدر الإمكان.',
         '- لا تكتب تسميات داخل fixedText مثل "النص المقترح" أو "الإجابة".',
+        '- يجب أن يكون الرد JSON صالحاً فقط، دون Markdown fences ودون شرح خارج JSON.',
+        '- المفتاح suggestions إلزامي، وكل عنصر داخله يجب أن يحتوي fixedText نصياً غير فارغ.',
         '',
         'أرجع JSON حصراً بهذا الشكل:',
         '{ "suggestions": [ { "label": "اقتراح 1", "fixedText": "..." }, { "label": "اقتراح 2", "fixedText": "..." }, { "label": "اقتراح 3", "fixedText": "..." } ] }',
@@ -454,14 +456,42 @@ const formatBulkFixGroupPrompt = (group: BulkFixTargetGroup, targetText: string)
 };
 
 const normalizeBulkFixVariants = (raw: unknown, originalText: string): BulkFixReviewVariant[] => {
-    const record = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
-    const rawSuggestions = Array.isArray(record.suggestions)
-        ? record.suggestions
-        : Array.isArray(record.variants)
-            ? record.variants
-            : record.fixedText
-                ? [{ label: 'اقتراح 1', fixedText: record.fixedText }]
-                : [];
+    const parsedRaw = typeof raw === 'string' ? (extractJson(raw) || raw) : raw;
+    const record = parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)
+        ? parsedRaw as Record<string, unknown>
+        : {};
+    const listKeys = ['suggestions', 'variants', 'options', 'alternatives', 'اقتراحات', 'الاقتراحات', 'البدائل'];
+    const textKeys = ['fixedText', 'fixed_text', 'text', 'content', 'contentMarkdown', 'replacement', 'suggestion', 'النص', 'النص المقترح', 'النص البديل', 'الاقتراح', 'المحتوى'];
+    const labelKeys = ['label', 'title', 'name', 'العنوان', 'التسمية', 'اسم الاقتراح'];
+    const firstValueByKeys = (source: Record<string, unknown>, keys: string[]) => {
+        for (const key of keys) {
+            if (source[key] != null) return source[key];
+        }
+        return undefined;
+    };
+    const looseTextVariants = (value: string): unknown[] => {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+        const pattern = /(?:^|\n)\s*(?:#{1,4}\s*)?(?:اقتراح|الاقتراح|Suggestion|Option|Variant)\s*\d+\s*[:：-]?\s*\n?([\s\S]*?)(?=(?:\n\s*(?:#{1,4}\s*)?(?:اقتراح|الاقتراح|Suggestion|Option|Variant)\s*\d+\s*[:：-]?)|$)/gi;
+        const matches = Array.from(trimmed.matchAll(pattern))
+            .map(match => match[1]?.trim())
+            .filter(Boolean);
+        return matches.length > 0
+            ? matches.map((fixedText, index) => ({ label: `اقتراح ${index + 1}`, fixedText }))
+            : [{ label: 'اقتراح 1', fixedText: trimmed }];
+    };
+    const rawListValue = firstValueByKeys(record, listKeys);
+    const rawSuggestions = Array.isArray(parsedRaw)
+        ? parsedRaw
+        : Array.isArray(rawListValue)
+            ? rawListValue
+            : rawListValue && typeof rawListValue === 'object'
+                ? Object.values(rawListValue as Record<string, unknown>)
+                : firstValueByKeys(record, textKeys) != null
+                    ? [{ label: 'اقتراح 1', fixedText: firstValueByKeys(record, textKeys) }]
+                    : typeof parsedRaw === 'string'
+                        ? looseTextVariants(parsedRaw)
+                        : [];
 
     const statsBefore = getBulkFixStats(originalText);
     return rawSuggestions
@@ -470,12 +500,12 @@ const normalizeBulkFixVariants = (raw: unknown, originalText: string): BulkFixRe
                 ? suggestion as Record<string, unknown>
                 : { fixedText: suggestion };
             const fixedText = cleanAiPatchContentMarkdown(asTrimmedString(
-                suggestionRecord.fixedText || suggestionRecord.text || suggestionRecord.content
+                firstValueByKeys(suggestionRecord, textKeys)
             ));
             if (!fixedText) return null;
             return {
                 id: `variant-${index + 1}-${Math.random().toString(36).slice(2)}`,
-                label: asTrimmedString(suggestionRecord.label) || `اقتراح ${index + 1}`,
+                label: asTrimmedString(firstValueByKeys(suggestionRecord, labelKeys)) || `اقتراح ${index + 1}`,
                 fixedText,
                 statsBefore,
                 statsAfter: getBulkFixStats(fixedText),
@@ -626,13 +656,34 @@ const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[])
 
 const extractJson = (text: string): any | null => {
     if (!text) return null;
-    try {
-        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```|({[\s\S]*})/);
-        if (jsonMatch && (jsonMatch[1] || jsonMatch[2])) {
-            return JSON.parse(jsonMatch[1] || jsonMatch[2]);
+    const tryParse = (candidate: string): any | null => {
+        try {
+            return JSON.parse(candidate);
+        } catch {
+            return null;
         }
-        if (text.trim().startsWith('{')) {
-            return JSON.parse(text);
+    };
+    try {
+        const trimmed = text.trim();
+        const jsonMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```|({[\s\S]*})/i);
+        if (jsonMatch && (jsonMatch[1] || jsonMatch[2])) {
+            const parsed = tryParse(jsonMatch[1] || jsonMatch[2]);
+            if (parsed != null) return parsed;
+        }
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            const parsed = tryParse(trimmed);
+            if (parsed != null) return parsed;
+        }
+        const objectStart = trimmed.indexOf('{');
+        const arrayStart = trimmed.indexOf('[');
+        const starts = [objectStart, arrayStart].filter(index => index >= 0);
+        if (starts.length > 0) {
+            const start = Math.min(...starts);
+            const endChar = trimmed[start] === '[' ? ']' : '}';
+            const end = trimmed.lastIndexOf(endChar);
+            if (end > start) {
+                return tryParse(trimmed.slice(start, end + 1));
+            }
         }
         return null;
     } catch (e) {
@@ -1439,7 +1490,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const prompt = buildComprehensivePrompt(formatBulkFixGroupPrompt(group, targetText));
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
-                const variants = normalizeBulkFixVariants(parsed, targetText);
+                const variants = normalizeBulkFixVariants(parsed || res, targetText);
                 const primaryVariant = variants[0];
                 const ruleTitles = Array.from(new Set(group.violations.map(violation => violation.rule.title)));
                 if (primaryVariant) {
