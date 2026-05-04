@@ -470,7 +470,7 @@ const BulkFixReviewPanel: React.FC<{
                             <div className="mt-3 grid grid-cols-1 gap-2">
                                 <div>
                                     <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-gray-400">{isArabic ? 'قبل' : 'Before'}</div>
-                                    <div className="max-h-24 overflow-y-auto custom-scrollbar rounded-lg border border-gray-100 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-600 whitespace-pre-wrap dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300">
+                                    <div className="overflow-y-auto custom-scrollbar rounded-lg border border-gray-100 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-600 whitespace-pre-wrap break-words dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300" style={{ maxHeight: 'min(42vh, 24rem)' }}>
                                         {item.originalText}
                                     </div>
                                 </div>
@@ -496,6 +496,7 @@ const BulkFixReviewPanel: React.FC<{
                                         after: isArabic ? 'غير متاح' : 'Unavailable',
                                         required: String(criterion.required),
                                         status: 'unknown',
+                                        source: criterion.source,
                                     })),
                                 } as BulkFixReviewVariant]).map((variant, variantIndex) => {
                                     const isAppliedVariant = item.appliedVariantId === variant.id || (item.status === 'applied' && !item.appliedVariantId && variantIndex === 0);
@@ -526,16 +527,26 @@ const BulkFixReviewPanel: React.FC<{
                                                                     </span>
                                                                 </div>
                                                                 <div className="mt-1 grid grid-cols-1 gap-1">
-                                                                    <span>{isArabic ? 'الحالي' : 'Current'}: <b>{check.before}</b></span>
+                                                                    <span>{check.source === 'article' ? (isArabic ? 'الحالي العام' : 'Overall current') : (isArabic ? 'الحالي' : 'Current')}: <b>{check.before}</b></span>
                                                                     <span>{isArabic ? 'المطلوب' : 'Required'}: <b>{check.required}</b></span>
                                                                     <span>{isArabic ? 'المستخرج' : 'Extracted'}: <b>{check.after}</b></span>
+                                                                    {check.source === 'article' && (
+                                                                        <span className="text-gray-400 dark:text-gray-500">
+                                                                            {isArabic
+                                                                                ? 'التقييم هنا مبني على النص المقترح فقط؛ أما الوضع العام فهو مذكور في سطر الحالي.'
+                                                                                : 'This status is based on the proposed text only; the overall article state is shown in the current line.'}
+                                                                        </span>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         ))}
                                                     </div>
                                                 </div>
                                             )}
-                                            <div className="max-h-28 overflow-y-auto custom-scrollbar rounded-lg border border-white/60 bg-white/80 p-2 text-[11px] leading-relaxed text-gray-800 whitespace-pre-wrap dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+                                            <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
+                                                {isArabic ? 'النص المقترح' : 'Suggested text'}
+                                            </div>
+                                            <div className="overflow-y-auto custom-scrollbar rounded-lg border border-white/60 bg-white/80 p-2 text-[11px] leading-relaxed text-gray-800 whitespace-pre-wrap break-words dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100" style={{ maxHeight: 'min(42vh, 24rem)' }}>
                                                 {variant.fixedText}
                                             </div>
                                             <div className="mt-2 flex flex-wrap items-center gap-2">

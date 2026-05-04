@@ -140,6 +140,8 @@ const STRUCTURE_CRITERIA_ATTACHMENTS: StructureCriteriaAttachment[] = [
     },
 ];
 
+const CONTEXTUAL_CRITERIA_WORDS_NOTE = 'ملاحظة مهمة: الكلمات المذكورة داخل شروط وقواعد المعايير هي مؤشرات وسياقات مساعدة، وليست قائمة حصرية. عند التحليل أو الاقتراح، راعِ أيضًا الكلمات والعبارات الأخرى من نفس السياق والمعنى حتى لو لم تكن مذكورة حرفيًا في المعيار.';
+
 const formatStructureCriteriaRules = (sectionTitle: string, rules: CheckResult[]): string => {
     const formattedRules = rules
         .filter(Boolean)
@@ -162,7 +164,7 @@ const formatStructureCriteriaRules = (sectionTitle: string, rules: CheckResult[]
         })
         .join('\n\n');
 
-    return `**${sectionTitle} وشروطها وقواعدها:**\n${formattedRules || '- لا توجد معايير متاحة لهذه المجموعة.'}`;
+    return `**${sectionTitle} وشروطها وقواعدها:**\n${CONTEXTUAL_CRITERIA_WORDS_NOTE}\n${formattedRules || '- لا توجد معايير متاحة لهذه المجموعة.'}`;
 };
 
 const formatBulkFixViolationPrompt = (
@@ -634,8 +636,8 @@ const formatBulkFixGroupPrompt = (
         '- إذا كان هدف الإصلاح هو تقصير فقرة أو ضبط طولها، فلا تطل الجمل ولا تضف شرحاً غير ضروري.',
         '- حافظ خصوصاً على قيود الحماية المعروضة فقط، ولا تضف كلمات بطيئة أو كلمات للحذف أو مخالفات ترقيم أو إحالات غامضة جديدة.',
         '- لا تضف كلمات حث أو كلمات تحذيرية أو كلمات انتقالية فقط لإرضاء معيار عام ما لم يكن هذا المعيار هدف الإصلاح الأساسي.',
-        '- إذا ظهر معيار ضمن أهداف مستوى المقال، فقيّمه على كامل المقال بعد استبدال النص، لا على الفقرة وحدها.',
-        '- إذا كان معيار مستوى المقال محققاً أصلاً، فلا تجعله قيداً محلياً على الفقرة ولا تضعه كخارج الحد بسبب قياس الفقرة وحدها.',
+        '- إذا ظهر معيار ضمن أهداف مستوى المقال، فاجعل status في criteriaChecks مبنياً على توافق النص المقترح نفسه مع شروط المعيار، ولا تجعله خارج الحد بسبب فقرات أخرى في المقال.',
+        '- الوضع العام للمقال موجود في before/current؛ أما after/status فيجب أن يصفا النص المقترح نفسه. إذا لم يمكن الجزم من النص المقترح وحده فاستخدم unknown بدلاً من fail.',
         '- معيار تمهيد خطوات ينطبق فقط عندما تكون الفقرة الحالية قبل قائمة تعداد آلية مباشرة؛ غير ذلك لا تقيّمه ولا تذكره داخل criteriaChecks.',
         '- إذا كانت الوحدة فقرة تمهيد خطوات، فلا تطبق عليها شروط طول الفقرات العادية؛ قيّمها بمعيار تمهيد خطوات فقط.',
         '- حافظ على المعنى الأصلي وسياق الصفحة ولا تضف معلومات أو ادعاءات جديدة.',
@@ -1016,9 +1018,27 @@ const getBulkFixTextualAudit = (
     return null;
 };
 
+const isBulkFixArticlePresenceCriterion = (haystack: string): boolean => (
+    haystack.includes('كلمات الحث') ||
+    haystack.includes('cta words') ||
+    haystack.includes('لغة تفاعلية') ||
+    haystack.includes('interactive language') ||
+    haystack.includes('كلمات تحذيرية') ||
+    haystack.includes('warning words') ||
+    haystack.includes('كلمات إنتقالية') ||
+    haystack.includes('كلمات انتقالية') ||
+    haystack.includes('transitional words')
+);
+
+const isBulkFixArticleOnlyCriterion = (haystack: string): boolean => (
+    haystack.includes('عدد الكلمات') ||
+    haystack.includes('word count') ||
+    haystack.includes('جداول') ||
+    haystack.includes('tables')
+);
+
 const summarizeBulkFixMeasuredState = (textValue: string, criterionText = '', targetContext?: BulkFixTargetContext): string => {
-    const isArticleScope = criterionText.includes('source:article');
-    const measuredText = isArticleScope ? buildBulkFixCandidateArticleText(textValue, targetContext) : textValue;
+    const measuredText = textValue;
     const stats = getBulkFixStats(measuredText);
     const paragraphs = splitBulkFixParagraphs(measuredText);
     const sentences = splitBulkFixSentences(measuredText);
@@ -1049,7 +1069,7 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = '', ta
         return `${stats.words} كلمة، ${stats.sentences} جملة، ${colonState}`;
     }
 
-    const textualAudit = getBulkFixTextualAudit(measuredText, criterionText, isArticleScope ? 'article' : 'local');
+    const textualAudit = getBulkFixTextualAudit(measuredText, criterionText, 'local');
     if (textualAudit) {
         return textualAudit.summary;
     }
@@ -1073,7 +1093,7 @@ const inferBulkFixCriterionCheck = (
     fixedText: string,
     targetContext?: BulkFixTargetContext
 ): BulkFixCriterionCheck => {
-    const criterionText = `${criterion.title} ${criterion.required} ${criterion.message || ''} ${criterion.source === 'article' ? 'source:article' : ''}`;
+    const criterionText = `${criterion.title} ${criterion.required} ${criterion.message || ''}`;
     const haystack = criterionText.toLowerCase();
     const wordRange = extractBulkFixRange(criterionText, 'كلمة|كلمات|word|words');
     const sentenceRange = extractBulkFixRange(criterionText, 'جملة|جمل|sentence|sentences');
@@ -1085,10 +1105,35 @@ const inferBulkFixCriterionCheck = (
     const isPunctuationSpacingCriterion = haystack.includes('فراغات الترقيم') || haystack.includes('punctuation spacing');
     const isPunctuationCriterion = (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) && !isPunctuationSpacingCriterion;
     const isArticleScope = criterion.source === 'article';
-    const measuredText = isArticleScope ? buildBulkFixCandidateArticleText(fixedText, targetContext) : fixedText;
-    const measuredParagraphs = isArticleScope ? splitBulkFixParagraphs(measuredText) : paragraphs;
-    const measuredSentences = isArticleScope ? splitBulkFixSentences(measuredText) : sentences;
-    const measuredStats = isArticleScope ? getBulkFixStats(measuredText) : afterStats;
+    const measuredText = fixedText;
+    const measuredParagraphs = paragraphs;
+    const measuredSentences = sentences;
+    const measuredStats = afterStats;
+
+    if (isArticleScope) {
+        const textualAudit = getBulkFixTextualAudit(measuredText, criterionText, 'local');
+        const after = textualAudit?.summary || summarizeBulkFixMeasuredState(fixedText, criterionText, targetContext);
+        if (textualAudit) {
+            return {
+                criterionTitle: criterion.title,
+                before: String(criterion.current),
+                after,
+                required: String(criterion.required),
+                status: textualAudit.passed ? 'pass' : isBulkFixArticlePresenceCriterion(haystack) ? 'unknown' : 'fail',
+                source: criterion.source,
+            };
+        }
+        if (isBulkFixArticleOnlyCriterion(haystack)) {
+            return {
+                criterionTitle: criterion.title,
+                before: String(criterion.current),
+                after,
+                required: String(criterion.required),
+                status: 'unknown',
+                source: criterion.source,
+            };
+        }
+    }
 
     if (isArticleScope && criterion.status === 'pass') {
         return {
@@ -1159,11 +1204,14 @@ const buildBulkFixCriteriaChecks = (
             check.criterionTitle.includes(criterion.title) ||
             criterion.title.includes(check.criterionTitle)
         ));
-        const shouldUseAiAfter = inferred.status === 'unknown' && matchingAiCheck?.after && inferred.after.includes('غير قابل للقياس');
+        const shouldUseAiAfter = inferred.source !== 'article' && inferred.status === 'unknown' && matchingAiCheck?.after && inferred.after.includes('غير قابل للقياس');
+        const status = inferred.source === 'article'
+            ? (inferred.status !== 'unknown' ? inferred.status : matchingAiCheck?.status === 'pass' ? 'pass' : 'unknown')
+            : (inferred.status !== 'unknown' ? inferred.status : matchingAiCheck?.status || 'unknown');
         return {
             ...inferred,
             after: shouldUseAiAfter ? matchingAiCheck.after : inferred.after || matchingAiCheck?.after || 'غير متاح',
-            status: inferred.status !== 'unknown' ? inferred.status : matchingAiCheck?.status || 'unknown',
+            status,
         };
     }));
 };

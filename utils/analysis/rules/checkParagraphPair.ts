@@ -88,6 +88,32 @@ const buildExclusionSet = (context: AnalysisContext): Set<string> => {
     return exclusionSet;
 };
 
+const getEligibleParagraphs = (context: AnalysisContext): ParagraphEntry[] => {
+    const { nodes, nonEmptyParagraphs, conclusionSection } = context;
+    const excludedParagraphPositions = new Set<number>();
+
+    if (nonEmptyParagraphs[0]) {
+        excludedParagraphPositions.add(nonEmptyParagraphs[0].pos);
+    }
+
+    const firstH2Index = nodes.findIndex(node => node.type === 'heading' && node.level === 2);
+    if (firstH2Index !== -1) {
+        nodes.slice(0, firstH2Index).forEach((node) => {
+            if (node.type === 'paragraph' && node.text.trim().length > 0) {
+                excludedParagraphPositions.add(node.pos);
+            }
+        });
+    } else {
+        nonEmptyParagraphs.slice(0, 2).forEach(paragraph => excludedParagraphPositions.add(paragraph.pos));
+    }
+
+    conclusionSection?.paragraphs.forEach((paragraph: ParagraphEntry) => {
+        excludedParagraphPositions.add(paragraph.pos);
+    });
+
+    return nonEmptyParagraphs.filter(paragraph => !excludedParagraphPositions.has(paragraph.pos));
+};
+
 const getParagraphWordSet = (
     paragraph: ParagraphEntry,
     exclusionSet: Set<string>,
@@ -159,21 +185,23 @@ const formatSharedWords = (sharedWords: string[], articleLanguage: 'ar' | 'en'):
 };
 
 export const checkParagraphPair = (context: AnalysisContext): CheckResult => {
-    const { nonEmptyParagraphs, articleLanguage, uiLanguage, t } = context;
+    const { articleLanguage, uiLanguage, t } = context;
     const tRule = t.structureAnalysis['زوج فقرات'];
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
     const details = uiLanguage === 'ar'
-        ? 'يبحث عن أقوى زوج فقرات من حيث الكلمات المشتركة بعد استثناء الكلمات العامة وكلمات العبارة المفتاحية الأساسية والصيغ البديلة واسم الشركة. يصبح خارج الحد عند وجود 8 كلمات مشتركة أو أكثر، أو عند بلوغ التشارك 35% من أصغر الفقرتين.'
-        : 'Finds the strongest paragraph pair by shared meaningful words after excluding common words, the primary keyword, alternate keyword forms, and the company name. It fails at 8+ shared words or 35% overlap of the smaller paragraph.';
+        ? 'يبحث عن أقوى زوج فقرات من حيث الكلمات المشتركة داخل فقرات المتن فقط، مع استثناء فقرة المقدمة والفقرة التلخيصية والخاتمة، وبعد استثناء الكلمات العامة وكلمات العبارة المفتاحية الأساسية والصيغ البديلة واسم الشركة. يصبح خارج الحد عند وجود 8 كلمات مشتركة أو أكثر، أو عند بلوغ التشارك 35% من أصغر الفقرتين.'
+        : 'Finds the strongest paragraph pair by shared meaningful words in body paragraphs only, excluding intro, summary, and conclusion paragraphs, then excluding common words, the primary keyword, alternate keyword forms, and the company name. It fails at 8+ shared words or 35% overlap of the smaller paragraph.';
 
-    if (nonEmptyParagraphs.length < 2) {
+    const eligibleParagraphs = getEligibleParagraphs(context);
+
+    if (eligibleParagraphs.length < 2) {
         return createCheckResult(title, 'pass', t.common.good, requiredText, 1, description, details);
     }
 
     const exclusionSet = buildExclusionSet(context);
-    const paragraphWordSets = nonEmptyParagraphs.map(paragraph =>
+    const paragraphWordSets = eligibleParagraphs.map(paragraph =>
         getParagraphWordSet(paragraph, exclusionSet, articleLanguage)
     );
     const strongestPair = findStrongestParagraphPair(paragraphWordSets);
