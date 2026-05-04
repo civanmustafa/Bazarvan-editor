@@ -10,8 +10,8 @@ export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
     const requiredText = tRule.required;
     
     const details = uiLanguage === 'ar'
-        ? "• ينطبق على فقرات المحتوى الأساسية (خارج المقدمة، الخاتمة، والأسئلة الشائعة).\n• طول الفقرة المثالي: 1-4 جمل.\n• عدد الكلمات المسموح: 30-100 كلمة.\n• الهدف: تجنب الكتل النصية الطويلة لتحسين قابلية القراءة."
-        : "• Applies to core content paragraphs (excluding intro, conclusion, and FAQs).\n• Ideal length: 1-4 sentences.\n• Allowed words: 30-100 words.\n• Goal: Avoid large text blocks to improve readability.";
+        ? "• ينطبق على فقرات المحتوى الأساسية (خارج المقدمة، الخاتمة، والأسئلة الشائعة، وتمهيد القوائم المنتهي بنقطتين).\n• طول الفقرة المثالي: 1-4 جمل.\n• عدد الكلمات المسموح: 30-100 كلمة.\n• الهدف: تجنب الكتل النصية الطويلة لتحسين قابلية القراءة."
+        : "• Applies to core content paragraphs (excluding intro, conclusion, FAQs, and colon-ended list intro paragraphs).\n• Ideal length: 1-4 sentences.\n• Allowed words: 30-100 words.\n• Goal: Avoid large text blocks to improve readability.";
 
     const firstHeadingIndex = nodes.findIndex(n => n.type === 'heading');
     const introNodes = firstHeadingIndex === -1 ? nodes : nodes.slice(0, firstHeadingIndex);
@@ -19,10 +19,22 @@ export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
 
     const conclusionParas = conclusionSection ? conclusionSection.paragraphs : [];
     const conclusionParaPositions = new Set(conclusionParas.map(p => p.pos));
+    const listIntroParagraphPositions = new Set<number>();
+    nodes.forEach((node, index) => {
+        const nextNode = nodes[index + 1];
+        if (
+            node.type === 'paragraph' &&
+            (nextNode?.type === 'bulletList' || nextNode?.type === 'orderedList') &&
+            /[:：]\s*$/.test(node.text.trim())
+        ) {
+            listIntroParagraphPositions.add(node.pos);
+        }
+    });
 
     const contentParagraphs = nonEmptyParagraphs.filter(p => {
         if (introParagraphPositions.has(p.pos)) return false;
         if (conclusionParaPositions.has(p.pos)) return false;
+        if (listIntroParagraphPositions.has(p.pos)) return false;
         if (isPosInFaqSection(p.pos)) return false;
         return true;
     });

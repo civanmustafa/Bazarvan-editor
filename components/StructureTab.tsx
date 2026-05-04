@@ -104,6 +104,20 @@ const getConciseSummary = (item: CheckResult, t: typeof translations.ar, uiLangu
   return typeof item.required === 'string' ? item.required : String(item.required);
 };
 
+const getCriterionDisplayOrder = (status?: string): number => {
+  if (status === 'pass') return 0;
+  if (status === 'fail') return 1;
+  if (status === 'warn') return 2;
+  return 3;
+};
+
+const orderCriteriaChecksForDisplay = (checks?: BulkFixReviewVariant['criteriaChecks']) => (
+  (checks || [])
+    .map((check, index) => ({ check, index }))
+    .sort((a, b) => getCriterionDisplayOrder(a.check.status) - getCriterionDisplayOrder(b.check.status) || a.index - b.index)
+    .map(({ check }) => check)
+);
+
 const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighlighted?: boolean; onInfoClick: (item: CheckResult) => void; uiLanguage: 'ar' | 'en'; }> = ({ item, onClick, isHighlighted, onInfoClick, uiLanguage }) => {
   const t = translations[uiLanguage];
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
@@ -503,7 +517,7 @@ const BulkFixReviewPanel: React.FC<{
                                                         {isArabic ? 'تدقيق المعايير' : 'Criteria audit'}
                                                     </div>
                                                     <div className="space-y-1">
-                                                        {variant.criteriaChecks.map((check, checkIndex) => (
+                                                        {orderCriteriaChecksForDisplay(variant.criteriaChecks).map((check, checkIndex) => (
                                                             <div key={`${check.criterionTitle}-${checkIndex}`} className="rounded-md bg-gray-50 p-1.5 text-[9px] leading-relaxed text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">
                                                                 <div className="flex flex-wrap items-center justify-between gap-1">
                                                                     <span className="font-black text-gray-800 dark:text-gray-100">{check.criterionTitle}</span>

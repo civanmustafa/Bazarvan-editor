@@ -4,6 +4,21 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { BookCopy, Trash2, Check, Copy } from 'lucide-react';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
+import type { BulkFixReviewVariant } from '../types';
+
+const getCriterionDisplayOrder = (status?: string): number => {
+    if (status === 'pass') return 0;
+    if (status === 'fail') return 1;
+    if (status === 'warn') return 2;
+    return 3;
+};
+
+const orderCriteriaChecksForDisplay = (checks?: BulkFixReviewVariant['criteriaChecks']) => (
+    (checks || [])
+        .map((check, index) => ({ check, index }))
+        .sort((a, b) => getCriterionDisplayOrder(a.check.status) - getCriterionDisplayOrder(b.check.status) || a.index - b.index)
+        .map(({ check }) => check)
+);
 
 const AIHistoryTab: React.FC = () => {
     const { aiHistory, applySuggestionFromHistory, removeFromAiHistory } = useAI();
@@ -138,7 +153,7 @@ const AIHistoryTab: React.FC = () => {
                                                     {isArabic ? 'تدقيق المعايير' : 'Criteria audit'}
                                                 </div>
                                                 <div className="space-y-1">
-                                                    {variant.criteriaChecks.map((check, checkIndex) => (
+                                                    {orderCriteriaChecksForDisplay(variant.criteriaChecks).map((check, checkIndex) => (
                                                         <div key={`${check.criterionTitle}-${checkIndex}`} className="rounded-md bg-gray-50 p-1.5 text-[9px] leading-relaxed text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">
                                                             <div className="flex flex-wrap items-center justify-between gap-1">
                                                                 <span className="font-black text-gray-800 dark:text-gray-100">{check.criterionTitle}</span>

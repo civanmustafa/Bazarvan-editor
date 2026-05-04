@@ -276,6 +276,8 @@ const getBulkFixStats = (value: string): BulkFixReviewStats => ({
     characters: value.trim().length,
 });
 
+const isBulkFixStepIntroCandidate = (value: string): boolean => /[:：]\s*$/.test(value.trim());
+
 const getBulkFixTextUnit = (
     editor: any,
     item: NonNullable<CheckResult['violatingItems']>[number]
@@ -539,8 +541,10 @@ const formatBulkFixGroupPrompt = (
         '- لا تحول قيود الحماية إلى هدف توسعة أو إعادة كتابة زائدة؛ دورها منع ظهور مخالفات جديدة.',
         '- ارفق في تفكيرك قواعد وشروط أهداف الإصلاح وقيود الحماية عند صياغة البدائل.',
         '- قدم اقتراحين فقط مختلفين قابلين للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
+        '- رتّب الاقتراحات بحيث يأتي أولاً الاقتراح الذي يجعل أكبر عدد من تدقيقات criteriaChecks بحالة pass، ثم الأقل كسراً للقيود.',
         '- إذا كان هدف الإصلاح هو تقصير فقرة أو ضبط طولها، فلا تطل الجمل ولا تضف شرحاً غير ضروري.',
         '- حافظ خصوصاً على قيود: طول الجمل، طول الفقرات، علامات الترقيم، تكرار الفقرة، الإحالات الغامضة، كلمات للحذف، تمهيد الخطوات، نهايات الفقرات، بدايات الجمل، الكلمات اللاتينية، فراغات الترقيم، الثنائيات المكررة، تناسق الكلمات، كلمات الحث، اللغة التفاعلية، الكلمات التحذيرية، الكلمات الانتقالية، والكلمات البطيئة.',
+        '- إذا كانت الوحدة فقرة تمهيد خطوات تنتهي بنقطتين وتفتح قائمة، فلا تطبق عليها شروط طول الفقرات العادية؛ قيّمها بمعيار تمهيد خطوات فقط.',
         '- حافظ على المعنى الأصلي وسياق الصفحة ولا تضف معلومات أو ادعاءات جديدة.',
         '- إذا كان النص يحتوي عناوين، فاستخدم Markdown للحفاظ على مستويات العناوين قدر الإمكان.',
         '- لا تكتب تسميات داخل fixedText مثل "النص المقترح" أو "الإجابة".',
@@ -558,6 +562,20 @@ const normalizeCriteriaCheckStatus = (value: unknown): BulkFixCriterionCheck['st
     const status = asTrimmedString(value).toLowerCase();
     return status === 'pass' || status === 'warn' || status === 'fail' || status === 'unknown' ? status : 'unknown';
 };
+
+const getBulkFixCriterionStatusOrder = (status?: BulkFixCriterionCheck['status']): number => {
+    if (status === 'pass') return 0;
+    if (status === 'fail') return 1;
+    if (status === 'warn') return 2;
+    return 3;
+};
+
+const sortBulkFixCriteriaChecks = (checks: BulkFixCriterionCheck[]): BulkFixCriterionCheck[] => (
+    checks
+        .map((check, index) => ({ check, index }))
+        .sort((a, b) => getBulkFixCriterionStatusOrder(a.check.status) - getBulkFixCriterionStatusOrder(b.check.status) || a.index - b.index)
+        .map(({ check }) => check)
+);
 
 const normalizeBulkFixCriteriaChecks = (rawChecks: unknown, criteria: BulkFixCriterionSummary[]): BulkFixCriterionCheck[] => {
     const checksArray = Array.isArray(rawChecks)
@@ -581,15 +599,15 @@ const normalizeBulkFixCriteriaChecks = (rawChecks: unknown, criteria: BulkFixCri
         })
         .filter((check): check is BulkFixCriterionCheck => Boolean(check));
 
-    if (normalized.length > 0) return normalized;
+    if (normalized.length > 0) return sortBulkFixCriteriaChecks(normalized);
 
-    return criteria.map((criterion) => ({
+    return sortBulkFixCriteriaChecks(criteria.map((criterion) => ({
         criterionTitle: criterion.title,
         before: String(criterion.current),
         after: 'غير متاح',
         required: String(criterion.required),
         status: 'unknown',
-    }));
+    })));
 };
 
 const splitBulkFixParagraphs = (value: string): string[] => (
@@ -837,7 +855,7 @@ const getBulkFixTextualAudit = (textValue: string, criterionText: string): { sum
         const examples = matches.slice(0, 5).map(item => item.term).join('، ');
         return {
             summary: `${total} كلمة بطيئة من ${wordCount} كلمة (${(percentage * 100).toFixed(1)}%)${examples ? ` - ${examples}` : ''}`,
-            passed: percentage <= 0.02,
+            passed: total === 0,
         };
     }
 
@@ -903,6 +921,9 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): s
         return sentenceWords.length ? `أطوال الجمل: ${min}-${max} كلمة` : 'لا توجد جمل قابلة للقياس';
     }
     if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
+        if (isBulkFixStepIntroCandidate(textValue)) {
+            return 'فقرة تمهيد خطوات منتهية بنقطتين؛ لا يطبق عليها معيار طول الفقرات العادية';
+        }
         return `${stats.words} كلمة، ${stats.sentences} جملة، ${stats.paragraphs} فقرة`;
     }
     if (isPunctuationCriterion) {
@@ -952,8 +973,12 @@ const inferBulkFixCriterionCheck = (
         const targetRange = wordRange || { min: 6, max: 20 };
         checks.push(isWithinBulkFixRange(sentences.map(countWords), targetRange) === true);
     } else if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
-        checks.push(isWithinBulkFixRange(paragraphs.map(countWords), wordRange || { min: 30, max: 100 }) === true);
-        checks.push(isWithinBulkFixRange(paragraphs.map(countSentences), sentenceRange || { min: 1, max: 4 }) === true);
+        if (isBulkFixStepIntroCandidate(fixedText)) {
+            checks.push(true);
+        } else {
+            checks.push(isWithinBulkFixRange(paragraphs.map(countWords), wordRange || { min: 30, max: 100 }) === true);
+            checks.push(isWithinBulkFixRange(paragraphs.map(countSentences), sentenceRange || { min: 1, max: 4 }) === true);
+        }
     } else {
         const wordStatus = isWithinBulkFixRange([afterStats.words], wordRange);
         const sentenceStatus = isWithinBulkFixRange([afterStats.sentences], sentenceRange);
@@ -991,7 +1016,7 @@ const buildBulkFixCriteriaChecks = (
 ): BulkFixCriterionCheck[] => {
     const aiChecks = normalizeBulkFixCriteriaChecks(rawChecks, criteria);
     if (criteria.length === 0) return aiChecks;
-    return criteria.map((criterion) => {
+    return sortBulkFixCriteriaChecks(criteria.map((criterion) => {
         const inferred = inferBulkFixCriterionCheck(criterion, originalText, fixedText);
         const matchingAiCheck = aiChecks.find(check => (
             check.criterionTitle === criterion.title ||
@@ -1004,8 +1029,47 @@ const buildBulkFixCriteriaChecks = (
             after: shouldUseAiAfter ? matchingAiCheck.after : inferred.after || matchingAiCheck?.after || 'غير متاح',
             status: inferred.status !== 'unknown' ? inferred.status : matchingAiCheck?.status || 'unknown',
         };
-    });
+    }));
 };
+
+const getBulkFixVariantQuality = (variant: BulkFixReviewVariant) => {
+    const checks = variant.criteriaChecks || [];
+    return {
+        pass: checks.filter(check => check.status === 'pass').length,
+        fail: checks.filter(check => check.status === 'fail').length,
+        warn: checks.filter(check => check.status === 'warn').length,
+        unknown: checks.filter(check => check.status === 'unknown').length,
+        total: checks.length,
+    };
+};
+
+const compareBulkFixVariantsByQuality = (a: BulkFixReviewVariant, b: BulkFixReviewVariant): number => {
+    const aQuality = getBulkFixVariantQuality(a);
+    const bQuality = getBulkFixVariantQuality(b);
+    return bQuality.pass - aQuality.pass ||
+        aQuality.fail - bQuality.fail ||
+        aQuality.warn - bQuality.warn ||
+        aQuality.unknown - bQuality.unknown ||
+        bQuality.total - aQuality.total;
+};
+
+const isDefaultBulkFixVariantLabel = (label: string): boolean => (
+    /^(?:اقتراح|الاقتراح|suggestion|option|variant)\s*\d+$/i.test(label.trim())
+);
+
+const formatDefaultBulkFixVariantLabel = (label: string, index: number): string => (
+    /^(?:suggestion|option|variant)/i.test(label.trim()) ? `Suggestion ${index + 1}` : `اقتراح ${index + 1}`
+);
+
+const sortBulkFixVariantsByCriteria = (variants: BulkFixReviewVariant[]): BulkFixReviewVariant[] => (
+    [...variants]
+        .sort(compareBulkFixVariantsByQuality)
+        .map((variant, index) => (
+            isDefaultBulkFixVariantLabel(variant.label)
+                ? { ...variant, label: formatDefaultBulkFixVariantLabel(variant.label, index) }
+                : variant
+        ))
+);
 
 const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: BulkFixCriterionSummary[]): BulkFixReviewVariant[] => {
     const parsedRaw = typeof raw === 'string' ? (extractJson(raw) || raw) : raw;
@@ -1046,7 +1110,7 @@ const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: 
                         : [];
 
     const statsBefore = getBulkFixStats(originalText);
-    return rawSuggestions
+    const variants = rawSuggestions
         .map((suggestion, index): BulkFixReviewVariant | null => {
             const suggestionRecord = suggestion && typeof suggestion === 'object'
                 ? suggestion as Record<string, unknown>
@@ -1069,8 +1133,9 @@ const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: 
                 ),
             };
         })
-        .filter((variant): variant is BulkFixReviewVariant => Boolean(variant))
-        .slice(0, 2);
+        .filter((variant): variant is BulkFixReviewVariant => Boolean(variant));
+
+    return sortBulkFixVariantsByCriteria(variants).slice(0, 2);
 };
 
 const getGeminiErrorMessage = (error: unknown): string => {
@@ -1599,6 +1664,25 @@ const findBestTextBlockMatch = (editor: any, candidates: string[]): TextBlockMat
     return bestMatch;
 };
 
+const normalizeBulkFixRangeMatchText = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const findExactBulkFixTextUnitMatch = (editor: any, targetText: string, preferredFrom: number): TextBlockMatch | null => {
+    if (!editor || !targetText.trim()) return null;
+    const normalizedTarget = normalizeBulkFixRangeMatchText(targetText);
+    if (!normalizedTarget) return null;
+    const candidates: TextBlockMatch[] = [];
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (!node.isBlock || !['paragraph', 'heading', 'listItem'].includes(node.type.name)) return true;
+        const textContent = node.textContent || '';
+        if (normalizeBulkFixRangeMatchText(textContent) !== normalizedTarget) return true;
+        candidates.push({ from: pos, to: pos + node.nodeSize, score: 4 });
+        return true;
+    });
+
+    return candidates.sort((a, b) => Math.abs(a.from - preferredFrom) - Math.abs(b.from - preferredFrom))[0] || null;
+};
+
 const findSectionEnd = (editor: any, heading: HeadingMatch): number => {
     let sectionEnd = editor.state.doc.content.size;
 
@@ -1750,9 +1834,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [aiFixingInfo, setAiFixingInfo] = useState<{ title: string; from: number } | null>(null);
     const [aiHistory, setAiHistory] = useState<AIHistoryItem[]>([]);
     const [bulkFixReviewItems, setBulkFixReviewItems] = useState<BulkFixReviewItem[]>([]);
+    const bulkFixReviewItemsRef = useRef<BulkFixReviewItem[]>([]);
     const [fixAllProgress, setFixAllProgress] = useState<FixAllProgress>({ current: 0, total: 0, running: false, failed: 0, errors: [] });
     
     const isInitialMount = useRef(true);
+
+    const replaceBulkFixReviewItems = useCallback((items: BulkFixReviewItem[]) => {
+        bulkFixReviewItemsRef.current = items;
+        setBulkFixReviewItems(items);
+    }, []);
+
+    const updateBulkFixReviewItems = useCallback((updater: (items: BulkFixReviewItem[]) => BulkFixReviewItem[]) => {
+        const nextItems = updater(bulkFixReviewItemsRef.current);
+        bulkFixReviewItemsRef.current = nextItems;
+        setBulkFixReviewItems(nextItems);
+        return nextItems;
+    }, []);
 
     useEffect(() => {
         if (isInitialMount.current) {
@@ -1760,10 +1857,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return;
         }
         setAiHistory([]);
-        setBulkFixReviewItems([]);
+        replaceBulkFixReviewItems([]);
         setAiInsertionPatches({ gemini: [], chatgpt: [] });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
-    }, [articleKey]);
+    }, [articleKey, replaceBulkFixReviewItems]);
+
+    useEffect(() => {
+        bulkFixReviewItemsRef.current = bulkFixReviewItems;
+    }, [bulkFixReviewItems]);
 
     const logToAiHistory = useCallback((item: Omit<AIHistoryItem, 'id'>) => {
         const newItem: AIHistoryItem = { ...item, id: `${Date.now()}-${Math.random()}` };
@@ -1781,6 +1882,23 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
         return editor.state.doc.textBetween(from, to, ' ');
     }, [editor]);
+
+    const resolveBulkFixReviewRange = useCallback((item: Pick<BulkFixReviewItem, 'from' | 'to' | 'originalText'>): { from: number; to: number; currentText: string } | null => {
+        const currentText = getSafeRangeText(item.from, item.to);
+        if (currentText !== null && normalizeRangeText(currentText) === normalizeRangeText(item.originalText)) {
+            return { from: item.from, to: item.to, currentText };
+        }
+
+        const exactMatch = findExactBulkFixTextUnitMatch(editor, item.originalText, item.from);
+        if (!exactMatch) return null;
+
+        const matchedText = getSafeRangeText(exactMatch.from, exactMatch.to);
+        if (matchedText === null || normalizeRangeText(matchedText) !== normalizeRangeText(item.originalText)) {
+            return null;
+        }
+
+        return { from: exactMatch.from, to: exactMatch.to, currentText: matchedText };
+    }, [editor, getSafeRangeText, normalizeRangeText]);
 
     useEffect(() => {
         if (suggestion) openModal('suggestion');
@@ -2025,7 +2143,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleFixAllViolations = useCallback(async (rulesToFix: string[], options: { includeRelatedRules?: boolean } = {}) => {
         if (!editor || !analysisResults.structureAnalysis) return;
-        setBulkFixReviewItems([]);
+        replaceBulkFixReviewItems([]);
         setFixAllProgress({ current: 0, total: 0, running: true, failed: 0, errors: [] });
         const selectedRuleTitles = new Set(rulesToFix);
         const allViolations = collectBulkFixViolations(analysisResults.structureAnalysis);
@@ -2103,7 +2221,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }));
             }
         }
-        setBulkFixReviewItems(proposedItems);
+        replaceBulkFixReviewItems(proposedItems);
         proposedItems.forEach(item => {
             logToAiHistory({
                 type: 'fix-violation',
@@ -2119,16 +2237,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             });
         });
         setFixAllProgress(p => ({ ...p, running: false }));
-    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText, logToAiHistory]);
+    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems]);
 
     const updateBulkFixReviewItem = useCallback((itemId: string, updates: Partial<BulkFixReviewItem>) => {
-        setBulkFixReviewItems(items => items.map(item => (
+        updateBulkFixReviewItems(items => items.map(item => (
             item.id === itemId ? { ...item, ...updates } : item
         )));
-    }, []);
+    }, [updateBulkFixReviewItems]);
 
     const markBulkFixAppliedAndShiftRanges = useCallback((appliedItem: BulkFixReviewItem, delta: number, appliedText: string, appliedVariantId?: string) => {
-        setBulkFixReviewItems(items => items.map(item => {
+        updateBulkFixReviewItems(items => items.map(item => {
             if (item.id === appliedItem.id) {
                 return {
                     ...item,
@@ -2163,35 +2281,40 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 applyError: 'يتداخل هذا الاقتراح مع تعديل تم تطبيقه سابقاً. أعد إنشاء قائمة الإصلاحات لمراجعته من جديد.',
             };
         }));
-    }, []);
+    }, [updateBulkFixReviewItems]);
 
     const selectBulkFixReviewItemTarget = useCallback((itemId: string) => {
         if (!editor) return;
         const item = bulkFixReviewItems.find(reviewItem => reviewItem.id === itemId);
         if (!item) return;
-        const currentText = getSafeRangeText(item.from, item.to);
-        if (currentText === null) {
+        const resolvedRange = resolveBulkFixReviewRange(item);
+        if (!resolvedRange) {
             updateBulkFixReviewItem(itemId, { status: 'failed', applyError: 'تعذر تحديد الموضع لأن نطاق النص لم يعد صالحاً.' });
             return;
         }
-        editor.chain().focus().setTextSelection({ from: item.from, to: item.to }).scrollIntoView().run();
-    }, [bulkFixReviewItems, editor, getSafeRangeText, updateBulkFixReviewItem]);
+        if (resolvedRange.from !== item.from || resolvedRange.to !== item.to) {
+            updateBulkFixReviewItem(itemId, { from: resolvedRange.from, to: resolvedRange.to });
+        }
+        editor.chain().focus().setTextSelection({ from: resolvedRange.from, to: resolvedRange.to }).scrollIntoView().run();
+    }, [bulkFixReviewItems, editor, resolveBulkFixReviewRange, updateBulkFixReviewItem]);
 
     const applySelectedBulkFixReviewItems = useCallback((itemIds: string[], variantSelections: Record<string, string> = {}) => {
         if (!editor) return;
         const selectedIds = new Set(itemIds);
-        const itemsToApply = bulkFixReviewItems
+        const itemsToApply = bulkFixReviewItemsRef.current
             .filter(item => selectedIds.has(item.id) && item.status === 'pending')
             .sort((a, b) => b.from - a.from);
 
-        itemsToApply.forEach(item => {
+        itemsToApply.forEach(plannedItem => {
+            const item = bulkFixReviewItemsRef.current.find(reviewItem => reviewItem.id === plannedItem.id) || plannedItem;
+            if (item.status !== 'pending') return;
             const selectedVariantId = variantSelections[item.id];
             const selectedVariant = selectedVariantId
                 ? item.variants?.find(variant => variant.id === selectedVariantId)
                 : item.variants?.[0];
             const fixedText = selectedVariant?.fixedText || item.fixedText;
-            const currentText = getSafeRangeText(item.from, item.to);
-            if (currentText === null || normalizeRangeText(currentText) !== normalizeRangeText(item.originalText)) {
+            const resolvedRange = resolveBulkFixReviewRange(item);
+            if (!resolvedRange) {
                 updateBulkFixReviewItem(item.id, {
                     status: 'failed',
                     applyError: 'النص الأصلي تغير داخل المحرر. أعد إنشاء قائمة الإصلاحات قبل تطبيق هذا الاقتراح.',
@@ -2204,20 +2327,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const applied = editor
                     .chain()
                     .focus()
-                    .insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(fixedText), { updateSelection: true })
+                    .insertContentAt({ from: resolvedRange.from, to: resolvedRange.to }, parseMarkdownToHtml(fixedText), { updateSelection: true })
                     .scrollIntoView()
                     .run();
                 if (!applied) {
                     throw new Error('تعذر تطبيق التعديل داخل المحرر.');
                 }
                 const delta = editor.state.doc.content.size - beforeDocSize;
-                markBulkFixAppliedAndShiftRanges(item, delta, fixedText, selectedVariant?.id);
+                markBulkFixAppliedAndShiftRanges({ ...item, from: resolvedRange.from, to: resolvedRange.to }, delta, fixedText, selectedVariant?.id);
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'تعذر تطبيق التعديل داخل المحرر.';
                 updateBulkFixReviewItem(item.id, { status: 'failed', applyError: message });
             }
         });
-    }, [bulkFixReviewItems, editor, getSafeRangeText, markBulkFixAppliedAndShiftRanges, normalizeRangeText, updateBulkFixReviewItem]);
+    }, [editor, markBulkFixAppliedAndShiftRanges, resolveBulkFixReviewRange, updateBulkFixReviewItem]);
 
     const applyBulkFixReviewItem = useCallback((itemId: string, variantId?: string) => {
         applySelectedBulkFixReviewItems([itemId], variantId ? { [itemId]: variantId } : {});
@@ -2228,9 +2351,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, [updateBulkFixReviewItem]);
 
     const clearBulkFixReviewItems = useCallback(() => {
-        setBulkFixReviewItems([]);
+        replaceBulkFixReviewItems([]);
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
-    }, []);
+    }, [replaceBulkFixReviewItems]);
 
     const updateAiInsertionPatch = useCallback((provider: AiPatchProvider, patchId: string, updates: Partial<AiContentPatch>) => {
         setAiInsertionPatches(prev => ({
@@ -2305,8 +2428,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (!editor) return;
         const item = aiHistory.find(historyItem => historyItem.id === id);
         if (!item || item.appliedSuggestion) return;
-        const currentText = getSafeRangeText(item.from, item.to);
-        if (currentText === null || normalizeRangeText(currentText) !== normalizeRangeText(item.originalText)) {
+        const resolvedRange = resolveBulkFixReviewRange(item);
+        if (!resolvedRange) {
             setAiHistory(history => history.map(historyItem => (
                 historyItem.id === id
                     ? { ...historyItem, applyError: 'Original text changed. Recreate this suggestion before applying it.' }
@@ -2314,7 +2437,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             )));
             return;
         }
-        editor.chain().focus().insertContentAt({ from: item.from, to: item.to }, parseMarkdownToHtml(text)).run();
+        editor.chain().focus().insertContentAt({ from: resolvedRange.from, to: resolvedRange.to }, parseMarkdownToHtml(text)).run();
         markHistorySuggestionApplied(id, text);
     };
 
