@@ -347,7 +347,7 @@ const BulkFixReviewPanel: React.FC<{
     onApplySelected: () => void;
     onLocateItem: (itemId: string) => void;
     onSkipItem: (itemId: string) => void;
-    onClear: () => void;
+    onClose: () => void;
     uiLanguage: 'ar' | 'en';
 }> = ({
     items,
@@ -358,7 +358,7 @@ const BulkFixReviewPanel: React.FC<{
     onApplySelected,
     onLocateItem,
     onSkipItem,
-    onClear,
+    onClose,
     uiLanguage,
 }) => {
     if (items.length === 0) return null;
@@ -367,18 +367,6 @@ const BulkFixReviewPanel: React.FC<{
     const pendingItems = items.filter(item => item.status === 'pending');
     const selectedPendingCount = selectedIds.filter(id => pendingItems.some(item => item.id === id)).length;
     const allPendingSelected = pendingItems.length > 0 && selectedPendingCount === pendingItems.length;
-    const statusLabel = (item: BulkFixReviewItem) => {
-        if (item.status === 'applied') return isArabic ? 'تم التطبيق' : 'Applied';
-        if (item.status === 'failed') return isArabic ? 'تعذر التطبيق' : 'Failed';
-        if (item.status === 'skipped') return isArabic ? 'تم التجاهل' : 'Skipped';
-        return isArabic ? 'بانتظار المراجعة' : 'Pending review';
-    };
-    const statusClass = (item: BulkFixReviewItem) => {
-        if (item.status === 'applied') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300';
-        if (item.status === 'failed') return 'bg-red-100 text-red-700 dark:bg-red-900/25 dark:text-red-300';
-        if (item.status === 'skipped') return 'bg-gray-100 text-gray-600 dark:bg-[#333] dark:text-gray-300';
-        return 'bg-amber-100 text-amber-700 dark:bg-amber-900/25 dark:text-amber-300';
-    };
     const copyText = (text: string) => {
         void navigator.clipboard?.writeText(text);
     };
@@ -430,9 +418,9 @@ const BulkFixReviewPanel: React.FC<{
                         </p>
                     </div>
                     <button
-                        onClick={onClear}
+                        onClick={onClose}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                        title={isArabic ? 'مسح القائمة' : 'Clear list'}
+                        title={isArabic ? 'إخفاء القائمة' : 'Hide list'}
                     >
                         <X size={15} />
                     </button>
@@ -458,12 +446,12 @@ const BulkFixReviewPanel: React.FC<{
             </div>
 
             <div className="divide-y divide-[#d4af37]/15 dark:divide-[#d4af37]/20 max-h-[560px] overflow-y-auto custom-scrollbar">
-                {items.map((item, index) => {
+                {items.map((item) => {
                     const isPending = item.status === 'pending';
                     const isSelected = selectedIds.includes(item.id);
                     return (
                         <div key={item.id} className="p-3 bg-white/70 dark:bg-[#242424]/70">
-                            <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-start gap-2">
                                 <button
                                     onClick={() => onToggleItem(item.id)}
                                     disabled={!isPending}
@@ -473,40 +461,8 @@ const BulkFixReviewPanel: React.FC<{
                                     {isSelected && isPending ? <CheckSquare size={16} className="text-[#d4af37]" /> : <Square size={16} />}
                                 </button>
                                 <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <span className="text-[10px] font-black text-gray-400">#{index + 1}</span>
-                                        <span className="text-[11px] font-black text-gray-800 dark:text-gray-100">{item.ruleTitle}</span>
-                                        {item.ruleTitles && item.ruleTitles.length > 1 && (
-                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-[#d4af37]/15 text-[#8a6a12] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
-                                                {isArabic ? `بطاقة مركبة: ${item.ruleTitles.length} معايير` : `Combined: ${item.ruleTitles.length} criteria`}
-                                            </span>
-                                        )}
-                                        {item.variants && item.variants.length > 1 && (
-                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-100 text-blue-700 dark:bg-blue-900/25 dark:text-blue-300">
-                                                {isArabic ? `${item.variants.length} بدائل` : `${item.variants.length} variants`}
-                                            </span>
-                                        )}
-                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${statusClass(item)}`}>{statusLabel(item)}</span>
-                                    </div>
-                                    {item.ruleTitles && item.ruleTitles.length > 1 && (
-                                        <div className="mt-2 flex flex-wrap gap-1">
-                                            {item.ruleTitles.slice(0, 6).map((ruleTitle) => (
-                                                <span key={ruleTitle} className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
-                                                    {ruleTitle}
-                                                </span>
-                                            ))}
-                                            {item.ruleTitles.length > 6 && (
-                                                <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
-                                                    +{item.ruleTitles.length - 6}
-                                                </span>
-                                            )}
-                                        </div>
-                                    )}
-                                    {item.message && (
-                                        <p className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{item.message}</p>
-                                    )}
-                                    {item.criteria && item.criteria.length > 1 && (
-                                        <div className="mt-2 rounded-lg border border-[#d4af37]/15 bg-white/70 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/70">
+                                    {item.criteria && item.criteria.length > 0 && (
+                                        <div className="rounded-lg border border-[#d4af37]/15 bg-white/70 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/70">
                                             <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-[#b8922e]">
                                                 {isArabic ? 'المعايير المخالفة' : 'Violated criteria'}
                                             </div>
@@ -692,6 +648,7 @@ const StructureTab: React.FC = () => {
     const [modalContent, setModalContent] = useState<CheckResult | null>(null);
     const [isFixModalOpen, setIsFixModalOpen] = useState(false);
     const [selectedBulkFixIds, setSelectedBulkFixIds] = useState<string[]>([]);
+    const [isBulkFixReviewVisible, setIsBulkFixReviewVisible] = useState(true);
     const t = translations[uiLanguage];
     const tSt = t.structureTab;
 
@@ -716,6 +673,9 @@ const StructureTab: React.FC = () => {
 
     useEffect(() => {
         setSelectedBulkFixIds(bulkFixReviewItems.filter(item => item.status === 'pending').map(item => item.id));
+        if (bulkFixReviewItems.length > 0) {
+            setIsBulkFixReviewVisible(true);
+        }
     }, [bulkFixReviewIdsKey]);
 
     const handleToggleBulkFixItem = (itemId: string) => {
@@ -775,7 +735,6 @@ const StructureTab: React.FC = () => {
               analysis.secondParagraph,
               analysis.paragraphLength,
               analysis.sentenceLength,
-              analysis.tableListOpportunities,
               analysis.stepsIntroduction,
               analysis.keywordStuffing,
               analysis.automaticLists,
@@ -884,18 +843,43 @@ const StructureTab: React.FC = () => {
                   ))}
               </div>
           )}
-          <BulkFixReviewPanel
-              items={bulkFixReviewItems}
-              selectedIds={selectedBulkFixIds}
-              onToggleItem={handleToggleBulkFixItem}
-              onToggleAll={handleToggleAllBulkFixItems}
-              onApplyItem={handleApplyBulkFixItem}
-              onApplySelected={handleApplySelectedBulkFixes}
-              onLocateItem={selectBulkFixReviewItemTarget}
-              onSkipItem={handleSkipBulkFixItem}
-              onClear={clearBulkFixReviewItems}
-              uiLanguage={uiLanguage}
-          />
+          {bulkFixReviewItems.length > 0 && !isBulkFixReviewVisible && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#d4af37]/20 bg-[#d4af37]/5 p-3 dark:bg-[#d4af37]/10">
+                  <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">
+                      {uiLanguage === 'ar'
+                          ? `قائمة إصلاحات مقترحة محفوظة (${bulkFixReviewItems.length})`
+                          : `Saved proposed fix list (${bulkFixReviewItems.length})`}
+                  </span>
+                  <div className="flex items-center gap-2">
+                      <button
+                          onClick={() => setIsBulkFixReviewVisible(true)}
+                          className="px-2.5 py-1.5 rounded-lg text-[10px] font-black bg-[#d4af37] text-white hover:bg-[#b8922e]"
+                      >
+                          {uiLanguage === 'ar' ? 'إظهار القائمة' : 'Show list'}
+                      </button>
+                      <button
+                          onClick={clearBulkFixReviewItems}
+                          className="px-2.5 py-1.5 rounded-lg text-[10px] font-bold bg-gray-100 text-gray-600 hover:bg-red-50 hover:text-red-700 dark:bg-[#333] dark:text-gray-300 dark:hover:bg-red-900/20 dark:hover:text-red-300"
+                      >
+                          {uiLanguage === 'ar' ? 'مسح نهائي' : 'Clear'}
+                      </button>
+                  </div>
+              </div>
+          )}
+          {isBulkFixReviewVisible && (
+              <BulkFixReviewPanel
+                  items={bulkFixReviewItems}
+                  selectedIds={selectedBulkFixIds}
+                  onToggleItem={handleToggleBulkFixItem}
+                  onToggleAll={handleToggleAllBulkFixItems}
+                  onApplyItem={handleApplyBulkFixItem}
+                  onApplySelected={handleApplySelectedBulkFixes}
+                  onLocateItem={selectBulkFixReviewItemTarget}
+                  onSkipItem={handleSkipBulkFixItem}
+                  onClose={() => setIsBulkFixReviewVisible(false)}
+                  uiLanguage={uiLanguage}
+              />
+          )}
        </div>
 
       {viewMode === 'grid' ? (

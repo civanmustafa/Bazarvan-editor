@@ -18,7 +18,6 @@ import { checkWhoIsItForH2 } from '../utils/analysis/rules/checkWhoIsItForH2';
 import { checkSummaryParagraph } from '../utils/analysis/rules/checkSummaryParagraph';
 import { checkSecondParagraph } from '../utils/analysis/rules/checkSecondParagraph';
 import { checkParagraphLength } from '../utils/analysis/rules/checkParagraphLength';
-import { checkTableListOpportunities } from '../utils/analysis/rules/checkTableListOpportunities';
 import { checkH2Structure } from '../utils/analysis/rules/checkH2Structure';
 import { checkH2Count } from '../utils/analysis/rules/checkH2Count';
 import { checkSubHeadingStructure } from '../utils/analysis/rules/checkSubHeadingStructure';
@@ -174,7 +173,6 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
         summaryParagraph: checkSummaryParagraph(analysisContext),
         secondParagraph: checkSecondParagraph(analysisContext),
         paragraphLength: checkParagraphLength(analysisContext),
-        tableListOpportunities: checkTableListOpportunities(analysisContext),
         h2Structure: checkH2Structure(analysisContext),
         h2Count: checkH2Count(analysisContext),
         h3Structure: checkSubHeadingStructure(analysisContext, 3),

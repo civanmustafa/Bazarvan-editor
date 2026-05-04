@@ -93,7 +93,6 @@ const STRUCTURE_CRITERIA_ATTACHMENTS: StructureCriteriaAttachment[] = [
             'secondParagraph',
             'paragraphLength',
             'sentenceLength',
-            'tableListOpportunities',
             'stepsIntroduction',
             'keywordStuffing',
             'automaticLists',
@@ -1711,8 +1710,21 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
         }
         setBulkFixReviewItems(proposedItems);
+        proposedItems.forEach(item => {
+            logToAiHistory({
+                type: 'fix-violation',
+                ruleTitle: item.ruleTitle,
+                originalText: item.originalText,
+                suggestions: (item.variants && item.variants.length > 0
+                    ? item.variants.map(variant => variant.fixedText)
+                    : [item.fixedText]
+                ).filter(Boolean),
+                from: item.from,
+                to: item.to,
+            });
+        });
         setFixAllProgress(p => ({ ...p, running: false }));
-    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText]);
+    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText, logToAiHistory]);
 
     const updateBulkFixReviewItem = useCallback((itemId: string, updates: Partial<BulkFixReviewItem>) => {
         setBulkFixReviewItems(items => items.map(item => (

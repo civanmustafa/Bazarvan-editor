@@ -115,7 +115,6 @@ export interface StructureAnalysis {
     summaryParagraph: CheckResult;
     secondParagraph: CheckResult;
     paragraphLength: CheckResult;
-    tableListOpportunities: CheckResult;
     h2Structure: CheckResult;
     h2Count: CheckResult;
     h3Structure: CheckResult;
