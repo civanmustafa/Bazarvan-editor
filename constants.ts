@@ -79,6 +79,8 @@ export const VIOLATION_PRIORITY: { [key: string]: number } = {
   'H4 Section': 4,
   'طول الفقرات': 5,
   'Paragraph Length': 5,
+  'زوج فقرات': 6,
+  'Paragraph Pair': 6,
   'طول الجمل': 6,
   'Sentence Length': 6,
   'جداول وقوائم': 7,

@@ -115,6 +115,7 @@ export interface StructureAnalysis {
     summaryParagraph: CheckResult;
     secondParagraph: CheckResult;
     paragraphLength: CheckResult;
+    paragraphPair: CheckResult;
     h2Structure: CheckResult;
     h2Count: CheckResult;
     h3Structure: CheckResult;
@@ -263,6 +264,8 @@ export interface BulkFixCriterionSummary {
   required: string | number;
   status?: string;
   message?: string;
+  source?: 'target' | 'protection' | 'article';
+  isListIntroContext?: boolean;
 }
 
 export interface BulkFixCriterionCheck {
@@ -271,6 +274,7 @@ export interface BulkFixCriterionCheck {
   after: string;
   required: string;
   status: 'pass' | 'warn' | 'fail' | 'unknown';
+  source?: 'target' | 'protection' | 'article';
 }
 
 export interface BulkFixReviewVariant {

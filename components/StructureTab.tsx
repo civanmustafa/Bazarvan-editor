@@ -702,6 +702,7 @@ const StructureTab: React.FC = () => {
               analysis.summaryParagraph,
               analysis.secondParagraph,
               analysis.paragraphLength,
+              analysis.paragraphPair,
               analysis.sentenceLength,
               analysis.stepsIntroduction,
               analysis.keywordStuffing,

@@ -94,6 +94,7 @@ const STRUCTURE_CRITERIA_ATTACHMENTS: StructureCriteriaAttachment[] = [
             'summaryParagraph',
             'secondParagraph',
             'paragraphLength',
+            'paragraphPair',
             'sentenceLength',
             'stepsIntroduction',
             'keywordStuffing',
@@ -211,6 +212,14 @@ type BulkFixTargetGroup = BulkFixTextUnit & {
     violations: BulkFixViolationContext[];
 };
 
+type BulkFixTargetContext = {
+    isListIntro: boolean;
+    currentBlockType?: string;
+    nextBlockType?: string;
+    articleTextBefore?: string;
+    articleTextAfter?: string;
+};
+
 const BULK_FIX_PROTECTION_RULE_KEYS: (keyof StructureAnalysis)[] = [
     'sentenceLength',
     'paragraphLength',
@@ -221,15 +230,20 @@ const BULK_FIX_PROTECTION_RULE_KEYS: (keyof StructureAnalysis)[] = [
     'stepsIntroduction',
     'paragraphEndings',
     'sentenceBeginnings',
-    'arabicOnly',
     'punctuationSpacing',
     'repeatedBigrams',
     'wordConsistency',
+];
+
+const BULK_FIX_ARTICLE_LEVEL_RULE_KEYS: (keyof StructureAnalysis)[] = [
+    'wordCount',
     'ctaWords',
     'interactiveLanguage',
     'warningWords',
     'differentTransitionalWords',
     'slowWords',
+    'arabicOnly',
+    'tablesCount',
 ];
 
 const ENGLISH_TRANSITIONAL_WORDS = ['firstly', 'secondly', 'finally', 'in addition', 'furthermore', 'therefore', 'consequently', 'on the other hand', 'in contrast', 'also', 'as well as', 'moreover', 'in fact', 'actually', 'in other words', 'for example', 'specifically', 'in general', 'however', 'although', 'while', 'in summary', 'in conclusion'];
@@ -275,8 +289,6 @@ const getBulkFixStats = (value: string): BulkFixReviewStats => ({
     paragraphs: value.split(/\n{2,}|\r?\n/).map(part => part.trim()).filter(Boolean).length || (value.trim() ? 1 : 0),
     characters: value.trim().length,
 });
-
-const isBulkFixStepIntroCandidate = (value: string): boolean => /[:：]\s*$/.test(value.trim());
 
 const getBulkFixTextUnit = (
     editor: any,
@@ -362,6 +374,45 @@ const groupBulkFixViolationsByTextUnit = (
     return groups
         .filter(group => !absorbedGroupIds.has(group.id))
         .sort((a, b) => a.from - b.from);
+};
+
+const getBulkFixTopLevelBlocks = (editor: any): { from: number; to: number; type: string; text: string }[] => {
+    const blocks: { from: number; to: number; type: string; text: string }[] = [];
+    if (!editor?.state?.doc?.forEach) return blocks;
+
+    editor.state.doc.forEach((node: any, offset: number) => {
+        blocks.push({
+            from: offset,
+            to: offset + node.nodeSize,
+            type: node.type.name,
+            text: node.textContent || '',
+        });
+    });
+
+    return blocks;
+};
+
+const getBulkFixTargetContext = (editor: any, group: BulkFixTargetGroup): BulkFixTargetContext => {
+    const blocks = getBulkFixTopLevelBlocks(editor);
+    const docSize = editor?.state?.doc?.content?.size || 0;
+    const currentIndex = blocks.findIndex(block => (
+        block.from <= group.from &&
+        block.to >= group.to
+    ));
+    const currentBlock = currentIndex >= 0 ? blocks[currentIndex] : undefined;
+    const nextBlock = currentIndex >= 0 ? blocks[currentIndex + 1] : undefined;
+    const isListIntro = currentBlock?.type === 'paragraph' && (
+        nextBlock?.type === 'bulletList' ||
+        nextBlock?.type === 'orderedList'
+    );
+
+    return {
+        isListIntro,
+        currentBlockType: currentBlock?.type,
+        nextBlockType: nextBlock?.type,
+        articleTextBefore: docSize > 0 ? editor.state.doc.textBetween(0, group.from, ' ') : '',
+        articleTextAfter: docSize > 0 ? editor.state.doc.textBetween(group.to, docSize, ' ') : '',
+    };
 };
 
 const collectBulkFixViolations = (structureAnalysis: StructureAnalysis): BulkFixViolationContext[] => {
@@ -461,6 +512,29 @@ const getUniqueBulkFixRules = (violations: BulkFixViolationContext[]): CheckResu
     }, [])
 );
 
+const isBulkFixStepsIntroductionRule = (rule: CheckResult | BulkFixCriterionSummary): boolean => {
+    const text = `${rule.title} ${rule.required}`.toLowerCase();
+    return text.includes('تمهيد خطوات') || text.includes('steps introduction');
+};
+
+const isBulkFixParagraphLengthRule = (rule: CheckResult | BulkFixCriterionSummary): boolean => {
+    const text = `${rule.title} ${rule.required}`.toLowerCase();
+    return text.includes('طول الفقرات') || text.includes('paragraph length');
+};
+
+const getBulkFixArticleLevelRules = (
+    structureAnalysis: StructureAnalysis,
+    selectedRuleTitles: Set<string>
+): CheckResult[] => {
+    const rules = BULK_FIX_ARTICLE_LEVEL_RULE_KEYS
+        .map(ruleKey => structureAnalysis[ruleKey])
+        .filter((rule): rule is CheckResult => Boolean(rule))
+        .filter(rule => !selectedRuleTitles.has(rule.title))
+        .filter(rule => rule.status !== 'pass');
+
+    return rules.filter((rule, index) => rules.findIndex(item => item.title === rule.title) === index);
+};
+
 const formatBulkFixRuleCards = (rules: CheckResult[], group: BulkFixTargetGroup): string => (
     rules.map((rule) => {
         const messages = group.violations
@@ -483,18 +557,23 @@ const formatBulkFixRuleCards = (rules: CheckResult[], group: BulkFixTargetGroup)
 const getBulkFixProtectionRules = (
     structureAnalysis: StructureAnalysis,
     group: BulkFixTargetGroup,
-    selectedRuleTitles: Set<string>
+    selectedRuleTitles: Set<string>,
+    targetContext: BulkFixTargetContext
 ): CheckResult[] => {
     const protectionRules = new Map<string, CheckResult>();
 
     BULK_FIX_PROTECTION_RULE_KEYS.forEach((ruleKey) => {
         const rule = structureAnalysis[ruleKey];
         if (!rule || selectedRuleTitles.has(rule.title)) return;
+        if (ruleKey === 'stepsIntroduction' && !targetContext.isListIntro) return;
+        if (ruleKey === 'paragraphLength' && targetContext.isListIntro) return;
         protectionRules.set(rule.title, rule);
     });
 
     group.violations.forEach((violation) => {
         if (selectedRuleTitles.has(violation.rule.title)) return;
+        if (isBulkFixStepsIntroductionRule(violation.rule) && !targetContext.isListIntro) return;
+        if (isBulkFixParagraphLengthRule(violation.rule) && targetContext.isListIntro) return;
         protectionRules.set(violation.rule.title, violation.rule);
     });
 
@@ -505,7 +584,9 @@ const formatBulkFixGroupPrompt = (
     group: BulkFixTargetGroup,
     targetText: string,
     selectedRuleTitles: Set<string>,
-    protectionRules: CheckResult[]
+    protectionRules: CheckResult[],
+    targetContext: BulkFixTargetContext,
+    articleLevelRules: CheckResult[] = []
 ): string => {
     const uniqueRules = getUniqueBulkFixRules(group.violations);
     const targetRules = uniqueRules.filter(rule => selectedRuleTitles.has(rule.title));
@@ -515,6 +596,7 @@ const formatBulkFixGroupPrompt = (
         protectionRules.filter(rule => !fallbackTargetRules.some(targetRule => targetRule.title === rule.title)),
         group
     );
+    const articleRuleCards = formatBulkFixRuleCards(articleLevelRules, group);
 
     const unitLabel = group.unitType === 'section'
         ? 'قسم كامل'
@@ -523,15 +605,22 @@ const formatBulkFixGroupPrompt = (
             : group.unitType === 'paragraph'
                 ? 'فقرة'
                 : 'وحدة نصية';
+    const contextLine = targetContext.isListIntro
+        ? 'سياق الموضع: هذه الفقرة تسبق قائمة تعداد آلية مباشرة، لذلك ينطبق عليها معيار تمهيد خطوات ولا ينطبق عليها معيار طول الفقرات العادية.'
+        : 'سياق الموضع: هذه الوحدة لا تسبق قائمة تعداد آلية مباشرة، لذلك لا تعاملها كتمهيد خطوات ولا تطبق عليها شروط تمهيد الخطوات.';
 
     return [
         `هذه ${unitLabel} واحدة تحتاج إصلاحاً موجهاً دون كسر المعايير المرتبطة بها.`,
+        contextLine,
         '',
         '**أهداف الإصلاح الأساسية:**',
         targetRuleCards || '- لا توجد أهداف إصلاح محددة بوضوح.',
         '',
         '**قيود الحماية التي يجب عدم كسرها أثناء الإصلاح:**',
         protectionRuleCards || '- لا توجد قيود حماية إضافية متاحة.',
+        '',
+        '**أهداف إضافية على مستوى المقال عند وجود سكور عام مخالف:**',
+        articleRuleCards || '- لا توجد أهداف عامة مخالفة على مستوى المقال.',
         '',
         '**النص المراد استبداله كوحدة واحدة:**',
         `"""${targetText}"""`,
@@ -543,14 +632,18 @@ const formatBulkFixGroupPrompt = (
         '- قدم اقتراحين فقط مختلفين قابلين للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
         '- رتّب الاقتراحات بحيث يأتي أولاً الاقتراح الذي يجعل أكبر عدد من تدقيقات criteriaChecks بحالة pass، ثم الأقل كسراً للقيود.',
         '- إذا كان هدف الإصلاح هو تقصير فقرة أو ضبط طولها، فلا تطل الجمل ولا تضف شرحاً غير ضروري.',
-        '- حافظ خصوصاً على قيود: طول الجمل، طول الفقرات، علامات الترقيم، تكرار الفقرة، الإحالات الغامضة، كلمات للحذف، تمهيد الخطوات، نهايات الفقرات، بدايات الجمل، الكلمات اللاتينية، فراغات الترقيم، الثنائيات المكررة، تناسق الكلمات، كلمات الحث، اللغة التفاعلية، الكلمات التحذيرية، الكلمات الانتقالية، والكلمات البطيئة.',
-        '- إذا كانت الوحدة فقرة تمهيد خطوات تنتهي بنقطتين وتفتح قائمة، فلا تطبق عليها شروط طول الفقرات العادية؛ قيّمها بمعيار تمهيد خطوات فقط.',
+        '- حافظ خصوصاً على قيود الحماية المعروضة فقط، ولا تضف كلمات بطيئة أو كلمات للحذف أو مخالفات ترقيم أو إحالات غامضة جديدة.',
+        '- لا تضف كلمات حث أو كلمات تحذيرية أو كلمات انتقالية فقط لإرضاء معيار عام ما لم يكن هذا المعيار هدف الإصلاح الأساسي.',
+        '- إذا ظهر معيار ضمن أهداف مستوى المقال، فقيّمه على كامل المقال بعد استبدال النص، لا على الفقرة وحدها.',
+        '- إذا كان معيار مستوى المقال محققاً أصلاً، فلا تجعله قيداً محلياً على الفقرة ولا تضعه كخارج الحد بسبب قياس الفقرة وحدها.',
+        '- معيار تمهيد خطوات ينطبق فقط عندما تكون الفقرة الحالية قبل قائمة تعداد آلية مباشرة؛ غير ذلك لا تقيّمه ولا تذكره داخل criteriaChecks.',
+        '- إذا كانت الوحدة فقرة تمهيد خطوات، فلا تطبق عليها شروط طول الفقرات العادية؛ قيّمها بمعيار تمهيد خطوات فقط.',
         '- حافظ على المعنى الأصلي وسياق الصفحة ولا تضف معلومات أو ادعاءات جديدة.',
         '- إذا كان النص يحتوي عناوين، فاستخدم Markdown للحفاظ على مستويات العناوين قدر الإمكان.',
         '- لا تكتب تسميات داخل fixedText مثل "النص المقترح" أو "الإجابة".',
         '- يجب أن يكون الرد JSON صالحاً فقط، دون Markdown fences ودون شرح خارج JSON.',
         '- المفتاح suggestions إلزامي، وكل عنصر داخله يجب أن يحتوي fixedText نصياً غير فارغ.',
-        '- داخل كل اقتراح أضف criteriaChecks لكل هدف إصلاح ولكل قيد حماية، وفيه: criterionTitle، before، after، required، و status بقيمة pass أو warn أو fail أو unknown.',
+        '- داخل كل اقتراح أضف criteriaChecks لكل هدف إصلاح ولكل قيد حماية ولكل هدف مستوى مقال ظاهر، وفيه: criterionTitle، before، after، required، و status بقيمة pass أو warn أو fail أو unknown.',
         '- إذا أصلح الاقتراح هدف الإصلاح لكنه كسر قيد حماية، فاعتبر status الخاص بهذا القيد fail ولا تعرضه كأنه ضمن الحد.',
         '',
         'أرجع JSON حصراً بهذا الشكل:',
@@ -595,6 +688,7 @@ const normalizeBulkFixCriteriaChecks = (rawChecks: unknown, criteria: BulkFixCri
                 after: asTrimmedString(record.after || record.afterStatus || record.result || record['بعد'] || record['الحالة بعد التعديل']) || 'غير متاح',
                 required: asTrimmedString(record.required || record.target || record['المطلوب'] || record['الحالة المطلوبة']) || 'غير متاح',
                 status: normalizeCriteriaCheckStatus(record.status || record['الحالة']),
+                source: record.source === 'target' || record.source === 'protection' || record.source === 'article' ? record.source : undefined,
             };
         })
         .filter((check): check is BulkFixCriterionCheck => Boolean(check));
@@ -607,6 +701,7 @@ const normalizeBulkFixCriteriaChecks = (rawChecks: unknown, criteria: BulkFixCri
         after: 'غير متاح',
         required: String(criterion.required),
         status: 'unknown',
+        source: criterion.source,
     })));
 };
 
@@ -641,6 +736,17 @@ const isWithinBulkFixRange = (values: number[], range: { min: number; max: numbe
     if (values.length === 0) return false;
     return values.every(value => value >= range.min && value <= range.max);
 };
+
+const buildBulkFixCandidateArticleText = (fixedText: string, targetContext?: BulkFixTargetContext): string => (
+    [
+        targetContext?.articleTextBefore || '',
+        fixedText,
+        targetContext?.articleTextAfter || '',
+    ]
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+);
 
 const getBulkFixLanguage = (value: string): 'ar' | 'en' => /[\u0600-\u06FF]/.test(value) ? 'ar' : 'en';
 
@@ -778,7 +884,11 @@ const getBulkFixAmbiguousStarts = (textValue: string): { term: string; count: nu
     return Array.from(counts.entries()).map(([term, count]) => ({ term, count }));
 };
 
-const getBulkFixTextualAudit = (textValue: string, criterionText: string): { summary: string; passed: boolean } | null => {
+const getBulkFixTextualAudit = (
+    textValue: string,
+    criterionText: string,
+    scope: 'local' | 'article' = 'local'
+): { summary: string; passed: boolean } | null => {
     const haystack = criterionText.toLowerCase();
     const wordCount = countWords(textValue);
 
@@ -855,7 +965,7 @@ const getBulkFixTextualAudit = (textValue: string, criterionText: string): { sum
         const examples = matches.slice(0, 5).map(item => item.term).join('، ');
         return {
             summary: `${total} كلمة بطيئة من ${wordCount} كلمة (${(percentage * 100).toFixed(1)}%)${examples ? ` - ${examples}` : ''}`,
-            passed: total === 0,
+            passed: scope === 'article' ? percentage <= 0.02 : total === 0,
         };
     }
 
@@ -906,10 +1016,12 @@ const getBulkFixTextualAudit = (textValue: string, criterionText: string): { sum
     return null;
 };
 
-const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): string => {
-    const stats = getBulkFixStats(textValue);
-    const paragraphs = splitBulkFixParagraphs(textValue);
-    const sentences = splitBulkFixSentences(textValue);
+const summarizeBulkFixMeasuredState = (textValue: string, criterionText = '', targetContext?: BulkFixTargetContext): string => {
+    const isArticleScope = criterionText.includes('source:article');
+    const measuredText = isArticleScope ? buildBulkFixCandidateArticleText(textValue, targetContext) : textValue;
+    const stats = getBulkFixStats(measuredText);
+    const paragraphs = splitBulkFixParagraphs(measuredText);
+    const sentences = splitBulkFixSentences(measuredText);
     const paragraphWords = paragraphs.map(countWords);
     const sentenceWords = sentences.map(countWords);
     const haystack = criterionText.toLowerCase();
@@ -921,20 +1033,23 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): s
         return sentenceWords.length ? `أطوال الجمل: ${min}-${max} كلمة` : 'لا توجد جمل قابلة للقياس';
     }
     if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
-        if (isBulkFixStepIntroCandidate(textValue)) {
+        if (targetContext?.isListIntro) {
             return 'فقرة تمهيد خطوات منتهية بنقطتين؛ لا يطبق عليها معيار طول الفقرات العادية';
         }
         return `${stats.words} كلمة، ${stats.sentences} جملة، ${stats.paragraphs} فقرة`;
     }
     if (isPunctuationCriterion) {
-        return /[.!؟?:]\s*$/.test(textValue.trim()) ? 'علامة النهاية موجودة' : 'علامة النهاية غير موجودة';
+        return /[.!؟?:]\s*$/.test(measuredText.trim()) ? 'علامة النهاية موجودة' : 'علامة النهاية غير موجودة';
     }
     if (haystack.includes('تمهيد خطوات') || haystack.includes('steps introduction')) {
-        const colonState = /[:：]\s*$/.test(textValue.trim()) ? 'تنتهي بنقطتين' : 'لا تنتهي بنقطتين';
+        if (!targetContext?.isListIntro) {
+            return 'لا ينطبق؛ الفقرة التالية ليست قائمة تعداد آلية';
+        }
+        const colonState = /[:：]\s*$/.test(measuredText.trim()) ? 'تنتهي بنقطتين' : 'لا تنتهي بنقطتين';
         return `${stats.words} كلمة، ${stats.sentences} جملة، ${colonState}`;
     }
 
-    const textualAudit = getBulkFixTextualAudit(textValue, criterionText);
+    const textualAudit = getBulkFixTextualAudit(measuredText, criterionText, isArticleScope ? 'article' : 'local');
     if (textualAudit) {
         return textualAudit.summary;
     }
@@ -955,9 +1070,10 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = ''): s
 const inferBulkFixCriterionCheck = (
     criterion: BulkFixCriterionSummary,
     originalText: string,
-    fixedText: string
+    fixedText: string,
+    targetContext?: BulkFixTargetContext
 ): BulkFixCriterionCheck => {
-    const criterionText = `${criterion.title} ${criterion.required} ${criterion.message || ''}`;
+    const criterionText = `${criterion.title} ${criterion.required} ${criterion.message || ''} ${criterion.source === 'article' ? 'source:article' : ''}`;
     const haystack = criterionText.toLowerCase();
     const wordRange = extractBulkFixRange(criterionText, 'كلمة|كلمات|word|words');
     const sentenceRange = extractBulkFixRange(criterionText, 'جملة|جمل|sentence|sentences');
@@ -968,33 +1084,51 @@ const inferBulkFixCriterionCheck = (
     const checks: boolean[] = [];
     const isPunctuationSpacingCriterion = haystack.includes('فراغات الترقيم') || haystack.includes('punctuation spacing');
     const isPunctuationCriterion = (haystack.includes('علامات الترقيم') || haystack.includes('punctuation')) && !isPunctuationSpacingCriterion;
+    const isArticleScope = criterion.source === 'article';
+    const measuredText = isArticleScope ? buildBulkFixCandidateArticleText(fixedText, targetContext) : fixedText;
+    const measuredParagraphs = isArticleScope ? splitBulkFixParagraphs(measuredText) : paragraphs;
+    const measuredSentences = isArticleScope ? splitBulkFixSentences(measuredText) : sentences;
+    const measuredStats = isArticleScope ? getBulkFixStats(measuredText) : afterStats;
+
+    if (isArticleScope && criterion.status === 'pass') {
+        return {
+            criterionTitle: criterion.title,
+            before: String(criterion.current),
+            after: `محقق على مستوى المقال: ${criterion.current}`,
+            required: String(criterion.required),
+            status: 'pass',
+            source: criterion.source,
+        };
+    }
 
     if (haystack.includes('طول الجمل') || haystack.includes('sentence length')) {
         const targetRange = wordRange || { min: 6, max: 20 };
-        checks.push(isWithinBulkFixRange(sentences.map(countWords), targetRange) === true);
+        checks.push(isWithinBulkFixRange(measuredSentences.map(countWords), targetRange) === true);
     } else if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
-        if (isBulkFixStepIntroCandidate(fixedText)) {
+        if (targetContext?.isListIntro) {
             checks.push(true);
         } else {
-            checks.push(isWithinBulkFixRange(paragraphs.map(countWords), wordRange || { min: 30, max: 100 }) === true);
-            checks.push(isWithinBulkFixRange(paragraphs.map(countSentences), sentenceRange || { min: 1, max: 4 }) === true);
+            checks.push(isWithinBulkFixRange(measuredParagraphs.map(countWords), wordRange || { min: 30, max: 100 }) === true);
+            checks.push(isWithinBulkFixRange(measuredParagraphs.map(countSentences), sentenceRange || { min: 1, max: 4 }) === true);
         }
     } else {
-        const wordStatus = isWithinBulkFixRange([afterStats.words], wordRange);
-        const sentenceStatus = isWithinBulkFixRange([afterStats.sentences], sentenceRange);
-        const paragraphStatus = isWithinBulkFixRange([afterStats.paragraphs], paragraphRange);
+        const wordStatus = isWithinBulkFixRange([measuredStats.words], wordRange);
+        const sentenceStatus = isWithinBulkFixRange([measuredStats.sentences], sentenceRange);
+        const paragraphStatus = isWithinBulkFixRange([measuredStats.paragraphs], paragraphRange);
         [wordStatus, sentenceStatus, paragraphStatus].forEach(status => {
             if (status !== null) checks.push(status);
         });
     }
 
     if (isPunctuationCriterion) {
-        checks.push(/[.!؟?:]\s*$/.test(fixedText.trim()));
+        checks.push(/[.!؟?:]\s*$/.test(measuredText.trim()));
     }
     if (haystack.includes('تمهيد خطوات') || haystack.includes('steps introduction')) {
-        checks.push(/[:：]\s*$/.test(fixedText.trim()));
+        if (targetContext?.isListIntro) {
+            checks.push(/[:：]\s*$/.test(measuredText.trim()));
+        }
     }
-    const textualAudit = getBulkFixTextualAudit(fixedText, criterionText);
+    const textualAudit = getBulkFixTextualAudit(measuredText, criterionText, isArticleScope ? 'article' : 'local');
     if (textualAudit) {
         checks.push(textualAudit.passed);
     }
@@ -1002,9 +1136,10 @@ const inferBulkFixCriterionCheck = (
     return {
         criterionTitle: criterion.title,
         before: String(criterion.current),
-        after: summarizeBulkFixMeasuredState(fixedText, criterionText),
+        after: summarizeBulkFixMeasuredState(fixedText, criterionText, targetContext),
         required: String(criterion.required),
         status: checks.length === 0 ? 'unknown' : checks.every(Boolean) ? 'pass' : 'fail',
+        source: criterion.source,
     };
 };
 
@@ -1012,12 +1147,13 @@ const buildBulkFixCriteriaChecks = (
     rawChecks: unknown,
     criteria: BulkFixCriterionSummary[],
     originalText: string,
-    fixedText: string
+    fixedText: string,
+    targetContext?: BulkFixTargetContext
 ): BulkFixCriterionCheck[] => {
     const aiChecks = normalizeBulkFixCriteriaChecks(rawChecks, criteria);
     if (criteria.length === 0) return aiChecks;
     return sortBulkFixCriteriaChecks(criteria.map((criterion) => {
-        const inferred = inferBulkFixCriterionCheck(criterion, originalText, fixedText);
+        const inferred = inferBulkFixCriterionCheck(criterion, originalText, fixedText, targetContext);
         const matchingAiCheck = aiChecks.find(check => (
             check.criterionTitle === criterion.title ||
             check.criterionTitle.includes(criterion.title) ||
@@ -1035,6 +1171,11 @@ const buildBulkFixCriteriaChecks = (
 const getBulkFixVariantQuality = (variant: BulkFixReviewVariant) => {
     const checks = variant.criteriaChecks || [];
     return {
+        targetPass: checks.filter(check => check.source === 'target' && check.status === 'pass').length,
+        targetFail: checks.filter(check => check.source === 'target' && check.status === 'fail').length,
+        articlePass: checks.filter(check => check.source === 'article' && check.status === 'pass').length,
+        articleFail: checks.filter(check => check.source === 'article' && check.status === 'fail').length,
+        protectionFail: checks.filter(check => check.source === 'protection' && check.status === 'fail').length,
         pass: checks.filter(check => check.status === 'pass').length,
         fail: checks.filter(check => check.status === 'fail').length,
         warn: checks.filter(check => check.status === 'warn').length,
@@ -1046,7 +1187,12 @@ const getBulkFixVariantQuality = (variant: BulkFixReviewVariant) => {
 const compareBulkFixVariantsByQuality = (a: BulkFixReviewVariant, b: BulkFixReviewVariant): number => {
     const aQuality = getBulkFixVariantQuality(a);
     const bQuality = getBulkFixVariantQuality(b);
-    return bQuality.pass - aQuality.pass ||
+    return bQuality.targetPass - aQuality.targetPass ||
+        aQuality.targetFail - bQuality.targetFail ||
+        aQuality.articleFail - bQuality.articleFail ||
+        bQuality.articlePass - aQuality.articlePass ||
+        aQuality.protectionFail - bQuality.protectionFail ||
+        bQuality.pass - aQuality.pass ||
         aQuality.fail - bQuality.fail ||
         aQuality.warn - bQuality.warn ||
         aQuality.unknown - bQuality.unknown ||
@@ -1071,7 +1217,7 @@ const sortBulkFixVariantsByCriteria = (variants: BulkFixReviewVariant[]): BulkFi
         ))
 );
 
-const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: BulkFixCriterionSummary[]): BulkFixReviewVariant[] => {
+const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: BulkFixCriterionSummary[], targetContext?: BulkFixTargetContext): BulkFixReviewVariant[] => {
     const parsedRaw = typeof raw === 'string' ? (extractJson(raw) || raw) : raw;
     const record = parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)
         ? parsedRaw as Record<string, unknown>
@@ -1129,7 +1275,8 @@ const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: 
                     suggestionRecord.criteriaChecks || suggestionRecord.criteria || suggestionRecord.checks || suggestionRecord['تدقيق المعايير'] || suggestionRecord['المعايير'],
                     criteria,
                     originalText,
-                    fixedText
+                    fixedText,
+                    targetContext
                 ),
             };
         })
@@ -2163,31 +2310,41 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 if (targetText === null) {
                     throw new Error('Target range is no longer valid.');
                 }
-                const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles);
-                const prompt = buildComprehensivePrompt(formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules));
+                const targetContext = getBulkFixTargetContext(editor, group);
+                const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
+                const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
+                const prompt = buildComprehensivePrompt(formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules, targetContext, articleLevelRules));
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);
                 const uniqueRules = getUniqueBulkFixRules(group.violations);
                 const targetRules = uniqueRules.filter(rule => selectedRuleTitles.has(rule.title));
                 const fallbackTargetRules = targetRules.length > 0 ? targetRules : uniqueRules.slice(0, 1);
-                const criteriaRules = [
-                    ...fallbackTargetRules,
-                    ...protectionRules.filter(rule => !fallbackTargetRules.some(targetRule => targetRule.title === rule.title)),
+                const criteriaRuleEntries = [
+                    ...fallbackTargetRules.map(rule => ({ rule, source: 'target' as const })),
+                    ...protectionRules
+                        .filter(rule => !fallbackTargetRules.some(targetRule => targetRule.title === rule.title))
+                        .map(rule => ({ rule, source: 'protection' as const })),
+                    ...articleLevelRules
+                        .filter(rule => !fallbackTargetRules.some(targetRule => targetRule.title === rule.title))
+                        .filter(rule => !protectionRules.some(protectionRule => protectionRule.title === rule.title))
+                        .map(rule => ({ rule, source: 'article' as const })),
                 ];
-                const criteria: BulkFixCriterionSummary[] = criteriaRules.map((rule) => ({
+                const criteria: BulkFixCriterionSummary[] = criteriaRuleEntries.map(({ rule, source }) => ({
                     title: rule.title,
                     current: rule.current,
                     required: rule.required,
                     status: rule.status,
+                    source,
+                    isListIntroContext: targetContext.isListIntro,
                     message: group.violations
                         .filter(violation => violation.rule.title === rule.title)
                         .map(violation => violation.item.message)
                         .filter(Boolean)
                         .join(' | '),
                 }));
-                let variants = normalizeBulkFixVariants(parsed, targetText, criteria);
+                let variants = normalizeBulkFixVariants(parsed, targetText, criteria, targetContext);
                 if (variants.length === 0) {
-                    variants = normalizeBulkFixVariants(res, targetText, criteria);
+                    variants = normalizeBulkFixVariants(res, targetText, criteria, targetContext);
                 }
                 const primaryVariant = variants[0];
                 const ruleTitles = fallbackTargetRules.map(rule => rule.title);
