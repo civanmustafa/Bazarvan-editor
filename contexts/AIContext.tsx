@@ -12,6 +12,7 @@ import type {
     CheckResult,
     HeadingAnalysisResult,
     AIHistoryItem,
+    BulkFixRelatedRule,
     BulkFixReviewItem,
     BulkFixReviewStats,
     BulkFixReviewVariant,
@@ -307,6 +308,96 @@ const groupBulkFixViolationsByTextUnit = (
     return groups
         .filter(group => !absorbedGroupIds.has(group.id))
         .sort((a, b) => a.from - b.from);
+};
+
+const collectBulkFixViolations = (structureAnalysis: StructureAnalysis): BulkFixViolationContext[] => {
+    const violations: BulkFixViolationContext[] = [];
+    Object.values(structureAnalysis).forEach((rule) => {
+        if (rule.violatingItems?.length) {
+            rule.violatingItems.forEach((item) => violations.push({ rule, item }));
+        }
+    });
+    return violations;
+};
+
+const isSameBulkFixUnit = (a: BulkFixTextUnit, b: BulkFixTextUnit): boolean => a.from === b.from && a.to === b.to;
+
+const isBulkFixUnitRelated = (selectedUnit: BulkFixTextUnit, candidateUnit: BulkFixTextUnit): boolean => {
+    if (isSameBulkFixUnit(selectedUnit, candidateUnit)) return true;
+    return selectedUnit.unitType === 'section' &&
+        selectedUnit.from <= candidateUnit.from &&
+        selectedUnit.to >= candidateUnit.to;
+};
+
+const getRelatedBulkFixViolations = (
+    editor: any,
+    allViolations: BulkFixViolationContext[],
+    selectedRuleTitles: Set<string>
+): BulkFixViolationContext[] => {
+    if (!editor || selectedRuleTitles.size === 0) return [];
+
+    const selectedViolations = allViolations.filter(violation => selectedRuleTitles.has(violation.rule.title));
+    const selectedUnits = selectedViolations
+        .map(violation => ({
+            violation,
+            unit: getBulkFixTextUnit(editor, violation.item),
+        }))
+        .filter((entry): entry is { violation: BulkFixViolationContext; unit: BulkFixTextUnit } => Boolean(entry.unit));
+
+    const relatedKeys = new Set<string>();
+    const relatedViolations: BulkFixViolationContext[] = [];
+
+    allViolations.forEach((violation) => {
+        if (selectedRuleTitles.has(violation.rule.title)) return;
+        const candidateUnit = getBulkFixTextUnit(editor, violation.item);
+        if (!candidateUnit) return;
+        const isRelated = selectedUnits.some(({ unit }) => isBulkFixUnitRelated(unit, candidateUnit));
+        if (!isRelated) return;
+
+        const key = `${violation.rule.title}:${violation.item.from}:${violation.item.to}:${violation.item.message}`;
+        if (relatedKeys.has(key)) return;
+        relatedKeys.add(key);
+        relatedViolations.push(violation);
+    });
+
+    return relatedViolations;
+};
+
+const summarizeRelatedBulkFixRules = (
+    editor: any,
+    allViolations: BulkFixViolationContext[],
+    selectedRuleTitles: Set<string>
+): BulkFixRelatedRule[] => {
+    if (!editor || selectedRuleTitles.size === 0) return [];
+    const selectedViolations = allViolations.filter(violation => selectedRuleTitles.has(violation.rule.title));
+    const selectedUnits = selectedViolations
+        .map(violation => ({
+            sourceRuleTitle: violation.rule.title,
+            unit: getBulkFixTextUnit(editor, violation.item),
+        }))
+        .filter((entry): entry is { sourceRuleTitle: string; unit: BulkFixTextUnit } => Boolean(entry.unit));
+
+    const summary = new Map<string, BulkFixRelatedRule>();
+    allViolations.forEach((violation) => {
+        if (selectedRuleTitles.has(violation.rule.title)) return;
+        const candidateUnit = getBulkFixTextUnit(editor, violation.item);
+        if (!candidateUnit) return;
+        const sourceRuleTitles = selectedUnits
+            .filter(({ unit }) => isBulkFixUnitRelated(unit, candidateUnit))
+            .map(({ sourceRuleTitle }) => sourceRuleTitle);
+        if (sourceRuleTitles.length === 0) return;
+
+        const current = summary.get(violation.rule.title) || {
+            title: violation.rule.title,
+            count: 0,
+            sourceRuleTitles: [],
+        };
+        current.count += 1;
+        current.sourceRuleTitles = Array.from(new Set([...current.sourceRuleTitles, ...sourceRuleTitles]));
+        summary.set(violation.rule.title, current);
+    });
+
+    return Array.from(summary.values()).sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
 };
 
 const formatBulkFixGroupPrompt = (group: BulkFixTargetGroup, targetText: string): string => {
@@ -1010,7 +1101,8 @@ interface AIContextType {
     handleAiAnalyze: (userPrompt: string, options: any) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any) => Promise<void>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
-    handleFixAllViolations: (rulesToFix: string[]) => Promise<void>;
+    handleFixAllViolations: (rulesToFix: string[], options?: { includeRelatedRules?: boolean }) => Promise<void>;
+    getRelatedBulkFixRules: (rulesToFix: string[]) => BulkFixRelatedRule[];
     applyBulkFixReviewItem: (itemId: string, variantId?: string) => void;
     applySelectedBulkFixReviewItems: (itemIds: string[]) => void;
     selectBulkFixReviewItemTarget: (itemId: string) => void;
@@ -1315,20 +1407,24 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
     }, [editor, buildComprehensivePrompt, apiKeys.gemini, logToAiHistory]);
 
-    const handleFixAllViolations = useCallback(async (rulesToFix: string[]) => {
+    const getRelatedBulkFixRules = useCallback((rulesToFix: string[]): BulkFixRelatedRule[] => {
+        if (!editor || !analysisResults.structureAnalysis || rulesToFix.length === 0) return [];
+        const selectedRuleTitles = new Set(rulesToFix);
+        const allViolations = collectBulkFixViolations(analysisResults.structureAnalysis);
+        return summarizeRelatedBulkFixRules(editor, allViolations, selectedRuleTitles);
+    }, [editor, analysisResults.structureAnalysis]);
+
+    const handleFixAllViolations = useCallback(async (rulesToFix: string[], options: { includeRelatedRules?: boolean } = {}) => {
         if (!editor || !analysisResults.structureAnalysis) return;
         setBulkFixReviewItems([]);
         setFixAllProgress({ current: 0, total: 0, running: true, failed: 0, errors: [] });
-        const allViolations: {
-            rule: CheckResult;
-            item: NonNullable<CheckResult['violatingItems']>[number];
-        }[] = [];
-        Object.values(analysisResults.structureAnalysis).forEach((rule) => {
-            if (rulesToFix.includes(rule.title) && rule.violatingItems?.length) {
-                rule.violatingItems.forEach((item) => allViolations.push({ rule, item }));
-            }
-        });
-        const groupedViolations = groupBulkFixViolationsByTextUnit(editor, allViolations);
+        const selectedRuleTitles = new Set(rulesToFix);
+        const allViolations = collectBulkFixViolations(analysisResults.structureAnalysis);
+        const selectedViolations = allViolations.filter(violation => selectedRuleTitles.has(violation.rule.title));
+        const relatedViolations = options.includeRelatedRules
+            ? getRelatedBulkFixViolations(editor, allViolations, selectedRuleTitles)
+            : [];
+        const groupedViolations = groupBulkFixViolationsByTextUnit(editor, [...selectedViolations, ...relatedViolations]);
         setFixAllProgress(p => ({ ...p, total: groupedViolations.length }));
 
         const proposedItems: BulkFixReviewItem[] = [];
@@ -1584,7 +1680,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         aiResults, aiInsertionPatches, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
-        handleChatGptAnalyze, handleAiFix, handleFixAllViolations, applyBulkFixReviewItem,
+        handleChatGptAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
         clearBulkFixReviewItems, applySuggestionFromHistory,
         applyAiInsertionPatch, applyAllAiInsertionPatches, selectAiInsertionPatchTarget,

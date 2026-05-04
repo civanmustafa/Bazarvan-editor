@@ -265,6 +265,12 @@ export interface BulkFixReviewVariant {
   statsAfter: BulkFixReviewStats;
 }
 
+export interface BulkFixRelatedRule {
+  title: string;
+  count: number;
+  sourceRuleTitles: string[];
+}
+
 export interface BulkFixReviewItem {
   id: string;
   ruleTitle: string;

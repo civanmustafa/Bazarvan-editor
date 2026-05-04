@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
-import type { BulkFixReviewItem, BulkFixReviewStats, BulkFixReviewVariant, CheckResult } from '../types';
+import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewStats, BulkFixReviewVariant, CheckResult } from '../types';
 import { Pilcrow, Heading, AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, ShieldAlert, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2 } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -234,12 +234,16 @@ const StatDisplay: React.FC<{ icon: React.ReactNode; value: number; label: strin
 const FixAllModal: React.FC<{
     groups: { [title: string]: number };
     onClose: () => void;
-    onConfirm: (selectedRules: string[]) => void;
+    onConfirm: (selectedRules: string[], includeRelatedRules: boolean) => void;
+    getRelatedRules: (selectedRules: string[]) => BulkFixRelatedRule[];
     uiLanguage: 'ar' | 'en';
     t: typeof translations.ar;
-}> = ({ groups, onClose, onConfirm, uiLanguage, t }) => {
+}> = ({ groups, onClose, onConfirm, getRelatedRules, uiLanguage, t }) => {
     const [selectedRules, setSelectedRules] = useState<string[]>(() => Object.keys(groups));
+    const [includeRelatedRules, setIncludeRelatedRules] = useState(true);
     const isArabic = uiLanguage === 'ar';
+    const relatedRules = useMemo(() => getRelatedRules(selectedRules), [getRelatedRules, selectedRules]);
+    const relatedRulesCount = relatedRules.reduce((sum, rule) => sum + rule.count, 0);
 
     const handleToggleRule = (ruleTitle: string) => {
         setSelectedRules(prev =>
@@ -292,12 +296,41 @@ const FixAllModal: React.FC<{
                         </div>
                     ))}
                 </div>
+                {relatedRules.length > 0 && (
+                    <div className="mt-4 rounded-xl border border-[#d4af37]/25 bg-[#d4af37]/5 p-3 dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10">
+                        <button
+                            type="button"
+                            onClick={() => setIncludeRelatedRules(prev => !prev)}
+                            className="flex w-full items-start gap-2 text-start"
+                        >
+                            {includeRelatedRules ? <CheckSquare size={18} className="mt-0.5 text-[#d4af37]" /> : <Square size={18} className="mt-0.5 text-gray-300" />}
+                            <span className="min-w-0">
+                                <span className="block text-xs font-black text-gray-800 dark:text-gray-100">
+                                    {isArabic ? 'تضمين المعايير المرتبطة في نفس المواضع' : 'Include related criteria in the same locations'}
+                                </span>
+                                <span className="mt-1 block text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                                    {isArabic
+                                        ? `تم العثور على ${relatedRulesCount} مخالفة مرتبطة داخل نفس الفقرات أو الأقسام المحددة.`
+                                        : `${relatedRulesCount} related violations were found in the same selected paragraphs or sections.`}
+                                </span>
+                            </span>
+                        </button>
+                        <div className="mt-3 max-h-28 overflow-y-auto custom-scrollbar space-y-1.5">
+                            {relatedRules.map((rule) => (
+                                <div key={rule.title} className="flex items-center gap-2 rounded-lg bg-white/70 px-2 py-1.5 text-[10px] font-bold text-gray-600 dark:bg-[#1F1F1F]/70 dark:text-gray-300">
+                                    <span className="min-w-0 flex-1 truncate">{rule.title}</span>
+                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{rule.count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 <div className="mt-8 flex justify-end gap-3">
                     <button onClick={onClose} className="px-5 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 rounded-lg hover:bg-[#d4af37]/15 dark:bg-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#d4af37]/25 transition-colors">
                         {t.cancel}
                     </button>
-                    <button onClick={() => onConfirm(selectedRules)} disabled={selectedRules.length === 0} className="px-5 py-2.5 text-sm font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] disabled:bg-gray-300 shadow-md shadow-[#d4af37]/20 transition-all">
-                        {isArabic ? 'إنشاء الاقتراحات' : 'Create Proposals'} ({selectedRules.length})
+                    <button onClick={() => onConfirm(selectedRules, includeRelatedRules && relatedRules.length > 0)} disabled={selectedRules.length === 0} className="px-5 py-2.5 text-sm font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] disabled:bg-gray-300 shadow-md shadow-[#d4af37]/20 transition-all">
+                        {isArabic ? 'إنشاء الاقتراحات' : 'Create Proposals'} ({selectedRules.length}{includeRelatedRules && relatedRules.length > 0 ? ` + ${relatedRules.length}` : ''})
                     </button>
                 </div>
             </div>
@@ -548,6 +581,7 @@ const StructureTab: React.FC = () => {
         handleFixAllViolations,
         fixAllProgress,
         bulkFixReviewItems,
+        getRelatedBulkFixRules,
         applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems,
         selectBulkFixReviewItemTarget,
@@ -576,8 +610,8 @@ const StructureTab: React.FC = () => {
     const pendingBulkFixIds = useMemo(() => bulkFixReviewItems.filter(item => item.status === 'pending').map(item => item.id), [bulkFixReviewItems]);
     const bulkFixReviewIdsKey = useMemo(() => bulkFixReviewItems.map(item => item.id).join('|'), [bulkFixReviewItems]);
 
-    const handleStartFixing = (selectedRules: string[]) => {
-        handleFixAllViolations(selectedRules);
+    const handleStartFixing = (selectedRules: string[], includeRelatedRules: boolean) => {
+        handleFixAllViolations(selectedRules, { includeRelatedRules });
         setIsFixModalOpen(false);
     };
 
@@ -829,6 +863,7 @@ const StructureTab: React.FC = () => {
           groups={fixableViolationGroups}
           onClose={() => setIsFixModalOpen(false)}
           onConfirm={handleStartFixing}
+          getRelatedRules={getRelatedBulkFixRules}
           uiLanguage={uiLanguage}
           t={t}
         />
