@@ -43,7 +43,6 @@ const EditorToolbar: React.FC = () => {
         restoreStatus,
         draftExists,
         handleNewArticle: onNewArticle,
-        handleClearKeywords: onClearKeywords,
         articleLanguage,
         handleLanguageChange: onLanguageChange,
     } = useEditor();
@@ -209,7 +208,6 @@ const EditorToolbar: React.FC = () => {
                     isTocVisible={isTocVisible}
                     isFindReplaceVisible={isFindReplaceVisible}
                     onClearAllHighlights={clearAllHighlights}
-                    onClearKeywords={onClearKeywords}
                     onToggleAllKeywordsHighlight={onToggleAllKeywordsHighlight}
                     onSetIsTooltipAlwaysOn={setIsTooltipAlwaysOn}
                     onToggleToc={onToggleToc}

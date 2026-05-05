@@ -1,7 +1,7 @@
 import React from 'react';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
-import { Eraser, KeyRound, Trash2, MessageSquare, Bookmark, Split, Shrink, Search, ListRestart } from 'lucide-react';
+import { Eraser, KeyRound, MessageSquare, Bookmark, Split, Shrink, Search, ListRestart } from 'lucide-react';
 
 interface UtilityActionsProps {
     t: typeof translations.ar;
@@ -10,7 +10,6 @@ interface UtilityActionsProps {
     isTocVisible: boolean;
     isFindReplaceVisible: boolean;
     onClearAllHighlights: () => void;
-    onClearKeywords: () => void;
     onToggleAllKeywordsHighlight: () => void;
     onSetIsTooltipAlwaysOn: React.Dispatch<React.SetStateAction<boolean>>;
     onToggleToc: () => void;
@@ -27,7 +26,6 @@ const UtilityActions: React.FC<UtilityActionsProps> = ({
     isTocVisible,
     isFindReplaceVisible,
     onClearAllHighlights,
-    onClearKeywords,
     onToggleAllKeywordsHighlight,
     onSetIsTooltipAlwaysOn,
     onToggleToc,
@@ -39,7 +37,6 @@ const UtilityActions: React.FC<UtilityActionsProps> = ({
     return (
         <>
             <ToolbarButton onClick={onClearAllHighlights} title={t.removeAllHighlights}><Eraser size={16} /></ToolbarButton>
-            <ToolbarButton onClick={onClearKeywords} title={t.clearKeywords}><Trash2 size={16} /></ToolbarButton>
             <ToolbarButton onClick={onToggleAllKeywordsHighlight} title={t.highlightAllKeywords} isActive={isAllKeywordsHighlighted}><KeyRound size={16} /></ToolbarButton>
             <ToolbarButton onClick={() => onSetIsTooltipAlwaysOn(prev => !prev)} title={t.toggleTooltips} isActive={isTooltipAlwaysOn}><MessageSquare size={16} /></ToolbarButton>
             <ToolbarButton onClick={onToggleToc} title={isTocVisible ? t.hideToc : t.createToc} isActive={isTocVisible}><Bookmark size={16} /></ToolbarButton>

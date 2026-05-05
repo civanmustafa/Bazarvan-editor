@@ -2098,6 +2098,7 @@ interface AIContextType {
     handleAnalyzeHeadings: () => Promise<void>;
     handleAiAnalyze: (userPrompt: string, options: any) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any) => Promise<void>;
+    generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string }>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[], options?: { includeRelatedRules?: boolean }) => Promise<void>;
     getRelatedBulkFixRules: (rulesToFix: string[]) => BulkFixRelatedRule[];
@@ -2307,6 +2308,69 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
         return parts.join('\n\n');
     }, [title, keywords, text, goalContext, articleLanguage, analysisResults, t]);
+
+    const generateSemanticKeywords = useCallback(async (): Promise<{ secondaries: string[]; lsi: string[]; error?: string }> => {
+        const primary = keywords.primary.trim();
+        if (!primary) {
+            return { secondaries: [], lsi: [], error: 'أدخل الكلمة المفتاحية الأساسية أولًا.' };
+        }
+
+        const prompt = [
+            'أنت خبير SEO دلالي وLLM SEO.',
+            '',
+            'مهمتك توليد صيغ بديلة طبيعية للكلمة المفتاحية الأساسية وكلمات LSI مرتبطة بنية البحث وسياق هدف الصفحة والجمهور، ثم إرجاعها بصيغة JSON فقط لتوزيعها تلقائيًا داخل لوحة الكلمات.',
+            '',
+            `الكلمة المفتاحية الأساسية: ${primary}`,
+            keywords.company.trim() ? `اسم الشركة: ${keywords.company.trim()}` : '',
+            title.trim() ? `عنوان المقال: ${title.trim()}` : '',
+            `لغة المقال: ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`,
+            '',
+            'سياق هدف الصفحة والجمهور:',
+            formatGoalContext(goalContext) || '- لم يحدد',
+            '',
+            'الشروط:',
+            '- لا تكتب المقالة.',
+            '- لا تستخدم حشوًا مفتاحيًا.',
+            '- لا تقترح كلمات بعيدة عن نية البحث.',
+            '- اجعل كل الاقتراحات طبيعية وقابلة للاستخدام داخل محتوى حقيقي.',
+            '- راعِ هدف المقالة والجمهور المستهدف في كل اقتراح.',
+            '- لا تكرر الكلمة المفتاحية الأساسية نفسها ضمن الصيغ البديلة.',
+            '- أخرج 4 إلى 6 صيغ بديلة قصيرة.',
+            '- أخرج 10 إلى 16 كلمة أو عبارة LSI.',
+            '',
+            'أرجع JSON فقط بهذا الشكل دون Markdown ودون شرح:',
+            '{ "secondaries": ["صيغة بديلة 1", "صيغة بديلة 2"], "lsi": ["كلمة LSI 1", "كلمة LSI 2"] }',
+        ].filter(Boolean).join('\n');
+
+        const result = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        if (/^حدث خطأ أثناء الاتصال بـ Gemini/.test(result)) {
+            return { secondaries: [], lsi: [], error: result };
+        }
+
+        const parsed = extractJson(result);
+        const normalizeTerms = (value: unknown): string[] => {
+            if (!Array.isArray(value)) return [];
+            const seen = new Set<string>();
+            return value
+                .map(item => typeof item === 'string' ? item.replace(/[.،,;؛]+$/g, '').trim() : '')
+                .filter(Boolean)
+                .filter(item => item !== primary)
+                .filter(item => {
+                    const key = item.toLowerCase();
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+        };
+
+        const secondaries = normalizeTerms(parsed?.secondaries).slice(0, 6);
+        const lsi = normalizeTerms(parsed?.lsi).slice(0, 16);
+        if (secondaries.length === 0 && lsi.length === 0) {
+            return { secondaries, lsi, error: 'لم يرجع الذكاء الاصطناعي صيغا قابلة للتوزيع. حاول مرة أخرى.' };
+        }
+
+        return { secondaries, lsi };
+    }, [apiKeys.gemini, articleLanguage, goalContext, keywords.company, keywords.primary, title]);
     
     const handleAiAnalyze = useCallback(async (userPrompt: string, options: any) => {
         if (!editor) return;
@@ -2788,6 +2852,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         aiResults, aiInsertionPatches, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
+        generateSemanticKeywords,
         handleChatGptAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
         clearBulkFixReviewItems, applySuggestionFromHistory,

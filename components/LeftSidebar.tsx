@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check } from 'lucide-react';
+import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check, Sparkles, Loader2 } from 'lucide-react';
 import DuplicatesTab from './DuplicatesTab';
 import GoalTab from './GoalTab';
 import { SECONDARY_COLORS } from '../constants';
@@ -7,6 +7,7 @@ import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
+import { useAI } from '../contexts/AIContext';
 import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis } from '../types';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 
@@ -90,15 +91,18 @@ const ModernProgressBar: React.FC<{ analysis: KeywordStats, isCompact?: boolean,
     );
 };
 
-const ModernSection: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode; onClick?: () => void; }> = ({ icon, title, children, onClick }) => (
+const ModernSection: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode; onClick?: () => void; actions?: React.ReactNode; }> = ({ icon, title, children, onClick, actions }) => (
     <div 
         className={`bg-white dark:bg-[#2A2A2A] rounded-xl shadow-sm border border-gray-300 dark:border-[#3C3C3C] p-2 transition-all duration-200 ${onClick ? 'cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20' : ''}`}
         onClick={onClick}
     >
-        <h3 className="flex items-center gap-2 text-sm font-bold text-[#333333] dark:text-[#C7C7C7] mb-2">
-            {icon}
-            <span>{title}</span>
-        </h3>
+        <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="flex min-w-0 items-center gap-2 text-sm font-bold text-[#333333] dark:text-[#C7C7C7]">
+                {icon}
+                <span className="truncate">{title}</span>
+            </h3>
+            {actions}
+        </div>
         <div className="space-y-2" onClick={onClick ? e => e.stopPropagation() : undefined}>
             {children}
         </div>
@@ -259,12 +263,15 @@ const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
   const { keywords, setKeywords, setGoalContext, analysisResults } = useEditor();
   const { applyHighlights, clearAllHighlights, highlightedItem, setHighlightedItem } = useInteraction();
+  const { generateSemanticKeywords } = useAI();
   
   const { keywordAnalysis, duplicateAnalysis } = analysisResults;
 
   const [activeTab, setActiveTab] = React.useState<'keywords' | 'duplicates'>('keywords');
   const [lsiInputValue, setLsiInputValue] = React.useState('');
   const [autoDistributeText, setAutoDistributeText] = React.useState('');
+  const [isGeneratingSemanticKeywords, setIsGeneratingSemanticKeywords] = React.useState(false);
+  const [semanticGenerationStatus, setSemanticGenerationStatus] = React.useState('');
   const tLk = t.leftSidebar;
   const savedCompanyNames = React.useMemo(
     () => Object.keys(clientGoalContexts).sort((a, b) => a.localeCompare(b)),
@@ -480,12 +487,61 @@ const LeftSidebar: React.FC = () => {
             setHighlightedItem('__ALL_LSI__');
         }
     };
-    const handleClearLsi = () => {
+  const handleClearLsi = () => {
         setKeywords(prev => ({ ...prev, lsi: [] }));
+        setLsiInputValue('');
         if (highlightedItem === '__ALL_LSI__' || keywords.lsi.includes(highlightedItem as string)) {
             clearAllHighlights();
         }
     };
+
+  const handleGenerateSemanticKeywords = async () => {
+    if (!keywords.primary.trim() || isGeneratingSemanticKeywords) {
+      setSemanticGenerationStatus(tLk.primaryRequiredForGeneration);
+      return;
+    }
+
+    setIsGeneratingSemanticKeywords(true);
+    setSemanticGenerationStatus('');
+    try {
+      const result = await generateSemanticKeywords();
+      if (result.error) {
+        setSemanticGenerationStatus(result.error);
+        return;
+      }
+      setKeywords(prev => ({
+        ...prev,
+        secondaries: result.secondaries.length > 0 ? result.secondaries : prev.secondaries,
+        lsi: result.lsi.length > 0 ? result.lsi : prev.lsi,
+      }));
+      setLsiInputValue('');
+      setSemanticGenerationStatus(tLk.semanticKeywordsGenerated);
+    } catch (error) {
+      setSemanticGenerationStatus(tLk.semanticKeywordsGenerationFailed);
+    } finally {
+      setIsGeneratingSemanticKeywords(false);
+    }
+  };
+
+  const semanticGeneratorControl = (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={handleGenerateSemanticKeywords}
+        disabled={isGeneratingSemanticKeywords || !keywords.primary.trim()}
+        className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
+        title={!keywords.primary.trim() ? tLk.primaryRequiredForGeneration : tLk.generateSemanticKeywords}
+      >
+        {isGeneratingSemanticKeywords ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+        <span>{isGeneratingSemanticKeywords ? tLk.generatingSemanticKeywords : tLk.generateSemanticKeywords}</span>
+      </button>
+      {semanticGenerationStatus && (
+        <p className={`text-xs font-bold ${semanticGenerationStatus === tLk.semanticKeywordsGenerated ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} aria-live="polite">
+          {semanticGenerationStatus}
+        </p>
+      )}
+    </div>
+  );
     
     const handleAutoDistribute = (text: string) => {
         if (!text.trim()) return;
@@ -569,6 +625,7 @@ const LeftSidebar: React.FC = () => {
                     </div>
                 </div>
             </ModernSection>
+            {semanticGeneratorControl}
             <ModernSection 
                 icon={<ListChecks size={20} />} 
                 title={tLk.synonyms}
@@ -639,6 +696,17 @@ const LeftSidebar: React.FC = () => {
                 icon={<Repeat size={20} />} 
                 title={tLk.lsiKeywords}
                 onClick={handleToggleAllLsiHighlights}
+                actions={
+                    <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleClearLsi(); }}
+                        disabled={keywords.lsi.length === 0}
+                        className="p-1.5 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 disabled:cursor-not-allowed disabled:opacity-40"
+                        title={tLk.clearAllLsi}
+                    >
+                        <Trash2 size={16} className="text-red-500 dark:text-red-400" />
+                    </button>
+                }
             >
                 <div onClick={e => e.stopPropagation()}>
                     <textarea
@@ -653,9 +721,6 @@ const LeftSidebar: React.FC = () => {
                     <div className="flex items-center gap-2">
                         <button onClick={handleToggleAllLsiHighlights} disabled={keywords.lsi.length === 0} className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-[#3C3C3C] rounded-md hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 disabled:opacity-50 disabled:cursor-not-allowed">
                             <Eye size={14} /> <span>{tLk.highlightAll}</span>
-                        </button>
-                        <button onClick={handleClearLsi} disabled={keywords.lsi.length === 0} className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-md hover:bg-red-100 dark:hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed">
-                            <Trash2 size={14} /> <span>{tLk.clearAll}</span>
                         </button>
                     </div>
                     {keywordAnalysis.lsi.balance.status === 'fail' && (
@@ -734,6 +799,7 @@ const LeftSidebar: React.FC = () => {
                 </div>
             </AdvancedKeywordCard>
 
+            {semanticGeneratorControl}
             <AdvancedKeywordCard
                 title={tLk.synonyms}
                 icon={<ListChecks size={20} />}
@@ -779,24 +845,24 @@ const LeftSidebar: React.FC = () => {
                 onClick={handleToggleAllLsiHighlights}
                 t={tLk}
                 actions={
-                    keywords.lsi.length > 0 ? (
-                        <div className="flex items-center gap-1">
-                             <button
-                                onClick={(e) => { e.stopPropagation(); handleClearLsi(); }}
-                                className="p-1.5 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50"
-                                title={tLk.clearAll}
-                            >
-                                <Trash2 size={16} className="text-red-500 dark:text-red-400" />
-                            </button>
-                             <button
-                                onClick={(e) => { e.stopPropagation(); handleToggleAllLsiHighlights(); }}
-                                className={`p-1.5 rounded-full transition-colors ${highlightedItem === '__ALL_LSI__' ? 'bg-[#d4af37]/15 dark:bg-[#d4af37]/20' : 'hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
-                                title={highlightedItem === '__ALL_LSI__' ? t.duplicatesTab.unhighlightAll : tLk.highlightAll}
-                            >
-                                <Eye size={16} className={highlightedItem === '__ALL_LSI__' ? 'text-[#d4af37] dark:text-[#f2d675]' : 'text-gray-500 dark:text-gray-400'} />
-                            </button>
-                        </div>
-                    ) : undefined
+                    <div className="flex items-center gap-1">
+                         <button
+                            onClick={(e) => { e.stopPropagation(); handleClearLsi(); }}
+                            disabled={keywords.lsi.length === 0}
+                            className="p-1.5 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={tLk.clearAllLsi}
+                        >
+                            <Trash2 size={16} className="text-red-500 dark:text-red-400" />
+                        </button>
+                         <button
+                            onClick={(e) => { e.stopPropagation(); handleToggleAllLsiHighlights(); }}
+                            disabled={keywords.lsi.length === 0}
+                            className={`p-1.5 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${highlightedItem === '__ALL_LSI__' ? 'bg-[#d4af37]/15 dark:bg-[#d4af37]/20' : 'hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
+                            title={highlightedItem === '__ALL_LSI__' ? t.duplicatesTab.unhighlightAll : tLk.highlightAll}
+                        >
+                            <Eye size={16} className={highlightedItem === '__ALL_LSI__' ? 'text-[#d4af37] dark:text-[#f2d675]' : 'text-gray-500 dark:text-gray-400'} />
+                        </button>
+                    </div>
                 }
             >
                 <div onClick={(e) => e.stopPropagation()}>

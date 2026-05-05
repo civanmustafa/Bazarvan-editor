@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Edit3, Save, Trash2, Upload, Users } from 'lucide-react';
+import { Copy, Edit3, Save, Trash2, Upload, Users } from 'lucide-react';
 import { INITIAL_GOAL_CONTEXT } from '../constants';
 import { useUser } from '../contexts/UserContext';
 import type { GoalContext } from '../types';
 import GoalContextFields from './GoalContextFields';
-import { getGoalContextFields, normalizeGoalContext, parseClientGoalContextBulk } from '../utils/goalContext';
+import { formatGoalContextForCopy, getGoalContextFields, normalizeGoalContext, parseClientGoalContextBulk } from '../utils/goalContext';
 
 const inputClass = 'w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500';
 
@@ -40,6 +40,13 @@ const ClientGoalSettings: React.FC = () => {
     handleSaveClientGoalContext(normalizedCompany, draftContext);
     setCompanyName(normalizedCompany);
     setStatusText(t.clientPresetSaved.replace('{company}', normalizedCompany));
+  };
+
+  const handleCopySelectedContext = async () => {
+    const normalizedCompany = companyName.trim();
+    if (!normalizedCompany || !clientGoalContexts[normalizedCompany]) return;
+    await navigator.clipboard.writeText(formatGoalContextForCopy(normalizedCompany, draftContext, t.goalTab));
+    setStatusText(t.goalTab.clientContextCopied);
   };
 
   const handleDelete = () => {
@@ -109,16 +116,28 @@ const ClientGoalSettings: React.FC = () => {
       )}
 
       {clientNames.length > 0 && (
-        <select
-          value={clientGoalContexts[companyName.trim()] ? companyName.trim() : ''}
-          onChange={(event) => handleSelectClient(event.target.value)}
-          className={inputClass}
-        >
-          <option value="">{t.selectSavedClient}</option>
-          {clientNames.map(name => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={clientGoalContexts[companyName.trim()] ? companyName.trim() : ''}
+            onChange={(event) => handleSelectClient(event.target.value)}
+            className={inputClass}
+          >
+            <option value="">{t.selectSavedClient}</option>
+            {clientNames.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleCopySelectedContext}
+            disabled={!clientGoalContexts[companyName.trim()]}
+            className="flex flex-shrink-0 items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-[#d4af37]/15 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#d4af37]/25"
+            title={t.goalTab.copyClientContext}
+          >
+            <Copy size={16} />
+            <span className="hidden sm:inline">{t.goalTab.copyClientContext}</span>
+          </button>
+        </div>
       )}
 
       <input

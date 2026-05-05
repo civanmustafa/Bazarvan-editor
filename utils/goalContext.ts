@@ -130,6 +130,28 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
   ];
 };
 
+export const formatGoalContextForCopy = (
+  companyName: string,
+  context: GoalContext,
+  t: GoalTabTranslations,
+): string => {
+  const fields = getGoalContextFields(t);
+  const normalizedContext = normalizeGoalContext(context);
+  const lines = companyName.trim() ? [`${t.companyName}:`, companyName.trim(), ''] : [];
+
+  fields.forEach(field => {
+    const rawValue = normalizedContext[field.key];
+    const value = field.kind === 'text'
+      ? rawValue
+      : field.options.find(option => option.value === rawValue)?.label || rawValue;
+    lines.push(`${field.label}:`);
+    lines.push(value || '-');
+    lines.push('');
+  });
+
+  return lines.join('\n').trim();
+};
+
 const normalizeToken = (value: string) => value.trim().toLowerCase();
 
 const resolveFieldValue = (field: GoalContextFieldConfig, rawValue: string): string => {
