@@ -6,7 +6,6 @@ import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
-import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 
 const usePrevious = <T,>(value: T): T | undefined => {
     const ref = useRef<T | undefined>(undefined);
@@ -108,19 +107,6 @@ const DuplicatesTab: React.FC = () => {
     '6': t.sixGrams, '7': t.sevenGrams, '8': t.eightGrams
   };
 
-  const duplicateSpiderMetrics: SpiderStatMetric[] = ([8, 7, 6, 5, 4, 3, 2] as (keyof DuplicateAnalysis)[]).map(key => {
-    const phrases = analysis[key] || [];
-    const repeatedInstances = phrases.reduce((sum, phrase) => sum + Math.max(0, phrase.count - 1), 0);
-    const score = repeatedInstances === 0 ? 100 : Math.max(12, 100 - repeatedInstances * 12);
-    return {
-      label: nGramMap[key],
-      value: repeatedInstances,
-      score,
-      outerPoint: repeatedInstances === 0,
-      tone: repeatedInstances === 0 ? 'good' : 'bad',
-    };
-  });
-
   const PhraseList: React.FC<{phrases: DuplicatePhrase[]}> = ({ phrases }) => {
     return (
       <ul 
@@ -169,13 +155,6 @@ const DuplicatesTab: React.FC = () => {
 
   return (
     <div className="p-3">
-      {/* Duplicate tab stats:
-          SpiderStats summarizes duplicateStats from hooks/useContentAnalysis.ts -> runDuplicateAnalysis.ts.
-          Edit the displayed boxes here; edit the counting logic in utils/analysis/runDuplicateAnalysis.ts. */}
-      <div className="p-2 mb-4">
-        <SpiderStats metrics={duplicateSpiderMetrics} compact />
-      </div>
-
       {Object.entries(analysis)
         .reverse()
         .filter(([_, phrases]) => (phrases as any[]).length > 0)

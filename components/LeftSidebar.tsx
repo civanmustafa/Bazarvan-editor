@@ -706,12 +706,6 @@ const LeftSidebar: React.FC = () => {
     return (
         <div className="p-1 space-y-3">
             {autoDistributeSection}
-             {/* Keyword detail stats:
-                 SpiderStats shows current/required counts for primary, synonyms, company, and LSI.
-                 The actual calculations come from hooks/useContentAnalysis.ts -> runKeywordAnalysis.ts. */}
-             <div className="px-1 py-1">
-                <SpiderStats metrics={keywordDetailSpiderMetrics} compact />
-              </div>
             <AdvancedKeywordCard
                 title={tLk.primaryKeyword}
                 icon={<KeyRound size={20} />}
