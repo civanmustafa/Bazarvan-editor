@@ -1,5 +1,13 @@
 import type { Keywords } from './types';
 
+/*
+ * Project-wide static configuration.
+ * Edit this file for shared word lists, demo users, draft localStorage keys,
+ * violation priority, and rules that can be auto-fixed from the tooltip.
+ *
+ * Feature-specific defaults may live in constants/* when they are large enough
+ * to deserve their own file.
+ */
 export const INITIAL_CONTENT = ``;
 
 export const SECONDARY_COLORS = [

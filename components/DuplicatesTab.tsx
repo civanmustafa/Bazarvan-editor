@@ -1,20 +1,12 @@
 ﻿import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { DuplicateAnalysis, DuplicateStats, DuplicatePhrase } from '../types';
-import { ChevronDown, Eye, Copy, FileText, Sparkles, CopyX, Repeat, Key } from 'lucide-react';
+import { ChevronDown, Eye, Copy, Key } from 'lucide-react';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
-
-const StatDisplay: React.FC<{ icon: React.ReactNode; value: number | string; label: string }> = ({ icon, value, label }) => (
-    <div title={label} className="flex-1 flex items-center justify-center gap-2 p-2 text-center flex-col cursor-help">
-      <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
-        {icon}
-      </div>
-      <div className="font-bold text-base text-[#333333] dark:text-[#b7b7b7]">{value}</div>
-    </div>
-);
+import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 
 const usePrevious = <T,>(value: T): T | undefined => {
     const ref = useRef<T | undefined>(undefined);
@@ -121,6 +113,44 @@ const DuplicatesTab: React.FC = () => {
     : 0;
 
   const uniqueWordsDisplay = `${stats.uniqueWords}/${uniqueWordsPercentage}%`;
+  const duplicateBase = Math.max(stats.totalWords, stats.totalDuplicates, 1);
+  const duplicateSpiderMetrics: SpiderStatMetric[] = [
+    {
+      label: t.totalWords,
+      value: stats.totalWords,
+      score: stats.totalWords > 0 ? 100 : 0,
+      outerPoint: stats.totalWords > 0,
+      tone: 'neutral',
+    },
+    {
+      label: t.uniqueWords,
+      value: uniqueWordsDisplay,
+      score: uniqueWordsPercentage,
+      outerPoint: uniqueWordsPercentage === 100 && stats.totalWords > 0,
+      tone: uniqueWordsPercentage >= 85 ? 'good' : 'neutral',
+    },
+    {
+      label: t.totalDuplicates,
+      value: stats.totalDuplicates,
+      score: Math.max(0, 100 - (stats.totalDuplicates / duplicateBase) * 100),
+      outerPoint: stats.totalDuplicates === 0,
+      tone: stats.totalDuplicates === 0 ? 'good' : 'bad',
+    },
+    {
+      label: t.keywordDuplicates,
+      value: stats.keywordDuplicatesCount,
+      score: Math.max(0, 100 - (stats.keywordDuplicatesCount / duplicateBase) * 100),
+      outerPoint: stats.keywordDuplicatesCount === 0,
+      tone: stats.keywordDuplicatesCount === 0 ? 'good' : 'warn',
+    },
+    {
+      label: t.commonDuplicates,
+      value: stats.commonDuplicatesCount,
+      score: Math.max(0, 100 - (stats.commonDuplicatesCount / duplicateBase) * 100),
+      outerPoint: stats.commonDuplicatesCount === 0,
+      tone: stats.commonDuplicatesCount === 0 ? 'good' : 'bad',
+    },
+  ];
 
   const PhraseList: React.FC<{phrases: DuplicatePhrase[]}> = ({ phrases }) => {
     return (
@@ -170,14 +200,11 @@ const DuplicatesTab: React.FC = () => {
 
   return (
     <div className="p-3">
+      {/* Duplicate tab stats:
+          SpiderStats summarizes duplicateStats from hooks/useContentAnalysis.ts -> runDuplicateAnalysis.ts.
+          Edit the displayed boxes here; edit the counting logic in utils/analysis/runDuplicateAnalysis.ts. */}
       <div className="p-2 mb-4">
-        <div className="flex bg-white dark:bg-gradient-to-r from-[#2A2A2A] via-[#222222] to-[#1F1F1F] rounded-lg border border-gray-200 dark:border-[#3C3C3C]">
-          <StatDisplay icon={<FileText size={16} />} value={stats.totalWords} label={t.totalWords} />
-          <StatDisplay icon={<Sparkles size={16} />} value={uniqueWordsDisplay} label={t.uniqueWords} />
-          <StatDisplay icon={<Repeat size={16} />} value={stats.totalDuplicates} label={t.totalDuplicates} />
-          <StatDisplay icon={<Key size={16} />} value={stats.keywordDuplicatesCount} label={t.keywordDuplicates} />
-          <StatDisplay icon={<CopyX size={16} />} value={stats.commonDuplicatesCount} label={t.commonDuplicates} />
-        </div>
+        <SpiderStats metrics={duplicateSpiderMetrics} compact />
       </div>
 
       {Object.entries(analysis)

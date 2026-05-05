@@ -7,6 +7,14 @@ import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../con
 import type { ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 
+/*
+ * UserContext is the owner of session-level app state:
+ * login/logout, selected screen, theme, UI language, article language preference,
+ * API keys, saved client goal contexts, and editable engineering prompts.
+ *
+ * Edit here when adding a user preference or anything that should survive per user.
+ * Persistent writes are delegated to hooks/useUserActivity.ts.
+ */
 type ApiKeys = { gemini: string[]; chatgpt: string[] };
 type StoredApiKeys = { gemini?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
 
@@ -90,6 +98,7 @@ const normalizeApiKeys = (keys?: StoredApiKeys): ApiKeys => {
 };
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    // Screen-level state. AppContent in App.tsx reads currentView to choose the visible page.
     const [currentUser, setCurrentUser] = useState<string | null>(() => sessionStorage.getItem('currentUser'));
     const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'editor'>(
       sessionStorage.getItem('currentUser') ? 'dashboard' : 'login'
@@ -132,6 +141,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     }, [isDarkMode, currentUser]);
 
+     // Idle tracking feeds EditorContext time tracking so inactive tabs do not inflate article time.
      useEffect(() => {
         if (currentView !== 'editor') {
         if (!isIdle) setIsIdle(true);
@@ -178,6 +188,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, [currentUser, currentView, isIdle]);
 
+    // Load all saved preferences whenever a user logs in or changes.
     useEffect(() => {
         if (currentUser) {
             const data = getActivityData();

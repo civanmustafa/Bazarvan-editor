@@ -8,6 +8,14 @@ import { useAI } from './AIContext';
 import type { CheckResult, StructureAnalysis } from '../types';
 import { SECONDARY_COLORS, VIOLATION_PRIORITY, DEFAULT_PRIORITY, FIXABLE_RULES } from '../constants';
 
+/*
+ * InteractionContext owns editor-side interactions that are not article data:
+ * keyword/violation highlighting, tooltips, scroll-to-top, TOC insertion,
+ * paste cleanup, spotlight visibility, and formatting cleanup actions.
+ *
+ * Edit here when a sidebar/toolbar button needs to manipulate the current editor view.
+ * Edit EditorContext for persistence/state, and AIContext for AI requests.
+ */
 
 type TooltipState = { 
   content: string; 
@@ -70,6 +78,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [justPasted, setJustPasted] = useState(false);
     const [hasPerformedFirstPaste, setHasPerformedFirstPaste] = useState(false);
 
+    // Flatten rule results into clickable/highlightable ranges used by tooltips.
     const allViolations = useMemo(() => {
         const violations: ({ rule: CheckResult } & NonNullable<CheckResult['violatingItems']>[0])[] = [];
         if (!analysisResults?.structureAnalysis) return [];
@@ -112,6 +121,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                    .replace(/ء|ئ/g, '[ءئ]');
     };
 
+    // Shared keyword highlighter. Structure violations use handleHighlightStructureItem below.
     const applyHighlights = useCallback((highlights: { text: string; color: string }[], scrollToFirst = true) => {
         if (!editor) return;
         const { tr } = editor.state;
@@ -221,6 +231,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         editor.chain().focus().unsetAllMarks().clearNodes().run();
     }, [editor]);
     
+    // First paste cleanup normalizes copied articles before analysis starts flagging layout noise.
     useEffect(() => {
         if (!editor) return;
         const handlePaste = () => setJustPasted(true);
@@ -356,6 +367,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+    // Tooltip event bridge: DOM hover/click -> React tooltip state -> optional AI fix action.
     useEffect(() => {
         if (!editor) return;
     

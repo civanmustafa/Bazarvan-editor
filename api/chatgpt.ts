@@ -1,6 +1,10 @@
 const OPENAI_MODEL = "gpt-4.1-mini";
 const OPENAI_TIMEOUT_MS = 120000;
 
+/*
+ * Local OpenAI/ChatGPT API route used by the Vite dev middleware.
+ * Keep browser code away from direct OpenAI calls; add request/response changes here.
+ */
 const normalizeKeys = (apiKey?: unknown, apiKeys?: unknown): string[] => {
   const rawKeys = Array.isArray(apiKeys)
     ? apiKeys

@@ -1,7 +1,13 @@
 import type { Keywords, CheckResult, AnalysisStatus, DuplicateAnalysis } from '../../types';
 import { translations } from '../../components/translations';
 
-// --- Types ---
+/*
+ * Shared analysis utilities.
+ * Rule files should import helpers from here instead of duplicating text parsing,
+ * Arabic normalization, node-size math, or CheckResult construction.
+ */
+
+// --- Types shared by every structure/keyword rule ---
 export interface AnalysisContext {
     editorState: any;
     nodes: { type: string; level?: number; text: string; node: any; pos: number }[];
@@ -29,7 +35,7 @@ export interface AnalysisContext {
     duplicateAnalysis: DuplicateAnalysis;
 }
 
-// --- Helper Functions ---
+// --- TipTap JSON text helpers ---
 
 export const getNodeText = (node: any): string => {
   if (!node) {
@@ -79,6 +85,8 @@ export const normalizeArabicText = (text: string): string => {
         .replace(/\u0629/g, "\u0647"); 
 };
 
+// Counts keyword matches with language-aware boundaries.
+// Arabic uses light normalization plus common prefixes/suffixes.
 export const countOccurrences = (text: string, sub: string, lang: 'ar' | 'en'): number => {
     if (!sub || !text) return 0;
 
@@ -133,6 +141,7 @@ export const createCheckResult = (
   title, status, current, required, progress, description, details
 });
 
+// Standard status thresholds used by count-based rules.
 export const getStatus = (current: number, min: number, max: number, warnMin?: number, warnMax?: number): AnalysisStatus => {
   if (current >= min && current <= max) return 'pass';
   if ((warnMin !== undefined && current >= warnMin) && (warnMax !== undefined && current <= warnMax)) return 'warn';
@@ -140,6 +149,7 @@ export const getStatus = (current: number, min: number, max: number, warnMin?: n
 };
 
 export const getNodeSizeFromJSON = (nodeJSON: any): number => {
+    // Mirrors ProseMirror nodeSize closely enough for highlight ranges from serialized JSON.
     if (!nodeJSON || typeof nodeJSON !== 'object') {
         return 0;
     }

@@ -9,6 +9,13 @@ import { useModal } from '../contexts/ModalContext';
 import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 
+/*
+ * Dashboard is the user workspace:
+ * saved articles, activity summary, filters, report export, and user-facing settings.
+ *
+ * Edit here for dashboard layout or article list actions.
+ * Edit hooks/useUserActivity.ts for the saved data shape and persistence behavior.
+ */
 type ActivityData = {
   [username: string]: UserActivity;
 };
@@ -393,6 +400,7 @@ const Dashboard: React.FC = () => {
 
   const currentUserData = activityData[currentUser];
 
+  // Article filters stay derived from activityData so refreshData remains the only reload path.
   const filteredArticles = useMemo(() => {
     if (!currentUserData) return [];
 

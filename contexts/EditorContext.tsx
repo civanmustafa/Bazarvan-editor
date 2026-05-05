@@ -16,7 +16,16 @@ import { INITIAL_CONTENT, INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE
 import { useUser } from './UserContext';
 import { normalizeGoalContext } from '../utils/goalContext';
 
-// --- Helper Hooks ---
+/*
+ * EditorContext is the owner of article editing state:
+ * TipTap setup, title, keywords, article language, goal context, autosave/manual save,
+ * draft restore, loading saved articles, and triggering content analysis.
+ *
+ * Edit here when changing editor persistence, language direction, or article lifecycle.
+ * Edit hooks/useContentAnalysis.ts when changing SEO/content rules.
+ */
+
+// --- Local timing helpers ---
 function useDebounce<T>(value: T, delay: number): T {
     const [debouncedValue, setDebouncedValue] = useState<T>(value);
     useEffect(() => {
@@ -41,6 +50,12 @@ const getInitialContent = () => {
   return INITIAL_CONTENT;
 };
 
+const getCollapsedSelectionStart = (editor: any): number => {
+    // TipTap text selections must point inside the document when content exists.
+    const docSize = editor?.state?.doc?.content?.size || 0;
+    return docSize > 0 ? 1 : 0;
+};
+
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
     const saved = localStorage.getItem(key);
     return saved === 'ar' || saved === 'en' ? saved : null;
@@ -56,6 +71,8 @@ const getStoredGoalContext = (key: string): GoalContext => {
 };
 
 const ViolationHighlight = Highlight.extend({
+    // Custom highlight mark used by keyword highlights and structure violations.
+    // UI behavior is controlled in InteractionContext; this only defines stored attrs/rendering.
     addAttributes() {
         return {
             ...this.parent?.(),
@@ -186,11 +203,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     
-    // Debounce editor state and text content for performance
+    // Debounce editor state and text content before analysis to keep typing responsive.
     const debouncedEditorState = useDebounce(editorState, 500);
     const debouncedText = useDebounce(text, 500);
 
-    // Fix: Stabilize extensions array and move up to avoid block-scoped variable error
+    // TipTap extensions live here. Add editor-level behavior or formatting support in this list.
     const extensions = useMemo(() => [
         StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
         TextAlign.configure({ types: ['heading', 'paragraph'], alignments: ['left', 'center', 'right', 'justify'], defaultAlignment: 'right' }),
@@ -203,7 +220,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         TextDirection,
     ], []);
 
-    // Fix: Move editor creation above handleLanguageChange and other callbacks to ensure 'editor' is defined when callbacks are created
+    // TipTap editor instance. onUpdate is also the automatic local draft writer.
     const editor = useTiptapEditor({
         extensions,
         content: getInitialContent(),
@@ -225,11 +242,18 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setTimeout(() => {
                 const direction = targetLang === 'ar' ? 'rtl' : 'ltr';
                 const alignment = targetLang === 'ar' ? 'right' : 'left';
-                (editor.chain() as any).focus().selectAll().setTextDirection(direction).setTextAlign(alignment).run();
+                (editor.chain() as any)
+                    .focus()
+                    .selectAll()
+                    .setTextDirection(direction)
+                    .setTextAlign(alignment)
+                    .setTextSelection(getCollapsedSelectionStart(editor))
+                    .run();
             }, 10);
         },
     });
 
+    // Keep the latest draft metadata mirrored in localStorage.
     useEffect(() => {
         setDraftExists(!!localStorage.getItem(MANUAL_DRAFT_KEY));
     }, [currentView]);
@@ -246,9 +270,16 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setArticleLanguage(lang);
         const direction = lang === 'ar' ? 'rtl' : 'ltr';
         const alignment = lang === 'ar' ? 'right' : 'left';
-        (editor.chain() as any).focus().selectAll().setTextDirection(direction).setTextAlign(alignment).run();
+        (editor.chain() as any)
+            .focus()
+            .selectAll()
+            .setTextDirection(direction)
+            .setTextAlign(alignment)
+            .setTextSelection(getCollapsedSelectionStart(editor))
+            .run();
     }, [editor]);
 
+    // Analysis is derived state: do not manually store rule results elsewhere.
     const analysisResults = useContentAnalysis(debouncedEditorState, debouncedText, keywords, goalContext, articleLanguage, uiLanguage);
 
     useEffect(() => {
@@ -265,6 +296,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setKeywords(INITIAL_KEYWORDS);
     }, []);
 
+    // Manual save updates both per-user activity history and the manual restore draft.
     const handleSaveDraft = useCallback(() => {
         if (!editor || !currentUser) return;
         const contentJSON = editor.getJSON();

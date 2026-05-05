@@ -1,6 +1,11 @@
 
 import { GoogleGenAI } from "@google/genai";
 
+/*
+ * Local Gemini API route used by the Vite dev middleware.
+ * The UI sends one or more user-provided keys; this route randomizes attempts
+ * so quota errors on one key do not block the whole request.
+ */
 const randomizeKeyOrder = (keys: string[]): string[] => {
   const shuffled = [...keys];
   for (let i = shuffled.length - 1; i > 0; i -= 1) {

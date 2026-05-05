@@ -5,6 +5,7 @@ import SuggestionModal from './SuggestionModal';
 import HeadingsAnalysisModal from './HeadingsAnalysisModal';
 import ApiKeysModal from './ApiKeysModal';
 
+// Register every ModalContext modal type here so rendering stays centralized.
 const MODALS = {
   suggestion: SuggestionModal,
   headingsAnalysis: HeadingsAnalysisModal,

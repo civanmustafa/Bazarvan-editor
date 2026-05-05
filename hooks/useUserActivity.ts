@@ -15,6 +15,13 @@ import {
 } from '../constants';
 import { DEFAULT_ENGINEERING_PROMPTS } from '../constants/engineeringPrompts';
 
+/*
+ * localStorage persistence layer for per-user data.
+ * Contexts should call these functions instead of reading/writing the activity key directly.
+ *
+ * Edit ArticleActivity/UserActivity when adding saved fields, then update the default builders
+ * and any migration/normalization logic that reads older saved records.
+ */
 const ACTIVITY_KEY = 'smartEditorUserActivity';
 
 export type ArticleActivity = {
@@ -121,6 +128,7 @@ const saveActivityData = (data: ActivityData) => {
 };
 
 const modifyUserData = (username: string, modification: (user: UserActivity) => void) => {
+  // Single write path keeps localStorage updates consistent.
   const data = getActivityData();
   if (!data[username]) {
     data[username] = getDefaultUserActivity();
@@ -136,6 +144,7 @@ export const recordLogin = (username: string) => {
 };
 
 const findOrCreateArticle = (user: UserActivity, currentTitle: string): ArticleActivity => {
+    // If an untitled draft later gets a title, merge its activity into the titled article.
     const currentKey = currentTitle.trim() || "(بدون عنوان)";
     const untitledKey = "(بدون عنوان)";
 

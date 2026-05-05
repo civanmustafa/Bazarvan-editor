@@ -2,6 +2,13 @@ import type { KeywordAnalysis, PrimaryKeywordAnalysis, SecondaryKeywordAnalysis,
 import { countOccurrences, getStatus, createCheckResult } from './analysisUtils';
 import type { AnalysisContext } from './analysisUtils';
 
+/*
+ * Keyword analysis owns density and placement checks for:
+ * primary keyword, secondary keywords, company name, and LSI terms.
+ *
+ * Edit thresholds here when SEO percentage/count rules change.
+ * Edit constants/translations when the visible wording of checks changes.
+ */
 export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis => {
     const { keywords, totalWordCount, analysisGoal, textContent, headings, paragraphs, articleLanguage, t } = context;
     const tKwChecks = t.keywordChecks;

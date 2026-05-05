@@ -1,11 +1,12 @@
 ﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
 import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewVariant, CheckResult } from '../types';
-import { Pilcrow, Heading, AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, ShieldAlert, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown } from 'lucide-react';
+import { AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
+import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 
 // Internal component for the floating tooltip to ensure it's never clipped
 const FloatingTooltip: React.FC<{ content: string; targetRect: DOMRect | null }> = ({ content, targetRect }) => {
@@ -245,17 +246,6 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
     </>
   );
 };
-
-const StatDisplay: React.FC<{ icon: React.ReactNode; value: number; label: string }> = ({ icon, value, label }) => (
-  <div title={label} className="min-w-0 flex items-center justify-center gap-1 px-1 py-2 cursor-help group sm:gap-1.5">
-    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#d4af37]/10 text-[#d4af37] transition-transform group-hover:scale-105 dark:bg-[#d4af37]/20">
-      {icon}
-    </div>
-    <div className={`min-w-0 ${document.documentElement.dir === 'rtl' ? "text-right" : "text-left"}`}>
-      <div className="truncate text-sm font-bold leading-none text-[#333333] dark:text-[#b7b7b7] sm:text-base">{value}</div>
-    </div>
-  </div>
-);
 
 const FixAllModal: React.FC<{
     groups: { [title: string]: number };
@@ -823,15 +813,39 @@ const StructureTab: React.FC = () => {
       },
     ];
 
+    const getCriterionScore = (item: CheckResult): number => {
+        if (item.status === 'pass') return 100;
+        if (item.status === 'warn') return 68;
+        if (item.status === 'info') return 50;
+        const violations = item.violatingItems?.length || 1;
+        return Math.max(18, 58 - violations * 8);
+    };
+
+    const criteriaSpiderMetrics: SpiderStatMetric[] = analysisGroups.map(group => {
+        const items = group.items.filter(Boolean);
+        const totalItems = items.length || 1;
+        const failCount = items.filter(item => item.status === 'fail').length;
+        const warnCount = items.filter(item => item.status === 'warn').length;
+        const passCount = items.filter(item => item.status === 'pass').length;
+        const score = items.reduce((sum, item) => sum + getCriterionScore(item), 0) / totalItems;
+
+        return {
+            label: group.name,
+            value: `${passCount}/${totalItems}`,
+            score,
+            outerPoint: failCount === 0 && warnCount === 0 && passCount === totalItems,
+            tone: failCount > 0 ? 'bad' : warnCount > 0 ? 'warn' : 'good',
+        };
+    });
+
   return (
     <div className="min-w-0 overflow-x-hidden p-2 space-y-3">
+       {/* Criteria tab stats:
+           SpiderStats represents each criteria category: structure, headings, language quality,
+           interaction/CTA, and conclusion. Each point moves outward as that category improves.
+           Edit this display here; edit the underlying rule calculations in utils/analysis/rules/* and useContentAnalysis.ts. */}
        <div className="px-1 py-1">
-         <div className="grid min-w-0 grid-cols-4 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm divide-x divide-gray-100 dark:divide-[#3C3C3C] dark:border-[#3C3C3C] dark:bg-gradient-to-r dark:from-[#2A2A2A] dark:via-[#222222] dark:to-[#1F1F1F]">
-            <StatDisplay icon={<ShieldAlert size={14} />} value={stats.violatingCriteriaCount} label={tSt.violatingCriteria} />
-            <StatDisplay icon={<AlertCircleIcon size={14} />} value={stats.totalErrorsCount} label={tSt.totalErrors} />
-            <StatDisplay icon={<Pilcrow size={14} />} value={stats.paragraphCount} label={tSt.paragraph} />
-            <StatDisplay icon={<Heading size={14} />} value={stats.headingCount} label={tSt.heading} />
-          </div>
+         <SpiderStats metrics={criteriaSpiderMetrics} compact />
        </div>
        <div className="px-1">
           <button

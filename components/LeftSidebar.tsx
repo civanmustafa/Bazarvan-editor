@@ -8,6 +8,7 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
 import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis, DuplicateStats } from '../types';
+import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 
 const getProgressBarColor = (status: AnalysisStatus) => {
     switch (status) {
@@ -238,6 +239,21 @@ const splitDistributedTerms = (value: string, separator: RegExp): string[] => {
         .filter(Boolean);
 };
 
+const getKeywordStatScore = (analysis: KeywordStats): number => {
+    if (!analysis || analysis.status === 'info') return 0;
+    if (analysis.status === 'pass') return 100;
+    if (analysis.status === 'warn') return 72;
+    const maxRequired = analysis.requiredCount[1] || analysis.requiredCount[0] || 1;
+    return Math.min(60, (analysis.count / maxRequired) * 100);
+};
+
+const getKeywordStatTone = (analysis: KeywordStats): SpiderStatMetric['tone'] => {
+    if (analysis.status === 'pass') return 'good';
+    if (analysis.status === 'warn') return 'warn';
+    if (analysis.status === 'fail') return 'bad';
+    return 'neutral';
+};
+
 
 const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
@@ -359,6 +375,9 @@ const LeftSidebar: React.FC = () => {
   let totalConditions = 0;
   let violatingConditions = 0;
 
+  // Keyword tab header stats:
+  // totalConditions and violatingConditions drive the small summary strip above the tab body.
+  // Edit this block when keyword/goal rule counts should include or exclude a condition.
   if (keywords.primary.trim()) {
       const primaryChecks = keywordAnalysis.primary.checks;
       totalConditions += 1 + primaryChecks.length;
@@ -393,6 +412,89 @@ const LeftSidebar: React.FC = () => {
           violatingConditions++;
       }
   }
+
+  const keywordConditionScore = totalConditions > 0
+      ? ((totalConditions - violatingConditions) / totalConditions) * 100
+      : 0;
+
+  const keywordHeaderSpiderMetrics: SpiderStatMetric[] = [
+    {
+      label: tLk.violations,
+      value: violatingConditions,
+      score: totalConditions > 0 ? Math.max(0, 100 - (violatingConditions / totalConditions) * 100) : 100,
+      outerPoint: violatingConditions === 0 && totalConditions > 0,
+      tone: violatingConditions === 0 ? 'good' : 'bad',
+    },
+    {
+      label: tLk.rules,
+      value: totalConditions,
+      score: keywordConditionScore,
+      outerPoint: keywordConditionScore >= 100 && totalConditions > 0,
+      tone: keywordConditionScore >= 100 ? 'good' : 'neutral',
+    },
+    {
+      label: tLk.primary,
+      value: `${keywordAnalysis.primary.count}/${keywordAnalysis.primary.requiredCount[1] || '-'}`,
+      score: getKeywordStatScore(keywordAnalysis.primary),
+      outerPoint: keywordAnalysis.primary.status === 'pass',
+      tone: getKeywordStatTone(keywordAnalysis.primary),
+    },
+  ];
+
+  const keywordDetailSpiderMetrics: SpiderStatMetric[] = [
+    {
+      label: tLk.primary,
+      value: `${keywordAnalysis.primary.count}/${keywordAnalysis.primary.requiredCount[1] || '-'}`,
+      score: getKeywordStatScore(keywordAnalysis.primary),
+      outerPoint: keywordAnalysis.primary.status === 'pass',
+      tone: getKeywordStatTone(keywordAnalysis.primary),
+    },
+    {
+      label: tLk.synonyms,
+      value: `${keywordAnalysis.secondariesDistribution.count}/${keywordAnalysis.secondariesDistribution.requiredCount[1] || '-'}`,
+      score: getKeywordStatScore(keywordAnalysis.secondariesDistribution),
+      outerPoint: keywordAnalysis.secondariesDistribution.status === 'pass',
+      tone: getKeywordStatTone(keywordAnalysis.secondariesDistribution),
+    },
+    {
+      label: tLk.company,
+      value: `${keywordAnalysis.company.count}/${keywordAnalysis.company.requiredCount[1] || '-'}`,
+      score: getKeywordStatScore(keywordAnalysis.company),
+      outerPoint: keywordAnalysis.company.status === 'pass',
+      tone: getKeywordStatTone(keywordAnalysis.company),
+    },
+    {
+      label: 'LSI',
+      value: `${keywordAnalysis.lsi.distribution.count}/${keywordAnalysis.lsi.distribution.requiredCount[1] || '-'}`,
+      score: getKeywordStatScore(keywordAnalysis.lsi.distribution),
+      outerPoint: keywordAnalysis.lsi.distribution.status === 'pass' && keywordAnalysis.lsi.balance.status !== 'fail',
+      tone: keywordAnalysis.lsi.balance.status === 'fail' ? 'bad' : getKeywordStatTone(keywordAnalysis.lsi.distribution),
+    },
+  ];
+
+  const duplicateHeaderSpiderMetrics: SpiderStatMetric[] = [
+    {
+      label: tLk.word,
+      value: duplicateStats.totalWords,
+      score: duplicateStats.totalWords > 0 ? 100 : 0,
+      outerPoint: duplicateStats.totalWords > 0,
+      tone: 'neutral',
+    },
+    {
+      label: tLk.unique,
+      value: duplicateStats.uniqueWords,
+      score: duplicateStats.totalWords > 0 ? (duplicateStats.uniqueWords / duplicateStats.totalWords) * 100 : 0,
+      outerPoint: duplicateStats.totalWords > 0 && duplicateStats.uniqueWords === duplicateStats.totalWords,
+      tone: duplicateStats.totalDuplicates === 0 ? 'good' : 'neutral',
+    },
+    {
+      label: tLk.duplicate,
+      value: duplicateStats.totalDuplicates,
+      score: duplicateStats.totalWords > 0 ? Math.max(0, 100 - (duplicateStats.totalDuplicates / duplicateStats.totalWords) * 100) : 100,
+      outerPoint: duplicateStats.totalDuplicates === 0,
+      tone: duplicateStats.totalDuplicates === 0 ? 'good' : 'bad',
+    },
+  ];
 
   const handleAddSecondary = () => {
     setKeywords(k => ({ ...k, secondaries: [...k.secondaries, ''] }));
@@ -673,33 +775,11 @@ const LeftSidebar: React.FC = () => {
     return (
         <div className="p-1 space-y-3">
             {autoDistributeSection}
+             {/* Keyword detail stats:
+                 SpiderStats shows current/required counts for primary, synonyms, company, and LSI.
+                 The actual calculations come from hooks/useContentAnalysis.ts -> runKeywordAnalysis.ts. */}
              <div className="px-1 py-1">
-                <div className="flex bg-white dark:bg-gradient-to-r from-[#2A2A2A] via-[#222222] to-[#1F1F1F] rounded-lg border border-gray-300 dark:border-[#3C3C3C] divide-x divide-gray-200 dark:divide-[#3C3C3C] cursor-help">
-                    <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title={tLk.primary}>
-                        <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
-                            <KeyRound size={16} />
-                        </div>
-                        <div className="font-bold text-base text-[#333333] dark:text-gray-200">{`${keywordAnalysis.primary.count}/${keywordAnalysis.primary.requiredCount[1] || '-'}`}</div>
-                    </div>
-                    <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title={tLk.synonyms}>
-                        <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
-                            <ListChecks size={16} />
-                        </div>
-                        <div className="font-bold text-base text-[#333333] dark:text-gray-200">{`${keywordAnalysis.secondariesDistribution.count}/${keywordAnalysis.secondariesDistribution.requiredCount[1] || '-'}`}</div>
-                    </div>
-                    <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title={tLk.company}>
-                        <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
-                            <Users size={16} />
-                        </div>
-                        <div className="font-bold text-base text-[#333333] dark:text-gray-200">{`${keywordAnalysis.company.count}/${keywordAnalysis.company.requiredCount[1] || '-'}`}</div>
-                    </div>
-                    <div className="flex-1 flex flex-col items-center justify-center gap-2 p-2 text-center" title="LSI">
-                        <div className="p-2 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-full">
-                            <Repeat size={16} />
-                        </div>
-                        <div className="font-bold text-base text-[#333333] dark:text-gray-200">{`${keywordAnalysis.lsi.distribution.count}/${keywordAnalysis.lsi.distribution.requiredCount[1] || '-'}`}</div>
-                    </div>
-                </div>
+                <SpiderStats metrics={keywordDetailSpiderMetrics} compact />
               </div>
             <AdvancedKeywordCard
                 title={tLk.primaryKeyword}
@@ -892,28 +972,12 @@ const LeftSidebar: React.FC = () => {
 
         <div className="flex-shrink-0 p-3 bg-[#F2F3F5] dark:bg-[#1F1F1F] border-b border-gray-200 dark:border-[#3C3C3C]">
              {activeTab === 'keywords' ? (
-                 <div className="flex justify-between items-center px-2">
-                     <div className="flex items-center gap-2 text-xs font-bold" title={tLk.keywordStats}>
-                        <div className="flex items-center gap-1.5 text-red-500">
-                           <XCircle size={14}/>
-                           <span>{violatingConditions} {tLk.violations}</span>
-                        </div>
-                        <span className="text-gray-300 dark:text-gray-600">/</span>
-                        <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-                           <CheckCircle size={14}/>
-                           <span>{totalConditions} {tLk.rules}</span>
-                        </div>
-                     </div>
-                 </div>
+                 // Compact keyword/goal tab stats shown directly under the tab buttons.
+                 <SpiderStats metrics={keywordHeaderSpiderMetrics} title={tLk.keywordStats} compact />
              ) : (
                 uiLanguage === 'ar' && (
-                    <div className="flex items-center justify-center gap-4 text-xs font-bold text-gray-500 dark:text-gray-400">
-                        <span>{duplicateStats.totalWords} {tLk.word}</span>
-                        <span>|</span>
-                        <span>{duplicateStats.uniqueWords} {tLk.unique}</span>
-                        <span>|</span>
-                        <span>{duplicateStats.totalDuplicates} {tLk.duplicate}</span>
-                    </div>
+                    // Compact duplicate stats shown under the tab buttons for the duplicate tab.
+                    <SpiderStats metrics={duplicateHeaderSpiderMetrics} compact />
                 )
              )}
         </div>

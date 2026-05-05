@@ -26,6 +26,15 @@ import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt }
 import { CTA_WORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 
+/*
+ * AIContext owns all AI workflows:
+ * prompt construction, Gemini/OpenAI calls, heading analysis, single-violation fixes,
+ * bulk fix review items, insertion patches, and AI history.
+ *
+ * Edit here when changing AI behavior or prompt inputs.
+ * Edit constants/engineeringPrompts.ts for user-editable prompt templates.
+ * Edit api/* when changing server-side model calls or key handling.
+ */
 const GEMINI_MODEL = 'gemini-3-flash-preview';
 const OPENAI_MODEL = 'gpt-4.1-mini';
 const CHATGPT_TIMEOUT_MS = 180000;

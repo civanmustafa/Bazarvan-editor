@@ -22,6 +22,15 @@ import './styles/global.css';
 import './styles/editor.css';
 import './styles/components.css';
 
+/*
+ * App shell map:
+ * - AppProviders wires all global state providers.
+ * - AppContent decides which screen is visible: login, dashboard, or editor.
+ * - EditorView owns the three-column editor layout and shared floating UI.
+ *
+ * When adding a new full page, edit AppContent.
+ * When changing editor layout, edit EditorView and the sidebar/toolbar components.
+ */
 const EditorView: React.FC = () => {
     const { isDarkMode, t } = useUser();
     const { editor, scrollContainerRef } = useEditor();
@@ -102,6 +111,7 @@ const EditorView: React.FC = () => {
 const AppContent: React.FC = () => {
     const { currentView } = useUser();
     
+    // Keep route-like screen switching centralized here.
     const renderView = () => {
         if (currentView === 'login') {
             return <Login />;

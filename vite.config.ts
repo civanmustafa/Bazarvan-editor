@@ -6,6 +6,7 @@ import geminiHandler from './api/gemini';
 
 type ApiHandler = (req: Request) => Promise<Response>;
 
+// Add local browser-facing API routes here, then implement their handler in api/*.
 const apiHandlers = new Map<string, ApiHandler>([
   ['/api/chatgpt', chatgptHandler],
   ['/api/gemini', geminiHandler],
@@ -57,6 +58,7 @@ export default defineConfig({
         {
           name: 'local-api-routes',
           configureServer(server) {
+            // Small adapter from Vite/Node middleware requests to Web Request handlers.
             server.middlewares.use(async (req, res, next) => {
               if (!req.url) {
                 next();
@@ -93,6 +95,7 @@ export default defineConfig({
       build: {
         rollupOptions: {
           output: {
+            // Keep heavy editor dependencies in separate chunks for faster cached reloads.
             manualChunks(id) {
               if (!id.includes('node_modules')) return undefined;
               if (id.includes('@tiptap')) return 'tiptap';

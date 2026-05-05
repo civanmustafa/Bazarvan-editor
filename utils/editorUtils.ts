@@ -1,4 +1,9 @@
 
+/*
+ * Editor content conversion helpers.
+ * AI responses can contain Markdown or safe table HTML; these helpers convert
+ * them into HTML that TipTap can insert without allowing arbitrary markup.
+ */
 export const escapeHtml = (value: string): string => {
     const replacements: Record<string, string> = {
         '&': '&amp;',
@@ -30,6 +35,7 @@ const sanitizeTableAttributeValue = (value: string | null): string | null => {
 };
 
 const sanitizeHtmlTable = (html: string): string | null => {
+    // Preserve useful table structure while stripping unsupported tags/attributes.
     if (typeof DOMParser === 'undefined') return null;
 
     const parser = new DOMParser();

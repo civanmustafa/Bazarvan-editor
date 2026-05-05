@@ -52,6 +52,18 @@ import { checkTablesCount } from '../utils/analysis/rules/checkTablesCount';
 import { checkHeadingLength } from '../utils/analysis/rules/checkHeadingLength';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../constants';
 
+/*
+ * Main analysis pipeline.
+ *
+ * To add or change a structure rule:
+ * 1. Create/edit a file in utils/analysis/rules.
+ * 2. Import it in this hook.
+ * 3. Add its result to structureAnalysis with a key defined in types.ts.
+ * 4. Add UI labels/translations if the rule introduces new visible text.
+ *
+ * Keyword and duplicate analysis are separate prerequisites because several
+ * structure rules need their results as context.
+ */
 
 const getAnalysisGoal = (goalContext: GoalContext): string => {
   switch (goalContext.objective) {
@@ -73,7 +85,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
     const t = translations[uiLanguage];
     const analysisGoal = getAnalysisGoal(goalContext);
     
-    // --- 1. Prepare Analysis Context ---
+    // --- 1. Prepare shared analysis context from the TipTap JSON document ---
     const totalWordCount = textContent.trim().split(/\s+/).filter(Boolean).length;
     let nodes: { type: string; level?: number; text: string; node: any; pos: number }[] = [];
     let totalDocSize = 0;
@@ -101,6 +113,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
     const L_FAQ_KEYWORDS = articleLanguage === 'ar' ? FAQ_KEYWORDS : ['questions', 'faq', 'frequently asked questions'];
     const L_CONCLUSION_KEYWORDS = articleLanguage === 'ar' ? CONCLUSION_KEYWORDS : ['conclusion', 'summary', 'in conclusion', 'in summary', 'finally', 'to sum up', 'lastly', 'in the end'];
 
+    // Precompute FAQ/conclusion sections once so individual rules stay small.
     const faqSections: { startPos: number; endPos: number }[] = [];
     const faqH2Indices = nodes
         .map((node, index) => (node.type === 'heading' && node.level === 2 && L_FAQ_KEYWORDS.some(k => node.text.toLowerCase().includes(k.toLowerCase())) ? index : -1))
@@ -135,7 +148,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
         return { text: sectionText, nodes: sectionNodes, paragraphs: sectionParagraphs, hasList, hasNumber, wordCount: sectionText.trim().split(/\s+/).filter(Boolean).length };
     })();
 
-    // --- 2. Run Prerequisite Analyses ---
+    // --- 2. Run prerequisite analyses used by later rules ---
     const { duplicateAnalysis, duplicateStats } = runDuplicateAnalysis(textContent, keywords, totalWordCount, articleLanguage);
 
     const analysisContext: AnalysisContext = {
@@ -158,7 +171,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
       duplicateAnalysis
     };
     
-    // --- 3. Run All Analysis Rules ---
+    // --- 3. Run all content rules and keep this list as the rule registry ---
     const keywordAnalysis = runKeywordAnalysis(analysisContext);
 
     const conclusionChecks = checkConclusion(analysisContext);
@@ -215,7 +228,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
         tablesCount: checkTablesCount(analysisContext),
     };
     
-    // --- 4. Calculate Final Stats & Assemble Result ---
+    // --- 4. Calculate final stats and assemble the single analysis result ---
     const violatingCriteriaCount = Object.values(structureAnalysis).filter(c => c.status === 'fail').length;
     const totalErrorsCount = Object.values(structureAnalysis).reduce((sum, c) => sum + (c.violatingItems?.length || 0), 0);
 

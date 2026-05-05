@@ -1,5 +1,9 @@
 import React, { useState, useCallback, createContext, useContext } from 'react';
 
+/*
+ * Add new app-wide modals here, then register their component in components/ModalManager.tsx.
+ * Keep modal payload/state in the feature context that owns it; this context only chooses which modal is open.
+ */
 export type ModalType = 'suggestion' | 'headingsAnalysis' | 'apiKeys';
 
 interface ModalContextState {

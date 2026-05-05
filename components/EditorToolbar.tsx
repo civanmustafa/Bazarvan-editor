@@ -12,7 +12,15 @@ import AIActions from './toolbar/AIActions';
 import DocumentActions from './toolbar/DocumentActions';
 import FindAndReplace from './toolbar/FindAndReplace';
 
-
+/*
+ * Toolbar composition:
+ * - FormattingActions: TipTap formatting buttons.
+ * - UtilityActions: cleanup, highlights, TOC, find/replace.
+ * - AIActions: AI commands that create suggestions/analysis.
+ * - DocumentActions: save/restore/new/dashboard/logout/theme.
+ *
+ * Add a new toolbar command in the matching toolbar/* component, then pass only the needed handler here.
+ */
 const EditorToolbar: React.FC = () => {
     const {
         isDarkMode,
@@ -101,6 +109,7 @@ const EditorToolbar: React.FC = () => {
         setIsFindReplaceVisible(prev => !prev);
     }, []);
 
+    // Mirror TipTap selection/formatting state into button active states and counters.
     useEffect(() => {
       if (!editor) return;
       const updateToolbarState = () => {

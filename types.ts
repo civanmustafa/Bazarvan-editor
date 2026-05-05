@@ -1,5 +1,12 @@
 
 
+/*
+ * Shared application contracts.
+ * Update these types before wiring new analysis fields through contexts or UI.
+ *
+ * Important flow:
+ * CheckResult -> StructureAnalysis -> FullAnalysis -> sidebars/dashboard/AI prompts.
+ */
 export type AnalysisStatus = 'pass' | 'warn' | 'fail' | 'info';
 
 export interface Keywords {

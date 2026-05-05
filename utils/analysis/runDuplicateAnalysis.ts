@@ -1,6 +1,11 @@
 import type { Keywords, DuplicateAnalysis, DuplicateStats } from '../../types';
 import { normalizeArabicText } from './analysisUtils';
 
+/*
+ * Duplicate analysis scans repeated 2-8 word phrases.
+ * It also marks repeated phrases that overlap target keywords so the UI can
+ * separate keyword repetition from general repetition.
+ */
 export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, totalWordCount: number, articleLanguage: 'ar' | 'en'): { duplicateAnalysis: DuplicateAnalysis; duplicateStats: DuplicateStats } => {
     const duplicateAnalysis: DuplicateAnalysis = { 2:[], 3:[], 4:[], 5:[], 6:[], 7:[], 8:[] };
     const duplicateStats: DuplicateStats = {
