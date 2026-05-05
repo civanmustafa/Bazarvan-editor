@@ -964,7 +964,7 @@ const LeftSidebar: React.FC = () => {
         <div className="flex-shrink-0 p-3 bg-[#F2F3F5] dark:bg-[#1F1F1F] border-b border-gray-200 dark:border-[#3C3C3C]">
              {activeTab === 'keywords' ? (
                  // Compact keyword/goal tab network: primary, synonyms, company, and LSI.
-                 <SpiderStats metrics={keywordDetailSpiderMetrics} title={tLk.keywordStats} compact />
+                 <SpiderStats metrics={keywordDetailSpiderMetrics} compact />
              ) : (
                 uiLanguage === 'ar' && (
                     // Compact duplicate stats shown under the tab buttons for the duplicate tab.

@@ -57,24 +57,25 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             </div>
             <GoalContextFields goalContext={goalContext} onChange={updateGoalContext} />
             <div className="space-y-2 pt-2">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="flex items-center gap-2">
                 <button
                     type="button"
                     onClick={handleSaveClientContext}
                     disabled={!companyName || isClientSaved}
-                    className="flex items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
-                    title={!companyName ? t.companyRequiredForContextSave : undefined}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#d4af37] text-white transition-colors hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
+                    title={!companyName ? t.companyRequiredForContextSave : t.saveClientContext}
+                    aria-label={t.saveClientContext}
                 >
                     <Save size={16} />
-                    <span>{t.saveClientContext}</span>
                 </button>
                 <button
                     type="button"
                     onClick={handleCopyClientContext}
-                    className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-sm font-bold text-gray-700 transition-colors hover:bg-[#d4af37]/15 dark:bg-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#d4af37]/25"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors hover:bg-[#d4af37]/15 dark:bg-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#d4af37]/25"
+                    title={t.copyClientContext}
+                    aria-label={t.copyClientContext}
                 >
                     <Copy size={16} />
-                    <span>{t.copyClientContext}</span>
                 </button>
               </div>
                 {visibleStatusMessage && (

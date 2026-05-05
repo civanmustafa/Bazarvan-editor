@@ -124,17 +124,6 @@ const SpiderStats: React.FC<{ metrics: SpiderStatMetric[]; title?: string; compa
             </div>
           ))}
         </div>
-        <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-52 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2 text-start shadow-xl group-hover:block group-focus-within:block dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-          {visibleMetrics.map((metric, index) => (
-            <div key={metric.label} className="flex min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1.5">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: getMetricColor(metric, index) }} />
-                <div className="truncate text-[10px] font-bold text-gray-500 dark:text-gray-400">{metric.label}</div>
-              </div>
-              <div className={`truncate text-sm font-black ${toneClass(metric.tone)}`}>{metric.value}</div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
