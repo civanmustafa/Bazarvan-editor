@@ -195,17 +195,40 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         }
       };
 
+    const isVisuallyEmptyParagraph = (node: any): boolean => {
+        if (!node.isBlock || node.type.name !== 'paragraph') return false;
+        const normalizedText = node.textContent.replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, '').trim();
+        if (normalizedText) return false;
+        let hasVisibleChild = false;
+        node.descendants((child: any) => {
+            if (child.type.name !== 'text' && child.type.name !== 'hardBreak') {
+                hasVisibleChild = true;
+                return false;
+            }
+        });
+        return !hasVisibleChild;
+    };
+
     const handleRemoveEmptyLines = useCallback(() => {
         if (!editor) return;
+        editor.view.focus();
         const { tr, doc } = editor.state;
         const rangesToRemove: { from: number; to: number }[] = [];
+        let topLevelParagraphCount = 0;
         doc.descendants((node, pos) => {
-            if (node.isBlock && node.type.name === 'paragraph' && node.nodeSize === 2 && !node.textContent) {
+            if (node.type.name === 'paragraph' && pos >= 0) {
+                topLevelParagraphCount++;
+            }
+            if (isVisuallyEmptyParagraph(node)) {
                  rangesToRemove.push({ from: pos, to: pos + node.nodeSize });
             }
         });
         if (rangesToRemove.length > 0) {
-            rangesToRemove.reverse().forEach(range => tr.delete(range.from, range.to));
+            const safeRanges = rangesToRemove.length >= topLevelParagraphCount
+                ? rangesToRemove.slice(1)
+                : rangesToRemove;
+            if (safeRanges.length === 0) return;
+            safeRanges.reverse().forEach(range => tr.delete(range.from, range.to));
             editor.view.dispatch(tr);
         }
     }, [editor]);
