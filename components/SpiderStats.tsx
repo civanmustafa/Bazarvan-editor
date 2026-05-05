@@ -47,13 +47,13 @@ const SpiderStats: React.FC<{ metrics: SpiderStatMetric[]; title?: string; compa
   const dataPoints = visibleMetrics.map((metric, index) => getPoint(index, visibleMetrics.length, radius, center, metric.score));
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-gradient-to-r dark:from-[#2A2A2A] dark:via-[#222222] dark:to-[#1F1F1F]">
+    <div className="group relative rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-gradient-to-r dark:from-[#2A2A2A] dark:via-[#222222] dark:to-[#1F1F1F]">
       {title && (
         <div className="mb-2 text-xs font-black uppercase tracking-wide text-gray-500 dark:text-gray-400">
           {title}
         </div>
       )}
-      <div className="flex flex-col items-center gap-3">
+      <div className="flex flex-col items-center">
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="overflow-visible">
           {gridLevels.map(level => (
             <polygon
@@ -110,9 +110,9 @@ const SpiderStats: React.FC<{ metrics: SpiderStatMetric[]; title?: string; compa
             );
           })}
         </svg>
-        <div className="grid w-full grid-cols-2 gap-2">
+        <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-52 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2 text-start shadow-xl group-hover:block group-focus-within:block dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
           {visibleMetrics.map(metric => (
-            <div key={metric.label} title={metric.label} className="min-w-0 rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-[#1F1F1F]">
+            <div key={metric.label} className="flex min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1.5">
               <div className="truncate text-[10px] font-bold text-gray-500 dark:text-gray-400">{metric.label}</div>
               <div className={`truncate text-sm font-black ${toneClass(metric.tone)}`}>{metric.value}</div>
             </div>

@@ -7,7 +7,7 @@ import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
-import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis, DuplicateStats } from '../types';
+import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis } from '../types';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 
 const getProgressBarColor = (status: AnalysisStatus) => {
@@ -260,7 +260,7 @@ const LeftSidebar: React.FC = () => {
   const { keywords, setKeywords, setGoalContext, analysisResults } = useEditor();
   const { applyHighlights, clearAllHighlights, highlightedItem, setHighlightedItem } = useInteraction();
   
-  const { keywordAnalysis, duplicateAnalysis, duplicateStats } = analysisResults;
+  const { keywordAnalysis, duplicateAnalysis } = analysisResults;
 
   const [activeTab, setActiveTab] = React.useState<'keywords' | 'duplicates'>('keywords');
   const [lsiInputValue, setLsiInputValue] = React.useState('');
@@ -372,74 +372,6 @@ const LeftSidebar: React.FC = () => {
   };
 
   const enteredSynonymsCount = keywords.secondaries.filter(s => s.trim() !== '').length;
-  let totalConditions = 0;
-  let violatingConditions = 0;
-
-  // Keyword tab header stats:
-  // totalConditions and violatingConditions drive the small summary strip above the tab body.
-  // Edit this block when keyword/goal rule counts should include or exclude a condition.
-  if (keywords.primary.trim()) {
-      const primaryChecks = keywordAnalysis.primary.checks;
-      totalConditions += 1 + primaryChecks.length;
-      if (keywordAnalysis.primary.status === 'fail') {
-          violatingConditions++;
-      }
-      violatingConditions += primaryChecks.filter(c => !c.isMet).length;
-  }
-
-  if (enteredSynonymsCount > 0) {
-      totalConditions += 1;
-      if (keywordAnalysis.secondariesDistribution.status === 'fail') {
-          violatingConditions++;
-      }
-
-      keywords.secondaries.forEach((s, i) => {
-          if (s.trim()) {
-              const synonymAnalysis = keywordAnalysis.secondaries[i];
-              const synonymChecks = synonymAnalysis.checks;
-              totalConditions += 1 + synonymChecks.length;
-              if (synonymAnalysis.status === 'fail') {
-                  violatingConditions++;
-              }
-              violatingConditions += synonymChecks.filter(c => !c.isMet).length;
-          }
-      });
-  }
-
-  if (keywords.company.trim()) {
-      totalConditions += 1;
-      if (keywordAnalysis.company.status === 'fail') {
-          violatingConditions++;
-      }
-  }
-
-  const keywordConditionScore = totalConditions > 0
-      ? ((totalConditions - violatingConditions) / totalConditions) * 100
-      : 0;
-
-  const keywordHeaderSpiderMetrics: SpiderStatMetric[] = [
-    {
-      label: tLk.violations,
-      value: violatingConditions,
-      score: totalConditions > 0 ? Math.max(0, 100 - (violatingConditions / totalConditions) * 100) : 100,
-      outerPoint: violatingConditions === 0 && totalConditions > 0,
-      tone: violatingConditions === 0 ? 'good' : 'bad',
-    },
-    {
-      label: tLk.rules,
-      value: totalConditions,
-      score: keywordConditionScore,
-      outerPoint: keywordConditionScore >= 100 && totalConditions > 0,
-      tone: keywordConditionScore >= 100 ? 'good' : 'neutral',
-    },
-    {
-      label: tLk.primary,
-      value: `${keywordAnalysis.primary.count}/${keywordAnalysis.primary.requiredCount[1] || '-'}`,
-      score: getKeywordStatScore(keywordAnalysis.primary),
-      outerPoint: keywordAnalysis.primary.status === 'pass',
-      tone: getKeywordStatTone(keywordAnalysis.primary),
-    },
-  ];
 
   const keywordDetailSpiderMetrics: SpiderStatMetric[] = [
     {
@@ -472,29 +404,28 @@ const LeftSidebar: React.FC = () => {
     },
   ];
 
-  const duplicateHeaderSpiderMetrics: SpiderStatMetric[] = [
-    {
-      label: tLk.word,
-      value: duplicateStats.totalWords,
-      score: duplicateStats.totalWords > 0 ? 100 : 0,
-      outerPoint: duplicateStats.totalWords > 0,
-      tone: 'neutral',
-    },
-    {
-      label: tLk.unique,
-      value: duplicateStats.uniqueWords,
-      score: duplicateStats.totalWords > 0 ? (duplicateStats.uniqueWords / duplicateStats.totalWords) * 100 : 0,
-      outerPoint: duplicateStats.totalWords > 0 && duplicateStats.uniqueWords === duplicateStats.totalWords,
-      tone: duplicateStats.totalDuplicates === 0 ? 'good' : 'neutral',
-    },
-    {
-      label: tLk.duplicate,
-      value: duplicateStats.totalDuplicates,
-      score: duplicateStats.totalWords > 0 ? Math.max(0, 100 - (duplicateStats.totalDuplicates / duplicateStats.totalWords) * 100) : 100,
-      outerPoint: duplicateStats.totalDuplicates === 0,
-      tone: duplicateStats.totalDuplicates === 0 ? 'good' : 'bad',
-    },
-  ];
+  const duplicateCategoryLabels: Record<keyof DuplicateAnalysis, string> = {
+    2: t.duplicatesTab.bigrams,
+    3: t.duplicatesTab.trigrams,
+    4: t.duplicatesTab.fourGrams,
+    5: t.duplicatesTab.fiveGrams,
+    6: t.duplicatesTab.sixGrams,
+    7: t.duplicatesTab.sevenGrams,
+    8: t.duplicatesTab.eightGrams,
+  };
+
+  const duplicateHeaderSpiderMetrics: SpiderStatMetric[] = ([8, 7, 6, 5, 4, 3, 2] as (keyof DuplicateAnalysis)[]).map(key => {
+    const phrases = duplicateAnalysis[key] || [];
+    const repeatedInstances = phrases.reduce((sum, phrase) => sum + Math.max(0, phrase.count - 1), 0);
+    const score = repeatedInstances === 0 ? 100 : Math.max(12, 100 - repeatedInstances * 12);
+    return {
+      label: duplicateCategoryLabels[key],
+      value: repeatedInstances,
+      score,
+      outerPoint: repeatedInstances === 0,
+      tone: repeatedInstances === 0 ? 'good' : 'bad',
+    };
+  });
 
   const handleAddSecondary = () => {
     setKeywords(k => ({ ...k, secondaries: [...k.secondaries, ''] }));
@@ -972,8 +903,8 @@ const LeftSidebar: React.FC = () => {
 
         <div className="flex-shrink-0 p-3 bg-[#F2F3F5] dark:bg-[#1F1F1F] border-b border-gray-200 dark:border-[#3C3C3C]">
              {activeTab === 'keywords' ? (
-                 // Compact keyword/goal tab stats shown directly under the tab buttons.
-                 <SpiderStats metrics={keywordHeaderSpiderMetrics} title={tLk.keywordStats} compact />
+                 // Compact keyword/goal tab network: primary, synonyms, company, and LSI.
+                 <SpiderStats metrics={keywordDetailSpiderMetrics} title={tLk.keywordStats} compact />
              ) : (
                 uiLanguage === 'ar' && (
                     // Compact duplicate stats shown under the tab buttons for the duplicate tab.

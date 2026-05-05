@@ -1,5 +1,5 @@
 ﻿import React, { useState, useCallback, useEffect, useRef } from 'react';
-import type { DuplicateAnalysis, DuplicateStats, DuplicatePhrase } from '../types';
+import type { DuplicateAnalysis, DuplicatePhrase } from '../types';
 import { ChevronDown, Eye, Copy, Key } from 'lucide-react';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
@@ -21,7 +21,7 @@ const DuplicatesTab: React.FC = () => {
   const { editor, analysisResults } = useEditor();
   const { clearAllHighlights, applyHighlights, highlightedItem, setHighlightedItem } = useInteraction();
   
-  const { duplicateAnalysis: analysis, duplicateStats: stats } = analysisResults;
+  const { duplicateAnalysis: analysis } = analysisResults;
   
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     '2': false, '3': false, '4': false, '5': false, '6': false, '7': false, '8': false
@@ -108,49 +108,18 @@ const DuplicatesTab: React.FC = () => {
     '6': t.sixGrams, '7': t.sevenGrams, '8': t.eightGrams
   };
 
-  const uniqueWordsPercentage = stats.totalWords > 0 
-    ? Math.round((stats.uniqueWords / stats.totalWords) * 100)
-    : 0;
-
-  const uniqueWordsDisplay = `${stats.uniqueWords}/${uniqueWordsPercentage}%`;
-  const duplicateBase = Math.max(stats.totalWords, stats.totalDuplicates, 1);
-  const duplicateSpiderMetrics: SpiderStatMetric[] = [
-    {
-      label: t.totalWords,
-      value: stats.totalWords,
-      score: stats.totalWords > 0 ? 100 : 0,
-      outerPoint: stats.totalWords > 0,
-      tone: 'neutral',
-    },
-    {
-      label: t.uniqueWords,
-      value: uniqueWordsDisplay,
-      score: uniqueWordsPercentage,
-      outerPoint: uniqueWordsPercentage === 100 && stats.totalWords > 0,
-      tone: uniqueWordsPercentage >= 85 ? 'good' : 'neutral',
-    },
-    {
-      label: t.totalDuplicates,
-      value: stats.totalDuplicates,
-      score: Math.max(0, 100 - (stats.totalDuplicates / duplicateBase) * 100),
-      outerPoint: stats.totalDuplicates === 0,
-      tone: stats.totalDuplicates === 0 ? 'good' : 'bad',
-    },
-    {
-      label: t.keywordDuplicates,
-      value: stats.keywordDuplicatesCount,
-      score: Math.max(0, 100 - (stats.keywordDuplicatesCount / duplicateBase) * 100),
-      outerPoint: stats.keywordDuplicatesCount === 0,
-      tone: stats.keywordDuplicatesCount === 0 ? 'good' : 'warn',
-    },
-    {
-      label: t.commonDuplicates,
-      value: stats.commonDuplicatesCount,
-      score: Math.max(0, 100 - (stats.commonDuplicatesCount / duplicateBase) * 100),
-      outerPoint: stats.commonDuplicatesCount === 0,
-      tone: stats.commonDuplicatesCount === 0 ? 'good' : 'bad',
-    },
-  ];
+  const duplicateSpiderMetrics: SpiderStatMetric[] = ([8, 7, 6, 5, 4, 3, 2] as (keyof DuplicateAnalysis)[]).map(key => {
+    const phrases = analysis[key] || [];
+    const repeatedInstances = phrases.reduce((sum, phrase) => sum + Math.max(0, phrase.count - 1), 0);
+    const score = repeatedInstances === 0 ? 100 : Math.max(12, 100 - repeatedInstances * 12);
+    return {
+      label: nGramMap[key],
+      value: repeatedInstances,
+      score,
+      outerPoint: repeatedInstances === 0,
+      tone: repeatedInstances === 0 ? 'good' : 'bad',
+    };
+  });
 
   const PhraseList: React.FC<{phrases: DuplicatePhrase[]}> = ({ phrases }) => {
     return (
