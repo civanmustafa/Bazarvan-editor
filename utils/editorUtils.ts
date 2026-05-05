@@ -101,6 +101,26 @@ const isMarkdownTableSeparator = (row: string): boolean => {
     return cells.length > 1 && cells.every(cell => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, '')));
 };
 
+const isMarkdownTableRow = (row: string): boolean => {
+    const trimmed = row.trim();
+    return trimmed.startsWith('|') && trimmed.endsWith('|') && splitMarkdownTableRow(trimmed).length > 1;
+};
+
+const renderMarkdownTable = (rows: string[][], hasHeader: boolean): string => {
+    if (rows.length === 0) return '';
+
+    const [firstRow, ...remainingRows] = rows;
+    const headerHtml = hasHeader
+        ? `<thead><tr>${firstRow.map(cell => `<th>${processInlineFormatting(cell)}</th>`).join('')}</tr></thead>`
+        : '';
+    const bodyRows = hasHeader ? remainingRows : rows;
+    const bodyHtml = bodyRows
+        .map(row => `<tr>${row.map(cell => `<td>${processInlineFormatting(cell)}</td>`).join('')}</tr>`)
+        .join('');
+
+    return `<table>${headerHtml}<tbody>${bodyHtml}</tbody></table>`;
+};
+
 export const parseMarkdownToHtml = (markdown: string): string => {
     if (!markdown) return '';
 
@@ -120,33 +140,30 @@ export const parseMarkdownToHtml = (markdown: string): string => {
         const line = lines[index];
         const trimmedLine = line.trim();
 
-        if (
-            trimmedLine.includes('|') &&
-            index + 1 < lines.length &&
-            isMarkdownTableSeparator(lines[index + 1])
-        ) {
+        if (isMarkdownTableRow(trimmedLine)) {
             if (inList) {
                 htmlLines.push(`</${listType}>`);
                 inList = false;
             }
 
-            const headers = splitMarkdownTableRow(trimmedLine);
-            const bodyRows: string[][] = [];
-            let rowIndex = index + 2;
+            const rows: string[][] = [];
+            let hasSeparator = false;
+            let rowIndex = index;
 
-            while (rowIndex < lines.length && lines[rowIndex].trim().includes('|')) {
+            while (rowIndex < lines.length) {
                 const row = lines[rowIndex].trim();
-                if (!row || isMarkdownTableSeparator(row)) break;
-                bodyRows.push(splitMarkdownTableRow(row));
+                if (!row) break;
+                if (isMarkdownTableSeparator(row)) {
+                    hasSeparator = true;
+                    rowIndex += 1;
+                    continue;
+                }
+                if (!isMarkdownTableRow(row)) break;
+                rows.push(splitMarkdownTableRow(row));
                 rowIndex += 1;
             }
 
-            const headerHtml = headers.map(cell => `<th>${processInlineFormatting(cell)}</th>`).join('');
-            const bodyHtml = bodyRows
-                .map(row => `<tr>${row.map(cell => `<td>${processInlineFormatting(cell)}</td>`).join('')}</tr>`)
-                .join('');
-
-            htmlLines.push(`<table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`);
+            htmlLines.push(renderMarkdownTable(rows, hasSeparator || rows.length > 1));
             index = rowIndex - 1;
             continue;
         }

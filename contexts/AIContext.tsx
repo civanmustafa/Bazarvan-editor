@@ -1683,6 +1683,8 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
   "confidence": 0.85
 }
 
+عند تحويل فقرة أو مقطع موجود إلى جدول أو قائمة نقطية أو قائمة مرقمة أو قائمة تحقق أو خطوات، استخدم دائماً operation بقيمة "replace_block"، واجعل targetText نسخة حرفية من النص الحالي، واجعل contentMarkdown يحتوي النص البديل فقط. عند إنشاء جدول Markdown يجب أن يحتوي contentMarkdown على صفوف جدول كاملة، ويفضل إضافة صف الفاصل، ولا تكتف بصف عنوان واحد يبدأ وينتهي بعلامة | دون بيانات.
+
 لا تستخدم عبارة "قسم التعديلات القابلة للتطبيق". استخدم فقط علامة [[PATCH:...]] في موضع التنفيذ داخل التقرير.`;
 
 const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
@@ -2025,6 +2027,13 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
             return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
         }
         return { from: match.from, to: match.to, selectFrom: match.from, selectTo: match.to, mode: 'replace' };
+    }
+
+    if (patch.targetText) {
+        const match = findBestTextBlockMatch(editor, [patch.targetText]);
+        if (match && match.score >= 3) {
+            return { from: match.from, to: match.to, selectFrom: match.from, selectTo: match.to, mode: 'replace' };
+        }
     }
 
     if (patch.operation === 'append_to_article') {
@@ -2429,9 +2438,38 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 selectedText: textToProcess,
                 fullArticleText: text,
             });
+            const toolbarGuardRuleKeys: (keyof StructureAnalysis)[] = [
+                'paragraphLength',
+                'sentenceLength',
+                'summaryParagraph',
+                'secondParagraph',
+                'keywordStuffing',
+                'stepsIntroduction',
+                'punctuation',
+                'punctuationSpacing',
+                'ambiguousParagraphReferences',
+                'wordsToDelete',
+                'slowWords',
+                'differentTransitionalWords',
+                'h2Structure',
+                'headingLength',
+            ];
+            const toolbarGuardRules = toolbarGuardRuleKeys
+                .map(ruleKey => analysisResults.structureAnalysis[ruleKey])
+                .filter(Boolean) as CheckResult[];
+            const toolbarCommandGuard = [
+                '**معايير إلزامية لأوامر شريط الأدوات:**',
+                '- قبل إخراج أي اقتراح، افحصه داخلياً مقابل معايير تبويب المعايير، خصوصاً طول الفقرات، طول الجمل، الحشو المفتاحي، الكلمات الضعيفة، علامات الترقيم، وترابط الفقرة مع القسم.',
+                '- لا ترسل فقرة طويلة أو جملة طويلة. إن احتاج المعنى إلى تفصيل، قسّمه إلى جمل قصيرة أو قائمة/جدول حسب الأمر.',
+                '- التزم بسياق عنوان القسم والنص السابق والنص اللاحق المرفقين للقراءة فقط، ولا تعيد فتح الموضوع من البداية إذا كان النص داخل منتصف القسم.',
+                '- استخدم الكلمة الأساسية والصيغ المرادفة وLSI واسم الشركة بشكل طبيعي فقط عند الحاجة، ولا تجمع الكلمة الأساسية مع مرادفاتها داخل نفس الفقرة إذا كان ذلك يسبب حشواً أو مخالفة.',
+                '- راعِ نوع الصفحة وهدفها والجمهور ونية البحث في النبرة، مستوى التفصيل، والعبارات المقترحة.',
+                formatStructureCriteriaRules('معايير يجب احترامها عند توليد اقتراح شريط الأدوات', toolbarGuardRules),
+            ].join('\n\n');
             const boundedPrompt = action === 'replace-text'
                 ? [
                     formatAiReadOnlyLocalContext(localContext),
+                    toolbarCommandGuard,
                     '**الأمر المطلوب على النص المستهدف فقط:**',
                     prompt,
                     '',
@@ -2468,7 +2506,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiCommandLoading(false);
         }
-    }, [editor, title, text, buildComprehensivePrompt, apiKeys.gemini, logToAiHistory]);
+    }, [editor, title, text, analysisResults, buildComprehensivePrompt, apiKeys.gemini, logToAiHistory]);
 
     const handleAnalyzeHeadings = useCallback(async () => {
         if (isAiLoading.gemini || !editor) return;

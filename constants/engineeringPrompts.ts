@@ -151,12 +151,6 @@ const STRUCTURED_CONTENT_OPPORTUNITIES_PROMPT = `أنت خبير محتوى SEO 
 الشكل المقترح:
 [قدّم النموذج العملي الجاهز للتحويل هنا، على شكل جدول أو قائمة مكتوبة بالكامل]
 
-ثالثًا: أفضل 3 فرص ذات أولوية
-اختر أقوى 3 مواضع فقط يجب تحويلها أولًا، واذكر السبب العملي لكل واحدة.
-
-رابعًا: ملاحظات تحسين سريعة
-اذكر أي ملاحظات مختصرة لتحسين وضوح النص وقابليته للاقتباس، بدون إطالة.
-
 قواعد مهمة:
 - لا تكرر نفس الفكرة أكثر من مرة.
 - لا تقترح جداول كثيرة بلا داعٍ.
@@ -398,6 +392,14 @@ export const DEFAULT_ENGINEERING_PROMPTS: EngineeringPrompts = ENGINEERING_PROMP
   return acc;
 }, {} as EngineeringPrompts);
 
+const sanitizeEngineeringPrompt = (id: EngineeringPromptId, value: string): string => {
+  if (id !== ENGINEERING_PROMPT_IDS.smartAnalysis.structuredContent) return value;
+  return value.replace(
+    /\n+ثالثًا: أفضل 3 فرص ذات أولوية[\s\S]*?رابعًا: ملاحظات تحسين سريعة[\s\S]*?(?=\n+قواعد مهمة:)/,
+    '\n'
+  );
+};
+
 export const normalizeEngineeringPrompts = (prompts?: Partial<EngineeringPrompts> | null): EngineeringPrompts => {
   const normalized = { ...DEFAULT_ENGINEERING_PROMPTS };
   if (!prompts || typeof prompts !== 'object') return normalized;
@@ -405,7 +407,7 @@ export const normalizeEngineeringPrompts = (prompts?: Partial<EngineeringPrompts
   for (const definition of ENGINEERING_PROMPT_DEFINITIONS) {
     const value = prompts[definition.id];
     if (typeof value === 'string' && value.trim().length > 0) {
-      normalized[definition.id] = value;
+      normalized[definition.id] = sanitizeEngineeringPrompt(definition.id, value);
     }
   }
 
