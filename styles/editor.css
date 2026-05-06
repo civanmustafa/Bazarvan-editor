@@ -1,0 +1,37 @@
+.ProseMirror {
+  min-height: 100%;
+  padding: 2rem;
+  outline: none;
+  line-height: 1.9;
+}
+
+.ProseMirror p {
+  margin: 0 0 1rem;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4 {
+  margin: 1.5rem 0 0.75rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+  margin: 0 1.5rem 1rem;
+  padding: 0;
+}
+
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+  width: 100%;
+}
+
+.ProseMirror td,
+.ProseMirror th {
+  border: 1px solid #d1d5db;
+  padding: 0.5rem;
+}
