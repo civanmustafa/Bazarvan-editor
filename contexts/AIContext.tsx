@@ -1,6 +1,5 @@
 
 import React, { useState, useCallback, createContext, useContext, useEffect, useRef } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { useUser } from './UserContext';
 import { useEditor } from './EditorContext';
 import { useModal } from './ModalContext';
@@ -1479,41 +1478,28 @@ const randomizeApiKeyOrder = (keys: string[]): string[] => {
 
 const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
     const trimmedUserKeys = normalizeGeminiKeys(userKeys);
-
-    if (trimmedUserKeys.length > 0) {
-        const errors: string[] = [];
-        const randomizedUserKeys = randomizeApiKeyOrder(trimmedUserKeys);
-
-        for (const [index, apiKey] of randomizedUserKeys.entries()) {
-            try {
-                const ai = new GoogleGenAI({ apiKey });
-                const response = await ai.models.generateContent({
-                    model: GEMINI_MODEL,
-                    contents: prompt,
-                });
-                return typeof response.text === 'string' ? response.text : '';
-            } catch (error) {
-                console.error(`Gemini API key #${index + 1} failed:`, error);
-                errors.push(getGeminiErrorMessage(error));
-            }
-        }
-
-        const lastError = errors[errors.length - 1] || 'فشلت كل مفاتيح Gemini.';
-        const prefix = trimmedUserKeys.length > 1
-            ? `فشلت كل مفاتيح Gemini (${trimmedUserKeys.length}). آخر خطأ: `
-            : '';
-        return `حدث خطأ أثناء الاتصال بـ Gemini: ${prefix}${lastError}`;
-    }
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
 
     try {
       const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+            prompt,
+            apiKeys: trimmedUserKeys.length > 0 ? randomizeApiKeyOrder(trimmedUserKeys) : undefined,
+        }),
+        signal: controller.signal,
       });
+
+      window.clearTimeout(timeoutId);
 
       const isJson = response.headers.get('content-type')?.includes('application/json');
       const data = isJson ? await response.json().catch(() => ({})) : {};
+
+      if (response.status === 404) {
+          throw new Error('Gemini API route is not enabled locally. Restart the Vite dev server so it can load the local API middleware.');
+      }
 
       if (!response.ok) {
           throw new Error(data.error || `Gemini request failed with status ${response.status}`);
@@ -1525,7 +1511,11 @@ const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]):
 
       return data.text;
     } catch (error) {
+      window.clearTimeout(timeoutId);
       console.error("Error calling Gemini API:", error);
+      if (error instanceof Error && error.name === 'AbortError') {
+          return `انتهت مهلة الاتصال بـ Gemini (${GEMINI_MODEL}). حاول مرة أخرى أو استخدم مفتاحا آخر.`;
+      }
       const errorMessage = getGeminiErrorMessage(error);
       return `حدث خطأ أثناء الاتصال بـ Gemini: ${errorMessage}`;
     }
