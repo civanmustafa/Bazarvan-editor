@@ -75,7 +75,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, apiKey, apiKeys } = await readRequestBody(req) as any;
+    const { prompt, apiKey, apiKeys, useUrlContext } = await readRequestBody(req) as any;
     const requestKeys = Array.isArray(apiKeys)
       ? apiKeys
       : typeof apiKey === 'string'
@@ -105,6 +105,12 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
         const response = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
           contents: prompt,
+          config: useUrlContext
+            ? {
+                tools: [{ urlContext: {} }],
+                toolConfig: { includeServerSideToolInvocations: true },
+              }
+            : undefined,
         });
 
         const text = response.text;

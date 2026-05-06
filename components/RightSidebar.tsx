@@ -16,8 +16,128 @@ type ReadyCommand = {
     options?: Partial<AiAnalysisOptions>;
 };
 
+type CompetitorExtractedContent = {
+    url: string;
+    fetchedUrl: string;
+    title: string;
+    description: string;
+    headings: {
+        h1: string[];
+        h2: string[];
+        h3: string[];
+    };
+    paragraphs: string[];
+    listItems: string[];
+    text: string;
+    wordCount: number;
+};
+
+type CompetitorExtractionState = {
+    status: 'idle' | 'loading' | 'success' | 'error';
+    content: CompetitorExtractedContent | null;
+    error: string;
+};
+
+const COMPETITOR_STORAGE_KEY = 'bazarvan-competitor-links';
+const COMPETITOR_TIMEOUT_MS = 180000;
+
+const createEmptyCompetitorState = (): CompetitorExtractionState => ({
+    status: 'idle',
+    content: null,
+    error: '',
+});
+
+const createDefaultCompetitorUrls = () => ['', '', ''];
+
+const createDefaultCompetitorExtractions = () => [
+    createEmptyCompetitorState(),
+    createEmptyCompetitorState(),
+    createEmptyCompetitorState(),
+];
+
+const loadStoredCompetitorUrls = (): string[] => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(COMPETITOR_STORAGE_KEY) || '[]');
+        const urls = Array.isArray(parsed) ? parsed : [];
+        return createDefaultCompetitorUrls().map((_, index) => typeof urls[index] === 'string' ? urls[index] : '');
+    } catch {
+        return createDefaultCompetitorUrls();
+    }
+};
+
+const extractJsonFromGeminiText = (value: string): any | null => {
+    const tryParse = (candidate: string): any | null => {
+        try {
+            return JSON.parse(candidate);
+        } catch {
+            return null;
+        }
+    };
+    const trimmed = value.trim();
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fenced?.[1]) {
+        const parsed = tryParse(fenced[1].trim());
+        if (parsed) return parsed;
+    }
+    const objectStart = trimmed.indexOf('{');
+    const objectEnd = trimmed.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) {
+        return tryParse(trimmed.slice(objectStart, objectEnd + 1));
+    }
+    return tryParse(trimmed);
+};
+
+const normalizeStringArray = (value: unknown, maxItems: number): string[] => {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set<string>();
+    return value
+        .map(item => typeof item === 'string' ? item.trim() : '')
+        .filter(Boolean)
+        .filter(item => {
+            const key = item.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .slice(0, maxItems);
+};
+
+const buildCompetitorPrompt = (url: string): string => `أنت محلل محتوى SEO تقني صارم داخل أداة تحرير محتوى.
+
+استخدم أداة URL Context في Gemini لقراءة هذا الرابط فقط:
+${url}
+
+المطلوب:
+استخرج محتوى الصفحة المهم فقط، وليس القوائم الجانبية أو الفوتر أو الهيدر أو الكوكيز أو التعليقات أو عناصر التنقل أو النصوص الدعائية المتكررة.
+
+طبّق قواعد هندسية صارمة:
+- ركّز على المحتوى التحريري الأساسي.
+- استخرج العنوان، الوصف، H1، H2، H3، أهم الفقرات، وأهم عناصر القوائم.
+- لا تخترع أي نص غير موجود في الصفحة.
+- إذا لم تتمكن من قراءة الرابط، أرجع JSON يوضح الخطأ في حقل "error".
+- لا تكتب Markdown.
+- أرجع JSON صالحًا فقط بدون شرح خارجي.
+
+صيغة JSON المطلوبة:
+{
+  "url": "...",
+  "fetchedUrl": "...",
+  "title": "...",
+  "description": "...",
+  "headings": {
+    "h1": ["..."],
+    "h2": ["..."],
+    "h3": ["..."]
+  },
+  "paragraphs": ["..."],
+  "listItems": ["..."],
+  "text": "...",
+  "wordCount": 0,
+  "error": ""
+}`;
+
 const RightSidebar: React.FC = () => {
-    const { t, engineeringPrompts } = useUser();
+    const { t, engineeringPrompts, apiKeys } = useUser();
     const {
         handleAiAnalyze,
         handleChatGptAnalyze,
@@ -28,9 +148,11 @@ const RightSidebar: React.FC = () => {
         selectAiInsertionPatchTarget,
     } = useAI();
     
-    const [activeTab, setActiveTab] = useState<'structure' | 'ai'>('structure');
+    const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors'>('structure');
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history'>('new');
     const [aiCommand, setAiCommand] = useState('');
+    const [competitorUrls, setCompetitorUrls] = useState<string[]>(() => loadStoredCompetitorUrls());
+    const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => createDefaultCompetitorExtractions());
     const [selectedReadyCommandId, setSelectedReadyCommandId] = useState('');
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(true);
@@ -55,6 +177,14 @@ const RightSidebar: React.FC = () => {
             document.removeEventListener("mousedown", handleClickOutside);
         };
     }, []);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(COMPETITOR_STORAGE_KEY, JSON.stringify(competitorUrls));
+        } catch (error) {
+            console.error('Could not save competitor links:', error);
+        }
+    }, [competitorUrls]);
 
     const readyCommands: ReadyCommand[] = useMemo(() => {
         return ENGINEERING_PROMPT_DEFINITIONS
@@ -106,6 +236,103 @@ const RightSidebar: React.FC = () => {
             }, 1500);
         } catch (error) {
             console.error('Could not copy AI patch:', error);
+        }
+    };
+
+    const handleCompetitorUrlChange = (index: number, value: string) => {
+        setCompetitorUrls(prev => prev.map((url, urlIndex) => urlIndex === index ? value : url));
+        setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? createEmptyCompetitorState() : item));
+    };
+
+    const handleExtractCompetitor = async (index: number) => {
+        const url = competitorUrls[index]?.trim();
+        if (!url) {
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'error',
+                content: null,
+                error: tRs.competitorUrlRequired,
+            } : item));
+            return;
+        }
+
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), COMPETITOR_TIMEOUT_MS);
+        setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+            ...item,
+            status: 'loading',
+            error: '',
+        } : item));
+
+        try {
+            const response = await fetch('/api/gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: buildCompetitorPrompt(url),
+                    apiKeys: apiKeys.gemini.filter(Boolean),
+                    useUrlContext: true,
+                }),
+                signal: controller.signal,
+            });
+            window.clearTimeout(timeoutId);
+            const data = await response.json().catch(() => ({}));
+            if (response.status === 404) {
+                throw new Error(tRs.competitorApiUnavailable);
+            }
+            if (!response.ok) {
+                throw new Error(data.error || `${tRs.competitorExtractionFailed} (${response.status})`);
+            }
+
+            const parsed = extractJsonFromGeminiText(typeof data.text === 'string' ? data.text : '');
+            if (!parsed || typeof parsed !== 'object') {
+                throw new Error(tRs.competitorExtractionFailed);
+            }
+            if (typeof parsed.error === 'string' && parsed.error.trim()) {
+                throw new Error(parsed.error.trim());
+            }
+
+            const content: CompetitorExtractedContent = {
+                url,
+                fetchedUrl: typeof parsed.fetchedUrl === 'string' && parsed.fetchedUrl.trim() ? parsed.fetchedUrl.trim() : url,
+                title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
+                description: typeof parsed.description === 'string' ? parsed.description.trim() : '',
+                headings: {
+                    h1: normalizeStringArray(parsed.headings?.h1, 8),
+                    h2: normalizeStringArray(parsed.headings?.h2, 30),
+                    h3: normalizeStringArray(parsed.headings?.h3, 30),
+                },
+                paragraphs: normalizeStringArray(parsed.paragraphs, 40),
+                listItems: normalizeStringArray(parsed.listItems, 40),
+                text: typeof parsed.text === 'string' ? parsed.text.trim() : '',
+                wordCount: Number.isFinite(Number(parsed.wordCount)) ? Number(parsed.wordCount) : 0,
+            };
+            if (!content.wordCount) {
+                content.wordCount = [
+                    content.title,
+                    content.description,
+                    ...content.headings.h1,
+                    ...content.headings.h2,
+                    ...content.headings.h3,
+                    ...content.paragraphs,
+                    ...content.listItems,
+                    content.text,
+                ].join(' ').split(/\s+/).filter(Boolean).length;
+            }
+
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'success',
+                content,
+                error: '',
+            } : item));
+        } catch (error) {
+            window.clearTimeout(timeoutId);
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'error',
+                content: null,
+                error: error instanceof Error && error.name === 'AbortError'
+                    ? tRs.competitorExtractionTimeout
+                    : error instanceof Error ? error.message : tRs.competitorExtractionFailed,
+            } : item));
         }
     };
 
@@ -342,16 +569,122 @@ const RightSidebar: React.FC = () => {
         </div>
     );
 
+    const renderCompetitorsTab = () => (
+        <div className="flex h-full flex-col">
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-4">
+                <div>
+                    <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">{tRs.competitors}</h3>
+                    <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{tRs.competitorsHint}</p>
+                </div>
+
+                {competitorUrls.map((url, index) => {
+                    const extraction = competitorExtractions[index] || createEmptyCompetitorState();
+                    const content = extraction.content;
+                    return (
+                        <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                            <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
+                                {tRs.competitorLabel} {index + 1}
+                            </label>
+                            <div className="flex items-stretch gap-2">
+                                <input
+                                    type="url"
+                                    value={url}
+                                    onChange={(event) => handleCompetitorUrlChange(index, event.target.value)}
+                                    placeholder={tRs.competitorUrlPlaceholder}
+                                    className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
+                                    dir="ltr"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => handleExtractCompetitor(index)}
+                                    disabled={extraction.status === 'loading'}
+                                    className="flex shrink-0 items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {extraction.status === 'loading' ? <Wand2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
+                                    <span>{extraction.status === 'loading' ? tRs.extractingCompetitor : tRs.extractCompetitor}</span>
+                                </button>
+                            </div>
+
+                            {extraction.status === 'error' && (
+                                <div className="mt-2 flex items-start gap-2 rounded-md bg-red-50 px-2 py-2 text-[11px] font-semibold text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                                    <span>{extraction.error}</span>
+                                </div>
+                            )}
+
+                            {content && (
+                                <div className="mt-3 space-y-3 border-t border-gray-100 pt-3 text-xs dark:border-[#3C3C3C]">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{tRs.extractedContent}</span>
+                                        <span className="shrink-0 text-[11px] text-gray-400">{content.wordCount} {t.common.words}</span>
+                                    </div>
+                                    {content.title && (
+                                        <div className="font-bold leading-5 text-gray-800 dark:text-gray-100">{content.title}</div>
+                                    )}
+                                    {content.description && (
+                                        <p className="leading-5 text-gray-600 dark:text-gray-300">{content.description}</p>
+                                    )}
+                                    {content.headings.h1.length > 0 && (
+                                        <div>
+                                            <div className="mb-1 font-bold text-gray-700 dark:text-gray-200">H1</div>
+                                            <ul className="space-y-1 text-gray-600 dark:text-gray-300">
+                                                {content.headings.h1.map((item, itemIndex) => <li key={itemIndex}>- {item}</li>)}
+                                            </ul>
+                                        </div>
+                                    )}
+                                    {content.headings.h2.length > 0 && (
+                                        <details className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]" open>
+                                            <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">H2</summary>
+                                            <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto custom-scrollbar text-gray-600 dark:text-gray-300">
+                                                {content.headings.h2.map((item, itemIndex) => <li key={itemIndex}>- {item}</li>)}
+                                            </ul>
+                                        </details>
+                                    )}
+                                    {content.paragraphs.length > 0 && (
+                                        <details className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]" open>
+                                            <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">{tRs.importantParagraphs}</summary>
+                                            <div className="mt-2 max-h-44 space-y-2 overflow-y-auto custom-scrollbar leading-5 text-gray-600 dark:text-gray-300">
+                                                {content.paragraphs.map((item, itemIndex) => <p key={itemIndex}>{item}</p>)}
+                                            </div>
+                                        </details>
+                                    )}
+                                    {content.listItems.length > 0 && (
+                                        <details className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
+                                            <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">{tRs.importantListItems}</summary>
+                                            <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto custom-scrollbar leading-5 text-gray-600 dark:text-gray-300">
+                                                {content.listItems.map((item, itemIndex) => <li key={itemIndex}>- {item}</li>)}
+                                            </ul>
+                                        </details>
+                                    )}
+                                    {content.text && (
+                                        <details className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
+                                            <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">{tRs.fullExtractedText}</summary>
+                                            <div className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap custom-scrollbar leading-5 text-gray-600 dark:text-gray-300">
+                                                {content.text}
+                                            </div>
+                                        </details>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+
     return (
         <aside className="basis-[18.7%] flex flex-col h-full min-w-0 bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg overflow-hidden border-s border-gray-300 dark:border-[#333]">
             <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
-                {(['structure', 'ai'] as const).map(tab => (
+                {(['structure', 'ai', 'competitors'] as const).map(tab => (
                     <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15'}`}>
-                        {tab === 'structure' ? <LayoutTemplate size={18} /> : <BrainCircuit size={18} />}
+                        {tab === 'structure' ? <LayoutTemplate size={18} /> : tab === 'ai' ? <BrainCircuit size={18} /> : <Users size={18} />}
                     </button>
                 ))}
             </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar">{activeTab === 'structure' ? <StructureTab /> : renderAiTab()}</div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar">
+                {activeTab === 'structure' ? <StructureTab /> : activeTab === 'ai' ? renderAiTab() : renderCompetitorsTab()}
+            </div>
         </aside>
     );
 };
