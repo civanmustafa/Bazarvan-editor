@@ -13,14 +13,16 @@ const findDuplicateWords = (
     const description = tRule.description;
     const details = nodeType === 'paragraph' && articleLanguage === 'ar' ? DUPLICATE_WORDS_EXCLUSION_LIST.toString() : undefined;
 
-    const exclusionSet = articleLanguage === 'ar' ? new Set(DUPLICATE_WORDS_EXCLUSION_LIST) : new Set();
+    const exclusionSet = articleLanguage === 'ar' ? new Set(DUPLICATE_WORDS_EXCLUSION_LIST) : new Set<string>();
     if (nodeType === 'paragraph' && keywords) {
         const addPhraseToExclusionSet = (phrase: string) => {
             if (!phrase) return;
-            phrase.trim().split(/\s+/).forEach(word => {
+            const words = articleLanguage === 'ar'
+                ? normalizeArabicText(phrase.toLowerCase()).match(/[\p{L}\p{N}]+/gu) || []
+                : phrase.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+            words.forEach(word => {
                 if (word) {
-                    const normalizedWord = articleLanguage === 'ar' ? normalizeArabicText(word.toLowerCase()) : word.toLowerCase();
-                    exclusionSet.add(normalizedWord);
+                    exclusionSet.add(word);
                 }
             });
         };

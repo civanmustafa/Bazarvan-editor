@@ -7,6 +7,8 @@ export type SpiderStatMetric = {
   outerPoint?: boolean;
   tone?: 'good' | 'warn' | 'bad' | 'neutral';
   color?: string;
+  problems?: number;
+  corrected?: number;
 };
 
 const clampScore = (score: number): number => Math.max(0, Math.min(100, Number.isFinite(score) ? score : 0));
@@ -38,6 +40,12 @@ const pointsToString = (points: { x: number; y: number }[]) =>
   points.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
 
 const getMetricColor = (metric: SpiderStatMetric, index: number) => metric.color || METRIC_COLORS[index % METRIC_COLORS.length];
+const getMetricStatsText = (metric: SpiderStatMetric): string => {
+  if (typeof metric.problems === 'number' || typeof metric.corrected === 'number') {
+    return `${metric.problems ?? 0}/${metric.corrected ?? 0}`;
+  }
+  return String(metric.value);
+};
 
 const SpiderStats: React.FC<{ metrics: SpiderStatMetric[]; title?: string; compact?: boolean }> = ({ metrics, title, compact = false }) => {
   const visibleMetrics = metrics.filter(Boolean);
@@ -121,6 +129,9 @@ const SpiderStats: React.FC<{ metrics: SpiderStatMetric[]; title?: string; compa
             <div key={metric.label} title={`${metric.label}: ${metric.value}`} className="flex min-w-0 items-center gap-1.5">
               <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: getMetricColor(metric, index) }} />
               <span className="truncate text-[10px] font-bold text-gray-500 dark:text-gray-400">{metric.label}</span>
+              <span className="ms-auto flex-shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-black text-gray-700 dark:bg-[#1F1F1F] dark:text-gray-200">
+                {getMetricStatsText(metric)}
+              </span>
             </div>
           ))}
         </div>

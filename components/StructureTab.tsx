@@ -831,10 +831,12 @@ const StructureTab: React.FC = () => {
 
         return {
             label: group.name,
-            value: `${passCount}/${totalItems}`,
+            value: `${failCount + warnCount}/${passCount}`,
             score,
             outerPoint: failCount === 0 && warnCount === 0 && passCount === totalItems,
             tone: failCount > 0 ? 'bad' : warnCount > 0 ? 'warn' : 'good',
+            problems: failCount + warnCount,
+            corrected: passCount,
         };
     });
 

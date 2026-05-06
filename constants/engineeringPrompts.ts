@@ -11,6 +11,7 @@ export const ENGINEERING_PROMPT_IDS = {
     suggestNewIdea: 'smartAnalysis.suggestNewIdea',
     peopleQuestions: 'smartAnalysis.peopleQuestions',
     structuredContent: 'smartAnalysis.structuredContent',
+    unsuitableSections: 'smartAnalysis.unsuitableSections',
   },
   toolbar: {
     suggestHeadings: 'toolbar.suggestHeadings',
@@ -25,6 +26,7 @@ export const ENGINEERING_PROMPT_IDS = {
     summarize50: 'toolbar.summarize50',
     summarize100: 'toolbar.summarize100',
     findStats: 'toolbar.findStats',
+    evaluateSection: 'toolbar.evaluateSection',
     toQa: 'toolbar.toQa',
     toSteps: 'toolbar.toSteps',
     toTable: 'toolbar.toTable',
@@ -159,6 +161,114 @@ const STRUCTURED_CONTENT_OPPORTUNITIES_PROMPT = `أنت خبير محتوى SEO 
 - يجب أن يكون الشكل المقترح قابلًا للنسخ مباشرة داخل المقال.
 - حافظ على لغة واضحة ومهنية.`;
 
+const UNSUITABLE_SECTIONS_AUDIT_PROMPT = `أنت خبير SEO Content Audit وLLM SEO.
+
+سأعطيك نصًا، وكلمة مفتاحية أساسية، وصيغًا مرادفة، وكلمات LSI، وهدف الصفحة، وسياق الجمهور.
+
+المطلوب:
+حلّل النص ثم حدّد قسمين فقط غير مناسبين أو الأقل ملاءمة، بناءً على:
+- توافقهما مع الكلمة المفتاحية الأساسية.
+- توافقهما مع الصيغ المرادفة وكلمات LSI.
+- خدمتهما لهدف الصفحة.
+- فائدتهما للجمهور المستهدف.
+- قابليتهما للاستخلاص في SEO / AEO / GEO / LLM.
+
+صيغة الإخراج:
+1. ملخص عام قصير.
+2. القسم الأول غير المناسب:
+- مكان القسم:
+   - العنوان:
+   - سبب المشكلة:
+   - تأثيره على SEO/AEO/GEO/LLM:
+   - الإجراء المقترح:
+   - صياغة بديلة مختصرة تناسب هدف الصفحة والجمهور والاستهداف
+3. القسم الثاني غير المناسب:
+- مكان القسم:
+   - العنوان:
+   - سبب المشكلة:
+   - تأثيره على SEO/AEO/GEO/LLM:
+   - الإجراء المقترح:
+   - صياغة بديلة مختصرة تناسب هدف الصفحة والجمهور والاستهداف
+
+4. توصية نهائية.
+
+الشروط:
+- اختر قسمين فقط.
+- لا تقترح حذف محتوى ضروري للثقة أو السلامة.
+- لا تعتمد على كثافة الكلمات فقط.
+- اربط كل ملاحظة بهدف الصفحة والجمهور والكلمات الدلالية.
+- اجعل النقد عمليًا وقابلًا للتنفيذ.`;
+
+const EVALUATE_SECTION_PROMPT = `أنت كاتب محتوى محترف وخبير SEO / AEO / GEO / LLM SEO، ومتخصص في تقييم ملاءمة الفقرات لأهداف الصفحات.
+
+سيتم إرفاق الكلمة المفتاحية الأساسية، الصيغ المرادفة، كلمات LSI، نوع الصفحة، هدف الصفحة، نطاق الجمهور، الدولة أو السوق، الجمهور المستهدف، نية البحث، وسياق موضع النص تلقائيًا مع الطلب.
+
+مهمتك:
+قيّم النص المحدد فقط، وحدّد هل يناسب سياق الصفحة وهدفها، ثم اقترح أفضل تنسيق وصياغة محسّنة جاهزة للاستخدام.
+
+النص المراد تقييمه:
+"""
+${selectedText}
+"""
+
+المطلوب:
+
+1. الحكم العام
+حدّد هل النص:
+- مناسب
+- مناسب جزئيًا
+- غير مناسب
+
+مع توضيح مختصر لمدى توافقه مع:
+- الكلمة المفتاحية الأساسية
+- الصيغ المرادفة وكلمات LSI
+- هدف الصفحة
+- نية البحث
+- الجمهور المستهدف
+
+2. المشاكل العملية
+اذكر فقط المشاكل المؤثرة، مثل:
+- عنوان غير مناسب
+- تنسيق طويل أو مشتت
+- ضعف الربط بالتحويل
+- عبارات مبالغ فيها
+- تكرار غير طبيعي للكلمة المفتاحية
+- معلومات غير دقيقة أو تحتاج صياغة آمنة
+- خروج عن هدف الصفحة أو نية البحث
+
+3. أفضل شكل للقسم
+حدّد أنسب تنسيق:
+[فقرة مختصرة / جدول / قائمة نقطية / قائمة مرقمة / FAQ / قائمة تحقق]
+
+واشرح باختصار لماذا هذا الشكل أفضل للقارئ وSEO وAEO/GEO/LLM.
+
+4. عناوين بديلة
+اقترح 2 إلى 4 عناوين مناسبة، مع مراعاة الكلمة المفتاحية الأساسية والصيغ المرادفة.
+
+5. النسخة المحسّنة الجاهزة للاستخدام
+أعد كتابة النص بالشكل الأنسب بحيث يكون:
+- واضحًا ومباشرًا
+- مناسبًا لنوع الصفحة وهدفها
+- داعمًا للتحويل إذا كان الهدف بيعيًا
+- متوافقًا مع SEO وAEO/GEO/LLM
+- قابلًا للاقتباس والاستخلاص
+- خاليًا من المبالغات والوعود المطلقة
+
+6. ملاحظات سريعة
+اذكر 3 ملاحظات عملية لتحسين النص داخل الصفحة.
+
+قواعد مهمة:
+- قيّم القسم المرفق فقط، وليس الصفحة كاملة.
+- لا تعتمد على كثافة الكلمة المفتاحية فقط.
+- لا تخترع معلومات غير موجودة.
+- لا تضف أسعارًا، أسماء أطباء، شهادات، اعتمادات، أو وعود نتائج.
+- لا تستخدم وعودًا مطلقة مثل: مضمون، آمن تمامًا، أفضل نتيجة، علاج نهائي.
+- انتبه لأي عبارات غير مناسبة طبيًا، قانونيًا، تجاريًا، بيعيًا، أو تسويقيًا.
+- استخدم لغة آمنة عند الحاجة مثل: قد يساعد، يمكن أن، حسب الحالة، بعد التقييم، تختلف النتائج من حالة لأخرى.
+- لا تجعل النص دعائيًا بشكل مبالغ فيه.
+- اربط كل توصية بهدف الصفحة، نية البحث، والجمهور.
+- إذا كان النص مناسبًا جزئيًا، قل ذلك بوضوح واقترح تحسينه بدل حذفه.`;
+
 const ENTITY_MAP_SEO_PROMPT = `حلّل المقال من منظور خريطة الكيانات الدلالية SEO / AEO / GEO / LLM SEO، وليس من منظور تكرار الكلمات المفتاحية فقط.
 
 استخدم المرفقات التي اختارها المستخدم فقط من قائمة المرفقات. إذا لم تكن بعض البيانات مرفقة، لا تفترضها، واكتفِ بتحليل ما هو متاح.
@@ -275,6 +385,13 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {
+    id: ENGINEERING_PROMPT_IDS.smartAnalysis.unsuitableSections,
+    source: 'smartAnalysis',
+    labelKey: 'unsuitableSections',
+    defaultValue: UNSUITABLE_SECTIONS_AUDIT_PROMPT,
+    options: DEFAULT_SMART_ANALYSIS_OPTIONS,
+  },
+  {
     id: ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings,
     source: 'toolbar',
     labelKey: 'suggestHeadings',
@@ -355,6 +472,13 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     source: 'toolbar',
     labelKey: 'findStats',
     defaultValue: AI_PROMPTS.FIND_STATS,
+    variables: ['${selectedText}'],
+  },
+  {
+    id: ENGINEERING_PROMPT_IDS.toolbar.evaluateSection,
+    source: 'toolbar',
+    labelKey: 'evaluateSection',
+    defaultValue: EVALUATE_SECTION_PROMPT,
     variables: ['${selectedText}'],
   },
   {

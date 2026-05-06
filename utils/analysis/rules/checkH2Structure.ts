@@ -4,7 +4,7 @@ import type { AnalysisContext } from '../analysisUtils';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../../../constants';
 
 export const checkH2Structure = (context: AnalysisContext): CheckResult => {
-    const { nodes, totalDocSize, t, articleLanguage } = context;
+    const { nodes, totalDocSize, t, articleLanguage, uiLanguage } = context;
     const tRule = t.structureAnalysis['قسم H2'];
     const title = tRule.title;
     const description = tRule.description;
@@ -110,7 +110,9 @@ export const checkH2Structure = (context: AnalysisContext): CheckResult => {
     }
 
     if (worstStatus !== 'pass') {
-        const currentText = `${violations.length} ${t.common.violations}, ${warnings.length} ${t.common.warnings}`;
+        const currentText = uiLanguage === 'ar'
+            ? `الوضع الحالي: يوجد ${violations.length} من المخالفات و ${warnings.length} من التحذيرات في أقسام H2.`
+            : `${violations.length} ${t.common.violations}, ${warnings.length} ${t.common.warnings}`;
         const result = createCheckResult(title, worstStatus, currentText, requiredText, progress, description, details);
         result.violatingItems = [...violations, ...warnings];
         return result;

@@ -379,6 +379,10 @@ const LeftSidebar: React.FC = () => {
   };
 
   const enteredSynonymsCount = keywords.secondaries.filter(s => s.trim() !== '').length;
+  const keywordMetricCounts = (status: string) => ({
+    problems: status === 'pass' || status === 'info' ? 0 : 1,
+    corrected: status === 'pass' ? 1 : 0,
+  });
 
   const keywordDetailSpiderMetrics: SpiderStatMetric[] = [
     {
@@ -387,6 +391,7 @@ const LeftSidebar: React.FC = () => {
       score: getKeywordStatScore(keywordAnalysis.primary),
       outerPoint: keywordAnalysis.primary.status === 'pass',
       tone: getKeywordStatTone(keywordAnalysis.primary),
+      ...keywordMetricCounts(keywordAnalysis.primary.status),
     },
     {
       label: tLk.synonyms,
@@ -394,6 +399,7 @@ const LeftSidebar: React.FC = () => {
       score: getKeywordStatScore(keywordAnalysis.secondariesDistribution),
       outerPoint: keywordAnalysis.secondariesDistribution.status === 'pass',
       tone: getKeywordStatTone(keywordAnalysis.secondariesDistribution),
+      ...keywordMetricCounts(keywordAnalysis.secondariesDistribution.status),
     },
     {
       label: tLk.company,
@@ -401,6 +407,7 @@ const LeftSidebar: React.FC = () => {
       score: getKeywordStatScore(keywordAnalysis.company),
       outerPoint: keywordAnalysis.company.status === 'pass',
       tone: getKeywordStatTone(keywordAnalysis.company),
+      ...keywordMetricCounts(keywordAnalysis.company.status),
     },
     {
       label: 'LSI',
@@ -408,6 +415,8 @@ const LeftSidebar: React.FC = () => {
       score: getKeywordStatScore(keywordAnalysis.lsi.distribution),
       outerPoint: keywordAnalysis.lsi.distribution.status === 'pass' && keywordAnalysis.lsi.balance.status !== 'fail',
       tone: keywordAnalysis.lsi.balance.status === 'fail' ? 'bad' : getKeywordStatTone(keywordAnalysis.lsi.distribution),
+      problems: (keywordAnalysis.lsi.distribution.status === 'pass' || keywordAnalysis.lsi.distribution.status === 'info' ? 0 : 1) + (keywordAnalysis.lsi.balance.status === 'fail' ? 1 : 0),
+      corrected: keywordAnalysis.lsi.distribution.status === 'pass' && keywordAnalysis.lsi.balance.status !== 'fail' ? 1 : 0,
     },
   ];
 
@@ -431,6 +440,8 @@ const LeftSidebar: React.FC = () => {
       score,
       outerPoint: repeatedInstances === 0,
       tone: repeatedInstances === 0 ? 'good' : 'bad',
+      problems: repeatedInstances,
+      corrected: repeatedInstances === 0 ? 1 : 0,
     };
   });
 

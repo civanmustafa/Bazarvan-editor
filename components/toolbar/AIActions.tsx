@@ -1,5 +1,5 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
-import { Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight } from 'lucide-react';
+import { Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight, ClipboardCheck } from 'lucide-react';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
 import { useUser } from '../../contexts/UserContext';
@@ -118,6 +118,7 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                         )}
                     </div>
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.findStats), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><TestTube size={14} /> <span>{t.aiMenu.findStats}</span></AiMenuItem>
+                    <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.evaluateSection), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><ClipboardCheck size={14} /> <span>{t.aiMenu.evaluateSection}</span></AiMenuItem>
 
                     <div className="my-1 h-px bg-gray-200 dark:bg-[#3C3C3C]"></div>
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.toQa), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><HelpCircle size={14} /> <span>{t.aiMenu.toQA}</span></AiMenuItem>

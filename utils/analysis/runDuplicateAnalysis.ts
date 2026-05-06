@@ -46,17 +46,48 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
           }
       }
 
+      const tokenizeForDuplicateComparison = (value: string): string[] => {
+        const normalized = articleLanguage === 'ar' ? normalizeArabicText(value.toLowerCase()) : value.toLowerCase();
+        return normalized.match(/[\p{L}\p{N}]+/gu) || [];
+      };
+
+      const containsTokenSequence = (tokens: string[], sequence: string[]): boolean => {
+        if (sequence.length === 0 || sequence.length > tokens.length) return false;
+        for (let index = 0; index <= tokens.length - sequence.length; index++) {
+          if (sequence.every((token, offset) => tokens[index + offset] === token)) return true;
+        }
+        return false;
+      };
+
       const allKeywordsForDupCheck = [
           keywords.primary,
           ...keywords.secondaries,
           ...keywords.lsi,
           keywords.company,
       ].filter(Boolean).map(kw => articleLanguage === 'ar' ? normalizeArabicText(kw.toLowerCase()) : kw.toLowerCase());
+      const protectedKeywordTokens = [
+          keywords.primary,
+          ...keywords.secondaries,
+          ...keywords.lsi,
+      ]
+        .filter(Boolean)
+        .map(term => tokenizeForDuplicateComparison(term))
+        .filter(tokens => tokens.length > 0);
+
+      const isProtectedBigram = (key: string): boolean => {
+        const bigramTokens = tokenizeForDuplicateComparison(key);
+        if (bigramTokens.length === 0) return false;
+        return protectedKeywordTokens.some(keywordTokens => (
+          containsTokenSequence(bigramTokens, keywordTokens) ||
+          containsTokenSequence(keywordTokens, bigramTokens)
+        ));
+      };
 
       for (let n = 2; n <= 8; n++) {
         nGrams[n].forEach((value, key) => {
           if (value.locations.length > 1) {
             const isKeywordPhrase = allKeywordsForDupCheck.some(kw => key.includes(kw) || kw.includes(key));
+            if (n === 2 && isProtectedBigram(key)) return;
             duplicateAnalysis[n as keyof DuplicateAnalysis].push({
               text: value.text,
               count: value.locations.length,
