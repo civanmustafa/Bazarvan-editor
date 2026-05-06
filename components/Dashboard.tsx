@@ -675,6 +675,9 @@ const Dashboard: React.FC = () => {
                 </div>
             </div>
         </div>
+        <footer className="mt-10 border-t border-gray-200 pt-4 text-center text-xs font-semibold text-gray-500 dark:border-[#3C3C3C] dark:text-gray-400">
+          جميع الحقوق محفوظة - 2026-05-07 01:54:51
+        </footer>
       </div>
       {isConfirmModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" aria-labelledby="modal-title" role="dialog" aria-modal="true">
