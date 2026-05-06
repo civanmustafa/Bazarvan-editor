@@ -127,7 +127,7 @@ const AppContent: React.FC = () => {
     return (
       <>
         {renderView()}
-        <ModalManager />
+        {currentView !== 'login' && <ModalManager />}
       </>
     );
 }
