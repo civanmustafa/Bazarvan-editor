@@ -245,20 +245,18 @@ const Dashboard: React.FC = () => {
     language: 'all',
   });
 
-  if (!currentUser) {
-    return null;
-  }
-
   const refreshData = () => {
     setActivityData(getActivityData());
   };
 
   const handleDeleteArticle = (articleTitle: string) => {
+    if (!currentUser) return;
     deleteArticleActivity(currentUser, articleTitle);
     refreshData();
   };
   
   const handleRenameArticle = (oldTitle: string, newTitle: string): boolean => {
+      if (!currentUser) return false;
       const success = renameArticleActivity(currentUser, oldTitle, newTitle);
       if (success) {
           refreshData();
@@ -272,6 +270,7 @@ const Dashboard: React.FC = () => {
   }, []);
 
   const handleExportHtml = () => {
+    if (!currentUser) return;
     const currentUserData = activityData[currentUser];
     if (!currentUserData) return;
 
@@ -378,6 +377,7 @@ const Dashboard: React.FC = () => {
   };
 
   const handleConfirmClearData = () => {
+    if (!currentUser) return;
     clearUserActivity(currentUser);
     refreshData();
     setIsConfirmModalOpen(false);
@@ -405,7 +405,7 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  const currentUserData = activityData[currentUser];
+  const currentUserData = currentUser ? activityData[currentUser] : undefined;
 
   // Article filters stay derived from activityData so refreshData remains the only reload path.
   const filteredArticles = useMemo(() => {
@@ -454,6 +454,10 @@ const Dashboard: React.FC = () => {
     }`;
 
   const inputClass = "w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0]";
+
+  if (!currentUser) {
+    return null;
+  }
 
   return (
     <div className={`min-h-screen ${isDarkMode ? 'dark' : ''} bg-gray-50 dark:bg-[#181818]`}>
