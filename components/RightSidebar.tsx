@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2 } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
@@ -32,22 +32,28 @@ type CompetitorExtractedContent = {
     wordCount: number;
 };
 
+type CompetitorExtractionSource = 'url' | 'html';
+
 type CompetitorExtractionState = {
     status: 'idle' | 'loading' | 'success' | 'error';
+    source?: CompetitorExtractionSource;
     content: CompetitorExtractedContent | null;
     error: string;
 };
 
 const COMPETITOR_STORAGE_KEY = 'bazarvan-competitor-links';
+const COMPETITOR_HTML_STORAGE_KEY = 'bazarvan-competitor-html-snippets';
 const COMPETITOR_TIMEOUT_MS = 180000;
 
 const createEmptyCompetitorState = (): CompetitorExtractionState => ({
     status: 'idle',
+    source: undefined,
     content: null,
     error: '',
 });
 
 const createDefaultCompetitorUrls = () => ['', '', ''];
+const createDefaultCompetitorHtmls = () => ['', '', ''];
 
 const createDefaultCompetitorExtractions = () => [
     createEmptyCompetitorState(),
@@ -62,6 +68,16 @@ const loadStoredCompetitorUrls = (): string[] => {
         return createDefaultCompetitorUrls().map((_, index) => typeof urls[index] === 'string' ? urls[index] : '');
     } catch {
         return createDefaultCompetitorUrls();
+    }
+};
+
+const loadStoredCompetitorHtmls = (): string[] => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(COMPETITOR_HTML_STORAGE_KEY) || '[]');
+        const snippets = Array.isArray(parsed) ? parsed : [];
+        return createDefaultCompetitorHtmls().map((_, index) => typeof snippets[index] === 'string' ? snippets[index] : '');
+    } catch {
+        return createDefaultCompetitorHtmls();
     }
 };
 
@@ -100,6 +116,41 @@ const normalizeStringArray = (value: unknown, maxItems: number): string[] => {
             return true;
         })
         .slice(0, maxItems);
+};
+
+const normalizeCompetitorContent = (parsed: any, fallbackUrl: string): CompetitorExtractedContent => {
+    const content: CompetitorExtractedContent = {
+        url: typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : fallbackUrl,
+        fetchedUrl: typeof parsed.fetchedUrl === 'string' && parsed.fetchedUrl.trim()
+            ? parsed.fetchedUrl.trim()
+            : typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : fallbackUrl,
+        title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
+        description: typeof parsed.description === 'string' ? parsed.description.trim() : '',
+        headings: {
+            h1: normalizeStringArray(parsed.headings?.h1, 8),
+            h2: normalizeStringArray(parsed.headings?.h2, 30),
+            h3: normalizeStringArray(parsed.headings?.h3, 30),
+        },
+        paragraphs: normalizeStringArray(parsed.paragraphs, 60),
+        listItems: normalizeStringArray(parsed.listItems, 60),
+        text: typeof parsed.text === 'string' ? parsed.text.trim() : '',
+        wordCount: Number.isFinite(Number(parsed.wordCount)) ? Number(parsed.wordCount) : 0,
+    };
+
+    if (!content.wordCount) {
+        content.wordCount = [
+            content.title,
+            content.description,
+            ...content.headings.h1,
+            ...content.headings.h2,
+            ...content.headings.h3,
+            ...content.paragraphs,
+            ...content.listItems,
+            content.text,
+        ].join(' ').split(/\s+/).filter(Boolean).length;
+    }
+
+    return content;
 };
 
 const buildCompetitorPrompt = (url: string): string => `أنت محلل محتوى SEO تقني صارم داخل أداة تحرير محتوى.
@@ -183,6 +234,100 @@ ${url}
   "error": ""
 }`;
 
+const buildCompetitorHtmlPrompt = (html: string): string => `أنت محلل محتوى SEO تقني صارم داخل أداة تحرير محتوى.
+
+مهمتك الوحيدة هي قراءة كود HTML التالي فقط، ثم استخراج المحتوى التحريري الأساسي الظاهر في الصفحة بدقة وبشكل حرفي قدر الإمكان.
+
+ممنوع تمامًا:
+- استخدام الذاكرة أو المعرفة العامة.
+- توقع محتوى غير موجود داخل كود HTML.
+- إعادة الصياغة أو التحسين أو التلخيص.
+- ترجمة النص أو تغيير لغته.
+- إضافة عناوين أو أفكار أو فقرات غير موجودة نصيًا في الكود.
+- استخراج أكواد البرمجة أو أسماء الكلاسات أو CSS أو JavaScript أو JSON غير التحريري.
+- استخراج الهيدر أو الفوتر أو القوائم الجانبية أو عناصر التنقل أو الكوكيز أو التعليقات أو الإعلانات المتكررة أو الدعوات العامة المتكررة غير المرتبطة بالمحتوى الأساسي.
+- كتابة أي شرح خارج JSON.
+- استخدام Markdown.
+
+قواعد قراءة HTML:
+- تعامل مع الكود كصفحة HTML قد تأتي من أي نوع موقع أو قالب، ولا تعتمد على أسماء كلاس ثابتة.
+- حلّل بنية DOM منطقيًا وابحث عن المحتوى التحريري الرئيسي داخل عناصر مثل article أو main أو section أو post/content إذا وُجدت، لكن لا تعتمد عليها وحدها.
+- تجاهل عناصر script و style و noscript و svg و canvas و form و header و footer و nav و aside وكل عناصر البحث والمشاركة والتعليقات والتصنيفات والوسوم والمواضيع الحديثة إذا لم تكن جزءًا مباشرًا من المقال.
+- استخرج النص الظاهر للمستخدم من عناصر HTML، مع فك ترميز HTML entities مثل &amp; و &nbsp;، وتنظيف المسافات الزائدة فقط دون تغيير الجمل.
+- حافظ على علامات الترقيم والكلمات كما هي داخل النص.
+- إذا كان الكود ناتجًا عن ترجمة أو بروكسي ترجمة، استخرج محتوى المقال الظاهر فقط وتجاهل واجهة الترجمة وسكربتاتها.
+- يمكن استخدام title و meta description و canonical و base لملء حقول العنوان والوصف والرابط، لكن حقل text يجب أن يعتمد على المحتوى التحريري الظاهر في جسم الصفحة فقط.
+- إذا تعذر تحديد محتوى تحريري رئيسي واضح، أرجع JSON صالحًا يحتوي على وصف الخطأ داخل حقل "error".
+
+قواعد الاستخراج:
+- ركّز فقط على المحتوى التحريري الرئيسي للصفحة.
+- استخرج كما يظهر في HTML قدر الإمكان:
+  - عنوان الصفحة title
+  - وصف الصفحة description
+  - H1
+  - H2
+  - H3
+  - الفقرات الأساسية
+  - عناصر القوائم المهمة المرتبطة بالمحتوى التحريري
+- حافظ على ترتيب المحتوى من الأعلى إلى الأسفل كما يظهر في DOM.
+- كل عنوان أو فقرة أو عنصر قائمة يجب أن يكون مستندًا إلى نص موجود داخل كود HTML فقط.
+- إذا لم تجد دليلًا نصيًا واضحًا على فكرة معينة، لا تضفها.
+- إذا كان هناك نص مكرر أو دعائي يظهر في أكثر من موضع، تجاهله ما لم يكن جزءًا مباشرًا من المحتوى التحريري الأساسي.
+
+طريقة تنظيم حقل text:
+- ابدأ بـ H1 إن وجد.
+- بعد ذلك، نظّم المحتوى حسب H2 ثم H3 التابعة له.
+- لكل H2 مهم، اكتب:
+  "H2: العنوان"
+  ثم أدرج الفقرات التابعة له بهذا النمط:
+  "الفقرة الأولى: النص الكامل للفقرة كما يظهر في HTML."
+  "الفقرة الثانية: النص الكامل للفقرة كما يظهر في HTML."
+- لكل H3 تابع، اكتب:
+  "H3: العنوان"
+  ثم أدرج الفقرات التابعة له بنفس النمط.
+- عند وجود قائمة مهمة تحت H2 أو H3، أدرج عناصرها داخل text بهذا النمط:
+  "عنصر قائمة: النص كما يظهر في HTML."
+- لا تكتب أي تفسير أو تعليق خارج هذا التنظيم داخل text.
+
+طريقة ملء الحقول:
+- url: استخرج canonical أو og:url أو base href إن وجد، وإلا اكتب "html_input".
+- fetchedUrl: نفس قيمة url لأن المصدر هو كود HTML مُدخل يدويًا.
+- title: عنوان الصفحة من title أو og:title أو H1، دون تعديل.
+- description: وصف الصفحة من meta description أو og:description إن وجد، دون تعديل.
+- headings.h1: جميع عناوين H1 كما تظهر.
+- headings.h2: جميع عناوين H2 المهمة المرتبطة بالمحتوى الأساسي.
+- headings.h3: جميع عناوين H3 المهمة المرتبطة بالمحتوى الأساسي.
+- paragraphs: الفقرات الأساسية المستخرجة من المحتوى التحريري فقط، دون تعديل.
+- listItems: عناصر القوائم المهمة المرتبطة بالمحتوى التحريري فقط، دون تعديل.
+- text: الخريطة التحريرية الكاملة المنظمة حسب H1/H2/H3 والفقرات والقوائم.
+- wordCount: عدد كلمات النص الموجود داخل حقل text فقط.
+- error: اتركه فارغًا إذا تم الاستخراج بنجاح، أو اكتب سبب الخطأ إذا فشلت القراءة.
+
+أرجع JSON صالحًا فقط، بدون Markdown وبدون أي شرح خارجي.
+
+صيغة الإخراج المطلوبة:
+{
+  "url": "...",
+  "fetchedUrl": "...",
+  "title": "...",
+  "description": "...",
+  "headings": {
+    "h1": ["..."],
+    "h2": ["..."],
+    "h3": ["..."]
+  },
+  "paragraphs": ["..."],
+  "listItems": ["..."],
+  "text": "...",
+  "wordCount": 0,
+  "error": ""
+}
+
+كود HTML:
+<<<HTML_START
+${html}
+HTML_END>>>`;
+
 const RightSidebar: React.FC = () => {
     const { t, engineeringPrompts, apiKeys } = useUser();
     const {
@@ -199,6 +344,7 @@ const RightSidebar: React.FC = () => {
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history'>('new');
     const [aiCommand, setAiCommand] = useState('');
     const [competitorUrls, setCompetitorUrls] = useState<string[]>(() => loadStoredCompetitorUrls());
+    const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
     const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => createDefaultCompetitorExtractions());
     const [selectedReadyCommandId, setSelectedReadyCommandId] = useState('');
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
@@ -232,6 +378,14 @@ const RightSidebar: React.FC = () => {
             console.error('Could not save competitor links:', error);
         }
     }, [competitorUrls]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(COMPETITOR_HTML_STORAGE_KEY, JSON.stringify(competitorHtmls));
+        } catch (error) {
+            console.error('Could not save competitor HTML snippets:', error);
+        }
+    }, [competitorHtmls]);
 
     const readyCommands: ReadyCommand[] = useMemo(() => {
         return ENGINEERING_PROMPT_DEFINITIONS
@@ -291,22 +445,24 @@ const RightSidebar: React.FC = () => {
         setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? createEmptyCompetitorState() : item));
     };
 
-    const handleExtractCompetitor = async (index: number) => {
-        const url = competitorUrls[index]?.trim();
-        if (!url) {
-            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
-                status: 'error',
-                content: null,
-                error: tRs.competitorUrlRequired,
-            } : item));
-            return;
-        }
+    const handleCompetitorHtmlChange = (index: number, value: string) => {
+        setCompetitorHtmls(prev => prev.map((html, htmlIndex) => htmlIndex === index ? value : html));
+        setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? createEmptyCompetitorState() : item));
+    };
 
+    const runCompetitorExtraction = async (
+        index: number,
+        prompt: string,
+        useUrlContext: boolean,
+        source: CompetitorExtractionSource,
+        fallbackUrl: string,
+    ) => {
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), COMPETITOR_TIMEOUT_MS);
         setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
             ...item,
             status: 'loading',
+            source,
             error: '',
         } : item));
 
@@ -315,9 +471,9 @@ const RightSidebar: React.FC = () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    prompt: buildCompetitorPrompt(url),
+                    prompt,
                     apiKeys: apiKeys.gemini.filter(Boolean),
-                    useUrlContext: true,
+                    useUrlContext,
                 }),
                 signal: controller.signal,
             });
@@ -338,36 +494,11 @@ const RightSidebar: React.FC = () => {
                 throw new Error(parsed.error.trim());
             }
 
-            const content: CompetitorExtractedContent = {
-                url,
-                fetchedUrl: typeof parsed.fetchedUrl === 'string' && parsed.fetchedUrl.trim() ? parsed.fetchedUrl.trim() : url,
-                title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
-                description: typeof parsed.description === 'string' ? parsed.description.trim() : '',
-                headings: {
-                    h1: normalizeStringArray(parsed.headings?.h1, 8),
-                    h2: normalizeStringArray(parsed.headings?.h2, 30),
-                    h3: normalizeStringArray(parsed.headings?.h3, 30),
-                },
-                paragraphs: normalizeStringArray(parsed.paragraphs, 40),
-                listItems: normalizeStringArray(parsed.listItems, 40),
-                text: typeof parsed.text === 'string' ? parsed.text.trim() : '',
-                wordCount: Number.isFinite(Number(parsed.wordCount)) ? Number(parsed.wordCount) : 0,
-            };
-            if (!content.wordCount) {
-                content.wordCount = [
-                    content.title,
-                    content.description,
-                    ...content.headings.h1,
-                    ...content.headings.h2,
-                    ...content.headings.h3,
-                    ...content.paragraphs,
-                    ...content.listItems,
-                    content.text,
-                ].join(' ').split(/\s+/).filter(Boolean).length;
-            }
+            const content = normalizeCompetitorContent(parsed, fallbackUrl);
 
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
                 status: 'success',
+                source,
                 content,
                 error: '',
             } : item));
@@ -375,12 +506,44 @@ const RightSidebar: React.FC = () => {
             window.clearTimeout(timeoutId);
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
                 status: 'error',
+                source,
                 content: null,
                 error: error instanceof Error && error.name === 'AbortError'
                     ? tRs.competitorExtractionTimeout
                     : error instanceof Error ? error.message : tRs.competitorExtractionFailed,
             } : item));
         }
+    };
+
+    const handleExtractCompetitorUrl = async (index: number) => {
+        const url = competitorUrls[index]?.trim();
+        if (!url) {
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'error',
+                source: 'url',
+                content: null,
+                error: tRs.competitorUrlRequired,
+            } : item));
+            return;
+        }
+
+        await runCompetitorExtraction(index, buildCompetitorPrompt(url), true, 'url', url);
+    };
+
+    const handleExtractCompetitorHtml = async (index: number) => {
+        const html = competitorHtmls[index]?.trim();
+        if (!html) {
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'error',
+                source: 'html',
+                content: null,
+                error: tRs.competitorHtmlRequired,
+            } : item));
+            return;
+        }
+
+        const fallbackUrl = competitorUrls[index]?.trim() || 'html_input';
+        await runCompetitorExtraction(index, buildCompetitorHtmlPrompt(html), false, 'html', fallbackUrl);
     };
 
     const getPatchActionLabel = (operation: string) => (
@@ -627,29 +790,59 @@ const RightSidebar: React.FC = () => {
                 {competitorUrls.map((url, index) => {
                     const extraction = competitorExtractions[index] || createEmptyCompetitorState();
                     const content = extraction.content;
+                    const html = competitorHtmls[index] || '';
+                    const isLoading = extraction.status === 'loading';
+                    const isUrlLoading = isLoading && extraction.source === 'url';
+                    const isHtmlLoading = isLoading && extraction.source === 'html';
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
                                 {tRs.competitorLabel} {index + 1}
                             </label>
-                            <div className="flex items-stretch gap-2">
-                                <input
-                                    type="url"
-                                    value={url}
-                                    onChange={(event) => handleCompetitorUrlChange(index, event.target.value)}
-                                    placeholder={tRs.competitorUrlPlaceholder}
-                                    className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
-                                    dir="ltr"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => handleExtractCompetitor(index)}
-                                    disabled={extraction.status === 'loading'}
-                                    className="flex shrink-0 items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    {extraction.status === 'loading' ? <Wand2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
-                                    <span>{extraction.status === 'loading' ? tRs.extractingCompetitor : tRs.extractCompetitor}</span>
-                                </button>
+                            <div className="space-y-3">
+                                <div>
+                                    <div className="mb-1 text-[11px] font-bold text-gray-500 dark:text-gray-400">{tRs.competitorUrlField}</div>
+                                    <div className="flex items-stretch gap-2">
+                                        <input
+                                            type="url"
+                                            value={url}
+                                            onChange={(event) => handleCompetitorUrlChange(index, event.target.value)}
+                                            placeholder={tRs.competitorUrlPlaceholder}
+                                            className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
+                                            dir="ltr"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => handleExtractCompetitorUrl(index)}
+                                            disabled={isLoading}
+                                            className="flex shrink-0 items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {isUrlLoading ? <Wand2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
+                                            <span>{isUrlLoading ? tRs.extractingCompetitor : tRs.extractCompetitorFromUrl}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="mb-1 text-[11px] font-bold text-gray-500 dark:text-gray-400">{tRs.competitorHtmlField}</div>
+                                    <textarea
+                                        value={html}
+                                        onChange={(event) => handleCompetitorHtmlChange(index, event.target.value)}
+                                        placeholder={tRs.competitorHtmlPlaceholder}
+                                        rows={5}
+                                        className="w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-2 font-mono text-[11px] leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
+                                        dir="ltr"
+                                        spellCheck={false}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => handleExtractCompetitorHtml(index)}
+                                        disabled={isLoading}
+                                        className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#f2d675]"
+                                    >
+                                        {isHtmlLoading ? <Wand2 size={14} className="animate-spin" /> : <Code2 size={14} />}
+                                        <span>{isHtmlLoading ? tRs.extractingCompetitor : tRs.extractCompetitorFromHtml}</span>
+                                    </button>
+                                </div>
                             </div>
 
                             {extraction.status === 'error' && (
