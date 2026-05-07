@@ -643,51 +643,27 @@ const RightSidebar: React.FC = () => {
                                         <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{tRs.extractedContent}</span>
                                         <span className="shrink-0 text-[11px] text-gray-400">{content.wordCount} {t.common.words}</span>
                                     </div>
-                                    {content.title && (
-                                        <div className="font-bold leading-5 text-gray-800 dark:text-gray-100">{content.title}</div>
-                                    )}
-                                    {content.description && (
-                                        <p className="leading-5 text-gray-600 dark:text-gray-300">{content.description}</p>
-                                    )}
-                                    {content.headings.h1.length > 0 && (
-                                        <div>
-                                            <div className="mb-1 font-bold text-gray-700 dark:text-gray-200">H1</div>
-                                            <ul className="space-y-1 text-gray-600 dark:text-gray-300">
-                                                {content.headings.h1.map((item, itemIndex) => <li key={itemIndex}>- {item}</li>)}
-                                            </ul>
+                                    <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
+                                        <div className="mb-2 font-bold text-gray-700 dark:text-gray-200">{tRs.pageTableOfContents}</div>
+                                        <div className="max-h-44 overflow-y-auto custom-scrollbar leading-5 text-gray-600 dark:text-gray-300">
+                                            {content.headings.h1.length === 0 && content.headings.h2.length === 0 && content.headings.h3.length === 0 ? (
+                                                <span className="text-gray-400">{tRs.noTableOfContents}</span>
+                                            ) : (
+                                                <ul className="space-y-1">
+                                                    {content.headings.h1.map((item, itemIndex) => <li key={`h1-${itemIndex}`} className="font-bold">H1: {item}</li>)}
+                                                    {content.headings.h2.map((item, itemIndex) => <li key={`h2-${itemIndex}`} className="ps-3">H2: {item}</li>)}
+                                                    {content.headings.h3.map((item, itemIndex) => <li key={`h3-${itemIndex}`} className="ps-6 text-gray-500 dark:text-gray-400">H3: {item}</li>)}
+                                                </ul>
+                                            )}
                                         </div>
-                                    )}
-                                    {content.headings.h2.length > 0 && (
-                                        <details className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]" open>
-                                            <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">H2</summary>
-                                            <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto custom-scrollbar text-gray-600 dark:text-gray-300">
-                                                {content.headings.h2.map((item, itemIndex) => <li key={itemIndex}>- {item}</li>)}
-                                            </ul>
-                                        </details>
-                                    )}
-                                    {content.paragraphs.length > 0 && (
-                                        <details className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]" open>
-                                            <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">{tRs.importantParagraphs}</summary>
-                                            <div className="mt-2 max-h-44 space-y-2 overflow-y-auto custom-scrollbar leading-5 text-gray-600 dark:text-gray-300">
-                                                {content.paragraphs.map((item, itemIndex) => <p key={itemIndex}>{item}</p>)}
-                                            </div>
-                                        </details>
-                                    )}
-                                    {content.listItems.length > 0 && (
-                                        <details className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
-                                            <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">{tRs.importantListItems}</summary>
-                                            <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto custom-scrollbar leading-5 text-gray-600 dark:text-gray-300">
-                                                {content.listItems.map((item, itemIndex) => <li key={itemIndex}>- {item}</li>)}
-                                            </ul>
-                                        </details>
-                                    )}
+                                    </div>
                                     {content.text && (
-                                        <details className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
-                                            <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">{tRs.fullExtractedText}</summary>
+                                        <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
+                                            <div className="font-bold text-gray-700 dark:text-gray-200">{tRs.fullExtractedText}</div>
                                             <div className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap custom-scrollbar leading-5 text-gray-600 dark:text-gray-300">
                                                 {content.text}
                                             </div>
-                                        </details>
+                                        </div>
                                     )}
                                 </div>
                             )}
