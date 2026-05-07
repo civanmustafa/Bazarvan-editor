@@ -243,6 +243,29 @@ const splitDistributedTerms = (value: string, separator: RegExp): string[] => {
         .filter(Boolean);
 };
 
+const isAutoDistributeSeparatorLine = (line: string): boolean => {
+    const trimmed = line.trim();
+    if (trimmed.length < 2) return false;
+    return !/[A-Za-z0-9\u0600-\u06FF]/.test(trimmed);
+};
+
+const splitAutoDistributeSections = (value: string): string[] => {
+    const sections: string[] = [];
+    let current: string[] = [];
+
+    value.split(/\r?\n/).forEach(line => {
+        if (isAutoDistributeSeparatorLine(line)) {
+            sections.push(current.join('\n').trim());
+            current = [];
+            return;
+        }
+        current.push(line);
+    });
+
+    sections.push(current.join('\n').trim());
+    return sections;
+};
+
 const getKeywordStatScore = (analysis: KeywordStats): number => {
     if (!analysis || analysis.status === 'info') return 0;
     if (analysis.status === 'pass') return 100;
@@ -592,7 +615,7 @@ const LeftSidebar: React.FC = () => {
     const handleAutoDistribute = (text: string) => {
         if (!text.trim()) return;
     
-        const parts = text.split(/^\s*[\p{P}\p{S}]{2,}\s*$/mu);
+        const parts = splitAutoDistributeSections(text);
     
         const primaryAndSynonymsPart = (parts[0] || '').trim();
         const lsiPart = (parts[1] || '').trim();
