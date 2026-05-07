@@ -8,6 +8,7 @@ import { useEditor } from '../contexts/EditorContext';
 import { useModal } from '../contexts/ModalContext';
 import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
+import NewArticleLanguageModal from './NewArticleLanguageModal';
 
 /*
  * Dashboard is the user workspace:
@@ -232,6 +233,7 @@ const Dashboard: React.FC = () => {
   
   const [activityData, setActivityData] = useState<ActivityData>(getActivityData());
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [filters, setFilters] = useState({
     dateFrom: '',
@@ -381,6 +383,11 @@ const Dashboard: React.FC = () => {
     setIsConfirmModalOpen(false);
   };
 
+  const handleChooseNewArticleLanguage = (lang: 'ar' | 'en') => {
+    setIsNewArticleLanguageModalOpen(false);
+    onNewArticle(lang);
+  };
+
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFilters(prev => ({ ...prev, [name]: value }));
@@ -458,7 +465,7 @@ const Dashboard: React.FC = () => {
           </div>
            <div className="flex items-center gap-2">
             <button
-              onClick={onNewArticle}
+              onClick={() => setIsNewArticleLanguageModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
             >
               <PlusSquare size={18} />
@@ -715,6 +722,13 @@ const Dashboard: React.FC = () => {
                 </div>
             </div>
         </div>
+      )}
+      {isNewArticleLanguageModalOpen && (
+        <NewArticleLanguageModal
+          t={t}
+          uiLanguage={uiLanguage}
+          onChoose={handleChooseNewArticleLanguage}
+        />
       )}
     </div>
   );

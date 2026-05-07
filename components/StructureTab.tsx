@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
 import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewVariant, CheckResult } from '../types';
-import { AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown } from 'lucide-react';
+import { AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown, Hash } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
@@ -130,6 +130,23 @@ const getCriteriaStatusCounts = (checks?: BulkFixReviewVariant['criteriaChecks']
     { pass: 0, fail: 0, unknown: 0 }
   )
 );
+
+const MiniStat: React.FC<{ icon: React.ReactNode; value: string | number; title: string; tone?: 'red' | 'gold' }> = ({ icon, value, title, tone = 'gold' }) => {
+  const toneClass = tone === 'red'
+    ? 'text-red-700 bg-red-50 border-red-100 dark:text-red-300 dark:bg-red-900/20 dark:border-red-900/40'
+    : 'text-[#b8922e] bg-[#d4af37]/10 border-[#d4af37]/20 dark:text-[#f2d675] dark:bg-[#d4af37]/15 dark:border-[#d4af37]/25';
+
+  return (
+    <div
+      className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 ${toneClass}`}
+      title={title}
+      aria-label={title}
+    >
+      <span className="flex-shrink-0">{icon}</span>
+      <span className="truncate text-[11px] font-black tabular-nums">{value}</span>
+    </div>
+  );
+};
 
 const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighlighted?: boolean; onInfoClick: (item: CheckResult) => void; uiLanguage: 'ar' | 'en'; }> = ({ item, onClick, isHighlighted, onInfoClick, uiLanguage }) => {
   const t = translations[uiLanguage];
@@ -664,6 +681,15 @@ const StructureTab: React.FC = () => {
     const [isBulkFixReviewVisible, setIsBulkFixReviewVisible] = useState(true);
     const t = translations[uiLanguage];
     const tSt = t.structureTab;
+    const criteriaMiniStats = uiLanguage === 'ar'
+        ? {
+            violatingCriteria: 'عدد المعايير المخالفة',
+            violations: 'عدد المخالفات',
+        }
+        : {
+            violatingCriteria: 'Violating criteria count',
+            violations: 'Violations count',
+        };
 
     const fixableViolationGroups = useMemo(() => {
         const groups: { [title: string]: number } = {};
@@ -847,6 +873,10 @@ const StructureTab: React.FC = () => {
            interaction/CTA, and conclusion. Each point moves outward as that category improves.
            Edit this display here; edit the underlying rule calculations in utils/analysis/rules/* and useContentAnalysis.ts. */}
        <div className="px-1 py-1">
+         <div className="mb-2 grid grid-cols-2 gap-1.5">
+           <MiniStat icon={<AlertCircleIcon size={14} />} value={stats.violatingCriteriaCount} title={criteriaMiniStats.violatingCriteria} tone={stats.violatingCriteriaCount > 0 ? 'red' : 'gold'} />
+           <MiniStat icon={<Hash size={14} />} value={stats.totalErrorsCount} title={criteriaMiniStats.violations} tone={stats.totalErrorsCount > 0 ? 'red' : 'gold'} />
+         </div>
          <SpiderStats metrics={criteriaSpiderMetrics} compact />
        </div>
        <div className="px-1">

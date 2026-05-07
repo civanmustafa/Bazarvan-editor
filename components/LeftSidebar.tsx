@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check, Sparkles, Loader2 } from 'lucide-react';
+import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check, Sparkles, Loader2, Hash, Percent } from 'lucide-react';
 import DuplicatesTab from './DuplicatesTab';
 import GoalTab from './GoalTab';
 import { SECONDARY_COLORS } from '../constants';
@@ -258,6 +258,25 @@ const getKeywordStatTone = (analysis: KeywordStats): SpiderStatMetric['tone'] =>
     return 'neutral';
 };
 
+const MiniStat: React.FC<{ icon: React.ReactNode; value: string | number; title: string; tone?: 'gold' | 'red' | 'green' }> = ({ icon, value, title, tone = 'gold' }) => {
+    const toneClass = tone === 'red'
+        ? 'text-red-700 bg-red-50 border-red-100 dark:text-red-300 dark:bg-red-900/20 dark:border-red-900/40'
+        : tone === 'green'
+          ? 'text-emerald-700 bg-emerald-50 border-emerald-100 dark:text-emerald-300 dark:bg-emerald-900/20 dark:border-emerald-900/40'
+          : 'text-[#b8922e] bg-[#d4af37]/10 border-[#d4af37]/20 dark:text-[#f2d675] dark:bg-[#d4af37]/15 dark:border-[#d4af37]/25';
+
+    return (
+        <div
+            className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 ${toneClass}`}
+            title={title}
+            aria-label={title}
+        >
+            <span className="flex-shrink-0">{icon}</span>
+            <span className="truncate text-[11px] font-black tabular-nums">{value}</span>
+        </div>
+    );
+};
+
 
 const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
@@ -265,7 +284,7 @@ const LeftSidebar: React.FC = () => {
   const { applyHighlights, clearAllHighlights, highlightedItem, setHighlightedItem } = useInteraction();
   const { generateSemanticKeywords } = useAI();
   
-  const { keywordAnalysis, duplicateAnalysis } = analysisResults;
+  const { keywordAnalysis, duplicateAnalysis, duplicateStats } = analysisResults;
 
   const [activeTab, setActiveTab] = React.useState<'keywords' | 'duplicates'>('keywords');
   const [lsiInputValue, setLsiInputValue] = React.useState('');
@@ -444,6 +463,22 @@ const LeftSidebar: React.FC = () => {
       corrected: repeatedInstances === 0 ? 1 : 0,
     };
   });
+  const duplicateRepeatedPhrasesCount = (Object.values(duplicateAnalysis).flat() as { count: number }[]).length;
+  const duplicateOccurrencesCount = (Object.values(duplicateAnalysis).flat() as { count: number }[]).reduce((sum, phrase) => sum + phrase.count, 0);
+  const uniqueWordsPercentage = duplicateStats.totalWords > 0
+    ? `${((duplicateStats.uniqueWords / duplicateStats.totalWords) * 100).toFixed(1)}%`
+    : '0%';
+  const duplicateMiniStats = uiLanguage === 'ar'
+    ? {
+        repeatedPhrases: 'عدد العبارات المكررة',
+        totalOccurrences: 'إجمالي عدد التكرارات',
+        uniquePercentage: 'نسبة الكلمات الفريدة في النص',
+      }
+    : {
+        repeatedPhrases: 'Repeated phrases count',
+        totalOccurrences: 'Total repetitions count',
+        uniquePercentage: 'Unique words percentage',
+      };
 
   const handleAddSecondary = () => {
     setKeywords(k => ({ ...k, secondaries: [...k.secondaries, ''] }));
@@ -960,7 +995,7 @@ const LeftSidebar: React.FC = () => {
   };
   
   return (
-    <aside className="relative z-30 basis-[18.7%] bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg flex flex-col h-full min-w-0">
+    <aside className="relative z-30 basis-[20.57%] bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg flex flex-col h-full min-w-0">
         <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
             <button onClick={() => setActiveTab('keywords')} className={getTabClass('keywords')}>
                 <KeyRound size={16} />
@@ -977,10 +1012,15 @@ const LeftSidebar: React.FC = () => {
                  // Compact keyword/goal tab network: primary, synonyms, company, and LSI.
                  <SpiderStats metrics={keywordDetailSpiderMetrics} compact />
              ) : (
-                uiLanguage === 'ar' && (
-                    // Compact duplicate stats shown under the tab buttons for the duplicate tab.
+                <div className="space-y-2">
+                    <div className="grid grid-cols-3 gap-1.5">
+                        <MiniStat icon={<Hash size={14} />} value={duplicateRepeatedPhrasesCount} title={duplicateMiniStats.repeatedPhrases} tone={duplicateRepeatedPhrasesCount > 0 ? 'red' : 'green'} />
+                        <MiniStat icon={<Repeat size={14} />} value={duplicateOccurrencesCount} title={duplicateMiniStats.totalOccurrences} tone={duplicateOccurrencesCount > 0 ? 'red' : 'green'} />
+                        <MiniStat icon={<Percent size={14} />} value={uniqueWordsPercentage} title={duplicateMiniStats.uniquePercentage} tone="gold" />
+                    </div>
+                    {/* Compact duplicate stats shown under the tab buttons for the duplicate tab. */}
                     <SpiderStats metrics={duplicateHeaderSpiderMetrics} compact />
-                )
+                </div>
              )}
         </div>
         <div className="flex-grow overflow-y-auto custom-scrollbar">

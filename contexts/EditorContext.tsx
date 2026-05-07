@@ -177,7 +177,7 @@ interface EditorContextType {
     handleClearKeywords: () => void;
     handleSaveDraft: () => void;
     handleRestoreDraft: () => void;
-    handleNewArticle: () => void;
+    handleNewArticle: (lang: 'ar' | 'en') => void;
     handleLoadArticle: (title: string, article: ArticleActivity) => void;
 }
 
@@ -347,7 +347,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setTimeout(() => setRestoreStatus('idle'), 2000);
     }, [editor, handleLanguageChange]);
 
-    const handleNewArticle = useCallback(() => {
+    const handleNewArticle = useCallback((lang: 'ar' | 'en') => {
         handleSaveDraft();
         if (editor) {
             setTitle('');
@@ -355,10 +355,10 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setKeywords(INITIAL_KEYWORDS);
             setGoalContext(normalizeGoalContext());
             editor.commands.setContent(INITIAL_CONTENT);
-            handleLanguageChange(preferredLanguage);
+            handleLanguageChange(lang);
             setCurrentView('editor');
         }
-    }, [editor, handleSaveDraft, preferredLanguage, setCurrentView, handleLanguageChange]);
+    }, [editor, handleSaveDraft, setCurrentView, handleLanguageChange]);
 
     const handleLoadArticle = useCallback((titleStr: string, article: ArticleActivity) => {
         if (editor && article) {

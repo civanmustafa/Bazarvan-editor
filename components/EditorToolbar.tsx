@@ -11,6 +11,7 @@ import UtilityActions from './toolbar/UtilityActions';
 import AIActions from './toolbar/AIActions';
 import DocumentActions from './toolbar/DocumentActions';
 import FindAndReplace from './toolbar/FindAndReplace';
+import NewArticleLanguageModal from './NewArticleLanguageModal';
 
 /*
  * Toolbar composition:
@@ -96,6 +97,7 @@ const EditorToolbar: React.FC = () => {
     const isAllKeywordsHighlighted = highlightedItem === '__ALL_KEYWORDS__';
 
     const [isFindReplaceVisible, setIsFindReplaceVisible] = useState(false);
+    const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   
     const isAnyGeminiLoading = isAiCommandLoading || isAiLoading.gemini;
   
@@ -107,6 +109,15 @@ const EditorToolbar: React.FC = () => {
     const handleToggleFindReplace = useCallback(() => {
         setIsFindReplaceVisible(prev => !prev);
     }, []);
+
+    const handleStartNewArticle = useCallback(() => {
+        setIsNewArticleLanguageModalOpen(true);
+    }, []);
+
+    const handleChooseNewArticleLanguage = useCallback((lang: 'ar' | 'en') => {
+        setIsNewArticleLanguageModalOpen(false);
+        onNewArticle(lang);
+    }, [onNewArticle]);
 
     // Mirror TipTap selection/formatting state into button active states and counters.
     useEffect(() => {
@@ -157,6 +168,7 @@ const EditorToolbar: React.FC = () => {
     if (!editor) return null;
     
     return (
+      <>
       <div className="sticky top-0 z-20 flex flex-col gap-1 p-1 bg-[#F2F3F5] dark:bg-[#1F1F1F] border-b border-gray-300 dark:border-[#3C3C3C]">
         <div className="flex items-center gap-4 w-full">
           <input
@@ -236,7 +248,7 @@ const EditorToolbar: React.FC = () => {
                     saveStatus={saveStatus}
                     onRestoreDraft={onRestoreDraft}
                     onSaveDraft={onSaveDraft}
-                    onNewArticle={onNewArticle}
+                    onNewArticle={handleStartNewArticle}
                     onShowDashboard={onShowDashboard}
                     onLogout={onLogout}
                     onSetIsDarkMode={setIsDarkMode}
@@ -244,6 +256,14 @@ const EditorToolbar: React.FC = () => {
             </div>
         </div>
       </div>
+      {isNewArticleLanguageModalOpen && (
+        <NewArticleLanguageModal
+          t={t}
+          uiLanguage={uiLanguage}
+          onChoose={handleChooseNewArticleLanguage}
+        />
+      )}
+      </>
     );
 };
 

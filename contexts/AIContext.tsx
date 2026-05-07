@@ -20,7 +20,7 @@ import type {
     GoalContext,
     StructureAnalysis,
 } from '../types';
-import { parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
+import { parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { CTA_WORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
@@ -2758,7 +2758,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const applied = editor
                     .chain()
                     .focus()
-                    .insertContentAt({ from: resolvedRange.from, to: resolvedRange.to }, parseMarkdownToHtml(fixedText), { updateSelection: true })
+                    .insertContentAt({ from: resolvedRange.from, to: resolvedRange.to }, parseMarkdownToArticleHtml(fixedText, articleLanguage), { updateSelection: true })
                     .scrollIntoView()
                     .run();
                 if (!applied) {
@@ -2831,7 +2831,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 .focus()
                 .insertContentAt(
                     target.mode === 'replace' ? { from: target.from, to: target.to } : target.from,
-                    parseMarkdownToHtml(patch.contentMarkdown),
+                    parseMarkdownToArticleHtml(patch.contentMarkdown, articleLanguage),
                     { updateSelection: true }
                 )
                 .scrollIntoView()
@@ -2868,7 +2868,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             )));
             return;
         }
-        editor.chain().focus().insertContentAt({ from: resolvedRange.from, to: resolvedRange.to }, parseMarkdownToHtml(text)).run();
+        editor.chain().focus().insertContentAt({ from: resolvedRange.from, to: resolvedRange.to }, parseMarkdownToArticleHtml(text, articleLanguage)).run();
         markHistorySuggestionApplied(id, text);
     };
 

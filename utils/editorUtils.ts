@@ -238,6 +238,33 @@ export const parseMarkdownToHtml = (markdown: string): string => {
     return htmlLines.join('\n');
 };
 
+export const applyArticleLanguageFlowToHtml = (html: string, articleLanguage: 'ar' | 'en'): string => {
+    if (!html) return '';
+
+    const direction = articleLanguage === 'ar' ? 'rtl' : 'ltr';
+    const alignment = articleLanguage === 'ar' ? 'right' : 'left';
+
+    if (typeof DOMParser === 'undefined') {
+        return html;
+    }
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
+    const root = doc.body.firstElementChild as HTMLElement | null;
+    if (!root) return html;
+
+    root.querySelectorAll<HTMLElement>('p, h1, h2, h3, h4, li, td, th').forEach(element => {
+        element.setAttribute('dir', direction);
+        element.style.textAlign = alignment;
+    });
+
+    return root.innerHTML;
+};
+
+export const parseMarkdownToArticleHtml = (markdown: string, articleLanguage: 'ar' | 'en'): string => (
+    applyArticleLanguageFlowToHtml(parseMarkdownToHtml(markdown), articleLanguage)
+);
+
 
 export const getNodeText = (node: any): string => {
   if (!node) {

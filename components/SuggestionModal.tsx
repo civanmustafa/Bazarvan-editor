@@ -4,13 +4,13 @@ import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
 import { useModal } from '../contexts/ModalContext';
 import { useEditor } from '../contexts/EditorContext';
-import { parseMarkdownToHtml } from '../utils/editorUtils';
+import { parseMarkdownToArticleHtml, parseMarkdownToHtml } from '../utils/editorUtils';
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 const SuggestionModal: React.FC = () => {
   const { t } = useUser();
-  const { editor, setTitle } = useEditor();
+  const { editor, setTitle, articleLanguage } = useEditor();
   const { suggestion, setSuggestion, markHistorySuggestionApplied } = useAI();
   const { closeModal } = useModal();
 
@@ -98,7 +98,7 @@ const SuggestionModal: React.FC = () => {
       switch (suggestion.action) {
         case 'replace-text':
           if (suggestion.from != null && suggestion.to != null) {
-            const contentHtml = parseMarkdownToHtml(acceptedSuggestion);
+            const contentHtml = parseMarkdownToArticleHtml(acceptedSuggestion, articleLanguage);
             editor.chain().focus()
               .insertContentAt(
                 { from: suggestion.from, to: suggestion.to },
