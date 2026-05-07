@@ -3,11 +3,11 @@ import { createCheckResult, getNodeSizeFromJSON } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkPunctuation = (context: AnalysisContext): CheckResult => {
-    const { nonEmptyParagraphs, t } = context;
-    const tRule = t.structureAnalysis['Ø¹Ù„Ø§Ù…Ø§Øª Ø§Ù„ØªØ±Ù‚ÙŠÙ…'];
-    const title = tRule.title;
-    const description = tRule.description;
-    const requiredText = tRule.required;
+    const { nonEmptyParagraphs, t, uiLanguage } = context;
+    const tRule = t.structureAnalysis['علامات الترقيم'];
+    const title = tRule?.title || (uiLanguage === 'ar' ? 'علامات الترقيم' : 'Punctuation');
+    const description = tRule?.description || '';
+    const requiredText = tRule?.required || (uiLanguage === 'ar' ? 'إنهاء الفقرات بعلامة ترقيم' : 'End paragraphs with punctuation');
     const repeatedPunctuationRegex = /([.,!?;:،؛؟])\1+/gu;
 
     if (nonEmptyParagraphs.length === 0) {
@@ -15,7 +15,7 @@ export const checkPunctuation = (context: AnalysisContext): CheckResult => {
     }
 
     const missingEndPunctuationViolations = nonEmptyParagraphs
-        .filter(p => !/[.!?ØŸ؟:]\s*$/.test(p.text.trim()))
+        .filter(p => !/[.!?؟:]\s*$/.test(p.text.trim()))
         .map(v => ({
             from: v.pos,
             to: v.pos + getNodeSizeFromJSON(v.node),
@@ -39,7 +39,7 @@ export const checkPunctuation = (context: AnalysisContext): CheckResult => {
     });
 
     const violations = [...missingEndPunctuationViolations, ...repeatedPunctuationViolations];
-    
+
     if (violations.length === 0) {
         return createCheckResult(title, 'pass', t.common.good, requiredText, 1, description);
     }
