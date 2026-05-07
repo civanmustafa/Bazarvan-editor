@@ -61,6 +61,16 @@ const createDefaultCompetitorExtractions = () => [
     createEmptyCompetitorState(),
 ];
 
+const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string => {
+    const labels: Record<string, { ar: string; en: string }> = {
+        improveConclusion: { ar: 'تحسين الخاتمة', en: 'Improve conclusion' },
+        articleTitle: { ar: 'عنوان المقالة', en: 'Article Title' },
+        articleToc: { ar: 'جدول المحتويات', en: 'Table of Contents' },
+        currentConclusion: { ar: 'الخاتمة الحالية', en: 'Current Conclusion' },
+    };
+    return labels[key]?.[isArabic ? 'ar' : 'en'] || key;
+};
+
 const loadStoredCompetitorUrls = (): string[] => {
     try {
         const parsed = JSON.parse(localStorage.getItem(COMPETITOR_STORAGE_KEY) || '[]');
@@ -536,15 +546,16 @@ const RightSidebar: React.FC = () => {
     }, [competitorHtmls]);
 
     const readyCommands: ReadyCommand[] = useMemo(() => {
+        const isArabic = t.locale === 'ar';
         return ENGINEERING_PROMPT_DEFINITIONS
             .filter(definition => definition.source === 'smartAnalysis')
             .map(definition => ({
                 id: definition.id,
-                label: (tRs as any)[definition.labelKey] || definition.labelKey,
+                label: (tRs as any)[definition.labelKey] || getSmartAnalysisLabelFallback(definition.labelKey, isArabic),
                 value: getEngineeringPrompt(engineeringPrompts, definition.id),
                 options: definition.options,
             }));
-    }, [engineeringPrompts, tRs]);
+    }, [engineeringPrompts, t.locale, tRs]);
 
     useEffect(() => {
         if (!selectedReadyCommandId) return;
@@ -899,7 +910,7 @@ const RightSidebar: React.FC = () => {
                             {Object.keys(aiOptions).map((opt) => (
                                 <label key={opt} className="flex items-center gap-2 text-xs cursor-pointer text-gray-600 dark:text-gray-400">
                                     <input type="checkbox" checked={(aiOptions as any)[opt]} onChange={() => handleOptionChange(opt as any)} className="rounded text-[#d4af37]" />
-                                    {(tRs as any)[opt] || opt}
+                                    {(tRs as any)[opt] || getSmartAnalysisLabelFallback(opt, t.locale === 'ar')}
                                 </label>
                             ))}
                         </div>

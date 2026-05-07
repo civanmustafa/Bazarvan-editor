@@ -5,7 +5,7 @@ import type { AnalysisContext } from '../analysisUtils';
 const noSpaceBeforeMarks = new Set(['.', '!', '؟', '?', ',', '،']);
 const requireSpaceBeforeMarks = new Set(['"', '/', '(', '*', '-', '&', '%']);
 const requireSpaceAfterMarks = new Set(['-', '%', '&', ')', '!']);
-const punctuationAfterClosingParen = new Set(['،', ',', '.', '!']);
+const punctuationAfterClosingParen = new Set(['،', ',', '.', '!', '؟', '?', ';', ':', '؛']);
 const whitespaceRegex = /[\s\u00A0]/u;
 const extraSpacesRegex = / {2,}/g;
 const digitRegex = /\p{N}/u;
@@ -158,6 +158,15 @@ export const checkPunctuationSpacing = (context: AnalysisContext): CheckResult =
             }
 
             if (requireSpaceAfterMarks.has(mark) && index < text.length - 1) {
+                const isPunctuationAfterClosingParen =
+                    mark === ')' &&
+                    !!nextChar &&
+                    punctuationAfterClosingParen.has(nextChar);
+
+                if (isPunctuationAfterClosingParen) {
+                    continue;
+                }
+
                 const hasExactlyOneSpaceAfter =
                     isWhitespace(nextChar) &&
                     (index + 2 >= text.length || !isWhitespace(text[index + 2]));

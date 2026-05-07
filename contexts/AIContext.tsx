@@ -2225,6 +2225,32 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             `- LSI: ${keywords.lsi.filter(Boolean).join(', ') || 'لم تحدد'}`,
         ].join('\n');
         contextParts.push(`**الكلمات والعلامة المستهدفة:**\n${keywordContext}`);
+        if (articleToc) {
+            const tocString = generateToc(editor);
+            if (tocString) {
+                parts.push(`**جدول محتويات المقالة:**\n${tocString}`);
+            }
+        }
+        if (currentConclusion && editor) {
+            const h2Nodes: { pos: number; text: string }[] = [];
+            editor.state.doc.descendants((node, pos) => {
+                if (node.type.name === 'heading' && node.attrs.level === 2) {
+                    h2Nodes.push({ pos, text: node.textContent });
+                }
+            });
+            const lastH2 = h2Nodes[h2Nodes.length - 1];
+            const conclusionRule = analysisResults.structureAnalysis.lastH2IsConclusion;
+            const looksLikeConclusion = lastH2 && (
+                conclusionRule?.status === 'pass' ||
+                /خاتمة|خلاصة|conclusion|summary|finally|in conclusion/i.test(lastH2.text)
+            );
+            if (lastH2 && looksLikeConclusion) {
+                const conclusionText = editor.state.doc.textBetween(lastH2.pos, editor.state.doc.content.size, '\n').trim();
+                if (conclusionText) {
+                    parts.push(`**الخاتمة الحالية إن وجدت:**\n---\n${conclusionText}\n---`);
+                }
+            }
+        }
         const goalContextText = formatGoalContext(goalContext);
         if (goalContextText) contextParts.push(`**سياق هدف الصفحة والجمهور:**\n${goalContextText}`);
         if (sectionHeading) contextParts.push(`**سياق العنوان:** "${sectionHeading}"`);
@@ -2236,6 +2262,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const generateContextAwarePrompt = useCallback((userPrompt: string, options: any) => {
         const {
             manualCommand,
+            articleTitle,
+            articleToc,
+            currentConclusion,
             editorText,
             targetKeywords,
             companyName,
@@ -2248,7 +2277,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             ? `أنت خبير SEO وكاتب محتوى محترف. هدف الصفحة هو "${pageObjective}".`
             : 'أنت خبير SEO وكاتب محتوى محترف.'
         );
-        if (title.trim()) {
+        if (articleTitle && title.trim()) {
             parts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
         }
         parts.push(`**لغة المقال:** ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`);
@@ -2306,7 +2335,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
              parts.push(userPrompt);
         }
         return parts.join('\n\n');
-    }, [title, keywords, text, goalContext, articleLanguage, analysisResults, t]);
+    }, [editor, title, keywords, text, goalContext, articleLanguage, analysisResults, t]);
 
     const generateSemanticKeywords = useCallback(async (): Promise<{ secondaries: string[]; lsi: string[]; error?: string }> => {
         const primary = keywords.primary.trim();

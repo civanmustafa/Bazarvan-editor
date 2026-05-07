@@ -29,6 +29,9 @@ export type ClientGoalContexts = Record<string, GoalContext>;
 
 export interface AiAnalysisOptions {
   manualCommand: boolean;
+  articleTitle: boolean;
+  articleToc: boolean;
+  currentConclusion: boolean;
   editorText: boolean;
   targetKeywords: boolean;
   companyName: boolean;

@@ -7,6 +7,7 @@ export const ENGINEERING_PROMPT_IDS = {
   smartAnalysis: {
     entityMap: 'smartAnalysis.entityMap',
     fullArticleAudit: 'smartAnalysis.fullArticleAudit',
+    improveConclusion: 'smartAnalysis.improveConclusion',
     improveWeakest: 'smartAnalysis.improveWeakest',
     suggestNewIdea: 'smartAnalysis.suggestNewIdea',
     peopleQuestions: 'smartAnalysis.peopleQuestions',
@@ -37,6 +38,9 @@ export const ENGINEERING_PROMPT_IDS = {
 
 export const DEFAULT_SMART_ANALYSIS_OPTIONS: AiAnalysisOptions = {
   manualCommand: true,
+  articleTitle: true,
+  articleToc: false,
+  currentConclusion: false,
   editorText: true,
   targetKeywords: true,
   goalContext: true,
@@ -47,6 +51,44 @@ export const DEFAULT_SMART_ANALYSIS_OPTIONS: AiAnalysisOptions = {
   interactionCtaCriteria: false,
   conclusionCriteria: false,
 };
+
+const IMPROVE_CONCLUSION_PROMPT = `أنت كاتب محتوى محترف وخبير SEO / AEO / GEO / LLM SEO، ومتخصص في تحسين خواتيم المحتوى بما يخدم هدف الصفحة والجمهور ونية البحث.
+
+سيتم إرفاق البيانات التالية تلقائيا مع الطلب:
+- عنوان المقالة.
+- سياق هدف الصفحة والجمهور.
+- جدول محتويات المقالة.
+- الخاتمة الحالية إن وجدت.
+- الكلمات المفتاحية المستهدفة.
+- معايير الخاتمة المطلوب الالتزام بها.
+
+المطلوب:
+اكتب خاتمة محسّنة احترافية وطبيعية ومناسبة لهدف الصفحة، مع الالتزام الكامل بالمعايير المرفقة.
+
+قواعد الكتابة:
+- لا تكتب خاتمة عامة أو مكررة.
+- اربط الخاتمة مباشرة بموضوع المقالة ونية البحث.
+- لخّص القيمة الأساسية التي حصل عليها القارئ دون إعادة شرح المقالة.
+- استخدم الكلمة المفتاحية الأساسية مرة واحدة فقط وبشكل طبيعي إن أمكن.
+- استخدم صيغة بديلة أو كلمة LSI واحدة فقط إذا كان ذلك يخدم السياق.
+- أضف CTA واضحا ومناسبا إذا كان هدف الصفحة خدميا أو تجاريا.
+- إذا كان هدف الصفحة تعليميا، اجعل الخاتمة إرشادية لا بيعية.
+- اجعل الخاتمة مناسبة للظهور في نتائج البحث وملخصات الذكاء الاصطناعي.
+- لا تضف وعودا مبالغا فيها أو ادعاءات غير مثبتة.
+- لا تستخدم حشوا إنشائيا مثل: في الختام، مما لا شك فيه، لا يخفى على أحد.
+- حافظ على أسلوب بشري، مباشر، وواثق.
+
+معايير التقييم قبل التسليم:
+- هل الخاتمة تخدم نية البحث؟
+- هل تربط المقالة بهدف الصفحة؟
+- هل تحتوي على قيمة واضحة للقارئ؟
+- هل تتضمن CTA مناسب دون مبالغة عند الحاجة؟
+- هل الكلمة المفتاحية مستخدمة طبيعيا؟
+- هل الخاتمة صالحة للاقتباس أو التلخيص من أدوات الذكاء الاصطناعي؟
+- هل التزمت بجميع المعايير المرفقة؟
+
+المخرجات المطلوبة:
+الخاتمة المحسّنة فقط، دون شرح أو عناوين إضافية.`;
 
 const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO/LLM SEO. افحص المحتوى التالي بعمق ولكن باختصار، وقيّمه من حيث مطابقته لنية البحث، كفاية الإجابة، قابلية الاقتباس في AI Overviews، الفجوات المعرفية، الأسئلة الناقصة، الادعاءات غير المدعومة، الكيانات الناقصة، البنية، وقوة التحويل.
 
@@ -372,6 +414,27 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {
+    id: ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion,
+    source: 'smartAnalysis',
+    labelKey: 'improveConclusion',
+    defaultValue: IMPROVE_CONCLUSION_PROMPT,
+    options: {
+      manualCommand: true,
+      articleTitle: true,
+      articleToc: true,
+      currentConclusion: true,
+      editorText: false,
+      targetKeywords: true,
+      companyName: true,
+      goalContext: true,
+      keywordCriteria: false,
+      basicStructureCriteria: false,
+      headingsSequenceCriteria: false,
+      interactionCtaCriteria: false,
+      conclusionCriteria: true,
+    },
+  },
+  {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.improveWeakest,
     source: 'smartAnalysis',
     labelKey: 'improveWeakest',
@@ -562,7 +625,16 @@ export const DEFAULT_ENGINEERING_PROMPTS: EngineeringPrompts = ENGINEERING_PROMP
   return acc;
 }, {} as EngineeringPrompts);
 
+const LEGACY_IMPROVE_WORDING_PROMPT = `قم بتحسين صياغة النص التالي لجعله أكثر احترافية وسلاسة، مع الحفاظ على نفس المعنى ونفس عدد الكلمات تقريبًا.\n\nالنص:\n---\n${'${selectedText}'}\n---`;
+
 const sanitizeEngineeringPrompt = (id: EngineeringPromptId, value: string): string => {
+  if (
+    id === ENGINEERING_PROMPT_IDS.toolbar.improveWording &&
+    value.trim() === LEGACY_IMPROVE_WORDING_PROMPT.trim()
+  ) {
+    return DEFAULT_ENGINEERING_PROMPTS[id];
+  }
+
   if (id !== ENGINEERING_PROMPT_IDS.smartAnalysis.structuredContent) return value;
   return value.replace(
     /\n+ثالثًا: أفضل 3 فرص ذات أولوية[\s\S]*?رابعًا: ملاحظات تحسين سريعة[\s\S]*?(?=\n+قواعد مهمة:)/,
