@@ -118,6 +118,19 @@ const normalizeStringArray = (value: unknown, maxItems: number): string[] => {
         .slice(0, maxItems);
 };
 
+const stripExtractionLabels = (value: string): string => (
+    value
+        .split(/\r?\n/)
+        .map(line => line
+            .replace(/^\s*H[1-6]\s*[:：]\s*/i, '')
+            .replace(/^\s*الفقرة\s+(?:الأولى|الثانية|الثالثة|الرابعة|الخامسة|السادسة|السابعة|الثامنة|التاسعة|العاشرة|\d+)\s*[:：]\s*/i, '')
+            .replace(/^\s*عنصر\s+قائمة\s*[:：]\s*/i, '')
+        )
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+);
+
 const normalizeCompetitorContent = (parsed: any, fallbackUrl: string): CompetitorExtractedContent => {
     const content: CompetitorExtractedContent = {
         url: typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : fallbackUrl,
@@ -133,7 +146,7 @@ const normalizeCompetitorContent = (parsed: any, fallbackUrl: string): Competito
         },
         paragraphs: normalizeStringArray(parsed.paragraphs, 60),
         listItems: normalizeStringArray(parsed.listItems, 60),
-        text: typeof parsed.text === 'string' ? parsed.text.trim() : '',
+        text: typeof parsed.text === 'string' ? stripExtractionLabels(parsed.text) : '',
         wordCount: Number.isFinite(Number(parsed.wordCount)) ? Number(parsed.wordCount) : 0,
     };
 
@@ -310,32 +323,14 @@ const collectHtmlContentBlocks = (root: Element): HtmlContentBlock[] => {
     return blocks;
 };
 
-const getArabicParagraphOrdinal = (index: number): string => {
-    const ordinals = ['الأولى', 'الثانية', 'الثالثة', 'الرابعة', 'الخامسة', 'السادسة', 'السابعة', 'الثامنة', 'التاسعة', 'العاشرة'];
-    return ordinals[index - 1] || String(index);
-};
-
 const buildHtmlContentText = (blocks: HtmlContentBlock[]): string => {
     const lines: string[] = [];
-    let paragraphIndex = 0;
 
     blocks.forEach(block => {
-        if (block.type === 'h1' || block.type === 'h2' || block.type === 'h3') {
-            lines.push(`${block.type.toUpperCase()}: ${block.text}`);
-            paragraphIndex = 0;
-            return;
-        }
-
-        if (block.type === 'li') {
-            lines.push(`عنصر قائمة: ${block.text}`);
-            return;
-        }
-
-        paragraphIndex += 1;
-        lines.push(`الفقرة ${getArabicParagraphOrdinal(paragraphIndex)}: ${block.text}`);
+        lines.push(block.text);
     });
 
-    return lines.join('\n');
+    return lines.join('\n\n');
 };
 
 const extractCompetitorContentFromHtml = (html: string, fallbackUrl: string): CompetitorExtractedContent => {
@@ -420,19 +415,14 @@ ${url}
 - إذا تعذر الوصول إلى الرابط أو قراءة محتواه، أرجع JSON صالحًا يحتوي على وصف الخطأ داخل حقل "error".
 
 طريقة تنظيم حقل text:
-- ابدأ بـ H1 إن وجد.
-- بعد ذلك، نظّم المحتوى حسب H2 ثم H3 التابعة له.
-- لكل H2 مهم، اكتب:
-  "H2: العنوان"
-  ثم أدرج الفقرات التابعة له بهذا النمط:
-  "الفقرة الأولى: النص الكامل للفقرة كما يظهر في الصفحة."
-  "الفقرة الثانية: النص الكامل للفقرة كما يظهر في الصفحة."
-- لكل H3 تابع، اكتب:
-  "H3: العنوان"
-  ثم أدرج الفقرات التابعة له بنفس النمط.
-- عند وجود قائمة مهمة تحت H2 أو H3، أدرج عناصرها داخل text بهذا النمط:
-  "عنصر قائمة: النص كما يظهر في الصفحة."
-- لا تكتب أي تفسير أو تعليق خارج هذا التنظيم داخل text.
+- حقل text يجب أن يحتوي على النص التحريري الكامل كما يظهر للمستخدم فقط.
+- لا تكتب أي تسميات توضيحية مثل H1 أو H2 أو H3 أو "الفقرة الأولى" أو "عنصر قائمة".
+- لا تكتب نوع الوسم أو اسم الوسم أو أي شرح قبل النص.
+- اكتب العناوين كنصوصها الأصلية فقط في أسطر مستقلة.
+- اكتب الفقرات كما هي، كل فقرة كمقطع مستقل دون تعديل.
+- اكتب عناصر القوائم كنصوصها الأصلية فقط، كل عنصر في سطر مستقل دون أي بادئة توضيحية.
+- حافظ على ترتيب النص من الأعلى إلى الأسفل كما يظهر في الصفحة.
+- استخدم فواصل الأسطر فقط للحفاظ على قابلية القراءة، دون إضافة أي كلمات غير موجودة في الصفحة.
 
 طريقة ملء الحقول:
 - url: الرابط الأصلي المُدخل.
@@ -444,7 +434,7 @@ ${url}
 - headings.h3: جميع عناوين H3 المهمة المرتبطة بالمحتوى الأساسي.
 - paragraphs: الفقرات الأساسية المستخرجة من المحتوى التحريري فقط، دون تعديل.
 - listItems: عناصر القوائم المهمة المرتبطة بالمحتوى التحريري فقط، دون تعديل.
-- text: الخريطة التحريرية الكاملة المنظمة حسب H1/H2/H3 والفقرات والقوائم.
+- text: النص التحريري الكامل كما يظهر في الصفحة فقط، بدون تسميات أو شروحات أو أسماء وسوم.
 - wordCount: عدد كلمات النص الموجود داخل حقل text فقط.
 - error: اتركه فارغًا إذا تم الاستخراج بنجاح، أو اكتب سبب الخطأ إذا فشلت القراءة.
 
