@@ -153,6 +153,240 @@ const normalizeCompetitorContent = (parsed: any, fallbackUrl: string): Competito
     return content;
 };
 
+type HtmlContentBlock = {
+    type: 'h1' | 'h2' | 'h3' | 'p' | 'li';
+    text: string;
+};
+
+const HTML_NOISE_SELECTOR = [
+    'script',
+    'style',
+    'noscript',
+    'svg',
+    'canvas',
+    'iframe',
+    'template',
+    'form',
+    'input',
+    'select',
+    'textarea',
+    'header',
+    'footer',
+    'nav',
+    'aside',
+    '[hidden]',
+    '[aria-hidden="true"]',
+    '[role="navigation"]',
+    '[role="banner"]',
+    '[role="contentinfo"]',
+].join(',');
+
+const HTML_NOISE_ATTRIBUTE_PATTERN = /(^|[\s_-])(nav|navbar|menu|header|footer|sidebar|aside|widget|comment|comments|reply|share|social|breadcrumb|breadcrumbs|cookie|cookies|banner|advertisement|advert|ads|popup|modal|newsletter|subscribe|search|recent|popular|related|tagcloud|tags|category|categories|pagination|preloader|offcanvas|login|post-meta)([\s_-]|$)/i;
+
+const HTML_MAIN_CANDIDATE_SELECTOR = [
+    'article',
+    'main',
+    '[role="main"]',
+    '[class*="post-content"]',
+    '[class*="entry-content"]',
+    '[class*="article-content"]',
+    '[class*="blog-content"]',
+    '[class*="post-body"]',
+    '[class*="article-body"]',
+    '[class*="content-area"]',
+    '[id*="article"]',
+    '[id*="content"]',
+    '[id*="post"]',
+].join(',');
+
+const normalizeHtmlText = (value: string): string => (
+    value
+        .replace(/\u00a0/g, ' ')
+        .replace(/[ \t\r\n\f]+/g, ' ')
+        .trim()
+);
+
+const getHtmlMetaContent = (doc: Document, selectors: string[]): string => {
+    for (const selector of selectors) {
+        const content = doc.querySelector(selector)?.getAttribute('content');
+        const normalized = normalizeHtmlText(content || '');
+        if (normalized) return normalized;
+    }
+    return '';
+};
+
+const getHtmlAttribute = (doc: Document, selector: string, attribute: string): string => (
+    normalizeHtmlText(doc.querySelector(selector)?.getAttribute(attribute) || '')
+);
+
+const resolveHtmlUrl = (value: string, baseUrl: string): string => {
+    const normalized = normalizeHtmlText(value);
+    if (!normalized) return baseUrl || 'html_input';
+    try {
+        return new URL(normalized, baseUrl && baseUrl !== 'html_input' ? baseUrl : undefined).href;
+    } catch {
+        return normalized;
+    }
+};
+
+const isHtmlElementHidden = (element: Element): boolean => {
+    let current: Element | null = element;
+    while (current) {
+        if (current.hasAttribute('hidden') || current.getAttribute('aria-hidden') === 'true') return true;
+        const style = current.getAttribute('style') || '';
+        if (/display\s*:\s*none|visibility\s*:\s*hidden/i.test(style)) return true;
+        current = current.parentElement;
+    }
+    return false;
+};
+
+const isHtmlNoiseElement = (element: Element): boolean => {
+    const marker = [
+        element.id,
+        element.className,
+        element.getAttribute('role') || '',
+        element.getAttribute('aria-label') || '',
+    ].join(' ');
+    return HTML_NOISE_ATTRIBUTE_PATTERN.test(marker);
+};
+
+const removeHtmlNoise = (root: ParentNode) => {
+    root.querySelectorAll(HTML_NOISE_SELECTOR).forEach(element => element.remove());
+    root.querySelectorAll('*').forEach(element => {
+        if (isHtmlNoiseElement(element)) {
+            element.remove();
+        }
+    });
+};
+
+const getHtmlElementScore = (element: Element): number => {
+    const text = normalizeHtmlText(element.textContent || '');
+    if (text.length < 40) return -Infinity;
+    const linkTextLength = Array.from(element.querySelectorAll('a'))
+        .reduce((sum, link) => sum + normalizeHtmlText(link.textContent || '').length, 0);
+    const paragraphCount = element.querySelectorAll('p').length;
+    const headingCount = element.querySelectorAll('h1,h2,h3').length;
+    const listCount = element.querySelectorAll('li').length;
+    const linkRatio = text.length ? linkTextLength / text.length : 0;
+    const linkPenalty = linkRatio > 0.35 ? linkTextLength * 1.5 : linkTextLength * 0.35;
+    const focusedBonus = element.tagName.toLowerCase() === 'body' ? 0 : 1500;
+    return text.length + paragraphCount * 140 + headingCount * 90 + listCount * 20 + focusedBonus - linkPenalty;
+};
+
+const selectHtmlMainContentRoot = (doc: Document): Element => {
+    const candidates = Array.from(doc.body.querySelectorAll(HTML_MAIN_CANDIDATE_SELECTOR));
+    const uniqueCandidates = Array.from(new Set<Element>([doc.body, ...candidates]))
+        .filter(element => !isHtmlElementHidden(element) && !isHtmlNoiseElement(element));
+
+    let bestElement: Element = doc.body;
+    let bestScore = getHtmlElementScore(doc.body);
+    uniqueCandidates.forEach(element => {
+        const score = getHtmlElementScore(element);
+        if (score > bestScore) {
+            bestElement = element;
+            bestScore = score;
+        }
+    });
+
+    return bestElement;
+};
+
+const collectHtmlContentBlocks = (root: Element): HtmlContentBlock[] => {
+    const blocks: HtmlContentBlock[] = [];
+    const seen = new Set<string>();
+
+    root.querySelectorAll('h1,h2,h3,p,li').forEach(element => {
+        if (isHtmlElementHidden(element) || isHtmlNoiseElement(element)) return;
+        const tagName = element.tagName.toLowerCase() as HtmlContentBlock['type'];
+        if (tagName === 'p' && element.closest('li')) return;
+        const text = normalizeHtmlText(element.textContent || '');
+        if (!text || text.length < 2) return;
+        const duplicateKey = `${tagName}:${text.toLowerCase()}`;
+        if (seen.has(duplicateKey)) return;
+        seen.add(duplicateKey);
+        blocks.push({ type: tagName, text });
+    });
+
+    return blocks;
+};
+
+const getArabicParagraphOrdinal = (index: number): string => {
+    const ordinals = ['الأولى', 'الثانية', 'الثالثة', 'الرابعة', 'الخامسة', 'السادسة', 'السابعة', 'الثامنة', 'التاسعة', 'العاشرة'];
+    return ordinals[index - 1] || String(index);
+};
+
+const buildHtmlContentText = (blocks: HtmlContentBlock[]): string => {
+    const lines: string[] = [];
+    let paragraphIndex = 0;
+
+    blocks.forEach(block => {
+        if (block.type === 'h1' || block.type === 'h2' || block.type === 'h3') {
+            lines.push(`${block.type.toUpperCase()}: ${block.text}`);
+            paragraphIndex = 0;
+            return;
+        }
+
+        if (block.type === 'li') {
+            lines.push(`عنصر قائمة: ${block.text}`);
+            return;
+        }
+
+        paragraphIndex += 1;
+        lines.push(`الفقرة ${getArabicParagraphOrdinal(paragraphIndex)}: ${block.text}`);
+    });
+
+    return lines.join('\n');
+};
+
+const extractCompetitorContentFromHtml = (html: string, fallbackUrl: string): CompetitorExtractedContent => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const baseHref = getHtmlAttribute(doc, 'base[href]', 'href');
+    const canonicalUrl = getHtmlAttribute(doc, 'link[rel~="canonical"][href]', 'href');
+    const ogUrl = getHtmlMetaContent(doc, ['meta[property="og:url"]']);
+    const resolvedUrl = resolveHtmlUrl(canonicalUrl || ogUrl || baseHref || fallbackUrl || 'html_input', baseHref || fallbackUrl || 'html_input');
+
+    const title = normalizeHtmlText(
+        doc.querySelector('title')?.textContent || getHtmlMetaContent(doc, [
+            'meta[property="og:title"]',
+            'meta[name="twitter:title"]',
+        ])
+    );
+    const description = getHtmlMetaContent(doc, [
+        'meta[name="description"]',
+        'meta[property="og:description"]',
+        'meta[name="twitter:description"]',
+    ]);
+
+    removeHtmlNoise(doc);
+    const root = selectHtmlMainContentRoot(doc);
+    removeHtmlNoise(root);
+    const blocks = collectHtmlContentBlocks(root);
+    const headings = {
+        h1: blocks.filter(block => block.type === 'h1').map(block => block.text).slice(0, 8),
+        h2: blocks.filter(block => block.type === 'h2').map(block => block.text).slice(0, 30),
+        h3: blocks.filter(block => block.type === 'h3').map(block => block.text).slice(0, 30),
+    };
+    const paragraphs = blocks.filter(block => block.type === 'p').map(block => block.text).slice(0, 80);
+    const listItems = blocks.filter(block => block.type === 'li').map(block => block.text).slice(0, 80);
+    const text = buildHtmlContentText(blocks);
+
+    if (!text || (!paragraphs.length && !headings.h1.length && !headings.h2.length && !headings.h3.length)) {
+        throw new Error('تعذر العثور على محتوى تحريري واضح داخل كود HTML.');
+    }
+
+    return {
+        url: resolvedUrl,
+        fetchedUrl: resolvedUrl,
+        title: title || headings.h1[0] || '',
+        description,
+        headings,
+        paragraphs,
+        listItems,
+        text,
+        wordCount: text.split(/\s+/).filter(Boolean).length,
+    };
+};
+
 const buildCompetitorPrompt = (url: string): string => `أنت محلل محتوى SEO تقني صارم داخل أداة تحرير محتوى.
 
 مهمتك الوحيدة هي استخدام أداة URL Context في Gemini لقراءة الرابط التالي فقط:
@@ -233,100 +467,6 @@ ${url}
   "wordCount": 0,
   "error": ""
 }`;
-
-const buildCompetitorHtmlPrompt = (html: string): string => `أنت محلل محتوى SEO تقني صارم داخل أداة تحرير محتوى.
-
-مهمتك الوحيدة هي قراءة كود HTML التالي فقط، ثم استخراج المحتوى التحريري الأساسي الظاهر في الصفحة بدقة وبشكل حرفي قدر الإمكان.
-
-ممنوع تمامًا:
-- استخدام الذاكرة أو المعرفة العامة.
-- توقع محتوى غير موجود داخل كود HTML.
-- إعادة الصياغة أو التحسين أو التلخيص.
-- ترجمة النص أو تغيير لغته.
-- إضافة عناوين أو أفكار أو فقرات غير موجودة نصيًا في الكود.
-- استخراج أكواد البرمجة أو أسماء الكلاسات أو CSS أو JavaScript أو JSON غير التحريري.
-- استخراج الهيدر أو الفوتر أو القوائم الجانبية أو عناصر التنقل أو الكوكيز أو التعليقات أو الإعلانات المتكررة أو الدعوات العامة المتكررة غير المرتبطة بالمحتوى الأساسي.
-- كتابة أي شرح خارج JSON.
-- استخدام Markdown.
-
-قواعد قراءة HTML:
-- تعامل مع الكود كصفحة HTML قد تأتي من أي نوع موقع أو قالب، ولا تعتمد على أسماء كلاس ثابتة.
-- حلّل بنية DOM منطقيًا وابحث عن المحتوى التحريري الرئيسي داخل عناصر مثل article أو main أو section أو post/content إذا وُجدت، لكن لا تعتمد عليها وحدها.
-- تجاهل عناصر script و style و noscript و svg و canvas و form و header و footer و nav و aside وكل عناصر البحث والمشاركة والتعليقات والتصنيفات والوسوم والمواضيع الحديثة إذا لم تكن جزءًا مباشرًا من المقال.
-- استخرج النص الظاهر للمستخدم من عناصر HTML، مع فك ترميز HTML entities مثل &amp; و &nbsp;، وتنظيف المسافات الزائدة فقط دون تغيير الجمل.
-- حافظ على علامات الترقيم والكلمات كما هي داخل النص.
-- إذا كان الكود ناتجًا عن ترجمة أو بروكسي ترجمة، استخرج محتوى المقال الظاهر فقط وتجاهل واجهة الترجمة وسكربتاتها.
-- يمكن استخدام title و meta description و canonical و base لملء حقول العنوان والوصف والرابط، لكن حقل text يجب أن يعتمد على المحتوى التحريري الظاهر في جسم الصفحة فقط.
-- إذا تعذر تحديد محتوى تحريري رئيسي واضح، أرجع JSON صالحًا يحتوي على وصف الخطأ داخل حقل "error".
-
-قواعد الاستخراج:
-- ركّز فقط على المحتوى التحريري الرئيسي للصفحة.
-- استخرج كما يظهر في HTML قدر الإمكان:
-  - عنوان الصفحة title
-  - وصف الصفحة description
-  - H1
-  - H2
-  - H3
-  - الفقرات الأساسية
-  - عناصر القوائم المهمة المرتبطة بالمحتوى التحريري
-- حافظ على ترتيب المحتوى من الأعلى إلى الأسفل كما يظهر في DOM.
-- كل عنوان أو فقرة أو عنصر قائمة يجب أن يكون مستندًا إلى نص موجود داخل كود HTML فقط.
-- إذا لم تجد دليلًا نصيًا واضحًا على فكرة معينة، لا تضفها.
-- إذا كان هناك نص مكرر أو دعائي يظهر في أكثر من موضع، تجاهله ما لم يكن جزءًا مباشرًا من المحتوى التحريري الأساسي.
-
-طريقة تنظيم حقل text:
-- ابدأ بـ H1 إن وجد.
-- بعد ذلك، نظّم المحتوى حسب H2 ثم H3 التابعة له.
-- لكل H2 مهم، اكتب:
-  "H2: العنوان"
-  ثم أدرج الفقرات التابعة له بهذا النمط:
-  "الفقرة الأولى: النص الكامل للفقرة كما يظهر في HTML."
-  "الفقرة الثانية: النص الكامل للفقرة كما يظهر في HTML."
-- لكل H3 تابع، اكتب:
-  "H3: العنوان"
-  ثم أدرج الفقرات التابعة له بنفس النمط.
-- عند وجود قائمة مهمة تحت H2 أو H3، أدرج عناصرها داخل text بهذا النمط:
-  "عنصر قائمة: النص كما يظهر في HTML."
-- لا تكتب أي تفسير أو تعليق خارج هذا التنظيم داخل text.
-
-طريقة ملء الحقول:
-- url: استخرج canonical أو og:url أو base href إن وجد، وإلا اكتب "html_input".
-- fetchedUrl: نفس قيمة url لأن المصدر هو كود HTML مُدخل يدويًا.
-- title: عنوان الصفحة من title أو og:title أو H1، دون تعديل.
-- description: وصف الصفحة من meta description أو og:description إن وجد، دون تعديل.
-- headings.h1: جميع عناوين H1 كما تظهر.
-- headings.h2: جميع عناوين H2 المهمة المرتبطة بالمحتوى الأساسي.
-- headings.h3: جميع عناوين H3 المهمة المرتبطة بالمحتوى الأساسي.
-- paragraphs: الفقرات الأساسية المستخرجة من المحتوى التحريري فقط، دون تعديل.
-- listItems: عناصر القوائم المهمة المرتبطة بالمحتوى التحريري فقط، دون تعديل.
-- text: الخريطة التحريرية الكاملة المنظمة حسب H1/H2/H3 والفقرات والقوائم.
-- wordCount: عدد كلمات النص الموجود داخل حقل text فقط.
-- error: اتركه فارغًا إذا تم الاستخراج بنجاح، أو اكتب سبب الخطأ إذا فشلت القراءة.
-
-أرجع JSON صالحًا فقط، بدون Markdown وبدون أي شرح خارجي.
-
-صيغة الإخراج المطلوبة:
-{
-  "url": "...",
-  "fetchedUrl": "...",
-  "title": "...",
-  "description": "...",
-  "headings": {
-    "h1": ["..."],
-    "h2": ["..."],
-    "h3": ["..."]
-  },
-  "paragraphs": ["..."],
-  "listItems": ["..."],
-  "text": "...",
-  "wordCount": 0,
-  "error": ""
-}
-
-كود HTML:
-<<<HTML_START
-${html}
-HTML_END>>>`;
 
 const RightSidebar: React.FC = () => {
     const { t, engineeringPrompts, apiKeys } = useUser();
@@ -530,7 +670,7 @@ const RightSidebar: React.FC = () => {
         await runCompetitorExtraction(index, buildCompetitorPrompt(url), true, 'url', url);
     };
 
-    const handleExtractCompetitorHtml = async (index: number) => {
+    const handleExtractCompetitorHtml = (index: number) => {
         const html = competitorHtmls[index]?.trim();
         if (!html) {
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
@@ -543,7 +683,31 @@ const RightSidebar: React.FC = () => {
         }
 
         const fallbackUrl = competitorUrls[index]?.trim() || 'html_input';
-        await runCompetitorExtraction(index, buildCompetitorHtmlPrompt(html), false, 'html', fallbackUrl);
+        setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+            ...item,
+            status: 'loading',
+            source: 'html',
+            error: '',
+        } : item));
+
+        window.setTimeout(() => {
+            try {
+                const content = extractCompetitorContentFromHtml(html, fallbackUrl);
+                setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                    status: 'success',
+                    source: 'html',
+                    content,
+                    error: '',
+                } : item));
+            } catch (error) {
+                setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                    status: 'error',
+                    source: 'html',
+                    content: null,
+                    error: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
+                } : item));
+            }
+        }, 0);
     };
 
     const getPatchActionLabel = (operation: string) => (
