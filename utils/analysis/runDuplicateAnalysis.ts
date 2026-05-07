@@ -1,10 +1,37 @@
 import type { Keywords, DuplicateAnalysis, DuplicateStats } from '../../types';
 import { normalizeArabicText } from './analysisUtils';
 
+const ENGLISH_TARGET_STOPWORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'by',
+  'for',
+  'from',
+  'how',
+  'in',
+  'is',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+  'what',
+  'when',
+  'where',
+  'which',
+  'who',
+  'why',
+  'with',
+]);
+
 /*
  * Duplicate analysis scans repeated 2-8 word phrases.
- * It also marks repeated phrases that overlap target keywords so the UI can
- * separate keyword repetition from general repetition.
+ * It excludes repeated phrases that are already covered by target keywords,
+ * alternate forms, LSI terms, or the company name.
  */
 export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, totalWordCount: number, articleLanguage: 'ar' | 'en'): { duplicateAnalysis: DuplicateAnalysis; duplicateStats: DuplicateStats } => {
     const duplicateAnalysis: DuplicateAnalysis = { 2:[], 3:[], 4:[], 5:[], 6:[], 7:[], 8:[] };
@@ -51,6 +78,21 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
         return normalized.match(/[\p{L}\p{N}]+/gu) || [];
       };
 
+      const normalizeComparisonToken = (token: string): string => {
+        if (articleLanguage === 'ar') return token;
+        const normalized = token.replace(/'s$/i, '');
+        if (normalized.length > 4 && normalized.endsWith('ies')) return `${normalized.slice(0, -3)}y`;
+        if (normalized.length > 4 && /(ches|shes|xes|zes|ses)$/.test(normalized)) return normalized.replace(/es$/, '');
+        if (normalized.length > 3 && normalized.endsWith('s') && !normalized.endsWith('ss')) return normalized.slice(0, -1);
+        return normalized;
+      };
+
+      const getMeaningfulComparisonTokens = (value: string): string[] => (
+        tokenizeForDuplicateComparison(value)
+          .map(normalizeComparisonToken)
+          .filter(token => token && (articleLanguage === 'ar' || !ENGLISH_TARGET_STOPWORDS.has(token)))
+      );
+
       const containsTokenSequence = (tokens: string[], sequence: string[]): boolean => {
         if (sequence.length === 0 || sequence.length > tokens.length) return false;
         for (let index = 0; index <= tokens.length - sequence.length; index++) {
@@ -63,13 +105,14 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
           keywords.primary,
           ...keywords.secondaries,
           ...keywords.lsi,
+          keywords.company,
       ]
         .filter(Boolean)
-        .map(term => tokenizeForDuplicateComparison(term))
+        .map(term => getMeaningfulComparisonTokens(term))
         .filter(tokens => tokens.length > 0);
 
-      const containsTargetKeywordPhrase = (key: string): boolean => {
-        const phraseTokens = tokenizeForDuplicateComparison(key);
+      const isProtectedTargetPhrase = (key: string): boolean => {
+        const phraseTokens = getMeaningfulComparisonTokens(key);
         if (phraseTokens.length === 0) return false;
         return targetKeywordTokens.some(keywordTokens => (
           containsTokenSequence(phraseTokens, keywordTokens) ||
@@ -77,20 +120,11 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
         ));
       };
 
-      const isProtectedBigram = (key: string): boolean => {
-        const bigramTokens = tokenizeForDuplicateComparison(key);
-        if (bigramTokens.length === 0) return false;
-        return targetKeywordTokens.some(keywordTokens => (
-          containsTokenSequence(bigramTokens, keywordTokens) ||
-          containsTokenSequence(keywordTokens, bigramTokens)
-        ));
-      };
-
       for (let n = 2; n <= 8; n++) {
         nGrams[n].forEach((value, key) => {
           if (value.locations.length > 1) {
-            const isKeywordPhrase = containsTargetKeywordPhrase(key);
-            if (n === 2 && isProtectedBigram(key)) return;
+            const isKeywordPhrase = isProtectedTargetPhrase(key);
+            if (isKeywordPhrase) return;
             duplicateAnalysis[n as keyof DuplicateAnalysis].push({
               text: value.text,
               count: value.locations.length,
