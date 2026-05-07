@@ -252,7 +252,7 @@ export const translations = {
       phrases: 'العبارات',
       keyword: 'مفتاحية',
       common: 'شائعة',
-      duplicatesWithKeywords: 'تكرارات تحتوي على كلمات مفتاحية',
+      duplicatesWithKeywords: 'عبارات تتضمن كلمات أساسية/ثانوية/LSI',
       noDuplicatesInCategory: 'لا توجد عبارات مكررة في هذه الفئة.',
     },
     // Right Sidebar
@@ -851,7 +851,7 @@ export const translations = {
       phrases: 'Phrases',
       keyword: 'Keyword',
       common: 'Common',
-      duplicatesWithKeywords: 'Duplicates with Keywords',
+      duplicatesWithKeywords: 'Phrases with Primary/Secondary/LSI Keywords',
       noDuplicatesInCategory: 'No duplicate phrases in this category.',
     },
     // Right Sidebar

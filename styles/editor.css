@@ -3,6 +3,17 @@
   padding: 2rem;
   outline: none;
   line-height: 1.9;
+  color: #1f2937;
+  caret-color: #1f2937;
+}
+
+.dark .ProseMirror {
+  color: #e5e7eb;
+  caret-color: #f2d675;
+}
+
+.dark .ProseMirror :where(p, h1, h2, h3, h4, li, td, th) {
+  color: inherit;
 }
 
 .ProseMirror p {

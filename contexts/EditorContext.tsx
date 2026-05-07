@@ -50,12 +50,6 @@ const getInitialContent = () => {
   return INITIAL_CONTENT;
 };
 
-const getCollapsedSelectionStart = (editor: any): number => {
-    // TipTap text selections must point inside the document when content exists.
-    const docSize = editor?.state?.doc?.content?.size || 0;
-    return docSize > 0 ? 1 : 0;
-};
-
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
     const saved = localStorage.getItem(key);
     return saved === 'ar' || saved === 'en' ? saved : null;
@@ -68,6 +62,18 @@ const getStoredGoalContext = (key: string): GoalContext => {
     } catch {
         return normalizeGoalContext();
     }
+};
+
+const applyArticleLanguageFormatting = (editor: Editor, lang: 'ar' | 'en') => {
+    const direction = lang === 'ar' ? 'rtl' : 'ltr';
+    const alignment = lang === 'ar' ? 'right' : 'left';
+
+    (editor.chain() as any)
+        .focus()
+        .selectAll()
+        .setTextDirection(direction)
+        .setTextAlign(alignment)
+        .run();
 };
 
 const ViolationHighlight = Highlight.extend({
@@ -210,7 +216,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // TipTap extensions live here. Add editor-level behavior or formatting support in this list.
     const extensions = useMemo(() => [
         StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
-        TextAlign.configure({ types: ['heading', 'paragraph'], alignments: ['left', 'center', 'right', 'justify'], defaultAlignment: 'right' }),
+        TextAlign.configure({ types: ['heading', 'paragraph'], alignments: ['left', 'center', 'right', 'justify'] }),
         ViolationHighlight.configure({ multicolor: true }),
         Table.configure({ resizable: true }),
         TableRow,
@@ -240,15 +246,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             
             // Set initial direction/alignment after a tiny delay to ensure editor is ready
             setTimeout(() => {
-                const direction = targetLang === 'ar' ? 'rtl' : 'ltr';
-                const alignment = targetLang === 'ar' ? 'right' : 'left';
-                (editor.chain() as any)
-                    .focus()
-                    .selectAll()
-                    .setTextDirection(direction)
-                    .setTextAlign(alignment)
-                    .setTextSelection(getCollapsedSelectionStart(editor))
-                    .run();
+                applyArticleLanguageFormatting(editor, targetLang);
             }, 10);
         },
     });
@@ -268,15 +266,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const handleLanguageChange = useCallback((lang: 'ar' | 'en') => {
         if (!editor) return;
         setArticleLanguage(lang);
-        const direction = lang === 'ar' ? 'rtl' : 'ltr';
-        const alignment = lang === 'ar' ? 'right' : 'left';
-        (editor.chain() as any)
-            .focus()
-            .selectAll()
-            .setTextDirection(direction)
-            .setTextAlign(alignment)
-            .setTextSelection(getCollapsedSelectionStart(editor))
-            .run();
+        applyArticleLanguageFormatting(editor, lang);
     }, [editor]);
 
     // Analysis is derived state: do not manually store rule results elsewhere.

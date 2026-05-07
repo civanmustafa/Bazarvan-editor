@@ -59,13 +59,7 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
         return false;
       };
 
-      const allKeywordsForDupCheck = [
-          keywords.primary,
-          ...keywords.secondaries,
-          ...keywords.lsi,
-          keywords.company,
-      ].filter(Boolean).map(kw => articleLanguage === 'ar' ? normalizeArabicText(kw.toLowerCase()) : kw.toLowerCase());
-      const protectedKeywordTokens = [
+      const targetKeywordTokens = [
           keywords.primary,
           ...keywords.secondaries,
           ...keywords.lsi,
@@ -74,10 +68,19 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
         .map(term => tokenizeForDuplicateComparison(term))
         .filter(tokens => tokens.length > 0);
 
+      const containsTargetKeywordPhrase = (key: string): boolean => {
+        const phraseTokens = tokenizeForDuplicateComparison(key);
+        if (phraseTokens.length === 0) return false;
+        return targetKeywordTokens.some(keywordTokens => (
+          containsTokenSequence(phraseTokens, keywordTokens) ||
+          containsTokenSequence(keywordTokens, phraseTokens)
+        ));
+      };
+
       const isProtectedBigram = (key: string): boolean => {
         const bigramTokens = tokenizeForDuplicateComparison(key);
         if (bigramTokens.length === 0) return false;
-        return protectedKeywordTokens.some(keywordTokens => (
+        return targetKeywordTokens.some(keywordTokens => (
           containsTokenSequence(bigramTokens, keywordTokens) ||
           containsTokenSequence(keywordTokens, bigramTokens)
         ));
@@ -86,7 +89,7 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
       for (let n = 2; n <= 8; n++) {
         nGrams[n].forEach((value, key) => {
           if (value.locations.length > 1) {
-            const isKeywordPhrase = allKeywordsForDupCheck.some(kw => key.includes(kw) || kw.includes(key));
+            const isKeywordPhrase = containsTargetKeywordPhrase(key);
             if (n === 2 && isProtectedBigram(key)) return;
             duplicateAnalysis[n as keyof DuplicateAnalysis].push({
               text: value.text,

@@ -253,6 +253,19 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if (!editor) return;
         editor.chain().focus().unsetAllMarks().clearNodes().run();
     }, [editor]);
+
+    const applyArticleLanguageFlow = useCallback(() => {
+        if (!editor || editor.isDestroyed) return;
+        const direction = articleLanguage === 'ar' ? 'rtl' : 'ltr';
+        const alignment = articleLanguage === 'ar' ? 'right' : 'left';
+
+        (editor.chain() as any)
+            .focus()
+            .selectAll()
+            .setTextDirection(direction)
+            .setTextAlign(alignment)
+            .run();
+    }, [editor, articleLanguage]);
     
     // First paste cleanup normalizes copied articles before analysis starts flagging layout noise.
     useEffect(() => {
@@ -270,12 +283,18 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     if (editor.isDestroyed) { setJustPasted(false); return; }
                     handleRemoveEmptyLines();
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, 350));
+                    if (editor.isDestroyed) { setJustPasted(false); return; }
+                    applyArticleLanguageFlow();
+                    await new Promise(resolve => setTimeout(resolve, 650));
                     if (editor.isDestroyed) { setJustPasted(false); return; }
                     handleFixParagraphs();
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, 350));
                     if (editor.isDestroyed) { setJustPasted(false); return; }
-                    handleScrollToTop();
+                    applyArticleLanguageFlow();
+                    await new Promise(resolve => setTimeout(resolve, 650));
+                    if (editor.isDestroyed) { setJustPasted(false); return; }
+                    scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                     setHasPerformedFirstPaste(true);
                     setJustPasted(false);
                 };
@@ -287,7 +306,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return () => {
             editor.off('transaction', handleTransaction);
         };
-    }, [justPasted, editor, hasPerformedFirstPaste, handleRemoveEmptyLines, handleFixParagraphs, handleScrollToTop]);
+    }, [justPasted, editor, hasPerformedFirstPaste, handleRemoveEmptyLines, handleFixParagraphs, scrollContainerRef, applyArticleLanguageFlow]);
 
       const generateToc = useCallback((editorInstance: EditorClass | null) => {
         if (!editorInstance) return '';
