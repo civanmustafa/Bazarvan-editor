@@ -592,11 +592,12 @@ const LeftSidebar: React.FC = () => {
     const handleAutoDistribute = (text: string) => {
         if (!text.trim()) return;
     
-        const parts = text.split(/^\s*[-/\\=.+*]+\s*$/m);
+        const parts = text.split(/^\s*[\p{P}\p{S}]{2,}\s*$/mu);
     
         const primaryAndSynonymsPart = (parts[0] || '').trim();
         const lsiPart = (parts[1] || '').trim();
         const companyPart = (parts[2] || '').trim();
+        const competitorsPart = (parts[3] || '').trim();
     
         const primaryAndSynonymsLines = splitDistributedTerms(primaryAndSynonymsPart, /[\n,،]+/);
         const newPrimary = primaryAndSynonymsLines[0] || keywords.primary;
@@ -614,6 +615,15 @@ const LeftSidebar: React.FC = () => {
             company: newCompany,
         });
         applyCompanyGoalContext(newCompany);
+
+        const competitorUrls = competitorsPart
+            ? competitorsPart.split(/\r?\n/).map(url => url.trim()).filter(Boolean).slice(0, 3)
+            : [];
+        if (competitorUrls.length > 0) {
+            window.dispatchEvent(new CustomEvent('bazarvan:auto-distribute-competitors', {
+                detail: { urls: competitorUrls },
+            }));
+        }
     };
 
     const handlePasteAndDistribute = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {

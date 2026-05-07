@@ -510,6 +510,24 @@ const RightSidebar: React.FC = () => {
     }, [competitorUrls]);
 
     useEffect(() => {
+        const handleAutoDistributedCompetitors = (event: Event) => {
+            const urls = (event as CustomEvent<{ urls?: string[] }>).detail?.urls || [];
+            const normalizedUrls = urls.map(url => url.trim()).filter(Boolean).slice(0, 3);
+            if (normalizedUrls.length === 0) return;
+
+            setCompetitorUrls(prev => createDefaultCompetitorUrls().map((_, index) => normalizedUrls[index] || prev[index] || ''));
+            setCompetitorExtractions(prev => createDefaultCompetitorExtractions().map((emptyState, index) => (
+                normalizedUrls[index] ? emptyState : prev[index] || emptyState
+            )));
+        };
+
+        window.addEventListener('bazarvan:auto-distribute-competitors', handleAutoDistributedCompetitors);
+        return () => {
+            window.removeEventListener('bazarvan:auto-distribute-competitors', handleAutoDistributedCompetitors);
+        };
+    }, []);
+
+    useEffect(() => {
         try {
             localStorage.setItem(COMPETITOR_HTML_STORAGE_KEY, JSON.stringify(competitorHtmls));
         } catch (error) {
