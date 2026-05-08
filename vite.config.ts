@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 import chatgptHandler from './api/chatgpt';
 import geminiHandler from './api/gemini';
 
-type ApiHandler = (req: Request) => Promise<Response>;
+type ApiHandler = (req: Request) => Promise<Response | void>;
 
 // Add local browser-facing API routes here, then implement their handler in api/*.
 const apiHandlers = new Map<string, ApiHandler>([
@@ -77,6 +77,9 @@ export default defineConfig({
               try {
                 const request = await createWebRequest(req, url.toString());
                 const response = await handler(request);
+                if (!response) {
+                  throw new Error(`Local API route did not return a response for ${url.pathname}`);
+                }
                 await sendWebResponse(res, response);
               } catch (error) {
                 console.error(`Local API route failed for ${url.pathname}:`, error);

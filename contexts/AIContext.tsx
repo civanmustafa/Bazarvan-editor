@@ -24,6 +24,7 @@ import { parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '..
 import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { CTA_WORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
+import { normalizeGoalContext } from '../utils/goalContext';
 
 /*
  * AIContext owns all AI workflows:
@@ -75,6 +76,81 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     navigational: 'الوصول إلى علامة أو صفحة محددة',
     'support-intent': 'حل مشكلة أو معرفة طريقة الاستخدام',
     'local-intent': 'فهم وتعلّم',
+};
+
+const GOAL_CONTEXT_ALLOWED_VALUES = {
+    pageType: ['article', 'news', 'service', 'comparison', 'product', 'landing', 'guide', 'faq'],
+    objective: ['educate', 'compare', 'convert', 'trust', 'support'],
+    audienceScope: ['local', 'country', 'regional', 'global'],
+    searchIntent: ['informational', 'commercial', 'transactional', 'navigational', 'support-intent'],
+} as const;
+
+const normalizeTokenForMatching = (value: string) => value.trim().toLowerCase();
+
+const resolveGoalContextChoice = (
+    rawValue: unknown,
+    allowedValues: readonly string[],
+    fallbackValue: string,
+): string => {
+    if (typeof rawValue !== 'string') return fallbackValue;
+    const normalizedValue = normalizeTokenForMatching(rawValue);
+    const matchedValue = allowedValues.find(value => normalizeTokenForMatching(value) === normalizedValue);
+    if (matchedValue) return matchedValue;
+
+    const matchedLabel = allowedValues.find(value => (
+        normalizeTokenForMatching(GOAL_CONTEXT_VALUE_LABELS[value] || '') === normalizedValue
+    ));
+    return matchedLabel || fallbackValue;
+};
+
+const cleanGeneratedGoalText = (value: unknown, maxLength: number): string => {
+    if (typeof value !== 'string') return '';
+    return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
+};
+
+const getFirstGeneratedValue = (record: Record<string, unknown>, keys: string[]): unknown => {
+    return keys.map(key => record[key]).find(value => value != null);
+};
+
+const normalizeGeneratedGoalContext = (rawValue: unknown, currentContext: GoalContext): GoalContext | null => {
+    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) return null;
+    const root = rawValue as Record<string, unknown>;
+    const nestedContext = root.context || root.goalContext || root.goal_context;
+    const record = nestedContext && typeof nestedContext === 'object' && !Array.isArray(nestedContext)
+        ? nestedContext as Record<string, unknown>
+        : root;
+    const normalizedCurrent = normalizeGoalContext(currentContext);
+
+    return normalizeGoalContext({
+        pageType: resolveGoalContextChoice(
+            getFirstGeneratedValue(record, ['pageType', 'page_type', 'type']),
+            GOAL_CONTEXT_ALLOWED_VALUES.pageType,
+            normalizedCurrent.pageType,
+        ),
+        objective: resolveGoalContextChoice(
+            getFirstGeneratedValue(record, ['objective', 'pageObjective', 'page_objective']),
+            GOAL_CONTEXT_ALLOWED_VALUES.objective,
+            normalizedCurrent.objective,
+        ),
+        audienceScope: resolveGoalContextChoice(
+            getFirstGeneratedValue(record, ['audienceScope', 'audience_scope', 'scope']),
+            GOAL_CONTEXT_ALLOWED_VALUES.audienceScope,
+            normalizedCurrent.audienceScope,
+        ),
+        targetCountry: cleanGeneratedGoalText(
+            getFirstGeneratedValue(record, ['targetCountry', 'target_country', 'country', 'market']),
+            80,
+        ),
+        targetAudience: cleanGeneratedGoalText(
+            getFirstGeneratedValue(record, ['targetAudience', 'target_audience', 'audience']),
+            160,
+        ),
+        searchIntent: resolveGoalContextChoice(
+            getFirstGeneratedValue(record, ['searchIntent', 'search_intent', 'intent']),
+            GOAL_CONTEXT_ALLOWED_VALUES.searchIntent,
+            normalizedCurrent.searchIntent,
+        ),
+    });
 };
 
 const formatGoalContext = (goalContext: GoalContext): string => {
@@ -1405,7 +1481,7 @@ const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: 
     const statsBefore = getBulkFixStats(originalText);
     const variants = rawSuggestions
         .map((suggestion, index): BulkFixReviewVariant | null => {
-            const suggestionRecord = suggestion && typeof suggestion === 'object'
+            const suggestionRecord: Record<string, unknown> = suggestion && typeof suggestion === 'object'
                 ? suggestion as Record<string, unknown>
                 : { fixedText: suggestion };
             const fixedText = cleanAiPatchContentMarkdown(asTrimmedString(
@@ -2098,6 +2174,7 @@ interface AIContextType {
     handleAiAnalyze: (userPrompt: string, options: any) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any) => Promise<void>;
     generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string }>;
+    generateGoalContext: () => Promise<{ context?: GoalContext; error?: string }>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[], options?: { includeRelatedRules?: boolean }) => Promise<void>;
     getRelatedBulkFixRules: (rulesToFix: string[]) => BulkFixRelatedRule[];
@@ -2225,32 +2302,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             `- LSI: ${keywords.lsi.filter(Boolean).join(', ') || 'لم تحدد'}`,
         ].join('\n');
         contextParts.push(`**الكلمات والعلامة المستهدفة:**\n${keywordContext}`);
-        if (articleToc) {
-            const tocString = generateToc(editor);
-            if (tocString) {
-                parts.push(`**جدول محتويات المقالة:**\n${tocString}`);
-            }
-        }
-        if (currentConclusion && editor) {
-            const h2Nodes: { pos: number; text: string }[] = [];
-            editor.state.doc.descendants((node, pos) => {
-                if (node.type.name === 'heading' && node.attrs.level === 2) {
-                    h2Nodes.push({ pos, text: node.textContent });
-                }
-            });
-            const lastH2 = h2Nodes[h2Nodes.length - 1];
-            const conclusionRule = analysisResults.structureAnalysis.lastH2IsConclusion;
-            const looksLikeConclusion = lastH2 && (
-                conclusionRule?.status === 'pass' ||
-                /خاتمة|خلاصة|conclusion|summary|finally|in conclusion/i.test(lastH2.text)
-            );
-            if (lastH2 && looksLikeConclusion) {
-                const conclusionText = editor.state.doc.textBetween(lastH2.pos, editor.state.doc.content.size, '\n').trim();
-                if (conclusionText) {
-                    parts.push(`**الخاتمة الحالية إن وجدت:**\n---\n${conclusionText}\n---`);
-                }
-            }
-        }
         const goalContextText = formatGoalContext(goalContext);
         if (goalContextText) contextParts.push(`**سياق هدف الصفحة والجمهور:**\n${goalContextText}`);
         if (sectionHeading) contextParts.push(`**سياق العنوان:** "${sectionHeading}"`);
@@ -2399,6 +2450,61 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         return { secondaries, lsi };
     }, [apiKeys.gemini, articleLanguage, goalContext, keywords.company, keywords.primary, title]);
+
+    const generateGoalContext = useCallback(async (): Promise<{ context?: GoalContext; error?: string }> => {
+        const primary = keywords.primary.trim();
+        const secondaries = keywords.secondaries.map(term => term.trim()).filter(Boolean);
+        const articleTitle = title.trim();
+
+        if (!primary && secondaries.length === 0 && !articleTitle) {
+            return { error: 'أدخل الكلمة المفتاحية الأساسية أو عنوان المقالة أولًا.' };
+        }
+
+        const prompt = [
+            'أنت خبير SEO واستراتيجية محتوى.',
+            '',
+            'استنتج سياق هدف الصفحة والجمهور من نمط الكلمة المفتاحية الأساسية والصيغ البديلة وعنوان المقالة فقط.',
+            'املأ حقول سياق الصفحة بحيث تكون مناسبة للتحليل وكتابة المحتوى، ولا تكتب مقالة أو شرحًا.',
+            '',
+            `عنوان المقالة: ${articleTitle || 'غير محدد'}`,
+            `الكلمة المفتاحية الأساسية: ${primary || 'غير محددة'}`,
+            `الصيغ البديلة: ${secondaries.length > 0 ? secondaries.join(', ') : 'غير محددة'}`,
+            `لغة المقال: ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`,
+            '',
+            'القيم المسموحة:',
+            `- pageType: ${GOAL_CONTEXT_ALLOWED_VALUES.pageType.join(', ')}`,
+            `- objective: ${GOAL_CONTEXT_ALLOWED_VALUES.objective.join(', ')}`,
+            `- audienceScope: ${GOAL_CONTEXT_ALLOWED_VALUES.audienceScope.join(', ')}`,
+            `- searchIntent: ${GOAL_CONTEXT_ALLOWED_VALUES.searchIntent.join(', ')}`,
+            '',
+            'قواعد الاستنتاج:',
+            '- اختر pageType من نية العنوان والكلمات: service للخدمات، product للمنتجات، comparison للمقارنات، guide للأدلة، article للمقالات العامة.',
+            '- اختر objective بحسب نية المستخدم: educate للتعلّم، compare للمقارنة، convert للحجز/الشراء/التواصل، trust لبناء الثقة، support للدعم والاستخدام.',
+            '- اختر searchIntent بحسب ما يوحي به العنوان والكلمات.',
+            '- إذا ظهرت دولة أو سوق أو مدينة بوضوح فاكتبها في targetCountry واختر audienceScope المناسب.',
+            '- إذا لم يظهر سوق واضح، اترك targetCountry فارغًا واختر audienceScope بقيمة global.',
+            '- targetAudience يجب أن يكون وصفًا قصيرًا ودقيقًا للجمهور المستهدف بلغة المقال.',
+            '- لا تخترع دولة أو سوقًا غير ظاهر من العنوان أو الكلمات.',
+            '',
+            'أرجع JSON فقط دون Markdown ودون شرح بهذا الشكل:',
+            '{ "pageType": "service", "objective": "convert", "audienceScope": "global", "targetCountry": "", "targetAudience": "وصف الجمهور المستهدف", "searchIntent": "transactional" }',
+        ].join('\n');
+
+        const result = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        const parsed = extractJson(result);
+        const context = normalizeGeneratedGoalContext(parsed, goalContext);
+
+        if (!context) {
+            const looksLikeApiError = /Gemini|API|خطأ|مهلة|فشل/i.test(result);
+            return {
+                error: looksLikeApiError
+                    ? result
+                    : 'لم يرجع الذكاء الاصطناعي سياقًا قابلًا للتعبئة. حاول مرة أخرى.',
+            };
+        }
+
+        return { context };
+    }, [apiKeys.gemini, articleLanguage, goalContext, keywords.primary, keywords.secondaries, title]);
     
     const handleAiAnalyze = useCallback(async (userPrompt: string, options: any) => {
         if (!editor) return;
@@ -2909,7 +3015,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         aiResults, aiInsertionPatches, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
-        generateSemanticKeywords,
+        generateSemanticKeywords, generateGoalContext,
         handleChatGptAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
         clearBulkFixReviewItems, applySuggestionFromHistory,

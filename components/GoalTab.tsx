@@ -1,8 +1,9 @@
 ﻿import React from 'react';
-import { CheckCircle, Copy, Save, Target } from 'lucide-react';
+import { AlertCircle, CheckCircle, Copy, Loader2, Save, Sparkles, Target } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
+import { useAI } from '../contexts/AIContext';
 import GoalContextFields from './GoalContextFields';
 import { formatGoalContextForCopy } from '../utils/goalContext';
 
@@ -16,20 +17,34 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
         goalContext,
         setGoalContext,
         keywords,
+        title,
     } = useEditor();
+    const { generateGoalContext } = useAI();
     const [lastSavedCompany, setLastSavedCompany] = React.useState('');
     const [copyStatus, setCopyStatus] = React.useState('');
+    const [isGeneratingGoalContext, setIsGeneratingGoalContext] = React.useState(false);
+    const [goalContextGenerationStatus, setGoalContextGenerationStatus] = React.useState('');
+    const [isGoalContextGenerationSuccess, setIsGoalContextGenerationSuccess] = React.useState(false);
 
   const t = translations[uiLanguage].goalTab;
   const companyName = keywords.company.trim();
+  const hasGoalContextSource = Boolean(
+    title.trim() ||
+    keywords.primary.trim() ||
+    keywords.secondaries.some(term => term.trim())
+  );
   const isClientSaved = Boolean(companyName && clientGoalContexts[companyName]);
   const savedMessage = companyName && lastSavedCompany === companyName
     ? t.clientContextSaved.replace('{company}', companyName)
     : '';
   const contextStatusMessage = savedMessage || (isClientSaved ? t.clientAlreadySaved : '');
-  const visibleStatusMessage = copyStatus || contextStatusMessage;
+  const visibleStatusMessage = goalContextGenerationStatus || copyStatus || contextStatusMessage;
+  const visibleStatusClass = goalContextGenerationStatus && !isGoalContextGenerationSuccess
+    ? 'text-red-600 dark:text-red-400'
+    : 'text-green-600 dark:text-green-400';
 
   const updateGoalContext = (key: keyof typeof goalContext, value: string) => {
+    setGoalContextGenerationStatus('');
     setGoalContext(prev => ({ ...prev, [key]: value }));
   };
 
@@ -37,12 +52,45 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     if (!companyName || isClientSaved) return;
     handleSaveClientGoalContext(companyName, goalContext);
     setLastSavedCompany(companyName);
+    setGoalContextGenerationStatus('');
     setCopyStatus('');
   };
 
   const handleCopyClientContext = async () => {
     await navigator.clipboard.writeText(formatGoalContextForCopy(companyName, goalContext, t));
+    setGoalContextGenerationStatus('');
     setCopyStatus(t.clientContextCopied);
+  };
+
+  const handleGenerateGoalContext = async () => {
+    if (!hasGoalContextSource || isGeneratingGoalContext) {
+      setIsGoalContextGenerationSuccess(false);
+      setGoalContextGenerationStatus(t.goalContextSourceRequired);
+      return;
+    }
+
+    setIsGeneratingGoalContext(true);
+    setGoalContextGenerationStatus('');
+    setCopyStatus('');
+
+    try {
+      const result = await generateGoalContext();
+      if (result.error || !result.context) {
+        setIsGoalContextGenerationSuccess(false);
+        setGoalContextGenerationStatus(result.error || t.goalContextGenerationFailed);
+        return;
+      }
+
+      setGoalContext(result.context);
+      setLastSavedCompany('');
+      setIsGoalContextGenerationSuccess(true);
+      setGoalContextGenerationStatus(t.goalContextGenerated);
+    } catch (error) {
+      setIsGoalContextGenerationSuccess(false);
+      setGoalContextGenerationStatus(t.goalContextGenerationFailed);
+    } finally {
+      setIsGeneratingGoalContext(false);
+    }
   };
 
   return (
@@ -57,6 +105,16 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             </div>
             <GoalContextFields goalContext={goalContext} onChange={updateGoalContext} />
             <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={handleGenerateGoalContext}
+                disabled={isGeneratingGoalContext || !hasGoalContextSource}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#d4af37]/10 px-3 py-2 text-sm font-bold text-[#b8922e] transition-colors hover:bg-[#d4af37]/20 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#d4af37]/20 dark:text-[#f2d675] dark:hover:bg-[#d4af37]/30"
+                title={!hasGoalContextSource ? t.goalContextSourceRequired : t.generateGoalContext}
+              >
+                {isGeneratingGoalContext ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                <span>{isGeneratingGoalContext ? t.generatingGoalContext : t.generateGoalContext}</span>
+              </button>
               <div className="flex items-center gap-2">
                 <button
                     type="button"
@@ -79,8 +137,11 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 </button>
               </div>
                 {visibleStatusMessage && (
-                    <p className="flex items-start gap-2 text-xs font-bold text-green-600 dark:text-green-400" aria-live="polite">
-                        <CheckCircle size={14} className="mt-0.5 flex-shrink-0" />
+                    <p className={`flex items-start gap-2 text-xs font-bold ${visibleStatusClass}`} aria-live="polite">
+                        {goalContextGenerationStatus && !isGoalContextGenerationSuccess
+                          ? <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                          : <CheckCircle size={14} className="mt-0.5 flex-shrink-0" />
+                        }
                         <span>{visibleStatusMessage}</span>
                     </p>
                 )}
