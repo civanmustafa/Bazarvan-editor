@@ -13,7 +13,6 @@ export const ENGINEERING_PROMPT_IDS = {
     peopleQuestions: 'smartAnalysis.peopleQuestions',
     structuredContent: 'smartAnalysis.structuredContent',
     unsuitableSections: 'smartAnalysis.unsuitableSections',
-    meetingLinks: 'smartAnalysis.meetingLinks',
   },
   toolbar: {
     suggestHeadings: 'toolbar.suggestHeadings',
@@ -364,40 +363,6 @@ const ENTITY_MAP_SEO_PROMPT = `حلّل المقال من منظور خريطة 
 - ركّز على تحسين الفهم، الثقة، الاكتمال، وقابلية الاقتباس.
 - أخرج النتيجة بالعربية وبشكل منظم ومباشر.`;
 
-const MEETING_LINKS_TASK_PROMPT = `You are a conversion-focused content editor and UX reviewer.
-
-Review the attached editor text, page goal, audience context, target keywords, and brand/company name when provided.
-
-Task:
-Audit the content for places where a meeting link should be added, improved, or made clearer. Include Google Meet, Zoom Meeting, Microsoft Teams, Webex, GoTo Meeting, Whereby, Calendly, booking-calendar links, and any other online meeting or consultation links.
-
-Output in Arabic only, using this exact structure:
-
-1. Existing meeting links:
-- List every meeting or booking link you find.
-- Identify the platform when possible.
-- Mention the surrounding section or CTA.
-- Flag broken-looking, vague, duplicated, or poorly placed links.
-
-2. Missing meeting-link opportunities:
-- Suggest the best places to add a meeting link.
-- Explain the intent of each link: consultation, demo, sales call, support call, interview, onboarding, or follow-up.
-- Do not invent a real URL. Use placeholders such as [Google Meet link], [Zoom meeting link], [Teams meeting link], [booking link], or [meeting link].
-
-3. Ready-to-insert CTA copy:
-- Provide 3 to 6 short CTA options that can be inserted directly into the article.
-- Include variants for Google Meet, Zoom Meeting, Teams/Webex, and a neutral "book a meeting" link.
-
-4. Recommended placement:
-- For each suggested CTA, state exactly where it should be inserted in the article.
-- Keep recommendations practical and avoid adding too many links.
-
-Rules:
-- Do not create fake meeting URLs.
-- Keep anchor text clear and trustworthy.
-- Prefer one primary meeting CTA plus contextual secondary links when needed.
-- If the content is not suitable for meetings, say so and suggest the safest alternative CTA.`;
-
 export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
   {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.entityMap,
@@ -460,7 +425,14 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
 3. الفقرة المقترحة جاهزة للإضافة.
 4. سبب أهميتها للبحث والقرار والتحويل.
 لا تقدّم أكثر من فكرة واحدة ولا تقترح صورًا أو فيديوهات أو Schema.`,
-    options: DEFAULT_SMART_ANALYSIS_OPTIONS,
+    options: {
+      ...DEFAULT_SMART_ANALYSIS_OPTIONS,
+      articleToc: true,
+      keywordCriteria: true,
+      basicStructureCriteria: true,
+      headingsSequenceCriteria: true,
+      interactionCtaCriteria: true,
+    },
   },
   {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.peopleQuestions,
@@ -488,17 +460,6 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     labelKey: 'unsuitableSections',
     defaultValue: UNSUITABLE_SECTIONS_AUDIT_PROMPT,
     options: DEFAULT_SMART_ANALYSIS_OPTIONS,
-  },
-  {
-    id: ENGINEERING_PROMPT_IDS.smartAnalysis.meetingLinks,
-    source: 'smartAnalysis',
-    labelKey: 'meetingLinks',
-    defaultValue: MEETING_LINKS_TASK_PROMPT,
-    options: {
-      ...DEFAULT_SMART_ANALYSIS_OPTIONS,
-      companyName: true,
-      interactionCtaCriteria: true,
-    },
   },
   {
     id: ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings,

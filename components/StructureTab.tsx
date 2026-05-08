@@ -852,17 +852,18 @@ const StructureTab: React.FC = () => {
         const totalItems = items.length || 1;
         const failCount = items.filter(item => item.status === 'fail').length;
         const warnCount = items.filter(item => item.status === 'warn').length;
+        const violatingCount = failCount + warnCount;
         const passCount = items.filter(item => item.status === 'pass').length;
         const score = items.reduce((sum, item) => sum + getCriterionScore(item), 0) / totalItems;
+        const statsText = `${totalItems}/${violatingCount}`;
 
         return {
             label: group.name,
-            value: `${failCount + warnCount}/${passCount}`,
+            value: statsText,
+            statsText,
             score,
             outerPoint: failCount === 0 && warnCount === 0 && passCount === totalItems,
             tone: failCount > 0 ? 'bad' : warnCount > 0 ? 'warn' : 'good',
-            problems: failCount + warnCount,
-            corrected: passCount,
         };
     });
 

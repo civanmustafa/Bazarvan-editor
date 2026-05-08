@@ -76,6 +76,33 @@ const applyArticleLanguageFormatting = (editor: Editor, lang: 'ar' | 'en') => {
         .run();
 };
 
+const removePastedSectionSeparatorsFromText = (text: string): string => {
+    return text
+        .split(/\r?\n/)
+        .filter(line => !/^\s*[-_=*─━—]{3,}\s*$/.test(line))
+        .join('\n');
+};
+
+const removePastedSectionSeparatorsFromHtml = (html: string): string => {
+    if (typeof DOMParser === 'undefined') {
+        return html.replace(/<hr\b[^>]*\/?>/gi, '');
+    }
+
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('hr, [data-type="horizontalRule"]').forEach(node => node.remove());
+    doc.body.querySelectorAll<HTMLElement>('*').forEach(element => {
+        const text = (element.textContent || '').replace(/\u00a0/g, ' ').trim();
+        const style = element.getAttribute('style') || '';
+        const hasBorderSeparator = /border-(top|bottom)\s*:/i.test(style);
+        const isTextSeparator = /^[-_=*─━—]{3,}$/.test(text);
+        if ((!text && hasBorderSeparator) || isTextSeparator) {
+            element.remove();
+        }
+    });
+
+    return removePastedSectionSeparatorsFromText(doc.body.innerHTML);
+};
+
 const ViolationHighlight = Highlight.extend({
     // Custom highlight mark used by keyword highlights and structure violations.
     // UI behavior is controlled in InteractionContext; this only defines stored attrs/rendering.
@@ -230,6 +257,10 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const editor = useTiptapEditor({
         extensions,
         content: getInitialContent(),
+        editorProps: {
+            transformPastedHTML: removePastedSectionSeparatorsFromHtml,
+            transformPastedText: removePastedSectionSeparatorsFromText,
+        },
         onUpdate: ({ editor, transaction }) => {
             if (transaction.getMeta('preventUpdate')) return;
             const contentJSON = editor.getJSON();

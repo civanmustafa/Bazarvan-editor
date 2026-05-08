@@ -5,7 +5,7 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { BookCopy, Trash2, Check, Copy, MapPin, ChevronDown } from 'lucide-react';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
-import type { BulkFixReviewVariant } from '../types';
+import type { AiContentPatch, AIHistoryItem, BulkFixReviewVariant } from '../types';
 
 const getCriterionDisplayOrder = (status?: string): number => {
     if (status === 'pass') return 0;
@@ -75,6 +75,89 @@ const AIHistoryTab: React.FC = () => {
         if (status === 'warn') return isArabic ? 'يحتاج مراجعة' : 'Review';
         return isArabic ? 'غير مؤكد' : 'Unknown';
     };
+    const historyTypeLabel = (item: AIHistoryItem) => {
+        if (item.type === 'fix-violation') return t.aiHistory.violationFix;
+        if (item.type === 'manual-analysis') return isArabic ? 'تحليل أمر يدوي جاهز' : 'Ready Command Analysis';
+        return t.aiHistory.userCommand;
+    };
+    const providerLabel = (provider?: AIHistoryItem['provider']) => {
+        if (provider === 'gemini') return 'Gemini';
+        if (provider === 'chatgpt') return 'ChatGPT';
+        return '';
+    };
+    const renderAnalysisPatch = (patch: AiContentPatch) => (
+        <div key={patch.id} className="my-3 rounded-lg border border-[#d4af37]/25 bg-white/80 p-2 dark:border-[#d4af37]/30 dark:bg-[#1F1F1F]/80">
+            <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                    <div className="text-xs font-bold text-[#333333] line-clamp-2 dark:text-gray-100">{patch.title}</div>
+                    {(patch.placementLabel || patch.anchorText || patch.targetText) && (
+                        <div className="mt-1 text-[11px] text-gray-500 line-clamp-2 dark:text-gray-400">
+                            {patch.placementLabel || patch.anchorText || patch.targetText}
+                        </div>
+                    )}
+                </div>
+                <button
+                    type="button"
+                    onClick={() => copyText(patch.contentMarkdown)}
+                    className={iconButtonClass}
+                    title={isArabic ? 'نسخ النص الجاهز' : 'Copy ready text'}
+                    aria-label={isArabic ? 'نسخ النص الجاهز' : 'Copy ready text'}
+                >
+                    <Copy size={13} />
+                </button>
+            </div>
+            <div
+                className="ai-output rounded-md border border-gray-100 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-800 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-100"
+                dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }}
+            />
+        </div>
+    );
+    const renderManualAnalysisResult = (item: AIHistoryItem) => {
+        const result = item.analysisResult || item.suggestions.join('\n\n');
+        const patches = item.analysisPatches || [];
+
+        if (!patches.length) {
+            return <div className="ai-output text-sm text-[#333333] dark:text-[#b7b7b7]" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(result) }} />;
+        }
+
+        const usedPatchIds = new Set<string>();
+        const markerPattern = /\[\[PATCH:([^\]]+)\]\]/g;
+        const parts: React.ReactNode[] = [];
+        let lastIndex = 0;
+        let match: RegExpExecArray | null;
+
+        while ((match = markerPattern.exec(result)) !== null) {
+            const textChunk = result.slice(lastIndex, match.index);
+            const marker = match[1].trim();
+
+            if (textChunk.trim()) {
+                parts.push(
+                    <div key={`text-${lastIndex}`} className="ai-output text-sm text-[#333333] dark:text-[#b7b7b7]" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(textChunk) }} />
+                );
+            }
+
+            const patch = patches.find(itemPatch => itemPatch.marker === marker || itemPatch.title === marker);
+            if (patch) {
+                usedPatchIds.add(patch.id);
+                parts.push(renderAnalysisPatch(patch));
+            }
+
+            lastIndex = markerPattern.lastIndex;
+        }
+
+        const tail = result.slice(lastIndex);
+        if (tail.trim()) {
+            parts.push(
+                <div key="text-tail" className="ai-output text-sm text-[#333333] dark:text-[#b7b7b7]" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(tail) }} />
+            );
+        }
+
+        patches
+            .filter(patch => !usedPatchIds.has(patch.id))
+            .forEach(patch => parts.push(renderAnalysisPatch(patch)));
+
+        return <>{parts}</>;
+    };
 
     return (
         <div className="p-2 space-y-3">
@@ -84,11 +167,18 @@ const AIHistoryTab: React.FC = () => {
                         <div className="flex justify-between items-start gap-2">
                             <div>
                                 <h4 className="text-xs font-bold text-[#d4af37] dark:text-[#f2d675] uppercase tracking-wider">
-                                    {item.type === 'fix-violation' ? t.aiHistory.violationFix : t.aiHistory.userCommand}
+                                    {historyTypeLabel(item)}
                                 </h4>
-                                {item.ruleTitle && (
-                                    <p className="text-base font-semibold text-[#333333] dark:text-[#b7b7b7] mt-1 ai-history-content-text">{item.ruleTitle}</p>
-                                )}
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                    {item.ruleTitle && (
+                                        <p className="text-base font-semibold text-[#333333] dark:text-[#b7b7b7] ai-history-content-text">{item.ruleTitle}</p>
+                                    )}
+                                    {providerLabel(item.provider) && (
+                                        <span className="rounded-full bg-[#d4af37]/15 px-2 py-0.5 text-[10px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                                            {providerLabel(item.provider)}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                             <button 
                                 onClick={() => removeFromAiHistory(item.id)}
@@ -98,7 +188,7 @@ const AIHistoryTab: React.FC = () => {
                                 <Trash2 size={14} />
                             </button>
                         </div>
-                        {!item.bulkFixReviewItem && (
+                        {item.type !== 'manual-analysis' && !item.bulkFixReviewItem && (
                             <p
                                 onClick={() => handleOriginalTextClick(item.from, item.to)}
                                 className="mt-2 text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#1F1F1F] p-2 rounded-md line-clamp-2 cursor-pointer hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 transition-colors"
@@ -114,7 +204,24 @@ const AIHistoryTab: React.FC = () => {
                         )}
                     </div>
 
-                    {item.bulkFixReviewItem ? (
+                    {item.type === 'manual-analysis' ? (
+                        <div className="p-3 space-y-3 bg-gray-50/50 dark:bg-[#2A2A2A]/50">
+                            <div className="flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => copyText(item.analysisResult || item.suggestions.join('\n\n'))}
+                                    className={iconButtonClass}
+                                    title={isArabic ? 'نسخ النتيجة' : 'Copy result'}
+                                    aria-label={isArabic ? 'نسخ النتيجة' : 'Copy result'}
+                                >
+                                    <Copy size={13} />
+                                </button>
+                            </div>
+                            <div className="overflow-y-auto custom-scrollbar rounded-lg border border-gray-100 bg-white/80 p-2 text-sm leading-relaxed text-gray-800 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100" style={{ maxHeight: 'min(56vh, 34rem)' }}>
+                                {renderManualAnalysisResult(item)}
+                            </div>
+                        </div>
+                    ) : item.bulkFixReviewItem ? (
                         <div className="p-3 space-y-3 bg-gray-50/50 dark:bg-[#2A2A2A]/50">
                             <div>
                                 <div

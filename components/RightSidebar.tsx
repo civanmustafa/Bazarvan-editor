@@ -6,8 +6,8 @@ import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
-import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider } from '../types';
-import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, getEngineeringPrompt } from '../constants/engineeringPrompts';
+import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
+import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
     id: string;
@@ -473,6 +473,7 @@ const RightSidebar: React.FC = () => {
     const {
         handleAiAnalyze,
         handleChatGptAnalyze,
+        handleGeminiReadyCommandsAnalyze,
         aiResults,
         aiInsertionPatches,
         isAiLoading,
@@ -486,7 +487,7 @@ const RightSidebar: React.FC = () => {
     const [competitorUrls, setCompetitorUrls] = useState<string[]>(() => loadStoredCompetitorUrls());
     const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
     const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => createDefaultCompetitorExtractions());
-    const [selectedReadyCommandId, setSelectedReadyCommandId] = useState('');
+    const [selectedReadyCommandIds, setSelectedReadyCommandIds] = useState<string[]>([]);
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(true);
     const [copiedPatchId, setCopiedPatchId] = useState('');
@@ -557,34 +558,113 @@ const RightSidebar: React.FC = () => {
             }));
     }, [engineeringPrompts, t.locale, tRs]);
 
-    useEffect(() => {
-        if (!selectedReadyCommandId) return;
-        const selectedCommand = readyCommands.find(command => command.id === selectedReadyCommandId);
-        if (selectedCommand) {
-            setAiCommand(selectedCommand.value);
-        }
-    }, [readyCommands, selectedReadyCommandId]);
+    const getReadyCommandOptions = (command: ReadyCommand): AiAnalysisOptions => ({
+        ...DEFAULT_SMART_ANALYSIS_OPTIONS,
+        ...(command.options || {}),
+    });
 
-    const getCommandIcon = (index: number) => {
-        switch (index) {
-            case 1: return <BrainCircuit size={16} className="text-[#d4af37]" />;
-            case 2: return <FileSearch size={16} className="text-[#d4af37]" />;
-            case 3: return <ShieldAlert size={16} className="text-[#d4af37]" />;
-            case 4: return <Lightbulb size={16} className="text-[#d4af37]" />;
-            case 5: return <Users size={16} className="text-[#d4af37]" />;
-            default: return <Command size={16} className="text-gray-400" />;
+    const selectedReadyCommands = useMemo(
+        () => selectedReadyCommandIds
+            .map(id => readyCommands.find(command => command.id === id))
+            .filter((command): command is ReadyCommand => Boolean(command)),
+        [readyCommands, selectedReadyCommandIds]
+    );
+
+    useEffect(() => {
+        setSelectedReadyCommandIds(prev => {
+            const availableIds = new Set(readyCommands.map(command => command.id));
+            const next = prev.filter(id => availableIds.has(id));
+            return next.length === prev.length ? prev : next;
+        });
+    }, [readyCommands]);
+
+    useEffect(() => {
+        if (selectedReadyCommands.length === 0) return;
+        if (selectedReadyCommands.length === 1) {
+            const selectedCommand = selectedReadyCommands[0];
+            setAiCommand(selectedCommand.value);
+            setAiOptions(getReadyCommandOptions(selectedCommand));
+            return;
+        }
+
+        setAiCommand(selectedReadyCommands
+            .map((command, index) => `### ${index + 1}. ${command.label}\n${command.value}`)
+            .join('\n\n')
+        );
+        setAiOptions(selectedReadyCommands.reduce(
+            (merged, command) => ({ ...merged, ...(command.options || {}) }),
+            { ...DEFAULT_SMART_ANALYSIS_OPTIONS }
+        ));
+    }, [selectedReadyCommands]);
+
+    const selectedReadyCommand = selectedReadyCommands.length === 1 ? selectedReadyCommands[0] : null;
+
+    const readyCommandHistoryMeta: ReadyCommandAnalysisHistoryMeta | undefined = selectedReadyCommand
+        ? { commandId: selectedReadyCommand.id, commandLabel: selectedReadyCommand.label }
+        : undefined;
+
+    const readyCommandBatchItems: ReadyCommandAnalysisBatchItem[] = selectedReadyCommands.map(command => ({
+        commandId: command.id,
+        commandLabel: command.label,
+        userPrompt: command.value,
+        options: getReadyCommandOptions(command),
+    }));
+
+    const selectedReadyCommandsLabel = selectedReadyCommands.length === 0
+        ? tRs.selectCommand
+        : selectedReadyCommands.length === 1
+            ? selectedReadyCommands[0].label
+            : t.locale === 'ar'
+                ? `${selectedReadyCommands.length} أوامر محددة`
+                : `${selectedReadyCommands.length} commands selected`;
+
+    const getCommandIcon = (commandId: string) => {
+        const iconClass = 'text-[#d4af37]';
+        switch (commandId) {
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.entityMap:
+                return <BrainCircuit size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.fullArticleAudit:
+                return <FileSearch size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion:
+                return <FilePlus2 size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.improveWeakest:
+                return <ShieldAlert size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.suggestNewIdea:
+                return <Lightbulb size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.peopleQuestions:
+                return <Users size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.structuredContent:
+                return <LayoutTemplate size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.unsuitableSections:
+                return <LocateFixed size={16} className={iconClass} />;
+            default:
+                return <Command size={16} className={iconClass} />;
         }
     };
 
     const handleCommandSelect = (command: ReadyCommand) => {
-        setSelectedReadyCommandId(command.id);
-        if (command.value) setAiCommand(command.value);
-        setAiOptions({ ...DEFAULT_SMART_ANALYSIS_OPTIONS, ...(command.options || {}) });
-        setIsCommandsMenuOpen(false);
+        setSelectedReadyCommandIds(prev => (
+            prev.includes(command.id)
+                ? prev.filter(id => id !== command.id)
+                : [...prev, command.id]
+        ));
     };
 
     const handleOptionChange = (key: keyof typeof aiOptions) => {
         setAiOptions(prev => ({ ...prev, [key]: !prev[key] }));
+    };
+
+    const handleRunGeminiAnalysis = () => {
+        if (selectedReadyCommands.length > 1) {
+            handleGeminiReadyCommandsAnalyze(readyCommandBatchItems);
+            return;
+        }
+
+        handleAiAnalyze(aiCommand, aiOptions, readyCommandHistoryMeta);
+    };
+
+    const handleRunChatGptAnalysis = () => {
+        handleChatGptAnalyze(aiCommand, aiOptions, readyCommandHistoryMeta);
     };
 
     const handleCopyPatch = async (patchId: string, content: string) => {
@@ -867,17 +947,13 @@ const RightSidebar: React.FC = () => {
                                 className="w-full flex items-center justify-between p-2.5 bg-white dark:bg-[#1F1F1F] border border-gray-300 dark:border-[#3C3C3C] rounded-lg text-sm text-start focus:outline-none focus:ring-1 focus:ring-[#d4af37] shadow-sm transition-all"
                             >
                                 <span className="truncate text-gray-700 dark:text-gray-200 font-medium flex items-center gap-2">
-                                    {selectedReadyCommandId ? (
-                                        (() => {
-                                            const cmdIndex = readyCommands.findIndex(c => c.id === selectedReadyCommandId);
-                                            const cmd = readyCommands[cmdIndex];
-                                            return (
-                                                <>
-                                                    {cmdIndex >= 0 && getCommandIcon(cmdIndex + 1)}
-                                                    <span>{cmd ? cmd.label : tRs.selectCommand}</span>
-                                                </>
-                                            );
-                                        })()
+                                    {selectedReadyCommands.length > 0 ? (
+                                        <>
+                                            {selectedReadyCommands.length === 1
+                                                ? getCommandIcon(selectedReadyCommands[0].id)
+                                                : <Command size={16} className="text-[#d4af37]" />}
+                                            <span>{selectedReadyCommandsLabel}</span>
+                                        </>
                                     ) : (
                                         <span className="text-gray-500">{tRs.selectCommand}</span>
                                     )}
@@ -887,23 +963,51 @@ const RightSidebar: React.FC = () => {
 
                             {isCommandsMenuOpen && (
                                 <div className="absolute z-20 mt-2 w-full bg-white dark:bg-[#2A2A2A] border border-gray-200 dark:border-[#3C3C3C] rounded-lg shadow-xl max-h-60 overflow-y-auto custom-scrollbar ring-1 ring-black ring-opacity-5">
-                                    {readyCommands.map((cmd, idx) => (
+                                    {readyCommands.map((cmd) => {
+                                        const isSelected = selectedReadyCommandIds.includes(cmd.id);
+                                        return (
                                         <button
                                             key={cmd.id}
                                             onClick={() => handleCommandSelect(cmd)}
-                                            className="w-full text-start px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors flex items-center gap-3 border-b border-gray-50 dark:border-[#333] last:border-0"
+                                            className={`w-full text-start px-3 py-2.5 text-sm transition-colors flex items-center gap-3 border-b border-gray-50 dark:border-[#333] last:border-0 ${
+                                                isSelected
+                                                    ? 'bg-[#d4af37]/10 text-[#8a6f1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
+                                                    : 'text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'
+                                            }`}
                                         >
-                                            {getCommandIcon(idx + 1)}
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                readOnly
+                                                className="rounded border-gray-300 text-[#d4af37] focus:ring-[#d4af37]"
+                                                tabIndex={-1}
+                                            />
+                                            {getCommandIcon(cmd.id)}
                                             <span>{cmd.label}</span>
                                         </button>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
 
                         <div>
                             <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">{tRs.aiCommand}</label>
-                            <textarea value={aiCommand} onChange={(e) => setAiCommand(e.target.value)} rows={4} className="w-full p-2 bg-white dark:bg-[#1F1F1F] border border-gray-300 dark:border-[#3C3C3C] rounded-md text-sm resize-none text-[#333333] dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37]" placeholder={tRs.aiPlaceholder} />
+                            <textarea
+                                value={aiCommand}
+                                onChange={(e) => setAiCommand(e.target.value)}
+                                rows={selectedReadyCommands.length > 1 ? 6 : 4}
+                                readOnly={selectedReadyCommands.length > 1}
+                                className={`w-full p-2 bg-white dark:bg-[#1F1F1F] border border-gray-300 dark:border-[#3C3C3C] rounded-md text-sm resize-none text-[#333333] dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] ${selectedReadyCommands.length > 1 ? 'cursor-default bg-gray-50 dark:bg-[#1F1F1F]/80' : ''}`}
+                                placeholder={tRs.aiPlaceholder}
+                            />
+                            {selectedReadyCommands.length > 1 && (
+                                <p className="mt-1.5 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
+                                    {t.locale === 'ar'
+                                        ? `سيتم إرسال ${selectedReadyCommands.length} أوامر إلى Gemini دفعة واحدة، مع توزيعها على ${Math.max(1, apiKeys.gemini.filter(Boolean).length)} مفاتيح API متاحة.`
+                                        : `${selectedReadyCommands.length} commands will be sent to Gemini together, distributed across ${Math.max(1, apiKeys.gemini.filter(Boolean).length)} available API keys.`}
+                                </p>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-2 gap-2">
@@ -917,11 +1021,11 @@ const RightSidebar: React.FC = () => {
 
                         <div className="flex flex-col gap-2">
                             <div className="flex gap-2">
-                                <button onClick={() => handleAiAnalyze(aiCommand, aiOptions)} disabled={isAiLoading.gemini} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
+                                <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                     <span className="text-xs font-bold">Gemini</span>
                                 </button>
-                                <button onClick={() => handleChatGptAnalyze(aiCommand, aiOptions)} disabled={isAiLoading.chatgpt} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
+                                <button onClick={handleRunChatGptAnalysis} disabled={isAiLoading.chatgpt} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
                                     <span className="text-xs font-bold">ChatGPT</span>
                                 </button>

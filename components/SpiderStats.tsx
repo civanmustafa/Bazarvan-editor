@@ -3,6 +3,7 @@ import React from 'react';
 export type SpiderStatMetric = {
   label: string;
   value: string | number;
+  statsText?: string;
   score: number;
   outerPoint?: boolean;
   tone?: 'good' | 'warn' | 'bad' | 'neutral';
@@ -41,6 +42,7 @@ const pointsToString = (points: { x: number; y: number }[]) =>
 
 const getMetricColor = (metric: SpiderStatMetric, index: number) => metric.color || METRIC_COLORS[index % METRIC_COLORS.length];
 const getMetricStatsText = (metric: SpiderStatMetric): string => {
+  if (metric.statsText) return metric.statsText;
   if (typeof metric.problems === 'number' || typeof metric.corrected === 'number') {
     return `${metric.problems ?? 0}/${metric.corrected ?? 0}`;
   }

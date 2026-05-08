@@ -18,11 +18,13 @@ import type {
     BulkFixReviewStats,
     BulkFixReviewVariant,
     GoalContext,
+    ReadyCommandAnalysisBatchItem,
+    ReadyCommandAnalysisHistoryMeta,
     StructureAnalysis,
 } from '../types';
 import { parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
-import { CTA_WORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
+import { CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { normalizeGoalContext } from '../utils/goalContext';
 
@@ -1898,6 +1900,36 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
     return { displayText: patches.length ? stripDuplicatePatchTextFromAnalysis(displayText || rawResponse, patches) : displayText || rawResponse, patches };
 };
 
+type SmartAnalysisParsedResult = ReturnType<typeof parseSmartAnalysisResponse>;
+
+const normalizePatchMarkerId = (value: string): string => {
+    const normalized = value
+        .normalize('NFKC')
+        .replace(/[^\p{L}\p{N}_-]+/gu, '_')
+        .replace(/^_+|_+$/g, '');
+    return normalized || 'patch';
+};
+
+const namespaceSmartAnalysisPatches = (
+    parsedResult: SmartAnalysisParsedResult,
+    namespace: string,
+    titlePrefix?: string
+): SmartAnalysisParsedResult => {
+    let displayText = parsedResult.displayText;
+    const patches = parsedResult.patches.map((patch, index) => {
+        const originalMarker = patch.marker || patch.title || `patch_${index + 1}`;
+        const marker = `${namespace}_${normalizePatchMarkerId(originalMarker)}`;
+        displayText = displayText.split(`[[PATCH:${originalMarker}]]`).join(`[[PATCH:${marker}]]`);
+        return {
+            ...patch,
+            marker,
+            title: titlePrefix ? `${titlePrefix}: ${patch.title}` : patch.title,
+        };
+    });
+
+    return { displayText, patches };
+};
+
 const normalizeAnchorText = (value: string): string => value
     .normalize('NFKC')
     .replace(/[ًٌٍَُِّْـ]/g, '')
@@ -1960,7 +1992,10 @@ const findHeadingByKeywords = (editor: any, keywords: string[]): HeadingMatch | 
     editor.state.doc.descendants((node: any, pos: number) => {
         if (node.type.name !== 'heading') return true;
         const heading = normalizeAnchorText(node.textContent);
-        const found = keywords.some(keyword => heading.includes(normalizeAnchorText(keyword)));
+        const found = keywords.some(keyword => {
+            const normalizedKeyword = normalizeAnchorText(keyword);
+            return normalizedKeyword && heading.includes(normalizedKeyword);
+        });
         if (found) {
             match = {
                 pos,
@@ -1971,6 +2006,36 @@ const findHeadingByKeywords = (editor: any, keywords: string[]): HeadingMatch | 
             };
             return false;
         }
+        return true;
+    });
+
+    return match;
+};
+
+const findHeadingByKeywordsAfter = (editor: any, keywords: string[], startPos: number): HeadingMatch | null => {
+    if (!editor) return null;
+    let match: HeadingMatch | null = null;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (pos <= startPos) return true;
+        if (node.type.name !== 'heading') return true;
+        const heading = normalizeAnchorText(node.textContent);
+        const found = keywords.some(keyword => {
+            const normalizedKeyword = normalizeAnchorText(keyword);
+            return normalizedKeyword && heading.includes(normalizedKeyword);
+        });
+
+        if (found) {
+            match = {
+                pos,
+                to: pos + node.nodeSize,
+                level: node.attrs.level || 2,
+                text: node.textContent,
+                score: 2,
+            };
+            return false;
+        }
+
         return true;
     });
 
@@ -2071,6 +2136,53 @@ const findSectionEnd = (editor: any, heading: HeadingMatch): number => {
     return sectionEnd;
 };
 
+const FAQ_SECTION_HEADING_KEYWORDS = [
+    ...FAQ_KEYWORDS,
+    'الأسئلة الشائعة',
+    'اسئلة شائعة',
+    'faq',
+    'faqs',
+    'frequently asked questions',
+];
+
+const CONCLUSION_HEADING_KEYWORDS = [
+    ...CONCLUSION_KEYWORDS,
+    'ختام',
+    'conclusion',
+    'summary',
+];
+
+const findFaqAppendTarget = (editor: any, docEnd: number): PatchTarget => {
+    const faqHeading = findHeadingByKeywords(editor, FAQ_SECTION_HEADING_KEYWORDS);
+
+    if (!faqHeading) {
+        const conclusionHeading = findHeadingByKeywords(editor, CONCLUSION_HEADING_KEYWORDS);
+        const fallbackPos = conclusionHeading?.pos ?? docEnd;
+        return {
+            from: fallbackPos,
+            to: fallbackPos,
+            selectFrom: conclusionHeading?.pos ?? docEnd,
+            selectTo: conclusionHeading?.to ?? docEnd,
+            mode: 'insert',
+        };
+    }
+
+    const sectionEnd = findSectionEnd(editor, faqHeading);
+    const conclusionHeading = findHeadingByKeywordsAfter(editor, CONCLUSION_HEADING_KEYWORDS, faqHeading.pos);
+    const insertBeforeConclusion = conclusionHeading && conclusionHeading.pos <= sectionEnd
+        ? conclusionHeading.pos
+        : null;
+    const insertionPos = insertBeforeConclusion ?? sectionEnd;
+
+    return {
+        from: insertionPos,
+        to: insertionPos,
+        selectFrom: faqHeading.pos,
+        selectTo: faqHeading.to,
+        mode: 'insert',
+    };
+};
+
 type PatchTarget = {
     from: number;
     to: number;
@@ -2107,14 +2219,11 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
     }
 
     if (patch.operation === 'insert_before_faq') {
-        const faqHeading = findHeadingByKeywords(editor, ['الأسئلة الشائعة', 'اسئلة شائعة', 'faq']);
-        return faqHeading
-            ? { from: faqHeading.pos, to: faqHeading.pos, selectFrom: faqHeading.pos, selectTo: faqHeading.to, mode: 'insert' }
-            : { from: docEnd, to: docEnd, selectFrom: docEnd, selectTo: docEnd, mode: 'insert' };
+        return findFaqAppendTarget(editor, docEnd);
     }
 
     if (patch.operation === 'insert_before_conclusion') {
-        const conclusionHeading = findHeadingByKeywords(editor, ['الخاتمة', 'الخلاصة', 'في الختام', 'ختام']);
+        const conclusionHeading = findHeadingByKeywords(editor, CONCLUSION_HEADING_KEYWORDS);
         return conclusionHeading
             ? { from: conclusionHeading.pos, to: conclusionHeading.pos, selectFrom: conclusionHeading.pos, selectTo: conclusionHeading.to, mode: 'insert' }
             : { from: docEnd, to: docEnd, selectFrom: docEnd, selectTo: docEnd, mode: 'insert' };
@@ -2171,8 +2280,9 @@ interface AIContextType {
     fixAllProgress: FixAllProgress;
     handleAiRequest: (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => Promise<void>;
     handleAnalyzeHeadings: () => Promise<void>;
-    handleAiAnalyze: (userPrompt: string, options: any) => Promise<void>;
-    handleChatGptAnalyze: (userPrompt: string, options: any) => Promise<void>;
+    handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
+    handleChatGptAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
+    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[]) => Promise<void>;
     generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string }>;
     generateGoalContext: () => Promise<{ context?: GoalContext; error?: string }>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
@@ -2506,7 +2616,74 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return { context };
     }, [apiKeys.gemini, articleLanguage, goalContext, keywords.primary, keywords.secondaries, title]);
     
-    const handleAiAnalyze = useCallback(async (userPrompt: string, options: any) => {
+    const logReadyCommandAnalysis = useCallback((
+        provider: AiPatchProvider,
+        parsedResult: SmartAnalysisParsedResult,
+        historyMeta?: ReadyCommandAnalysisHistoryMeta
+    ) => {
+        const displayText = parsedResult.displayText.trim();
+        if (!historyMeta || !displayText) return;
+
+        logToAiHistory({
+            type: 'manual-analysis',
+            ruleTitle: historyMeta.commandLabel,
+            originalText: '',
+            suggestions: [],
+            from: 0,
+            to: 0,
+            analysisResult: displayText,
+            analysisPatches: parsedResult.patches,
+            provider,
+            commandId: historyMeta.commandId,
+        });
+    }, [logToAiHistory]);
+
+    const handleGeminiReadyCommandsAnalyze = useCallback(async (items: ReadyCommandAnalysisBatchItem[]) => {
+        if (!editor || items.length === 0) return;
+        const geminiKeys = normalizeGeminiKeys(apiKeys.gemini);
+        setIsAiLoading(prev => ({ ...prev, gemini: true }));
+        setAiResults(prev => ({ ...prev, gemini: '' }));
+        setAiInsertionPatches(prev => ({ ...prev, gemini: [] }));
+
+        try {
+            const results = await Promise.all(items.map(async (item, index) => {
+                const assignedKey = geminiKeys.length > 0 ? geminiKeys[index % geminiKeys.length] : undefined;
+                const finalPrompt = `${generateContextAwarePrompt(item.userPrompt, item.options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
+                const result = await callGeminiAnalysis(finalPrompt, assignedKey ? [assignedKey] : undefined);
+                const parsedResult = namespaceSmartAnalysisPatches(
+                    parseSmartAnalysisResponse(result, 'gemini'),
+                    `cmd_${index + 1}`,
+                    item.commandLabel
+                );
+                logReadyCommandAnalysis('gemini', parsedResult, item);
+                return {
+                    item,
+                    parsedResult,
+                    keyIndex: assignedKey ? (index % geminiKeys.length) + 1 : undefined,
+                };
+            }));
+
+            const keyReuseNote = geminiKeys.length > 0 && items.length > geminiKeys.length
+                ? `\n\n> ملاحظة: تم توزيع ${items.length} أوامر على ${geminiKeys.length} مفاتيح Gemini متاحة، لذلك تمت إعادة استخدام بعض المفاتيح.`
+                : '';
+            const displayText = results.map((result, index) => {
+                const keyLabel = result.keyIndex ? `\n\n> Gemini API #${result.keyIndex}` : '';
+                return `## ${index + 1}. ${result.item.commandLabel}${keyLabel}\n\n${result.parsedResult.displayText}`;
+            }).join('\n\n---\n\n') + keyReuseNote;
+
+            setAiResults(prev => ({ ...prev, gemini: displayText }));
+            setAiInsertionPatches(prev => ({
+                ...prev,
+                gemini: results.flatMap(result => result.parsedResult.patches),
+            }));
+        } catch (e) {
+            setAiResults(prev => ({ ...prev, gemini: "فشل التحليل المتعدد." }));
+        } finally {
+            setIsAiLoading(prev => ({ ...prev, gemini: false }));
+        }
+    }, [apiKeys.gemini, editor, generateContextAwarePrompt, logReadyCommandAnalysis]);
+
+    const handleAiAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
         setIsAiLoading(prev => ({ ...prev, gemini: true }));
         setAiInsertionPatches(prev => ({ ...prev, gemini: [] }));
@@ -2516,14 +2693,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const parsedResult = parseSmartAnalysisResponse(result, 'gemini');
             setAiResults(prev => ({ ...prev, gemini: parsedResult.displayText }));
             setAiInsertionPatches(prev => ({ ...prev, gemini: parsedResult.patches }));
+            logReadyCommandAnalysis('gemini', parsedResult, historyMeta);
         } catch (e) {
             setAiResults(prev => ({ ...prev, gemini: "فشل التحليل." }));
         } finally {
             setIsAiLoading(prev => ({ ...prev, gemini: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.gemini, editor]);
+    }, [generateContextAwarePrompt, apiKeys.gemini, editor, logReadyCommandAnalysis]);
 
-    const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any) => {
+    const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
         setIsAiLoading(prev => ({ ...prev, chatgpt: true }));
         setAiResults(prev => ({ ...prev, chatgpt: '' }));
@@ -2534,12 +2712,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const parsedResult = parseSmartAnalysisResponse(result, 'chatgpt');
             setAiResults(prev => ({ ...prev, chatgpt: parsedResult.displayText }));
             setAiInsertionPatches(prev => ({ ...prev, chatgpt: parsedResult.patches }));
+            logReadyCommandAnalysis('chatgpt', parsedResult, historyMeta);
         } catch (e) {
             setAiResults(prev => ({ ...prev, chatgpt: "فشل تحليل ChatGPT." }));
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor]);
+    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         if (isAiCommandLoading || isAiLoading.gemini || !editor) return;
@@ -3016,7 +3195,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         generateSemanticKeywords, generateGoalContext,
-        handleChatGptAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
+        handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
         clearBulkFixReviewItems, applySuggestionFromHistory,
         applyAiInsertionPatch, applyAllAiInsertionPatches, selectAiInsertionPatchTarget,

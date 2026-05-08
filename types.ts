@@ -43,6 +43,16 @@ export interface AiAnalysisOptions {
   conclusionCriteria: boolean;
 }
 
+export interface ReadyCommandAnalysisHistoryMeta {
+  commandId: string;
+  commandLabel: string;
+}
+
+export interface ReadyCommandAnalysisBatchItem extends ReadyCommandAnalysisHistoryMeta {
+  userPrompt: string;
+  options: AiAnalysisOptions;
+}
+
 export type EngineeringPromptSource = 'smartAnalysis' | 'toolbar';
 export type EngineeringPromptId = string;
 export type EngineeringPrompts = Record<EngineeringPromptId, string>;
@@ -248,7 +258,7 @@ export interface AiContentPatch {
 
 export interface AIHistoryItem {
   id: string;
-  type: 'fix-violation' | 'user-command';
+  type: 'fix-violation' | 'user-command' | 'manual-analysis';
   ruleTitle?: string; // For 'fix-violation'
   originalText: string;
   suggestions: string[];
@@ -257,6 +267,10 @@ export interface AIHistoryItem {
   appliedSuggestion?: string;
   applyError?: string;
   bulkFixReviewItem?: BulkFixReviewItem;
+  analysisResult?: string;
+  analysisPatches?: AiContentPatch[];
+  provider?: AiPatchProvider;
+  commandId?: string;
 }
 
 export type BulkFixReviewStatus = 'pending' | 'applied' | 'failed' | 'skipped';
