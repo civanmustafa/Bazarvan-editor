@@ -73,6 +73,7 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
         { value: 'article', label: contextOptions.article },
         { value: 'news', label: contextOptions.news },
         { value: 'service', label: contextOptions.service },
+        { value: 'category', label: contextOptions.categoryPage },
         { value: 'comparison', label: contextOptions.comparisonPage },
         { value: 'product', label: contextOptions.product },
         { value: 'landing', label: contextOptions.landing },
@@ -88,6 +89,7 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
         { value: 'educate', label: contextOptions.educate },
         { value: 'compare', label: contextOptions.compare },
         { value: 'convert', label: contextOptions.convert },
+        { value: 'category-support', label: contextOptions.categorySupport },
         { value: 'trust', label: contextOptions.trust },
         { value: 'support', label: contextOptions.support },
       ],
@@ -122,6 +124,7 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
       options: [
         { value: 'informational', label: contextOptions.informational },
         { value: 'commercial', label: contextOptions.commercial },
+        { value: 'commercial-support', label: contextOptions.commercialSupport },
         { value: 'transactional', label: contextOptions.transactional },
         { value: 'navigational', label: contextOptions.navigational },
         { value: 'support-intent', label: contextOptions.supportIntent },

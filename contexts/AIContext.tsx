@@ -54,6 +54,7 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     article: 'مقالة',
     news: 'خبر',
     service: 'صفحة خدمة',
+    category: 'صفحة تصنيف منتجات/خدمات',
     comparison: 'مقارنة',
     product: 'منتج',
     landing: 'صفحة هبوط',
@@ -62,6 +63,7 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     educate: 'شرح وتثقيف',
     compare: 'مقارنة ومساعدة على الاختيار',
     convert: 'تحويل مباشر: شراء/حجز/تواصل',
+    'category-support': 'محتوى داعم لصفحة تصنيف',
     trust: 'بناء الثقة وتقليل الاعتراضات',
     support: 'دعم بعد القرار أو الاستخدام',
     sell: 'تحويل مباشر: شراء/حجز/تواصل',
@@ -74,6 +76,7 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     regional: 'عدة دول أو إقليم',
     informational: 'فهم وتعلّم',
     commercial: 'مقارنة واختيار',
+    'commercial-support': 'معلومات تجارية داعمة',
     transactional: 'تنفيذ إجراء',
     navigational: 'الوصول إلى علامة أو صفحة محددة',
     'support-intent': 'حل مشكلة أو معرفة طريقة الاستخدام',
@@ -81,10 +84,10 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
 };
 
 const GOAL_CONTEXT_ALLOWED_VALUES = {
-    pageType: ['article', 'news', 'service', 'comparison', 'product', 'landing', 'guide', 'faq'],
-    objective: ['educate', 'compare', 'convert', 'trust', 'support'],
+    pageType: ['article', 'news', 'service', 'category', 'comparison', 'product', 'landing', 'guide', 'faq'],
+    objective: ['educate', 'compare', 'convert', 'category-support', 'trust', 'support'],
     audienceScope: ['local', 'country', 'regional', 'global'],
-    searchIntent: ['informational', 'commercial', 'transactional', 'navigational', 'support-intent'],
+    searchIntent: ['informational', 'commercial', 'commercial-support', 'transactional', 'navigational', 'support-intent'],
 } as const;
 
 const normalizeTokenForMatching = (value: string) => value.trim().toLowerCase();
@@ -2043,6 +2046,7 @@ const findHeadingByKeywordsAfter = (editor: any, keywords: string[], startPos: n
 };
 
 const REPLACEABLE_BLOCK_TYPES = new Set(['paragraph', 'listItem']);
+const MAX_REPLACE_RANGE_BLOCKS = 12;
 
 const scoreTextBlockMatch = (blockText: string, targetText: string): number => {
     const block = normalizeAnchorText(blockText);
@@ -2062,6 +2066,35 @@ type TextBlockMatch = {
     from: number;
     to: number;
     score: number;
+    text?: string;
+};
+
+type TextBlockCandidate = {
+    from: number;
+    to: number;
+    text: string;
+};
+
+const getNodeSearchText = (node: any): string => {
+    if (!node) return '';
+    if (typeof node.textBetween === 'function') {
+        return node.textBetween(0, node.content?.size || 0, '\n', '\n') || node.textContent || '';
+    }
+    return node.textContent || '';
+};
+
+const isBetterTextBlockMatch = (next: TextBlockMatch, current: TextBlockMatch | null, targetText: string): boolean => {
+    if (!current) return true;
+    if (Math.abs(next.score - current.score) > 0.001) return next.score > current.score;
+
+    const targetLength = normalizeAnchorText(targetText).length;
+    if (targetLength > 0 && next.text && current.text) {
+        const nextDistance = Math.abs(normalizeAnchorText(next.text).length - targetLength);
+        const currentDistance = Math.abs(normalizeAnchorText(current.text).length - targetLength);
+        if (nextDistance !== currentDistance) return nextDistance < currentDistance;
+    }
+
+    return (next.to - next.from) > (current.to - current.from);
 };
 
 const findTextBlockMatch = (editor: any, targetText: string): TextBlockMatch | null => {
@@ -2070,17 +2103,67 @@ const findTextBlockMatch = (editor: any, targetText: string): TextBlockMatch | n
 
     editor.state.doc.descendants((node: any, pos: number) => {
         if (!REPLACEABLE_BLOCK_TYPES.has(node.type.name)) return true;
-        const textContent = node.textContent || '';
+        const textContent = getNodeSearchText(node);
         if (!textContent.trim()) return true;
         const score = scoreTextBlockMatch(textContent, targetText);
-        if (score > 0 && (!bestMatch || score > bestMatch.score)) {
-            bestMatch = {
-                from: pos,
-                to: pos + node.nodeSize,
-                score,
-            };
+        const match = {
+            from: pos,
+            to: pos + node.nodeSize,
+            score,
+            text: textContent,
+        };
+        if (score > 0 && isBetterTextBlockMatch(match, bestMatch, targetText)) {
+            bestMatch = match;
         }
         return true;
+    });
+
+    return bestMatch;
+};
+
+const collectTopLevelTextBlocks = (editor: any): TextBlockCandidate[] => {
+    if (!editor?.state?.doc) return [];
+    const blocks: TextBlockCandidate[] = [];
+
+    editor.state.doc.forEach((node: any, offset: number) => {
+        if (!node.isBlock) return;
+        const text = getNodeSearchText(node);
+        if (!text.trim()) return;
+        blocks.push({
+            from: offset,
+            to: offset + node.nodeSize,
+            text,
+        });
+    });
+
+    return blocks;
+};
+
+const findTextBlockRangeMatch = (editor: any, targetText: string): TextBlockMatch | null => {
+    if (!editor || !targetText.trim()) return null;
+    const blocks = collectTopLevelTextBlocks(editor);
+    let bestMatch: TextBlockMatch | null = null;
+
+    blocks.forEach((startBlock, startIndex) => {
+        let combinedText = '';
+        const maxEndIndex = Math.min(blocks.length, startIndex + MAX_REPLACE_RANGE_BLOCKS);
+
+        for (let endIndex = startIndex; endIndex < maxEndIndex; endIndex += 1) {
+            const endBlock = blocks[endIndex];
+            combinedText = combinedText ? `${combinedText}\n${endBlock.text}` : endBlock.text;
+            const score = scoreTextBlockMatch(combinedText, targetText);
+            const match = {
+                from: startBlock.from,
+                to: endBlock.to,
+                score,
+                text: combinedText,
+            };
+
+            if (score > 0 && isBetterTextBlockMatch(match, bestMatch, targetText)) {
+                bestMatch = match;
+            }
+            if (score >= 4) break;
+        }
     });
 
     return bestMatch;
@@ -2093,10 +2176,13 @@ const findBestTextBlockMatch = (editor: any, candidates: string[]): TextBlockMat
         .map(candidate => candidate.trim())
         .filter(candidate => candidate.length > 0)
         .forEach(candidate => {
-            const match = findTextBlockMatch(editor, candidate);
-            if (match && (!bestMatch || match.score > bestMatch.score)) {
-                bestMatch = match;
-            }
+            const singleBlockMatch = findTextBlockMatch(editor, candidate);
+            const rangeMatch = findTextBlockRangeMatch(editor, candidate);
+            [singleBlockMatch, rangeMatch].forEach(match => {
+                if (match && isBetterTextBlockMatch(match, bestMatch, candidate)) {
+                    bestMatch = match;
+                }
+            });
         });
 
     return bestMatch;
@@ -2197,11 +2283,9 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
 
     if (patch.operation === 'replace_block' || patch.operation === 'replace_text') {
         const match = findBestTextBlockMatch(editor, [
-            patch.targetText || '',
-            patch.anchorText || '',
-            patch.contentMarkdown || '',
+            patch.targetText?.trim() ? patch.targetText : patch.anchorText || '',
         ]);
-        if (!match) {
+        if (!match || match.score < 3) {
             return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
         }
         return { from: match.from, to: match.to, selectFrom: match.from, selectTo: match.to, mode: 'replace' };
@@ -2588,9 +2672,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             `- searchIntent: ${GOAL_CONTEXT_ALLOWED_VALUES.searchIntent.join(', ')}`,
             '',
             'قواعد الاستنتاج:',
-            '- اختر pageType من نية العنوان والكلمات: service للخدمات، product للمنتجات، comparison للمقارنات، guide للأدلة، article للمقالات العامة.',
-            '- اختر objective بحسب نية المستخدم: educate للتعلّم، compare للمقارنة، convert للحجز/الشراء/التواصل، trust لبناء الثقة، support للدعم والاستخدام.',
+            '- اختر pageType من نية العنوان والكلمات: category لصفحة تصنيف تضم منتجات أو خدمات ويكتب فيها محتوى داعم، service للخدمات، product للمنتجات، comparison للمقارنات، guide للأدلة، article للمقالات العامة.',
+            '- اختر objective بحسب نية المستخدم: category-support عندما يكون المحتوى داعماً لصفحة تصنيف منتجات/خدمات، educate للتعلّم، compare للمقارنة، convert للحجز/الشراء/التواصل، trust لبناء الثقة، support للدعم والاستخدام.',
             '- اختر searchIntent بحسب ما يوحي به العنوان والكلمات.',
+            '- إذا كانت الصفحة تصنيف منتجات أو خدمات والمحتوى هدفه شرح الخيارات أو توجيه المستخدم داخل التصنيف، فغالباً اختر pageType بقيمة category وobjective بقيمة category-support وsearchIntent بقيمة commercial-support.',
             '- إذا ظهرت دولة أو سوق أو مدينة بوضوح فاكتبها في targetCountry واختر audienceScope المناسب.',
             '- إذا لم يظهر سوق واضح، اترك targetCountry فارغًا واختر audienceScope بقيمة global.',
             '- targetAudience يجب أن يكون وصفًا قصيرًا ودقيقًا للجمهور المستهدف بلغة المقال.',
@@ -3140,7 +3225,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         try {
-            editor
+            const applied = editor
                 .chain()
                 .focus()
                 .insertContentAt(
@@ -3150,12 +3235,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 )
                 .scrollIntoView()
                 .run();
+            if (!applied) throw new Error('تعذر تطبيق التعديل داخل المحرر.');
             updateAiInsertionPatch(provider, patchId, { status: 'applied', applyError: undefined });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'تعذر تطبيق التعديل داخل المحرر.';
             updateAiInsertionPatch(provider, patchId, { status: 'failed', applyError: message });
         }
-    }, [aiInsertionPatches, editor, updateAiInsertionPatch]);
+    }, [aiInsertionPatches, articleLanguage, editor, updateAiInsertionPatch]);
 
     const applyAllAiInsertionPatches = useCallback((provider: AiPatchProvider) => {
         aiInsertionPatches[provider]

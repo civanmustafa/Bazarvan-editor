@@ -70,6 +70,7 @@ const getAnalysisGoal = (goalContext: GoalContext): string => {
     case 'educate':
       return 'اكاديمية';
     case 'compare':
+    case 'category-support':
       return 'مقارنة';
     case 'convert':
       return 'البيع';
