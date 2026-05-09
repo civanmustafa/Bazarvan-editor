@@ -5,7 +5,7 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useAI } from '../contexts/AIContext';
 import GoalContextFields from './GoalContextFields';
-import { formatGoalContextForCopy } from '../utils/goalContext';
+import { formatGoalContextForCopy, updateGoalContextField } from '../utils/goalContext';
 
 const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     const {
@@ -45,7 +45,7 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
   const updateGoalContext = (key: keyof typeof goalContext, value: string) => {
     setGoalContextGenerationStatus('');
-    setGoalContext(prev => ({ ...prev, [key]: value }));
+    setGoalContext(prev => updateGoalContextField(prev, key, value));
   };
 
   const handleSaveClientContext = () => {

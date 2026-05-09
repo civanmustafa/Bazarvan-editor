@@ -45,13 +45,11 @@ const GOAL_CONTEXT_LABELS: Record<string, string> = {
     pageType: 'نوع الصفحة',
     objective: 'هدف الصفحة',
     audienceScope: 'نطاق الجمهور',
-    targetCountry: 'الدولة/السوق المستهدف',
-    targetAudience: 'الجمهور المستهدف',
     searchIntent: 'نية البحث',
 };
 
 const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
-    article: 'مقالة',
+    article: 'مقالة/دليل',
     news: 'خبر',
     service: 'صفحة خدمة',
     category: 'صفحة تصنيف منتجات/خدمات',
@@ -59,7 +57,6 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     product: 'منتج',
     landing: 'صفحة هبوط',
     guide: 'دليل',
-    faq: 'أسئلة وأجوبة',
     educate: 'شرح وتثقيف',
     compare: 'مقارنة ومساعدة على الاختيار',
     convert: 'تحويل مباشر: شراء/حجز/تواصل',
@@ -74,17 +71,17 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     global: 'عالمي دون سوق محدد',
     country: 'دولة واحدة محددة',
     regional: 'عدة دول أو إقليم',
-    informational: 'فهم وتعلّم',
+    informational: 'شرح وتعلّم',
     commercial: 'مقارنة واختيار',
     'commercial-support': 'معلومات تجارية داعمة',
-    transactional: 'تنفيذ إجراء',
+    transactional: 'تنفيذ إجراء/شراء',
     navigational: 'الوصول إلى علامة أو صفحة محددة',
     'support-intent': 'حل مشكلة أو معرفة طريقة الاستخدام',
-    'local-intent': 'فهم وتعلّم',
+    'local-intent': 'شرح وتعلّم',
 };
 
 const GOAL_CONTEXT_ALLOWED_VALUES = {
-    pageType: ['article', 'news', 'service', 'category', 'comparison', 'product', 'landing', 'guide', 'faq'],
+    pageType: ['article', 'news', 'service', 'category', 'comparison', 'product', 'landing', 'guide'],
     objective: ['educate', 'compare', 'convert', 'category-support', 'trust', 'support'],
     audienceScope: ['local', 'country', 'regional', 'global'],
     searchIntent: ['informational', 'commercial', 'commercial-support', 'transactional', 'navigational', 'support-intent'],
@@ -106,11 +103,6 @@ const resolveGoalContextChoice = (
         normalizeTokenForMatching(GOAL_CONTEXT_VALUE_LABELS[value] || '') === normalizedValue
     ));
     return matchedLabel || fallbackValue;
-};
-
-const cleanGeneratedGoalText = (value: unknown, maxLength: number): string => {
-    if (typeof value !== 'string') return '';
-    return value.replace(/\s+/g, ' ').trim().slice(0, maxLength);
 };
 
 const getFirstGeneratedValue = (record: Record<string, unknown>, keys: string[]): unknown => {
@@ -142,14 +134,8 @@ const normalizeGeneratedGoalContext = (rawValue: unknown, currentContext: GoalCo
             GOAL_CONTEXT_ALLOWED_VALUES.audienceScope,
             normalizedCurrent.audienceScope,
         ),
-        targetCountry: cleanGeneratedGoalText(
-            getFirstGeneratedValue(record, ['targetCountry', 'target_country', 'country', 'market']),
-            80,
-        ),
-        targetAudience: cleanGeneratedGoalText(
-            getFirstGeneratedValue(record, ['targetAudience', 'target_audience', 'audience']),
-            160,
-        ),
+        targetCountry: '',
+        targetAudience: '',
         searchIntent: resolveGoalContextChoice(
             getFirstGeneratedValue(record, ['searchIntent', 'search_intent', 'intent']),
             GOAL_CONTEXT_ALLOWED_VALUES.searchIntent,
@@ -159,8 +145,9 @@ const normalizeGeneratedGoalContext = (rawValue: unknown, currentContext: GoalCo
 };
 
 const formatGoalContext = (goalContext: GoalContext): string => {
-    return Object.entries(goalContext)
-        .filter(([, value]) => value.trim().length > 0)
+    const normalizedContext = normalizeGoalContext(goalContext);
+    return Object.entries(normalizedContext)
+        .filter(([key, value]) => Boolean(GOAL_CONTEXT_LABELS[key]) && value.trim().length > 0)
         .map(([key, value]) => `- ${GOAL_CONTEXT_LABELS[key] || key}: ${GOAL_CONTEXT_VALUE_LABELS[value] || value}`)
         .join('\n');
 };
@@ -2673,16 +2660,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '',
             'قواعد الاستنتاج:',
             '- اختر pageType من نية العنوان والكلمات: category لصفحة تصنيف تضم منتجات أو خدمات ويكتب فيها محتوى داعم، service للخدمات، product للمنتجات، comparison للمقارنات، guide للأدلة، article للمقالات العامة.',
-            '- اختر objective بحسب نية المستخدم: category-support عندما يكون المحتوى داعماً لصفحة تصنيف منتجات/خدمات، educate للتعلّم، compare للمقارنة، convert للحجز/الشراء/التواصل، trust لبناء الثقة، support للدعم والاستخدام.',
+            '- اختر objective بحسب نية المستخدم: category-support عندما يكون المحتوى داعماً لصفحة تصنيف منتجات/خدمات، educate للشرح والتعلّم، compare للمقارنة، convert للحجز/الشراء/التواصل، trust لبناء الثقة، support للدعم والاستخدام.',
             '- اختر searchIntent بحسب ما يوحي به العنوان والكلمات.',
             '- إذا كانت الصفحة تصنيف منتجات أو خدمات والمحتوى هدفه شرح الخيارات أو توجيه المستخدم داخل التصنيف، فغالباً اختر pageType بقيمة category وobjective بقيمة category-support وsearchIntent بقيمة commercial-support.',
-            '- إذا ظهرت دولة أو سوق أو مدينة بوضوح فاكتبها في targetCountry واختر audienceScope المناسب.',
-            '- إذا لم يظهر سوق واضح، اترك targetCountry فارغًا واختر audienceScope بقيمة global.',
-            '- targetAudience يجب أن يكون وصفًا قصيرًا ودقيقًا للجمهور المستهدف بلغة المقال.',
-            '- لا تخترع دولة أو سوقًا غير ظاهر من العنوان أو الكلمات.',
+            '- اختر audienceScope بحسب وضوح نطاق الاستهداف من العنوان والكلمات، وإذا لم يظهر نطاق واضح فاختر global.',
             '',
             'أرجع JSON فقط دون Markdown ودون شرح بهذا الشكل:',
-            '{ "pageType": "service", "objective": "convert", "audienceScope": "global", "targetCountry": "", "targetAudience": "وصف الجمهور المستهدف", "searchIntent": "transactional" }',
+            '{ "pageType": "service", "objective": "convert", "audienceScope": "global", "searchIntent": "transactional" }',
         ].join('\n');
 
         const result = await callGeminiAnalysis(prompt, apiKeys.gemini);

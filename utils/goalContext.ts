@@ -29,6 +29,9 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
     ...(value || {}),
   };
 
+  const pageTypeMap: Record<string, string> = {
+    faq: 'article',
+  };
   const objectiveMap: Record<string, string> = {
     sell: 'convert',
     bookings: 'convert',
@@ -40,13 +43,33 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
   };
 
   return {
-    pageType: normalized.pageType,
+    pageType: pageTypeMap[normalized.pageType] || normalized.pageType,
     objective: objectiveMap[normalized.objective] || normalized.objective,
     audienceScope: normalized.audienceScope,
-    targetCountry: normalized.targetCountry,
-    targetAudience: normalized.targetAudience,
+    targetCountry: '',
+    targetAudience: '',
     searchIntent: intentMap[normalized.searchIntent] || normalized.searchIntent,
   };
+};
+
+export const updateGoalContextField = (
+  currentContext: GoalContext,
+  key: keyof GoalContext,
+  value: string,
+): GoalContext => {
+  const nextContext = normalizeGoalContext({
+    ...currentContext,
+    [key]: value,
+  });
+
+  if (key === 'pageType' && value === 'category') {
+    return {
+      ...nextContext,
+      objective: 'category-support',
+    };
+  }
+
+  return nextContext;
 };
 
 export const normalizeClientGoalContexts = (
@@ -78,7 +101,6 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
         { value: 'product', label: contextOptions.product },
         { value: 'landing', label: contextOptions.landing },
         { value: 'guide', label: contextOptions.guide },
-        { value: 'faq', label: contextOptions.faq },
       ],
     },
     {
@@ -104,18 +126,6 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
         { value: 'regional', label: contextOptions.regional },
         { value: 'global', label: contextOptions.global },
       ],
-    },
-    {
-      key: 'targetCountry',
-      label: t.targetCountry,
-      kind: 'text',
-      placeholder: t.targetCountryPlaceholder,
-    },
-    {
-      key: 'targetAudience',
-      label: t.targetAudience,
-      kind: 'text',
-      placeholder: t.targetAudiencePlaceholder,
     },
     {
       key: 'searchIntent',
