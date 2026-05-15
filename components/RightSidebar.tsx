@@ -1,19 +1,21 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2 } from 'lucide-react';
+import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2, FileText } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
-import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
+import { CONTENT_SUMMARY_STORAGE_KEY, DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
     id: string;
     label: string;
     value: string;
     options?: Partial<AiAnalysisOptions>;
+    skipPatchInstructions?: boolean;
+    savesContentSummary?: boolean;
 };
 
 type CompetitorExtractedContent = {
@@ -32,7 +34,7 @@ type CompetitorExtractedContent = {
     wordCount: number;
 };
 
-type CompetitorExtractionSource = 'url' | 'html';
+type CompetitorExtractionSource = 'url' | 'html' | 'text';
 
 type CompetitorExtractionState = {
     status: 'idle' | 'loading' | 'success' | 'error';
@@ -41,8 +43,23 @@ type CompetitorExtractionState = {
     error: string;
 };
 
+type StoredContentSummary = {
+    summary: string;
+    savedAt?: string;
+    provider?: string;
+    commandId?: string;
+    wordCount?: number;
+};
+
+type CompetitorComparisonState = {
+    status: 'idle' | 'loading' | 'success' | 'error';
+    result: string;
+    error: string;
+};
+
 const COMPETITOR_STORAGE_KEY = 'bazarvan-competitor-links';
 const COMPETITOR_HTML_STORAGE_KEY = 'bazarvan-competitor-html-snippets';
+const COMPETITOR_TEXT_STORAGE_KEY = 'bazarvan-competitor-text-snippets';
 const COMPETITOR_TIMEOUT_MS = 180000;
 
 const createEmptyCompetitorState = (): CompetitorExtractionState => ({
@@ -54,6 +71,7 @@ const createEmptyCompetitorState = (): CompetitorExtractionState => ({
 
 const createDefaultCompetitorUrls = () => ['', '', ''];
 const createDefaultCompetitorHtmls = () => ['', '', ''];
+const createDefaultCompetitorTexts = () => ['', '', ''];
 
 const createDefaultCompetitorExtractions = () => [
     createEmptyCompetitorState(),
@@ -61,12 +79,50 @@ const createDefaultCompetitorExtractions = () => [
     createEmptyCompetitorState(),
 ];
 
+const createEmptyCompetitorComparisonState = (): CompetitorComparisonState => ({
+    status: 'idle',
+    result: '',
+    error: '',
+});
+
+const countPromptWords = (value: string): number => value.split(/\s+/).filter(Boolean).length;
+
+const truncatePromptText = (value: string, maxLength = 9000): string => {
+    const trimmed = value.trim();
+    if (trimmed.length <= maxLength) return trimmed;
+    return `${trimmed.slice(0, maxLength).trim()}\n\n[تم اختصار بقية النص لتخفيف حجم الطلب على API.]`;
+};
+
+const loadStoredContentSummary = (): StoredContentSummary | null => {
+    try {
+        const raw = localStorage.getItem(CONTENT_SUMMARY_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === 'string' && parsed.trim()) {
+            return { summary: parsed.trim(), wordCount: countPromptWords(parsed) };
+        }
+        if (!parsed || typeof parsed !== 'object') return null;
+        const summary = typeof parsed.summary === 'string' ? parsed.summary.trim() : '';
+        if (!summary) return null;
+        return {
+            summary,
+            savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : undefined,
+            provider: typeof parsed.provider === 'string' ? parsed.provider : undefined,
+            commandId: typeof parsed.commandId === 'string' ? parsed.commandId : undefined,
+            wordCount: Number.isFinite(Number(parsed.wordCount)) ? Number(parsed.wordCount) : countPromptWords(summary),
+        };
+    } catch {
+        return null;
+    }
+};
+
 const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string => {
     const labels: Record<string, { ar: string; en: string }> = {
         improveConclusion: { ar: 'تحسين الخاتمة', en: 'Improve conclusion' },
         articleTitle: { ar: 'عنوان المقالة', en: 'Article Title' },
         articleToc: { ar: 'جدول المحتويات', en: 'Table of Contents' },
         currentConclusion: { ar: 'الخاتمة الحالية', en: 'Current Conclusion' },
+        contentSummaryForCompetitors: { ar: 'تلخيص المحتوى للمنافسين', en: 'Content summary for competitors' },
     };
     return labels[key]?.[isArabic ? 'ar' : 'en'] || key;
 };
@@ -88,6 +144,16 @@ const loadStoredCompetitorHtmls = (): string[] => {
         return createDefaultCompetitorHtmls().map((_, index) => typeof snippets[index] === 'string' ? snippets[index] : '');
     } catch {
         return createDefaultCompetitorHtmls();
+    }
+};
+
+const loadStoredCompetitorTexts = (): string[] => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(COMPETITOR_TEXT_STORAGE_KEY) || '[]');
+        const snippets = Array.isArray(parsed) ? parsed : [];
+        return createDefaultCompetitorTexts().map((_, index) => typeof snippets[index] === 'string' ? snippets[index] : '');
+    } catch {
+        return createDefaultCompetitorTexts();
     }
 };
 
@@ -392,6 +458,96 @@ const extractCompetitorContentFromHtml = (html: string, fallbackUrl: string): Co
     };
 };
 
+const normalizePlainCompetitorText = (value: string): string => (
+    value
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .split('\n')
+        .map(line => line.trim())
+        .join('\n')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+);
+
+const extractCompetitorContentFromText = (value: string, fallbackUrl: string): CompetitorExtractedContent => {
+    const text = stripExtractionLabels(normalizePlainCompetitorText(value));
+    if (!text) {
+        throw new Error('أدخل نص المحتوى العادي أولًا.');
+    }
+
+    const paragraphs = text
+        .split(/\n{2,}|\n/)
+        .map(block => normalizeHtmlText(block))
+        .filter(Boolean)
+        .slice(0, 80);
+    const titleCandidate = paragraphs[0] || '';
+
+    return {
+        url: fallbackUrl || 'text_input',
+        fetchedUrl: fallbackUrl || 'text_input',
+        title: titleCandidate.length <= 140 ? titleCandidate : '',
+        description: '',
+        headings: {
+            h1: [],
+            h2: [],
+            h3: [],
+        },
+        paragraphs,
+        listItems: [],
+        text,
+        wordCount: text.split(/\s+/).filter(Boolean).length,
+    };
+};
+
+const buildCompetitorComparisonPrompt = (
+    contentSummary: StoredContentSummary,
+    competitors: CompetitorExtractedContent[],
+): string => {
+    const competitorBlocks = competitors.map((competitor, index) => {
+        const competitorText = competitor.text || [
+            competitor.title,
+            competitor.description,
+            ...competitor.headings.h1,
+            ...competitor.headings.h2,
+            ...competitor.headings.h3,
+            ...competitor.paragraphs,
+            ...competitor.listItems,
+        ].filter(Boolean).join('\n\n');
+
+        return `## المنافس ${index + 1}
+الرابط: ${competitor.url || competitor.fetchedUrl || 'غير محدد'}
+العنوان: ${competitor.title || 'غير محدد'}
+عدد الكلمات المستخرجة: ${competitor.wordCount || countPromptWords(competitorText)}
+
+النص المستخرج من المنافس:
+---
+${truncatePromptText(competitorText)}
+---`;
+    }).join('\n\n');
+
+    return `أنت محلل محتوى SEO/AEO/GEO صارم.
+
+استخدم ملخص المحتوى الحالي أدناه بدل المقال الكامل، لأن الهدف تقليل حجم الطلب على API.
+قارن ملخص المحتوى الحالي مع محتوى المنافسين المستخرج، ولا تطلب النص الكامل للمقال.
+
+ملخص المحتوى الحالي المحفوظ:
+---
+${truncatePromptText(contentSummary.summary, 12000)}
+---
+
+محتوى المنافسين:
+${competitorBlocks}
+
+المطلوب:
+1. استخرج فجوات المحتوى الحالية مقارنة بالمنافسين.
+2. حدد العناوين أو الأفكار أو الكيانات الموجودة عند المنافسين وغير واضحة في المحتوى الحالي.
+3. حدد النقاط التي يغطيها المحتوى الحالي أفضل من المنافسين.
+4. اقترح إضافات عملية مرتبة حسب الأولوية، مع مكان الإضافة داخل المقال إن أمكن.
+5. لا تكرر نصوص المنافسين حرفيًا، ولا تضف معلومات خارج الملخص أو نصوص المنافسين.
+6. اجعل النتيجة مختصرة ومنظمة وقابلة للتنفيذ.`;
+};
+
 const buildCompetitorPrompt = (url: string): string => `أنت محلل محتوى SEO تقني صارم داخل أداة تحرير محتوى.
 
 مهمتك الوحيدة هي استخدام أداة URL Context في Gemini لقراءة الرابط التالي فقط:
@@ -486,7 +642,10 @@ const RightSidebar: React.FC = () => {
     const [aiCommand, setAiCommand] = useState('');
     const [competitorUrls, setCompetitorUrls] = useState<string[]>(() => loadStoredCompetitorUrls());
     const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
+    const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => loadStoredCompetitorTexts());
     const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => createDefaultCompetitorExtractions());
+    const [contentSummary, setContentSummary] = useState<StoredContentSummary | null>(() => loadStoredContentSummary());
+    const [competitorComparison, setCompetitorComparison] = useState<CompetitorComparisonState>(() => createEmptyCompetitorComparisonState());
     const [selectedReadyCommandIds, setSelectedReadyCommandIds] = useState<string[]>([]);
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(true);
@@ -546,6 +705,24 @@ const RightSidebar: React.FC = () => {
         }
     }, [competitorHtmls]);
 
+    useEffect(() => {
+        try {
+            localStorage.setItem(COMPETITOR_TEXT_STORAGE_KEY, JSON.stringify(competitorTexts));
+        } catch (error) {
+            console.error('Could not save competitor text snippets:', error);
+        }
+    }, [competitorTexts]);
+
+    useEffect(() => {
+        const refreshSummary = () => setContentSummary(loadStoredContentSummary());
+        window.addEventListener('bazarvan:content-summary-updated', refreshSummary);
+        window.addEventListener('storage', refreshSummary);
+        return () => {
+            window.removeEventListener('bazarvan:content-summary-updated', refreshSummary);
+            window.removeEventListener('storage', refreshSummary);
+        };
+    }, []);
+
     const readyCommands: ReadyCommand[] = useMemo(() => {
         const isArabic = t.locale === 'ar';
         return ENGINEERING_PROMPT_DEFINITIONS
@@ -555,6 +732,8 @@ const RightSidebar: React.FC = () => {
                 label: (tRs as any)[definition.labelKey] || getSmartAnalysisLabelFallback(definition.labelKey, isArabic),
                 value: getEngineeringPrompt(engineeringPrompts, definition.id),
                 options: definition.options,
+                skipPatchInstructions: definition.skipPatchInstructions,
+                savesContentSummary: definition.savesContentSummary,
             }));
     }, [engineeringPrompts, t.locale, tRs]);
 
@@ -600,7 +779,12 @@ const RightSidebar: React.FC = () => {
     const selectedReadyCommand = selectedReadyCommands.length === 1 ? selectedReadyCommands[0] : null;
 
     const readyCommandHistoryMeta: ReadyCommandAnalysisHistoryMeta | undefined = selectedReadyCommand
-        ? { commandId: selectedReadyCommand.id, commandLabel: selectedReadyCommand.label }
+        ? {
+            commandId: selectedReadyCommand.id,
+            commandLabel: selectedReadyCommand.label,
+            skipPatchInstructions: selectedReadyCommand.skipPatchInstructions,
+            savesContentSummary: selectedReadyCommand.savesContentSummary,
+        }
         : undefined;
 
     const readyCommandBatchItems: ReadyCommandAnalysisBatchItem[] = selectedReadyCommands.map(command => ({
@@ -608,6 +792,8 @@ const RightSidebar: React.FC = () => {
         commandLabel: command.label,
         userPrompt: command.value,
         options: getReadyCommandOptions(command),
+        skipPatchInstructions: command.skipPatchInstructions,
+        savesContentSummary: command.savesContentSummary,
     }));
 
     const selectedReadyCommandsLabel = selectedReadyCommands.length === 0
@@ -625,6 +811,8 @@ const RightSidebar: React.FC = () => {
                 return <BrainCircuit size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.fullArticleAudit:
                 return <FileSearch size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.contentSummaryForCompetitors:
+                return <FileText size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion:
                 return <FilePlus2 size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.improveWeakest:
@@ -686,6 +874,11 @@ const RightSidebar: React.FC = () => {
 
     const handleCompetitorHtmlChange = (index: number, value: string) => {
         setCompetitorHtmls(prev => prev.map((html, htmlIndex) => htmlIndex === index ? value : html));
+        setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? createEmptyCompetitorState() : item));
+    };
+
+    const handleCompetitorTextChange = (index: number, value: string) => {
+        setCompetitorTexts(prev => prev.map((text, textIndex) => textIndex === index ? value : text));
         setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? createEmptyCompetitorState() : item));
     };
 
@@ -807,6 +1000,103 @@ const RightSidebar: React.FC = () => {
                 } : item));
             }
         }, 0);
+    };
+
+    const handleExtractCompetitorText = (index: number) => {
+        const text = competitorTexts[index]?.trim();
+        if (!text) {
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'error',
+                source: 'text',
+                content: null,
+                error: tRs.competitorPlainTextRequired,
+            } : item));
+            return;
+        }
+
+        const fallbackUrl = competitorUrls[index]?.trim() || 'text_input';
+        setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+            ...item,
+            status: 'loading',
+            source: 'text',
+            error: '',
+        } : item));
+
+        window.setTimeout(() => {
+            try {
+                const content = extractCompetitorContentFromText(text, fallbackUrl);
+                setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                    status: 'success',
+                    source: 'text',
+                    content,
+                    error: '',
+                } : item));
+            } catch (error) {
+                setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                    status: 'error',
+                    source: 'text',
+                    content: null,
+                    error: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
+                } : item));
+            }
+        }, 0);
+    };
+
+    const handleCompareCompetitors = async () => {
+        const summary = contentSummary?.summary.trim();
+        if (!summary) {
+            setCompetitorComparison({
+                status: 'error',
+                result: '',
+                error: tRs.competitorComparisonNoSummary,
+            });
+            return;
+        }
+
+        const competitors = competitorExtractions
+            .map(item => item.content)
+            .filter((content): content is CompetitorExtractedContent => Boolean(content?.text?.trim()));
+
+        if (competitors.length === 0) {
+            setCompetitorComparison({
+                status: 'error',
+                result: '',
+                error: tRs.competitorComparisonNoContent,
+            });
+            return;
+        }
+
+        setCompetitorComparison({ status: 'loading', result: '', error: '' });
+
+        try {
+            const response = await fetch('/api/gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: buildCompetitorComparisonPrompt({ ...contentSummary, summary }, competitors),
+                    apiKeys: apiKeys.gemini.filter(Boolean),
+                    useUrlContext: false,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (response.status === 404) {
+                throw new Error(tRs.competitorApiUnavailable);
+            }
+            if (!response.ok) {
+                throw new Error(data.error || `${tRs.competitorComparisonFailed} (${response.status})`);
+            }
+            const result = typeof data.text === 'string' ? data.text.trim() : '';
+            if (!result) {
+                throw new Error(tRs.competitorComparisonFailed);
+            }
+            setCompetitorComparison({ status: 'success', result, error: '' });
+        } catch (error) {
+            setCompetitorComparison({
+                status: 'error',
+                result: '',
+                error: error instanceof Error ? error.message : tRs.competitorComparisonFailed,
+            });
+        }
     };
 
     const getPatchActionLabel = (operation: string) => (
@@ -1074,13 +1364,57 @@ const RightSidebar: React.FC = () => {
                     <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{tRs.competitorsHint}</p>
                 </div>
 
+                <div className="rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/10 p-3 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/10">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">
+                                <FileText size={14} />
+                                <span>{tRs.contentSummaryForCompetitors}</span>
+                            </div>
+                            <p className="mt-1 text-[11px] leading-5 text-gray-600 dark:text-gray-300">
+                                {contentSummary
+                                    ? `${tRs.contentSummarySaved} ${contentSummary.wordCount || countPromptWords(contentSummary.summary)} ${t.common.words}${contentSummary.savedAt ? ` - ${new Date(contentSummary.savedAt).toLocaleString()}` : ''}`
+                                    : tRs.contentSummaryMissing}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleCompareCompetitors}
+                            disabled={competitorComparison.status === 'loading' || !contentSummary || !competitorExtractions.some(item => item.content?.text?.trim())}
+                            className="flex shrink-0 items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {competitorComparison.status === 'loading' ? <Wand2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
+                            <span>{competitorComparison.status === 'loading' ? tRs.comparingCompetitors : tRs.compareWithCompetitors}</span>
+                        </button>
+                    </div>
+                    {contentSummary?.summary && (
+                        <div className="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap rounded-md bg-white/70 p-2 text-[11px] leading-5 text-gray-600 custom-scrollbar dark:bg-[#1F1F1F]/70 dark:text-gray-300">
+                            {contentSummary.summary}
+                        </div>
+                    )}
+                    {competitorComparison.status === 'error' && (
+                        <div className="mt-2 flex items-start gap-2 rounded-md bg-red-50 px-2 py-2 text-[11px] font-semibold text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                            <span>{competitorComparison.error}</span>
+                        </div>
+                    )}
+                    {competitorComparison.status === 'success' && competitorComparison.result && (
+                        <div className="mt-3 rounded-md bg-white/80 p-2 text-xs text-gray-700 ai-output dark:bg-[#1F1F1F]/80 dark:text-gray-300">
+                            <div className="mb-2 font-bold text-[#8a6f1d] dark:text-[#f2d675]">{tRs.competitorComparisonResult}</div>
+                            <div dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(competitorComparison.result) }} />
+                        </div>
+                    )}
+                </div>
+
                 {competitorUrls.map((url, index) => {
                     const extraction = competitorExtractions[index] || createEmptyCompetitorState();
                     const content = extraction.content;
                     const html = competitorHtmls[index] || '';
+                    const plainText = competitorTexts[index] || '';
                     const isLoading = extraction.status === 'loading';
                     const isUrlLoading = isLoading && extraction.source === 'url';
                     const isHtmlLoading = isLoading && extraction.source === 'html';
+                    const isTextLoading = isLoading && extraction.source === 'text';
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
@@ -1128,6 +1462,26 @@ const RightSidebar: React.FC = () => {
                                     >
                                         {isHtmlLoading ? <Wand2 size={14} className="animate-spin" /> : <Code2 size={14} />}
                                         <span>{isHtmlLoading ? tRs.extractingCompetitor : tRs.extractCompetitorFromHtml}</span>
+                                    </button>
+                                </div>
+                                <div>
+                                    <div className="mb-1 text-[11px] font-bold text-gray-500 dark:text-gray-400">{tRs.competitorPlainTextField}</div>
+                                    <textarea
+                                        value={plainText}
+                                        onChange={(event) => handleCompetitorTextChange(index, event.target.value)}
+                                        placeholder={tRs.competitorPlainTextPlaceholder}
+                                        rows={5}
+                                        className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
+                                        dir="auto"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => handleExtractCompetitorText(index)}
+                                        disabled={isLoading}
+                                        className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 hover:border-[#d4af37]/50 hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200 dark:hover:border-[#d4af37]/50 dark:hover:bg-[#d4af37]/15"
+                                    >
+                                        {isTextLoading ? <Wand2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                                        <span>{isTextLoading ? tRs.extractingCompetitor : tRs.extractCompetitorFromText}</span>
                                     </button>
                                 </div>
                             </div>

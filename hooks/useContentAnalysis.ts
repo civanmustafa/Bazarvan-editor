@@ -31,6 +31,7 @@ import { checkPunctuation } from '../utils/analysis/rules/checkPunctuation';
 import { checkParagraphEndings } from '../utils/analysis/rules/checkParagraphEndings';
 import { checkInterrogativeH2 } from '../utils/analysis/rules/checkInterrogativeH2';
 import { checkTransitionalWords } from '../utils/analysis/rules/checkTransitionalWords';
+import { checkImmediateDuplicateWords } from '../utils/analysis/rules/checkImmediateDuplicateWords';
 import { checkDuplicateWordsInParagraph, checkDuplicateWordsInHeading } from '../utils/analysis/rules/checkDuplicateWords';
 import { checkSentenceLength } from '../utils/analysis/rules/checkSentenceLength';
 import { checkStepsIntroduction } from '../utils/analysis/rules/checkStepsIntroduction';
@@ -45,6 +46,7 @@ import { checkPunctuationSpacing } from '../utils/analysis/rules/checkPunctuatio
 import { checkRepeatedBigrams } from '../utils/analysis/rules/checkRepeatedBigrams';
 import { checkSlowWords } from '../utils/analysis/rules/checkSlowWords';
 import { checkWordConsistency } from '../utils/analysis/rules/checkWordConsistency';
+import { checkCommonEnglishTerms } from '../utils/analysis/rules/checkCommonEnglishTerms';
 import { checkWordsToDelete } from '../utils/analysis/rules/checkWordsToDelete';
 import { checkKeywordStuffing } from '../utils/analysis/rules/checkKeywordStuffing';
 import { checkDeviceSaleMandatoryH2, checkDeviceSaleSupportingH2 } from '../utils/analysis/rules/checkDeviceSaleH2';
@@ -207,6 +209,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
         paragraphEndings: checkParagraphEndings(analysisContext),
         interrogativeH2: checkInterrogativeH2(analysisContext),
         differentTransitionalWords: checkTransitionalWords(analysisContext),
+        immediateDuplicateWords: checkImmediateDuplicateWords(analysisContext),
         automaticLists: checkAutomaticLists(analysisContext),
         ctaWords: checkCtaWords(analysisContext),
         interactiveLanguage: checkInteractiveLanguage(analysisContext),
@@ -222,6 +225,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
         repeatedBigrams: checkRepeatedBigrams(analysisContext),
         slowWords: checkSlowWords(analysisContext),
         wordConsistency: checkWordConsistency(analysisContext),
+        commonEnglishTerms: checkCommonEnglishTerms(analysisContext),
         wordsToDelete: checkWordsToDelete(analysisContext),
         keywordStuffing: checkKeywordStuffing(analysisContext),
         mandatoryH2Sections: checkDeviceSaleMandatoryH2(analysisContext),

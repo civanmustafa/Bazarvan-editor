@@ -14,6 +14,7 @@ import {
   MANUAL_DRAFT_LANGUAGE_KEY,
 } from '../constants';
 import { DEFAULT_ENGINEERING_PROMPTS } from '../constants/engineeringPrompts';
+import { getIstanbulTimestamp } from '../utils/dateTime';
 
 /*
  * localStorage persistence layer for per-user data.
@@ -139,7 +140,7 @@ const modifyUserData = (username: string, modification: (user: UserActivity) => 
 
 export const recordLogin = (username: string) => {
   modifyUserData(username, user => {
-    user.logins.push(new Date().toISOString());
+    user.logins.push(getIstanbulTimestamp());
   });
 };
 
@@ -188,7 +189,7 @@ export const recordArticleSave = (username: string, title: string, content: any,
   modifyUserData(username, user => {
     const article = findOrCreateArticle(user, title);
     article.saveCount += 1;
-    article.lastSaved = new Date().toISOString();
+    article.lastSaved = getIstanbulTimestamp();
     article.content = content;
     article.keywords = keywords;
     article.articleLanguage = articleLanguage;

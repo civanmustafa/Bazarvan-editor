@@ -46,6 +46,8 @@ export interface AiAnalysisOptions {
 export interface ReadyCommandAnalysisHistoryMeta {
   commandId: string;
   commandLabel: string;
+  skipPatchInstructions?: boolean;
+  savesContentSummary?: boolean;
 }
 
 export interface ReadyCommandAnalysisBatchItem extends ReadyCommandAnalysisHistoryMeta {
@@ -64,6 +66,8 @@ export interface EngineeringPromptDefinition {
   defaultValue: string;
   variables?: string[];
   options?: Partial<AiAnalysisOptions>;
+  skipPatchInstructions?: boolean;
+  savesContentSummary?: boolean;
 }
 
 export interface KeywordCheck {
@@ -149,6 +153,7 @@ export interface StructureAnalysis {
     paragraphEndings: CheckResult;
     interrogativeH2: CheckResult;
     differentTransitionalWords: CheckResult;
+    immediateDuplicateWords: CheckResult;
     duplicateWordsInParagraph: CheckResult;
     duplicateWordsInHeading: CheckResult;
     sentenceLength: CheckResult;
@@ -168,6 +173,7 @@ export interface StructureAnalysis {
     repeatedBigrams: CheckResult;
     slowWords: CheckResult;
     wordConsistency: CheckResult;
+    commonEnglishTerms: CheckResult;
     wordsToDelete: CheckResult;
     keywordStuffing: CheckResult;
     mandatoryH2Sections: CheckResult;

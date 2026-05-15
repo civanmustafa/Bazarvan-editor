@@ -23,8 +23,8 @@ import type {
     StructureAnalysis,
 } from '../types';
 import { parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
-import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
-import { CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
+import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
+import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { normalizeGoalContext } from '../utils/goalContext';
 
@@ -311,6 +311,7 @@ const BULK_FIX_PROTECTION_RULE_KEYS: (keyof StructureAnalysis)[] = [
     'sentenceLength',
     'paragraphLength',
     'punctuation',
+    'immediateDuplicateWords',
     'duplicateWordsInParagraph',
     'ambiguousParagraphReferences',
     'wordsToDelete',
@@ -320,6 +321,7 @@ const BULK_FIX_PROTECTION_RULE_KEYS: (keyof StructureAnalysis)[] = [
     'punctuationSpacing',
     'repeatedBigrams',
     'wordConsistency',
+    'commonEnglishTerms',
 ];
 
 const BULK_FIX_ARTICLE_LEVEL_RULE_KEYS: (keyof StructureAnalysis)[] = [
@@ -520,7 +522,11 @@ const inferAiTargetRole = (
     return 'فقرة وسطية داخل القسم؛ يجب أن تكمل التدفق بين النص السابق واللاحق دون تكرار.';
 };
 
-const getAiLocalTextContext = (editor: any, from: number, to: number): BulkFixTargetContext => {
+const normalizeAiHeadingForCompare = (value?: string): string => {
+    return (value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+};
+
+const getAiLocalTextContext = (editor: any, from: number, to: number, articleTitle?: string): BulkFixTargetContext => {
     const blocks = getBulkFixTopLevelBlocks(editor);
     const docSize = editor?.state?.doc?.content?.size || 0;
     const overlappingIndexes = blocks
@@ -531,10 +537,14 @@ const getAiLocalTextContext = (editor: any, from: number, to: number): BulkFixTa
     const lastIndex = overlappingIndexes[overlappingIndexes.length - 1] ?? firstIndex;
     const currentBlock = blocks[firstIndex];
     const nextBlock = blocks[lastIndex + 1];
+    const normalizedArticleTitle = normalizeAiHeadingForCompare(articleTitle);
     const sectionHeadingBlock = blocks
         .slice(0, firstIndex + 1)
         .reverse()
-        .find(block => block.type === 'heading' && block.text.trim().length > 0);
+        .find(block => {
+            if (block.type !== 'heading' || block.text.trim().length === 0) return false;
+            return normalizeAiHeadingForCompare(block.text) !== normalizedArticleTitle;
+        });
     const previousBlocks = getMeaningfulContextBlocks(blocks, firstIndex - 1, 'before');
     const nextBlocks = getMeaningfulContextBlocks(blocks, lastIndex + 1, 'after');
     const sectionHeading = sectionHeadingBlock
@@ -575,8 +585,8 @@ const formatAiReadOnlyLocalContext = (context?: Partial<BulkFixTargetContext>): 
     return lines.length > 4 ? lines.join('\n') : '';
 };
 
-const getBulkFixTargetContext = (editor: any, group: BulkFixTargetGroup): BulkFixTargetContext => {
-    return getAiLocalTextContext(editor, group.from, group.to);
+const getBulkFixTargetContext = (editor: any, group: BulkFixTargetGroup, articleTitle?: string): BulkFixTargetContext => {
+    return getAiLocalTextContext(editor, group.from, group.to, articleTitle);
 };
 
 const collectBulkFixViolations = (structureAnalysis: StructureAnalysis): BulkFixViolationContext[] => {
@@ -981,6 +991,35 @@ const getBulkFixRepeatedWords = (textValue: string): { term: string; count: numb
         .sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
 };
 
+const getBulkFixImmediateDuplicateWords = (textValue: string): { term: string; count: number }[] => {
+    const language = getBulkFixLanguage(textValue);
+    const tokens: { text: string; normalized: string; index: number; end: number }[] = [];
+    const wordRegex = /[\p{L}\p{N}][\p{L}\p{M}\p{N}]*/gu;
+    let match: RegExpExecArray | null;
+
+    while ((match = wordRegex.exec(textValue)) !== null) {
+        const word = match[0];
+        tokens.push({
+            text: word,
+            normalized: normalizeBulkFixToken(word, language),
+            index: match.index,
+            end: match.index + word.length,
+        });
+    }
+
+    const counts = new Map<string, number>();
+    for (let index = 1; index < tokens.length; index++) {
+        const previous = tokens[index - 1];
+        const current = tokens[index];
+        const separator = textValue.slice(previous.end, current.index);
+        if (!previous.normalized || previous.normalized !== current.normalized || !/^\s+$/u.test(separator)) continue;
+        const phrase = `${previous.text} ${current.text}`;
+        counts.set(phrase, (counts.get(phrase) || 0) + 1);
+    }
+
+    return Array.from(counts.entries()).map(([term, count]) => ({ term, count }));
+};
+
 const getBulkFixSentenceBeginningRepeats = (textValue: string): { term: string; count: number }[] => {
     const language = getBulkFixLanguage(textValue);
     const sentences = splitBulkFixSentences(textValue);
@@ -1021,6 +1060,39 @@ const getBulkFixLatinWordStats = (textValue: string): { count: number; percentag
         percentage: wordCount > 0 ? latinWords.length / wordCount : 0,
         words: uniqueWords,
     };
+};
+
+const escapeCommonEnglishTermRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildCommonEnglishTermRegex = (term: string): RegExp => {
+    const parts = term.trim().split(/\s+/).map(escapeCommonEnglishTermRegex);
+    return new RegExp(`(?<![A-Za-z0-9])${parts.join('[\\s_-]+')}(?![A-Za-z0-9])`, 'giu');
+};
+
+const getBulkFixCommonEnglishTermMatches = (textValue: string): { term: string; preferred: string; index: number; length: number }[] => {
+    const candidates: { term: string; preferred: string; index: number; length: number }[] = [];
+
+    COMMON_ENGLISH_TERMS.forEach(({ terms, preferred }) => {
+        terms.forEach((term) => {
+            const regex = buildCommonEnglishTermRegex(term);
+            let match: RegExpExecArray | null;
+            while ((match = regex.exec(textValue)) !== null) {
+                candidates.push({
+                    term: match[0],
+                    preferred,
+                    index: match.index,
+                    length: match[0].length,
+                });
+            }
+        });
+    });
+
+    return candidates
+        .sort((a, b) => a.index - b.index || b.length - a.length)
+        .reduce<{ term: string; preferred: string; index: number; length: number }[]>((selected, candidate) => {
+            const overlaps = selected.some(item => candidate.index < item.index + item.length && candidate.index + candidate.length > item.index);
+            return overlaps ? selected : [...selected, candidate];
+        }, []);
 };
 
 const getBulkFixPunctuationSpacingIssues = (textValue: string): { label: string; count: number }[] => {
@@ -1071,6 +1143,16 @@ const getBulkFixTextualAudit = (
         };
     }
 
+    if (haystack.includes('تكرار مباشر') || haystack.includes('direct repetition')) {
+        const repeated = getBulkFixImmediateDuplicateWords(textValue);
+        return {
+            summary: repeated.length === 0
+                ? 'لا توجد كلمات مكررة مباشرة'
+                : `كلمات مكررة مباشرة: ${repeated.slice(0, 5).map(item => `${item.term} (${item.count})`).join('، ')}`,
+            passed: repeated.length === 0,
+        };
+    }
+
     if (haystack.includes('بدايات الجمل') || haystack.includes('sentence beginnings')) {
         const repeated = getBulkFixSentenceBeginningRepeats(textValue);
         return {
@@ -1106,6 +1188,16 @@ const getBulkFixTextualAudit = (
         return {
             summary: `${stats.count} كلمة لاتينية من ${wordCount} كلمة (${(stats.percentage * 100).toFixed(2)}%)${stats.words.length ? ` - ${stats.words.join('، ')}` : ''}`,
             passed: stats.percentage <= 0.005,
+        };
+    }
+
+    if (haystack.includes('مصطلحات إنجليزية شائعة') || haystack.includes('common english terms')) {
+        const matches = getBulkFixCommonEnglishTermMatches(textValue);
+        return {
+            summary: matches.length === 0
+                ? 'لا توجد مصطلحات إنجليزية شائعة تحتاج تعريبًا'
+                : `مصطلحات تحتاج تعريبًا: ${matches.slice(0, 5).map(item => `${item.term} -> ${item.preferred}`).join('، ')}`,
+            passed: matches.length === 0,
         };
     }
 
@@ -1744,6 +1836,41 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 عند تحويل فقرة أو مقطع موجود إلى جدول أو قائمة نقطية أو قائمة مرقمة أو قائمة تحقق أو خطوات، استخدم دائماً operation بقيمة "replace_block"، واجعل targetText نسخة حرفية من النص الحالي، واجعل contentMarkdown يحتوي النص البديل فقط. عند إنشاء جدول Markdown يجب أن يحتوي contentMarkdown على صفوف جدول كاملة، ويفضل إضافة صف الفاصل، ولا تكتف بصف عنوان واحد يبدأ وينتهي بعلامة | دون بيانات.
 
 لا تستخدم عبارة "قسم التعديلات القابلة للتطبيق". استخدم فقط علامة [[PATCH:...]] في موضع التنفيذ داخل التقرير.`;
+
+const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPatchInstructions?: boolean }) => (
+    options?.skipPatchInstructions
+        ? contextPrompt
+        : `${contextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`
+);
+
+const saveContentSummaryForCompetitors = (
+    summary: string,
+    provider: AiPatchProvider,
+    historyMeta: ReadyCommandAnalysisHistoryMeta,
+) => {
+    const cleanSummary = summary.trim();
+    if (!cleanSummary) return;
+
+    const payload = {
+        summary: cleanSummary,
+        savedAt: new Date().toISOString(),
+        provider,
+        commandId: historyMeta.commandId,
+        commandLabel: historyMeta.commandLabel,
+        wordCount: cleanSummary.split(/\s+/).filter(Boolean).length,
+    };
+
+    try {
+        localStorage.setItem(CONTENT_SUMMARY_STORAGE_KEY, JSON.stringify(payload));
+        window.dispatchEvent(new CustomEvent('bazarvan:content-summary-updated', { detail: payload }));
+    } catch (error) {
+        console.error('Could not save content summary for competitors:', error);
+    }
+};
+
+const isAiErrorResponseText = (value: string): boolean => (
+    /^(?:حدث خطأ أثناء الاتصال|انتهت مهلة الاتصال|فشل التحليل|فشل تحليل|فشل التحليل المتعدد|Gemini API route|The Gemini API|Could not|تعذر)/i.test(value.trim())
+);
 
 const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
     'replace_block',
@@ -2471,10 +2598,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (headingsAnalysis && !isHeadingsAnalysisMinimized) openModal('headingsAnalysis');
     }, [headingsAnalysis, isHeadingsAnalysisMinimized, openModal]);
 
-    const buildComprehensivePrompt = (basePrompt: string, sectionHeading?: string) => {
+    const buildComprehensivePrompt = (
+        basePrompt: string,
+        sectionHeading?: string,
+        options: { includeArticleTitle?: boolean; includeArticleToc?: boolean } = {}
+    ) => {
+        const { includeArticleTitle = true, includeArticleToc = true } = options;
         const professionalRoleAndGoal = `أنت كاتب محتوى خبير في موضوع "${keywords.primary || 'المحتوى العام'}". هدفك إنتاج محتوى متوافق مع SEO و AEO و GEO.`;
         let contextParts: string[] = [];
-        if (title.trim()) contextParts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
+        if (includeArticleTitle && title.trim()) contextParts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
         contextParts.push(`**لغة المقال:** ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`);
         const keywordContext = [
             `- الأساسية: ${keywords.primary || 'لم تحدد'}`,
@@ -2485,8 +2617,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         contextParts.push(`**الكلمات والعلامة المستهدفة:**\n${keywordContext}`);
         const goalContextText = formatGoalContext(goalContext);
         if (goalContextText) contextParts.push(`**سياق هدف الصفحة والجمهور:**\n${goalContextText}`);
-        if (sectionHeading) contextParts.push(`**سياق العنوان:** "${sectionHeading}"`);
-        const tocString = generateToc(editor);
+        if (sectionHeading) contextParts.push(`**عنوان القسم الحالي:** "${sectionHeading}"`);
+        const tocString = includeArticleToc ? generateToc(editor) : '';
         if (tocString) contextParts.push(`**هيكل المقال:**\n${tocString}`);
         return `${professionalRoleAndGoal}\n\n${contextParts.join('\n\n')}\n\n**المطلوب:**\n${basePrompt}`;
     };
@@ -2693,6 +2825,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const displayText = parsedResult.displayText.trim();
         if (!historyMeta || !displayText) return;
 
+        if (
+            !isAiErrorResponseText(displayText) &&
+            (
+                historyMeta.savesContentSummary ||
+                historyMeta.commandId === ENGINEERING_PROMPT_IDS.smartAnalysis.contentSummaryForCompetitors
+            )
+        ) {
+            saveContentSummaryForCompetitors(displayText, provider, historyMeta);
+        }
+
         logToAiHistory({
             type: 'manual-analysis',
             ruleTitle: historyMeta.commandLabel,
@@ -2717,13 +2859,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         try {
             const results = await Promise.all(items.map(async (item, index) => {
                 const assignedKey = geminiKeys.length > 0 ? geminiKeys[index % geminiKeys.length] : undefined;
-                const finalPrompt = `${generateContextAwarePrompt(item.userPrompt, item.options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
-                const result = await callGeminiAnalysis(finalPrompt, assignedKey ? [assignedKey] : undefined);
-                const parsedResult = namespaceSmartAnalysisPatches(
-                    parseSmartAnalysisResponse(result, 'gemini'),
-                    `cmd_${index + 1}`,
-                    item.commandLabel
+                const finalPrompt = buildSmartAnalysisFinalPrompt(
+                    generateContextAwarePrompt(item.userPrompt, item.options),
+                    { skipPatchInstructions: item.skipPatchInstructions },
                 );
+                const result = await callGeminiAnalysis(finalPrompt, assignedKey ? [assignedKey] : undefined);
+                const parsedResult = item.skipPatchInstructions
+                    ? { displayText: result, patches: [] }
+                    : namespaceSmartAnalysisPatches(
+                        parseSmartAnalysisResponse(result, 'gemini'),
+                        `cmd_${index + 1}`,
+                        item.commandLabel
+                    );
                 logReadyCommandAnalysis('gemini', parsedResult, item);
                 return {
                     item,
@@ -2757,9 +2904,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setIsAiLoading(prev => ({ ...prev, gemini: true }));
         setAiInsertionPatches(prev => ({ ...prev, gemini: [] }));
         try {
-            const finalPrompt = `${generateContextAwarePrompt(userPrompt, options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
+            const finalPrompt = buildSmartAnalysisFinalPrompt(
+                generateContextAwarePrompt(userPrompt, options),
+                { skipPatchInstructions: historyMeta?.skipPatchInstructions },
+            );
             const result = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
-            const parsedResult = parseSmartAnalysisResponse(result, 'gemini');
+            const parsedResult = historyMeta?.skipPatchInstructions
+                ? { displayText: result, patches: [] }
+                : parseSmartAnalysisResponse(result, 'gemini');
             setAiResults(prev => ({ ...prev, gemini: parsedResult.displayText }));
             setAiInsertionPatches(prev => ({ ...prev, gemini: parsedResult.patches }));
             logReadyCommandAnalysis('gemini', parsedResult, historyMeta);
@@ -2776,9 +2928,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setAiResults(prev => ({ ...prev, chatgpt: '' }));
         setAiInsertionPatches(prev => ({ ...prev, chatgpt: [] }));
         try {
-            const finalPrompt = `${generateContextAwarePrompt(userPrompt, options)}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
+            const finalPrompt = buildSmartAnalysisFinalPrompt(
+                generateContextAwarePrompt(userPrompt, options),
+                { skipPatchInstructions: historyMeta?.skipPatchInstructions },
+            );
             const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt);
-            const parsedResult = parseSmartAnalysisResponse(result, 'chatgpt');
+            const parsedResult = historyMeta?.skipPatchInstructions
+                ? { displayText: result, patches: [] }
+                : parseSmartAnalysisResponse(result, 'chatgpt');
             setAiResults(prev => ({ ...prev, chatgpt: parsedResult.displayText }));
             setAiInsertionPatches(prev => ({ ...prev, chatgpt: parsedResult.patches }));
             logReadyCommandAnalysis('chatgpt', parsedResult, historyMeta);
@@ -2797,12 +2954,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             let originalText = "";
             let localContext: BulkFixTargetContext | undefined;
             let from, to;
-            if (action === 'replace-text') {
+            if (action === 'replace-text' || action === 'copy-meta') {
                 const { from: f, to: t } = editor.state.selection;
                 from = f; to = t;
                 textToProcess = editor.state.doc.textBetween(f, t, ' ');
-                originalText = textToProcess;
-                localContext = getAiLocalTextContext(editor, f, t);
+                originalText = action === 'copy-meta' ? 'Meta Description' : textToProcess;
+                localContext = getAiLocalTextContext(editor, f, t, title);
             } else {
                 textToProcess = text;
                 originalText = action === 'replace-title' ? title : 'Meta Description';
@@ -2820,7 +2977,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 'stepsIntroduction',
                 'punctuation',
                 'punctuationSpacing',
+                'immediateDuplicateWords',
                 'ambiguousParagraphReferences',
+                'commonEnglishTerms',
                 'wordsToDelete',
                 'slowWords',
                 'differentTransitionalWords',
@@ -2839,23 +2998,37 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 '- راعِ نوع الصفحة وهدفها والجمهور ونية البحث في النبرة، مستوى التفصيل، والعبارات المقترحة.',
                 formatStructureCriteriaRules('معايير يجب احترامها عند توليد اقتراح شريط الأدوات', toolbarGuardRules),
             ].join('\n\n');
-            const boundedPrompt = action === 'replace-text'
+            const usesSelectedTextContext = Boolean(localContext && textToProcess.trim());
+            const boundedPrompt = usesSelectedTextContext
                 ? [
                     formatAiReadOnlyLocalContext(localContext),
                     toolbarCommandGuard,
-                    '**الأمر المطلوب على النص المستهدف فقط:**',
+                    action === 'replace-text'
+                        ? '**الأمر المطلوب على النص المستهدف فقط:**'
+                        : '**الأمر المطلوب اعتمادًا على النص المحدد والسياق:**',
                     prompt,
                     '',
-                    '**النص المستهدف المسموح باستبداله فقط:**',
+                    action === 'replace-text'
+                        ? '**النص المستهدف المسموح باستبداله فقط:**'
+                        : '**النص المحدد المرجعي:**',
                     `"""${textToProcess}"""`,
                     '',
-                    '**قواعد الحفاظ على السياق:**',
-                    '- أعد النص المستهدف فقط، ولا تكتب النص السابق أو اللاحق ضمن الاقتراح.',
-                    '- حافظ على اتصال الفقرة بما قبلها وما بعدها، وتجنب إعادة المعلومة نفسها أو افتتاح الموضوع من جديد بلا حاجة.',
-                    '- إذا كان النص السابق يمهد للفكرة، ابدأ مباشرة بالتكملة. وإذا كان النص اللاحق يكمل الفكرة، لا تختم الاقتراح كأنه نهاية القسم.',
+                    action === 'replace-text'
+                        ? [
+                            '**قواعد الحفاظ على السياق:**',
+                            '- أعد النص المستهدف فقط، ولا تكتب النص السابق أو اللاحق ضمن الاقتراح.',
+                            '- حافظ على اتصال الفقرة بما قبلها وما بعدها، وتجنب إعادة المعلومة نفسها أو افتتاح الموضوع من جديد بلا حاجة.',
+                            '- إذا كان النص السابق يمهد للفكرة، ابدأ مباشرة بالتكملة. وإذا كان النص اللاحق يكمل الفكرة، لا تختم الاقتراح كأنه نهاية القسم.',
+                        ].join('\n')
+                        : [
+                            '**قواعد استخدام السياق لوصف الميتا:**',
+                            '- استخدم عنوان القسم والفقرة السابقة والفقرة التالية لفهم السياق فقط.',
+                            '- لا تنقل النص السابق أو اللاحق حرفيًا داخل وصف الميتا.',
+                            '- أخرج وصف ميتا واحدًا فقط مناسبًا للنص المحدد وسياقه.',
+                        ].join('\n'),
                 ].filter(Boolean).join('\n\n')
                 : prompt;
-            const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading)}\n\nأرجع النتيجة بتنسيق JSON حصراً: { "suggestions": ["..."] }`;
+            const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً: { "suggestions": ["..."] }`;
             const resultJson = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
@@ -2889,7 +3062,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             editor.state.doc.descendants((node, pos) => {
                 if (node.type.name === 'heading') headings.push({ level: node.attrs.level, text: node.textContent, from: pos, to: pos + node.nodeSize });
             });
-            const headingsText = headings.map(h => `[H${h.level}] ${h.text}`).join('\n');
+            const headingsText = headings.map(h => {
+                const localContext = getAiLocalTextContext(editor, h.from, h.to, title);
+                return [
+                    `[H${h.level}] ${h.text}`,
+                    localContext.sectionHeading ? `عنوان القسم للاطلاع فقط: ${localContext.sectionHeading}` : '',
+                    localContext.previousTexts?.[0] ? `الفقرة السابقة للاطلاع فقط: """${localContext.previousTexts[0]}"""` : '',
+                    localContext.nextTexts?.[0] ? `الفقرة التالية للاطلاع فقط: """${localContext.nextTexts[0]}"""` : '',
+                ].filter(Boolean).join('\n');
+            }).join('\n\n---\n\n');
             const promptTemplate = getEngineeringPrompt(engineeringPrompts, ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings);
             const prompt = `${buildComprehensivePrompt(promptTemplate)}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
             const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
@@ -2909,10 +3090,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setAiFixingInfo({ title: rule.title, from: item.from });
         try {
             const originalText = editor.state.doc.textBetween(item.from, item.to, ' ');
-            const localContext = getAiLocalTextContext(editor, item.from, item.to);
+            const localContext = getAiLocalTextContext(editor, item.from, item.to, title);
             const prompt = buildComprehensivePrompt(
                 formatBulkFixViolationPrompt(rule, item, originalText, localContext),
-                localContext.sectionHeading
+                localContext.sectionHeading,
+                { includeArticleTitle: false, includeArticleToc: false }
             );
             const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
@@ -2964,12 +3146,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 if (targetText === null) {
                     throw new Error('Target range is no longer valid.');
                 }
-                const targetContext = getBulkFixTargetContext(editor, group);
+                const targetContext = getBulkFixTargetContext(editor, group, title);
                 const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
                 const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
                 const prompt = buildComprehensivePrompt(
                     formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules, targetContext, articleLevelRules),
-                    targetContext.sectionHeading
+                    targetContext.sectionHeading,
+                    { includeArticleTitle: false, includeArticleToc: false }
                 );
                 const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
                 const parsed = extractJson(res);

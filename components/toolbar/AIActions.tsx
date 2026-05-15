@@ -3,7 +3,8 @@ import { Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, L
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
 import { useUser } from '../../contexts/UserContext';
-import { ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../../constants/engineeringPrompts';
+import { AI_PROMPTS } from '../../constants/aiPrompts';
+import { DEFAULT_ENGINEERING_PROMPTS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../../constants/engineeringPrompts';
 
 interface AIActionsProps {
     hasSelection: boolean;
@@ -36,7 +37,16 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
 
     const TONES = [t.tones.professional, t.tones.friendly, t.tones.persuasive, t.tones.simple];
     const getPrompt = (id: string, variables: Record<string, string> = {}) => {
-        return renderEngineeringPrompt(getEngineeringPrompt(engineeringPrompts, id), variables);
+        const template = getEngineeringPrompt(engineeringPrompts, id);
+        if (
+            id === ENGINEERING_PROMPT_IDS.toolbar.changeTone &&
+            variables.tone &&
+            template.trim() === DEFAULT_ENGINEERING_PROMPTS[ENGINEERING_PROMPT_IDS.toolbar.changeTone].trim()
+        ) {
+            return AI_PROMPTS.CHANGE_TONE(variables.tone);
+        }
+
+        return renderEngineeringPrompt(template, variables);
     };
 
     useEffect(() => {
@@ -83,7 +93,7 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
             {isAiMenuOpen && (
                 <div className={`absolute mt-2 w-60 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-30 ${uiLanguage === 'ar' ? 'left-0' : 'right-0'}`}>
                     <AiMenuItem onClick={handleAnalyzeHeadings} disabled={isAnyGeminiLoading}><FileSignature size={14} /> <span>{t.aiMenu.suggestHeadings}</span></AiMenuItem>
-                    <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.generateMeta), 'copy-meta')} disabled={isAnyGeminiLoading}><Tag size={14} /> <span>{t.aiMenu.generateMeta}</span></AiMenuItem>
+                    <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.generateMeta), 'copy-meta')} disabled={!hasSelection || isAnyGeminiLoading}><Tag size={14} /> <span>{t.aiMenu.generateMeta}</span></AiMenuItem>
                     <div className="my-1 h-px bg-gray-200 dark:bg-[#3C3C3C]"></div>
 
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.rephrase), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><PenLine size={14} /> <span>{t.aiMenu.rephrase}</span></AiMenuItem>

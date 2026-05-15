@@ -9,6 +9,7 @@ import { useModal } from '../contexts/ModalContext';
 import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
+import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
 
 /*
  * Dashboard is the user workspace:
@@ -162,7 +163,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
                     {activity.lastSaved && (
                          <span className="flex items-center gap-1.5" title={t.lastSaved}>
                             <RefreshCw size={12} />
-                            {new Date(activity.lastSaved).toLocaleDateString(t.locale, { day: 'numeric', month: 'short' })}
+                            {formatIstanbulDateTime(activity.lastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                         </span>
                     )}
                     <span className="flex items-center gap-1.5" title={t.timeSpent}><Clock size={12} /> {formatSeconds(activity.timeSpentSeconds, t)}</span>
@@ -352,7 +353,7 @@ const Dashboard: React.FC = () => {
         <body>
             <div class="container">
                 <h1>${t.userActivityReport}: ${currentUser}</h1>
-                <p>${t.reportDate}: ${new Date().toLocaleString(t.locale)}</p>
+                <p>${t.reportDate}: ${formatIstanbulDateTime(new Date(), t.locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p>
                 <h2>${t.activitySummary}</h2>
                 <table class="summary-table">
                     <tr><th>${t.totalArticles}</th><td>${totalArticles}</td></tr>
@@ -369,7 +370,7 @@ const Dashboard: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `report-${currentUser}-${new Date().toISOString().split('T')[0]}.html`;
+    a.download = `report-${currentUser}-${getIstanbulDateKey()}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -413,15 +414,14 @@ const Dashboard: React.FC = () => {
 
     return (Object.entries(currentUserData.articles) as [string, ArticleActivity][]).filter(([, activity]) => {
       if (filters.dateFrom) {
-          if (!activity.lastSaved || new Date(activity.lastSaved) < new Date(filters.dateFrom)) {
+          if (!activity.lastSaved || new Date(activity.lastSaved) < getIstanbulDayStart(filters.dateFrom)) {
               return false;
           }
       }
       if (filters.dateTo) {
           if (!activity.lastSaved) return false;
           const articleDate = new Date(activity.lastSaved);
-          const filterDate = new Date(filters.dateTo);
-          filterDate.setHours(23, 59, 59, 999);
+          const filterDate = getIstanbulDayEnd(filters.dateTo);
           if (articleDate > filterDate) {
               return false;
           }
