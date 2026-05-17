@@ -65,6 +65,14 @@ const sendNodeResponse = (res: any, result: ApiResult) => {
   res.end(JSON.stringify(result.body));
 };
 
+const parseEnvGeminiKeys = (): string[] => {
+  const raw = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+  return raw
+    .split(/[\n,;]+/)
+    .map(key => key.trim())
+    .filter(Boolean);
+};
+
 const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
   if (req.method !== "POST") {
     return { status: 405, body: { error: "الطريقة غير مسموح بها" } };
@@ -84,9 +92,8 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     const GEMINI_API_KEYS = requestKeys
       .map(key => typeof key === 'string' ? key.trim() : '')
       .filter(Boolean);
-    const serverKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-    if (GEMINI_API_KEYS.length === 0 && serverKey) {
-      GEMINI_API_KEYS.push(serverKey);
+    if (GEMINI_API_KEYS.length === 0) {
+      GEMINI_API_KEYS.push(...parseEnvGeminiKeys());
     }
 
     if (GEMINI_API_KEYS.length === 0) {
