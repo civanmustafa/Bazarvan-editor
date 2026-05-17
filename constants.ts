@@ -139,9 +139,7 @@ export const COMMON_ENGLISH_TERMS: CommonEnglishTerm[] = [
 // Constants moved from App.tsx
 export const USERS = [
   { username: 'Admin1', password: 'Admin1' },
-  { username: 'Nagham1234', password: 'Nagham1234' },
-  { username: 'Sam1234', password: 'Sam1234' },
-  { username: 'Essa1234', password: 'Essa1234' },
+  { username: 'Maria', password: 'Maria1234' },
 ];
 
 export const INITIAL_KEYWORDS: Keywords = {
