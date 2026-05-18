@@ -55,6 +55,15 @@ const ARTICLE_WIDE_TOOLTIP_EXCLUDED_RULES = new Set<keyof StructureAnalysis>([
     'automaticLists',
 ]);
 
+const escapeTooltipHtml = (value: unknown): string => (
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+);
+
 export const useInteraction = () => {
   const context = useContext(InteractionContext);
   if (!context) throw new Error("useInteraction must be used within an InteractionProvider");
@@ -377,6 +386,8 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 editor.view.dispatch(tr);
             }
             setHighlightedItem(title);
+            setTooltip(null);
+            setPinnedTooltip(null);
     
             setTimeout(() => {
                 if (editor && !editor.isDestroyed && item.violatingItems?.[0]) {
@@ -417,7 +428,13 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const editorDom = editorView.dom;
     
         const handleMouseMove = (event: MouseEvent) => {
-            if (!isTooltipAlwaysOn) {
+            const selectedRuleTitle = typeof highlightedItem === 'string' &&
+                allViolations.some(v => v.rule.title === highlightedItem)
+                    ? highlightedItem
+                    : null;
+            const shouldShowHoverTooltip = isTooltipAlwaysOn || Boolean(selectedRuleTitle);
+
+            if (!shouldShowHoverTooltip) {
                 if (tooltip) setTooltip(null);
                 if (pinnedTooltip) setPinnedTooltip(null);
                 return;
@@ -435,7 +452,10 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             }
     
             const currentPos = posResult.pos;
-            const activeViolations = allViolations.filter(v => currentPos >= v.from && currentPos <= v.to);
+            const activeViolations = allViolations.filter(v => {
+                if (selectedRuleTitle && v.rule.title !== selectedRuleTitle) return false;
+                return currentPos >= v.from && currentPos <= v.to;
+            });
 
             if (activeViolations.length > 0) {
                 const uniqueViolations: { [key: string]: { rule: CheckResult; from: number; message?: string } } = {};
@@ -451,20 +471,24 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                         const rule = v.rule;
                         const isFixingThis = aiFixingInfo?.title === rule.title && aiFixingInfo?.from === v.from;
                         const isFixable = FIXABLE_RULES.has(rule.title);
-                        const buttonHtml = isFixable ? `<button data-from="${v.from}" data-title="${rule.title}" class="ai-fix-btn" ${isFixingThis ? 'disabled' : ''}>${isFixingThis ? '<span class="ai-fix-btn-spinner"></span>' : t.fix}</button>` : '';
+                        const safeTitle = escapeTooltipHtml(rule.title);
+                        const buttonHtml = isFixable ? `<button data-from="${v.from}" data-title="${safeTitle}" class="ai-fix-btn" ${isFixingThis ? 'disabled' : ''}>${isFixingThis ? '<span class="ai-fix-btn-spinner"></span>' : escapeTooltipHtml(t.fix)}</button>` : '';
 
                         const rawCurrentText = v.message || rule.current;
-                        const currentText = String(rawCurrentText).replace(/<[^>]*>/g, '').substring(0, 50);
-                        const requiredText = String(rule.required).replace(/<[^>]*>/g, '').substring(0, 30);
+                        const currentText = escapeTooltipHtml(String(rawCurrentText).replace(/<[^>]*>/g, '').substring(0, 140));
+                        const requiredText = escapeTooltipHtml(String(rule.required).replace(/<[^>]*>/g, '').substring(0, 90));
+                        const currentLabel = v.message
+                            ? (uiLanguage === 'ar' ? 'المشكلة' : 'Issue')
+                            : t.leftSidebar.current;
                         
                         const detailsHtml = `
-                            <div style="display: grid; grid-template-columns: auto auto; justify-content: space-between; gap: 0 8px; font-size: 11px; color: #6b7280;" class="dark:text-gray-400 w-full">
-                                <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${t.leftSidebar.required}:</strong> ${requiredText}</span>
-                                <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${t.leftSidebar.current}:</strong> ${currentText}</span>
+                            <div style="display: grid; gap: 4px; font-size: 11px; color: #6b7280;" class="dark:text-gray-400 w-full">
+                                <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${escapeTooltipHtml(currentLabel)}:</strong> ${currentText}</span>
+                                <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${escapeTooltipHtml(t.leftSidebar.required)}:</strong> ${requiredText}</span>
                             </div>`;
 
                         return `<div class="flex flex-col items-start gap-1.5 w-full">
-                                    <div class="flex items-center gap-2 font-semibold">${buttonHtml}${rule.title}</div>
+                                    <div class="flex items-center gap-2 font-semibold">${buttonHtml}${safeTitle}</div>
                                     ${detailsHtml}
                                 </div>`;
                     })
@@ -523,7 +547,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             editorDom.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('click', handleClick);
         };
-    }, [editor, isTooltipAlwaysOn, pinnedTooltip, tooltip, aiFixingInfo, t.fix, allViolations, uiLanguage, t.leftSidebar.required, t.leftSidebar.current, handleAiFix]);
+    }, [editor, highlightedItem, isTooltipAlwaysOn, pinnedTooltip, tooltip, aiFixingInfo, t.fix, allViolations, uiLanguage, t.leftSidebar.required, t.leftSidebar.current, handleAiFix]);
     
 
     const value = {

@@ -5,7 +5,7 @@ import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
 import { Languages } from 'lucide-react';
 
-import { Separator } from './toolbar/ToolbarItems';
+import { IconTooltip, Separator } from './toolbar/ToolbarItems';
 import FormattingActions from './toolbar/FormattingActions';
 import UtilityActions from './toolbar/UtilityActions';
 import AIActions from './toolbar/AIActions';
@@ -182,13 +182,14 @@ const EditorToolbar: React.FC = () => {
           <div className="flex-shrink-0 flex items-center gap-4">
               <button
                 onClick={handleLanguageToggle}
-                title={t.toggleArticleLanguage}
-                className="p-1.5 rounded-md text-gray-600 dark:text-gray-300 bg-transparent hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
+                aria-label={t.toggleArticleLanguage}
+                className="group relative p-1.5 rounded-md text-gray-600 dark:text-gray-300 bg-transparent hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#d4af37]"
               >
                 <div className="flex items-center gap-1.5 px-1">
                   <Languages size={16} />
                   <span className="text-xs font-bold">{articleLanguage.toUpperCase()}</span>
                 </div>
+                <IconTooltip label={t.toggleArticleLanguage} />
               </button>
             <div className="flex items-center gap-2" title={isIdle ? t.idle : t.active}>
                 <div className={`w-3 h-3 rounded-full transition-colors duration-500 ${isIdle ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
