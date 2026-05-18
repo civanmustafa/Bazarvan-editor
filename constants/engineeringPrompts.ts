@@ -19,6 +19,8 @@ export const ENGINEERING_PROMPT_IDS = {
   toolbar: {
     suggestHeadings: 'toolbar.suggestHeadings',
     generateMeta: 'toolbar.generateMeta',
+    suggestTitle: 'toolbar.suggestTitle',
+    merge: 'toolbar.merge',
     rephrase: 'toolbar.rephrase',
     improveWording: 'toolbar.improveWording',
     simplifyText: 'toolbar.simplifyText',
@@ -530,6 +532,20 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     source: 'toolbar',
     labelKey: 'generateMeta',
     defaultValue: AI_PROMPTS.GENERATE_META,
+    variables: ['${selectedText}'],
+  },
+  {
+    id: ENGINEERING_PROMPT_IDS.toolbar.suggestTitle,
+    source: 'toolbar',
+    labelKey: 'suggestTitle',
+    defaultValue: AI_PROMPTS.SUGGEST_TITLE,
+    variables: ['${selectedText}'],
+  },
+  {
+    id: ENGINEERING_PROMPT_IDS.toolbar.merge,
+    source: 'toolbar',
+    labelKey: 'merge',
+    defaultValue: AI_PROMPTS.MERGE,
     variables: ['${selectedText}'],
   },
   {

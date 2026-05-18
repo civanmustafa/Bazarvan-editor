@@ -190,6 +190,11 @@ export const translations = {
       toSteps: 'تحويل إلى خطوات',
       toTable: 'تحويل إلى جدول',
       changeTone: 'تغيير النبرة',
+      suggestTitle: 'اقتراح عنوان للنص',
+      merge: 'الدمج',
+      manualCommand: 'أمر يدوي',
+      manualCommandPlaceholder: 'اكتب الأمر اليدوي هنا...',
+      sendManualCommand: 'إرسال الأمر إلى Gemini',
     },
     tones: {
       professional: 'احترافي',
@@ -816,6 +821,11 @@ export const translations = {
       toSteps: 'Convert to Steps',
       toTable: 'Convert to Table',
       changeTone: 'Change Tone',
+      suggestTitle: 'Suggest Title',
+      merge: 'Merge',
+      manualCommand: 'Manual Command',
+      manualCommandPlaceholder: 'Write the manual command here...',
+      sendManualCommand: 'Send to Gemini',
     },
     tones: {
       professional: 'Professional',

@@ -1,5 +1,5 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
-import { Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight, ClipboardCheck } from 'lucide-react';
+import { Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight, ClipboardCheck, Heading1, Combine } from 'lucide-react';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
 import { useUser } from '../../contexts/UserContext';
@@ -94,11 +94,13 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                 <div className={`absolute mt-2 w-60 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-30 ${uiLanguage === 'ar' ? 'left-0' : 'right-0'}`}>
                     <AiMenuItem onClick={handleAnalyzeHeadings} disabled={isAnyGeminiLoading}><FileSignature size={14} /> <span>{t.aiMenu.suggestHeadings}</span></AiMenuItem>
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.generateMeta), 'copy-meta')} disabled={!hasSelection || isAnyGeminiLoading}><Tag size={14} /> <span>{t.aiMenu.generateMeta}</span></AiMenuItem>
+                    <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.suggestTitle), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><Heading1 size={14} /> <span>{t.aiMenu.suggestTitle}</span></AiMenuItem>
                     <div className="my-1 h-px bg-gray-200 dark:bg-[#3C3C3C]"></div>
 
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.rephrase), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><PenLine size={14} /> <span>{t.aiMenu.rephrase}</span></AiMenuItem>
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.improveWording), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><Wand2 size={14} /> <span>{t.aiMenu.improveWording}</span></AiMenuItem>
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.simplifyText), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><Zap size={14} /> <span>{t.aiMenu.simplify}</span></AiMenuItem>
+                    <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.merge), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><Combine size={14} /> <span>{t.aiMenu.merge}</span></AiMenuItem>
                     
                     <div className="relative" onMouseEnter={() => setIsExpandMenuOpen(true)} onMouseLeave={() => setIsExpandMenuOpen(false)}>
                         <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.expand), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}>
