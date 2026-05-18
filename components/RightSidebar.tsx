@@ -648,7 +648,7 @@ const RightSidebar: React.FC = () => {
     const [competitorComparison, setCompetitorComparison] = useState<CompetitorComparisonState>(() => createEmptyCompetitorComparisonState());
     const [selectedReadyCommandIds, setSelectedReadyCommandIds] = useState<string[]>([]);
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
-    const [isChatGptExpanded, setIsChatGptExpanded] = useState(true);
+    const [isChatGptExpanded, setIsChatGptExpanded] = useState(false);
     const [copiedPatchId, setCopiedPatchId] = useState('');
     
     // Custom Dropdown State
@@ -852,6 +852,11 @@ const RightSidebar: React.FC = () => {
     };
 
     const handleRunChatGptAnalysis = () => {
+        if (selectedReadyCommands.length > 0) {
+            handleRunGeminiAnalysis();
+            return;
+        }
+
         handleChatGptAnalyze(aiCommand, aiOptions, readyCommandHistoryMeta);
     };
 
@@ -1310,15 +1315,21 @@ const RightSidebar: React.FC = () => {
                         </div>
 
                         <div className="flex flex-col gap-2">
-                            <div className="flex gap-2">
-                                <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
+                            <div className={`grid gap-2 ${selectedReadyCommands.length > 0 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                                <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                                    <span className="text-xs font-bold">Gemini</span>
+                                    <span className="text-xs font-bold">
+                                        {selectedReadyCommands.length > 0
+                                            ? (t.locale === 'ar' ? 'Gemini الافتراضي للأوامر' : 'Gemini default for commands')
+                                            : 'Gemini'}
+                                    </span>
                                 </button>
-                                <button onClick={handleRunChatGptAnalysis} disabled={isAiLoading.chatgpt} className="flex-1 flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
-                                    {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
-                                    <span className="text-xs font-bold">ChatGPT</span>
-                                </button>
+                                {selectedReadyCommands.length === 0 && (
+                                    <button onClick={handleRunChatGptAnalysis} disabled={isAiLoading.chatgpt} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
+                                        {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
+                                        <span className="text-xs font-bold">ChatGPT</span>
+                                    </button>
+                                )}
                             </div>
                         </div>
 

@@ -1,4 +1,4 @@
-const OPENAI_MODEL = "gpt-4.1-mini";
+const OPENAI_MODEL = "gpt-5.5";
 const OPENAI_TIMEOUT_MS = 120000;
 
 type ApiResult = {

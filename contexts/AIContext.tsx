@@ -38,7 +38,7 @@ import { normalizeGoalContext } from '../utils/goalContext';
  * Edit api/* when changing server-side model calls or key handling.
  */
 const GEMINI_MODEL = 'gemini-3-flash-preview';
-const OPENAI_MODEL = 'gpt-4.1-mini';
+const OPENAI_MODEL = 'gpt-5.5';
 const CHATGPT_TIMEOUT_MS = 180000;
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
