@@ -67,6 +67,11 @@ const getStoredGoalContext = (key: string): GoalContext => {
 const applyArticleLanguageFormatting = (editor: Editor, lang: 'ar' | 'en') => {
     const direction = lang === 'ar' ? 'rtl' : 'ltr';
     const alignment = 'left';
+    const editorDom = editor.view.dom as HTMLElement;
+
+    editorDom.setAttribute('dir', direction);
+    editorDom.style.direction = direction;
+    editorDom.style.textAlign = alignment;
 
     (editor.chain() as any)
         .focus()
@@ -145,6 +150,17 @@ const TextDirection = Extension.create({
         const { tr } = state;
         let changed = false;
         const types = new Set(this.options.types);
+        const editorDom = this.editor?.view?.dom as HTMLElement | undefined;
+
+        if (editorDom) {
+            if (direction === 'auto') {
+                editorDom.removeAttribute('dir');
+                editorDom.style.direction = '';
+            } else {
+                editorDom.setAttribute('dir', direction);
+                editorDom.style.direction = direction;
+            }
+        }
 
         state.doc.descendants((node: any, pos: any) => {
             if (types.has(node.type.name)) {

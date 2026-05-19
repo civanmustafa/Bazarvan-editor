@@ -281,6 +281,11 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if (!editor || editor.isDestroyed) return;
         const direction = articleLanguage === 'ar' ? 'rtl' : 'ltr';
         const alignment = 'left';
+        const editorDom = editor.view.dom as HTMLElement;
+
+        editorDom.setAttribute('dir', direction);
+        editorDom.style.direction = direction;
+        editorDom.style.textAlign = alignment;
 
         (editor.chain() as any)
             .focus()

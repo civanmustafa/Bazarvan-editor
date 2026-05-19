@@ -852,12 +852,11 @@ const RightSidebar: React.FC = () => {
     };
 
     const handleRunChatGptAnalysis = () => {
-        if (selectedReadyCommands.length > 0) {
-            handleRunGeminiAnalysis();
-            return;
-        }
-
-        handleChatGptAnalyze(aiCommand, aiOptions, readyCommandHistoryMeta);
+        handleChatGptAnalyze(
+            aiCommand,
+            aiOptions,
+            selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined
+        );
     };
 
     const handleCopyPatch = async (patchId: string, content: string) => {
@@ -1315,7 +1314,7 @@ const RightSidebar: React.FC = () => {
                         </div>
 
                         <div className="flex flex-col gap-2">
-                            <div className={`grid gap-2 ${selectedReadyCommands.length > 0 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                            <div className="grid grid-cols-2 gap-2">
                                 <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                     <span className="text-xs font-bold">
@@ -1324,12 +1323,10 @@ const RightSidebar: React.FC = () => {
                                             : 'Gemini'}
                                     </span>
                                 </button>
-                                {selectedReadyCommands.length === 0 && (
-                                    <button onClick={handleRunChatGptAnalysis} disabled={isAiLoading.chatgpt} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
-                                        {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
-                                        <span className="text-xs font-bold">ChatGPT</span>
-                                    </button>
-                                )}
+                                <button onClick={handleRunChatGptAnalysis} disabled={isAiLoading.chatgpt} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
+                                    {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
+                                    <span className="text-xs font-bold">ChatGPT</span>
+                                </button>
                             </div>
                         </div>
 
