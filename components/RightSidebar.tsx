@@ -79,6 +79,32 @@ const createDefaultCompetitorExtractions = () => [
     createEmptyCompetitorState(),
 ];
 
+const isCompetitorTextSeparatorLine = (line: string): boolean => {
+    const trimmed = line.trim();
+    if (trimmed.length < 2) return false;
+    return !/[A-Za-z0-9\u0600-\u06FF]/.test(trimmed);
+};
+
+const splitBulkCompetitorTexts = (value: string): string[] => {
+    const sections: string[] = [];
+    let current: string[] = [];
+
+    value.split(/\r?\n/).forEach(line => {
+        if (isCompetitorTextSeparatorLine(line)) {
+            const section = current.join('\n').trim();
+            if (section) sections.push(section);
+            current = [];
+            return;
+        }
+        current.push(line);
+    });
+
+    const lastSection = current.join('\n').trim();
+    if (lastSection) sections.push(lastSection);
+
+    return sections.slice(0, 3);
+};
+
 const createEmptyCompetitorComparisonState = (): CompetitorComparisonState => ({
     status: 'idle',
     result: '',
@@ -123,6 +149,7 @@ const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string =
         articleToc: { ar: 'جدول المحتويات', en: 'Table of Contents' },
         currentConclusion: { ar: 'الخاتمة الحالية', en: 'Current Conclusion' },
         contentSummaryForCompetitors: { ar: 'تلخيص المحتوى للمنافسين', en: 'Content summary for competitors' },
+        competitorGapAnalysis: { ar: 'مقارنة المحتوى مع المنافسين', en: 'Compare content with competitors' },
     };
     return labels[key]?.[isArabic ? 'ar' : 'en'] || key;
 };
@@ -500,11 +527,11 @@ const extractCompetitorContentFromText = (value: string, fallbackUrl: string): C
     };
 };
 
-const buildCompetitorComparisonPrompt = (
-    contentSummary: StoredContentSummary,
+const buildCompetitorPromptBlocks = (
     competitors: CompetitorExtractedContent[],
-): string => {
-    const competitorBlocks = competitors.map((competitor, index) => {
+    headingPrefix = '##',
+): string => (
+    competitors.map((competitor, index) => {
         const competitorText = competitor.text || [
             competitor.title,
             competitor.description,
@@ -515,7 +542,7 @@ const buildCompetitorComparisonPrompt = (
             ...competitor.listItems,
         ].filter(Boolean).join('\n\n');
 
-        return `## المنافس ${index + 1}
+        return `${headingPrefix} المنافس ${index + 1}
 الرابط: ${competitor.url || competitor.fetchedUrl || 'غير محدد'}
 العنوان: ${competitor.title || 'غير محدد'}
 عدد الكلمات المستخرجة: ${competitor.wordCount || countPromptWords(competitorText)}
@@ -524,7 +551,14 @@ const buildCompetitorComparisonPrompt = (
 ---
 ${truncatePromptText(competitorText)}
 ---`;
-    }).join('\n\n');
+    }).join('\n\n')
+);
+
+const buildCompetitorComparisonPrompt = (
+    contentSummary: StoredContentSummary,
+    competitors: CompetitorExtractedContent[],
+): string => {
+    const competitorBlocks = buildCompetitorPromptBlocks(competitors);
 
     return `أنت محلل محتوى SEO/AEO/GEO صارم.
 
@@ -640,6 +674,7 @@ const RightSidebar: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors'>('structure');
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history'>('new');
     const [aiCommand, setAiCommand] = useState('');
+    const [bulkCompetitorText, setBulkCompetitorText] = useState('');
     const [competitorUrls, setCompetitorUrls] = useState<string[]>(() => loadStoredCompetitorUrls());
     const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
     const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => loadStoredCompetitorTexts());
@@ -654,6 +689,7 @@ const RightSidebar: React.FC = () => {
     // Custom Dropdown State
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
     const commandsMenuRef = useRef<HTMLDivElement>(null);
+    const clearReadyCommandSelectionOnNextOpenRef = useRef(false);
 
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
@@ -749,6 +785,24 @@ const RightSidebar: React.FC = () => {
         [readyCommands, selectedReadyCommandIds]
     );
 
+    const readyCommandCompetitorBlocks = useMemo(() => {
+        const competitors = competitorExtractions
+            .map(item => item.content)
+            .filter((content): content is CompetitorExtractedContent => Boolean(content?.text?.trim()));
+        return buildCompetitorPromptBlocks(competitors, '###');
+    }, [competitorExtractions]);
+
+    const getReadyCommandPrompt = (command: ReadyCommand): string => {
+        if (command.id !== ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis) {
+            return command.value;
+        }
+
+        return `${command.value}
+
+محتوى المنافسين المرفقين:
+${readyCommandCompetitorBlocks || 'لا يوجد محتوى منافسين مستخرج بعد. أضف محتوى المنافسين من تبويب المنافسين قبل تشغيل هذا الأمر.'}`;
+    };
+
     useEffect(() => {
         setSelectedReadyCommandIds(prev => {
             const availableIds = new Set(readyCommands.map(command => command.id));
@@ -761,20 +815,20 @@ const RightSidebar: React.FC = () => {
         if (selectedReadyCommands.length === 0) return;
         if (selectedReadyCommands.length === 1) {
             const selectedCommand = selectedReadyCommands[0];
-            setAiCommand(selectedCommand.value);
+            setAiCommand(getReadyCommandPrompt(selectedCommand));
             setAiOptions(getReadyCommandOptions(selectedCommand));
             return;
         }
 
         setAiCommand(selectedReadyCommands
-            .map((command, index) => `### ${index + 1}. ${command.label}\n${command.value}`)
+            .map((command, index) => `### ${index + 1}. ${command.label}\n${getReadyCommandPrompt(command)}`)
             .join('\n\n')
         );
         setAiOptions(selectedReadyCommands.reduce(
             (merged, command) => ({ ...merged, ...(command.options || {}) }),
             { ...DEFAULT_SMART_ANALYSIS_OPTIONS }
         ));
-    }, [selectedReadyCommands]);
+    }, [selectedReadyCommands, readyCommandCompetitorBlocks]);
 
     const selectedReadyCommand = selectedReadyCommands.length === 1 ? selectedReadyCommands[0] : null;
 
@@ -790,7 +844,7 @@ const RightSidebar: React.FC = () => {
     const readyCommandBatchItems: ReadyCommandAnalysisBatchItem[] = selectedReadyCommands.map(command => ({
         commandId: command.id,
         commandLabel: command.label,
-        userPrompt: command.value,
+        userPrompt: getReadyCommandPrompt(command),
         options: getReadyCommandOptions(command),
         skipPatchInstructions: command.skipPatchInstructions,
         savesContentSummary: command.savesContentSummary,
@@ -813,6 +867,8 @@ const RightSidebar: React.FC = () => {
                 return <FileSearch size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.contentSummaryForCompetitors:
                 return <FileText size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis:
+                return <Users size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion:
                 return <FilePlus2 size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.improveWeakest:
@@ -838,11 +894,23 @@ const RightSidebar: React.FC = () => {
         ));
     };
 
+    const handleReadyCommandsMenuToggle = () => {
+        const shouldOpen = !isCommandsMenuOpen;
+        if (shouldOpen && clearReadyCommandSelectionOnNextOpenRef.current) {
+            setSelectedReadyCommandIds([]);
+            clearReadyCommandSelectionOnNextOpenRef.current = false;
+        }
+        setIsCommandsMenuOpen(shouldOpen);
+    };
+
     const handleOptionChange = (key: keyof typeof aiOptions) => {
         setAiOptions(prev => ({ ...prev, [key]: !prev[key] }));
     };
 
     const handleRunGeminiAnalysis = () => {
+        if (selectedReadyCommands.length > 0) {
+            clearReadyCommandSelectionOnNextOpenRef.current = true;
+        }
         if (selectedReadyCommands.length > 1) {
             handleGeminiReadyCommandsAnalyze(readyCommandBatchItems);
             return;
@@ -852,6 +920,9 @@ const RightSidebar: React.FC = () => {
     };
 
     const handleRunChatGptAnalysis = () => {
+        if (selectedReadyCommands.length > 0) {
+            clearReadyCommandSelectionOnNextOpenRef.current = true;
+        }
         handleChatGptAnalyze(
             aiCommand,
             aiOptions,
@@ -884,6 +955,23 @@ const RightSidebar: React.FC = () => {
     const handleCompetitorTextChange = (index: number, value: string) => {
         setCompetitorTexts(prev => prev.map((text, textIndex) => textIndex === index ? value : text));
         setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? createEmptyCompetitorState() : item));
+    };
+
+    const handleBulkCompetitorTextDistribute = (value: string) => {
+        const sections = splitBulkCompetitorTexts(value);
+        if (sections.length === 0) return;
+
+        setCompetitorTexts(prev => createDefaultCompetitorTexts().map((_, index) => sections[index] || prev[index] || ''));
+        setCompetitorExtractions(prev => createDefaultCompetitorExtractions().map((emptyState, index) => (
+            sections[index] ? emptyState : prev[index] || emptyState
+        )));
+    };
+
+    const handleBulkCompetitorTextPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        event.preventDefault();
+        const pastedText = event.clipboardData.getData('text');
+        handleBulkCompetitorTextDistribute(pastedText);
+        setBulkCompetitorText('');
     };
 
     const runCompetitorExtraction = async (
@@ -1237,7 +1325,7 @@ const RightSidebar: React.FC = () => {
                             <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">{tRs.readyCommands}</label>
                             <button
                                 type="button"
-                                onClick={() => setIsCommandsMenuOpen(!isCommandsMenuOpen)}
+                                onClick={handleReadyCommandsMenuToggle}
                                 className="w-full flex items-center justify-between p-2.5 bg-white dark:bg-[#1F1F1F] border border-gray-300 dark:border-[#3C3C3C] rounded-lg text-sm text-start focus:outline-none focus:ring-1 focus:ring-[#d4af37] shadow-sm transition-all"
                             >
                                 <span className="truncate text-gray-700 dark:text-gray-200 font-medium flex items-center gap-2">
@@ -1370,6 +1458,44 @@ const RightSidebar: React.FC = () => {
                 <div>
                     <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">{tRs.competitors}</h3>
                     <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{tRs.competitorsHint}</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                        <div>
+                            <div className="text-xs font-bold text-gray-700 dark:text-gray-200">
+                                {t.locale === 'ar' ? 'توزيع نصوص المنافسين' : 'Distribute competitor texts'}
+                            </div>
+                            <p className="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
+                                {t.locale === 'ar'
+                                    ? 'الصق نصوص المنافسين مفصولة بأسطر رموز فقط مثل -- أو ** أو // أو == أو .. أو ،، وسيتم تعبئة خانات النص العادي فقط.'
+                                    : 'Paste competitor texts separated by symbol-only lines such as --, **, //, ==, .., or ،،. Only plain text fields will be filled.'}
+                            </p>
+                        </div>
+                    </div>
+                    <textarea
+                        value={bulkCompetitorText}
+                        onChange={(event) => setBulkCompetitorText(event.target.value)}
+                        onPaste={handleBulkCompetitorTextPaste}
+                        placeholder={t.locale === 'ar'
+                            ? 'نص المنافس الأول...\n--\nنص المنافس الثاني...\n**\nنص المنافس الثالث...'
+                            : 'First competitor text...\n--\nSecond competitor text...\n**\nThird competitor text...'}
+                        rows={5}
+                        className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
+                        dir="auto"
+                    />
+                    <button
+                        type="button"
+                        onClick={() => {
+                            handleBulkCompetitorTextDistribute(bulkCompetitorText);
+                            setBulkCompetitorText('');
+                        }}
+                        disabled={!bulkCompetitorText.trim()}
+                        className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#f2d675]"
+                    >
+                        <FileText size={14} />
+                        <span>{t.locale === 'ar' ? 'تعبئة النصوص العادية' : 'Fill plain text fields'}</span>
+                    </button>
                 </div>
 
                 <div className="rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/10 p-3 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/10">

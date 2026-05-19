@@ -9,6 +9,7 @@ export const ENGINEERING_PROMPT_IDS = {
     entityMap: 'smartAnalysis.entityMap',
     fullArticleAudit: 'smartAnalysis.fullArticleAudit',
     contentSummaryForCompetitors: 'smartAnalysis.contentSummaryForCompetitors',
+    competitorGapAnalysis: 'smartAnalysis.competitorGapAnalysis',
     improveConclusion: 'smartAnalysis.improveConclusion',
     improveWeakest: 'smartAnalysis.improveWeakest',
     suggestNewIdea: 'smartAnalysis.suggestNewIdea',
@@ -110,6 +111,95 @@ const CONTENT_SUMMARY_FOR_COMPETITORS_PROMPT = `حوّل المحتوى التا
 لا تضف معلومات خارج النص.
 لا تحذف أي فكرة تؤثر على قيمة المحتوى.
 قلل التكرار فقط دون إضعاف المعنى.`;
+
+const COMPETITOR_GAP_ANALYSIS_PROMPT = `تصرّف كخبير محتوى SEO/AEO/GEO/LLM SEO، وقارن المحتوى الموجود في المحرر مع محتوى المنافسين المرفقين لاكتشاف الفجوات، نقاط القوة، نقاط الضعف، وفرص التحسين.
+
+إليك المعلومات التالية:
+- هدف الصفحة والجمهور.
+- عنوان الصفحة أو القسم.
+- الكلمة المفتاحية الأساسية والثانوية.
+- الصيغ البديلة.
+- المحتوى الحالي.
+- محتوى المنافسين.
+
+حلّل المقارنة من حيث:
+
+- تغطية نية البحث.
+- عمق المعلومات وقيمتها.
+- الأسئلة التي يجيب عنها المنافسون ولا يجيب عنها المحتوى الحالي.
+- البنية والعناوين وسهولة القراءة.
+- SEO واستخدام الكلمات المفتاحية.
+- قابلية الاقتباس في AI Overviews ومحركات الإجابة.
+- الكيانات والمصطلحات المهمة.
+- قوة الثقة وE-E-A-T.
+- قوة التحويل والـ CTA.
+- الادعاءات غير المدعومة أو المبالغات.
+
+القواعد:
+
+- لا تنسخ من المنافسين حرفيًا.
+- لا تخترع معلومات أو أرقامًا أو ادعاءات.
+- لا تقترح شهادات عملاء، صور، فيديوهات، Schema Data، أو روابط داخلية إلا إذا طُلب ذلك.
+- لا تقدم نصائح عامة.
+- اجعل التوصيات محددة وتوضح: ماذا أفعل؟ أين أطبقه؟ ولماذا؟
+
+صيغة الإخراج المطلوبة:
+
+1. ملخص تنفيذي
+
+اكتب 5–8 نقاط توضّح قوة المحتوى، ضعفه، وأهم فرص التحسين.
+
+2. جدول مقارنة مختصر
+
+استخدم جدول Markdown بالأعمدة التالية:
+المحور | تقييم المحتوى الحالي | تفوق المنافسين | الفجوة | الأولوية
+
+غطِّ المحاور التالية:
+نية البحث، عمق المعلومات، البنية، SEO، AEO/GEO/LLM، الكيانات، الثقة، التحويل.
+
+3. فجوات المحتوى
+
+قسّم الفجوات إلى:
+
+- أسئلة ناقصة.
+- نقاط مقارنة أو اختيار ناقصة.
+- اعتراضات غير معالجة.
+- تعريفات أو مفاهيم ناقصة.
+- خطوات أو أمثلة ناقصة.
+- وغيرها من المعايير المهمة المرتبطة بالمحتوى.
+
+4. أفضل ما لدى المنافسين
+
+اذكر 6–12 فكرة منهجية يمكن الاستفادة منها دون نسخ حرفي، مع توضيح طريقة تطبيقها في المحتوى الحالي.
+
+5. التوصيات العملية
+
+قدّم 5 توصيات فقط مع نصوص جاهزة، وكل توصية يجب أن تتضمن:
+
+- ماذا أفعل؟
+- أين أطبقه؟
+- لماذا؟
+- علامة تنفيذ بصيغة [[PATCH:patch_1]] أو [[PATCH:patch_2]] بدل كتابة النص الجاهز داخل التقرير.
+
+تعليمات بطاقات التنفيذ:
+
+- أي نص جاهز للإضافة أو الاستبدال يجب أن يكون داخل patches فقط، وليس داخل نص التقرير.
+- أنشئ patch مستقلًا لكل توصية قابلة للتطبيق، بحيث يمكن للمستخدم النقر على الموضع لمعرفة مكان الإضافة، والنقر على النسخ، والنقر على التطبيق أو الإضافة داخل المحرر.
+- استخدم operation المناسبة:
+  - replace_block عند استبدال فقرة أو قسم موجود، مع وضع targetText حرفيًا من النص الحالي.
+  - insert_after_heading عند إضافة فقرة بعد عنوان محدد.
+  - append_to_section عند إضافة نص داخل قسم محدد.
+  - insert_before_conclusion عند إضافة نص قبل الخاتمة.
+  - insert_before_faq عند إضافة سؤال وجواب داخل قسم الأسئلة الشائعة.
+  - append_to_article إذا لم يوجد موضع أدق.
+- اكتب anchorText بدقة اعتمادًا على عنوان القسم أو الفقرة المرجعية داخل المحتوى الحالي.
+- اكتب placementLabel بوضوح لشرح مكان الإضافة أو الاستبدال.
+- اكتب contentMarkdown كنص نهائي جاهز للإدراج فقط، دون شرح أو عناوين تفسيرية.
+- داخل التقرير، ضع علامة [[PATCH:patch_1]] في موضع التوصية التي تخص هذا النص حتى تظهر بطاقة التنفيذ في مكانها الصحيح.
+
+6. الحكم النهائي
+
+اختم بتقييم مختصر يوضح هل المحتوى الحالي أقوى أم أضعف من المنافسين، وما أول تعديل يجب تنفيذه.`;
 
 const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO/LLM SEO. افحص المحتوى التالي بعمق ولكن باختصار، وقيّمه من حيث مطابقته لنية البحث، كفاية الإجابة، قابلية الاقتباس في AI Overviews، الفجوات المعرفية، الأسئلة الناقصة، الادعاءات غير المدعومة، الكيانات الناقصة، البنية، وقوة التحويل.
 
@@ -437,6 +527,23 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     },
     skipPatchInstructions: true,
     savesContentSummary: true,
+  },
+  {
+    id: ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis,
+    source: 'smartAnalysis',
+    labelKey: 'competitorGapAnalysis',
+    defaultValue: COMPETITOR_GAP_ANALYSIS_PROMPT,
+    options: {
+      ...DEFAULT_SMART_ANALYSIS_OPTIONS,
+      articleToc: true,
+      currentConclusion: true,
+      companyName: true,
+      keywordCriteria: true,
+      basicStructureCriteria: true,
+      headingsSequenceCriteria: true,
+      interactionCtaCriteria: true,
+      conclusionCriteria: true,
+    },
   },
   {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion,
