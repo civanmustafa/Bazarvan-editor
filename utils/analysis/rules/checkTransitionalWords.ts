@@ -1,10 +1,10 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus } from '../analysisUtils';
+import { createCheckResult, findTermMatchesInNodes, getStatus } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { TRANSITIONAL_WORDS } from '../../../constants';
 
 export const checkTransitionalWords = (context: AnalysisContext): CheckResult => {
-    const { nonEmptyParagraphs, t, articleLanguage, uiLanguage } = context;
+    const { nodes, nonEmptyParagraphs, t, articleLanguage, uiLanguage } = context;
     const tRule = t.structureAnalysis['كلمات إنتقالية'];
     const title = tRule.title;
     const description = tRule.description;
@@ -36,5 +36,10 @@ export const checkTransitionalWords = (context: AnalysisContext): CheckResult =>
     
     const percentage = transitionalCount / sentenceCount;
     const status = getStatus(percentage, 0.3, 1);
-    return createCheckResult(title, status, `${(percentage*100).toFixed(0)}%`, requiredText, Math.min(percentage / 0.3, 1), description, details);
+    const result = createCheckResult(title, status, `${(percentage*100).toFixed(0)}%`, requiredText, Math.min(percentage / 0.3, 1), description, details);
+    const matches = findTermMatchesInNodes(nodes, L_TRANSITIONAL_WORDS, articleLanguage, word =>
+        articleLanguage === 'ar' ? `كلمة انتقالية: "${word}"` : `Transitional word: "${word}"`
+    );
+    if (matches.length > 0) result.violatingItems = matches;
+    return result;
 };

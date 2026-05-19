@@ -115,6 +115,63 @@ export const countOccurrences = (text: string, sub: string, lang: 'ar' | 'en'): 
     }
 };
 
+const escapeRegex = (value: string): string => value.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+
+const createTermSearchRegex = (term: string, lang: 'ar' | 'en'): RegExp | null => {
+    const trimmedTerm = term.trim();
+    if (!trimmedTerm) return null;
+
+    const escapedTerm = escapeRegex(trimmedTerm).replace(/\s+/g, '\\s+');
+    const arabicPrefixes = '(?:ال|و|ف|ب|ك|ل|وبال|وال|فال|فل|وب|فب|كال|لل)?';
+    const arabicSuffixes = '(?:ه|ها|هم|هن|ك|كم|كن|ي|نا|ان|ون|ين|ات|تم|كما|هما)?';
+    const pattern = lang === 'ar'
+        ? `(?<![\\p{L}\\p{N}])${arabicPrefixes}${escapedTerm}${arabicSuffixes}(?![\\p{L}\\p{N}])`
+        : `\\b${escapedTerm}\\b`;
+
+    return new RegExp(pattern, lang === 'ar' ? 'giu' : 'gi');
+};
+
+export const findTermMatchesInNodes = (
+    nodes: AnalysisContext['nodes'],
+    terms: string[],
+    lang: 'ar' | 'en',
+    messageForTerm: (term: string) => string
+): NonNullable<CheckResult['violatingItems']> => {
+    const searchableNodes = nodes.filter(node =>
+        (node.type === 'paragraph' || node.type === 'heading') &&
+        node.text.trim().length > 0
+    );
+    const uniqueTerms = Array.from(new Set(terms.map(term => term.trim()).filter(Boolean)))
+        .sort((a, b) => b.length - a.length);
+    const matches: NonNullable<CheckResult['violatingItems']> = [];
+
+    searchableNodes.forEach(node => {
+        const occupiedRanges: { from: number; to: number }[] = [];
+
+        uniqueTerms.forEach(term => {
+            const regex = createTermSearchRegex(term, lang);
+            if (!regex) return;
+
+            let match;
+            while ((match = regex.exec(node.text)) !== null) {
+                const from = node.pos + 1 + match.index;
+                const to = from + match[0].length;
+                const overlapsExisting = occupiedRanges.some(range => from < range.to && to > range.from);
+                if (overlapsExisting) continue;
+
+                occupiedRanges.push({ from, to });
+                matches.push({
+                    from,
+                    to,
+                    message: messageForTerm(match[0]),
+                });
+            }
+        });
+    });
+
+    return matches.sort((a, b) => a.from - b.from || a.to - b.to);
+};
+
 export const countNodesByType = (node: any, type: string): number => {
     if (!node) return 0;
     let count = 0;

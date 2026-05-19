@@ -1,10 +1,10 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus, countOccurrences } from '../analysisUtils';
+import { createCheckResult, getStatus, countOccurrences, findTermMatchesInNodes } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { CTA_WORDS } from '../../../constants';
 
 export const checkCtaWords = (context: AnalysisContext): CheckResult => {
-    const { textContent, t, articleLanguage, uiLanguage } = context;
+    const { nodes, textContent, t, articleLanguage, uiLanguage } = context;
     const tRule = t.structureAnalysis['كلمات الحث'];
     const title = tRule.title;
     const description = tRule.description;
@@ -18,5 +18,10 @@ export const checkCtaWords = (context: AnalysisContext): CheckResult => {
 
     const count = L_CTA_WORDS.reduce((sum, word) => sum + countOccurrences(textContent, word, articleLanguage), 0);
     const status = getStatus(count, 1, Infinity);
-    return createCheckResult(title, status, count, requiredText, Math.min(count, 1), description, details);
+    const result = createCheckResult(title, status, count, requiredText, Math.min(count, 1), description, details);
+    const matches = findTermMatchesInNodes(nodes, L_CTA_WORDS, articleLanguage, word =>
+        articleLanguage === 'ar' ? `كلمة حث: "${word}"` : `CTA word: "${word}"`
+    );
+    if (matches.length > 0) result.violatingItems = matches;
+    return result;
 };

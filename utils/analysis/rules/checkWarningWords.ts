@@ -1,10 +1,10 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus, countOccurrences } from '../analysisUtils';
+import { createCheckResult, getStatus, countOccurrences, findTermMatchesInNodes } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { WARNING_ADVICE_WORDS } from '../../../constants';
 
 export const checkWarningWords = (context: AnalysisContext): CheckResult => {
-    const { textContent, t, articleLanguage, uiLanguage } = context;
+    const { nodes, textContent, t, articleLanguage, uiLanguage } = context;
     const tRule = t.structureAnalysis['كلمات تحذيرية'];
     const title = tRule.title;
     const description = tRule.description;
@@ -17,5 +17,10 @@ export const checkWarningWords = (context: AnalysisContext): CheckResult => {
         : `• At least one warning or golden advice word should be used.\n• Examples: ${L_WARNING_ADVICE_WORDS.slice(0, 10).join(', ')}.\n• Goal: Build reader trust by providing useful preventative advice.`;
 
     const count = L_WARNING_ADVICE_WORDS.reduce((sum, word) => sum + countOccurrences(textContent, word, articleLanguage), 0);
-    return createCheckResult(title, getStatus(count, 1, Infinity), count, requiredText, Math.min(count, 1), description, details);
+    const result = createCheckResult(title, getStatus(count, 1, Infinity), count, requiredText, Math.min(count, 1), description, details);
+    const matches = findTermMatchesInNodes(nodes, L_WARNING_ADVICE_WORDS, articleLanguage, word =>
+        articleLanguage === 'ar' ? `كلمة تحذيرية أو نصيحة: "${word}"` : `Warning or advice word: "${word}"`
+    );
+    if (matches.length > 0) result.violatingItems = matches;
+    return result;
 };

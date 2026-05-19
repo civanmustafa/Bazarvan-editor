@@ -119,12 +119,16 @@ export interface CheckResult {
   required: string | number;
   progress: number; // Value from 0 to 1
   details?: string;
+  violationCount?: number;
   violatingItems?: { 
     from: number; 
     to: number; 
     message: string; 
     sectionFrom?: number; 
-    sectionTo?: number 
+    sectionTo?: number;
+    pairedFrom?: number;
+    pairedTo?: number;
+    pairedText?: string;
   }[];
 }
 

@@ -66,7 +66,7 @@ const getStoredGoalContext = (key: string): GoalContext => {
 
 const applyArticleLanguageFormatting = (editor: Editor, lang: 'ar' | 'en') => {
     const direction = lang === 'ar' ? 'rtl' : 'ltr';
-    const alignment = lang === 'ar' ? 'right' : 'left';
+    const alignment = 'left';
 
     (editor.chain() as any)
         .focus()
@@ -243,7 +243,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // TipTap extensions live here. Add editor-level behavior or formatting support in this list.
     const extensions = useMemo(() => [
         StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
-        TextAlign.configure({ types: ['heading', 'paragraph'], alignments: ['left', 'center', 'right', 'justify'] }),
+        TextAlign.configure({ types: ['heading', 'paragraph', 'listItem', 'tableCell', 'tableHeader'], alignments: ['left', 'center', 'right', 'justify'] }),
         ViolationHighlight.configure({ multicolor: true }),
         Table.configure({ resizable: true }),
         TableRow,

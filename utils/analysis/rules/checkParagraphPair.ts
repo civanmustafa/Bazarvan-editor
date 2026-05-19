@@ -22,10 +22,7 @@ type ParagraphPairMatch = {
 };
 
 const MIN_UNIQUE_WORDS_PER_PARAGRAPH = 8;
-const FAIL_SHARED_WORDS = 8;
-const WARN_SHARED_WORDS = 5;
-const FAIL_SHARED_RATIO = 0.35;
-const WARN_SHARED_RATIO = 0.25;
+const FAIL_SHARED_RATIO = 0.30;
 const WORDS_DISPLAY_LIMIT = 28;
 
 const ARABIC_EXCLUSION_WORDS = new Set([
@@ -136,8 +133,8 @@ const getParagraphWordSet = (
     return { paragraph, words };
 };
 
-const findStrongestParagraphPair = (paragraphWordSets: ParagraphWordSet[]): ParagraphPairMatch | null => {
-    let strongestPair: ParagraphPairMatch | null = null;
+const findParagraphPairs = (paragraphWordSets: ParagraphWordSet[]): ParagraphPairMatch[] => {
+    const pairs: ParagraphPairMatch[] = [];
 
     for (let i = 0; i < paragraphWordSets.length - 1; i += 1) {
         const first = paragraphWordSets[i];
@@ -153,26 +150,14 @@ const findStrongestParagraphPair = (paragraphWordSets: ParagraphWordSet[]): Para
             const smallerWordSetSize = Math.min(first.words.size, second.words.size);
             const sharedRatio = sharedNormalizedWords.length / Math.max(smallerWordSetSize, 1);
             const sharedWords = sharedNormalizedWords.map(word => first.words.get(word) || word);
-            const candidate: ParagraphPairMatch = { first, second, sharedWords, sharedRatio };
-
-            if (!strongestPair) {
-                strongestPair = candidate;
-                continue;
-            }
-
-            if (
-                candidate.sharedWords.length > strongestPair.sharedWords.length ||
-                (
-                    candidate.sharedWords.length === strongestPair.sharedWords.length &&
-                    candidate.sharedRatio > strongestPair.sharedRatio
-                )
-            ) {
-                strongestPair = candidate;
-            }
+            pairs.push({ first, second, sharedWords, sharedRatio });
         }
     }
 
-    return strongestPair;
+    return pairs.sort((a, b) =>
+        b.sharedRatio - a.sharedRatio ||
+        b.sharedWords.length - a.sharedWords.length
+    );
 };
 
 const formatSharedWords = (sharedWords: string[], articleLanguage: 'ar' | 'en'): string => {
@@ -184,6 +169,10 @@ const formatSharedWords = (sharedWords: string[], articleLanguage: 'ar' | 'en'):
     return `${shownWords.join(separator)}${suffix}`;
 };
 
+const formatSharedPercentage = (sharedRatio: number): string => (
+    (sharedRatio * 100).toFixed(1).replace(/\.0$/, '')
+);
+
 export const checkParagraphPair = (context: AnalysisContext): CheckResult => {
     const { articleLanguage, uiLanguage, t } = context;
     const tRule = t.structureAnalysis['زوج فقرات'];
@@ -191,8 +180,8 @@ export const checkParagraphPair = (context: AnalysisContext): CheckResult => {
     const description = tRule.description;
     const requiredText = tRule.required;
     const details = uiLanguage === 'ar'
-        ? 'يبحث عن أقوى زوج فقرات من حيث الكلمات المشتركة داخل فقرات المتن فقط، مع استثناء فقرة المقدمة والفقرة التلخيصية والخاتمة، وبعد استثناء الكلمات العامة وكلمات العبارة المفتاحية الأساسية والصيغ البديلة واسم الشركة. يصبح خارج الحد عند وجود 8 كلمات مشتركة أو أكثر، أو عند بلوغ التشارك 35% من أصغر الفقرتين.'
-        : 'Finds the strongest paragraph pair by shared meaningful words in body paragraphs only, excluding intro, summary, and conclusion paragraphs, then excluding common words, the primary keyword, alternate keyword forms, and the company name. It fails at 8+ shared words or 35% overlap of the smaller paragraph.';
+        ? 'يفحص جميع أزواج الفقرات داخل المتن فقط، مع استثناء فقرة المقدمة والفقرة التلخيصية والخاتمة، وبعد استثناء الكلمات العامة وكلمات العبارة المفتاحية الأساسية والصيغ البديلة واسم الشركة. يصبح المعيار خطأ عند وجود أي زوج فقرات تتجاوز نسبة التشابه بينهما 30% من أصغر الفقرتين، ويعرض رقم الخطأ عدد الأزواج المتجاوزة لهذا الحد.'
+        : 'Checks all body paragraph pairs, excluding intro, summary, and conclusion paragraphs, then excluding common words, the primary keyword, alternate keyword forms, and the company name. The criterion fails when any paragraph pair exceeds 30% overlap of the smaller paragraph, and the error count shows the number of pairs above that limit.';
 
     const eligibleParagraphs = getEligibleParagraphs(context);
 
@@ -204,39 +193,62 @@ export const checkParagraphPair = (context: AnalysisContext): CheckResult => {
     const paragraphWordSets = eligibleParagraphs.map(paragraph =>
         getParagraphWordSet(paragraph, exclusionSet, articleLanguage)
     );
-    const strongestPair = findStrongestParagraphPair(paragraphWordSets);
+    const paragraphPairs = findParagraphPairs(paragraphWordSets);
+    const violatingPairs = paragraphPairs.filter(pair => pair.sharedRatio > FAIL_SHARED_RATIO);
+    const strongestPair = paragraphPairs[0] || null;
 
     if (!strongestPair) {
         return createCheckResult(title, 'pass', t.common.good, requiredText, 1, description, details);
     }
 
-    const sharedCount = strongestPair.sharedWords.length;
-    const sharedRatio = strongestPair.sharedRatio;
-    const percentage = Math.round(sharedRatio * 100);
-    const isFail = sharedCount >= FAIL_SHARED_WORDS || sharedRatio >= FAIL_SHARED_RATIO;
-    const isWarn = sharedCount >= WARN_SHARED_WORDS || sharedRatio >= WARN_SHARED_RATIO;
-    const currentText = articleLanguage === 'ar'
-        ? `${sharedCount} كلمة مشتركة (${percentage}%)`
-        : `${sharedCount} shared words (${percentage}%)`;
-
-    if (!isFail && !isWarn) {
+    if (violatingPairs.length === 0) {
+        const sharedCount = strongestPair.sharedWords.length;
+        const percentage = formatSharedPercentage(strongestPair.sharedRatio);
+        const currentText = articleLanguage === 'ar'
+            ? `${sharedCount} كلمة مشتركة (${percentage}%)`
+            : `${sharedCount} shared words (${percentage}%)`;
         return createCheckResult(title, 'pass', currentText, requiredText, 1, description, details);
     }
 
-    const status = isFail ? 'fail' : 'warn';
-    const sharedWordsText = formatSharedWords(strongestPair.sharedWords, articleLanguage);
-    const message = articleLanguage === 'ar'
-        ? `أقوى زوج فقرات يتشارك ${sharedCount} كلمة (${percentage}%). الكلمات المشتركة: ${sharedWordsText}`
-        : `Strongest paragraph pair shares ${sharedCount} words (${percentage}%). Shared words: ${sharedWordsText}`;
-    const progressPressure = Math.max(sharedCount / FAIL_SHARED_WORDS, sharedRatio / FAIL_SHARED_RATIO);
-    const progress = Math.max(0, 1 - Math.min(progressPressure, 1));
+    const strongestViolationPair = violatingPairs[0];
+    const strongestPercentage = formatSharedPercentage(strongestViolationPair.sharedRatio);
+    const currentText = articleLanguage === 'ar'
+        ? `${violatingPairs.length} أزواج أعلى من 30% (الأعلى ${strongestPercentage}%)`
+        : `${violatingPairs.length} pairs above 30% (highest ${strongestPercentage}%)`;
 
-    const result = createCheckResult(title, status, currentText, requiredText, progress, description, details);
-    result.violatingItems = [strongestPair.first.paragraph, strongestPair.second.paragraph].map(paragraph => ({
-        from: paragraph.pos,
-        to: paragraph.pos + getNodeSizeFromJSON(paragraph.node),
-        message,
-    }));
+    const result = createCheckResult(title, 'fail', currentText, requiredText, 0, description, details);
+    result.violationCount = violatingPairs.length;
+    result.violatingItems = violatingPairs.flatMap((pair) => {
+        const sharedCount = pair.sharedWords.length;
+        const percentage = formatSharedPercentage(pair.sharedRatio);
+        const sharedWordsText = formatSharedWords(pair.sharedWords, articleLanguage);
+        const message = articleLanguage === 'ar'
+            ? `زوج فقرات يتشارك ${sharedCount} كلمة (${percentage}%). الكلمات المشتركة: ${sharedWordsText}`
+            : `Paragraph pair shares ${sharedCount} words (${percentage}%). Shared words: ${sharedWordsText}`;
+        const firstParagraph = pair.first.paragraph;
+        const secondParagraph = pair.second.paragraph;
+        const firstTo = firstParagraph.pos + getNodeSizeFromJSON(firstParagraph.node);
+        const secondTo = secondParagraph.pos + getNodeSizeFromJSON(secondParagraph.node);
+
+        return [
+            {
+                from: firstParagraph.pos,
+                to: firstTo,
+                message,
+                pairedFrom: secondParagraph.pos,
+                pairedTo: secondTo,
+                pairedText: secondParagraph.text,
+            },
+            {
+                from: secondParagraph.pos,
+                to: secondTo,
+                message,
+                pairedFrom: firstParagraph.pos,
+                pairedTo: firstTo,
+                pairedText: firstParagraph.text,
+            },
+        ];
+    });
 
     return result;
 };

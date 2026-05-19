@@ -1,10 +1,10 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus, countOccurrences } from '../analysisUtils';
+import { createCheckResult, getStatus, countOccurrences, findTermMatchesInNodes } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { SLOW_WORDS } from '../../../constants';
 
 export const checkSlowWords = (context: AnalysisContext): CheckResult => {
-    const { textContent, totalWordCount, t, articleLanguage, uiLanguage } = context;
+    const { nodes, textContent, totalWordCount, t, articleLanguage, uiLanguage } = context;
     const tRule = t.structureAnalysis['كلمات بطيئة'];
     const title = tRule.title;
     const description = tRule.description;
@@ -19,5 +19,10 @@ export const checkSlowWords = (context: AnalysisContext): CheckResult => {
     const count = L_SLOW_WORDS.reduce((sum, word) => sum + countOccurrences(textContent, word, articleLanguage), 0);
     const percentage = totalWordCount > 0 ? count / totalWordCount : 0;
     const status = getStatus(percentage, 0, 0.02);
-    return createCheckResult(title, status, `${(percentage*100).toFixed(1)}%`, requiredText, 1 - Math.min(percentage / 0.02, 1), description, details);
+    const result = createCheckResult(title, status, `${(percentage*100).toFixed(1)}%`, requiredText, 1 - Math.min(percentage / 0.02, 1), description, details);
+    const matches = findTermMatchesInNodes(nodes, L_SLOW_WORDS, articleLanguage, word =>
+        articleLanguage === 'ar' ? `كلمة بطيئة: "${word}"` : `Slow word: "${word}"`
+    );
+    if (matches.length > 0) result.violatingItems = matches;
+    return result;
 };

@@ -64,6 +64,20 @@ const escapeTooltipHtml = (value: unknown): string => (
     .replace(/'/g, '&#39;')
 );
 
+const getRuleTooltipNote = (ruleTitle: string, uiLanguage: 'ar' | 'en'): string => {
+    const normalizedTitle = ruleTitle.toLowerCase();
+    const isStepsIntroduction = normalizedTitle.includes('تمهيد خطوات') || normalizedTitle.includes('steps introduction');
+    if (!isStepsIntroduction) return '';
+
+    return uiLanguage === 'ar'
+        ? 'عند وجود جملة تمهيد قصيرة قبل القائمة، ادمجها مع الفقرة السابقة للحصول على فقرة تمهيدية واحدة فقط قبل القائمة.'
+        : 'When there is a short list-intro sentence, merge it with the previous paragraph so there is only one introductory paragraph before the list.';
+};
+
+const formatTooltipTextBlock = (value: string): string => (
+    escapeTooltipHtml(value.replace(/\s+/g, ' ').trim())
+);
+
 export const useInteraction = () => {
   const context = useContext(InteractionContext);
   if (!context) throw new Error("useInteraction must be used within an InteractionProvider");
@@ -266,7 +280,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const applyArticleLanguageFlow = useCallback(() => {
         if (!editor || editor.isDestroyed) return;
         const direction = articleLanguage === 'ar' ? 'rtl' : 'ltr';
-        const alignment = articleLanguage === 'ar' ? 'right' : 'left';
+        const alignment = 'left';
 
         (editor.chain() as any)
             .focus()
@@ -302,6 +316,8 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     if (editor.isDestroyed) { setJustPasted(false); return; }
                     applyArticleLanguageFlow();
                     await new Promise(resolve => setTimeout(resolve, 650));
+                    if (editor.isDestroyed) { setJustPasted(false); return; }
+                    applyArticleLanguageFlow();
                     if (editor.isDestroyed) { setJustPasted(false); return; }
                     scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                     setHasPerformedFirstPaste(true);
@@ -366,14 +382,14 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             return;
         }
         
-        if (item.status !== 'pass' && item.violatingItems && item.violatingItems.length > 0) {
+        if (item.violatingItems && item.violatingItems.length > 0) {
             const { tr } = editor.state;
             const highlightMarkType = editor.schema.marks.highlight;
             tr.removeMark(0, editor.state.doc.content.size, highlightMarkType);
     
             item.violatingItems.forEach(violation => {
                 const highlightMark = (highlightMarkType as any).create({
-                    color: '#fda4af',
+                    color: item.status === 'pass' ? '#fde68a' : '#fda4af',
                     violation: title,
                     from: violation.from,
                     highlightStyle: highlightStyle,
@@ -458,9 +474,16 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             });
 
             if (activeViolations.length > 0) {
-                const uniqueViolations: { [key: string]: { rule: CheckResult; from: number; message?: string } } = {};
+                const uniqueViolations: { [key: string]: { rule: CheckResult; from: number; message?: string; pairedFrom?: number; pairedText?: string } } = {};
                 activeViolations.forEach(v => {
-                    uniqueViolations[v.rule.title] = { rule: v.rule, from: v.from, message: (v as any).message };
+                    const key = [v.rule.title, v.from, v.pairedFrom ?? ''].join('|');
+                    uniqueViolations[key] = {
+                        rule: v.rule,
+                        from: v.from,
+                        message: v.message,
+                        pairedFrom: v.pairedFrom,
+                        pairedText: v.pairedText,
+                    };
                 });
 
                 const violationsArray = Object.values(uniqueViolations)
@@ -480,11 +503,23 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                         const currentLabel = v.message
                             ? (uiLanguage === 'ar' ? 'المشكلة' : 'Issue')
                             : t.leftSidebar.current;
+                        const ruleNote = getRuleTooltipNote(rule.title, uiLanguage);
+                        const noteHtml = ruleNote
+                            ? `<span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${uiLanguage === 'ar' ? 'تلميح' : 'Tip'}:</strong> ${escapeTooltipHtml(ruleNote)}</span>`
+                            : '';
+                        const pairedParagraphHtml = v.pairedText
+                            ? `<div style="margin-top: 4px; display: grid; gap: 3px; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};">
+                                    <strong>${uiLanguage === 'ar' ? 'الفقرة الزوجية للمقارنة اليدوية' : 'Paired paragraph for manual comparison'}:</strong>
+                                    <span style="display: block; max-width: 420px; max-height: 120px; overflow-y: auto; padding: 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.08); color: inherit; line-height: 1.6;">${formatTooltipTextBlock(v.pairedText)}</span>
+                                </div>`
+                            : '';
                         
                         const detailsHtml = `
                             <div style="display: grid; gap: 4px; font-size: 11px; color: #6b7280;" class="dark:text-gray-400 w-full">
                                 <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${escapeTooltipHtml(currentLabel)}:</strong> ${currentText}</span>
                                 <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${escapeTooltipHtml(t.leftSidebar.required)}:</strong> ${requiredText}</span>
+                                ${noteHtml}
+                                ${pairedParagraphHtml}
                             </div>`;
 
                         return `<div class="flex flex-col items-start gap-1.5 w-full">

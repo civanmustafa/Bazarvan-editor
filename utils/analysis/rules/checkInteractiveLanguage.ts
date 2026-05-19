@@ -1,10 +1,10 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus, countOccurrences } from '../analysisUtils';
+import { createCheckResult, getStatus, countOccurrences, findTermMatchesInNodes } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { INTERACTIVE_WORDS } from '../../../constants';
 
 export const checkInteractiveLanguage = (context: AnalysisContext): CheckResult => {
-    const { textContent, totalWordCount, t, articleLanguage } = context;
+    const { nodes, textContent, totalWordCount, t, articleLanguage } = context;
     const tRule = t.structureAnalysis['0.02% لغة تفاعلية'];
     const title = tRule.title;
     const description = tRule.description;
@@ -16,5 +16,10 @@ export const checkInteractiveLanguage = (context: AnalysisContext): CheckResult 
     const count = L_INTERACTIVE_WORDS.reduce((sum, word) => sum + countOccurrences(textContent, word, articleLanguage), 0);
     const percentage = totalWordCount > 0 ? count / totalWordCount : 0;
     const status = getStatus(percentage, 0.0002, 1);
-    return createCheckResult(title, status, `${(percentage*100).toFixed(3)}%`, requiredText, Math.min(percentage / 0.0002, 1), description, details);
+    const result = createCheckResult(title, status, `${(percentage*100).toFixed(3)}%`, requiredText, Math.min(percentage / 0.0002, 1), description, details);
+    const matches = findTermMatchesInNodes(nodes, L_INTERACTIVE_WORDS, articleLanguage, word =>
+        articleLanguage === 'ar' ? `لغة تفاعلية: "${word}"` : `Interactive language: "${word}"`
+    );
+    if (matches.length > 0) result.violatingItems = matches;
+    return result;
 };

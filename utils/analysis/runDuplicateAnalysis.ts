@@ -1,4 +1,5 @@
 import type { Keywords, DuplicateAnalysis, DuplicateStats } from '../../types';
+import { CTA_WORDS, INTERACTIVE_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS } from '../../constants';
 import { normalizeArabicText } from './analysisUtils';
 
 const ENGLISH_TARGET_STOPWORDS = new Set([
@@ -28,10 +29,15 @@ const ENGLISH_TARGET_STOPWORDS = new Set([
   'with',
 ]);
 
+const ENGLISH_TRANSITIONAL_WORDS = ['firstly', 'secondly', 'finally', 'in addition', 'furthermore', 'therefore', 'consequently', 'on the other hand', 'in contrast', 'also', 'as well as', 'moreover', 'in fact', 'actually', 'in other words', 'for example', 'specifically', 'in general', 'however', 'although', 'while', 'in summary', 'in conclusion'];
+const ENGLISH_CTA_WORDS = ['start now', 'try now', 'sign up', 'book your spot', 'get', 'order now', 'contact us', 'join us', 'discover more', 'learn more', 'benefit now', 'subscribe', 'download', 'buy', 'shop', 'explore', 'request a quote', 'click here', 'submit', 'register', 'claim your', 'get started', 'find out more'];
+const ENGLISH_INTERACTIVE_WORDS = ['you can', 'you will find', 'you need', 'you want', 'discover', 'learn', 'try', 'choose', 'use', 'start', 'get', 'benefit', 'enjoy', 'read', 'watch', 'compare', 'check', 'did you know', 'have you ever', 'imagine', 'think about', 'explore', 'see how', 'your', 'unlock', 'uncover', 'consider', 'you', "let's"];
+const ENGLISH_WARNING_ADVICE_WORDS = ['warning', 'caution', 'be careful', 'note', 'important', 'recommendation', 'it is recommended', 'it is important', 'avoid', 'make sure', 'be aware', 'beware', 'take note', 'heads up', 'it is crucial', 'you should', 'remember to', 'pro tip', 'keep in mind'];
+
 /*
  * Duplicate analysis scans repeated 2-8 word phrases.
  * It excludes repeated phrases that are already covered by target keywords,
- * alternate forms, LSI terms, or the company name.
+ * alternate forms, LSI terms, the company name, and protected editorial signals.
  */
 export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, totalWordCount: number, articleLanguage: 'ar' | 'en'): { duplicateAnalysis: DuplicateAnalysis; duplicateStats: DuplicateStats } => {
     const duplicateAnalysis: DuplicateAnalysis = { 2:[], 3:[], 4:[], 5:[], 6:[], 7:[], 8:[] };
@@ -101,22 +107,61 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
         return false;
       };
 
-      const targetKeywordTokens = [
+      const editorialSignalTerms = articleLanguage === 'ar'
+        ? [
+          ...TRANSITIONAL_WORDS,
+          ...WARNING_ADVICE_WORDS,
+          ...CTA_WORDS,
+          ...INTERACTIVE_WORDS,
+        ]
+        : [
+          ...ENGLISH_TRANSITIONAL_WORDS,
+          ...ENGLISH_WARNING_ADVICE_WORDS,
+          ...ENGLISH_CTA_WORDS,
+          ...ENGLISH_INTERACTIVE_WORDS,
+        ];
+
+      const protectedDuplicateTokens = [
           keywords.primary,
           ...keywords.secondaries,
           ...keywords.lsi,
           keywords.company,
+          ...editorialSignalTerms,
       ]
         .filter(Boolean)
         .map(term => getMeaningfulComparisonTokens(term))
         .filter(tokens => tokens.length > 0);
 
+      const getTokenSequenceKey = (tokens: string[]): string => tokens.join('\u0001');
+      const protectedSubphraseKeys = new Set<string>();
+      protectedDuplicateTokens.forEach(tokens => {
+        const minLength = tokens.length === 1 ? 1 : 2;
+        const maxLength = Math.min(tokens.length, 8);
+        for (let length = minLength; length <= maxLength; length++) {
+          for (let index = 0; index <= tokens.length - length; index++) {
+            protectedSubphraseKeys.add(getTokenSequenceKey(tokens.slice(index, index + length)));
+          }
+        }
+      });
+
+      const containsProtectedSubphrase = (phraseTokens: string[]): boolean => {
+        for (let length = phraseTokens.length; length >= 1; length--) {
+          for (let index = 0; index <= phraseTokens.length - length; index++) {
+            if (protectedSubphraseKeys.has(getTokenSequenceKey(phraseTokens.slice(index, index + length)))) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
       const isProtectedTargetPhrase = (key: string): boolean => {
         const phraseTokens = getMeaningfulComparisonTokens(key);
         if (phraseTokens.length === 0) return false;
-        return targetKeywordTokens.some(keywordTokens => (
-          containsTokenSequence(phraseTokens, keywordTokens) ||
-          containsTokenSequence(keywordTokens, phraseTokens)
+        if (containsProtectedSubphrase(phraseTokens)) return true;
+        return protectedDuplicateTokens.some(protectedTokens => (
+          containsTokenSequence(phraseTokens, protectedTokens) ||
+          containsTokenSequence(protectedTokens, phraseTokens)
         ));
       };
 

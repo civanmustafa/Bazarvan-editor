@@ -235,7 +235,7 @@ export const useContentAnalysis = (editorState: any, textContent: string, keywor
     
     // --- 4. Calculate final stats and assemble the single analysis result ---
     const violatingCriteriaCount = Object.values(structureAnalysis).filter(c => c.status === 'fail').length;
-    const totalErrorsCount = Object.values(structureAnalysis).reduce((sum, c) => sum + (c.violatingItems?.length || 0), 0);
+    const totalErrorsCount = Object.values(structureAnalysis).reduce((sum, c) => sum + (c.violationCount ?? c.violatingItems?.length ?? 0), 0);
 
     return {
       keywordAnalysis,

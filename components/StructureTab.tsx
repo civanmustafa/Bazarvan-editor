@@ -112,6 +112,10 @@ const getCriterionDisplayOrder = (status?: string): number => {
   return 3;
 };
 
+const getViolationDisplayCount = (item: CheckResult): number => (
+  item.violationCount ?? item.violatingItems?.length ?? 0
+);
+
 const orderCriteriaChecksForDisplay = (checks?: BulkFixReviewVariant['criteriaChecks']) => (
   (checks || [])
     .map((check, index) => ({ check, index }))
@@ -155,6 +159,7 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
   
   const progress = Math.max(0, Math.min(item.progress || 0, 1));
   const hasViolatingItems = item.violatingItems && item.violatingItems.length > 0;
+  const violationDisplayCount = getViolationDisplayCount(item);
   
   const conciseSummary = getConciseSummary(item, t, uiLanguage);
   const hoverTooltipContent = (item.status !== 'pass' && item.violatingItems?.[0]?.message)
@@ -185,7 +190,7 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
                         className="text-white text-[9px] font-black min-w-[14px] h-3.5 px-1 flex items-center justify-center rounded-full"
                         style={{ backgroundColor: item.status === 'fail' ? '#810701' : '#F59E0B' }}
                     >
-                        {item.violatingItems!.length}
+                        {violationDisplayCount}
                     </span>
                     ) : null}
                     <button 
@@ -228,6 +233,7 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
   
   const statusColor = item.status === 'fail' ? 'bg-[#810701]' : item.status === 'warn' ? 'bg-amber-500' : 'bg-emerald-500';
   const hasViolatingItems = item.violatingItems && item.violatingItems.length > 0;
+  const violationDisplayCount = getViolationDisplayCount(item);
   
   const conciseSummary = getConciseSummary(item, t, uiLanguage);
   const hoverTooltipContent = (item.status !== 'pass' && item.violatingItems?.[0]?.message)
@@ -249,7 +255,7 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
             </div>
             <div className="flex items-center gap-2 flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
                 {hasViolatingItems && (item.status === 'fail' || item.status === 'warn') ? (
-                <span className={`text-white text-[8px] font-black w-3.5 h-3.5 flex items-center justify-center rounded-full ${item.status === 'fail' ? 'bg-[#810701]' : 'bg-amber-500'}`}>{item.violatingItems!.length}</span>
+                <span className={`text-white text-[8px] font-black w-3.5 h-3.5 flex items-center justify-center rounded-full ${item.status === 'fail' ? 'bg-[#810701]' : 'bg-amber-500'}`}>{violationDisplayCount}</span>
                 ) : null}
                 <button
                 onClick={(e) => { e.stopPropagation(); onInfoClick(item); }}
@@ -845,7 +851,7 @@ const StructureTab: React.FC = () => {
         if (item.status === 'pass') return 100;
         if (item.status === 'warn') return 68;
         if (item.status === 'info') return 50;
-        const violations = item.violatingItems?.length || 1;
+        const violations = getViolationDisplayCount(item) || 1;
         return Math.max(18, 58 - violations * 8);
     };
 

@@ -3024,15 +3024,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                             '**قواعد استخدام السياق لوصف الميتا:**',
                             '- استخدم عنوان القسم والفقرة السابقة والفقرة التالية لفهم السياق فقط.',
                             '- لا تنقل النص السابق أو اللاحق حرفيًا داخل وصف الميتا.',
-                            '- أخرج وصف ميتا واحدًا فقط مناسبًا للنص المحدد وسياقه.',
+                            '- أخرج وصفي ميتا مختلفين مناسبين للنص المحدد وسياقه.',
                         ].join('\n'),
                 ].filter(Boolean).join('\n\n')
                 : prompt;
-            const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً: { "suggestions": ["..."] }`;
+            const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً وباقتراحين مختلفين بالضبط، حتى إذا طلب نص الأمر اقتراحًا واحدًا: { "suggestions": ["الاقتراح الأول", "الاقتراح الثاني"] }`;
             const resultJson = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
-                const suggestions = parsed.suggestions.filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0);
+                const suggestions = parsed.suggestions
+                    .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
+                    .slice(0, 2);
                 if (suggestions.length > 0) {
                     let historyItemId: string | undefined;
                     if (action === 'replace-text' && from != null && to != null) {
