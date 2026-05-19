@@ -158,7 +158,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
             model: selectedModel,
             instructions: "أنت خبير SEO وAEO وGEO وLLM SEO. أجب بالعربية بشكل عملي ومنظم.",
             input: prompt,
-            max_output_tokens: 3000,
+            max_output_tokens: 8000,
           }),
           signal: controller.signal,
         });

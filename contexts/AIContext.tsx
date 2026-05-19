@@ -1743,13 +1743,52 @@ const extractJson = (text: string): any | null => {
     };
     try {
         const trimmed = text.trim();
+        const tryParsePossiblyEncoded = (candidate: string): any | null => {
+            const parsed = tryParse(candidate.trim());
+            if (typeof parsed === 'string' && parsed.trim() && parsed.trim() !== candidate.trim()) {
+                return tryParse(parsed.trim()) || tryParseObjectBody(parsed.trim()) || parsed;
+            }
+            return parsed;
+        };
+
+        const tryParseObjectBody = (candidate: string): any | null => {
+            const keyIndex = candidate.search(/"analysisMarkdown"\s*:/);
+            if (keyIndex === -1) return null;
+
+            const body = candidate
+                .slice(keyIndex)
+                .trim()
+                .replace(/^[,{]\s*/, '');
+            const endIndexes = [body.length - 1, body.lastIndexOf(']'), body.lastIndexOf('}')]
+                .filter(index => index >= 0)
+                .sort((a, b) => b - a);
+            const fragments = Array.from(new Set(endIndexes.map(index => body.slice(0, index + 1))));
+
+            for (const fragment of fragments) {
+                const normalized = fragment.replace(/,\s*$/, '').trim();
+                const parsed = tryParsePossiblyEncoded(`{${normalized}}`);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+            }
+
+            return null;
+        };
+
+        const directParsed = tryParsePossiblyEncoded(trimmed);
+        if (directParsed != null) return directParsed;
+
+        const objectBodyParsed = tryParseObjectBody(trimmed);
+        if (objectBodyParsed != null) return objectBodyParsed;
+
         const jsonMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```|({[\s\S]*})/i);
         if (jsonMatch && (jsonMatch[1] || jsonMatch[2])) {
-            const parsed = tryParse(jsonMatch[1] || jsonMatch[2]);
+            const candidate = jsonMatch[1] || jsonMatch[2];
+            const parsed = tryParsePossiblyEncoded(candidate);
             if (parsed != null) return parsed;
+            const objectBodyFromFence = tryParseObjectBody(candidate);
+            if (objectBodyFromFence != null) return objectBodyFromFence;
         }
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-            const parsed = tryParse(trimmed);
+            const parsed = tryParsePossiblyEncoded(trimmed);
             if (parsed != null) return parsed;
         }
         const objectStart = trimmed.indexOf('{');
@@ -1760,13 +1799,51 @@ const extractJson = (text: string): any | null => {
             const endChar = trimmed[start] === '[' ? ']' : '}';
             const end = trimmed.lastIndexOf(endChar);
             if (end > start) {
-                return tryParse(trimmed.slice(start, end + 1));
+                return tryParsePossiblyEncoded(trimmed.slice(start, end + 1));
             }
         }
         return null;
     } catch (e) {
         return null;
     }
+};
+
+const extractJsonStringProperty = (text: string, propertyName: string): string => {
+    const match = new RegExp(`"${propertyName}"\\s*:\\s*"`).exec(text);
+    if (!match) return '';
+
+    let rawValue = '';
+    let isEscaped = false;
+    for (let index = match.index + match[0].length; index < text.length; index += 1) {
+        const char = text[index];
+        if (isEscaped) {
+            rawValue += `\\${char}`;
+            isEscaped = false;
+            continue;
+        }
+        if (char === '\\') {
+            isEscaped = true;
+            continue;
+        }
+        if (char === '"') {
+            try {
+                return JSON.parse(`"${rawValue}"`).trim();
+            } catch {
+                return rawValue
+                    .replace(/\\n/g, '\n')
+                    .replace(/\\"/g, '"')
+                    .replace(/\\\\/g, '\\')
+                    .trim();
+            }
+        }
+        rawValue += char;
+    }
+
+    return rawValue
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\')
+        .trim();
 };
 
 const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
@@ -1997,6 +2074,10 @@ const stripDuplicatePatchTextFromAnalysis = (analysisMarkdown: string, patches: 
 const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvider): { displayText: string; patches: AiContentPatch[] } => {
     const parsed = extractJson(rawResponse);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        const partialDisplayText = extractJsonStringProperty(rawResponse, 'analysisMarkdown');
+        if (partialDisplayText) {
+            return { displayText: partialDisplayText, patches: [] };
+        }
         return { displayText: rawResponse, patches: [] };
     }
 

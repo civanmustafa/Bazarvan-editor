@@ -29,6 +29,22 @@
   line-height: 1.4;
 }
 
+.ProseMirror h1 {
+  font-size: 2rem;
+}
+
+.ProseMirror h2 {
+  font-size: 1.65rem;
+}
+
+.ProseMirror h3 {
+  font-size: 1.35rem;
+}
+
+.ProseMirror h4 {
+  font-size: 1.15rem;
+}
+
 .ProseMirror ul,
 .ProseMirror ol {
   margin: 0 1.5rem 1rem;

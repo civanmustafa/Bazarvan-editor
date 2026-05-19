@@ -5,6 +5,21 @@
   font-weight: 700;
 }
 
+.ai-output h1 {
+  font-size: 1.5rem;
+  line-height: 1.45;
+}
+
+.ai-output h2 {
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
+.ai-output h3 {
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
 .ai-output p {
   margin: 0 0 0.75rem;
 }
