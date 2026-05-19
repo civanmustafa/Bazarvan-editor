@@ -98,8 +98,8 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [isTocVisible, setIsTocVisible] = useState(false);
     const [isSpotlightVisible, setIsSpotlightVisible] = useState(false);
     
-    const [justPasted, setJustPasted] = useState(false);
-    const [hasPerformedFirstPaste, setHasPerformedFirstPaste] = useState(false);
+    const hasRunFirstPasteCleanupRef = useRef(false);
+    const isFirstPasteCleanupRunningRef = useRef(false);
 
     // Flatten rule results into clickable/highlightable ranges used by tooltips.
     const allViolations = useMemo(() => {
@@ -295,48 +295,60 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             .run();
     }, [editor, articleLanguage]);
     
+    useEffect(() => {
+        hasRunFirstPasteCleanupRef.current = false;
+        isFirstPasteCleanupRunningRef.current = false;
+    }, [editor]);
+
     // First paste cleanup normalizes copied articles before analysis starts flagging layout noise.
     useEffect(() => {
         if (!editor) return;
-        const handlePaste = () => setJustPasted(true);
-        const handleTransaction = ({ transaction }: { transaction: any }) => {
-            if (transaction.getMeta('paste')) handlePaste();
-        };
-        editor.on('transaction', handleTransaction);
-    
-        if (justPasted) {
-            if (!hasPerformedFirstPaste) {
-                const cleanup = async () => {
-                    if (!editor || editor.isDestroyed) { setJustPasted(false); return; }
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    if (editor.isDestroyed) { setJustPasted(false); return; }
-                    handleRemoveEmptyLines();
-                    await new Promise(resolve => setTimeout(resolve, 350));
-                    if (editor.isDestroyed) { setJustPasted(false); return; }
-                    applyArticleLanguageFlow();
-                    await new Promise(resolve => setTimeout(resolve, 650));
-                    if (editor.isDestroyed) { setJustPasted(false); return; }
-                    handleFixParagraphs();
-                    await new Promise(resolve => setTimeout(resolve, 350));
-                    if (editor.isDestroyed) { setJustPasted(false); return; }
-                    applyArticleLanguageFlow();
-                    await new Promise(resolve => setTimeout(resolve, 650));
-                    if (editor.isDestroyed) { setJustPasted(false); return; }
-                    applyArticleLanguageFlow();
-                    if (editor.isDestroyed) { setJustPasted(false); return; }
-                    scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-                    setHasPerformedFirstPaste(true);
-                    setJustPasted(false);
-                };
-                cleanup();
-            } else {
-                setJustPasted(false);
+        let isCancelled = false;
+        const wait = (delayMs: number) => new Promise(resolve => setTimeout(resolve, delayMs));
+        const shouldStopCleanup = () => isCancelled || !editor || editor.isDestroyed;
+
+        const runFirstPasteCleanup = async () => {
+            if (hasRunFirstPasteCleanupRef.current || isFirstPasteCleanupRunningRef.current) return;
+            hasRunFirstPasteCleanupRef.current = true;
+            isFirstPasteCleanupRunningRef.current = true;
+
+            try {
+                if (shouldStopCleanup()) return;
+                await wait(2000);
+                if (shouldStopCleanup()) return;
+                handleRemoveEmptyLines();
+                await wait(350);
+                if (shouldStopCleanup()) return;
+                applyArticleLanguageFlow();
+                await wait(650);
+                if (shouldStopCleanup()) return;
+                handleFixParagraphs();
+                await wait(350);
+                if (shouldStopCleanup()) return;
+                applyArticleLanguageFlow();
+                await wait(650);
+                if (shouldStopCleanup()) return;
+                applyArticleLanguageFlow();
+                if (shouldStopCleanup()) return;
+                scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+            } finally {
+                isFirstPasteCleanupRunningRef.current = false;
             }
-        }
+        };
+
+        const handleTransaction = ({ transaction }: { transaction: any }) => {
+            if (transaction.getMeta('paste')) {
+                void runFirstPasteCleanup();
+            }
+        };
+
+        editor.on('transaction', handleTransaction);
+
         return () => {
+            isCancelled = true;
             editor.off('transaction', handleTransaction);
         };
-    }, [justPasted, editor, hasPerformedFirstPaste, handleRemoveEmptyLines, handleFixParagraphs, scrollContainerRef, applyArticleLanguageFlow]);
+    }, [editor, handleRemoveEmptyLines, handleFixParagraphs, scrollContainerRef, applyArticleLanguageFlow]);
 
       const generateToc = useCallback((editorInstance: EditorClass | null) => {
         if (!editorInstance) return '';

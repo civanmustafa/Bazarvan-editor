@@ -1881,6 +1881,46 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 
 اجعل patches تشمل فقط النصوص المقترحة الجاهزة للإضافة أو الاستبدال الجزئي المذكورة في التحليل. لا تضف patches إذا لم يكن هناك نص جاهز قابل للتطبيق داخل المقال. لا تخترع معلومات جديدة.`;
 
+const READY_COMMAND_PATCH_CARD_REQUIREMENT = `
+
+تعليمات إلزامية إضافية للأوامر اليدوية الجاهزة:
+أي أمر جاهز ينتج نصًا قابلًا للتطبيق داخل المقال يجب أن يضع هذا النص داخل patches فقط، مع علامة [[PATCH:...]] داخل analysisMarkdown في نفس موضع الحديث عن التعديل.
+
+ينطبق ذلك على جميع الحالات التالية:
+- تحسين أضعف قسم أو فقرة.
+- الأقسام الأقل ملاءمة أو غير المناسبة.
+- تحسين الخاتمة.
+- اقتراح فقرة أو فكرة جديدة.
+- تحويل فقرة إلى جدول أو قائمة أو خطوات.
+- إضافة أسئلة شائعة أو إجابات أو جمل قابلة للاقتباس.
+- أي صياغة بديلة أو نسخة محسنة أو نص جاهز للاستبدال أو الإضافة.
+
+لكل patch يجب الالتزام بما يلي:
+- إذا كان المطلوب استبدال قسم أو فقرة موجودة، استخدم operation بقيمة "replace_block".
+- ضع في targetText النص الأصلي المراد استبداله حرفيًا من المقال، أو بداية الفقرة/القسم حرفيًا إذا كان النص طويلًا جدًا.
+- ضع في anchorText عنوان القسم أو الجملة المرجعية الأقرب داخل المقال.
+- ضع في placementLabel وصفًا قصيرًا واضحًا لمكان التنفيذ مثل: داخل قسم كذا، بعد فقرة كذا، قبل الخاتمة.
+- ضع في contentMarkdown النص الجديد الجاهز للتطبيق فقط دون شرح.
+- لا تكتفِ بكتابة الصياغة البديلة داخل analysisMarkdown.
+- لا تكتب عبارات مثل "الصياغة البديلة:" أو "النص المقترح:" داخل contentMarkdown.
+
+بالنسبة لأمر الأقسام الأقل ملاءمة:
+- أنشئ patch مستقل لكل قسم غير مناسب أو أقل ملاءمة.
+- اجعل كل patch يستبدل القسم أو الفقرة الضعيفة بنسخة أكثر ملاءمة لهدف الصفحة والجمهور والكلمات الدلالية.
+- يجب أن يظهر داخل analysisMarkdown سبب المشكلة ومكانها فقط، ثم علامة [[PATCH:patch_1]] أو [[PATCH:patch_2]] لعرض بطاقة الاستبدال.
+
+بالنسبة لأمر أسئلة الناس People Also Ask:
+- أنشئ patch مستقل لكل سؤال قابل للإضافة.
+- استخدم operation بقيمة "insert_before_faq".
+- اكتب contentMarkdown بهذا الشكل فقط:
+### السؤال المقترح؟
+الإجابة المختصرة المفيدة في فقرة واحدة.
+- يجب أن يكون السؤال H3 باستخدام ###.
+- يجب أن يحتوي كل patch على سؤال مع إجابة، وليس السؤال وحده.
+- اجعل anchorText عنوان قسم الأسئلة الشائعة إن ظهر في المقال، أو اتركه عامًا مثل "الأسئلة الشائعة".
+- اجعل placementLabel يوضح أن الإضافة تكون داخل قسم الأسئلة الشائعة، أو قبل الخاتمة إذا لم يوجد قسم أسئلة.
+`;
+
 const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 
 تعليمات أحدث لبطاقات التنفيذ داخل التقرير:
@@ -1917,7 +1957,7 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPatchInstructions?: boolean }) => (
     options?.skipPatchInstructions
         ? contextPrompt
-        : `${contextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`
+        : `${contextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${READY_COMMAND_PATCH_CARD_REQUIREMENT}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`
 );
 
 const saveContentSummaryForCompetitors = (
@@ -2126,6 +2166,57 @@ const namespaceSmartAnalysisPatches = (
     });
 
     return { displayText, patches };
+};
+
+const normalizeFaqQuestionHeading = (line: string): string => line
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^\d+[\).\-\s]+/, '')
+    .replace(/^[-*]\s+/, '')
+    .replace(/^(?:السؤال|سؤال|س)\s*[:：-]\s*/i, '')
+    .trim();
+
+const normalizeFaqAnswerLine = (line: string): string => line
+    .replace(/^(?:الإجابة|الاجابة|جواب|ج)\s*[:：-]\s*/i, '')
+    .trim();
+
+const ensureFaqQuestionContentMarkdown = (contentMarkdown: string): string => {
+    const lines = contentMarkdown
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    if (lines.length === 0) return contentMarkdown.trim();
+
+    const question = normalizeFaqQuestionHeading(lines[0]);
+    const answer = lines
+        .slice(1)
+        .map(normalizeFaqAnswerLine)
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+
+    if (!question) return contentMarkdown.trim();
+    return answer ? `### ${question}\n${answer}` : `### ${question}`;
+};
+
+const applyReadyCommandPatchRules = (
+    parsedResult: SmartAnalysisParsedResult,
+    commandId?: string
+): SmartAnalysisParsedResult => {
+    if (commandId !== ENGINEERING_PROMPT_IDS.smartAnalysis.peopleQuestions) return parsedResult;
+
+    return {
+        displayText: parsedResult.displayText,
+        patches: parsedResult.patches.map(patch => ({
+            ...patch,
+            operation: 'insert_before_faq',
+            anchorText: patch.anchorText || 'الأسئلة الشائعة',
+            targetText: '',
+            placementLabel: patch.placementLabel || 'داخل قسم الأسئلة الشائعة',
+            contentMarkdown: ensureFaqQuestionContentMarkdown(patch.contentMarkdown),
+        })),
+    };
 };
 
 const normalizeAnchorText = (value: string): string => value
@@ -2948,7 +3039,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const parsedResult = item.skipPatchInstructions
                     ? { displayText: result, patches: [] }
                     : namespaceSmartAnalysisPatches(
-                        parseSmartAnalysisResponse(result, 'gemini'),
+                        applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, 'gemini'), item.commandId),
                         `cmd_${index + 1}`,
                         item.commandLabel
                     );
@@ -2992,7 +3083,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const result = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result, patches: [] }
-                : parseSmartAnalysisResponse(result, 'gemini');
+                : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, 'gemini'), historyMeta?.commandId);
             setAiResults(prev => ({ ...prev, gemini: parsedResult.displayText }));
             setAiInsertionPatches(prev => ({ ...prev, gemini: parsedResult.patches }));
             logReadyCommandAnalysis('gemini', parsedResult, historyMeta);
@@ -3016,7 +3107,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt);
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result, patches: [] }
-                : parseSmartAnalysisResponse(result, 'chatgpt');
+                : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, 'chatgpt'), historyMeta?.commandId);
             setAiResults(prev => ({ ...prev, chatgpt: parsedResult.displayText }));
             setAiInsertionPatches(prev => ({ ...prev, chatgpt: parsedResult.patches }));
             logReadyCommandAnalysis('chatgpt', parsedResult, historyMeta);

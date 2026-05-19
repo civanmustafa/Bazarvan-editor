@@ -176,7 +176,7 @@ const EditorToolbar: React.FC = () => {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={t.titlePlaceholder}
-            className="title-input flex-grow py-0.5 px-2 text-base font-bold bg-transparent border-none rounded-md focus:ring-0 focus:outline-none"
+            className="title-input flex-grow py-0.5 px-2 text-base font-bold bg-transparent border-none rounded-md text-[#333333] placeholder:text-gray-400 focus:ring-0 focus:outline-none dark:text-gray-100 dark:placeholder:text-gray-500"
             aria-label={t.articleTitle}
           />
           <div className="flex-shrink-0 flex items-center gap-4">
