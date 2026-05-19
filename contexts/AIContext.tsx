@@ -39,7 +39,7 @@ import { normalizeGoalContext } from '../utils/goalContext';
  */
 const GEMINI_MODEL = 'gemini-3-flash-preview';
 const OPENAI_MODEL = 'gpt-5.5';
-const CHATGPT_TIMEOUT_MS = 180000;
+const CHATGPT_TIMEOUT_MS = 300000;
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
     pageType: 'نوع الصفحة',
@@ -1725,7 +1725,7 @@ const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[])
         window.clearTimeout(timeoutId);
         console.error("Error calling ChatGPT API:", error);
         if (error instanceof Error && error.name === 'AbortError') {
-            return "انتهت مهلة الاتصال بـ ChatGPT (180 ثانية). إذا لم يظهر طلب في لوحة OpenAI فهذا يعني أن الخادم المحلي لم يصل إلى OpenAI.";
+            return "انتهت مهلة الاتصال بـ ChatGPT (300 ثانية). إذا لم يظهر طلب في لوحة OpenAI فهذا يعني أن الخادم المحلي لم يصل إلى OpenAI.";
         }
         const message = error instanceof Error ? error.message : 'خطأ غير معروف';
         return `حدث خطأ أثناء الاتصال بـ ChatGPT: ${message}`;
@@ -2331,7 +2331,7 @@ const findHeadingByKeywordsAfter = (editor: any, keywords: string[], startPos: n
     return match;
 };
 
-const REPLACEABLE_BLOCK_TYPES = new Set(['paragraph', 'listItem']);
+const REPLACEABLE_BLOCK_TYPES = new Set(['paragraph', 'heading', 'listItem']);
 const MAX_REPLACE_RANGE_BLOCKS = 12;
 
 const scoreTextBlockMatch = (blockText: string, targetText: string): number => {
@@ -2355,6 +2355,11 @@ type TextBlockMatch = {
     text?: string;
 };
 
+type TextBlockSearchBounds = {
+    from?: number;
+    to?: number;
+};
+
 type TextBlockCandidate = {
     from: number;
     to: number;
@@ -2367,6 +2372,13 @@ const getNodeSearchText = (node: any): string => {
         return node.textBetween(0, node.content?.size || 0, '\n', '\n') || node.textContent || '';
     }
     return node.textContent || '';
+};
+
+const isInsideTextBlockSearchBounds = (from: number, to: number, bounds?: TextBlockSearchBounds): boolean => {
+    if (!bounds) return true;
+    if (typeof bounds.from === 'number' && from < bounds.from) return false;
+    if (typeof bounds.to === 'number' && to > bounds.to) return false;
+    return true;
 };
 
 const isBetterTextBlockMatch = (next: TextBlockMatch, current: TextBlockMatch | null, targetText: string): boolean => {
@@ -2383,12 +2395,13 @@ const isBetterTextBlockMatch = (next: TextBlockMatch, current: TextBlockMatch | 
     return (next.to - next.from) > (current.to - current.from);
 };
 
-const findTextBlockMatch = (editor: any, targetText: string): TextBlockMatch | null => {
+const findTextBlockMatch = (editor: any, targetText: string, bounds?: TextBlockSearchBounds): TextBlockMatch | null => {
     if (!editor || !targetText.trim()) return null;
     let bestMatch: TextBlockMatch | null = null;
 
     editor.state.doc.descendants((node: any, pos: number) => {
         if (!REPLACEABLE_BLOCK_TYPES.has(node.type.name)) return true;
+        if (!isInsideTextBlockSearchBounds(pos, pos + node.nodeSize, bounds)) return true;
         const textContent = getNodeSearchText(node);
         if (!textContent.trim()) return true;
         const score = scoreTextBlockMatch(textContent, targetText);
@@ -2407,12 +2420,13 @@ const findTextBlockMatch = (editor: any, targetText: string): TextBlockMatch | n
     return bestMatch;
 };
 
-const collectTopLevelTextBlocks = (editor: any): TextBlockCandidate[] => {
+const collectTopLevelTextBlocks = (editor: any, bounds?: TextBlockSearchBounds): TextBlockCandidate[] => {
     if (!editor?.state?.doc) return [];
     const blocks: TextBlockCandidate[] = [];
 
     editor.state.doc.forEach((node: any, offset: number) => {
         if (!node.isBlock) return;
+        if (!isInsideTextBlockSearchBounds(offset, offset + node.nodeSize, bounds)) return;
         const text = getNodeSearchText(node);
         if (!text.trim()) return;
         blocks.push({
@@ -2425,9 +2439,9 @@ const collectTopLevelTextBlocks = (editor: any): TextBlockCandidate[] => {
     return blocks;
 };
 
-const findTextBlockRangeMatch = (editor: any, targetText: string): TextBlockMatch | null => {
+const findTextBlockRangeMatch = (editor: any, targetText: string, bounds?: TextBlockSearchBounds): TextBlockMatch | null => {
     if (!editor || !targetText.trim()) return null;
-    const blocks = collectTopLevelTextBlocks(editor);
+    const blocks = collectTopLevelTextBlocks(editor, bounds);
     let bestMatch: TextBlockMatch | null = null;
 
     blocks.forEach((startBlock, startIndex) => {
@@ -2455,15 +2469,15 @@ const findTextBlockRangeMatch = (editor: any, targetText: string): TextBlockMatc
     return bestMatch;
 };
 
-const findBestTextBlockMatch = (editor: any, candidates: string[]): TextBlockMatch | null => {
+const findBestTextBlockMatch = (editor: any, candidates: string[], bounds?: TextBlockSearchBounds): TextBlockMatch | null => {
     let bestMatch: TextBlockMatch | null = null;
 
     candidates
         .map(candidate => candidate.trim())
         .filter(candidate => candidate.length > 0)
         .forEach(candidate => {
-            const singleBlockMatch = findTextBlockMatch(editor, candidate);
-            const rangeMatch = findTextBlockRangeMatch(editor, candidate);
+            const singleBlockMatch = findTextBlockMatch(editor, candidate, bounds);
+            const rangeMatch = findTextBlockRangeMatch(editor, candidate, bounds);
             [singleBlockMatch, rangeMatch].forEach(match => {
                 if (match && isBetterTextBlockMatch(match, bestMatch, candidate)) {
                     bestMatch = match;
@@ -2568,9 +2582,24 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
     const docEnd = editor.state.doc.content.size;
 
     if (patch.operation === 'replace_block' || patch.operation === 'replace_text') {
-        const match = findBestTextBlockMatch(editor, [
+        const replaceCandidates = [
             patch.targetText?.trim() ? patch.targetText : patch.anchorText || '',
-        ]);
+        ];
+        const anchorHeading = patch.anchorText?.trim() ? findHeadingMatch(editor, patch.anchorText) : null;
+
+        if (anchorHeading && patch.targetText?.trim()) {
+            const sectionEnd = findSectionEnd(editor, anchorHeading);
+            const sectionMatch = findBestTextBlockMatch(editor, replaceCandidates, {
+                from: anchorHeading.pos,
+                to: sectionEnd,
+            });
+            if (!sectionMatch || sectionMatch.score < 3) {
+                return { error: `لم يتم العثور على النص المراد استبداله داخل الموضع المحدد: ${patch.targetText || patch.title}` };
+            }
+            return { from: sectionMatch.from, to: sectionMatch.to, selectFrom: sectionMatch.from, selectTo: sectionMatch.to, mode: 'replace' };
+        }
+
+        const match = findBestTextBlockMatch(editor, replaceCandidates);
         if (!match || match.score < 3) {
             return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
         }
@@ -3250,7 +3279,57 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (Array.isArray(parsed)) {
-                setHeadingsAnalysis(parsed.map((item, idx) => ({ ...item, from: headings[idx]?.from, to: headings[idx]?.to })));
+                const usedHeadingIndexes = new Set<number>();
+                const mappedAnalysis = parsed
+                    .map((item, parsedIndex): HeadingAnalysisResult | null => {
+                        const original = asTrimmedString(item?.original);
+                        const requestedLevel = Number(item?.level);
+                        const preferredFrom = headings[parsedIndex]?.from ?? 0;
+                        let bestMatch: { heading: any; index: number; score: number } | null = null;
+
+                        headings.forEach((heading, headingIndex) => {
+                            if (usedHeadingIndexes.has(headingIndex)) return;
+                            const baseScore = scoreHeadingMatch(heading.text, original);
+                            if (baseScore <= 0) return;
+                            const levelScore = Number.isFinite(requestedLevel)
+                                ? (Number(heading.level) === requestedLevel ? 0.25 : -0.25)
+                                : 0;
+                            const score = baseScore + levelScore;
+                            if (!bestMatch || score > bestMatch.score) {
+                                bestMatch = { heading, index: headingIndex, score };
+                                return;
+                            }
+                            if (Math.abs(score - bestMatch.score) <= 0.001) {
+                                const nextDistance = Math.abs(heading.from - preferredFrom);
+                                const currentDistance = Math.abs(bestMatch.heading.from - preferredFrom);
+                                if (nextDistance < currentDistance) {
+                                    bestMatch = { heading, index: headingIndex, score };
+                                }
+                            }
+                        });
+
+                        if (!bestMatch) return null;
+                        usedHeadingIndexes.add(bestMatch.index);
+                        const flaws = Array.isArray(item?.flaws)
+                            ? item.flaws.filter((flaw: unknown): flaw is string => typeof flaw === 'string' && flaw.trim().length > 0)
+                            : [];
+                        const suggestions = Array.isArray(item?.suggestions)
+                            ? item.suggestions.filter((suggestion: unknown): suggestion is string => typeof suggestion === 'string' && suggestion.trim().length > 0)
+                            : [];
+                        if (suggestions.length === 0) return null;
+
+                        return {
+                            original: bestMatch.heading.text,
+                            level: bestMatch.heading.level,
+                            from: bestMatch.heading.from,
+                            to: bestMatch.heading.to,
+                            flaws,
+                            suggestions,
+                        };
+                    })
+                    .filter((item): item is HeadingAnalysisResult => Boolean(item));
+
+                setHeadingsAnalysis(mappedAnalysis.length > 0 ? mappedAnalysis : null);
             }
         } catch (e) {
             console.error(e);

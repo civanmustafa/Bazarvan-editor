@@ -120,6 +120,7 @@ export interface CheckResult {
   progress: number; // Value from 0 to 1
   details?: string;
   violationCount?: number;
+  displayCountLabel?: string;
   violatingItems?: { 
     from: number; 
     to: number; 

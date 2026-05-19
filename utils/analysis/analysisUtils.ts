@@ -117,13 +117,33 @@ export const countOccurrences = (text: string, sub: string, lang: 'ar' | 'en'): 
 
 const escapeRegex = (value: string): string => value.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
 
+const ARABIC_OPTIONAL_MARKS_PATTERN = '[\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED\\u0640]*';
+
+const createArabicInsensitiveTermPattern = (term: string): string => {
+    const normalizedTerm = normalizeArabicText(term)
+        .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g, '');
+
+    return Array.from(normalizedTerm).map(char => {
+        if (/\s/.test(char)) return '\\s+';
+        const normalizedChar = normalizeArabicText(char);
+        let pattern = escapeRegex(char);
+        if (normalizedChar === '\u0627') pattern = '[\u0627\u0622\u0623\u0625\u0671]';
+        else if (normalizedChar === '\u064A') pattern = '[\u064A\u0649\u0626]';
+        else if (normalizedChar === '\u0648') pattern = '[\u0648\u0624]';
+        else if (normalizedChar === '\u0647') pattern = '[\u0647\u0629]';
+        return `${pattern}${ARABIC_OPTIONAL_MARKS_PATTERN}`;
+    }).join('');
+};
+
 const createTermSearchRegex = (term: string, lang: 'ar' | 'en'): RegExp | null => {
     const trimmedTerm = term.trim();
     if (!trimmedTerm) return null;
 
-    const escapedTerm = escapeRegex(trimmedTerm).replace(/\s+/g, '\\s+');
     const arabicPrefixes = '(?:ال|و|ف|ب|ك|ل|وبال|وال|فال|فل|وب|فب|كال|لل)?';
     const arabicSuffixes = '(?:ه|ها|هم|هن|ك|كم|كن|ي|نا|ان|ون|ين|ات|تم|كما|هما)?';
+    const escapedTerm = lang === 'ar'
+        ? createArabicInsensitiveTermPattern(trimmedTerm)
+        : escapeRegex(trimmedTerm).replace(/\s+/g, '\\s+');
     const pattern = lang === 'ar'
         ? `(?<![\\p{L}\\p{N}])${arabicPrefixes}${escapedTerm}${arabicSuffixes}(?![\\p{L}\\p{N}])`
         : `\\b${escapedTerm}\\b`;

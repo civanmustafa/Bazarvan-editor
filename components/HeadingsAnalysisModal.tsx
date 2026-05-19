@@ -4,8 +4,28 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useAI } from '../contexts/AIContext';
 import { useModal } from '../contexts/ModalContext';
+import type { HeadingAnalysisResult } from '../types';
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+type LiveHeadingTarget = {
+  from: number;
+  to: number;
+  level: number;
+  text: string;
+};
+
+const normalizeHeadingText = (value: string): string => value
+  .normalize('NFKC')
+  .replace(/[ًٌٍَُِّْـ]/g, '')
+  .replace(/[\u200c\u200d\u200e\u200f]/g, '')
+  .replace(/[أإآٱ]/g, 'ا')
+  .replace(/ى/g, 'ي')
+  .replace(/ة/g, 'ه')
+  .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toLowerCase();
 
 const HeadingsAnalysisModal: React.FC = () => {
   const { t } = useUser();
@@ -84,30 +104,102 @@ const HeadingsAnalysisModal: React.FC = () => {
     setIsDragging(true);
   };
 
-  const handleLocateHeading = (from: number, to: number) => {
-    if (!editor) return;
+  const resolveLiveHeadingTarget = useCallback((item: HeadingAnalysisResult): LiveHeadingTarget | null => {
+    if (!editor) return null;
+    const normalizedOriginal = normalizeHeadingText(item.original);
+    if (!normalizedOriginal) return null;
     const docSize = editor.state.doc.content.size;
-    if (from < 0 || to > docSize || from >= to) return;
+    let bestTarget: (LiveHeadingTarget & { score: number }) | null = null;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+      if (node.type.name !== 'heading') return true;
+      const text = node.textContent || '';
+      const normalizedText = normalizeHeadingText(text);
+      if (!normalizedText) return true;
+
+      let score = 0;
+      if (normalizedText === normalizedOriginal) {
+        score = 4;
+      } else if (normalizedText.includes(normalizedOriginal) || normalizedOriginal.includes(normalizedText)) {
+        score = 3;
+      } else {
+        const originalWords = normalizedOriginal.split(' ').filter(word => word.length > 2);
+        const overlap = originalWords.length
+          ? originalWords.filter(word => normalizedText.includes(word)).length / originalWords.length
+          : 0;
+        score = overlap >= 0.7 ? overlap : 0;
+      }
+
+      if (score <= 0) return true;
+      if ((node.attrs.level || 2) === item.level) score += 0.25;
+      const target = {
+        from: pos,
+        to: pos + node.nodeSize,
+        level: node.attrs.level || 2,
+        text,
+        score,
+      };
+
+      if (!bestTarget || target.score > bestTarget.score) {
+        bestTarget = target;
+        return true;
+      }
+
+      if (Math.abs(target.score - bestTarget.score) <= 0.001) {
+        const nextDistance = Math.abs(target.from - item.from);
+        const currentDistance = Math.abs(bestTarget.from - item.from);
+        if (nextDistance < currentDistance) bestTarget = target;
+      }
+      return true;
+    });
+
+    if (!bestTarget || bestTarget.from < 0 || bestTarget.to > docSize || bestTarget.from >= bestTarget.to) {
+      return null;
+    }
+
+    return {
+      from: bestTarget.from,
+      to: bestTarget.to,
+      level: bestTarget.level,
+      text: bestTarget.text,
+    };
+  }, [editor]);
+
+  const refreshAnalysisTargets = useCallback((items: HeadingAnalysisResult[]): HeadingAnalysisResult[] => (
+    items
+      .map(item => {
+        const target = resolveLiveHeadingTarget(item);
+        return target
+          ? { ...item, from: target.from, to: target.to, level: target.level, original: target.text }
+          : null;
+      })
+      .filter((item): item is HeadingAnalysisResult => Boolean(item))
+  ), [resolveLiveHeadingTarget]);
+
+  const handleLocateHeading = (item: HeadingAnalysisResult) => {
+    if (!editor) return;
+    const target = resolveLiveHeadingTarget(item);
+    if (!target) return;
 
     editor
       .chain()
       .focus()
-      .setTextSelection({ from, to })
+      .setTextSelection({ from: target.from, to: target.to })
       .scrollIntoView()
       .run();
   };
 
-  const handleSuggestionClick = (originalFrom: number, suggestion: string) => {
+  const handleSuggestionClick = (item: HeadingAnalysisResult, suggestion: string) => {
     if (!analysis) return;
-    const itemToUpdate = analysis.find(a => a.from === originalFrom);
-    if (editor && itemToUpdate) {
+    const target = resolveLiveHeadingTarget(item);
+    if (editor && target) {
         const newHeadingContent = {
             type: 'heading',
-            attrs: { level: itemToUpdate.level },
+            attrs: { level: target.level },
             content: suggestion.trim() ? [{ type: 'text', text: suggestion }] : [],
         };
         editor.chain().focus()
-            .insertContentAt({ from: itemToUpdate.from, to: itemToUpdate.to }, newHeadingContent, {
+            .insertContentAt({ from: target.from, to: target.to }, newHeadingContent, {
                 updateSelection: true,
                 parseOptions: {
                     preserveWhitespace: false,
@@ -115,7 +207,7 @@ const HeadingsAnalysisModal: React.FC = () => {
             })
             .run();
 
-        const updatedAnalysis = analysis.filter(a => a.from !== originalFrom);
+        const updatedAnalysis = refreshAnalysisTargets(analysis.filter(a => a !== item));
 
         if (updatedAnalysis.length > 0) {
             setHeadingsAnalysis(updatedAnalysis);
@@ -178,7 +270,7 @@ const HeadingsAnalysisModal: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleLocateHeading(item.from, item.to)}
+                    onClick={() => handleLocateHeading(item)}
                     className="shrink-0 flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
                   >
                     <LocateFixed size={13} />
@@ -212,7 +304,7 @@ const HeadingsAnalysisModal: React.FC = () => {
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => handleLocateHeading(item.from, item.to)}
+                          onClick={() => handleLocateHeading(item)}
                           className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
                         >
                           <LocateFixed size={13} />
@@ -220,7 +312,7 @@ const HeadingsAnalysisModal: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleSuggestionClick(item.from, suggestion)}
+                          onClick={() => handleSuggestionClick(item, suggestion)}
                           className="rounded-md bg-[#d4af37] px-2 py-1 text-xs font-bold text-white hover:bg-[#b8922e]"
                         >
                           استبدال

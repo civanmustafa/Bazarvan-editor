@@ -8,6 +8,46 @@ import { parseMarkdownToArticleHtml, parseMarkdownToHtml } from '../utils/editor
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
+type ResolvedSuggestionRange = {
+  from: number;
+  to: number;
+};
+
+const normalizeSuggestionRangeText = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const getSuggestionRangeText = (editor: any, from: number, to: number): string | null => {
+  const docSize = editor?.state?.doc?.content?.size ?? 0;
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to > docSize || from >= to) return null;
+  return editor.state.doc.textBetween(from, to, ' ');
+};
+
+const resolveSuggestionRange = (
+  editor: any,
+  from: number | undefined,
+  to: number | undefined,
+  originalText: string | undefined,
+): ResolvedSuggestionRange | null => {
+  if (!editor || from == null || to == null) return null;
+  const normalizedOriginal = normalizeSuggestionRangeText(originalText || '');
+  if (!normalizedOriginal) return { from, to };
+
+  const currentText = getSuggestionRangeText(editor, from, to);
+  if (currentText !== null && normalizeSuggestionRangeText(currentText) === normalizedOriginal) {
+    return { from, to };
+  }
+
+  const candidates: ResolvedSuggestionRange[] = [];
+  editor.state.doc.descendants((node: any, pos: number) => {
+    if (!node.isBlock || !['paragraph', 'heading', 'listItem'].includes(node.type.name)) return true;
+    const textContent = node.textContent || '';
+    if (normalizeSuggestionRangeText(textContent) !== normalizedOriginal) return true;
+    candidates.push({ from: pos, to: pos + node.nodeSize });
+    return true;
+  });
+
+  return candidates.sort((a, b) => Math.abs(a.from - from) - Math.abs(b.from - from))[0] || null;
+};
+
 const SuggestionModal: React.FC = () => {
   const { t } = useUser();
   const { editor, setTitle, articleLanguage } = useEditor();
@@ -18,6 +58,7 @@ const SuggestionModal: React.FC = () => {
   const [panelWidth, setPanelWidth] = useState(300);
   const [panelMaxHeight, setPanelMaxHeight] = useState(620);
   const [isDragging, setIsDragging] = useState(false);
+  const [rangeError, setRangeError] = useState('');
   const dragOffsetRef = useRef({ x: 0, y: 0 });
 
   const getClampedPosition = useCallback((x: number, y: number) => ({
@@ -27,6 +68,7 @@ const SuggestionModal: React.FC = () => {
 
   useEffect(() => {
     if (!suggestion) return;
+    setRangeError('');
 
     const leftSidebar = document.querySelector('main > aside') as HTMLElement | null;
     const sidebarRect = leftSidebar?.getBoundingClientRect();
@@ -82,15 +124,19 @@ const SuggestionModal: React.FC = () => {
 
   const handleLocate = () => {
     if (!editor || !suggestion || suggestion.action !== 'replace-text' || suggestion.from == null || suggestion.to == null) return;
-    const docSize = editor.state.doc.content.size;
-    if (suggestion.from < 0 || suggestion.to > docSize || suggestion.from >= suggestion.to) return;
+    const range = resolveSuggestionRange(editor, suggestion.from, suggestion.to, suggestion.original);
+    if (!range) {
+      setRangeError('تعذر العثور على النص الأصلي داخل المحرر. أعد إنشاء الاقتراح قبل التطبيق.');
+      return;
+    }
 
     editor
       .chain()
       .focus()
-      .setTextSelection({ from: suggestion.from, to: suggestion.to })
+      .setTextSelection({ from: range.from, to: range.to })
       .scrollIntoView()
       .run();
+    setRangeError('');
   };
 
   const handleAccept = (acceptedSuggestion: string) => {
@@ -98,10 +144,15 @@ const SuggestionModal: React.FC = () => {
       switch (suggestion.action) {
         case 'replace-text':
           if (suggestion.from != null && suggestion.to != null) {
+            const range = resolveSuggestionRange(editor, suggestion.from, suggestion.to, suggestion.original);
+            if (!range) {
+              setRangeError('تعذر العثور على النص الأصلي داخل المحرر. أعد إنشاء الاقتراح قبل التطبيق.');
+              return;
+            }
             const contentHtml = parseMarkdownToArticleHtml(acceptedSuggestion, articleLanguage);
             editor.chain().focus()
               .insertContentAt(
-                { from: suggestion.from, to: suggestion.to },
+                { from: range.from, to: range.to },
                 contentHtml
               )
               .run();
@@ -167,6 +218,11 @@ const SuggestionModal: React.FC = () => {
           </div>
 
           <div className="flex flex-col gap-3">
+            {rangeError && (
+              <div className="rounded-md bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                {rangeError}
+              </div>
+            )}
             {suggestion.suggestions.map((suggestionText, index) => (
               <div
                 key={index}

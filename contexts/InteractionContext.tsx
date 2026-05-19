@@ -86,7 +86,7 @@ export const useInteraction = () => {
 
 export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { highlightStyle, uiLanguage, t } = useUser();
-    const { editor, keywords, analysisResults, scrollContainerRef, articleLanguage } = useEditor();
+    const { editor, text, keywords, analysisResults, scrollContainerRef, articleLanguage } = useEditor();
     const { aiFixingInfo, handleAiFix } = useAI();
     
     const [highlightedItem, setHighlightedItem] = useState<string | any[] | null>(null);
@@ -100,6 +100,18 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     
     const hasRunFirstPasteCleanupRef = useRef(false);
     const isFirstPasteCleanupRunningRef = useRef(false);
+
+    const isDocumentTextEmpty = (doc: any): boolean => {
+        const rawText = typeof doc?.textBetween === 'function'
+            ? doc.textBetween(0, doc.content?.size || 0, ' ', ' ')
+            : doc?.textContent || '';
+        return rawText.replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, '').trim().length === 0;
+    };
+
+    const didPasteStartFromEmptyDocument = (transaction: any): boolean => {
+        if (!transaction?.before) return false;
+        return isDocumentTextEmpty(transaction.before);
+    };
 
     // Flatten rule results into clickable/highlightable ranges used by tooltips.
     const allViolations = useMemo(() => {
@@ -300,6 +312,14 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         isFirstPasteCleanupRunningRef.current = false;
     }, [editor]);
 
+    useEffect(() => {
+        if (!editor || editor.isDestroyed) return;
+        if (text.replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, '').trim().length === 0) {
+            hasRunFirstPasteCleanupRef.current = false;
+            isFirstPasteCleanupRunningRef.current = false;
+        }
+    }, [editor, text]);
+
     // First paste cleanup normalizes copied articles before analysis starts flagging layout noise.
     useEffect(() => {
         if (!editor) return;
@@ -337,7 +357,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         };
 
         const handleTransaction = ({ transaction }: { transaction: any }) => {
-            if (transaction.getMeta('paste')) {
+            if (transaction.getMeta('paste') && didPasteStartFromEmptyDocument(transaction)) {
                 void runFirstPasteCleanup();
             }
         };

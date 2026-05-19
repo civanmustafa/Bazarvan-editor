@@ -1,5 +1,5 @@
 const OPENAI_MODEL = "gpt-5.5";
-const OPENAI_TIMEOUT_MS = 120000;
+const OPENAI_TIMEOUT_MS = 300000;
 
 type ApiResult = {
   status: number;

@@ -116,6 +116,10 @@ const getViolationDisplayCount = (item: CheckResult): number => (
   item.violationCount ?? item.violatingItems?.length ?? 0
 );
 
+const getViolationDisplayLabel = (item: CheckResult): string => (
+  item.displayCountLabel ?? String(getViolationDisplayCount(item))
+);
+
 const orderCriteriaChecksForDisplay = (checks?: BulkFixReviewVariant['criteriaChecks']) => (
   (checks || [])
     .map((check, index) => ({ check, index }))
@@ -159,7 +163,8 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
   
   const progress = Math.max(0, Math.min(item.progress || 0, 1));
   const hasViolatingItems = item.violatingItems && item.violatingItems.length > 0;
-  const violationDisplayCount = getViolationDisplayCount(item);
+  const shouldShowStatusBadge = Boolean(hasViolatingItems || item.displayCountLabel) && (item.status === 'fail' || item.status === 'warn') && item.title !== 'عدد H2' && item.title !== 'H2 Count';
+  const violationDisplayLabel = getViolationDisplayLabel(item);
   
   const conciseSummary = getConciseSummary(item, t, uiLanguage);
   const hoverTooltipContent = (item.status !== 'pass' && item.violatingItems?.[0]?.message)
@@ -185,12 +190,12 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
             <div className="flex-1 flex items-center justify-between px-3">
                 <h4 className="font-bold text-[10px] text-gray-500 dark:text-[#8d8d8d] uppercase tracking-tight truncate pe-1">{item.title}</h4>
                 <div className="flex items-center gap-1.5">
-                    {hasViolatingItems && (item.status === 'fail' || item.status === 'warn') && item.title !== 'عدد H2' && item.title !== 'H2 Count' ? (
+                    {shouldShowStatusBadge ? (
                     <span 
                         className="text-white text-[9px] font-black min-w-[14px] h-3.5 px-1 flex items-center justify-center rounded-full"
                         style={{ backgroundColor: item.status === 'fail' ? '#810701' : '#F59E0B' }}
                     >
-                        {violationDisplayCount}
+                        {violationDisplayLabel}
                     </span>
                     ) : null}
                     <button 
@@ -233,7 +238,8 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
   
   const statusColor = item.status === 'fail' ? 'bg-[#810701]' : item.status === 'warn' ? 'bg-amber-500' : 'bg-emerald-500';
   const hasViolatingItems = item.violatingItems && item.violatingItems.length > 0;
-  const violationDisplayCount = getViolationDisplayCount(item);
+  const shouldShowStatusBadge = Boolean(hasViolatingItems || item.displayCountLabel) && (item.status === 'fail' || item.status === 'warn');
+  const violationDisplayLabel = getViolationDisplayLabel(item);
   
   const conciseSummary = getConciseSummary(item, t, uiLanguage);
   const hoverTooltipContent = (item.status !== 'pass' && item.violatingItems?.[0]?.message)
@@ -254,8 +260,8 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
                 <span className="text-[11px] font-bold text-gray-700 dark:text-gray-300">{item.title}</span>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
-                {hasViolatingItems && (item.status === 'fail' || item.status === 'warn') ? (
-                <span className={`text-white text-[8px] font-black w-3.5 h-3.5 flex items-center justify-center rounded-full ${item.status === 'fail' ? 'bg-[#810701]' : 'bg-amber-500'}`}>{violationDisplayCount}</span>
+                {shouldShowStatusBadge ? (
+                <span className={`text-white text-[8px] font-black min-w-3.5 h-3.5 px-1 flex items-center justify-center rounded-full ${item.status === 'fail' ? 'bg-[#810701]' : 'bg-amber-500'}`}>{violationDisplayLabel}</span>
                 ) : null}
                 <button
                 onClick={(e) => { e.stopPropagation(); onInfoClick(item); }}
