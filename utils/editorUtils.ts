@@ -242,7 +242,7 @@ export const applyArticleLanguageFlowToHtml = (html: string, articleLanguage: 'a
     if (!html) return '';
 
     const direction = articleLanguage === 'ar' ? 'rtl' : 'ltr';
-    const alignment = 'left';
+    const alignment = articleLanguage === 'ar' ? 'right' : 'left';
 
     if (typeof DOMParser === 'undefined') {
         return html;

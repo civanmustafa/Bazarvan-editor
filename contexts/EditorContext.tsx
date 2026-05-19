@@ -66,7 +66,7 @@ const getStoredGoalContext = (key: string): GoalContext => {
 
 const applyArticleLanguageFormatting = (editor: Editor, lang: 'ar' | 'en') => {
     const direction = lang === 'ar' ? 'rtl' : 'ltr';
-    const alignment = 'left';
+    const alignment = lang === 'ar' ? 'right' : 'left';
     const editorDom = editor.view.dom as HTMLElement;
 
     editorDom.setAttribute('dir', direction);
