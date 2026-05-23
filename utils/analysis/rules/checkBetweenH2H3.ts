@@ -1,5 +1,5 @@
 import type { CheckResult, AnalysisStatus } from '../../../types';
-import { createCheckResult, getWordCount, countOccurrences, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getWordCount, countOccurrences, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { FAQ_KEYWORDS } from '../../../constants';
 
@@ -43,7 +43,7 @@ export const checkBetweenH2H3 = (context: AnalysisContext): CheckResult => {
                         
                         if (!paragraphsMet || !wordsMet) {
                             const item = {
-                                from: h2Node.pos, to: h2Node.pos + getNodeSizeFromJSON(h2Node.node),
+                                from: h2Node.pos, to: h2Node.pos + getAnalysisNodeSize(h2Node),
                                 message: t.violationMessages.currentParasWords(paraCount, sectionWordCount),
                                 sectionFrom: h2Node.pos, sectionTo: aheadNode.pos
                             };

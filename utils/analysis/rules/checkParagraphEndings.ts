@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkParagraphEndings = (context: AnalysisContext): CheckResult => {
@@ -22,7 +22,7 @@ export const checkParagraphEndings = (context: AnalysisContext): CheckResult => 
         if (lastWord1 && lastWord2 && lastWord1 === lastWord2) {
             violations.push({
                 from: p2.pos,
-                to: p2.pos + getNodeSizeFromJSON(p2.node),
+                to: p2.pos + getAnalysisNodeSize(p2),
                 message: t.violationMessages.repeatedEnding(lastWord1)
             });
         }

@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkPunctuation = (context: AnalysisContext): CheckResult => {
@@ -18,7 +18,7 @@ export const checkPunctuation = (context: AnalysisContext): CheckResult => {
         .filter(p => !/[.!?؟:]\s*$/.test(p.text.trim()))
         .map(v => ({
             from: v.pos,
-            to: v.pos + getNodeSizeFromJSON(v.node),
+            to: v.pos + getAnalysisNodeSize(v),
             message: t.violationMessages.noPunctuation,
         }));
 

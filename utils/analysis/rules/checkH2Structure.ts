@@ -1,5 +1,5 @@
 import type { CheckResult, AnalysisStatus } from '../../../types';
-import { createCheckResult, getWordCount, countOccurrences, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getWordCount, countOccurrences, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../../../constants';
 
@@ -82,7 +82,7 @@ export const checkH2Structure = (context: AnalysisContext): CheckResult => {
         if (statusForThisSection !== 'pass') {
             const item = {
                 from: h2Node.pos,
-                to: h2Node.pos + getNodeSizeFromJSON(h2Node.node),
+                to: h2Node.pos + getAnalysisNodeSize(h2Node),
                 message: violationMessage,
                 sectionFrom: h2Node.pos,
                 sectionTo: endNodeIndex < nodes.length ? nodes[endNodeIndex].pos : totalDocSize,

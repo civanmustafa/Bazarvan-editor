@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getStatus, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkH2Count = (context: AnalysisContext): CheckResult => {
@@ -29,7 +29,7 @@ export const checkH2Count = (context: AnalysisContext): CheckResult => {
         requiredText = tRule.required;
         const result = createCheckResult(title, 'pass', h2Count, requiredText, 1, description, details);
         result.violatingItems = h2Headings.map(h => ({
-            from: h.pos, to: h.pos + getNodeSizeFromJSON(h.node), message: `${t.common.current}: ${h.text}`
+            from: h.pos, to: h.pos + getAnalysisNodeSize(h), message: `${t.common.current}: ${h.text}`
         }));
         return result;
     }
@@ -42,7 +42,7 @@ export const checkH2Count = (context: AnalysisContext): CheckResult => {
     if (status !== 'pass') {
         result.violatingItems = h2Headings.map(h => ({
             from: h.pos,
-            to: h.pos + getNodeSizeFromJSON(h.node),
+            to: h.pos + getAnalysisNodeSize(h),
             message: t.violationMessages.h2Count(h2Count, requiredText)
         }));
     }

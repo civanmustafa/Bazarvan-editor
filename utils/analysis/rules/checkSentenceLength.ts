@@ -1,5 +1,5 @@
 import type { CheckResult, AnalysisStatus } from '../../../types';
-import { createCheckResult, getWordCount, getNodeContentAsText } from '../analysisUtils';
+import { createCheckResult, getWordCount, getAnalysisNodeContentText } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkSentenceLength = (context: AnalysisContext): CheckResult => {
@@ -22,7 +22,7 @@ export const checkSentenceLength = (context: AnalysisContext): CheckResult => {
     let invalidSentencesCount = 0;
 
     nonEmptyParagraphs.forEach(p => {
-        const text = getNodeContentAsText(p.node);
+        const text = getAnalysisNodeContentText(p);
         if (!text.trim()) return;
 
         const sentenceRegex = /([^\s.!?؟][^.!?؟]*[.!?؟]+|\S.*$)/g;

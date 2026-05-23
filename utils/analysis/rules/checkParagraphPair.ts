@@ -2,7 +2,7 @@ import type { CheckResult } from '../../../types';
 import {
     createCheckResult,
     DUPLICATE_WORDS_EXCLUSION_LIST,
-    getNodeSizeFromJSON,
+    getAnalysisNodeSize,
     normalizeArabicText,
 } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
@@ -227,8 +227,8 @@ export const checkParagraphPair = (context: AnalysisContext): CheckResult => {
             : `Paragraph pair shares ${sharedCount} words (${percentage}%). Shared words: ${sharedWordsText}`;
         const firstParagraph = pair.first.paragraph;
         const secondParagraph = pair.second.paragraph;
-        const firstTo = firstParagraph.pos + getNodeSizeFromJSON(firstParagraph.node);
-        const secondTo = secondParagraph.pos + getNodeSizeFromJSON(secondParagraph.node);
+        const firstTo = firstParagraph.pos + getAnalysisNodeSize(firstParagraph);
+        const secondTo = secondParagraph.pos + getAnalysisNodeSize(secondParagraph);
 
         return [
             {

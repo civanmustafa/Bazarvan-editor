@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getNodeContentAsText, normalizeArabicText, DUPLICATE_WORDS_EXCLUSION_LIST } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeContentText, normalizeArabicText, DUPLICATE_WORDS_EXCLUSION_LIST } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 const findDuplicateWords = (
@@ -42,7 +42,7 @@ const findDuplicateWords = (
     const violatingNodePositions = new Set<number>();
 
     relevantNodes.forEach(node => {
-        const text = getNodeContentAsText(node.node);
+        const text = getAnalysisNodeContentText(node);
         const wordsMap: Map<string, { text: string; index: number }[]> = new Map();
         
         const wordRegex = articleLanguage === 'ar' ? /\p{L}{3,}/gu : /[a-zA-Z]{3,}/g;

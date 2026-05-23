@@ -1,5 +1,5 @@
 import type { CheckResult, AnalysisStatus } from '../../../types';
-import { createCheckResult, getWordCount, getSentenceCount, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getWordCount, getSentenceCount, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkSubHeadingStructure = (context: AnalysisContext, level: 3 | 4): CheckResult => {
@@ -75,7 +75,7 @@ export const checkSubHeadingStructure = (context: AnalysisContext, level: 3 | 4)
 
         if (!wordsMet || !structureMet) {
             const baseViolation = {
-                from: headingNode.pos, to: headingNode.pos + getNodeSizeFromJSON(headingNode.node), message: message,
+                from: headingNode.pos, to: headingNode.pos + getAnalysisNodeSize(headingNode), message: message,
                 sectionFrom: headingNode.pos, sectionTo: endNodeIndex < nodes.length ? nodes[endNodeIndex].pos : totalDocSize
             };
             if (structureMet && wordsWarn) warnings.push(baseViolation);

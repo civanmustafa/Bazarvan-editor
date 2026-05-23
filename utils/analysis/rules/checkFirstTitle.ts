@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus, getWordCount, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getStatus, getWordCount, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkFirstTitle = (context: AnalysisContext): CheckResult => {
@@ -32,7 +32,7 @@ export const checkFirstTitle = (context: AnalysisContext): CheckResult => {
         const h1Node = nodes[h1Index];
         result.violatingItems = [{
             from: h1Node.pos,
-            to: h1Node.pos + getNodeSizeFromJSON(h1Node.node),
+            to: h1Node.pos + getAnalysisNodeSize(h1Node),
             message: t.violationMessages.currentWords(wordCount),
         }];
     }

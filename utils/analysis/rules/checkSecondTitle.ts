@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, countOccurrences, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, countOccurrences, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkSecondTitle = (context: AnalysisContext): CheckResult => {
@@ -35,7 +35,7 @@ export const checkSecondTitle = (context: AnalysisContext): CheckResult => {
     if (status === 'fail') {
         result.violatingItems = [{
             from: firstH2Node.pos,
-            to: firstH2Node.pos + getNodeSizeFromJSON(firstH2Node.node),
+            to: firstH2Node.pos + getAnalysisNodeSize(firstH2Node),
             message: t.violationMessages.secondTitle(textCondition, h3Count)
         }];
     }

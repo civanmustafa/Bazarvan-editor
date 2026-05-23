@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getStatus, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getStatus, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { INTERROGATIVE_H2_KEYWORDS } from '../../../constants';
 
@@ -22,7 +22,7 @@ export const checkInterrogativeH2 = (context: AnalysisContext): CheckResult => {
     const result = createCheckResult(title, status, count, requiredText, Math.min(count / 3, 1), description, details);
     if (status === 'fail') {
         result.violatingItems = headings.filter(h => h.level === 2).map(h => ({
-            from: h.pos, to: h.pos + getNodeSizeFromJSON(h.node), message: t.violationMessages.interrogativeCount(count)
+            from: h.pos, to: h.pos + getAnalysisNodeSize(h), message: t.violationMessages.interrogativeCount(count)
         }));
     }
     return result;

@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getWordCount, getSentenceCount, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getWordCount, getSentenceCount, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkAnswerParagraph = (context: AnalysisContext): CheckResult => {
@@ -47,7 +47,7 @@ export const checkAnswerParagraph = (context: AnalysisContext): CheckResult => {
         const result = createCheckResult(title, 'fail', `${violations.length} ${t.common.violations}`, requiredText, progress, description);
         result.violatingItems = violations.map(p => ({
             from: p.pos,
-            to: p.pos + getNodeSizeFromJSON(p.node),
+            to: p.pos + getAnalysisNodeSize(p),
             message: t.violationMessages.currentWordsSentences(getWordCount(p.text), getSentenceCount(p.text))
         }));
         return result;

@@ -2,8 +2,8 @@ import type { Keywords, FullAnalysis, StructureAnalysis, GoalContext, DuplicateA
 import { translations } from '../../components/translations';
 import { runDuplicateAnalysis } from './runDuplicateAnalysis';
 import { runKeywordAnalysis } from './runKeywordAnalysis';
-import type { AnalysisContext } from './analysisUtils';
-import { getNodeSizeFromJSON, getNodeText } from './analysisUtils';
+import type { AnalysisContext, AnalysisDocumentNode } from './analysisUtils';
+import { countNodesByType, getAnalysisNodeSize, getNodeContentAsText, getNodeSizeFromJSON, getNodeText } from './analysisUtils';
 
 import { checkWordCount } from './rules/checkWordCount';
 import { checkFirstTitle } from './rules/checkFirstTitle';
@@ -52,12 +52,14 @@ import { checkHeadingLength } from './rules/checkHeadingLength';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../../constants';
 
 export interface ContentAnalysisInput {
-  editorState: any;
+  editorState?: any;
+  analysisNodes?: AnalysisDocumentNode[];
   textContent: string;
   keywords: Keywords;
   goalContext: GoalContext;
   articleLanguage: 'ar' | 'en';
   uiLanguage: 'ar' | 'en';
+  tableCount?: number;
   updateDuplicateAnalysis?: boolean;
 }
 
@@ -93,38 +95,53 @@ const createEmptyDuplicateStats = (totalWordCount: number): DuplicateStats => ({
   commonDuplicatesCount: 0,
 });
 
+export const createAnalysisNodesFromEditorState = (editorState: any): AnalysisDocumentNode[] => {
+  if (!editorState?.content) {
+    return [];
+  }
+
+  const nodes: AnalysisDocumentNode[] = [];
+  let pos = 0;
+
+  editorState.content.forEach((node: any) => {
+    if (!node || typeof node !== 'object') return;
+    const nodeSize = getNodeSizeFromJSON(node);
+    const text = getNodeText(node);
+    const contentText = getNodeContentAsText(node);
+    nodes.push({
+      type: node.type,
+      level: node.attrs?.level,
+      text,
+      ...(contentText !== text ? { contentText } : {}),
+      nodeSize,
+      pos,
+    });
+    pos += nodeSize;
+  });
+
+  return nodes;
+};
+
 export const runContentAnalysis = ({
   editorState,
+  analysisNodes,
   textContent,
   keywords,
   goalContext,
   articleLanguage,
   uiLanguage,
+  tableCount,
   updateDuplicateAnalysis = true,
 }: ContentAnalysisInput): FullAnalysis => {
   const t = translations[uiLanguage] || translations.ar;
   const analysisGoal = getAnalysisGoal(goalContext);
 
   const totalWordCount = textContent.trim().split(/\s+/).filter(Boolean).length;
-  const nodes: { type: string; level?: number; text: string; node: any; pos: number }[] = [];
-  let totalDocSize = 0;
-
-  if (editorState?.content) {
-    let pos = 0;
-    editorState.content.forEach((node: any) => {
-      if (!node || typeof node !== 'object') return;
-      const nodeSize = getNodeSizeFromJSON(node);
-      nodes.push({
-        type: node.type,
-        level: node.attrs?.level,
-        text: getNodeText(node),
-        node,
-        pos,
-      });
-      pos += nodeSize;
-      totalDocSize += nodeSize;
-    });
-  }
+  const nodes: AnalysisDocumentNode[] = analysisNodes?.length
+    ? analysisNodes
+    : createAnalysisNodesFromEditorState(editorState);
+  const totalDocSize = nodes.reduce((size, node) => size + getAnalysisNodeSize(node), 0);
+  const totalTableCount = tableCount ?? countNodesByType(editorState, 'table');
 
   const paragraphs = nodes.filter(n => n.type === 'paragraph');
   const nonEmptyParagraphs = paragraphs.filter(p => p.text.trim().length > 0);
@@ -201,6 +218,7 @@ export const runContentAnalysis = ({
     uiLanguage,
     t,
     totalDocSize,
+    tableCount: totalTableCount,
     faqSections,
     isPosInFaqSection,
     conclusionSection,

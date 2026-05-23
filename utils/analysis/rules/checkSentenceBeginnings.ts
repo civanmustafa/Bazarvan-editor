@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getNodeSizeFromJSON, getNodeContentAsText } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeSize, getAnalysisNodeContentText } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkSentenceBeginnings = (context: AnalysisContext): CheckResult => {
@@ -11,7 +11,7 @@ export const checkSentenceBeginnings = (context: AnalysisContext): CheckResult =
     const violations: {from: number, to: number, message: string}[] = [];
 
     nonEmptyParagraphs.forEach(p => {
-        const text = getNodeContentAsText(p.node);
+        const text = getAnalysisNodeContentText(p);
         const sentences = text.split(/[.!?؟]+/).filter(s => s.trim());
         if (sentences.length < 2) return;
 
@@ -21,7 +21,7 @@ export const checkSentenceBeginnings = (context: AnalysisContext): CheckResult =
             if (firstWord1 && firstWord2 && firstWord1.toLowerCase() === firstWord2.toLowerCase()) {
                  violations.push({
                     from: p.pos, 
-                    to: p.pos + getNodeSizeFromJSON(p.node), 
+                    to: p.pos + getAnalysisNodeSize(p), 
                     message: t.violationMessages.consecutiveSentences(firstWord1)
                 });
             }

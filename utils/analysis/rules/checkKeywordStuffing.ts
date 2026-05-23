@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, countOccurrences, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, countOccurrences, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkKeywordStuffing = (context: AnalysisContext): CheckResult => {
@@ -18,7 +18,7 @@ export const checkKeywordStuffing = (context: AnalysisContext): CheckResult => {
                 if (foundSecondary) {
                     violations.push({
                         from: p.pos,
-                        to: p.pos + getNodeSizeFromJSON(p.node),
+                        to: p.pos + getAnalysisNodeSize(p),
                         message: t.violationMessages.keywordStuffing(keywords.primary, foundSecondary)
                     });
                 }

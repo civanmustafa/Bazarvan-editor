@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getNodeContentAsText, normalizeArabicText } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeContentText, normalizeArabicText } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 type WordToken = {
@@ -46,7 +46,7 @@ export const checkImmediateDuplicateWords = (context: AnalysisContext): CheckRes
     ));
 
     textBlocks.forEach((node) => {
-        const text = getNodeContentAsText(node.node);
+        const text = getAnalysisNodeContentText(node);
         const tokens = getWordTokens(text, articleLanguage);
 
         for (let index = 1; index < tokens.length; index++) {

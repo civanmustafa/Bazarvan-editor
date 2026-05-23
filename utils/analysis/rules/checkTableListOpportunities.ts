@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getNodeSizeFromJSON, getWordCount } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeSize, getWordCount } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 const AR_TABLE_INDICATORS = [
@@ -146,7 +146,7 @@ export const checkTableListOpportunities = (context: AnalysisContext): CheckResu
         if (shouldBeTable && !hasStructuredNodeInSection(nodes, nodeIndex, 'table')) {
             warnings.push({
                 from: paragraph.pos,
-                to: paragraph.pos + getNodeSizeFromJSON(paragraph.node),
+                to: paragraph.pos + getAnalysisNodeSize(paragraph),
                 message: t.violationMessages.tableOpportunity,
             });
             return;
@@ -155,7 +155,7 @@ export const checkTableListOpportunities = (context: AnalysisContext): CheckResu
         if (shouldBeList && !hasStructuredNodeInSection(nodes, nodeIndex, 'list')) {
             warnings.push({
                 from: paragraph.pos,
-                to: paragraph.pos + getNodeSizeFromJSON(paragraph.node),
+                to: paragraph.pos + getAnalysisNodeSize(paragraph),
                 message: t.violationMessages.listOpportunity,
             });
         }

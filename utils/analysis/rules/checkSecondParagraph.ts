@@ -1,5 +1,5 @@
 import type { CheckResult, AnalysisStatus } from '../../../types';
-import { createCheckResult, getStatus, getWordCount, getSentenceCount, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getStatus, getWordCount, getSentenceCount, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkSecondParagraph = (context: AnalysisContext): CheckResult => {
@@ -43,7 +43,7 @@ export const checkSecondParagraph = (context: AnalysisContext): CheckResult => {
     if (finalStatus !== 'pass') {
         result.violatingItems = [{
             from: p.pos,
-            to: p.pos + getNodeSizeFromJSON(p.node),
+            to: p.pos + getAnalysisNodeSize(p),
             message: t.violationMessages.currentWordsSentences(wc, sc),
         }];
     }

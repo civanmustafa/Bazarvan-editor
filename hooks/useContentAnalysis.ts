@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Keywords, FullAnalysis, GoalContext, StructureAnalysis } from '../types';
-import { runContentAnalysis, type ContentAnalysisInput } from '../utils/analysis/runContentAnalysis';
+import { createAnalysisNodesFromEditorState, runContentAnalysis, type ContentAnalysisInput } from '../utils/analysis/runContentAnalysis';
+import { countNodesByType } from '../utils/analysis/analysisUtils';
 
 type ContentAnalysisWorkerResponse =
   | { requestId: number; result: FullAnalysis; error?: never }
@@ -15,12 +16,13 @@ const createAnalysisInput = (
   uiLanguage: 'ar' | 'en',
   updateDuplicateAnalysis: boolean,
 ): ContentAnalysisInput => ({
-  editorState,
+  analysisNodes: createAnalysisNodesFromEditorState(editorState),
   textContent,
   keywords,
   goalContext,
   articleLanguage,
   uiLanguage,
+  tableCount: countNodesByType(editorState, 'table'),
   updateDuplicateAnalysis,
 });
 

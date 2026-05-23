@@ -1,11 +1,100 @@
-﻿import React, { useState, useCallback, useEffect, useRef } from 'react';
-import type { DuplicateAnalysis, DuplicatePhrase } from '../types';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import type { DuplicatePhrase } from '../types';
 import { ChevronDown, Eye, Copy, Key } from 'lucide-react';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
+
+const INITIAL_VISIBLE_PHRASES = 80;
+const PHRASE_BATCH_SIZE = 80;
+
+type PhraseListProps = {
+  phrases: DuplicatePhrase[];
+  highlightedItem: unknown;
+  uiLanguage: 'ar' | 'en';
+  copyTitle: string;
+  onPhraseClick: (phrase: DuplicatePhrase, color: string) => void;
+};
+
+const PhraseList: React.FC<PhraseListProps> = React.memo(({
+  phrases,
+  highlightedItem,
+  uiLanguage,
+  copyTitle,
+  onPhraseClick,
+}) => {
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_PHRASES);
+  const phraseSignature = useMemo(
+    () => phrases.map(phrase => `${phrase.text}:${phrase.count}`).join('\u0001'),
+    [phrases]
+  );
+  const sortedPhrases = useMemo(
+    () => [...phrases].sort((a, b) => b.count - a.count),
+    [phraseSignature]
+  );
+  const visiblePhrases = sortedPhrases.slice(0, visibleCount);
+  const remainingCount = Math.max(sortedPhrases.length - visibleCount, 0);
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_PHRASES);
+  }, [phraseSignature]);
+
+  return (
+    <div className="space-y-2">
+      <ul className="space-y-2">
+        {visiblePhrases.map((phrase, index) => {
+          const isHighlighted = Array.isArray(highlightedItem) && highlightedItem.some(h => h.text === phrase.text);
+          const accentColor = SECONDARY_COLORS[index % SECONDARY_COLORS.length];
+          return (
+            <li
+              key={phrase.text}
+              onClick={() => onPhraseClick(phrase, accentColor)}
+              className={`group relative flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${uiLanguage === 'ar' ? 'pr-5' : 'pl-5'} ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/30' : 'bg-gray-50 dark:bg-[#2A2A2A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
+            >
+              <div
+                className={`absolute top-0 h-full w-1.5 ${uiLanguage === 'ar' ? 'right-0 rounded-r-md' : 'left-0 rounded-l-md'}`}
+                style={{ backgroundColor: accentColor }}
+              ></div>
+
+              <span className="text-[#333333] dark:text-[#8d8d8d] text-sm font-medium flex-grow">{phrase.text}</span>
+
+              <div className="flex items-center gap-3 ps-1 flex-shrink-0">
+                <span className="text-xs font-semibold bg-[#d4af37]/10 text-[#b8922e] dark:bg-[#d4af37]/20 dark:text-[#f2d675] rounded-full px-2.5 py-0.5">
+                  {phrase.count}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(phrase.text);
+                  }}
+                  className="p-1.5 rounded-full text-[#d4af37] hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  title={copyTitle}
+                  aria-label="Copy phrase"
+                >
+                  <Copy size={14} />
+                </button>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+
+      {remainingCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setVisibleCount(count => Math.min(count + PHRASE_BATCH_SIZE, sortedPhrases.length))}
+          className="w-full rounded-md border border-gray-200 dark:border-[#3C3C3C] px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15 transition-colors"
+        >
+          {uiLanguage === 'ar'
+            ? `عرض المزيد (${remainingCount})`
+            : `Show more (${remainingCount})`}
+        </button>
+      )}
+    </div>
+  );
+});
 
 const usePrevious = <T,>(value: T): T | undefined => {
     const ref = useRef<T | undefined>(undefined);
@@ -90,7 +179,7 @@ const DuplicatesTab: React.FC = () => {
       if (isAllHighlighted) {
           clearAllHighlights();
       } else {
-          const phraseColors = phrases
+          const phraseColors = [...phrases]
             .sort((a, b) => b.count - a.count)
             .map((p, i) => ({ text: p.text, color: SECONDARY_COLORS[i % SECONDARY_COLORS.length] }));
           applyHighlights(phraseColors, false);
@@ -105,52 +194,6 @@ const DuplicatesTab: React.FC = () => {
   const nGramMap: { [key: string]: string } = {
     '2': t.bigrams, '3': t.trigrams, '4': t.fourGrams, '5': t.fiveGrams,
     '6': t.sixGrams, '7': t.sevenGrams, '8': t.eightGrams
-  };
-
-  const PhraseList: React.FC<{phrases: DuplicatePhrase[]}> = ({ phrases }) => {
-    return (
-      <ul 
-        className="space-y-2"
-      >
-        {phrases
-        .sort((a, b) => b.count - a.count)
-        .map((phrase, index) => {
-            const isHighlighted = Array.isArray(highlightedItem) && highlightedItem.some(h => h.text === phrase.text);
-            const accentColor = SECONDARY_COLORS[index % SECONDARY_COLORS.length];
-            return (
-                <li
-                    key={phrase.text}
-                    onClick={() => handlePhraseClick(phrase, accentColor)}
-                    className={`group relative flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${uiLanguage === 'ar' ? 'pr-5' : 'pl-5'} ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/30' : 'bg-gray-50 dark:bg-[#2A2A2A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
-                >
-                    <div 
-                        className={`absolute top-0 h-full w-1.5 ${uiLanguage === 'ar' ? 'right-0 rounded-r-md' : 'left-0 rounded-l-md'}`}
-                        style={{ backgroundColor: accentColor }}
-                    ></div>
-                    
-                    <span className="text-[#333333] dark:text-[#8d8d8d] text-sm font-medium flex-grow">{phrase.text}</span>
-                    
-                    <div className="flex items-center gap-3 ps-1 flex-shrink-0">
-                        <span className="text-xs font-semibold bg-[#d4af37]/10 text-[#b8922e] dark:bg-[#d4af37]/20 dark:text-[#f2d675] rounded-full px-2.5 py-0.5">
-                            {phrase.count}
-                        </span>
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                navigator.clipboard.writeText(phrase.text);
-                            }}
-                            className="p-1.5 rounded-full text-[#d4af37] hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            title={t.copyAll}
-                            aria-label="Copy phrase"
-                        >
-                            <Copy size={14} />
-                        </button>
-                    </div>
-                </li>
-            )
-        })}
-      </ul>
-    );
   };
 
   return (
@@ -211,7 +254,15 @@ const DuplicatesTab: React.FC = () => {
                     </div>
                     {openSections[key] && (
                         <div className="p-3 border-t border-gray-200 dark:border-[#3C3C3C] bg-gray-50/50 dark:bg-[#1F1F1F]">
-                          {commonPhrases.length > 0 && <PhraseList phrases={commonPhrases} />}
+                          {commonPhrases.length > 0 && (
+                            <PhraseList
+                              phrases={commonPhrases}
+                              highlightedItem={highlightedItem}
+                              uiLanguage={uiLanguage}
+                              copyTitle={t.copyAll}
+                              onPhraseClick={handlePhraseClick}
+                            />
+                          )}
                           
                           {keywordPhrases.length > 0 && (
                             <>
@@ -222,7 +273,13 @@ const DuplicatesTab: React.FC = () => {
                                 </h5>
                               )}
                               <div className={commonPhrases.length > 0 ? "mt-2" : ""}>
-                                <PhraseList phrases={keywordPhrases} />
+                                <PhraseList
+                                  phrases={keywordPhrases}
+                                  highlightedItem={highlightedItem}
+                                  uiLanguage={uiLanguage}
+                                  copyTitle={t.copyAll}
+                                  onPhraseClick={handlePhraseClick}
+                                />
                               </div>
                             </>
                           )}

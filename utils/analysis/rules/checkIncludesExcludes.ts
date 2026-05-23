@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, countOccurrences, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, countOccurrences, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkIncludesExcludes = (context: AnalysisContext): CheckResult => {
@@ -25,7 +25,7 @@ export const checkIncludesExcludes = (context: AnalysisContext): CheckResult => 
     if (h2IncludesHeadings.length > 1) {
         const result = createCheckResult(title, 'fail', `${h2IncludesHeadings.length} H2s with 'includes'`, requiredText, 0, description);
         result.violatingItems = h2IncludesHeadings.map(h => ({
-            from: h.pos, to: h.pos + getNodeSizeFromJSON(h.node), message: t.violationMessages.includesExcludes_multiple
+            from: h.pos, to: h.pos + getAnalysisNodeSize(h), message: t.violationMessages.includesExcludes_multiple
         }));
         return result;
     }
@@ -49,7 +49,7 @@ export const checkIncludesExcludes = (context: AnalysisContext): CheckResult => 
     if (status === 'fail') {
          result.violatingItems = [{
             from: targetH2.pos,
-            to: targetH2.pos + getNodeSizeFromJSON(targetH2.node),
+            to: targetH2.pos + getAnalysisNodeSize(targetH2),
             message: t.violationMessages.includesExcludes_state(current)
          }];
     }

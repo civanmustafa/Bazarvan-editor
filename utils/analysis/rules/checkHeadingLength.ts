@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkHeadingLength = (context: AnalysisContext): CheckResult => {
@@ -31,7 +31,7 @@ export const checkHeadingLength = (context: AnalysisContext): CheckResult => {
         if (length < rule.min || length > rule.max) {
             violations.push({
                 from: heading.pos,
-                to: heading.pos + getNodeSizeFromJSON(heading.node),
+                to: heading.pos + getAnalysisNodeSize(heading),
                 message: t.violationMessages.headingLength(level, length, rule.min, rule.max)
             });
         }

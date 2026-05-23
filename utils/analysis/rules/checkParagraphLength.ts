@@ -1,5 +1,5 @@
 import type { CheckResult, AnalysisStatus } from '../../../types';
-import { createCheckResult, getWordCount, getSentenceCount, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getWordCount, getSentenceCount, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
@@ -43,7 +43,7 @@ export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
     const warnings: { from: number; to: number; message: string }[] = [];
     
     contentParagraphs.forEach(p => {
-        if (!p || !p.node) return;
+        if (!p) return;
         const wc = getWordCount(p.text);
         const sc = getSentenceCount(p.text);
         const scMet = sc >= 1 && sc <= 4;
@@ -53,7 +53,7 @@ export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
         if (!scMet || !wcMet) {
             const item = {
                 from: p.pos,
-                to: p.pos + getNodeSizeFromJSON(p.node),
+                to: p.pos + getAnalysisNodeSize(p),
                 message: t.violationMessages.currentWordsSentences(wc, sc)
             };
             if (scMet && wcWarn) {

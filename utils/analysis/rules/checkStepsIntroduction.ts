@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getWordCount, getSentenceCount, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getWordCount, getSentenceCount, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkStepsIntroduction = (context: AnalysisContext): CheckResult => {
@@ -51,7 +51,7 @@ export const checkStepsIntroduction = (context: AnalysisContext): CheckResult =>
             }
              violations.push({
                 from: introNode.pos,
-                to: introNode.pos + getNodeSizeFromJSON(introNode.node),
+                to: introNode.pos + getAnalysisNodeSize(introNode),
                 message: messageParts.join(' | ')
             });
         }

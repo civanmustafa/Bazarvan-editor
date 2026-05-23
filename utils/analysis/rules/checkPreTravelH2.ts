@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getWordCount, countOccurrences, getStatus, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getWordCount, countOccurrences, getStatus, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 const createH2KeywordAndWordCountCheck = (
@@ -36,7 +36,7 @@ const createH2KeywordAndWordCountCheck = (
     if (status === 'fail') {
         result.violatingItems = [{
             from: targetH2.pos,
-            to: targetH2.pos + getNodeSizeFromJSON(targetH2.node),
+            to: targetH2.pos + getAnalysisNodeSize(targetH2),
             message: t.violationMessages.currentWords(wordCount),
         }];
     }

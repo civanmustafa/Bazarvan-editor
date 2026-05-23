@@ -8,12 +8,22 @@ import { translations } from '../../components/translations';
  */
 
 // --- Types shared by every structure/keyword rule ---
+export interface AnalysisDocumentNode {
+    type: string;
+    level?: number;
+    text: string;
+    contentText?: string;
+    nodeSize?: number;
+    node?: any;
+    pos: number;
+}
+
 export interface AnalysisContext {
     editorState: any;
-    nodes: { type: string; level?: number; text: string; node: any; pos: number }[];
-    headings: { type: string; level?: number; text: string; node: any; pos: number }[];
-    paragraphs: { type: string; level?: number; text: string; node: any; pos: number }[];
-    nonEmptyParagraphs: { type: string; level?: number; text: string; node: any; pos: number }[];
+    nodes: AnalysisDocumentNode[];
+    headings: AnalysisDocumentNode[];
+    paragraphs: AnalysisDocumentNode[];
+    nonEmptyParagraphs: AnalysisDocumentNode[];
     textContent: string;
     totalWordCount: number;
     keywords: Keywords;
@@ -22,12 +32,13 @@ export interface AnalysisContext {
     uiLanguage: 'ar' | 'en';
     t: typeof translations.ar;
     totalDocSize: number;
+    tableCount: number;
     faqSections: { startPos: number; endPos: number }[];
     isPosInFaqSection: (pos: number) => boolean;
     conclusionSection: {
         text: string;
-        nodes: { type: string; level?: number; text: string; node: any; pos: number }[];
-        paragraphs: any[];
+        nodes: AnalysisDocumentNode[];
+        paragraphs: AnalysisDocumentNode[];
         hasList: boolean;
         hasNumber: boolean;
         wordCount: number;
@@ -248,6 +259,14 @@ export const getNodeSizeFromJSON = (nodeJSON: any): number => {
     }
     
     return size;
+};
+
+export const getAnalysisNodeSize = (node: AnalysisDocumentNode): number => {
+    return node.nodeSize ?? getNodeSizeFromJSON(node.node);
+};
+
+export const getAnalysisNodeContentText = (node: AnalysisDocumentNode): string => {
+    return node.contentText ?? (node.node ? getNodeContentAsText(node.node) : node.text);
 };
 
 // --- Constants ---

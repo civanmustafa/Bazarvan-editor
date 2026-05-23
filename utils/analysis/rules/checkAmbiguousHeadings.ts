@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, countOccurrences, getNodeSizeFromJSON, normalizeArabicText } from '../analysisUtils';
+import { createCheckResult, countOccurrences, getAnalysisNodeSize, normalizeArabicText } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { AMBIGUOUS_HEADING_WORDS, INTERROGATIVE_H2_KEYWORDS } from '../../../constants';
 
@@ -96,7 +96,7 @@ export const checkAmbiguousHeadings = (context: AnalysisContext): CheckResult =>
     const result = createCheckResult(title, 'fail', `${violations.length} ${t.common.violations}`, requiredText, 1 - (violations.length / h2s.length), description, details);
     result.violatingItems = violations.map(v => ({
         from: v.pos,
-        to: v.pos + getNodeSizeFromJSON(v.node),
+        to: v.pos + getAnalysisNodeSize(v),
         message: t.violationMessages.ambiguousHeading
     }));
     return result;

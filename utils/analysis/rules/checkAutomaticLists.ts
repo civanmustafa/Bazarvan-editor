@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getNodeSizeFromJSON } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkAutomaticLists = (context: AnalysisContext): CheckResult => {
@@ -18,7 +18,7 @@ export const checkAutomaticLists = (context: AnalysisContext): CheckResult => {
     const result = createCheckResult(title, 'fail', `${violations.length} ${t.common.violations}`, requiredText, 1 - (violations.length / nonEmptyParagraphs.length), description);
     result.violatingItems = violations.map(v => ({
         from: v.pos,
-        to: v.pos + getNodeSizeFromJSON(v.node),
+        to: v.pos + getAnalysisNodeSize(v),
         message: t.violationMessages.manualList
     }));
     return result;
