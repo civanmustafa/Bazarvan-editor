@@ -303,7 +303,7 @@ const MiniStat: React.FC<{ icon: React.ReactNode; value: string | number; title:
 
 const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
-  const { keywords, setKeywords, setGoalContext, analysisResults } = useEditor();
+  const { keywords, setKeywords, setGoalContext, analysisResults, setIsDuplicatesTabActive } = useEditor();
   const { applyHighlights, clearAllHighlights, highlightedItem, setHighlightedItem } = useInteraction();
   const { generateSemanticKeywords } = useAI();
   
@@ -328,6 +328,16 @@ const LeftSidebar: React.FC = () => {
         : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white'
     }`;
   };
+
+  const handleTabChange = React.useCallback((tabName: 'keywords' | 'duplicates') => {
+    setActiveTab(tabName);
+    setIsDuplicatesTabActive(tabName === 'duplicates');
+  }, [setIsDuplicatesTabActive]);
+
+  React.useEffect(() => {
+    setIsDuplicatesTabActive(activeTab === 'duplicates');
+    return () => setIsDuplicatesTabActive(false);
+  }, [activeTab, setIsDuplicatesTabActive]);
   
   const handleHighlightToggle = (term: string, type: 'primary' | 'company') => {
     if (!term) {
@@ -462,46 +472,59 @@ const LeftSidebar: React.FC = () => {
     },
   ];
 
-  const duplicateCategoryLabels: Record<keyof DuplicateAnalysis, string> = {
-    2: t.duplicatesTab.bigrams,
-    3: t.duplicatesTab.trigrams,
-    4: t.duplicatesTab.fourGrams,
-    5: t.duplicatesTab.fiveGrams,
-    6: t.duplicatesTab.sixGrams,
-    7: t.duplicatesTab.sevenGrams,
-    8: t.duplicatesTab.eightGrams,
-  };
-
-  const duplicateHeaderSpiderMetrics: SpiderStatMetric[] = ([8, 7, 6, 5, 4, 3, 2] as (keyof DuplicateAnalysis)[]).map(key => {
-    const phrases = duplicateAnalysis[key] || [];
-    const repeatedInstances = phrases.reduce((sum, phrase) => sum + Math.max(0, phrase.count - 1), 0);
-    const score = repeatedInstances === 0 ? 100 : Math.max(12, 100 - repeatedInstances * 12);
-    return {
-      label: duplicateCategoryLabels[key],
-      value: repeatedInstances,
-      score,
-      outerPoint: repeatedInstances === 0,
-      tone: repeatedInstances === 0 ? 'good' : 'bad',
-      problems: repeatedInstances,
-      corrected: repeatedInstances === 0 ? 1 : 0,
+  const {
+    duplicateHeaderSpiderMetrics,
+    duplicateRepeatedPhrasesCount,
+    duplicateOccurrencesCount,
+    uniqueWordsPercentage,
+    duplicateMiniStats,
+  } = React.useMemo(() => {
+    const duplicateCategoryLabels: Record<keyof DuplicateAnalysis, string> = {
+      2: t.duplicatesTab.bigrams,
+      3: t.duplicatesTab.trigrams,
+      4: t.duplicatesTab.fourGrams,
+      5: t.duplicatesTab.fiveGrams,
+      6: t.duplicatesTab.sixGrams,
+      7: t.duplicatesTab.sevenGrams,
+      8: t.duplicatesTab.eightGrams,
     };
-  });
-  const duplicateRepeatedPhrasesCount = (Object.values(duplicateAnalysis).flat() as { count: number }[]).length;
-  const duplicateOccurrencesCount = (Object.values(duplicateAnalysis).flat() as { count: number }[]).reduce((sum, phrase) => sum + phrase.count, 0);
-  const uniqueWordsPercentage = duplicateStats.totalWords > 0
-    ? `${((duplicateStats.uniqueWords / duplicateStats.totalWords) * 100).toFixed(1)}%`
-    : '0%';
-  const duplicateMiniStats = uiLanguage === 'ar'
-    ? {
-        repeatedPhrases: 'عدد العبارات المكررة',
-        totalOccurrences: 'إجمالي عدد التكرارات',
-        uniquePercentage: 'نسبة الكلمات الفريدة في النص',
-      }
-    : {
-        repeatedPhrases: 'Repeated phrases count',
-        totalOccurrences: 'Total repetitions count',
-        uniquePercentage: 'Unique words percentage',
+
+    const allPhrases = Object.values(duplicateAnalysis).flat() as { count: number }[];
+    const headerMetrics: SpiderStatMetric[] = ([8, 7, 6, 5, 4, 3, 2] as (keyof DuplicateAnalysis)[]).map(key => {
+      const phrases = duplicateAnalysis[key] || [];
+      const repeatedInstances = phrases.reduce((sum, phrase) => sum + Math.max(0, phrase.count - 1), 0);
+      const score = repeatedInstances === 0 ? 100 : Math.max(12, 100 - repeatedInstances * 12);
+      return {
+        label: duplicateCategoryLabels[key],
+        value: repeatedInstances,
+        score,
+        outerPoint: repeatedInstances === 0,
+        tone: repeatedInstances === 0 ? 'good' : 'bad',
+        problems: repeatedInstances,
+        corrected: repeatedInstances === 0 ? 1 : 0,
       };
+    });
+
+    return {
+      duplicateHeaderSpiderMetrics: headerMetrics,
+      duplicateRepeatedPhrasesCount: allPhrases.length,
+      duplicateOccurrencesCount: allPhrases.reduce((sum, phrase) => sum + phrase.count, 0),
+      uniqueWordsPercentage: duplicateStats.totalWords > 0
+        ? `${((duplicateStats.uniqueWords / duplicateStats.totalWords) * 100).toFixed(1)}%`
+        : '0%',
+      duplicateMiniStats: uiLanguage === 'ar'
+        ? {
+            repeatedPhrases: 'عدد العبارات المكررة',
+            totalOccurrences: 'إجمالي عدد التكرارات',
+            uniquePercentage: 'نسبة الكلمات الفريدة في النص',
+          }
+        : {
+            repeatedPhrases: 'Repeated phrases count',
+            totalOccurrences: 'Total repetitions count',
+            uniquePercentage: 'Unique words percentage',
+          },
+    };
+  }, [duplicateAnalysis, duplicateStats, t.duplicatesTab, uiLanguage]);
 
   const handleAddSecondary = () => {
     setKeywords(k => ({ ...k, secondaries: [...k.secondaries, ''] }));
@@ -1030,11 +1053,11 @@ const LeftSidebar: React.FC = () => {
   return (
     <aside className="relative z-30 basis-[20.57%] bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg flex flex-col h-full min-w-0">
         <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
-            <button onClick={() => setActiveTab('keywords')} className={getTabClass('keywords')}>
+            <button onClick={() => handleTabChange('keywords')} className={getTabClass('keywords')}>
                 <KeyRound size={16} />
                 <span>{tLk.targetKeywords}</span>
             </button>
-            <button onClick={() => setActiveTab('duplicates')} className={getTabClass('duplicates')}>
+            <button onClick={() => handleTabChange('duplicates')} className={getTabClass('duplicates')}>
                 <Repeat size={16} />
                 <span>{tLk.duplicates}</span>
             </button>

@@ -1,254 +1,145 @@
+import { useEffect, useRef, useState } from 'react';
+import type { Keywords, FullAnalysis, GoalContext, StructureAnalysis } from '../types';
+import { runContentAnalysis, type ContentAnalysisInput } from '../utils/analysis/runContentAnalysis';
 
-import { useMemo } from 'react';
-import type { Keywords, FullAnalysis, StructureAnalysis, GoalContext } from '../types';
-import { translations } from '../components/translations';
-import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
-import { runKeywordAnalysis } from '../utils/analysis/runKeywordAnalysis';
-import type { AnalysisContext } from '../utils/analysis/analysisUtils';
-import { getNodeSizeFromJSON, getNodeText } from '../utils/analysis/analysisUtils';
+type ContentAnalysisWorkerResponse =
+  | { requestId: number; result: FullAnalysis; error?: never }
+  | { requestId: number; result?: never; error: string };
 
-// Import all structure analysis rules
-import { checkWordCount } from '../utils/analysis/rules/checkWordCount';
-import { checkFirstTitle } from '../utils/analysis/rules/checkFirstTitle';
-import { checkSecondTitle } from '../utils/analysis/rules/checkSecondTitle';
-import { checkIncludesExcludes } from '../utils/analysis/rules/checkIncludesExcludes';
-import { checkPreTravelH2 } from '../utils/analysis/rules/checkPreTravelH2';
-import { checkPricingH2 } from '../utils/analysis/rules/checkPricingH2';
-import { checkWhoIsItForH2 } from '../utils/analysis/rules/checkWhoIsItForH2';
-import { checkSummaryParagraph } from '../utils/analysis/rules/checkSummaryParagraph';
-import { checkSecondParagraph } from '../utils/analysis/rules/checkSecondParagraph';
-import { checkParagraphLength } from '../utils/analysis/rules/checkParagraphLength';
-import { checkParagraphPair } from '../utils/analysis/rules/checkParagraphPair';
-import { checkH2Structure } from '../utils/analysis/rules/checkH2Structure';
-import { checkH2Count } from '../utils/analysis/rules/checkH2Count';
-import { checkSubHeadingStructure } from '../utils/analysis/rules/checkSubHeadingStructure';
-import { checkBetweenH2H3 } from '../utils/analysis/rules/checkBetweenH2H3';
-import { checkFaqSection } from '../utils/analysis/rules/checkFaqSection';
-import { checkAnswerParagraph } from '../utils/analysis/rules/checkAnswerParagraph';
-import { checkAmbiguousHeadings } from '../utils/analysis/rules/checkAmbiguousHeadings';
-import { checkAmbiguousParagraphReferences } from '../utils/analysis/rules/checkAmbiguousParagraphReferences';
-import { checkPunctuation } from '../utils/analysis/rules/checkPunctuation';
-import { checkParagraphEndings } from '../utils/analysis/rules/checkParagraphEndings';
-import { checkInterrogativeH2 } from '../utils/analysis/rules/checkInterrogativeH2';
-import { checkTransitionalWords } from '../utils/analysis/rules/checkTransitionalWords';
-import { checkImmediateDuplicateWords } from '../utils/analysis/rules/checkImmediateDuplicateWords';
-import { checkDuplicateWordsInParagraph, checkDuplicateWordsInHeading } from '../utils/analysis/rules/checkDuplicateWords';
-import { checkSentenceLength } from '../utils/analysis/rules/checkSentenceLength';
-import { checkStepsIntroduction } from '../utils/analysis/rules/checkStepsIntroduction';
-import { checkAutomaticLists } from '../utils/analysis/rules/checkAutomaticLists';
-import { checkCtaWords } from '../utils/analysis/rules/checkCtaWords';
-import { checkInteractiveLanguage } from '../utils/analysis/rules/checkInteractiveLanguage';
-import { checkArabicOnly } from '../utils/analysis/rules/checkArabicOnly';
-import { checkConclusion } from '../utils/analysis/rules/checkConclusion';
-import { checkSentenceBeginnings } from '../utils/analysis/rules/checkSentenceBeginnings';
-import { checkWarningWords } from '../utils/analysis/rules/checkWarningWords';
-import { checkPunctuationSpacing } from '../utils/analysis/rules/checkPunctuationSpacing';
-import { checkRepeatedBigrams } from '../utils/analysis/rules/checkRepeatedBigrams';
-import { checkSlowWords } from '../utils/analysis/rules/checkSlowWords';
-import { checkWordConsistency } from '../utils/analysis/rules/checkWordConsistency';
-import { checkCommonEnglishTerms } from '../utils/analysis/rules/checkCommonEnglishTerms';
-import { checkWordsToDelete } from '../utils/analysis/rules/checkWordsToDelete';
-import { checkKeywordStuffing } from '../utils/analysis/rules/checkKeywordStuffing';
-import { checkDeviceSaleMandatoryH2, checkDeviceSaleSupportingH2 } from '../utils/analysis/rules/checkDeviceSaleH2';
-import { checkTablesCount } from '../utils/analysis/rules/checkTablesCount';
-import { checkHeadingLength } from '../utils/analysis/rules/checkHeadingLength';
-import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../constants';
+const createAnalysisInput = (
+  editorState: any,
+  textContent: string,
+  keywords: Keywords,
+  goalContext: GoalContext,
+  articleLanguage: 'ar' | 'en',
+  uiLanguage: 'ar' | 'en',
+  updateDuplicateAnalysis: boolean,
+): ContentAnalysisInput => ({
+  editorState,
+  textContent,
+  keywords,
+  goalContext,
+  articleLanguage,
+  uiLanguage,
+  updateDuplicateAnalysis,
+});
 
-/*
- * Main analysis pipeline.
- *
- * To add or change a structure rule:
- * 1. Create/edit a file in utils/analysis/rules.
- * 2. Import it in this hook.
- * 3. Add its result to structureAnalysis with a key defined in types.ts.
- * 4. Add UI labels/translations if the rule introduces new visible text.
- *
- * Keyword and duplicate analysis are separate prerequisites because several
- * structure rules need their results as context.
- */
+const getStructureStats = (structureAnalysis: StructureAnalysis, paragraphCount: number, headingCount: number) => ({
+  violatingCriteriaCount: Object.values(structureAnalysis).filter(c => c.status === 'fail').length,
+  totalErrorsCount: Object.values(structureAnalysis).reduce((sum, c) => sum + (c.violationCount ?? c.violatingItems?.length ?? 0), 0),
+  paragraphCount,
+  headingCount,
+});
 
-const getAnalysisGoal = (goalContext: GoalContext): string => {
-  switch (goalContext.objective) {
-    case 'educate':
-      return 'اكاديمية';
-    case 'compare':
-    case 'category-support':
-      return 'مقارنة';
-    case 'convert':
-      return 'البيع';
-    default:
-      return 'مدونة';
-  }
+const mergePreviousDuplicateResults = (nextResult: FullAnalysis, previousResult: FullAnalysis | null, updateDuplicateAnalysis: boolean): FullAnalysis => {
+  if (updateDuplicateAnalysis || !previousResult) return nextResult;
+
+  const structureAnalysis = {
+    ...nextResult.structureAnalysis,
+    repeatedBigrams: previousResult.structureAnalysis.repeatedBigrams,
+  };
+
+  return {
+    ...nextResult,
+    structureAnalysis,
+    structureStats: getStructureStats(
+      structureAnalysis,
+      nextResult.structureStats.paragraphCount,
+      nextResult.structureStats.headingCount,
+    ),
+    duplicateAnalysis: previousResult.duplicateAnalysis,
+    duplicateStats: previousResult.duplicateStats,
+  };
 };
 
-// --- Main Hook ---
+export const useContentAnalysis = (
+  editorState: any,
+  textContent: string,
+  keywords: Keywords,
+  goalContext: GoalContext,
+  articleLanguage: 'ar' | 'en',
+  uiLanguage: 'ar' | 'en',
+  updateDuplicateAnalysis = true,
+): FullAnalysis => {
+  const [analysisResults, setAnalysisResults] = useState<FullAnalysis>(() =>
+    runContentAnalysis(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, true))
+  );
+  const [workerDisabled, setWorkerDisabled] = useState(false);
+  const activeWorkerRef = useRef<Worker | null>(null);
+  const latestRequestIdRef = useRef(0);
+  const latestAnalysisRef = useRef<FullAnalysis>(analysisResults);
 
-export const useContentAnalysis = (editorState: any, textContent: string, keywords: Keywords, goalContext: GoalContext, articleLanguage: 'ar' | 'en', uiLanguage: 'ar' | 'en'): FullAnalysis => {
-  return useMemo(() => {
-    const t = translations[uiLanguage];
-    const analysisGoal = getAnalysisGoal(goalContext);
-    
-    // --- 1. Prepare shared analysis context from the TipTap JSON document ---
-    const totalWordCount = textContent.trim().split(/\s+/).filter(Boolean).length;
-    let nodes: { type: string; level?: number; text: string; node: any; pos: number }[] = [];
-    let totalDocSize = 0;
-    if (editorState?.content) {
-      let pos = 0; // The document starts at position 0.
-      editorState.content.forEach((node: any) => {
-        if (!node || typeof node !== 'object') return;
-        const nodeSize = getNodeSizeFromJSON(node);
-        nodes.push({ 
-            type: node.type, 
-            level: node.attrs?.level, 
-            text: getNodeText(node), 
-            node,
-            pos
-        });
-        pos += nodeSize;
-        totalDocSize += nodeSize;
-      });
+  const setLatestAnalysisResults = (nextResult: FullAnalysis) => {
+    latestAnalysisRef.current = nextResult;
+    setAnalysisResults(nextResult);
+  };
+
+  useEffect(() => {
+    return () => {
+      activeWorkerRef.current?.terminate();
+      activeWorkerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const input = createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, updateDuplicateAnalysis);
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
+
+    const runFallbackAnalysis = () => {
+      const result = runContentAnalysis(input);
+      setLatestAnalysisResults(mergePreviousDuplicateResults(result, latestAnalysisRef.current, updateDuplicateAnalysis));
+    };
+
+    if (workerDisabled || typeof Worker === 'undefined') {
+      runFallbackAnalysis();
+      return;
     }
 
-    const paragraphs = nodes.filter(n => n.type === 'paragraph');
-    const nonEmptyParagraphs = paragraphs.filter(p => p.text.trim().length > 0);
-    const headings = nodes.filter(n => n.type === 'heading');
-    
-    const L_FAQ_KEYWORDS = articleLanguage === 'ar' ? FAQ_KEYWORDS : ['questions', 'faq', 'frequently asked questions'];
-    const L_CONCLUSION_KEYWORDS = articleLanguage === 'ar' ? CONCLUSION_KEYWORDS : ['conclusion', 'summary', 'in conclusion', 'in summary', 'finally', 'to sum up', 'lastly', 'in the end'];
+    activeWorkerRef.current?.terminate();
 
-    // Precompute FAQ/conclusion sections once so individual rules stay small.
-    const faqSections: { startPos: number; endPos: number }[] = [];
-    const faqH2Indices = nodes
-        .map((node, index) => (node.type === 'heading' && node.level === 2 && L_FAQ_KEYWORDS.some(k => node.text.toLowerCase().includes(k.toLowerCase())) ? index : -1))
-        .filter(index => index !== -1);
+    let disposed = false;
+    const worker = new Worker(new URL('../workers/contentAnalysis.worker.ts', import.meta.url), { type: 'module' });
+    activeWorkerRef.current = worker;
 
-    faqH2Indices.forEach(startIndex => {
-        const startPos = nodes[startIndex].pos;
-        let endIndex = -1;
-        for (let i = startIndex + 1; i < nodes.length; i++) {
-            if (nodes[i].type === 'heading' && nodes[i].level === 2) {
-                endIndex = i;
-                break;
-            }
-        }
-        const endPos = endIndex === -1 ? totalDocSize : nodes[endIndex].pos;
-        faqSections.push({ startPos, endPos });
-    });
+    worker.onmessage = (event: MessageEvent<ContentAnalysisWorkerResponse>) => {
+      if (disposed || event.data.requestId !== latestRequestIdRef.current) return;
+      worker.terminate();
+      if (activeWorkerRef.current === worker) {
+        activeWorkerRef.current = null;
+      }
 
-    const isPosInFaqSection = (pos: number) => faqSections.some(section => pos >= section.startPos && pos < section.endPos);
+      if (event.data.result) {
+        setLatestAnalysisResults(mergePreviousDuplicateResults(event.data.result, latestAnalysisRef.current, updateDuplicateAnalysis));
+        return;
+      }
 
-    const conclusionSection = (() => {
-        const lastH2Index = nodes.map((n, i) => (n.type === 'heading' && n.level === 2 ? i : -1)).filter(i => i !== -1).pop();
-        if (lastH2Index === undefined) return null;
-        const lastH2Node = nodes[lastH2Index];
-        const isConclusion = L_CONCLUSION_KEYWORDS.some(k => lastH2Node.text.toLowerCase().includes(k.toLowerCase()));
-        if (!isConclusion) return null;
-        const sectionNodes = nodes.slice(lastH2Index + 1);
-        const sectionText = sectionNodes.map(n => n.text).join(' ');
-        const sectionParagraphs = sectionNodes.filter(n => n.type === 'paragraph' && n.text.trim().length > 0);
-        const hasList = sectionNodes.some(n => n.type === 'bulletList' || n.type === 'orderedList');
-        const hasNumber = /\d/.test(sectionText);
-        return { text: sectionText, nodes: sectionNodes, paragraphs: sectionParagraphs, hasList, hasNumber, wordCount: sectionText.trim().split(/\s+/).filter(Boolean).length };
-    })();
-
-    // --- 2. Run prerequisite analyses used by later rules ---
-    const { duplicateAnalysis, duplicateStats } = runDuplicateAnalysis(textContent, keywords, totalWordCount, articleLanguage);
-
-    const analysisContext: AnalysisContext = {
-      editorState,
-      nodes,
-      headings,
-      paragraphs,
-      nonEmptyParagraphs,
-      textContent,
-      totalWordCount,
-      keywords,
-      analysisGoal,
-      articleLanguage,
-      uiLanguage,
-      t,
-      totalDocSize,
-      faqSections,
-      isPosInFaqSection,
-      conclusionSection,
-      duplicateAnalysis
+      console.error('Content analysis worker failed:', event.data.error);
+      setWorkerDisabled(true);
+      runFallbackAnalysis();
     };
-    
-    // --- 3. Run all content rules and keep this list as the rule registry ---
-    const keywordAnalysis = runKeywordAnalysis(analysisContext);
 
-    const conclusionChecks = checkConclusion(analysisContext);
-
-    const structureAnalysis: StructureAnalysis = {
-        wordCount: checkWordCount(analysisContext),
-        firstTitle: checkFirstTitle(analysisContext),
-        secondTitle: checkSecondTitle(analysisContext),
-        includesExcludes: checkIncludesExcludes(analysisContext),
-        preTravelH2: checkPreTravelH2(analysisContext),
-        pricingH2: checkPricingH2(analysisContext),
-        whoIsItForH2: checkWhoIsItForH2(analysisContext),
-        summaryParagraph: checkSummaryParagraph(analysisContext),
-        secondParagraph: checkSecondParagraph(analysisContext),
-        paragraphLength: checkParagraphLength(analysisContext),
-        paragraphPair: checkParagraphPair(analysisContext),
-        h2Structure: checkH2Structure(analysisContext),
-        h2Count: checkH2Count(analysisContext),
-        h3Structure: checkSubHeadingStructure(analysisContext, 3),
-        h4Structure: checkSubHeadingStructure(analysisContext, 4),
-        betweenH2H3: checkBetweenH2H3(analysisContext),
-        sentenceLength: checkSentenceLength(analysisContext),
-        stepsIntroduction: checkStepsIntroduction(analysisContext),
-        duplicateWordsInParagraph: checkDuplicateWordsInParagraph(analysisContext),
-        duplicateWordsInHeading: checkDuplicateWordsInHeading(analysisContext),
-        headingLength: checkHeadingLength(analysisContext),
-        faqSection: checkFaqSection(analysisContext),
-        answerParagraph: checkAnswerParagraph(analysisContext),
-        ambiguousHeadings: checkAmbiguousHeadings(analysisContext),
-        ambiguousParagraphReferences: checkAmbiguousParagraphReferences(analysisContext),
-        punctuation: checkPunctuation(analysisContext),
-        paragraphEndings: checkParagraphEndings(analysisContext),
-        interrogativeH2: checkInterrogativeH2(analysisContext),
-        differentTransitionalWords: checkTransitionalWords(analysisContext),
-        immediateDuplicateWords: checkImmediateDuplicateWords(analysisContext),
-        automaticLists: checkAutomaticLists(analysisContext),
-        ctaWords: checkCtaWords(analysisContext),
-        interactiveLanguage: checkInteractiveLanguage(analysisContext),
-        arabicOnly: checkArabicOnly(analysisContext),
-        lastH2IsConclusion: conclusionChecks.lastH2IsConclusion,
-        conclusionParagraph: conclusionChecks.conclusionParagraph,
-        conclusionWordCount: conclusionChecks.conclusionWordCount,
-        conclusionHasNumber: conclusionChecks.conclusionHasNumber,
-        conclusionHasList: conclusionChecks.conclusionHasList,
-        sentenceBeginnings: checkSentenceBeginnings(analysisContext),
-        warningWords: checkWarningWords(analysisContext),
-        punctuationSpacing: checkPunctuationSpacing(analysisContext),
-        repeatedBigrams: checkRepeatedBigrams(analysisContext),
-        slowWords: checkSlowWords(analysisContext),
-        wordConsistency: checkWordConsistency(analysisContext),
-        commonEnglishTerms: checkCommonEnglishTerms(analysisContext),
-        wordsToDelete: checkWordsToDelete(analysisContext),
-        keywordStuffing: checkKeywordStuffing(analysisContext),
-        mandatoryH2Sections: checkDeviceSaleMandatoryH2(analysisContext),
-        supportingH2Sections: checkDeviceSaleSupportingH2(analysisContext),
-        tablesCount: checkTablesCount(analysisContext),
+    worker.onerror = (event) => {
+      if (disposed) return;
+      worker.terminate();
+      if (activeWorkerRef.current === worker) {
+        activeWorkerRef.current = null;
+      }
+      console.error('Content analysis worker error:', event.message || event);
+      setWorkerDisabled(true);
+      runFallbackAnalysis();
     };
-    
-    // --- 4. Calculate final stats and assemble the single analysis result ---
-    const violatingCriteriaCount = Object.values(structureAnalysis).filter(c => c.status === 'fail').length;
-    const totalErrorsCount = Object.values(structureAnalysis).reduce((sum, c) => sum + (c.violationCount ?? c.violatingItems?.length ?? 0), 0);
 
-    return {
-      keywordAnalysis,
-      structureAnalysis,
-      structureStats: {
-        violatingCriteriaCount,
-        totalErrorsCount,
-        paragraphCount: nonEmptyParagraphs.length,
-        headingCount: headings.length,
-      },
-      duplicateAnalysis,
-      duplicateStats,
-      wordCount: totalWordCount,
+    worker.postMessage({ requestId, input });
+
+    return () => {
+      disposed = true;
+      worker.terminate();
+      if (activeWorkerRef.current === worker) {
+        activeWorkerRef.current = null;
+      }
     };
-  }, [editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage]);
+  }, [editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, updateDuplicateAnalysis, workerDisabled]);
+
+  return analysisResults;
 };

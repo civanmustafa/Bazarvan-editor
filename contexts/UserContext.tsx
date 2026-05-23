@@ -115,6 +115,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     const [isIdle, setIsIdle] = useState(false);
     const idleTimerRef = useRef<number | null>(null);
+    const hiddenTimerRef = useRef<number | null>(null);
+    const isIdleRef = useRef(false);
 
     const t = translations[uiLanguage] || translations.ar;
 
@@ -144,49 +146,96 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
      // Idle tracking feeds EditorContext time tracking so inactive tabs do not inflate article time.
      useEffect(() => {
         if (currentView !== 'editor') {
-        if (!isIdle) setIsIdle(true);
-        return;
+            isIdleRef.current = true;
+            setIsIdle(true);
+            if (idleTimerRef.current) {
+                clearTimeout(idleTimerRef.current);
+                idleTimerRef.current = null;
+            }
+            if (hiddenTimerRef.current) {
+                clearTimeout(hiddenTimerRef.current);
+                hiddenTimerRef.current = null;
+            }
+            return;
         }
         
         const IDLE_TIMEOUT = 2 * 60 * 1000;
+        const HIDDEN_IDLE_GRACE_MS = 5 * 1000;
+
+        const setIdleState = (nextIsIdle: boolean) => {
+            if (isIdleRef.current === nextIsIdle) return;
+            isIdleRef.current = nextIsIdle;
+            setIsIdle(nextIsIdle);
+        };
+
+        const clearIdleTimer = () => {
+            if (idleTimerRef.current) {
+                clearTimeout(idleTimerRef.current);
+                idleTimerRef.current = null;
+            }
+        };
+
+        const clearHiddenTimer = () => {
+            if (hiddenTimerRef.current) {
+                clearTimeout(hiddenTimerRef.current);
+                hiddenTimerRef.current = null;
+            }
+        };
 
         const handleUserActivity = () => {
-        setIsIdle(false); 
-        
-        if (idleTimerRef.current) {
-            clearTimeout(idleTimerRef.current);
-        }
+            if (document.hidden) return;
 
-        idleTimerRef.current = window.setTimeout(() => {
-            setIsIdle(true);
-        }, IDLE_TIMEOUT);
+            clearHiddenTimer();
+            setIdleState(false);
+            clearIdleTimer();
+
+            idleTimerRef.current = window.setTimeout(() => {
+                setIdleState(true);
+            }, IDLE_TIMEOUT);
         };
 
         const handleVisibilityChange = () => {
-        if (document.hidden) {
-            if (idleTimerRef.current) {
-            clearTimeout(idleTimerRef.current);
+            if (document.hidden) {
+                clearIdleTimer();
+                clearHiddenTimer();
+                hiddenTimerRef.current = window.setTimeout(() => {
+                    if (document.hidden) {
+                        setIdleState(true);
+                    }
+                }, HIDDEN_IDLE_GRACE_MS);
+            } else {
+                handleUserActivity();
             }
-            setIsIdle(true);
-        } else {
+        };
+
+        const handleWindowFocus = () => {
             handleUserActivity();
-        }
+        };
+
+        const handleWindowBlur = () => {
+            if (!document.hidden) return;
+            handleVisibilityChange();
         };
 
         handleUserActivity();
 
-        const events: (keyof WindowEventMap)[] = ['mousemove', 'keydown', 'mousedown', 'scroll', 'touchstart'];
+        const events: (keyof WindowEventMap)[] = ['mousemove', 'pointermove', 'keydown', 'mousedown', 'pointerdown', 'click', 'scroll', 'wheel', 'touchstart'];
         events.forEach(event => window.addEventListener(event, handleUserActivity, { passive: true }));
+        window.addEventListener('focus', handleWindowFocus);
+        window.addEventListener('blur', handleWindowBlur);
+        document.addEventListener('selectionchange', handleUserActivity);
         document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
-        if (idleTimerRef.current) {
-            clearTimeout(idleTimerRef.current);
-        }
-        events.forEach(event => window.removeEventListener(event, handleUserActivity));
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
+            clearIdleTimer();
+            clearHiddenTimer();
+            events.forEach(event => window.removeEventListener(event, handleUserActivity));
+            window.removeEventListener('focus', handleWindowFocus);
+            window.removeEventListener('blur', handleWindowBlur);
+            document.removeEventListener('selectionchange', handleUserActivity);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [currentUser, currentView, isIdle]);
+    }, [currentUser, currentView]);
 
     // Load all saved preferences whenever a user logs in or changes.
     useEffect(() => {

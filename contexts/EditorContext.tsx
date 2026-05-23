@@ -26,6 +26,10 @@ import { normalizeGoalContext } from '../utils/goalContext';
  */
 
 // --- Local timing helpers ---
+const EDITOR_SNAPSHOT_DELAY_MS = 300;
+const ANALYSIS_DEBOUNCE_MS = 900;
+const AUTOSAVE_INTERVAL_MS = 60 * 1000;
+
 function useDebounce<T>(value: T, delay: number): T {
     const [debouncedValue, setDebouncedValue] = useState<T>(value);
     useEffect(() => {
@@ -212,6 +216,8 @@ interface EditorContextType {
     goalContext: GoalContext;
     setGoalContext: React.Dispatch<React.SetStateAction<GoalContext>>;
     analysisResults: FullAnalysis;
+    isDuplicatesTabActive: boolean;
+    setIsDuplicatesTabActive: React.Dispatch<React.SetStateAction<boolean>>;
     saveStatus: 'idle' | 'saved';
     restoreStatus: 'idle' | 'restored';
     draftExists: boolean;
@@ -249,12 +255,40 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
     const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restored'>('idle');
     const [draftExists, setDraftExists] = useState(false);
+    const [isDuplicatesTabActive, setIsDuplicatesTabActive] = useState(false);
     
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const editorSnapshotTimerRef = useRef<number | null>(null);
     
     // Debounce editor state and text content before analysis to keep typing responsive.
-    const debouncedEditorState = useDebounce(editorState, 500);
-    const debouncedText = useDebounce(text, 500);
+    const debouncedEditorState = useDebounce(editorState, ANALYSIS_DEBOUNCE_MS);
+    const debouncedText = useDebounce(text, ANALYSIS_DEBOUNCE_MS);
+
+    const clearEditorSnapshotTimer = useCallback(() => {
+        if (editorSnapshotTimerRef.current) {
+            clearTimeout(editorSnapshotTimerRef.current);
+            editorSnapshotTimerRef.current = null;
+        }
+    }, []);
+
+    const captureEditorSnapshot = useCallback((targetEditor: Editor, persistDraft = true) => {
+        const contentJSON = targetEditor.getJSON();
+        setEditorState(contentJSON);
+        setText(targetEditor.getText());
+        if (persistDraft) {
+            localStorage.setItem(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
+        }
+    }, []);
+
+    const scheduleEditorSnapshot = useCallback((targetEditor: Editor) => {
+        clearEditorSnapshotTimer();
+        editorSnapshotTimerRef.current = window.setTimeout(() => {
+            captureEditorSnapshot(targetEditor);
+            editorSnapshotTimerRef.current = null;
+        }, EDITOR_SNAPSHOT_DELAY_MS);
+    }, [captureEditorSnapshot, clearEditorSnapshotTimer]);
+
+    useEffect(() => clearEditorSnapshotTimer, [clearEditorSnapshotTimer]);
 
     // TipTap extensions live here. Add editor-level behavior or formatting support in this list.
     const extensions = useMemo(() => [
@@ -279,14 +313,10 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         },
         onUpdate: ({ editor, transaction }) => {
             if (transaction.getMeta('preventUpdate')) return;
-            const contentJSON = editor.getJSON();
-            setEditorState(contentJSON);
-            setText(editor.getText());
-            localStorage.setItem(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
+            scheduleEditorSnapshot(editor);
         },
         onCreate: ({ editor }) => {
-            setEditorState(editor.getJSON());
-            setText(editor.getText());
+            captureEditorSnapshot(editor);
             const savedLang = getStoredLanguage(AUTO_DRAFT_LANGUAGE_KEY) || getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
             const targetLang = savedLang || preferredLanguage || 'ar';
             setArticleLanguage(targetLang);
@@ -316,8 +346,14 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         applyArticleLanguageFormatting(editor, lang);
     }, [editor]);
 
+    useEffect(() => {
+        if (!isDuplicatesTabActive || !editor || editor.isDestroyed) return;
+        clearEditorSnapshotTimer();
+        captureEditorSnapshot(editor, false);
+    }, [isDuplicatesTabActive, editor, clearEditorSnapshotTimer, captureEditorSnapshot]);
+
     // Analysis is derived state: do not manually store rule results elsewhere.
-    const analysisResults = useContentAnalysis(debouncedEditorState, debouncedText, keywords, goalContext, articleLanguage, uiLanguage);
+    const analysisResults = useContentAnalysis(debouncedEditorState, debouncedText, keywords, goalContext, articleLanguage, uiLanguage, isDuplicatesTabActive);
 
     useEffect(() => {
         if (!currentUser) return;
@@ -337,7 +373,12 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const handleSaveDraft = useCallback(() => {
         if (!editor || !currentUser) return;
         const contentJSON = editor.getJSON();
-        if (title.trim() === '' && editor.getText().trim() === '') return;
+        const currentText = editor.getText();
+        if (title.trim() === '' && currentText.trim() === '') return;
+        clearEditorSnapshotTimer();
+        setEditorState(contentJSON);
+        setText(currentText);
+        localStorage.setItem(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
 
         let currentKey = articleKey;
         const newTitle = title.trim();
@@ -362,7 +403,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setDraftExists(true);
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2000);
-    }, [editor, currentUser, title, articleKey, keywords, analysisResults, articleLanguage, goalContext]);
+    }, [editor, currentUser, title, articleKey, keywords, analysisResults, articleLanguage, goalContext, clearEditorSnapshotTimer]);
     
     const handleSaveDraftRef = useRef(handleSaveDraft);
     useEffect(() => {
@@ -372,7 +413,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     useEffect(() => {
         const autosaveInterval = setInterval(() => {
             handleSaveDraftRef.current();
-        }, 20 * 1000); // Autosave every 20 seconds
+        }, AUTOSAVE_INTERVAL_MS);
         return () => clearInterval(autosaveInterval);
     }, []);
 
@@ -382,7 +423,10 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const titleStr = localStorage.getItem(MANUAL_DRAFT_TITLE_KEY);
         const keywordsStr = localStorage.getItem(MANUAL_DRAFT_KEYWORDS_KEY);
         const lang = getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
-        if (content) editor.commands.setContent(JSON.parse(content));
+        if (content) {
+            editor.commands.setContent(JSON.parse(content));
+            captureEditorSnapshot(editor);
+        }
         if (titleStr) {
             setTitle(titleStr);
             setArticleKey(titleStr);
@@ -392,7 +436,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (lang) handleLanguageChange(lang);
         setRestoreStatus('restored');
         setTimeout(() => setRestoreStatus('idle'), 2000);
-    }, [editor, handleLanguageChange]);
+    }, [editor, handleLanguageChange, captureEditorSnapshot]);
 
     const handleNewArticle = useCallback((lang: 'ar' | 'en') => {
         handleSaveDraft();
@@ -402,10 +446,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setKeywords(INITIAL_KEYWORDS);
             setGoalContext(normalizeGoalContext());
             editor.commands.setContent(INITIAL_CONTENT);
+            captureEditorSnapshot(editor);
             handleLanguageChange(lang);
             setCurrentView('editor');
         }
-    }, [editor, handleSaveDraft, setCurrentView, handleLanguageChange]);
+    }, [editor, handleSaveDraft, setCurrentView, handleLanguageChange, captureEditorSnapshot]);
 
     const handleLoadArticle = useCallback((titleStr: string, article: ArticleActivity) => {
         if (editor && article) {
@@ -415,10 +460,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setKeywords(article.keywords || INITIAL_KEYWORDS);
             setGoalContext(normalizeGoalContext(article.goalContext));
             editor.commands.setContent(article.content || INITIAL_CONTENT);
+            captureEditorSnapshot(editor);
             handleLanguageChange(lang);
             setCurrentView('editor');
         }
-    }, [editor, setCurrentView, handleLanguageChange]);
+    }, [editor, setCurrentView, handleLanguageChange, captureEditorSnapshot]);
     
     const value: EditorContextType = {
         editor,
@@ -432,6 +478,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         goalContext,
         setGoalContext,
         analysisResults,
+        isDuplicatesTabActive,
+        setIsDuplicatesTabActive,
         saveStatus,
         restoreStatus,
         draftExists,

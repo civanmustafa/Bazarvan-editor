@@ -105,37 +105,37 @@ export const runKeywordAnalysis = (context: AnalysisContext): KeywordAnalysis =>
       const h2sWithSynonym = h2s.filter(h => countOccurrences(h.text, s, articleLanguage) > 0);
       const isInH2 = h2sWithSynonym.length > 0;
 
-      let allH2sWithSynonymAreValid = true;
-      if (isInH2) {
-          for (const h2 of h2sWithSynonym) {
-              const h2IndexInNodes = context.nodes.findIndex(node => node.pos === h2.pos);
-              if (h2IndexInNodes === -1) continue;
+      const getH2SectionText = (h2: typeof h2s[number]): string => {
+          const h2IndexInNodes = context.nodes.findIndex(node => node.pos === h2.pos);
+          if (h2IndexInNodes === -1) return '';
 
-              let nextHeadingIndex = -1;
-              for (let i = h2IndexInNodes + 1; i < context.nodes.length; i++) {
-                  if (context.nodes[i].type === 'heading') {
-                      nextHeadingIndex = i;
-                      break;
-                  }
-              }
-              
-              const endOfSectionIndex = nextHeadingIndex === -1 ? context.nodes.length : nextHeadingIndex;
-              const sectionParagraphs = context.nodes.slice(h2IndexInNodes + 1, endOfSectionIndex).filter(node => node.type === 'paragraph');
-              const sectionText = sectionParagraphs.map(p => p.text).join(' ');
-              
-              if (countOccurrences(sectionText, s, articleLanguage) === 0) {
-                  allH2sWithSynonymAreValid = false;
+          let nextH2Index = -1;
+          for (let i = h2IndexInNodes + 1; i < context.nodes.length; i++) {
+              const node = context.nodes[i];
+              if (node.type === 'heading' && (node.level || 0) <= 2) {
+                  nextH2Index = i;
                   break;
               }
           }
-      }
+
+          const endOfSectionIndex = nextH2Index === -1 ? context.nodes.length : nextH2Index;
+          return context.nodes
+              .slice(h2IndexInNodes + 1, endOfSectionIndex)
+              .filter(node => node.type !== 'heading')
+              .map(node => node.text)
+              .join(' ');
+      };
+
+      const hasValidH2Section = h2sWithSynonym.some(h2 =>
+          countOccurrences(getH2SectionText(h2), s, articleLanguage) > 0
+      );
 
       return {
         count, percentage, requiredPercentage, requiredCount,
         status: getStatus(count, requiredCount[0], requiredCount[1]),
         checks: [
           { text: tKwChecks.inH2Simple, isMet: isInH2 },
-          { text: tKwChecks.inH2Section, isMet: isInH2 && allH2sWithSynonymAreValid }
+          { text: tKwChecks.inH2Section, isMet: isInH2 && hasValidH2Section }
         ],
       };
     });
