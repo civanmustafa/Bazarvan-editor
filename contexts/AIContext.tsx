@@ -1867,15 +1867,17 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 مهم جداً: لا تكرر أي نص جاهز للإضافة داخل analysisMarkdown وداخل patches في الوقت نفسه.
 اجعل analysisMarkdown للتشخيص المختصر، الحكم، الفجوة، سببها، ومكانها فقط.
 اجعل patches هي المكان الوحيد الذي يحتوي النصوص الجاهزة للنسخ أو الإدراج داخل المقال.
-إذا كان بند في التقرير يحتاج "الحل العملي الجاهز" أو "الإجابة المقترحة" أو "الجملة المقترحة"، فاكتب في analysisMarkdown عبارة قصيرة مثل: النص الجاهز متاح في قسم التعديلات القابلة للتطبيق بعنوان: [عنوان التعديل].
+إذا كان بند في التقرير يحتاج "الحل العملي الجاهز" أو "الإجابة المقترحة" أو "الجملة المقترحة"، فاكتب في analysisMarkdown سبب المشكلة ومكانها باختصار، ثم ضع علامة [[PATCH:patch_1]] مباشرة في موضع بطاقة التنفيذ.
 استخدم هذا الشكل حصراً:
 {
   "analysisMarkdown": "اكتب هنا التحليل العربي بنفس ترتيب الأمر المطلوب.",
   "patches": [
     {
+      "marker": "patch_1",
       "operation": "insert_after_heading",
       "title": "عنوان قصير للتعديل",
       "anchorText": "العنوان أو الفقرة المرجعية داخل المقال",
+      "targetText": "",
       "placementLabel": "بعد قسم كذا",
       "contentMarkdown": "النص المقترح الجاهز للإضافة فقط",
       "reason": "سبب مختصر",
@@ -1885,6 +1887,8 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 }
 
 القيم المسموحة لـ operation:
+- replace_block
+- replace_text
 - insert_after_heading
 - insert_before_heading
 - append_to_section
