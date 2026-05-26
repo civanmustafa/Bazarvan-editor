@@ -1,5 +1,5 @@
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import chatgptHandler from './api/chatgpt';
 import geminiHandler from './api/gemini';
@@ -48,7 +48,15 @@ const sendWebResponse = async (res: any, response: Response) => {
   res.end(body);
 };
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+      const env = loadEnv(mode, process.cwd(), '');
+      ['GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY', 'OPENAI_API_KEY', 'OPENAI_API_KEYS'].forEach((key) => {
+        if (!process.env[key] && env[key]) {
+          process.env[key] = env[key];
+        }
+      });
+
+      return {
       server: {
         port: 3000,
         host: '0.0.0.0',
@@ -115,4 +123,5 @@ export default defineConfig({
           '@': path.resolve(__dirname, '.'),
         }
       }
+      };
 });

@@ -8,10 +8,17 @@ type ApiResult = {
   headers?: Record<string, string>;
 };
 
+type GeminiErrorDetails = {
+  status: number;
+  message: string;
+};
+
+const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
+
 /*
  * Local Gemini API route used by the Vite dev middleware.
- * The UI sends one or more user-provided keys; this route randomizes attempts
- * so quota errors on one key do not block the whole request.
+ * The UI may send user-provided keys; otherwise this route reads server keys.
+ * Key attempts are randomized so quota errors on one key do not block the request.
  */
 const randomizeKeyOrder = (keys: string[]): string[] => {
   const shuffled = [...keys];
@@ -74,6 +81,33 @@ const parseEnvGeminiKeys = (): string[] => {
     .filter(Boolean);
 };
 
+const getGeminiErrorDetails = (error: unknown): GeminiErrorDetails => {
+  const value = error && typeof error === "object" ? error as Record<string, any> : {};
+  const nestedError = value.error && typeof value.error === "object" ? value.error : {};
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : typeof nestedError.message === "string"
+        ? nestedError.message
+        : typeof value.message === "string"
+          ? value.message
+          : "خطأ غير معروف";
+  const statusFromValue = typeof value.status === "number"
+    ? value.status
+    : typeof nestedError.code === "number"
+      ? nestedError.code
+      : undefined;
+  const statusFromMessage = message.match(/\b(400|401|403|404|408|429|500|502|503|504)\b/)?.[1];
+
+  return {
+    status: statusFromValue || (statusFromMessage ? Number(statusFromMessage) : 502),
+    message,
+  };
+};
+
+const wait = (duration: number) => new Promise(resolve => setTimeout(resolve, duration));
+
 const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
   if (req.method !== "POST") {
     return { status: 405, body: { error: "الطريقة غير مسموح بها" } };
@@ -98,7 +132,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     }
 
     if (GEMINI_API_KEYS.length === 0) {
-      return { status: 500, body: { error: "لم يتم تكوين مفتاح Gemini API على الخادم." } };
+      return { status: 503, body: { error: "لم يتم تكوين مفتاح Gemini API على الخادم." } };
     }
     
     if (!prompt) {
@@ -106,37 +140,52 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     }
 
     // Flash has a free-tier quota, while Pro can return limit 0 on unpaid projects.
-    let lastError: unknown = null;
+    let lastError: GeminiErrorDetails | null = null;
     for (const GEMINI_API_KEY of randomizeKeyOrder(GEMINI_API_KEYS)) {
-      try {
-        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
-          model: GEMINI_ANALYSIS_MODEL,
-          contents: prompt,
-          config: useUrlContext
-            ? {
-                tools: [{ urlContext: {} }],
-                toolConfig: { includeServerSideToolInvocations: true },
-              }
-            : undefined,
-        });
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+          const response = await ai.models.generateContent({
+            model: GEMINI_ANALYSIS_MODEL,
+            contents: prompt,
+            config: useUrlContext
+              ? {
+                  tools: [{ urlContext: {} }],
+                  toolConfig: { includeServerSideToolInvocations: true },
+                }
+              : undefined,
+          });
 
-        const text = response.text;
+          const text = response.text;
 
-        return { status: 200, body: { text } };
-      } catch (error) {
-        lastError = error;
+          return { status: 200, body: { text } };
+        } catch (error) {
+          lastError = getGeminiErrorDetails(error);
+          if (attempt === 0 && RETRIABLE_GEMINI_STATUSES.has(lastError.status)) {
+            await wait(400);
+            continue;
+          }
+          break;
+        }
       }
     }
 
-    throw lastError || new Error("فشلت كل مفاتيح Gemini.");
+    const responseStatus = lastError && lastError.status >= 400 && lastError.status < 500
+      ? lastError.status
+      : 502;
+    return {
+      status: responseStatus,
+      body: {
+        error: `خطأ من Gemini API باستخدام النموذج ${GEMINI_ANALYSIS_MODEL}: ${lastError?.message || "فشلت كل مفاتيح Gemini."}`,
+      },
+    };
 
   } catch (error) {
     console.error("Error processing request:", error);
     if (error instanceof SyntaxError) {
       return { status: 400, body: { error: "طلب JSON غير صالح" } };
     }
-    const errorMessage = error instanceof Error ? error.message : "خطأ غير معروف";
+    const errorMessage = getGeminiErrorDetails(error).message;
     return { status: 500, body: { error: `خطأ من Gemini API: ${errorMessage}` } };
   }
 };

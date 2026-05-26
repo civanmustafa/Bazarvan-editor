@@ -1655,15 +1655,27 @@ const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]):
 
       window.clearTimeout(timeoutId);
 
-      const isJson = response.headers.get('content-type')?.includes('application/json');
-      const data = isJson ? await response.json().catch(() => ({})) : {};
+      const rawBody = await response.text().catch(() => '');
+      let data: Record<string, any> = {};
+      try {
+          data = rawBody ? JSON.parse(rawBody) : {};
+      } catch {
+          // Some proxies return plain-text errors; use the raw response below.
+      }
 
       if (response.status === 404) {
           throw new Error('Gemini API route is not enabled locally. Restart the Vite dev server so it can load the local API middleware.');
       }
 
       if (!response.ok) {
-          throw new Error(data.error || `Gemini request failed with status ${response.status}`);
+          const serverError = typeof data.error === 'string'
+              ? data.error
+              : typeof data.error?.message === 'string'
+                ? data.error.message
+                : rawBody.trim() && !rawBody.trim().startsWith('<')
+                  ? rawBody.trim().slice(0, 500)
+                  : '';
+          throw new Error(serverError || `Gemini request failed with status ${response.status}`);
       }
 
       if (typeof data.text !== 'string') {
