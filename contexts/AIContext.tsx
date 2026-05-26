@@ -2508,6 +2508,56 @@ const findBestTextBlockMatch = (editor: any, candidates: string[], bounds?: Text
     return bestMatch;
 };
 
+const normalizePatchLocationCandidate = (value?: string): string => (value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^(?:بعد|قبل|داخل|ضمن|في)\s+(?:قسم|عنوان|فقرة|جزء)\s+/i, '')
+    .trim();
+
+const getPatchLocationCandidates = (patch: AiContentPatch): string[] => {
+    const candidates = [
+        patch.targetText,
+        patch.anchorText,
+        patch.placementLabel,
+    ].map(normalizePatchLocationCandidate);
+    const seen = new Set<string>();
+
+    return candidates.filter(candidate => {
+        const normalized = normalizeAnchorText(candidate);
+        if (!normalized || seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+    });
+};
+
+const isConfidentLocationMatch = (match: TextBlockMatch | null, candidate: string): match is TextBlockMatch => {
+    if (!match) return false;
+    if (match.score >= 3) return true;
+
+    const candidateWordCount = normalizeAnchorText(candidate).split(' ').filter(Boolean).length;
+    if (candidateWordCount < 4) return false;
+    if (candidateWordCount >= 12) return match.score >= 0.5;
+    if (candidateWordCount >= 8) return match.score >= 0.58;
+    return match.score >= 0.68;
+};
+
+const findPatchLocationBlockMatch = (
+    editor: any,
+    patch: AiContentPatch,
+    bounds?: TextBlockSearchBounds,
+): TextBlockMatch | null => {
+    let bestMatch: TextBlockMatch | null = null;
+
+    getPatchLocationCandidates(patch).forEach(candidate => {
+        const match = findBestTextBlockMatch(editor, [candidate], bounds);
+        if (!isConfidentLocationMatch(match, candidate)) return;
+        if (isBetterTextBlockMatch(match, bestMatch, candidate)) {
+            bestMatch = match;
+        }
+    });
+
+    return bestMatch;
+};
+
 const isConfidentReplacementMatch = (match: TextBlockMatch | null, targetText: string): match is TextBlockMatch => {
     if (!match) return false;
     if (match.score >= 3) return true;
@@ -2701,17 +2751,31 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
     }
 
     const heading = findHeadingMatch(editor, patch.anchorText || '');
-    if (!heading) {
+    const anchorBlock = heading
+        ? null
+        : findPatchLocationBlockMatch(editor, patch) || findIntroductionReplacementTarget(editor, patch);
+
+    if (!heading && !anchorBlock) {
         return { error: `لم يتم العثور على الموضع المرجعي: ${patch.anchorText || patch.placementLabel || patch.title}` };
     }
 
     if (patch.operation === 'insert_before_heading') {
+        if (!heading && anchorBlock) {
+            return { from: anchorBlock.from, to: anchorBlock.from, selectFrom: anchorBlock.from, selectTo: anchorBlock.to, mode: 'insert' };
+        }
         return { from: heading.pos, to: heading.pos, selectFrom: heading.pos, selectTo: heading.to, mode: 'insert' };
     }
 
     if (patch.operation === 'append_to_section') {
+        if (!heading && anchorBlock) {
+            return { from: anchorBlock.to, to: anchorBlock.to, selectFrom: anchorBlock.from, selectTo: anchorBlock.to, mode: 'insert' };
+        }
         const sectionEnd = findSectionEnd(editor, heading);
         return { from: sectionEnd, to: sectionEnd, selectFrom: heading.pos, selectTo: heading.to, mode: 'insert' };
+    }
+
+    if (!heading && anchorBlock) {
+        return { from: anchorBlock.to, to: anchorBlock.to, selectFrom: anchorBlock.from, selectTo: anchorBlock.to, mode: 'insert' };
     }
 
     return { from: heading.to, to: heading.to, selectFrom: heading.pos, selectTo: heading.to, mode: 'insert' };
