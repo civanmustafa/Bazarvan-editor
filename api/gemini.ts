@@ -1,6 +1,9 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { GEMINI_ANALYSIS_MODEL } from "../constants/aiModels";
+
+// Keep the serverless function self-contained: Vercel executes this compiled
+// ESM file directly and cannot resolve extensionless frontend module imports.
+const GEMINI_ANALYSIS_MODEL = "gemini-2.5-flash";
 
 type ApiResult = {
   status: number;
