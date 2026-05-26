@@ -68,6 +68,34 @@ type ActivityData = {
   [username: string]: UserActivity;
 };
 
+const isRecord = (value: unknown): value is Record<string, any> => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
+);
+
+const toFiniteNumber = (value: unknown, fallback = 0): number => (
+  typeof value === 'number' && Number.isFinite(value) ? value : fallback
+);
+
+const toStringArray = (value: unknown, fallback: string[] = []): string[] => (
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : fallback
+);
+
+const toKeyList = (value: unknown): string[] => {
+  if (typeof value === 'string') return [value];
+  const keys = toStringArray(value);
+  return keys.length > 0 ? keys : [''];
+};
+
+export const normalizeKeywords = (value: unknown): Keywords => {
+  const source = isRecord(value) ? value : {};
+  return {
+    primary: typeof source.primary === 'string' ? source.primary : '',
+    secondaries: toStringArray(source.secondaries, ['', '', '', '']),
+    company: typeof source.company === 'string' ? source.company : '',
+    lsi: toStringArray(source.lsi),
+  };
+};
+
 const getDefaultUserActivity = (): UserActivity => ({
   logins: [],
   apiKeys: {
@@ -110,10 +138,80 @@ const getDefaultArticleActivity = (): ArticleActivity => ({
   },
 });
 
+const normalizeArticleActivity = (value: unknown): ArticleActivity => {
+  const source = isRecord(value) ? value : {};
+  const defaults = getDefaultArticleActivity();
+  const storedStats = isRecord(source.stats) ? source.stats : {};
+
+  return {
+    ...defaults,
+    timeSpentSeconds: toFiniteNumber(source.timeSpentSeconds),
+    saveCount: toFiniteNumber(source.saveCount),
+    lastSaved: typeof source.lastSaved === 'string' ? source.lastSaved : '',
+    content: source.content ?? null,
+    keywords: normalizeKeywords(source.keywords),
+    goalContext: isRecord(source.goalContext) ? source.goalContext as GoalContext : defaults.goalContext,
+    articleLanguage: source.articleLanguage === 'en' ? 'en' : 'ar',
+    stats: {
+      wordCount: toFiniteNumber(storedStats.wordCount),
+      keywordViolations: toFiniteNumber(storedStats.keywordViolations),
+      violatingCriteriaCount: toFiniteNumber(storedStats.violatingCriteriaCount),
+      totalErrorsCount: toFiniteNumber(storedStats.totalErrorsCount),
+      keywordDuplicatesCount: toFiniteNumber(storedStats.keywordDuplicatesCount),
+      totalDuplicates: toFiniteNumber(storedStats.totalDuplicates),
+      commonDuplicatesCount: toFiniteNumber(storedStats.commonDuplicatesCount),
+      uniqueWordsPercentage: toFiniteNumber(storedStats.uniqueWordsPercentage),
+    },
+  };
+};
+
+const normalizeUserActivity = (value: unknown): UserActivity => {
+  const source = isRecord(value) ? value : {};
+  const defaults = getDefaultUserActivity();
+  const storedApiKeys = isRecord(source.apiKeys) ? source.apiKeys : {};
+  const articles = isRecord(source.articles)
+    ? Object.entries(source.articles).reduce<UserActivity['articles']>((normalized, [title, article]) => {
+        if (isRecord(article)) {
+          normalized[title] = normalizeArticleActivity(article);
+        }
+        return normalized;
+      }, {})
+    : {};
+
+  return {
+    ...defaults,
+    logins: toStringArray(source.logins),
+    apiKeys: {
+      gemini: toKeyList(storedApiKeys.gemini),
+      chatgpt: toKeyList(storedApiKeys.chatgpt ?? storedApiKeys.openai),
+    },
+    articles,
+    preferredHighlightStyle: source.preferredHighlightStyle === 'underline' ? 'underline' : 'background',
+    preferredKeywordViewMode: source.preferredKeywordViewMode === 'modern' ? 'modern' : 'classic',
+    preferredStructureViewMode: source.preferredStructureViewMode === 'list' ? 'list' : 'grid',
+    preferredTheme: source.preferredTheme === 'light' ? 'light' : 'dark',
+    preferredLanguage: source.preferredLanguage === 'en' ? 'en' : 'ar',
+    preferredUILanguage: source.preferredUILanguage === 'en' ? 'en' : 'ar',
+    clientGoalContexts: isRecord(source.clientGoalContexts) ? source.clientGoalContexts as ClientGoalContexts : {},
+    engineeringPrompts: isRecord(source.engineeringPrompts) ? source.engineeringPrompts as EngineeringPrompts : defaults.engineeringPrompts,
+  };
+};
+
+const normalizeActivityData = (value: unknown): ActivityData => {
+  if (!isRecord(value)) return {};
+
+  return Object.entries(value).reduce<ActivityData>((normalized, [username, activity]) => {
+    if (isRecord(activity)) {
+      normalized[username] = normalizeUserActivity(activity);
+    }
+    return normalized;
+  }, {});
+};
+
 export const getActivityData = (): ActivityData => {
   try {
     const data = localStorage.getItem(ACTIVITY_KEY);
-    return data ? JSON.parse(data) : {};
+    return data ? normalizeActivityData(JSON.parse(data)) : {};
   } catch (error) {
     console.error("Failed to read activity data from localStorage:", error);
     return {};

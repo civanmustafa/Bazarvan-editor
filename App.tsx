@@ -1,5 +1,5 @@
 ﻿
-import React from 'react';
+import React, { Component } from 'react';
 import { EditorContent } from '@tiptap/react';
 import { ArrowUp, Sparkles } from 'lucide-react';
 
@@ -18,6 +18,18 @@ import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import ModalManager from './components/ModalManager';
 import SpotlightSearch from './components/SpotlightSearch';
+import {
+    AUTO_DRAFT_GOAL_CONTEXT_KEY,
+    AUTO_DRAFT_KEY,
+    AUTO_DRAFT_KEYWORDS_KEY,
+    AUTO_DRAFT_LANGUAGE_KEY,
+    AUTO_DRAFT_TITLE_KEY,
+    MANUAL_DRAFT_GOAL_CONTEXT_KEY,
+    MANUAL_DRAFT_KEY,
+    MANUAL_DRAFT_KEYWORDS_KEY,
+    MANUAL_DRAFT_LANGUAGE_KEY,
+    MANUAL_DRAFT_TITLE_KEY,
+} from './constants';
 import './styles/global.css';
 import './styles/editor.css';
 import './styles/components.css';
@@ -31,6 +43,83 @@ import './styles/components.css';
  * When adding a new full page, edit AppContent.
  * When changing editor layout, edit EditorView and the sidebar/toolbar components.
  */
+type AppErrorBoundaryState = { hasError: boolean };
+
+class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppErrorBoundaryState> {
+    state: AppErrorBoundaryState = { hasError: false };
+
+    static getDerivedStateFromError(): AppErrorBoundaryState {
+        return { hasError: true };
+    }
+
+    componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+        console.error('Application rendering failed:', error, errorInfo);
+    }
+
+    private reload = () => {
+        window.location.reload();
+    };
+
+    private clearDraftAndReload = () => {
+        [
+            AUTO_DRAFT_KEY,
+            AUTO_DRAFT_TITLE_KEY,
+            AUTO_DRAFT_KEYWORDS_KEY,
+            AUTO_DRAFT_LANGUAGE_KEY,
+            AUTO_DRAFT_GOAL_CONTEXT_KEY,
+            MANUAL_DRAFT_KEY,
+            MANUAL_DRAFT_TITLE_KEY,
+            MANUAL_DRAFT_KEYWORDS_KEY,
+            MANUAL_DRAFT_LANGUAGE_KEY,
+            MANUAL_DRAFT_GOAL_CONTEXT_KEY,
+        ].forEach(key => {
+            try {
+                localStorage.removeItem(key);
+            } catch (error) {
+                console.error(`Failed to remove recovery field "${key}":`, error);
+            }
+        });
+        this.reload();
+    };
+
+    private logoutAndReload = () => {
+        try {
+            sessionStorage.removeItem('currentUser');
+        } catch (error) {
+            console.error('Failed to clear session during recovery:', error);
+        }
+        this.reload();
+    };
+
+    render() {
+        if (!this.state.hasError) {
+            return this.props.children;
+        }
+
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-[#FAFAFA] dark:bg-[#181818] p-4" dir="rtl">
+                <div className="w-full max-w-lg rounded-lg border border-gray-200 bg-white p-6 text-right shadow-lg dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+                    <h1 className="text-xl font-bold text-[#333333] dark:text-gray-100">تعذر فتح اللوحة</h1>
+                    <p className="mt-3 text-sm leading-7 text-gray-600 dark:text-gray-300">
+                        حدث خطأ أثناء تحميل بيانات محفوظة على هذا الجهاز. يمكنك إعادة المحاولة، أو إزالة بيانات المسودة المحلية فقط دون حذف المقالات المحفوظة.
+                    </p>
+                    <div className="mt-5 flex flex-wrap gap-2">
+                        <button onClick={this.reload} className="rounded-md bg-[#d4af37] px-4 py-2 text-sm font-bold text-white hover:bg-[#b8922e]">
+                            إعادة المحاولة
+                        </button>
+                        <button onClick={this.clearDraftAndReload} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#2A2A2A]">
+                            إزالة المسودة المحلية
+                        </button>
+                        <button onClick={this.logoutAndReload} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#2A2A2A]">
+                            تسجيل الخروج
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+}
+
 const EditorView: React.FC = () => {
     const { isDarkMode, t } = useUser();
     const { editor, scrollContainerRef } = useEditor();
@@ -134,9 +223,11 @@ const AppContent: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <AppProviders>
-      <AppContent />
-    </AppProviders>
+    <AppErrorBoundary>
+      <AppProviders>
+        <AppContent />
+      </AppProviders>
+    </AppErrorBoundary>
   );
 };
 

@@ -62,6 +62,7 @@ export const useContentAnalysis = (
   articleLanguage: 'ar' | 'en',
   uiLanguage: 'ar' | 'en',
   updateDuplicateAnalysis = true,
+  enabled = true,
 ): FullAnalysis => {
   const [analysisResults, setAnalysisResults] = useState<FullAnalysis>(() =>
     runContentAnalysis(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, true))
@@ -84,6 +85,12 @@ export const useContentAnalysis = (
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      activeWorkerRef.current?.terminate();
+      activeWorkerRef.current = null;
+      return;
+    }
+
     const input = createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, updateDuplicateAnalysis);
     const requestId = latestRequestIdRef.current + 1;
     latestRequestIdRef.current = requestId;
@@ -141,7 +148,7 @@ export const useContentAnalysis = (
         activeWorkerRef.current = null;
       }
     };
-  }, [editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, updateDuplicateAnalysis, workerDisabled]);
+  }, [editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, updateDuplicateAnalysis, enabled, workerDisabled]);
 
   return analysisResults;
 };

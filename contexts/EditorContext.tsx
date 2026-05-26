@@ -10,7 +10,7 @@ import { TableCell } from '@tiptap/extension-table-cell';
 import TextAlign from '@tiptap/extension-text-align';
 import { Extension, Editor } from '@tiptap/core';
 import { useContentAnalysis } from '../hooks/useContentAnalysis';
-import { recordArticleSave, recordTimeSpentOnArticle, ArticleActivity, renameArticleActivity } from '../hooks/useUserActivity';
+import { recordArticleSave, recordTimeSpentOnArticle, ArticleActivity, renameArticleActivity, normalizeKeywords } from '../hooks/useUserActivity';
 import type { Keywords, FullAnalysis, GoalContext } from '../types';
 import { INITIAL_CONTENT, INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAFT_KEYWORDS_KEY, MANUAL_DRAFT_LANGUAGE_KEY, MANUAL_DRAFT_GOAL_CONTEXT_KEY, AUTO_DRAFT_KEY, AUTO_DRAFT_TITLE_KEY, AUTO_DRAFT_KEYWORDS_KEY, AUTO_DRAFT_LANGUAGE_KEY, AUTO_DRAFT_GOAL_CONTEXT_KEY } from '../constants';
 import { useUser } from './UserContext';
@@ -30,6 +30,42 @@ const EDITOR_SNAPSHOT_DELAY_MS = 300;
 const ANALYSIS_DEBOUNCE_MS = 900;
 const AUTOSAVE_INTERVAL_MS = 60 * 1000;
 
+const readStorageValue = (key: string): string | null => {
+    try {
+        return localStorage.getItem(key);
+    } catch (error) {
+        console.error(`Failed to read local draft field "${key}":`, error);
+        return null;
+    }
+};
+
+const writeStorageValue = (key: string, value: string): boolean => {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (error) {
+        console.error(`Failed to save local draft field "${key}":`, error);
+        return false;
+    }
+};
+
+const removeStorageValue = (key: string) => {
+    try {
+        localStorage.removeItem(key);
+    } catch (error) {
+        console.error(`Failed to remove invalid local draft field "${key}":`, error);
+    }
+};
+
+const isUsableEditorContent = (value: unknown): boolean => (
+    typeof value === 'string' ||
+    Array.isArray(value) ||
+    (!!value && typeof value === 'object' && (
+        (value as { type?: string }).type === 'doc' ||
+        Array.isArray((value as { content?: unknown[] }).content)
+    ))
+);
+
 function useDebounce<T>(value: T, delay: number): T {
     const [debouncedValue, setDebouncedValue] = useState<T>(value);
     useEffect(() => {
@@ -45,23 +81,27 @@ function useDebounce<T>(value: T, delay: number): T {
 
 const getInitialContent = () => {
   try {
-    const savedContent = localStorage.getItem(AUTO_DRAFT_KEY);
-    if (savedContent) return JSON.parse(savedContent);
+    const savedContent = readStorageValue(AUTO_DRAFT_KEY);
+    if (savedContent) {
+        const parsedContent = JSON.parse(savedContent);
+        if (isUsableEditorContent(parsedContent)) return parsedContent;
+        removeStorageValue(AUTO_DRAFT_KEY);
+    }
   } catch (error) {
     console.error("Failed to parse saved content from localStorage:", error);
-    localStorage.removeItem(AUTO_DRAFT_KEY);
+    removeStorageValue(AUTO_DRAFT_KEY);
   }
   return INITIAL_CONTENT;
 };
 
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
-    const saved = localStorage.getItem(key);
+    const saved = readStorageValue(key);
     return saved === 'ar' || saved === 'en' ? saved : null;
 };
 
 const getStoredGoalContext = (key: string): GoalContext => {
     try {
-        const saved = localStorage.getItem(key);
+        const saved = readStorageValue(key);
         return saved ? normalizeGoalContext(JSON.parse(saved)) : normalizeGoalContext();
     } catch {
         return normalizeGoalContext();
@@ -240,14 +280,14 @@ export const useEditor = () => {
 
 export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { currentUser, currentView, setCurrentView, preferredLanguage, uiLanguage, isIdle } = useUser();
-    const [title, setTitle] = useState<string>(() => localStorage.getItem(AUTO_DRAFT_TITLE_KEY) || '');
-    const [articleKey, setArticleKey] = useState<string>(() => localStorage.getItem(AUTO_DRAFT_TITLE_KEY) || '');
+    const [title, setTitle] = useState<string>(() => readStorageValue(AUTO_DRAFT_TITLE_KEY) || '');
+    const [articleKey, setArticleKey] = useState<string>(() => readStorageValue(AUTO_DRAFT_TITLE_KEY) || '');
     const [editorState, setEditorState] = useState<any | null>(null);
     const [text, setText] = useState<string>('');
     const [keywords, setKeywords] = useState<Keywords>(() => {
         try {
-          const saved = localStorage.getItem(AUTO_DRAFT_KEYWORDS_KEY);
-          return saved ? JSON.parse(saved) : INITIAL_KEYWORDS;
+          const saved = readStorageValue(AUTO_DRAFT_KEYWORDS_KEY);
+          return saved ? normalizeKeywords(JSON.parse(saved)) : INITIAL_KEYWORDS;
         } catch { return INITIAL_KEYWORDS; }
     });
     const [articleLanguage, setArticleLanguage] = useState<'ar' | 'en'>('ar');
@@ -276,7 +316,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setEditorState(contentJSON);
         setText(targetEditor.getText());
         if (persistDraft) {
-            localStorage.setItem(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
+            writeStorageValue(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
         }
     }, []);
 
@@ -316,35 +356,45 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             scheduleEditorSnapshot(editor);
         },
         onCreate: ({ editor }) => {
-            captureEditorSnapshot(editor);
+            captureEditorSnapshot(editor, currentView === 'editor');
             const savedLang = getStoredLanguage(AUTO_DRAFT_LANGUAGE_KEY) || getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
             const targetLang = savedLang || preferredLanguage || 'ar';
             setArticleLanguage(targetLang);
-            
-            // Set initial direction/alignment after a tiny delay to ensure editor is ready
-            setTimeout(() => {
-                applyArticleLanguageFormatting(editor, targetLang);
-            }, 10);
         },
     });
 
     // Keep the latest draft metadata mirrored in localStorage.
     useEffect(() => {
-        setDraftExists(!!localStorage.getItem(MANUAL_DRAFT_KEY));
+        setDraftExists(!!readStorageValue(MANUAL_DRAFT_KEY));
     }, [currentView]);
 
     useEffect(() => {
-        localStorage.setItem(AUTO_DRAFT_TITLE_KEY, title);
-        localStorage.setItem(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
-        localStorage.setItem(AUTO_DRAFT_LANGUAGE_KEY, articleLanguage);
-        localStorage.setItem(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
+        writeStorageValue(AUTO_DRAFT_TITLE_KEY, title);
+        writeStorageValue(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
+        writeStorageValue(AUTO_DRAFT_LANGUAGE_KEY, articleLanguage);
+        writeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
     }, [title, keywords, articleLanguage, goalContext]);
 
     const handleLanguageChange = useCallback((lang: 'ar' | 'en') => {
-        if (!editor) return;
         setArticleLanguage(lang);
+        if (!editor || currentView !== 'editor') return;
         applyArticleLanguageFormatting(editor, lang);
-    }, [editor]);
+    }, [editor, currentView]);
+
+    useEffect(() => {
+        if (!editor || editor.isDestroyed || currentView !== 'editor') return;
+
+        const formattingTimer = window.setTimeout(() => {
+            if (editor.isDestroyed) return;
+            try {
+                applyArticleLanguageFormatting(editor, articleLanguage);
+            } catch (error) {
+                console.error("Failed to apply editor language formatting after mounting:", error);
+            }
+        }, 0);
+
+        return () => window.clearTimeout(formattingTimer);
+    }, [editor, articleLanguage, currentView]);
 
     useEffect(() => {
         if (!isDuplicatesTabActive || !editor || editor.isDestroyed) return;
@@ -353,7 +403,16 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [isDuplicatesTabActive, editor, clearEditorSnapshotTimer, captureEditorSnapshot]);
 
     // Analysis is derived state: do not manually store rule results elsewhere.
-    const analysisResults = useContentAnalysis(debouncedEditorState, debouncedText, keywords, goalContext, articleLanguage, uiLanguage, isDuplicatesTabActive);
+    const analysisResults = useContentAnalysis(
+        debouncedEditorState,
+        debouncedText,
+        keywords,
+        goalContext,
+        articleLanguage,
+        uiLanguage,
+        isDuplicatesTabActive,
+        currentView === 'editor'
+    );
 
     useEffect(() => {
         if (!currentUser) return;
@@ -378,7 +437,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         clearEditorSnapshotTimer();
         setEditorState(contentJSON);
         setText(currentText);
-        localStorage.setItem(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
+        writeStorageValue(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
 
         let currentKey = articleKey;
         const newTitle = title.trim();
@@ -395,11 +454,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
         }
         recordArticleSave(currentUser, finalTitleToSave, contentJSON, keywords, analysisResults, articleLanguage, goalContext);
-        localStorage.setItem(MANUAL_DRAFT_KEY, JSON.stringify(contentJSON));
-        localStorage.setItem(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
-        localStorage.setItem(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
-        localStorage.setItem(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
-        localStorage.setItem(MANUAL_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
+        writeStorageValue(MANUAL_DRAFT_KEY, JSON.stringify(contentJSON));
+        writeStorageValue(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
+        writeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
+        writeStorageValue(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
+        writeStorageValue(MANUAL_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
         setDraftExists(true);
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2000);
@@ -411,27 +470,45 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [handleSaveDraft]);
 
     useEffect(() => {
+        if (currentView !== 'editor') return;
         const autosaveInterval = setInterval(() => {
             handleSaveDraftRef.current();
         }, AUTOSAVE_INTERVAL_MS);
         return () => clearInterval(autosaveInterval);
-    }, []);
+    }, [currentView]);
 
     const handleRestoreDraft = useCallback(() => {
         if (!editor) return;
-        const content = localStorage.getItem(MANUAL_DRAFT_KEY);
-        const titleStr = localStorage.getItem(MANUAL_DRAFT_TITLE_KEY);
-        const keywordsStr = localStorage.getItem(MANUAL_DRAFT_KEYWORDS_KEY);
+        const content = readStorageValue(MANUAL_DRAFT_KEY);
+        const titleStr = readStorageValue(MANUAL_DRAFT_TITLE_KEY);
+        const keywordsStr = readStorageValue(MANUAL_DRAFT_KEYWORDS_KEY);
         const lang = getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
         if (content) {
-            editor.commands.setContent(JSON.parse(content));
-            captureEditorSnapshot(editor);
+            try {
+                const parsedContent = JSON.parse(content);
+                if (isUsableEditorContent(parsedContent)) {
+                    editor.commands.setContent(parsedContent);
+                    captureEditorSnapshot(editor);
+                } else {
+                    removeStorageValue(MANUAL_DRAFT_KEY);
+                }
+            } catch (error) {
+                console.error("Failed to restore saved draft content:", error);
+                removeStorageValue(MANUAL_DRAFT_KEY);
+            }
         }
         if (titleStr) {
             setTitle(titleStr);
             setArticleKey(titleStr);
         }
-        if (keywordsStr) setKeywords(JSON.parse(keywordsStr));
+        if (keywordsStr) {
+            try {
+                setKeywords(normalizeKeywords(JSON.parse(keywordsStr)));
+            } catch (error) {
+                console.error("Failed to restore saved draft keywords:", error);
+                removeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY);
+            }
+        }
         setGoalContext(getStoredGoalContext(MANUAL_DRAFT_GOAL_CONTEXT_KEY));
         if (lang) handleLanguageChange(lang);
         setRestoreStatus('restored');

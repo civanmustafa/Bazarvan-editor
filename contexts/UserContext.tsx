@@ -56,9 +56,18 @@ export const useUser = () => {
   return context;
 };
 
+const getStoredSessionUser = (): string | null => {
+    try {
+        return sessionStorage.getItem('currentUser');
+    } catch (error) {
+        console.error("Could not read current user from sessionStorage:", error);
+        return null;
+    }
+};
+
 const getInitialTheme = () => {
     try {
-      const user = sessionStorage.getItem('currentUser');
+      const user = getStoredSessionUser();
       if (user) {
           const data = getActivityData();
           const userPrefs = data[user];
@@ -99,9 +108,9 @@ const normalizeApiKeys = (keys?: StoredApiKeys): ApiKeys => {
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     // Screen-level state. AppContent in App.tsx reads currentView to choose the visible page.
-    const [currentUser, setCurrentUser] = useState<string | null>(() => sessionStorage.getItem('currentUser'));
+    const [currentUser, setCurrentUser] = useState<string | null>(getStoredSessionUser);
     const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'editor'>(
-      sessionStorage.getItem('currentUser') ? 'dashboard' : 'login'
+      getStoredSessionUser() ? 'dashboard' : 'login'
     );
     const [isDarkMode, setIsDarkMode] = useState(getInitialTheme);
     const [highlightStyle, setHighlightStyle] = useState<'background' | 'underline'>('background');
