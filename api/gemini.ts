@@ -1,5 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
+import { GEMINI_ANALYSIS_MODEL } from "../constants/aiModels";
 
 type ApiResult = {
   status: number;
@@ -110,7 +111,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       try {
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
         const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+          model: GEMINI_ANALYSIS_MODEL,
           contents: prompt,
           config: useUrlContext
             ? {

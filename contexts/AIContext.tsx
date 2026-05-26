@@ -23,6 +23,7 @@ import type {
     StructureAnalysis,
 } from '../types';
 import { parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
+import { GEMINI_ANALYSIS_MODEL } from '../constants/aiModels';
 import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
@@ -37,7 +38,7 @@ import { normalizeGoalContext } from '../utils/goalContext';
  * Edit constants/engineeringPrompts.ts for user-editable prompt templates.
  * Edit api/* when changing server-side model calls or key handling.
  */
-const GEMINI_MODEL = 'gemini-3-flash-preview';
+const GEMINI_MODEL = GEMINI_ANALYSIS_MODEL;
 const OPENAI_MODEL = 'gpt-5.5';
 const CHATGPT_TIMEOUT_MS = 300000;
 
@@ -1898,6 +1899,8 @@ const READY_COMMAND_PATCH_CARD_REQUIREMENT = `
 لكل patch يجب الالتزام بما يلي:
 - إذا كان المطلوب استبدال قسم أو فقرة موجودة، استخدم operation بقيمة "replace_block".
 - ضع في targetText النص الأصلي المراد استبداله حرفيًا من المقال، أو بداية الفقرة/القسم حرفيًا إذا كان النص طويلًا جدًا.
+- لا تضع في targetText تسمية للمكان مثل "الفقرة الافتتاحية" أو "المقدمة"؛ ضع نص الفقرة الفعلي الموجود في المحرر.
+- إذا كانت الفقرة المراد استبدالها قبل أول عنوان قسم، ضع نصها الحرفي في targetText ولا تربطها بعنوان قسم لاحق في anchorText.
 - ضع في anchorText عنوان القسم أو الجملة المرجعية الأقرب داخل المقال.
 - ضع في placementLabel وصفًا قصيرًا واضحًا لمكان التنفيذ مثل: داخل قسم كذا، بعد فقرة كذا، قبل الخاتمة.
 - ضع في contentMarkdown النص الجديد الجاهز للتطبيق فقط دون شرح.
@@ -1932,6 +1935,7 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 لكل patch استخدم marker مطابقاً للعلامة، مثل "patch_1". لا تكتب النص الجاهز داخل analysisMarkdown.
 
 إذا كان المطلوب تعديل فقرة موجودة، استخدم operation بقيمة "replace_block"، ويجب أن يكون targetText نسخة حرفية من الفقرة الحالية داخل المقال لا تلخيصاً لها. ضع النص الجديد فقط في contentMarkdown.
+لا تستخدم في targetText تسميات عامة مثل "الفقرة الافتتاحية" أو "المقدمة". عند تعديل فقرة افتتاحية قبل أول عنوان قسم، انسخ الفقرة نفسها حرفيًا في targetText واترك anchorText فارغًا إذا لم يوجد عنوان سابق لها.
 إذا لم تستطع نسخ الفقرة الحالية حرفياً، فلا تستخدم replace_block، واستخدم عملية إضافة مناسبة بدلاً من ذلك.
 إذا كان المطلوب إضافة فقرة أو سؤال أو جملة جديدة، استخدم عمليات الإضافة المناسبة مثل insert_after_heading أو insert_before_faq أو insert_before_conclusion أو append_to_section أو append_to_article.
 مهم جداً: يجب أن يكون contentMarkdown محتوى نهائياً جاهزاً للإدراج في المقال فقط، دون أي تسميات تفسيرية مثل "السؤال:" أو "الإجابة:" أو "النص المقترح:" أو "الحل العملي الجاهز:" أو "مكان الإضافة:".
@@ -2488,6 +2492,54 @@ const findBestTextBlockMatch = (editor: any, candidates: string[], bounds?: Text
     return bestMatch;
 };
 
+const isConfidentReplacementMatch = (match: TextBlockMatch | null, targetText: string): match is TextBlockMatch => {
+    if (!match) return false;
+    if (match.score >= 3) return true;
+
+    const targetWordCount = normalizeAnchorText(targetText).split(' ').filter(Boolean).length;
+    if (targetWordCount < 6) return false;
+    if (targetWordCount >= 14) return match.score >= 0.72;
+    if (targetWordCount >= 8) return match.score >= 0.78;
+    return match.score >= 0.9;
+};
+
+const INTRODUCTION_TARGET_KEYWORDS = [
+    'الفقرة الافتتاحية',
+    'فقرة افتتاحية',
+    'المقدمة',
+    'مقدمة المقال',
+    'افتتاحية المقال',
+    'opening paragraph',
+    'introduction',
+    'intro',
+];
+
+const findIntroductionReplacementTarget = (editor: any, patch: AiContentPatch): TextBlockMatch | null => {
+    const locationHint = normalizeAnchorText([
+        patch.title,
+        patch.placementLabel,
+        patch.anchorText,
+        patch.targetText,
+    ].filter(Boolean).join(' '));
+    const refersToIntroduction = INTRODUCTION_TARGET_KEYWORDS.some(keyword => (
+        locationHint.includes(normalizeAnchorText(keyword))
+    ));
+    if (!refersToIntroduction || !editor?.state?.doc) return null;
+
+    let firstParagraph: TextBlockMatch | null = null;
+    editor.state.doc.forEach((node: any, offset: number) => {
+        if (firstParagraph || node.type.name !== 'paragraph' || !node.textContent?.trim()) return;
+        firstParagraph = {
+            from: offset,
+            to: offset + node.nodeSize,
+            score: 1,
+            text: node.textContent,
+        };
+    });
+
+    return firstParagraph;
+};
+
 const normalizeBulkFixRangeMatchText = (value: string): string => value.replace(/\s+/g, ' ').trim();
 
 const findExactBulkFixTextUnitMatch = (editor: any, targetText: string, preferredFrom: number): TextBlockMatch | null => {
@@ -2582,9 +2634,8 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
     const docEnd = editor.state.doc.content.size;
 
     if (patch.operation === 'replace_block' || patch.operation === 'replace_text') {
-        const replaceCandidates = [
-            patch.targetText?.trim() ? patch.targetText : patch.anchorText || '',
-        ];
+        const targetText = patch.targetText?.trim() ? patch.targetText : patch.anchorText || '';
+        const replaceCandidates = [targetText];
         const anchorHeading = patch.anchorText?.trim() ? findHeadingMatch(editor, patch.anchorText) : null;
 
         if (anchorHeading && patch.targetText?.trim()) {
@@ -2593,17 +2644,22 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
                 from: anchorHeading.pos,
                 to: sectionEnd,
             });
-            if (!sectionMatch || sectionMatch.score < 3) {
-                return { error: `لم يتم العثور على النص المراد استبداله داخل الموضع المحدد: ${patch.targetText || patch.title}` };
+            if (isConfidentReplacementMatch(sectionMatch, targetText)) {
+                return { from: sectionMatch.from, to: sectionMatch.to, selectFrom: sectionMatch.from, selectTo: sectionMatch.to, mode: 'replace' };
             }
-            return { from: sectionMatch.from, to: sectionMatch.to, selectFrom: sectionMatch.from, selectTo: sectionMatch.to, mode: 'replace' };
         }
 
         const match = findBestTextBlockMatch(editor, replaceCandidates);
-        if (!match || match.score < 3) {
-            return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
+        if (isConfidentReplacementMatch(match, targetText)) {
+            return { from: match.from, to: match.to, selectFrom: match.from, selectTo: match.to, mode: 'replace' };
         }
-        return { from: match.from, to: match.to, selectFrom: match.from, selectTo: match.to, mode: 'replace' };
+
+        const introductionTarget = findIntroductionReplacementTarget(editor, patch);
+        if (introductionTarget) {
+            return { from: introductionTarget.from, to: introductionTarget.to, selectFrom: introductionTarget.from, selectTo: introductionTarget.to, mode: 'replace' };
+        }
+
+        return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
     }
 
     if (patch.targetText) {

@@ -13,8 +13,10 @@ import { useContentAnalysis } from '../hooks/useContentAnalysis';
 import { recordArticleSave, recordTimeSpentOnArticle, ArticleActivity, renameArticleActivity, normalizeKeywords } from '../hooks/useUserActivity';
 import type { Keywords, FullAnalysis, GoalContext } from '../types';
 import { INITIAL_CONTENT, INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAFT_KEYWORDS_KEY, MANUAL_DRAFT_LANGUAGE_KEY, MANUAL_DRAFT_GOAL_CONTEXT_KEY, AUTO_DRAFT_KEY, AUTO_DRAFT_TITLE_KEY, AUTO_DRAFT_KEYWORDS_KEY, AUTO_DRAFT_LANGUAGE_KEY, AUTO_DRAFT_GOAL_CONTEXT_KEY } from '../constants';
+import { CONTENT_SUMMARY_STORAGE_KEY } from '../constants/engineeringPrompts';
 import { useUser } from './UserContext';
 import { normalizeGoalContext } from '../utils/goalContext';
+import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT } from '../utils/competitorStorage';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -518,6 +520,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const handleNewArticle = useCallback((lang: 'ar' | 'en') => {
         handleSaveDraft();
         if (editor) {
+            clearStoredCompetitorInputs();
+            removeStorageValue(CONTENT_SUMMARY_STORAGE_KEY);
+            window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT));
             setTitle('');
             setArticleKey('');
             setKeywords(INITIAL_KEYWORDS);

@@ -1,9 +1,7 @@
 import type { CheckResult } from '../../../types';
 import { createCheckResult, getSentenceCount, getStatus } from '../analysisUtils';
-import type { AnalysisContext } from '../analysisUtils';
+import type { AnalysisContext, AnalysisDocumentNode } from '../analysisUtils';
 import { CONCLUSION_KEYWORDS, CONCLUSION_INDICATOR_WORDS } from '../../../constants';
-
-type AnalysisNode = { type: string; level?: number; text: string; node: any; pos: number };
 
 export const checkConclusion = (context: AnalysisContext): {
     lastH2IsConclusion: CheckResult;
@@ -46,12 +44,12 @@ export const checkConclusion = (context: AnalysisContext): {
     const listIntroViolations: { from: number; to: number; message: string }[] = [];
     const listIntroMessage = t.violationMessages.conclusionListIntro;
 
-    const getNodeRange = (node: AnalysisNode) => ({
+    const getNodeRange = (node: AnalysisDocumentNode) => ({
         from: node.pos + 1,
         to: node.pos + 1 + Math.max(node.text.length, 1),
     });
 
-    const getPreviousMeaningfulNode = (listIndex: number): AnalysisNode | null => {
+    const getPreviousMeaningfulNode = (listIndex: number): AnalysisDocumentNode | null => {
         for (let index = listIndex - 1; index >= 0; index--) {
             const node = conclusionSection.nodes[index];
             if (node.text.trim().length > 0) return node;
