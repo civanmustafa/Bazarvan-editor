@@ -33,6 +33,7 @@ export interface AiAnalysisOptions {
   articleToc: boolean;
   currentConclusion: boolean;
   editorText: boolean;
+  competitorContent: boolean;
   targetKeywords: boolean;
   companyName: boolean;
   goalContext: boolean;

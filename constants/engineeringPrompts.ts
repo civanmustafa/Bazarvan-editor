@@ -46,6 +46,7 @@ export const DEFAULT_SMART_ANALYSIS_OPTIONS: AiAnalysisOptions = {
   articleToc: false,
   currentConclusion: false,
   editorText: true,
+  competitorContent: false,
   targetKeywords: true,
   goalContext: true,
   companyName: false,
@@ -516,6 +517,7 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
       articleToc: false,
       currentConclusion: false,
       editorText: true,
+      competitorContent: false,
       targetKeywords: false,
       companyName: false,
       goalContext: false,
@@ -535,6 +537,7 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     defaultValue: COMPETITOR_GAP_ANALYSIS_PROMPT,
     options: {
       ...DEFAULT_SMART_ANALYSIS_OPTIONS,
+      competitorContent: true,
       articleToc: true,
       currentConclusion: true,
       companyName: true,
