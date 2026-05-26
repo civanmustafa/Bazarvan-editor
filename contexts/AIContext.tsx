@@ -2754,6 +2754,11 @@ interface AIContextType {
     handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
     handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[]) => Promise<void>;
+    parseAiPatchResponse: (
+        rawResponse: string,
+        provider: AiPatchProvider,
+        options?: { namespace?: string; titlePrefix?: string; commandId?: string }
+    ) => SmartAnalysisParsedResult;
     generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string }>;
     generateGoalContext: () => Promise<{ context?: GoalContext; error?: string }>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
@@ -2768,6 +2773,8 @@ interface AIContextType {
     applyAiInsertionPatch: (provider: AiPatchProvider, patchId: string) => void;
     applyAllAiInsertionPatches: (provider: AiPatchProvider) => void;
     selectAiInsertionPatchTarget: (provider: AiPatchProvider, patchId: string) => void;
+    applyAiContentPatch: (patch: AiContentPatch) => { status: 'applied' | 'failed'; error?: string };
+    selectAiContentPatchTarget: (patch: AiContentPatch) => { error?: string };
     markHistorySuggestionApplied: (historyItemId: string, suggestionText: string) => void;
     removeFromAiHistory: (historyItemId: string) => void;
     generateContextAwarePrompt: (userPrompt: string, options: any) => string;
@@ -3686,15 +3693,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }));
     }, []);
 
-    const selectAiInsertionPatchTarget = useCallback((provider: AiPatchProvider, patchId: string) => {
-        if (!editor) return;
-        const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
-        if (!patch) return;
-
+    const selectAiContentPatchTarget = useCallback((patch: AiContentPatch): { error?: string } => {
+        if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
         const target = resolveAiPatchTarget(editor, patch);
         if ('error' in target) {
-            updateAiInsertionPatch(provider, patchId, { status: 'failed', applyError: target.error });
-            return;
+            return { error: target.error };
         }
 
         editor
@@ -3703,17 +3706,25 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             .setTextSelection(target.selectFrom === target.selectTo ? target.from : { from: target.selectFrom, to: target.selectTo })
             .scrollIntoView()
             .run();
-    }, [aiInsertionPatches, editor, updateAiInsertionPatch]);
 
-    const applyAiInsertionPatch = useCallback((provider: AiPatchProvider, patchId: string) => {
-        if (!editor) return;
+        return {};
+    }, [editor]);
+
+    const selectAiInsertionPatchTarget = useCallback((provider: AiPatchProvider, patchId: string) => {
         const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
-        if (!patch || patch.status !== 'pending') return;
+        if (!patch) return;
+        const result = selectAiContentPatchTarget(patch);
+        if (result.error) {
+            updateAiInsertionPatch(provider, patchId, { status: 'failed', applyError: result.error });
+        }
+    }, [aiInsertionPatches, selectAiContentPatchTarget, updateAiInsertionPatch]);
 
+    const applyAiContentPatch = useCallback((patch: AiContentPatch): { status: 'applied' | 'failed'; error?: string } => {
+        if (!editor) return { status: 'failed', error: 'المحرر غير جاهز حالياً.' };
+        if (patch.status !== 'pending') return { status: 'failed', error: patch.applyError };
         const target = resolveAiPatchTarget(editor, patch);
         if ('error' in target) {
-            updateAiInsertionPatch(provider, patchId, { status: 'failed', applyError: target.error });
-            return;
+            return { status: 'failed', error: target.error };
         }
 
         try {
@@ -3728,12 +3739,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 .scrollIntoView()
                 .run();
             if (!applied) throw new Error('تعذر تطبيق التعديل داخل المحرر.');
-            updateAiInsertionPatch(provider, patchId, { status: 'applied', applyError: undefined });
+            return { status: 'applied' };
         } catch (error) {
             const message = error instanceof Error ? error.message : 'تعذر تطبيق التعديل داخل المحرر.';
-            updateAiInsertionPatch(provider, patchId, { status: 'failed', applyError: message });
+            return { status: 'failed', error: message };
         }
-    }, [aiInsertionPatches, articleLanguage, editor, updateAiInsertionPatch]);
+    }, [articleLanguage, editor]);
+
+    const applyAiInsertionPatch = useCallback((provider: AiPatchProvider, patchId: string) => {
+        const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
+        if (!patch || patch.status !== 'pending') return;
+        const result = applyAiContentPatch(patch);
+        updateAiInsertionPatch(provider, patchId, {
+            status: result.status,
+            applyError: result.status === 'failed' ? result.error : undefined,
+        });
+    }, [aiInsertionPatches, applyAiContentPatch, updateAiInsertionPatch]);
 
     const applyAllAiInsertionPatches = useCallback((provider: AiPatchProvider) => {
         aiInsertionPatches[provider]
@@ -3768,15 +3789,28 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
     };
 
+    const parseAiPatchResponse = useCallback((
+        rawResponse: string,
+        provider: AiPatchProvider,
+        options?: { namespace?: string; titlePrefix?: string; commandId?: string }
+    ): SmartAnalysisParsedResult => {
+        let parsedResult = applyReadyCommandPatchRules(parseSmartAnalysisResponse(rawResponse, provider), options?.commandId);
+        if (options?.namespace) {
+            parsedResult = namespaceSmartAnalysisPatches(parsedResult, options.namespace, options.titlePrefix);
+        }
+        return parsedResult;
+    }, []);
+
     const value = {
         aiResults, aiInsertionPatches, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
-        generateSemanticKeywords, generateGoalContext,
+        parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
         handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
         clearBulkFixReviewItems, applySuggestionFromHistory,
         applyAiInsertionPatch, applyAllAiInsertionPatches, selectAiInsertionPatchTarget,
+        applyAiContentPatch, selectAiContentPatchTarget,
         markHistorySuggestionApplied,
         removeFromAiHistory: (id: string) => setAiHistory(h => h.filter(x => x.id !== id)),
         generateContextAwarePrompt, openGoogleSearch
