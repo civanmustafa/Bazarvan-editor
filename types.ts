@@ -186,8 +186,6 @@ export interface StructureAnalysis {
     productUsageHeading: CheckResult;
     productTechnicalSpecsHeading: CheckResult;
     productWarrantyContent: CheckResult;
-    mandatoryH2Sections: CheckResult;
-    supportingH2Sections: CheckResult;
     tablesCount: CheckResult;
     headingLength: CheckResult;
 }

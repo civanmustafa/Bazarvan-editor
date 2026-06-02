@@ -200,8 +200,6 @@ const STRUCTURE_CRITERIA_ATTACHMENTS: StructureCriteriaAttachment[] = [
             'productUsageHeading',
             'productTechnicalSpecsHeading',
             'productWarrantyContent',
-            'mandatoryH2Sections',
-            'supportingH2Sections',
             'tablesCount',
         ],
     },

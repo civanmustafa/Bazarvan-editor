@@ -44,7 +44,36 @@ type CompetitorExtractionState = {
     error: string;
 };
 
+type CompetitorRepeatedPhrase = {
+    text: string;
+    size: number;
+    count: number;
+};
+
+type CompetitorWordFrequency = {
+    word: string;
+    count: number;
+};
+
+type CompetitorTextStats = {
+    totalWords: number;
+    uniqueWords: number;
+    topWords: CompetitorWordFrequency[];
+    repeatedPhrases: CompetitorRepeatedPhrase[];
+};
+
 const COMPETITOR_TIMEOUT_MS = 180000;
+
+const COMPETITOR_STOP_WORDS = new Set([
+    'في', 'من', 'إلى', 'الى', 'عن', 'على', 'علي', 'مع', 'حتى', 'ثم', 'أو', 'او', 'أم', 'ام', 'بل', 'لا', 'نعم',
+    'و', 'ف', 'ب', 'ك', 'ل', 'لل', 'والى', 'وإلى', 'ومن', 'وعلى', 'وفي', 'عنها', 'عنه', 'منها', 'منه',
+    'الذي', 'التي', 'الذين', 'اللذين', 'اللتين', 'اللاتي', 'اللواتي', 'هذا', 'هذه', 'ذلك', 'تلك', 'هؤلاء', 'أولئك',
+    'هو', 'هي', 'هما', 'هم', 'هن', 'أنا', 'انا', 'نحن', 'أنت', 'انت', 'أنتم', 'انتم', 'أنتن', 'انتن', 'أنتما', 'انتما',
+    'كان', 'كانت', 'كانوا', 'يكون', 'تكون', 'يتم', 'تم', 'قد', 'لقد', 'إن', 'ان', 'أن', 'الى', 'كما', 'كل', 'أي', 'اي',
+    'غير', 'سوى', 'ما', 'ماذا', 'لماذا', 'كيف', 'متى', 'أين', 'اين', 'إذا', 'اذا', 'لكن', 'لذلك', 'لذا',
+    'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with', 'from', 'by', 'at', 'as', 'is', 'are',
+    'was', 'were', 'be', 'been', 'being', 'this', 'that', 'these', 'those', 'it', 'its', 'you', 'your', 'we', 'our',
+]);
 
 const createEmptyCompetitorState = (): CompetitorExtractionState => ({
     status: 'idle',
@@ -452,6 +481,87 @@ const normalizePlainCompetitorText = (value: string): string => (
         .trim()
 );
 
+const normalizeCompetitorToken = (value: string): string => (
+    value
+        .normalize('NFKC')
+        .replace(/[ًٌٍَُِّْـ]/g, '')
+        .replace(/[أإآٱ]/g, 'ا')
+        .replace(/ى/g, 'ي')
+        .replace(/ة/g, 'ه')
+        .toLowerCase()
+);
+
+const tokenizeCompetitorText = (value: string): string[] => (
+    normalizePlainCompetitorText(value)
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .split(/\s+/)
+        .map(normalizeCompetitorToken)
+        .filter(Boolean)
+);
+
+const collectCompetitorStatTexts = (
+    plainTexts: string[],
+    extractions: CompetitorExtractionState[],
+): string[] => {
+    const texts: string[] = [];
+
+    plainTexts.forEach(value => {
+        const text = stripExtractionLabels(normalizePlainCompetitorText(value));
+        if (text) texts.push(text);
+    });
+
+    extractions.forEach(extraction => {
+        const text = extraction.content?.text?.trim();
+        if (text) texts.push(stripExtractionLabels(text));
+    });
+
+    return texts.filter(Boolean);
+};
+
+const createCompetitorTextStats = (
+    plainTexts: string[],
+    extractions: CompetitorExtractionState[],
+): CompetitorTextStats => {
+    const words = collectCompetitorStatTexts(plainTexts, extractions).flatMap(tokenizeCompetitorText);
+    const wordCounts = new Map<string, number>();
+    const filteredWordCounts = new Map<string, number>();
+    const phraseCounts = new Map<string, { size: number; count: number }>();
+
+    words.forEach(word => {
+        wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+        if (word.length > 1 && !COMPETITOR_STOP_WORDS.has(word)) {
+            filteredWordCounts.set(word, (filteredWordCounts.get(word) || 0) + 1);
+        }
+    });
+
+    [3, 4, 5].forEach(size => {
+        for (let index = 0; index <= words.length - size; index += 1) {
+            const phrase = words.slice(index, index + size).join(' ');
+            phraseCounts.set(phrase, {
+                size,
+                count: (phraseCounts.get(phrase)?.count || 0) + 1,
+            });
+        }
+    });
+
+    const topWords = Array.from(filteredWordCounts.entries())
+        .map(([word, count]) => ({ word, count }))
+        .sort((a, b) => b.count - a.count || a.word.localeCompare(b.word))
+        .slice(0, 5);
+
+    const repeatedPhrases = Array.from(phraseCounts.entries())
+        .map(([text, value]) => ({ text, size: value.size, count: value.count }))
+        .filter(item => item.count > 1)
+        .sort((a, b) => b.count - a.count || a.size - b.size || a.text.localeCompare(b.text));
+
+    return {
+        totalWords: words.length,
+        uniqueWords: wordCounts.size,
+        topWords,
+        repeatedPhrases,
+    };
+};
+
 const loadStoredCompetitorExtractions = (): CompetitorExtractionState[] => {
     return createDefaultCompetitorExtractions();
 };
@@ -704,6 +814,10 @@ const RightSidebar: React.FC = () => {
     const readyCommandCompetitorBlocks = useMemo(() => {
         return buildReadyCommandCompetitorBlocks(competitorExtractions, competitorTexts, competitorUrls);
     }, [competitorExtractions, competitorTexts, competitorUrls]);
+
+    const competitorTextStats = useMemo(() => {
+        return createCompetitorTextStats(competitorTexts, competitorExtractions);
+    }, [competitorExtractions, competitorTexts]);
 
     const appendSelectedAttachments = (prompt: string, options: AiAnalysisOptions): string => {
         if (!options.competitorContent) return prompt;
@@ -1457,6 +1571,87 @@ ${readyCommandCompetitorBlocks}`;
                         </div>
                     );
                 })}
+
+                <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                    <div className="mb-3 flex items-center gap-2 text-xs font-bold text-gray-800 dark:text-gray-100">
+                        <FileText size={14} className="text-[#d4af37]" />
+                        <span>{t.locale === 'ar' ? 'إحصاءات نصوص المنافسين' : 'Competitor Text Stats'}</span>
+                    </div>
+
+                    {competitorTextStats.totalWords === 0 ? (
+                        <div className="rounded-md bg-gray-50 p-3 text-xs text-gray-400 dark:bg-[#1F1F1F]">
+                            {t.locale === 'ar' ? 'لا توجد نصوص منافسين بعد.' : 'No competitor text yet.'}
+                        </div>
+                    ) : (
+                        <div className="space-y-3 text-xs">
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
+                                    <div className="text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                                        {t.locale === 'ar' ? 'الكلمات الفريدة' : 'Unique words'}
+                                    </div>
+                                    <div className="mt-1 text-lg font-black tabular-nums text-[#8a6f1d] dark:text-[#f2d675]">
+                                        {competitorTextStats.uniqueWords}
+                                    </div>
+                                </div>
+                                <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
+                                    <div className="text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                                        {t.locale === 'ar' ? 'إجمالي الكلمات' : 'Total words'}
+                                    </div>
+                                    <div className="mt-1 text-lg font-black tabular-nums text-[#8a6f1d] dark:text-[#f2d675]">
+                                        {competitorTextStats.totalWords}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
+                                <div className="mb-2 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+                                    {t.locale === 'ar' ? 'أكثر 5 كلمات تكرارًا' : 'Top 5 repeated words'}
+                                </div>
+                                {competitorTextStats.topWords.length === 0 ? (
+                                    <div className="text-gray-400">{t.locale === 'ar' ? 'لا توجد كلمات كافية بعد التصفية.' : 'No enough words after filtering.'}</div>
+                                ) : (
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {competitorTextStats.topWords.map(item => (
+                                            <span key={item.word} className="rounded-md border border-[#d4af37]/25 bg-[#d4af37]/10 px-2 py-1 font-bold text-[#8a6f1d] dark:text-[#f2d675]">
+                                                {item.word} <span className="tabular-nums text-gray-500 dark:text-gray-400">({item.count})</span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">
+                                        {t.locale === 'ar' ? 'عبارات 3-4-5 كلمات المكررة' : 'Repeated 3-4-5 word phrases'}
+                                    </span>
+                                    <span className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-500 dark:bg-[#2A2A2A] dark:text-gray-400">
+                                        {competitorTextStats.repeatedPhrases.length}
+                                    </span>
+                                </div>
+                                {competitorTextStats.repeatedPhrases.length === 0 ? (
+                                    <div className="text-gray-400">{t.locale === 'ar' ? 'لا توجد عبارات مكررة بهذا الطول.' : 'No repeated phrases at these lengths.'}</div>
+                                ) : (
+                                    <div className="max-h-72 overflow-y-auto custom-scrollbar space-y-1.5">
+                                        {competitorTextStats.repeatedPhrases.map((item) => (
+                                            <div key={`${item.size}-${item.text}`} className="flex items-start justify-between gap-2 rounded border border-gray-200 bg-white px-2 py-1.5 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                                                <div className="min-w-0">
+                                                    <div className="whitespace-normal break-words leading-5 text-gray-700 dark:text-gray-200">{item.text}</div>
+                                                    <div className="mt-0.5 text-[10px] font-bold text-gray-400">
+                                                        {item.size} {t.locale === 'ar' ? 'كلمات' : 'words'}
+                                                    </div>
+                                                </div>
+                                                <span className="shrink-0 rounded bg-[#d4af37]/10 px-1.5 py-0.5 text-[11px] font-black tabular-nums text-[#8a6f1d] dark:text-[#f2d675]">
+                                                    {item.count}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );

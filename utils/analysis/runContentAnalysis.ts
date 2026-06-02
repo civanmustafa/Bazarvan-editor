@@ -46,7 +46,7 @@ import { checkWordConsistency } from './rules/checkWordConsistency';
 import { checkCommonEnglishTerms } from './rules/checkCommonEnglishTerms';
 import { checkWordsToDelete } from './rules/checkWordsToDelete';
 import { checkKeywordStuffing } from './rules/checkKeywordStuffing';
-import { checkDeviceSaleMandatoryH2, checkDeviceSaleSupportingH2, checkProductTechnicalSpecsHeading, checkProductUsageHeading, checkProductWarrantyContent } from './rules/checkDeviceSaleH2';
+import { checkProductTechnicalSpecsHeading, checkProductUsageHeading, checkProductWarrantyContent } from './rules/checkDeviceSaleH2';
 import { checkTablesCount } from './rules/checkTablesCount';
 import { checkHeadingLength } from './rules/checkHeadingLength';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../../constants';
@@ -281,8 +281,6 @@ export const runContentAnalysis = ({
     productUsageHeading: checkProductUsageHeading(analysisContext),
     productTechnicalSpecsHeading: checkProductTechnicalSpecsHeading(analysisContext),
     productWarrantyContent: checkProductWarrantyContent(analysisContext),
-    mandatoryH2Sections: checkDeviceSaleMandatoryH2(analysisContext),
-    supportingH2Sections: checkDeviceSaleSupportingH2(analysisContext),
     tablesCount: checkTablesCount(analysisContext),
   };
 

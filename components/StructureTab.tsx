@@ -817,8 +817,6 @@ const StructureTab: React.FC = () => {
               analysis.productUsageHeading,
               analysis.productTechnicalSpecsHeading,
               analysis.productWarrantyContent,
-              analysis.mandatoryH2Sections,
-              analysis.supportingH2Sections,
               analysis.tablesCount,
           ],
       }] : []),
