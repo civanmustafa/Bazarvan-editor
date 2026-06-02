@@ -6,6 +6,7 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
+import { isProductPageContext } from '../utils/goalContext';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 
 // Internal component for the floating tooltip to ensure it's never clipped
@@ -809,7 +810,7 @@ const StructureTab: React.FC = () => {
               analysis.headingLength,
           ],
       },
-      ...(goalContext.pageType === 'product' ? [{
+      ...(isProductPageContext(goalContext) ? [{
           name: tSt.productPageCriteria,
           icon: <PackageCheck size={16} className="text-[#d4af37]" />,
           items: [

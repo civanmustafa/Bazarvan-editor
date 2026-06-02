@@ -23,6 +23,20 @@ export type GoalContextFieldConfig =
       placeholder: string;
     };
 
+const normalizeChoiceToken = (value?: string | null): string => (
+  String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+);
+
+const normalizeMappedChoice = (value: string | undefined, choiceMap: Record<string, string>, fallback: string): string => {
+  const token = normalizeChoiceToken(value);
+  if (!token) return fallback;
+  return choiceMap[token] || value || fallback;
+};
+
+export const isProductPageContext = (goalContext?: Partial<GoalContext> | null): boolean => (
+  normalizeGoalContext(goalContext).pageType === 'product'
+);
+
 export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalContext => {
   const normalized = {
     ...INITIAL_GOAL_CONTEXT,
@@ -31,6 +45,11 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
 
   const pageTypeMap: Record<string, string> = {
     faq: 'article',
+    product: 'product',
+    'product page': 'product',
+    'صفحة منتج': 'product',
+    'صفحة المنتج': 'product',
+    'منتج': 'product',
   };
   const objectiveMap: Record<string, string> = {
     sell: 'convert',
@@ -43,12 +62,12 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
   };
 
   return {
-    pageType: pageTypeMap[normalized.pageType] || normalized.pageType,
-    objective: objectiveMap[normalized.objective] || normalized.objective,
+    pageType: normalizeMappedChoice(normalized.pageType, pageTypeMap, INITIAL_GOAL_CONTEXT.pageType),
+    objective: normalizeMappedChoice(normalized.objective, objectiveMap, INITIAL_GOAL_CONTEXT.objective),
     audienceScope: normalized.audienceScope,
     targetCountry: '',
     targetAudience: '',
-    searchIntent: intentMap[normalized.searchIntent] || normalized.searchIntent,
+    searchIntent: normalizeMappedChoice(normalized.searchIntent, intentMap, INITIAL_GOAL_CONTEXT.searchIntent),
   };
 };
 

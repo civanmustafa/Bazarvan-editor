@@ -54,14 +54,14 @@ const createProductHeadingPresenceCheck = (
     originalTitleKey: string,
     terms: string[],
 ): CheckResult => {
-    const { goalContext, headings, articleLanguage, t } = context;
+    const { headings, articleLanguage, t } = context;
     const tRule = t.structureAnalysis[originalTitleKey as keyof typeof t.structureAnalysis];
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
     const details = 'details' in tRule ? tRule.details : undefined;
 
-    if (goalContext.pageType !== 'product') {
+    if (!isProductSaleContext(context)) {
         return createCheckResult(title, 'pass', t.common.notApplicable, requiredText, 1, description, details);
     }
 
@@ -82,14 +82,14 @@ const createProductContentPresenceCheck = (
     originalTitleKey: string,
     terms: string[],
 ): CheckResult => {
-    const { goalContext, textContent, articleLanguage, t } = context;
+    const { textContent, articleLanguage, t } = context;
     const tRule = t.structureAnalysis[originalTitleKey as keyof typeof t.structureAnalysis];
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
     const details = 'details' in tRule ? tRule.details : undefined;
 
-    if (goalContext.pageType !== 'product') {
+    if (!isProductSaleContext(context)) {
         return createCheckResult(title, 'pass', t.common.notApplicable, requiredText, 1, description, details);
     }
 

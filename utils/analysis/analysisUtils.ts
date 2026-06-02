@@ -1,5 +1,6 @@
 import type { Keywords, CheckResult, AnalysisStatus, DuplicateAnalysis, GoalContext } from '../../types';
 import { translations } from '../../components/translations';
+import { isProductPageContext } from '../goalContext';
 
 /*
  * Shared analysis utilities.
@@ -271,7 +272,7 @@ export const getAnalysisNodeContentText = (node: AnalysisDocumentNode): string =
 };
 
 export const isProductSaleContext = (context: Pick<AnalysisContext, 'analysisGoal' | 'goalContext'>): boolean => (
-    context.goalContext.pageType === 'product' || context.analysisGoal === 'بيع جهاز'
+    isProductPageContext(context.goalContext) || context.analysisGoal === 'بيع جهاز'
 );
 
 // --- Constants ---

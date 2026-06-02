@@ -156,9 +156,9 @@ const formatGoalContext = (goalContext: GoalContext): string => {
 type StructureCriteriaAttachment = {
     optionKey: keyof Pick<
         AiAnalysisOptions,
-        'basicStructureCriteria' | 'headingsSequenceCriteria' | 'interactionCtaCriteria' | 'conclusionCriteria'
+        'basicStructureCriteria' | 'headingsSequenceCriteria' | 'productPageCriteria' | 'interactionCtaCriteria' | 'conclusionCriteria'
     >;
-    labelKey: 'basicStructure' | 'headingsSequence' | 'interactionCta' | 'conclusion';
+    labelKey: 'basicStructure' | 'headingsSequence' | 'productPageCriteria' | 'interactionCta' | 'conclusion';
     ruleKeys: (keyof StructureAnalysis)[];
 };
 
@@ -176,9 +176,6 @@ const STRUCTURE_CRITERIA_ATTACHMENTS: StructureCriteriaAttachment[] = [
             'stepsIntroduction',
             'keywordStuffing',
             'automaticLists',
-            'productUsageHeading',
-            'productTechnicalSpecsHeading',
-            'productWarrantyContent',
         ],
     },
     {
@@ -194,6 +191,18 @@ const STRUCTURE_CRITERIA_ATTACHMENTS: StructureCriteriaAttachment[] = [
             'answerParagraph',
             'ambiguousHeadings',
             'headingLength',
+        ],
+    },
+    {
+        optionKey: 'productPageCriteria',
+        labelKey: 'productPageCriteria',
+        ruleKeys: [
+            'productUsageHeading',
+            'productTechnicalSpecsHeading',
+            'productWarrantyContent',
+            'mandatoryH2Sections',
+            'supportingH2Sections',
+            'tablesCount',
         ],
     },
     {

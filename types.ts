@@ -40,6 +40,7 @@ export interface AiAnalysisOptions {
   keywordCriteria: boolean;
   basicStructureCriteria: boolean;
   headingsSequenceCriteria: boolean;
+  productPageCriteria: boolean;
   interactionCtaCriteria: boolean;
   conclusionCriteria: boolean;
 }
