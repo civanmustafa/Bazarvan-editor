@@ -134,6 +134,7 @@ const COMPETITOR_GAP_ANALYSIS_PROMPT = `تصرّف كخبير محتوى SEO/AEO
 - الكيانات والمصطلحات المهمة.
 - قوة الثقة وE-E-A-T.
 - قوة التحويل والـ CTA.
+- قم بالتأكد من المواصفات التقنية والخصائص إن وجدت في المحتوى أو لدى المنافسين.
 - الادعاءات غير المدعومة أو المبالغات.
 
 القواعد:
@@ -207,12 +208,16 @@ const COMPETITOR_GAP_ANALYSIS_PROMPT = `تصرّف كخبير محتوى SEO/AEO
 اختم بتقييم مختصر يوضح هل المحتوى الحالي أقوى أم أضعف من المنافسين، وما أول تعديل يجب تنفيذه.`;
 
 const PREVIOUS_COMPETITOR_GAP_ANALYSIS_PROMPT = COMPETITOR_GAP_ANALYSIS_PROMPT
+  .replace('\n- قم بالتأكد من المواصفات التقنية والخصائص إن وجدت في المحتوى أو لدى المنافسين.', '')
   .replaceAll('\nوقدم اقتراحات تحسين لكل فجوة مع زر الموضع والنسخ والاستبدال كما العادة.', '')
   .replace('\nوقدم اقتراحات تحسين لكل فجوة ناقصة مع زر الموضع والنسخ والاستبدال كما العادة.', '')
   .replace(
     'قدّم 5 توصيات فقط مع نصوص جاهزة وقدم اقتراحات تحسين لكل فجوة مع زر الموضع والنسخ والاستبدال كما العادة، وكل توصية يجب أن تتضمن:',
     'قدّم 5 توصيات فقط مع نصوص جاهزة، وكل توصية يجب أن تتضمن:'
   );
+
+const PREVIOUS_COMPETITOR_GAP_ANALYSIS_PATCH_PROMPT = COMPETITOR_GAP_ANALYSIS_PROMPT
+  .replace('\n- قم بالتأكد من المواصفات التقنية والخصائص إن وجدت في المحتوى أو لدى المنافسين.', '');
 
 const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO/LLM SEO. افحص المحتوى التالي بعمق ولكن باختصار، وقيّمه من حيث مطابقته لنية البحث، كفاية الإجابة، قابلية الاقتباس في AI Overviews، الفجوات المعرفية، الأسئلة الناقصة، الادعاءات غير المدعومة، الكيانات الناقصة، البنية، وقوة التحويل.
 
@@ -832,7 +837,10 @@ ${'${selectedText}'}
 ---`;
 
 const REPLACED_ENGINEERING_PROMPTS: Partial<Record<EngineeringPromptId, string[]>> = {
-  [ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis]: [PREVIOUS_COMPETITOR_GAP_ANALYSIS_PROMPT],
+  [ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis]: [
+    PREVIOUS_COMPETITOR_GAP_ANALYSIS_PROMPT,
+    PREVIOUS_COMPETITOR_GAP_ANALYSIS_PATCH_PROMPT,
+  ],
   [ENGINEERING_PROMPT_IDS.toolbar.generateMeta]: [PREVIOUS_GENERATE_META_PROMPT],
   [ENGINEERING_PROMPT_IDS.toolbar.rephrase]: [PREVIOUS_REPHRASE_PROMPT],
   [ENGINEERING_PROMPT_IDS.toolbar.improveWording]: [LEGACY_IMPROVE_WORDING_PROMPT, PREVIOUS_IMPROVE_WORDING_PROMPT],

@@ -1,4 +1,4 @@
-import type { Keywords, CheckResult, AnalysisStatus, DuplicateAnalysis } from '../../types';
+import type { Keywords, CheckResult, AnalysisStatus, DuplicateAnalysis, GoalContext } from '../../types';
 import { translations } from '../../components/translations';
 
 /*
@@ -27,6 +27,7 @@ export interface AnalysisContext {
     textContent: string;
     totalWordCount: number;
     keywords: Keywords;
+    goalContext: GoalContext;
     analysisGoal: string;
     articleLanguage: 'ar' | 'en';
     uiLanguage: 'ar' | 'en';

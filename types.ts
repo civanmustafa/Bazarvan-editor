@@ -182,6 +182,9 @@ export interface StructureAnalysis {
     commonEnglishTerms: CheckResult;
     wordsToDelete: CheckResult;
     keywordStuffing: CheckResult;
+    productUsageHeading: CheckResult;
+    productTechnicalSpecsHeading: CheckResult;
+    productWarrantyContent: CheckResult;
     mandatoryH2Sections: CheckResult;
     supportingH2Sections: CheckResult;
     tablesCount: CheckResult;

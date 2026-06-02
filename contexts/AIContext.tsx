@@ -176,6 +176,9 @@ const STRUCTURE_CRITERIA_ATTACHMENTS: StructureCriteriaAttachment[] = [
             'stepsIntroduction',
             'keywordStuffing',
             'automaticLists',
+            'productUsageHeading',
+            'productTechnicalSpecsHeading',
+            'productWarrantyContent',
         ],
     },
     {
@@ -334,6 +337,9 @@ const BULK_FIX_ARTICLE_LEVEL_RULE_KEYS: (keyof StructureAnalysis)[] = [
     'slowWords',
     'arabicOnly',
     'tablesCount',
+    'productUsageHeading',
+    'productTechnicalSpecsHeading',
+    'productWarrantyContent',
 ];
 
 const ENGLISH_TRANSITIONAL_WORDS = ['firstly', 'secondly', 'finally', 'in addition', 'furthermore', 'therefore', 'consequently', 'on the other hand', 'in contrast', 'also', 'as well as', 'moreover', 'in fact', 'actually', 'in other words', 'for example', 'specifically', 'in general', 'however', 'although', 'while', 'in summary', 'in conclusion'];
