@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
 import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewVariant, CheckResult } from '../types';
-import { AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown, Hash } from 'lucide-react';
+import { AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown, Hash, PackageCheck } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
@@ -672,7 +672,7 @@ const BulkFixReviewPanel: React.FC<{
 
 const StructureTab: React.FC = () => {
     const { structureViewMode: viewMode, uiLanguage } = useUser();
-    const { analysisResults } = useEditor();
+    const { analysisResults, goalContext } = useEditor();
     const { highlightedItem, handleHighlightStructureItem: onHighlightStructureItem } = useInteraction();
     const {
         handleFixAllViolations,
@@ -809,6 +809,18 @@ const StructureTab: React.FC = () => {
               analysis.headingLength,
           ],
       },
+      ...(goalContext.pageType === 'product' ? [{
+          name: tSt.productPageCriteria,
+          icon: <PackageCheck size={16} className="text-[#d4af37]" />,
+          items: [
+              analysis.productUsageHeading,
+              analysis.productTechnicalSpecsHeading,
+              analysis.productWarrantyContent,
+              analysis.mandatoryH2Sections,
+              analysis.supportingH2Sections,
+              analysis.tablesCount,
+          ],
+      }] : []),
       {
           name: tSt.languageQuality,
           icon: <SpellCheck size={16} className="text-[#d4af37]" />,
@@ -885,7 +897,7 @@ const StructureTab: React.FC = () => {
     <div className="min-w-0 overflow-x-hidden p-2 space-y-3">
        {/* Criteria tab stats:
            SpiderStats represents each criteria category: structure, headings, language quality,
-           interaction/CTA, and conclusion. Each point moves outward as that category improves.
+           product page criteria, interaction/CTA, and conclusion. Each point moves outward as that category improves.
            Edit this display here; edit the underlying rule calculations in utils/analysis/rules/* and useContentAnalysis.ts. */}
        <div className="px-1 py-1">
          <div className="mb-2 grid grid-cols-2 gap-1.5">
