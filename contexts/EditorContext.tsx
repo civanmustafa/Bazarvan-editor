@@ -464,6 +464,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const editorSnapshotTimerRef = useRef<number | null>(null);
+    const latestDraftMetaRef = useRef({ title, keywords, articleLanguage, goalContext });
     
     // Debounce editor state and text content before analysis to keep typing responsive.
     const debouncedEditorState = useDebounce(editorState, ANALYSIS_DEBOUNCE_MS);
@@ -476,14 +477,28 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
     }, []);
 
+    useEffect(() => {
+        latestDraftMetaRef.current = { title, keywords, articleLanguage, goalContext };
+    }, [title, keywords, articleLanguage, goalContext]);
+
+    const persistEditorSnapshotNow = useCallback((targetEditor: Editor) => {
+        if (!targetEditor || targetEditor.isDestroyed) return;
+        const { title, keywords, articleLanguage, goalContext } = latestDraftMetaRef.current;
+        writeStorageValue(AUTO_DRAFT_KEY, JSON.stringify(targetEditor.getJSON()));
+        writeStorageValue(AUTO_DRAFT_TITLE_KEY, title);
+        writeStorageValue(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
+        writeStorageValue(AUTO_DRAFT_LANGUAGE_KEY, articleLanguage);
+        writeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
+    }, []);
+
     const captureEditorSnapshot = useCallback((targetEditor: Editor, persistDraft = true) => {
         const contentJSON = targetEditor.getJSON();
         setEditorState(contentJSON);
         setText(targetEditor.getText());
         if (persistDraft) {
-            writeStorageValue(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
+            persistEditorSnapshotNow(targetEditor);
         }
-    }, []);
+    }, [persistEditorSnapshotNow]);
 
     const scheduleEditorSnapshot = useCallback((targetEditor: Editor) => {
         clearEditorSnapshotTimer();
@@ -492,8 +507,6 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             editorSnapshotTimerRef.current = null;
         }, EDITOR_SNAPSHOT_DELAY_MS);
     }, [captureEditorSnapshot, clearEditorSnapshotTimer]);
-
-    useEffect(() => clearEditorSnapshotTimer, [clearEditorSnapshotTimer]);
 
     // TipTap extensions live here. Add editor-level behavior or formatting support in this list.
     const extensions = useMemo(() => [
@@ -527,6 +540,32 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleLanguage(targetLang);
         },
     });
+
+    useEffect(() => {
+        if (!editor) return;
+
+        const flushDraft = () => {
+            clearEditorSnapshotTimer();
+            persistEditorSnapshotNow(editor);
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                flushDraft();
+            }
+        };
+
+        window.addEventListener('beforeunload', flushDraft);
+        window.addEventListener('pagehide', flushDraft);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            flushDraft();
+            window.removeEventListener('beforeunload', flushDraft);
+            window.removeEventListener('pagehide', flushDraft);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [editor, clearEditorSnapshotTimer, persistEditorSnapshotNow]);
 
     // Keep the latest draft metadata mirrored in localStorage.
     useEffect(() => {

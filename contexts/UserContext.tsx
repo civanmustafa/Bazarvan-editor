@@ -65,6 +65,16 @@ const getStoredSessionUser = (): string | null => {
     }
 };
 
+const getStoredSessionView = (): 'dashboard' | 'editor' => {
+    try {
+        const savedView = sessionStorage.getItem('currentView');
+        return savedView === 'editor' || savedView === 'dashboard' ? savedView : 'dashboard';
+    } catch (error) {
+        console.error("Could not read current view from sessionStorage:", error);
+        return 'dashboard';
+    }
+};
+
 const getInitialTheme = () => {
     try {
       const user = getStoredSessionUser();
@@ -110,7 +120,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Screen-level state. AppContent in App.tsx reads currentView to choose the visible page.
     const [currentUser, setCurrentUser] = useState<string | null>(getStoredSessionUser);
     const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'editor'>(
-      getStoredSessionUser() ? 'dashboard' : 'login'
+      getStoredSessionUser() ? getStoredSessionView() : 'login'
     );
     const [isDarkMode, setIsDarkMode] = useState(getInitialTheme);
     const [highlightStyle, setHighlightStyle] = useState<'background' | 'underline'>('background');
@@ -134,6 +144,18 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         document.documentElement.dir = uiLanguage === 'ar' ? 'rtl' : 'ltr';
         document.title = t.appTitle;
     }, [uiLanguage, t]);
+
+    useEffect(() => {
+        try {
+            if (currentUser && currentView !== 'login') {
+                sessionStorage.setItem('currentView', currentView);
+            } else {
+                sessionStorage.removeItem('currentView');
+            }
+        } catch (error) {
+            console.error("Could not persist current view to sessionStorage:", error);
+        }
+    }, [currentUser, currentView]);
     
     useEffect(() => {
         if (isDarkMode) {
@@ -278,6 +300,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             recordLogin(user.username);
             try {
                 sessionStorage.setItem('currentUser', user.username);
+                sessionStorage.setItem('currentView', 'dashboard');
             } catch (error) {
                 console.error("Could not write to sessionStorage:", error);
             }
@@ -293,6 +316,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setEngineeringPrompts(normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
         try {
             sessionStorage.removeItem('currentUser');
+            sessionStorage.removeItem('currentView');
         } catch (error) {
             console.error("Could not remove from sessionStorage:", error);
         }

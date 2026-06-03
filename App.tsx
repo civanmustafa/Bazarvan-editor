@@ -111,6 +111,7 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppError
 
         try {
             sessionStorage.removeItem('currentUser');
+            sessionStorage.removeItem('currentView');
         } catch (error) {
             console.error('Failed to clear session during recovery:', error);
         }
@@ -130,6 +131,7 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppError
         }
         try {
             sessionStorage.removeItem('currentUser');
+            sessionStorage.removeItem('currentView');
         } catch (error) {
             console.error('Failed to clear session during recovery:', error);
         }
@@ -139,6 +141,7 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppError
     private logoutAndReload = () => {
         try {
             sessionStorage.removeItem('currentUser');
+            sessionStorage.removeItem('currentView');
         } catch (error) {
             console.error('Failed to clear session during recovery:', error);
         }

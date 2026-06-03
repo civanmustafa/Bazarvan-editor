@@ -69,7 +69,16 @@ const EditorToolbar: React.FC = () => {
     } = useAI();
 
 
-    const onShowDashboard = () => setCurrentView('dashboard');
+    const handleShowDashboard = useCallback(() => {
+      onSaveDraft();
+      setCurrentView('dashboard');
+    }, [onSaveDraft, setCurrentView]);
+
+    const handleLogout = useCallback(() => {
+      onSaveDraft();
+      onLogout();
+    }, [onSaveDraft, onLogout]);
+
     const totalWordCount = analysisResults.wordCount;
     const totalCharCount = editor?.getText().length ?? 0;
 
@@ -241,7 +250,7 @@ const EditorToolbar: React.FC = () => {
                 
                 <Separator />
 
-                <DocumentActions 
+                <DocumentActions
                     isDarkMode={isDarkMode}
                     t={t}
                     restoreStatus={restoreStatus}
@@ -250,8 +259,8 @@ const EditorToolbar: React.FC = () => {
                     onRestoreDraft={onRestoreDraft}
                     onSaveDraft={onSaveDraft}
                     onNewArticle={handleStartNewArticle}
-                    onShowDashboard={onShowDashboard}
-                    onLogout={onLogout}
+                    onShowDashboard={handleShowDashboard}
+                    onLogout={handleLogout}
                     onSetIsDarkMode={setIsDarkMode}
                 />
             </div>
