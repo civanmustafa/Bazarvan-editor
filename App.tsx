@@ -30,6 +30,12 @@ import {
     MANUAL_DRAFT_LANGUAGE_KEY,
     MANUAL_DRAFT_TITLE_KEY,
 } from './constants';
+import { CONTENT_SUMMARY_STORAGE_KEY } from './constants/engineeringPrompts';
+import {
+    COMPETITOR_HTML_STORAGE_KEY,
+    COMPETITOR_TEXT_STORAGE_KEY,
+    COMPETITOR_URLS_STORAGE_KEY,
+} from './utils/competitorStorage';
 import './styles/global.css';
 import './styles/editor.css';
 import './styles/components.css';
@@ -43,13 +49,35 @@ import './styles/components.css';
  * When adding a new full page, edit AppContent.
  * When changing editor layout, edit EditorView and the sidebar/toolbar components.
  */
-type AppErrorBoundaryState = { hasError: boolean };
+type AppErrorBoundaryState = { hasError: boolean; errorMessage?: string };
+
+const RECOVERY_STORAGE_KEYS = [
+    AUTO_DRAFT_KEY,
+    AUTO_DRAFT_TITLE_KEY,
+    AUTO_DRAFT_KEYWORDS_KEY,
+    AUTO_DRAFT_LANGUAGE_KEY,
+    AUTO_DRAFT_GOAL_CONTEXT_KEY,
+    MANUAL_DRAFT_KEY,
+    MANUAL_DRAFT_TITLE_KEY,
+    MANUAL_DRAFT_KEYWORDS_KEY,
+    MANUAL_DRAFT_LANGUAGE_KEY,
+    MANUAL_DRAFT_GOAL_CONTEXT_KEY,
+    CONTENT_SUMMARY_STORAGE_KEY,
+    COMPETITOR_URLS_STORAGE_KEY,
+    COMPETITOR_HTML_STORAGE_KEY,
+    COMPETITOR_TEXT_STORAGE_KEY,
+];
+
+const RECOVERY_STORAGE_PREFIXES = [
+    'bazarvan:gemini-chat:',
+    'bazarvan:chatgpt-conversation:',
+];
 
 class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppErrorBoundaryState> {
     state: AppErrorBoundaryState = { hasError: false };
 
-    static getDerivedStateFromError(): AppErrorBoundaryState {
-        return { hasError: true };
+    static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
+        return { hasError: true, errorMessage: error.message };
     }
 
     componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
@@ -60,7 +88,64 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppError
         window.location.reload();
     };
 
+    private removeRecoveryStorageKey = (key: string) => {
+        try {
+            localStorage.removeItem(key);
+        } catch (error) {
+            console.error(`Failed to remove recovery field "${key}":`, error);
+        }
+    };
+
     private clearDraftAndReload = () => {
+        RECOVERY_STORAGE_KEYS.forEach(this.removeRecoveryStorageKey);
+
+        try {
+            Object.keys(localStorage).forEach(key => {
+                if (RECOVERY_STORAGE_PREFIXES.some(prefix => key.startsWith(prefix))) {
+                    this.removeRecoveryStorageKey(key);
+                }
+            });
+        } catch (error) {
+            console.error('Failed to inspect local storage during recovery:', error);
+        }
+
+        try {
+            sessionStorage.removeItem('currentUser');
+        } catch (error) {
+            console.error('Failed to clear session during recovery:', error);
+        }
+
+        this.reload();
+    };
+
+    private clearAllLocalDataAndReload = () => {
+        if (!window.confirm('سيتم مسح كل البيانات المحلية على هذا الجهاز، بما في ذلك المقالات المحفوظة ومفاتيح API. هل تريد المتابعة؟')) {
+            return;
+        }
+
+        try {
+            localStorage.clear();
+        } catch (error) {
+            console.error('Failed to clear localStorage during recovery:', error);
+        }
+        try {
+            sessionStorage.removeItem('currentUser');
+        } catch (error) {
+            console.error('Failed to clear session during recovery:', error);
+        }
+        this.reload();
+    };
+
+    private logoutAndReload = () => {
+        try {
+            sessionStorage.removeItem('currentUser');
+        } catch (error) {
+            console.error('Failed to clear session during recovery:', error);
+        }
+        this.reload();
+    };
+
+    private clearDraftOnlyAndReload = () => {
         [
             AUTO_DRAFT_KEY,
             AUTO_DRAFT_TITLE_KEY,
@@ -82,15 +167,6 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppError
         this.reload();
     };
 
-    private logoutAndReload = () => {
-        try {
-            sessionStorage.removeItem('currentUser');
-        } catch (error) {
-            console.error('Failed to clear session during recovery:', error);
-        }
-        this.reload();
-    };
-
     render() {
         if (!this.state.hasError) {
             return this.props.children;
@@ -103,15 +179,26 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppError
                     <p className="mt-3 text-sm leading-7 text-gray-600 dark:text-gray-300">
                         حدث خطأ أثناء تحميل بيانات محفوظة على هذا الجهاز. يمكنك إعادة المحاولة، أو إزالة بيانات المسودة المحلية فقط دون حذف المقالات المحفوظة.
                     </p>
+                    {this.state.errorMessage && (
+                        <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-200" dir="ltr">
+                            {this.state.errorMessage}
+                        </p>
+                    )}
                     <div className="mt-5 flex flex-wrap gap-2">
                         <button onClick={this.reload} className="rounded-md bg-[#d4af37] px-4 py-2 text-sm font-bold text-white hover:bg-[#b8922e]">
                             إعادة المحاولة
                         </button>
                         <button onClick={this.clearDraftAndReload} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#2A2A2A]">
-                            إزالة المسودة المحلية
+                            إصلاح بيانات المحرر المحلية
+                        </button>
+                        <button onClick={this.clearDraftOnlyAndReload} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#2A2A2A]">
+                            إزالة المسودة فقط
                         </button>
                         <button onClick={this.logoutAndReload} className="rounded-md border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-200 dark:hover:bg-[#2A2A2A]">
                             تسجيل الخروج
+                        </button>
+                        <button onClick={this.clearAllLocalDataAndReload} className="rounded-md border border-red-300 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-900/20">
+                            مسح كل البيانات المحلية
                         </button>
                     </div>
                 </div>

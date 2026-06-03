@@ -96,7 +96,7 @@ const createEmptyDuplicateStats = (totalWordCount: number): DuplicateStats => ({
 });
 
 export const createAnalysisNodesFromEditorState = (editorState: any): AnalysisDocumentNode[] => {
-  if (!editorState?.content) {
+  if (!Array.isArray(editorState?.content)) {
     return [];
   }
 

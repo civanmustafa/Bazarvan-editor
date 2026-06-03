@@ -23,14 +23,22 @@ export type GoalContextFieldConfig =
       placeholder: string;
     };
 
-const normalizeChoiceToken = (value?: string | null): string => (
+const normalizeChoiceToken = (value?: unknown): string => (
   String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
 );
 
-const normalizeMappedChoice = (value: string | undefined, choiceMap: Record<string, string>, fallback: string): string => {
+const isRecord = (value: unknown): value is Record<string, any> => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
+);
+
+const asStoredString = (value: unknown): string => (
+  typeof value === 'string' ? value : ''
+);
+
+const normalizeMappedChoice = (value: unknown, choiceMap: Record<string, string>, fallback: string): string => {
   const token = normalizeChoiceToken(value);
   if (!token) return fallback;
-  return choiceMap[token] || value || fallback;
+  return choiceMap[token] || asStoredString(value) || fallback;
 };
 
 export const isProductPageContext = (goalContext?: Partial<GoalContext> | null): boolean => (
@@ -38,9 +46,10 @@ export const isProductPageContext = (goalContext?: Partial<GoalContext> | null):
 );
 
 export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalContext => {
+  const source = isRecord(value) ? value : {};
   const normalized = {
     ...INITIAL_GOAL_CONTEXT,
-    ...(value || {}),
+    ...source,
   };
 
   const pageTypeMap: Record<string, string> = {
@@ -64,7 +73,7 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
   return {
     pageType: normalizeMappedChoice(normalized.pageType, pageTypeMap, INITIAL_GOAL_CONTEXT.pageType),
     objective: normalizeMappedChoice(normalized.objective, objectiveMap, INITIAL_GOAL_CONTEXT.objective),
-    audienceScope: normalized.audienceScope,
+    audienceScope: normalizeMappedChoice(normalized.audienceScope, {}, INITIAL_GOAL_CONTEXT.audienceScope),
     targetCountry: '',
     targetAudience: '',
     searchIntent: normalizeMappedChoice(normalized.searchIntent, intentMap, INITIAL_GOAL_CONTEXT.searchIntent),
@@ -94,7 +103,9 @@ export const updateGoalContextField = (
 export const normalizeClientGoalContexts = (
   value?: Record<string, Partial<GoalContext>> | null,
 ): ClientGoalContexts => {
-  return Object.entries(value || {}).reduce<ClientGoalContexts>((acc, [companyName, context]) => {
+  if (!isRecord(value)) return {};
+
+  return Object.entries(value).reduce<ClientGoalContexts>((acc, [companyName, context]) => {
     const normalizedCompany = companyName.trim();
     if (normalizedCompany) {
       acc[normalizedCompany] = normalizeGoalContext(context);

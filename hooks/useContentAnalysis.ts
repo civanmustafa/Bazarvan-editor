@@ -7,6 +7,129 @@ type ContentAnalysisWorkerResponse =
   | { requestId: number; result: FullAnalysis; error?: never }
   | { requestId: number; result?: never; error: string };
 
+const STRUCTURE_ANALYSIS_KEYS: (keyof StructureAnalysis)[] = [
+  'wordCount',
+  'firstTitle',
+  'secondTitle',
+  'includesExcludes',
+  'preTravelH2',
+  'pricingH2',
+  'whoIsItForH2',
+  'summaryParagraph',
+  'secondParagraph',
+  'paragraphLength',
+  'paragraphPair',
+  'h2Structure',
+  'h2Count',
+  'h3Structure',
+  'h4Structure',
+  'betweenH2H3',
+  'faqSection',
+  'answerParagraph',
+  'ambiguousHeadings',
+  'ambiguousParagraphReferences',
+  'punctuation',
+  'paragraphEndings',
+  'interrogativeH2',
+  'differentTransitionalWords',
+  'immediateDuplicateWords',
+  'duplicateWordsInParagraph',
+  'duplicateWordsInHeading',
+  'sentenceLength',
+  'stepsIntroduction',
+  'automaticLists',
+  'ctaWords',
+  'interactiveLanguage',
+  'arabicOnly',
+  'lastH2IsConclusion',
+  'conclusionParagraph',
+  'conclusionWordCount',
+  'conclusionHasList',
+  'conclusionHasNumber',
+  'sentenceBeginnings',
+  'warningWords',
+  'punctuationSpacing',
+  'repeatedBigrams',
+  'slowWords',
+  'wordConsistency',
+  'commonEnglishTerms',
+  'wordsToDelete',
+  'keywordStuffing',
+  'productUsageHeading',
+  'productTechnicalSpecsHeading',
+  'productWarrantyContent',
+  'tablesCount',
+  'headingLength',
+];
+
+const createFallbackAnalysis = (textContent = ''): FullAnalysis => {
+  const wordCount = textContent.trim().split(/\s+/).filter(Boolean).length;
+  const keywordStats = {
+    count: 0,
+    percentage: 0,
+    requiredCount: [0, 0] as [number, number],
+    requiredPercentage: [0, 0] as [number, number],
+    status: 'info' as const,
+  };
+  const fallbackCheck = (title: string) => ({
+    title,
+    status: 'info' as const,
+    current: 0,
+    required: '-',
+    progress: 0,
+  });
+  const structureAnalysis = Object.fromEntries(
+    STRUCTURE_ANALYSIS_KEYS.map(key => [key, fallbackCheck(key)])
+  ) as StructureAnalysis;
+
+  return {
+    keywordAnalysis: {
+      primary: { ...keywordStats, checks: [] },
+      secondaries: [],
+      secondariesDistribution: keywordStats,
+      company: keywordStats,
+      lsi: {
+        distribution: keywordStats,
+        balance: fallbackCheck('lsi'),
+        keywords: [],
+      },
+    },
+    structureAnalysis,
+    structureStats: {
+      violatingCriteriaCount: 0,
+      totalErrorsCount: 0,
+      paragraphCount: 0,
+      headingCount: 0,
+    },
+    duplicateAnalysis: {
+      2: [],
+      3: [],
+      4: [],
+      5: [],
+      6: [],
+      7: [],
+      8: [],
+    },
+    duplicateStats: {
+      totalWords: wordCount,
+      uniqueWords: 0,
+      keywordDuplicatesCount: 0,
+      totalDuplicates: 0,
+      commonDuplicatesCount: 0,
+    },
+    wordCount,
+  };
+};
+
+const runContentAnalysisSafely = (input: ContentAnalysisInput): FullAnalysis => {
+  try {
+    return runContentAnalysis(input);
+  } catch (error) {
+    console.error('Content analysis failed:', error);
+    return createFallbackAnalysis(input.textContent);
+  }
+};
+
 const createAnalysisInput = (
   editorState: any,
   textContent: string,
@@ -17,7 +140,7 @@ const createAnalysisInput = (
   updateDuplicateAnalysis: boolean,
 ): ContentAnalysisInput => ({
   analysisNodes: createAnalysisNodesFromEditorState(editorState),
-  textContent,
+  textContent: typeof textContent === 'string' ? textContent : '',
   keywords,
   goalContext,
   articleLanguage,
@@ -65,7 +188,7 @@ export const useContentAnalysis = (
   enabled = true,
 ): FullAnalysis => {
   const [analysisResults, setAnalysisResults] = useState<FullAnalysis>(() =>
-    runContentAnalysis(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, true))
+    runContentAnalysisSafely(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, true))
   );
   const [workerDisabled, setWorkerDisabled] = useState(false);
   const activeWorkerRef = useRef<Worker | null>(null);
@@ -96,7 +219,7 @@ export const useContentAnalysis = (
     latestRequestIdRef.current = requestId;
 
     const runFallbackAnalysis = () => {
-      const result = runContentAnalysis(input);
+      const result = runContentAnalysisSafely(input);
       setLatestAnalysisResults(mergePreviousDuplicateResults(result, latestAnalysisRef.current, updateDuplicateAnalysis));
     };
 
