@@ -59,14 +59,177 @@ const removeStorageValue = (key: string) => {
     }
 };
 
-const isUsableEditorContent = (value: unknown): boolean => (
-    typeof value === 'string' ||
-    Array.isArray(value) ||
-    (!!value && typeof value === 'object' && (
-        (value as { type?: string }).type === 'doc' ||
-        Array.isArray((value as { content?: unknown[] }).content)
-    ))
+const isRecord = (value: unknown): value is Record<string, any> => (
+    !!value && typeof value === 'object' && !Array.isArray(value)
 );
+
+const ALLOWED_EDITOR_NODE_TYPES = new Set([
+    'doc',
+    'paragraph',
+    'text',
+    'heading',
+    'blockquote',
+    'bulletList',
+    'orderedList',
+    'listItem',
+    'codeBlock',
+    'hardBreak',
+    'horizontalRule',
+    'table',
+    'tableRow',
+    'tableHeader',
+    'tableCell',
+]);
+
+const ALLOWED_EDITOR_MARK_TYPES = new Set([
+    'bold',
+    'italic',
+    'strike',
+    'code',
+    'highlight',
+]);
+
+const INLINE_EDITOR_NODE_TYPES = new Set(['text', 'hardBreak']);
+const BLOCK_EDITOR_NODE_TYPES = new Set([
+    'paragraph',
+    'heading',
+    'blockquote',
+    'bulletList',
+    'orderedList',
+    'codeBlock',
+    'horizontalRule',
+    'table',
+]);
+
+const isValidEditorMark = (value: unknown): boolean => {
+    if (!isRecord(value) || typeof value.type !== 'string') return false;
+    if (!ALLOWED_EDITOR_MARK_TYPES.has(value.type)) return false;
+    return value.attrs === undefined || isRecord(value.attrs);
+};
+
+const hasValidEditorChildren = (type: string, children: Record<string, any>[]): boolean => {
+    const childTypes = children.map(child => child.type);
+
+    switch (type) {
+        case 'doc':
+            return childTypes.every(childType => BLOCK_EDITOR_NODE_TYPES.has(childType));
+        case 'paragraph':
+        case 'heading':
+            return childTypes.every(childType => INLINE_EDITOR_NODE_TYPES.has(childType));
+        case 'blockquote':
+            return childTypes.every(childType => BLOCK_EDITOR_NODE_TYPES.has(childType));
+        case 'bulletList':
+        case 'orderedList':
+            return childTypes.every(childType => childType === 'listItem');
+        case 'listItem':
+            return childTypes.every(childType => BLOCK_EDITOR_NODE_TYPES.has(childType));
+        case 'codeBlock':
+            return childTypes.every(childType => childType === 'text');
+        case 'table':
+            return childTypes.every(childType => childType === 'tableRow');
+        case 'tableRow':
+            return childTypes.every(childType => childType === 'tableCell' || childType === 'tableHeader');
+        case 'tableCell':
+        case 'tableHeader':
+            return childTypes.every(childType => BLOCK_EDITOR_NODE_TYPES.has(childType));
+        case 'text':
+        case 'hardBreak':
+        case 'horizontalRule':
+            return children.length === 0;
+        default:
+            return false;
+    }
+};
+
+const isValidEditorNode = (value: unknown): boolean => {
+    if (!isRecord(value) || typeof value.type !== 'string') return false;
+    if (!ALLOWED_EDITOR_NODE_TYPES.has(value.type)) return false;
+    if (value.attrs !== undefined && !isRecord(value.attrs)) return false;
+    if (value.marks !== undefined && (!Array.isArray(value.marks) || !value.marks.every(isValidEditorMark))) return false;
+
+    if (value.type === 'text') {
+        return typeof value.text === 'string' && value.content === undefined;
+    }
+
+    if (value.type === 'heading') {
+        const level = value.attrs?.level;
+        if (level !== undefined && (![1, 2, 3, 4] as const).includes(level)) return false;
+    }
+
+    if (value.type === 'hardBreak' || value.type === 'horizontalRule') {
+        return value.content === undefined;
+    }
+
+    if (value.content === undefined) {
+        if (value.type === 'doc' || value.type === 'table' || value.type === 'tableRow' || value.type === 'bulletList' || value.type === 'orderedList') {
+            return false;
+        }
+        return true;
+    }
+
+    if (!Array.isArray(value.content) || !value.content.every(isValidEditorNode)) return false;
+    return hasValidEditorChildren(value.type, value.content);
+};
+
+const normalizeStoredEditorContent = (value: unknown): any | null => {
+    if (typeof value === 'string') return value;
+
+    if (Array.isArray(value)) {
+        return value.every(isValidEditorNode) ? { type: 'doc', content: value } : null;
+    }
+
+    if (!isRecord(value)) return null;
+
+    const content = Array.isArray(value.content) ? value.content : undefined;
+    const normalizedValue = typeof value.type === 'string'
+        ? value
+        : content
+          ? { ...value, type: 'doc' }
+          : value;
+
+    return isValidEditorNode(normalizedValue) ? normalizedValue : null;
+};
+
+const extractTextFromStoredEditorContent = (value: unknown): string => {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) {
+        return value.map(extractTextFromStoredEditorContent).filter(Boolean).join('\n');
+    }
+    if (!isRecord(value)) return '';
+    if (typeof value.text === 'string') return value.text;
+    if (Array.isArray(value.content)) {
+        return value.content.map(extractTextFromStoredEditorContent).filter(Boolean).join('\n');
+    }
+    return '';
+};
+
+const getSafeEditorContent = (value: unknown, fallback: any = INITIAL_CONTENT): any => {
+    const normalized = normalizeStoredEditorContent(value);
+    if (normalized !== null) return normalized;
+
+    const recoveredText = extractTextFromStoredEditorContent(value).trim();
+    return recoveredText || fallback;
+};
+
+const isUsableEditorContent = (value: unknown): boolean => (
+    normalizeStoredEditorContent(value) !== null ||
+    extractTextFromStoredEditorContent(value).trim().length > 0
+);
+
+const setEditorContentSafely = (editor: Editor, value: unknown, fallback: any = INITIAL_CONTENT): boolean => {
+    try {
+        editor.commands.setContent(getSafeEditorContent(value, fallback));
+        return normalizeStoredEditorContent(value) !== null;
+    } catch (error) {
+        console.error('Failed to set stored editor content:', error);
+        try {
+            editor.commands.setContent(fallback);
+        } catch (fallbackError) {
+            console.error('Failed to set fallback editor content:', fallbackError);
+        }
+        return false;
+    }
+};
 
 function useDebounce<T>(value: T, delay: number): T {
     const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -86,7 +249,7 @@ const getInitialContent = () => {
     const savedContent = readStorageValue(AUTO_DRAFT_KEY);
     if (savedContent) {
         const parsedContent = JSON.parse(savedContent);
-        if (isUsableEditorContent(parsedContent)) return parsedContent;
+        if (isUsableEditorContent(parsedContent)) return getSafeEditorContent(parsedContent);
         removeStorageValue(AUTO_DRAFT_KEY);
     }
   } catch (error) {
@@ -489,8 +652,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             try {
                 const parsedContent = JSON.parse(content);
                 if (isUsableEditorContent(parsedContent)) {
-                    editor.commands.setContent(parsedContent);
+                    const isOriginalContentValid = setEditorContentSafely(editor, parsedContent);
                     captureEditorSnapshot(editor);
+                    if (!isOriginalContentValid) {
+                        writeStorageValue(MANUAL_DRAFT_KEY, JSON.stringify(editor.getJSON()));
+                    }
                 } else {
                     removeStorageValue(MANUAL_DRAFT_KEY);
                 }
@@ -527,7 +693,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleKey('');
             setKeywords(INITIAL_KEYWORDS);
             setGoalContext(normalizeGoalContext());
-            editor.commands.setContent(INITIAL_CONTENT);
+            setEditorContentSafely(editor, INITIAL_CONTENT);
             captureEditorSnapshot(editor);
             handleLanguageChange(lang);
             setCurrentView('editor');
@@ -541,7 +707,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleKey(titleStr);
             setKeywords(article.keywords || INITIAL_KEYWORDS);
             setGoalContext(normalizeGoalContext(article.goalContext));
-            editor.commands.setContent(article.content || INITIAL_CONTENT);
+            setEditorContentSafely(editor, article.content || INITIAL_CONTENT);
             captureEditorSnapshot(editor);
             handleLanguageChange(lang);
             setCurrentView('editor');
