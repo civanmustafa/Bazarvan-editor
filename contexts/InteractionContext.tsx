@@ -81,6 +81,10 @@ const formatTooltipTextBlock = (value: string): string => (
 type StructureViolationItem = NonNullable<CheckResult['violatingItems']>[number];
 type ResolvedStructureViolation = StructureViolationItem & { rule: CheckResult };
 
+const isStructureHighlightedItem = (value: string | any[] | null): value is string => (
+    typeof value === 'string' && value !== '__ALL_KEYWORDS__'
+);
+
 const normalizeViolationText = (value: string): string => (
     value
         .replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, ' ')
@@ -95,6 +99,43 @@ const getSafeDocTextBetween = (editor: EditorClass, from: number, to: number): s
     }
 
     return editor.state.doc.textBetween(from, to, ' ');
+};
+
+const findBestViolationTextMatch = (
+    editor: EditorClass,
+    expectedText: string,
+    originalFrom: number,
+): { from: number; to: number } | null => {
+    const normalizedExpectedText = normalizeViolationText(expectedText);
+    const exactExpectedText = expectedText.trim();
+    let bestMatch: { from: number; to: number; score: number } | null = null;
+
+    const considerMatch = (from: number, to: number, bonus = 0) => {
+        const score = Math.abs(from - originalFrom) + bonus;
+        if (!bestMatch || score < bestMatch.score) {
+            bestMatch = { from, to, score };
+        }
+    };
+
+    editor.state.doc.descendants((node, pos) => {
+        if (node.isBlock && ['paragraph', 'heading', 'listItem'].includes(node.type.name)) {
+            if (normalizeViolationText(node.textContent) === normalizedExpectedText) {
+                considerMatch(pos, pos + node.nodeSize);
+            }
+        }
+
+        if (!node.isText || !node.text || exactExpectedText.length === 0) return;
+
+        let searchFrom = 0;
+        while (searchFrom <= node.text.length) {
+            const index = node.text.indexOf(exactExpectedText, searchFrom);
+            if (index === -1) break;
+            considerMatch(pos + index, pos + index + exactExpectedText.length, 2);
+            searchFrom = index + Math.max(1, exactExpectedText.length);
+        }
+    });
+
+    return bestMatch ? { from: bestMatch.from, to: bestMatch.to } : null;
 };
 
 const resolveViolationRangeInCurrentDoc = (
@@ -114,17 +155,7 @@ const resolveViolationRangeInCurrentDoc = (
         return violation;
     }
 
-    let bestMatch: { from: number; to: number; score: number } | null = null;
-    editor.state.doc.descendants((node, pos) => {
-        if (!node.isBlock || !['paragraph', 'heading', 'listItem'].includes(node.type.name)) return;
-        if (normalizeViolationText(node.textContent) !== expectedText) return;
-
-        const score = Math.abs(pos - violation.from);
-        if (!bestMatch || score < bestMatch.score) {
-            bestMatch = { from: pos, to: pos + node.nodeSize, score };
-        }
-    });
-
+    const bestMatch = findBestViolationTextMatch(editor, violation.text || expectedText, violation.from);
     return bestMatch
         ? { ...violation, from: bestMatch.from, to: bestMatch.to }
         : null;
@@ -146,12 +177,17 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [pinnedTooltip, setPinnedTooltip] = useState<TooltipState>(null);
     const [isTooltipAlwaysOn, setIsTooltipAlwaysOn] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
+    const highlightedItemRef = useRef<string | any[] | null>(null);
 
     const [isTocVisible, setIsTocVisible] = useState(false);
     const [isSpotlightVisible, setIsSpotlightVisible] = useState(false);
     
     const hasRunFirstPasteCleanupRef = useRef(false);
     const isFirstPasteCleanupRunningRef = useRef(false);
+
+    useEffect(() => {
+        highlightedItemRef.current = highlightedItem;
+    }, [highlightedItem]);
 
     const isDocumentTextEmpty = (doc: any): boolean => {
         const rawText = typeof doc?.textBetween === 'function'
@@ -199,9 +235,50 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if (editor && !editor.isDestroyed) {
             const { tr } = editor.state;
             tr.removeMark(0, editor.state.doc.content.size, editor.schema.marks.highlight);
+            tr.setMeta('internal-highlight-maintenance', true);
             editor.view.dispatch(tr);
         }
     }, [editor]);
+
+    const clearViolationHighlights = useCallback(() => {
+        if (!editor || editor.isDestroyed) return;
+        const highlightMarkType = editor.schema.marks.highlight;
+        const { tr } = editor.state;
+        let changed = false;
+
+        editor.state.doc.descendants((node, pos) => {
+            if (!node.isText || !node.marks?.length) return;
+            node.marks
+                .filter(mark => mark.type === highlightMarkType && mark.attrs?.isViolation)
+                .forEach(mark => {
+                    tr.removeMark(pos, pos + node.nodeSize, mark);
+                    changed = true;
+                });
+        });
+
+        if (changed) {
+            tr.setMeta('internal-highlight-maintenance', true);
+            editor.view.dispatch(tr);
+        }
+    }, [editor]);
+
+    useEffect(() => {
+        if (!editor) return;
+
+        const handleTransaction = ({ transaction }: { transaction: any }) => {
+            if (!transaction.docChanged || transaction.getMeta('internal-highlight-maintenance')) return;
+            if (!isStructureHighlightedItem(highlightedItemRef.current)) return;
+
+            highlightedItemRef.current = null;
+            setHighlightedItem(null);
+            setTooltip(null);
+            setPinnedTooltip(null);
+            window.setTimeout(clearViolationHighlights, 0);
+        };
+
+        editor.on('transaction', handleTransaction);
+        return () => editor.off('transaction', handleTransaction);
+    }, [editor, clearViolationHighlights]);
 
     const createArabicInsensitiveRegexString = (text: string): string => {
         return text.replace(/ا|أ|إ|آ/g, '[اأإآ]')
@@ -493,6 +570,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 });
                 tr.addMark(violation.from, violation.to, highlightMark);
             });
+            tr.setMeta('internal-highlight-maintenance', true);
     
             if (tr.steps.length > 0) {
                 editor.view.dispatch(tr);

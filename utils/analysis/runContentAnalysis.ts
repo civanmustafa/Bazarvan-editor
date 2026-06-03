@@ -1,4 +1,4 @@
-import type { Keywords, FullAnalysis, StructureAnalysis, GoalContext, DuplicateAnalysis, DuplicateStats } from '../../types';
+import type { Keywords, FullAnalysis, StructureAnalysis, GoalContext, DuplicateAnalysis, DuplicateStats, CheckResult } from '../../types';
 import { translations } from '../../components/translations';
 import { runDuplicateAnalysis } from './runDuplicateAnalysis';
 import { runKeywordAnalysis } from './runKeywordAnalysis';
@@ -122,6 +122,58 @@ export const createAnalysisNodesFromEditorState = (editorState: any): AnalysisDo
   return nodes;
 };
 
+const getViolationTextFromAnalysisNodes = (
+  nodes: AnalysisDocumentNode[],
+  from: number,
+  to: number,
+): string | undefined => {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return undefined;
+
+  const textParts: string[] = [];
+  nodes.forEach(node => {
+    const nodeSize = getAnalysisNodeSize(node);
+    const nodeFrom = node.pos;
+    const nodeTo = node.pos + nodeSize;
+    if (to <= nodeFrom || from >= nodeTo) return;
+
+    const nodeText = getAnalysisNodeContentText(node);
+    if (!nodeText) return;
+
+    if (from <= nodeFrom && to >= nodeTo) {
+      textParts.push(nodeText);
+      return;
+    }
+
+    const textStart = nodeFrom + 1;
+    const startIndex = Math.max(0, from - textStart);
+    const endIndex = Math.min(nodeText.length, to - textStart);
+    if (endIndex > startIndex) {
+      textParts.push(nodeText.slice(startIndex, endIndex));
+    }
+  });
+
+  const text = textParts.join(' ').replace(/\s+/g, ' ').trim();
+  return text || undefined;
+};
+
+const enrichStructureViolationText = (
+  structureAnalysis: StructureAnalysis,
+  nodes: AnalysisDocumentNode[],
+): StructureAnalysis => {
+  const entries = Object.entries(structureAnalysis).map(([key, result]) => {
+    if (!result.violatingItems?.length) return [key, result];
+
+    const violatingItems: NonNullable<CheckResult['violatingItems']> = result.violatingItems.map(item => ({
+      ...item,
+      text: item.text || getViolationTextFromAnalysisNodes(nodes, item.from, item.to),
+    }));
+
+    return [key, { ...result, violatingItems }];
+  });
+
+  return Object.fromEntries(entries) as StructureAnalysis;
+};
+
 export const runContentAnalysis = ({
   editorState,
   analysisNodes,
@@ -229,7 +281,7 @@ export const runContentAnalysis = ({
   const keywordAnalysis = runKeywordAnalysis(analysisContext);
   const conclusionChecks = checkConclusion(analysisContext);
 
-  const structureAnalysis: StructureAnalysis = {
+  const rawStructureAnalysis: StructureAnalysis = {
     wordCount: checkWordCount(analysisContext),
     firstTitle: checkFirstTitle(analysisContext),
     secondTitle: checkSecondTitle(analysisContext),
@@ -283,6 +335,7 @@ export const runContentAnalysis = ({
     productWarrantyContent: checkProductWarrantyContent(analysisContext),
     tablesCount: checkTablesCount(analysisContext),
   };
+  const structureAnalysis = enrichStructureViolationText(rawStructureAnalysis, nodes);
 
   const violatingCriteriaCount = Object.values(structureAnalysis).filter(c => c.status === 'fail').length;
   const totalErrorsCount = Object.values(structureAnalysis).reduce((sum, c) => sum + (c.violationCount ?? c.violatingItems?.length ?? 0), 0);

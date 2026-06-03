@@ -1525,6 +1525,35 @@ const compareBulkFixVariantsByQuality = (a: BulkFixReviewVariant, b: BulkFixRevi
         bQuality.total - aQuality.total;
 };
 
+const getBulkFixVariantViolationScore = (variant: BulkFixReviewVariant) => {
+    const checks = variant.criteriaChecks || [];
+    const violationCount = checks.filter(check => check.status === 'fail' || check.status === 'warn').length;
+    const unknownCount = checks.filter(check => check.status === 'unknown').length;
+    const passCount = checks.filter(check => check.status === 'pass').length;
+
+    return {
+        violationCount,
+        unknownCount,
+        passCount,
+        total: checks.length,
+    };
+};
+
+const selectLeastViolatingBulkFixVariant = (item: BulkFixReviewItem): BulkFixReviewVariant | undefined => {
+    if (!item.variants || item.variants.length === 0) return undefined;
+
+    return [...item.variants].sort((a, b) => {
+        const aScore = getBulkFixVariantViolationScore(a);
+        const bScore = getBulkFixVariantViolationScore(b);
+
+        return aScore.violationCount - bScore.violationCount ||
+            aScore.unknownCount - bScore.unknownCount ||
+            bScore.passCount - aScore.passCount ||
+            bScore.total - aScore.total ||
+            compareBulkFixVariantsByQuality(a, b);
+    })[0];
+};
+
 const isDefaultBulkFixVariantLabel = (label: string): boolean => (
     /^(?:اقتراح|الاقتراح|suggestion|option|variant)\s*\d+$/i.test(label.trim())
 );
@@ -3912,7 +3941,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const selectedVariantId = variantSelections[item.id];
             const selectedVariant = selectedVariantId
                 ? item.variants?.find(variant => variant.id === selectedVariantId)
-                : item.variants?.[0];
+                : selectLeastViolatingBulkFixVariant(item);
             const fixedText = selectedVariant?.fixedText || item.fixedText;
             const resolvedRange = resolveBulkFixReviewRange(item);
             if (!resolvedRange) {
