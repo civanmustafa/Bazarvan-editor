@@ -41,6 +41,7 @@ import { normalizeGoalContext } from '../utils/goalContext';
 const GEMINI_MODEL = GEMINI_ANALYSIS_MODEL;
 const OPENAI_MODEL = 'gpt-5.5';
 const CHATGPT_TIMEOUT_MS = 300000;
+const CHATGPT_CONVERSATION_STORAGE_PREFIX = 'bazarvan:chatgpt-conversation';
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
     pageType: 'نوع الصفحة',
@@ -1712,7 +1713,41 @@ const normalizeChatGptKeys = (keys?: string | string[]): string[] => {
     return keyList.map(key => key.trim()).filter(Boolean);
 };
 
-const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
+type ChatGptAnalysisResult = {
+    text: string;
+    conversationId?: string;
+};
+
+const getChatGptConversationStorageKey = (currentUser: string | null, articleKey: string): string => {
+    const userPart = currentUser?.trim() || 'anonymous';
+    const articlePart = articleKey?.trim() || 'default';
+    return `${CHATGPT_CONVERSATION_STORAGE_PREFIX}:${userPart}:${articlePart}`;
+};
+
+const readStoredChatGptConversationId = (currentUser: string | null, articleKey: string): string | undefined => {
+    try {
+        const value = localStorage.getItem(getChatGptConversationStorageKey(currentUser, articleKey));
+        return value?.trim() || undefined;
+    } catch (error) {
+        console.error('Could not read ChatGPT conversation id from localStorage:', error);
+        return undefined;
+    }
+};
+
+const saveStoredChatGptConversationId = (currentUser: string | null, articleKey: string, conversationId?: string) => {
+    if (!conversationId?.trim()) return;
+    try {
+        localStorage.setItem(getChatGptConversationStorageKey(currentUser, articleKey), conversationId.trim());
+    } catch (error) {
+        console.error('Could not save ChatGPT conversation id to localStorage:', error);
+    }
+};
+
+const callChatGptAnalysis = async (
+    prompt: string,
+    userKeys?: string | string[],
+    conversationId?: string,
+): Promise<ChatGptAnalysisResult> => {
     const trimmedUserKeys = normalizeChatGptKeys(userKeys);
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
@@ -1725,6 +1760,7 @@ const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[])
                 prompt,
                 model: OPENAI_MODEL,
                 apiKeys: trimmedUserKeys.length > 0 ? randomizeApiKeyOrder(trimmedUserKeys) : undefined,
+                conversationId,
             }),
             signal: controller.signal,
         });
@@ -1746,15 +1782,24 @@ const callChatGptAnalysis = async (prompt: string, userKeys?: string | string[])
             throw new Error('ChatGPT server route did not return a valid text response.');
         }
 
-        return data.text;
+        return {
+            text: data.text,
+            conversationId: typeof data.conversationId === 'string' ? data.conversationId : conversationId,
+        };
     } catch (error) {
         window.clearTimeout(timeoutId);
         console.error("Error calling ChatGPT API:", error);
         if (error instanceof Error && error.name === 'AbortError') {
-            return "انتهت مهلة الاتصال بـ ChatGPT (300 ثانية). إذا لم يظهر طلب في لوحة OpenAI فهذا يعني أن الخادم المحلي لم يصل إلى OpenAI.";
+            return {
+                text: "انتهت مهلة الاتصال بـ ChatGPT (300 ثانية). إذا لم يظهر طلب في لوحة OpenAI فهذا يعني أن الخادم المحلي لم يصل إلى OpenAI.",
+                conversationId,
+            };
         }
         const message = error instanceof Error ? error.message : 'خطأ غير معروف';
-        return `حدث خطأ أثناء الاتصال بـ ChatGPT: ${message}`;
+        return {
+            text: `حدث خطأ أثناء الاتصال بـ ChatGPT: ${message}`,
+            conversationId,
+        };
     }
 };
 
@@ -2867,7 +2912,7 @@ export const useAI = () => {
 };
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { t, uiLanguage, apiKeys, engineeringPrompts } = useUser();
+    const { t, uiLanguage, apiKeys, engineeringPrompts, currentUser } = useUser();
     const { editor, title, text, keywords, analysisResults, goalContext, articleLanguage, articleKey } = useEditor();
     const { openModal } = useModal();
     
@@ -3289,10 +3334,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 generateContextAwarePrompt(userPrompt, options),
                 { skipPatchInstructions: historyMeta?.skipPatchInstructions },
             );
-            const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt);
+            const storedConversationId = readStoredChatGptConversationId(currentUser, articleKey);
+            const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt, storedConversationId);
+            saveStoredChatGptConversationId(currentUser, articleKey, result.conversationId);
             const parsedResult = historyMeta?.skipPatchInstructions
-                ? { displayText: result, patches: [] }
-                : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, 'chatgpt'), historyMeta?.commandId);
+                ? { displayText: result.text, patches: [] }
+                : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result.text, 'chatgpt'), historyMeta?.commandId);
             setAiResults(prev => ({ ...prev, chatgpt: parsedResult.displayText }));
             setAiInsertionPatches(prev => ({ ...prev, chatgpt: parsedResult.patches }));
             logReadyCommandAnalysis('chatgpt', parsedResult, historyMeta);
@@ -3301,7 +3348,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis]);
+    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         if (isAiCommandLoading || isAiLoading.gemini || !editor) return;

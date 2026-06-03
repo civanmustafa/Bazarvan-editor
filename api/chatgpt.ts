@@ -7,6 +7,16 @@ type ApiResult = {
   headers?: Record<string, string>;
 };
 
+class OpenAiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "OpenAiRequestError";
+    this.status = status;
+  }
+}
+
 /*
  * Local OpenAI/ChatGPT API route used by the Vite dev middleware.
  * Keep browser code away from direct OpenAI calls; add request/response changes here.
@@ -76,6 +86,40 @@ const randomizeKeyOrder = (keys: string[]): string[] => {
   return shuffled;
 };
 
+const normalizeConversationId = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const createOpenAiConversation = async (openAiKey: string, signal: AbortSignal): Promise<string> => {
+  const response = await fetch("https://api.openai.com/v1/conversations", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${openAiKey}`,
+    },
+    body: JSON.stringify({
+      metadata: {
+        source: "bazarvan-editor",
+      },
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new OpenAiRequestError(await extractErrorMessage(response), response.status);
+  }
+
+  const data = await response.json();
+  const conversationId = normalizeConversationId(data?.id);
+  if (!conversationId) {
+    throw new Error("OpenAI did not return a valid conversation id.");
+  }
+
+  return conversationId;
+};
+
 const extractResponseText = (data: any): string => {
   if (typeof data?.output_text === "string") {
     return data.output_text;
@@ -101,6 +145,48 @@ const extractErrorMessage = async (response: Response): Promise<string> => {
   }
 };
 
+const isMissingConversationError = (error: unknown): boolean => (
+  error instanceof OpenAiRequestError
+  && error.status === 404
+  && error.message.toLowerCase().includes("conversation")
+);
+
+const createOpenAiResponse = async (
+  openAiKey: string,
+  signal: AbortSignal,
+  selectedModel: string,
+  conversationId: string,
+  prompt: string,
+): Promise<string> => {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${openAiKey}`,
+    },
+    body: JSON.stringify({
+      model: selectedModel,
+      conversation: conversationId,
+      instructions: "أنت خبير SEO وAEO وGEO وLLM SEO. أجب بالعربية بشكل عملي ومنظم.",
+      input: prompt,
+      max_output_tokens: 8000,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new OpenAiRequestError(await extractErrorMessage(response), response.status);
+  }
+
+  const data = await response.json();
+  const text = extractResponseText(data);
+  if (!text) {
+    throw new Error("لم يرجع OpenAI نصًا صالحًا.");
+  }
+
+  return text;
+};
+
 const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
   if (req.method === "OPTIONS") {
     return {
@@ -123,7 +209,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, apiKey, apiKeys, model } = await readRequestBody(req) as any;
+    const { prompt, apiKey, apiKeys, model, conversationId } = await readRequestBody(req) as any;
     if (!prompt || typeof prompt !== "string") {
       return { status: 400, body: { error: "الموجه مطلوب" } };
     }
@@ -141,51 +227,64 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
     const selectedModel = typeof model === "string" && model.trim()
       ? model.trim()
       : OPENAI_MODEL;
+    const requestedConversationId = normalizeConversationId(conversationId);
 
     let lastError: unknown = null;
-    for (const openAiKey of randomizeKeyOrder(openAiKeys)) {
+    let sawMissingConversationError = false;
+    const openAiKeysToTry = randomizeKeyOrder(openAiKeys);
+    for (const openAiKey of openAiKeysToTry) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
 
       try {
-        const response = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${openAiKey}`,
-          },
-          body: JSON.stringify({
-            model: selectedModel,
-            instructions: "أنت خبير SEO وAEO وGEO وLLM SEO. أجب بالعربية بشكل عملي ومنظم.",
-            input: prompt,
-            max_output_tokens: 8000,
-          }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(await extractErrorMessage(response));
-        }
-
-        const data = await response.json();
-        const text = extractResponseText(data);
-        if (!text) {
-          throw new Error("لم يرجع OpenAI نصًا صالحًا.");
-        }
+        const activeConversationId = requestedConversationId || await createOpenAiConversation(openAiKey, controller.signal);
+        const text = await createOpenAiResponse(openAiKey, controller.signal, selectedModel, activeConversationId, prompt);
 
         return {
           status: 200,
-          body: { text },
+          body: { text, conversationId: activeConversationId },
           headers: {
             "Access-Control-Allow-Origin": "*",
           },
         };
       } catch (error) {
+        if (requestedConversationId && isMissingConversationError(error)) {
+          sawMissingConversationError = true;
+          lastError = error;
+          continue;
+        }
+
         lastError = error instanceof Error && error.name === "AbortError"
           ? new Error("انتهت مهلة اتصال الخادم بـ OpenAI قبل وصول رد.")
           : error;
       } finally {
         clearTimeout(timeoutId);
+      }
+    }
+
+    if (requestedConversationId && sawMissingConversationError) {
+      for (const openAiKey of openAiKeysToTry) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+
+        try {
+          const activeConversationId = await createOpenAiConversation(openAiKey, controller.signal);
+          const text = await createOpenAiResponse(openAiKey, controller.signal, selectedModel, activeConversationId, prompt);
+
+          return {
+            status: 200,
+            body: { text, conversationId: activeConversationId, conversationReset: true },
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+            },
+          };
+        } catch (error) {
+          lastError = error instanceof Error && error.name === "AbortError"
+            ? new Error("انتهت مهلة اتصال الخادم بـ OpenAI قبل وصول رد.")
+            : error;
+        } finally {
+          clearTimeout(timeoutId);
+        }
       }
     }
 
