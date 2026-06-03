@@ -41,6 +41,10 @@ import { normalizeGoalContext } from '../utils/goalContext';
 const GEMINI_MODEL = GEMINI_ANALYSIS_MODEL;
 const OPENAI_MODEL = 'gpt-5.5';
 const CHATGPT_TIMEOUT_MS = 300000;
+const GEMINI_CHAT_STORAGE_PREFIX = 'bazarvan:gemini-chat';
+const GEMINI_CHAT_MAX_MESSAGES = 8;
+const GEMINI_CHAT_MAX_TOTAL_CHARS = 48000;
+const GEMINI_CHAT_MESSAGE_CHAR_LIMIT = 12000;
 const CHATGPT_CONVERSATION_STORAGE_PREFIX = 'bazarvan:chatgpt-conversation';
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
@@ -1651,7 +1655,116 @@ const randomizeApiKeyOrder = (keys: string[]): string[] => {
     return shuffled;
 };
 
-const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
+type GeminiChatMessage = {
+    role: 'user' | 'model';
+    text: string;
+};
+
+type GeminiAnalysisResult = {
+    text: string;
+    ok: boolean;
+};
+
+const getArticleChatStorageScope = (articleKey: string, title: string): string => {
+    const rawScope = articleKey?.trim() || title?.trim() || 'draft';
+    return rawScope.slice(0, 200);
+};
+
+const getGeminiChatStorageKey = (currentUser: string | null, articleScope: string): string => {
+    const userPart = currentUser?.trim() || 'anonymous';
+    const articlePart = articleScope?.trim() || 'draft';
+    return `${GEMINI_CHAT_STORAGE_PREFIX}:${userPart}:${articlePart}`;
+};
+
+const truncateGeminiChatText = (value: string): string => {
+    const normalizedValue = value.trim();
+    if (normalizedValue.length <= GEMINI_CHAT_MESSAGE_CHAR_LIMIT) return normalizedValue;
+    return `${normalizedValue.slice(0, GEMINI_CHAT_MESSAGE_CHAR_LIMIT)}\n\n[truncated]`;
+};
+
+const normalizeGeminiChatHistory = (value: unknown): GeminiChatMessage[] => {
+    if (!Array.isArray(value)) return [];
+
+    return value
+        .map((item): GeminiChatMessage | null => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+            const record = item as Record<string, unknown>;
+            const role = record.role === 'user' || record.role === 'model' ? record.role : null;
+            const text = typeof record.text === 'string' ? truncateGeminiChatText(record.text) : '';
+            if (!role || !text) return null;
+            return { role, text };
+        })
+        .filter((item): item is GeminiChatMessage => Boolean(item));
+};
+
+const trimGeminiChatHistory = (history: GeminiChatMessage[]): GeminiChatMessage[] => {
+    const recentMessages = history
+        .map(message => ({ ...message, text: truncateGeminiChatText(message.text) }))
+        .filter(message => message.text.length > 0)
+        .slice(-GEMINI_CHAT_MAX_MESSAGES);
+
+    const trimmedMessages: GeminiChatMessage[] = [];
+    let totalChars = 0;
+    for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
+        const message = recentMessages[index];
+        const nextTotal = totalChars + message.text.length;
+        if (trimmedMessages.length > 0 && nextTotal > GEMINI_CHAT_MAX_TOTAL_CHARS) {
+            break;
+        }
+        totalChars = nextTotal;
+        trimmedMessages.unshift(message);
+    }
+
+    while (trimmedMessages.length > 0 && trimmedMessages[0].role !== 'user') {
+        trimmedMessages.shift();
+    }
+    while (trimmedMessages.length > 0 && trimmedMessages[trimmedMessages.length - 1].role !== 'model') {
+        trimmedMessages.pop();
+    }
+
+    return trimmedMessages;
+};
+
+const readStoredGeminiChatHistory = (currentUser: string | null, articleScope: string): GeminiChatMessage[] => {
+    try {
+        const value = localStorage.getItem(getGeminiChatStorageKey(currentUser, articleScope));
+        return trimGeminiChatHistory(normalizeGeminiChatHistory(value ? JSON.parse(value) : []));
+    } catch (error) {
+        console.error('Could not read Gemini chat history from localStorage:', error);
+        return [];
+    }
+};
+
+const saveStoredGeminiChatHistory = (
+    currentUser: string | null,
+    articleScope: string,
+    history: GeminiChatMessage[],
+) => {
+    try {
+        localStorage.setItem(
+            getGeminiChatStorageKey(currentUser, articleScope),
+            JSON.stringify(trimGeminiChatHistory(history)),
+        );
+    } catch (error) {
+        console.error('Could not save Gemini chat history to localStorage:', error);
+    }
+};
+
+const appendGeminiChatExchange = (
+    history: GeminiChatMessage[],
+    prompt: string,
+    response: string,
+): GeminiChatMessage[] => trimGeminiChatHistory([
+    ...history,
+    { role: 'user', text: truncateGeminiChatText(prompt) },
+    { role: 'model', text: truncateGeminiChatText(response) },
+]);
+
+const requestGeminiAnalysis = async (
+    prompt: string,
+    userKeys?: string | string[],
+    history?: GeminiChatMessage[],
+): Promise<GeminiAnalysisResult> => {
     const trimmedUserKeys = normalizeGeminiKeys(userKeys);
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
@@ -1663,6 +1776,7 @@ const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]):
         body: JSON.stringify({
             prompt,
             apiKeys: trimmedUserKeys.length > 0 ? randomizeApiKeyOrder(trimmedUserKeys) : undefined,
+            history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
         }),
         signal: controller.signal,
       });
@@ -1696,16 +1810,41 @@ const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]):
           throw new Error('Gemini server route did not return a valid text response.');
       }
 
-      return data.text;
+      return { text: data.text, ok: true };
     } catch (error) {
       window.clearTimeout(timeoutId);
       console.error("Error calling Gemini API:", error);
       if (error instanceof Error && error.name === 'AbortError') {
-          return `انتهت مهلة الاتصال بـ Gemini (${GEMINI_MODEL}). حاول مرة أخرى أو استخدم مفتاحا آخر.`;
+          return {
+              text: `انتهت مهلة الاتصال بـ Gemini (${GEMINI_MODEL}). حاول مرة أخرى أو استخدم مفتاحا آخر.`,
+              ok: false,
+          };
       }
       const errorMessage = getGeminiErrorMessage(error);
-      return `حدث خطأ أثناء الاتصال بـ Gemini: ${errorMessage}`;
+      return {
+          text: `حدث خطأ أثناء الاتصال بـ Gemini: ${errorMessage}`,
+          ok: false,
+      };
     }
+};
+
+const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
+    const result = await requestGeminiAnalysis(prompt, userKeys);
+    return result.text;
+};
+
+const callGeminiArticleChatAnalysis = async (
+    prompt: string,
+    userKeys: string | string[] | undefined,
+    currentUser: string | null,
+    articleScope: string,
+): Promise<string> => {
+    const history = readStoredGeminiChatHistory(currentUser, articleScope);
+    const result = await requestGeminiAnalysis(prompt, userKeys, history);
+    if (result.ok) {
+        saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text));
+    }
+    return result.text;
 };
 
 const normalizeChatGptKeys = (keys?: string | string[]): string[] => {
@@ -3259,13 +3398,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setAiInsertionPatches(prev => ({ ...prev, gemini: [] }));
 
         try {
-            const results = await Promise.all(items.map(async (item, index) => {
+            const articleScope = getArticleChatStorageScope(articleKey, title);
+            const results: {
+                item: ReadyCommandAnalysisBatchItem;
+                parsedResult: SmartAnalysisParsedResult;
+                keyIndex?: number;
+            }[] = [];
+            for (let index = 0; index < items.length; index += 1) {
+                const item = items[index];
                 const assignedKey = geminiKeys.length > 0 ? geminiKeys[index % geminiKeys.length] : undefined;
                 const finalPrompt = buildSmartAnalysisFinalPrompt(
                     generateContextAwarePrompt(item.userPrompt, item.options),
                     { skipPatchInstructions: item.skipPatchInstructions },
                 );
-                const result = await callGeminiAnalysis(finalPrompt, assignedKey ? [assignedKey] : undefined);
+                const result = await callGeminiArticleChatAnalysis(finalPrompt, assignedKey ? [assignedKey] : undefined, currentUser, articleScope);
                 const parsedResult = item.skipPatchInstructions
                     ? { displayText: result, patches: [] }
                     : namespaceSmartAnalysisPatches(
@@ -3274,12 +3420,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         item.commandLabel
                     );
                 logReadyCommandAnalysis('gemini', parsedResult, item);
-                return {
+                results.push({
                     item,
                     parsedResult,
                     keyIndex: assignedKey ? (index % geminiKeys.length) + 1 : undefined,
-                };
-            }));
+                });
+            }
 
             const keyReuseNote = geminiKeys.length > 0 && items.length > geminiKeys.length
                 ? `\n\n> ملاحظة: تم توزيع ${items.length} أوامر على ${geminiKeys.length} مفاتيح Gemini متاحة، لذلك تمت إعادة استخدام بعض المفاتيح.`
@@ -3299,7 +3445,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, gemini: false }));
         }
-    }, [apiKeys.gemini, editor, generateContextAwarePrompt, logReadyCommandAnalysis]);
+    }, [apiKeys.gemini, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title]);
 
     const handleAiAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -3310,7 +3456,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 generateContextAwarePrompt(userPrompt, options),
                 { skipPatchInstructions: historyMeta?.skipPatchInstructions },
             );
-            const result = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
+            const articleScope = getArticleChatStorageScope(articleKey, title);
+            const result = await callGeminiArticleChatAnalysis(finalPrompt, apiKeys.gemini, currentUser, articleScope);
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result, patches: [] }
                 : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, 'gemini'), historyMeta?.commandId);
@@ -3322,7 +3469,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, gemini: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.gemini, editor, logReadyCommandAnalysis]);
+    }, [generateContextAwarePrompt, apiKeys.gemini, editor, logReadyCommandAnalysis, currentUser, articleKey, title]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -3334,9 +3481,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 generateContextAwarePrompt(userPrompt, options),
                 { skipPatchInstructions: historyMeta?.skipPatchInstructions },
             );
-            const storedConversationId = readStoredChatGptConversationId(currentUser, articleKey);
+            const articleScope = getArticleChatStorageScope(articleKey, title);
+            const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
             const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt, storedConversationId);
-            saveStoredChatGptConversationId(currentUser, articleKey, result.conversationId);
+            saveStoredChatGptConversationId(currentUser, articleScope, result.conversationId);
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result.text, patches: [] }
                 : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result.text, 'chatgpt'), historyMeta?.commandId);
@@ -3348,7 +3496,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey]);
+    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey, title]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         if (isAiCommandLoading || isAiLoading.gemini || !editor) return;

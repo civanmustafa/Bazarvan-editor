@@ -78,6 +78,58 @@ const formatTooltipTextBlock = (value: string): string => (
     escapeTooltipHtml(value.replace(/\s+/g, ' ').trim())
 );
 
+type StructureViolationItem = NonNullable<CheckResult['violatingItems']>[number];
+type ResolvedStructureViolation = StructureViolationItem & { rule: CheckResult };
+
+const normalizeViolationText = (value: string): string => (
+    value
+        .replace(/[\u00a0\u200b\u200c\u200d\ufeff]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+);
+
+const getSafeDocTextBetween = (editor: EditorClass, from: number, to: number): string | null => {
+    const docSize = editor.state.doc.content.size;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to > docSize || from >= to) {
+        return null;
+    }
+
+    return editor.state.doc.textBetween(from, to, ' ');
+};
+
+const resolveViolationRangeInCurrentDoc = (
+    editor: EditorClass,
+    violation: StructureViolationItem,
+): StructureViolationItem | null => {
+    const expectedText = typeof violation.text === 'string'
+        ? normalizeViolationText(violation.text)
+        : '';
+    const currentRangeText = getSafeDocTextBetween(editor, violation.from, violation.to);
+
+    if (!expectedText) {
+        return currentRangeText === null ? null : violation;
+    }
+
+    if (currentRangeText !== null && normalizeViolationText(currentRangeText) === expectedText) {
+        return violation;
+    }
+
+    let bestMatch: { from: number; to: number; score: number } | null = null;
+    editor.state.doc.descendants((node, pos) => {
+        if (!node.isBlock || !['paragraph', 'heading', 'listItem'].includes(node.type.name)) return;
+        if (normalizeViolationText(node.textContent) !== expectedText) return;
+
+        const score = Math.abs(pos - violation.from);
+        if (!bestMatch || score < bestMatch.score) {
+            bestMatch = { from: pos, to: pos + node.nodeSize, score };
+        }
+    });
+
+    return bestMatch
+        ? { ...violation, from: bestMatch.from, to: bestMatch.to }
+        : null;
+};
+
 export const useInteraction = () => {
   const context = useContext(InteractionContext);
   if (!context) throw new Error("useInteraction must be used within an InteractionProvider");
@@ -115,20 +167,23 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     // Flatten rule results into clickable/highlightable ranges used by tooltips.
     const allViolations = useMemo(() => {
-        const violations: ({ rule: CheckResult } & NonNullable<CheckResult['violatingItems']>[0])[] = [];
-        if (!analysisResults?.structureAnalysis) return [];
+        const violations: ResolvedStructureViolation[] = [];
+        if (!analysisResults?.structureAnalysis || !editor || editor.isDestroyed) return [];
         
         for (const [ruleKey, rule] of Object.entries(analysisResults.structureAnalysis) as [keyof StructureAnalysis, CheckResult][]) {
             if (ARTICLE_WIDE_TOOLTIP_EXCLUDED_RULES.has(ruleKey)) continue;
             const typedRule = rule as CheckResult;
             if (typedRule && typedRule.violatingItems) {
                 for (const item of typedRule.violatingItems) {
-                    violations.push({ ...item, rule: typedRule });
+                    const resolvedItem = resolveViolationRangeInCurrentDoc(editor, item);
+                    if (resolvedItem) {
+                        violations.push({ ...resolvedItem, rule: typedRule });
+                    }
                 }
             }
         }
         return violations;
-    }, [analysisResults]);
+    }, [analysisResults, editor, text]);
 
     const handleScrollToTop = () => {
         if (scrollContainerRef.current) {
@@ -419,12 +474,16 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             return;
         }
         
-        if (item.violatingItems && item.violatingItems.length > 0) {
+        const resolvedViolations = (item.violatingItems || [])
+            .map(violation => resolveViolationRangeInCurrentDoc(editor, violation))
+            .filter((violation): violation is StructureViolationItem => Boolean(violation));
+
+        if (resolvedViolations.length > 0) {
             const { tr } = editor.state;
             const highlightMarkType = editor.schema.marks.highlight;
             tr.removeMark(0, editor.state.doc.content.size, highlightMarkType);
     
-            item.violatingItems.forEach(violation => {
+            resolvedViolations.forEach(violation => {
                 const highlightMark = (highlightMarkType as any).create({
                     color: item.status === 'pass' ? '#fde68a' : '#fda4af',
                     violation: title,
@@ -443,10 +502,10 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             setPinnedTooltip(null);
     
             setTimeout(() => {
-                if (editor && !editor.isDestroyed && item.violatingItems?.[0]) {
+                if (editor && !editor.isDestroyed && resolvedViolations[0]) {
                     // This position points to the start of the node, outside its content.
                     // Adding 1 moves the cursor inside the node, which is a valid position for a TextSelection.
-                    const selectionPos = item.violatingItems[0].from + 1;
+                    const selectionPos = Math.min(resolvedViolations[0].from + 1, editor.state.doc.content.size);
                     (editor.chain() as any)
                         .focus()
                         .setTextSelection(selectionPos)

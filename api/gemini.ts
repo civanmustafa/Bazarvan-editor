@@ -16,6 +16,11 @@ type GeminiErrorDetails = {
   message: string;
 };
 
+type GeminiHistoryContent = {
+  role: "user" | "model";
+  parts: { text: string }[];
+};
+
 const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 
 /*
@@ -84,6 +89,24 @@ const parseEnvGeminiKeys = (): string[] => {
     .filter(Boolean);
 };
 
+const normalizeGeminiHistory = (history: unknown): GeminiHistoryContent[] => {
+  if (!Array.isArray(history)) return [];
+
+  return history
+    .map((item): GeminiHistoryContent | null => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const record = item as Record<string, unknown>;
+      const role = record.role === "user" || record.role === "model"
+        ? record.role
+        : null;
+      const text = typeof record.text === "string" ? record.text.trim() : "";
+
+      if (!role || !text) return null;
+      return { role, parts: [{ text }] };
+    })
+    .filter((item): item is GeminiHistoryContent => Boolean(item));
+};
+
 const getGeminiErrorDetails = (error: unknown): GeminiErrorDetails => {
   const value = error && typeof error === "object" ? error as Record<string, any> : {};
   const nestedError = value.error && typeof value.error === "object" ? value.error : {};
@@ -121,7 +144,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, apiKey, apiKeys, useUrlContext } = await readRequestBody(req) as any;
+    const { prompt, apiKey, apiKeys, useUrlContext, history } = await readRequestBody(req) as any;
     const requestKeys = Array.isArray(apiKeys)
       ? apiKeys
       : typeof apiKey === 'string'
@@ -142,6 +165,12 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       return { status: 400, body: { error: "الموجه مطلوب" } };
     }
 
+    const normalizedPrompt = typeof prompt === "string" ? prompt : String(prompt);
+    const normalizedHistory = normalizeGeminiHistory(history);
+    const contents = normalizedHistory.length > 0
+      ? [...normalizedHistory, { role: "user" as const, parts: [{ text: normalizedPrompt }] }]
+      : normalizedPrompt;
+
     // Flash has a free-tier quota, while Pro can return limit 0 on unpaid projects.
     let lastError: GeminiErrorDetails | null = null;
     for (const GEMINI_API_KEY of randomizeKeyOrder(GEMINI_API_KEYS)) {
@@ -150,7 +179,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
             model: GEMINI_ANALYSIS_MODEL,
-            contents: prompt,
+            contents,
             config: useUrlContext
               ? {
                   tools: [{ urlContext: {} }],

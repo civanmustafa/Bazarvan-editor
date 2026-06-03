@@ -127,6 +127,7 @@ export interface CheckResult {
     from: number; 
     to: number; 
     message: string; 
+    text?: string;
     sectionFrom?: number; 
     sectionTo?: number;
     pairedFrom?: number;
