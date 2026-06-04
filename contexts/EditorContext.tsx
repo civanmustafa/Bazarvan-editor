@@ -905,10 +905,53 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const snapshotSaveResult = await saveArticleSnapshotDurably(articleSnapshot, {
             saveLocalFallback: true,
         });
+        const snapshotWasPersisted = snapshotSaveResult.indexedDb || snapshotSaveResult.localChunkCount > 0;
+        const articleSaveResult = await saveEditorContentDurably(articleContentKey, contentJSON, {
+            saveLocalFallback: !snapshotWasPersisted,
+        });
+        const articleContentWasPersisted = articleSaveResult.indexedDb ||
+            articleSaveResult.localChunkCount > 0 ||
+            articleSaveResult.localTextChunkCount > 0;
 
-        const contentForActivity = snapshotSaveResult.indexedDb || snapshotSaveResult.localChunkCount > 0
-            ? snapshotSaveResult.reference
-            : createEditorContentReferenceWithFallback(articleContentKey, contentJSON);
+        let contentForActivity = articleContentWasPersisted
+            ? (() => {
+                const hasFallbackChunks = articleSaveResult.localChunkCount > 0 || articleSaveResult.localTextChunkCount > 0;
+                return hasFallbackChunks
+                    ? createEditorContentReferenceWithChunkFallback(
+                        articleContentKey,
+                        articleSaveResult.localChunkCount,
+                        articleSaveResult.localTextChunkCount,
+                    )
+                    : createEditorContentReference(articleContentKey);
+            })()
+            : snapshotWasPersisted
+              ? snapshotSaveResult.reference
+              : null;
+
+        if (!contentForActivity && articleSaveResult) {
+            const hasFallbackChunks = articleSaveResult.localChunkCount > 0 || articleSaveResult.localTextChunkCount > 0;
+            contentForActivity = hasFallbackChunks
+                ? createEditorContentReferenceWithChunkFallback(
+                    articleContentKey,
+                    articleSaveResult.localChunkCount,
+                    articleSaveResult.localTextChunkCount,
+                )
+                : articleSaveResult.indexedDb
+                  ? createEditorContentReference(articleContentKey)
+                  : null;
+        }
+
+        if (!contentForActivity) {
+            const inlineFallbackReference = createEditorContentReferenceWithFallback(articleContentKey, contentJSON);
+            contentForActivity = Object.prototype.hasOwnProperty.call(inlineFallbackReference, 'fallbackContent')
+                ? inlineFallbackReference
+                : null;
+        }
+
+        if (!contentForActivity) {
+            console.error(`Skipped article activity save for "${finalTitleToSave}" because no durable content copy was written.`);
+            return;
+        }
 
         recordArticleSave(currentUser, finalTitleToSave, contentForActivity, keywords, analysisForSave, articleLanguage, goalContext);
         if (previousSnapshotTitleToDelete && previousSnapshotTitleToDelete !== finalTitleToSave) {
@@ -1020,9 +1063,14 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             try {
                 const articleSnapshot = currentUser ? await loadArticleSnapshot(currentUser, titleStr) : null;
                 const snapshotContent = articleSnapshot?.content;
-                const resolvedContent = isUsableEditorContent(snapshotContent)
-                    ? snapshotContent
-                    : await resolveArticleContent(article);
+                const snapshotPlainText = articleSnapshot?.plainText?.trim();
+                let resolvedContent = isUsableEditorContent(snapshotContent) ? snapshotContent : null;
+                if (!resolvedContent && snapshotPlainText) {
+                    resolvedContent = snapshotPlainText;
+                }
+                if (!resolvedContent) {
+                    resolvedContent = await resolveArticleContent(article);
+                }
                 if (articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
                 const lang = articleSnapshot?.articleLanguage || article.articleLanguage || 'ar';
                 const nextKeywords = normalizeKeywords(articleSnapshot?.keywords || article.keywords || INITIAL_KEYWORDS);

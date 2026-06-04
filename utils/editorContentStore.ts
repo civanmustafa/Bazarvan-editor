@@ -412,7 +412,6 @@ export const saveArticleSnapshotDurably = async (
   options: { saveLocalFallback?: boolean } = {},
 ): Promise<{ indexedDb: boolean; localChunkCount: number; reference: EditorContentReference }> => {
   const key = getArticleSnapshotKey(snapshot.username, snapshot.title);
-  const localChunkCount = options.saveLocalFallback ? saveArticleSnapshotChunks(key, snapshot) : 0;
   let indexedDb = false;
 
   try {
@@ -421,6 +420,8 @@ export const saveArticleSnapshotDurably = async (
   } catch (error) {
     console.error(`Failed to save unified article snapshot "${key}":`, error);
   }
+
+  const localChunkCount = options.saveLocalFallback ? saveArticleSnapshotChunks(key, snapshot) : 0;
 
   return {
     indexedDb,
@@ -472,8 +473,6 @@ export const saveEditorContentDurably = async (
   content: any,
   options: { saveLocalFallback?: boolean } = {},
 ): Promise<{ indexedDb: boolean; localChunkCount: number; localTextChunkCount: number }> => {
-  const localTextChunkCount = options.saveLocalFallback ? saveEditorTextChunks(key, content) : 0;
-  const localChunkCount = options.saveLocalFallback ? saveEditorContentChunks(key, content) : 0;
   let indexedDb = false;
 
   try {
@@ -482,6 +481,9 @@ export const saveEditorContentDurably = async (
   } catch (error) {
     console.error(`Failed to save editor content in IndexedDB "${key}":`, error);
   }
+
+  const localTextChunkCount = options.saveLocalFallback ? saveEditorTextChunks(key, content) : 0;
+  const localChunkCount = options.saveLocalFallback ? saveEditorContentChunks(key, content) : 0;
 
   return { indexedDb, localChunkCount, localTextChunkCount };
 };
@@ -498,6 +500,16 @@ export const resolveEditorContentReference = async (
   try {
     const storedContent = await loadEditorContent(reference.key);
     if (storedContent !== null && storedContent !== undefined) {
+      if (isArticleStorageSnapshot(storedContent)) {
+        const snapshotContentText = extractPlainTextFromEditorContent(storedContent.content).trim();
+        if (snapshotContentText.length > 0) {
+          return storedContent.content;
+        }
+        if (storedContent.plainText.trim().length > 0) {
+          return createEditorContentFromPlainText(storedContent.plainText);
+        }
+      }
+
       const storedText = extractPlainTextFromEditorContent(storedContent).trim();
       if (storedText.length > 0) {
         return storedContent;
