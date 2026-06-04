@@ -16,16 +16,20 @@ import { INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAF
 import { CONTENT_SUMMARY_STORAGE_KEY } from '../constants/engineeringPrompts';
 import { useUser } from './UserContext';
 import { normalizeGoalContext } from '../utils/goalContext';
-import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT } from '../utils/competitorStorage';
+import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT, readStoredCompetitorInputs, writeStoredCompetitorInputs } from '../utils/competitorStorage';
 import {
+    ArticleStorageSnapshot,
     createEditorContentReference,
     createEditorContentReferenceWithChunkFallback,
     createEditorContentReferenceWithFallback,
+    deleteArticleSnapshot,
     getArticleContentKey,
     getAutoDraftContentKey,
     getManualDraftContentKey,
     isEditorContentReference,
+    loadArticleSnapshot,
     resolveEditorContentReference,
+    saveArticleSnapshotDurably,
     saveEditorContentDurably,
 } from '../utils/editorContentStore';
 
@@ -74,6 +78,41 @@ const removeStorageValue = (key: string) => {
         localStorage.removeItem(key);
     } catch (error) {
         console.error(`Failed to remove invalid local draft field "${key}":`, error);
+    }
+};
+
+const readJsonStorageValue = (key: string): any | null => {
+    const value = readStorageValue(key);
+    if (!value) return null;
+
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
+};
+
+const readCurrentArticleAttachments = (): ArticleStorageSnapshot['attachments'] => ({
+    competitors: readStoredCompetitorInputs(),
+    contentSummary: readJsonStorageValue(CONTENT_SUMMARY_STORAGE_KEY),
+});
+
+const restoreArticleAttachments = (attachments?: ArticleStorageSnapshot['attachments']) => {
+    const competitors = attachments?.competitors;
+    if (competitors) {
+        writeStoredCompetitorInputs(competitors);
+    } else {
+        clearStoredCompetitorInputs();
+    }
+    window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT, { detail: competitors }));
+
+    const contentSummary = attachments?.contentSummary;
+    if (contentSummary) {
+        writeStorageValue(CONTENT_SUMMARY_STORAGE_KEY, JSON.stringify(contentSummary));
+        window.dispatchEvent(new CustomEvent('bazarvan:content-summary-updated', { detail: contentSummary }));
+    } else {
+        removeStorageValue(CONTENT_SUMMARY_STORAGE_KEY);
+        window.dispatchEvent(new CustomEvent('bazarvan:content-summary-updated', { detail: null }));
     }
 };
 
@@ -829,10 +868,13 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const newTitle = title.trim();
         let finalTitleToSave = newTitle || currentKey || '(بدون عنوان)';
 
+        let previousSnapshotTitleToDelete: string | null = null;
+
         if (!currentKey && newTitle) {
             setArticleKey(newTitle);
         } else if (currentKey && newTitle && currentKey !== newTitle) {
-            if (renameArticleActivity(currentUser, currentKey, newTitle)) {
+            if (renameArticleActivity(currentUser, currentKey, newTitle, { renameSnapshot: false })) {
+                previousSnapshotTitleToDelete = currentKey;
                 setArticleKey(newTitle);
             } else {
                 setTitle(currentKey);
@@ -842,19 +884,38 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         const articleContentKey = getArticleContentKey(currentUser, finalTitleToSave);
         const manualDraftContentKey = getManualDraftContentKey();
-        const articleSaveResult = await saveEditorContentDurably(articleContentKey, contentJSON, {
+        const articleSnapshot: ArticleStorageSnapshot = {
+            kind: 'articleSnapshot',
+            version: 1,
+            username: currentUser,
+            title: finalTitleToSave,
+            content: contentJSON,
+            plainText: currentText,
+            keywords,
+            goalContext,
+            articleLanguage,
+            analysisSummary: {
+                wordCount: currentWordCount,
+                structureStats: analysisForSave.structureStats,
+                duplicateStats: analysisForSave.duplicateStats,
+            },
+            attachments: readCurrentArticleAttachments(),
+            savedAt: new Date().toISOString(),
+        };
+        const snapshotSaveResult = await saveArticleSnapshotDurably(articleSnapshot, {
             saveLocalFallback: true,
         });
-        const hasLocalArticleFallback = articleSaveResult.localChunkCount > 0 || articleSaveResult.localTextChunkCount > 0;
-        const contentForActivity = hasLocalArticleFallback
-            ? createEditorContentReferenceWithChunkFallback(
-                articleContentKey,
-                articleSaveResult.localChunkCount,
-                articleSaveResult.localTextChunkCount,
-            )
+
+        const contentForActivity = snapshotSaveResult.indexedDb || snapshotSaveResult.localChunkCount > 0
+            ? snapshotSaveResult.reference
             : createEditorContentReferenceWithFallback(articleContentKey, contentJSON);
 
         recordArticleSave(currentUser, finalTitleToSave, contentForActivity, keywords, analysisForSave, articleLanguage, goalContext);
+        if (previousSnapshotTitleToDelete && previousSnapshotTitleToDelete !== finalTitleToSave) {
+            void deleteArticleSnapshot(currentUser, previousSnapshotTitleToDelete).catch(error => {
+                console.error(`Failed to delete old article snapshot "${previousSnapshotTitleToDelete}":`, error);
+            });
+        }
         await persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON, {
             awaitBackup: true,
         });
@@ -948,31 +1009,57 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             articleLoadRequestIdRef.current = requestId;
             isArticleContentLoadingRef.current = true;
             skipNextAutoDraftMetadataWriteRef.current = true;
-            const lang = article.articleLanguage || 'ar';
-            const nextKeywords = article.keywords || INITIAL_KEYWORDS;
-            const nextGoalContext = normalizeGoalContext(article.goalContext);
             clearEditorSnapshotTimer();
             clearDraftPersistTimer();
             setEditorContentSafely(editor, createEmptyEditorContent(), createEmptyEditorContent());
             captureEditorSnapshot(editor, false);
             setTitle(titleStr);
             setArticleKey(titleStr);
-            setKeywords(nextKeywords);
-            setGoalContext(nextGoalContext);
-            setArticleLanguage(lang);
             setCurrentView('editor');
 
             try {
-                const resolvedContent = await resolveArticleContent(article);
+                const articleSnapshot = currentUser ? await loadArticleSnapshot(currentUser, titleStr) : null;
+                const snapshotContent = articleSnapshot?.content;
+                const resolvedContent = isUsableEditorContent(snapshotContent)
+                    ? snapshotContent
+                    : await resolveArticleContent(article);
                 if (articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
+                const lang = articleSnapshot?.articleLanguage || article.articleLanguage || 'ar';
+                const nextKeywords = normalizeKeywords(articleSnapshot?.keywords || article.keywords || INITIAL_KEYWORDS);
+                const nextGoalContext = normalizeGoalContext(articleSnapshot?.goalContext || article.goalContext);
                 const hasResolvedContent = isUsableEditorContent(resolvedContent);
                 if (!hasResolvedContent && (article.stats?.wordCount || 0) > 0) {
                     console.warn(`Article "${titleStr}" has saved stats but no recoverable editor content.`);
                 }
 
+                setKeywords(nextKeywords);
+                setGoalContext(nextGoalContext);
+                setArticleLanguage(lang);
                 setEditorContentSafely(editor, hasResolvedContent ? resolvedContent : createEmptyEditorContent(), createEmptyEditorContent());
                 captureEditorSnapshot(editor, false);
                 applyArticleLanguageFormatting(editor, lang);
+                restoreArticleAttachments(articleSnapshot?.attachments);
+
+                if (!articleSnapshot && hasResolvedContent && currentUser) {
+                    void saveArticleSnapshotDurably({
+                        kind: 'articleSnapshot',
+                        version: 1,
+                        username: currentUser,
+                        title: titleStr,
+                        content: editor.getJSON(),
+                        plainText: editor.getText(),
+                        keywords: nextKeywords,
+                        goalContext: nextGoalContext,
+                        articleLanguage: lang,
+                        analysisSummary: {
+                            wordCount: article.stats?.wordCount || editor.getText().trim().split(/\s+/).filter(Boolean).length,
+                        },
+                        attachments: readCurrentArticleAttachments(),
+                        savedAt: article.lastSaved || new Date().toISOString(),
+                    }, { saveLocalFallback: true }).catch(error => {
+                        console.error(`Failed to migrate article "${titleStr}" to unified snapshot storage:`, error);
+                    });
+                }
 
                 if (hasResolvedContent) {
                     await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), editor.getJSON());
@@ -993,7 +1080,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 }
             }
         }
-    }, [editor, setCurrentView, captureEditorSnapshot, clearEditorSnapshotTimer, clearDraftPersistTimer]);
+    }, [editor, currentUser, setCurrentView, captureEditorSnapshot, clearEditorSnapshotTimer, clearDraftPersistTimer]);
     
     const value: EditorContextType = {
         editor,

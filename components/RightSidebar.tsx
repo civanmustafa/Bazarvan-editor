@@ -7,6 +7,7 @@ import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
+import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
@@ -775,11 +776,18 @@ const RightSidebar: React.FC = () => {
     }, [competitorTexts]);
 
     useEffect(() => {
-        const resetCompetitors = () => {
+        const normalizeStoredList = (items: unknown, fallback: string[]) => (
+            fallback.map((emptyValue, index) => (
+                Array.isArray(items) && typeof items[index] === 'string' ? items[index] : emptyValue
+            ))
+        );
+
+        const resetCompetitors = (event: Event) => {
+            const restoredInputs = (event as CustomEvent<StoredCompetitorInputs | undefined>).detail;
             setBulkCompetitorText('');
-            setCompetitorUrls(createDefaultCompetitorUrls());
-            setCompetitorHtmls(createDefaultCompetitorHtmls());
-            setCompetitorTexts(createDefaultCompetitorTexts());
+            setCompetitorUrls(normalizeStoredList(restoredInputs?.urls, createDefaultCompetitorUrls()));
+            setCompetitorHtmls(normalizeStoredList(restoredInputs?.htmls, createDefaultCompetitorHtmls()));
+            setCompetitorTexts(normalizeStoredList(restoredInputs?.texts, createDefaultCompetitorTexts()));
             setCompetitorExtractions(createDefaultCompetitorExtractions());
         };
 

@@ -1,9 +1,12 @@
+import type { DuplicateStats, GoalContext, Keywords, StructureStats } from '../types';
+
 const DB_NAME = 'bazarvan-editor-content';
 const STORE_NAME = 'editorContent';
 const DB_VERSION = 1;
 const INLINE_FALLBACK_MAX_CHARS = 1_200_000;
 const LOCAL_CHUNK_PREFIX = 'bazarvan-editor-content-chunk:';
 const LOCAL_TEXT_CHUNK_PREFIX = 'bazarvan-editor-content-text-chunk:';
+const LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX = 'bazarvan-article-snapshot-chunk:';
 const LOCAL_CHUNK_SIZE = 200_000;
 
 export type EditorContentReference = {
@@ -26,6 +29,34 @@ type StoredEditorContent = {
 
 type ResolveEditorContentOptions = {
   allowUnreferencedLocalFallback?: boolean;
+};
+
+export type ArticleCompetitorSnapshot = {
+  urls: string[];
+  htmls: string[];
+  texts: string[];
+};
+
+export type ArticleStorageSnapshot = {
+  kind: 'articleSnapshot';
+  version: 1;
+  username: string;
+  title: string;
+  content: any;
+  plainText: string;
+  keywords: Keywords;
+  goalContext?: GoalContext;
+  articleLanguage: 'ar' | 'en';
+  analysisSummary?: {
+    wordCount: number;
+    structureStats?: StructureStats;
+    duplicateStats?: DuplicateStats;
+  };
+  attachments?: {
+    competitors?: ArticleCompetitorSnapshot;
+    contentSummary?: any;
+  };
+  savedAt: string;
 };
 
 let editorContentDbPromise: Promise<IDBDatabase> | null = null;
@@ -109,6 +140,10 @@ const getSerializedContentLength = (content: any): number | null => {
   }
 };
 
+const isRecord = (value: unknown): value is Record<string, any> => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
+);
+
 const extractPlainTextFromEditorContent = (value: any): string => {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) {
@@ -186,6 +221,10 @@ export const deleteEditorTextChunks = (key: string): void => {
   deleteStorageChunks(LOCAL_TEXT_CHUNK_PREFIX, key, 'editor text');
 };
 
+export const deleteArticleSnapshotChunks = (key: string): void => {
+  deleteStorageChunks(LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX, key, 'article snapshot');
+};
+
 const saveStorageChunks = (prefix: string, key: string, serializedContent: string, label: string): number => {
   if (!canUseLocalStorage()) return 0;
 
@@ -260,6 +299,29 @@ export const loadEditorTextChunks = (key: string): any | null => {
   return textContent === null ? null : createEditorContentFromPlainText(textContent);
 };
 
+export const saveArticleSnapshotChunks = (key: string, snapshot: ArticleStorageSnapshot): number => {
+  try {
+    return saveStorageChunks(LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX, key, JSON.stringify(snapshot), 'article snapshot');
+  } catch (error) {
+    deleteArticleSnapshotChunks(key);
+    console.error(`Failed to serialize article snapshot chunks "${key}":`, error);
+    return 0;
+  }
+};
+
+export const loadArticleSnapshotChunks = (key: string): ArticleStorageSnapshot | null => {
+  const serializedSnapshot = loadStorageChunks(LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX, key, 'article snapshot');
+  if (serializedSnapshot === null) return null;
+
+  try {
+    const parsed = JSON.parse(serializedSnapshot);
+    return isArticleStorageSnapshot(parsed) ? parsed : null;
+  } catch (error) {
+    console.error(`Failed to parse local article snapshot chunks "${key}":`, error);
+    return null;
+  }
+};
+
 export const createEditorContentReference = (key: string): EditorContentReference => ({
   storage: 'indexeddb',
   key,
@@ -316,6 +378,9 @@ export const getManualDraftContentKey = () => 'draft:manual';
 export const getArticleContentKey = (username: string, title: string) => (
   `article:${username}:${title.trim() || '(untitled)'}`
 );
+export const getArticleSnapshotKey = (username: string, title: string) => (
+  `articleSnapshot:${username}:${title.trim() || '(untitled)'}`
+);
 
 export const saveEditorContent = async (key: string, content: any): Promise<void> => {
   const record: StoredEditorContent = {
@@ -325,6 +390,81 @@ export const saveEditorContent = async (key: string, content: any): Promise<void
   };
 
   await runEditorContentTransaction('readwrite', store => store.put(record));
+};
+
+export const isArticleStorageSnapshot = (value: unknown): value is ArticleStorageSnapshot => (
+  isRecord(value) &&
+  value.kind === 'articleSnapshot' &&
+  value.version === 1 &&
+  typeof value.username === 'string' &&
+  typeof value.title === 'string' &&
+  typeof value.plainText === 'string' &&
+  (value.articleLanguage === 'ar' || value.articleLanguage === 'en') &&
+  Object.prototype.hasOwnProperty.call(value, 'content')
+);
+
+export const createArticleSnapshotReference = (username: string, title: string): EditorContentReference => (
+  createEditorContentReference(getArticleSnapshotKey(username, title))
+);
+
+export const saveArticleSnapshotDurably = async (
+  snapshot: ArticleStorageSnapshot,
+  options: { saveLocalFallback?: boolean } = {},
+): Promise<{ indexedDb: boolean; localChunkCount: number; reference: EditorContentReference }> => {
+  const key = getArticleSnapshotKey(snapshot.username, snapshot.title);
+  const localChunkCount = options.saveLocalFallback ? saveArticleSnapshotChunks(key, snapshot) : 0;
+  let indexedDb = false;
+
+  try {
+    await saveEditorContent(key, snapshot);
+    indexedDb = true;
+  } catch (error) {
+    console.error(`Failed to save unified article snapshot "${key}":`, error);
+  }
+
+  return {
+    indexedDb,
+    localChunkCount,
+    reference: createArticleSnapshotReference(snapshot.username, snapshot.title),
+  };
+};
+
+export const loadArticleSnapshot = async (username: string, title: string): Promise<ArticleStorageSnapshot | null> => {
+  const key = getArticleSnapshotKey(username, title);
+
+  try {
+    const storedSnapshot = await loadEditorContent(key);
+    if (isArticleStorageSnapshot(storedSnapshot)) {
+      return storedSnapshot;
+    }
+  } catch (error) {
+    console.error(`Failed to load unified article snapshot "${key}":`, error);
+  }
+
+  return loadArticleSnapshotChunks(key);
+};
+
+export const deleteArticleSnapshot = async (username: string, title: string): Promise<void> => {
+  const key = getArticleSnapshotKey(username, title);
+  try {
+    await runEditorContentTransaction('readwrite', store => store.delete(key));
+  } catch (error) {
+    console.error(`Failed to delete unified article snapshot "${key}":`, error);
+  } finally {
+    deleteArticleSnapshotChunks(key);
+  }
+};
+
+export const renameArticleSnapshot = async (username: string, oldTitle: string, newTitle: string): Promise<void> => {
+  const snapshot = await loadArticleSnapshot(username, oldTitle);
+  if (!snapshot) return;
+
+  await saveArticleSnapshotDurably({
+    ...snapshot,
+    title: newTitle.trim() || '(untitled)',
+    savedAt: new Date().toISOString(),
+  }, { saveLocalFallback: true });
+  await deleteArticleSnapshot(username, oldTitle);
 };
 
 export const saveEditorContentDurably = async (

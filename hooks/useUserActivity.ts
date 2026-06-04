@@ -15,6 +15,7 @@ import {
 } from '../constants';
 import { DEFAULT_ENGINEERING_PROMPTS } from '../constants/engineeringPrompts';
 import { getIstanbulTimestamp } from '../utils/dateTime';
+import { deleteArticleSnapshot, renameArticleSnapshot } from '../utils/editorContentStore';
 
 /*
  * localStorage persistence layer for per-user data.
@@ -370,7 +371,12 @@ export const recordArticleSave = (username: string, title: string, content: any,
   });
 };
 
-export const renameArticleActivity = (username: string, oldTitle: string, newTitle: string): boolean => {
+export const renameArticleActivity = (
+    username: string,
+    oldTitle: string,
+    newTitle: string,
+    options: { renameSnapshot?: boolean } = {},
+): boolean => {
     const data = getActivityData();
     const oldKey = oldTitle.trim() || "(بدون عنوان)";
     const newKey = newTitle.trim();
@@ -392,8 +398,13 @@ export const renameArticleActivity = (username: string, oldTitle: string, newTit
     user.articles[newKey] = user.articles[oldKey];
     delete user.articles[oldKey];
 
-    saveActivityData(data);
-    return true;
+    const saved = saveActivityData(data);
+    if (saved && options.renameSnapshot !== false) {
+        void renameArticleSnapshot(username, oldKey, newKey).catch(error => {
+            console.error(`Failed to rename article snapshot "${oldKey}" to "${newKey}":`, error);
+        });
+    }
+    return saved;
 };
 
 export const deleteArticleActivity = (username: string, articleTitleToDelete: string) => {
@@ -401,7 +412,11 @@ export const deleteArticleActivity = (username: string, articleTitleToDelete: st
     const keyToDelete = articleTitleToDelete.trim() || "(بدون عنوان)";
     if (data[username] && data[username].articles[keyToDelete]) {
         delete data[username].articles[keyToDelete];
-        saveActivityData(data);
+        if (saveActivityData(data)) {
+            void deleteArticleSnapshot(username, keyToDelete).catch(error => {
+                console.error(`Failed to delete article snapshot "${keyToDelete}":`, error);
+            });
+        }
     }
 };
 
@@ -430,8 +445,14 @@ export const saveUserEngineeringPrompts = (username: string, engineeringPrompts:
 };
 
 export const clearUserActivity = (username: string) => {
+  const existingArticleTitles = Object.keys(getActivityData()[username]?.articles || {});
   modifyUserData(username, user => {
     user.articles = {};
+  });
+  existingArticleTitles.forEach(title => {
+    void deleteArticleSnapshot(username, title).catch(error => {
+      console.error(`Failed to delete article snapshot "${title}":`, error);
+    });
   });
   // Also clear any lingering draft data from localStorage
   try {
