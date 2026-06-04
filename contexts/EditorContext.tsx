@@ -296,14 +296,15 @@ const persistEditorContentValue = async (
 
     if (options.awaitBackup) {
         const result = await backupPromise;
-        const reference = result.localChunkCount > 0
-            ? createEditorContentReferenceWithChunkFallback(backupKey, result.localChunkCount)
+        const hasLocalFallback = result.localChunkCount > 0 || result.localTextChunkCount > 0;
+        const reference = hasLocalFallback
+            ? createEditorContentReferenceWithChunkFallback(backupKey, result.localChunkCount, result.localTextChunkCount)
             : options.includeFallback
               ? createEditorContentReferenceWithFallback(backupKey, content)
               : createEditorContentReference(backupKey);
         const wroteReference = writeStorageValue(storageKey, JSON.stringify(reference));
 
-        if (!result.indexedDb && result.localChunkCount <= 0 && options.includeFallback) {
+        if (!result.indexedDb && !hasLocalFallback && options.includeFallback) {
             return writeStorageValue(storageKey, JSON.stringify(createEditorContentReferenceWithFallback(backupKey, content)));
         }
 
@@ -572,6 +573,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const editorSnapshotTimerRef = useRef<number | null>(null);
     const draftPersistTimerRef = useRef<number | null>(null);
     const articleLoadRequestIdRef = useRef(0);
+    const isArticleContentLoadingRef = useRef(false);
     const latestDraftMetaRef = useRef({ title, keywords, articleLanguage, goalContext });
     const pendingAutoDraftRestoreRef = useRef(Boolean(readStoredContentReference(AUTO_DRAFT_KEY)));
     
@@ -599,6 +601,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const persistEditorSnapshotNow = useCallback((targetEditor: Editor) => {
         if (!targetEditor || targetEditor.isDestroyed) return;
+        if (isArticleContentLoadingRef.current) return;
         const { title, keywords, articleLanguage, goalContext } = latestDraftMetaRef.current;
         void persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), targetEditor.getJSON());
         writeStorageValue(AUTO_DRAFT_TITLE_KEY, title);
@@ -795,9 +798,15 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Manual save updates both per-user activity history and the manual restore draft.
     const handleSaveDraft = useCallback(async () => {
         if (!editor || !currentUser) return;
+        if (isArticleContentLoadingRef.current) return;
         const contentJSON = editor.getJSON();
         const currentText = editor.getText();
-        if (title.trim() === '' && currentText.trim() === '') return;
+        const currentTextTrimmed = currentText.trim();
+        if (title.trim() === '' && currentTextTrimmed === '') return;
+        if (currentTextTrimmed === '' && (title.trim() || articleKey.trim())) {
+            console.warn('Skipped saving empty editor content for a titled article to avoid overwriting saved content.');
+            return;
+        }
         clearEditorSnapshotTimer();
         clearDraftPersistTimer();
         setEditorState(contentJSON);
@@ -833,8 +842,13 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const articleSaveResult = await saveEditorContentDurably(articleContentKey, contentJSON, {
             saveLocalFallback: true,
         });
-        const contentForActivity = articleSaveResult.localChunkCount > 0
-            ? createEditorContentReferenceWithChunkFallback(articleContentKey, articleSaveResult.localChunkCount)
+        const hasLocalArticleFallback = articleSaveResult.localChunkCount > 0 || articleSaveResult.localTextChunkCount > 0;
+        const contentForActivity = hasLocalArticleFallback
+            ? createEditorContentReferenceWithChunkFallback(
+                articleContentKey,
+                articleSaveResult.localChunkCount,
+                articleSaveResult.localTextChunkCount,
+            )
             : createEditorContentReferenceWithFallback(articleContentKey, contentJSON);
 
         recordArticleSave(currentUser, finalTitleToSave, contentForActivity, keywords, analysisForSave, articleLanguage, goalContext);
@@ -929,6 +943,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (editor && article) {
             const requestId = articleLoadRequestIdRef.current + 1;
             articleLoadRequestIdRef.current = requestId;
+            isArticleContentLoadingRef.current = true;
             const lang = article.articleLanguage || 'ar';
             setTitle(titleStr);
             setArticleKey(titleStr);
@@ -937,12 +952,21 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleLanguage(lang);
             setCurrentView('editor');
 
-            const resolvedContent = await resolveArticleContentWithDraftFallback(titleStr, article);
-            if (articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
+            try {
+                const resolvedContent = await resolveArticleContentWithDraftFallback(titleStr, article);
+                if (articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
+                if (!resolvedContent && (article.stats?.wordCount || 0) > 0) {
+                    console.warn(`Article "${titleStr}" has saved stats but no recoverable editor content.`);
+                }
 
-            setEditorContentSafely(editor, resolvedContent || INITIAL_CONTENT);
-            captureEditorSnapshot(editor, false);
-            applyArticleLanguageFormatting(editor, lang);
+                setEditorContentSafely(editor, resolvedContent || INITIAL_CONTENT);
+                captureEditorSnapshot(editor, false);
+                applyArticleLanguageFormatting(editor, lang);
+            } finally {
+                if (articleLoadRequestIdRef.current === requestId) {
+                    isArticleContentLoadingRef.current = false;
+                }
+            }
         }
     }, [editor, setCurrentView, captureEditorSnapshot]);
     
