@@ -24,6 +24,10 @@ type StoredEditorContent = {
   updatedAt: string;
 };
 
+type ResolveEditorContentOptions = {
+  allowUnreferencedLocalFallback?: boolean;
+};
+
 let editorContentDbPromise: Promise<IDBDatabase> | null = null;
 
 const canUseIndexedDb = (): boolean => (
@@ -347,24 +351,30 @@ export const loadEditorContent = async (key: string): Promise<any | null> => {
   return record?.content ?? null;
 };
 
-export const resolveEditorContentReference = async (reference: EditorContentReference): Promise<any | null> => {
+export const resolveEditorContentReference = async (
+  reference: EditorContentReference,
+  options: ResolveEditorContentOptions = {},
+): Promise<any | null> => {
   try {
     const storedContent = await loadEditorContent(reference.key);
     if (storedContent !== null && storedContent !== undefined) {
-      return storedContent;
+      const storedText = extractPlainTextFromEditorContent(storedContent).trim();
+      if (storedText.length > 0) {
+        return storedContent;
+      }
     }
   } catch (error) {
     console.error(`Failed to load editor content backup "${reference.key}":`, error);
   }
 
-  if ((reference.chunkCount || 0) > 0) {
+  if ((reference.chunkCount || 0) > 0 || options.allowUnreferencedLocalFallback) {
     const chunkContent = loadEditorContentChunks(reference.fallbackKey || reference.key);
     if (chunkContent !== null && chunkContent !== undefined) {
       return chunkContent;
     }
   }
 
-  if ((reference.textChunkCount || 0) > 0) {
+  if ((reference.textChunkCount || 0) > 0 || options.allowUnreferencedLocalFallback) {
     const textChunkContent = loadEditorTextChunks(reference.fallbackTextKey || reference.key);
     if (textChunkContent !== null && textChunkContent !== undefined) {
       return textChunkContent;
