@@ -19,13 +19,14 @@ import { normalizeGoalContext } from '../utils/goalContext';
 import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT } from '../utils/competitorStorage';
 import {
     createEditorContentReference,
+    createEditorContentReferenceWithChunkFallback,
     createEditorContentReferenceWithFallback,
     getArticleContentKey,
     getAutoDraftContentKey,
     getManualDraftContentKey,
     isEditorContentReference,
     resolveEditorContentReference,
-    saveEditorContent,
+    saveEditorContentDurably,
 } from '../utils/editorContentStore';
 
 /*
@@ -287,39 +288,33 @@ const persistEditorContentValue = async (
     storageKey: string,
     backupKey: string,
     content: any,
-    options: { awaitBackup?: boolean; includeFallback?: boolean } = {},
+    options: { awaitBackup?: boolean; includeFallback?: boolean; localFallback?: boolean } = {},
 ): Promise<boolean> => {
-    const reference = options.includeFallback
-        ? createEditorContentReferenceWithFallback(backupKey, content)
-        : createEditorContentReference(backupKey);
-    const wroteReference = writeStorageValue(storageKey, JSON.stringify(reference));
-
-    const backupPromise = saveEditorContent(backupKey, content);
+    const backupPromise = saveEditorContentDurably(backupKey, content, {
+        saveLocalFallback: options.localFallback,
+    });
 
     if (options.awaitBackup) {
-        try {
-            await backupPromise;
-            return wroteReference;
-        } catch (error) {
-            console.error(`Failed to save editor content backup "${backupKey}":`, error);
-            if (options.includeFallback && reference.fallbackContent !== undefined) {
-                return wroteReference;
-            }
+        const result = await backupPromise;
+        const reference = result.localChunkCount > 0
+            ? createEditorContentReferenceWithChunkFallback(backupKey, result.localChunkCount)
+            : options.includeFallback
+              ? createEditorContentReferenceWithFallback(backupKey, content)
+              : createEditorContentReference(backupKey);
+        const wroteReference = writeStorageValue(storageKey, JSON.stringify(reference));
 
-            try {
-                return writeStorageValue(storageKey, JSON.stringify(content));
-            } catch (fallbackError) {
-                console.error(`Failed to save inline fallback for "${storageKey}":`, fallbackError);
-                return wroteReference;
-            }
+        if (!result.indexedDb && result.localChunkCount <= 0 && options.includeFallback) {
+            return writeStorageValue(storageKey, JSON.stringify(createEditorContentReferenceWithFallback(backupKey, content)));
         }
+
+        return wroteReference;
     }
 
     void backupPromise.catch(error => {
         console.error(`Failed to save editor content backup "${backupKey}":`, error);
     });
 
-    return wroteReference;
+    return writeStorageValue(storageKey, JSON.stringify(createEditorContentReference(backupKey)));
 };
 
 const resolveStoredEditorContent = async (value: unknown): Promise<any | null> => {
@@ -576,6 +571,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const editorSnapshotTimerRef = useRef<number | null>(null);
     const draftPersistTimerRef = useRef<number | null>(null);
+    const articleLoadRequestIdRef = useRef(0);
     const latestDraftMetaRef = useRef({ title, keywords, articleLanguage, goalContext });
     const pendingAutoDraftRestoreRef = useRef(Boolean(readStoredContentReference(AUTO_DRAFT_KEY)));
     
@@ -806,6 +802,15 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         clearDraftPersistTimer();
         setEditorState(contentJSON);
         setText(currentText);
+        const currentWordCount = currentText.trim().split(/\s+/).filter(Boolean).length;
+        const analysisForSave: FullAnalysis = {
+            ...analysisResults,
+            duplicateStats: {
+                ...analysisResults.duplicateStats,
+                totalWords: currentWordCount,
+            },
+            wordCount: currentWordCount,
+        };
         await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), contentJSON, { awaitBackup: true });
 
         let currentKey = articleKey;
@@ -825,18 +830,16 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         const articleContentKey = getArticleContentKey(currentUser, finalTitleToSave);
         const manualDraftContentKey = getManualDraftContentKey();
-        const contentForActivity = createEditorContentReferenceWithFallback(articleContentKey, contentJSON);
+        const articleSaveResult = await saveEditorContentDurably(articleContentKey, contentJSON, {
+            saveLocalFallback: true,
+        });
+        const contentForActivity = articleSaveResult.localChunkCount > 0
+            ? createEditorContentReferenceWithChunkFallback(articleContentKey, articleSaveResult.localChunkCount)
+            : createEditorContentReferenceWithFallback(articleContentKey, contentJSON);
 
-        try {
-            await saveEditorContent(articleContentKey, contentJSON);
-        } catch (error) {
-            console.error('Failed to save article content backup:', error);
-        }
-
-        recordArticleSave(currentUser, finalTitleToSave, contentForActivity, keywords, analysisResults, articleLanguage, goalContext);
+        recordArticleSave(currentUser, finalTitleToSave, contentForActivity, keywords, analysisForSave, articleLanguage, goalContext);
         await persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON, {
             awaitBackup: true,
-            includeFallback: true,
         });
         writeStorageValue(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
         writeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
@@ -875,7 +878,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     captureEditorSnapshot(editor);
                     if (!isOriginalContentValid) {
                         void persistEditorContentValue(MANUAL_DRAFT_KEY, getManualDraftContentKey(), editor.getJSON(), {
-                            includeFallback: true,
+                            awaitBackup: true,
                         });
                     }
                 } else {
@@ -907,6 +910,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const handleNewArticle = useCallback(async (lang: 'ar' | 'en') => {
         await handleSaveDraft();
         if (editor) {
+            articleLoadRequestIdRef.current += 1;
             clearStoredCompetitorInputs();
             removeStorageValue(CONTENT_SUMMARY_STORAGE_KEY);
             window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT));
@@ -923,18 +927,24 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const handleLoadArticle = useCallback(async (titleStr: string, article: ArticleActivity) => {
         if (editor && article) {
+            const requestId = articleLoadRequestIdRef.current + 1;
+            articleLoadRequestIdRef.current = requestId;
             const lang = article.articleLanguage || 'ar';
-            const resolvedContent = await resolveArticleContentWithDraftFallback(titleStr, article);
             setTitle(titleStr);
             setArticleKey(titleStr);
             setKeywords(article.keywords || INITIAL_KEYWORDS);
             setGoalContext(normalizeGoalContext(article.goalContext));
-            setEditorContentSafely(editor, resolvedContent || INITIAL_CONTENT);
-            captureEditorSnapshot(editor);
-            handleLanguageChange(lang);
+            setArticleLanguage(lang);
             setCurrentView('editor');
+
+            const resolvedContent = await resolveArticleContentWithDraftFallback(titleStr, article);
+            if (articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
+
+            setEditorContentSafely(editor, resolvedContent || INITIAL_CONTENT);
+            captureEditorSnapshot(editor, false);
+            applyArticleLanguageFormatting(editor, lang);
         }
-    }, [editor, setCurrentView, handleLanguageChange, captureEditorSnapshot]);
+    }, [editor, setCurrentView, captureEditorSnapshot]);
     
     const value: EditorContextType = {
         editor,

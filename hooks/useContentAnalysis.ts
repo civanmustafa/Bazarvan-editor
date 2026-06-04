@@ -182,11 +182,22 @@ const createFallbackAnalysis = (textContent = '', uiLanguage: 'ar' | 'en' = 'ar'
   };
 };
 
-const runContentAnalysisSafely = (input: ContentAnalysisInput): FullAnalysis => {
+const runContentAnalysisSafely = (input: ContentAnalysisInput, previousResult?: FullAnalysis | null): FullAnalysis => {
   try {
     return runContentAnalysis(input);
   } catch (error) {
     console.error('Content analysis failed:', error);
+    if (previousResult) {
+      const wordCount = input.textContent.trim().split(/\s+/).filter(Boolean).length;
+      return {
+        ...previousResult,
+        duplicateStats: {
+          ...previousResult.duplicateStats,
+          totalWords: wordCount,
+        },
+        wordCount,
+      };
+    }
     return createFallbackAnalysis(input.textContent, input.uiLanguage);
   }
 };
@@ -280,7 +291,7 @@ export const useContentAnalysis = (
     latestRequestIdRef.current = requestId;
 
     const runFallbackAnalysis = () => {
-      const result = runContentAnalysisSafely(input);
+      const result = runContentAnalysisSafely(input, latestAnalysisRef.current);
       setLatestAnalysisResults(mergePreviousDuplicateResults(result, latestAnalysisRef.current, updateDuplicateAnalysis));
     };
 

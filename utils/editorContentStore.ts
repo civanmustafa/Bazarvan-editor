@@ -2,11 +2,16 @@ const DB_NAME = 'bazarvan-editor-content';
 const STORE_NAME = 'editorContent';
 const DB_VERSION = 1;
 const INLINE_FALLBACK_MAX_CHARS = 1_200_000;
+const LOCAL_CHUNK_PREFIX = 'bazarvan-editor-content-chunk:';
+const LOCAL_CHUNK_SIZE = 200_000;
 
 export type EditorContentReference = {
   storage: 'indexeddb';
   key: string;
   fallbackContent?: any;
+  fallbackStorage?: 'localStorageChunks';
+  fallbackKey?: string;
+  chunkCount?: number;
   updatedAt?: string;
 };
 
@@ -97,6 +102,91 @@ const getSerializedContentLength = (content: any): number | null => {
   }
 };
 
+const getChunkIndexKey = (key: string): string => `${LOCAL_CHUNK_PREFIX}${key}:index`;
+const getChunkKey = (key: string, index: number): string => `${LOCAL_CHUNK_PREFIX}${key}:${index}`;
+
+const canUseLocalStorage = (): boolean => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const readStoredChunkCount = (key: string): number => {
+  if (!canUseLocalStorage()) return 0;
+
+  try {
+    const indexRaw = window.localStorage.getItem(getChunkIndexKey(key));
+    if (!indexRaw) return 0;
+    const parsed = JSON.parse(indexRaw);
+    return typeof parsed.chunkCount === 'number' && Number.isFinite(parsed.chunkCount)
+      ? parsed.chunkCount
+      : 0;
+  } catch {
+    return 0;
+  }
+};
+
+export const deleteEditorContentChunks = (key: string): void => {
+  if (!canUseLocalStorage()) return;
+
+  try {
+    const chunkCount = readStoredChunkCount(key);
+    for (let index = 0; index < chunkCount; index += 1) {
+      window.localStorage.removeItem(getChunkKey(key, index));
+    }
+    window.localStorage.removeItem(getChunkIndexKey(key));
+  } catch (error) {
+    console.error(`Failed to delete local editor content chunks "${key}":`, error);
+  }
+};
+
+export const saveEditorContentChunks = (key: string, content: any): number => {
+  if (!canUseLocalStorage()) return 0;
+
+  let serializedContent: string;
+  try {
+    serializedContent = JSON.stringify(content);
+  } catch (error) {
+    console.error(`Failed to serialize editor content chunks "${key}":`, error);
+    return 0;
+  }
+
+  const chunks = serializedContent.match(new RegExp(`.{1,${LOCAL_CHUNK_SIZE}}`, 'gs')) || [''];
+
+  try {
+    deleteEditorContentChunks(key);
+    chunks.forEach((chunk, index) => {
+      window.localStorage.setItem(getChunkKey(key, index), chunk);
+    });
+    window.localStorage.setItem(getChunkIndexKey(key), JSON.stringify({
+      chunkCount: chunks.length,
+      updatedAt: new Date().toISOString(),
+    }));
+    return chunks.length;
+  } catch (error) {
+    deleteEditorContentChunks(key);
+    console.error(`Failed to save local editor content chunks "${key}":`, error);
+    return 0;
+  }
+};
+
+export const loadEditorContentChunks = (key: string): any | null => {
+  if (!canUseLocalStorage()) return null;
+
+  try {
+    const chunkCount = readStoredChunkCount(key);
+    if (chunkCount <= 0) return null;
+
+    const chunks: string[] = [];
+    for (let index = 0; index < chunkCount; index += 1) {
+      const chunk = window.localStorage.getItem(getChunkKey(key, index));
+      if (chunk === null) return null;
+      chunks.push(chunk);
+    }
+
+    return JSON.parse(chunks.join(''));
+  } catch (error) {
+    console.error(`Failed to load local editor content chunks "${key}":`, error);
+    return null;
+  }
+};
+
 export const createEditorContentReference = (key: string): EditorContentReference => ({
   storage: 'indexeddb',
   key,
@@ -117,6 +207,20 @@ export const createEditorContentReferenceWithFallback = (
 
   return reference;
 };
+
+export const createEditorContentReferenceWithChunkFallback = (
+  key: string,
+  chunkCount: number,
+): EditorContentReference => ({
+  storage: 'indexeddb',
+  key,
+  ...(chunkCount > 0 ? {
+    fallbackStorage: 'localStorageChunks' as const,
+    fallbackKey: key,
+    chunkCount,
+    updatedAt: new Date().toISOString(),
+  } : {}),
+});
 
 export const isEditorContentReference = (value: unknown): value is EditorContentReference => (
   !!value &&
@@ -143,6 +247,24 @@ export const saveEditorContent = async (key: string, content: any): Promise<void
   await runEditorContentTransaction('readwrite', store => store.put(record));
 };
 
+export const saveEditorContentDurably = async (
+  key: string,
+  content: any,
+  options: { saveLocalFallback?: boolean } = {},
+): Promise<{ indexedDb: boolean; localChunkCount: number }> => {
+  const localChunkCount = options.saveLocalFallback ? saveEditorContentChunks(key, content) : 0;
+  let indexedDb = false;
+
+  try {
+    await saveEditorContent(key, content);
+    indexedDb = true;
+  } catch (error) {
+    console.error(`Failed to save editor content in IndexedDB "${key}":`, error);
+  }
+
+  return { indexedDb, localChunkCount };
+};
+
 export const loadEditorContent = async (key: string): Promise<any | null> => {
   const record = await runEditorContentTransaction<StoredEditorContent>('readonly', store => store.get(key));
   return record?.content ?? null;
@@ -158,9 +280,15 @@ export const resolveEditorContentReference = async (reference: EditorContentRefe
     console.error(`Failed to load editor content backup "${reference.key}":`, error);
   }
 
+  const chunkContent = loadEditorContentChunks(reference.fallbackKey || reference.key);
+  if (chunkContent !== null && chunkContent !== undefined) {
+    return chunkContent;
+  }
+
   return reference.fallbackContent ?? null;
 };
 
 export const deleteEditorContent = async (key: string): Promise<void> => {
   await runEditorContentTransaction('readwrite', store => store.delete(key));
+  deleteEditorContentChunks(key);
 };

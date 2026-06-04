@@ -3,7 +3,7 @@ import { translations } from '../../components/translations';
 import { runDuplicateAnalysis } from './runDuplicateAnalysis';
 import { runKeywordAnalysis } from './runKeywordAnalysis';
 import type { AnalysisContext, AnalysisDocumentNode } from './analysisUtils';
-import { countNodesByType, getAnalysisNodeSize, getNodeContentAsText, getNodeSizeFromJSON, getNodeText } from './analysisUtils';
+import { countNodesByType, getAnalysisNodeContentText, getAnalysisNodeSize, getNodeContentAsText, getNodeSizeFromJSON, getNodeText } from './analysisUtils';
 
 import { checkWordCount } from './rules/checkWordCount';
 import { checkFirstTitle } from './rules/checkFirstTitle';
