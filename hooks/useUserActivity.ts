@@ -218,12 +218,59 @@ export const getActivityData = (): ActivityData => {
   }
 };
 
-const saveActivityData = (data: ActivityData) => {
+const compactEditorContentFallbacks = (data: ActivityData): { data: ActivityData; changed: boolean } => {
+  let changed = false;
+  const compacted: ActivityData = {};
+
+  Object.entries(data).forEach(([username, user]) => {
+    compacted[username] = {
+      ...user,
+      articles: {},
+    };
+
+    Object.entries(user.articles).forEach(([title, article]) => {
+      const content = article.content;
+      if (
+        isRecord(content) &&
+        content.storage === 'indexeddb' &&
+        Object.prototype.hasOwnProperty.call(content, 'fallbackContent')
+      ) {
+        const contentWithoutFallback = { ...content };
+        delete contentWithoutFallback.fallbackContent;
+        compacted[username].articles[title] = {
+          ...article,
+          content: contentWithoutFallback,
+        };
+        changed = true;
+        return;
+      }
+
+      compacted[username].articles[title] = article;
+    });
+  });
+
+  return { data: compacted, changed };
+};
+
+const saveActivityData = (data: ActivityData): boolean => {
   try {
     localStorage.setItem(ACTIVITY_KEY, JSON.stringify(data));
+    return true;
   } catch (error) {
-    console.error("Failed to save activity data to localStorage:", error);
+    const compacted = compactEditorContentFallbacks(data);
+    if (compacted.changed) {
+      try {
+        localStorage.setItem(ACTIVITY_KEY, JSON.stringify(compacted.data));
+        return true;
+      } catch (compactError) {
+        console.error("Failed to save compacted activity data to localStorage:", compactError);
+      }
+    } else {
+      console.error("Failed to save activity data to localStorage:", error);
+    }
   }
+
+  return false;
 };
 
 const modifyUserData = (username: string, modification: (user: UserActivity) => void) => {

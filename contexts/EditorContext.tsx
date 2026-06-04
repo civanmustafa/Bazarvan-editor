@@ -19,11 +19,12 @@ import { normalizeGoalContext } from '../utils/goalContext';
 import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT } from '../utils/competitorStorage';
 import {
     createEditorContentReference,
+    createEditorContentReferenceWithFallback,
     getArticleContentKey,
     getAutoDraftContentKey,
     getManualDraftContentKey,
     isEditorContentReference,
-    loadEditorContent,
+    resolveEditorContentReference,
     saveEditorContent,
 } from '../utils/editorContentStore';
 
@@ -37,9 +38,11 @@ import {
  */
 
 // --- Local timing helpers ---
-const EDITOR_SNAPSHOT_DELAY_MS = 300;
-const ANALYSIS_DEBOUNCE_MS = 900;
+const EDITOR_SNAPSHOT_DELAY_MS = 700;
+const DRAFT_PERSIST_DELAY_MS = 2500;
+const ANALYSIS_DEBOUNCE_MS = 1500;
 const AUTOSAVE_INTERVAL_MS = 60 * 1000;
+const MAX_DOCUMENT_LANGUAGE_FORMATTING_SIZE = 60_000;
 
 const readStorageValue = (key: string): string | null => {
     try {
@@ -280,26 +283,87 @@ const getInitialContent = () => {
   return INITIAL_CONTENT;
 };
 
-const persistEditorContentValue = (storageKey: string, backupKey: string, content: any): boolean => {
-    const serializedContent = JSON.stringify(content);
-    void saveEditorContent(backupKey, content).catch(error => {
+const persistEditorContentValue = async (
+    storageKey: string,
+    backupKey: string,
+    content: any,
+    options: { awaitBackup?: boolean; includeFallback?: boolean } = {},
+): Promise<boolean> => {
+    const reference = options.includeFallback
+        ? createEditorContentReferenceWithFallback(backupKey, content)
+        : createEditorContentReference(backupKey);
+    const wroteReference = writeStorageValue(storageKey, JSON.stringify(reference));
+
+    const backupPromise = saveEditorContent(backupKey, content);
+
+    if (options.awaitBackup) {
+        try {
+            await backupPromise;
+            return wroteReference;
+        } catch (error) {
+            console.error(`Failed to save editor content backup "${backupKey}":`, error);
+            if (options.includeFallback && reference.fallbackContent !== undefined) {
+                return wroteReference;
+            }
+
+            try {
+                return writeStorageValue(storageKey, JSON.stringify(content));
+            } catch (fallbackError) {
+                console.error(`Failed to save inline fallback for "${storageKey}":`, fallbackError);
+                return wroteReference;
+            }
+        }
+    }
+
+    void backupPromise.catch(error => {
         console.error(`Failed to save editor content backup "${backupKey}":`, error);
     });
 
-    if (writeStorageValue(storageKey, serializedContent)) {
-        return true;
-    }
-
-    removeStorageValue(storageKey);
-    return writeStorageValue(storageKey, JSON.stringify(createEditorContentReference(backupKey)));
+    return wroteReference;
 };
 
 const resolveStoredEditorContent = async (value: unknown): Promise<any | null> => {
     if (isEditorContentReference(value)) {
-        return loadEditorContent(value.key);
+        return resolveEditorContentReference(value);
     }
 
     return value;
+};
+
+const resolveStoredContentFromLocalKey = async (storageKey: string): Promise<any | null> => {
+    const storedContent = readStorageValue(storageKey);
+    if (!storedContent) return null;
+
+    try {
+        return resolveStoredEditorContent(JSON.parse(storedContent));
+    } catch (error) {
+        console.error(`Failed to resolve stored editor content "${storageKey}":`, error);
+        return null;
+    }
+};
+
+const resolveArticleContentWithDraftFallback = async (
+    titleStr: string,
+    article: ArticleActivity,
+): Promise<any | null> => {
+    const resolvedArticleContent = await resolveStoredEditorContent(article.content);
+    if (isUsableEditorContent(resolvedArticleContent)) {
+        return resolvedArticleContent;
+    }
+
+    const manualDraftTitle = readStorageValue(MANUAL_DRAFT_TITLE_KEY);
+    if (manualDraftTitle === titleStr) {
+        const manualDraftContent = await resolveStoredContentFromLocalKey(MANUAL_DRAFT_KEY);
+        if (isUsableEditorContent(manualDraftContent)) return manualDraftContent;
+    }
+
+    const autoDraftTitle = readStorageValue(AUTO_DRAFT_TITLE_KEY);
+    if (autoDraftTitle === titleStr) {
+        const autoDraftContent = await resolveStoredContentFromLocalKey(AUTO_DRAFT_KEY);
+        if (isUsableEditorContent(autoDraftContent)) return autoDraftContent;
+    }
+
+    return null;
 };
 
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
@@ -316,7 +380,7 @@ const getStoredGoalContext = (key: string): GoalContext => {
     }
 };
 
-const applyArticleLanguageFormatting = (editor: Editor, lang: 'ar' | 'en') => {
+const applyArticleLanguageFormatting = (editor: Editor, lang: 'ar' | 'en', updateDocument = false) => {
     const direction = lang === 'ar' ? 'rtl' : 'ltr';
     const alignment = lang === 'ar' ? 'right' : 'left';
     const editorDom = editor.view.dom as HTMLElement;
@@ -324,6 +388,10 @@ const applyArticleLanguageFormatting = (editor: Editor, lang: 'ar' | 'en') => {
     editorDom.setAttribute('dir', direction);
     editorDom.style.direction = direction;
     editorDom.style.textAlign = alignment;
+
+    if (!updateDocument || editor.state.doc.content.size > MAX_DOCUMENT_LANGUAGE_FORMATTING_SIZE) {
+        return;
+    }
 
     (editor.chain() as any)
         .focus()
@@ -507,6 +575,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const editorSnapshotTimerRef = useRef<number | null>(null);
+    const draftPersistTimerRef = useRef<number | null>(null);
     const latestDraftMetaRef = useRef({ title, keywords, articleLanguage, goalContext });
     const pendingAutoDraftRestoreRef = useRef(Boolean(readStoredContentReference(AUTO_DRAFT_KEY)));
     
@@ -521,6 +590,13 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
     }, []);
 
+    const clearDraftPersistTimer = useCallback(() => {
+        if (draftPersistTimerRef.current) {
+            clearTimeout(draftPersistTimerRef.current);
+            draftPersistTimerRef.current = null;
+        }
+    }, []);
+
     useEffect(() => {
         latestDraftMetaRef.current = { title, keywords, articleLanguage, goalContext };
     }, [title, keywords, articleLanguage, goalContext]);
@@ -528,7 +604,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const persistEditorSnapshotNow = useCallback((targetEditor: Editor) => {
         if (!targetEditor || targetEditor.isDestroyed) return;
         const { title, keywords, articleLanguage, goalContext } = latestDraftMetaRef.current;
-        persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), targetEditor.getJSON());
+        void persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), targetEditor.getJSON());
         writeStorageValue(AUTO_DRAFT_TITLE_KEY, title);
         writeStorageValue(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
         writeStorageValue(AUTO_DRAFT_LANGUAGE_KEY, articleLanguage);
@@ -544,13 +620,22 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
     }, [persistEditorSnapshotNow]);
 
+    const scheduleDraftPersistence = useCallback((targetEditor: Editor) => {
+        clearDraftPersistTimer();
+        draftPersistTimerRef.current = window.setTimeout(() => {
+            persistEditorSnapshotNow(targetEditor);
+            draftPersistTimerRef.current = null;
+        }, DRAFT_PERSIST_DELAY_MS);
+    }, [clearDraftPersistTimer, persistEditorSnapshotNow]);
+
     const scheduleEditorSnapshot = useCallback((targetEditor: Editor) => {
         clearEditorSnapshotTimer();
         editorSnapshotTimerRef.current = window.setTimeout(() => {
-            captureEditorSnapshot(targetEditor);
+            captureEditorSnapshot(targetEditor, false);
             editorSnapshotTimerRef.current = null;
         }, EDITOR_SNAPSHOT_DELAY_MS);
-    }, [captureEditorSnapshot, clearEditorSnapshotTimer]);
+        scheduleDraftPersistence(targetEditor);
+    }, [captureEditorSnapshot, clearEditorSnapshotTimer, scheduleDraftPersistence]);
 
     // TipTap extensions live here. Add editor-level behavior or formatting support in this list.
     const extensions = useMemo(() => [
@@ -597,8 +682,12 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
 
             try {
-                const backupContent = await loadEditorContent(reference.key);
-                if (cancelled || !backupContent || !isUsableEditorContent(backupContent)) return;
+                const backupContent = await resolveEditorContentReference(reference);
+                if (cancelled) return;
+                if (!backupContent || !isUsableEditorContent(backupContent)) {
+                    pendingAutoDraftRestoreRef.current = false;
+                    return;
+                }
                 setEditorContentSafely(editor, backupContent);
                 pendingAutoDraftRestoreRef.current = false;
                 captureEditorSnapshot(editor);
@@ -620,6 +709,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         const flushDraft = () => {
             clearEditorSnapshotTimer();
+            clearDraftPersistTimer();
             persistEditorSnapshotNow(editor);
         };
 
@@ -639,7 +729,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             window.removeEventListener('pagehide', flushDraft);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [editor, clearEditorSnapshotTimer, persistEditorSnapshotNow]);
+    }, [editor, clearEditorSnapshotTimer, clearDraftPersistTimer, persistEditorSnapshotNow]);
 
     // Keep the latest draft metadata mirrored in localStorage.
     useEffect(() => {
@@ -656,7 +746,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const handleLanguageChange = useCallback((lang: 'ar' | 'en') => {
         setArticleLanguage(lang);
         if (!editor || currentView !== 'editor') return;
-        applyArticleLanguageFormatting(editor, lang);
+        applyArticleLanguageFormatting(editor, lang, true);
     }, [editor, currentView]);
 
     useEffect(() => {
@@ -713,9 +803,10 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const currentText = editor.getText();
         if (title.trim() === '' && currentText.trim() === '') return;
         clearEditorSnapshotTimer();
+        clearDraftPersistTimer();
         setEditorState(contentJSON);
         setText(currentText);
-        persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), contentJSON);
+        await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), contentJSON, { awaitBackup: true });
 
         let currentKey = articleKey;
         const newTitle = title.trim();
@@ -734,17 +825,19 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         const articleContentKey = getArticleContentKey(currentUser, finalTitleToSave);
         const manualDraftContentKey = getManualDraftContentKey();
-        let contentForActivity: any = createEditorContentReference(articleContentKey);
+        const contentForActivity = createEditorContentReferenceWithFallback(articleContentKey, contentJSON);
 
         try {
             await saveEditorContent(articleContentKey, contentJSON);
         } catch (error) {
             console.error('Failed to save article content backup:', error);
-            contentForActivity = contentJSON;
         }
 
         recordArticleSave(currentUser, finalTitleToSave, contentForActivity, keywords, analysisResults, articleLanguage, goalContext);
-        persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON);
+        await persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON, {
+            awaitBackup: true,
+            includeFallback: true,
+        });
         writeStorageValue(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
         writeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
         writeStorageValue(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
@@ -752,7 +845,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setDraftExists(true);
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2000);
-    }, [editor, currentUser, title, articleKey, keywords, analysisResults, articleLanguage, goalContext, clearEditorSnapshotTimer]);
+    }, [editor, currentUser, title, articleKey, keywords, analysisResults, articleLanguage, goalContext, clearEditorSnapshotTimer, clearDraftPersistTimer]);
     
     const handleSaveDraftRef = useRef(handleSaveDraft);
     useEffect(() => {
@@ -781,7 +874,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     const isOriginalContentValid = setEditorContentSafely(editor, resolvedContent);
                     captureEditorSnapshot(editor);
                     if (!isOriginalContentValid) {
-                        persistEditorContentValue(MANUAL_DRAFT_KEY, getManualDraftContentKey(), editor.getJSON());
+                        void persistEditorContentValue(MANUAL_DRAFT_KEY, getManualDraftContentKey(), editor.getJSON(), {
+                            includeFallback: true,
+                        });
                     }
                 } else {
                     removeStorageValue(MANUAL_DRAFT_KEY);
@@ -829,7 +924,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const handleLoadArticle = useCallback(async (titleStr: string, article: ArticleActivity) => {
         if (editor && article) {
             const lang = article.articleLanguage || 'ar';
-            const resolvedContent = await resolveStoredEditorContent(article.content);
+            const resolvedContent = await resolveArticleContentWithDraftFallback(titleStr, article);
             setTitle(titleStr);
             setArticleKey(titleStr);
             setKeywords(article.keywords || INITIAL_KEYWORDS);

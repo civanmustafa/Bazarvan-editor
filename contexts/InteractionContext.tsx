@@ -431,6 +431,10 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         editorDom.style.direction = direction;
         editorDom.style.textAlign = alignment;
 
+        if (editor.state.doc.content.size > 60_000) {
+            return;
+        }
+
         (editor.chain() as any)
             .focus()
             .selectAll()

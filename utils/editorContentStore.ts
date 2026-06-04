@@ -1,10 +1,13 @@
 const DB_NAME = 'bazarvan-editor-content';
 const STORE_NAME = 'editorContent';
 const DB_VERSION = 1;
+const INLINE_FALLBACK_MAX_CHARS = 1_200_000;
 
 export type EditorContentReference = {
   storage: 'indexeddb';
   key: string;
+  fallbackContent?: any;
+  updatedAt?: string;
 };
 
 type StoredEditorContent = {
@@ -13,26 +16,53 @@ type StoredEditorContent = {
   updatedAt: string;
 };
 
+let editorContentDbPromise: Promise<IDBDatabase> | null = null;
+
 const canUseIndexedDb = (): boolean => (
   typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined'
 );
 
-const openEditorContentDb = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
+const openEditorContentDb = (): Promise<IDBDatabase> => {
   if (!canUseIndexedDb()) {
-    reject(new Error('IndexedDB is not available.'));
-    return;
+    return Promise.reject(new Error('IndexedDB is not available.'));
   }
 
-  const request = window.indexedDB.open(DB_NAME, DB_VERSION);
-  request.onupgradeneeded = () => {
-    const db = request.result;
-    if (!db.objectStoreNames.contains(STORE_NAME)) {
-      db.createObjectStore(STORE_NAME, { keyPath: 'key' });
-    }
-  };
-  request.onsuccess = () => resolve(request.result);
-  request.onerror = () => reject(request.error || new Error('Failed to open IndexedDB.'));
-});
+  if (editorContentDbPromise) {
+    return editorContentDbPromise;
+  }
+
+  editorContentDbPromise = new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'key' });
+      }
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        editorContentDbPromise = null;
+      };
+      resolve(db);
+    };
+
+    request.onerror = () => {
+      editorContentDbPromise = null;
+      reject(request.error || new Error('Failed to open IndexedDB.'));
+    };
+
+    request.onblocked = () => {
+      editorContentDbPromise = null;
+      reject(new Error('IndexedDB open request was blocked.'));
+    };
+  });
+
+  return editorContentDbPromise;
+};
 
 const runEditorContentTransaction = async <T>(
   mode: IDBTransactionMode,
@@ -46,15 +76,12 @@ const runEditorContentTransaction = async <T>(
     let request: IDBRequest<T> | void;
 
     transaction.oncomplete = () => {
-      db.close();
       resolve(request ? request.result : undefined);
     };
     transaction.onerror = () => {
-      db.close();
       reject(transaction.error || new Error('IndexedDB transaction failed.'));
     };
     transaction.onabort = () => {
-      db.close();
       reject(transaction.error || new Error('IndexedDB transaction aborted.'));
     };
 
@@ -62,10 +89,34 @@ const runEditorContentTransaction = async <T>(
   });
 };
 
+const getSerializedContentLength = (content: any): number | null => {
+  try {
+    return JSON.stringify(content).length;
+  } catch {
+    return null;
+  }
+};
+
 export const createEditorContentReference = (key: string): EditorContentReference => ({
   storage: 'indexeddb',
   key,
 });
+
+export const createEditorContentReferenceWithFallback = (
+  key: string,
+  content: any,
+  maxSerializedChars = INLINE_FALLBACK_MAX_CHARS,
+): EditorContentReference => {
+  const reference = createEditorContentReference(key);
+  const serializedLength = getSerializedContentLength(content);
+
+  if (serializedLength !== null && serializedLength <= maxSerializedChars) {
+    reference.fallbackContent = content;
+    reference.updatedAt = new Date().toISOString();
+  }
+
+  return reference;
+};
 
 export const isEditorContentReference = (value: unknown): value is EditorContentReference => (
   !!value &&
@@ -79,7 +130,7 @@ export const isEditorContentReference = (value: unknown): value is EditorContent
 export const getAutoDraftContentKey = () => 'draft:auto';
 export const getManualDraftContentKey = () => 'draft:manual';
 export const getArticleContentKey = (username: string, title: string) => (
-  `article:${username}:${title.trim() || '(بدون عنوان)'}`
+  `article:${username}:${title.trim() || '(untitled)'}`
 );
 
 export const saveEditorContent = async (key: string, content: any): Promise<void> => {
@@ -95,6 +146,19 @@ export const saveEditorContent = async (key: string, content: any): Promise<void
 export const loadEditorContent = async (key: string): Promise<any | null> => {
   const record = await runEditorContentTransaction<StoredEditorContent>('readonly', store => store.get(key));
   return record?.content ?? null;
+};
+
+export const resolveEditorContentReference = async (reference: EditorContentReference): Promise<any | null> => {
+  try {
+    const storedContent = await loadEditorContent(reference.key);
+    if (storedContent !== null && storedContent !== undefined) {
+      return storedContent;
+    }
+  } catch (error) {
+    console.error(`Failed to load editor content backup "${reference.key}":`, error);
+  }
+
+  return reference.fallbackContent ?? null;
 };
 
 export const deleteEditorContent = async (key: string): Promise<void> => {
