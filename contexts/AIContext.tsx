@@ -2882,6 +2882,44 @@ const CONCLUSION_HEADING_KEYWORDS = [
     'summary',
 ];
 
+const findConclusionAttachmentHeading = (editor: any): HeadingMatch | null => {
+    if (!editor) return null;
+    let lastH2Match: HeadingMatch | null = null;
+    let lastAnyMatch: HeadingMatch | null = null;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (node.type.name !== 'heading') return true;
+
+        const heading = normalizeAnchorText(node.textContent);
+        const found = CONCLUSION_HEADING_KEYWORDS.some(keyword => {
+            const normalizedKeyword = normalizeAnchorText(keyword);
+            return normalizedKeyword && heading.includes(normalizedKeyword);
+        });
+        if (!found) return true;
+
+        const match = {
+            pos,
+            to: pos + node.nodeSize,
+            level: node.attrs.level || 2,
+            text: node.textContent,
+            score: 2,
+        };
+        lastAnyMatch = match;
+        if (match.level === 2) lastH2Match = match;
+        return true;
+    });
+
+    return lastH2Match || lastAnyMatch;
+};
+
+const getCurrentConclusionAttachmentText = (editor: any): string => {
+    const conclusionHeading = findConclusionAttachmentHeading(editor);
+    if (!editor || !conclusionHeading) return '';
+
+    const sectionEnd = findSectionEnd(editor, conclusionHeading);
+    return editor.state.doc.textBetween(conclusionHeading.pos, sectionEnd, '\n', '\n').trim();
+};
+
 const findFaqAppendTarget = (editor: any, docEnd: number): PatchTarget => {
     const faqHeading = findHeadingByKeywords(editor, FAQ_SECTION_HEADING_KEYWORDS);
 
@@ -3215,6 +3253,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             parts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
         }
         parts.push(`**لغة المقال:** ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`);
+        if (articleToc) {
+            const tocString = generateToc(editor);
+            parts.push(`**جدول محتويات المقالة:**\n${tocString || '- لا يوجد جدول محتويات متاح لأن المقال لا يحتوي على عناوين بعد.'}`);
+        }
         const goalContextText = formatGoalContext(goalContext);
         if (includeGoalContext && goalContextText) {
             parts.push(`**سياق هدف الصفحة والجمهور لاستخدامه في التقييم والتحليل:**\n${goalContextText}`);
@@ -3251,6 +3293,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
         if (editorText) {
             parts.push(`**نص المقال الحالي من المحرر:**\n---\n${text}\n---`);
+        }
+        if (currentConclusion) {
+            const conclusionText = getCurrentConclusionAttachmentText(editor);
+            parts.push(`**الخاتمة الحالية:**\n${conclusionText ? `---\n${conclusionText}\n---` : '- لا توجد خاتمة حالية واضحة في المحرر.'}`);
         }
         STRUCTURE_CRITERIA_ATTACHMENTS.forEach((attachment) => {
             if (!options[attachment.optionKey]) return;
