@@ -11,6 +11,7 @@ export const ENGINEERING_PROMPT_IDS = {
     contentSummaryForCompetitors: 'smartAnalysis.contentSummaryForCompetitors',
     competitorGapAnalysis: 'smartAnalysis.competitorGapAnalysis',
     competitorContentComparison: 'smartAnalysis.competitorContentComparison',
+    combinedCommands: 'smartAnalysis.combinedCommands',
     improveConclusion: 'smartAnalysis.improveConclusion',
     improveWeakest: 'smartAnalysis.improveWeakest',
     suggestNewIdea: 'smartAnalysis.suggestNewIdea',
@@ -220,6 +221,32 @@ const PREVIOUS_COMPETITOR_GAP_ANALYSIS_PROMPT = COMPETITOR_GAP_ANALYSIS_PROMPT
 
 const PREVIOUS_COMPETITOR_GAP_ANALYSIS_PATCH_PROMPT = COMPETITOR_GAP_ANALYSIS_PROMPT
   .replace('\n- قم بالتأكد من المواصفات التقنية والخصائص إن وجدت في المحتوى أو لدى المنافسين.', '');
+
+const IMPROVE_WEAKEST_SECTION_PROMPT = `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، معايير التحليل، ونص المحرر المرفقة تلقائيًا:
+حدّد أضعف قسم أو فقرة في المقال من حيث SEO/AEO/GEO/LLM SEO ومطابقة هدف الصفحة.
+أخرج فقط:
+1. اسم القسم أو بداية الفقرة الضعيفة.
+2. سبب الضعف باختصار.
+3. نسخة محسنة جاهزة للاستبدال.
+4. لماذا النسخة الجديدة أفضل.
+لا تقدّم نصائح عامة ولا تقترح صورًا أو فيديوهات أو Schema.`;
+
+const SUGGEST_NEW_IDEA_PROMPT = `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، وسياق الهدف والجمهور المرفق تلقائيًا:
+اقترح فكرة أو فقرة جديدة غير مذكورة في المقال وتضيف قيمة واضحة للقارئ وتزيد قابلية الاقتباس في AI Overviews.
+أخرج فقط:
+1. مكان الإضافة المقترح داخل المقال.
+2. عنوان فرعي مناسب إن لزم.
+3. الفقرة المقترحة جاهزة للإضافة.
+4. سبب أهميتها للبحث والقرار والتحويل.
+لا تقدّم أكثر من فكرة واحدة ولا تقترح صورًا أو فيديوهات أو Schema.`;
+
+const PEOPLE_QUESTIONS_PROMPT = `استخرج أهم أسئلة الباحثين المرتبطة بالكلمة المفتاحية ونية البحث والجمهور المستهدف المرفقين تلقائيًا.
+أخرج 10 أسئلة فقط، مع تقسيمها إلى:
+- أسئلة قبل القرار.
+- أسئلة مقارنة أو اختيار.
+- أسئلة تكلفة أو سعر.
+- أسئلة اعتراضات أو مخاطر.
+لكل سؤال اذكر أين يمكن إضافته داخل المقال باختصار.`;
 
 const COMPETITOR_CONTENT_COMPARISON_PROMPT = `# مقارنة المحتوى الحالي مع محتوى المنافسين + اقتراح محتوى جاهز
 
@@ -499,6 +526,85 @@ const UNSUITABLE_SECTIONS_AUDIT_PROMPT = `أنت خبير SEO Content Audit وLL
 - اربط كل ملاحظة بهدف الصفحة والجمهور والكلمات الدلالية.
 - اجعل النقد عمليًا وقابلًا للتنفيذ.`;
 
+const COMBINED_COMMANDS_PROMPT = `# تجميعة أوامر
+
+نفّذ الأوامر الهندسية اليدوية الجاهزة التالية كتحليل واحد مترابط، مع الحفاظ على تعليمات كل أمر كما هي، وتجنّب تكرار نفس الملاحظة أو اقتراح تعديلين يعالجان المشكلة نفسها:
+
+## الأمر 1: تحسين أضعف قسم
+
+${IMPROVE_WEAKEST_SECTION_PROMPT}
+
+## الأمر 2: اقتراح فقرة فكرة جديدة
+
+${SUGGEST_NEW_IDEA_PROMPT}
+
+## الأمر 3: أسئلة الناس
+
+${PEOPLE_QUESTIONS_PROMPT}
+
+## الأمر 4: فرص الجداول والقوائم
+
+${STRUCTURED_CONTENT_OPPORTUNITIES_PROMPT}
+
+## الأمر 5: الأقسام الأقل ملاءمة
+
+${UNSUITABLE_SECTIONS_AUDIT_PROMPT}
+
+صيغة الإخراج المطلوبة لتجميعة الأوامر:
+
+1. ملخص تنفيذي قصير:
+- أضعف نقطة في المحتوى.
+- أهم فكرة جديدة قابلة للإضافة.
+- أهم نوع فرصة تنظيمية: جدول / قائمة / خطوات.
+- عدد الأسئلة القابلة للإضافة.
+- عدد الأقسام الأقل ملاءمة.
+
+2. تحسين أضعف قسم:
+- اسم القسم أو بداية الفقرة الضعيفة.
+- سبب الضعف باختصار.
+- لماذا النسخة الجديدة أفضل.
+- ضع علامة بطاقة تنفيذ واحدة مثل [[PATCH:patch_1]] لعرض النسخة المحسّنة الجاهزة للاستبدال.
+
+3. اقتراح فقرة فكرة جديدة:
+- مكان الإضافة المقترح داخل المقال.
+- عنوان فرعي مناسب إن لزم.
+- سبب أهميتها للبحث والقرار والتحويل.
+- ضع علامة بطاقة تنفيذ واحدة مثل [[PATCH:patch_2]] لعرض الفقرة الجاهزة للإضافة.
+
+4. أسئلة الناس:
+- اعرض 10 أسئلة فقط، مقسّمة إلى: أسئلة قبل القرار، أسئلة مقارنة أو اختيار، أسئلة تكلفة أو سعر، أسئلة اعتراضات أو مخاطر.
+- لكل سؤال اذكر مكان إضافته داخل المقال باختصار.
+- لكل سؤال قابل للإضافة، ضع علامة بطاقة تنفيذ مستقلة مثل [[PATCH:patch_3]]، ويجب أن يحتوي محتوى البطاقة على السؤال كعنوان H3 وإجابة مختصرة مفيدة في فقرة واحدة.
+
+5. فرص الجداول والقوائم:
+- اعرض المقاطع المناسبة للتحويل فقط.
+- لكل مقطع اذكر: مكان المقطع، نوع التحويل المقترح، وسبب أن التحويل يضيف قيمة.
+- لا تكتب الشكل المقترح داخل التقرير؛ ضع علامة بطاقة تنفيذ مستقلة لكل جدول أو قائمة جاهزة مثل [[PATCH:patch_13]].
+
+6. الأقسام الأقل ملاءمة:
+- حدّد قسمين فقط غير مناسبين أو الأقل ملاءمة.
+- لكل قسم اذكر: العنوان أو مكان القسم، سبب المشكلة، تأثيره على SEO/AEO/GEO/LLM، والإجراء المقترح.
+- ضع علامة بطاقة تنفيذ مستقلة لكل صياغة بديلة مختصرة وجاهزة للاستبدال.
+
+تعليمات إلزامية لبطاقات الموضع والنسخ والاستبدال:
+
+- أي نص جاهز للإضافة أو الاستبدال يجب أن يكون داخل patches فقط، وليس داخل analysisMarkdown.
+- لا تكرر النص الجاهز داخل التقرير وداخل البطاقة في الوقت نفسه.
+- استخدم replace_block عند تحسين أضعف قسم أو استبدال قسم أقل ملاءمة، مع وضع targetText حرفيًا من النص الحالي.
+- استخدم insert_after_heading أو append_to_section عند إضافة الفكرة الجديدة داخل قسم محدد.
+- استخدم insert_before_faq لأسئلة الناس، واجعل contentMarkdown لكل سؤال بهذا الشكل فقط:
+### السؤال المقترح؟
+الإجابة المختصرة المفيدة في فقرة واحدة.
+- استخدم replace_block عند تحويل فقرة موجودة إلى جدول أو قائمة أو خطوات، واجعل targetText نسخة حرفية من المقطع الحالي.
+- استخدم insert_before_conclusion أو append_to_article فقط إذا تعذر تحديد موضع أدق.
+- اكتب anchorText بدقة اعتمادًا على عنوان القسم أو الفقرة المرجعية داخل المحتوى الحالي.
+- اكتب placementLabel بوضوح مثل: داخل قسم كذا، بعد فقرة كذا، قبل الخاتمة.
+- اكتب contentMarkdown كنص نهائي جاهز للإدراج فقط، دون شرح أو عناوين تفسيرية مثل "النص المقترح" أو "الإجابة".
+- لا تقترح صورًا أو فيديوهات أو Schema.
+- لا تقدم نصائح عامة.
+- لا تخترع معلومات أو أرقامًا أو ادعاءات غير موجودة في النص أو لا يمكن استنتاجها منطقيًا.
+- يجب أن تظهر بطاقة التنفيذ في موضعها داخل التقرير عبر علامة [[PATCH:...]] حتى يتمكن المستخدم من استخدام أزرار الموضع والنسخ والاستبدال.`;
+
 const EVALUATE_SECTION_PROMPT = `أنت كاتب محتوى محترف وخبير SEO / AEO / GEO / LLM SEO، ومتخصص في تقييم ملاءمة الفقرات لأهداف الصفحات.
 
 سيتم إرفاق الكلمة المفتاحية الأساسية، الصيغ المرادفة، كلمات LSI، نوع الصفحة، هدف الصفحة، نطاق الجمهور، الدولة أو السوق، الجمهور المستهدف، نية البحث، وسياق موضع النص تلقائيًا مع الطلب.
@@ -715,6 +821,25 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     },
   },
   {
+    id: ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands,
+    source: 'smartAnalysis',
+    labelKey: 'combinedCommands',
+    defaultValue: COMBINED_COMMANDS_PROMPT,
+    options: {
+      ...DEFAULT_SMART_ANALYSIS_OPTIONS,
+      articleToc: false,
+      currentConclusion: false,
+      competitorContent: true,
+      companyName: false,
+      keywordCriteria: true,
+      basicStructureCriteria: true,
+      headingsSequenceCriteria: true,
+      productPageCriteria: true,
+      interactionCtaCriteria: true,
+      conclusionCriteria: false,
+    },
+  },
+  {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion,
     source: 'smartAnalysis',
     labelKey: 'improveConclusion',
@@ -740,28 +865,14 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.improveWeakest,
     source: 'smartAnalysis',
     labelKey: 'improveWeakest',
-    defaultValue: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، معايير التحليل، ونص المحرر المرفقة تلقائيًا:
-حدّد أضعف قسم أو فقرة في المقال من حيث SEO/AEO/GEO/LLM SEO ومطابقة هدف الصفحة.
-أخرج فقط:
-1. اسم القسم أو بداية الفقرة الضعيفة.
-2. سبب الضعف باختصار.
-3. نسخة محسنة جاهزة للاستبدال.
-4. لماذا النسخة الجديدة أفضل.
-لا تقدّم نصائح عامة ولا تقترح صورًا أو فيديوهات أو Schema.`,
+    defaultValue: IMPROVE_WEAKEST_SECTION_PROMPT,
     options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.suggestNewIdea,
     source: 'smartAnalysis',
     labelKey: 'suggestNew',
-    defaultValue: `باستخدام بيانات الصفحة، الكلمات، الجمهور، نية البحث، وسياق الهدف والجمهور المرفق تلقائيًا:
-اقترح فكرة أو فقرة جديدة غير مذكورة في المقال وتضيف قيمة واضحة للقارئ وتزيد قابلية الاقتباس في AI Overviews.
-أخرج فقط:
-1. مكان الإضافة المقترح داخل المقال.
-2. عنوان فرعي مناسب إن لزم.
-3. الفقرة المقترحة جاهزة للإضافة.
-4. سبب أهميتها للبحث والقرار والتحويل.
-لا تقدّم أكثر من فكرة واحدة ولا تقترح صورًا أو فيديوهات أو Schema.`,
+    defaultValue: SUGGEST_NEW_IDEA_PROMPT,
     options: {
       ...DEFAULT_SMART_ANALYSIS_OPTIONS,
       articleToc: true,
@@ -776,13 +887,7 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.peopleQuestions,
     source: 'smartAnalysis',
     labelKey: 'peopleQuestions',
-    defaultValue: `استخرج أهم أسئلة الباحثين المرتبطة بالكلمة المفتاحية ونية البحث والجمهور المستهدف المرفقين تلقائيًا.
-أخرج 10 أسئلة فقط، مع تقسيمها إلى:
-- أسئلة قبل القرار.
-- أسئلة مقارنة أو اختيار.
-- أسئلة تكلفة أو سعر.
-- أسئلة اعتراضات أو مخاطر.
-لكل سؤال اذكر أين يمكن إضافته داخل المقال باختصار.`,
+    defaultValue: PEOPLE_QUESTIONS_PROMPT,
     options: DEFAULT_SMART_ANALYSIS_OPTIONS,
   },
   {

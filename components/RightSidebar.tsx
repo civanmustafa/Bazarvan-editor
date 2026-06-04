@@ -135,6 +135,7 @@ const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string =
         contentSummaryForCompetitors: { ar: 'تلخيص المحتوى للمنافسين', en: 'Content summary for competitors' },
         competitorGapAnalysis: { ar: 'مقارنة المحتوى مع المنافسين', en: 'Compare content with competitors' },
         competitorContentComparison: { ar: 'مقارنة المحتوى + محتوى جاهز', en: 'Competitor comparison + ready content' },
+        combinedCommands: { ar: 'تجميعة أوامر', en: 'Commands bundle' },
     };
     return labels[key]?.[isArabic ? 'ar' : 'en'] || key;
 };
@@ -901,6 +902,8 @@ ${readyCommandCompetitorBlocks}`;
                 return <Users size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison:
                 return <FilePlus2 size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands:
+                return <Sparkles size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion:
                 return <FilePlus2 size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.improveWeakest:

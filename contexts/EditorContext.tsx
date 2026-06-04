@@ -17,6 +17,15 @@ import { CONTENT_SUMMARY_STORAGE_KEY } from '../constants/engineeringPrompts';
 import { useUser } from './UserContext';
 import { normalizeGoalContext } from '../utils/goalContext';
 import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT } from '../utils/competitorStorage';
+import {
+    createEditorContentReference,
+    getArticleContentKey,
+    getAutoDraftContentKey,
+    getManualDraftContentKey,
+    isEditorContentReference,
+    loadEditorContent,
+    saveEditorContent,
+} from '../utils/editorContentStore';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -56,6 +65,17 @@ const removeStorageValue = (key: string) => {
         localStorage.removeItem(key);
     } catch (error) {
         console.error(`Failed to remove invalid local draft field "${key}":`, error);
+    }
+};
+
+const readStoredContentReference = (key: string) => {
+    try {
+        const rawValue = readStorageValue(key);
+        if (!rawValue) return null;
+        const parsed = JSON.parse(rawValue);
+        return isEditorContentReference(parsed) ? parsed : null;
+    } catch {
+        return null;
     }
 };
 
@@ -249,6 +269,7 @@ const getInitialContent = () => {
     const savedContent = readStorageValue(AUTO_DRAFT_KEY);
     if (savedContent) {
         const parsedContent = JSON.parse(savedContent);
+        if (isEditorContentReference(parsedContent)) return INITIAL_CONTENT;
         if (isUsableEditorContent(parsedContent)) return getSafeEditorContent(parsedContent);
         removeStorageValue(AUTO_DRAFT_KEY);
     }
@@ -257,6 +278,28 @@ const getInitialContent = () => {
     removeStorageValue(AUTO_DRAFT_KEY);
   }
   return INITIAL_CONTENT;
+};
+
+const persistEditorContentValue = (storageKey: string, backupKey: string, content: any): boolean => {
+    const serializedContent = JSON.stringify(content);
+    void saveEditorContent(backupKey, content).catch(error => {
+        console.error(`Failed to save editor content backup "${backupKey}":`, error);
+    });
+
+    if (writeStorageValue(storageKey, serializedContent)) {
+        return true;
+    }
+
+    removeStorageValue(storageKey);
+    return writeStorageValue(storageKey, JSON.stringify(createEditorContentReference(backupKey)));
+};
+
+const resolveStoredEditorContent = async (value: unknown): Promise<any | null> => {
+    if (isEditorContentReference(value)) {
+        return loadEditorContent(value.key);
+    }
+
+    return value;
 };
 
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
@@ -465,6 +508,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const editorSnapshotTimerRef = useRef<number | null>(null);
     const latestDraftMetaRef = useRef({ title, keywords, articleLanguage, goalContext });
+    const pendingAutoDraftRestoreRef = useRef(Boolean(readStoredContentReference(AUTO_DRAFT_KEY)));
     
     // Debounce editor state and text content before analysis to keep typing responsive.
     const debouncedEditorState = useDebounce(editorState, ANALYSIS_DEBOUNCE_MS);
@@ -484,7 +528,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const persistEditorSnapshotNow = useCallback((targetEditor: Editor) => {
         if (!targetEditor || targetEditor.isDestroyed) return;
         const { title, keywords, articleLanguage, goalContext } = latestDraftMetaRef.current;
-        writeStorageValue(AUTO_DRAFT_KEY, JSON.stringify(targetEditor.getJSON()));
+        persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), targetEditor.getJSON());
         writeStorageValue(AUTO_DRAFT_TITLE_KEY, title);
         writeStorageValue(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
         writeStorageValue(AUTO_DRAFT_LANGUAGE_KEY, articleLanguage);
@@ -534,12 +578,42 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             scheduleEditorSnapshot(editor);
         },
         onCreate: ({ editor }) => {
-            captureEditorSnapshot(editor, currentView === 'editor');
+            captureEditorSnapshot(editor, currentView === 'editor' && !pendingAutoDraftRestoreRef.current);
             const savedLang = getStoredLanguage(AUTO_DRAFT_LANGUAGE_KEY) || getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
             const targetLang = savedLang || preferredLanguage || 'ar';
             setArticleLanguage(targetLang);
         },
     });
+
+    useEffect(() => {
+        if (!editor || !pendingAutoDraftRestoreRef.current) return;
+
+        let cancelled = false;
+        const restoreAutoDraftBackup = async () => {
+            const reference = readStoredContentReference(AUTO_DRAFT_KEY);
+            if (!reference) {
+                pendingAutoDraftRestoreRef.current = false;
+                return;
+            }
+
+            try {
+                const backupContent = await loadEditorContent(reference.key);
+                if (cancelled || !backupContent || !isUsableEditorContent(backupContent)) return;
+                setEditorContentSafely(editor, backupContent);
+                pendingAutoDraftRestoreRef.current = false;
+                captureEditorSnapshot(editor);
+            } catch (error) {
+                console.error('Failed to restore large auto draft backup:', error);
+                pendingAutoDraftRestoreRef.current = false;
+            }
+        };
+
+        void restoreAutoDraftBackup();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [editor, captureEditorSnapshot]);
 
     useEffect(() => {
         if (!editor) return;
@@ -633,7 +707,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, []);
 
     // Manual save updates both per-user activity history and the manual restore draft.
-    const handleSaveDraft = useCallback(() => {
+    const handleSaveDraft = useCallback(async () => {
         if (!editor || !currentUser) return;
         const contentJSON = editor.getJSON();
         const currentText = editor.getText();
@@ -641,7 +715,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         clearEditorSnapshotTimer();
         setEditorState(contentJSON);
         setText(currentText);
-        writeStorageValue(AUTO_DRAFT_KEY, JSON.stringify(contentJSON));
+        persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(), contentJSON);
 
         let currentKey = articleKey;
         const newTitle = title.trim();
@@ -657,8 +731,20 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 finalTitleToSave = currentKey;
             }
         }
-        recordArticleSave(currentUser, finalTitleToSave, contentJSON, keywords, analysisResults, articleLanguage, goalContext);
-        writeStorageValue(MANUAL_DRAFT_KEY, JSON.stringify(contentJSON));
+
+        const articleContentKey = getArticleContentKey(currentUser, finalTitleToSave);
+        const manualDraftContentKey = getManualDraftContentKey();
+        let contentForActivity: any = createEditorContentReference(articleContentKey);
+
+        try {
+            await saveEditorContent(articleContentKey, contentJSON);
+        } catch (error) {
+            console.error('Failed to save article content backup:', error);
+            contentForActivity = contentJSON;
+        }
+
+        recordArticleSave(currentUser, finalTitleToSave, contentForActivity, keywords, analysisResults, articleLanguage, goalContext);
+        persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON);
         writeStorageValue(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
         writeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
         writeStorageValue(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
@@ -681,7 +767,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return () => clearInterval(autosaveInterval);
     }, [currentView]);
 
-    const handleRestoreDraft = useCallback(() => {
+    const handleRestoreDraft = useCallback(async () => {
         if (!editor) return;
         const content = readStorageValue(MANUAL_DRAFT_KEY);
         const titleStr = readStorageValue(MANUAL_DRAFT_TITLE_KEY);
@@ -690,11 +776,12 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (content) {
             try {
                 const parsedContent = JSON.parse(content);
-                if (isUsableEditorContent(parsedContent)) {
-                    const isOriginalContentValid = setEditorContentSafely(editor, parsedContent);
+                const resolvedContent = await resolveStoredEditorContent(parsedContent);
+                if (isUsableEditorContent(resolvedContent)) {
+                    const isOriginalContentValid = setEditorContentSafely(editor, resolvedContent);
                     captureEditorSnapshot(editor);
                     if (!isOriginalContentValid) {
-                        writeStorageValue(MANUAL_DRAFT_KEY, JSON.stringify(editor.getJSON()));
+                        persistEditorContentValue(MANUAL_DRAFT_KEY, getManualDraftContentKey(), editor.getJSON());
                     }
                 } else {
                     removeStorageValue(MANUAL_DRAFT_KEY);
@@ -722,8 +809,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setTimeout(() => setRestoreStatus('idle'), 2000);
     }, [editor, handleLanguageChange, captureEditorSnapshot]);
 
-    const handleNewArticle = useCallback((lang: 'ar' | 'en') => {
-        handleSaveDraft();
+    const handleNewArticle = useCallback(async (lang: 'ar' | 'en') => {
+        await handleSaveDraft();
         if (editor) {
             clearStoredCompetitorInputs();
             removeStorageValue(CONTENT_SUMMARY_STORAGE_KEY);
@@ -739,14 +826,15 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
     }, [editor, handleSaveDraft, setCurrentView, handleLanguageChange, captureEditorSnapshot]);
 
-    const handleLoadArticle = useCallback((titleStr: string, article: ArticleActivity) => {
+    const handleLoadArticle = useCallback(async (titleStr: string, article: ArticleActivity) => {
         if (editor && article) {
             const lang = article.articleLanguage || 'ar';
+            const resolvedContent = await resolveStoredEditorContent(article.content);
             setTitle(titleStr);
             setArticleKey(titleStr);
             setKeywords(article.keywords || INITIAL_KEYWORDS);
             setGoalContext(normalizeGoalContext(article.goalContext));
-            setEditorContentSafely(editor, article.content || INITIAL_CONTENT);
+            setEditorContentSafely(editor, resolvedContent || INITIAL_CONTENT);
             captureEditorSnapshot(editor);
             handleLanguageChange(lang);
             setCurrentView('editor');

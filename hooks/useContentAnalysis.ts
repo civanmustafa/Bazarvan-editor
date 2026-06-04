@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Keywords, FullAnalysis, GoalContext, StructureAnalysis } from '../types';
 import { createAnalysisNodesFromEditorState, runContentAnalysis, type ContentAnalysisInput } from '../utils/analysis/runContentAnalysis';
 import { countNodesByType } from '../utils/analysis/analysisUtils';
+import { translations } from '../components/translations';
 
 type ContentAnalysisWorkerResponse =
   | { requestId: number; result: FullAnalysis; error?: never }
@@ -62,7 +63,63 @@ const STRUCTURE_ANALYSIS_KEYS: (keyof StructureAnalysis)[] = [
   'headingLength',
 ];
 
-const createFallbackAnalysis = (textContent = ''): FullAnalysis => {
+const STRUCTURE_ANALYSIS_TITLE_KEYS: Record<keyof StructureAnalysis, keyof typeof translations.ar.structureAnalysis> = {
+  wordCount: 'عدد الكلمات',
+  firstTitle: 'H2 الأول',
+  secondTitle: 'H2 الثاني',
+  includesExcludes: 'H2 التضمينات',
+  preTravelH2: 'H2 قبل السفر',
+  pricingH2: 'H2 الأسعار',
+  whoIsItForH2: 'H2 المرشح',
+  summaryParagraph: 'الفقرة التلخيصية',
+  secondParagraph: 'الفقرة الثانية',
+  paragraphLength: 'طول الفقرات',
+  paragraphPair: 'زوج فقرات',
+  h2Structure: 'قسم H2',
+  h2Count: 'عدد H2',
+  h3Structure: 'قسم H3',
+  h4Structure: 'قسم H4',
+  betweenH2H3: 'بين H2-H3',
+  faqSection: 'الأسئلة والاجوبة',
+  answerParagraph: 'فقرة الأجوبة',
+  ambiguousHeadings: 'عناوين مبهمة',
+  ambiguousParagraphReferences: 'إحالات غامضة',
+  punctuation: 'علامات الترقيم',
+  paragraphEndings: 'نهايات الفقرات',
+  interrogativeH2: 'عناوين H2 استفهامية',
+  differentTransitionalWords: 'كلمات إنتقالية',
+  immediateDuplicateWords: 'تكرار مباشر',
+  duplicateWordsInParagraph: 'تكرار بالفقرة',
+  duplicateWordsInHeading: 'تكرار بالعنوان',
+  sentenceLength: 'طول الجمل',
+  stepsIntroduction: 'تمهيد خطوات',
+  automaticLists: 'التعداد الآلي',
+  ctaWords: 'كلمات الحث',
+  interactiveLanguage: 'لغة تفاعلية',
+  arabicOnly: 'الأحرف العربية',
+  lastH2IsConclusion: 'عنوان الخاتمة',
+  conclusionParagraph: 'فقرة الخاتمة',
+  conclusionWordCount: 'طول الخاتمة',
+  conclusionHasList: 'قائمة الخاتمة',
+  conclusionHasNumber: 'أرقام بالخاتمة',
+  sentenceBeginnings: 'بدايات الجمل',
+  warningWords: 'كلمات تحذيرية',
+  punctuationSpacing: 'فراغات الترقيم',
+  repeatedBigrams: 'ثنائيات مكررة',
+  slowWords: 'كلمات بطيئة',
+  wordConsistency: 'تناسق الكلمات',
+  commonEnglishTerms: 'مصطلحات إنجليزية شائعة',
+  wordsToDelete: 'كلمات للحذف',
+  keywordStuffing: 'حشو استهداف',
+  productUsageHeading: 'H2 الاستخدام',
+  productTechnicalSpecsHeading: 'H2 المواصفات',
+  productWarrantyContent: 'الضمان',
+  tablesCount: 'جداول',
+  headingLength: 'طول العناوين',
+};
+
+const createFallbackAnalysis = (textContent = '', uiLanguage: 'ar' | 'en' = 'ar'): FullAnalysis => {
+  const t = translations[uiLanguage] || translations.ar;
   const wordCount = textContent.trim().split(/\s+/).filter(Boolean).length;
   const keywordStats = {
     count: 0,
@@ -79,7 +136,11 @@ const createFallbackAnalysis = (textContent = ''): FullAnalysis => {
     progress: 0,
   });
   const structureAnalysis = Object.fromEntries(
-    STRUCTURE_ANALYSIS_KEYS.map(key => [key, fallbackCheck(key)])
+    STRUCTURE_ANALYSIS_KEYS.map(key => {
+      const titleKey = STRUCTURE_ANALYSIS_TITLE_KEYS[key];
+      const translatedTitle = t.structureAnalysis[titleKey]?.title || titleKey || key;
+      return [key, fallbackCheck(translatedTitle)];
+    })
   ) as StructureAnalysis;
 
   return {
@@ -126,7 +187,7 @@ const runContentAnalysisSafely = (input: ContentAnalysisInput): FullAnalysis => 
     return runContentAnalysis(input);
   } catch (error) {
     console.error('Content analysis failed:', error);
-    return createFallbackAnalysis(input.textContent);
+    return createFallbackAnalysis(input.textContent, input.uiLanguage);
   }
 };
 
