@@ -258,7 +258,11 @@ const EditorView: React.FC = () => {
                         style={{ 
                             top: displayTooltip.top, 
                             left: displayTooltip.left, 
-                            transform: 'translateY(calc(-100% - 16px))' 
+                            width: displayTooltip.fixedWidth ? `${displayTooltip.fixedWidth}px` : undefined,
+                            maxWidth: 'calc(100vw - 24px)',
+                            boxSizing: 'border-box',
+                            overflowWrap: 'anywhere',
+                            transform: 'translate(-50%, calc(-100% - 16px))' 
                         }}
                         dangerouslySetInnerHTML={{ __html: displayTooltip.content }}
                     >

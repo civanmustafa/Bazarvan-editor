@@ -4059,37 +4059,120 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
     }, [editor, buildComprehensivePrompt, apiKeys.gemini, engineeringPrompts]);
 
+    const createBulkFixReviewItemForGroup = useCallback(async (
+        group: BulkFixTargetGroup,
+        selectedRuleTitles: Set<string>,
+        index: number,
+    ): Promise<BulkFixReviewItem> => {
+        if (!editor || !analysisResults.structureAnalysis) {
+            throw new Error('Editor or analysis data is not ready.');
+        }
+
+        const targetText = getSafeRangeText(group.from, group.to);
+        if (targetText === null) {
+            throw new Error('Target range is no longer valid.');
+        }
+
+        const targetContext = getBulkFixTargetContext(editor, group, title);
+        const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
+        const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
+        const prompt = buildComprehensivePrompt(
+            formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules, targetContext, articleLevelRules),
+            targetContext.sectionHeading,
+            { includeArticleTitle: false, includeArticleToc: false }
+        );
+        const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        const parsed = extractJson(res);
+        const uniqueRules = getUniqueBulkFixRules(group.violations);
+        const targetRules = uniqueRules.filter(itemRule => selectedRuleTitles.has(itemRule.title));
+        const fallbackTargetRules = targetRules.length > 0 ? targetRules : uniqueRules.slice(0, 1);
+        const criteriaRuleEntries = [
+            ...fallbackTargetRules.map(itemRule => ({ rule: itemRule, source: 'target' as const })),
+            ...protectionRules
+                .filter(rule => !fallbackTargetRules.some(targetRule => targetRule.title === rule.title))
+                .map(rule => ({ rule, source: 'protection' as const })),
+            ...articleLevelRules
+                .filter(rule => !fallbackTargetRules.some(targetRule => targetRule.title === rule.title))
+                .filter(rule => !protectionRules.some(protectionRule => protectionRule.title === rule.title))
+                .map(rule => ({ rule, source: 'article' as const })),
+        ];
+        const criteria: BulkFixCriterionSummary[] = criteriaRuleEntries.map(({ rule, source }) => ({
+            title: rule.title,
+            current: rule.current,
+            required: rule.required,
+            status: rule.status,
+            source,
+            isListIntroContext: targetContext.isListIntro,
+            message: group.violations
+                .filter(violation => violation.rule.title === rule.title)
+                .map(violation => violation.item.message)
+                .filter(Boolean)
+                .join(' | '),
+        }));
+        let variants = normalizeBulkFixVariants(parsed, targetText, criteria, targetContext);
+        if (variants.length === 0) {
+            variants = normalizeBulkFixVariants(res, targetText, criteria, targetContext);
+        }
+        const primaryVariant = variants[0];
+        if (!primaryVariant) {
+            throw new Error('AI did not return usable suggestions.');
+        }
+
+        const ruleTitles = fallbackTargetRules.map(rule => rule.title);
+        return {
+            id: `bulk-fix-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
+            ruleTitle: ruleTitles.length > 1 ? `${ruleTitles.length} معايير: ${ruleTitles.join('، ')}` : ruleTitles[0],
+            ruleTitles,
+            criteria,
+            originalText: targetText,
+            fixedText: primaryVariant.fixedText,
+            variants,
+            from: group.from,
+            to: group.to,
+            message: group.violations
+                .map(violation => `${violation.rule.title}: ${violation.item.message}`)
+                .filter(Boolean)
+                .join(' | '),
+            status: 'pending',
+        };
+    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, apiKeys.gemini]);
+
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
-        if (!editor) return;
+        if (!editor || !analysisResults.structureAnalysis) return;
         setAiFixingInfo({ title: rule.title, from: item.from });
+        replaceBulkFixReviewItems([]);
+        setFixAllProgress({ current: 0, total: 1, running: true, failed: 0, errors: [] });
         try {
-            const originalText = editor.state.doc.textBetween(item.from, item.to, ' ');
-            const localContext = getAiLocalTextContext(editor, item.from, item.to, title);
-            const prompt = buildComprehensivePrompt(
-                formatBulkFixViolationPrompt(rule, item, originalText, localContext),
-                localContext.sectionHeading,
-                { includeArticleTitle: false, includeArticleToc: false }
-            );
-            const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
-            const parsed = extractJson(resultJson);
-            if (parsed?.suggestions) {
-                const suggestions = parsed.suggestions.filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0);
-                if (suggestions.length > 0) {
-                    const historyItemId = logToAiHistory({
-                        type: 'fix-violation',
-                        ruleTitle: rule.title,
-                        originalText,
-                        suggestions,
-                        from: item.from,
-                        to: item.to,
-                    });
-                    setSuggestion({ original: originalText, suggestions, action: 'replace-text', from: item.from, to: item.to, historyItemId });
-                }
+            const groups = groupBulkFixViolationsByTextUnit(editor, [{ rule, item }]);
+            const group = groups[0];
+            if (!group) {
+                throw new Error('Could not identify the violating text unit.');
             }
+
+            setFixAllProgress(p => ({ ...p, current: 1 }));
+            const proposedItem = await createBulkFixReviewItemForGroup(group, new Set([rule.title]), 0);
+            replaceBulkFixReviewItems([proposedItem]);
+            logToAiHistory({
+                type: 'fix-violation',
+                ruleTitle: proposedItem.ruleTitle,
+                originalText: proposedItem.originalText,
+                suggestions: (proposedItem.variants && proposedItem.variants.length > 0
+                    ? proposedItem.variants.map(variant => variant.fixedText)
+                    : [proposedItem.fixedText]
+                ).filter(Boolean),
+                from: proposedItem.from,
+                to: proposedItem.to,
+                bulkFixReviewItem: proposedItem,
+            });
+            setFixAllProgress(p => ({ ...p, running: false }));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown fix error';
+            console.error('Single fix proposal failed:', rule.title, error);
+            setFixAllProgress({ current: 1, total: 1, running: false, failed: 1, errors: [`${rule.title}: ${message}`] });
         } finally {
             setAiFixingInfo(null);
         }
-    }, [editor, buildComprehensivePrompt, apiKeys.gemini, logToAiHistory]);
+    }, [editor, analysisResults.structureAnalysis, createBulkFixReviewItemForGroup, logToAiHistory, replaceBulkFixReviewItems]);
 
     const getRelatedBulkFixRules = useCallback((rulesToFix: string[]): BulkFixRelatedRule[] => {
         if (!editor || !analysisResults.structureAnalysis || rulesToFix.length === 0) return [];

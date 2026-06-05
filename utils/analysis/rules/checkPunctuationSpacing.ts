@@ -10,10 +10,12 @@ const whitespaceRegex = /[\s\u00A0]/u;
 const extraSpacesRegex = / {2,}/g;
 const digitRegex = /\p{N}/u;
 const letterRegex = /\p{L}/u;
+const latinLetterRegex = /[A-Za-z]/u;
 
 const isWhitespace = (value: string | undefined): boolean => !!value && whitespaceRegex.test(value);
 const isDigit = (value: string | undefined): boolean => !!value && digitRegex.test(value);
 const isLetter = (value: string | undefined): boolean => !!value && letterRegex.test(value);
+const isLatinLetter = (value: string | undefined): boolean => !!value && latinLetterRegex.test(value);
 
 const findPreviousNonSpaceIndex = (text: string, startIndex: number): number => {
     for (let index = startIndex; index >= 0; index--) {
@@ -38,6 +40,13 @@ const isNumericHyphen = (text: string, index: number): boolean => {
 
 const hasSpacesAroundNumericHyphen = (text: string, index: number): boolean => {
     return isWhitespace(text[index - 1]) || isWhitespace(text[index + 1]);
+};
+
+const isLatinOrNumericHyphen = (text: string, index: number): boolean => {
+    if (text[index] !== '-') return false;
+    const previousIndex = findPreviousNonSpaceIndex(text, index - 1);
+    if (previousIndex === -1) return false;
+    return isDigit(text[previousIndex]) || isLatinLetter(text[previousIndex]);
 };
 
 const getSpaceRunBefore = (text: string, index: number): number => {
@@ -115,6 +124,10 @@ export const checkPunctuationSpacing = (context: AnalysisContext): CheckResult =
             const mark = text[index];
             const previousChar = text[index - 1];
             const nextChar = text[index + 1];
+
+            if (mark === '-' && isLatinOrNumericHyphen(text, index)) {
+                continue;
+            }
 
             if (mark === '-' && isNumericHyphen(text, index)) {
                 if (hasSpacesAroundNumericHyphen(text, index)) {
@@ -198,7 +211,7 @@ export const checkPunctuationSpacing = (context: AnalysisContext): CheckResult =
             }
             const end = index;
 
-            if (isLetter(text[start - 1])) {
+            if (isLetter(text[start - 1]) && !isLatinLetter(text[start - 1])) {
                 addViolation(
                     node.pos,
                     start,
@@ -207,7 +220,7 @@ export const checkPunctuationSpacing = (context: AnalysisContext): CheckResult =
                 );
             }
 
-            if (isLetter(text[end])) {
+            if (isLetter(text[end]) && !isLatinLetter(text[end])) {
                 addViolation(
                     node.pos,
                     start,

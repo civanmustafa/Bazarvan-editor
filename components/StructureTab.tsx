@@ -6,8 +6,11 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
+import { FIXABLE_RULES } from '../constants';
 import { isProductPageContext } from '../utils/goalContext';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
+
+type StructureViolationItem = NonNullable<CheckResult['violatingItems']>[number];
 
 // Internal component for the floating tooltip to ensure it's never clipped
 const FloatingTooltip: React.FC<{ content: string; targetRect: DOMRect | null }> = ({ content, targetRect }) => {
@@ -33,7 +36,16 @@ const FloatingTooltip: React.FC<{ content: string; targetRect: DOMRect | null }>
     );
 };
 
-const InfoModal: React.FC<{ item: CheckResult; onClose: () => void, t: typeof translations.ar.structureTab }> = ({ item, onClose, t }) => {
+const InfoModal: React.FC<{
+  item: CheckResult;
+  onClose: () => void;
+  t: typeof translations.ar.structureTab;
+  uiLanguage: 'ar' | 'en';
+  fixingInfo: { title: string; from: number } | null;
+  onFixViolation: (rule: CheckResult, violation: StructureViolationItem) => void;
+}> = ({ item, onClose, t, uiLanguage, fixingInfo, onFixViolation }) => {
+  const isArabic = uiLanguage === 'ar';
+  const canFixRule = FIXABLE_RULES.has(item.title);
   return (
     <div 
       className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm"
@@ -81,6 +93,44 @@ const InfoModal: React.FC<{ item: CheckResult; onClose: () => void, t: typeof tr
                   <span className="flex items-center gap-2"><span className="text-gray-400 font-normal">{document.documentElement.lang === 'ar' ? 'الحالي:' : 'Current:'}</span> <span className={item.status === 'fail' ? 'text-red-500' : 'text-emerald-500'}>{item.current}</span></span>
               </div>
           </div>
+
+          {item.violatingItems && item.violatingItems.length > 0 && (
+            <div>
+              <h4 className="text-[10px] font-black uppercase tracking-[0.1em] text-gray-400 mb-2">
+                {isArabic ? 'المخالفات' : 'Violations'}
+              </h4>
+              <div className="space-y-2">
+                {item.violatingItems.map((violation, index) => {
+                  const isFixingThis = fixingInfo?.title === item.title && fixingInfo?.from === violation.from;
+                  return (
+                    <div key={`${violation.from}-${violation.to}-${index}`} className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 flex-1 leading-relaxed text-gray-600 dark:text-gray-300">
+                          {violation.message}
+                        </p>
+                        {canFixRule && (
+                          <button
+                            type="button"
+                            onClick={() => onFixViolation(item, violation)}
+                            disabled={Boolean(fixingInfo)}
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#d4af37] px-2.5 py-1.5 text-[10px] font-black text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:bg-gray-300"
+                          >
+                            {isFixingThis ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+                            <span>{isArabic ? 'إصلاح هذه المخالفة' : 'Fix this'}</span>
+                          </button>
+                        )}
+                      </div>
+                      {violation.text && (
+                        <p className="mt-2 max-h-24 overflow-y-auto rounded-lg bg-white p-2 text-[11px] leading-relaxed text-gray-500 dark:bg-[#2A2A2A] dark:text-gray-400">
+                          {violation.text}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -685,6 +735,8 @@ const StructureTab: React.FC = () => {
         selectBulkFixReviewItemTarget,
         skipBulkFixReviewItem,
         clearBulkFixReviewItems,
+        handleAiFix,
+        aiFixingInfo,
     } = useAI();
     
     const { structureAnalysis: analysis, structureStats: stats } = analysisResults;
@@ -1038,7 +1090,16 @@ const StructureTab: React.FC = () => {
         </div>
       )}
       
-      {modalContent && <InfoModal item={modalContent} onClose={() => setModalContent(null)} t={tSt} />}
+      {modalContent && (
+        <InfoModal
+          item={modalContent}
+          onClose={() => setModalContent(null)}
+          t={tSt}
+          uiLanguage={uiLanguage}
+          fixingInfo={aiFixingInfo}
+          onFixViolation={handleAiFix}
+        />
+      )}
       {isFixModalOpen && (
         <FixAllModal
           groups={fixableViolationGroups}

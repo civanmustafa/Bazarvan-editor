@@ -21,6 +21,7 @@ type TooltipState = {
   content: string; 
   top: number; 
   left: number; 
+  fixedWidth?: number;
   violations: { title: string; from: number }[] 
 } | null;
 
@@ -54,6 +55,8 @@ const ARTICLE_WIDE_TOOLTIP_EXCLUDED_RULES = new Set<keyof StructureAnalysis>([
     'interrogativeH2',
     'automaticLists',
 ]);
+
+const PARAGRAPH_PAIR_TOOLTIP_WIDTH_PX = 380;
 
 const escapeTooltipHtml = (value: unknown): string => (
   String(value ?? '')
@@ -709,6 +712,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     content: tooltipContent,
                     top: event.clientY,
                     left: event.clientX,
+                    fixedWidth: violationsArray.some(v => Boolean(v.pairedText)) ? PARAGRAPH_PAIR_TOOLTIP_WIDTH_PX : undefined,
                     violations: violationsArray.map(v => ({ title: v.rule.title, from: v.from }))
                 });
             } else {
