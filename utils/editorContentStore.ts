@@ -1,8 +1,20 @@
-import type { DuplicateStats, GoalContext, Keywords, StructureStats } from '../types';
+import type { DuplicateStats, FullAnalysis, GoalContext, Keywords, StructureStats } from '../types';
 
+/*
+ * Article persistence map:
+ * - Article meta stays small in one localStorage item: title, keywords, goal context,
+ *   language, attachments, and summary counters.
+ * - Large editor content is stored as chunks under the article content key:
+ *   JSON for exact TipTap structure, HTML for formatted heading/table recovery,
+ *   and plain text as a last-resort fallback.
+ * - Full analysis data is also stored as chunks so structure criteria, keyword
+ *   checks, duplicate details, and violation/error items survive reloads without
+ *   bloating the meta item.
+ */
 const LOCAL_CONTENT_PREFIX = 'bazarvan-editor-content:';
 const LOCAL_HTML_PREFIX = 'bazarvan-editor-html:';
 const LOCAL_TEXT_PREFIX = 'bazarvan-editor-text:';
+const LOCAL_ANALYSIS_PREFIX = 'bazarvan-editor-analysis:';
 const LOCAL_ARTICLE_META_PREFIX = 'bazarvan-article-meta:';
 const LEGACY_CONTENT_PREFIX = 'bazarvan-editor-content-chunk:';
 const LEGACY_TEXT_PREFIX = 'bazarvan-editor-content-text-chunk:';
@@ -61,6 +73,7 @@ export type ArticleStorageSnapshot = {
     structureStats?: StructureStats;
     duplicateStats?: DuplicateStats;
   };
+  analysis?: FullAnalysis;
   attachments?: {
     competitors?: ArticleCompetitorSnapshot;
     contentSummary?: any;
@@ -68,8 +81,9 @@ export type ArticleStorageSnapshot = {
   savedAt: string;
 };
 
-type ArticleStorageMeta = Omit<ArticleStorageSnapshot, 'content' | 'contentHtml' | 'plainText'> & {
+type ArticleStorageMeta = Omit<ArticleStorageSnapshot, 'content' | 'contentHtml' | 'plainText' | 'analysis'> & {
   contentKey: string;
+  hasAnalysis?: boolean;
 };
 
 const canUseLocalStorage = (): boolean => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
@@ -318,6 +332,27 @@ const loadEditorHtml = (key: string): string | null => (
   loadStorageChunks(LOCAL_HTML_PREFIX, key)
 );
 
+const saveArticleAnalysisChunks = (key: string, analysis: FullAnalysis): number => {
+  try {
+    return saveStorageChunks(LOCAL_ANALYSIS_PREFIX, key, JSON.stringify(analysis));
+  } catch (error) {
+    console.error(`Failed to serialize article analysis "${key}":`, error);
+    return 0;
+  }
+};
+
+const loadArticleAnalysisChunks = (key: string): FullAnalysis | undefined => {
+  const serializedAnalysis = loadStorageChunks(LOCAL_ANALYSIS_PREFIX, key);
+  if (serializedAnalysis === null) return undefined;
+
+  try {
+    return JSON.parse(serializedAnalysis) as FullAnalysis;
+  } catch (error) {
+    console.error(`Failed to parse article analysis "${key}":`, error);
+    return undefined;
+  }
+};
+
 export const loadEditorTextChunks = (key: string): any | null => {
   const text = loadEditorPlainText(key);
   return text === null ? null : createEditorContentFromPlainText(text);
@@ -335,6 +370,10 @@ export const deleteEditorTextChunks = (key: string): void => {
 
 export const deleteEditorHtmlChunks = (key: string): void => {
   deleteStorageChunks(LOCAL_HTML_PREFIX, key);
+};
+
+export const deleteArticleAnalysisChunks = (key: string): void => {
+  deleteStorageChunks(LOCAL_ANALYSIS_PREFIX, key);
 };
 
 export const deleteArticleSnapshotChunks = (key: string): void => {
@@ -415,19 +454,22 @@ export const saveArticleSnapshotDurably = async (
 ): Promise<{ indexedDb: boolean; localChunkCount: number; reference: EditorContentReference }> => {
   const snapshotKey = getArticleSnapshotKey(snapshot.username, snapshot.title);
   const contentKey = getArticleContentKey(snapshot.username, snapshot.title);
+  // Save large fields first. The dashboard is updated only after these chunks exist.
   const contentChunkCount = saveEditorContentChunks(contentKey, snapshot.content);
   const htmlChunkCount = snapshot.contentHtml ? saveEditorHtmlChunks(contentKey, snapshot.contentHtml) : 0;
   const textChunkCount = saveEditorPlainTextChunks(contentKey, snapshot.plainText);
-  const { content: _content, contentHtml: _contentHtml, plainText: _plainText, ...metaSource } = snapshot;
+  const analysisChunkCount = snapshot.analysis ? saveArticleAnalysisChunks(contentKey, snapshot.analysis) : 0;
+  const { content: _content, contentHtml: _contentHtml, plainText: _plainText, analysis: _analysis, ...metaSource } = snapshot;
   const metaSaved = writeArticleMeta(snapshotKey, {
     ...metaSource,
     contentKey,
+    hasAnalysis: Boolean(snapshot.analysis && analysisChunkCount > 0),
   });
 
   return {
     indexedDb: false,
     localChunkCount: metaSaved && (contentChunkCount > 0 || htmlChunkCount > 0 || textChunkCount > 0)
-      ? Math.max(contentChunkCount, htmlChunkCount, textChunkCount)
+      ? Math.max(contentChunkCount, htmlChunkCount, textChunkCount, analysisChunkCount)
       : 0,
     reference: createArticleSnapshotReference(snapshot.username, snapshot.title),
   };
@@ -438,15 +480,19 @@ export const loadArticleSnapshot = async (username: string, title: string): Prom
   const meta = readArticleMeta(snapshotKey);
 
   if (meta) {
+    // Restore in the same priority used by the editor: HTML preserves H2/H3/H4,
+    // JSON preserves full TipTap structure, and plain text is the final fallback.
     const content = loadEditorContentChunks(meta.contentKey);
     const contentHtml = loadEditorHtml(meta.contentKey) || undefined;
     const plainText = loadEditorPlainText(meta.contentKey) || extractPlainTextFromEditorContent(content);
+    const analysis = meta.hasAnalysis ? loadArticleAnalysisChunks(meta.contentKey) : undefined;
     if (contentHtml || content || plainText.trim()) {
       return {
         ...meta,
         content: contentHtml || content || createEditorContentFromPlainText(plainText),
         contentHtml,
         plainText,
+        analysis,
       };
     }
   }
@@ -458,6 +504,7 @@ export const loadArticleSnapshot = async (username: string, title: string): Prom
   const content = loadEditorContentChunks(contentKey);
   const contentHtml = loadEditorHtml(contentKey) || undefined;
   const plainText = loadEditorPlainText(contentKey) || extractPlainTextFromEditorContent(content);
+  const analysis = loadArticleAnalysisChunks(contentKey);
   if (!contentHtml && !content && !plainText.trim()) return null;
 
   return {
@@ -468,6 +515,7 @@ export const loadArticleSnapshot = async (username: string, title: string): Prom
     content: contentHtml || content || createEditorContentFromPlainText(plainText),
     contentHtml,
     plainText,
+    analysis,
     keywords: {
       primary: '',
       secondaries: ['', '', '', ''],
@@ -486,6 +534,7 @@ export const deleteArticleSnapshot = async (username: string, title: string): Pr
   deleteEditorContentChunks(contentKey);
   deleteEditorHtmlChunks(contentKey);
   deleteEditorTextChunks(contentKey);
+  deleteArticleAnalysisChunks(contentKey);
   deleteArticleSnapshotChunks(snapshotKey);
 };
 

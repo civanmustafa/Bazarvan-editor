@@ -1096,6 +1096,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
 
         const manualDraftContentKey = getManualDraftContentKey();
+        // One article save writes every reviewable article field:
+        // editor content, formatted HTML, plain text fallback, keywords, goal context,
+        // competitor attachments, summary counters, and full analysis criteria/errors.
         const articleSnapshot: ArticleStorageSnapshot = {
             kind: 'articleSnapshot',
             version: 1,
@@ -1112,9 +1115,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 structureStats: analysisForSave.structureStats,
                 duplicateStats: analysisForSave.duplicateStats,
             },
+            analysis: analysisForSave,
             attachments: readCurrentArticleAttachments(),
             savedAt: new Date().toISOString(),
         };
+        // The dashboard is updated only after the local article snapshot accepts the chunks.
         const snapshotSaveResult = await saveArticleSnapshotDurably(articleSnapshot);
         if (snapshotSaveResult.localChunkCount <= 0) {
             console.error(`Skipped article activity save for "${finalTitleToSave}" because localStorage did not accept the article content.`);
@@ -1255,6 +1260,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             try {
                 const latestArticle = getFreshArticleActivity(currentUser, titleStr, article) || article;
+                // Loading prefers the article snapshot by title, then falls back to older dashboard/draft references.
+                // Snapshot attachments restore competitor URLs/HTML/text and content summary together with the editor.
                 const articleSnapshot = currentUser ? await loadArticleSnapshot(currentUser, titleStr) : null;
                 const snapshotContent = articleSnapshot?.content;
                 const snapshotPlainText = articleSnapshot?.plainText?.trim();

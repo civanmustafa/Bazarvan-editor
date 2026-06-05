@@ -334,6 +334,9 @@ export const recordTimeSpentOnArticle = (username: string, title: string, second
 export const recordArticleSave = (username: string, title: string, content: any, keywords: Keywords, analysis: FullAnalysis, articleLanguage: 'ar' | 'en', goalContext?: GoalContext) => {
   modifyUserData(username, user => {
     const article = findOrCreateArticle(user, title);
+    // Dashboard activity is an index: it stores the article reference, keywords,
+    // goal context, language, and compact counters. Full editor content,
+    // competitors, and criteria/error details live in the article snapshot store.
     article.saveCount += 1;
     article.lastSaved = getIstanbulTimestamp();
     article.content = content;
