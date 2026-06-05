@@ -2093,7 +2093,9 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 مهم جداً: لا تكرر أي نص جاهز للإضافة داخل analysisMarkdown وداخل patches في الوقت نفسه.
 اجعل analysisMarkdown للتشخيص المختصر، الحكم، الفجوة، سببها، ومكانها فقط.
 اجعل patches هي المكان الوحيد الذي يحتوي النصوص الجاهزة للنسخ أو الإدراج داخل المقال.
-إذا كان بند في التقرير يحتاج "الحل العملي الجاهز" أو "الإجابة المقترحة" أو "الجملة المقترحة"، فاكتب في analysisMarkdown سبب المشكلة ومكانها باختصار، ثم ضع علامة [[PATCH:patch_1]] مباشرة في موضع بطاقة التنفيذ.
+إذا كان بند في التقرير يحتاج "الحل العملي الجاهز" أو "الإجابة المقترحة" أو "الجملة المقترحة"، فاكتب في analysisMarkdown ملخصًا بسيطًا من جملة أو جملتين يوضح سبب الاقتراح ومكانه باختصار، ثم ضع علامة [[PATCH:patch_1]] مباشرة في موضع بطاقة التنفيذ.
+لا تعرض النص الجاهز داخل analysisMarkdown.
+لا تستخدم عناوين "الفكرة" أو "سبب أهميتها" أو "سبب أهمية إضافتها" عند وجود بطاقة تنفيذ؛ اكتب الملخص القصير فقط ثم علامة البطاقة.
 استخدم هذا الشكل حصراً:
 {
   "analysisMarkdown": "اكتب هنا التحليل العربي بنفس ترتيب الأمر المطلوب.",
@@ -2139,6 +2141,8 @@ const READY_COMMAND_PATCH_CARD_REQUIREMENT = `
 - أي صياغة بديلة أو نسخة محسنة أو نص جاهز للاستبدال أو الإضافة.
 
 لكل patch يجب الالتزام بما يلي:
+- إذا كان المطلوب تعديل أو تحسين أو توسيع أو إعادة صياغة أو تصحيح قسم أو فقرة أو جملة موجودة أصلًا في النص، استخدم operation بقيمة "replace_block" وليس أي عملية إضافة.
+- استخدم عمليات الإضافة فقط عندما يكون النص المقترح جديدًا وغير موجود في المقال أصلًا.
 - إذا كان المطلوب استبدال قسم أو فقرة موجودة، استخدم operation بقيمة "replace_block".
 - ضع في targetText النص الأصلي المراد استبداله حرفيًا من المقال، أو بداية الفقرة/القسم حرفيًا إذا كان النص طويلًا جدًا.
 - لا تضع في targetText تسمية للمكان مثل "الفقرة الافتتاحية" أو "المقدمة"؛ ضع نص الفقرة الفعلي الموجود في المحرر.
@@ -2146,8 +2150,18 @@ const READY_COMMAND_PATCH_CARD_REQUIREMENT = `
 - ضع في anchorText عنوان القسم أو الجملة المرجعية الأقرب داخل المقال.
 - ضع في placementLabel وصفًا قصيرًا واضحًا لمكان التنفيذ مثل: داخل قسم كذا، بعد فقرة كذا، قبل الخاتمة.
 - ضع في contentMarkdown النص الجديد الجاهز للتطبيق فقط دون شرح.
+- ضع في reason سببًا مختصرًا لإضافة النص أو استبداله.
+- ضع في title اسم البند أو عنوان القسم فقط؛ واجهة البطاقة ستعرض نوع العملية إضافة أو استبدال.
 - لا تكتفِ بكتابة الصياغة البديلة داخل analysisMarkdown.
 - لا تكتب عبارات مثل "الصياغة البديلة:" أو "النص المقترح:" داخل contentMarkdown.
+
+شكل بطاقة النص المقترح الذي يجب تغذيته بالحقول:
+- عنوان البطاقة في الواجهة سيكون نوع العملية إضافة/استبدال مع title.
+- reason هو سبب إضافة النص المقترح أو استبداله.
+- placementLabel هو مكان النص في المحرر نصيًا.
+- contentMarkdown هو النص المقترح الجاهز فقط.
+- قبل علامة [[PATCH:...]] داخل analysisMarkdown اكتب ملخصًا بسيطًا من جملة أو جملتين يوضح سبب الاقتراح.
+- لا تعرض "الفكرة" و"سبب أهميتها" كبنود منفصلة في التقرير؛ لا سيما في أوامر المقارنة والمحتوى الجاهز.
 
 بالنسبة لأمر الأقسام الأقل ملاءمة:
 - أنشئ patch مستقل لكل قسم غير مناسب أو أقل ملاءمة.
@@ -2175,10 +2189,16 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 [[PATCH:patch_2]]
 
 لكل patch استخدم marker مطابقاً للعلامة، مثل "patch_1". لا تكتب النص الجاهز داخل analysisMarkdown.
+قبل كل علامة [[PATCH:...]] اكتب ملخصًا بسيطًا من جملة أو جملتين يوضح سبب الاقتراح ومكانه بإيجاز.
+لا تستخدم عناوين "الفكرة" أو "سبب أهميتها" أو "سبب أهمية إضافتها" عند وجود بطاقة تنفيذ.
 
 إذا كان المطلوب تعديل فقرة موجودة، استخدم operation بقيمة "replace_block"، ويجب أن يكون targetText نسخة حرفية من الفقرة الحالية داخل المقال لا تلخيصاً لها. ضع النص الجديد فقط في contentMarkdown.
+إذا كان المطلوب تعديل أو تحسين أو توسيع أو إعادة صياغة أو تصحيح قسم أو فقرة أو جملة موجودة أصلًا في النص، فهذا استبدال وليس إضافة. استخدم replace_block دائمًا مع targetText للنص الحالي.
+استخدم عمليات الإضافة فقط عند إضافة نص جديد غير موجود أصلًا في المقال.
 لا تستخدم في targetText تسميات عامة مثل "الفقرة الافتتاحية" أو "المقدمة". عند تعديل فقرة افتتاحية قبل أول عنوان قسم، انسخ الفقرة نفسها حرفيًا في targetText واترك anchorText فارغًا إذا لم يوجد عنوان سابق لها.
-إذا لم تستطع نسخ الفقرة الحالية حرفياً، فلا تستخدم replace_block، واستخدم عملية إضافة مناسبة بدلاً من ذلك.
+عند استهداف الفقرة الافتتاحية أو الفقرة الثانية، اعلم أن الفقرة الافتتاحية هي أول فقرة نصية في المحرر، والفقرة الثانية هي ثاني فقرة نصية في المحرر. اكتب ذلك بوضوح في placementLabel مثل: "الفقرة الافتتاحية - أول فقرة في المحرر" أو "الفقرة الثانية - ثاني فقرة في المحرر".
+إذا لم تستطع نسخ targetText حرفيًا للفقرة الافتتاحية أو الثانية، اترك targetText فارغًا واستخدم placementLabel الواضح أعلاه حتى يتمكن المحرر من تحديد الموضع.
+في غير حالتي الفقرة الافتتاحية والفقرة الثانية، إذا لم تستطع نسخ الفقرة الحالية حرفياً، فلا تستخدم replace_block، واستخدم عملية إضافة مناسبة بدلاً من ذلك.
 إذا كان المطلوب إضافة فقرة أو سؤال أو جملة جديدة، استخدم عمليات الإضافة المناسبة مثل insert_after_heading أو insert_before_faq أو insert_before_conclusion أو append_to_section أو append_to_article.
 مهم جداً: يجب أن يكون contentMarkdown محتوى نهائياً جاهزاً للإدراج في المقال فقط، دون أي تسميات تفسيرية مثل "السؤال:" أو "الإجابة:" أو "النص المقترح:" أو "الحل العملي الجاهز:" أو "مكان الإضافة:".
 إذا كان المحتوى سؤالاً وجواباً، فاكتب السؤال كسطر عنوان Markdown مناسب ثم الجواب مباشرة تحته، دون كتابة كلمتي "السؤال" أو "الإجابة".
@@ -2198,7 +2218,8 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 
 عند تحويل فقرة أو مقطع موجود إلى جدول أو قائمة نقطية أو قائمة مرقمة أو قائمة تحقق أو خطوات، استخدم دائماً operation بقيمة "replace_block"، واجعل targetText نسخة حرفية من النص الحالي، واجعل contentMarkdown يحتوي النص البديل فقط. عند إنشاء جدول Markdown يجب أن يحتوي contentMarkdown على صفوف جدول كاملة، ويفضل إضافة صف الفاصل، ولا تكتف بصف عنوان واحد يبدأ وينتهي بعلامة | دون بيانات.
 
-لا تستخدم عبارة "قسم التعديلات القابلة للتطبيق". استخدم فقط علامة [[PATCH:...]] في موضع التنفيذ داخل التقرير.`;
+لا تستخدم عبارة "قسم التعديلات القابلة للتطبيق". استخدم فقط علامة [[PATCH:...]] في موضع التنفيذ داخل التقرير.
+يجب أن تظهر البطاقات بهذا المعنى: عنوان العملية مع اسم البند، ثم سبب الاقتراح من reason، ثم موضع التنفيذ النصي من placementLabel، ثم النص المقترح من contentMarkdown، ثم أزرار الموضع والنسخ والإضافة أو الاستبدال.`;
 
 const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPatchInstructions?: boolean }) => (
     options?.skipPatchInstructions
@@ -2308,6 +2329,96 @@ const normalizePatchOperation = (value: unknown): AiContentPatchOperation => {
     return ALLOWED_PATCH_OPERATIONS.has(operation) ? operation : 'append_to_article';
 };
 
+const PATCH_REPLACEMENT_INTENT_KEYWORDS = [
+    'استبدال',
+    'بدل',
+    'تعديل',
+    'تحسين',
+    'توسيع',
+    'اعادة صياغة',
+    'إعادة صياغة',
+    'صياغة بديلة',
+    'تصحيح',
+    'تخفيف',
+    'تحديث',
+    'تنقيح',
+    'معالجة',
+    'تحويل',
+    'نسخة محسنة',
+    'نسخة بديلة',
+    'replace',
+    'rewrite',
+    'update',
+    'revise',
+    'improve',
+    'expand',
+    'correct',
+    'convert',
+];
+
+const PATCH_ADDITION_INTENT_KEYWORDS = [
+    'اضافة',
+    'إضافة',
+    'اضف',
+    'أضف',
+    'فقرة جديدة',
+    'سؤال جديد',
+    'غير موجودة',
+    'ناقصة',
+    'insert',
+    'add',
+    'append',
+    'new paragraph',
+];
+
+const getNormalizedWordCount = (value: string): number => normalizeAnchorText(value).split(' ').filter(Boolean).length;
+
+const hasPatchIntentKeyword = (value: string, keywords: string[]): boolean => {
+    const normalizedValue = normalizeAnchorText(value);
+    if (!normalizedValue) return false;
+
+    return keywords.some(keyword => {
+        const normalizedKeyword = normalizeAnchorText(keyword);
+        return normalizedKeyword && normalizedValue.includes(normalizedKeyword);
+    });
+};
+
+const inferPatchOperation = (
+    requestedOperation: AiContentPatchOperation,
+    record: Record<string, unknown>,
+    targetText: string,
+): AiContentPatchOperation => {
+    if (requestedOperation === 'replace_block' || requestedOperation === 'replace_text') return requestedOperation;
+    const hasExplicitReplacementTarget = Boolean(
+        asTrimmedString(record.targetText) ||
+        asTrimmedString(record.originalText) ||
+        asTrimmedString(record.currentText) ||
+        asTrimmedString(record.original) ||
+        asTrimmedString(record.replaceTarget)
+    );
+    const intentText = [
+        asTrimmedString(record.title),
+        asTrimmedString(record.reason),
+        asTrimmedString(record.placementLabel || record.placement || record.place),
+        asTrimmedString(record.anchorText || record.anchor || record.target),
+        asTrimmedString(record.operation || record.type),
+    ].join(' ');
+    const additionIntent = hasPatchIntentKeyword(intentText, PATCH_ADDITION_INTENT_KEYWORDS);
+    const replacementIntent = hasPatchIntentKeyword(intentText, PATCH_REPLACEMENT_INTENT_KEYWORDS);
+    const targetLooksLikeExistingText = getNormalizedWordCount(targetText) >= 6 || isOrdinalParagraphLocationText(targetText);
+    const intentTargetsOrdinalParagraph = hasOrdinalParagraphReference(intentText);
+
+    if (!targetText) {
+        return replacementIntent && intentTargetsOrdinalParagraph && !additionIntent ? 'replace_block' : requestedOperation;
+    }
+
+    if (hasExplicitReplacementTarget && targetLooksLikeExistingText && (replacementIntent || !additionIntent)) {
+        return 'replace_block';
+    }
+
+    return requestedOperation;
+};
+
 const normalizeConfidence = (value: unknown): number | undefined => {
     const confidence = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(confidence)) return undefined;
@@ -2324,14 +2435,17 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
             const contentMarkdown = cleanAiPatchContentMarkdown(asTrimmedString(record.contentMarkdown || record.content || record.text));
             if (!contentMarkdown) return null;
 
+            const operation = normalizePatchOperation(record.operation || record.type);
+            const targetText = asTrimmedString(record.targetText || record.originalText || record.currentText || record.original || record.replaceTarget);
+
             return {
                 id: `${provider}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
                 provider,
-                operation: normalizePatchOperation(record.operation || record.type),
+                operation: inferPatchOperation(operation, record, targetText),
                 title: asTrimmedString(record.title) || `تعديل ${index + 1}`,
                 marker: asTrimmedString(record.marker) || `patch_${index + 1}`,
                 anchorText: asTrimmedString(record.anchorText || record.anchor || record.target),
-                targetText: asTrimmedString(record.targetText || record.originalText || record.currentText || record.original || record.replaceTarget),
+                targetText,
                 placementLabel: asTrimmedString(record.placementLabel || record.placement || record.place),
                 contentMarkdown,
                 reason: asTrimmedString(record.reason),
@@ -2795,41 +2909,113 @@ const isConfidentReplacementMatch = (match: TextBlockMatch | null, targetText: s
     return match.score >= 0.9;
 };
 
-const INTRODUCTION_TARGET_KEYWORDS = [
-    'الفقرة الافتتاحية',
-    'فقرة افتتاحية',
-    'المقدمة',
-    'مقدمة المقال',
-    'افتتاحية المقال',
-    'opening paragraph',
-    'introduction',
-    'intro',
-];
+const ORDINAL_PARAGRAPH_TARGETS = [
+    {
+        index: 0,
+        keywords: [
+            'الفقرة الافتتاحية',
+            'فقرة افتتاحية',
+            'الفقرة الاولى',
+            'الفقرة الأولى',
+            'اول فقرة',
+            'أول فقرة',
+            'المقدمة',
+            'مقدمة المقال',
+            'افتتاحية المقال',
+            'opening paragraph',
+            'first paragraph',
+            'introduction',
+            'intro',
+        ],
+    },
+    {
+        index: 1,
+        keywords: [
+            'الفقرة الثانية',
+            'فقرة ثانية',
+            'ثاني فقرة',
+            'الفقرة رقم 2',
+            'فقرة رقم 2',
+            'فقرة 2',
+            'ثانية المقال',
+            'second paragraph',
+            'paragraph 2',
+            '2nd paragraph',
+        ],
+    },
+] as const;
 
-const findIntroductionReplacementTarget = (editor: any, patch: AiContentPatch): TextBlockMatch | null => {
+const getPatchLocationHint = (patch: AiContentPatch): string => normalizeAnchorText([
+    patch.title,
+    patch.reason,
+    patch.placementLabel,
+    patch.anchorText,
+    patch.targetText,
+].filter(Boolean).join(' '));
+
+const findOrdinalParagraphIndex = (patch: AiContentPatch): number | null => {
+    const locationHint = getPatchLocationHint(patch);
+    if (!locationHint) return null;
+
+    const target = ORDINAL_PARAGRAPH_TARGETS.find(item => item.keywords.some(keyword => {
+        const normalizedKeyword = normalizeAnchorText(keyword);
+        return normalizedKeyword && locationHint.includes(normalizedKeyword);
+    }));
+
+    return typeof target?.index === 'number' ? target.index : null;
+};
+
+const hasOrdinalParagraphReference = (value?: string): boolean => {
+    const normalizedValue = normalizeAnchorText(value || '');
+    if (!normalizedValue) return false;
+
+    return ORDINAL_PARAGRAPH_TARGETS.some(item => item.keywords.some(keyword => {
+        const normalizedKeyword = normalizeAnchorText(keyword);
+        return normalizedKeyword && normalizedValue.includes(normalizedKeyword);
+    }));
+};
+
+const isOrdinalParagraphLocationText = (value?: string): boolean => {
+    const normalizedValue = normalizeAnchorText(value || '');
+    if (!normalizedValue) return false;
+    if (normalizedValue.split(' ').filter(Boolean).length > 8) return false;
+
+    return hasOrdinalParagraphReference(value);
+};
+
+const findTopLevelParagraphByIndex = (editor: any, paragraphIndex: number): TextBlockMatch | null => {
+    if (!editor?.state?.doc || paragraphIndex < 0) return null;
+    let currentIndex = 0;
+    let match: TextBlockMatch | null = null;
+
+    editor.state.doc.forEach((node: any, offset: number) => {
+        if (match || node.type.name !== 'paragraph' || !node.textContent?.trim()) return;
+        if (currentIndex === paragraphIndex) {
+            match = {
+                from: offset,
+                to: offset + node.nodeSize,
+                score: 3,
+                text: node.textContent,
+            };
+            return;
+        }
+        currentIndex += 1;
+    });
+
+    return match;
+};
+
+const findOrdinalParagraphTarget = (editor: any, patch: AiContentPatch): TextBlockMatch | null => {
     const locationHint = normalizeAnchorText([
         patch.title,
+        patch.reason,
         patch.placementLabel,
         patch.anchorText,
         patch.targetText,
     ].filter(Boolean).join(' '));
-    const refersToIntroduction = INTRODUCTION_TARGET_KEYWORDS.some(keyword => (
-        locationHint.includes(normalizeAnchorText(keyword))
-    ));
-    if (!refersToIntroduction || !editor?.state?.doc) return null;
-
-    let firstParagraph: TextBlockMatch | null = null;
-    editor.state.doc.forEach((node: any, offset: number) => {
-        if (firstParagraph || node.type.name !== 'paragraph' || !node.textContent?.trim()) return;
-        firstParagraph = {
-            from: offset,
-            to: offset + node.nodeSize,
-            score: 1,
-            text: node.textContent,
-        };
-    });
-
-    return firstParagraph;
+    if (!locationHint) return null;
+    const paragraphIndex = findOrdinalParagraphIndex(patch);
+    return typeof paragraphIndex === 'number' ? findTopLevelParagraphByIndex(editor, paragraphIndex) : null;
 };
 
 const normalizeBulkFixRangeMatchText = (value: string): string => value.replace(/\s+/g, ' ').trim();
@@ -2966,6 +3152,16 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
     if (patch.operation === 'replace_block' || patch.operation === 'replace_text') {
         const targetText = patch.targetText?.trim() ? patch.targetText : patch.anchorText || '';
         const replaceCandidates = [targetText];
+        const ordinalParagraphTarget = findOrdinalParagraphTarget(editor, patch);
+        if (ordinalParagraphTarget && (!patch.targetText?.trim() || isOrdinalParagraphLocationText(patch.targetText))) {
+            return {
+                from: ordinalParagraphTarget.from,
+                to: ordinalParagraphTarget.to,
+                selectFrom: ordinalParagraphTarget.from,
+                selectTo: ordinalParagraphTarget.to,
+                mode: 'replace',
+            };
+        }
         const anchorHeading = patch.anchorText?.trim() ? findHeadingMatch(editor, patch.anchorText) : null;
 
         if (anchorHeading && patch.targetText?.trim()) {
@@ -2984,9 +3180,14 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
             return { from: match.from, to: match.to, selectFrom: match.from, selectTo: match.to, mode: 'replace' };
         }
 
-        const introductionTarget = findIntroductionReplacementTarget(editor, patch);
-        if (introductionTarget) {
-            return { from: introductionTarget.from, to: introductionTarget.to, selectFrom: introductionTarget.from, selectTo: introductionTarget.to, mode: 'replace' };
+        if (ordinalParagraphTarget) {
+            return {
+                from: ordinalParagraphTarget.from,
+                to: ordinalParagraphTarget.to,
+                selectFrom: ordinalParagraphTarget.from,
+                selectTo: ordinalParagraphTarget.to,
+                mode: 'replace',
+            };
         }
 
         return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
@@ -3014,10 +3215,11 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
             : { from: docEnd, to: docEnd, selectFrom: docEnd, selectTo: docEnd, mode: 'insert' };
     }
 
-    const heading = findHeadingMatch(editor, patch.anchorText || '');
+    const ordinalParagraphTarget = findOrdinalParagraphTarget(editor, patch);
+    const heading = ordinalParagraphTarget ? null : findHeadingMatch(editor, patch.anchorText || '');
     const anchorBlock = heading
         ? null
-        : findPatchLocationBlockMatch(editor, patch) || findIntroductionReplacementTarget(editor, patch);
+        : findPatchLocationBlockMatch(editor, patch) || ordinalParagraphTarget;
 
     if (!heading && !anchorBlock) {
         return { error: `لم يتم العثور على الموضع المرجعي: ${patch.anchorText || patch.placementLabel || patch.title}` };

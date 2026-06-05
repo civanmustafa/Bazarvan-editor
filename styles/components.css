@@ -34,6 +34,40 @@
   margin: 0.25rem 0;
 }
 
+.ai-output table {
+  width: 100%;
+  margin: 0.75rem 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.ai-output th,
+.ai-output td {
+  padding: 0.38rem 0.45rem;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ai-output th {
+  font-weight: 700;
+  background: rgba(212, 175, 55, 0.08);
+}
+
+.ai-output tr {
+  border-bottom: 1px solid rgba(107, 114, 128, 0.22);
+}
+
+.dark .ai-output th {
+  background: rgba(212, 175, 55, 0.12);
+}
+
+.dark .ai-output tr {
+  border-bottom-color: rgba(156, 163, 175, 0.22);
+}
+
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;

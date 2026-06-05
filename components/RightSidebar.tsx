@@ -1146,20 +1146,28 @@ ${readyCommandCompetitorBlocks}`;
     ) => {
         const actionLabel = getPatchActionLabel(patch.operation);
         const isCopied = copiedPatchId === patch.id;
+        const cleanPatchTitle = (patch.title || 'نص مقترح')
+            .replace(/^(?:إضافة|اضافة|استبدال)\s*[-:–]\s*/i, '')
+            .trim() || 'نص مقترح';
+        const patchLocationText = patch.placementLabel || patch.anchorText || patch.targetText || 'لم يتم تحديد موضع نصي دقيق.';
+        const patchReason = patch.reason || 'سبب الاقتراح غير محدد.';
+        const reasonLabel = actionLabel === 'استبدال' ? 'سبب الاستبدال' : 'سبب إضافة النص المقترح';
 
         return (
             <div key={patch.id} className="my-3 border border-[#d4af37]/25 dark:border-[#d4af37]/30 rounded-md bg-white/80 dark:bg-[#1F1F1F]/80 p-2 not-prose">
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                            <span className="rounded bg-[#d4af37]/15 px-1.5 py-0.5 text-[11px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">{actionLabel}</span>
-                            <div className="text-xs font-bold text-[#333333] dark:text-gray-100 line-clamp-2">{patch.title}</div>
+                        <div className="text-xs font-bold text-[#333333] dark:text-gray-100">
+                            {actionLabel} - {cleanPatchTitle}
                         </div>
-                        {(patch.placementLabel || patch.anchorText || patch.targetText) && (
-                            <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
-                                {patch.placementLabel || patch.anchorText || patch.targetText}
-                            </div>
-                        )}
+                        <div className="mt-1.5 text-[11px] leading-relaxed text-gray-600 dark:text-gray-300">
+                            <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{reasonLabel}: </span>
+                            {patchReason}
+                        </div>
+                        <div className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400 break-words">
+                            <span className="font-semibold">{'مكان النص في المحرر'}: </span>
+                            {patchLocationText}
+                        </div>
                     </div>
                     {patch.status === 'applied' && (
                         <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
@@ -1175,11 +1183,10 @@ ${readyCommandCompetitorBlocks}`;
                     )}
                 </div>
 
-                <div className="mt-2 text-xs text-gray-700 dark:text-gray-300 ai-output" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }} />
-
-                {patch.reason && (
-                    <div className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2">{patch.reason}</div>
-                )}
+                <div className="mt-2 rounded-md border border-gray-100 bg-gray-50/80 p-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]/80">
+                    <div className="mb-1 text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">النص المقترح</div>
+                    <div className="text-xs text-gray-700 dark:text-gray-300 ai-output" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }} />
+                </div>
 
                 {patch.applyError && (
                     <div className="mt-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 rounded px-2 py-1">{patch.applyError}</div>

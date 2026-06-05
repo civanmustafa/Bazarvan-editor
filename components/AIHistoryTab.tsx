@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useAI } from '../contexts/AIContext';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
-import { BookCopy, Trash2, Check, Copy, MapPin, ChevronDown } from 'lucide-react';
+import { BookCopy, Trash2, Check, Copy, MapPin, ChevronDown, AlertTriangle } from 'lucide-react';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
 import type { AiContentPatch, AIHistoryItem, BulkFixReviewVariant } from '../types';
 
@@ -34,11 +34,12 @@ const getCriteriaStatusCounts = (checks?: BulkFixReviewVariant['criteriaChecks']
 );
 
 const AIHistoryTab: React.FC = () => {
-    const { aiHistory, applySuggestionFromHistory, removeFromAiHistory } = useAI();
+    const { aiHistory, applySuggestionFromHistory, removeFromAiHistory, selectAiContentPatchTarget, applyAiContentPatch } = useAI();
     const { t, uiLanguage } = useUser();
     const { editor } = useEditor();
     const isArabic = uiLanguage === 'ar';
     const [expandedCriteriaKeys, setExpandedCriteriaKeys] = useState<Record<string, boolean>>({});
+    const [manualPatchUiState, setManualPatchUiState] = useState<Record<string, { status?: 'applied' | 'failed'; error?: string }>>({});
     const toggleCriteria = (key: string) => {
         setExpandedCriteriaKeys(prev => ({ ...prev, [key]: !prev[key] }));
     };
@@ -85,33 +86,112 @@ const AIHistoryTab: React.FC = () => {
         if (provider === 'chatgpt') return 'ChatGPT';
         return '';
     };
-    const renderAnalysisPatch = (patch: AiContentPatch) => (
+    const getPatchActionLabel = (operation: string) => (
+        operation === 'replace_block' || operation === 'replace_text' ? 'استبدال' : 'إضافة'
+    );
+    const getPatchTitle = (patch: AiContentPatch) => (
+        (patch.title || 'نص مقترح')
+            .replace(/^(?:إضافة|اضافة|استبدال)\s*[-:–]\s*/i, '')
+            .trim() || 'نص مقترح'
+    );
+    const handleSelectManualPatch = (patch: AiContentPatch) => {
+        const result = selectAiContentPatchTarget(patch);
+        if (result.error) {
+            setManualPatchUiState(prev => ({ ...prev, [patch.id]: { status: 'failed', error: result.error } }));
+        }
+    };
+    const handleApplyManualPatch = (patch: AiContentPatch) => {
+        const result = applyAiContentPatch({ ...patch, status: 'pending' });
+        setManualPatchUiState(prev => ({
+            ...prev,
+            [patch.id]: {
+                status: result.status,
+                error: result.status === 'failed' ? result.error : undefined,
+            },
+        }));
+    };
+    const renderAnalysisPatch = (patch: AiContentPatch) => {
+        const actionLabel = getPatchActionLabel(patch.operation);
+        const localState = manualPatchUiState[patch.id];
+        const status = localState?.status || patch.status;
+        const applyError = localState?.error || patch.applyError;
+        const patchLocationText = patch.placementLabel || patch.anchorText || patch.targetText || (isArabic ? 'لم يتم تحديد موضع نصي دقيق.' : 'No precise text location was provided.');
+        const patchReason = patch.reason || (isArabic ? 'سبب الاقتراح غير محدد.' : 'No reason was provided.');
+        const reasonLabel = actionLabel === 'استبدال'
+            ? (isArabic ? 'سبب الاستبدال' : 'Replacement reason')
+            : (isArabic ? 'سبب إضافة النص المقترح' : 'Reason for adding');
+
+        return (
         <div key={patch.id} className="my-3 rounded-lg border border-[#d4af37]/25 bg-white/80 p-2 dark:border-[#d4af37]/30 dark:bg-[#1F1F1F]/80">
             <div className="mb-2 flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                    <div className="text-xs font-bold text-[#333333] line-clamp-2 dark:text-gray-100">{patch.title}</div>
-                    {(patch.placementLabel || patch.anchorText || patch.targetText) && (
-                        <div className="mt-1 text-[11px] text-gray-500 line-clamp-2 dark:text-gray-400">
-                            {patch.placementLabel || patch.anchorText || patch.targetText}
-                        </div>
-                    )}
+                    <div className="text-xs font-bold text-[#333333] dark:text-gray-100">
+                        {actionLabel} - {getPatchTitle(patch)}
+                    </div>
+                    <div className="mt-1.5 text-[11px] leading-relaxed text-gray-600 dark:text-gray-300">
+                        <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{reasonLabel}: </span>
+                        {patchReason}
+                    </div>
+                    <div className="mt-1 text-[10px] leading-relaxed text-gray-500 break-words dark:text-gray-400">
+                        <span className="font-semibold">{isArabic ? 'مكان النص في المحرر' : 'Editor location'}: </span>
+                        {patchLocationText}
+                    </div>
                 </div>
+                {status === 'applied' && (
+                    <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                        <Check size={13} />
+                        {isArabic ? 'تم' : 'Done'}
+                    </span>
+                )}
+                {status === 'failed' && (
+                    <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-red-600 dark:text-red-400">
+                        <AlertTriangle size={13} />
+                        {isArabic ? 'تعذر' : 'Failed'}
+                    </span>
+                )}
+            </div>
+            <div className="rounded-md border border-gray-100 bg-gray-50 p-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                <div className="mb-1 text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">
+                    {isArabic ? 'النص المقترح' : 'Suggested text'}
+                </div>
+                <div
+                    className="ai-output text-[11px] leading-relaxed text-gray-800 dark:text-gray-100"
+                    dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }}
+                />
+            </div>
+            {applyError && (
+                <div className="mt-1.5 rounded bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 dark:bg-red-900/20 dark:text-red-300">{applyError}</div>
+            )}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                    type="button"
+                    onClick={() => handleSelectManualPatch(patch)}
+                    className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                >
+                    <MapPin size={13} />
+                    {isArabic ? 'الموضع' : 'Locate'}
+                </button>
                 <button
                     type="button"
                     onClick={() => copyText(patch.contentMarkdown)}
-                    className={iconButtonClass}
-                    title={isArabic ? 'نسخ النص الجاهز' : 'Copy ready text'}
-                    aria-label={isArabic ? 'نسخ النص الجاهز' : 'Copy ready text'}
+                    className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
                 >
                     <Copy size={13} />
+                    {isArabic ? 'نسخ' : 'Copy'}
+                </button>
+                <button
+                    type="button"
+                    onClick={() => handleApplyManualPatch(patch)}
+                    disabled={status === 'applied'}
+                    className="flex items-center gap-1 rounded-md bg-[#d4af37] px-2 py-1 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    <Check size={13} />
+                    {actionLabel}
                 </button>
             </div>
-            <div
-                className="ai-output rounded-md border border-gray-100 bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-800 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-100"
-                dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }}
-            />
         </div>
-    );
+        );
+    };
     const renderManualAnalysisResult = (item: AIHistoryItem) => {
         const result = item.analysisResult || item.suggestions.join('\n\n');
         const patches = item.analysisPatches || [];
