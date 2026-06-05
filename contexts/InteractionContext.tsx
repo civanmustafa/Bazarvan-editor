@@ -677,7 +677,6 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
                         const rawCurrentText = v.message || rule.current;
                         const currentText = escapeTooltipHtml(String(rawCurrentText).replace(/<[^>]*>/g, '').substring(0, 140));
-                        const requiredText = escapeTooltipHtml(String(rule.required).replace(/<[^>]*>/g, '').substring(0, 90));
                         const currentLabel = v.message
                             ? (uiLanguage === 'ar' ? 'المشكلة' : 'Issue')
                             : t.leftSidebar.current;
@@ -686,16 +685,15 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                             ? `<span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${uiLanguage === 'ar' ? 'تلميح' : 'Tip'}:</strong> ${escapeTooltipHtml(ruleNote)}</span>`
                             : '';
                         const pairedParagraphHtml = v.pairedText
-                            ? `<div style="margin-top: 4px; display: grid; gap: 3px; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};">
+                            ? `<div style="margin-top: 4px; display: grid; gap: 3px; width: 100%; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};">
                                     <strong>${uiLanguage === 'ar' ? 'الفقرة الزوجية للمقارنة اليدوية' : 'Paired paragraph for manual comparison'}:</strong>
-                                    <span style="display: block; max-width: 420px; max-height: 120px; overflow-y: auto; padding: 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.08); color: inherit; line-height: 1.6;">${formatTooltipTextBlock(v.pairedText)}</span>
+                                    <span style="display: block; width: 100%; box-sizing: border-box; max-height: 120px; overflow-y: auto; padding: 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.08); color: inherit; line-height: 1.6;">${formatTooltipTextBlock(v.pairedText)}</span>
                                 </div>`
                             : '';
                         
                         const detailsHtml = `
                             <div style="display: grid; gap: 4px; font-size: 11px; color: #6b7280;" class="dark:text-gray-400 w-full">
                                 <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${escapeTooltipHtml(currentLabel)}:</strong> ${currentText}</span>
-                                <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${escapeTooltipHtml(t.leftSidebar.required)}:</strong> ${requiredText}</span>
                                 ${noteHtml}
                                 ${pairedParagraphHtml}
                             </div>`;
@@ -760,7 +758,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             editorDom.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('click', handleClick);
         };
-    }, [editor, highlightedItem, isTooltipAlwaysOn, pinnedTooltip, tooltip, aiFixingInfo, t.fix, allViolations, uiLanguage, t.leftSidebar.required, t.leftSidebar.current, handleAiFix]);
+    }, [editor, highlightedItem, isTooltipAlwaysOn, pinnedTooltip, tooltip, aiFixingInfo, t.fix, allViolations, uiLanguage, t.leftSidebar.current, handleAiFix]);
     
 
     const value = {

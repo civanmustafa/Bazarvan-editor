@@ -2091,11 +2091,11 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 أرجع الرد بصيغة JSON فقط دون أي نص خارج JSON. يجب أن يكون محتوى التقرير العربي داخل analysisMarkdown، ويجب أن تكون أي إضافات جاهزة للتطبيق داخل patches.
 هذه التعليمات لها أولوية على أي طلب سابق يطلب كتابة النصوص الجاهزة داخل التقرير نفسه.
 مهم جداً: لا تكرر أي نص جاهز للإضافة داخل analysisMarkdown وداخل patches في الوقت نفسه.
-اجعل analysisMarkdown للتشخيص المختصر، الحكم، الفجوة، سببها، ومكانها فقط.
+اجعل analysisMarkdown للتشخيص العام المختصر فقط. عند وجود بطاقة تنفيذ، لا تكرر عنوانها أو سببها أو موضعها أو نصها داخل analysisMarkdown.
 اجعل patches هي المكان الوحيد الذي يحتوي النصوص الجاهزة للنسخ أو الإدراج داخل المقال.
-إذا كان بند في التقرير يحتاج "الحل العملي الجاهز" أو "الإجابة المقترحة" أو "الجملة المقترحة"، فاكتب في analysisMarkdown ملخصًا بسيطًا من جملة أو جملتين يوضح سبب الاقتراح ومكانه باختصار، ثم ضع علامة [[PATCH:patch_1]] مباشرة في موضع بطاقة التنفيذ.
+إذا كان بند في التقرير يحتاج "الحل العملي الجاهز" أو "الإجابة المقترحة" أو "الجملة المقترحة"، فلا تكتب السؤال أو العنوان أو الموضع أو سبب الاقتراح خارج البطاقة. ضع علامة [[PATCH:patch_1]] فقط في موضع بطاقة التنفيذ.
 لا تعرض النص الجاهز داخل analysisMarkdown.
-لا تستخدم عناوين "الفكرة" أو "سبب أهميتها" أو "سبب أهمية إضافتها" عند وجود بطاقة تنفيذ؛ اكتب الملخص القصير فقط ثم علامة البطاقة.
+لا تستخدم عناوين "الفكرة" أو "سبب أهميتها" أو "سبب أهمية إضافتها" عند وجود بطاقة تنفيذ؛ استخدم علامة البطاقة فقط.
 استخدم هذا الشكل حصراً:
 {
   "analysisMarkdown": "اكتب هنا التحليل العربي بنفس ترتيب الأمر المطلوب.",
@@ -2160,13 +2160,14 @@ const READY_COMMAND_PATCH_CARD_REQUIREMENT = `
 - reason هو سبب إضافة النص المقترح أو استبداله.
 - placementLabel هو مكان النص في المحرر نصيًا.
 - contentMarkdown هو النص المقترح الجاهز فقط.
-- قبل علامة [[PATCH:...]] داخل analysisMarkdown اكتب ملخصًا بسيطًا من جملة أو جملتين يوضح سبب الاقتراح.
+- داخل analysisMarkdown ضع علامة [[PATCH:...]] فقط دون تكرار title أو reason أو placementLabel أو contentMarkdown قبل البطاقة أو بعدها.
 - لا تعرض "الفكرة" و"سبب أهميتها" كبنود منفصلة في التقرير؛ لا سيما في أوامر المقارنة والمحتوى الجاهز.
+- لا تعرض السؤال مرة خارج البطاقة ومرة داخلها. إذا كان السؤال داخل contentMarkdown أو title، فلا تكتبه داخل analysisMarkdown.
 
 بالنسبة لأمر الأقسام الأقل ملاءمة:
 - أنشئ patch مستقل لكل قسم غير مناسب أو أقل ملاءمة.
 - اجعل كل patch يستبدل القسم أو الفقرة الضعيفة بنسخة أكثر ملاءمة لهدف الصفحة والجمهور والكلمات الدلالية.
-- يجب أن يظهر داخل analysisMarkdown سبب المشكلة ومكانها فقط، ثم علامة [[PATCH:patch_1]] أو [[PATCH:patch_2]] لعرض بطاقة الاستبدال.
+- يجب أن يظهر داخل analysisMarkdown علامة [[PATCH:patch_1]] أو [[PATCH:patch_2]] فقط لعرض بطاقة الاستبدال، دون تكرار سبب المشكلة أو مكانها خارج البطاقة.
 
 بالنسبة لأمر أسئلة الناس People Also Ask:
 - أنشئ patch مستقل لكل سؤال قابل للإضافة.
@@ -2189,7 +2190,7 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 [[PATCH:patch_2]]
 
 لكل patch استخدم marker مطابقاً للعلامة، مثل "patch_1". لا تكتب النص الجاهز داخل analysisMarkdown.
-قبل كل علامة [[PATCH:...]] اكتب ملخصًا بسيطًا من جملة أو جملتين يوضح سبب الاقتراح ومكانه بإيجاز.
+لا تكتب قبل علامة [[PATCH:...]] السؤال أو الموضع أو نوع التحويل أو سبب الاقتراح إذا كانت هذه المعلومات موجودة في title أو reason أو placementLabel. ضع علامة البطاقة فقط.
 لا تستخدم عناوين "الفكرة" أو "سبب أهميتها" أو "سبب أهمية إضافتها" عند وجود بطاقة تنفيذ.
 
 إذا كان المطلوب تعديل فقرة موجودة، استخدم operation بقيمة "replace_block"، ويجب أن يكون targetText نسخة حرفية من الفقرة الحالية داخل المقال لا تلخيصاً لها. ضع النص الجديد فقط في contentMarkdown.
@@ -2219,6 +2220,7 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 عند تحويل فقرة أو مقطع موجود إلى جدول أو قائمة نقطية أو قائمة مرقمة أو قائمة تحقق أو خطوات، استخدم دائماً operation بقيمة "replace_block"، واجعل targetText نسخة حرفية من النص الحالي، واجعل contentMarkdown يحتوي النص البديل فقط. عند إنشاء جدول Markdown يجب أن يحتوي contentMarkdown على صفوف جدول كاملة، ويفضل إضافة صف الفاصل، ولا تكتف بصف عنوان واحد يبدأ وينتهي بعلامة | دون بيانات.
 
 لا تستخدم عبارة "قسم التعديلات القابلة للتطبيق". استخدم فقط علامة [[PATCH:...]] في موضع التنفيذ داخل التقرير.
+لا تكرر بيانات البطاقة خارجها: title وreason وplacementLabel وcontentMarkdown يجب أن تظهر مرة واحدة داخل البطاقة فقط.
 يجب أن تظهر البطاقات بهذا المعنى: عنوان العملية مع اسم البند، ثم سبب الاقتراح من reason، ثم موضع التنفيذ النصي من placementLabel، ثم النص المقترح من contentMarkdown، ثم أزرار الموضع والنسخ والإضافة أو الاستبدال.`;
 
 const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPatchInstructions?: boolean }) => (
@@ -2466,6 +2468,8 @@ const stripDuplicatePatchTextFromAnalysis = (analysisMarkdown: string, patches: 
         cleaned = cleaned.split(content).join(`[[PATCH:${patch.marker || patch.title}]]`);
     });
 
+    cleaned = stripDuplicatePatchMetadataFromAnalysis(cleaned, patches);
+
     return cleaned
         .replace(/\n{3,}/g, '\n\n')
         .trim();
@@ -2526,6 +2530,95 @@ const namespaceSmartAnalysisPatches = (
     });
 
     return { displayText, patches };
+};
+
+const normalizePatchMetadataLine = (value: string): string => normalizeAnchorText(
+    value
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/^(?:[-*]|\d+[.)])\s*/, '')
+        .replace(/^(?:السؤال(?:\s+المقترح)?|الإجابة|الاجابة|مكان(?:\s+\S+){0,4}|الموضع(?:\s+\S+){0,4}|نوع\s+التحويل(?:\s+\S+){0,3}|سبب(?:\s+\S+){0,4}|العنوان(?:\s+\S+){0,3}|عنوان(?:\s+\S+){0,3}|الفكرة(?:\s+\S+){0,3}|النص\s+المقترح(?:\s+\S+){0,4}|الإجراء\s+المقترح|ماذا\s+أفعل|أين\s+أطبقه|لماذا(?:\s+\S+){0,2})\s*[:：-]\s*/i, '')
+);
+
+const PATCH_ANALYSIS_METADATA_LABEL_PATTERN = /^(?:[-*]\s*)?(?:#{1,6}\s*)?(?:السؤال(?:\s+المقترح)?|الإجابة|الاجابة|مكان(?:\s+\S+){0,4}|الموضع(?:\s+\S+){0,4}|نوع\s+التحويل(?:\s+\S+){0,3}|سبب(?:\s+\S+){0,4}|العنوان(?:\s+\S+){0,3}|عنوان(?:\s+\S+){0,3}|الفكرة(?:\s+\S+){0,3}|النص\s+المقترح(?:\s+\S+){0,4}|الإجراء\s+المقترح|ماذا\s+أفعل|أين\s+أطبقه|لماذا(?:\s+\S+){0,2})\s*[:：-]/i;
+
+const getPatchMetadataComparisonValues = (patch: AiContentPatch): string[] => {
+    const firstContentLine = patch.contentMarkdown
+        .split('\n')
+        .map(line => line.trim())
+        .find(Boolean) || '';
+    const values = [
+        patch.title,
+        patch.reason,
+        patch.placementLabel,
+        patch.anchorText,
+        patch.targetText,
+        normalizeFaqQuestionHeading(firstContentLine),
+        stripAiPatchLabelsFromLine(firstContentLine),
+    ];
+    const seen = new Set<string>();
+
+    return values
+        .map(value => normalizePatchMetadataLine(value || ''))
+        .filter(value => {
+            if (!value || seen.has(value)) return false;
+            seen.add(value);
+            return true;
+        });
+};
+
+const isDuplicatePatchAnalysisLine = (line: string, patch: AiContentPatch): boolean => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.includes('[[PATCH:')) return false;
+    const normalizedLine = normalizePatchMetadataLine(trimmed);
+    if (!normalizedLine) return false;
+
+    const comparisonValues = getPatchMetadataComparisonValues(patch);
+    const matchesPatchValue = comparisonValues.some(value => (
+        normalizedLine === value ||
+        (value.length >= 12 && (normalizedLine.includes(value) || value.includes(normalizedLine)))
+    ));
+    if (matchesPatchValue) return true;
+
+    return PATCH_ANALYSIS_METADATA_LABEL_PATTERN.test(trimmed) && normalizedLine.split(' ').filter(Boolean).length <= 28;
+};
+
+const stripDuplicatePatchMetadataFromAnalysis = (analysisMarkdown: string, patches: AiContentPatch[]): string => {
+    const markerPattern = /\[\[PATCH:([^\]]+)\]\]/g;
+    let cleaned = '';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = markerPattern.exec(analysisMarkdown)) !== null) {
+        const marker = match[1].trim();
+        const patch = patches.find(item => item.marker === marker || item.title === marker);
+        let chunk = analysisMarkdown.slice(lastIndex, match.index);
+
+        if (patch) {
+            const lines = chunk.replace(/\r\n/g, '\n').split('\n');
+            let removedMetadata = false;
+
+            for (let index = lines.length - 1; index >= 0 && lines.length - index <= 10; index -= 1) {
+                const line = lines[index];
+                if (!line.trim()) {
+                    if (removedMetadata) {
+                        lines.splice(index, 1);
+                    }
+                    continue;
+                }
+                if (!isDuplicatePatchAnalysisLine(line, patch)) break;
+                lines.splice(index, 1);
+                removedMetadata = true;
+            }
+
+            chunk = lines.join('\n');
+        }
+
+        cleaned += chunk + match[0];
+        lastIndex = markerPattern.lastIndex;
+    }
+
+    cleaned += analysisMarkdown.slice(lastIndex);
+    return cleaned;
 };
 
 const normalizeFaqQuestionHeading = (line: string): string => line
