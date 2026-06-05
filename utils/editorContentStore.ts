@@ -4,6 +4,7 @@ const DB_NAME = 'bazarvan-editor-content';
 const STORE_NAME = 'editorContent';
 const DB_VERSION = 1;
 const INLINE_FALLBACK_MAX_CHARS = 1_200_000;
+const LOCAL_CONTENT_FALLBACK_MAX_CHARS = 2_000_000;
 const LOCAL_CHUNK_PREFIX = 'bazarvan-editor-content-chunk:';
 const LOCAL_TEXT_CHUNK_PREFIX = 'bazarvan-editor-content-text-chunk:';
 const LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX = 'bazarvan-article-snapshot-chunk:';
@@ -29,6 +30,14 @@ type StoredEditorContent = {
 
 type ResolveEditorContentOptions = {
   allowUnreferencedLocalFallback?: boolean;
+};
+
+type SaveEditorContentOptions = {
+  saveLocalFallback?: boolean;
+  saveLocalContentFallback?: boolean;
+  saveLocalTextFallback?: boolean;
+  textFallback?: string;
+  maxLocalContentChars?: number;
 };
 
 export type ArticleCompetitorSnapshot = {
@@ -60,10 +69,28 @@ export type ArticleStorageSnapshot = {
 };
 
 let editorContentDbPromise: Promise<IDBDatabase> | null = null;
+let persistentStoragePromise: Promise<boolean> | null = null;
 
 const canUseIndexedDb = (): boolean => (
   typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined'
 );
+
+const requestPersistentEditorStorage = async (): Promise<boolean> => {
+  if (typeof navigator === 'undefined' || !navigator.storage?.persist) {
+    return false;
+  }
+
+  if (!persistentStoragePromise) {
+    persistentStoragePromise = navigator.storage.persisted()
+      .then(isPersisted => (isPersisted ? true : navigator.storage.persist()))
+      .catch(error => {
+        console.error('Failed to request persistent editor storage:', error);
+        return false;
+      });
+  }
+
+  return persistentStoragePromise;
+};
 
 const openEditorContentDb = (): Promise<IDBDatabase> => {
   if (!canUseIndexedDb()) {
@@ -282,6 +309,10 @@ export const saveEditorTextChunks = (key: string, content: any): number => (
   saveStorageChunks(LOCAL_TEXT_CHUNK_PREFIX, key, extractPlainTextFromEditorContent(content), 'editor text')
 );
 
+export const saveEditorPlainTextChunks = (key: string, text: string): number => (
+  saveStorageChunks(LOCAL_TEXT_CHUNK_PREFIX, key, text, 'editor text')
+);
+
 export const loadEditorContentChunks = (key: string): any | null => {
   const serializedContent = loadStorageChunks(LOCAL_CHUNK_PREFIX, key, 'editor content');
   if (serializedContent === null) return null;
@@ -415,6 +446,7 @@ export const saveArticleSnapshotDurably = async (
   let indexedDb = false;
 
   try {
+    await requestPersistentEditorStorage();
     await saveEditorContent(key, snapshot);
     indexedDb = true;
   } catch (error) {
@@ -471,19 +503,29 @@ export const renameArticleSnapshot = async (username: string, oldTitle: string, 
 export const saveEditorContentDurably = async (
   key: string,
   content: any,
-  options: { saveLocalFallback?: boolean } = {},
+  options: SaveEditorContentOptions = {},
 ): Promise<{ indexedDb: boolean; localChunkCount: number; localTextChunkCount: number }> => {
   let indexedDb = false;
 
   try {
+    await requestPersistentEditorStorage();
     await saveEditorContent(key, content);
     indexedDb = true;
   } catch (error) {
     console.error(`Failed to save editor content in IndexedDB "${key}":`, error);
   }
 
-  const localTextChunkCount = options.saveLocalFallback ? saveEditorTextChunks(key, content) : 0;
-  const localChunkCount = options.saveLocalFallback ? saveEditorContentChunks(key, content) : 0;
+  const saveLocalTextFallback = options.saveLocalTextFallback ?? options.saveLocalFallback ?? false;
+  const saveLocalContentFallback = options.saveLocalContentFallback ?? options.saveLocalFallback ?? false;
+  const serializedLength = saveLocalContentFallback ? getSerializedContentLength(content) : null;
+  const maxLocalContentChars = options.maxLocalContentChars ?? LOCAL_CONTENT_FALLBACK_MAX_CHARS;
+  const canSaveLocalContent = saveLocalContentFallback &&
+    serializedLength !== null &&
+    serializedLength <= maxLocalContentChars;
+  const localTextChunkCount = saveLocalTextFallback
+    ? saveEditorPlainTextChunks(key, options.textFallback ?? extractPlainTextFromEditorContent(content))
+    : 0;
+  const localChunkCount = canSaveLocalContent ? saveEditorContentChunks(key, content) : 0;
 
   return { indexedDb, localChunkCount, localTextChunkCount };
 };

@@ -9,11 +9,11 @@ interface DocumentActionsProps {
     restoreStatus: 'idle' | 'restored';
     draftExists: boolean;
     saveStatus: 'idle' | 'saved';
-    onRestoreDraft: () => void;
-    onSaveDraft: () => void;
-    onNewArticle: () => void;
-    onShowDashboard: () => void;
-    onLogout: () => void;
+    onRestoreDraft: () => void | Promise<void>;
+    onSaveDraft: () => void | Promise<void>;
+    onNewArticle: () => void | Promise<void>;
+    onShowDashboard: () => void | Promise<void>;
+    onLogout: () => void | Promise<void>;
     onSetIsDarkMode: React.Dispatch<React.SetStateAction<boolean>>;
 }
 

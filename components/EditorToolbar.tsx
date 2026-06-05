@@ -69,13 +69,13 @@ const EditorToolbar: React.FC = () => {
     } = useAI();
 
 
-    const handleShowDashboard = useCallback(() => {
-      onSaveDraft();
+    const handleShowDashboard = useCallback(async () => {
+      await onSaveDraft();
       setCurrentView('dashboard');
     }, [onSaveDraft, setCurrentView]);
 
-    const handleLogout = useCallback(() => {
-      onSaveDraft();
+    const handleLogout = useCallback(async () => {
+      await onSaveDraft();
       onLogout();
     }, [onSaveDraft, onLogout]);
 
