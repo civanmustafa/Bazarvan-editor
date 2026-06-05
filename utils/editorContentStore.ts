@@ -404,7 +404,12 @@ export const isEditorContentReference = (value: unknown): value is EditorContent
   (value as EditorContentReference).key.trim().length > 0
 );
 
-export const getAutoDraftContentKey = () => 'draft:auto';
+export const getAutoDraftContentKey = (username?: string | null, title?: string | null) => {
+  const normalizedTitle = title?.trim();
+  return username && normalizedTitle
+    ? `draft:auto:${username}:${normalizedTitle}`
+    : 'draft:auto';
+};
 export const getManualDraftContentKey = () => 'draft:manual';
 export const getArticleContentKey = (username: string, title: string) => (
   `article:${username}:${title.trim() || '(untitled)'}`
