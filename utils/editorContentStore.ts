@@ -1,17 +1,16 @@
 import type { DuplicateStats, GoalContext, Keywords, StructureStats } from '../types';
 
-const DB_NAME = 'bazarvan-editor-content';
-const STORE_NAME = 'editorContent';
-const DB_VERSION = 1;
-const INLINE_FALLBACK_MAX_CHARS = 1_200_000;
-const LOCAL_CONTENT_FALLBACK_MAX_CHARS = 2_000_000;
-const LOCAL_CHUNK_PREFIX = 'bazarvan-editor-content-chunk:';
-const LOCAL_TEXT_CHUNK_PREFIX = 'bazarvan-editor-content-text-chunk:';
-const LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX = 'bazarvan-article-snapshot-chunk:';
-const LOCAL_CHUNK_SIZE = 200_000;
+const LOCAL_CONTENT_PREFIX = 'bazarvan-editor-content:';
+const LOCAL_TEXT_PREFIX = 'bazarvan-editor-text:';
+const LOCAL_ARTICLE_META_PREFIX = 'bazarvan-article-meta:';
+const LEGACY_CONTENT_PREFIX = 'bazarvan-editor-content-chunk:';
+const LEGACY_TEXT_PREFIX = 'bazarvan-editor-content-text-chunk:';
+const LEGACY_SNAPSHOT_PREFIX = 'bazarvan-article-snapshot-chunk:';
+const LOCAL_CHUNK_SIZE = 180_000;
+const INLINE_FALLBACK_MAX_CHARS = 300_000;
 
 export type EditorContentReference = {
-  storage: 'indexeddb';
+  storage: 'localStorage' | 'indexeddb';
   key: string;
   fallbackContent?: any;
   fallbackStorage?: 'localStorageChunks';
@@ -22,10 +21,10 @@ export type EditorContentReference = {
   updatedAt?: string;
 };
 
-type StoredEditorContent = {
-  key: string;
-  content: any;
-  updatedAt: string;
+type StoredChunkIndex = {
+  chunkCount: number;
+  saveId?: string;
+  updatedAt?: string;
 };
 
 type ResolveEditorContentOptions = {
@@ -37,7 +36,6 @@ type SaveEditorContentOptions = {
   saveLocalContentFallback?: boolean;
   saveLocalTextFallback?: boolean;
   textFallback?: string;
-  maxLocalContentChars?: number;
 };
 
 export type ArticleCompetitorSnapshot = {
@@ -68,108 +66,113 @@ export type ArticleStorageSnapshot = {
   savedAt: string;
 };
 
-let editorContentDbPromise: Promise<IDBDatabase> | null = null;
-let persistentStoragePromise: Promise<boolean> | null = null;
+type ArticleStorageMeta = Omit<ArticleStorageSnapshot, 'content' | 'plainText'> & {
+  contentKey: string;
+};
 
-const canUseIndexedDb = (): boolean => (
-  typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined'
+const canUseLocalStorage = (): boolean => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+const isRecord = (value: unknown): value is Record<string, any> => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
 );
 
-const requestPersistentEditorStorage = async (): Promise<boolean> => {
-  if (typeof navigator === 'undefined' || !navigator.storage?.persist) {
-    return false;
-  }
+const createSaveId = (): string => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+const getIndexKey = (prefix: string, key: string): string => `${prefix}${key}:index`;
+const getChunkKey = (prefix: string, key: string, index: number, saveId?: string): string => (
+  saveId ? `${prefix}${key}:${saveId}:${index}` : `${prefix}${key}:${index}`
+);
 
-  if (!persistentStoragePromise) {
-    persistentStoragePromise = navigator.storage.persisted()
-      .then(isPersisted => (isPersisted ? true : navigator.storage.persist()))
-      .catch(error => {
-        console.error('Failed to request persistent editor storage:', error);
-        return false;
-      });
-  }
+const readIndex = (prefix: string, key: string): StoredChunkIndex | null => {
+  if (!canUseLocalStorage()) return null;
 
-  return persistentStoragePromise;
-};
-
-const openEditorContentDb = (): Promise<IDBDatabase> => {
-  if (!canUseIndexedDb()) {
-    return Promise.reject(new Error('IndexedDB is not available.'));
-  }
-
-  if (editorContentDbPromise) {
-    return editorContentDbPromise;
-  }
-
-  editorContentDbPromise = new Promise((resolve, reject) => {
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'key' });
-      }
-    };
-
-    request.onsuccess = () => {
-      const db = request.result;
-      db.onversionchange = () => {
-        db.close();
-        editorContentDbPromise = null;
-      };
-      resolve(db);
-    };
-
-    request.onerror = () => {
-      editorContentDbPromise = null;
-      reject(request.error || new Error('Failed to open IndexedDB.'));
-    };
-
-    request.onblocked = () => {
-      editorContentDbPromise = null;
-      reject(new Error('IndexedDB open request was blocked.'));
-    };
-  });
-
-  return editorContentDbPromise;
-};
-
-const runEditorContentTransaction = async <T>(
-  mode: IDBTransactionMode,
-  action: (store: IDBObjectStore) => IDBRequest<T> | void,
-): Promise<T | undefined> => {
-  const db = await openEditorContentDb();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode);
-    const store = transaction.objectStore(STORE_NAME);
-    let request: IDBRequest<T> | void;
-
-    transaction.oncomplete = () => {
-      resolve(request ? request.result : undefined);
-    };
-    transaction.onerror = () => {
-      reject(transaction.error || new Error('IndexedDB transaction failed.'));
-    };
-    transaction.onabort = () => {
-      reject(transaction.error || new Error('IndexedDB transaction aborted.'));
-    };
-
-    request = action(store);
-  });
-};
-
-const getSerializedContentLength = (content: any): number | null => {
   try {
-    return JSON.stringify(content).length;
+    const raw = window.localStorage.getItem(getIndexKey(prefix, key));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return isRecord(parsed) && typeof parsed.chunkCount === 'number' && Number.isFinite(parsed.chunkCount)
+      ? {
+          chunkCount: parsed.chunkCount,
+          saveId: typeof parsed.saveId === 'string' ? parsed.saveId : undefined,
+          updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+        }
+      : null;
   } catch {
     return null;
   }
 };
 
-const isRecord = (value: unknown): value is Record<string, any> => (
-  !!value && typeof value === 'object' && !Array.isArray(value)
-);
+const removeChunksForIndex = (prefix: string, key: string, index: StoredChunkIndex | null): void => {
+  if (!canUseLocalStorage() || !index) return;
+
+  for (let chunkIndex = 0; chunkIndex < index.chunkCount; chunkIndex += 1) {
+    window.localStorage.removeItem(getChunkKey(prefix, key, chunkIndex, index.saveId));
+  }
+};
+
+const deleteStorageChunks = (prefix: string, key: string): void => {
+  if (!canUseLocalStorage()) return;
+
+  try {
+    const index = readIndex(prefix, key);
+    removeChunksForIndex(prefix, key, index);
+    window.localStorage.removeItem(getIndexKey(prefix, key));
+
+    // Legacy chunks did not include a save id. Remove a reasonable tail as cleanup.
+    for (let chunkIndex = 0; chunkIndex < 200; chunkIndex += 1) {
+      window.localStorage.removeItem(getChunkKey(prefix, key, chunkIndex));
+    }
+  } catch (error) {
+    console.error(`Failed to delete local chunks "${key}":`, error);
+  }
+};
+
+const saveStorageChunks = (prefix: string, key: string, serializedContent: string): number => {
+  if (!canUseLocalStorage()) return 0;
+
+  const chunks = serializedContent.match(new RegExp(`.{1,${LOCAL_CHUNK_SIZE}}`, 'gs')) || [''];
+  const previousIndex = readIndex(prefix, key);
+  const saveId = createSaveId();
+
+  try {
+    removeChunksForIndex(prefix, key, previousIndex);
+    chunks.forEach((chunk, index) => {
+      window.localStorage.setItem(getChunkKey(prefix, key, index, saveId), chunk);
+    });
+    window.localStorage.setItem(getIndexKey(prefix, key), JSON.stringify({
+      chunkCount: chunks.length,
+      saveId,
+      updatedAt: new Date().toISOString(),
+    }));
+    return chunks.length;
+  } catch (error) {
+    for (let index = 0; index < chunks.length; index += 1) {
+      window.localStorage.removeItem(getChunkKey(prefix, key, index, saveId));
+    }
+    console.error(`Failed to save local chunks "${key}":`, error);
+    return 0;
+  }
+};
+
+const loadStorageChunks = (prefix: string, key: string): string | null => {
+  if (!canUseLocalStorage()) return null;
+
+  try {
+    const index = readIndex(prefix, key);
+    if (!index || index.chunkCount <= 0) return null;
+
+    const chunks: string[] = [];
+    for (let chunkIndex = 0; chunkIndex < index.chunkCount; chunkIndex += 1) {
+      const chunk = window.localStorage.getItem(getChunkKey(prefix, key, chunkIndex, index.saveId));
+      if (chunk === null) return null;
+      chunks.push(chunk);
+    }
+
+    return chunks.join('');
+  } catch (error) {
+    console.error(`Failed to load local chunks "${key}":`, error);
+    return null;
+  }
+};
 
 const extractPlainTextFromEditorContent = (value: any): string => {
   if (typeof value === 'string') return value;
@@ -180,10 +183,9 @@ const extractPlainTextFromEditorContent = (value: any): string => {
   if (typeof value.text === 'string') return value.text;
   if (value.type === 'hardBreak') return '\n';
   if (Array.isArray(value.content)) {
-    const childText = value.content.map(extractPlainTextFromEditorContent).filter(Boolean);
-    const blockContainerTypes = new Set(['doc', 'blockquote', 'bulletList', 'orderedList', 'listItem', 'table', 'tableRow', 'tableCell', 'tableHeader']);
-    const separator = blockContainerTypes.has(value.type) ? '\n' : '';
-    return childText.join(separator);
+    const blockTypes = new Set(['doc', 'blockquote', 'bulletList', 'orderedList', 'listItem', 'table', 'tableRow', 'tableCell', 'tableHeader']);
+    const separator = blockTypes.has(value.type) ? '\n' : '';
+    return value.content.map(extractPlainTextFromEditorContent).filter(Boolean).join(separator);
   }
   return '';
 };
@@ -206,155 +208,33 @@ const createEditorContentFromPlainText = (text: string): any | null => {
   };
 };
 
-const getStorageChunkIndexKey = (prefix: string, key: string): string => `${prefix}${key}:index`;
-const getStorageChunkKey = (prefix: string, key: string, index: number): string => `${prefix}${key}:${index}`;
-
-const canUseLocalStorage = (): boolean => typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
-
-const readStoredChunkCountWithPrefix = (prefix: string, key: string): number => {
-  if (!canUseLocalStorage()) return 0;
-
+const getSerializedLength = (content: any): number | null => {
   try {
-    const indexRaw = window.localStorage.getItem(getStorageChunkIndexKey(prefix, key));
-    if (!indexRaw) return 0;
-    const parsed = JSON.parse(indexRaw);
-    return typeof parsed.chunkCount === 'number' && Number.isFinite(parsed.chunkCount)
-      ? parsed.chunkCount
-      : 0;
+    return JSON.stringify(content).length;
   } catch {
-    return 0;
-  }
-};
-
-const deleteStorageChunks = (prefix: string, key: string, label: string): void => {
-  if (!canUseLocalStorage()) return;
-
-  try {
-    const chunkCount = readStoredChunkCountWithPrefix(prefix, key);
-    for (let index = 0; index < chunkCount; index += 1) {
-      window.localStorage.removeItem(getStorageChunkKey(prefix, key, index));
-    }
-    window.localStorage.removeItem(getStorageChunkIndexKey(prefix, key));
-  } catch (error) {
-    console.error(`Failed to delete local ${label} chunks "${key}":`, error);
-  }
-};
-
-export const deleteEditorContentChunks = (key: string): void => {
-  deleteStorageChunks(LOCAL_CHUNK_PREFIX, key, 'editor content');
-};
-
-export const deleteEditorTextChunks = (key: string): void => {
-  deleteStorageChunks(LOCAL_TEXT_CHUNK_PREFIX, key, 'editor text');
-};
-
-export const deleteArticleSnapshotChunks = (key: string): void => {
-  deleteStorageChunks(LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX, key, 'article snapshot');
-};
-
-const saveStorageChunks = (prefix: string, key: string, serializedContent: string, label: string): number => {
-  if (!canUseLocalStorage()) return 0;
-
-  const chunks = serializedContent.match(new RegExp(`.{1,${LOCAL_CHUNK_SIZE}}`, 'gs')) || [''];
-
-  try {
-    deleteStorageChunks(prefix, key, label);
-    chunks.forEach((chunk, index) => {
-      window.localStorage.setItem(getStorageChunkKey(prefix, key, index), chunk);
-    });
-    window.localStorage.setItem(getStorageChunkIndexKey(prefix, key), JSON.stringify({
-      chunkCount: chunks.length,
-      updatedAt: new Date().toISOString(),
-    }));
-    return chunks.length;
-  } catch (error) {
-    deleteStorageChunks(prefix, key, label);
-    console.error(`Failed to save local ${label} chunks "${key}":`, error);
-    return 0;
-  }
-};
-
-const loadStorageChunks = (prefix: string, key: string, label: string): string | null => {
-  if (!canUseLocalStorage()) return null;
-
-  try {
-    const chunkCount = readStoredChunkCountWithPrefix(prefix, key);
-    if (chunkCount <= 0) return null;
-
-    const chunks: string[] = [];
-    for (let index = 0; index < chunkCount; index += 1) {
-      const chunk = window.localStorage.getItem(getStorageChunkKey(prefix, key, index));
-      if (chunk === null) return null;
-      chunks.push(chunk);
-    }
-
-    return chunks.join('');
-  } catch (error) {
-    console.error(`Failed to load local ${label} chunks "${key}":`, error);
     return null;
   }
 };
 
-export const saveEditorContentChunks = (key: string, content: any): number => {
-  try {
-    return saveStorageChunks(LOCAL_CHUNK_PREFIX, key, JSON.stringify(content), 'editor content');
-  } catch (error) {
-    deleteEditorContentChunks(key);
-    console.error(`Failed to serialize editor content chunks "${key}":`, error);
-    return 0;
-  }
+export const getAutoDraftContentKey = (username?: string | null, title?: string | null) => {
+  const normalizedTitle = title?.trim();
+  return username && normalizedTitle
+    ? `draft:auto:${username}:${normalizedTitle}`
+    : 'draft:auto';
 };
 
-export const saveEditorTextChunks = (key: string, content: any): number => (
-  saveStorageChunks(LOCAL_TEXT_CHUNK_PREFIX, key, extractPlainTextFromEditorContent(content), 'editor text')
+export const getManualDraftContentKey = () => 'draft:manual';
+
+export const getArticleContentKey = (username: string, title: string) => (
+  `article:${username}:${title.trim() || '(untitled)'}`
 );
 
-export const saveEditorPlainTextChunks = (key: string, text: string): number => (
-  saveStorageChunks(LOCAL_TEXT_CHUNK_PREFIX, key, text, 'editor text')
+export const getArticleSnapshotKey = (username: string, title: string) => (
+  `articleSnapshot:${username}:${title.trim() || '(untitled)'}`
 );
-
-export const loadEditorContentChunks = (key: string): any | null => {
-  const serializedContent = loadStorageChunks(LOCAL_CHUNK_PREFIX, key, 'editor content');
-  if (serializedContent === null) return null;
-
-  try {
-    return JSON.parse(serializedContent);
-  } catch (error) {
-    console.error(`Failed to parse local editor content chunks "${key}":`, error);
-    return null;
-  }
-};
-
-export const loadEditorTextChunks = (key: string): any | null => {
-  const textContent = loadStorageChunks(LOCAL_TEXT_CHUNK_PREFIX, key, 'editor text');
-  return textContent === null ? null : createEditorContentFromPlainText(textContent);
-};
-
-export const saveArticleSnapshotChunks = (key: string, snapshot: ArticleStorageSnapshot): number => {
-  try {
-    return saveStorageChunks(LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX, key, JSON.stringify(snapshot), 'article snapshot');
-  } catch (error) {
-    deleteArticleSnapshotChunks(key);
-    console.error(`Failed to serialize article snapshot chunks "${key}":`, error);
-    return 0;
-  }
-};
-
-export const loadArticleSnapshotChunks = (key: string): ArticleStorageSnapshot | null => {
-  const serializedSnapshot = loadStorageChunks(LOCAL_ARTICLE_SNAPSHOT_CHUNK_PREFIX, key, 'article snapshot');
-  if (serializedSnapshot === null) return null;
-
-  try {
-    const parsed = JSON.parse(serializedSnapshot);
-    return isArticleStorageSnapshot(parsed) ? parsed : null;
-  } catch (error) {
-    console.error(`Failed to parse local article snapshot chunks "${key}":`, error);
-    return null;
-  }
-};
 
 export const createEditorContentReference = (key: string): EditorContentReference => ({
-  storage: 'indexeddb',
+  storage: 'localStorage',
   key,
 });
 
@@ -364,13 +244,11 @@ export const createEditorContentReferenceWithFallback = (
   maxSerializedChars = INLINE_FALLBACK_MAX_CHARS,
 ): EditorContentReference => {
   const reference = createEditorContentReference(key);
-  const serializedLength = getSerializedContentLength(content);
-
+  const serializedLength = getSerializedLength(content);
   if (serializedLength !== null && serializedLength <= maxSerializedChars) {
     reference.fallbackContent = content;
     reference.updatedAt = new Date().toISOString();
   }
-
   return reference;
 };
 
@@ -379,53 +257,74 @@ export const createEditorContentReferenceWithChunkFallback = (
   chunkCount: number,
   textChunkCount = 0,
 ): EditorContentReference => ({
-  storage: 'indexeddb',
+  storage: 'localStorage',
   key,
-  ...((chunkCount > 0 || textChunkCount > 0) ? {
-    fallbackStorage: 'localStorageChunks' as const,
-    ...(chunkCount > 0 ? {
-      fallbackKey: key,
-      chunkCount,
-    } : {}),
-    ...(textChunkCount > 0 ? {
-      fallbackTextKey: key,
-      textChunkCount,
-    } : {}),
-    updatedAt: new Date().toISOString(),
-  } : {}),
+  fallbackStorage: 'localStorageChunks',
+  fallbackKey: key,
+  chunkCount,
+  fallbackTextKey: key,
+  textChunkCount,
+  updatedAt: new Date().toISOString(),
 });
 
 export const isEditorContentReference = (value: unknown): value is EditorContentReference => (
-  !!value &&
-  typeof value === 'object' &&
-  !Array.isArray(value) &&
-  (value as EditorContentReference).storage === 'indexeddb' &&
-  typeof (value as EditorContentReference).key === 'string' &&
-  (value as EditorContentReference).key.trim().length > 0
+  isRecord(value) &&
+  (value.storage === 'localStorage' || value.storage === 'indexeddb') &&
+  typeof value.key === 'string' &&
+  value.key.trim().length > 0
 );
 
-export const getAutoDraftContentKey = (username?: string | null, title?: string | null) => {
-  const normalizedTitle = title?.trim();
-  return username && normalizedTitle
-    ? `draft:auto:${username}:${normalizedTitle}`
-    : 'draft:auto';
+export const saveEditorContentChunks = (key: string, content: any): number => {
+  try {
+    return saveStorageChunks(LOCAL_CONTENT_PREFIX, key, JSON.stringify(content));
+  } catch (error) {
+    console.error(`Failed to serialize editor content "${key}":`, error);
+    return 0;
+  }
 };
-export const getManualDraftContentKey = () => 'draft:manual';
-export const getArticleContentKey = (username: string, title: string) => (
-  `article:${username}:${title.trim() || '(untitled)'}`
-);
-export const getArticleSnapshotKey = (username: string, title: string) => (
-  `articleSnapshot:${username}:${title.trim() || '(untitled)'}`
+
+export const saveEditorPlainTextChunks = (key: string, text: string): number => (
+  saveStorageChunks(LOCAL_TEXT_PREFIX, key, text)
 );
 
-export const saveEditorContent = async (key: string, content: any): Promise<void> => {
-  const record: StoredEditorContent = {
-    key,
-    content,
-    updatedAt: new Date().toISOString(),
-  };
+export const saveEditorTextChunks = (key: string, content: any): number => (
+  saveEditorPlainTextChunks(key, extractPlainTextFromEditorContent(content))
+);
 
-  await runEditorContentTransaction('readwrite', store => store.put(record));
+export const loadEditorContentChunks = (key: string): any | null => {
+  const serializedContent = loadStorageChunks(LOCAL_CONTENT_PREFIX, key) ??
+    loadStorageChunks(LEGACY_CONTENT_PREFIX, key);
+  if (serializedContent === null) return null;
+
+  try {
+    return JSON.parse(serializedContent);
+  } catch (error) {
+    console.error(`Failed to parse editor content "${key}":`, error);
+    return null;
+  }
+};
+
+const loadEditorPlainText = (key: string): string | null => (
+  loadStorageChunks(LOCAL_TEXT_PREFIX, key) ?? loadStorageChunks(LEGACY_TEXT_PREFIX, key)
+);
+
+export const loadEditorTextChunks = (key: string): any | null => {
+  const text = loadEditorPlainText(key);
+  return text === null ? null : createEditorContentFromPlainText(text);
+};
+
+export const deleteEditorContentChunks = (key: string): void => {
+  deleteStorageChunks(LOCAL_CONTENT_PREFIX, key);
+  deleteStorageChunks(LEGACY_CONTENT_PREFIX, key);
+};
+
+export const deleteEditorTextChunks = (key: string): void => {
+  deleteStorageChunks(LOCAL_TEXT_PREFIX, key);
+  deleteStorageChunks(LEGACY_TEXT_PREFIX, key);
+};
+
+export const deleteArticleSnapshotChunks = (key: string): void => {
+  deleteStorageChunks(LEGACY_SNAPSHOT_PREFIX, key);
 };
 
 export const isArticleStorageSnapshot = (value: unknown): value is ArticleStorageSnapshot => (
@@ -439,58 +338,135 @@ export const isArticleStorageSnapshot = (value: unknown): value is ArticleStorag
   Object.prototype.hasOwnProperty.call(value, 'content')
 );
 
+const readArticleMeta = (snapshotKey: string): ArticleStorageMeta | null => {
+  if (!canUseLocalStorage()) return null;
+
+  try {
+    const raw = window.localStorage.getItem(`${LOCAL_ARTICLE_META_PREFIX}${snapshotKey}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return isRecord(parsed) &&
+      parsed.kind === 'articleSnapshot' &&
+      parsed.version === 1 &&
+      typeof parsed.username === 'string' &&
+      typeof parsed.title === 'string' &&
+      typeof parsed.contentKey === 'string' &&
+      (parsed.articleLanguage === 'ar' || parsed.articleLanguage === 'en')
+        ? parsed as ArticleStorageMeta
+        : null;
+  } catch (error) {
+    console.error(`Failed to read article meta "${snapshotKey}":`, error);
+    return null;
+  }
+};
+
+const writeArticleMeta = (snapshotKey: string, meta: ArticleStorageMeta): boolean => {
+  if (!canUseLocalStorage()) return false;
+
+  try {
+    window.localStorage.setItem(`${LOCAL_ARTICLE_META_PREFIX}${snapshotKey}`, JSON.stringify(meta));
+    return true;
+  } catch (error) {
+    console.error(`Failed to save article meta "${snapshotKey}":`, error);
+    return false;
+  }
+};
+
+const deleteArticleMeta = (snapshotKey: string): void => {
+  if (!canUseLocalStorage()) return;
+  window.localStorage.removeItem(`${LOCAL_ARTICLE_META_PREFIX}${snapshotKey}`);
+};
+
+const loadLegacyArticleSnapshotChunks = (key: string): ArticleStorageSnapshot | null => {
+  const serializedSnapshot = loadStorageChunks(LEGACY_SNAPSHOT_PREFIX, key);
+  if (serializedSnapshot === null) return null;
+
+  try {
+    const parsed = JSON.parse(serializedSnapshot);
+    return isArticleStorageSnapshot(parsed) ? parsed : null;
+  } catch (error) {
+    console.error(`Failed to parse legacy article snapshot "${key}":`, error);
+    return null;
+  }
+};
+
+export const loadArticleSnapshotChunks = loadLegacyArticleSnapshotChunks;
+
 export const createArticleSnapshotReference = (username: string, title: string): EditorContentReference => (
   createEditorContentReference(getArticleSnapshotKey(username, title))
 );
 
 export const saveArticleSnapshotDurably = async (
   snapshot: ArticleStorageSnapshot,
-  options: { saveLocalFallback?: boolean } = {},
 ): Promise<{ indexedDb: boolean; localChunkCount: number; reference: EditorContentReference }> => {
-  const key = getArticleSnapshotKey(snapshot.username, snapshot.title);
-  let indexedDb = false;
-
-  try {
-    await requestPersistentEditorStorage();
-    await saveEditorContent(key, snapshot);
-    indexedDb = true;
-  } catch (error) {
-    console.error(`Failed to save unified article snapshot "${key}":`, error);
-  }
-
-  const localChunkCount = options.saveLocalFallback ? saveArticleSnapshotChunks(key, snapshot) : 0;
+  const snapshotKey = getArticleSnapshotKey(snapshot.username, snapshot.title);
+  const contentKey = getArticleContentKey(snapshot.username, snapshot.title);
+  const contentChunkCount = saveEditorContentChunks(contentKey, snapshot.content);
+  const textChunkCount = saveEditorPlainTextChunks(contentKey, snapshot.plainText);
+  const { content: _content, plainText: _plainText, ...metaSource } = snapshot;
+  const metaSaved = writeArticleMeta(snapshotKey, {
+    ...metaSource,
+    contentKey,
+  });
 
   return {
-    indexedDb,
-    localChunkCount,
+    indexedDb: false,
+    localChunkCount: metaSaved && (contentChunkCount > 0 || textChunkCount > 0)
+      ? Math.max(contentChunkCount, textChunkCount)
+      : 0,
     reference: createArticleSnapshotReference(snapshot.username, snapshot.title),
   };
 };
 
 export const loadArticleSnapshot = async (username: string, title: string): Promise<ArticleStorageSnapshot | null> => {
-  const key = getArticleSnapshotKey(username, title);
+  const snapshotKey = getArticleSnapshotKey(username, title);
+  const meta = readArticleMeta(snapshotKey);
 
-  try {
-    const storedSnapshot = await loadEditorContent(key);
-    if (isArticleStorageSnapshot(storedSnapshot)) {
-      return storedSnapshot;
+  if (meta) {
+    const content = loadEditorContentChunks(meta.contentKey);
+    const plainText = loadEditorPlainText(meta.contentKey) || extractPlainTextFromEditorContent(content);
+    if (content || plainText.trim()) {
+      return {
+        ...meta,
+        content: content || createEditorContentFromPlainText(plainText),
+        plainText,
+      };
     }
-  } catch (error) {
-    console.error(`Failed to load unified article snapshot "${key}":`, error);
   }
 
-  return loadArticleSnapshotChunks(key);
+  const legacySnapshot = loadLegacyArticleSnapshotChunks(snapshotKey);
+  if (legacySnapshot) return legacySnapshot;
+
+  const contentKey = getArticleContentKey(username, title);
+  const content = loadEditorContentChunks(contentKey);
+  const plainText = loadEditorPlainText(contentKey) || extractPlainTextFromEditorContent(content);
+  if (!content && !plainText.trim()) return null;
+
+  return {
+    kind: 'articleSnapshot',
+    version: 1,
+    username,
+    title,
+    content: content || createEditorContentFromPlainText(plainText),
+    plainText,
+    keywords: {
+      primary: '',
+      secondaries: ['', '', '', ''],
+      company: '',
+      lsi: [],
+    },
+    articleLanguage: 'ar',
+    savedAt: new Date().toISOString(),
+  };
 };
 
 export const deleteArticleSnapshot = async (username: string, title: string): Promise<void> => {
-  const key = getArticleSnapshotKey(username, title);
-  try {
-    await runEditorContentTransaction('readwrite', store => store.delete(key));
-  } catch (error) {
-    console.error(`Failed to delete unified article snapshot "${key}":`, error);
-  } finally {
-    deleteArticleSnapshotChunks(key);
-  }
+  const snapshotKey = getArticleSnapshotKey(username, title);
+  const contentKey = getArticleContentKey(username, title);
+  deleteArticleMeta(snapshotKey);
+  deleteEditorContentChunks(contentKey);
+  deleteEditorTextChunks(contentKey);
+  deleteArticleSnapshotChunks(snapshotKey);
 };
 
 export const renameArticleSnapshot = async (username: string, oldTitle: string, newTitle: string): Promise<void> => {
@@ -501,7 +477,7 @@ export const renameArticleSnapshot = async (username: string, oldTitle: string, 
     ...snapshot,
     title: newTitle.trim() || '(untitled)',
     savedAt: new Date().toISOString(),
-  }, { saveLocalFallback: true });
+  });
   await deleteArticleSnapshot(username, oldTitle);
 };
 
@@ -510,73 +486,41 @@ export const saveEditorContentDurably = async (
   content: any,
   options: SaveEditorContentOptions = {},
 ): Promise<{ indexedDb: boolean; localChunkCount: number; localTextChunkCount: number }> => {
-  let indexedDb = false;
-
-  try {
-    await requestPersistentEditorStorage();
-    await saveEditorContent(key, content);
-    indexedDb = true;
-  } catch (error) {
-    console.error(`Failed to save editor content in IndexedDB "${key}":`, error);
-  }
-
-  const saveLocalTextFallback = options.saveLocalTextFallback ?? options.saveLocalFallback ?? false;
-  const saveLocalContentFallback = options.saveLocalContentFallback ?? options.saveLocalFallback ?? false;
-  const serializedLength = saveLocalContentFallback ? getSerializedContentLength(content) : null;
-  const maxLocalContentChars = options.maxLocalContentChars ?? LOCAL_CONTENT_FALLBACK_MAX_CHARS;
-  const canSaveLocalContent = saveLocalContentFallback &&
-    serializedLength !== null &&
-    serializedLength <= maxLocalContentChars;
-  const localTextChunkCount = saveLocalTextFallback
+  const localChunkCount = saveEditorContentChunks(key, content);
+  const shouldSaveText = options.saveLocalTextFallback ?? options.saveLocalFallback ?? true;
+  const localTextChunkCount = shouldSaveText
     ? saveEditorPlainTextChunks(key, options.textFallback ?? extractPlainTextFromEditorContent(content))
     : 0;
-  const localChunkCount = canSaveLocalContent ? saveEditorContentChunks(key, content) : 0;
 
-  return { indexedDb, localChunkCount, localTextChunkCount };
+  return {
+    indexedDb: false,
+    localChunkCount,
+    localTextChunkCount,
+  };
 };
 
-export const loadEditorContent = async (key: string): Promise<any | null> => {
-  const record = await runEditorContentTransaction<StoredEditorContent>('readonly', store => store.get(key));
-  return record?.content ?? null;
-};
+export const loadEditorContent = async (key: string): Promise<any | null> => (
+  loadEditorContentChunks(key)
+);
 
 export const resolveEditorContentReference = async (
   reference: EditorContentReference,
   options: ResolveEditorContentOptions = {},
 ): Promise<any | null> => {
-  try {
-    const storedContent = await loadEditorContent(reference.key);
-    if (storedContent !== null && storedContent !== undefined) {
-      if (isArticleStorageSnapshot(storedContent)) {
-        const snapshotContentText = extractPlainTextFromEditorContent(storedContent.content).trim();
-        if (snapshotContentText.length > 0) {
-          return storedContent.content;
-        }
-        if (storedContent.plainText.trim().length > 0) {
-          return createEditorContentFromPlainText(storedContent.plainText);
-        }
-      }
-
-      const storedText = extractPlainTextFromEditorContent(storedContent).trim();
-      if (storedText.length > 0) {
-        return storedContent;
-      }
-    }
-  } catch (error) {
-    console.error(`Failed to load editor content backup "${reference.key}":`, error);
-  }
-
-  if ((reference.chunkCount || 0) > 0 || options.allowUnreferencedLocalFallback) {
-    const chunkContent = loadEditorContentChunks(reference.fallbackKey || reference.key);
-    if (chunkContent !== null && chunkContent !== undefined) {
-      return chunkContent;
-    }
-  }
+  const key = reference.fallbackKey || reference.key;
+  const content = loadEditorContentChunks(key);
+  if (content !== null && content !== undefined) return content;
 
   if ((reference.textChunkCount || 0) > 0 || options.allowUnreferencedLocalFallback) {
-    const textChunkContent = loadEditorTextChunks(reference.fallbackTextKey || reference.key);
-    if (textChunkContent !== null && textChunkContent !== undefined) {
-      return textChunkContent;
+    const textContent = loadEditorTextChunks(reference.fallbackTextKey || key);
+    if (textContent !== null && textContent !== undefined) return textContent;
+  }
+
+  if (reference.key.startsWith('articleSnapshot:')) {
+    const meta = readArticleMeta(reference.key);
+    if (meta) {
+      const snapshot = await loadArticleSnapshot(meta.username, meta.title);
+      if (snapshot?.content) return snapshot.content;
     }
   }
 
@@ -584,7 +528,6 @@ export const resolveEditorContentReference = async (
 };
 
 export const deleteEditorContent = async (key: string): Promise<void> => {
-  await runEditorContentTransaction('readwrite', store => store.delete(key));
   deleteEditorContentChunks(key);
   deleteEditorTextChunks(key);
 };

@@ -508,13 +508,6 @@ const resolveDraftContentForTitle = async (titleStr: string, username?: string |
     return null;
 };
 
-const hasExpectedSavedText = (content: unknown, expectedWordCount: number): boolean => {
-    const restoredWordCount = countWordsInText(extractTextFromStoredEditorContent(content));
-    if (expectedWordCount <= 0) return restoredWordCount > 0;
-    const minimumExpectedWords = Math.max(1, Math.floor(expectedWordCount * 0.98));
-    return restoredWordCount >= minimumExpectedWords;
-};
-
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
     const saved = readStorageValue(key);
     return saved === 'ar' || saved === 'en' ? saved : null;
@@ -1100,7 +1093,6 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             textFallback: currentText,
         });
 
-        const articleContentKey = getArticleContentKey(currentUser, finalTitleToSave);
         const manualDraftContentKey = getManualDraftContentKey();
         const articleSnapshot: ArticleStorageSnapshot = {
             kind: 'articleSnapshot',
@@ -1120,68 +1112,13 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             attachments: readCurrentArticleAttachments(),
             savedAt: new Date().toISOString(),
         };
-        const snapshotSaveResult = await saveArticleSnapshotDurably(articleSnapshot, {
-            saveLocalFallback: true,
-        });
-        const snapshotWasPersisted = snapshotSaveResult.indexedDb || snapshotSaveResult.localChunkCount > 0;
-        const articleSaveResult = await saveEditorContentDurably(articleContentKey, contentJSON, {
-            saveLocalContentFallback: !snapshotWasPersisted,
-            saveLocalTextFallback: true,
-            textFallback: currentText,
-        });
-        const articleContentWasPersisted = articleSaveResult.indexedDb ||
-            articleSaveResult.localChunkCount > 0 ||
-            articleSaveResult.localTextChunkCount > 0;
-
-        let contentForActivity = articleContentWasPersisted
-            ? (() => {
-                const hasFallbackChunks = articleSaveResult.localChunkCount > 0 || articleSaveResult.localTextChunkCount > 0;
-                return hasFallbackChunks
-                    ? createEditorContentReferenceWithChunkFallback(
-                        articleContentKey,
-                        articleSaveResult.localChunkCount,
-                        articleSaveResult.localTextChunkCount,
-                    )
-                    : createEditorContentReference(articleContentKey);
-            })()
-            : snapshotWasPersisted
-              ? snapshotSaveResult.reference
-              : null;
-
-        if (!contentForActivity && articleSaveResult) {
-            const hasFallbackChunks = articleSaveResult.localChunkCount > 0 || articleSaveResult.localTextChunkCount > 0;
-            contentForActivity = hasFallbackChunks
-                ? createEditorContentReferenceWithChunkFallback(
-                    articleContentKey,
-                    articleSaveResult.localChunkCount,
-                    articleSaveResult.localTextChunkCount,
-                )
-                : articleSaveResult.indexedDb
-                  ? createEditorContentReference(articleContentKey)
-                  : null;
-        }
-
-        if (!contentForActivity) {
-            const inlineFallbackReference = createEditorContentReferenceWithFallback(articleContentKey, contentJSON);
-            contentForActivity = Object.prototype.hasOwnProperty.call(inlineFallbackReference, 'fallbackContent')
-                ? inlineFallbackReference
-                : null;
-        }
-
-        if (!contentForActivity) {
-            console.error(`Skipped article activity save for "${finalTitleToSave}" because no durable content copy was written.`);
+        const snapshotSaveResult = await saveArticleSnapshotDurably(articleSnapshot);
+        if (snapshotSaveResult.localChunkCount <= 0) {
+            console.error(`Skipped article activity save for "${finalTitleToSave}" because localStorage did not accept the article content.`);
             return;
         }
 
-        const verifiedSavedContent = await resolveEditorContentReference(contentForActivity, {
-            allowUnreferencedLocalFallback: true,
-        });
-        if (!verifiedSavedContent || !hasExpectedSavedText(verifiedSavedContent, currentWordCount)) {
-            console.error(`Skipped article activity save for "${finalTitleToSave}" because the saved content could not be verified.`);
-            return;
-        }
-
-        recordArticleSave(currentUser, finalTitleToSave, contentForActivity, keywords, analysisForSave, articleLanguage, goalContext);
+        recordArticleSave(currentUser, finalTitleToSave, snapshotSaveResult.reference, keywords, analysisForSave, articleLanguage, goalContext);
         if (previousSnapshotTitleToDelete && previousSnapshotTitleToDelete !== finalTitleToSave) {
             void deleteArticleSnapshot(currentUser, previousSnapshotTitleToDelete).catch(error => {
                 console.error(`Failed to delete old article snapshot "${previousSnapshotTitleToDelete}":`, error);
