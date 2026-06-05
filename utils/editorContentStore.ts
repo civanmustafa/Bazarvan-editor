@@ -1,6 +1,7 @@
 import type { DuplicateStats, GoalContext, Keywords, StructureStats } from '../types';
 
 const LOCAL_CONTENT_PREFIX = 'bazarvan-editor-content:';
+const LOCAL_HTML_PREFIX = 'bazarvan-editor-html:';
 const LOCAL_TEXT_PREFIX = 'bazarvan-editor-text:';
 const LOCAL_ARTICLE_META_PREFIX = 'bazarvan-article-meta:';
 const LEGACY_CONTENT_PREFIX = 'bazarvan-editor-content-chunk:';
@@ -50,6 +51,7 @@ export type ArticleStorageSnapshot = {
   username: string;
   title: string;
   content: any;
+  contentHtml?: string;
   plainText: string;
   keywords: Keywords;
   goalContext?: GoalContext;
@@ -66,7 +68,7 @@ export type ArticleStorageSnapshot = {
   savedAt: string;
 };
 
-type ArticleStorageMeta = Omit<ArticleStorageSnapshot, 'content' | 'plainText'> & {
+type ArticleStorageMeta = Omit<ArticleStorageSnapshot, 'content' | 'contentHtml' | 'plainText'> & {
   contentKey: string;
 };
 
@@ -291,6 +293,10 @@ export const saveEditorTextChunks = (key: string, content: any): number => (
   saveEditorPlainTextChunks(key, extractPlainTextFromEditorContent(content))
 );
 
+export const saveEditorHtmlChunks = (key: string, html: string): number => (
+  saveStorageChunks(LOCAL_HTML_PREFIX, key, html)
+);
+
 export const loadEditorContentChunks = (key: string): any | null => {
   const serializedContent = loadStorageChunks(LOCAL_CONTENT_PREFIX, key) ??
     loadStorageChunks(LEGACY_CONTENT_PREFIX, key);
@@ -308,6 +314,10 @@ const loadEditorPlainText = (key: string): string | null => (
   loadStorageChunks(LOCAL_TEXT_PREFIX, key) ?? loadStorageChunks(LEGACY_TEXT_PREFIX, key)
 );
 
+const loadEditorHtml = (key: string): string | null => (
+  loadStorageChunks(LOCAL_HTML_PREFIX, key)
+);
+
 export const loadEditorTextChunks = (key: string): any | null => {
   const text = loadEditorPlainText(key);
   return text === null ? null : createEditorContentFromPlainText(text);
@@ -321,6 +331,10 @@ export const deleteEditorContentChunks = (key: string): void => {
 export const deleteEditorTextChunks = (key: string): void => {
   deleteStorageChunks(LOCAL_TEXT_PREFIX, key);
   deleteStorageChunks(LEGACY_TEXT_PREFIX, key);
+};
+
+export const deleteEditorHtmlChunks = (key: string): void => {
+  deleteStorageChunks(LOCAL_HTML_PREFIX, key);
 };
 
 export const deleteArticleSnapshotChunks = (key: string): void => {
@@ -402,8 +416,9 @@ export const saveArticleSnapshotDurably = async (
   const snapshotKey = getArticleSnapshotKey(snapshot.username, snapshot.title);
   const contentKey = getArticleContentKey(snapshot.username, snapshot.title);
   const contentChunkCount = saveEditorContentChunks(contentKey, snapshot.content);
+  const htmlChunkCount = snapshot.contentHtml ? saveEditorHtmlChunks(contentKey, snapshot.contentHtml) : 0;
   const textChunkCount = saveEditorPlainTextChunks(contentKey, snapshot.plainText);
-  const { content: _content, plainText: _plainText, ...metaSource } = snapshot;
+  const { content: _content, contentHtml: _contentHtml, plainText: _plainText, ...metaSource } = snapshot;
   const metaSaved = writeArticleMeta(snapshotKey, {
     ...metaSource,
     contentKey,
@@ -411,8 +426,8 @@ export const saveArticleSnapshotDurably = async (
 
   return {
     indexedDb: false,
-    localChunkCount: metaSaved && (contentChunkCount > 0 || textChunkCount > 0)
-      ? Math.max(contentChunkCount, textChunkCount)
+    localChunkCount: metaSaved && (contentChunkCount > 0 || htmlChunkCount > 0 || textChunkCount > 0)
+      ? Math.max(contentChunkCount, htmlChunkCount, textChunkCount)
       : 0,
     reference: createArticleSnapshotReference(snapshot.username, snapshot.title),
   };
@@ -424,11 +439,13 @@ export const loadArticleSnapshot = async (username: string, title: string): Prom
 
   if (meta) {
     const content = loadEditorContentChunks(meta.contentKey);
+    const contentHtml = loadEditorHtml(meta.contentKey) || undefined;
     const plainText = loadEditorPlainText(meta.contentKey) || extractPlainTextFromEditorContent(content);
-    if (content || plainText.trim()) {
+    if (contentHtml || content || plainText.trim()) {
       return {
         ...meta,
-        content: content || createEditorContentFromPlainText(plainText),
+        content: contentHtml || content || createEditorContentFromPlainText(plainText),
+        contentHtml,
         plainText,
       };
     }
@@ -439,15 +456,17 @@ export const loadArticleSnapshot = async (username: string, title: string): Prom
 
   const contentKey = getArticleContentKey(username, title);
   const content = loadEditorContentChunks(contentKey);
+  const contentHtml = loadEditorHtml(contentKey) || undefined;
   const plainText = loadEditorPlainText(contentKey) || extractPlainTextFromEditorContent(content);
-  if (!content && !plainText.trim()) return null;
+  if (!contentHtml && !content && !plainText.trim()) return null;
 
   return {
     kind: 'articleSnapshot',
     version: 1,
     username,
     title,
-    content: content || createEditorContentFromPlainText(plainText),
+    content: contentHtml || content || createEditorContentFromPlainText(plainText),
+    contentHtml,
     plainText,
     keywords: {
       primary: '',
@@ -465,6 +484,7 @@ export const deleteArticleSnapshot = async (username: string, title: string): Pr
   const contentKey = getArticleContentKey(username, title);
   deleteArticleMeta(snapshotKey);
   deleteEditorContentChunks(contentKey);
+  deleteEditorHtmlChunks(contentKey);
   deleteEditorTextChunks(contentKey);
   deleteArticleSnapshotChunks(snapshotKey);
 };

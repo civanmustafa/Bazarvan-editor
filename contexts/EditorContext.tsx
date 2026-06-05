@@ -254,7 +254,8 @@ const isValidEditorNode = (value: unknown): boolean => {
 
     if (value.type === 'heading') {
         const level = value.attrs?.level;
-        if (level !== undefined && (![1, 2, 3, 4] as const).includes(level)) return false;
+        const normalizedLevel = typeof level === 'string' ? Number(level) : level;
+        if (normalizedLevel !== undefined && (![1, 2, 3, 4] as const).includes(normalizedLevel)) return false;
     }
 
     if (value.type === 'hardBreak' || value.type === 'horizontalRule') {
@@ -1048,6 +1049,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (!editor || !currentUser) return;
         if (isArticleContentLoadingRef.current) return;
         const contentJSON = editor.getJSON();
+        const contentHTML = editor.getHTML();
         const currentText = editor.getText();
         const currentTextTrimmed = currentText.trim();
         if (title.trim() === '' && currentTextTrimmed === '') return;
@@ -1100,6 +1102,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             username: currentUser,
             title: finalTitleToSave,
             content: contentJSON,
+            contentHtml: contentHTML,
             plainText: currentText,
             keywords,
             goalContext,
@@ -1292,6 +1295,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         username: currentUser,
                         title: titleStr,
                         content: editor.getJSON(),
+                        contentHtml: editor.getHTML(),
                         plainText: editor.getText(),
                         keywords: nextKeywords,
                         goalContext: nextGoalContext,
