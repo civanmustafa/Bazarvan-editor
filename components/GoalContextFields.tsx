@@ -1,7 +1,7 @@
 import React from 'react';
 import type { GoalContext } from '../types';
 import { useUser } from '../contexts/UserContext';
-import { getGoalContextFields } from '../utils/goalContext';
+import { getGoalContextFields, getGoalContextPresetOptions, isGoalContextFieldVisible } from '../utils/goalContext';
 
 type GoalContextFieldsProps = {
   goalContext: GoalContext;
@@ -18,10 +18,40 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
 }) => {
   const { t } = useUser();
   const fields = getGoalContextFields(t.goalTab);
+  const presetOptions = getGoalContextPresetOptions(t.goalTab);
+  const selectedPreset = presetOptions.find(option => (
+    option.context.pageType === goalContext.pageType &&
+    option.context.objective === goalContext.objective &&
+    option.context.audienceScope === goalContext.audienceScope &&
+    option.context.searchIntent === goalContext.searchIntent
+  ))?.value || '';
+
+  const handlePresetChange = (presetId: string) => {
+    const preset = presetOptions.find(option => option.value === presetId);
+    if (!preset) return;
+
+    (['pageType', 'objective', 'audienceScope', 'searchIntent'] as const).forEach(key => {
+      onChange(key, preset.context[key]);
+    });
+  };
 
   return (
     <div className={className}>
-      {fields.map(field => (
+      <label className="block">
+        <span className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">{t.goalTab.readyContext}</span>
+        <select
+          value={selectedPreset}
+          onChange={(event) => handlePresetChange(event.target.value)}
+          className={fieldClass}
+        >
+          <option value="">{t.goalTab.chooseReadyContext}</option>
+          {presetOptions.map(option => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </label>
+
+      {fields.filter(field => isGoalContextFieldVisible(field, goalContext)).map(field => (
         <label key={field.key} className="block">
           <span className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">{field.label}</span>
           {field.kind === 'select' ? (

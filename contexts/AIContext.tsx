@@ -51,6 +51,7 @@ const GOAL_CONTEXT_LABELS: Record<string, string> = {
     pageType: 'نوع الصفحة',
     objective: 'هدف الصفحة',
     audienceScope: 'نطاق الجمهور',
+    targetCountry: 'المدينة/الدولة/الإقليم المستهدف',
     searchIntent: 'نية البحث',
 };
 
@@ -115,6 +116,11 @@ const getFirstGeneratedValue = (record: Record<string, unknown>, keys: string[])
     return keys.map(key => record[key]).find(value => value != null);
 };
 
+const getFirstGeneratedTextValue = (record: Record<string, unknown>, keys: string[]): string => {
+    const value = getFirstGeneratedValue(record, keys);
+    return typeof value === 'string' ? value.trim() : '';
+};
+
 const normalizeGeneratedGoalContext = (rawValue: unknown, currentContext: GoalContext): GoalContext | null => {
     if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) return null;
     const root = rawValue as Record<string, unknown>;
@@ -123,6 +129,23 @@ const normalizeGeneratedGoalContext = (rawValue: unknown, currentContext: GoalCo
         ? nestedContext as Record<string, unknown>
         : root;
     const normalizedCurrent = normalizeGoalContext(currentContext);
+
+    const audienceScope = resolveGoalContextChoice(
+        getFirstGeneratedValue(record, ['audienceScope', 'audience_scope', 'scope']),
+        GOAL_CONTEXT_ALLOWED_VALUES.audienceScope,
+        normalizedCurrent.audienceScope,
+    );
+    const generatedTargetLocation = getFirstGeneratedTextValue(record, [
+        'targetCountry',
+        'target_country',
+        'targetLocation',
+        'target_location',
+        'location',
+        'market',
+        'country',
+        'region',
+        'city',
+    ]);
 
     return normalizeGoalContext({
         pageType: resolveGoalContextChoice(
@@ -135,13 +158,11 @@ const normalizeGeneratedGoalContext = (rawValue: unknown, currentContext: GoalCo
             GOAL_CONTEXT_ALLOWED_VALUES.objective,
             normalizedCurrent.objective,
         ),
-        audienceScope: resolveGoalContextChoice(
-            getFirstGeneratedValue(record, ['audienceScope', 'audience_scope', 'scope']),
-            GOAL_CONTEXT_ALLOWED_VALUES.audienceScope,
-            normalizedCurrent.audienceScope,
-        ),
-        targetCountry: '',
-        targetAudience: '',
+        audienceScope,
+        targetCountry: audienceScope === 'global'
+            ? ''
+            : generatedTargetLocation || normalizedCurrent.targetCountry,
+        targetAudience: normalizedCurrent.targetAudience,
         searchIntent: resolveGoalContextChoice(
             getFirstGeneratedValue(record, ['searchIntent', 'search_intent', 'intent']),
             GOAL_CONTEXT_ALLOWED_VALUES.searchIntent,
@@ -4030,6 +4051,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             `- pageType: ${GOAL_CONTEXT_ALLOWED_VALUES.pageType.join(', ')}`,
             `- objective: ${GOAL_CONTEXT_ALLOWED_VALUES.objective.join(', ')}`,
             `- audienceScope: ${GOAL_CONTEXT_ALLOWED_VALUES.audienceScope.join(', ')}`,
+            '- targetCountry: نص حر لاسم المدينة أو الدولة أو الإقليم إذا كان واضحًا من العنوان أو الكلمات، وإلا اتركه فارغًا',
             `- searchIntent: ${GOAL_CONTEXT_ALLOWED_VALUES.searchIntent.join(', ')}`,
             '',
             'قواعد الاستنتاج:',
@@ -4038,9 +4060,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '- اختر searchIntent بحسب ما يوحي به العنوان والكلمات.',
             '- إذا كانت الصفحة تصنيف منتجات أو خدمات والمحتوى هدفه شرح الخيارات أو توجيه المستخدم داخل التصنيف، فغالباً اختر pageType بقيمة category وobjective بقيمة category-support وsearchIntent بقيمة commercial-support.',
             '- اختر audienceScope بحسب وضوح نطاق الاستهداف من العنوان والكلمات، وإذا لم يظهر نطاق واضح فاختر global.',
+            '- إذا اخترت local أو country أو regional وكان اسم المدينة أو الدولة أو الإقليم واضحًا، ضعه في targetCountry.',
             '',
             'أرجع JSON فقط دون Markdown ودون شرح بهذا الشكل:',
-            '{ "pageType": "service", "objective": "convert", "audienceScope": "global", "searchIntent": "transactional" }',
+            '{ "pageType": "service", "objective": "convert", "audienceScope": "global", "targetCountry": "", "searchIntent": "transactional" }',
         ].join('\n');
 
         const result = await callGeminiAnalysis(prompt, apiKeys.gemini);

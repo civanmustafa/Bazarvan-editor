@@ -4,7 +4,7 @@ import { INITIAL_GOAL_CONTEXT } from '../constants';
 import { useUser } from '../contexts/UserContext';
 import type { GoalContext } from '../types';
 import GoalContextFields from './GoalContextFields';
-import { formatGoalContextForCopy, getGoalContextFields, normalizeGoalContext, parseClientGoalContextBulk, updateGoalContextField } from '../utils/goalContext';
+import { formatGoalContextForCopy, getGoalContextFields, isGoalContextFieldVisible, normalizeGoalContext, parseClientGoalContextBulk, updateGoalContextField } from '../utils/goalContext';
 
 const inputClass = 'w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500';
 
@@ -101,7 +101,7 @@ const ClientGoalSettings: React.FC = () => {
                     <Edit3 size={14} className="text-[#d4af37] flex-shrink-0" />
                   </div>
                   <div className="mt-2 grid grid-cols-1 gap-1">
-                    {contextFields.map(field => (
+                    {contextFields.filter(field => isGoalContextFieldVisible(field, context)).map(field => (
                       <div key={field.key} className="flex items-start gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                         <span className="font-bold text-gray-600 dark:text-gray-300 flex-shrink-0">{field.label}:</span>
                         <span className="truncate">{formatFieldValue(field, context)}</span>
