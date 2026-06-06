@@ -8,8 +8,9 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
-import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis } from '../types';
+import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis, GoalContext } from '../types';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
+import { parseGoalContextText } from '../utils/goalContext';
 
 const getProgressBarColor = (status: AnalysisStatus) => {
     switch (status) {
@@ -638,12 +639,25 @@ const LeftSidebar: React.FC = () => {
     const handleAutoDistribute = (text: string) => {
         if (!text.trim()) return;
     
-        const parts = splitAutoDistributeSections(text);
+        const parts = splitAutoDistributeSections(text)
+            .map(part => part.trim())
+            .filter(Boolean);
     
         const primaryAndSynonymsPart = (parts[0] || '').trim();
         const lsiPart = (parts[1] || '').trim();
         const companyPart = (parts[2] || '').trim();
-        const competitorsPart = (parts[3] || '').trim();
+        const remainingParts = parts.slice(3);
+        let distributedGoalContext: GoalContext | null = null;
+        const competitorParts: string[] = [];
+
+        remainingParts.forEach(part => {
+            const parsedGoalContext = parseGoalContextText(part, t.goalTab);
+            if (parsedGoalContext && !distributedGoalContext) {
+                distributedGoalContext = parsedGoalContext;
+                return;
+            }
+            competitorParts.push(part);
+        });
     
         const primaryAndSynonymsLines = splitDistributedTerms(primaryAndSynonymsPart, /[\n,،]+/);
         const newPrimary = primaryAndSynonymsLines[0] || keywords.primary;
@@ -660,8 +674,13 @@ const LeftSidebar: React.FC = () => {
             lsi: newLsi,
             company: newCompany,
         });
-        applyCompanyGoalContext(newCompany);
+        if (distributedGoalContext) {
+            setGoalContext(distributedGoalContext);
+        } else {
+            applyCompanyGoalContext(newCompany);
+        }
 
+        const competitorsPart = competitorParts.join('\n');
         const competitorUrls = competitorsPart
             ? competitorsPart.split(/\r?\n/).map(url => url.trim()).filter(Boolean).slice(0, 3)
             : [];
@@ -688,7 +707,7 @@ const LeftSidebar: React.FC = () => {
             </label>
             <textarea
                 id="auto-distribute"
-                rows={4}
+                rows={9}
                 value={autoDistributeText}
                 onChange={(e) => setAutoDistributeText(e.target.value)}
                 onPaste={handlePasteAndDistribute}

@@ -31,6 +31,7 @@ type GoalContextPreset = Pick<GoalContext, 'pageType' | 'objective' | 'audienceS
 export type GoalContextPresetOption = {
   value: string;
   label: string;
+  searchText: string;
   context: GoalContext;
 };
 
@@ -75,6 +76,73 @@ const GOAL_CONTEXT_PRESETS: GoalContextPreset[] = [
   { id: 'landing-convert-country-transactional', pageType: 'landing', objective: 'convert', audienceScope: 'country', searchIntent: 'transactional' },
   { id: 'landing-trust-global-commercial', pageType: 'landing', objective: 'trust', audienceScope: 'global', searchIntent: 'commercial' },
 ];
+
+const CONTEXT_OPTION_TRANSLATION_KEYS: Partial<Record<keyof GoalContext, Record<string, keyof GoalTabTranslations['contextOptions']>>> = {
+  pageType: {
+    article: 'article',
+    news: 'news',
+    service: 'service',
+    category: 'categoryPage',
+    comparison: 'comparisonPage',
+    product: 'product',
+    landing: 'landing',
+    guide: 'guide',
+  },
+  objective: {
+    educate: 'educate',
+    compare: 'compare',
+    convert: 'convert',
+    'category-support': 'categorySupport',
+    trust: 'trust',
+    support: 'support',
+  },
+  audienceScope: {
+    local: 'local',
+    country: 'country',
+    regional: 'regional',
+    global: 'global',
+  },
+  searchIntent: {
+    informational: 'informational',
+    commercial: 'commercial',
+    'commercial-support': 'commercialSupport',
+    transactional: 'transactional',
+    navigational: 'navigational',
+    'support-intent': 'supportIntent',
+  },
+};
+
+const CHOICE_ALIASES: Partial<Record<keyof GoalContext, Record<string, string[]>>> = {
+  pageType: {
+    service: ['صفحة خدمة', 'صفحة الخدمة', 'service page'],
+    category: ['صفحة تصنيف', 'صفحة تصنيف منتجات/خدمات', 'صفحة تصنيف منتجات خدمات', 'category page'],
+    comparison: ['صفحة مقارنة', 'comparison page'],
+    product: ['صفحة منتج', 'صفحة المنتج', 'product page'],
+    landing: ['صفحة هبوط', 'landing page'],
+  },
+  objective: {
+    educate: ['شرح', 'تثقيف', 'educate'],
+    compare: ['اختيار', 'compare', 'choose'],
+    convert: ['تحويل', 'بيع', 'حجز', 'شراء', 'convert'],
+    'category-support': ['داعم', 'دعم التصنيف', 'category support'],
+    trust: ['الثقة', 'ثقة', 'trust'],
+    support: ['دعم', 'مساعدة', 'help'],
+  },
+  audienceScope: {
+    local: ['محلي', 'مدينة', 'local'],
+    country: ['دولة', 'بلد', 'country'],
+    regional: ['إقليم', 'اقليم', 'منطقة', 'region'],
+    global: ['عالمي', 'global'],
+  },
+  searchIntent: {
+    informational: ['شرح', 'معلومة', 'معلومات', 'info'],
+    commercial: ['اختيار', 'مقارنة', 'choose'],
+    'commercial-support': ['تجاري', 'commercial support'],
+    transactional: ['تنفيذ', 'شراء', 'action', 'buy'],
+    navigational: ['وصول', 'navigate'],
+    'support-intent': ['حل', 'solve'],
+  },
+};
 
 const normalizeChoiceToken = (value?: unknown): string => (
   String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
@@ -271,6 +339,18 @@ const getFieldOptionLabel = (
   return field.options.find(option => option.value === value)?.label || value;
 };
 
+const getTranslatedChoiceLabel = (
+  t: GoalTabTranslations,
+  key: keyof GoalContext,
+  value: string,
+  compact = false,
+): string => {
+  const optionKey = CONTEXT_OPTION_TRANSLATION_KEYS[key]?.[value];
+  if (!optionKey) return value;
+  const source = compact ? t.contextCompactOptions : t.contextOptions;
+  return source[optionKey] || t.contextOptions[optionKey] || value;
+};
+
 export const getGoalContextPresetOptions = (t: GoalTabTranslations): GoalContextPresetOption[] => {
   const fields = getGoalContextFields(t);
 
@@ -279,7 +359,13 @@ export const getGoalContextPresetOptions = (t: GoalTabTranslations): GoalContext
       ...INITIAL_GOAL_CONTEXT,
       ...preset,
     });
-    const label = [
+    const compactLabel = [
+      getTranslatedChoiceLabel(t, 'pageType', preset.pageType, true),
+      getTranslatedChoiceLabel(t, 'objective', preset.objective, true),
+      getTranslatedChoiceLabel(t, 'audienceScope', preset.audienceScope, true),
+      getTranslatedChoiceLabel(t, 'searchIntent', preset.searchIntent, true),
+    ].join(' - ');
+    const fullLabel = [
       getFieldOptionLabel(fields, 'pageType', preset.pageType),
       getFieldOptionLabel(fields, 'objective', preset.objective),
       getFieldOptionLabel(fields, 'audienceScope', preset.audienceScope),
@@ -288,7 +374,8 @@ export const getGoalContextPresetOptions = (t: GoalTabTranslations): GoalContext
 
     return {
       value: preset.id,
-      label,
+      label: compactLabel,
+      searchText: `${compactLabel} ${fullLabel}`,
       context,
     };
   });
@@ -381,10 +468,13 @@ const getChoiceCandidates = (field: GoalContextFieldConfig): { value: string; to
   if (field.kind !== 'select') return [];
 
   const seen = new Set<string>();
-  const candidates = field.options.flatMap(option => [option.label, option.value].map(rawValue => ({
-    value: option.value,
-    token: normalizeBulkMatchText(rawValue),
-  })));
+  const candidates = field.options.flatMap(option => {
+    const aliases = CHOICE_ALIASES[field.key]?.[option.value] || [];
+    return [option.label, option.value, ...aliases].map(rawValue => ({
+      value: option.value,
+      token: normalizeBulkMatchText(rawValue),
+    }));
+  });
 
   return candidates
     .filter(candidate => {
@@ -471,6 +561,113 @@ const findChoiceStart = (
   return bestMatch;
 };
 
+type FlexibleChoiceMatch = {
+  key: keyof GoalContext;
+  value: string;
+  token: string;
+  start: number;
+  end: number;
+};
+
+const rangesOverlap = (
+  left: Pick<FlexibleChoiceMatch, 'start' | 'end'>,
+  right: Pick<FlexibleChoiceMatch, 'start' | 'end'>,
+): boolean => left.start < right.end && right.start < left.end;
+
+const findChoiceAnywhere = (
+  field: GoalContextFieldConfig,
+  rawText: string,
+  usedRanges: Pick<FlexibleChoiceMatch, 'start' | 'end'>[] = [],
+): FlexibleChoiceMatch | null => {
+  const text = normalizeBulkMatchText(rawText);
+  let bestMatch: FlexibleChoiceMatch | null = null;
+
+  getChoiceCandidates(field).forEach(candidate => {
+    let searchFrom = 0;
+    while (searchFrom < text.length) {
+      const start = text.indexOf(candidate.token, searchFrom);
+      if (start === -1) break;
+
+      const end = start + candidate.token.length;
+      const beforeBoundary = start === 0 || text[start - 1] === ' ';
+      const afterBoundary = end === text.length || text[end] === ' ';
+      const overlapsUsedRange = usedRanges.some(range => rangesOverlap({ start, end }, range));
+
+      if (beforeBoundary && afterBoundary && !overlapsUsedRange) {
+        if (
+          !bestMatch ||
+          candidate.token.length > bestMatch.token.length ||
+          (candidate.token.length === bestMatch.token.length && start < bestMatch.start)
+        ) {
+          bestMatch = {
+            key: field.key,
+            value: candidate.value,
+            token: candidate.token,
+            start,
+            end,
+          };
+        }
+        break;
+      }
+
+      searchFrom = start + 1;
+    }
+  });
+
+  return bestMatch;
+};
+
+const removeMatchedRanges = (
+  rawText: string,
+  ranges: Pick<FlexibleChoiceMatch, 'start' | 'end'>[],
+): string => {
+  const text = normalizeBulkMatchText(rawText);
+  if (!text || ranges.length === 0) return text;
+
+  const chars = Array.from(text);
+  ranges.forEach(range => {
+    for (let index = range.start; index < range.end; index += 1) {
+      chars[index] = ' ';
+    }
+  });
+
+  return chars.join('').replace(/\s+/g, ' ').trim();
+};
+
+const parseFlexibleGoalContextText = (
+  contextText: string,
+  fields: GoalContextFieldConfig[],
+): { context: Partial<GoalContext>; complete: boolean } => {
+  const fieldKeys: (keyof GoalContext)[] = ['pageType', 'objective', 'audienceScope', 'searchIntent'];
+  const matches: Partial<Record<keyof GoalContext, FlexibleChoiceMatch>> = {};
+  const usedRanges: Pick<FlexibleChoiceMatch, 'start' | 'end'>[] = [];
+
+  fieldKeys.forEach(key => {
+    const field = getFieldByKey(fields, key);
+    const match = findChoiceAnywhere(field, contextText, usedRanges);
+    if (!match) return;
+
+    matches[key] = match;
+    usedRanges.push({ start: match.start, end: match.end });
+  });
+
+  const context: Partial<GoalContext> = {
+    pageType: matches.pageType?.value || INITIAL_GOAL_CONTEXT.pageType,
+    objective: matches.objective?.value || INITIAL_GOAL_CONTEXT.objective,
+    audienceScope: matches.audienceScope?.value || INITIAL_GOAL_CONTEXT.audienceScope,
+    searchIntent: matches.searchIntent?.value || INITIAL_GOAL_CONTEXT.searchIntent,
+  };
+
+  if (usesTargetLocation(context.audienceScope || '')) {
+    context.targetCountry = removeMatchedRanges(contextText, usedRanges);
+  }
+
+  return {
+    context,
+    complete: fieldKeys.every(key => Boolean(matches[key])),
+  };
+};
+
 const startsWithPageType = (
   value: string,
   fields: GoalContextFieldConfig[],
@@ -515,6 +712,9 @@ const parseBulkContextText = (
   contextText: string,
   fields: GoalContextFieldConfig[],
 ): Partial<GoalContext> => {
+  const flexibleResult = parseFlexibleGoalContextText(contextText, fields);
+  if (flexibleResult.complete) return flexibleResult.context;
+
   const pageTypeField = getFieldByKey(fields, 'pageType');
   const objectiveField = getFieldByKey(fields, 'objective');
   const audienceScopeField = getFieldByKey(fields, 'audienceScope');
@@ -548,6 +748,19 @@ const parseBulkContextText = (
   }
 
   return context;
+};
+
+export const parseGoalContextText = (
+  text: string,
+  t: GoalTabTranslations,
+): GoalContext | null => {
+  if (!text.trim()) return null;
+
+  const fields = getGoalContextFields(t);
+  const flexibleResult = parseFlexibleGoalContextText(text, fields);
+  return flexibleResult.complete
+    ? normalizeGoalContext(flexibleResult.context)
+    : null;
 };
 
 export const parseClientGoalContextBulk = (

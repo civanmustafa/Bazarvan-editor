@@ -213,7 +213,17 @@ export const translations = {
       unique: 'فريدة',
       duplicate: 'تكرار',
       autoDistribute: 'التوزيع التلقائي',
-      pasteToDistribute: 'الصق النص هنا للتوزيع التلقائي...',
+      pasteToDistribute: `الكلمات الأساسية
+الصيغ البديلة
+فاصل: - / * . # | ، ; TAB أو سطر رموز
+
+كلمات LSI
+فاصل: - / * . # | ، ; TAB أو سطر رموز
+
+اسم الشركة
+فاصل: - / * . # | ، ; TAB أو سطر رموز
+
+سياق هدف الصفحة والجمهور`,
       primaryKeyword: 'الكلمة الأساسية',
       enterPrimary: 'أدخل الكلمة الأساسية',
       synonyms: 'الصيغ المرادفة',
@@ -373,6 +383,7 @@ export const translations = {
       searchIntent: 'نية البحث',
       readyContext: 'سياق جاهز',
       chooseReadyContext: 'اختر سياقًا جاهزًا',
+      noReadyContextResults: 'لا توجد سياقات مطابقة',
       generateGoalContext: 'توليد السياق والجمهور بالذكاء الاصطناعي',
       generatingGoalContext: 'جار توليد السياق والجمهور...',
       goalContextGenerated: 'تم توليد السياق والجمهور وتعبئة الحقول تلقائيا.',
@@ -388,10 +399,10 @@ export const translations = {
         article: 'مقالة/دليل',
         news: 'خبر',
         service: 'خدمة',
-        categoryPage: 'صفحة تصنيف منتجات/خدمات',
-        comparisonPage: 'صفحة مقارنة',
-        product: 'صفحة منتج',
-        landing: 'صفحة هبوط',
+        categoryPage: 'تصنيف منتجات/خدمات',
+        comparisonPage: 'مقارنة',
+        product: 'منتج',
+        landing: 'هبوط',
         guide: 'دليل',
         educate: 'شرح وتثقيف',
         compare: 'مقارنة ومساعدة على الاختيار',
@@ -414,6 +425,37 @@ export const translations = {
         navigational: 'الوصول إلى علامة أو صفحة محددة',
         supportIntent: 'حل مشكلة أو معرفة طريقة الاستخدام',
         localIntent: 'شرح وتعلّم',
+      },
+      contextCompactOptions: {
+        article: 'مقال',
+        news: 'خبر',
+        service: 'خدمة',
+        categoryPage: 'تصنيف',
+        comparisonPage: 'مقارنة',
+        product: 'منتج',
+        landing: 'هبوط',
+        guide: 'دليل',
+        educate: 'شرح',
+        compare: 'اختيار',
+        convert: 'تحويل',
+        categorySupport: 'داعم',
+        trust: 'الثقة',
+        support: 'دعم',
+        sell: 'تحويل',
+        bookings: 'تحويل',
+        leads: 'تحويل',
+        retention: 'دعم',
+        local: 'محلي',
+        country: 'دولة',
+        regional: 'إقليم',
+        global: 'عالمي',
+        informational: 'شرح',
+        commercial: 'اختيار',
+        commercialSupport: 'تجاري',
+        transactional: 'تنفيذ',
+        navigational: 'وصول',
+        supportIntent: 'حل',
+        localIntent: 'شرح',
       },
     },
     // AI History Tab
@@ -849,7 +891,17 @@ export const translations = {
       unique: 'Unique',
       duplicate: 'Duplicate',
       autoDistribute: 'Auto-Distribute',
-      pasteToDistribute: 'Paste text here to auto-distribute...',
+      pasteToDistribute: `Primary keyword
+Synonyms
+Separator: - / * . # | , ; TAB or a symbol-only line
+
+LSI keywords
+Separator: - / * . # | , ; TAB or a symbol-only line
+
+Company name
+Separator: - / * . # | , ; TAB or a symbol-only line
+
+Page objective and audience context`,
       primaryKeyword: 'Primary Keyword',
       enterPrimary: 'Enter primary keyword',
       synonyms: 'Synonyms',
@@ -1009,6 +1061,7 @@ export const translations = {
       searchIntent: 'Search Intent',
       readyContext: 'Ready Context',
       chooseReadyContext: 'Select a ready context',
+      noReadyContextResults: 'No matching contexts',
       generateGoalContext: 'Generate context and audience with AI',
       generatingGoalContext: 'Generating context and audience...',
       goalContextGenerated: 'Generated the context and audience and autofilled the fields.',
@@ -1024,10 +1077,10 @@ export const translations = {
         article: 'Article/Guide',
         news: 'News',
         service: 'Service',
-        categoryPage: 'Product/Service Category Page',
-        comparisonPage: 'Comparison Page',
-        product: 'Product Page',
-        landing: 'Landing Page',
+        categoryPage: 'Product/Service Category',
+        comparisonPage: 'Comparison',
+        product: 'Product',
+        landing: 'Landing',
         guide: 'Guide',
         educate: 'Explain and educate',
         compare: 'Compare and help choose',
@@ -1050,6 +1103,37 @@ export const translations = {
         navigational: 'Reach a specific brand or page',
         supportIntent: 'Solve a problem or learn usage',
         localIntent: 'Explain and learn',
+      },
+      contextCompactOptions: {
+        article: 'Article',
+        news: 'News',
+        service: 'Service',
+        categoryPage: 'Category',
+        comparisonPage: 'Compare',
+        product: 'Product',
+        landing: 'Landing',
+        guide: 'Guide',
+        educate: 'Educate',
+        compare: 'Choose',
+        convert: 'Convert',
+        categorySupport: 'Support',
+        trust: 'Trust',
+        support: 'Help',
+        sell: 'Convert',
+        bookings: 'Convert',
+        leads: 'Convert',
+        retention: 'Help',
+        local: 'Local',
+        country: 'Country',
+        regional: 'Region',
+        global: 'Global',
+        informational: 'Info',
+        commercial: 'Choose',
+        commercialSupport: 'Commercial',
+        transactional: 'Action',
+        navigational: 'Navigate',
+        supportIntent: 'Solve',
+        localIntent: 'Info',
       },
     },
     // AI History Tab
