@@ -77,7 +77,7 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     local: 'مدينة أو منطقة محلية',
     global: 'عالمي دون سوق محدد',
     country: 'دولة واحدة محددة',
-    regional: 'عدة دول أو إقليم',
+    regional: 'إقليم',
     informational: 'شرح وتعلّم',
     commercial: 'مقارنة واختيار',
     'commercial-support': 'معلومات تجارية داعمة',
