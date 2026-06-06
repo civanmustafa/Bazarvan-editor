@@ -11,7 +11,7 @@ type GoalContextFieldsProps = {
 };
 
 const fieldClass = 'w-full rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] px-2 py-2 text-sm text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]';
-const presetInputClass = 'w-full rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] py-1.5 pe-8 ps-8 text-xs text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]';
+const presetInputClass = 'w-full rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] py-2 pe-8 ps-8 text-sm leading-5 text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]';
 
 const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
   goalContext,
@@ -87,19 +87,19 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
           <ChevronDown size={14} className="pointer-events-none absolute end-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
         </div>
         {isPresetOpen && (
-          <div className="absolute z-30 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-gray-200 bg-white py-1 text-[11px] shadow-lg dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+          <div className="absolute z-30 mt-1 max-h-52 w-full min-w-full overflow-y-auto rounded-md border border-gray-200 bg-white py-1 text-sm leading-5 shadow-lg dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
             {filteredPresetOptions.length > 0 ? filteredPresetOptions.map(option => (
               <button
                 key={option.value}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => handlePresetSelect(option)}
-                className="block w-full px-2 py-1.5 text-start text-[#333333] transition-colors hover:bg-[#d4af37]/10 focus:bg-[#d4af37]/10 focus:outline-none dark:text-[#e0e0e0] dark:hover:bg-[#d4af37]/20 dark:focus:bg-[#d4af37]/20"
+                className="block w-full whitespace-normal break-words px-3 py-2 text-start text-[#333333] transition-colors hover:bg-[#d4af37]/10 focus:bg-[#d4af37]/10 focus:outline-none dark:text-[#e0e0e0] dark:hover:bg-[#d4af37]/20 dark:focus:bg-[#d4af37]/20"
               >
                 {option.label}
               </button>
             )) : (
-              <span className="block px-2 py-1.5 text-gray-400 dark:text-gray-500">{t.goalTab.noReadyContextResults}</span>
+              <span className="block w-full px-3 py-2 text-gray-400 dark:text-gray-500">{t.goalTab.noReadyContextResults}</span>
             )}
           </div>
         )}

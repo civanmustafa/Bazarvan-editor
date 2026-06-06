@@ -127,6 +127,17 @@ const truncatePromptText = (value: string, maxLength = 9000): string => {
     return `${trimmed.slice(0, maxLength).trim()}\n\n[تم اختصار بقية النص لتخفيف حجم الطلب على API.]`;
 };
 
+const formatCompetitorEvidenceParagraphs = (value: string): string => {
+    const paragraphs = truncatePromptText(value)
+        .split(/\n{2,}/)
+        .map(paragraph => paragraph.trim())
+        .filter(Boolean);
+
+    return paragraphs
+        .map((paragraph, index) => `[فقرة ${index + 1}] ${paragraph}`)
+        .join('\n\n');
+};
+
 const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string => {
     const labels: Record<string, { ar: string; en: string }> = {
         improveConclusion: { ar: 'تحسين الخاتمة', en: 'Improve conclusion' },
@@ -134,12 +145,25 @@ const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string =
         articleToc: { ar: 'جدول المحتويات', en: 'Table of Contents' },
         currentConclusion: { ar: 'الخاتمة الحالية', en: 'Current Conclusion' },
         contentSummaryForCompetitors: { ar: 'تلخيص المحتوى للمنافسين', en: 'Content summary for competitors' },
-        competitorGapAnalysis: { ar: 'مقارنة المحتوى مع المنافسين', en: 'Compare content with competitors' },
+        competitorGapAnalysis: { ar: 'مقارنة محتوى المنافسين', en: 'Compare content with competitors' },
         competitorContentComparison: { ar: 'أفكار جديدة/متضاربة مع منافسين', en: 'New/conflicting competitor ideas' },
         combinedCommands: { ar: 'تجميعة أوامر', en: 'Commands bundle' },
-        repetitionAndFillerAudit: { ar: 'اكتشاف التكرار والحشو بين أقسام المحتوى', en: 'Repetition and filler audit' },
+        repetitionAndFillerAudit: { ar: 'اكتشاف التكرار والحشو', en: 'Repetition and filler audit' },
     };
     return labels[key]?.[isArabic ? 'ar' : 'en'] || key;
+};
+
+const READY_COMMAND_DISPLAY_ORDER = [
+    ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison,
+    ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis,
+    ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands,
+    ENGINEERING_PROMPT_IDS.smartAnalysis.repetitionAndFillerAudit,
+    ENGINEERING_PROMPT_IDS.smartAnalysis.fullArticleAudit,
+];
+
+const getReadyCommandDisplayOrder = (id: string): number => {
+    const index = READY_COMMAND_DISPLAY_ORDER.indexOf(id as typeof READY_COMMAND_DISPLAY_ORDER[number]);
+    return index === -1 ? READY_COMMAND_DISPLAY_ORDER.length : index;
 };
 
 const loadStoredCompetitorUrls = (): string[] => {
@@ -584,10 +608,11 @@ const buildReadyCommandCompetitorBlocks = (
         blocks.push(`### المنافس ${index + 1} - محتوى نص عادي
 الرابط: ${urls[index]?.trim() || 'غير محدد'}
 عدد الكلمات: ${countPromptWords(text)}
+طريقة الاستشهاد عند استخدام فكرة من هذا النص: المصدر: المنافس ${index + 1}؛ فقرة الدليل: [فقرة رقمها] مقتطف قصير من الفقرة.
 
-النص:
+النص مرقم الفقرات:
 ---
-${truncatePromptText(text)}
+${formatCompetitorEvidenceParagraphs(text)}
 ---`);
     });
 
@@ -601,10 +626,11 @@ ${truncatePromptText(text)}
 الرابط: ${content.url || content.fetchedUrl || urls[index]?.trim() || 'غير محدد'}
 العنوان: ${content.title || 'غير محدد'}
 عدد الكلمات المستخرجة: ${content.wordCount || countPromptWords(extractedText)}
+طريقة الاستشهاد عند استخدام فكرة من هذا النص: المصدر: المنافس ${index + 1}؛ فقرة الدليل: [فقرة رقمها] مقتطف قصير من الفقرة.
 
-النص المستخرج:
+النص المستخرج مرقم الفقرات:
 ---
-${truncatePromptText(extractedText)}
+${formatCompetitorEvidenceParagraphs(extractedText)}
 ---`);
     });
 
@@ -802,6 +828,9 @@ const RightSidebar: React.FC = () => {
         const isArabic = t.locale === 'ar';
         return ENGINEERING_PROMPT_DEFINITIONS
             .filter(definition => definition.source === 'smartAnalysis')
+            .sort((first, second) => (
+                getReadyCommandDisplayOrder(first.id) - getReadyCommandDisplayOrder(second.id)
+            ))
             .map(definition => ({
                 id: definition.id,
                 label: (tRs as any)[definition.labelKey] || getSmartAnalysisLabelFallback(definition.labelKey, isArabic),
