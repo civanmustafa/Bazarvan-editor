@@ -52,6 +52,10 @@ export type UserActivity = {
     gemini: string[];
     chatgpt: string[];
   };
+  geminiKeyUsage: Record<string, {
+    count: number;
+    lastUsed: string;
+  }>;
   articles: {
     [title: string]: ArticleActivity;
   };
@@ -103,6 +107,7 @@ const getDefaultUserActivity = (): UserActivity => ({
     gemini: [''],
     chatgpt: [''],
   },
+  geminiKeyUsage: {},
   articles: {},
   preferredHighlightStyle: 'background',
   preferredKeywordViewMode: 'classic',
@@ -170,6 +175,7 @@ const normalizeUserActivity = (value: unknown): UserActivity => {
   const source = isRecord(value) ? value : {};
   const defaults = getDefaultUserActivity();
   const storedApiKeys = isRecord(source.apiKeys) ? source.apiKeys : {};
+  const storedGeminiKeyUsage = isRecord(source.geminiKeyUsage) ? source.geminiKeyUsage : {};
   const articles = isRecord(source.articles)
     ? Object.entries(source.articles).reduce<UserActivity['articles']>((normalized, [title, article]) => {
         if (isRecord(article)) {
@@ -186,6 +192,15 @@ const normalizeUserActivity = (value: unknown): UserActivity => {
       gemini: toKeyList(storedApiKeys.gemini),
       chatgpt: toKeyList(storedApiKeys.chatgpt ?? storedApiKeys.openai),
     },
+    geminiKeyUsage: Object.entries(storedGeminiKeyUsage).reduce<UserActivity['geminiKeyUsage']>((normalized, [fingerprint, value]) => {
+      const record = isRecord(value) ? value : {};
+      const legacyCount = typeof value === 'number' ? value : record.count;
+      normalized[fingerprint] = {
+        count: toFiniteNumber(legacyCount),
+        lastUsed: typeof record.lastUsed === 'string' ? record.lastUsed : '',
+      };
+      return normalized;
+    }, {}),
     articles,
     preferredHighlightStyle: source.preferredHighlightStyle === 'underline' ? 'underline' : 'background',
     preferredKeywordViewMode: source.preferredKeywordViewMode === 'modern' ? 'modern' : 'classic',
@@ -432,6 +447,19 @@ export const saveUserPreference = (username:string, preferences: Partial<Pick<Us
 export const saveUserApiKeys = (username: string, apiKeys: UserActivity['apiKeys']) => {
   modifyUserData(username, user => {
     user.apiKeys = apiKeys;
+  });
+};
+
+export const recordGeminiKeyUsage = (username: string, keyFingerprint: string) => {
+  const normalizedFingerprint = keyFingerprint.trim();
+  if (!normalizedFingerprint) return;
+
+  modifyUserData(username, user => {
+    const current = user.geminiKeyUsage[normalizedFingerprint] || { count: 0, lastUsed: '' };
+    user.geminiKeyUsage[normalizedFingerprint] = {
+      count: current.count + 1,
+      lastUsed: getIstanbulTimestamp(),
+    };
   });
 };
 

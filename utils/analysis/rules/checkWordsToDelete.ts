@@ -1,10 +1,10 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult } from '../analysisUtils';
+import { createCheckResult, isProtectedKeywordTerm } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { WORDS_TO_DELETE } from '../../../constants';
 
 export const checkWordsToDelete = (context: AnalysisContext): CheckResult => {
-    const { nodes, t, articleLanguage, uiLanguage } = context;
+    const { nodes, keywords, t, articleLanguage, uiLanguage } = context;
     const tRule = t.structureAnalysis['كلمات للحذف'];
     const title = tRule.title;
     const description = tRule.description;
@@ -17,12 +17,13 @@ export const checkWordsToDelete = (context: AnalysisContext): CheckResult => {
         : `• A list of overused marketing terms or clichés to be removed.\n• Examples: ${L_WORDS_TO_DELETE.slice(0, 10).join(', ')}.\n• Goal: Reduce linguistic filler that lacks real value and diminishes reader trust.`;
     
     const searchableNodes = nodes.filter(node => (node.type === 'paragraph' || node.type === 'heading') && node.text.trim().length > 0);
-    const violations: {from: number, to: number, message: string}[] = [];
+    const violations: {from: number, to: number, message: string, text: string}[] = [];
     searchableNodes.forEach(node => {
         L_WORDS_TO_DELETE.forEach(word => {
             const regex = new RegExp(word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
             let match;
             while((match = regex.exec(node.text)) !== null) {
+                if (isProtectedKeywordTerm(match[0], keywords, articleLanguage)) continue;
                 violations.push({
                     from: node.pos + 1 + match.index,
                     to: node.pos + 1 + match.index + match[0].length,

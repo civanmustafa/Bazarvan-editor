@@ -1084,6 +1084,11 @@ ${readyCommandCompetitorBlocks}`;
             if (!response.ok) {
                 throw new Error(data.error || `${tRs.competitorExtractionFailed} (${response.status})`);
             }
+            if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
+                window.dispatchEvent(new CustomEvent('gemini-key-used', {
+                    detail: { keyFingerprint: data.keyFingerprint.trim() },
+                }));
+            }
 
             const parsed = extractJsonFromGeminiText(typeof data.text === 'string' ? data.text : '');
             if (!parsed || typeof parsed !== 'object') {

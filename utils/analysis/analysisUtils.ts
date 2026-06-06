@@ -98,6 +98,63 @@ export const normalizeArabicText = (text: string): string => {
         .replace(/\u0629/g, "\u0647"); 
 };
 
+export const tokenizeForProtectedKeywordMatching = (value: string, lang: 'ar' | 'en'): string[] => {
+    const normalized = lang === 'ar'
+        ? normalizeArabicText(value.toLowerCase())
+        : value.toLowerCase();
+
+    return normalized.match(/[\p{L}\p{N}]+/gu) || [];
+};
+
+const containsProtectedTokenSequence = (tokens: string[], sequence: string[]): boolean => {
+    if (sequence.length === 0 || sequence.length > tokens.length) return false;
+
+    for (let index = 0; index <= tokens.length - sequence.length; index++) {
+        if (sequence.every((token, offset) => tokens[index + offset] === token)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+const isProtectedTokenOverlap = (token: string, protectedToken: string): boolean => {
+    if (!token || !protectedToken) return false;
+    if (token === protectedToken) return true;
+    if (Math.min(token.length, protectedToken.length) < 2) return false;
+    return token.includes(protectedToken) || protectedToken.includes(token);
+};
+
+export const getProtectedKeywordTokenSequences = (
+    keywords: Keywords,
+    lang: 'ar' | 'en'
+): string[][] => (
+    [
+        keywords.primary,
+        ...keywords.secondaries,
+        keywords.company,
+        ...keywords.lsi,
+    ]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map(value => tokenizeForProtectedKeywordMatching(value, lang))
+        .filter(tokens => tokens.length > 0)
+);
+
+export const isProtectedKeywordTerm = (
+    term: string,
+    keywords: Keywords,
+    lang: 'ar' | 'en'
+): boolean => {
+    const termTokens = tokenizeForProtectedKeywordMatching(term, lang);
+    if (termTokens.length === 0) return false;
+
+    return getProtectedKeywordTokenSequences(keywords, lang).some(protectedTokens => (
+        containsProtectedTokenSequence(termTokens, protectedTokens) ||
+        containsProtectedTokenSequence(protectedTokens, termTokens) ||
+        termTokens.some(token => protectedTokens.some(protectedToken => isProtectedTokenOverlap(token, protectedToken)))
+    ));
+};
+
 // Counts keyword matches with language-aware boundaries.
 // Arabic uses light normalization plus common prefixes/suffixes.
 export const countOccurrences = (text: string, sub: string, lang: 'ar' | 'en'): number => {

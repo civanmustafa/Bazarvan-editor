@@ -234,7 +234,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             }
         }
         return violations;
-    }, [analysisResults, editor, text]);
+    }, [analysisResults, editor]);
 
     const handleScrollToTop = () => {
         if (scrollContainerRef.current) {
@@ -653,8 +653,8 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const activeTitle = activeStructureHighlightTitleRef.current;
         if (!activeTitle || highlightedItem !== activeTitle) return;
 
-        const activeRule = allViolations.find(violation => violation.rule.title === activeTitle)?.rule;
-        if (!activeRule) {
+        const activeRule = Object.values(analysisResults.structureAnalysis).find(rule => rule?.title === activeTitle);
+        if (!activeRule || activeRule.status === 'pass' || !activeRule.violatingItems?.length) {
             activeStructureHighlightTitleRef.current = null;
             setHighlightedItem(null);
             setTooltip(null);
@@ -668,16 +668,13 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             .filter((violation): violation is StructureViolationItem => Boolean(violation));
 
         if (resolvedViolations.length === 0) {
-            activeStructureHighlightTitleRef.current = null;
-            setHighlightedItem(null);
             setTooltip(null);
             setPinnedTooltip(null);
-            clearViolationHighlights();
             return;
         }
 
         applyStructureViolationMarks(activeTitle, resolvedViolations, activeRule.status, { scrollToFirst: false, removeAllMarks: false });
-    }, [editor, allViolations, highlightedItem, applyStructureViolationMarks, clearViolationHighlights]);
+    }, [editor, analysisResults.structureAnalysis, highlightedItem, applyStructureViolationMarks, clearViolationHighlights]);
     
     // Spotlight Search Keyboard Listener
     useEffect(() => {

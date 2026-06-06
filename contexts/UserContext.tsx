@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, createContext, useContext, useRef } from 'react';
-import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
+import { recordGeminiKeyUsage, recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
 import { USERS } from '../constants';
 import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
@@ -144,6 +144,19 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         document.documentElement.dir = uiLanguage === 'ar' ? 'rtl' : 'ltr';
         document.title = t.appTitle;
     }, [uiLanguage, t]);
+
+    useEffect(() => {
+        const handleGeminiKeyUsed = (event: Event) => {
+            if (!currentUser) return;
+            const keyFingerprint = (event as CustomEvent<{ keyFingerprint?: unknown }>).detail?.keyFingerprint;
+            if (typeof keyFingerprint !== 'string' || !keyFingerprint.trim()) return;
+            recordGeminiKeyUsage(currentUser, keyFingerprint);
+            window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+        };
+
+        window.addEventListener('gemini-key-used', handleGeminiKeyUsed);
+        return () => window.removeEventListener('gemini-key-used', handleGeminiKeyUsed);
+    }, [currentUser]);
 
     useEffect(() => {
         try {

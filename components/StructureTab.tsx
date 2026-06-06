@@ -224,7 +224,7 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
     <>
         <div
             ref={cardRef}
-            className={`group relative rounded-xl transition-all duration-200 cursor-pointer bg-white hover:bg-[#d4af37]/10 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 h-14 flex flex-col justify-between border border-gray-100 dark:border-[#3C3C3C] hover:border-[#d4af37]/30 dark:hover:border-[#d4af37]/30 shadow-sm`}
+            className={`group relative min-h-14 rounded-lg transition-all duration-200 cursor-pointer bg-white hover:bg-[#d4af37]/10 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 flex flex-col justify-between border border-gray-100 dark:border-[#3C3C3C] hover:border-[#d4af37]/30 dark:hover:border-[#d4af37]/30 shadow-sm`}
             onClick={onClick}
             onMouseEnter={() => setHoverRect(cardRef.current?.getBoundingClientRect() || null)}
             onMouseLeave={() => setHoverRect(null)}
@@ -236,9 +236,9 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
                 </div>
             )}
             
-            <div className="flex-1 flex items-center justify-between px-3">
-                <h4 className="font-bold text-[10px] text-gray-500 dark:text-[#8d8d8d] uppercase tracking-tight truncate pe-1">{item.title}</h4>
-                <div className="flex items-center gap-1.5">
+            <div className="flex-1 flex items-center justify-between gap-1.5 px-2 py-1.5 pb-2.5">
+                <h4 className="min-w-0 flex-1 whitespace-normal break-words font-bold text-[10px] leading-tight text-gray-500 dark:text-[#8d8d8d] uppercase tracking-tight pe-1">{item.title}</h4>
+                <div className="flex shrink-0 flex-col items-center justify-center gap-0.5">
                     {shouldShowStatusBadge ? (
                     <span 
                         className="text-white text-[9px] font-black min-w-[14px] h-3.5 px-1 flex items-center justify-center rounded-full"
@@ -252,10 +252,10 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
                             e.stopPropagation();
                             onInfoClick(item);
                         }}
-                        className="p-1 rounded-md text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 hover:text-[#d4af37] transition-all"
+                        className="p-0.5 rounded-md text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 hover:text-[#d4af37] transition-all"
                         aria-label={t.structureTab.showDetails}
                     >
-                        <AlertCircleIcon size={14} />
+                        <AlertCircleIcon size={13} />
                     </button>
                 </div>
             </div>
@@ -302,21 +302,22 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
             onClick={onClick}
             onMouseEnter={() => setHoverRect(rowRef.current?.getBoundingClientRect() || null)}
             onMouseLeave={() => setHoverRect(null)}
-            className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all border border-transparent ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/10 border-[#d4af37]/20 dark:border-[#d4af37]/20' : 'hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
+            className={`group flex items-center justify-between gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-all border border-transparent ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/10 border-[#d4af37]/20 dark:border-[#d4af37]/20' : 'hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
         >
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${statusColor} flex-shrink-0 shadow-sm`}></span>
-                <span className="text-[11px] font-bold text-gray-700 dark:text-gray-300">{item.title}</span>
+                <span className="min-w-0 text-[11px] font-bold leading-tight text-gray-700 dark:text-gray-300">{item.title}</span>
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
+            <div className="flex flex-col items-center gap-0.5 flex-shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
                 {shouldShowStatusBadge ? (
                 <span className={`text-white text-[8px] font-black min-w-3.5 h-3.5 px-1 flex items-center justify-center rounded-full ${item.status === 'fail' ? 'bg-[#810701]' : 'bg-amber-500'}`}>{violationDisplayLabel}</span>
                 ) : null}
                 <button
                 onClick={(e) => { e.stopPropagation(); onInfoClick(item); }}
-                className="p-1 rounded-md text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 hover:text-[#d4af37]"
+                className="p-0.5 rounded-md text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 hover:text-[#d4af37]"
+                aria-label={t.structureTab.showDetails}
                 >
-                <AlertCircleIcon size={14} />
+                <AlertCircleIcon size={13} />
                 </button>
             </div>
         </div>
@@ -1031,18 +1032,18 @@ const StructureTab: React.FC = () => {
        </div>
 
       {viewMode === 'grid' ? (
-        <div className="space-y-6 px-1">
+        <div className="space-y-4 px-0">
           {analysisGroups.map((group) => {
             const validItems = group.items.filter(Boolean);
             if (validItems.length === 0) return null;
 
             return (
               <div key={group.name}>
-                <h3 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 dark:text-gray-500 mb-4 px-1">
+                <h3 className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500 mb-2 px-0.5">
                   {group.icon}
                   <span>{group.name}</span>
                 </h3>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-2 gap-1.5">
                   {validItems.map((item) => (
                     <ChecklistItem
                       key={item!.title}
@@ -1059,18 +1060,18 @@ const StructureTab: React.FC = () => {
           })}
         </div>
       ) : (
-        <div className="space-y-5 px-1">
+        <div className="space-y-3 px-0">
           {analysisGroups.map((group) => {
             const validItems = group.items.filter(Boolean);
             if (validItems.length === 0) return null;
 
             return (
-                <div key={group.name} className="bg-white dark:bg-[#2A2A2A] p-4 rounded-2xl border border-gray-200 dark:border-[#3C3C3C] shadow-sm">
-                  <h3 className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-4">
+                <div key={group.name} className="bg-white dark:bg-[#2A2A2A] p-2.5 rounded-xl border border-gray-200 dark:border-[#3C3C3C] shadow-sm">
+                  <h3 className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500 mb-2">
                     {group.icon}
                     <span>{group.name}</span>
                   </h3>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     {validItems.map((item) => (
                       <ChecklistItemList
                         key={item!.title}

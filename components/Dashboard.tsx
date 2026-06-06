@@ -44,6 +44,23 @@ const SummaryStat: React.FC<{ icon: React.ReactNode; label: string; value: strin
   </div>
 );
 
+const createApiKeyFingerprint = (key: string): string => {
+  const normalizedKey = key.trim();
+  let hash = 2166136261;
+  for (let index = 0; index < normalizedKey.length; index += 1) {
+    hash ^= normalizedKey.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+const maskApiKey = (key: string): string => {
+  const trimmedKey = key.trim();
+  if (!trimmedKey) return '';
+  const tail = trimmedKey.slice(-4);
+  return `**** ${tail}`;
+};
+
 const SeoScoreIndicator: React.FC<{ score: number }> = ({ score }) => {
   const getScoreColor = () => {
     if (score >= 85) return 'text-green-500 bg-green-500/10 border-green-500/20';
@@ -267,7 +284,12 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     const intervalId = setInterval(refreshData, 10000);
-    return () => clearInterval(intervalId);
+    const handleActivityUpdated = () => refreshData();
+    window.addEventListener('smart-editor-activity-updated', handleActivityUpdated);
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('smart-editor-activity-updated', handleActivityUpdated);
+    };
   }, []);
 
   const handleExportHtml = () => {
@@ -407,6 +429,36 @@ const Dashboard: React.FC = () => {
   };
 
   const currentUserData = currentUser ? activityData[currentUser] : undefined;
+  const geminiUsageRows = useMemo(() => {
+    const usage = currentUserData?.geminiKeyUsage || {};
+    const geminiKeys = (currentUserData?.apiKeys?.gemini || []).filter(key => key.trim());
+    const currentRows = geminiKeys.map((key, index) => {
+      const fingerprint = createApiKeyFingerprint(key);
+      const record = usage[fingerprint];
+      return {
+        id: fingerprint,
+        label: `Gemini #${index + 1}`,
+        keyPreview: maskApiKey(key),
+        count: record?.count || 0,
+        lastUsed: record?.lastUsed || '',
+        isSavedKey: true,
+      };
+    });
+    const currentFingerprints = new Set(currentRows.map(row => row.id));
+    const archivedRows = Object.entries(usage)
+      .filter(([fingerprint, record]) => !currentFingerprints.has(fingerprint) && (record?.count || 0) > 0)
+      .map(([fingerprint, record], index) => ({
+        id: fingerprint,
+        label: `${t.unsavedGeminiKey} #${index + 1}`,
+        keyPreview: fingerprint,
+        count: record.count,
+        lastUsed: record.lastUsed,
+        isSavedKey: false,
+      }));
+
+    return [...currentRows, ...archivedRows];
+  }, [currentUserData, t.unsavedGeminiKey]);
+  const totalGeminiUses = geminiUsageRows.reduce((sum, row) => sum + row.count, 0);
 
   // Article filters stay derived from activityData so refreshData remains the only reload path.
   const filteredArticles = useMemo(() => {
@@ -624,6 +676,48 @@ const Dashboard: React.FC = () => {
                      <div className="space-y-3">
                         <SummaryStat icon={<Book size={20} />} label={t.totalArticles} value={currentUserData ? Object.keys(currentUserData.articles).length : 0} />
                         <SummaryStat icon={<Clock size={20} />} label={t.totalTime} value={formatSeconds(currentUserData ? (Object.values(currentUserData.articles) as ArticleActivity[]).reduce((sum, article) => sum + article.timeSpentSeconds, 0) : 0, t)} />
+                    </div>
+                </div>
+
+                <div>
+                    <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center gap-2">
+                        <Key size={20} />
+                        <span>{t.geminiKeyUsage}</span>
+                    </h2>
+                    <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                        <div className="mb-3 flex items-center justify-between gap-3 text-sm">
+                            <span className="font-bold text-gray-600 dark:text-gray-300">{t.geminiTotalUses}</span>
+                            <span className="rounded-full bg-[#d4af37]/10 px-2.5 py-1 text-xs font-black text-[#8a6f1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
+                                {totalGeminiUses}
+                            </span>
+                        </div>
+                        {geminiUsageRows.length > 0 ? (
+                            <div className="space-y-2">
+                                {geminiUsageRows.map(row => (
+                                    <div key={row.id} className="rounded-md border border-gray-100 bg-gray-50 p-2.5 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <div className="text-xs font-black text-gray-700 dark:text-gray-200">{row.label}</div>
+                                                <div className="mt-0.5 truncate font-mono text-[10px] text-gray-400" title={row.keyPreview}>
+                                                    {row.keyPreview}
+                                                </div>
+                                            </div>
+                                            <div className="text-end">
+                                                <div className="text-lg font-black text-[#d4af37]">{row.count}</div>
+                                                <div className="text-[10px] font-bold text-gray-400">{t.geminiUsageCount}</div>
+                                            </div>
+                                        </div>
+                                        {row.lastUsed && (
+                                            <div className="mt-2 border-t border-gray-100 pt-1.5 text-[10px] font-semibold text-gray-400 dark:border-[#333]">
+                                                {t.geminiLastUsed}: {formatIstanbulDateTime(row.lastUsed, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t.noGeminiUsageYet}</p>
+                        )}
                     </div>
                 </div>
 

@@ -38,7 +38,7 @@ export const checkImmediateDuplicateWords = (context: AnalysisContext): CheckRes
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
-    const violations: { from: number; to: number; message: string }[] = [];
+    const violations: { from: number; to: number; message: string; text: string }[] = [];
 
     const textBlocks = nodes.filter(node => (
         (node.type === 'paragraph' || node.type === 'heading') &&
@@ -64,6 +64,7 @@ export const checkImmediateDuplicateWords = (context: AnalysisContext): CheckRes
                 from,
                 to,
                 message: t.violationMessages.immediateDuplicateWord(`${previous.text} ${current.text}`),
+                text: text.slice(previous.index, current.end),
             });
         }
     });

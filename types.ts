@@ -259,6 +259,7 @@ export type AiContentPatchStatus = 'pending' | 'applied' | 'failed';
 export interface AiContentPatch {
   id: string;
   provider: AiPatchProvider;
+  commandId?: string;
   operation: AiContentPatchOperation;
   title: string;
   marker?: string;

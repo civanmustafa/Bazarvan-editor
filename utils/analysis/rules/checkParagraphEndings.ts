@@ -1,5 +1,5 @@
 import type { CheckResult } from '../../../types';
-import { createCheckResult, getAnalysisNodeSize } from '../analysisUtils';
+import { createCheckResult, getAnalysisNodeContentText, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkParagraphEndings = (context: AnalysisContext): CheckResult => {
@@ -8,7 +8,7 @@ export const checkParagraphEndings = (context: AnalysisContext): CheckResult => 
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
-    const violations: {from: number, to: number, message: string}[] = [];
+    const violations: {from: number, to: number, message: string, text: string}[] = [];
 
     if (nonEmptyParagraphs.length < 2) {
         return createCheckResult(title, 'pass', t.common.good, requiredText, 1, description);
@@ -23,7 +23,8 @@ export const checkParagraphEndings = (context: AnalysisContext): CheckResult => 
             violations.push({
                 from: p2.pos,
                 to: p2.pos + getAnalysisNodeSize(p2),
-                message: t.violationMessages.repeatedEnding(lastWord1)
+                message: t.violationMessages.repeatedEnding(lastWord1),
+                text: getAnalysisNodeContentText(p2),
             });
         }
     }

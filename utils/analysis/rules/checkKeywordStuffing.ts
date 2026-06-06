@@ -8,7 +8,7 @@ export const checkKeywordStuffing = (context: AnalysisContext): CheckResult => {
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
-    const violations: {from: number, to: number, message: string}[] = [];
+    const violations: {from: number, to: number, message: string, text: string}[] = [];
     
     if (keywords.primary && keywords.secondaries.some(s => s.trim())) {
         nonEmptyParagraphs.forEach(p => {
@@ -19,7 +19,8 @@ export const checkKeywordStuffing = (context: AnalysisContext): CheckResult => {
                     violations.push({
                         from: p.pos,
                         to: p.pos + getAnalysisNodeSize(p),
-                        message: t.violationMessages.keywordStuffing(keywords.primary, foundSecondary)
+                        message: t.violationMessages.keywordStuffing(keywords.primary, foundSecondary),
+                        text: p.text,
                     });
                 }
             }

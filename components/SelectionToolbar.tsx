@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { PenLine, Wand2, Zap, Expand, BookText, ListChecks, HelpCircle, Loader2, MessageSquarePlus, Send, X, Heading1, Combine } from 'lucide-react';
+import { PenLine, Wand2, Zap, Expand, BookText, List, ListChecks, HelpCircle, Loader2, MessageSquarePlus, Send, X, Heading1, Combine } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
@@ -33,6 +33,7 @@ const SelectionToolbar: React.FC = () => {
     { id: 'summarize', label: t.aiMenu.summarize, icon: BookText, prompt: AI_PROMPTS.SUMMARIZE },
     { id: 'suggest_title', label: t.aiMenu.suggestTitle, icon: Heading1, prompt: AI_PROMPTS.SUGGEST_TITLE },
     { id: 'merge', label: t.aiMenu.merge, icon: Combine, prompt: AI_PROMPTS.MERGE },
+    { id: 'to_bullets', label: t.aiMenu.toBullets, icon: List, prompt: AI_PROMPTS.TO_BULLETS },
     { id: 'to_steps', label: t.aiMenu.toSteps, icon: ListChecks, prompt: AI_PROMPTS.TO_STEPS },
     { id: 'to_qa', label: t.aiMenu.toQA, icon: HelpCircle, prompt: AI_PROMPTS.TO_QA },
   ];

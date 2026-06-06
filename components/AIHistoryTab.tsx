@@ -115,6 +115,9 @@ const AIHistoryTab: React.FC = () => {
             .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|replace|delete)\s*[-:–]\s*/i, '')
             .trim() || 'نص مقترح'
     );
+    const withHistoryCommandId = (patch: AiContentPatch, commandId?: string): AiContentPatch => (
+        commandId && !patch.commandId ? { ...patch, commandId } : patch
+    );
     const handleSelectManualPatch = (patch: AiContentPatch) => {
         const result = selectAiContentPatchTarget(patch);
         if (result.error) {
@@ -152,7 +155,8 @@ const AIHistoryTab: React.FC = () => {
             },
         }));
     };
-    const renderAnalysisPatch = (patch: AiContentPatch) => {
+    const renderAnalysisPatch = (patch: AiContentPatch, commandId?: string) => {
+        const actionablePatch = withHistoryCommandId(patch, commandId);
         const actionLabel = getPatchActionLabel(patch.operation);
         const isDeletePatch = patch.operation === 'delete_block';
         const localState = manualPatchUiState[patch.id];
@@ -239,7 +243,7 @@ const AIHistoryTab: React.FC = () => {
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
                             type="button"
-                            onClick={() => handleSelectManualPatchMergeDeleteTarget(patch)}
+                            onClick={() => handleSelectManualPatchMergeDeleteTarget(actionablePatch)}
                             className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-red-100 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-red-900/25"
                         >
                             <MapPin size={13} />
@@ -247,7 +251,7 @@ const AIHistoryTab: React.FC = () => {
                         </button>
                         <button
                             type="button"
-                            onClick={() => handleDeleteManualPatchMergeDeleteTarget(patch)}
+                            onClick={() => handleDeleteManualPatchMergeDeleteTarget(actionablePatch)}
                             disabled={mergeDeleteStatus === 'applied'}
                             className="flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -265,7 +269,7 @@ const AIHistoryTab: React.FC = () => {
             <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button
                     type="button"
-                    onClick={() => handleSelectManualPatch(patch)}
+                    onClick={() => handleSelectManualPatch(actionablePatch)}
                     className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
                 >
                     <MapPin size={13} />
@@ -283,7 +287,7 @@ const AIHistoryTab: React.FC = () => {
                 )}
                 <button
                     type="button"
-                    onClick={() => handleApplyManualPatch(patch)}
+                    onClick={() => handleApplyManualPatch(actionablePatch)}
                     disabled={status === 'applied'}
                     className="flex items-center gap-1 rounded-md bg-[#d4af37] px-2 py-1 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -321,7 +325,7 @@ const AIHistoryTab: React.FC = () => {
             const patch = patches.find(itemPatch => itemPatch.marker === marker || itemPatch.title === marker);
             if (patch) {
                 usedPatchIds.add(patch.id);
-                parts.push(renderAnalysisPatch(patch));
+                parts.push(renderAnalysisPatch(patch, item.commandId));
             }
 
             lastIndex = markerPattern.lastIndex;
@@ -336,7 +340,7 @@ const AIHistoryTab: React.FC = () => {
 
         patches
             .filter(patch => !usedPatchIds.has(patch.id))
-            .forEach(patch => parts.push(renderAnalysisPatch(patch)));
+            .forEach(patch => parts.push(renderAnalysisPatch(patch, item.commandId)));
 
         return <>{parts}</>;
     };

@@ -39,6 +39,7 @@ export const ENGINEERING_PROMPT_IDS = {
     evaluateSection: 'toolbar.evaluateSection',
     toQa: 'toolbar.toQa',
     toSteps: 'toolbar.toSteps',
+    toBullets: 'toolbar.toBullets',
     toTable: 'toolbar.toTable',
     changeTone: 'toolbar.changeTone',
   },
@@ -1357,6 +1358,13 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     source: 'toolbar',
     labelKey: 'toSteps',
     defaultValue: AI_PROMPTS.TO_STEPS,
+    variables: ['${selectedText}'],
+  },
+  {
+    id: ENGINEERING_PROMPT_IDS.toolbar.toBullets,
+    source: 'toolbar',
+    labelKey: 'toBullets',
+    defaultValue: AI_PROMPTS.TO_BULLETS,
     variables: ['${selectedText}'],
   },
   {

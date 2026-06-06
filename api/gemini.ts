@@ -23,6 +23,16 @@ type GeminiHistoryContent = {
 
 const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 
+const createApiKeyFingerprint = (key: string): string => {
+  const normalizedKey = key.trim();
+  let hash = 2166136261;
+  for (let index = 0; index < normalizedKey.length; index += 1) {
+    hash ^= normalizedKey.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+
 /*
  * Local Gemini API route used by the Vite dev middleware.
  * The UI may send user-provided keys; otherwise this route reads server keys.
@@ -190,7 +200,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
 
           const text = response.text;
 
-          return { status: 200, body: { text } };
+          return { status: 200, body: { text, keyFingerprint: createApiKeyFingerprint(GEMINI_API_KEY) } };
         } catch (error) {
           lastError = getGeminiErrorDetails(error);
           if (attempt === 0 && RETRIABLE_GEMINI_STATUSES.has(lastError.status)) {

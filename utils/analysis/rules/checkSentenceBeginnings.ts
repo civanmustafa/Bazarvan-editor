@@ -8,7 +8,7 @@ export const checkSentenceBeginnings = (context: AnalysisContext): CheckResult =
     const title = tRule.title;
     const description = tRule.description;
     const requiredText = tRule.required;
-    const violations: {from: number, to: number, message: string}[] = [];
+    const violations: {from: number, to: number, message: string, text: string}[] = [];
 
     nonEmptyParagraphs.forEach(p => {
         const text = getAnalysisNodeContentText(p);
@@ -22,7 +22,8 @@ export const checkSentenceBeginnings = (context: AnalysisContext): CheckResult =
                  violations.push({
                     from: p.pos, 
                     to: p.pos + getAnalysisNodeSize(p), 
-                    message: t.violationMessages.consecutiveSentences(firstWord1)
+                    message: t.violationMessages.consecutiveSentences(firstWord1),
+                    text,
                 });
             }
         }

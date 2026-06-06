@@ -38,7 +38,7 @@ const findDuplicateWords = (
         return createCheckResult(title, 'pass', t.common.good, tRule.required, 1, description, details);
     }
     
-    const violations: { from: number; to: number; message: string }[] = [];
+    const violations: { from: number; to: number; message: string; text: string }[] = [];
     const violatingNodePositions = new Set<number>();
 
     relevantNodes.forEach(node => {
@@ -64,7 +64,7 @@ const findDuplicateWords = (
                 occurrences.forEach(occurrence => {
                     const from = node.pos + 1 + occurrence.index;
                     const to = from + occurrence.text.length;
-                    violations.push({ from, to, message: t.violationMessages.repeatedWord(word) });
+                    violations.push({ from, to, message: t.violationMessages.repeatedWord(word), text: occurrence.text });
                 });
             }
         });

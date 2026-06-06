@@ -1750,6 +1750,7 @@ type GeminiChatMessage = {
 type GeminiAnalysisResult = {
     text: string;
     ok: boolean;
+    keyFingerprint?: string;
 };
 
 const getArticleChatStorageScope = (articleKey: string, title: string): string => {
@@ -1897,7 +1898,17 @@ const requestGeminiAnalysis = async (
           throw new Error('Gemini server route did not return a valid text response.');
       }
 
-      return { text: data.text, ok: true };
+      if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
+          window.dispatchEvent(new CustomEvent('gemini-key-used', {
+              detail: { keyFingerprint: data.keyFingerprint.trim() },
+          }));
+      }
+
+      return {
+          text: data.text,
+          ok: true,
+          keyFingerprint: typeof data.keyFingerprint === 'string' ? data.keyFingerprint : undefined,
+      };
     } catch (error) {
       window.clearTimeout(timeoutId);
       console.error("Error calling Gemini API:", error);
@@ -2863,17 +2874,29 @@ const applyReadyCommandPatchRules = (
     parsedResult: SmartAnalysisParsedResult,
     commandId?: string
 ): SmartAnalysisParsedResult => {
-    if (commandId !== ENGINEERING_PROMPT_IDS.smartAnalysis.peopleQuestions) return parsedResult;
+    let nextResult = parsedResult;
+
+    if (commandId === ENGINEERING_PROMPT_IDS.smartAnalysis.peopleQuestions) {
+        nextResult = {
+            displayText: parsedResult.displayText,
+            patches: parsedResult.patches.map(patch => ({
+                ...patch,
+                operation: 'insert_before_faq',
+                anchorText: patch.anchorText || 'الأسئلة الشائعة',
+                targetText: '',
+                placementLabel: patch.placementLabel || 'داخل قسم الأسئلة الشائعة',
+                contentMarkdown: ensureFaqQuestionContentMarkdown(patch.contentMarkdown),
+            })),
+        };
+    }
+
+    if (!commandId) return nextResult;
 
     return {
-        displayText: parsedResult.displayText,
-        patches: parsedResult.patches.map(patch => ({
+        ...nextResult,
+        patches: nextResult.patches.map(patch => ({
             ...patch,
-            operation: 'insert_before_faq',
-            anchorText: patch.anchorText || 'الأسئلة الشائعة',
-            targetText: '',
-            placementLabel: patch.placementLabel || 'داخل قسم الأسئلة الشائعة',
-            contentMarkdown: ensureFaqQuestionContentMarkdown(patch.contentMarkdown),
+            commandId: patch.commandId || commandId,
         })),
     };
 };
@@ -3448,6 +3471,52 @@ const getCurrentConclusionAttachmentText = (editor: any): string => {
     return editor.state.doc.textBetween(conclusionHeading.pos, sectionEnd, '\n', '\n').trim();
 };
 
+const getLeadingMarkdownHeadingText = (value: string): string => {
+    const firstLine = value
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => line.trim())
+        .find(Boolean) || '';
+    const markdownHeading = firstLine.match(/^#{1,6}\s+(.+)$/);
+    if (markdownHeading?.[1]) return markdownHeading[1].trim();
+    const htmlHeading = firstLine.match(/^<h[1-6][^>]*>(.*?)<\/h[1-6]>/i);
+    if (htmlHeading?.[1]) return htmlHeading[1].replace(/<[^>]+>/g, '').trim();
+    return '';
+};
+
+const hasLeadingConclusionHeading = (value: string): boolean => {
+    const headingText = normalizeAnchorText(getLeadingMarkdownHeadingText(value));
+    if (!headingText) return false;
+
+    return CONCLUSION_HEADING_KEYWORDS.some(keyword => {
+        const normalizedKeyword = normalizeAnchorText(keyword);
+        return normalizedKeyword && headingText.includes(normalizedKeyword);
+    });
+};
+
+const isImproveConclusionPatch = (patch: AiContentPatch): boolean => (
+    patch.commandId === ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion
+);
+
+const resolveImproveConclusionPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget | null => {
+    if (!isImproveConclusionPatch(patch) || patch.operation === 'delete_block') return null;
+    const conclusionHeading = findConclusionAttachmentHeading(editor);
+    if (!conclusionHeading) return null;
+
+    const sectionEnd = findSectionEnd(editor, conclusionHeading);
+    const replaceWholeSection = isIndependentH2SectionContent(patch.contentMarkdown) || hasLeadingConclusionHeading(patch.contentMarkdown);
+    const from = replaceWholeSection ? conclusionHeading.pos : conclusionHeading.to;
+    const to = Math.max(from, sectionEnd);
+
+    return {
+        from,
+        to,
+        selectFrom: conclusionHeading.pos,
+        selectTo: Math.max(conclusionHeading.to, sectionEnd),
+        mode: 'replace',
+    };
+};
+
 const findFaqAppendTarget = (editor: any, docEnd: number): PatchTarget => {
     const faqHeading = findHeadingByKeywords(editor, FAQ_SECTION_HEADING_KEYWORDS);
 
@@ -3563,6 +3632,10 @@ type PatchTarget = {
 const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget | { error: string } => {
     if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
     const docEnd = editor.state.doc.content.size;
+    const improveConclusionTarget = resolveImproveConclusionPatchTarget(editor, patch);
+
+    if (improveConclusionTarget) return improveConclusionTarget;
+
     const independentH2Target = resolveIndependentH2SectionPatchTarget(editor, patch, docEnd);
 
     if (independentH2Target) return independentH2Target;
