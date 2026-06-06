@@ -94,6 +94,31 @@ const GOAL_CONTEXT_ALLOWED_VALUES = {
     searchIntent: ['informational', 'commercial', 'commercial-support', 'transactional', 'navigational', 'support-intent'],
 } as const;
 
+const getArticleLanguageLabel = (articleLanguage: string): string => (
+    articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'
+);
+
+const buildAiOutputLanguageInstruction = (articleLanguage: string): string => (
+    articleLanguage === 'en'
+        ? [
+            '**قاعدة لغة الإخراج الإلزامية:**',
+            '- لغة المقال هي الإنجليزية.',
+            '- اكتب كل الشروحات والتحليل والتقييم وأسباب الاقتراح ومواضع التنفيذ وعناوين البطاقات والملاحظات باللغة العربية.',
+            '- اكتب فقط النصوص المقترحة الجاهزة للإدراج أو الاستبدال أو النسخ داخل المقال باللغة الإنجليزية.',
+            '- في JSON الأزرار السريعة: عناصر suggestions هي نصوص مقترحة جاهزة للمقال، لذلك يجب أن تكون بالإنجليزية فقط ودون شرح عربي داخلها.',
+            '- في JSON الأوامر الجاهزة: اجعل analysisMarkdown وtitle وreason وplacementLabel بالعربية، واجعل contentMarkdown فقط باللغة الإنجليزية لأنه النص المقترح للمقال.',
+            '- أبقِ targetText وanchorText وmergeDeleteTargetText وmergeDeleteAnchorText نصوصاً حرفية كما تظهر في المحرر دون ترجمة، حتى يعمل التحديد والاستبدال بدقة.',
+            '- في تحليل العناوين: اجعل flaws بالعربية، واجعل suggestions عناوين مقترحة بالإنجليزية فقط.',
+            '- لا تخلط العربية داخل النص الإنجليزي المقترح إلا إذا كان اسماً أو علامة تجارية يجب نقلها كما هي.',
+        ].join('\n')
+        : [
+            '**قاعدة لغة الإخراج الإلزامية:**',
+            '- لغة المقال هي العربية.',
+            '- اكتب الشروحات والتحليل والتقييم وأسباب الاقتراح ومواضع التنفيذ باللغة العربية.',
+            '- اكتب النصوص المقترحة الجاهزة للإدراج أو الاستبدال أو النسخ داخل المقال باللغة العربية.',
+        ].join('\n')
+);
+
 const normalizeTokenForMatching = (value: string) => value.trim().toLowerCase();
 
 const resolveGoalContextChoice = (
@@ -849,6 +874,7 @@ const formatBulkFixGroupPrompt = (
         '- حافظ على وظيفة النص داخل القسم كما يوضح سياق الموضع، ولا تجعله يكرر ما قبله أو يقفز فوق ما بعده.',
         '- لا تبدأ الاقتراح بمقدمة عامة إذا كان النص السابق بدأ الفكرة، ولا تعيد شرح معلومة ستأتي مباشرة في النص اللاحق.',
         '- قدم اقتراحين فقط مختلفين قابلين للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
+        '- يجب أن يكون fixedText بلغة المقال فقط؛ إذا كانت لغة المقال الإنجليزية فاكتب fixedText بالإنجليزية، واجعل label وcriteriaChecks بالعربية.',
         '- رتّب الاقتراحات بحيث يأتي أولاً الاقتراح الذي يجعل أكبر عدد من تدقيقات criteriaChecks بحالة pass، ثم الأقل كسراً للقيود.',
         '- إذا كان هدف الإصلاح هو تقصير فقرة أو ضبط طولها، فلا تطل الجمل ولا تضف شرحاً غير ضروري.',
         '- حافظ خصوصاً على قيود الحماية المعروضة فقط، ولا تضف كلمات بطيئة أو كلمات للحذف أو مخالفات ترقيم أو إحالات غامضة جديدة.',
@@ -2110,6 +2136,7 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 
 تعليمات تنفيذية للمحرر:
 أرجع الرد بصيغة JSON فقط دون أي نص خارج JSON. يجب أن يكون محتوى التقرير العربي داخل analysisMarkdown، ويجب أن تكون أي إضافات جاهزة للتطبيق داخل patches.
+التزم بقاعدة لغة الإخراج المرفقة في سياق الطلب: عند لغة المقال الإنجليزية اجعل الشرح والحقول الوصفية بالعربية، واجعل النصوص المقترحة داخل contentMarkdown بالإنجليزية فقط، واترك targetText وanchorText نصوصاً حرفية من المحرر دون ترجمة.
 هذه التعليمات لها أولوية على أي طلب سابق يطلب كتابة النصوص الجاهزة داخل التقرير نفسه.
 مهم جداً: لا تكرر أي نص جاهز للإضافة داخل analysisMarkdown وداخل patches في الوقت نفسه.
 اجعل analysisMarkdown للتشخيص العام المختصر فقط. عند وجود بطاقة تنفيذ، لا تكرر عنوانها أو سببها أو موضعها أو نصها داخل analysisMarkdown.
@@ -3286,6 +3313,7 @@ const findExactBulkFixTextUnitMatch = (editor: any, targetText: string, preferre
     const normalizedTarget = normalizeBulkFixRangeMatchText(targetText);
     if (!normalizedTarget) return null;
     const candidates: TextBlockMatch[] = [];
+    const topLevelBlocks: { from: number; to: number }[] = [];
 
     editor.state.doc.descendants((node: any, pos: number) => {
         if (!node.isBlock || !['paragraph', 'heading', 'listItem'].includes(node.type.name)) return true;
@@ -3294,6 +3322,26 @@ const findExactBulkFixTextUnitMatch = (editor: any, targetText: string, preferre
         candidates.push({ from: pos, to: pos + node.nodeSize, score: 4 });
         return true;
     });
+
+    editor.state.doc.forEach((node: any, offset: number) => {
+        if (!node.textContent?.trim()) return;
+        topLevelBlocks.push({ from: offset, to: offset + node.nodeSize });
+    });
+
+    const targetLength = normalizedTarget.length;
+    for (let startIndex = 0; startIndex < topLevelBlocks.length; startIndex++) {
+        const from = topLevelBlocks[startIndex].from;
+        for (let endIndex = startIndex; endIndex < topLevelBlocks.length; endIndex++) {
+            const to = topLevelBlocks[endIndex].to;
+            const normalizedCandidate = normalizeBulkFixRangeMatchText(editor.state.doc.textBetween(from, to, ' '));
+            if (!normalizedCandidate) continue;
+            if (normalizedCandidate === normalizedTarget) {
+                candidates.push({ from, to, score: 5 });
+                break;
+            }
+            if (normalizedCandidate.length > targetLength * 1.2 && endIndex > startIndex) break;
+        }
+    }
 
     return candidates.sort((a, b) => Math.abs(a.from - preferredFrom) - Math.abs(b.from - preferredFrom))[0] || null;
 };
@@ -3849,7 +3897,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const professionalRoleAndGoal = `أنت كاتب محتوى خبير في موضوع "${keywords.primary || 'المحتوى العام'}". هدفك إنتاج محتوى متوافق مع SEO و AEO و GEO.`;
         let contextParts: string[] = [];
         if (includeArticleTitle && title.trim()) contextParts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
-        contextParts.push(`**لغة المقال:** ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`);
+        contextParts.push(`**لغة المقال:** ${getArticleLanguageLabel(articleLanguage)}`);
+        contextParts.push(buildAiOutputLanguageInstruction(articleLanguage));
         const keywordContext = [
             `- الأساسية: ${keywords.primary || 'لم تحدد'}`,
             `- المرادفة: ${keywords.secondaries.filter(Boolean).join(', ') || 'لم تحدد'}`,
@@ -3886,7 +3935,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (articleTitle && title.trim()) {
             parts.push(`**عنوان المقال الحالي:** ${title.trim()}`);
         }
-        parts.push(`**لغة المقال:** ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`);
+        parts.push(`**لغة المقال:** ${getArticleLanguageLabel(articleLanguage)}`);
+        parts.push(buildAiOutputLanguageInstruction(articleLanguage));
         if (articleToc) {
             const tocString = generateToc(editor);
             parts.push(`**جدول محتويات المقالة:**\n${tocString || '- لا يوجد جدول محتويات متاح لأن المقال لا يحتوي على عناوين بعد.'}`);
@@ -3976,6 +4026,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '- لا تقترح كلمات بعيدة عن نية البحث.',
             '- اجعل كل الاقتراحات طبيعية وقابلة للاستخدام داخل محتوى حقيقي.',
             '- راعِ هدف المقالة والجمهور المستهدف في كل اقتراح.',
+            '- اجعل كل عناصر secondaries وlsi بلغة المقال فقط؛ إذا كانت لغة المقال الإنجليزية فاكتب القوائم بالإنجليزية.',
             '- لا تعتبر اسم الشركة صيغة بديلة أو كلمة LSI، ولا تضع اسم الشركة أو جزءًا منه في أي قائمة.',
             '- لا تكرر الكلمة المفتاحية الأساسية نفسها ضمن الصيغ البديلة.',
             '- لا تعتبر الكلمة المفتاحية الأساسية أو أي صيغة بديلة أو جزءًا منهما كلمة LSI.',
@@ -4337,7 +4388,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         ].join('\n'),
                 ].filter(Boolean).join('\n\n')
                 : prompt;
-            const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً وباقتراحين مختلفين بالضبط، حتى إذا طلب نص الأمر اقتراحًا واحدًا: { "suggestions": ["الاقتراح الأول", "الاقتراح الثاني"] }`;
+            const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً وباقتراحين مختلفين بالضبط، حتى إذا طلب نص الأمر اقتراحًا واحدًا. كل عنصر داخل suggestions يجب أن يكون النص المقترح النهائي فقط بلغة المقال دون شرح أو تسمية. الشكل: { "suggestions": ["...", "..."] }`;
             const resultJson = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
@@ -4383,7 +4434,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 ].filter(Boolean).join('\n');
             }).join('\n\n---\n\n');
             const promptTemplate = getEngineeringPrompt(engineeringPrompts, ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings);
-            const prompt = `${buildComprehensivePrompt(promptTemplate)}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
+            const prompt = `${buildComprehensivePrompt(promptTemplate)}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً. اجعل flaws ملاحظات عربية، واجعل suggestions عناوين مقترحة بلغة المقال فقط: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
             const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
             const parsed = extractJson(resultJson);
             if (Array.isArray(parsed)) {
@@ -4504,6 +4555,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (!primaryVariant) {
             throw new Error('AI did not return usable suggestions.');
         }
+        const finalRange = resolveBulkFixReviewRange({ from: group.from, to: group.to, originalText: targetText });
+        if (!finalRange) {
+            throw new Error('النص الأصلي تغير أثناء إنشاء الاقتراح. أعد إنشاء قائمة الإصلاحات بعد انتهاء التعديل.');
+        }
 
         const ruleTitles = fallbackTargetRules.map(rule => rule.title);
         return {
@@ -4511,18 +4566,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             ruleTitle: ruleTitles.length > 1 ? `${ruleTitles.length} معايير: ${ruleTitles.join('، ')}` : ruleTitles[0],
             ruleTitles,
             criteria,
-            originalText: targetText,
+            originalText: finalRange.currentText,
             fixedText: primaryVariant.fixedText,
             variants,
-            from: group.from,
-            to: group.to,
+            from: finalRange.from,
+            to: finalRange.to,
             message: group.violations
                 .map(violation => `${violation.rule.title}: ${violation.item.message}`)
                 .filter(Boolean)
                 .join(' | '),
             status: 'pending',
         };
-    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, apiKeys.gemini]);
+    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, apiKeys.gemini, resolveBulkFixReviewRange]);
 
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
         if (!editor || !analysisResults.structureAnalysis) return;
@@ -4579,17 +4634,26 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             ? getRelatedBulkFixViolations(editor, allViolations, selectedRuleTitles)
             : [];
         const groupedViolations = groupBulkFixViolationsByTextUnit(editor, [...selectedViolations, ...relatedViolations]);
-        setFixAllProgress(p => ({ ...p, total: groupedViolations.length }));
+        const groupedTargets = groupedViolations
+            .map(group => {
+                const originalText = getSafeRangeText(group.from, group.to);
+                return originalText ? { group, originalText, from: group.from, to: group.to } : null;
+            })
+            .filter((target): target is { group: BulkFixTargetGroup; originalText: string; from: number; to: number } => Boolean(target));
+        setFixAllProgress(p => ({ ...p, total: groupedTargets.length }));
 
         const proposedItems: BulkFixReviewItem[] = [];
-        for (let i = 0; i < groupedViolations.length; i++) {
-            const group = groupedViolations[i];
+        for (let i = 0; i < groupedTargets.length; i++) {
+            const targetSnapshot = groupedTargets[i];
+            const originalGroup = targetSnapshot.group;
             setFixAllProgress(p => ({ ...p, current: i + 1 }));
             try {
-                const targetText = getSafeRangeText(group.from, group.to);
-                if (targetText === null) {
-                    throw new Error('Target range is no longer valid.');
+                const resolvedStartRange = resolveBulkFixReviewRange(targetSnapshot);
+                if (!resolvedStartRange) {
+                    throw new Error('النص الأصلي تغير داخل المحرر أثناء إنشاء الاقتراحات. أعد تشغيل الإصلاح المجمع بعد انتهاء التعديل.');
                 }
+                const group = { ...originalGroup, from: resolvedStartRange.from, to: resolvedStartRange.to };
+                const targetText = resolvedStartRange.currentText;
                 const targetContext = getBulkFixTargetContext(editor, group, title);
                 const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
                 const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
@@ -4633,16 +4697,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const primaryVariant = variants[0];
                 const ruleTitles = fallbackTargetRules.map(rule => rule.title);
                 if (primaryVariant) {
+                    const finalRange = resolveBulkFixReviewRange({ from: resolvedStartRange.from, to: resolvedStartRange.to, originalText: targetText });
+                    if (!finalRange) {
+                        throw new Error('النص الأصلي تغير أثناء إنشاء الاقتراح. أعد تشغيل الإصلاح المجمع بعد انتهاء التعديل.');
+                    }
                     proposedItems.push({
                         id: `bulk-fix-${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`,
                         ruleTitle: ruleTitles.length > 1 ? `${ruleTitles.length} معايير: ${ruleTitles.join('، ')}` : ruleTitles[0],
                         ruleTitles,
                         criteria,
-                        originalText: targetText,
+                        originalText: finalRange.currentText,
                         fixedText: primaryVariant.fixedText,
                         variants,
-                        from: group.from,
-                        to: group.to,
+                        from: finalRange.from,
+                        to: finalRange.to,
                         message: group.violations
                             .map(violation => `${violation.rule.title}: ${violation.item.message}`)
                             .filter(Boolean)
@@ -4654,11 +4722,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
             } catch (e) {
                 const message = e instanceof Error ? e.message : 'Unknown fix error';
-                console.error('Fix all proposal failed:', group.id, e);
+                console.error('Fix all proposal failed:', originalGroup.id, e);
                 setFixAllProgress(p => ({
                     ...p,
                     failed: p.failed + 1,
-                    errors: [...p.errors, `${group.violations.map(violation => violation.rule.title).join(', ')}: ${message}`].slice(-3),
+                    errors: [...p.errors, `${originalGroup.violations.map(violation => violation.rule.title).join(', ')}: ${message}`].slice(-3),
                 }));
             }
         }
@@ -4678,7 +4746,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             });
         });
         setFixAllProgress(p => ({ ...p, running: false }));
-    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems]);
+    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange]);
 
     const updateBulkFixReviewItem = useCallback((itemId: string, updates: Partial<BulkFixReviewItem>) => {
         updateBulkFixReviewItems(items => items.map(item => (

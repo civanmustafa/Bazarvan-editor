@@ -149,6 +149,7 @@ const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string =
         competitorContentComparison: { ar: 'أفكار جديدة/متضاربة مع منافسين', en: 'New/conflicting competitor ideas' },
         combinedCommands: { ar: 'تجميعة أوامر', en: 'Commands bundle' },
         repetitionAndFillerAudit: { ar: 'اكتشاف التكرار والحشو', en: 'Repetition and filler audit' },
+        articleSectionOrder: { ar: 'ترتيب الأقسام', en: 'Section order analysis' },
     };
     return labels[key]?.[isArabic ? 'ar' : 'en'] || key;
 };
@@ -958,6 +959,8 @@ ${readyCommandCompetitorBlocks}`;
                 return <LocateFixed size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.repetitionAndFillerAudit:
                 return <FileSearch size={16} className={iconClass} />;
+            case ENGINEERING_PROMPT_IDS.smartAnalysis.articleSectionOrder:
+                return <LayoutTemplate size={16} className={iconClass} />;
             default:
                 return <Command size={16} className={iconClass} />;
         }
