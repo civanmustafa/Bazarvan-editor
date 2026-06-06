@@ -1,11 +1,11 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2, FileText } from 'lucide-react';
+import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2, FileText, Trash2 } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
-import { parseMarkdownToHtml } from '../utils/editorUtils';
+import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
@@ -135,7 +135,7 @@ const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string =
         currentConclusion: { ar: 'الخاتمة الحالية', en: 'Current Conclusion' },
         contentSummaryForCompetitors: { ar: 'تلخيص المحتوى للمنافسين', en: 'Content summary for competitors' },
         competitorGapAnalysis: { ar: 'مقارنة المحتوى مع المنافسين', en: 'Compare content with competitors' },
-        competitorContentComparison: { ar: 'مقارنة المحتوى + محتوى جاهز', en: 'Competitor comparison + ready content' },
+        competitorContentComparison: { ar: 'أفكار جديدة/متضاربة مع منافسين', en: 'New/conflicting competitor ideas' },
         combinedCommands: { ar: 'تجميعة أوامر', en: 'Commands bundle' },
         repetitionAndFillerAudit: { ar: 'اكتشاف التكرار والحشو بين أقسام المحتوى', en: 'Repetition and filler audit' },
     };
@@ -698,6 +698,8 @@ const RightSidebar: React.FC = () => {
         isAiLoading,
         applyAiInsertionPatch,
         selectAiInsertionPatchTarget,
+        deleteAiInsertionPatchMergeDeleteTarget,
+        selectAiInsertionPatchMergeDeleteTarget,
     } = useAI();
     
     const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors'>('structure');
@@ -978,7 +980,7 @@ ${readyCommandCompetitorBlocks}`;
 
     const handleCopyPatch = async (patchId: string, content: string) => {
         try {
-            await navigator.clipboard.writeText(content);
+            await copyMarkdownToClipboard(content);
             setCopiedPatchId(patchId);
             window.setTimeout(() => {
                 setCopiedPatchId(current => current === patchId ? '' : current);
@@ -1155,6 +1157,13 @@ ${readyCommandCompetitorBlocks}`;
         const patchLocationText = patch.placementLabel || patch.anchorText || patch.targetText || 'لم يتم تحديد موضع نصي دقيق.';
         const patchReason = patch.reason || 'سبب الاقتراح غير محدد.';
         const reasonLabel = actionLabel === 'استبدال' ? 'سبب الاستبدال' : 'سبب إضافة النص المقترح';
+        const hasMergeDeleteTarget = Boolean(
+            patch.mergeDeleteTargetText?.trim() ||
+            patch.mergeDeletePlacementLabel?.trim() ||
+            patch.mergeDeleteAnchorText?.trim()
+        );
+        const mergeDeleteLocationText = patch.mergeDeletePlacementLabel || patch.mergeDeleteAnchorText || patch.mergeDeleteTargetText || 'لم يتم تحديد موضع فقرة الحذف نصيًا.';
+        const mergeDeleteStatus = patch.mergeDeleteStatus || 'pending';
 
         return (
             <div key={patch.id} className="my-3 border border-[#d4af37]/25 dark:border-[#d4af37]/30 rounded-md bg-white/80 dark:bg-[#1F1F1F]/80 p-2 not-prose">
@@ -1190,6 +1199,43 @@ ${readyCommandCompetitorBlocks}`;
                     <div className="mb-1 text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">النص المقترح</div>
                     <div className="text-xs text-gray-700 dark:text-gray-300 ai-output" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }} />
                 </div>
+
+                {hasMergeDeleteTarget && (
+                    <div className="mt-2 rounded-md border border-red-100 bg-red-50/70 p-2 dark:border-red-900/30 dark:bg-red-900/10">
+                        <div className="text-[10px] font-bold text-red-700 dark:text-red-300">الفقرة المدمجة المطلوب حذفها</div>
+                        <div className="mt-1 text-[10px] leading-relaxed text-gray-600 dark:text-gray-300 break-words">
+                            <span className="font-semibold">مكان الفقرة في المحرر: </span>
+                            {mergeDeleteLocationText}
+                        </div>
+                        {patch.mergeDeleteTargetText && (
+                            <div className="mt-1.5 max-h-24 overflow-y-auto rounded border border-red-100 bg-white/70 p-1.5 text-[11px] leading-relaxed text-gray-700 dark:border-red-900/30 dark:bg-[#1F1F1F]/60 dark:text-gray-200">
+                                {patch.mergeDeleteTargetText}
+                            </div>
+                        )}
+                        {patch.mergeDeleteApplyError && (
+                            <div className="mt-1.5 rounded bg-red-100 px-2 py-1 text-[11px] font-semibold text-red-700 dark:bg-red-900/20 dark:text-red-300">{patch.mergeDeleteApplyError}</div>
+                        )}
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => selectAiInsertionPatchMergeDeleteTarget(provider, patch.id)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-white dark:bg-[#2A2A2A] text-gray-700 dark:text-gray-200 hover:bg-red-100 dark:hover:bg-red-900/25"
+                            >
+                                <LocateFixed size={13} />
+                                موضع الحذف
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => deleteAiInsertionPatchMergeDeleteTarget(provider, patch.id)}
+                                disabled={mergeDeleteStatus === 'applied'}
+                                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {mergeDeleteStatus === 'applied' ? <CheckCircle2 size={13} /> : <Trash2 size={13} />}
+                                {mergeDeleteStatus === 'applied' ? 'تم حذف الفقرة' : 'حذف الفقرة'}
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {patch.applyError && (
                     <div className="mt-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 rounded px-2 py-1">{patch.applyError}</div>
@@ -1244,6 +1290,9 @@ ${readyCommandCompetitorBlocks}`;
                 patch.targetText,
                 patch.placementLabel,
                 patch.contentMarkdown,
+                patch.mergeDeleteTargetText,
+                patch.mergeDeletePlacementLabel,
+                patch.mergeDeleteAnchorText,
             ].join('|').replace(/\s+/g, ' ').trim().toLowerCase();
 
             return key && source.findIndex(item => [
@@ -1254,6 +1303,9 @@ ${readyCommandCompetitorBlocks}`;
                 item.targetText,
                 item.placementLabel,
                 item.contentMarkdown,
+                item.mergeDeleteTargetText,
+                item.mergeDeletePlacementLabel,
+                item.mergeDeleteAnchorText,
             ].join('|').replace(/\s+/g, ' ').trim().toLowerCase() === key) === index;
         });
 

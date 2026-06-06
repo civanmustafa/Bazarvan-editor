@@ -265,6 +265,97 @@ export const parseMarkdownToArticleHtml = (markdown: string, articleLanguage: 'a
     applyArticleLanguageFlowToHtml(parseMarkdownToHtml(markdown), articleLanguage)
 );
 
+const stripInlineMarkdownForClipboard = (text: string): string => text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1');
+
+const htmlTableToPlainText = (html: string): string => {
+    if (typeof DOMParser === 'undefined') return '';
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const table = doc.querySelector('table');
+    if (!table) return '';
+
+    return Array.from(table.querySelectorAll('tr'))
+        .map(row => Array.from(row.querySelectorAll('th,td'))
+            .map(cell => (cell.textContent || '').replace(/\s+/g, ' ').trim())
+            .join('\t')
+        )
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+};
+
+export const markdownToClipboardPlainText = (markdown: string): string => {
+    const normalizedMarkdown = stripWrappingCodeFence(markdown);
+    const trimmedMarkdown = normalizedMarkdown.trim();
+    if (/^<table[\s\S]*<\/table>$/i.test(trimmedMarkdown)) {
+        const tableText = htmlTableToPlainText(trimmedMarkdown);
+        if (tableText) return tableText;
+    }
+
+    const outputLines: string[] = [];
+
+    normalizedMarkdown.split('\n').forEach(line => {
+        const trimmedLine = line.trim();
+        if (!trimmedLine) {
+            outputLines.push('');
+            return;
+        }
+
+        if (isMarkdownTableSeparator(trimmedLine)) return;
+        if (isMarkdownTableRow(trimmedLine)) {
+            outputLines.push(splitMarkdownTableRow(trimmedLine).map(stripInlineMarkdownForClipboard).join('\t'));
+            return;
+        }
+
+        const headingMatch = trimmedLine.match(/^#{1,6}\s+(.+)$/);
+        if (headingMatch) {
+            outputLines.push(stripInlineMarkdownForClipboard(headingMatch[1].trim()));
+            return;
+        }
+
+        if (/^[*\-•]\s+/.test(trimmedLine)) {
+            outputLines.push(`• ${stripInlineMarkdownForClipboard(trimmedLine.replace(/^[*\-•]\s+/, '').trim())}`);
+            return;
+        }
+
+        const orderedMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
+        if (orderedMatch) {
+            outputLines.push(`${orderedMatch[1]}. ${stripInlineMarkdownForClipboard(orderedMatch[2].trim())}`);
+            return;
+        }
+
+        outputLines.push(stripInlineMarkdownForClipboard(trimmedLine));
+    });
+
+    return outputLines
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
+export const copyMarkdownToClipboard = async (markdown: string): Promise<void> => {
+    const plainText = markdownToClipboardPlainText(markdown) || markdown;
+    const html = parseMarkdownToHtml(markdown);
+
+    if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined' && html.trim()) {
+        const clipboardHtml = `<!doctype html><html><head><meta charset="utf-8"></head><body><div dir="auto">${html}</div></body></html>`;
+        await navigator.clipboard.write([
+            new ClipboardItem({
+                'text/html': new Blob([clipboardHtml], { type: 'text/html' }),
+                'text/plain': new Blob([plainText], { type: 'text/plain' }),
+            }),
+        ]);
+        return;
+    }
+
+    await navigator.clipboard.writeText(plainText);
+};
+
 
 export const getNodeText = (node: any): string => {
   if (!node) {

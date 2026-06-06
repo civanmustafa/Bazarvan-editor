@@ -10,8 +10,8 @@ export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
     const requiredText = tRule.required;
     
     const details = uiLanguage === 'ar'
-        ? "• ينطبق على فقرات المحتوى الأساسية (خارج المقدمة، الخاتمة، والأسئلة الشائعة، وتمهيد القوائم المنتهي بنقطتين).\n• طول الفقرة المثالي: 1-4 جمل.\n• عدد الكلمات المسموح: 30-100 كلمة.\n• الهدف: تجنب الكتل النصية الطويلة لتحسين قابلية القراءة."
-        : "• Applies to core content paragraphs (excluding intro, conclusion, FAQs, and colon-ended list intro paragraphs).\n• Ideal length: 1-4 sentences.\n• Allowed words: 30-100 words.\n• Goal: Avoid large text blocks to improve readability.";
+        ? "• ينطبق على فقرات المحتوى الأساسية (خارج المقدمة، الخاتمة، والأسئلة الشائعة، وتمهيد القوائم المنتهي بنقطتين أو علامة استفهام).\n• طول الفقرة المثالي: 1-4 جمل.\n• عدد الكلمات المسموح: 30-100 كلمة.\n• الهدف: تجنب الكتل النصية الطويلة لتحسين قابلية القراءة."
+        : "• Applies to core content paragraphs (excluding intro, conclusion, FAQs, and colon/question-ended list intro paragraphs).\n• Ideal length: 1-4 sentences.\n• Allowed words: 30-100 words.\n• Goal: Avoid large text blocks to improve readability.";
 
     const firstHeadingIndex = nodes.findIndex(n => n.type === 'heading');
     const introNodes = firstHeadingIndex === -1 ? nodes : nodes.slice(0, firstHeadingIndex);

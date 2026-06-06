@@ -6,7 +6,6 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
-import { FIXABLE_RULES } from '../constants';
 import { isProductPageContext } from '../utils/goalContext';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 
@@ -45,7 +44,6 @@ const InfoModal: React.FC<{
   onFixViolation: (rule: CheckResult, violation: StructureViolationItem) => void;
 }> = ({ item, onClose, t, uiLanguage, fixingInfo, onFixViolation }) => {
   const isArabic = uiLanguage === 'ar';
-  const canFixRule = FIXABLE_RULES.has(item.title);
   return (
     <div 
       className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm"
@@ -108,7 +106,7 @@ const InfoModal: React.FC<{
                         <p className="min-w-0 flex-1 leading-relaxed text-gray-600 dark:text-gray-300">
                           {violation.message}
                         </p>
-                        {canFixRule && (
+                        {item.status !== 'pass' && (
                           <button
                             type="button"
                             onClick={() => onFixViolation(item, violation)}

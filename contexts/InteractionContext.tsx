@@ -6,7 +6,7 @@ import { useUser } from './UserContext';
 import { useEditor } from './EditorContext';
 import { useAI } from './AIContext';
 import type { CheckResult, StructureAnalysis } from '../types';
-import { SECONDARY_COLORS, VIOLATION_PRIORITY, DEFAULT_PRIORITY, FIXABLE_RULES } from '../constants';
+import { SECONDARY_COLORS, VIOLATION_PRIORITY, DEFAULT_PRIORITY } from '../constants';
 
 /*
  * InteractionContext owns editor-side interactions that are not article data:
@@ -181,6 +181,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [isTooltipAlwaysOn, setIsTooltipAlwaysOn] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
     const highlightedItemRef = useRef<string | any[] | null>(null);
+    const tooltipFixTargetsRef = useRef<Map<string, ResolvedStructureViolation>>(new Map());
 
     const [isTocVisible, setIsTocVisible] = useState(false);
     const [isSpotlightVisible, setIsSpotlightVisible] = useState(false);
@@ -634,6 +635,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             if (!shouldShowHoverTooltip) {
                 if (tooltip) setTooltip(null);
                 if (pinnedTooltip) setPinnedTooltip(null);
+                tooltipFixTargetsRef.current.clear();
                 return;
             }
 
@@ -645,6 +647,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             const posResult = editorView.posAtCoords({ left: event.clientX, top: event.clientY });
             if (!posResult) {
                 setTooltip(null);
+                tooltipFixTargetsRef.current.clear();
                 return;
             }
     
@@ -655,28 +658,39 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             });
 
             if (activeViolations.length > 0) {
-                const uniqueViolations: { [key: string]: { rule: CheckResult; from: number; message?: string; pairedFrom?: number; pairedText?: string } } = {};
+                const uniqueViolations: { [key: string]: ResolvedStructureViolation } = {};
                 activeViolations.forEach(v => {
-                    const key = [v.rule.title, v.from, v.pairedFrom ?? ''].join('|');
-                    uniqueViolations[key] = {
-                        rule: v.rule,
-                        from: v.from,
-                        message: v.message,
-                        pairedFrom: v.pairedFrom,
-                        pairedText: v.pairedText,
-                    };
+                    const key = [v.rule.title, v.from, v.to, v.pairedFrom ?? ''].join('|');
+                    uniqueViolations[key] = v;
                 });
 
                 const violationsArray = Object.values(uniqueViolations)
                     .sort((a, b) => (VIOLATION_PRIORITY[a.rule.title] || DEFAULT_PRIORITY) - (VIOLATION_PRIORITY[b.rule.title] || DEFAULT_PRIORITY));
+
+                const nextFixTargets = new Map<string, ResolvedStructureViolation>();
                 
                 const tooltipContent = violationsArray
-                    .map(v => {
+                    .map((v, index) => {
                         const rule = v.rule;
                         const isFixingThis = aiFixingInfo?.title === rule.title && aiFixingInfo?.from === v.from;
-                        const isFixable = FIXABLE_RULES.has(rule.title);
+                        const isFixingAny = Boolean(aiFixingInfo);
+                        const fixKey = `${rule.title}|${v.from}|${v.to}|${v.pairedFrom ?? ''}|${index}`;
+                        nextFixTargets.set(fixKey, v);
                         const safeTitle = escapeTooltipHtml(rule.title);
-                        const buttonHtml = isFixable ? `<button data-from="${v.from}" data-title="${safeTitle}" class="ai-fix-btn" ${isFixingThis ? 'disabled' : ''}>${isFixingThis ? '<span class="ai-fix-btn-spinner"></span>' : escapeTooltipHtml(t.fix)}</button>` : '';
+                        const buttonLabel = isFixingThis
+                            ? (uiLanguage === 'ar' ? 'جاري الإصلاح...' : 'Fixing...')
+                            : (uiLanguage === 'ar' ? 'إصلاح هذه المخالفة' : 'Fix this');
+                        const buttonHtml = `
+                            <button
+                                type="button"
+                                data-fix-key="${escapeTooltipHtml(fixKey)}"
+                                class="ai-fix-btn"
+                                ${isFixingAny ? 'disabled' : ''}
+                                style="display:inline-flex;align-items:center;gap:6px;border:0;border-radius:8px;background:${isFixingThis ? '#9ca3af' : '#d4af37'};color:white;padding:5px 8px;font-size:10px;font-weight:800;line-height:1;cursor:${isFixingAny ? 'not-allowed' : 'pointer'};opacity:${isFixingAny && !isFixingThis ? '0.55' : '1'};"
+                            >
+                                ${isFixingThis ? '<span style="display:inline-block;width:10px;height:10px;border:2px solid rgba(255,255,255,.55);border-top-color:white;border-radius:999px;"></span>' : ''}
+                                ${escapeTooltipHtml(buttonLabel)}
+                            </button>`;
 
                         const rawCurrentText = v.message || rule.current;
                         const currentText = escapeTooltipHtml(String(rawCurrentText).replace(/<[^>]*>/g, '').substring(0, 140));
@@ -702,11 +716,13 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                             </div>`;
 
                         return `<div class="flex flex-col items-start gap-1.5 w-full">
-                                    <div class="flex items-center gap-2 font-semibold">${buttonHtml}${safeTitle}</div>
+                                    <div class="flex items-center gap-2 font-semibold" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${buttonHtml}<span>${safeTitle}</span></div>
                                     ${detailsHtml}
                                 </div>`;
                     })
                     .join('<hr class="border-gray-200 dark:border-[#3C3C3C] my-1.5 -mx-3 w-[calc(100%+1.5rem)]">');
+
+                tooltipFixTargetsRef.current = nextFixTargets;
 
                 setTooltip({
                     content: tooltipContent,
@@ -717,6 +733,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 });
             } else {
                  setTooltip(null);
+                 tooltipFixTargetsRef.current.clear();
             }
         };
     
@@ -725,13 +742,12 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             const fixButton = target.closest('.ai-fix-btn');
             
             if (fixButton) {
-                const from = fixButton.getAttribute('data-from');
-                const title = fixButton.getAttribute('data-title');
-                if (from && title) {
-                    const violation = allViolations.find(v => v.rule.title === title && v.from === parseInt(from, 10));
-                    if (violation) {
-                        handleAiFix(violation.rule, violation);
-                    }
+                event.preventDefault();
+                event.stopPropagation();
+                const fixKey = fixButton.getAttribute('data-fix-key');
+                const violation = fixKey ? tooltipFixTargetsRef.current.get(fixKey) : null;
+                if (violation) {
+                    handleAiFix(violation.rule, violation);
                 }
                 return;
             }

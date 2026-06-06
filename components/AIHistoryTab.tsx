@@ -4,7 +4,7 @@ import { useAI } from '../contexts/AIContext';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { BookCopy, Trash2, Check, Copy, MapPin, ChevronDown, AlertTriangle } from 'lucide-react';
-import { parseMarkdownToHtml } from '../utils/editorUtils';
+import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import type { AiContentPatch, AIHistoryItem, BulkFixReviewVariant } from '../types';
 
 const getCriterionDisplayOrder = (status?: string): number => {
@@ -34,12 +34,21 @@ const getCriteriaStatusCounts = (checks?: BulkFixReviewVariant['criteriaChecks']
 );
 
 const AIHistoryTab: React.FC = () => {
-    const { aiHistory, applySuggestionFromHistory, removeFromAiHistory, selectAiContentPatchTarget, applyAiContentPatch } = useAI();
+    const {
+        aiHistory,
+        applySuggestionFromHistory,
+        removeFromAiHistory,
+        selectAiContentPatchTarget,
+        applyAiContentPatch,
+        selectAiPatchMergeDeleteTarget,
+        deleteAiPatchMergeDeleteTarget,
+    } = useAI();
     const { t, uiLanguage } = useUser();
     const { editor } = useEditor();
     const isArabic = uiLanguage === 'ar';
     const [expandedCriteriaKeys, setExpandedCriteriaKeys] = useState<Record<string, boolean>>({});
     const [manualPatchUiState, setManualPatchUiState] = useState<Record<string, { status?: 'applied' | 'failed'; error?: string }>>({});
+    const [manualPatchMergeDeleteUiState, setManualPatchMergeDeleteUiState] = useState<Record<string, { status?: 'applied' | 'failed'; error?: string }>>({});
     const toggleCriteria = (key: string) => {
         setExpandedCriteriaKeys(prev => ({ ...prev, [key]: !prev[key] }));
     };
@@ -63,6 +72,11 @@ const AIHistoryTab: React.FC = () => {
     };
     const copyText = (text: string) => {
         void navigator.clipboard?.writeText(text);
+    };
+    const copyMarkdownText = (text: string) => {
+        void copyMarkdownToClipboard(text).catch(error => {
+            console.error('Could not copy formatted markdown:', error);
+        });
     };
     const criterionStatusClass = (status?: string) => {
         if (status === 'pass') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300';
@@ -110,6 +124,27 @@ const AIHistoryTab: React.FC = () => {
             },
         }));
     };
+    const handleSelectManualPatchMergeDeleteTarget = (patch: AiContentPatch) => {
+        const result = selectAiPatchMergeDeleteTarget(patch);
+        if (result.error) {
+            setManualPatchMergeDeleteUiState(prev => ({ ...prev, [patch.id]: { status: 'failed', error: result.error } }));
+        }
+    };
+    const handleDeleteManualPatchMergeDeleteTarget = (patch: AiContentPatch) => {
+        const localState = manualPatchMergeDeleteUiState[patch.id];
+        const result = deleteAiPatchMergeDeleteTarget({
+            ...patch,
+            mergeDeleteStatus: localState?.status || patch.mergeDeleteStatus,
+            mergeDeleteApplyError: localState?.error || patch.mergeDeleteApplyError,
+        });
+        setManualPatchMergeDeleteUiState(prev => ({
+            ...prev,
+            [patch.id]: {
+                status: result.status,
+                error: result.status === 'failed' ? result.error : undefined,
+            },
+        }));
+    };
     const renderAnalysisPatch = (patch: AiContentPatch) => {
         const actionLabel = getPatchActionLabel(patch.operation);
         const localState = manualPatchUiState[patch.id];
@@ -120,6 +155,15 @@ const AIHistoryTab: React.FC = () => {
         const reasonLabel = actionLabel === 'استبدال'
             ? (isArabic ? 'سبب الاستبدال' : 'Replacement reason')
             : (isArabic ? 'سبب إضافة النص المقترح' : 'Reason for adding');
+        const hasMergeDeleteTarget = Boolean(
+            patch.mergeDeleteTargetText?.trim() ||
+            patch.mergeDeletePlacementLabel?.trim() ||
+            patch.mergeDeleteAnchorText?.trim()
+        );
+        const mergeDeleteLocalState = manualPatchMergeDeleteUiState[patch.id];
+        const mergeDeleteStatus = mergeDeleteLocalState?.status || patch.mergeDeleteStatus || 'pending';
+        const mergeDeleteError = mergeDeleteLocalState?.error || patch.mergeDeleteApplyError;
+        const mergeDeleteLocationText = patch.mergeDeletePlacementLabel || patch.mergeDeleteAnchorText || patch.mergeDeleteTargetText || (isArabic ? 'لم يتم تحديد موضع فقرة الحذف نصيًا.' : 'No delete location was provided.');
 
         return (
         <div key={patch.id} className="my-3 rounded-lg border border-[#d4af37]/25 bg-white/80 p-2 dark:border-[#d4af37]/30 dark:bg-[#1F1F1F]/80">
@@ -159,6 +203,46 @@ const AIHistoryTab: React.FC = () => {
                     dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }}
                 />
             </div>
+            {hasMergeDeleteTarget && (
+                <div className="mt-2 rounded-md border border-red-100 bg-red-50/70 p-2 dark:border-red-900/30 dark:bg-red-900/10">
+                    <div className="text-[10px] font-bold text-red-700 dark:text-red-300">
+                        {isArabic ? 'الفقرة المدمجة المطلوب حذفها' : 'Merged paragraph to delete'}
+                    </div>
+                    <div className="mt-1 text-[10px] leading-relaxed text-gray-600 break-words dark:text-gray-300">
+                        <span className="font-semibold">{isArabic ? 'مكان الفقرة في المحرر' : 'Delete location'}: </span>
+                        {mergeDeleteLocationText}
+                    </div>
+                    {patch.mergeDeleteTargetText && (
+                        <div className="mt-1.5 max-h-24 overflow-y-auto rounded border border-red-100 bg-white/70 p-1.5 text-[11px] leading-relaxed text-gray-700 dark:border-red-900/30 dark:bg-[#1F1F1F]/60 dark:text-gray-200">
+                            {patch.mergeDeleteTargetText}
+                        </div>
+                    )}
+                    {mergeDeleteError && (
+                        <div className="mt-1.5 rounded bg-red-100 px-2 py-1 text-[11px] font-semibold text-red-700 dark:bg-red-900/20 dark:text-red-300">{mergeDeleteError}</div>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => handleSelectManualPatchMergeDeleteTarget(patch)}
+                            className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-red-100 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-red-900/25"
+                        >
+                            <MapPin size={13} />
+                            {isArabic ? 'موضع الحذف' : 'Delete location'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleDeleteManualPatchMergeDeleteTarget(patch)}
+                            disabled={mergeDeleteStatus === 'applied'}
+                            className="flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {mergeDeleteStatus === 'applied' ? <Check size={13} /> : <Trash2 size={13} />}
+                            {mergeDeleteStatus === 'applied'
+                                ? (isArabic ? 'تم حذف الفقرة' : 'Deleted')
+                                : (isArabic ? 'حذف الفقرة' : 'Delete paragraph')}
+                        </button>
+                    </div>
+                </div>
+            )}
             {applyError && (
                 <div className="mt-1.5 rounded bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 dark:bg-red-900/20 dark:text-red-300">{applyError}</div>
             )}
@@ -173,7 +257,7 @@ const AIHistoryTab: React.FC = () => {
                 </button>
                 <button
                     type="button"
-                    onClick={() => copyText(patch.contentMarkdown)}
+                    onClick={() => copyMarkdownText(patch.contentMarkdown)}
                     className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
                 >
                     <Copy size={13} />

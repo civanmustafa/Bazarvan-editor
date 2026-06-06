@@ -267,6 +267,11 @@ export interface AiContentPatch {
   contentMarkdown: string;
   reason?: string;
   confidence?: number;
+  mergeDeleteTargetText?: string;
+  mergeDeleteAnchorText?: string;
+  mergeDeletePlacementLabel?: string;
+  mergeDeleteStatus?: AiContentPatchStatus;
+  mergeDeleteApplyError?: string;
   status: AiContentPatchStatus;
   applyError?: string;
 }

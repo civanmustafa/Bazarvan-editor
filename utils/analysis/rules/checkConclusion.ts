@@ -65,7 +65,7 @@ export const checkConclusion = (context: AnalysisContext): {
         const hasValidIntro =
             introNode?.type === 'paragraph' &&
             getSentenceCount(introText) === 1 &&
-            /[:：]\s*$/.test(introText);
+            /[:：?؟？]\s*$/u.test(introText);
 
         if (!hasValidIntro) {
             const targetNode = introNode?.type === 'paragraph' ? introNode : node;

@@ -9,8 +9,8 @@ export const checkStepsIntroduction = (context: AnalysisContext): CheckResult =>
     const description = tRule.description;
     const requiredText = tRule.required;
     const details = uiLanguage === 'ar'
-        ? '• يجب أن تسبق كل قائمة فقرة تمهيدية مرتبطة بعنوان القسم مباشرة.\n• طول الفقرة التمهيدية: 15-40 كلمة و1-2 جملة.\n• يجب أن تنتهي الفقرة التمهيدية بعلامة نقطتين (:) لأنها تفتح التعداد التالي.'
-        : '• Each list must be preceded by an introductory paragraph directly tied to the section heading.\n• Intro length: 15-40 words and 1-2 sentences.\n• The intro paragraph must end with a colon (:) because it introduces the following list.';
+        ? '• يجب أن تسبق كل قائمة فقرة تمهيدية مرتبطة بعنوان القسم مباشرة.\n• طول الفقرة التمهيدية: 15-40 كلمة و1-2 جملة.\n• يجب أن تنتهي الفقرة التمهيدية بعلامة نقطتين (:) أو علامة استفهام (؟) لأنها تمهد للتعداد التالي.'
+        : '• Each list must be preceded by an introductory paragraph directly tied to the section heading.\n• Intro length: 15-40 words and 1-2 sentences.\n• The intro paragraph must end with a colon (:) or question mark (?) because it introduces the following list.';
 
     const listIndices = nodes
         .map((node, index) => (node.type === 'bulletList' || node.type === 'orderedList' ? index : -1))
@@ -39,14 +39,14 @@ export const checkStepsIntroduction = (context: AnalysisContext): CheckResult =>
         
         const wordsMet = wordCount >= 15 && wordCount <= 40;
         const sentencesMet = sentenceCount >= 1 && sentenceCount <= 2;
-        const colonMet = /[:：]\s*$/.test(introNode.text.trim());
+        const introEndingMet = /[:：?؟？]\s*$/u.test(introNode.text.trim());
 
-        if (!wordsMet || !sentencesMet || !colonMet) {
+        if (!wordsMet || !sentencesMet || !introEndingMet) {
             const messageParts = [];
             if (!wordsMet || !sentencesMet) {
                 messageParts.push(t.violationMessages.currentWordsSentences(wordCount, sentenceCount));
             }
-            if (!colonMet) {
+            if (!introEndingMet) {
                 messageParts.push(t.violationMessages.noIntroColon);
             }
              violations.push({

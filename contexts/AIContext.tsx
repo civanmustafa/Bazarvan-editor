@@ -1332,7 +1332,7 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = '', ta
     }
     if (haystack.includes('طول الفقرات') || haystack.includes('paragraph length')) {
         if (targetContext?.isListIntro) {
-            return 'فقرة تمهيد خطوات منتهية بنقطتين؛ لا يطبق عليها معيار طول الفقرات العادية';
+            return 'فقرة تمهيد خطوات منتهية بنقطتين أو علامة استفهام؛ لا يطبق عليها معيار طول الفقرات العادية';
         }
         return `${stats.words} كلمة، ${stats.sentences} جملة، ${stats.paragraphs} فقرة`;
     }
@@ -1343,8 +1343,8 @@ const summarizeBulkFixMeasuredState = (textValue: string, criterionText = '', ta
         if (!targetContext?.isListIntro) {
             return 'لا ينطبق؛ الفقرة التالية ليست قائمة تعداد آلية';
         }
-        const colonState = /[:：]\s*$/.test(measuredText.trim()) ? 'تنتهي بنقطتين' : 'لا تنتهي بنقطتين';
-        return `${stats.words} كلمة، ${stats.sentences} جملة، ${colonState}`;
+        const introEndingState = /[:：?؟？]\s*$/u.test(measuredText.trim()) ? 'نهاية التمهيد صحيحة' : 'لا تنتهي بنقطتين أو علامة استفهام';
+        return `${stats.words} كلمة، ${stats.sentences} جملة، ${introEndingState}`;
     }
 
     const textualAudit = getBulkFixTextualAudit(measuredText, criterionText, 'local');
@@ -1448,7 +1448,7 @@ const inferBulkFixCriterionCheck = (
     }
     if (haystack.includes('تمهيد خطوات') || haystack.includes('steps introduction')) {
         if (targetContext?.isListIntro) {
-            checks.push(/[:：]\s*$/.test(measuredText.trim()));
+            checks.push(/[:：?؟？]\s*$/u.test(measuredText.trim()));
         }
     }
     const textualAudit = getBulkFixTextualAudit(measuredText, criterionText, isArticleScope ? 'article' : 'local');
@@ -2223,10 +2223,19 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 لا تكرر بيانات البطاقة خارجها: title وreason وplacementLabel وcontentMarkdown يجب أن تظهر مرة واحدة داخل البطاقة فقط.
 يجب أن تظهر البطاقات بهذا المعنى: عنوان العملية مع اسم البند، ثم سبب الاقتراح من reason، ثم موضع التنفيذ النصي من placementLabel، ثم النص المقترح من contentMarkdown، ثم أزرار الموضع والنسخ والإضافة أو الاستبدال.`;
 
+const READY_COMMAND_H2_SECTION_REQUIREMENT = `
+
+قاعدة خاصة عند اقتراح قسم H2 جديد:
+- إذا كان contentMarkdown يبدأ بعنوان H2 مثل "## عنوان القسم" أو وسم <h2>، فهذا يعني إدخال قسم مستقل جديد.
+- لا تستخدم replace_block أو replace_text لهذا النوع من الإدخال، ولا تصفه كاستبدال أو إدراج داخل قسم موجود.
+- عند إضافة قسم H2 جديد، لا تضعه داخل قسم H2 موجود ولا مباشرة بعد عنوان H2 فقط.
+- استخدم insert_before_conclusion أو insert_before_heading أو append_to_article عند عدم وجود موضع مرجعي واضح.
+- إذا كان هناك anchorText لقسم H2 مرجعي، اجعل الموضع المقصود بعد نهاية ذلك القسم بالكامل كقسم مستقل، وليس داخل محتواه.`;
+
 const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPatchInstructions?: boolean }) => (
     options?.skipPatchInstructions
         ? contextPrompt
-        : `${contextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${READY_COMMAND_PATCH_CARD_REQUIREMENT}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`
+        : `${contextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${READY_COMMAND_PATCH_CARD_REQUIREMENT}\n\n${READY_COMMAND_H2_SECTION_REQUIREMENT}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`
 );
 
 const saveContentSummaryForCompetitors = (
@@ -2275,6 +2284,36 @@ const AI_PATCH_LABEL_PATTERN = /^(?:[-*]\s*)?(?:السؤال(?:\s+المقترح
 
 const stripAiPatchLabelsFromLine = (line: string): string => line.replace(AI_PATCH_LABEL_PATTERN, '').trim();
 
+const isManualRecommendationPatchContent = (value: string): boolean => {
+    const trimmed = value.trim().replace(/^[([{]\s*/, '').replace(/\s*[)\]}]$/, '');
+    const normalized = normalizeAnchorText(trimmed);
+    if (!normalized) return false;
+
+    const startsAsNote = /^(?:ملاحظة|تنبيه|توصية|توجيه|إرشاد|ارشاد|مهم)\s*[:：-]/i.test(trimmed);
+    const manualReviewIntent = [
+        'مراجعة يدوية',
+        'يتطلب مراجعة',
+        'تتطلب مراجعة',
+        'يتطلب التأكد',
+        'تتطلب التأكد',
+        'يجب التأكد',
+        'ينبغي التأكد',
+        'يجب فحص',
+        'ينبغي فحص',
+        'تحقق من',
+        'راجع',
+        'ليست نصا جاهزا',
+        'ليس نصا جاهزا',
+        'توصية توضيحية',
+        'manual review',
+        'requires review',
+        'make sure',
+        'verify',
+    ].some(keyword => normalized.includes(normalizeAnchorText(keyword)));
+
+    return (startsAsNote && manualReviewIntent) || normalized.includes('هذا التعديل يتطلب مراجعة يدوية');
+};
+
 const extractLabeledValue = (lines: string[], labels: RegExp[]): string => {
     for (const line of lines) {
         const trimmed = line.trim();
@@ -2287,6 +2326,8 @@ const extractLabeledValue = (lines: string[], labels: RegExp[]): string => {
 };
 
 const cleanAiPatchContentMarkdown = (value: string): string => {
+    if (isManualRecommendationPatchContent(value)) return '';
+
     const rawLines = value
         .replace(/\r\n/g, '\n')
         .split('\n')
@@ -2306,7 +2347,7 @@ const cleanAiPatchContentMarkdown = (value: string): string => {
         return `### ${question}\n${answer}`;
     }
 
-    return rawLines
+    const cleaned = rawLines
         .map(stripAiPatchLabelsFromLine)
         .filter(line => {
             const normalized = normalizeAnchorText(line);
@@ -2322,6 +2363,8 @@ const cleanAiPatchContentMarkdown = (value: string): string => {
         })
         .join('\n')
         .trim();
+
+    return isManualRecommendationPatchContent(cleaned) ? '' : cleaned;
 };
 
 const normalizePatchOperation = (value: unknown): AiContentPatchOperation => {
@@ -2329,6 +2372,25 @@ const normalizePatchOperation = (value: unknown): AiContentPatchOperation => {
     if (operation === 'replace_text' || operation === 'replace_block') return operation;
     if (['replace', 'replace_paragraph', 'update_paragraph', 'rewrite_paragraph'].includes(operation)) return 'replace_block';
     return ALLOWED_PATCH_OPERATIONS.has(operation) ? operation : 'append_to_article';
+};
+
+const isIndependentH2SectionContent = (value: string): boolean => (
+    /^(?:##(?!#)\s+\S|<h2(?:\s|>|\/))/i.test(value.trim())
+);
+
+const normalizeIndependentH2SectionOperation = (
+    operation: AiContentPatchOperation,
+    contentMarkdown: string,
+): AiContentPatchOperation => {
+    if (!isIndependentH2SectionContent(contentMarkdown)) return operation;
+    if (
+        operation === 'insert_before_heading' ||
+        operation === 'insert_before_conclusion' ||
+        operation === 'append_to_article'
+    ) {
+        return operation;
+    }
+    return 'append_to_section';
 };
 
 const PATCH_REPLACEMENT_INTENT_KEYWORDS = [
@@ -2437,8 +2499,20 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
             const contentMarkdown = cleanAiPatchContentMarkdown(asTrimmedString(record.contentMarkdown || record.content || record.text));
             if (!contentMarkdown) return null;
 
-            const operation = normalizePatchOperation(record.operation || record.type);
+            const operation = normalizeIndependentH2SectionOperation(
+                normalizePatchOperation(record.operation || record.type),
+                contentMarkdown,
+            );
             const targetText = asTrimmedString(record.targetText || record.originalText || record.currentText || record.original || record.replaceTarget);
+            const mergeDeleteTargetText = asTrimmedString(
+                record.mergeDeleteTargetText ||
+                record.deleteTargetText ||
+                record.secondaryDeleteTargetText ||
+                record.secondaryTargetText ||
+                record.mergedDeleteTargetText ||
+                record.textToDelete ||
+                record.deleteText
+            );
 
             return {
                 id: `${provider}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2452,6 +2526,21 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
                 contentMarkdown,
                 reason: asTrimmedString(record.reason),
                 confidence: normalizeConfidence(record.confidence),
+                mergeDeleteTargetText,
+                mergeDeleteAnchorText: asTrimmedString(
+                    record.mergeDeleteAnchorText ||
+                    record.deleteAnchorText ||
+                    record.secondaryAnchorText ||
+                    record.mergedDeleteAnchorText
+                ),
+                mergeDeletePlacementLabel: asTrimmedString(
+                    record.mergeDeletePlacementLabel ||
+                    record.deletePlacementLabel ||
+                    record.secondaryPlacementLabel ||
+                    record.mergedDeletePlacementLabel ||
+                    record.deleteLocation ||
+                    record.deletePlace
+                ),
                 status: 'pending',
             };
         })
@@ -2471,6 +2560,23 @@ const stripDuplicatePatchTextFromAnalysis = (analysisMarkdown: string, patches: 
     cleaned = stripDuplicatePatchMetadataFromAnalysis(cleaned, patches);
 
     return cleaned
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
+const stripOrphanPatchMarkers = (analysisMarkdown: string, patches: AiContentPatch[]): string => {
+    const validMarkers = new Set(
+        patches
+            .flatMap(patch => [patch.marker, patch.title])
+            .map(value => value.trim())
+            .filter(Boolean)
+    );
+
+    return analysisMarkdown
+        .replace(/\[\[PATCH:([^\]]+)\]\]/g, (match, marker) => (
+            validMarkers.has(String(marker).trim()) ? match : ''
+        ))
+        .replace(/[ \t]+\n/g, '\n')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 };
@@ -2499,7 +2605,12 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
         return { displayText: rawResponse, patches: [] };
     }
 
-    return { displayText: patches.length ? stripDuplicatePatchTextFromAnalysis(displayText || rawResponse, patches) : displayText || rawResponse, patches };
+    const cleanDisplayText = stripOrphanPatchMarkers(displayText || rawResponse, patches);
+
+    return {
+        displayText: patches.length ? stripDuplicatePatchTextFromAnalysis(cleanDisplayText, patches) : cleanDisplayText,
+        patches,
+    };
 };
 
 type SmartAnalysisParsedResult = ReturnType<typeof parseSmartAnalysisResponse>;
@@ -2552,6 +2663,9 @@ const getPatchMetadataComparisonValues = (patch: AiContentPatch): string[] => {
         patch.placementLabel,
         patch.anchorText,
         patch.targetText,
+        patch.mergeDeletePlacementLabel,
+        patch.mergeDeleteAnchorText,
+        patch.mergeDeleteTargetText,
         normalizeFaqQuestionHeading(firstContentLine),
         stripAiPatchLabelsFromLine(firstContentLine),
     ];
@@ -3145,6 +3259,28 @@ const findSectionEnd = (editor: any, heading: HeadingMatch): number => {
     return sectionEnd;
 };
 
+const findNearestPrecedingHeading = (editor: any, targetPos: number, levelFilter?: number): HeadingMatch | null => {
+    let heading: HeadingMatch | null = null;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (pos >= targetPos) return false;
+        if (node.type.name === 'heading') {
+            const level = node.attrs.level || 2;
+            if (levelFilter && level !== levelFilter) return true;
+            heading = {
+                pos,
+                to: pos + node.nodeSize,
+                level,
+                text: node.textContent,
+                score: 1,
+            };
+        }
+        return true;
+    });
+
+    return heading;
+};
+
 const FAQ_SECTION_HEADING_KEYWORDS = [
     ...FAQ_KEYWORDS,
     'الأسئلة الشائعة',
@@ -3230,6 +3366,79 @@ const findFaqAppendTarget = (editor: any, docEnd: number): PatchTarget => {
     };
 };
 
+const resolveIndependentH2SectionPatchTarget = (
+    editor: any,
+    patch: AiContentPatch,
+    docEnd: number,
+): PatchTarget | null => {
+    if (!isIndependentH2SectionContent(patch.contentMarkdown)) return null;
+
+    const conclusionHeading = findHeadingByKeywords(editor, CONCLUSION_HEADING_KEYWORDS);
+
+    if (patch.operation === 'insert_before_conclusion') {
+        const insertionPos = conclusionHeading?.pos ?? docEnd;
+        return {
+            from: insertionPos,
+            to: insertionPos,
+            selectFrom: conclusionHeading?.pos ?? docEnd,
+            selectTo: conclusionHeading?.to ?? docEnd,
+            mode: 'insert',
+        };
+    }
+
+    const anchorHeading = patch.anchorText?.trim() ? findHeadingMatch(editor, patch.anchorText) : null;
+
+    if (patch.operation === 'insert_before_heading' && anchorHeading) {
+        const insertionHeading = anchorHeading.level <= 2
+            ? anchorHeading
+            : findNearestPrecedingHeading(editor, anchorHeading.pos, 2) || anchorHeading;
+        return {
+            from: insertionHeading.pos,
+            to: insertionHeading.pos,
+            selectFrom: insertionHeading.pos,
+            selectTo: insertionHeading.to,
+            mode: 'insert',
+        };
+    }
+
+    if (anchorHeading) {
+        const sectionHeading = anchorHeading.level === 2
+            ? anchorHeading
+            : findNearestPrecedingHeading(editor, anchorHeading.pos, 2) || anchorHeading;
+        const sectionEnd = findSectionEnd(editor, sectionHeading);
+        return {
+            from: sectionEnd,
+            to: sectionEnd,
+            selectFrom: sectionHeading.pos,
+            selectTo: sectionHeading.to,
+            mode: 'insert',
+        };
+    }
+
+    const anchorBlock = findPatchLocationBlockMatch(editor, patch);
+    const containingHeading = anchorBlock ? findNearestPrecedingHeading(editor, anchorBlock.from, 2) : null;
+
+    if (containingHeading) {
+        const sectionEnd = findSectionEnd(editor, containingHeading);
+        return {
+            from: sectionEnd,
+            to: sectionEnd,
+            selectFrom: containingHeading.pos,
+            selectTo: containingHeading.to,
+            mode: 'insert',
+        };
+    }
+
+    const fallbackPos = conclusionHeading?.pos ?? docEnd;
+    return {
+        from: fallbackPos,
+        to: fallbackPos,
+        selectFrom: conclusionHeading?.pos ?? docEnd,
+        selectTo: conclusionHeading?.to ?? docEnd,
+        mode: 'insert',
+    };
+};
+
 type PatchTarget = {
     from: number;
     to: number;
@@ -3241,6 +3450,9 @@ type PatchTarget = {
 const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget | { error: string } => {
     if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
     const docEnd = editor.state.doc.content.size;
+    const independentH2Target = resolveIndependentH2SectionPatchTarget(editor, patch, docEnd);
+
+    if (independentH2Target) return independentH2Target;
 
     if (patch.operation === 'replace_block' || patch.operation === 'replace_text') {
         const targetText = patch.targetText?.trim() ? patch.targetText : patch.anchorText || '';
@@ -3340,6 +3552,75 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
     return { from: heading.to, to: heading.to, selectFrom: heading.pos, selectTo: heading.to, mode: 'insert' };
 };
 
+const hasAiPatchMergeDeleteTarget = (patch: AiContentPatch): boolean => Boolean(
+    patch.mergeDeleteTargetText?.trim() ||
+    patch.mergeDeletePlacementLabel?.trim() ||
+    patch.mergeDeleteAnchorText?.trim()
+);
+
+const buildAiPatchMergeDeleteLocationPatch = (patch: AiContentPatch): AiContentPatch => ({
+    ...patch,
+    operation: 'replace_block',
+    targetText: patch.mergeDeleteTargetText || '',
+    anchorText: patch.mergeDeleteAnchorText || patch.mergeDeletePlacementLabel || patch.anchorText || '',
+    placementLabel: patch.mergeDeletePlacementLabel || patch.placementLabel || '',
+    contentMarkdown: '',
+});
+
+const resolveAiPatchMergeDeleteTarget = (editor: any, patch: AiContentPatch): PatchTarget | { error: string } => {
+    if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
+    if (!hasAiPatchMergeDeleteTarget(patch)) {
+        return { error: 'لا توجد فقرة مدمجة محددة للحذف في هذه البطاقة.' };
+    }
+
+    const deletePatch = buildAiPatchMergeDeleteLocationPatch(patch);
+    const targetText = deletePatch.targetText?.trim() || '';
+    const anchorHeading = deletePatch.anchorText?.trim() ? findHeadingMatch(editor, deletePatch.anchorText) : null;
+
+    if (targetText && anchorHeading) {
+        const sectionEnd = findSectionEnd(editor, anchorHeading);
+        const sectionMatch = findBestTextBlockMatch(editor, [targetText], {
+            from: anchorHeading.pos,
+            to: sectionEnd,
+        });
+        if (isConfidentReplacementMatch(sectionMatch, targetText)) {
+            return {
+                from: sectionMatch.from,
+                to: sectionMatch.to,
+                selectFrom: sectionMatch.from,
+                selectTo: sectionMatch.to,
+                mode: 'replace',
+            };
+        }
+    }
+
+    if (targetText) {
+        const match = findBestTextBlockMatch(editor, [targetText]);
+        if (isConfidentReplacementMatch(match, targetText)) {
+            return {
+                from: match.from,
+                to: match.to,
+                selectFrom: match.from,
+                selectTo: match.to,
+                mode: 'replace',
+            };
+        }
+    }
+
+    const locationMatch = findPatchLocationBlockMatch(editor, deletePatch);
+    if (locationMatch) {
+        return {
+            from: locationMatch.from,
+            to: locationMatch.to,
+            selectFrom: locationMatch.from,
+            selectTo: locationMatch.to,
+            mode: 'replace',
+        };
+    }
+
+    return { error: `لم يتم العثور على الفقرة المدمجة المطلوب حذفها: ${patch.mergeDeleteTargetText || patch.mergeDeletePlacementLabel || patch.mergeDeleteAnchorText || patch.title}` };
+};
+
 type SuggestionState = {
   original?: string;
   suggestions: string[];
@@ -3398,6 +3679,10 @@ interface AIContextType {
     selectAiInsertionPatchTarget: (provider: AiPatchProvider, patchId: string) => void;
     applyAiContentPatch: (patch: AiContentPatch) => { status: 'applied' | 'failed'; error?: string };
     selectAiContentPatchTarget: (patch: AiContentPatch) => { error?: string };
+    deleteAiPatchMergeDeleteTarget: (patch: AiContentPatch) => { status: 'applied' | 'failed'; error?: string };
+    selectAiPatchMergeDeleteTarget: (patch: AiContentPatch) => { error?: string };
+    deleteAiInsertionPatchMergeDeleteTarget: (provider: AiPatchProvider, patchId: string) => void;
+    selectAiInsertionPatchMergeDeleteTarget: (provider: AiPatchProvider, patchId: string) => void;
     markHistorySuggestionApplied: (historyItemId: string, suggestionText: string) => void;
     removeFromAiHistory: (historyItemId: string) => void;
     generateContextAwarePrompt: (userPrompt: string, options: any) => string;
@@ -3637,7 +3922,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '- لا تقترح كلمات بعيدة عن نية البحث.',
             '- اجعل كل الاقتراحات طبيعية وقابلة للاستخدام داخل محتوى حقيقي.',
             '- راعِ هدف المقالة والجمهور المستهدف في كل اقتراح.',
+            '- لا تعتبر اسم الشركة صيغة بديلة أو كلمة LSI، ولا تضع اسم الشركة أو جزءًا منه في أي قائمة.',
             '- لا تكرر الكلمة المفتاحية الأساسية نفسها ضمن الصيغ البديلة.',
+            '- لا تعتبر الكلمة المفتاحية الأساسية أو أي صيغة بديلة أو جزءًا منهما كلمة LSI.',
+            '- ممنوع أن تتضمن كلمات LSI اسم الشركة أو جزءًا من الكلمة المفتاحية الأساسية أو جزءًا من الصيغ البديلة.',
+            '- يجب أن تكون كلمات LSI مفاهيم وكيانات وسياقات دلالية مفيدة، وليست كلمات عامة أو جملًا عامة بلا معنى.',
             '- أخرج 4 إلى 6 صيغ بديلة قصيرة.',
             '- أخرج 10 إلى 16 كلمة أو عبارة LSI.',
             '',
@@ -3651,15 +3940,53 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         const parsed = extractJson(result);
+        const normalizeSemanticTerm = (value: string): string => value
+            .normalize('NFKC')
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const semanticStopWords = new Set([
+            'في', 'من', 'عن', 'على', 'الى', 'إلى', 'مع', 'و', 'أو', 'او', 'ال', 'ل', 'ب', 'the', 'a', 'an', 'and', 'or', 'of', 'for', 'to', 'in', 'on', 'with',
+        ].map(normalizeSemanticTerm));
+        const getSemanticTokens = (value: string): string[] => normalizeSemanticTerm(value)
+            .split(' ')
+            .filter(token => token.length > 2 && !semanticStopWords.has(token));
+        const hasProtectedSemanticOverlap = (term: string, protectedTerms: string[]): boolean => {
+            const normalizedTerm = normalizeSemanticTerm(term);
+            if (!normalizedTerm) return true;
+
+            return protectedTerms.some(protectedTerm => {
+                const normalizedProtected = normalizeSemanticTerm(protectedTerm);
+                if (!normalizedProtected) return false;
+                if (normalizedTerm === normalizedProtected) return true;
+                if (normalizedTerm.includes(normalizedProtected) || normalizedProtected.includes(normalizedTerm)) return true;
+
+                const protectedTokens = getSemanticTokens(protectedTerm);
+                if (protectedTokens.length === 0) return false;
+                return protectedTokens.some(token => normalizedTerm.split(' ').includes(token));
+            });
+        };
+        const isGenericSemanticTerm = (term: string): boolean => {
+            const normalizedTerm = normalizeSemanticTerm(term);
+            const words = normalizedTerm.split(' ').filter(Boolean);
+            const genericTerms = new Set([
+                'معلومات', 'نصائح', 'فوائد', 'مميزات', 'خدمات', 'حلول', 'خيارات', 'دليل شامل', 'أفضل خيار', 'تجربة مميزة',
+                'information', 'tips', 'benefits', 'features', 'services', 'solutions', 'options', 'complete guide', 'best option',
+            ].map(normalizeSemanticTerm));
+
+            return genericTerms.has(normalizedTerm) || (words.length > 4 && !words.some(word => word.length > 5));
+        };
         const normalizeTerms = (value: unknown): string[] => {
             if (!Array.isArray(value)) return [];
             const seen = new Set<string>();
             return value
                 .map(item => typeof item === 'string' ? item.replace(/[.،,;؛]+$/g, '').trim() : '')
                 .filter(Boolean)
-                .filter(item => item !== primary)
+                .filter(item => normalizeSemanticTerm(item) !== normalizeSemanticTerm(primary))
+                .filter(item => !hasProtectedSemanticOverlap(item, [keywords.company]))
                 .filter(item => {
-                    const key = item.toLowerCase();
+                    const key = normalizeSemanticTerm(item);
                     if (seen.has(key)) return false;
                     seen.add(key);
                     return true;
@@ -3667,7 +3994,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         };
 
         const secondaries = normalizeTerms(parsed?.secondaries).slice(0, 6);
-        const lsi = normalizeTerms(parsed?.lsi).slice(0, 16);
+        const lsiProtectedTerms = [primary, keywords.company, ...secondaries].filter(Boolean);
+        const lsi = normalizeTerms(parsed?.lsi)
+            .filter(item => !hasProtectedSemanticOverlap(item, lsiProtectedTerms))
+            .filter(item => !isGenericSemanticTerm(item))
+            .slice(0, 16);
         if (secondaries.length === 0 && lsi.length === 0) {
             return { secondaries, lsi, error: 'لم يرجع الذكاء الاصطناعي صيغا قابلة للتوزيع. حاول مرة أخرى.' };
         }
@@ -4444,6 +4775,32 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
     }, [aiInsertionPatches, selectAiContentPatchTarget, updateAiInsertionPatch]);
 
+    const selectAiPatchMergeDeleteTarget = useCallback((patch: AiContentPatch): { error?: string } => {
+        if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
+        const target = resolveAiPatchMergeDeleteTarget(editor, patch);
+        if ('error' in target) {
+            return { error: target.error };
+        }
+
+        editor
+            .chain()
+            .focus()
+            .setTextSelection({ from: target.selectFrom, to: target.selectTo })
+            .scrollIntoView()
+            .run();
+
+        return {};
+    }, [editor]);
+
+    const selectAiInsertionPatchMergeDeleteTarget = useCallback((provider: AiPatchProvider, patchId: string) => {
+        const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
+        if (!patch) return;
+        const result = selectAiPatchMergeDeleteTarget(patch);
+        if (result.error) {
+            updateAiInsertionPatch(provider, patchId, { mergeDeleteStatus: 'failed', mergeDeleteApplyError: result.error });
+        }
+    }, [aiInsertionPatches, selectAiPatchMergeDeleteTarget, updateAiInsertionPatch]);
+
     const applyAiContentPatch = useCallback((patch: AiContentPatch): { status: 'applied' | 'failed'; error?: string } => {
         if (!editor) return { status: 'failed', error: 'المحرر غير جاهز حالياً.' };
         if (patch.status !== 'pending') return { status: 'failed', error: patch.applyError };
@@ -4471,6 +4828,29 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
     }, [articleLanguage, editor]);
 
+    const deleteAiPatchMergeDeleteTarget = useCallback((patch: AiContentPatch): { status: 'applied' | 'failed'; error?: string } => {
+        if (!editor) return { status: 'failed', error: 'المحرر غير جاهز حالياً.' };
+        if (patch.mergeDeleteStatus === 'applied') return { status: 'failed', error: patch.mergeDeleteApplyError };
+        const target = resolveAiPatchMergeDeleteTarget(editor, patch);
+        if ('error' in target) {
+            return { status: 'failed', error: target.error };
+        }
+
+        try {
+            const applied = editor
+                .chain()
+                .focus()
+                .deleteRange({ from: target.from, to: target.to })
+                .scrollIntoView()
+                .run();
+            if (!applied) throw new Error('تعذر حذف الفقرة المدمجة من المحرر.');
+            return { status: 'applied' };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'تعذر حذف الفقرة المدمجة من المحرر.';
+            return { status: 'failed', error: message };
+        }
+    }, [editor]);
+
     const applyAiInsertionPatch = useCallback((provider: AiPatchProvider, patchId: string) => {
         const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
         if (!patch || patch.status !== 'pending') return;
@@ -4480,6 +4860,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             applyError: result.status === 'failed' ? result.error : undefined,
         });
     }, [aiInsertionPatches, applyAiContentPatch, updateAiInsertionPatch]);
+
+    const deleteAiInsertionPatchMergeDeleteTarget = useCallback((provider: AiPatchProvider, patchId: string) => {
+        const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
+        if (!patch || patch.mergeDeleteStatus === 'applied') return;
+        const result = deleteAiPatchMergeDeleteTarget(patch);
+        updateAiInsertionPatch(provider, patchId, {
+            mergeDeleteStatus: result.status,
+            mergeDeleteApplyError: result.status === 'failed' ? result.error : undefined,
+        });
+    }, [aiInsertionPatches, deleteAiPatchMergeDeleteTarget, updateAiInsertionPatch]);
 
     const applyAllAiInsertionPatches = useCallback((provider: AiPatchProvider) => {
         aiInsertionPatches[provider]
@@ -4536,6 +4926,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         clearBulkFixReviewItems, applySuggestionFromHistory,
         applyAiInsertionPatch, applyAllAiInsertionPatches, selectAiInsertionPatchTarget,
         applyAiContentPatch, selectAiContentPatchTarget,
+        deleteAiPatchMergeDeleteTarget, selectAiPatchMergeDeleteTarget,
+        deleteAiInsertionPatchMergeDeleteTarget, selectAiInsertionPatchMergeDeleteTarget,
         markHistorySuggestionApplied,
         removeFromAiHistory: (id: string) => setAiHistory(h => h.filter(x => x.id !== id)),
         generateContextAwarePrompt, openGoogleSearch
