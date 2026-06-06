@@ -57,6 +57,7 @@ const ARTICLE_WIDE_TOOLTIP_EXCLUDED_RULES = new Set<keyof StructureAnalysis>([
 ]);
 
 const PARAGRAPH_PAIR_TOOLTIP_WIDTH_PX = 380;
+const STRUCTURE_TOOLTIP_WIDTH_PX = 420;
 
 const escapeTooltipHtml = (value: unknown): string => (
   String(value ?? '')
@@ -79,6 +80,14 @@ const getRuleTooltipNote = (ruleTitle: string, uiLanguage: 'ar' | 'en'): string 
 
 const formatTooltipTextBlock = (value: string): string => (
     escapeTooltipHtml(value.replace(/\s+/g, ' ').trim())
+);
+
+const formatTooltipMultilineBlock = (value: string): string => (
+    escapeTooltipHtml(value)
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/\n/g, '<br>')
 );
 
 type StructureViolationItem = NonNullable<CheckResult['violatingItems']>[number];
@@ -181,7 +190,9 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [isTooltipAlwaysOn, setIsTooltipAlwaysOn] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
     const highlightedItemRef = useRef<string | any[] | null>(null);
+    const activeStructureHighlightTitleRef = useRef<string | null>(null);
     const tooltipFixTargetsRef = useRef<Map<string, ResolvedStructureViolation>>(new Map());
+    const pinnedTooltipHideTimerRef = useRef<number | null>(null);
 
     const [isTocVisible, setIsTocVisible] = useState(false);
     const [isSpotlightVisible, setIsSpotlightVisible] = useState(false);
@@ -235,6 +246,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
     
     const clearAllHighlights = useCallback(() => {
+        activeStructureHighlightTitleRef.current = null;
         setHighlightedItem(null);
         if (editor && !editor.isDestroyed) {
             const { tr } = editor.state;
@@ -243,6 +255,68 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             editor.view.dispatch(tr);
         }
     }, [editor]);
+
+    const applyStructureViolationMarks = useCallback((
+        title: string,
+        violations: StructureViolationItem[],
+        status: CheckResult['status'],
+        options: { scrollToFirst?: boolean; removeAllMarks?: boolean } = {}
+    ): boolean => {
+        if (!editor || editor.isDestroyed || violations.length === 0) return false;
+        const { scrollToFirst = false, removeAllMarks = false } = options;
+        const { tr } = editor.state;
+        const highlightMarkType = editor.schema.marks.highlight;
+        let firstHighlightPos: number | null = null;
+
+        if (removeAllMarks) {
+            tr.removeMark(0, editor.state.doc.content.size, highlightMarkType);
+        } else {
+            editor.state.doc.descendants((node, pos) => {
+                if (!node.isText || !node.marks?.length) return;
+                node.marks
+                    .filter(mark => mark.type === highlightMarkType && mark.attrs?.isViolation)
+                    .forEach(mark => {
+                        tr.removeMark(pos, pos + node.nodeSize, mark);
+                    });
+            });
+        }
+
+        violations.forEach(violation => {
+            const docSize = editor.state.doc.content.size;
+            if (!Number.isFinite(violation.from) || !Number.isFinite(violation.to) || violation.from < 0 || violation.to > docSize || violation.from >= violation.to) {
+                return;
+            }
+            if (firstHighlightPos === null) firstHighlightPos = violation.from;
+            const highlightMark = (highlightMarkType as any).create({
+                color: status === 'pass' ? '#fde68a' : '#fda4af',
+                violation: title,
+                from: violation.from,
+                highlightStyle: highlightStyle,
+                isViolation: true,
+            });
+            tr.addMark(violation.from, violation.to, highlightMark);
+        });
+
+        tr.setMeta('internal-highlight-maintenance', true);
+        if (tr.steps.length > 0) {
+            editor.view.dispatch(tr);
+        }
+
+        if (scrollToFirst && firstHighlightPos !== null) {
+            setTimeout(() => {
+                if (editor && !editor.isDestroyed) {
+                    const selectionPos = Math.min(firstHighlightPos! + 1, editor.state.doc.content.size);
+                    (editor.chain() as any)
+                        .focus()
+                        .setTextSelection(selectionPos)
+                        .scrollIntoView()
+                        .run();
+                }
+            }, 50);
+        }
+
+        return firstHighlightPos !== null;
+    }, [editor, highlightStyle]);
 
     const clearViolationHighlights = useCallback(() => {
         if (!editor || editor.isDestroyed) return;
@@ -271,18 +345,15 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         const handleTransaction = ({ transaction }: { transaction: any }) => {
             if (!transaction.docChanged || transaction.getMeta('internal-highlight-maintenance')) return;
-            if (!isStructureHighlightedItem(highlightedItemRef.current)) return;
+            if (!activeStructureHighlightTitleRef.current || !isStructureHighlightedItem(highlightedItemRef.current)) return;
 
-            highlightedItemRef.current = null;
-            setHighlightedItem(null);
             setTooltip(null);
             setPinnedTooltip(null);
-            window.setTimeout(clearViolationHighlights, 0);
         };
 
         editor.on('transaction', handleTransaction);
         return () => editor.off('transaction', handleTransaction);
-    }, [editor, clearViolationHighlights]);
+    }, [editor]);
 
     const createArabicInsensitiveRegexString = (text: string): string => {
         return text.replace(/ا|أ|إ|آ/g, '[اأإآ]')
@@ -295,6 +366,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     // Shared keyword highlighter. Structure violations use handleHighlightStructureItem below.
     const applyHighlights = useCallback((highlights: { text: string; color: string }[], scrollToFirst = true) => {
         if (!editor) return;
+        activeStructureHighlightTitleRef.current = null;
         const { tr } = editor.state;
         const highlightMarkType = editor.schema.marks.highlight;
     
@@ -564,46 +636,48 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             .filter((violation): violation is StructureViolationItem => Boolean(violation));
 
         if (resolvedViolations.length > 0) {
-            const { tr } = editor.state;
-            const highlightMarkType = editor.schema.marks.highlight;
-            tr.removeMark(0, editor.state.doc.content.size, highlightMarkType);
-    
-            resolvedViolations.forEach(violation => {
-                const highlightMark = (highlightMarkType as any).create({
-                    color: item.status === 'pass' ? '#fde68a' : '#fda4af',
-                    violation: title,
-                    from: violation.from,
-                    highlightStyle: highlightStyle,
-                    isViolation: true,
-                });
-                tr.addMark(violation.from, violation.to, highlightMark);
-            });
-            tr.setMeta('internal-highlight-maintenance', true);
-    
-            if (tr.steps.length > 0) {
-                editor.view.dispatch(tr);
-            }
+            activeStructureHighlightTitleRef.current = title;
+            applyStructureViolationMarks(title, resolvedViolations, item.status, { scrollToFirst: true, removeAllMarks: true });
             setHighlightedItem(title);
             setTooltip(null);
             setPinnedTooltip(null);
     
-            setTimeout(() => {
-                if (editor && !editor.isDestroyed && resolvedViolations[0]) {
-                    // This position points to the start of the node, outside its content.
-                    // Adding 1 moves the cursor inside the node, which is a valid position for a TextSelection.
-                    const selectionPos = Math.min(resolvedViolations[0].from + 1, editor.state.doc.content.size);
-                    (editor.chain() as any)
-                        .focus()
-                        .setTextSelection(selectionPos)
-                        .scrollIntoView()
-                        .run();
-                }
-            }, 50);
-    
         } else {
+            activeStructureHighlightTitleRef.current = null;
             clearAllHighlights();
         }
-    }, [editor, highlightedItem, clearAllHighlights, setHighlightedItem, highlightStyle]);
+    }, [editor, highlightedItem, clearAllHighlights, setHighlightedItem, applyStructureViolationMarks]);
+
+    useEffect(() => {
+        if (!editor || editor.isDestroyed) return;
+        const activeTitle = activeStructureHighlightTitleRef.current;
+        if (!activeTitle || highlightedItem !== activeTitle) return;
+
+        const activeRule = allViolations.find(violation => violation.rule.title === activeTitle)?.rule;
+        if (!activeRule) {
+            activeStructureHighlightTitleRef.current = null;
+            setHighlightedItem(null);
+            setTooltip(null);
+            setPinnedTooltip(null);
+            clearViolationHighlights();
+            return;
+        }
+
+        const resolvedViolations = (activeRule.violatingItems || [])
+            .map(violation => resolveViolationRangeInCurrentDoc(editor, violation))
+            .filter((violation): violation is StructureViolationItem => Boolean(violation));
+
+        if (resolvedViolations.length === 0) {
+            activeStructureHighlightTitleRef.current = null;
+            setHighlightedItem(null);
+            setTooltip(null);
+            setPinnedTooltip(null);
+            clearViolationHighlights();
+            return;
+        }
+
+        applyStructureViolationMarks(activeTitle, resolvedViolations, activeRule.status, { scrollToFirst: false, removeAllMarks: false });
+    }, [editor, allViolations, highlightedItem, applyStructureViolationMarks, clearViolationHighlights]);
     
     // Spotlight Search Keyboard Listener
     useEffect(() => {
@@ -624,12 +698,155 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     
         const editorView = editor.view;
         const editorDom = editorView.dom;
-    
-        const handleMouseMove = (event: MouseEvent) => {
-            const selectedRuleTitle = typeof highlightedItem === 'string' &&
+
+        const clearPinnedTooltipHideTimer = () => {
+            if (pinnedTooltipHideTimerRef.current !== null) {
+                window.clearTimeout(pinnedTooltipHideTimerRef.current);
+                pinnedTooltipHideTimerRef.current = null;
+            }
+        };
+
+        const getSelectedRuleTitle = () => (
+            typeof highlightedItem === 'string' &&
                 allViolations.some(v => v.rule.title === highlightedItem)
                     ? highlightedItem
-                    : null;
+                    : null
+        );
+
+        const getPointerViolations = (event: MouseEvent, selectedRuleTitle: string | null): ResolvedStructureViolation[] => {
+            if (!editorDom.contains(event.target as Node)) return [];
+            const posResult = editorView.posAtCoords({ left: event.clientX, top: event.clientY });
+            if (!posResult) return [];
+
+            const currentPos = posResult.pos;
+            return allViolations.filter(v => {
+                if (selectedRuleTitle && v.rule.title !== selectedRuleTitle) return false;
+                return currentPos >= v.from && currentPos <= v.to;
+            });
+        };
+
+        const isPointerInsideTooltip = (event: MouseEvent, margin = 0): boolean => {
+            const tooltipElement = tooltipRef.current;
+            if (!tooltipElement) return false;
+            if (tooltipElement.contains(event.target as Node)) return true;
+            const rect = tooltipElement.getBoundingClientRect();
+            return (
+                event.clientX >= rect.left - margin &&
+                event.clientX <= rect.right + margin &&
+                event.clientY >= rect.top - margin &&
+                event.clientY <= rect.bottom + margin
+            );
+        };
+
+        const buildTooltipState = (event: MouseEvent, activeViolations: ResolvedStructureViolation[]): { tooltipState: NonNullable<TooltipState>; fixTargets: Map<string, ResolvedStructureViolation> } | null => {
+            if (activeViolations.length === 0) return null;
+            const uniqueViolations: { [key: string]: ResolvedStructureViolation } = {};
+            activeViolations.forEach(v => {
+                const key = [v.rule.title, v.from, v.to, v.pairedFrom ?? ''].join('|');
+                uniqueViolations[key] = v;
+            });
+
+            const violationsArray = Object.values(uniqueViolations)
+                .sort((a, b) => (VIOLATION_PRIORITY[a.rule.title] || DEFAULT_PRIORITY) - (VIOLATION_PRIORITY[b.rule.title] || DEFAULT_PRIORITY));
+
+            const nextFixTargets = new Map<string, ResolvedStructureViolation>();
+
+            const tooltipContent = violationsArray
+                .map((v, index) => {
+                    const rule = v.rule;
+                    const isFixingThis = aiFixingInfo?.title === rule.title && aiFixingInfo?.from === v.from;
+                    const isFixingAny = Boolean(aiFixingInfo);
+                    const fixKey = `${rule.title}|${v.from}|${v.to}|${v.pairedFrom ?? ''}|${index}`;
+                    nextFixTargets.set(fixKey, v);
+                    const safeTitle = escapeTooltipHtml(rule.title);
+                    const buttonLabel = isFixingThis
+                        ? (uiLanguage === 'ar' ? 'جاري الإصلاح...' : 'Fixing...')
+                        : (uiLanguage === 'ar' ? 'إصلاح هذه المخالفة' : 'Fix this');
+                    const buttonHtml = `
+                        <button
+                            type="button"
+                            data-fix-key="${escapeTooltipHtml(fixKey)}"
+                            class="ai-fix-btn"
+                            ${isFixingAny ? 'disabled' : ''}
+                            style="display:inline-flex;align-items:center;gap:6px;border:0;border-radius:8px;background:${isFixingThis ? '#9ca3af' : '#d4af37'};color:white;padding:5px 8px;font-size:10px;font-weight:800;line-height:1;cursor:${isFixingAny ? 'not-allowed' : 'pointer'};opacity:${isFixingAny && !isFixingThis ? '0.55' : '1'};"
+                        >
+                            ${isFixingThis ? '<span style="display:inline-block;width:10px;height:10px;border:2px solid rgba(255,255,255,.55);border-top-color:white;border-radius:999px;"></span>' : ''}
+                            ${escapeTooltipHtml(buttonLabel)}
+                        </button>`;
+
+                    const stripHtml = (value: unknown): string => String(value ?? '').replace(/<[^>]*>/g, '').trim();
+                    const violationText = stripHtml(v.text || getSafeDocTextBetween(editor, v.from, v.to) || '');
+                    const problemText = stripHtml(v.message || rule.description || rule.title);
+                    const currentParts = [
+                        rule.current != null && String(rule.current).trim()
+                            ? `${uiLanguage === 'ar' ? 'نتيجة المعيار الحالية' : 'Current criterion result'}: ${stripHtml(rule.current)}`
+                            : '',
+                        violationText
+                            ? `${uiLanguage === 'ar' ? 'النص المخالف' : 'Violating text'}: ${violationText}`
+                            : '',
+                    ].filter(Boolean);
+                    const currentText = currentParts.join('\n') || stripHtml(rule.current || problemText || safeTitle);
+                    const requiredText = stripHtml(rule.required || (uiLanguage === 'ar' ? 'راجع شروط المعيار.' : 'Review the criterion requirements.'));
+                    const ruleNote = getRuleTooltipNote(rule.title, uiLanguage);
+                    const correctionTips = [
+                        ruleNote,
+                        stripHtml(rule.details),
+                        stripHtml(rule.description),
+                    ]
+                        .filter((item, itemIndex, allItems): item is string => Boolean(item) && allItems.indexOf(item) === itemIndex)
+                        .join('\n\n') || (uiLanguage === 'ar'
+                            ? 'عدّل النص المخالف حتى يطابق قيمة "المطلوب"، ثم أعد التحليل للتأكد من زوال المخالفة.'
+                            : 'Edit the violating text so it matches the required value, then rerun analysis to confirm the issue is resolved.'
+                        );
+                    const pairedParagraphHtml = v.pairedText
+                        ? `<div style="margin-top: 4px; display: grid; gap: 3px; width: 100%; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};">
+                                <strong>${uiLanguage === 'ar' ? 'الفقرة الزوجية للمقارنة اليدوية' : 'Paired paragraph for manual comparison'}:</strong>
+                                <span style="display: block; width: 100%; box-sizing: border-box; max-height: 120px; overflow-y: auto; padding: 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.08); color: inherit; line-height: 1.6;">${formatTooltipTextBlock(v.pairedText)}</span>
+                            </div>`
+                        : '';
+
+                    const detailsHtml = `
+                        <div style="display: grid; gap: 8px; font-size: 11px; color: #6b7280; width: 100%; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};" class="dark:text-gray-400">
+                            <div style="display: grid; gap: 3px;">
+                                <strong style="color: inherit;">${uiLanguage === 'ar' ? 'المشكلة' : 'Problem'}</strong>
+                                <span style="display: block; line-height: 1.65;">${formatTooltipMultilineBlock(problemText)}</span>
+                            </div>
+                            <div style="display: grid; gap: 3px;">
+                                <strong style="color: inherit;">${uiLanguage === 'ar' ? 'الحالي' : 'Current'}</strong>
+                                <span style="display: block; line-height: 1.65;">${formatTooltipMultilineBlock(currentText)}</span>
+                            </div>
+                            <div style="display: grid; gap: 3px;">
+                                <strong style="color: inherit;">${uiLanguage === 'ar' ? 'المطلوب' : 'Required'}</strong>
+                                <span style="display: block; line-height: 1.65;">${formatTooltipMultilineBlock(requiredText)}</span>
+                            </div>
+                            <div style="display: grid; gap: 3px;">
+                                <strong style="color: inherit;">${uiLanguage === 'ar' ? 'نصائح للتصحيح حسب شروط المعيار' : 'Correction tips based on this criterion'}</strong>
+                                <span style="display: block; box-sizing: border-box; max-height: 150px; overflow-y: auto; padding: 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.08); line-height: 1.65;">${formatTooltipMultilineBlock(correctionTips)}</span>
+                            </div>
+                            ${pairedParagraphHtml}
+                        </div>`;
+
+                    return `<div class="flex flex-col items-start gap-2 w-full">
+                                <div class="flex items-center gap-2 font-semibold" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${buttonHtml}<span>${safeTitle}</span></div>
+                                ${detailsHtml}
+                            </div>`;
+                })
+                .join('<hr class="border-gray-200 dark:border-[#3C3C3C] my-1.5 -mx-3 w-[calc(100%+1.5rem)]">');
+
+            return {
+                fixTargets: nextFixTargets,
+                tooltipState: {
+                    content: tooltipContent,
+                    top: event.clientY,
+                    left: event.clientX,
+                    fixedWidth: violationsArray.some(v => Boolean(v.pairedText)) ? Math.max(PARAGRAPH_PAIR_TOOLTIP_WIDTH_PX, STRUCTURE_TOOLTIP_WIDTH_PX) : STRUCTURE_TOOLTIP_WIDTH_PX,
+                    violations: violationsArray.map(v => ({ title: v.rule.title, from: v.from }))
+                },
+            };
+        };
+
+        const handleMouseMove = (event: MouseEvent) => {
+            const selectedRuleTitle = getSelectedRuleTitle();
             const shouldShowHoverTooltip = isTooltipAlwaysOn || Boolean(selectedRuleTitle);
 
             if (!shouldShowHoverTooltip) {
@@ -643,98 +860,17 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 if (tooltip) setTooltip(null);
                 return;
             }
-    
-            const posResult = editorView.posAtCoords({ left: event.clientX, top: event.clientY });
-            if (!posResult) {
+
+            const activeViolations = getPointerViolations(event, selectedRuleTitle);
+            const builtTooltip = buildTooltipState(event, activeViolations);
+            if (!builtTooltip) {
                 setTooltip(null);
                 tooltipFixTargetsRef.current.clear();
                 return;
             }
-    
-            const currentPos = posResult.pos;
-            const activeViolations = allViolations.filter(v => {
-                if (selectedRuleTitle && v.rule.title !== selectedRuleTitle) return false;
-                return currentPos >= v.from && currentPos <= v.to;
-            });
 
-            if (activeViolations.length > 0) {
-                const uniqueViolations: { [key: string]: ResolvedStructureViolation } = {};
-                activeViolations.forEach(v => {
-                    const key = [v.rule.title, v.from, v.to, v.pairedFrom ?? ''].join('|');
-                    uniqueViolations[key] = v;
-                });
-
-                const violationsArray = Object.values(uniqueViolations)
-                    .sort((a, b) => (VIOLATION_PRIORITY[a.rule.title] || DEFAULT_PRIORITY) - (VIOLATION_PRIORITY[b.rule.title] || DEFAULT_PRIORITY));
-
-                const nextFixTargets = new Map<string, ResolvedStructureViolation>();
-                
-                const tooltipContent = violationsArray
-                    .map((v, index) => {
-                        const rule = v.rule;
-                        const isFixingThis = aiFixingInfo?.title === rule.title && aiFixingInfo?.from === v.from;
-                        const isFixingAny = Boolean(aiFixingInfo);
-                        const fixKey = `${rule.title}|${v.from}|${v.to}|${v.pairedFrom ?? ''}|${index}`;
-                        nextFixTargets.set(fixKey, v);
-                        const safeTitle = escapeTooltipHtml(rule.title);
-                        const buttonLabel = isFixingThis
-                            ? (uiLanguage === 'ar' ? 'جاري الإصلاح...' : 'Fixing...')
-                            : (uiLanguage === 'ar' ? 'إصلاح هذه المخالفة' : 'Fix this');
-                        const buttonHtml = `
-                            <button
-                                type="button"
-                                data-fix-key="${escapeTooltipHtml(fixKey)}"
-                                class="ai-fix-btn"
-                                ${isFixingAny ? 'disabled' : ''}
-                                style="display:inline-flex;align-items:center;gap:6px;border:0;border-radius:8px;background:${isFixingThis ? '#9ca3af' : '#d4af37'};color:white;padding:5px 8px;font-size:10px;font-weight:800;line-height:1;cursor:${isFixingAny ? 'not-allowed' : 'pointer'};opacity:${isFixingAny && !isFixingThis ? '0.55' : '1'};"
-                            >
-                                ${isFixingThis ? '<span style="display:inline-block;width:10px;height:10px;border:2px solid rgba(255,255,255,.55);border-top-color:white;border-radius:999px;"></span>' : ''}
-                                ${escapeTooltipHtml(buttonLabel)}
-                            </button>`;
-
-                        const rawCurrentText = v.message || rule.current;
-                        const currentText = escapeTooltipHtml(String(rawCurrentText).replace(/<[^>]*>/g, '').substring(0, 140));
-                        const currentLabel = v.message
-                            ? (uiLanguage === 'ar' ? 'المشكلة' : 'Issue')
-                            : t.leftSidebar.current;
-                        const ruleNote = getRuleTooltipNote(rule.title, uiLanguage);
-                        const noteHtml = ruleNote
-                            ? `<span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${uiLanguage === 'ar' ? 'تلميح' : 'Tip'}:</strong> ${escapeTooltipHtml(ruleNote)}</span>`
-                            : '';
-                        const pairedParagraphHtml = v.pairedText
-                            ? `<div style="margin-top: 4px; display: grid; gap: 3px; width: 100%; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};">
-                                    <strong>${uiLanguage === 'ar' ? 'الفقرة الزوجية للمقارنة اليدوية' : 'Paired paragraph for manual comparison'}:</strong>
-                                    <span style="display: block; width: 100%; box-sizing: border-box; max-height: 120px; overflow-y: auto; padding: 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.08); color: inherit; line-height: 1.6;">${formatTooltipTextBlock(v.pairedText)}</span>
-                                </div>`
-                            : '';
-                        
-                        const detailsHtml = `
-                            <div style="display: grid; gap: 4px; font-size: 11px; color: #6b7280;" class="dark:text-gray-400 w-full">
-                                <span style="text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};"><strong>${escapeTooltipHtml(currentLabel)}:</strong> ${currentText}</span>
-                                ${noteHtml}
-                                ${pairedParagraphHtml}
-                            </div>`;
-
-                        return `<div class="flex flex-col items-start gap-1.5 w-full">
-                                    <div class="flex items-center gap-2 font-semibold" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${buttonHtml}<span>${safeTitle}</span></div>
-                                    ${detailsHtml}
-                                </div>`;
-                    })
-                    .join('<hr class="border-gray-200 dark:border-[#3C3C3C] my-1.5 -mx-3 w-[calc(100%+1.5rem)]">');
-
-                tooltipFixTargetsRef.current = nextFixTargets;
-
-                setTooltip({
-                    content: tooltipContent,
-                    top: event.clientY,
-                    left: event.clientX,
-                    fixedWidth: violationsArray.some(v => Boolean(v.pairedText)) ? PARAGRAPH_PAIR_TOOLTIP_WIDTH_PX : undefined,
-                    violations: violationsArray.map(v => ({ title: v.rule.title, from: v.from }))
-                });
-            } else {
-                 setTooltip(null);
-                 tooltipFixTargetsRef.current.clear();
-            }
+            tooltipFixTargetsRef.current = builtTooltip.fixTargets;
+            setTooltip(builtTooltip.tooltipState);
         };
     
         const handleClick = (event: MouseEvent) => {
@@ -755,6 +891,22 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             if (tooltipRef.current?.contains(event.target as Node)) {
                 return;
             }
+
+            const selectedRuleTitle = getSelectedRuleTitle();
+            if (!isTooltipAlwaysOn && selectedRuleTitle) {
+                const activeViolations = getPointerViolations(event, selectedRuleTitle);
+                const builtTooltip = buildTooltipState(event, activeViolations);
+                if (builtTooltip) {
+                    clearPinnedTooltipHideTimer();
+                    tooltipFixTargetsRef.current = builtTooltip.fixTargets;
+                    setTooltip(null);
+                    setPinnedTooltip(builtTooltip.tooltipState);
+                    return;
+                }
+
+                if (pinnedTooltip) setPinnedTooltip(null);
+                return;
+            }
     
             if (!isTooltipAlwaysOn) {
                 if (pinnedTooltip) setPinnedTooltip(null);
@@ -773,10 +925,31 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     
         editorDom.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('click', handleClick);
+        const handleDocumentMouseMove = (event: MouseEvent) => {
+            if (!pinnedTooltip || isTooltipAlwaysOn) return;
+            const selectedRuleTitle = getSelectedRuleTitle();
+            if (!selectedRuleTitle) return;
+            if (isPointerInsideTooltip(event, 28) || getPointerViolations(event, selectedRuleTitle).length > 0) {
+                clearPinnedTooltipHideTimer();
+                return;
+            }
+
+            if (pinnedTooltipHideTimerRef.current === null) {
+                pinnedTooltipHideTimerRef.current = window.setTimeout(() => {
+                    pinnedTooltipHideTimerRef.current = null;
+                    setPinnedTooltip(null);
+                    setTooltip(null);
+                }, 220);
+            }
+        };
+
+        document.addEventListener('mousemove', handleDocumentMouseMove);
     
         return () => {
+            clearPinnedTooltipHideTimer();
             editorDom.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('click', handleClick);
+            document.removeEventListener('mousemove', handleDocumentMouseMove);
         };
     }, [editor, highlightedItem, isTooltipAlwaysOn, pinnedTooltip, tooltip, aiFixingInfo, t.fix, allViolations, uiLanguage, t.leftSidebar.current, handleAiFix]);
     

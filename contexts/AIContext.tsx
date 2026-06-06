@@ -1013,12 +1013,23 @@ const formatBulkFixMatchedTerms = (matches: { term: string; count: number }[], e
 const getBulkFixTransitionStats = (textValue: string): { count: number; total: number; percentage: number } => {
     const language = getBulkFixLanguage(textValue);
     const words = language === 'ar' ? TRANSITIONAL_WORDS : ENGLISH_TRANSITIONAL_WORDS;
-    const sentences = splitBulkFixSentences(textValue);
-    const count = sentences.filter(sentence => words.some(word => sentence.trim().toLowerCase().startsWith(word.toLowerCase()))).length;
+    const normalizeTransitionText = (value: string): string => (
+        (language === 'ar' ? normalizeArabicText(value.toLowerCase()) : value.toLowerCase())
+            .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+    );
+    const normalizedWords = Array.from(new Set(words.map(normalizeTransitionText).filter(Boolean)))
+        .sort((a, b) => b.length - a.length);
+    const segments = textValue
+        .split(/[.!?؟،,؛;:：…]+/u)
+        .map(segment => normalizeTransitionText(segment))
+        .filter(Boolean);
+    const count = segments.filter(segment => normalizedWords.some(word => segment === word || segment.startsWith(`${word} `))).length;
     return {
         count,
-        total: sentences.length,
-        percentage: sentences.length > 0 ? count / sentences.length : 0,
+        total: segments.length,
+        percentage: segments.length > 0 ? count / segments.length : 0,
     };
 };
 

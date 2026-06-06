@@ -26,7 +26,8 @@ export const checkWordsToDelete = (context: AnalysisContext): CheckResult => {
                 violations.push({
                     from: node.pos + 1 + match.index,
                     to: node.pos + 1 + match.index + match[0].length,
-                    message: t.violationMessages.avoidWord(word)
+                    message: t.violationMessages.avoidWord(word),
+                    text: match[0],
                 });
             }
         });
