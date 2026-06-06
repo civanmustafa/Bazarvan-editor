@@ -2119,6 +2119,7 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 إذا كان بند في التقرير يحتاج "الحل العملي الجاهز" أو "الإجابة المقترحة" أو "الجملة المقترحة"، فلا تكتب السؤال أو العنوان أو الموضع أو سبب الاقتراح خارج البطاقة. ضع علامة [[PATCH:patch_1]] فقط في موضع بطاقة التنفيذ.
 لا تعرض النص الجاهز داخل analysisMarkdown.
 لا تستخدم عناوين "الفكرة" أو "سبب أهميتها" أو "سبب أهمية إضافتها" عند وجود بطاقة تنفيذ؛ استخدم علامة البطاقة فقط.
+لا تستخدم الخط العريض داخل analysisMarkdown أو contentMarkdown نهائيًا: لا تستخدم **نص** أو __نص__ أو وسوم <strong>/<b>.
 استخدم هذا الشكل حصراً:
 {
   "analysisMarkdown": "اكتب هنا التحليل العربي بنفس ترتيب الأمر المطلوب.",
@@ -2140,6 +2141,7 @@ const SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION = `
 القيم المسموحة لـ operation:
 - replace_block
 - replace_text
+- delete_block
 - insert_after_heading
 - insert_before_heading
 - append_to_section
@@ -2165,6 +2167,7 @@ const READY_COMMAND_PATCH_CARD_REQUIREMENT = `
 
 لكل patch يجب الالتزام بما يلي:
 - إذا كان المطلوب تعديل أو تحسين أو توسيع أو إعادة صياغة أو تصحيح قسم أو فقرة أو جملة موجودة أصلًا في النص، استخدم operation بقيمة "replace_block" وليس أي عملية إضافة.
+- إذا كان المطلوب حذف فقرة أو قسم حشو/تكرار دون نص بديل، استخدم operation بقيمة "delete_block"، وضع النص المراد حذفه حرفيًا في targetText، واترك contentMarkdown فارغًا.
 - استخدم عمليات الإضافة فقط عندما يكون النص المقترح جديدًا وغير موجود في المقال أصلًا.
 - إذا كان المطلوب استبدال قسم أو فقرة موجودة، استخدم operation بقيمة "replace_block".
 - ضع في targetText النص الأصلي المراد استبداله حرفيًا من المقال، أو بداية الفقرة/القسم حرفيًا إذا كان النص طويلًا جدًا.
@@ -2176,8 +2179,10 @@ const READY_COMMAND_PATCH_CARD_REQUIREMENT = `
 - ضع في reason سببًا مختصرًا لإضافة النص أو استبداله.
 - إذا كان الاقتراح مستندًا إلى محتوى منافس، يجب أن يتضمن reason رقم المنافس وفقرة الدليل. إذا كان الاقتراح من الذكاء الاصطناعي وليس من المنافسين، يجب أن يتضمن reason عبارة "مصدر الفكرة: الذكاء الاصطناعي".
 - ضع في title اسم البند أو عنوان القسم فقط؛ واجهة البطاقة ستعرض نوع العملية إضافة أو استبدال.
+- إذا كان contentMarkdown يبدأ بعنوان H3 مثل "### عنوان فرعي" وكان anchorText هو قسم H2، استخدم operation بقيمة "append_to_section" حتى يضاف H3 في نهاية قسم H2 وقبل بداية H2 التالي، وليس مباشرة بعد عنوان H2.
 - لا تكتفِ بكتابة الصياغة البديلة داخل analysisMarkdown.
 - لا تكتب عبارات مثل "الصياغة البديلة:" أو "النص المقترح:" داخل contentMarkdown.
+- لا تستخدم الخط العريض داخل analysisMarkdown أو contentMarkdown نهائيًا.
 
 شكل بطاقة النص المقترح الذي يجب تغذيته بالحقول:
 - عنوان البطاقة في الواجهة سيكون نوع العملية إضافة/استبدال مع title.
@@ -2221,14 +2226,17 @@ const SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION = `
 لا تستخدم عناوين "الفكرة" أو "سبب أهميتها" أو "سبب أهمية إضافتها" عند وجود بطاقة تنفيذ.
 
 إذا كان المطلوب تعديل فقرة موجودة، استخدم operation بقيمة "replace_block"، ويجب أن يكون targetText نسخة حرفية من الفقرة الحالية داخل المقال لا تلخيصاً لها. ضع النص الجديد فقط في contentMarkdown.
+إذا كان المطلوب حذف فقرة أو قسم بسبب حشو أو تكرار دون نص بديل، استخدم operation بقيمة "delete_block"، واجعل targetText نسخة حرفية من النص المراد حذفه، واترك contentMarkdown فارغًا.
 إذا كان المطلوب تعديل أو تحسين أو توسيع أو إعادة صياغة أو تصحيح قسم أو فقرة أو جملة موجودة أصلًا في النص، فهذا استبدال وليس إضافة. استخدم replace_block دائمًا مع targetText للنص الحالي.
 استخدم عمليات الإضافة فقط عند إضافة نص جديد غير موجود أصلًا في المقال.
+إذا كان contentMarkdown يبدأ بعنوان H3 ويجب إدخاله داخل قسم H2 قائم، استخدم append_to_section مع anchorText لعنوان H2 حتى يظهر في نهاية القسم قبل H2 التالي.
 لا تستخدم في targetText تسميات عامة مثل "الفقرة الافتتاحية" أو "المقدمة". عند تعديل فقرة افتتاحية قبل أول عنوان قسم، انسخ الفقرة نفسها حرفيًا في targetText واترك anchorText فارغًا إذا لم يوجد عنوان سابق لها.
 عند استهداف الفقرة الافتتاحية أو الفقرة الثانية، اعلم أن الفقرة الافتتاحية هي أول فقرة نصية في المحرر، والفقرة الثانية هي ثاني فقرة نصية في المحرر. اكتب ذلك بوضوح في placementLabel مثل: "الفقرة الافتتاحية - أول فقرة في المحرر" أو "الفقرة الثانية - ثاني فقرة في المحرر".
 إذا لم تستطع نسخ targetText حرفيًا للفقرة الافتتاحية أو الثانية، اترك targetText فارغًا واستخدم placementLabel الواضح أعلاه حتى يتمكن المحرر من تحديد الموضع.
 في غير حالتي الفقرة الافتتاحية والفقرة الثانية، إذا لم تستطع نسخ الفقرة الحالية حرفياً، فلا تستخدم replace_block، واستخدم عملية إضافة مناسبة بدلاً من ذلك.
 إذا كان المطلوب إضافة فقرة أو سؤال أو جملة جديدة، استخدم عمليات الإضافة المناسبة مثل insert_after_heading أو insert_before_faq أو insert_before_conclusion أو append_to_section أو append_to_article.
 مهم جداً: يجب أن يكون contentMarkdown محتوى نهائياً جاهزاً للإدراج في المقال فقط، دون أي تسميات تفسيرية مثل "السؤال:" أو "الإجابة:" أو "النص المقترح:" أو "الحل العملي الجاهز:" أو "مكان الإضافة:".
+لا تستخدم الخط العريض أو علامات Markdown للخط العريض داخل أي تقرير أو نص مقترح.
 إذا كان المحتوى سؤالاً وجواباً، فاكتب السؤال كسطر عنوان Markdown مناسب ثم الجواب مباشرة تحته، دون كتابة كلمتي "السؤال" أو "الإجابة".
 
 الشكل المطلوب لكل patch:
@@ -2300,6 +2308,7 @@ const isAiErrorResponseText = (value: string): boolean => (
 const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
     'replace_block',
     'replace_text',
+    'delete_block',
     'insert_after_heading',
     'insert_before_heading',
     'append_to_section',
@@ -2313,6 +2322,13 @@ const asTrimmedString = (value: unknown): string => typeof value === 'string' ? 
 const AI_PATCH_LABEL_PATTERN = /^(?:[-*]\s*)?(?:السؤال(?:\s+المقترح)?|الإجابة|الاجابة|الإجابة\s+المقترحة(?:\s+الجاهزة)?|الاجابة\s+المقترحة(?:\s+الجاهزة)?|الجملة\s+المقترحة|جمل\s+مقترحة\s+للإضافة\s+للنص|النص\s+المقترح(?:\s+لإضافة\s+الكيان)?|الصياغة\s+المقترحة(?:\s+بعد\s+التخفيف\s+أو\s+التوضيح)?|الحل\s+العملي\s+الجاهز(?:\s+[^:]*)?|مكان\s+الإضافة|مكان\s+إضافتها\s+المقترح|مكان\s+تطبيقه|الموضع\s+المقترح)\s*[:：]\s*/i;
 
 const stripAiPatchLabelsFromLine = (line: string): string => line.replace(AI_PATCH_LABEL_PATTERN, '').trim();
+
+const removeMarkdownBold = (value: string): string => (
+    value
+        .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+        .replace(/__([^_\n]+)__/g, '$1')
+        .replace(/<\/?(?:strong|b)\b[^>]*>/gi, '')
+);
 
 const isManualRecommendationPatchContent = (value: string): boolean => {
     const trimmed = value.trim().replace(/^[([{]\s*/, '').replace(/\s*[)\]}]$/, '');
@@ -2374,7 +2390,7 @@ const cleanAiPatchContentMarkdown = (value: string): string => {
     ]);
 
     if (question && answer) {
-        return `### ${question}\n${answer}`;
+        return removeMarkdownBold(`### ${question}\n${answer}`);
     }
 
     const cleaned = rawLines
@@ -2394,13 +2410,14 @@ const cleanAiPatchContentMarkdown = (value: string): string => {
         .join('\n')
         .trim();
 
-    return isManualRecommendationPatchContent(cleaned) ? '' : cleaned;
+    return isManualRecommendationPatchContent(cleaned) ? '' : removeMarkdownBold(cleaned);
 };
 
 const normalizePatchOperation = (value: unknown): AiContentPatchOperation => {
     const operation = asTrimmedString(value) as AiContentPatchOperation;
-    if (operation === 'replace_text' || operation === 'replace_block') return operation;
+    if (operation === 'replace_text' || operation === 'replace_block' || operation === 'delete_block') return operation;
     if (['replace', 'replace_paragraph', 'update_paragraph', 'rewrite_paragraph'].includes(operation)) return 'replace_block';
+    if (['delete', 'remove', 'delete_paragraph', 'remove_paragraph', 'حذف', 'حذف فقرة'].includes(operation)) return 'delete_block';
     return ALLOWED_PATCH_OPERATIONS.has(operation) ? operation : 'append_to_article';
 };
 
@@ -2408,10 +2425,15 @@ const isIndependentH2SectionContent = (value: string): boolean => (
     /^(?:##(?!#)\s+\S|<h2(?:\s|>|\/))/i.test(value.trim())
 );
 
+const isH3SubsectionContent = (value: string): boolean => (
+    /^(?:###(?!#)\s+\S|<h3(?:\s|>|\/))/i.test(value.trim())
+);
+
 const normalizeIndependentH2SectionOperation = (
     operation: AiContentPatchOperation,
     contentMarkdown: string,
 ): AiContentPatchOperation => {
+    if (isH3SubsectionContent(contentMarkdown) && operation === 'insert_after_heading') return 'append_to_section';
     if (!isIndependentH2SectionContent(contentMarkdown)) return operation;
     if (
         operation === 'insert_before_heading' ||
@@ -2482,6 +2504,7 @@ const inferPatchOperation = (
     record: Record<string, unknown>,
     targetText: string,
 ): AiContentPatchOperation => {
+    if (requestedOperation === 'delete_block') return requestedOperation;
     if (requestedOperation === 'replace_block' || requestedOperation === 'replace_text') return requestedOperation;
     const hasExplicitReplacementTarget = Boolean(
         asTrimmedString(record.targetText) ||
@@ -2526,11 +2549,12 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
         .map((patch, index): AiContentPatch | null => {
             if (!patch || typeof patch !== 'object') return null;
             const record = patch as Record<string, unknown>;
+            const requestedOperation = normalizePatchOperation(record.operation || record.type);
             const contentMarkdown = cleanAiPatchContentMarkdown(asTrimmedString(record.contentMarkdown || record.content || record.text));
-            if (!contentMarkdown) return null;
+            if (!contentMarkdown && requestedOperation !== 'delete_block') return null;
 
             const operation = normalizeIndependentH2SectionOperation(
-                normalizePatchOperation(record.operation || record.type),
+                requestedOperation,
                 contentMarkdown,
             );
             const targetText = asTrimmedString(record.targetText || record.originalText || record.currentText || record.original || record.replaceTarget);
@@ -2635,7 +2659,7 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
         return { displayText: rawResponse, patches: [] };
     }
 
-    const cleanDisplayText = stripOrphanPatchMarkers(displayText || rawResponse, patches);
+    const cleanDisplayText = removeMarkdownBold(stripOrphanPatchMarkers(displayText || rawResponse, patches));
 
     return {
         displayText: patches.length ? stripDuplicatePatchTextFromAnalysis(cleanDisplayText, patches) : cleanDisplayText,
@@ -3484,7 +3508,7 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
 
     if (independentH2Target) return independentH2Target;
 
-    if (patch.operation === 'replace_block' || patch.operation === 'replace_text') {
+    if (patch.operation === 'replace_block' || patch.operation === 'replace_text' || patch.operation === 'delete_block') {
         const targetText = patch.targetText?.trim() ? patch.targetText : patch.anchorText || '';
         const replaceCandidates = [targetText];
         const ordinalParagraphTarget = findOrdinalParagraphTarget(editor, patch);
@@ -3525,7 +3549,7 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
             };
         }
 
-        return { error: `لم يتم العثور على النص المراد استبداله: ${patch.targetText || patch.anchorText || patch.title}` };
+        return { error: `لم يتم العثور على النص المراد ${patch.operation === 'delete_block' ? 'حذفه' : 'استبداله'}: ${patch.targetText || patch.anchorText || patch.title}` };
     }
 
     if (patch.targetText) {
@@ -4842,6 +4866,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         try {
+            if (patch.operation === 'delete_block') {
+                const applied = editor
+                    .chain()
+                    .focus()
+                    .deleteRange({ from: target.from, to: target.to })
+                    .scrollIntoView()
+                    .run();
+                if (!applied) throw new Error('تعذر حذف النص من المحرر.');
+                return { status: 'applied' };
+            }
+
             const applied = editor
                 .chain()
                 .focus()

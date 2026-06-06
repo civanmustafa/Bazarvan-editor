@@ -246,6 +246,7 @@ export type AiPatchProvider = 'gemini' | 'chatgpt';
 export type AiContentPatchOperation =
   | 'replace_block'
   | 'replace_text'
+  | 'delete_block'
   | 'insert_after_heading'
   | 'insert_before_heading'
   | 'append_to_section'

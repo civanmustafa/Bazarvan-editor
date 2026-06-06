@@ -100,12 +100,19 @@ const AIHistoryTab: React.FC = () => {
         if (provider === 'chatgpt') return 'ChatGPT';
         return '';
     };
-    const getPatchActionLabel = (operation: string) => (
-        operation === 'replace_block' || operation === 'replace_text' ? 'استبدال' : 'إضافة'
-    );
+    const getPatchActionLabel = (operation: string) => {
+        if (operation === 'delete_block') return isArabic ? 'حذف' : 'Delete';
+        if (operation === 'replace_block' || operation === 'replace_text') return isArabic ? 'استبدال' : 'Replace';
+        return isArabic ? 'إضافة' : 'Add';
+    };
+    const getHistoryDeleteLabel = (item: AIHistoryItem) => {
+        const provider = providerLabel(item.provider);
+        if (isArabic) return provider ? `حذف سجل ${provider}` : 'حذف السجل';
+        return provider ? `Delete ${provider} record` : 'Delete record';
+    };
     const getPatchTitle = (patch: AiContentPatch) => (
         (patch.title || 'نص مقترح')
-            .replace(/^(?:إضافة|اضافة|استبدال)\s*[-:–]\s*/i, '')
+            .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|replace|delete)\s*[-:–]\s*/i, '')
             .trim() || 'نص مقترح'
     );
     const handleSelectManualPatch = (patch: AiContentPatch) => {
@@ -147,12 +154,15 @@ const AIHistoryTab: React.FC = () => {
     };
     const renderAnalysisPatch = (patch: AiContentPatch) => {
         const actionLabel = getPatchActionLabel(patch.operation);
+        const isDeletePatch = patch.operation === 'delete_block';
         const localState = manualPatchUiState[patch.id];
         const status = localState?.status || patch.status;
         const applyError = localState?.error || patch.applyError;
         const patchLocationText = patch.placementLabel || patch.anchorText || patch.targetText || (isArabic ? 'لم يتم تحديد موضع نصي دقيق.' : 'No precise text location was provided.');
         const patchReason = patch.reason || (isArabic ? 'سبب الاقتراح غير محدد.' : 'No reason was provided.');
-        const reasonLabel = actionLabel === 'استبدال'
+        const reasonLabel = isDeletePatch
+            ? (isArabic ? 'سبب الحذف' : 'Deletion reason')
+            : actionLabel === (isArabic ? 'استبدال' : 'Replace')
             ? (isArabic ? 'سبب الاستبدال' : 'Replacement reason')
             : (isArabic ? 'سبب إضافة النص المقترح' : 'Reason for adding');
         const hasMergeDeleteTarget = Boolean(
@@ -194,14 +204,20 @@ const AIHistoryTab: React.FC = () => {
                     </span>
                 )}
             </div>
-            <div className="rounded-md border border-gray-100 bg-gray-50 p-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+            <div className={`rounded-md border p-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] ${isDeletePatch ? 'border-red-100 bg-red-50/60' : 'border-gray-100 bg-gray-50'}`}>
                 <div className="mb-1 text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">
-                    {isArabic ? 'النص المقترح' : 'Suggested text'}
+                    {isDeletePatch ? (isArabic ? 'النص المراد حذفه' : 'Text to delete') : (isArabic ? 'النص المقترح' : 'Suggested text')}
                 </div>
-                <div
-                    className="ai-output text-[11px] leading-relaxed text-gray-800 dark:text-gray-100"
-                    dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }}
-                />
+                {isDeletePatch ? (
+                    <div className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-gray-800 dark:text-gray-100">
+                        {patch.targetText || patchLocationText}
+                    </div>
+                ) : (
+                    <div
+                        className="ai-output text-[11px] leading-relaxed text-gray-800 dark:text-gray-100"
+                        dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }}
+                    />
+                )}
             </div>
             {hasMergeDeleteTarget && (
                 <div className="mt-2 rounded-md border border-red-100 bg-red-50/70 p-2 dark:border-red-900/30 dark:bg-red-900/10">
@@ -255,14 +271,16 @@ const AIHistoryTab: React.FC = () => {
                     <MapPin size={13} />
                     {isArabic ? 'الموضع' : 'Locate'}
                 </button>
-                <button
-                    type="button"
-                    onClick={() => copyMarkdownText(patch.contentMarkdown)}
-                    className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
-                >
-                    <Copy size={13} />
-                    {isArabic ? 'نسخ' : 'Copy'}
-                </button>
+                {!isDeletePatch && (
+                    <button
+                        type="button"
+                        onClick={() => copyMarkdownText(patch.contentMarkdown)}
+                        className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                    >
+                        <Copy size={13} />
+                        {isArabic ? 'نسخ' : 'Copy'}
+                    </button>
+                )}
                 <button
                     type="button"
                     onClick={() => handleApplyManualPatch(patch)}
@@ -346,10 +364,12 @@ const AIHistoryTab: React.FC = () => {
                             </div>
                             <button 
                                 onClick={() => removeFromAiHistory(item.id)}
-                                className="p-1.5 rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                                title={t.aiHistory.remove}
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-100 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600 hover:bg-red-100 dark:border-red-900/30 dark:bg-red-900/10 dark:text-red-300 dark:hover:bg-red-900/25"
+                                title={getHistoryDeleteLabel(item)}
+                                aria-label={getHistoryDeleteLabel(item)}
                             >
                                 <Trash2 size={14} />
+                                <span>{getHistoryDeleteLabel(item)}</span>
                             </button>
                         </div>
                         {item.type !== 'manual-analysis' && !item.bulkFixReviewItem && (
