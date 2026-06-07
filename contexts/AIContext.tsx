@@ -2651,6 +2651,130 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
         .slice(0, 20);
 };
 
+const findJsonArrayPropertyText = (text: string, propertyName: string): string => {
+    const match = new RegExp(`"${propertyName}"\\s*:\\s*\\[`, 'i').exec(text);
+    if (!match) return '';
+
+    const start = text.indexOf('[', match.index);
+    if (start === -1) return '';
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < text.length; index += 1) {
+        const char = text[index];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (char === '\\') {
+                escaped = true;
+            } else if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inString = true;
+            continue;
+        }
+        if (char === '[') depth += 1;
+        if (char === ']') {
+            depth -= 1;
+            if (depth === 0) return text.slice(start, index + 1);
+        }
+    }
+
+    return '';
+};
+
+const collectJsonObjectFragments = (text: string): string[] => {
+    const fragments: string[] = [];
+    let start = -1;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = 0; index < text.length; index += 1) {
+        const char = text[index];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (char === '\\') {
+                escaped = true;
+            } else if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inString = true;
+            continue;
+        }
+        if (char === '{') {
+            if (depth === 0) start = index;
+            depth += 1;
+            continue;
+        }
+        if (char === '}') {
+            depth -= 1;
+            if (depth === 0 && start >= 0) {
+                fragments.push(text.slice(start, index + 1));
+                start = -1;
+            }
+        }
+    }
+
+    return fragments;
+};
+
+const parseLooseJson = (value: string): unknown => {
+    const candidates = [
+        value,
+        value.replace(/,\s*([}\]])/g, '$1'),
+    ];
+
+    for (const candidate of candidates) {
+        try {
+            return JSON.parse(candidate);
+        } catch {
+            // Try the next lightly-normalized candidate.
+        }
+    }
+
+    return null;
+};
+
+const extractLooseAiPatchesFromText = (rawResponse: string, provider: AiPatchProvider): AiContentPatch[] => {
+    const rawPatchRecords: unknown[] = [];
+
+    ['patches', 'insertions', 'contentPatches'].forEach(propertyName => {
+        const arrayText = findJsonArrayPropertyText(rawResponse, propertyName);
+        if (!arrayText) return;
+
+        const parsedArray = parseLooseJson(arrayText);
+        if (Array.isArray(parsedArray)) {
+            rawPatchRecords.push(...parsedArray);
+            return;
+        }
+
+        collectJsonObjectFragments(arrayText).forEach(fragment => {
+            const parsedObject = parseLooseJson(fragment);
+            if (parsedObject && typeof parsedObject === 'object' && !Array.isArray(parsedObject)) {
+                rawPatchRecords.push(parsedObject);
+            }
+        });
+    });
+
+    if (rawPatchRecords.length === 0) return [];
+
+    return normalizeAiPatches(rawPatchRecords, provider);
+};
+
 const stripDuplicatePatchTextFromAnalysis = (analysisMarkdown: string, patches: AiContentPatch[]): string => {
     let cleaned = analysisMarkdown;
 
@@ -2667,17 +2791,26 @@ const stripDuplicatePatchTextFromAnalysis = (analysisMarkdown: string, patches: 
         .trim();
 };
 
+const normalizePatchMarkerForComparison = (value?: string): string => (
+    (value || '')
+        .normalize('NFKC')
+        .replace(/^\s*\[\[PATCH:/i, '')
+        .replace(/\]\]\s*$/i, '')
+        .replace(/[^\p{L}\p{N}_-]+/gu, '_')
+        .replace(/^_+|_+$/g, '')
+);
+
 const stripOrphanPatchMarkers = (analysisMarkdown: string, patches: AiContentPatch[]): string => {
     const validMarkers = new Set(
         patches
             .flatMap(patch => [patch.marker, patch.title])
-            .map(value => value.trim())
+            .map(value => normalizePatchMarkerForComparison(value))
             .filter(Boolean)
     );
 
     return analysisMarkdown
         .replace(/\[\[PATCH:([^\]]+)\]\]/g, (match, marker) => (
-            validMarkers.has(String(marker).trim()) ? match : ''
+            validMarkers.has(normalizePatchMarkerForComparison(String(marker))) ? match : ''
         ))
         .replace(/[ \t]+\n/g, '\n')
         .replace(/\n{3,}/g, '\n\n')
@@ -2688,10 +2821,19 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
     const parsed = extractJson(rawResponse);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         const partialDisplayText = extractJsonStringProperty(rawResponse, 'analysisMarkdown');
+        const loosePatches = extractLooseAiPatchesFromText(rawResponse, provider);
         if (partialDisplayText) {
-            return { displayText: partialDisplayText, patches: [] };
+            const cleanDisplayText = removeMarkdownBold(stripOrphanPatchMarkers(partialDisplayText, loosePatches));
+            return {
+                displayText: loosePatches.length ? stripDuplicatePatchTextFromAnalysis(cleanDisplayText, loosePatches) : cleanDisplayText,
+                patches: loosePatches,
+            };
         }
-        return { displayText: rawResponse, patches: [] };
+        const cleanDisplayText = removeMarkdownBold(stripOrphanPatchMarkers(rawResponse, loosePatches));
+        return {
+            displayText: loosePatches.length ? stripDuplicatePatchTextFromAnalysis(cleanDisplayText, loosePatches) : cleanDisplayText,
+            patches: loosePatches,
+        };
     }
 
     const record = parsed as Record<string, unknown>;
@@ -2704,15 +2846,16 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
     );
 
     const patches = normalizeAiPatches(record.patches || record.insertions || record.contentPatches, provider);
+    const resolvedPatches = patches.length ? patches : extractLooseAiPatchesFromText(rawResponse, provider);
     if (!displayText && patches.length === 0) {
-        return { displayText: rawResponse, patches: [] };
+        if (resolvedPatches.length === 0) return { displayText: rawResponse, patches: [] };
     }
 
-    const cleanDisplayText = removeMarkdownBold(stripOrphanPatchMarkers(displayText || rawResponse, patches));
+    const cleanDisplayText = removeMarkdownBold(stripOrphanPatchMarkers(displayText || rawResponse, resolvedPatches));
 
     return {
-        displayText: patches.length ? stripDuplicatePatchTextFromAnalysis(cleanDisplayText, patches) : cleanDisplayText,
-        patches,
+        displayText: resolvedPatches.length ? stripDuplicatePatchTextFromAnalysis(cleanDisplayText, resolvedPatches) : cleanDisplayText,
+        patches: resolvedPatches,
     };
 };
 

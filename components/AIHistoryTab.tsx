@@ -115,6 +115,12 @@ const AIHistoryTab: React.FC = () => {
             .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|replace|delete)\s*[-:–]\s*/i, '')
             .trim() || 'نص مقترح'
     );
+    const normalizePatchMarkerForMatch = (value?: string): string => (
+        (value || '')
+            .replace(/^\s*\[\[PATCH:/i, '')
+            .replace(/\]\]\s*$/i, '')
+            .trim()
+    );
     const withHistoryCommandId = (patch: AiContentPatch, commandId?: string): AiContentPatch => (
         commandId && !patch.commandId ? { ...patch, commandId } : patch
     );
@@ -322,7 +328,11 @@ const AIHistoryTab: React.FC = () => {
                 );
             }
 
-            const patch = patches.find(itemPatch => itemPatch.marker === marker || itemPatch.title === marker);
+            const normalizedMarker = normalizePatchMarkerForMatch(marker);
+            const patch = patches.find(itemPatch => (
+                normalizePatchMarkerForMatch(itemPatch.marker) === normalizedMarker ||
+                normalizePatchMarkerForMatch(itemPatch.title) === normalizedMarker
+            ));
             if (patch) {
                 usedPatchIds.add(patch.id);
                 parts.push(renderAnalysisPatch(patch, item.commandId));

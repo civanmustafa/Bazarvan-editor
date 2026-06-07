@@ -45,7 +45,7 @@ import {
 // --- Local timing helpers ---
 const EDITOR_SNAPSHOT_DELAY_MS = 700;
 const DRAFT_PERSIST_DELAY_MS = 2500;
-const ANALYSIS_DEBOUNCE_MS = 1500;
+const ANALYSIS_DEBOUNCE_MS = 600;
 const AUTOSAVE_INTERVAL_MS = 60 * 1000;
 const MAX_DOCUMENT_LANGUAGE_FORMATTING_SIZE = 60_000;
 const ACTIVE_ARTICLE_TITLE_KEY = 'bazarvan-active-article-title';
@@ -768,14 +768,18 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         writeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
     }, [currentUser, currentView]);
 
-    const captureEditorSnapshot = useCallback((targetEditor: Editor, persistDraft = true) => {
+    const updateEditorAnalysisSnapshot = useCallback((targetEditor: Editor) => {
         const contentJSON = targetEditor.getJSON();
         setEditorState(contentJSON);
         setText(targetEditor.getText());
+    }, []);
+
+    const captureEditorSnapshot = useCallback((targetEditor: Editor, persistDraft = true) => {
+        updateEditorAnalysisSnapshot(targetEditor);
         if (persistDraft) {
             persistEditorSnapshotNow(targetEditor);
         }
-    }, [persistEditorSnapshotNow]);
+    }, [persistEditorSnapshotNow, updateEditorAnalysisSnapshot]);
 
     const scheduleDraftPersistence = useCallback((targetEditor: Editor) => {
         clearDraftPersistTimer();
@@ -786,13 +790,14 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [clearDraftPersistTimer, persistEditorSnapshotNow]);
 
     const scheduleEditorSnapshot = useCallback((targetEditor: Editor) => {
+        updateEditorAnalysisSnapshot(targetEditor);
         clearEditorSnapshotTimer();
         editorSnapshotTimerRef.current = window.setTimeout(() => {
-            captureEditorSnapshot(targetEditor, false);
+            updateEditorAnalysisSnapshot(targetEditor);
             editorSnapshotTimerRef.current = null;
         }, EDITOR_SNAPSHOT_DELAY_MS);
         scheduleDraftPersistence(targetEditor);
-    }, [captureEditorSnapshot, clearEditorSnapshotTimer, scheduleDraftPersistence]);
+    }, [clearEditorSnapshotTimer, scheduleDraftPersistence, updateEditorAnalysisSnapshot]);
 
     // TipTap extensions live here. Add editor-level behavior or formatting support in this list.
     const extensions = useMemo(() => [
@@ -1026,7 +1031,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         goalContext,
         articleLanguage,
         uiLanguage,
-        isDuplicatesTabActive,
+        true,
         currentView === 'editor'
     );
 

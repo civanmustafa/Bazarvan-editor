@@ -1178,6 +1178,13 @@ ${readyCommandCompetitorBlocks}`;
         operation === 'replace_block' || operation === 'replace_text' ? 'استبدال' : 'إضافة'
     );
 
+    const normalizePatchMarkerForMatch = (value?: string): string => (
+        (value || '')
+            .replace(/^\s*\[\[PATCH:/i, '')
+            .replace(/\]\]\s*$/i, '')
+            .trim()
+    );
+
     const renderPatchCard = (
         provider: AiPatchProvider,
         patch: AiContentPatch,
@@ -1365,7 +1372,11 @@ ${readyCommandCompetitorBlocks}`;
                 );
             }
 
-            const patch = uniquePatches.find(item => item.marker === marker || item.title === marker);
+            const normalizedMarker = normalizePatchMarkerForMatch(marker);
+            const patch = uniquePatches.find(item => (
+                normalizePatchMarkerForMatch(item.marker) === normalizedMarker ||
+                normalizePatchMarkerForMatch(item.title) === normalizedMarker
+            ));
             if (patch && !usedPatchIds.has(patch.id)) {
                 usedPatchIds.add(patch.id);
                 parts.push(renderPatchCard(provider, patch, handlers));
