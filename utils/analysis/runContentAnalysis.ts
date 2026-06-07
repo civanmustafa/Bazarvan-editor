@@ -60,7 +60,10 @@ export interface ContentAnalysisInput {
   articleLanguage: 'ar' | 'en';
   uiLanguage: 'ar' | 'en';
   tableCount?: number;
+  updateKeywordAnalysis?: boolean;
+  updateStructureAnalysis?: boolean;
   updateDuplicateAnalysis?: boolean;
+  previousAnalysis?: FullAnalysis;
 }
 
 const getAnalysisGoal = (goalContext: GoalContext): string => {
@@ -183,7 +186,10 @@ export const runContentAnalysis = ({
   articleLanguage,
   uiLanguage,
   tableCount,
+  updateKeywordAnalysis = true,
+  updateStructureAnalysis = true,
   updateDuplicateAnalysis = true,
+  previousAnalysis,
 }: ContentAnalysisInput): FullAnalysis => {
   const t = translations[uiLanguage] || translations.ar;
   const analysisGoal = getAnalysisGoal(goalContext);
@@ -251,10 +257,15 @@ export const runContentAnalysis = ({
 
   const { duplicateAnalysis, duplicateStats } = updateDuplicateAnalysis
     ? runDuplicateAnalysis(textContent, keywords, totalWordCount, articleLanguage)
-    : {
-        duplicateAnalysis: createEmptyDuplicateAnalysis(),
-        duplicateStats: createEmptyDuplicateStats(totalWordCount),
-      };
+    : previousAnalysis
+      ? {
+          duplicateAnalysis: previousAnalysis.duplicateAnalysis,
+          duplicateStats: previousAnalysis.duplicateStats,
+        }
+      : {
+          duplicateAnalysis: createEmptyDuplicateAnalysis(),
+          duplicateStats: createEmptyDuplicateStats(totalWordCount),
+        };
 
   const analysisContext: AnalysisContext = {
     editorState,
@@ -278,64 +289,70 @@ export const runContentAnalysis = ({
     duplicateAnalysis,
   };
 
-  const keywordAnalysis = runKeywordAnalysis(analysisContext);
-  const conclusionChecks = checkConclusion(analysisContext);
+  const keywordAnalysis = updateKeywordAnalysis || !previousAnalysis
+    ? runKeywordAnalysis(analysisContext)
+    : previousAnalysis.keywordAnalysis;
 
-  const rawStructureAnalysis: StructureAnalysis = {
-    wordCount: checkWordCount(analysisContext),
-    firstTitle: checkFirstTitle(analysisContext),
-    secondTitle: checkSecondTitle(analysisContext),
-    includesExcludes: checkIncludesExcludes(analysisContext),
-    preTravelH2: checkPreTravelH2(analysisContext),
-    pricingH2: checkPricingH2(analysisContext),
-    whoIsItForH2: checkWhoIsItForH2(analysisContext),
-    summaryParagraph: checkSummaryParagraph(analysisContext),
-    secondParagraph: checkSecondParagraph(analysisContext),
-    paragraphLength: checkParagraphLength(analysisContext),
-    paragraphPair: checkParagraphPair(analysisContext),
-    h2Structure: checkH2Structure(analysisContext),
-    h2Count: checkH2Count(analysisContext),
-    h3Structure: checkSubHeadingStructure(analysisContext, 3),
-    h4Structure: checkSubHeadingStructure(analysisContext, 4),
-    betweenH2H3: checkBetweenH2H3(analysisContext),
-    sentenceLength: checkSentenceLength(analysisContext),
-    stepsIntroduction: checkStepsIntroduction(analysisContext),
-    duplicateWordsInParagraph: checkDuplicateWordsInParagraph(analysisContext),
-    duplicateWordsInHeading: checkDuplicateWordsInHeading(analysisContext),
-    headingLength: checkHeadingLength(analysisContext),
-    faqSection: checkFaqSection(analysisContext),
-    answerParagraph: checkAnswerParagraph(analysisContext),
-    ambiguousHeadings: checkAmbiguousHeadings(analysisContext),
-    ambiguousParagraphReferences: checkAmbiguousParagraphReferences(analysisContext),
-    punctuation: checkPunctuation(analysisContext),
-    paragraphEndings: checkParagraphEndings(analysisContext),
-    interrogativeH2: checkInterrogativeH2(analysisContext),
-    differentTransitionalWords: checkTransitionalWords(analysisContext),
-    immediateDuplicateWords: checkImmediateDuplicateWords(analysisContext),
-    automaticLists: checkAutomaticLists(analysisContext),
-    ctaWords: checkCtaWords(analysisContext),
-    interactiveLanguage: checkInteractiveLanguage(analysisContext),
-    arabicOnly: checkArabicOnly(analysisContext),
-    lastH2IsConclusion: conclusionChecks.lastH2IsConclusion,
-    conclusionParagraph: conclusionChecks.conclusionParagraph,
-    conclusionWordCount: conclusionChecks.conclusionWordCount,
-    conclusionHasNumber: conclusionChecks.conclusionHasNumber,
-    conclusionHasList: conclusionChecks.conclusionHasList,
-    sentenceBeginnings: checkSentenceBeginnings(analysisContext),
-    warningWords: checkWarningWords(analysisContext),
-    punctuationSpacing: checkPunctuationSpacing(analysisContext),
-    repeatedBigrams: checkRepeatedBigrams(analysisContext),
-    slowWords: checkSlowWords(analysisContext),
-    wordConsistency: checkWordConsistency(analysisContext),
-    commonEnglishTerms: checkCommonEnglishTerms(analysisContext),
-    wordsToDelete: checkWordsToDelete(analysisContext),
-    keywordStuffing: checkKeywordStuffing(analysisContext),
-    productUsageHeading: checkProductUsageHeading(analysisContext),
-    productTechnicalSpecsHeading: checkProductTechnicalSpecsHeading(analysisContext),
-    productWarrantyContent: checkProductWarrantyContent(analysisContext),
-    tablesCount: checkTablesCount(analysisContext),
-  };
-  const structureAnalysis = enrichStructureViolationText(rawStructureAnalysis, nodes);
+  const structureAnalysis = updateStructureAnalysis || !previousAnalysis
+    ? (() => {
+        const conclusionChecks = checkConclusion(analysisContext);
+        const rawStructureAnalysis: StructureAnalysis = {
+          wordCount: checkWordCount(analysisContext),
+          firstTitle: checkFirstTitle(analysisContext),
+          secondTitle: checkSecondTitle(analysisContext),
+          includesExcludes: checkIncludesExcludes(analysisContext),
+          preTravelH2: checkPreTravelH2(analysisContext),
+          pricingH2: checkPricingH2(analysisContext),
+          whoIsItForH2: checkWhoIsItForH2(analysisContext),
+          summaryParagraph: checkSummaryParagraph(analysisContext),
+          secondParagraph: checkSecondParagraph(analysisContext),
+          paragraphLength: checkParagraphLength(analysisContext),
+          paragraphPair: checkParagraphPair(analysisContext),
+          h2Structure: checkH2Structure(analysisContext),
+          h2Count: checkH2Count(analysisContext),
+          h3Structure: checkSubHeadingStructure(analysisContext, 3),
+          h4Structure: checkSubHeadingStructure(analysisContext, 4),
+          betweenH2H3: checkBetweenH2H3(analysisContext),
+          sentenceLength: checkSentenceLength(analysisContext),
+          stepsIntroduction: checkStepsIntroduction(analysisContext),
+          duplicateWordsInParagraph: checkDuplicateWordsInParagraph(analysisContext),
+          duplicateWordsInHeading: checkDuplicateWordsInHeading(analysisContext),
+          headingLength: checkHeadingLength(analysisContext),
+          faqSection: checkFaqSection(analysisContext),
+          answerParagraph: checkAnswerParagraph(analysisContext),
+          ambiguousHeadings: checkAmbiguousHeadings(analysisContext),
+          ambiguousParagraphReferences: checkAmbiguousParagraphReferences(analysisContext),
+          punctuation: checkPunctuation(analysisContext),
+          paragraphEndings: checkParagraphEndings(analysisContext),
+          interrogativeH2: checkInterrogativeH2(analysisContext),
+          differentTransitionalWords: checkTransitionalWords(analysisContext),
+          immediateDuplicateWords: checkImmediateDuplicateWords(analysisContext),
+          automaticLists: checkAutomaticLists(analysisContext),
+          ctaWords: checkCtaWords(analysisContext),
+          interactiveLanguage: checkInteractiveLanguage(analysisContext),
+          arabicOnly: checkArabicOnly(analysisContext),
+          lastH2IsConclusion: conclusionChecks.lastH2IsConclusion,
+          conclusionParagraph: conclusionChecks.conclusionParagraph,
+          conclusionWordCount: conclusionChecks.conclusionWordCount,
+          conclusionHasNumber: conclusionChecks.conclusionHasNumber,
+          conclusionHasList: conclusionChecks.conclusionHasList,
+          sentenceBeginnings: checkSentenceBeginnings(analysisContext),
+          warningWords: checkWarningWords(analysisContext),
+          punctuationSpacing: checkPunctuationSpacing(analysisContext),
+          repeatedBigrams: checkRepeatedBigrams(analysisContext),
+          slowWords: checkSlowWords(analysisContext),
+          wordConsistency: checkWordConsistency(analysisContext),
+          commonEnglishTerms: checkCommonEnglishTerms(analysisContext),
+          wordsToDelete: checkWordsToDelete(analysisContext),
+          keywordStuffing: checkKeywordStuffing(analysisContext),
+          productUsageHeading: checkProductUsageHeading(analysisContext),
+          productTechnicalSpecsHeading: checkProductTechnicalSpecsHeading(analysisContext),
+          productWarrantyContent: checkProductWarrantyContent(analysisContext),
+          tablesCount: checkTablesCount(analysisContext),
+        };
+        return enrichStructureViolationText(rawStructureAnalysis, nodes);
+      })()
+    : previousAnalysis.structureAnalysis;
 
   const violatingCriteriaCount = Object.values(structureAnalysis).filter(c => c.status === 'fail').length;
   const totalErrorsCount = Object.values(structureAnalysis).reduce((sum, c) => sum + (c.violationCount ?? c.violatingItems?.length ?? 0), 0);

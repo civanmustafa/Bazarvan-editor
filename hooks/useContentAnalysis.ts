@@ -8,6 +8,18 @@ type ContentAnalysisWorkerResponse =
   | { requestId: number; result: FullAnalysis; error?: never }
   | { requestId: number; result?: never; error: string };
 
+export type ContentAnalysisRefreshScope = {
+  keywords: boolean;
+  structure: boolean;
+  duplicates: boolean;
+};
+
+const DEFAULT_REFRESH_SCOPE: ContentAnalysisRefreshScope = {
+  keywords: true,
+  structure: true,
+  duplicates: false,
+};
+
 const STRUCTURE_ANALYSIS_KEYS: (keyof StructureAnalysis)[] = [
   'wordCount',
   'firstTitle',
@@ -209,7 +221,8 @@ const createAnalysisInput = (
   goalContext: GoalContext,
   articleLanguage: 'ar' | 'en',
   uiLanguage: 'ar' | 'en',
-  updateDuplicateAnalysis: boolean,
+  refreshScope: ContentAnalysisRefreshScope,
+  previousAnalysis?: FullAnalysis,
 ): ContentAnalysisInput => ({
   analysisNodes: createAnalysisNodesFromEditorState(editorState),
   textContent: typeof textContent === 'string' ? textContent : '',
@@ -218,34 +231,26 @@ const createAnalysisInput = (
   articleLanguage,
   uiLanguage,
   tableCount: countNodesByType(editorState, 'table'),
-  updateDuplicateAnalysis,
+  updateKeywordAnalysis: refreshScope.keywords,
+  updateStructureAnalysis: refreshScope.structure,
+  updateDuplicateAnalysis: refreshScope.duplicates,
+  previousAnalysis,
 });
 
-const getStructureStats = (structureAnalysis: StructureAnalysis, paragraphCount: number, headingCount: number) => ({
-  violatingCriteriaCount: Object.values(structureAnalysis).filter(c => c.status === 'fail').length,
-  totalErrorsCount: Object.values(structureAnalysis).reduce((sum, c) => sum + (c.violationCount ?? c.violatingItems?.length ?? 0), 0),
-  paragraphCount,
-  headingCount,
-});
-
-const mergePreviousDuplicateResults = (nextResult: FullAnalysis, previousResult: FullAnalysis | null, updateDuplicateAnalysis: boolean): FullAnalysis => {
-  if (updateDuplicateAnalysis || !previousResult) return nextResult;
-
-  const structureAnalysis = {
-    ...nextResult.structureAnalysis,
-    repeatedBigrams: previousResult.structureAnalysis.repeatedBigrams,
-  };
+const mergeInactiveAnalysisResults = (
+  nextResult: FullAnalysis,
+  previousResult: FullAnalysis | null,
+  refreshScope: ContentAnalysisRefreshScope,
+): FullAnalysis => {
+  if (!previousResult) return nextResult;
 
   return {
     ...nextResult,
-    structureAnalysis,
-    structureStats: getStructureStats(
-      structureAnalysis,
-      nextResult.structureStats.paragraphCount,
-      nextResult.structureStats.headingCount,
-    ),
-    duplicateAnalysis: previousResult.duplicateAnalysis,
-    duplicateStats: previousResult.duplicateStats,
+    keywordAnalysis: refreshScope.keywords ? nextResult.keywordAnalysis : previousResult.keywordAnalysis,
+    structureAnalysis: refreshScope.structure ? nextResult.structureAnalysis : previousResult.structureAnalysis,
+    structureStats: refreshScope.structure ? nextResult.structureStats : previousResult.structureStats,
+    duplicateAnalysis: refreshScope.duplicates ? nextResult.duplicateAnalysis : previousResult.duplicateAnalysis,
+    duplicateStats: refreshScope.duplicates ? nextResult.duplicateStats : previousResult.duplicateStats,
   };
 };
 
@@ -256,11 +261,11 @@ export const useContentAnalysis = (
   goalContext: GoalContext,
   articleLanguage: 'ar' | 'en',
   uiLanguage: 'ar' | 'en',
-  updateDuplicateAnalysis = true,
+  refreshScope: ContentAnalysisRefreshScope = DEFAULT_REFRESH_SCOPE,
   enabled = true,
 ): FullAnalysis => {
   const [analysisResults, setAnalysisResults] = useState<FullAnalysis>(() =>
-    runContentAnalysisSafely(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, true))
+    runContentAnalysisSafely(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, DEFAULT_REFRESH_SCOPE))
   );
   const [workerDisabled, setWorkerDisabled] = useState(false);
   const activeWorkerRef = useRef<Worker | null>(null);
@@ -286,13 +291,13 @@ export const useContentAnalysis = (
       return;
     }
 
-    const input = createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, updateDuplicateAnalysis);
+    const input = createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, refreshScope, latestAnalysisRef.current);
     const requestId = latestRequestIdRef.current + 1;
     latestRequestIdRef.current = requestId;
 
     const runFallbackAnalysis = () => {
       const result = runContentAnalysisSafely(input, latestAnalysisRef.current);
-      setLatestAnalysisResults(mergePreviousDuplicateResults(result, latestAnalysisRef.current, updateDuplicateAnalysis));
+      setLatestAnalysisResults(mergeInactiveAnalysisResults(result, latestAnalysisRef.current, refreshScope));
     };
 
     if (workerDisabled || typeof Worker === 'undefined') {
@@ -314,7 +319,7 @@ export const useContentAnalysis = (
       }
 
       if (event.data.result) {
-        setLatestAnalysisResults(mergePreviousDuplicateResults(event.data.result, latestAnalysisRef.current, updateDuplicateAnalysis));
+        setLatestAnalysisResults(mergeInactiveAnalysisResults(event.data.result, latestAnalysisRef.current, refreshScope));
         return;
       }
 
@@ -343,7 +348,19 @@ export const useContentAnalysis = (
         activeWorkerRef.current = null;
       }
     };
-  }, [editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, updateDuplicateAnalysis, enabled, workerDisabled]);
+  }, [
+    editorState,
+    textContent,
+    keywords,
+    goalContext,
+    articleLanguage,
+    uiLanguage,
+    refreshScope.keywords,
+    refreshScope.structure,
+    refreshScope.duplicates,
+    enabled,
+    workerDisabled,
+  ]);
 
   return analysisResults;
 };

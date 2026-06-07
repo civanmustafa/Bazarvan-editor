@@ -5,6 +5,7 @@ import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
 import { useAI } from '../contexts/AIContext';
+import { useEditor } from '../contexts/EditorContext';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
@@ -716,6 +717,7 @@ ${url}
 
 const RightSidebar: React.FC = () => {
     const { t, engineeringPrompts, apiKeys } = useUser();
+    const { setIsStructureTabActive } = useEditor();
     const {
         handleAiAnalyze,
         handleChatGptAnalyze,
@@ -750,6 +752,11 @@ const RightSidebar: React.FC = () => {
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
     const tRs = t.rightSidebar;
+
+    useEffect(() => {
+        setIsStructureTabActive(activeTab === 'structure');
+        return () => setIsStructureTabActive(false);
+    }, [activeTab, setIsStructureTabActive]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {

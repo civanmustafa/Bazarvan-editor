@@ -9,7 +9,7 @@ import { TableHeader } from '@tiptap/extension-table-header';
 import { TableCell } from '@tiptap/extension-table-cell';
 import TextAlign from '@tiptap/extension-text-align';
 import { Extension, Editor } from '@tiptap/core';
-import { useContentAnalysis } from '../hooks/useContentAnalysis';
+import { useContentAnalysis, type ContentAnalysisRefreshScope } from '../hooks/useContentAnalysis';
 import { getActivityData, recordArticleSave, recordTimeSpentOnArticle, ArticleActivity, renameArticleActivity, normalizeKeywords } from '../hooks/useUserActivity';
 import type { Keywords, FullAnalysis, GoalContext } from '../types';
 import { INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAFT_KEYWORDS_KEY, MANUAL_DRAFT_LANGUAGE_KEY, MANUAL_DRAFT_GOAL_CONTEXT_KEY, AUTO_DRAFT_KEY, AUTO_DRAFT_TITLE_KEY, AUTO_DRAFT_KEYWORDS_KEY, AUTO_DRAFT_LANGUAGE_KEY, AUTO_DRAFT_GOAL_CONTEXT_KEY } from '../constants';
@@ -677,6 +677,7 @@ interface EditorContextType {
     analysisResults: FullAnalysis;
     isDuplicatesTabActive: boolean;
     setIsDuplicatesTabActive: React.Dispatch<React.SetStateAction<boolean>>;
+    setIsStructureTabActive: React.Dispatch<React.SetStateAction<boolean>>;
     saveStatus: 'idle' | 'saved';
     restoreStatus: 'idle' | 'restored';
     draftExists: boolean;
@@ -718,7 +719,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
     const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restored'>('idle');
     const [draftExists, setDraftExists] = useState(false);
-    const [isDuplicatesTabActive, setIsDuplicatesTabActive] = useState(false);
+    const [activeAnalysisPanels, setActiveAnalysisPanels] = useState<ContentAnalysisRefreshScope>({
+        keywords: true,
+        structure: true,
+        duplicates: false,
+    });
     
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const editorSnapshotTimerRef = useRef<number | null>(null);
@@ -737,6 +742,26 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Debounce editor state and text content before analysis to keep typing responsive.
     const debouncedEditorState = useDebounce(editorState, ANALYSIS_DEBOUNCE_MS);
     const debouncedText = useDebounce(text, ANALYSIS_DEBOUNCE_MS);
+    const isDuplicatesTabActive = activeAnalysisPanels.duplicates;
+    const setIsDuplicatesTabActive = useCallback<React.Dispatch<React.SetStateAction<boolean>>>((value) => {
+        setActiveAnalysisPanels(prev => {
+            const nextValue = typeof value === 'function' ? value(prev.duplicates) : value;
+            return {
+                ...prev,
+                duplicates: nextValue,
+                keywords: !nextValue,
+            };
+        });
+    }, []);
+    const setIsStructureTabActive = useCallback<React.Dispatch<React.SetStateAction<boolean>>>((value) => {
+        setActiveAnalysisPanels(prev => {
+            const nextValue = typeof value === 'function' ? value(prev.structure) : value;
+            return {
+                ...prev,
+                structure: nextValue,
+            };
+        });
+    }, []);
 
     const clearEditorSnapshotTimer = useCallback(() => {
         if (editorSnapshotTimerRef.current) {
@@ -1018,10 +1043,17 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [editor, articleLanguage, currentView]);
 
     useEffect(() => {
-        if (!isDuplicatesTabActive || !editor || editor.isDestroyed) return;
+        if (!editor || editor.isDestroyed) return;
         clearEditorSnapshotTimer();
         captureEditorSnapshot(editor, false);
-    }, [isDuplicatesTabActive, editor, clearEditorSnapshotTimer, captureEditorSnapshot]);
+    }, [
+        activeAnalysisPanels.keywords,
+        activeAnalysisPanels.structure,
+        activeAnalysisPanels.duplicates,
+        editor,
+        clearEditorSnapshotTimer,
+        captureEditorSnapshot,
+    ]);
 
     // Analysis is derived state: do not manually store rule results elsewhere.
     const analysisResults = useContentAnalysis(
@@ -1031,7 +1063,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         goalContext,
         articleLanguage,
         uiLanguage,
-        true,
+        activeAnalysisPanels,
         currentView === 'editor'
     );
 
@@ -1360,6 +1392,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         analysisResults,
         isDuplicatesTabActive,
         setIsDuplicatesTabActive,
+        setIsStructureTabActive,
         saveStatus,
         restoreStatus,
         draftExists,
