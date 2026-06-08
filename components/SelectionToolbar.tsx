@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { PenLine, Wand2, Zap, Expand, BookText, List, ListChecks, HelpCircle, Loader2, MessageSquarePlus, Send, X, Heading1, Combine } from 'lucide-react';
+import { BrainCircuit, PenLine, Wand2, Zap, Expand, BookText, List, ListChecks, HelpCircle, Loader2, MessageSquarePlus, Send, X, Heading1, Combine } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
@@ -13,7 +13,7 @@ const MANUAL_COMMAND_PREFIX = 'أنت خبير محتوى SEO/AEO/GEO/LLM SEO.';
 const SelectionToolbar: React.FC = () => {
   const { uiLanguage } = useUser();
   const { editor, scrollContainerRef } = useEditor();
-  const { handleAiRequest: onAiRequest, isAiCommandLoading } = useAI();
+  const { handleAiRequest: onAiRequest, isAiCommandLoading, isAiLoading, quickAiProvider, setQuickAiProvider } = useAI();
   
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -24,6 +24,14 @@ const SelectionToolbar: React.FC = () => {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const manualTextareaRef = useRef<HTMLTextAreaElement>(null);
   const t = translations[uiLanguage];
+  const isChatGptQuickProvider = quickAiProvider === 'chatgpt';
+  const providerToggleLabel = isChatGptQuickProvider
+    ? (uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands')
+    : (uiLanguage === 'ar' ? 'Gemini للأوامر السريعة' : 'Gemini for quick commands');
+  const isAnyAiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.chatgpt;
+  const toggleQuickAiProvider = () => {
+    setQuickAiProvider(provider => provider === 'chatgpt' ? 'gemini' : 'chatgpt');
+  };
 
   const SELECTION_COMMANDS = [
     { id: 'rephrase', label: t.aiMenu.rephrase, icon: PenLine, prompt: AI_PROMPTS.REPHRASE },
@@ -39,7 +47,7 @@ const SelectionToolbar: React.FC = () => {
   ];
 
   const handleCommand = async (commandId: string, prompt: string) => {
-    if (isAiCommandLoading || localLoadingAction) return;
+    if (isAnyAiLoading || localLoadingAction) return;
     setIsManualCommandOpen(false);
     setLocalLoadingAction(commandId);
     await onAiRequest(prompt, 'replace-text');
@@ -47,7 +55,7 @@ const SelectionToolbar: React.FC = () => {
   };
 
   const handleManualCommandToggle = () => {
-    if (!editor || isAiCommandLoading || localLoadingAction) return;
+    if (!editor || isAnyAiLoading || localLoadingAction) return;
     const { from, to } = editor.state.selection;
     setManualSelectionRange({ from, to });
     setIsManualCommandOpen((current) => {
@@ -62,7 +70,7 @@ const SelectionToolbar: React.FC = () => {
   const handleManualCommandSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmedCommand = manualCommand.trim();
-    if (!editor || !trimmedCommand || isAiCommandLoading || localLoadingAction) return;
+    if (!editor || !trimmedCommand || isAnyAiLoading || localLoadingAction) return;
 
     const range = manualSelectionRange ?? {
       from: editor.state.selection.from,
@@ -167,7 +175,7 @@ const SelectionToolbar: React.FC = () => {
           <button
             key={command.id}
             onClick={() => handleCommand(command.id, command.prompt)}
-            disabled={isAiCommandLoading || !!localLoadingAction}
+            disabled={isAnyAiLoading || !!localLoadingAction}
             aria-label={command.label}
             className="group relative p-2 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 disabled:text-gray-400 dark:disabled:text-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37]"
           >
@@ -180,8 +188,21 @@ const SelectionToolbar: React.FC = () => {
           </button>
         ))}
         <button
+          onClick={toggleQuickAiProvider}
+          disabled={isAnyAiLoading || !!localLoadingAction}
+          aria-label={providerToggleLabel}
+          className={`group relative p-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37] disabled:text-gray-400 dark:disabled:text-gray-600 ${
+            isChatGptQuickProvider
+              ? 'bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
+              : 'text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20'
+          }`}
+        >
+          <BrainCircuit size={16} />
+          <IconTooltip label={providerToggleLabel} placement="top" />
+        </button>
+        <button
           onClick={handleManualCommandToggle}
-          disabled={isAiCommandLoading || !!localLoadingAction}
+          disabled={isAnyAiLoading || !!localLoadingAction}
           aria-label={t.aiMenu.manualCommand}
           className={`group relative p-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37] disabled:text-gray-400 dark:disabled:text-gray-600 ${
             isManualCommandOpen
@@ -223,7 +244,7 @@ const SelectionToolbar: React.FC = () => {
             </button>
             <button
               type="submit"
-              disabled={!manualCommand.trim() || isAiCommandLoading || !!localLoadingAction}
+              disabled={!manualCommand.trim() || isAnyAiLoading || !!localLoadingAction}
               aria-label={t.aiMenu.sendManualCommand}
               className="group relative rounded-md bg-[#d4af37] p-1.5 text-white transition-colors hover:bg-[#b8922e] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#d4af37] disabled:bg-gray-400 disabled:opacity-70 dark:focus:ring-offset-[#2A2A2A] dark:disabled:bg-gray-600"
             >

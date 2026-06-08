@@ -1,8 +1,9 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
-import { Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, List, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight, ClipboardCheck, Heading1, Combine } from 'lucide-react';
+import { BrainCircuit, Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, List, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight, ClipboardCheck, Heading1, Combine } from 'lucide-react';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
 import { useUser } from '../../contexts/UserContext';
+import { useAI } from '../../contexts/AIContext';
 import { AI_PROMPTS } from '../../constants/aiPrompts';
 import { DEFAULT_ENGINEERING_PROMPTS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../../constants/engineeringPrompts';
 
@@ -29,6 +30,7 @@ const AiMenuItem: React.FC<{ onClick: () => void; disabled: boolean; children: R
 
 const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading, uiLanguage, t, onAiRequest, onAnalyzeHeadings }) => {
     const { engineeringPrompts } = useUser();
+    const { quickAiProvider, setQuickAiProvider } = useAI();
     const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
     const [isToneMenuOpen, setIsToneMenuOpen] = useState(false);
     const [isExpandMenuOpen, setIsExpandMenuOpen] = useState(false);
@@ -36,6 +38,13 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
     const aiMenuRef = useRef<HTMLDivElement>(null);
 
     const TONES = [t.tones.professional, t.tones.friendly, t.tones.persuasive, t.tones.simple];
+    const isChatGptQuickProvider = quickAiProvider === 'chatgpt';
+    const providerToggleTitle = isChatGptQuickProvider
+        ? (uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands')
+        : (uiLanguage === 'ar' ? 'Gemini للأوامر السريعة' : 'Gemini for quick commands');
+    const toggleQuickAiProvider = () => {
+        setQuickAiProvider(provider => provider === 'chatgpt' ? 'gemini' : 'chatgpt');
+    };
     const getPrompt = (id: string, variables: Record<string, string> = {}) => {
         const template = getEngineeringPrompt(engineeringPrompts, id);
         if (
@@ -81,7 +90,7 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
     };
 
     return (
-        <div className="relative" ref={aiMenuRef}>
+        <div className="relative flex items-center gap-1" ref={aiMenuRef}>
             <ToolbarButton
                 onClick={() => setIsAiMenuOpen(!isAiMenuOpen)}
                 title={t.aiCommands}
@@ -89,6 +98,14 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                 disabled={isAnyGeminiLoading}
             >
                 {isAnyGeminiLoading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            </ToolbarButton>
+            <ToolbarButton
+                onClick={toggleQuickAiProvider}
+                title={providerToggleTitle}
+                isActive={isChatGptQuickProvider}
+                disabled={isAnyGeminiLoading}
+            >
+                <BrainCircuit size={16} />
             </ToolbarButton>
             {isAiMenuOpen && (
                 <div className={`absolute mt-2 w-60 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-30 ${uiLanguage === 'ar' ? 'left-0' : 'right-0'}`}>

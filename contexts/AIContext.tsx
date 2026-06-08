@@ -3971,6 +3971,8 @@ interface AIContextType {
     aiResults: { gemini: string; chatgpt: string };
     aiInsertionPatches: Record<AiPatchProvider, AiContentPatch[]>;
     isAiLoading: { gemini: boolean; chatgpt: boolean };
+    quickAiProvider: AiPatchProvider;
+    setQuickAiProvider: React.Dispatch<React.SetStateAction<AiPatchProvider>>;
     isAiCommandLoading: boolean;
     aiFixingInfo: { title: string; from: number } | null;
     suggestion: SuggestionState | null;
@@ -4034,6 +4036,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [aiResults, setAiResults] = useState({ gemini: '', chatgpt: '' });
     const [aiInsertionPatches, setAiInsertionPatches] = useState<Record<AiPatchProvider, AiContentPatch[]>>({ gemini: [], chatgpt: [] });
     const [isAiLoading, setIsAiLoading] = useState({ gemini: false, chatgpt: false });
+    const [quickAiProvider, setQuickAiProvider] = useState<AiPatchProvider>('gemini');
     const [isAiCommandLoading, setIsAiCommandLoading] = useState(false);
     const [suggestion, setSuggestion] = useState<SuggestionState | null>(null);
     const [headingsAnalysis, setHeadingsAnalysis] = useState<HeadingAnalysisResult[] | null>(null);
@@ -4532,10 +4535,27 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
     }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey, title]);
+
+    const callQuickProviderAnalysis = useCallback(async (
+        prompt: string,
+        provider: AiPatchProvider = quickAiProvider,
+    ): Promise<string> => {
+        if (provider === 'chatgpt') {
+            const articleScope = getArticleChatStorageScope(articleKey, title);
+            const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
+            const result = await callChatGptAnalysis(prompt, apiKeys.chatgpt, storedConversationId);
+            saveStoredChatGptConversationId(currentUser, articleScope, result.conversationId);
+            return result.text;
+        }
+
+        return callGeminiAnalysis(prompt, apiKeys.gemini);
+    }, [apiKeys.chatgpt, apiKeys.gemini, articleKey, currentUser, quickAiProvider, title]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
-        if (isAiCommandLoading || isAiLoading.gemini || !editor) return;
+        const provider = quickAiProvider;
+        if (isAiCommandLoading || isAiLoading.gemini || isAiLoading.chatgpt || !editor) return;
         setIsAiCommandLoading(true);
+        setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         try {
             let textToProcess = "";
             let originalText = "";
@@ -4616,7 +4636,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 ].filter(Boolean).join('\n\n')
                 : prompt;
             const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً وباقتراحين مختلفين بالضبط، حتى إذا طلب نص الأمر اقتراحًا واحدًا. كل عنصر داخل suggestions يجب أن يكون النص المقترح النهائي فقط بلغة المقال دون شرح أو تسمية. الشكل: { "suggestions": ["...", "..."] }`;
-            const resultJson = await callGeminiAnalysis(finalPrompt, apiKeys.gemini);
+            const resultJson = await callQuickProviderAnalysis(finalPrompt, provider);
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
                 const suggestions = parsed.suggestions
@@ -4639,13 +4659,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } catch (e) {
             console.error(e);
         } finally {
+            setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setIsAiCommandLoading(false);
         }
-    }, [editor, title, text, analysisResults, buildComprehensivePrompt, apiKeys.gemini, logToAiHistory]);
+    }, [editor, title, text, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis]);
 
     const handleAnalyzeHeadings = useCallback(async () => {
-        if (isAiLoading.gemini || !editor) return;
-        setIsAiLoading(prev => ({ ...prev, gemini: true }));
+        const provider = quickAiProvider;
+        if (isAiLoading.gemini || isAiLoading.chatgpt || !editor) return;
+        setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         try {
             const headings: any[] = [];
             editor.state.doc.descendants((node, pos) => {
@@ -4662,7 +4684,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }).join('\n\n---\n\n');
             const promptTemplate = getEngineeringPrompt(engineeringPrompts, ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings);
             const prompt = `${buildComprehensivePrompt(promptTemplate)}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً. اجعل flaws ملاحظات عربية، واجعل suggestions عناوين مقترحة بلغة المقال فقط: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
-            const resultJson = await callGeminiAnalysis(prompt, apiKeys.gemini);
+            const resultJson = await callQuickProviderAnalysis(prompt, provider);
             const parsed = extractJson(resultJson);
             if (Array.isArray(parsed)) {
                 const usedHeadingIndexes = new Set<number>();
@@ -4720,14 +4742,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } catch (e) {
             console.error(e);
         } finally {
-            setIsAiLoading(prev => ({ ...prev, gemini: false }));
+            setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [editor, buildComprehensivePrompt, apiKeys.gemini, engineeringPrompts]);
+    }, [editor, buildComprehensivePrompt, engineeringPrompts, isAiLoading, quickAiProvider, callQuickProviderAnalysis]);
 
     const createBulkFixReviewItemForGroup = useCallback(async (
         group: BulkFixTargetGroup,
         selectedRuleTitles: Set<string>,
         index: number,
+        provider: AiPatchProvider = quickAiProvider,
     ): Promise<BulkFixReviewItem> => {
         if (!editor || !analysisResults.structureAnalysis) {
             throw new Error('Editor or analysis data is not ready.');
@@ -4746,7 +4769,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             targetContext.sectionHeading,
             { includeArticleTitle: false, includeArticleToc: false }
         );
-        const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        const res = await callQuickProviderAnalysis(prompt, provider);
         const parsed = extractJson(res);
         const uniqueRules = getUniqueBulkFixRules(group.violations);
         const targetRules = uniqueRules.filter(itemRule => selectedRuleTitles.has(itemRule.title));
@@ -4804,13 +4827,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 .join(' | '),
             status: 'pending',
         };
-    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, apiKeys.gemini, resolveBulkFixReviewRange]);
+    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis]);
 
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
         if (!editor || !analysisResults.structureAnalysis) return;
+        const provider = quickAiProvider;
         setAiFixingInfo({ title: rule.title, from: item.from });
         replaceBulkFixReviewItems([]);
         setFixAllProgress({ current: 0, total: 1, running: true, failed: 0, errors: [] });
+        setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         try {
             const groups = groupBulkFixViolationsByTextUnit(editor, [{ rule, item }]);
             const group = groups[0];
@@ -4819,7 +4844,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
 
             setFixAllProgress(p => ({ ...p, current: 1 }));
-            const proposedItem = await createBulkFixReviewItemForGroup(group, new Set([rule.title]), 0);
+            const proposedItem = await createBulkFixReviewItemForGroup(group, new Set([rule.title]), 0, provider);
             replaceBulkFixReviewItems([proposedItem]);
             logToAiHistory({
                 type: 'fix-violation',
@@ -4839,9 +4864,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             console.error('Single fix proposal failed:', rule.title, error);
             setFixAllProgress({ current: 1, total: 1, running: false, failed: 1, errors: [`${rule.title}: ${message}`] });
         } finally {
+            setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setAiFixingInfo(null);
         }
-    }, [editor, analysisResults.structureAnalysis, createBulkFixReviewItemForGroup, logToAiHistory, replaceBulkFixReviewItems]);
+    }, [editor, analysisResults.structureAnalysis, createBulkFixReviewItemForGroup, logToAiHistory, replaceBulkFixReviewItems, quickAiProvider]);
 
     const getRelatedBulkFixRules = useCallback((rulesToFix: string[]): BulkFixRelatedRule[] => {
         if (!editor || !analysisResults.structureAnalysis || rulesToFix.length === 0) return [];
@@ -4852,8 +4878,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleFixAllViolations = useCallback(async (rulesToFix: string[], options: { includeRelatedRules?: boolean } = {}) => {
         if (!editor || !analysisResults.structureAnalysis) return;
+        const provider = quickAiProvider;
         replaceBulkFixReviewItems([]);
         setFixAllProgress({ current: 0, total: 0, running: true, failed: 0, errors: [] });
+        setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         const selectedRuleTitles = new Set(rulesToFix);
         const allViolations = collectBulkFixViolations(analysisResults.structureAnalysis);
         const selectedViolations = allViolations.filter(violation => selectedRuleTitles.has(violation.rule.title));
@@ -4889,7 +4917,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     targetContext.sectionHeading,
                     { includeArticleTitle: false, includeArticleToc: false }
                 );
-                const res = await callGeminiAnalysis(prompt, apiKeys.gemini);
+                const res = await callQuickProviderAnalysis(prompt, provider);
                 const parsed = extractJson(res);
                 const uniqueRules = getUniqueBulkFixRules(group.violations);
                 const targetRules = uniqueRules.filter(rule => selectedRuleTitles.has(rule.title));
@@ -4973,7 +5001,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             });
         });
         setFixAllProgress(p => ({ ...p, running: false }));
-    }, [editor, analysisResults, buildComprehensivePrompt, apiKeys.gemini, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange]);
+        setIsAiLoading(prev => ({ ...prev, [provider]: false }));
+    }, [editor, analysisResults, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis]);
 
     const updateBulkFixReviewItem = useCallback((itemId: string, updates: Partial<BulkFixReviewItem>) => {
         updateBulkFixReviewItems(items => items.map(item => (
@@ -5279,7 +5308,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, []);
 
     const value = {
-        aiResults, aiInsertionPatches, isAiLoading, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
+        aiResults, aiInsertionPatches, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
