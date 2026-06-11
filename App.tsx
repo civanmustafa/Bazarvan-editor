@@ -235,7 +235,11 @@ const EditorView: React.FC = () => {
                 <div className="relative basis-[60.73%] flex flex-col h-full min-w-0">
                     <TipsCarousel />
                     <EditorToolbar />
-                    <div ref={scrollContainerRef} className="relative flex-grow overflow-y-auto custom-scrollbar border-t border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F]">
+                    <div
+                        ref={scrollContainerRef}
+                        data-bazarvan-editor-panel="true"
+                        className="relative flex-grow overflow-y-auto custom-scrollbar border-t border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F]"
+                    >
                         <EditorContent editor={editor} />
                         {editor && (
                           <SelectionToolbar />

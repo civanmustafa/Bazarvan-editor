@@ -707,6 +707,23 @@ ${COMBINED_SECTION_ORDER_PROMPT}
 - لا تخترع معلومات أو أرقامًا أو ادعاءات غير موجودة في النص أو لا يمكن استنتاجها منطقيًا.
 - يجب أن تظهر بطاقة التنفيذ في موضعها داخل التقرير عبر علامة [[PATCH:...]] حتى يتمكن المستخدم من استخدام أزرار الموضع والنسخ والاستبدال.`;
 
+const COMBINED_COMMANDS_PATCH_CONTRACT = `<!-- BAZARVAN_COMBINED_PATCH_CONTRACT_V2 -->
+
+قاعدة إلزامية نهائية لتجميعة الأوامر:
+
+- يجب أن يكون الرد JSON فقط، ويجب أن يحتوي على analysisMarkdown و patches.
+- لا تجعل patches فارغة إذا وجدت أي فرصة عملية جاهزة للإضافة أو الاستبدال أو التحويل داخل المقال.
+- في تجميعة الأوامر، لا يكفي التقرير النصي. كل نتيجة قابلة للتطبيق يجب أن تتحول إلى بطاقة تنفيذ داخل patches.
+- يجب إنشاء بطاقة تنفيذ واحدة على الأقل لتحسين أضعف قسم عند وجود قسم ضعيف قابل للاستبدال.
+- يجب إنشاء بطاقة تنفيذ واحدة على الأقل لفقرة/فكرة جديدة عند وجود فجوة محتوى قابلة للإضافة.
+- يجب إنشاء بطاقات تنفيذ مستقلة لأسئلة الناس القابلة للإضافة، واجعل العملية insert_before_faq.
+- يجب إنشاء بطاقة تنفيذ لكل جدول أو قائمة أو خطوات جاهزة عند اقتراح تحويل مقطع موجود، واجعل العملية replace_block مع targetText حرفي من النص الحالي.
+- يجب إنشاء بطاقة تنفيذ لكل صياغة بديلة لقسم أقل ملاءمة عند تقديم نص بديل جاهز.
+- قسم ترتيب الأقسام يبقى تحليليًا فقط ولا يحتاج patches، لكن هذا لا يلغي إلزامية البطاقات لبقية أجزاء التجميعة.
+- داخل analysisMarkdown ضع فقط علامات مثل [[PATCH:patch_1]] في موضع البطاقة. لا تكتب النص الجاهز أو عنوان البطاقة أو سببها أو موضعها خارج patches.
+- إذا لم تستطع تحديد targetText حرفيًا من نص المحرر، لا تستخدم replace_block؛ استخدم عملية إضافة مناسبة مع placementLabel واضح.
+- لا تكتب عبارة "لا يمكن إنشاء بطاقات" إلا إذا لم يوجد أي نص جاهز قابل للتطبيق في كل أجزاء التجميعة.`;
+
 const EVALUATE_SECTION_PROMPT = `أنت كاتب محتوى محترف وخبير SEO / AEO / GEO / LLM SEO، ومتخصص في تقييم ملاءمة الفقرات لأهداف الصفحات.
 
 سيتم إرفاق الكلمة المفتاحية الأساسية، الصيغ المرادفة، كلمات LSI، نوع الصفحة، هدف الصفحة، نطاق الجمهور، الدولة أو السوق، الجمهور المستهدف، نية البحث، وسياق موضع النص تلقائيًا مع الطلب.
@@ -1122,7 +1139,7 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands,
     source: 'smartAnalysis',
     labelKey: 'combinedCommands',
-    defaultValue: COMBINED_COMMANDS_PROMPT,
+    defaultValue: `${COMBINED_COMMANDS_PROMPT}\n\n${COMBINED_COMMANDS_PATCH_CONTRACT}`,
     options: {
       ...DEFAULT_SMART_ANALYSIS_OPTIONS,
       articleToc: false,
@@ -1466,10 +1483,18 @@ const sanitizeEngineeringPrompt = (id: EngineeringPromptId, value: string): stri
   }
 
   if (id === ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands) {
-    const hasSectionOrderPrompt = /ترتيب الأقسام|Section order/i.test(value);
+    let nextValue = value;
+    const hasSectionOrderPrompt = /ترتيب الأقسام|Section order/i.test(nextValue);
     if (!hasSectionOrderPrompt) {
-      return `${value.trim()}\n\n## الأمر 6: ترتيب الأقسام\n\n${COMBINED_SECTION_ORDER_PROMPT}`;
+      nextValue = `${nextValue.trim()}\n\n## الأمر 6: ترتيب الأقسام\n\n${COMBINED_SECTION_ORDER_PROMPT}`;
     }
+
+    const hasPatchContract = /BAZARVAN_COMBINED_PATCH_CONTRACT_V2/.test(nextValue);
+    if (!hasPatchContract) {
+      nextValue = `${nextValue.trim()}\n\n${COMBINED_COMMANDS_PATCH_CONTRACT}`;
+    }
+
+    return nextValue;
   }
 
   if (

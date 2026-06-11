@@ -958,20 +958,23 @@ ${readyCommandCompetitorBlocks}`;
 
     const openManualChatGptWindow = () => {
         const tabRect = smartAnalysisTabRef.current?.getBoundingClientRect();
-        const availableWidth = window.screen?.availWidth || 1200;
-        const availableHeight = window.screen?.availHeight || 900;
-        const browserLeft = window.screenX ?? window.screenLeft ?? 0;
+        const editorPanel = document.querySelector('[data-bazarvan-editor-panel="true"]') as HTMLElement | null;
+        const editorRect = editorPanel?.getBoundingClientRect();
+        const screenInfo = window.screen as Screen & { availLeft?: number; availTop?: number };
+        const availableLeft = screenInfo.availLeft ?? 0;
+        const availableTop = screenInfo.availTop ?? 0;
+        const availableWidth = screenInfo.availWidth || 1200;
+        const availableHeight = screenInfo.availHeight || 900;
+        const availableRight = availableLeft + availableWidth;
+        const availableBottom = availableTop + availableHeight;
         const browserTop = window.screenY ?? window.screenTop ?? 0;
         const fallbackWidth = Math.min(420, Math.max(320, Math.floor(availableWidth * 0.24)));
-        const fallbackHeight = Math.min(availableHeight, Math.max(640, Math.floor(availableHeight * 0.9)));
         const measuredWidth = Math.round(tabRect?.width || fallbackWidth);
-        const measuredHeight = Math.round(tabRect?.height || fallbackHeight);
         const popupWidth = Math.max(320, Math.min(availableWidth, measuredWidth));
-        const popupHeight = Math.max(520, Math.min(availableHeight, measuredHeight));
-        const measuredLeft = tabRect ? browserLeft + tabRect.left : browserLeft + window.innerWidth - popupWidth;
-        const measuredTop = tabRect ? browserTop + tabRect.top : browserTop;
-        const popupLeft = Math.max(0, Math.min(availableWidth - popupWidth, Math.floor(measuredLeft)));
-        const popupTop = Math.max(0, Math.min(availableHeight - popupHeight, Math.floor(measuredTop)));
+        const measuredTop = browserTop + Math.round(editorRect?.top ?? tabRect?.top ?? 0);
+        const popupTop = Math.max(availableTop, Math.min(availableBottom - 520, Math.floor(measuredTop)));
+        const popupHeight = Math.max(520, Math.min(availableHeight, availableBottom - popupTop));
+        const popupLeft = Math.max(availableLeft, Math.floor(availableRight - popupWidth));
         const popupFeatures = [
             'popup=yes',
             `width=${popupWidth}`,

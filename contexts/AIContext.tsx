@@ -3013,6 +3013,75 @@ const ensureFaqQuestionContentMarkdown = (contentMarkdown: string): string => {
     return answer ? `### ${question}\n${answer}` : `### ${question}`;
 };
 
+const isCombinedCommandFaqPatch = (patch: AiContentPatch): boolean => {
+    const firstContentLine = patch.contentMarkdown
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => line.trim())
+        .find(Boolean) || '';
+    const combinedText = normalizeAnchorText([
+        patch.title,
+        patch.reason,
+        patch.placementLabel,
+        patch.anchorText,
+        firstContentLine,
+    ].filter(Boolean).join(' '));
+
+    return (
+        /[؟?]/.test(firstContentLine) ||
+        combinedText.includes('اسئلة الناس') ||
+        combinedText.includes('اسئله الناس') ||
+        combinedText.includes('الاسئلة الشائعة') ||
+        combinedText.includes('الاسئله الشائعه') ||
+        combinedText.includes('people also ask') ||
+        combinedText.includes('faq')
+    );
+};
+
+const normalizeCombinedCommandPatch = (patch: AiContentPatch): AiContentPatch => {
+    if (isCombinedCommandFaqPatch(patch)) {
+        return {
+            ...patch,
+            operation: 'insert_before_faq',
+            anchorText: patch.anchorText || 'الأسئلة الشائعة',
+            targetText: '',
+            placementLabel: patch.placementLabel || 'داخل قسم الأسئلة الشائعة',
+            contentMarkdown: ensureFaqQuestionContentMarkdown(patch.contentMarkdown),
+        };
+    }
+
+    const intentText = [
+        patch.title,
+        patch.reason,
+        patch.placementLabel,
+        patch.anchorText,
+    ].filter(Boolean).join(' ');
+    const normalizedIntent = normalizeAnchorText(intentText);
+    const hasReplacementTarget = Boolean(patch.targetText?.trim());
+    const conversionIntent = [
+        'تحويل',
+        'جدول',
+        'قائمة',
+        'قائمه',
+        'خطوات',
+        'تحسين اضعف قسم',
+        'اضعف قسم',
+        'اقل ملاءمة',
+        'اقل ملاءمه',
+        'صياغة بديلة',
+        'صياغه بديله',
+    ].some(keyword => normalizedIntent.includes(normalizeAnchorText(keyword)));
+
+    if (hasReplacementTarget && conversionIntent) {
+        return {
+            ...patch,
+            operation: 'replace_block',
+        };
+    }
+
+    return patch;
+};
+
 const applyReadyCommandPatchRules = (
     parsedResult: SmartAnalysisParsedResult,
     commandId?: string
@@ -3030,6 +3099,13 @@ const applyReadyCommandPatchRules = (
                 placementLabel: patch.placementLabel || 'داخل قسم الأسئلة الشائعة',
                 contentMarkdown: ensureFaqQuestionContentMarkdown(patch.contentMarkdown),
             })),
+        };
+    }
+
+    if (commandId === ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands) {
+        nextResult = {
+            displayText: nextResult.displayText,
+            patches: nextResult.patches.map(normalizeCombinedCommandPatch),
         };
     }
 
