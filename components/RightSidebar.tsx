@@ -21,7 +21,7 @@ type ReadyCommand = {
     savesContentSummary?: boolean;
 };
 
-type ManualBridgeCopyMode = 'full' | 'economy' | 'commandOnly' | 'sessionContext';
+type ManualBridgeCopyMode = 'economy' | 'full';
 
 type CompetitorExtractedContent = {
     url: string;
@@ -756,7 +756,7 @@ const RightSidebar: React.FC = () => {
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(false);
     const [copiedPatchId, setCopiedPatchId] = useState('');
-    const [manualBridgeMode, setManualBridgeMode] = useState<ManualBridgeCopyMode>('full');
+    const [manualBridgeMode, setManualBridgeMode] = useState<ManualBridgeCopyMode>('economy');
     const [manualBridgeImportText, setManualBridgeImportText] = useState('');
     const [isManualBridgeImportOpen, setIsManualBridgeImportOpen] = useState(false);
     const [manualBridgeStatus, setManualBridgeStatus] = useState('');
@@ -946,19 +946,19 @@ ${readyCommandCompetitorBlocks}`;
         };
     });
 
+    const isArabicLocale = t.locale.toLowerCase().startsWith('ar');
+
     const selectedReadyCommandsLabel = selectedReadyCommands.length === 0
         ? tRs.selectCommand
         : selectedReadyCommands.length === 1
             ? selectedReadyCommands[0].label
-            : t.locale === 'ar'
+            : isArabicLocale
                 ? `${selectedReadyCommands.length} أوامر محددة`
                 : `${selectedReadyCommands.length} commands selected`;
 
     const manualBridgeModeLabels: Record<ManualBridgeCopyMode, string> = {
-        full: t.locale === 'ar' ? 'كامل' : 'Full',
-        economy: t.locale === 'ar' ? 'اقتصادي' : 'Economy',
-        commandOnly: t.locale === 'ar' ? 'الأمر فقط' : 'Command only',
-        sessionContext: t.locale === 'ar' ? 'سياق الجلسة' : 'Session context',
+        economy: isArabicLocale ? 'موفر' : 'Lean',
+        full: isArabicLocale ? 'كامل' : 'Full',
     };
 
     const getManualBridgeEconomyOptions = (): AiAnalysisOptions => ({
@@ -973,67 +973,16 @@ ${readyCommandCompetitorBlocks}`;
         const historyMeta = selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined;
         const storedCompetitorSummary = loadStoredCompetitorSummaryText();
 
-        if (mode === 'commandOnly') {
-            const commandText = selectedReadyCommands.length > 1
-                ? selectedReadyCommands
-                    .map((command, index) => `### ${index + 1}. ${command.label}\n${command.value}`)
-                    .join('\n\n')
-                : aiCommand;
-
-            return [
-                t.locale === 'ar'
-                    ? 'استخدم سياق ومعايير هذه الدردشة السابقة لهذا المقال. لا تطلب مني إعادة إرسال المعايير إلا إذا كانت غير موجودة في هذه الدردشة.'
-                    : 'Use the previous context and criteria in this chat for this article. Do not ask me to resend the criteria unless they are missing in this chat.',
-                '',
-                t.locale === 'ar'
-                    ? 'أخرج النتيجة بنفس تنسيق بطاقات التنفيذ المتفق عليه سابقا حتى أتمكن من استيراد الرد في المحرر.'
-                    : 'Return the result using the previously agreed implementation-card format so I can import it into the editor.',
-                '',
-                commandText.trim() || (t.locale === 'ar' ? 'نفذ الأمر اليدوي المطلوب.' : 'Run the requested manual command.'),
-            ].join('\n');
-        }
-
-        if (mode === 'sessionContext') {
-            const sessionOptions: AiAnalysisOptions = {
-                ...DEFAULT_SMART_ANALYSIS_OPTIONS,
-                manualCommand: true,
-                articleTitle: true,
-                articleToc: true,
-                currentConclusion: false,
-                editorText: false,
-                competitorContent: false,
-                targetKeywords: true,
-                companyName: true,
-                goalContext: true,
-                keywordCriteria: true,
-                basicStructureCriteria: true,
-                headingsSequenceCriteria: true,
-                productPageCriteria: true,
-                interactionCtaCriteria: true,
-                conclusionCriteria: true,
-            };
-            const contextPrompt = buildSmartAnalysisPrompt(
-                t.locale === 'ar'
-                    ? 'هذه رسالة تهيئة لسياق هذا المقال. احفظ المعايير والسياق وطريقة إخراج بطاقات التنفيذ لاستخدامها في الأوامر التالية داخل هذه الدردشة. لا تنفذ تحليلا الآن، واكتف بتأكيد قصير.'
-                    : 'This is a setup message for this article. Keep the criteria, context, and implementation-card output format for later commands in this chat. Do not run an analysis now; reply with a short confirmation only.',
-                sessionOptions,
-            );
-            const competitorReference = storedCompetitorSummary || truncatePromptText(readyCommandCompetitorBlocks, 5000);
-            return competitorReference.trim()
-                ? `${contextPrompt}\n\n**${t.locale === 'ar' ? 'مرجع المنافسين المختصر للجلسة' : 'Compact competitor reference for this session'}:**\n${competitorReference}`
-                : contextPrompt;
-        }
-
         if (mode === 'economy') {
             const economyOptions = getManualBridgeEconomyOptions();
             const economyNotes = [
                 aiCommand.trim(),
                 '',
-                t.locale === 'ar'
-                    ? 'ملاحظة وضع اقتصادي: اعتمد على هيكل المقال والسياق والمعايير المختصرة. لا تفترض نصا حرفيا غير مرفق. عند الحاجة إلى استبدال نص موجود، اجعل targetText حرفيا فقط إذا كان النص ظاهرا في المعطيات، وإلا استخدم placementLabel واضحا أو عملية إضافة مناسبة.'
-                    : 'Economy mode note: rely on the article structure, context, and compact criteria. Do not assume exact text that is not attached. When replacing existing text, use an exact targetText only if it appears in the supplied data; otherwise use a clear placementLabel or an appropriate insert operation.',
+                isArabicLocale
+                    ? 'ملاحظة الوضع الموفر: اعتمد على هيكل المقال والسياق والمعايير المختصرة. لا تفترض نصا حرفيا غير مرفق. عند الحاجة إلى استبدال نص موجود، اجعل targetText حرفيا فقط إذا كان النص ظاهرا في المعطيات، وإلا استخدم placementLabel واضحا أو عملية إضافة مناسبة.'
+                    : 'Lean mode note: rely on the article structure, context, and compact criteria. Do not assume exact text that is not attached. When replacing existing text, use an exact targetText only if it appears in the supplied data; otherwise use a clear placementLabel or an appropriate insert operation.',
                 storedCompetitorSummary
-                    ? `\n**${t.locale === 'ar' ? 'ملخص المنافسين المحفوظ' : 'Saved competitor summary'}:**\n${storedCompetitorSummary}`
+                    ? `\n**${isArabicLocale ? 'ملخص المنافسين المحفوظ' : 'Saved competitor summary'}:**\n${storedCompetitorSummary}`
                     : '',
             ].filter(Boolean).join('\n');
 
@@ -1047,6 +996,28 @@ ${readyCommandCompetitorBlocks}`;
         );
     };
 
+    const openManualChatGptWindow = () => {
+        const availableWidth = window.screen?.availWidth || 1200;
+        const availableHeight = window.screen?.availHeight || 900;
+        const popupWidth = Math.min(1100, Math.max(760, Math.floor(availableWidth * 0.82)));
+        const popupHeight = Math.min(880, Math.max(640, Math.floor(availableHeight * 0.9)));
+        const popupLeft = Math.max(0, Math.floor((availableWidth - popupWidth) / 2));
+        const popupTop = Math.max(0, Math.floor((availableHeight - popupHeight) / 2));
+        const popupFeatures = [
+            'popup=yes',
+            `width=${popupWidth}`,
+            `height=${popupHeight}`,
+            `left=${popupLeft}`,
+            `top=${popupTop}`,
+            'resizable=yes',
+            'scrollbars=yes',
+            'noopener',
+            'noreferrer',
+        ].join(',');
+
+        window.open('https://chatgpt.com/', 'bazarvan-chatgpt-bridge', popupFeatures);
+    };
+
     const handleCopyManualBridgePrompt = async (openChat = false) => {
         try {
             const prompt = buildManualBridgePrompt(manualBridgeMode);
@@ -1055,21 +1026,21 @@ ${readyCommandCompetitorBlocks}`;
             } else {
                 await copyMarkdownToClipboard(prompt);
             }
-            setManualBridgeStatus(t.locale === 'ar' ? 'تم نسخ الأمر.' : 'Prompt copied.');
+            setManualBridgeStatus(isArabicLocale ? 'تم نسخ الأمر.' : 'Prompt copied.');
             if (openChat) {
-                window.open('https://chatgpt.com/', '_blank', 'noopener,noreferrer');
+                openManualChatGptWindow();
             }
             window.setTimeout(() => setManualBridgeStatus(''), 2200);
         } catch (error) {
             console.error('Could not copy manual ChatGPT bridge prompt:', error);
-            setManualBridgeStatus(t.locale === 'ar' ? 'تعذر نسخ الأمر.' : 'Could not copy prompt.');
+            setManualBridgeStatus(isArabicLocale ? 'تعذر نسخ الأمر.' : 'Could not copy prompt.');
         }
     };
 
     const handleImportManualChatGptResponse = () => {
         const responseText = manualBridgeImportText.trim();
         if (!responseText) {
-            setManualBridgeStatus(t.locale === 'ar' ? 'ألصق رد ChatGPT أولا.' : 'Paste the ChatGPT response first.');
+            setManualBridgeStatus(isArabicLocale ? 'ألصق رد ChatGPT أولا.' : 'Paste the ChatGPT response first.');
             return;
         }
 
@@ -1079,7 +1050,7 @@ ${readyCommandCompetitorBlocks}`;
         );
         setIsChatGptExpanded(true);
         setManualBridgeImportText('');
-        setManualBridgeStatus(t.locale === 'ar' ? 'تم استيراد الرد.' : 'Response imported.');
+        setManualBridgeStatus(isArabicLocale ? 'تم استيراد الرد.' : 'Response imported.');
         window.setTimeout(() => setManualBridgeStatus(''), 2200);
     };
 
@@ -1662,7 +1633,7 @@ ${readyCommandCompetitorBlocks}`;
                         <div className="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <div className="mb-2 flex items-center justify-between gap-2">
                                 <span className="text-xs font-black text-gray-700 dark:text-gray-200">
-                                    {t.locale === 'ar' ? 'جسر ChatGPT اليدوي' : 'Manual ChatGPT bridge'}
+                                    {isArabicLocale ? 'جسر ChatGPT اليدوي' : 'Manual ChatGPT bridge'}
                                 </span>
                                 <button
                                     type="button"
@@ -1670,11 +1641,11 @@ ${readyCommandCompetitorBlocks}`;
                                     className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
                                 >
                                     <ClipboardPaste size={13} />
-                                    {t.locale === 'ar' ? 'استيراد الرد' : 'Import response'}
+                                    {isArabicLocale ? 'استيراد الرد' : 'Import response'}
                                 </button>
                             </div>
-                            <div className="grid grid-cols-4 gap-1">
-                                {(['full', 'economy', 'commandOnly', 'sessionContext'] as ManualBridgeCopyMode[]).map(mode => (
+                            <div className="grid grid-cols-2 gap-1">
+                                {(['economy', 'full'] as ManualBridgeCopyMode[]).map(mode => (
                                     <button
                                         key={mode}
                                         type="button"
@@ -1696,7 +1667,7 @@ ${readyCommandCompetitorBlocks}`;
                                     className="flex items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]"
                                 >
                                     <Copy size={14} />
-                                    {t.locale === 'ar' ? 'نسخ' : 'Copy'}
+                                    {isArabicLocale ? 'نسخ' : 'Copy'}
                                 </button>
                                 <button
                                     type="button"
@@ -1704,7 +1675,7 @@ ${readyCommandCompetitorBlocks}`;
                                     className="flex items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]"
                                 >
                                     <ExternalLink size={14} />
-                                    {t.locale === 'ar' ? 'نسخ وفتح ChatGPT' : 'Copy and open ChatGPT'}
+                                    {isArabicLocale ? 'نسخ وفتح ChatGPT' : 'Copy and open ChatGPT'}
                                 </button>
                             </div>
                             {isManualBridgeImportOpen && (
@@ -1713,7 +1684,7 @@ ${readyCommandCompetitorBlocks}`;
                                         value={manualBridgeImportText}
                                         onChange={(event) => setManualBridgeImportText(event.target.value)}
                                         rows={5}
-                                        placeholder={t.locale === 'ar' ? 'ألصق رد ChatGPT هنا...' : 'Paste the ChatGPT response here...'}
+                                        placeholder={isArabicLocale ? 'ألصق رد ChatGPT هنا...' : 'Paste the ChatGPT response here...'}
                                         className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
                                         dir="auto"
                                     />
@@ -1724,7 +1695,7 @@ ${readyCommandCompetitorBlocks}`;
                                         className="flex w-full items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
                                     >
                                         <ClipboardPaste size={14} />
-                                        {t.locale === 'ar' ? 'استيراد وتنظيم الرد' : 'Import and organize'}
+                                        {isArabicLocale ? 'استيراد وتنظيم الرد' : 'Import and organize'}
                                     </button>
                                 </div>
                             )}
