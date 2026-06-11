@@ -976,7 +976,7 @@ const StructureTab: React.FC = () => {
                       <Wand2 size={16} />
                       <span>
                           {uiLanguage === 'ar'
-                              ? `إنشاء قائمة إصلاحات مقترحة (${fixableViolationsCount})`
+                              ? 'الاصلاح المتعدد'
                               : `Create proposed fixes (${fixableViolationsCount})`}
                       </span>
                   </>

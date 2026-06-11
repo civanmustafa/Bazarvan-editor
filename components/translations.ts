@@ -386,7 +386,7 @@ export const translations = {
       readyContext: 'سياق جاهز',
       chooseReadyContext: 'اختر سياقًا جاهزًا',
       noReadyContextResults: 'لا توجد سياقات مطابقة',
-      generateGoalContext: 'توليد السياق والجمهور بالذكاء الاصطناعي',
+      generateGoalContext: 'توليد السياق والجمهور',
       generatingGoalContext: 'جار توليد السياق والجمهور...',
       goalContextGenerated: 'تم توليد السياق والجمهور وتعبئة الحقول تلقائيا.',
       goalContextGenerationFailed: 'تعذر توليد السياق والجمهور. حاول مرة أخرى.',

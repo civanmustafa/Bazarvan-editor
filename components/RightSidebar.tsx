@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2, FileText, Trash2 } from 'lucide-react';
+import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2, FileText, Trash2, ExternalLink, ClipboardPaste } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
@@ -10,7 +10,7 @@ import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUti
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
-import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
+import { CONTENT_SUMMARY_STORAGE_KEY, DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
     id: string;
@@ -20,6 +20,8 @@ type ReadyCommand = {
     skipPatchInstructions?: boolean;
     savesContentSummary?: boolean;
 };
+
+type ManualBridgeCopyMode = 'full' | 'economy' | 'commandOnly' | 'sessionContext';
 
 type CompetitorExtractedContent = {
     url: string;
@@ -126,6 +128,15 @@ const truncatePromptText = (value: string, maxLength = 9000): string => {
     const trimmed = value.trim();
     if (trimmed.length <= maxLength) return trimmed;
     return `${trimmed.slice(0, maxLength).trim()}\n\n[تم اختصار بقية النص لتخفيف حجم الطلب على API.]`;
+};
+
+const loadStoredCompetitorSummaryText = (): string => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(CONTENT_SUMMARY_STORAGE_KEY) || 'null');
+        return typeof parsed?.summary === 'string' ? parsed.summary.trim() : '';
+    } catch {
+        return '';
+    }
 };
 
 const formatCompetitorEvidenceParagraphs = (value: string): string => {
@@ -722,6 +733,8 @@ const RightSidebar: React.FC = () => {
         handleAiAnalyze,
         handleChatGptAnalyze,
         handleGeminiReadyCommandsAnalyze,
+        buildSmartAnalysisPrompt,
+        importManualChatGptResponse,
         aiResults,
         aiInsertionPatches,
         isAiLoading,
@@ -743,6 +756,10 @@ const RightSidebar: React.FC = () => {
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(false);
     const [copiedPatchId, setCopiedPatchId] = useState('');
+    const [manualBridgeMode, setManualBridgeMode] = useState<ManualBridgeCopyMode>('full');
+    const [manualBridgeImportText, setManualBridgeImportText] = useState('');
+    const [isManualBridgeImportOpen, setIsManualBridgeImportOpen] = useState(false);
+    const [manualBridgeStatus, setManualBridgeStatus] = useState('');
     
     // Custom Dropdown State
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
@@ -937,6 +954,135 @@ ${readyCommandCompetitorBlocks}`;
                 ? `${selectedReadyCommands.length} أوامر محددة`
                 : `${selectedReadyCommands.length} commands selected`;
 
+    const manualBridgeModeLabels: Record<ManualBridgeCopyMode, string> = {
+        full: t.locale === 'ar' ? 'كامل' : 'Full',
+        economy: t.locale === 'ar' ? 'اقتصادي' : 'Economy',
+        commandOnly: t.locale === 'ar' ? 'الأمر فقط' : 'Command only',
+        sessionContext: t.locale === 'ar' ? 'سياق الجلسة' : 'Session context',
+    };
+
+    const getManualBridgeEconomyOptions = (): AiAnalysisOptions => ({
+        ...aiOptions,
+        articleToc: true,
+        editorText: false,
+        competitorContent: false,
+        currentConclusion: selectedReadyCommand?.id === ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion && aiOptions.currentConclusion,
+    });
+
+    const buildManualBridgePrompt = (mode: ManualBridgeCopyMode): string => {
+        const historyMeta = selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined;
+        const storedCompetitorSummary = loadStoredCompetitorSummaryText();
+
+        if (mode === 'commandOnly') {
+            const commandText = selectedReadyCommands.length > 1
+                ? selectedReadyCommands
+                    .map((command, index) => `### ${index + 1}. ${command.label}\n${command.value}`)
+                    .join('\n\n')
+                : aiCommand;
+
+            return [
+                t.locale === 'ar'
+                    ? 'استخدم سياق ومعايير هذه الدردشة السابقة لهذا المقال. لا تطلب مني إعادة إرسال المعايير إلا إذا كانت غير موجودة في هذه الدردشة.'
+                    : 'Use the previous context and criteria in this chat for this article. Do not ask me to resend the criteria unless they are missing in this chat.',
+                '',
+                t.locale === 'ar'
+                    ? 'أخرج النتيجة بنفس تنسيق بطاقات التنفيذ المتفق عليه سابقا حتى أتمكن من استيراد الرد في المحرر.'
+                    : 'Return the result using the previously agreed implementation-card format so I can import it into the editor.',
+                '',
+                commandText.trim() || (t.locale === 'ar' ? 'نفذ الأمر اليدوي المطلوب.' : 'Run the requested manual command.'),
+            ].join('\n');
+        }
+
+        if (mode === 'sessionContext') {
+            const sessionOptions: AiAnalysisOptions = {
+                ...DEFAULT_SMART_ANALYSIS_OPTIONS,
+                manualCommand: true,
+                articleTitle: true,
+                articleToc: true,
+                currentConclusion: false,
+                editorText: false,
+                competitorContent: false,
+                targetKeywords: true,
+                companyName: true,
+                goalContext: true,
+                keywordCriteria: true,
+                basicStructureCriteria: true,
+                headingsSequenceCriteria: true,
+                productPageCriteria: true,
+                interactionCtaCriteria: true,
+                conclusionCriteria: true,
+            };
+            const contextPrompt = buildSmartAnalysisPrompt(
+                t.locale === 'ar'
+                    ? 'هذه رسالة تهيئة لسياق هذا المقال. احفظ المعايير والسياق وطريقة إخراج بطاقات التنفيذ لاستخدامها في الأوامر التالية داخل هذه الدردشة. لا تنفذ تحليلا الآن، واكتف بتأكيد قصير.'
+                    : 'This is a setup message for this article. Keep the criteria, context, and implementation-card output format for later commands in this chat. Do not run an analysis now; reply with a short confirmation only.',
+                sessionOptions,
+            );
+            const competitorReference = storedCompetitorSummary || truncatePromptText(readyCommandCompetitorBlocks, 5000);
+            return competitorReference.trim()
+                ? `${contextPrompt}\n\n**${t.locale === 'ar' ? 'مرجع المنافسين المختصر للجلسة' : 'Compact competitor reference for this session'}:**\n${competitorReference}`
+                : contextPrompt;
+        }
+
+        if (mode === 'economy') {
+            const economyOptions = getManualBridgeEconomyOptions();
+            const economyNotes = [
+                aiCommand.trim(),
+                '',
+                t.locale === 'ar'
+                    ? 'ملاحظة وضع اقتصادي: اعتمد على هيكل المقال والسياق والمعايير المختصرة. لا تفترض نصا حرفيا غير مرفق. عند الحاجة إلى استبدال نص موجود، اجعل targetText حرفيا فقط إذا كان النص ظاهرا في المعطيات، وإلا استخدم placementLabel واضحا أو عملية إضافة مناسبة.'
+                    : 'Economy mode note: rely on the article structure, context, and compact criteria. Do not assume exact text that is not attached. When replacing existing text, use an exact targetText only if it appears in the supplied data; otherwise use a clear placementLabel or an appropriate insert operation.',
+                storedCompetitorSummary
+                    ? `\n**${t.locale === 'ar' ? 'ملخص المنافسين المحفوظ' : 'Saved competitor summary'}:**\n${storedCompetitorSummary}`
+                    : '',
+            ].filter(Boolean).join('\n');
+
+            return buildSmartAnalysisPrompt(economyNotes, economyOptions, historyMeta);
+        }
+
+        return buildSmartAnalysisPrompt(
+            appendSelectedAttachments(aiCommand, aiOptions),
+            aiOptions,
+            historyMeta
+        );
+    };
+
+    const handleCopyManualBridgePrompt = async (openChat = false) => {
+        try {
+            const prompt = buildManualBridgePrompt(manualBridgeMode);
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(prompt);
+            } else {
+                await copyMarkdownToClipboard(prompt);
+            }
+            setManualBridgeStatus(t.locale === 'ar' ? 'تم نسخ الأمر.' : 'Prompt copied.');
+            if (openChat) {
+                window.open('https://chatgpt.com/', '_blank', 'noopener,noreferrer');
+            }
+            window.setTimeout(() => setManualBridgeStatus(''), 2200);
+        } catch (error) {
+            console.error('Could not copy manual ChatGPT bridge prompt:', error);
+            setManualBridgeStatus(t.locale === 'ar' ? 'تعذر نسخ الأمر.' : 'Could not copy prompt.');
+        }
+    };
+
+    const handleImportManualChatGptResponse = () => {
+        const responseText = manualBridgeImportText.trim();
+        if (!responseText) {
+            setManualBridgeStatus(t.locale === 'ar' ? 'ألصق رد ChatGPT أولا.' : 'Paste the ChatGPT response first.');
+            return;
+        }
+
+        importManualChatGptResponse(
+            responseText,
+            selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined
+        );
+        setIsChatGptExpanded(true);
+        setManualBridgeImportText('');
+        setManualBridgeStatus(t.locale === 'ar' ? 'تم استيراد الرد.' : 'Response imported.');
+        window.setTimeout(() => setManualBridgeStatus(''), 2200);
+    };
+
     const getCommandIcon = (commandId: string) => {
         const iconClass = 'text-[#d4af37]';
         switch (commandId) {
@@ -1010,6 +1156,7 @@ ${readyCommandCompetitorBlocks}`;
         if (selectedReadyCommands.length > 0) {
             clearReadyCommandSelectionOnNextOpenRef.current = true;
         }
+        setIsChatGptExpanded(true);
         handleChatGptAnalyze(
             appendSelectedAttachments(aiCommand, aiOptions),
             aiOptions,
@@ -1512,6 +1659,82 @@ ${readyCommandCompetitorBlocks}`;
                             </div>
                         </div>
 
+                        <div className="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                                <span className="text-xs font-black text-gray-700 dark:text-gray-200">
+                                    {t.locale === 'ar' ? 'جسر ChatGPT اليدوي' : 'Manual ChatGPT bridge'}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsManualBridgeImportOpen(prev => !prev)}
+                                    className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                                >
+                                    <ClipboardPaste size={13} />
+                                    {t.locale === 'ar' ? 'استيراد الرد' : 'Import response'}
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-4 gap-1">
+                                {(['full', 'economy', 'commandOnly', 'sessionContext'] as ManualBridgeCopyMode[]).map(mode => (
+                                    <button
+                                        key={mode}
+                                        type="button"
+                                        onClick={() => setManualBridgeMode(mode)}
+                                        className={`rounded-md px-2 py-1.5 text-[11px] font-bold transition-colors ${
+                                            manualBridgeMode === mode
+                                                ? 'bg-[#d4af37] text-white'
+                                                : 'bg-gray-100 text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-300 dark:hover:bg-[#d4af37]/20'
+                                        }`}
+                                    >
+                                        {manualBridgeModeLabels[mode]}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => handleCopyManualBridgePrompt(false)}
+                                    className="flex items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]"
+                                >
+                                    <Copy size={14} />
+                                    {t.locale === 'ar' ? 'نسخ' : 'Copy'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleCopyManualBridgePrompt(true)}
+                                    className="flex items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]"
+                                >
+                                    <ExternalLink size={14} />
+                                    {t.locale === 'ar' ? 'نسخ وفتح ChatGPT' : 'Copy and open ChatGPT'}
+                                </button>
+                            </div>
+                            {isManualBridgeImportOpen && (
+                                <div className="mt-2 space-y-2">
+                                    <textarea
+                                        value={manualBridgeImportText}
+                                        onChange={(event) => setManualBridgeImportText(event.target.value)}
+                                        rows={5}
+                                        placeholder={t.locale === 'ar' ? 'ألصق رد ChatGPT هنا...' : 'Paste the ChatGPT response here...'}
+                                        className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
+                                        dir="auto"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={handleImportManualChatGptResponse}
+                                        disabled={!manualBridgeImportText.trim()}
+                                        className="flex w-full items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        <ClipboardPaste size={14} />
+                                        {t.locale === 'ar' ? 'استيراد وتنظيم الرد' : 'Import and organize'}
+                                    </button>
+                                </div>
+                            )}
+                            {manualBridgeStatus && (
+                                <div className="mt-2 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                                    {manualBridgeStatus}
+                                </div>
+                            )}
+                        </div>
+
                         <div className="-mx-3 space-y-2 pt-3 border-t border-gray-200 dark:border-[#3C3C3C]">
                             {/* Results Gemini */}
                             <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
@@ -1555,18 +1778,6 @@ ${readyCommandCompetitorBlocks}`;
                 </div>
 
                 <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                        <div>
-                            <div className="text-xs font-bold text-gray-700 dark:text-gray-200">
-                                {t.locale === 'ar' ? 'توزيع نصوص المنافسين' : 'Distribute competitor texts'}
-                            </div>
-                            <p className="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
-                                {t.locale === 'ar'
-                                    ? 'الصق نصوص المنافسين مفصولة بأسطر رموز فقط مثل -- أو ** أو // أو == أو .. أو ،، وسيتم تعبئة خانات النص العادي فقط.'
-                                    : 'Paste competitor texts separated by symbol-only lines such as --, **, //, ==, .., or ،،. Only plain text fields will be filled.'}
-                            </p>
-                        </div>
-                    </div>
                     <textarea
                         value={bulkCompetitorText}
                         onChange={(event) => setBulkCompetitorText(event.target.value)}

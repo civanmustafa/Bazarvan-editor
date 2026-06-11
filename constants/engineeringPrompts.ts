@@ -1465,6 +1465,13 @@ const sanitizeEngineeringPrompt = (id: EngineeringPromptId, value: string): stri
     return DEFAULT_ENGINEERING_PROMPTS[id];
   }
 
+  if (id === ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands) {
+    const hasSectionOrderPrompt = /ترتيب الأقسام|Section order/i.test(value);
+    if (!hasSectionOrderPrompt) {
+      return `${value.trim()}\n\n## الأمر 6: ترتيب الأقسام\n\n${COMBINED_SECTION_ORDER_PROMPT}`;
+    }
+  }
+
   if (
     id === ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings &&
     value.trim() === LEGACY_SUGGEST_HEADINGS_PROMPT.trim()

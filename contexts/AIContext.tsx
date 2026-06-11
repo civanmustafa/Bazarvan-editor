@@ -39,7 +39,7 @@ import { normalizeGoalContext } from '../utils/goalContext';
  * Edit api/* when changing server-side model calls or key handling.
  */
 const GEMINI_MODEL = GEMINI_ANALYSIS_MODEL;
-const OPENAI_MODEL = 'gpt-5.5';
+const OPENAI_MODEL = 'gpt-5.4';
 const CHATGPT_TIMEOUT_MS = 300000;
 const GEMINI_CHAT_STORAGE_PREFIX = 'bazarvan:gemini-chat';
 const GEMINI_CHAT_MAX_MESSAGES = 8;
@@ -3989,6 +3989,8 @@ interface AIContextType {
     handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
     handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[]) => Promise<void>;
+    buildSmartAnalysisPrompt: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => string;
+    importManualChatGptResponse: (rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => void;
     parseAiPatchResponse: (
         rawResponse: string,
         provider: AiPatchProvider,
@@ -4428,6 +4430,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         });
     }, [logToAiHistory]);
 
+    const buildSmartAnalysisPrompt = useCallback((
+        userPrompt: string,
+        options: any,
+        historyMeta?: ReadyCommandAnalysisHistoryMeta
+    ): string => (
+        buildSmartAnalysisFinalPrompt(
+            generateContextAwarePrompt(userPrompt, options),
+            { skipPatchInstructions: historyMeta?.skipPatchInstructions },
+        )
+    ), [generateContextAwarePrompt]);
+
     const handleGeminiReadyCommandsAnalyze = useCallback(async (items: ReadyCommandAnalysisBatchItem[]) => {
         if (!editor || items.length === 0) return;
         const geminiKeys = normalizeGeminiKeys(apiKeys.gemini);
@@ -4535,6 +4548,19 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
     }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey, title]);
+
+    const importManualChatGptResponse = useCallback((rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
+        const responseText = rawResponse.trim();
+        if (!responseText) return;
+
+        const parsedResult = historyMeta?.skipPatchInstructions
+            ? { displayText: responseText, patches: [] }
+            : applyReadyCommandPatchRules(parseSmartAnalysisResponse(responseText, 'chatgpt'), historyMeta?.commandId);
+
+        setAiResults(prev => ({ ...prev, chatgpt: parsedResult.displayText }));
+        setAiInsertionPatches(prev => ({ ...prev, chatgpt: parsedResult.patches }));
+        logReadyCommandAnalysis('chatgpt', parsedResult, historyMeta);
+    }, [logReadyCommandAnalysis]);
 
     const callQuickProviderAnalysis = useCallback(async (
         prompt: string,
@@ -5311,7 +5337,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         aiResults, aiInsertionPatches, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
-        parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
+        buildSmartAnalysisPrompt, importManualChatGptResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
         handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
         clearBulkFixReviewItems, applySuggestionFromHistory,
