@@ -10,7 +10,7 @@ import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUti
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
-import { CONTENT_SUMMARY_STORAGE_KEY, DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
+import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
     id: string;
@@ -20,8 +20,6 @@ type ReadyCommand = {
     skipPatchInstructions?: boolean;
     savesContentSummary?: boolean;
 };
-
-type ManualBridgeCopyMode = 'economy' | 'full';
 
 type CompetitorExtractedContent = {
     url: string;
@@ -128,15 +126,6 @@ const truncatePromptText = (value: string, maxLength = 9000): string => {
     const trimmed = value.trim();
     if (trimmed.length <= maxLength) return trimmed;
     return `${trimmed.slice(0, maxLength).trim()}\n\n[تم اختصار بقية النص لتخفيف حجم الطلب على API.]`;
-};
-
-const loadStoredCompetitorSummaryText = (): string => {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(CONTENT_SUMMARY_STORAGE_KEY) || 'null');
-        return typeof parsed?.summary === 'string' ? parsed.summary.trim() : '';
-    } catch {
-        return '';
-    }
 };
 
 const formatCompetitorEvidenceParagraphs = (value: string): string => {
@@ -756,14 +745,13 @@ const RightSidebar: React.FC = () => {
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(false);
     const [copiedPatchId, setCopiedPatchId] = useState('');
-    const [manualBridgeMode, setManualBridgeMode] = useState<ManualBridgeCopyMode>('economy');
     const [manualBridgeImportText, setManualBridgeImportText] = useState('');
-    const [isManualBridgeImportOpen, setIsManualBridgeImportOpen] = useState(false);
     const [manualBridgeStatus, setManualBridgeStatus] = useState('');
     
     // Custom Dropdown State
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
     const commandsMenuRef = useRef<HTMLDivElement>(null);
+    const smartAnalysisTabRef = useRef<HTMLDivElement>(null);
     const clearReadyCommandSelectionOnNextOpenRef = useRef(false);
 
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
@@ -956,53 +944,34 @@ ${readyCommandCompetitorBlocks}`;
                 ? `${selectedReadyCommands.length} أوامر محددة`
                 : `${selectedReadyCommands.length} commands selected`;
 
-    const manualBridgeModeLabels: Record<ManualBridgeCopyMode, string> = {
-        economy: isArabicLocale ? 'موفر' : 'Lean',
-        full: isArabicLocale ? 'كامل' : 'Full',
-    };
-
-    const getManualBridgeEconomyOptions = (): AiAnalysisOptions => ({
-        ...aiOptions,
-        articleToc: true,
-        editorText: false,
-        competitorContent: false,
-        currentConclusion: selectedReadyCommand?.id === ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion && aiOptions.currentConclusion,
+    // Keep Gemini, ChatGPT, and the manual ChatGPT copy button aligned on attachments/options.
+    const buildCurrentSmartAnalysisRequest = () => ({
+        userPrompt: appendSelectedAttachments(aiCommand, aiOptions),
+        options: aiOptions,
+        historyMeta: selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined,
     });
 
-    const buildManualBridgePrompt = (mode: ManualBridgeCopyMode): string => {
-        const historyMeta = selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined;
-        const storedCompetitorSummary = loadStoredCompetitorSummaryText();
-
-        if (mode === 'economy') {
-            const economyOptions = getManualBridgeEconomyOptions();
-            const economyNotes = [
-                aiCommand.trim(),
-                '',
-                isArabicLocale
-                    ? 'ملاحظة الوضع الموفر: اعتمد على هيكل المقال والسياق والمعايير المختصرة. لا تفترض نصا حرفيا غير مرفق. عند الحاجة إلى استبدال نص موجود، اجعل targetText حرفيا فقط إذا كان النص ظاهرا في المعطيات، وإلا استخدم placementLabel واضحا أو عملية إضافة مناسبة.'
-                    : 'Lean mode note: rely on the article structure, context, and compact criteria. Do not assume exact text that is not attached. When replacing existing text, use an exact targetText only if it appears in the supplied data; otherwise use a clear placementLabel or an appropriate insert operation.',
-                storedCompetitorSummary
-                    ? `\n**${isArabicLocale ? 'ملخص المنافسين المحفوظ' : 'Saved competitor summary'}:**\n${storedCompetitorSummary}`
-                    : '',
-            ].filter(Boolean).join('\n');
-
-            return buildSmartAnalysisPrompt(economyNotes, economyOptions, historyMeta);
-        }
-
-        return buildSmartAnalysisPrompt(
-            appendSelectedAttachments(aiCommand, aiOptions),
-            aiOptions,
-            historyMeta
-        );
+    const buildManualBridgePrompt = (): string => {
+        const request = buildCurrentSmartAnalysisRequest();
+        return buildSmartAnalysisPrompt(request.userPrompt, request.options, request.historyMeta);
     };
 
     const openManualChatGptWindow = () => {
+        const tabRect = smartAnalysisTabRef.current?.getBoundingClientRect();
         const availableWidth = window.screen?.availWidth || 1200;
         const availableHeight = window.screen?.availHeight || 900;
-        const popupWidth = Math.min(1100, Math.max(760, Math.floor(availableWidth * 0.82)));
-        const popupHeight = Math.min(880, Math.max(640, Math.floor(availableHeight * 0.9)));
-        const popupLeft = Math.max(0, Math.floor((availableWidth - popupWidth) / 2));
-        const popupTop = Math.max(0, Math.floor((availableHeight - popupHeight) / 2));
+        const browserLeft = window.screenX ?? window.screenLeft ?? 0;
+        const browserTop = window.screenY ?? window.screenTop ?? 0;
+        const fallbackWidth = Math.min(420, Math.max(320, Math.floor(availableWidth * 0.24)));
+        const fallbackHeight = Math.min(availableHeight, Math.max(640, Math.floor(availableHeight * 0.9)));
+        const measuredWidth = Math.round(tabRect?.width || fallbackWidth);
+        const measuredHeight = Math.round(tabRect?.height || fallbackHeight);
+        const popupWidth = Math.max(320, Math.min(availableWidth, measuredWidth));
+        const popupHeight = Math.max(520, Math.min(availableHeight, measuredHeight));
+        const measuredLeft = tabRect ? browserLeft + tabRect.left : browserLeft + window.innerWidth - popupWidth;
+        const measuredTop = tabRect ? browserTop + tabRect.top : browserTop;
+        const popupLeft = Math.max(0, Math.min(availableWidth - popupWidth, Math.floor(measuredLeft)));
+        const popupTop = Math.max(0, Math.min(availableHeight - popupHeight, Math.floor(measuredTop)));
         const popupFeatures = [
             'popup=yes',
             `width=${popupWidth}`,
@@ -1019,8 +988,12 @@ ${readyCommandCompetitorBlocks}`;
     };
 
     const handleCopyManualBridgePrompt = async (openChat = false) => {
+        if (selectedReadyCommands.length > 0) {
+            clearReadyCommandSelectionOnNextOpenRef.current = true;
+        }
+
         try {
-            const prompt = buildManualBridgePrompt(manualBridgeMode);
+            const prompt = buildManualBridgePrompt();
             if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(prompt);
             } else {
@@ -1050,7 +1023,7 @@ ${readyCommandCompetitorBlocks}`;
         );
         setIsChatGptExpanded(true);
         setManualBridgeImportText('');
-        setManualBridgeStatus(isArabicLocale ? 'تم استيراد الرد.' : 'Response imported.');
+        setManualBridgeStatus(isArabicLocale ? 'تم تنظيم الرد.' : 'Response organized.');
         window.setTimeout(() => setManualBridgeStatus(''), 2200);
     };
 
@@ -1120,7 +1093,8 @@ ${readyCommandCompetitorBlocks}`;
             return;
         }
 
-        handleAiAnalyze(appendSelectedAttachments(aiCommand, aiOptions), aiOptions, readyCommandHistoryMeta);
+        const request = buildCurrentSmartAnalysisRequest();
+        handleAiAnalyze(request.userPrompt, request.options, request.historyMeta);
     };
 
     const handleRunChatGptAnalysis = () => {
@@ -1128,11 +1102,8 @@ ${readyCommandCompetitorBlocks}`;
             clearReadyCommandSelectionOnNextOpenRef.current = true;
         }
         setIsChatGptExpanded(true);
-        handleChatGptAnalyze(
-            appendSelectedAttachments(aiCommand, aiOptions),
-            aiOptions,
-            selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined
-        );
+        const request = buildCurrentSmartAnalysisRequest();
+        handleChatGptAnalyze(request.userPrompt, request.options, request.historyMeta);
     };
 
     const handleCopyPatch = async (patchId: string, content: string) => {
@@ -1524,7 +1495,7 @@ ${readyCommandCompetitorBlocks}`;
     };
 
     const renderAiTab = () => (
-        <div className="flex flex-col h-full">
+        <div ref={smartAnalysisTabRef} className="flex flex-col h-full">
             <div className="flex p-2 mx-2 mt-2 mb-1 bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
                 <button onClick={() => setAiSubTab('new')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'new' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{tRs.newAnalysis}</button>
                 <button onClick={() => setAiSubTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'history' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.aiHistory.title}</button>
@@ -1614,93 +1585,48 @@ ${readyCommandCompetitorBlocks}`;
                         </div>
 
                         <div className="flex flex-col gap-2">
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-3 gap-2">
                                 <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                                    <span className="text-xs font-bold">
-                                        {selectedReadyCommands.length > 0
-                                            ? (t.locale === 'ar' ? 'Gemini الافتراضي للأوامر' : 'Gemini default for commands')
-                                            : 'Gemini'}
-                                    </span>
+                                    <span className="text-xs font-bold">Gemini</span>
                                 </button>
                                 <button onClick={handleRunChatGptAnalysis} disabled={isAiLoading.chatgpt} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
                                     <span className="text-xs font-bold">ChatGPT</span>
                                 </button>
-                            </div>
-                        </div>
-
-                        <div className="rounded-lg border border-gray-200 bg-white p-2.5 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                                <span className="text-xs font-black text-gray-700 dark:text-gray-200">
-                                    {isArabicLocale ? 'جسر ChatGPT اليدوي' : 'Manual ChatGPT bridge'}
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsManualBridgeImportOpen(prev => !prev)}
-                                    className="flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
-                                >
-                                    <ClipboardPaste size={13} />
-                                    {isArabicLocale ? 'استيراد الرد' : 'Import response'}
-                                </button>
-                            </div>
-                            <div className="grid grid-cols-2 gap-1">
-                                {(['economy', 'full'] as ManualBridgeCopyMode[]).map(mode => (
-                                    <button
-                                        key={mode}
-                                        type="button"
-                                        onClick={() => setManualBridgeMode(mode)}
-                                        className={`rounded-md px-2 py-1.5 text-[11px] font-bold transition-colors ${
-                                            manualBridgeMode === mode
-                                                ? 'bg-[#d4af37] text-white'
-                                                : 'bg-gray-100 text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-300 dark:hover:bg-[#d4af37]/20'
-                                        }`}
-                                    >
-                                        {manualBridgeModeLabels[mode]}
-                                    </button>
-                                ))}
-                            </div>
-                            <div className="mt-2 grid grid-cols-2 gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => handleCopyManualBridgePrompt(false)}
-                                    className="flex items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]"
-                                >
-                                    <Copy size={14} />
-                                    {isArabicLocale ? 'نسخ' : 'Copy'}
-                                </button>
                                 <button
                                     type="button"
                                     onClick={() => handleCopyManualBridgePrompt(true)}
-                                    className="flex items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]"
+                                    className="flex min-w-0 items-center justify-center gap-1 rounded-lg bg-[#d4af37] px-1.5 py-2 text-center text-[11px] font-bold leading-4 text-white hover:bg-[#b8922e]"
                                 >
                                     <ExternalLink size={14} />
-                                    {isArabicLocale ? 'نسخ وفتح ChatGPT' : 'Copy and open ChatGPT'}
+                                    <span className="min-w-0 whitespace-normal break-words">
+                                        {isArabicLocale ? 'نسخ وفتح ChatGPT' : 'Copy and open ChatGPT'}
+                                    </span>
                                 </button>
                             </div>
-                            {isManualBridgeImportOpen && (
-                                <div className="mt-2 space-y-2">
-                                    <textarea
-                                        value={manualBridgeImportText}
-                                        onChange={(event) => setManualBridgeImportText(event.target.value)}
-                                        rows={5}
-                                        placeholder={isArabicLocale ? 'ألصق رد ChatGPT هنا...' : 'Paste the ChatGPT response here...'}
-                                        className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
-                                        dir="auto"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={handleImportManualChatGptResponse}
-                                        disabled={!manualBridgeImportText.trim()}
-                                        className="flex w-full items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        <ClipboardPaste size={14} />
-                                        {isArabicLocale ? 'استيراد وتنظيم الرد' : 'Import and organize'}
-                                    </button>
-                                </div>
-                            )}
+
+                            <div className="space-y-2">
+                                <textarea
+                                    value={manualBridgeImportText}
+                                    onChange={(event) => setManualBridgeImportText(event.target.value)}
+                                    rows={5}
+                                    placeholder={isArabicLocale ? 'ألصق رد ChatGPT هنا...' : 'Paste the ChatGPT response here...'}
+                                    className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
+                                    dir="auto"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleImportManualChatGptResponse}
+                                    disabled={!manualBridgeImportText.trim()}
+                                    className="flex w-full items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <ClipboardPaste size={14} />
+                                    {isArabicLocale ? 'تنظيم الرد' : 'Organize response'}
+                                </button>
+                            </div>
                             {manualBridgeStatus && (
-                                <div className="mt-2 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                                <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
                                     {manualBridgeStatus}
                                 </div>
                             )}
