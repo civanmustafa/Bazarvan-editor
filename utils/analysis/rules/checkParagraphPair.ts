@@ -147,8 +147,8 @@ const findParagraphPairs = (paragraphWordSets: ParagraphWordSet[]): ParagraphPai
             const sharedNormalizedWords = Array.from(first.words.keys()).filter(word => second.words.has(word));
             if (sharedNormalizedWords.length === 0) continue;
 
-            const smallerWordSetSize = Math.min(first.words.size, second.words.size);
-            const sharedRatio = sharedNormalizedWords.length / Math.max(smallerWordSetSize, 1);
+            const averageWordSetSize = (first.words.size + second.words.size) / 2;
+            const sharedRatio = sharedNormalizedWords.length / Math.max(averageWordSetSize, 1);
             const sharedWords = sharedNormalizedWords.map(word => first.words.get(word) || word);
             pairs.push({ first, second, sharedWords, sharedRatio });
         }
@@ -180,8 +180,8 @@ export const checkParagraphPair = (context: AnalysisContext): CheckResult => {
     const description = tRule.description;
     const requiredText = tRule.required;
     const details = uiLanguage === 'ar'
-        ? 'يفحص جميع أزواج الفقرات داخل المتن فقط، مع استثناء فقرة المقدمة والفقرة التلخيصية والخاتمة، وبعد استثناء الكلمات العامة وكلمات العبارة المفتاحية الأساسية والصيغ البديلة واسم الشركة. يصبح المعيار خطأ عند وجود أي زوج فقرات تتجاوز نسبة التشابه بينهما 30% من أصغر الفقرتين، ويعرض رقم الخطأ عدد الأزواج المتجاوزة لهذا الحد.'
-        : 'Checks all body paragraph pairs, excluding intro, summary, and conclusion paragraphs, then excluding common words, the primary keyword, alternate keyword forms, and the company name. The criterion fails when any paragraph pair exceeds 30% overlap of the smaller paragraph, and the error count shows the number of pairs above that limit.';
+        ? 'يفحص جميع أزواج الفقرات داخل المتن فقط، مع استثناء فقرة المقدمة والفقرة التلخيصية والخاتمة، وبعد استثناء الكلمات العامة وكلمات العبارة المفتاحية الأساسية والصيغ البديلة واسم الشركة. تحسب النسبة هكذا: عدد الكلمات المشتركة ÷ متوسط عدد الكلمات الفريدة في الفقرتين بعد الاستثناءات × 100. يصبح المعيار خطأ فقط عند وجود أي زوج فقرات تتجاوز نسبة تشارك الكلمات بينهما 30%، ويعرض رقم الخطأ عدد الأزواج المتجاوزة لهذا الحد.'
+        : 'Checks all body paragraph pairs, excluding intro, summary, and conclusion paragraphs, then excluding common words, the primary keyword, alternate keyword forms, and the company name. The percentage is calculated as shared words divided by the average unique word count of the two paragraphs after exclusions, multiplied by 100. The criterion fails only when any paragraph pair exceeds 30% shared-word overlap, and the error count shows the number of pairs above that limit.';
 
     const eligibleParagraphs = getEligibleParagraphs(context);
 

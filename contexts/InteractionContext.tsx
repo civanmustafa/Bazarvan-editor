@@ -763,17 +763,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                         </button>`;
 
                     const stripHtml = (value: unknown): string => String(value ?? '').replace(/<[^>]*>/g, '').trim();
-                    const violationText = stripHtml(v.text || getSafeDocTextBetween(editor, v.from, v.to) || '');
                     const problemText = stripHtml(v.message || rule.description || rule.title);
-                    const currentParts = [
-                        rule.current != null && String(rule.current).trim()
-                            ? `${uiLanguage === 'ar' ? 'نتيجة المعيار الحالية' : 'Current criterion result'}: ${stripHtml(rule.current)}`
-                            : '',
-                        violationText
-                            ? `${uiLanguage === 'ar' ? 'النص المخالف' : 'Violating text'}: ${violationText}`
-                            : '',
-                    ].filter(Boolean);
-                    const currentText = currentParts.join('\n') || stripHtml(rule.current || problemText || safeTitle);
                     const requiredText = stripHtml(rule.required || (uiLanguage === 'ar' ? 'راجع شروط المعيار.' : 'Review the criterion requirements.'));
                     const pairedParagraphHtml = v.pairedText
                         ? `<div style="margin-top: 4px; display: grid; gap: 3px; width: 100%; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};">
@@ -784,17 +774,15 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
                     const detailsHtml = `
                         <div style="display: grid; gap: 8px; font-size: 11px; color: #6b7280; width: 100%; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};" class="dark:text-gray-400">
-                            <div style="display: grid; gap: 3px;">
-                                <strong style="color: inherit;">${uiLanguage === 'ar' ? 'المشكلة' : 'Problem'}</strong>
-                                <span style="display: block; line-height: 1.65;">${formatTooltipMultilineBlock(problemText)}</span>
-                            </div>
-                            <div style="display: grid; gap: 3px;">
-                                <strong style="color: inherit;">${uiLanguage === 'ar' ? 'الحالي' : 'Current'}</strong>
-                                <span style="display: block; line-height: 1.65;">${formatTooltipMultilineBlock(currentText)}</span>
-                            </div>
-                            <div style="display: grid; gap: 3px;">
-                                <strong style="color: inherit;">${uiLanguage === 'ar' ? 'المطلوب' : 'Required'}</strong>
-                                <span style="display: block; line-height: 1.65;">${formatTooltipMultilineBlock(requiredText)}</span>
+                            <div style="display:flex;align-items:flex-start;flex-wrap:wrap;gap:4px 28px;line-height:1.65;">
+                                <span style="display:inline-flex;align-items:flex-start;gap:5px;min-width:0;">
+                                    <strong style="color: inherit; flex-shrink:0;">${uiLanguage === 'ar' ? 'المشكلة:' : 'Problem:'}</strong>
+                                    <span style="min-width:0;">${formatTooltipMultilineBlock(problemText)}</span>
+                                </span>
+                                <span style="display:inline-flex;align-items:flex-start;gap:5px;min-width:0;">
+                                    <strong style="color: inherit; flex-shrink:0;">${uiLanguage === 'ar' ? 'المطلوب:' : 'Required:'}</strong>
+                                    <span style="min-width:0;">${formatTooltipMultilineBlock(requiredText)}</span>
+                                </span>
                             </div>
                             ${pairedParagraphHtml}
                         </div>`;

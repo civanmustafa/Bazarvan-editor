@@ -400,6 +400,8 @@ const BULK_FIX_ARTICLE_LEVEL_RULE_KEYS: (keyof StructureAnalysis)[] = [
     'productWarrantyContent',
 ];
 
+const BULK_FIX_MAX_VIOLATIONS_PER_RULE = 10;
+
 const ENGLISH_TRANSITIONAL_WORDS = ['firstly', 'secondly', 'finally', 'in addition', 'furthermore', 'therefore', 'consequently', 'on the other hand', 'in contrast', 'also', 'as well as', 'moreover', 'in fact', 'actually', 'in other words', 'for example', 'specifically', 'in general', 'however', 'although', 'while', 'in summary', 'in conclusion'];
 const ENGLISH_CTA_WORDS = ['start now', 'try now', 'sign up', 'book your spot', 'get', 'order now', 'contact us', 'join us', 'discover more', 'learn more', 'benefit now', 'subscribe', 'download', 'buy', 'shop', 'explore', 'request a quote', 'click here', 'submit', 'register', 'claim your', 'get started', 'find out more'];
 const ENGLISH_INTERACTIVE_WORDS = ['you can', 'you will find', 'you need', 'you want', 'discover', 'learn', 'try', 'choose', 'use', 'start', 'get', 'benefit', 'enjoy', 'read', 'watch', 'compare', 'check', 'did you know', 'have you ever', 'imagine', 'think about', 'explore', 'see how', 'your', 'unlock', 'uncover', 'consider', 'you', "let's"];
@@ -663,6 +665,20 @@ const collectBulkFixViolations = (structureAnalysis: StructureAnalysis): BulkFix
         }
     });
     return violations;
+};
+
+const limitBulkFixViolationsPerRule = (
+    violations: BulkFixViolationContext[],
+    maxPerRule = BULK_FIX_MAX_VIOLATIONS_PER_RULE
+): BulkFixViolationContext[] => {
+    const countsByRuleTitle = new Map<string, number>();
+
+    return violations.filter((violation) => {
+        const currentCount = countsByRuleTitle.get(violation.rule.title) || 0;
+        if (currentCount >= maxPerRule) return false;
+        countsByRuleTitle.set(violation.rule.title, currentCount + 1);
+        return true;
+    });
 };
 
 const isSameBulkFixUnit = (a: BulkFixTextUnit, b: BulkFixTextUnit): boolean => a.from === b.from && a.to === b.to;
@@ -5005,7 +5021,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const relatedViolations = options.includeRelatedRules
             ? getRelatedBulkFixViolations(editor, allViolations, selectedRuleTitles)
             : [];
-        const groupedViolations = groupBulkFixViolationsByTextUnit(editor, [...selectedViolations, ...relatedViolations]);
+        const requestViolations = limitBulkFixViolationsPerRule([...selectedViolations, ...relatedViolations]);
+        const groupedViolations = groupBulkFixViolationsByTextUnit(editor, requestViolations);
         const groupedTargets = groupedViolations
             .map(group => {
                 const originalText = getSafeRangeText(group.from, group.to);
