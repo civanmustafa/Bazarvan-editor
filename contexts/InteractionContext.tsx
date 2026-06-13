@@ -56,7 +56,7 @@ const ARTICLE_WIDE_TOOLTIP_EXCLUDED_RULES = new Set<keyof StructureAnalysis>([
     'automaticLists',
 ]);
 
-const TOOLTIP_WIDTH_SCALE = 1.5;
+const TOOLTIP_WIDTH_SCALE = 1.8;
 const PARAGRAPH_PAIR_TOOLTIP_WIDTH_PX = Math.round(380 * TOOLTIP_WIDTH_SCALE);
 const STRUCTURE_TOOLTIP_WIDTH_PX = Math.round(420 * TOOLTIP_WIDTH_SCALE);
 
@@ -68,16 +68,6 @@ const escapeTooltipHtml = (value: unknown): string => (
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 );
-
-const getRuleTooltipNote = (ruleTitle: string, uiLanguage: 'ar' | 'en'): string => {
-    const normalizedTitle = ruleTitle.toLowerCase();
-    const isStepsIntroduction = normalizedTitle.includes('تمهيد خطوات') || normalizedTitle.includes('steps introduction');
-    if (!isStepsIntroduction) return '';
-
-    return uiLanguage === 'ar'
-        ? 'عند وجود جملة تمهيد قصيرة قبل القائمة، ادمجها مع الفقرة السابقة للحصول على فقرة تمهيدية واحدة فقط قبل القائمة.'
-        : 'When there is a short list-intro sentence, merge it with the previous paragraph so there is only one introductory paragraph before the list.';
-};
 
 const formatTooltipTextBlock = (value: string): string => (
     escapeTooltipHtml(value.replace(/\s+/g, ' ').trim())
@@ -785,17 +775,6 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     ].filter(Boolean);
                     const currentText = currentParts.join('\n') || stripHtml(rule.current || problemText || safeTitle);
                     const requiredText = stripHtml(rule.required || (uiLanguage === 'ar' ? 'راجع شروط المعيار.' : 'Review the criterion requirements.'));
-                    const ruleNote = getRuleTooltipNote(rule.title, uiLanguage);
-                    const correctionTips = [
-                        ruleNote,
-                        stripHtml(rule.details),
-                        stripHtml(rule.description),
-                    ]
-                        .filter((item, itemIndex, allItems): item is string => Boolean(item) && allItems.indexOf(item) === itemIndex)
-                        .join('\n\n') || (uiLanguage === 'ar'
-                            ? 'عدّل النص المخالف حتى يطابق قيمة "المطلوب"، ثم أعد التحليل للتأكد من زوال المخالفة.'
-                            : 'Edit the violating text so it matches the required value, then rerun analysis to confirm the issue is resolved.'
-                        );
                     const pairedParagraphHtml = v.pairedText
                         ? `<div style="margin-top: 4px; display: grid; gap: 3px; width: 100%; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'};">
                                 <strong>${uiLanguage === 'ar' ? 'الفقرة الزوجية للمقارنة اليدوية' : 'Paired paragraph for manual comparison'}:</strong>
@@ -816,10 +795,6 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                             <div style="display: grid; gap: 3px;">
                                 <strong style="color: inherit;">${uiLanguage === 'ar' ? 'المطلوب' : 'Required'}</strong>
                                 <span style="display: block; line-height: 1.65;">${formatTooltipMultilineBlock(requiredText)}</span>
-                            </div>
-                            <div style="display: grid; gap: 3px;">
-                                <strong style="color: inherit;">${uiLanguage === 'ar' ? 'نصائح للتصحيح حسب شروط المعيار' : 'Correction tips based on this criterion'}</strong>
-                                <span style="display: block; box-sizing: border-box; max-height: 150px; overflow-y: auto; padding: 6px; border-radius: 6px; background: rgba(212, 175, 55, 0.08); line-height: 1.65;">${formatTooltipMultilineBlock(correctionTips)}</span>
                             </div>
                             ${pairedParagraphHtml}
                         </div>`;

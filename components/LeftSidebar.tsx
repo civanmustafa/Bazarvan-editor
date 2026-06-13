@@ -246,81 +246,28 @@ const splitDistributedTerms = (value: string, separator: RegExp): string[] => {
         .filter(Boolean);
 };
 
+const TERM_SEPARATOR_PATTERN = /[\n,،*\/#|؛;\t]+/;
+
 const isAutoDistributeSeparatorLine = (line: string): boolean => {
     const trimmed = line.trim();
-    if (trimmed.length < 2) return false;
-    return !/[A-Za-z0-9\u0600-\u06FF]/.test(trimmed);
-};
-
-type AutoDistributeHeading = 'primary' | 'lsi' | 'company' | 'goal';
-
-const normalizeAutoDistributeHeading = (line: string): string => (
-    line
-        .trim()
-        .replace(/[\u064B-\u065F\u0670ـ]/g, '')
-        .replace(/^(?:[#*•\-–—]+\s*)+/, '')
-        .replace(/^(?:\d+|[٠-٩]+)\s*[\).:\-–—]\s*/, '')
-        .replace(/^(?:القسم|section)\s*(?:\d+|[٠-٩]+|one|two|three|four|الأول|الاول|الثاني|الثالث|الرابع)\s*[:：.\-–—]?\s*/iu, '')
-        .replace(/[#:：*|/\\\-–—]+$/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase()
-);
-
-const getAutoDistributeHeading = (line: string): AutoDistributeHeading | null => {
-    const normalized = normalizeAutoDistributeHeading(line);
-    if (!normalized) return null;
-
-    if (/^(?:الكلمات? الاساسيه|الكلمات? الاساسية|الكلمة الاساسيه|الكلمة الاساسية|primary keywords?|target keywords?)$/iu.test(normalized)) {
-        return 'primary';
-    }
-    if (/^(?:الصيغ? البديله|الصيغ? البديلة|الصيغ? المرادفه|الصيغ? المرادفة|المرادفات|synonyms?|secondary keywords?|alternate keywords?)$/iu.test(normalized)) {
-        return 'primary';
-    }
-    if (/^(?:كلمات?\s*lsi|كلمات? ال\s*lsi|lsi|lsi keywords?)$/iu.test(normalized)) {
-        return 'lsi';
-    }
-    if (/^(?:اسم الشركه|اسم الشركة|الشركه|الشركة|اسم العلامه التجاريه|اسم العلامة التجارية|العلامه التجاريه|العلامة التجارية|company name|brand name)$/iu.test(normalized)) {
-        return 'company';
-    }
-    if (/^(?:سياق هدف الصفحه(?: والجمهور)?|سياق هدف الصفحة(?: والجمهور)?|سياق الجمهور|هدف الصفحه والجمهور|هدف الصفحة والجمهور|goal context|page goal(?: and audience)?|audience context)$/iu.test(normalized)) {
-        return 'goal';
-    }
-
-    return null;
+    if (!trimmed) return false;
+    return /^[\s\-_=*#./\\|،,؛;:：~–—]+$/.test(trimmed);
 };
 
 const splitAutoDistributeSections = (value: string): string[] => {
-    const sections: string[] = [];
-    let current: string[] = [];
-    let currentHeading: AutoDistributeHeading | null = null;
-
-    const pushCurrent = () => {
-        const section = current.join('\n').trim();
-        if (section) sections.push(section);
-        current = [];
-    };
+    const sections: string[][] = [[]];
+    let sectionIndex = 0;
 
     value.split(/\r?\n/).forEach(line => {
-        const heading = getAutoDistributeHeading(line);
-        if (heading) {
-            if (current.length > 0 && heading !== currentHeading) {
-                pushCurrent();
-            }
-            currentHeading = heading;
-            return;
-        }
-
         if (isAutoDistributeSeparatorLine(line)) {
-            pushCurrent();
-            currentHeading = null;
+            sectionIndex += 1;
+            if (!sections[sectionIndex]) sections[sectionIndex] = [];
             return;
         }
-        current.push(line);
+        sections[sectionIndex].push(line);
     });
 
-    pushCurrent();
-    return sections;
+    return sections.map(section => section.join('\n').trim());
 };
 
 const getKeywordStatScore = (analysis: KeywordStats): number => {
@@ -687,32 +634,33 @@ const LeftSidebar: React.FC = () => {
         if (!text.trim()) return;
     
         const parts = splitAutoDistributeSections(text)
-            .map(part => part.trim())
-            .filter(Boolean);
+            .map(part => part.trim());
     
         const primaryAndSynonymsPart = (parts[0] || '').trim();
         const lsiPart = (parts[1] || '').trim();
         const companyPart = (parts[2] || '').trim();
-        const remainingParts = parts.slice(3);
-        let distributedGoalContext: GoalContext | null = null;
-        const competitorParts: string[] = [];
-
-        remainingParts.forEach(part => {
-            const parsedGoalContext = parseGoalContextText(part, t.goalTab);
-            if (parsedGoalContext && !distributedGoalContext) {
-                distributedGoalContext = parsedGoalContext;
-                return;
-            }
-            competitorParts.push(part);
-        });
+        const goalContextPart = (parts[3] || '').trim();
+        const competitorParts = parts.slice(4);
+        const distributedGoalContext = goalContextPart
+            ? parseGoalContextText(goalContextPart, t.goalTab)
+            : null;
     
-        const primaryAndSynonymsLines = splitDistributedTerms(primaryAndSynonymsPart, /[\n,،]+/);
+        const primaryAndSynonymsLines = primaryAndSynonymsPart
+            .split(/\r?\n/)
+            .map(stripKeywordDots)
+            .filter(Boolean);
         const newPrimary = primaryAndSynonymsLines[0] || keywords.primary;
-        const newSecondaries = primaryAndSynonymsLines.length > 1 ? primaryAndSynonymsLines.slice(1) : keywords.secondaries;
+        const synonymsPart = primaryAndSynonymsLines.slice(1).join('\n');
+        const newSecondaries = synonymsPart
+            ? splitDistributedTerms(synonymsPart, TERM_SEPARATOR_PATTERN)
+            : keywords.secondaries;
     
-        const newLsi = lsiPart ? splitDistributedTerms(lsiPart, /[\n,،*\/#]+/) : keywords.lsi;
+        const newLsi = lsiPart ? splitDistributedTerms(lsiPart, TERM_SEPARATOR_PATTERN) : keywords.lsi;
     
-        const companyLines = splitDistributedTerms(companyPart, /[\n,،]+/);
+        const companyLines = companyPart
+            .split(/\r?\n/)
+            .map(stripKeywordDots)
+            .filter(Boolean);
         const newCompany = companyLines[0] || keywords.company;
     
         setKeywords({
