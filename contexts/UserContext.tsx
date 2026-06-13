@@ -4,7 +4,7 @@ import { recordGeminiKeyUsage, recordLogin, getActivityData, saveUserPreference,
 import { translations } from '../components/translations';
 import { USERS } from '../constants';
 import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
-import type { ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
+import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 
 /*
@@ -24,6 +24,7 @@ interface UserContextType {
     isDarkMode: boolean;
     setIsDarkMode: React.Dispatch<React.SetStateAction<boolean>>;
     highlightStyle: 'background' | 'underline';
+    chatGptOpenMode: ChatGptOpenMode;
     keywordViewMode: 'classic' | 'modern';
     structureViewMode: 'grid' | 'list';
     preferredLanguage: 'ar' | 'en';
@@ -37,6 +38,7 @@ interface UserContextType {
     handleLogout: () => void;
     setCurrentView: React.Dispatch<React.SetStateAction<'login' | 'dashboard' | 'editor'>>;
     handleHighlightStyleChange: (style: 'background' | 'underline') => void;
+    handleChatGptOpenModeChange: (mode: ChatGptOpenMode) => void;
     handleKeywordViewModeChange: (mode: 'classic' | 'modern') => void;
     handleStructureViewModeChange: (mode: 'grid' | 'list') => void;
     handlePreferredLanguageChange: (lang: 'ar' | 'en') => void;
@@ -124,6 +126,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
     const [isDarkMode, setIsDarkMode] = useState(getInitialTheme);
     const [highlightStyle, setHighlightStyle] = useState<'background' | 'underline'>('background');
+    const [chatGptOpenMode, setChatGptOpenMode] = useState<ChatGptOpenMode>('window');
     const [keywordViewMode, setKeywordViewMode] = useState<'classic' | 'modern'>('classic');
     const [structureViewMode, setStructureViewMode] = useState<'grid' | 'list'>('grid');
     const [preferredLanguage, setPreferredLanguage] = useState<'ar' | 'en'>('ar');
@@ -287,6 +290,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const data = getActivityData();
             const userPrefs = data[currentUser];
             setHighlightStyle(userPrefs?.preferredHighlightStyle || 'background');
+            setChatGptOpenMode(userPrefs?.preferredChatGptOpenMode === 'tab' ? 'tab' : 'window');
             setKeywordViewMode(userPrefs?.preferredKeywordViewMode || 'classic');
             setStructureViewMode(userPrefs?.preferredStructureViewMode || 'grid');
             setPreferredLanguage(userPrefs?.preferredLanguage || 'ar');
@@ -339,6 +343,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const handleHighlightStyleChange = (style: 'background' | 'underline') => {
         setHighlightStyle(style);
         if (currentUser) saveUserPreference(currentUser, { preferredHighlightStyle: style });
+    };
+
+    const handleChatGptOpenModeChange = (mode: ChatGptOpenMode) => {
+        setChatGptOpenMode(mode);
+        if (currentUser) saveUserPreference(currentUser, { preferredChatGptOpenMode: mode });
     };
 
     const handleKeywordViewModeChange = (mode: 'classic' | 'modern') => {
@@ -409,6 +418,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isDarkMode,
         setIsDarkMode,
         highlightStyle,
+        chatGptOpenMode,
         keywordViewMode,
         structureViewMode,
         preferredLanguage,
@@ -422,6 +432,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleLogout,
         setCurrentView,
         handleHighlightStyleChange,
+        handleChatGptOpenModeChange,
         handleKeywordViewModeChange,
         handleStructureViewModeChange,
         handlePreferredLanguageChange,

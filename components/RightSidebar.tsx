@@ -716,7 +716,7 @@ ${url}
 }`;
 
 const RightSidebar: React.FC = () => {
-    const { t, engineeringPrompts, apiKeys } = useUser();
+    const { t, engineeringPrompts, apiKeys, chatGptOpenMode } = useUser();
     const { setIsStructureTabActive } = useEditor();
     const {
         handleAiAnalyze,
@@ -957,6 +957,11 @@ ${readyCommandCompetitorBlocks}`;
     };
 
     const openManualChatGptWindow = () => {
+        if (chatGptOpenMode === 'tab') {
+            window.open('https://chatgpt.com/', '_blank', 'noopener,noreferrer');
+            return;
+        }
+
         const tabRect = smartAnalysisTabRef.current?.getBoundingClientRect();
         const editorPanel = document.querySelector('[data-bazarvan-editor-panel="true"]') as HTMLElement | null;
         const editorRect = editorPanel?.getBoundingClientRect();

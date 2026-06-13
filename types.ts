@@ -27,6 +27,8 @@ export interface GoalContext {
 
 export type ClientGoalContexts = Record<string, GoalContext>;
 
+export type ChatGptOpenMode = 'window' | 'tab';
+
 export interface AiAnalysisOptions {
   manualCommand: boolean;
   articleTitle: boolean;

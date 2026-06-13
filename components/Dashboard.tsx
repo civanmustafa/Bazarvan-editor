@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, ChevronRight, FileDown, Filter, X, Calendar, Settings, Languages } from 'lucide-react';
+import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, ChevronRight, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink } from 'lucide-react';
 import { getActivityData, UserActivity, ArticleActivity, deleteArticleActivity, renameArticleActivity, clearUserActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -234,6 +234,8 @@ const Dashboard: React.FC = () => {
     isDarkMode,
     highlightStyle: preferredHighlightStyle,
     handleHighlightStyleChange: onHighlightStyleChange,
+    chatGptOpenMode,
+    handleChatGptOpenModeChange: onChatGptOpenModeChange,
     keywordViewMode: preferredKeywordViewMode,
     handleKeywordViewModeChange: onKeywordViewModeChange,
     structureViewMode: preferredStructureViewMode,
@@ -738,6 +740,22 @@ const Dashboard: React.FC = () => {
                             <div className="flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-[#1F1F1F] p-1">
                                 <button onClick={() => onHighlightStyleChange('background')} className={styleButtonClass(preferredHighlightStyle === 'background')} title={t.background}><PaintRoller size={16} /></button>
                                 <button onClick={() => onHighlightStyleChange('underline')} className={styleButtonClass(preferredHighlightStyle === 'underline')} title={t.wavyUnderline}><Baseline size={16} /></button>
+                            </div>
+                            <div className="mt-3">
+                                <div className="mb-2 flex items-center gap-2 text-xs font-bold text-gray-500 dark:text-gray-400">
+                                    <ExternalLink size={14} className="text-[#d4af37]" />
+                                    <span>{t.chatGptOpenPreference}</span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-[#1F1F1F] sm:grid-cols-2">
+                                    <button onClick={() => onChatGptOpenModeChange('window')} className={styleButtonClass(chatGptOpenMode === 'window')} title={t.chatGptOpenSeparateWindow}>
+                                        <AppWindow size={16} />
+                                        <span>{t.chatGptOpenSeparateWindow}</span>
+                                    </button>
+                                    <button onClick={() => onChatGptOpenModeChange('tab')} className={styleButtonClass(chatGptOpenMode === 'tab')} title={t.chatGptOpenNewTab}>
+                                        <NotebookTabs size={16} />
+                                        <span>{t.chatGptOpenNewTab}</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <div>

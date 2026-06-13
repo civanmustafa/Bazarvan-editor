@@ -1,5 +1,5 @@
 
-import type { ClientGoalContexts, EngineeringPrompts, FullAnalysis, GoalContext, Keywords } from '../types';
+import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, FullAnalysis, GoalContext, Keywords } from '../types';
 import {
   AUTO_DRAFT_KEY,
   AUTO_DRAFT_GOAL_CONTEXT_KEY,
@@ -62,6 +62,7 @@ export type UserActivity = {
   preferredHighlightStyle?: 'background' | 'underline';
   preferredKeywordViewMode?: 'classic' | 'modern';
   preferredStructureViewMode?: 'grid' | 'list';
+  preferredChatGptOpenMode?: ChatGptOpenMode;
   preferredTheme?: 'dark' | 'light';
   preferredLanguage?: 'ar' | 'en';
   preferredUILanguage?: 'ar' | 'en';
@@ -112,6 +113,7 @@ const getDefaultUserActivity = (): UserActivity => ({
   preferredHighlightStyle: 'background',
   preferredKeywordViewMode: 'classic',
   preferredStructureViewMode: 'grid',
+  preferredChatGptOpenMode: 'window',
   preferredTheme: 'dark',
   preferredLanguage: 'ar',
   preferredUILanguage: 'ar',
@@ -205,6 +207,7 @@ const normalizeUserActivity = (value: unknown): UserActivity => {
     preferredHighlightStyle: source.preferredHighlightStyle === 'underline' ? 'underline' : 'background',
     preferredKeywordViewMode: source.preferredKeywordViewMode === 'modern' ? 'modern' : 'classic',
     preferredStructureViewMode: source.preferredStructureViewMode === 'list' ? 'list' : 'grid',
+    preferredChatGptOpenMode: source.preferredChatGptOpenMode === 'tab' ? 'tab' : 'window',
     preferredTheme: source.preferredTheme === 'light' ? 'light' : 'dark',
     preferredLanguage: source.preferredLanguage === 'en' ? 'en' : 'ar',
     preferredUILanguage: source.preferredUILanguage === 'en' ? 'en' : 'ar',
@@ -438,7 +441,7 @@ export const deleteArticleActivity = (username: string, articleTitleToDelete: st
     }
 };
 
-export const saveUserPreference = (username:string, preferences: Partial<Pick<UserActivity, 'preferredHighlightStyle' | 'preferredKeywordViewMode' | 'preferredStructureViewMode' | 'preferredTheme' | 'preferredLanguage' | 'preferredUILanguage'>>) => {
+export const saveUserPreference = (username:string, preferences: Partial<Pick<UserActivity, 'preferredHighlightStyle' | 'preferredKeywordViewMode' | 'preferredStructureViewMode' | 'preferredChatGptOpenMode' | 'preferredTheme' | 'preferredLanguage' | 'preferredUILanguage'>>) => {
     modifyUserData(username, user => {
         Object.assign(user, preferences);
     });
