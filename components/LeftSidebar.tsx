@@ -205,9 +205,10 @@ const KeywordInput: React.FC<{
   isHighlighted: boolean;
   onRemove?: () => void;
   onCopy?: () => void;
+  list?: string;
   className?: string;
   t: typeof translations.ar.leftSidebar;
-}> = ({ value, onChange, placeholder, onHighlight, isHighlighted, onRemove, onCopy, className, t }) => (
+}> = ({ value, onChange, placeholder, onHighlight, isHighlighted, onRemove, onCopy, list, className, t }) => (
   <div
     className="relative group cursor-pointer w-full"
     onClick={onHighlight}
@@ -217,6 +218,7 @@ const KeywordInput: React.FC<{
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      list={list}
       onClick={(e) => e.stopPropagation()}
       className={`w-full py-2 ps-3 pe-14 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0] ${isHighlighted ? 'ring-2 ring-offset-1 dark:ring-offset-[#181818] ring-[#d4af37]' : ''} ${className}`}
     />
@@ -250,20 +252,74 @@ const isAutoDistributeSeparatorLine = (line: string): boolean => {
     return !/[A-Za-z0-9\u0600-\u06FF]/.test(trimmed);
 };
 
+type AutoDistributeHeading = 'primary' | 'lsi' | 'company' | 'goal';
+
+const normalizeAutoDistributeHeading = (line: string): string => (
+    line
+        .trim()
+        .replace(/[\u064B-\u065F\u0670ـ]/g, '')
+        .replace(/^(?:[#*•\-–—]+\s*)+/, '')
+        .replace(/^(?:\d+|[٠-٩]+)\s*[\).:\-–—]\s*/, '')
+        .replace(/^(?:القسم|section)\s*(?:\d+|[٠-٩]+|one|two|three|four|الأول|الاول|الثاني|الثالث|الرابع)\s*[:：.\-–—]?\s*/iu, '')
+        .replace(/[#:：*|/\\\-–—]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase()
+);
+
+const getAutoDistributeHeading = (line: string): AutoDistributeHeading | null => {
+    const normalized = normalizeAutoDistributeHeading(line);
+    if (!normalized) return null;
+
+    if (/^(?:الكلمات? الاساسيه|الكلمات? الاساسية|الكلمة الاساسيه|الكلمة الاساسية|primary keywords?|target keywords?)$/iu.test(normalized)) {
+        return 'primary';
+    }
+    if (/^(?:الصيغ? البديله|الصيغ? البديلة|الصيغ? المرادفه|الصيغ? المرادفة|المرادفات|synonyms?|secondary keywords?|alternate keywords?)$/iu.test(normalized)) {
+        return 'primary';
+    }
+    if (/^(?:كلمات?\s*lsi|كلمات? ال\s*lsi|lsi|lsi keywords?)$/iu.test(normalized)) {
+        return 'lsi';
+    }
+    if (/^(?:اسم الشركه|اسم الشركة|الشركه|الشركة|اسم العلامه التجاريه|اسم العلامة التجارية|العلامه التجاريه|العلامة التجارية|company name|brand name)$/iu.test(normalized)) {
+        return 'company';
+    }
+    if (/^(?:سياق هدف الصفحه(?: والجمهور)?|سياق هدف الصفحة(?: والجمهور)?|سياق الجمهور|هدف الصفحه والجمهور|هدف الصفحة والجمهور|goal context|page goal(?: and audience)?|audience context)$/iu.test(normalized)) {
+        return 'goal';
+    }
+
+    return null;
+};
+
 const splitAutoDistributeSections = (value: string): string[] => {
     const sections: string[] = [];
     let current: string[] = [];
+    let currentHeading: AutoDistributeHeading | null = null;
+
+    const pushCurrent = () => {
+        const section = current.join('\n').trim();
+        if (section) sections.push(section);
+        current = [];
+    };
 
     value.split(/\r?\n/).forEach(line => {
+        const heading = getAutoDistributeHeading(line);
+        if (heading) {
+            if (current.length > 0 && heading !== currentHeading) {
+                pushCurrent();
+            }
+            currentHeading = heading;
+            return;
+        }
+
         if (isAutoDistributeSeparatorLine(line)) {
-            sections.push(current.join('\n').trim());
-            current = [];
+            pushCurrent();
+            currentHeading = null;
             return;
         }
         current.push(line);
     });
 
-    sections.push(current.join('\n').trim());
+    pushCurrent();
     return sections;
 };
 
@@ -316,6 +372,7 @@ const LeftSidebar: React.FC = () => {
   const [isGeneratingSemanticKeywords, setIsGeneratingSemanticKeywords] = React.useState(false);
   const [semanticGenerationStatus, setSemanticGenerationStatus] = React.useState('');
   const tLk = t.leftSidebar;
+  const companySuggestionsId = React.useId();
   const savedCompanyNames = React.useMemo(
     () => Object.keys(clientGoalContexts).sort((a, b) => a.localeCompare(b)),
     [clientGoalContexts],
@@ -375,23 +432,13 @@ const LeftSidebar: React.FC = () => {
     applyCompanyGoalContext(companyName);
   }, [applyCompanyGoalContext, setKeywords]);
 
-  const renderSavedCompanySelect = () => {
-    if (savedCompanyNames.length === 0) return null;
-
-    const selectedCompany = keywords.company.trim();
-    return (
-      <select
-        value={clientGoalContexts[selectedCompany] ? selectedCompany : ''}
-        onChange={(event) => handleCompanyChange(event.target.value)}
-        className="w-full mb-2 rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] px-2 py-2 text-sm text-[#333333] dark:text-[#e0e0e0] focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]"
-      >
-        <option value="">{tLk.chooseSavedCompany}</option>
-        {savedCompanyNames.map(companyName => (
-          <option key={companyName} value={companyName}>{companyName}</option>
-        ))}
-      </select>
-    );
-  };
+  const renderCompanySuggestions = () => savedCompanyNames.length > 0 ? (
+    <datalist id={companySuggestionsId}>
+      {savedCompanyNames.map(companyName => (
+        <option key={companyName} value={companyName} />
+      ))}
+    </datalist>
+  ) : null;
 
   const handleSecondaryHighlightToggle = (term: string, index: number) => {
     if (!term.trim()) {
@@ -799,16 +846,17 @@ const LeftSidebar: React.FC = () => {
                 onClick={() => handleHighlightToggle(keywords.company, 'company')}
             >
                 <div onClick={e => e.stopPropagation()}>
-                    {renderSavedCompanySelect()}
                     <KeywordInput 
                         value={keywords.company}
                         onChange={handleCompanyChange}
                         placeholder={tLk.enterCompany}
+                        list={savedCompanyNames.length > 0 ? companySuggestionsId : undefined}
                         onHighlight={() => handleHighlightToggle(keywords.company, 'company')}
                         isHighlighted={highlightedItem === keywords.company}
                         onCopy={() => navigator.clipboard.writeText(keywords.company)}
                         t={tLk}
                     />
+                    {renderCompanySuggestions()}
                     <ModernProgressBar analysis={keywordAnalysis.company} t={tLk} />
                 </div>
             </ModernSection>
@@ -1050,17 +1098,18 @@ const LeftSidebar: React.FC = () => {
                     <h4 className="text-sm font-bold text-[#333333] dark:text-[#C7C7C7]">{tLk.companyName}</h4>
                 </div>
                 <div onClick={(e) => e.stopPropagation()}>
-                    {renderSavedCompanySelect()}
                     <KeywordInput 
                         value={keywords.company}
                         onChange={handleCompanyChange}
                         placeholder={tLk.enterCompany}
+                        list={savedCompanyNames.length > 0 ? companySuggestionsId : undefined}
                         onHighlight={() => handleHighlightToggle(keywords.company, 'company')}
                         isHighlighted={highlightedItem === keywords.company}
                         className="bg-white dark:bg-[#2A2A2A]"
                         onCopy={() => navigator.clipboard.writeText(keywords.company)}
                         t={tLk}
                     />
+                    {renderCompanySuggestions()}
                     <ModernProgressBar analysis={keywordAnalysis.company} t={tLk} />
                 </div>
               </div>
