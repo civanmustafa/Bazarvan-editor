@@ -265,6 +265,89 @@ export const parseMarkdownToArticleHtml = (markdown: string, articleLanguage: 'a
     applyArticleLanguageFlowToHtml(parseMarkdownToHtml(markdown), articleLanguage)
 );
 
+type EditorRange = { from: number; to: number };
+
+type HeadingRangeMatch = {
+    node: any;
+    from: number;
+    to: number;
+};
+
+type ArticleReplacementContent = {
+    range: EditorRange;
+    content: unknown;
+};
+
+const normalizeEditorRangeText = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const extractHeadingReplacementText = (value: string): string => {
+    const lines = stripWrappingCodeFence(value)
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+    const text = lines.length > 0 ? lines.join(' ') : value.trim();
+    return text
+        .replace(/^#{1,6}\s+/, '')
+        .replace(/^[-*•]\s+/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
+
+const findHeadingForReplacementRange = (editor: any, range: EditorRange): HeadingRangeMatch | null => {
+    if (!editor?.state?.doc) return null;
+    let match: HeadingRangeMatch | null = null;
+
+    editor.state.doc.descendants((node: any, pos: number) => {
+        if (match || node.type.name !== 'heading') return !match;
+        const nodeTo = pos + node.nodeSize;
+        if (range.from < pos || range.to > nodeTo) return true;
+        match = { node, from: pos, to: nodeTo };
+        return false;
+    });
+
+    return match;
+};
+
+export const getArticleReplacementContent = (
+    editor: any,
+    range: EditorRange,
+    markdown: string,
+    articleLanguage: 'ar' | 'en',
+): ArticleReplacementContent => {
+    const headingMatch = findHeadingForReplacementRange(editor, range);
+    if (!headingMatch) {
+        return {
+            range,
+            content: parseMarkdownToArticleHtml(markdown, articleLanguage),
+        };
+    }
+
+    const replacementText = extractHeadingReplacementText(markdown);
+    const selectedText = editor.state.doc.textBetween(range.from, range.to, ' ');
+    const isWholeHeadingText = normalizeEditorRangeText(selectedText) === normalizeEditorRangeText(headingMatch.node.textContent || '');
+
+    if (!isWholeHeadingText && range.from > headingMatch.from && range.to < headingMatch.to) {
+        return {
+            range,
+            content: replacementText ? [{ type: 'text', text: replacementText }] : [],
+        };
+    }
+
+    const attrs = {
+        ...headingMatch.node.attrs,
+        level: headingMatch.node.attrs?.level || 2,
+    };
+
+    return {
+        range: { from: headingMatch.from, to: headingMatch.to },
+        content: {
+            type: 'heading',
+            attrs,
+            content: replacementText ? [{ type: 'text', text: replacementText }] : [],
+        },
+    };
+};
+
 const stripInlineMarkdownForClipboard = (text: string): string => text
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/`([^`]+)`/g, '$1')

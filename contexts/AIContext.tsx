@@ -22,7 +22,7 @@ import type {
     ReadyCommandAnalysisHistoryMeta,
     StructureAnalysis,
 } from '../types';
-import { parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
+import { getArticleReplacementContent, parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { GEMINI_ANALYSIS_MODEL } from '../constants/aiModels';
 import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
@@ -5191,10 +5191,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
             try {
                 const beforeDocSize = editor.state.doc.content.size;
+                const replacement = getArticleReplacementContent(editor, resolvedRange, fixedText, articleLanguage);
                 const applied = editor
                     .chain()
                     .focus()
-                    .insertContentAt({ from: resolvedRange.from, to: resolvedRange.to }, parseMarkdownToArticleHtml(fixedText, articleLanguage), { updateSelection: true })
+                    .insertContentAt(replacement.range, replacement.content, { updateSelection: true })
                     .scrollIntoView()
                     .run();
                 if (!applied) {
@@ -5207,7 +5208,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 updateBulkFixReviewItem(item.id, { status: 'failed', applyError: message });
             }
         });
-    }, [editor, markBulkFixAppliedAndShiftRanges, resolveBulkFixReviewRange, updateBulkFixReviewItem]);
+    }, [articleLanguage, editor, markBulkFixAppliedAndShiftRanges, resolveBulkFixReviewRange, updateBulkFixReviewItem]);
 
     const applyBulkFixReviewItem = useCallback((itemId: string, variantId?: string) => {
         applySelectedBulkFixReviewItems([itemId], variantId ? { [itemId]: variantId } : {});
@@ -5303,12 +5304,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 return { status: 'applied' };
             }
 
+            const replacement = target.mode === 'replace'
+                ? getArticleReplacementContent(editor, { from: target.from, to: target.to }, patch.contentMarkdown, articleLanguage)
+                : null;
             const applied = editor
                 .chain()
                 .focus()
                 .insertContentAt(
-                    target.mode === 'replace' ? { from: target.from, to: target.to } : target.from,
-                    parseMarkdownToArticleHtml(patch.contentMarkdown, articleLanguage),
+                    replacement ? replacement.range : target.from,
+                    replacement ? replacement.content : parseMarkdownToArticleHtml(patch.contentMarkdown, articleLanguage),
                     { updateSelection: true }
                 )
                 .scrollIntoView()
@@ -5389,7 +5393,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             )));
             return;
         }
-        editor.chain().focus().insertContentAt({ from: resolvedRange.from, to: resolvedRange.to }, parseMarkdownToArticleHtml(text, articleLanguage)).run();
+        const replacement = getArticleReplacementContent(editor, resolvedRange, text, articleLanguage);
+        editor.chain().focus().insertContentAt(replacement.range, replacement.content).run();
         markHistorySuggestionApplied(id, text);
     };
 

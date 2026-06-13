@@ -56,8 +56,9 @@ const ARTICLE_WIDE_TOOLTIP_EXCLUDED_RULES = new Set<keyof StructureAnalysis>([
     'automaticLists',
 ]);
 
-const PARAGRAPH_PAIR_TOOLTIP_WIDTH_PX = 380;
-const STRUCTURE_TOOLTIP_WIDTH_PX = 420;
+const TOOLTIP_WIDTH_SCALE = 1.5;
+const PARAGRAPH_PAIR_TOOLTIP_WIDTH_PX = Math.round(380 * TOOLTIP_WIDTH_SCALE);
+const STRUCTURE_TOOLTIP_WIDTH_PX = Math.round(420 * TOOLTIP_WIDTH_SCALE);
 
 const escapeTooltipHtml = (value: unknown): string => (
   String(value ?? '')
