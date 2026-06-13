@@ -2319,11 +2319,26 @@ const READY_COMMAND_H2_SECTION_REQUIREMENT = `
 - استخدم insert_before_conclusion أو insert_before_heading أو append_to_article عند عدم وجود موضع مرجعي واضح.
 - إذا كان هناك anchorText لقسم H2 مرجعي، اجعل الموضع المقصود بعد نهاية ذلك القسم بالكامل كقسم مستقل، وليس داخل محتواه.`;
 
-const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPatchInstructions?: boolean }) => (
-    options?.skipPatchInstructions
-        ? contextPrompt
-        : `${contextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${READY_COMMAND_PATCH_CARD_REQUIREMENT}\n\n${READY_COMMAND_H2_SECTION_REQUIREMENT}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`
+const SITE_OWNER_PUBLISHING_VOICE_GUARD = `**قاعدة صوت صاحب الموقع للنصوص الجاهزة للنشر:**
+- أي نص داخل suggestions أو contentMarkdown أو وصف ميتا أو عنوان أو فقرة مقترحة يجب أن يبدو كأنه صادر عن صاحب الموقع/البائع الذي يعرف المنتج والخدمة والسياسات، وليس كمراجع خارجي يطلب من القارئ التحقق.
+- ممنوع إدراج عبارات جاهزة للنشر توحي بعدم معرفة صاحب الموقع بالتفاصيل، مثل: تحقق من التوفر، قبل الطلب تحقق، اطلب قائمة، قد تشمل الخيارات، تختلف حسب البلد، تذكر إحدى الصفحات، يبدو أن، ربما، لا يعني وجود كذا، أو أي صياغة تنقل عبء التحقق إلى الزائر.
+- إذا كانت معلومة مثل التوفر أو وسائل الدفع أو القياسات أو الرسوم أو إصدار المنتج غير مؤكدة في السياق، فلا تحولها إلى نص داخل المقال. ضعها كملاحظة تحريرية أو سبب داخل التحليل/reason فقط، مثل: يلزم تأكيد وسائل الدفع قبل كتابة فقرة الدفع.
+- عند وجود معلومة مؤكدة في السياق، اكتبها بثقة وبصوت الموقع: نوفر، يأتي الجهاز، يدعم المنتج، تظهر الخيارات، بدلا من: تحقق من، اطلب، تذكر الصفحة، قد يكون.
+- عند شرح حدود تقنية أو شروط استخدام مهمة، صغها كمعلومة موثوقة تفيد الزائر ولا تجعل الكاتب يبدو غير ملم بالمنتج. مثال: تساعد مؤشرات نوع المعدن في توجيه قرار الحفر، مع بقاء الدقة مرتبطة بعمق الهدف وطبيعة التربة.
+- إذا لم تستطع كتابة نص آمن وجاهز للنشر من منظور صاحب الموقع، فلا تنشئ patch أو suggestion جاهزا؛ اكتب ملاحظة تحليلية فقط.`;
+
+const appendSiteOwnerPublishingVoiceGuard = (prompt: string): string => (
+    prompt.includes('قاعدة صوت صاحب الموقع للنصوص الجاهزة للنشر')
+        ? prompt
+        : `${prompt}\n\n${SITE_OWNER_PUBLISHING_VOICE_GUARD}`
 );
+
+const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPatchInstructions?: boolean }) => {
+    const guardedContextPrompt = appendSiteOwnerPublishingVoiceGuard(contextPrompt);
+    return options?.skipPatchInstructions
+        ? guardedContextPrompt
+        : `${guardedContextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${READY_COMMAND_PATCH_CARD_REQUIREMENT}\n\n${READY_COMMAND_H2_SECTION_REQUIREMENT}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
+};
 
 const saveContentSummaryForCompetitors = (
     summary: string,
@@ -4219,7 +4234,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (sectionHeading) contextParts.push(`**عنوان القسم الحالي:** "${sectionHeading}"`);
         const tocString = includeArticleToc ? generateToc(editor) : '';
         if (tocString) contextParts.push(`**هيكل المقال:**\n${tocString}`);
-        return `${professionalRoleAndGoal}\n\n${contextParts.join('\n\n')}\n\n**المطلوب:**\n${basePrompt}`;
+        return `${professionalRoleAndGoal}\n\n${contextParts.join('\n\n')}\n\n${SITE_OWNER_PUBLISHING_VOICE_GUARD}\n\n**المطلوب:**\n${basePrompt}`;
     };
 
     const generateContextAwarePrompt = useCallback((userPrompt: string, options: any) => {
