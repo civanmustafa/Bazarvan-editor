@@ -17,6 +17,7 @@ import type {
     BulkFixReviewItem,
     BulkFixReviewStats,
     BulkFixReviewVariant,
+    BulkFixTargetFingerprint,
     GoalContext,
     ReadyCommandAnalysisBatchItem,
     ReadyCommandAnalysisHistoryMeta,
@@ -551,6 +552,36 @@ const getBulkFixTopLevelBlocks = (editor: any): AiContextBlock[] => {
     return blocks;
 };
 
+const normalizeBulkFixFingerprintText = (value: string): string => (
+    normalizeArabicText(value)
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+);
+
+const getBulkFixFingerprintTokens = (value: string): string[] => (
+    normalizeBulkFixFingerprintText(value)
+        .split(/\s+/)
+        .filter(token => token.length > 1)
+);
+
+const getBulkFixTextSimilarity = (a = '', b = ''): number => {
+    const aTokens = Array.from(new Set(getBulkFixFingerprintTokens(a)));
+    const bTokens = Array.from(new Set(getBulkFixFingerprintTokens(b)));
+    if (aTokens.length === 0 || bTokens.length === 0) {
+        return normalizeBulkFixFingerprintText(a) && normalizeBulkFixFingerprintText(a) === normalizeBulkFixFingerprintText(b) ? 1 : 0;
+    }
+
+    const bSet = new Set(bTokens);
+    const intersection = aTokens.filter(token => bSet.has(token)).length;
+    const union = new Set([...aTokens, ...bTokens]).size || 1;
+    const jaccard = intersection / union;
+    const containment = intersection / Math.min(aTokens.length, bTokens.length);
+
+    return Math.max(jaccard, containment * 0.82);
+};
+
 const trimAiContextText = (value: string, maxLength = 520): string => {
     const normalized = value.replace(/\s+/g, ' ').trim();
     if (normalized.length <= maxLength) return normalized;
@@ -632,6 +663,54 @@ const getAiLocalTextContext = (editor: any, from: number, to: number, articleTit
         previousTexts: previousBlocks.map(block => trimAiContextText(block.text)),
         nextTexts: nextBlocks.map(block => trimAiContextText(block.text)),
         targetRole: inferAiTargetRole(currentBlock, previousBlocks, nextBlocks, sectionHeading),
+    };
+};
+
+const getBulkFixRangeFingerprint = (
+    editor: any,
+    from: number,
+    to: number,
+    unitType?: BulkFixTargetFingerprint['unitType'],
+    originalText?: string
+): BulkFixTargetFingerprint | undefined => {
+    if (!editor?.state?.doc) return undefined;
+    const blocks = getBulkFixTopLevelBlocks(editor);
+    if (blocks.length === 0) return undefined;
+
+    const overlappingIndexes = blocks
+        .map((block, index) => (block.to > from && block.from < to ? index : -1))
+        .filter(index => index !== -1);
+    const fallbackIndex = blocks.findIndex(block => block.from <= from && block.to >= from);
+    const firstBlockIndex = overlappingIndexes[0] ?? (fallbackIndex >= 0 ? fallbackIndex : 0);
+    const lastBlockIndex = overlappingIndexes[overlappingIndexes.length - 1] ?? firstBlockIndex;
+    const firstBlock = blocks[firstBlockIndex];
+    const lastBlock = blocks[lastBlockIndex];
+    const previousBlock = getMeaningfulContextBlocks(blocks, firstBlockIndex - 1, 'before', 1)[0];
+    const nextBlock = getMeaningfulContextBlocks(blocks, lastBlockIndex + 1, 'after', 1)[0];
+    const sectionHeadingBlock = blocks
+        .slice(0, firstBlockIndex + 1)
+        .reverse()
+        .find(block => block.type === 'heading' && block.text.trim().length > 0);
+    const docSize = editor.state.doc.content.size;
+    const safeText = originalText ?? (
+        Number.isFinite(from) && Number.isFinite(to) && from >= 0 && to <= docSize && to > from
+            ? editor.state.doc.textBetween(from, to, ' ')
+            : ''
+    );
+    const normalizedText = safeText.replace(/\s+/g, ' ').trim();
+
+    return {
+        unitType,
+        firstBlockIndex,
+        lastBlockIndex,
+        blockCount: Math.max(1, lastBlockIndex - firstBlockIndex + 1),
+        firstBlockType: firstBlock?.type,
+        lastBlockType: lastBlock?.type,
+        sectionHeading: sectionHeadingBlock ? trimAiContextText(sectionHeadingBlock.text, 180) : undefined,
+        previousText: previousBlock ? trimAiContextText(previousBlock.text, 260) : undefined,
+        nextText: nextBlock ? trimAiContextText(nextBlock.text, 260) : undefined,
+        originalStart: trimAiContextText(normalizedText.slice(0, 260), 260),
+        originalEnd: trimAiContextText(normalizedText.slice(Math.max(0, normalizedText.length - 260)), 260),
     };
 };
 
@@ -3630,6 +3709,122 @@ const findExactBulkFixTextUnitMatch = (editor: any, targetText: string, preferre
     return candidates.sort((a, b) => Math.abs(a.from - preferredFrom) - Math.abs(b.from - preferredFrom))[0] || null;
 };
 
+const getBulkFixContextScore = (
+    source?: BulkFixTargetFingerprint,
+    candidate?: BulkFixTargetFingerprint
+): { score: number; count: number } => {
+    if (!source || !candidate) return { score: 0, count: 0 };
+    const scores: number[] = [];
+
+    if (source.previousText && candidate.previousText) {
+        scores.push(getBulkFixTextSimilarity(source.previousText, candidate.previousText));
+    }
+    if (source.nextText && candidate.nextText) {
+        scores.push(getBulkFixTextSimilarity(source.nextText, candidate.nextText));
+    }
+    if (source.sectionHeading && candidate.sectionHeading) {
+        scores.push(getBulkFixTextSimilarity(source.sectionHeading, candidate.sectionHeading));
+    }
+
+    return {
+        score: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0,
+        count: scores.length,
+    };
+};
+
+const getBulkFixIndexScore = (source?: BulkFixTargetFingerprint, candidate?: BulkFixTargetFingerprint): number => {
+    if (
+        typeof source?.firstBlockIndex !== 'number' ||
+        typeof candidate?.firstBlockIndex !== 'number'
+    ) {
+        return 0;
+    }
+
+    return Math.max(0, 1 - Math.min(Math.abs(source.firstBlockIndex - candidate.firstBlockIndex), 8) / 8);
+};
+
+const getBulkFixTypeScore = (source?: BulkFixTargetFingerprint, candidate?: BulkFixTargetFingerprint): number => {
+    if (!source || !candidate) return 0;
+    const firstMatches = source.firstBlockType && candidate.firstBlockType && source.firstBlockType === candidate.firstBlockType;
+    const lastMatches = source.lastBlockType && candidate.lastBlockType && source.lastBlockType === candidate.lastBlockType;
+    if (firstMatches && lastMatches) return 1;
+    if (firstMatches || lastMatches) return 0.65;
+    return 0;
+};
+
+const findFuzzyBulkFixTextUnitMatch = (
+    editor: any,
+    targetText: string,
+    preferredFrom: number,
+    fingerprint?: BulkFixTargetFingerprint
+): TextBlockMatch | null => {
+    if (!editor?.state?.doc || !targetText.trim() || !fingerprint) return null;
+
+    const candidates: (TextBlockMatch & { confidence: number })[] = [];
+    const addCandidate = (from: number, to: number, unitType?: BulkFixTargetFingerprint['unitType']) => {
+        const docSize = editor.state.doc.content.size;
+        if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to > docSize || from >= to) return;
+        const text = editor.state.doc.textBetween(from, to, ' ');
+        if (!text.trim()) return;
+        const candidateFingerprint = getBulkFixRangeFingerprint(editor, from, to, unitType, text);
+        const textScore = Math.max(
+            getBulkFixTextSimilarity(targetText, text),
+            fingerprint.originalStart ? getBulkFixTextSimilarity(fingerprint.originalStart, text) * 0.92 : 0,
+            fingerprint.originalEnd ? getBulkFixTextSimilarity(fingerprint.originalEnd, text) * 0.92 : 0
+        );
+        const context = getBulkFixContextScore(fingerprint, candidateFingerprint);
+        const typeScore = getBulkFixTypeScore(fingerprint, candidateFingerprint);
+        const indexScore = getBulkFixIndexScore(fingerprint, candidateFingerprint);
+        const distanceScore = Math.max(0, 1 - Math.min(Math.abs(from - preferredFrom), 2400) / 2400);
+        const confidence = (
+            textScore * 0.48 +
+            context.score * 0.28 +
+            typeScore * 0.08 +
+            indexScore * 0.10 +
+            distanceScore * 0.06
+        );
+        const hasStrongTextMatch = textScore >= 0.55 && confidence >= 0.56;
+        const hasBalancedMatch = textScore >= 0.24 && context.score >= 0.45 && confidence >= 0.60;
+        const hasStrongContextMatch = context.count >= 2 && context.score >= 0.78 && typeScore >= 0.65 && indexScore >= 0.45 && confidence >= 0.52;
+
+        if (!hasStrongTextMatch && !hasBalancedMatch && !hasStrongContextMatch) return;
+        candidates.push({ from, to, score: confidence, confidence, text });
+    };
+
+    if (fingerprint.unitType === 'section' && (fingerprint.blockCount || 0) > 1) {
+        const blocks = getBulkFixTopLevelBlocks(editor).filter(block => block.text.trim().length > 0);
+        const baseCount = Math.max(1, fingerprint.blockCount || 1);
+        const minCount = Math.max(1, baseCount - 2);
+        const maxCount = Math.min(Math.max(baseCount + 2, minCount), 12);
+        for (let startIndex = 0; startIndex < blocks.length; startIndex += 1) {
+            for (let count = minCount; count <= maxCount; count += 1) {
+                const endIndex = startIndex + count - 1;
+                if (!blocks[endIndex]) continue;
+                addCandidate(blocks[startIndex].from, blocks[endIndex].to, 'section');
+            }
+        }
+    } else {
+        editor.state.doc.descendants((node: any, pos: number) => {
+            if (!node.isBlock || !['paragraph', 'heading', 'listItem'].includes(node.type.name)) return true;
+            if (!node.textContent?.trim()) return true;
+            addCandidate(
+                pos,
+                pos + node.nodeSize,
+                node.type.name === 'heading' ? 'heading' : node.type.name === 'paragraph' ? 'paragraph' : 'block'
+            );
+            return true;
+        });
+    }
+
+    const sorted = candidates.sort((a, b) => b.confidence - a.confidence || Math.abs(a.from - preferredFrom) - Math.abs(b.from - preferredFrom));
+    const best = sorted[0];
+    const second = sorted[1];
+    if (!best) return null;
+    if (second && best.confidence < 0.78 && best.confidence - second.confidence < 0.08) return null;
+
+    return best;
+};
+
 const findSectionEnd = (editor: any, heading: HeadingMatch): number => {
     let sectionEnd = editor.state.doc.content.size;
 
@@ -4202,21 +4397,26 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return editor.state.doc.textBetween(from, to, ' ');
     }, [editor]);
 
-    const resolveBulkFixReviewRange = useCallback((item: Pick<BulkFixReviewItem, 'from' | 'to' | 'originalText'>): { from: number; to: number; currentText: string } | null => {
+    const resolveBulkFixReviewRange = useCallback((item: Pick<BulkFixReviewItem, 'from' | 'to' | 'originalText' | 'targetFingerprint'>): { from: number; to: number; currentText: string } | null => {
         const currentText = getSafeRangeText(item.from, item.to);
         if (currentText !== null && normalizeRangeText(currentText) === normalizeRangeText(item.originalText)) {
             return { from: item.from, to: item.to, currentText };
         }
 
         const exactMatch = findExactBulkFixTextUnitMatch(editor, item.originalText, item.from);
-        if (!exactMatch) return null;
-
-        const matchedText = getSafeRangeText(exactMatch.from, exactMatch.to);
-        if (matchedText === null || normalizeRangeText(matchedText) !== normalizeRangeText(item.originalText)) {
-            return null;
+        if (exactMatch) {
+            const matchedText = getSafeRangeText(exactMatch.from, exactMatch.to);
+            if (matchedText !== null && normalizeRangeText(matchedText) === normalizeRangeText(item.originalText)) {
+                return { from: exactMatch.from, to: exactMatch.to, currentText: matchedText };
+            }
         }
 
-        return { from: exactMatch.from, to: exactMatch.to, currentText: matchedText };
+        const fuzzyMatch = findFuzzyBulkFixTextUnitMatch(editor, item.originalText, item.from, item.targetFingerprint);
+        if (!fuzzyMatch) return null;
+
+        const fuzzyText = getSafeRangeText(fuzzyMatch.from, fuzzyMatch.to);
+        if (fuzzyText === null) return null;
+        return { from: fuzzyMatch.from, to: fuzzyMatch.to, currentText: fuzzyText };
     }, [editor, getSafeRangeText, normalizeRangeText]);
 
     useEffect(() => {
@@ -4894,6 +5094,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             throw new Error('Target range is no longer valid.');
         }
 
+        const targetFingerprint = getBulkFixRangeFingerprint(editor, group.from, group.to, group.unitType, targetText);
         const targetContext = getBulkFixTargetContext(editor, group, title);
         const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
         const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
@@ -4938,10 +5139,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (!primaryVariant) {
             throw new Error('AI did not return usable suggestions.');
         }
-        const finalRange = resolveBulkFixReviewRange({ from: group.from, to: group.to, originalText: targetText });
+        const finalRange = resolveBulkFixReviewRange({ from: group.from, to: group.to, originalText: targetText, targetFingerprint });
         if (!finalRange) {
             throw new Error('النص الأصلي تغير أثناء إنشاء الاقتراح. أعد إنشاء قائمة الإصلاحات بعد انتهاء التعديل.');
         }
+        const finalFingerprint = getBulkFixRangeFingerprint(editor, finalRange.from, finalRange.to, group.unitType, finalRange.currentText);
 
         const ruleTitles = fallbackTargetRules.map(rule => rule.title);
         return {
@@ -4950,6 +5152,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             ruleTitles,
             criteria,
             originalText: finalRange.currentText,
+            targetFingerprint: finalFingerprint || targetFingerprint,
             fixedText: primaryVariant.fixedText,
             variants,
             from: finalRange.from,
@@ -5026,9 +5229,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const groupedTargets = groupedViolations
             .map(group => {
                 const originalText = getSafeRangeText(group.from, group.to);
-                return originalText ? { group, originalText, from: group.from, to: group.to } : null;
+                return originalText
+                    ? {
+                        group,
+                        originalText,
+                        from: group.from,
+                        to: group.to,
+                        targetFingerprint: getBulkFixRangeFingerprint(editor, group.from, group.to, group.unitType, originalText),
+                    }
+                    : null;
             })
-            .filter((target): target is { group: BulkFixTargetGroup; originalText: string; from: number; to: number } => Boolean(target));
+            .filter((target): target is { group: BulkFixTargetGroup; originalText: string; from: number; to: number; targetFingerprint?: BulkFixTargetFingerprint } => Boolean(target));
         setFixAllProgress(p => ({ ...p, total: groupedTargets.length }));
 
         const proposedItems: BulkFixReviewItem[] = [];
@@ -5043,6 +5254,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
                 const group = { ...originalGroup, from: resolvedStartRange.from, to: resolvedStartRange.to };
                 const targetText = resolvedStartRange.currentText;
+                const targetFingerprint = getBulkFixRangeFingerprint(editor, group.from, group.to, group.unitType, targetText) || targetSnapshot.targetFingerprint;
                 const targetContext = getBulkFixTargetContext(editor, group, title);
                 const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
                 const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
@@ -5086,16 +5298,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const primaryVariant = variants[0];
                 const ruleTitles = fallbackTargetRules.map(rule => rule.title);
                 if (primaryVariant) {
-                    const finalRange = resolveBulkFixReviewRange({ from: resolvedStartRange.from, to: resolvedStartRange.to, originalText: targetText });
+                    const finalRange = resolveBulkFixReviewRange({ from: resolvedStartRange.from, to: resolvedStartRange.to, originalText: targetText, targetFingerprint });
                     if (!finalRange) {
                         throw new Error('النص الأصلي تغير أثناء إنشاء الاقتراح. أعد تشغيل الإصلاح المجمع بعد انتهاء التعديل.');
                     }
+                    const finalFingerprint = getBulkFixRangeFingerprint(editor, finalRange.from, finalRange.to, group.unitType, finalRange.currentText);
                     proposedItems.push({
                         id: `bulk-fix-${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`,
                         ruleTitle: ruleTitles.length > 1 ? `${ruleTitles.length} معايير: ${ruleTitles.join('، ')}` : ruleTitles[0],
                         ruleTitles,
                         criteria,
                         originalText: finalRange.currentText,
+                        targetFingerprint: finalFingerprint || targetFingerprint,
                         fixedText: primaryVariant.fixedText,
                         variants,
                         from: finalRange.from,
@@ -5416,7 +5630,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (!editor) return;
         const item = aiHistory.find(historyItem => historyItem.id === id);
         if (!item || item.appliedSuggestion) return;
-        const resolvedRange = resolveBulkFixReviewRange(item);
+        const resolvedRange = resolveBulkFixReviewRange(item.bulkFixReviewItem || item);
         if (!resolvedRange) {
             setAiHistory(history => history.map(historyItem => (
                 historyItem.id === id

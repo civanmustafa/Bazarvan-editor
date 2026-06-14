@@ -340,12 +340,27 @@ export interface BulkFixRelatedRule {
   sourceRuleTitles: string[];
 }
 
+export interface BulkFixTargetFingerprint {
+  unitType?: 'paragraph' | 'heading' | 'section' | 'block';
+  firstBlockIndex?: number;
+  lastBlockIndex?: number;
+  blockCount?: number;
+  firstBlockType?: string;
+  lastBlockType?: string;
+  sectionHeading?: string;
+  previousText?: string;
+  nextText?: string;
+  originalStart?: string;
+  originalEnd?: string;
+}
+
 export interface BulkFixReviewItem {
   id: string;
   ruleTitle: string;
   ruleTitles?: string[];
   criteria?: BulkFixCriterionSummary[];
   originalText: string;
+  targetFingerprint?: BulkFixTargetFingerprint;
   fixedText: string;
   variants?: BulkFixReviewVariant[];
   from: number;
