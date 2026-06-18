@@ -503,7 +503,7 @@ const LeftSidebar: React.FC = () => {
     return {
       duplicateHeaderSpiderMetrics: headerMetrics,
       duplicateRepeatedPhrasesCount: allPhrases.length,
-      duplicateOccurrencesCount: allPhrases.reduce((sum, phrase) => sum + phrase.count, 0),
+      duplicateOccurrencesCount: duplicateStats.totalDuplicates,
       uniqueWordsPercentage: duplicateStats.totalWords > 0
         ? `${((duplicateStats.uniqueWords / duplicateStats.totalWords) * 100).toFixed(1)}%`
         : '0%',

@@ -50,43 +50,14 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
     };
 
     if (textContent) {
-      const normalizedContentForUniques = articleLanguage === 'ar' ? normalizeArabicText(textContent) : textContent.toLowerCase();
-      const words = normalizedContentForUniques.split(/\s+/).filter(Boolean);
-      duplicateStats.uniqueWords = new Set(words).size;
-
-      const nGrams: { [key: number]: Map<string, { locations: number[]; text: string }> } = {
-        2: new Map(), 3: new Map(), 4: new Map(), 5: new Map(), 6: new Map(), 7: new Map(), 8: new Map()
-      };
-
-      const originalWordsWithLocations = [...textContent.matchAll(/\S+/g)]
-        .map(match => ({ text: match[0], index: match.index ?? 0 }));
-      const originalWords = originalWordsWithLocations.map(word => word.text);
-      for (let n = 2; n <= 8; n++) {
-          if (originalWords.length < n) continue;
-
-          for (let i = 0; i <= originalWords.length - n; i++) {
-              const originalNgramArray = originalWords.slice(i, i + n);
-              const originalNgramText = originalNgramArray.join(' ');
-
-              const normalizedNgramArray = originalNgramArray.map(w => articleLanguage === 'ar' ? normalizeArabicText(w.toLowerCase()) : w.toLowerCase());
-              const normalizedNgramKey = normalizedNgramArray.join(' ');
-              
-              if (!nGrams[n].has(normalizedNgramKey)) {
-                  nGrams[n].set(normalizedNgramKey, { locations: [], text: originalNgramText });
-              }
-              const charIndex = originalWordsWithLocations[i]?.index ?? 0;
-              nGrams[n].get(normalizedNgramKey)!.locations.push(charIndex);
-          }
-      }
-
       const tokenizeForDuplicateComparison = (value: string): string[] => {
         const normalized = articleLanguage === 'ar' ? normalizeArabicText(value.toLowerCase()) : value.toLowerCase();
         return normalized.match(/[\p{L}\p{N}]+/gu) || [];
       };
 
       const normalizeComparisonToken = (token: string): string => {
-        if (articleLanguage === 'ar') return token;
-        const normalized = token.replace(/'s$/i, '');
+        if (articleLanguage === 'ar') return normalizeArabicText(token.toLowerCase());
+        const normalized = token.toLowerCase().replace(/'s$/i, '');
         if (normalized.length > 4 && normalized.endsWith('ies')) return `${normalized.slice(0, -3)}y`;
         if (normalized.length > 4 && /(ches|shes|xes|zes|ses)$/.test(normalized)) return normalized.replace(/es$/, '');
         if (normalized.length > 3 && normalized.endsWith('s') && !normalized.endsWith('ss')) return normalized.slice(0, -1);
@@ -98,6 +69,39 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
           .map(normalizeComparisonToken)
           .filter(token => token && (articleLanguage === 'ar' || !ENGLISH_TARGET_STOPWORDS.has(token)))
       );
+
+      const originalWordsWithLocations = [...textContent.matchAll(/[\p{L}\p{N}]+/gu)]
+        .map(match => ({
+          text: match[0],
+          normalized: normalizeComparisonToken(match[0]),
+          index: match.index ?? 0,
+        }))
+        .filter(word => word.normalized.length > 0);
+
+      duplicateStats.totalWords = originalWordsWithLocations.length || totalWordCount;
+      duplicateStats.uniqueWords = new Set(originalWordsWithLocations.map(word => word.normalized)).size;
+
+      const nGrams: { [key: number]: Map<string, { locations: number[]; text: string }> } = {
+        2: new Map(), 3: new Map(), 4: new Map(), 5: new Map(), 6: new Map(), 7: new Map(), 8: new Map()
+      };
+
+      const originalWords = originalWordsWithLocations.map(word => word.text);
+      const normalizedWords = originalWordsWithLocations.map(word => word.normalized);
+
+      for (let n = 2; n <= 8; n++) {
+          if (originalWords.length < n) continue;
+          for (let i = 0; i <= originalWords.length - n; i++) {
+              const originalNgramArray = originalWords.slice(i, i + n);
+              const originalNgramText = originalNgramArray.join(' ');
+              const normalizedNgramKey = normalizedWords.slice(i, i + n).join(' ');
+              
+              if (!nGrams[n].has(normalizedNgramKey)) {
+                  nGrams[n].set(normalizedNgramKey, { locations: [], text: originalNgramText });
+              }
+              const charIndex = originalWordsWithLocations[i]?.index ?? 0;
+              nGrams[n].get(normalizedNgramKey)!.locations.push(charIndex);
+          }
+      }
 
       const containsTokenSequence = (tokens: string[], sequence: string[]): boolean => {
         if (sequence.length === 0 || sequence.length > tokens.length) return false;
@@ -170,18 +174,15 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
           if (value.locations.length > 1) {
             const isKeywordPhrase = isProtectedTargetPhrase(key);
             if (isKeywordPhrase) return;
+            const repeatedInstances = value.locations.length - 1;
             duplicateAnalysis[n as keyof DuplicateAnalysis].push({
               text: value.text,
               count: value.locations.length,
               locations: value.locations,
               containsKeyword: isKeywordPhrase,
             });
-            duplicateStats.totalDuplicates += value.locations.length - 1;
-            if (isKeywordPhrase) {
-                duplicateStats.keywordDuplicatesCount++;
-            } else {
-                duplicateStats.commonDuplicatesCount++;
-            }
+            duplicateStats.totalDuplicates += repeatedInstances;
+            duplicateStats.commonDuplicatesCount += repeatedInstances;
           }
         });
       }

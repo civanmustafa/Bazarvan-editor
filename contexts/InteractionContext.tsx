@@ -844,6 +844,12 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 const fixKey = fixButton.getAttribute('data-fix-key');
                 const violation = fixKey ? tooltipFixTargetsRef.current.get(fixKey) : null;
                 if (violation) {
+                    const buttonElement = fixButton as HTMLButtonElement;
+                    buttonElement.disabled = true;
+                    buttonElement.style.background = '#9ca3af';
+                    buttonElement.style.cursor = 'not-allowed';
+                    buttonElement.style.opacity = '1';
+                    buttonElement.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border:2px solid rgba(255,255,255,.55);border-top-color:white;border-radius:999px;"></span>${uiLanguage === 'ar' ? 'جاري الإصلاح...' : 'Fixing...'}`;
                     handleAiFix(violation.rule, violation);
                 }
                 return;

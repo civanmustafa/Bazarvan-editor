@@ -5271,18 +5271,29 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setFixAllProgress(p => ({ ...p, current: 1 }));
             const proposedItem = await createBulkFixReviewItemForGroup(group, new Set([rule.title]), 0, provider);
             replaceBulkFixReviewItems([proposedItem]);
-            logToAiHistory({
+            const suggestions = (proposedItem.variants && proposedItem.variants.length > 0
+                ? proposedItem.variants.map(variant => variant.fixedText)
+                : [proposedItem.fixedText]
+            ).filter(Boolean);
+            const historyItemId = logToAiHistory({
                 type: 'fix-violation',
                 ruleTitle: proposedItem.ruleTitle,
                 originalText: proposedItem.originalText,
-                suggestions: (proposedItem.variants && proposedItem.variants.length > 0
-                    ? proposedItem.variants.map(variant => variant.fixedText)
-                    : [proposedItem.fixedText]
-                ).filter(Boolean),
+                suggestions,
                 from: proposedItem.from,
                 to: proposedItem.to,
                 bulkFixReviewItem: proposedItem,
             });
+            if (suggestions.length > 0) {
+                setSuggestion({
+                    original: proposedItem.originalText,
+                    suggestions,
+                    action: 'replace-text',
+                    from: proposedItem.from,
+                    to: proposedItem.to,
+                    historyItemId,
+                });
+            }
             setFixAllProgress(p => ({ ...p, running: false }));
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown fix error';

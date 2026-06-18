@@ -111,7 +111,12 @@ const InfoModal: React.FC<{
                             type="button"
                             onClick={() => onFixViolation(item, violation)}
                             disabled={Boolean(fixingInfo)}
-                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#d4af37] px-2.5 py-1.5 text-[10px] font-black text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:bg-gray-300"
+                            aria-busy={isFixingThis}
+                            className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-black text-white transition-colors disabled:cursor-not-allowed ${
+                              isFixingThis
+                                ? 'bg-gray-400 dark:bg-gray-600'
+                                : 'bg-[#d4af37] hover:bg-[#b8922e] disabled:bg-gray-300 dark:disabled:bg-gray-600'
+                            }`}
                           >
                             {isFixingThis ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
                             <span>{isArabic ? 'إصلاح هذه المخالفة' : 'Fix this'}</span>
