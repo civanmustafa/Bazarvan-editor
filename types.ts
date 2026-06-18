@@ -258,6 +258,14 @@ export type AiContentPatchOperation =
 
 export type AiContentPatchStatus = 'pending' | 'applied' | 'failed';
 
+export interface AiPatchResolvedTarget {
+  from: number;
+  to: number;
+  selectFrom: number;
+  selectTo: number;
+  mode: 'insert' | 'replace';
+}
+
 export interface AiContentPatch {
   id: string;
   provider: AiPatchProvider;
@@ -276,6 +284,7 @@ export interface AiContentPatch {
   mergeDeletePlacementLabel?: string;
   mergeDeleteStatus?: AiContentPatchStatus;
   mergeDeleteApplyError?: string;
+  resolvedTarget?: AiPatchResolvedTarget;
   status: AiContentPatchStatus;
   applyError?: string;
 }

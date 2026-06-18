@@ -119,8 +119,17 @@ const SelectionToolbar: React.FC = () => {
              return;
         }
 
-        const top = selectionRect.bottom - scrollRect.top + scrollEl.scrollTop;
-        const left = selectionRect.left - scrollRect.left + scrollEl.scrollLeft + (selectionRect.width / 2);
+        const viewportMargin = 12;
+        const toolbarWidth = toolbarRef.current?.offsetWidth || (isManualCommandOpen ? 320 : 460);
+        const toolbarHeight = toolbarRef.current?.offsetHeight || (isManualCommandOpen ? 220 : 48);
+        const centeredLeft = selectionRect.left + (selectionRect.width / 2);
+        const minLeft = viewportMargin + (toolbarWidth / 2);
+        const maxLeft = Math.max(minLeft, window.innerWidth - viewportMargin - (toolbarWidth / 2));
+        const left = Math.min(Math.max(centeredLeft, minLeft), maxLeft);
+        const belowTop = selectionRect.bottom + viewportMargin;
+        const aboveTop = selectionRect.top - toolbarHeight - viewportMargin;
+        const hasSpaceBelow = belowTop + toolbarHeight <= window.innerHeight - viewportMargin;
+        const top = hasSpaceBelow ? belowTop : Math.max(viewportMargin, aboveTop);
         
         setPosition({ top, left });
         setManualSelectionRange({ from, to });
@@ -130,7 +139,7 @@ const SelectionToolbar: React.FC = () => {
         setIsVisible(false);
     }
 
-  }, [editor, scrollContainerRef]);
+  }, [editor, isManualCommandOpen, scrollContainerRef]);
 
   useEffect(() => {
     if (!editor) return;
@@ -143,6 +152,7 @@ const SelectionToolbar: React.FC = () => {
     if (scrollEl) {
         scrollEl.addEventListener('scroll', handler, { passive: true });
     }
+    window.addEventListener('resize', handler);
 
     return () => {
       editor.off('selectionUpdate', handler);
@@ -150,8 +160,15 @@ const SelectionToolbar: React.FC = () => {
       if (scrollEl) {
           scrollEl.removeEventListener('scroll', handler);
       }
+      window.removeEventListener('resize', handler);
     };
   }, [editor, updatePosition, scrollContainerRef]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    const frame = window.requestAnimationFrame(updatePosition);
+    return () => window.cancelAnimationFrame(frame);
+  }, [isManualCommandOpen, isVisible, updatePosition]);
   
   if (!isVisible) {
     return null;
@@ -160,13 +177,14 @@ const SelectionToolbar: React.FC = () => {
   return (
     <div
       ref={toolbarRef}
-      className="absolute z-10 p-1 bg-white dark:bg-[#2A2A2A] rounded-lg shadow-xl border border-gray-300 dark:border-[#3C3C3C]"
+      className="fixed z-[10000] p-1 bg-white dark:bg-[#2A2A2A] rounded-lg shadow-xl border border-gray-300 dark:border-[#3C3C3C]"
       style={{
         top: `${position.top}px`,
         left: `${position.left}px`,
-        transform: 'translateX(-50%) translateY(16px)',
+        transform: 'translateX(-50%)',
         transition: 'opacity 0.15s ease-in-out',
         opacity: isVisible ? 1 : 0,
+        maxWidth: 'calc(100vw - 24px)',
       }}
       aria-label={t.selectionToolbar}
     >
@@ -215,7 +233,7 @@ const SelectionToolbar: React.FC = () => {
         </button>
       </div>
       {isManualCommandOpen && (
-        <form onSubmit={handleManualCommandSubmit} className="mt-1 w-72 border-t border-gray-200 pt-2 dark:border-[#3C3C3C]">
+        <form onSubmit={handleManualCommandSubmit} className="mt-1 w-72 max-h-[calc(100vh-7rem)] overflow-y-auto border-t border-gray-200 pt-2 dark:border-[#3C3C3C]">
           <textarea
             ref={manualTextareaRef}
             value={manualCommand}

@@ -258,7 +258,7 @@ const EditorView: React.FC = () => {
                 {displayTooltip && (
                     <div
                         ref={tooltipRef}
-                        className="fixed bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] text-[#333333] dark:text-gray-200 text-xs rounded-lg py-2 px-3 pointer-events-auto z-50 shadow-xl flex flex-col items-start gap-2"
+                        className="fixed bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] text-[#333333] dark:text-gray-200 text-xs rounded-lg py-2 px-3 pointer-events-auto z-[10000] shadow-xl flex flex-col items-start gap-2"
                         style={{ 
                             top: displayTooltip.top, 
                             left: displayTooltip.left, 

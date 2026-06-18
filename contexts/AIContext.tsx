@@ -7,6 +7,7 @@ import type {
     AiAnalysisOptions,
     AiContentPatch,
     AiContentPatchOperation,
+    AiPatchResolvedTarget,
     AiPatchProvider,
     CheckResult,
     HeadingAnalysisResult,
@@ -739,6 +740,7 @@ const collectBulkFixViolations = (structureAnalysis: StructureAnalysis): BulkFix
     const violations: BulkFixViolationContext[] = [];
     Object.entries(structureAnalysis).forEach(([key, rule]) => {
         if (key === 'paragraphPair') return;
+        if (rule.status !== 'fail') return;
         if (rule.violatingItems?.length) {
             rule.violatingItems.forEach((item) => violations.push({ rule, item }));
         }
@@ -2414,6 +2416,13 @@ const READY_COMMAND_H2_SECTION_REQUIREMENT = `
 - استخدم insert_before_conclusion أو insert_before_heading أو append_to_article عند عدم وجود موضع مرجعي واضح.
 - إذا كان هناك anchorText لقسم H2 مرجعي، اجعل الموضع المقصود بعد نهاية ذلك القسم بالكامل كقسم مستقل، وليس داخل محتواه.`;
 
+const READY_COMMAND_SINGLE_SECTION_CARD_REQUIREMENT = `
+
+Hard rule for ready command patch cards:
+- Each patch/card must contain only one independent H2 section.
+- If a proposal contains more than one H2 heading, split it into separate patches/cards.
+- H3/H4 subsections may stay inside their parent H2 card, but a second H2 must start a new card.`;
+
 const SITE_OWNER_PUBLISHING_VOICE_GUARD = `**قاعدة صوت صاحب الموقع للنصوص الجاهزة للنشر:**
 - أي نص داخل suggestions أو contentMarkdown أو وصف ميتا أو عنوان أو فقرة مقترحة يجب أن يبدو كأنه صادر عن صاحب الموقع/البائع الذي يعرف المنتج والخدمة والسياسات، وليس كمراجع خارجي يطلب من القارئ التحقق.
 - ممنوع إدراج عبارات جاهزة للنشر توحي بعدم معرفة صاحب الموقع بالتفاصيل، مثل: تحقق من التوفر، قبل الطلب تحقق، اطلب قائمة، قد تشمل الخيارات، تختلف حسب البلد، تذكر إحدى الصفحات، يبدو أن، ربما، لا يعني وجود كذا، أو أي صياغة تنقل عبء التحقق إلى الزائر.
@@ -2432,7 +2441,7 @@ const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPa
     const guardedContextPrompt = appendSiteOwnerPublishingVoiceGuard(contextPrompt);
     return options?.skipPatchInstructions
         ? guardedContextPrompt
-        : `${guardedContextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${READY_COMMAND_PATCH_CARD_REQUIREMENT}\n\n${READY_COMMAND_H2_SECTION_REQUIREMENT}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
+        : `${guardedContextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${READY_COMMAND_PATCH_CARD_REQUIREMENT}\n\n${READY_COMMAND_H2_SECTION_REQUIREMENT}\n\n${READY_COMMAND_SINGLE_SECTION_CARD_REQUIREMENT}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
 };
 
 const saveContentSummaryForCompetitors = (
@@ -3192,6 +3201,75 @@ const normalizeCombinedCommandPatch = (patch: AiContentPatch): AiContentPatch =>
     return patch;
 };
 
+const findTopLevelH2SectionStarts = (value: string): number[] => {
+    const text = value.replace(/\r\n/g, '\n');
+    const starts: number[] = [];
+    const pattern = /(^|\n)(?=(?:##(?!#)\s+\S|<h2(?:\s|>|\/)))/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(text)) !== null) {
+        starts.push(match.index + (match[1] ? 1 : 0));
+        if (pattern.lastIndex === match.index) pattern.lastIndex += 1;
+    }
+
+    return starts.filter((start, index) => index === 0 || start !== starts[index - 1]);
+};
+
+const splitContentMarkdownByH2Sections = (value: string): string[] => {
+    const text = value.replace(/\r\n/g, '\n').trim();
+    if (!text) return [];
+
+    const starts = findTopLevelH2SectionStarts(text);
+    if (starts.length <= 1) return [text];
+
+    return starts
+        .map((start, index) => {
+            const from = index === 0 && start > 0 ? 0 : start;
+            const to = starts[index + 1] ?? text.length;
+            return text.slice(from, to).trim();
+        })
+        .filter(Boolean);
+};
+
+const getLeadingPatchHeadingTitle = (value: string): string => {
+    const firstHeadingLine = value
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => line.trim())
+        .find(line => /^(?:##(?!#)\s+\S|<h2(?:\s|>|\/))/i.test(line));
+    if (!firstHeadingLine) return '';
+
+    const markdownHeading = firstHeadingLine.match(/^##(?!#)\s+(.+)$/);
+    if (markdownHeading?.[1]) return markdownHeading[1].trim();
+
+    const htmlHeading = firstHeadingLine.match(/^<h2[^>]*>(.*?)<\/h2>/i);
+    if (htmlHeading?.[1]) return htmlHeading[1].replace(/<[^>]+>/g, '').trim();
+
+    return '';
+};
+
+const splitReadyCommandH2SectionPatches = (patches: AiContentPatch[]): AiContentPatch[] => (
+    patches.flatMap((patch) => {
+        const sections = splitContentMarkdownByH2Sections(patch.contentMarkdown);
+        if (sections.length <= 1) return [patch];
+
+        const baseMarker = patch.marker || patch.title || patch.id;
+        return sections.map((contentMarkdown, index) => ({
+            ...patch,
+            id: index === 0 ? patch.id : `${patch.id}-h2-${index + 1}`,
+            marker: baseMarker,
+            title: getLeadingPatchHeadingTitle(contentMarkdown) || patch.title,
+            contentMarkdown,
+            operation: normalizeIndependentH2SectionOperation(patch.operation, contentMarkdown),
+            status: 'pending' as const,
+            applyError: undefined,
+            resolvedTarget: undefined,
+            mergeDeleteStatus: patch.mergeDeleteStatus,
+            mergeDeleteApplyError: patch.mergeDeleteApplyError,
+        }));
+    })
+);
+
 const applyReadyCommandPatchRules = (
     parsedResult: SmartAnalysisParsedResult,
     commandId?: string
@@ -3223,7 +3301,7 @@ const applyReadyCommandPatchRules = (
 
     return {
         ...nextResult,
-        patches: nextResult.patches.map(patch => ({
+        patches: splitReadyCommandH2SectionPatches(nextResult.patches).map(patch => ({
             ...patch,
             commandId: patch.commandId || commandId,
         })),
@@ -4066,13 +4144,7 @@ const resolveIndependentH2SectionPatchTarget = (
     };
 };
 
-type PatchTarget = {
-    from: number;
-    to: number;
-    selectFrom: number;
-    selectTo: number;
-    mode: 'insert' | 'replace';
-};
+type PatchTarget = AiPatchResolvedTarget;
 
 const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget | { error: string } => {
     if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
@@ -4182,6 +4254,23 @@ const resolveAiPatchTarget = (editor: any, patch: AiContentPatch): PatchTarget |
 
     return { from: heading.to, to: heading.to, selectFrom: heading.pos, selectTo: heading.to, mode: 'insert' };
 };
+
+const isStoredAiPatchTargetUsable = (editor: any, target?: AiPatchResolvedTarget): target is AiPatchResolvedTarget => {
+    if (!editor || !target) return false;
+    const docEnd = editor.state.doc.content.size;
+    const values = [target.from, target.to, target.selectFrom, target.selectTo];
+    if (!values.every(value => Number.isFinite(value))) return false;
+    if (target.mode !== 'insert' && target.mode !== 'replace') return false;
+    if (target.from < 0 || target.to < target.from || target.to > docEnd) return false;
+    if (target.selectFrom < 0 || target.selectTo < target.selectFrom || target.selectTo > docEnd) return false;
+    return true;
+};
+
+const resolveAiPatchTargetForApply = (editor: any, patch: AiContentPatch): PatchTarget | { error: string } => (
+    isStoredAiPatchTargetUsable(editor, patch.resolvedTarget)
+        ? patch.resolvedTarget
+        : resolveAiPatchTarget(editor, patch)
+);
 
 const hasAiPatchMergeDeleteTarget = (patch: AiContentPatch): boolean => Boolean(
     patch.mergeDeleteTargetText?.trim() ||
@@ -4313,7 +4402,7 @@ interface AIContextType {
     applyAllAiInsertionPatches: (provider: AiPatchProvider) => void;
     selectAiInsertionPatchTarget: (provider: AiPatchProvider, patchId: string) => void;
     applyAiContentPatch: (patch: AiContentPatch) => { status: 'applied' | 'failed'; error?: string };
-    selectAiContentPatchTarget: (patch: AiContentPatch) => { error?: string };
+    selectAiContentPatchTarget: (patch: AiContentPatch) => { error?: string; target?: AiPatchResolvedTarget };
     deleteAiPatchMergeDeleteTarget: (patch: AiContentPatch) => { status: 'applied' | 'failed'; error?: string };
     selectAiPatchMergeDeleteTarget: (patch: AiContentPatch) => { error?: string };
     deleteAiInsertionPatchMergeDeleteTarget: (provider: AiPatchProvider, patchId: string) => void;
@@ -5478,22 +5567,50 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }));
     }, []);
 
-    const selectAiContentPatchTarget = useCallback((patch: AiContentPatch): { error?: string } => {
+    const updateAiHistoryPatch = useCallback((patchId: string, updates: Partial<AiContentPatch>) => {
+        setAiHistory(history => history.map(historyItem => (
+            historyItem.analysisPatches?.some(patch => patch.id === patchId)
+                ? {
+                    ...historyItem,
+                    analysisPatches: historyItem.analysisPatches.map(patch => (
+                        patch.id === patchId ? { ...patch, ...updates } : patch
+                    )),
+                }
+                : historyItem
+        )));
+    }, []);
+
+    const selectAiContentPatchTarget = useCallback((patch: AiContentPatch): { error?: string; target?: AiPatchResolvedTarget } => {
         if (!editor) return { error: 'المحرر غير جاهز حالياً.' };
         const target = resolveAiPatchTarget(editor, patch);
         if ('error' in target) {
             return { error: target.error };
         }
 
+        const selection = target.mode === 'insert'
+            ? target.from
+            : target.selectFrom === target.selectTo
+                ? target.from
+                : { from: target.selectFrom, to: target.selectTo };
+
         editor
             .chain()
             .focus()
-            .setTextSelection(target.selectFrom === target.selectTo ? target.from : { from: target.selectFrom, to: target.selectTo })
+            .setTextSelection(selection)
             .scrollIntoView()
             .run();
 
-        return {};
-    }, [editor]);
+        const resolvedTarget = { ...target };
+        const targetUpdates: Partial<AiContentPatch> = {
+            resolvedTarget,
+            applyError: undefined,
+            status: patch.status === 'failed' ? 'pending' : patch.status,
+        };
+        updateAiInsertionPatch(patch.provider, patch.id, targetUpdates);
+        updateAiHistoryPatch(patch.id, targetUpdates);
+
+        return { target: resolvedTarget };
+    }, [editor, updateAiHistoryPatch, updateAiInsertionPatch]);
 
     const selectAiInsertionPatchTarget = useCallback((provider: AiPatchProvider, patchId: string) => {
         const patch = aiInsertionPatches[provider].find(item => item.id === patchId);
@@ -5533,7 +5650,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const applyAiContentPatch = useCallback((patch: AiContentPatch): { status: 'applied' | 'failed'; error?: string } => {
         if (!editor) return { status: 'failed', error: 'المحرر غير جاهز حالياً.' };
         if (patch.status !== 'pending') return { status: 'failed', error: patch.applyError };
-        const target = resolveAiPatchTarget(editor, patch);
+        const target = resolveAiPatchTargetForApply(editor, patch);
         if ('error' in target) {
             return { status: 'failed', error: target.error };
         }

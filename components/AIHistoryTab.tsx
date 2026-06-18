@@ -5,7 +5,7 @@ import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import { BookCopy, Trash2, Check, Copy, MapPin, ChevronDown, AlertTriangle } from 'lucide-react';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
-import type { AiContentPatch, AIHistoryItem, BulkFixReviewVariant } from '../types';
+import type { AiContentPatch, AiPatchResolvedTarget, AIHistoryItem, BulkFixReviewVariant } from '../types';
 
 const getCriterionDisplayOrder = (status?: string): number => {
     if (status === 'pass') return 0;
@@ -48,6 +48,7 @@ const AIHistoryTab: React.FC = () => {
     const isArabic = uiLanguage === 'ar';
     const [expandedCriteriaKeys, setExpandedCriteriaKeys] = useState<Record<string, boolean>>({});
     const [manualPatchUiState, setManualPatchUiState] = useState<Record<string, { status?: 'applied' | 'failed'; error?: string }>>({});
+    const [manualPatchSelectedTargets, setManualPatchSelectedTargets] = useState<Record<string, AiPatchResolvedTarget>>({});
     const [manualPatchMergeDeleteUiState, setManualPatchMergeDeleteUiState] = useState<Record<string, { status?: 'applied' | 'failed'; error?: string }>>({});
     const toggleCriteria = (key: string) => {
         setExpandedCriteriaKeys(prev => ({ ...prev, [key]: !prev[key] }));
@@ -128,10 +129,23 @@ const AIHistoryTab: React.FC = () => {
         const result = selectAiContentPatchTarget(patch);
         if (result.error) {
             setManualPatchUiState(prev => ({ ...prev, [patch.id]: { status: 'failed', error: result.error } }));
+            return;
+        }
+        setManualPatchUiState(prev => {
+            const next = { ...prev };
+            delete next[patch.id];
+            return next;
+        });
+        if (result.target) {
+            setManualPatchSelectedTargets(prev => ({ ...prev, [patch.id]: result.target! }));
         }
     };
     const handleApplyManualPatch = (patch: AiContentPatch) => {
-        const result = applyAiContentPatch({ ...patch, status: 'pending' });
+        const result = applyAiContentPatch({
+            ...patch,
+            resolvedTarget: manualPatchSelectedTargets[patch.id] || patch.resolvedTarget,
+            status: 'pending',
+        });
         setManualPatchUiState(prev => ({
             ...prev,
             [patch.id]: {
@@ -329,14 +343,17 @@ const AIHistoryTab: React.FC = () => {
             }
 
             const normalizedMarker = normalizePatchMarkerForMatch(marker);
-            const patch = patches.find(itemPatch => (
-                normalizePatchMarkerForMatch(itemPatch.marker) === normalizedMarker ||
-                normalizePatchMarkerForMatch(itemPatch.title) === normalizedMarker
+            const matchingPatches = patches.filter(itemPatch => (
+                !usedPatchIds.has(itemPatch.id) &&
+                (
+                    normalizePatchMarkerForMatch(itemPatch.marker) === normalizedMarker ||
+                    normalizePatchMarkerForMatch(itemPatch.title) === normalizedMarker
+                )
             ));
-            if (patch) {
+            matchingPatches.forEach(patch => {
                 usedPatchIds.add(patch.id);
                 parts.push(renderAnalysisPatch(patch, item.commandId));
-            }
+            });
 
             lastIndex = markerPattern.lastIndex;
         }

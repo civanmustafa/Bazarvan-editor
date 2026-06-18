@@ -1477,14 +1477,17 @@ ${readyCommandCompetitorBlocks}`;
             }
 
             const normalizedMarker = normalizePatchMarkerForMatch(marker);
-            const patch = uniquePatches.find(item => (
-                normalizePatchMarkerForMatch(item.marker) === normalizedMarker ||
-                normalizePatchMarkerForMatch(item.title) === normalizedMarker
+            const matchingPatches = uniquePatches.filter(item => (
+                !usedPatchIds.has(item.id) &&
+                (
+                    normalizePatchMarkerForMatch(item.marker) === normalizedMarker ||
+                    normalizePatchMarkerForMatch(item.title) === normalizedMarker
+                )
             ));
-            if (patch && !usedPatchIds.has(patch.id)) {
+            matchingPatches.forEach(patch => {
                 usedPatchIds.add(patch.id);
                 parts.push(renderPatchCard(provider, patch, handlers));
-            }
+            });
             lastIndex = markerPattern.lastIndex;
         }
 

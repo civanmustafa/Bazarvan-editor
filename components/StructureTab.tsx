@@ -760,7 +760,7 @@ const StructureTab: React.FC = () => {
         Object.entries(analysis)
             .filter(([key]) => key !== 'paragraphPair')
             .map(([, rule]) => rule)
-            .filter((rule: any) => rule && rule.violatingItems && rule.violatingItems.length > 0)
+            .filter((rule: any) => rule && rule.status === 'fail' && rule.violatingItems && rule.violatingItems.length > 0)
             .forEach((rule: any) => {
                 groups[rule.title] = (groups[rule.title] || 0) + rule.violatingItems!.length;
             });

@@ -108,7 +108,7 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                 <BrainCircuit size={16} />
             </ToolbarButton>
             {isAiMenuOpen && (
-                <div className={`absolute mt-2 w-60 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-30 ${uiLanguage === 'ar' ? 'left-0' : 'right-0'}`}>
+                <div className={`absolute mt-2 max-h-[calc(100vh-5rem)] w-60 origin-top-left overflow-y-auto rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-[10000] ${uiLanguage === 'ar' ? 'left-0' : 'right-0'}`}>
                     <AiMenuItem onClick={handleAnalyzeHeadings} disabled={isAnyGeminiLoading}><FileSignature size={14} /> <span>{t.aiMenu.suggestHeadings}</span></AiMenuItem>
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.generateMeta), 'copy-meta')} disabled={!hasSelection || isAnyGeminiLoading}><Tag size={14} /> <span>{t.aiMenu.generateMeta}</span></AiMenuItem>
                     <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.suggestTitle), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><Heading1 size={14} /> <span>{t.aiMenu.suggestTitle}</span></AiMenuItem>
@@ -126,7 +126,7 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                             <ChevronRight size={14} className="ms-auto" />
                         </AiMenuItem>
                         {isExpandMenuOpen && (
-                            <div className={`absolute top-0 ms-1 w-48 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 ${uiLanguage === 'ar' ? 'left-full' : 'right-full'}`}>
+                            <div className={`absolute top-0 z-[10001] ms-1 w-48 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 ${uiLanguage === 'ar' ? 'left-full' : 'right-full'}`}>
                                 <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.expand50), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><span>{t.aiMenu.expand50}</span></AiMenuItem>
                                 <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.expand100), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><span>{t.aiMenu.expand100}</span></AiMenuItem>
                             </div>
@@ -140,7 +140,7 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                             <ChevronRight size={14} className="ms-auto" />
                         </AiMenuItem>
                         {isSummarizeMenuOpen && (
-                            <div className={`absolute top-0 ms-1 w-48 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 ${uiLanguage === 'ar' ? 'left-full' : 'right-full'}`}>
+                            <div className={`absolute top-0 z-[10001] ms-1 w-48 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 ${uiLanguage === 'ar' ? 'left-full' : 'right-full'}`}>
                                 <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.summarize50), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><span>{t.aiMenu.summarize50}</span></AiMenuItem>
                                 <AiMenuItem onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.summarize100), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}><span>{t.aiMenu.summarize100}</span></AiMenuItem>
                             </div>
@@ -162,7 +162,7 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                             <ChevronRight size={14} className="ms-auto" />
                         </AiMenuItem>
                         {isToneMenuOpen && (
-                            <div className={`absolute top-0 ms-1 w-40 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 ${uiLanguage === 'ar' ? 'left-full' : 'right-full'}`}>
+                            <div className={`absolute top-0 z-[10001] ms-1 w-40 origin-top-left rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 ${uiLanguage === 'ar' ? 'left-full' : 'right-full'}`}>
                                 {TONES.map(tone => (
                                     <AiMenuItem key={tone} onClick={() => handleAiRequest(getPrompt(ENGINEERING_PROMPT_IDS.toolbar.changeTone, { tone }), 'replace-text')} disabled={!hasSelection || isAnyGeminiLoading}>
                                         <span>{tone}</span>
