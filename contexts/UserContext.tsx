@@ -15,8 +15,8 @@ import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goal
  * Edit here when adding a user preference or anything that should survive per user.
  * Persistent writes are delegated to hooks/useUserActivity.ts.
  */
-type ApiKeys = { gemini: string[]; chatgpt: string[] };
-type StoredApiKeys = { gemini?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
+type ApiKeys = { gemini: string[]; geminiPaid: string[]; chatgpt: string[] };
+type StoredApiKeys = { gemini?: string | string[]; geminiPaid?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
 
 interface UserContextType {
     currentUser: string | null;
@@ -102,6 +102,12 @@ const normalizeApiKeys = (keys?: StoredApiKeys): ApiKeys => {
           ? [keys.gemini]
           : [''];
 
+    const geminiPaidKeys = Array.isArray(keys?.geminiPaid)
+        ? keys.geminiPaid
+        : typeof keys?.geminiPaid === 'string'
+          ? [keys.geminiPaid]
+          : [''];
+
     const chatGptKeys = Array.isArray(keys?.chatgpt)
         ? keys.chatgpt
         : typeof keys?.chatgpt === 'string'
@@ -114,6 +120,7 @@ const normalizeApiKeys = (keys?: StoredApiKeys): ApiKeys => {
 
     return {
         gemini: geminiKeys.length > 0 ? geminiKeys : [''],
+        geminiPaid: geminiPaidKeys.length > 0 ? geminiPaidKeys : [''],
         chatgpt: chatGptKeys.length > 0 ? chatGptKeys : [''],
     };
 };

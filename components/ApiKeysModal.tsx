@@ -25,6 +25,21 @@ const ApiKeysModal: React.FC = () => {
     setKeys(prev => ({ ...prev, gemini: newGeminiKeys.length > 0 ? newGeminiKeys : [''] }));
   };
 
+  const handleGeminiPaidChange = (index: number, value: string) => {
+    const newGeminiPaidKeys = [...keys.geminiPaid];
+    newGeminiPaidKeys[index] = value;
+    setKeys(prev => ({ ...prev, geminiPaid: newGeminiPaidKeys }));
+  };
+
+  const addGeminiPaidKey = () => {
+    setKeys(prev => ({ ...prev, geminiPaid: [...prev.geminiPaid, ''] }));
+  };
+
+  const removeGeminiPaidKey = (index: number) => {
+    const newGeminiPaidKeys = keys.geminiPaid.filter((_, i) => i !== index);
+    setKeys(prev => ({ ...prev, geminiPaid: newGeminiPaidKeys.length > 0 ? newGeminiPaidKeys : [''] }));
+  };
+
   const handleChatGptChange = (index: number, value: string) => {
     const newChatGptKeys = [...keys.chatgpt];
     newChatGptKeys[index] = value;
@@ -101,6 +116,42 @@ const ApiKeysModal: React.FC = () => {
             <button
               type="button"
               onClick={addGeminiKey}
+              className="mt-2 flex items-center gap-1.5 text-sm text-[#d4af37] font-semibold hover:underline"
+            >
+              <Plus size={14} />
+              {t.addAnotherKey}
+            </button>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t.geminiPaidApiKeys}
+            </label>
+            <div className="space-y-2">
+              {keys.geminiPaid.map((key, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <input
+                    aria-label={`Gemini Pro API Key ${index + 1}`}
+                    name={`gemini-paid-${index}`}
+                    type="password"
+                    value={key}
+                    onChange={(e) => handleGeminiPaidChange(index, e.target.value)}
+                    className="w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-start text-sm text-[#333333] dark:text-[#e0e0e0]"
+                    placeholder={`${t.enterGeminiPaidKey} #${index + 1}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeGeminiPaidKey(index)}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/20 rounded-md"
+                    title={t.removeKey}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addGeminiPaidKey}
               className="mt-2 flex items-center gap-1.5 text-sm text-[#d4af37] font-semibold hover:underline"
             >
               <Plus size={14} />

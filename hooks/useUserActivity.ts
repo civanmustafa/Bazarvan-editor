@@ -50,6 +50,7 @@ export type UserActivity = {
   logins: string[];
   apiKeys: {
     gemini: string[];
+    geminiPaid: string[];
     chatgpt: string[];
   };
   geminiKeyUsage: Record<string, {
@@ -106,6 +107,7 @@ const getDefaultUserActivity = (): UserActivity => ({
   logins: [],
   apiKeys: {
     gemini: [''],
+    geminiPaid: [''],
     chatgpt: [''],
   },
   geminiKeyUsage: {},
@@ -192,6 +194,7 @@ const normalizeUserActivity = (value: unknown): UserActivity => {
     logins: toStringArray(source.logins),
     apiKeys: {
       gemini: toKeyList(storedApiKeys.gemini),
+      geminiPaid: toKeyList(storedApiKeys.geminiPaid),
       chatgpt: toKeyList(storedApiKeys.chatgpt ?? storedApiKeys.openai),
     },
     geminiKeyUsage: Object.entries(storedGeminiKeyUsage).reduce<UserActivity['geminiKeyUsage']>((normalized, [fingerprint, value]) => {

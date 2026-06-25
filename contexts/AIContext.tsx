@@ -25,7 +25,7 @@ import type {
     StructureAnalysis,
 } from '../types';
 import { getArticleReplacementContent, parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
-import { GEMINI_ANALYSIS_MODEL } from '../constants/aiModels';
+import { GEMINI_ANALYSIS_MODEL, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
 import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
@@ -41,6 +41,7 @@ import { normalizeGoalContext } from '../utils/goalContext';
  * Edit api/* when changing server-side model calls or key handling.
  */
 const GEMINI_MODEL = GEMINI_ANALYSIS_MODEL;
+const GEMINI_PAID_MODEL = GEMINI_PAID_ANALYSIS_MODEL;
 const OPENAI_MODEL = 'gpt-5.4';
 const CHATGPT_TIMEOUT_MS = 300000;
 const GEMINI_CHAT_STORAGE_PREFIX = 'bazarvan:gemini-chat';
@@ -48,6 +49,11 @@ const GEMINI_CHAT_MAX_MESSAGES = 8;
 const GEMINI_CHAT_MAX_TOTAL_CHARS = 48000;
 const GEMINI_CHAT_MESSAGE_CHAR_LIMIT = 12000;
 const CHATGPT_CONVERSATION_STORAGE_PREFIX = 'bazarvan:chatgpt-conversation';
+type GeminiPatchProvider = Extract<AiPatchProvider, 'gemini' | 'geminiPaid'>;
+
+const getGeminiModelForProvider = (provider: GeminiPatchProvider = 'gemini'): string => (
+    provider === 'geminiPaid' ? GEMINI_PAID_MODEL : GEMINI_MODEL
+);
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
     pageType: 'نوع الصفحة',
@@ -1855,10 +1861,14 @@ const getArticleChatStorageScope = (articleKey: string, title: string): string =
     return rawScope.slice(0, 200);
 };
 
-const getGeminiChatStorageKey = (currentUser: string | null, articleScope: string): string => {
+const getGeminiChatStorageKey = (
+    currentUser: string | null,
+    articleScope: string,
+    provider: GeminiPatchProvider = 'gemini',
+): string => {
     const userPart = currentUser?.trim() || 'anonymous';
     const articlePart = articleScope?.trim() || 'draft';
-    return `${GEMINI_CHAT_STORAGE_PREFIX}:${userPart}:${articlePart}`;
+    return `${GEMINI_CHAT_STORAGE_PREFIX}:${provider}:${userPart}:${articlePart}`;
 };
 
 const truncateGeminiChatText = (value: string): string => {
@@ -1910,9 +1920,13 @@ const trimGeminiChatHistory = (history: GeminiChatMessage[]): GeminiChatMessage[
     return trimmedMessages;
 };
 
-const readStoredGeminiChatHistory = (currentUser: string | null, articleScope: string): GeminiChatMessage[] => {
+const readStoredGeminiChatHistory = (
+    currentUser: string | null,
+    articleScope: string,
+    provider: GeminiPatchProvider = 'gemini',
+): GeminiChatMessage[] => {
     try {
-        const value = localStorage.getItem(getGeminiChatStorageKey(currentUser, articleScope));
+        const value = localStorage.getItem(getGeminiChatStorageKey(currentUser, articleScope, provider));
         return trimGeminiChatHistory(normalizeGeminiChatHistory(value ? JSON.parse(value) : []));
     } catch (error) {
         console.error('Could not read Gemini chat history from localStorage:', error);
@@ -1924,10 +1938,11 @@ const saveStoredGeminiChatHistory = (
     currentUser: string | null,
     articleScope: string,
     history: GeminiChatMessage[],
+    provider: GeminiPatchProvider = 'gemini',
 ) => {
     try {
         localStorage.setItem(
-            getGeminiChatStorageKey(currentUser, articleScope),
+            getGeminiChatStorageKey(currentUser, articleScope, provider),
             JSON.stringify(trimGeminiChatHistory(history)),
         );
     } catch (error) {
@@ -1949,6 +1964,7 @@ const requestGeminiAnalysis = async (
     prompt: string,
     userKeys?: string | string[],
     history?: GeminiChatMessage[],
+    model: string = GEMINI_MODEL,
 ): Promise<GeminiAnalysisResult> => {
     const trimmedUserKeys = normalizeGeminiKeys(userKeys);
     const controller = new AbortController();
@@ -1962,6 +1978,7 @@ const requestGeminiAnalysis = async (
             prompt,
             apiKeys: trimmedUserKeys.length > 0 ? randomizeApiKeyOrder(trimmedUserKeys) : undefined,
             history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
+            model,
         }),
         signal: controller.signal,
       });
@@ -2011,7 +2028,7 @@ const requestGeminiAnalysis = async (
       console.error("Error calling Gemini API:", error);
       if (error instanceof Error && error.name === 'AbortError') {
           return {
-              text: `انتهت مهلة الاتصال بـ Gemini (${GEMINI_MODEL}). حاول مرة أخرى أو استخدم مفتاحا آخر.`,
+              text: `انتهت مهلة الاتصال بـ Gemini (${model}). حاول مرة أخرى أو استخدم مفتاحا آخر.`,
               ok: false,
           };
       }
@@ -2023,8 +2040,8 @@ const requestGeminiAnalysis = async (
     }
 };
 
-const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[]): Promise<string> => {
-    const result = await requestGeminiAnalysis(prompt, userKeys);
+const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[], model: string = GEMINI_MODEL): Promise<string> => {
+    const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model);
     return result.text;
 };
 
@@ -2033,11 +2050,12 @@ const callGeminiArticleChatAnalysis = async (
     userKeys: string | string[] | undefined,
     currentUser: string | null,
     articleScope: string,
+    provider: GeminiPatchProvider = 'gemini',
 ): Promise<string> => {
-    const history = readStoredGeminiChatHistory(currentUser, articleScope);
-    const result = await requestGeminiAnalysis(prompt, userKeys, history);
+    const history = readStoredGeminiChatHistory(currentUser, articleScope, provider);
+    const result = await requestGeminiAnalysis(prompt, userKeys, history, getGeminiModelForProvider(provider));
     if (result.ok) {
-        saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text));
+        saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
     return result.text;
 };
@@ -2470,7 +2488,7 @@ const saveContentSummaryForCompetitors = (
 };
 
 const isAiErrorResponseText = (value: string): boolean => (
-    /^(?:حدث خطأ أثناء الاتصال|انتهت مهلة الاتصال|فشل التحليل|فشل تحليل|فشل التحليل المتعدد|Gemini API route|The Gemini API|Could not|تعذر)/i.test(value.trim())
+    /^(?:حدث خطأ أثناء الاتصال|انتهت مهلة الاتصال|فشل التحليل|فشل تحليل|فشل التحليل المتعدد|خطأ من|Gemini API route|The Gemini API|Could not|تعذر|Error\b|Request failed)/i.test(value.trim())
 );
 
 const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
@@ -2937,6 +2955,10 @@ const stripOrphanPatchMarkers = (analysisMarkdown: string, patches: AiContentPat
 };
 
 const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvider): { displayText: string; patches: AiContentPatch[] } => {
+    if (isAiErrorResponseText(rawResponse)) {
+        return { displayText: rawResponse.trim(), patches: [] };
+    }
+
     const parsed = extractJson(rawResponse);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         const partialDisplayText = extractJsonStringProperty(rawResponse, 'analysisMarkdown');
@@ -4359,9 +4381,9 @@ type FixAllProgress = {
 };
 
 interface AIContextType {
-    aiResults: { gemini: string; chatgpt: string };
+    aiResults: Record<AiPatchProvider, string>;
     aiInsertionPatches: Record<AiPatchProvider, AiContentPatch[]>;
-    isAiLoading: { gemini: boolean; chatgpt: boolean };
+    isAiLoading: Record<AiPatchProvider, boolean>;
     quickAiProvider: AiPatchProvider;
     setQuickAiProvider: React.Dispatch<React.SetStateAction<AiPatchProvider>>;
     isAiCommandLoading: boolean;
@@ -4377,9 +4399,9 @@ interface AIContextType {
     fixAllProgress: FixAllProgress;
     handleAiRequest: (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => Promise<void>;
     handleAnalyzeHeadings: () => Promise<void>;
-    handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
+    handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta, provider?: GeminiPatchProvider) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
-    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[]) => Promise<void>;
+    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[], provider?: GeminiPatchProvider) => Promise<void>;
     buildSmartAnalysisPrompt: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => string;
     importManualChatGptResponse: (rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => void;
     parseAiPatchResponse: (
@@ -4426,9 +4448,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const { editor, title, text, keywords, analysisResults, goalContext, articleLanguage, articleKey } = useEditor();
     const { openModal } = useModal();
     
-    const [aiResults, setAiResults] = useState({ gemini: '', chatgpt: '' });
-    const [aiInsertionPatches, setAiInsertionPatches] = useState<Record<AiPatchProvider, AiContentPatch[]>>({ gemini: [], chatgpt: [] });
-    const [isAiLoading, setIsAiLoading] = useState({ gemini: false, chatgpt: false });
+    const [aiResults, setAiResults] = useState<Record<AiPatchProvider, string>>({ gemini: '', geminiPaid: '', chatgpt: '' });
+    const [aiInsertionPatches, setAiInsertionPatches] = useState<Record<AiPatchProvider, AiContentPatch[]>>({ gemini: [], geminiPaid: [], chatgpt: [] });
+    const [isAiLoading, setIsAiLoading] = useState<Record<AiPatchProvider, boolean>>({ gemini: false, geminiPaid: false, chatgpt: false });
     const [quickAiProvider, setQuickAiProvider] = useState<AiPatchProvider>('gemini');
     const [isAiCommandLoading, setIsAiCommandLoading] = useState(false);
     const [suggestion, setSuggestion] = useState<SuggestionState | null>(null);
@@ -4461,7 +4483,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
         setAiHistory([]);
         replaceBulkFixReviewItems([]);
-        setAiInsertionPatches({ gemini: [], chatgpt: [] });
+        setAiInsertionPatches({ gemini: [], geminiPaid: [], chatgpt: [] });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
     }, [articleKey, replaceBulkFixReviewItems]);
 
@@ -4837,15 +4859,19 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         )
     ), [generateContextAwarePrompt]);
 
-    const handleGeminiReadyCommandsAnalyze = useCallback(async (items: ReadyCommandAnalysisBatchItem[]) => {
+    const handleGeminiReadyCommandsAnalyze = useCallback(async (
+        items: ReadyCommandAnalysisBatchItem[],
+        provider: GeminiPatchProvider = 'gemini',
+    ) => {
         if (!editor || items.length === 0) return;
-        const geminiKeys = normalizeGeminiKeys(apiKeys.gemini);
-        setIsAiLoading(prev => ({ ...prev, gemini: true }));
-        setAiResults(prev => ({ ...prev, gemini: '' }));
-        setAiInsertionPatches(prev => ({ ...prev, gemini: [] }));
+        const geminiKeys = normalizeGeminiKeys(provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini);
+        setIsAiLoading(prev => ({ ...prev, [provider]: true }));
+        setAiResults(prev => ({ ...prev, [provider]: '' }));
+        setAiInsertionPatches(prev => ({ ...prev, [provider]: [] }));
 
         try {
             const articleScope = getArticleChatStorageScope(articleKey, title);
+            const providerDisplayName = provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini';
             const results: {
                 item: ReadyCommandAnalysisBatchItem;
                 parsedResult: SmartAnalysisParsedResult;
@@ -4858,15 +4884,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     generateContextAwarePrompt(item.userPrompt, item.options),
                     { skipPatchInstructions: item.skipPatchInstructions },
                 );
-                const result = await callGeminiArticleChatAnalysis(finalPrompt, assignedKey ? [assignedKey] : undefined, currentUser, articleScope);
+                const result = await callGeminiArticleChatAnalysis(finalPrompt, assignedKey ? [assignedKey] : undefined, currentUser, articleScope, provider);
                 const parsedResult = item.skipPatchInstructions
                     ? { displayText: result, patches: [] }
                     : namespaceSmartAnalysisPatches(
-                        applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, 'gemini'), item.commandId),
+                        applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, provider), item.commandId),
                         `cmd_${index + 1}`,
                         item.commandLabel
                     );
-                logReadyCommandAnalysis('gemini', parsedResult, item);
+                logReadyCommandAnalysis(provider, parsedResult, item);
                 results.push({
                     item,
                     parsedResult,
@@ -4875,48 +4901,55 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
 
             const keyReuseNote = geminiKeys.length > 0 && items.length > geminiKeys.length
-                ? `\n\n> ملاحظة: تم توزيع ${items.length} أوامر على ${geminiKeys.length} مفاتيح Gemini متاحة، لذلك تمت إعادة استخدام بعض المفاتيح.`
+                ? `\n\n> ملاحظة: تم توزيع ${items.length} أوامر على ${geminiKeys.length} مفاتيح ${providerDisplayName} متاحة، لذلك تمت إعادة استخدام بعض المفاتيح.`
                 : '';
             const displayText = results.map((result, index) => {
-                const keyLabel = result.keyIndex ? `\n\n> Gemini API #${result.keyIndex}` : '';
+                const keyLabel = result.keyIndex ? `\n\n> ${providerDisplayName} API #${result.keyIndex}` : '';
                 return `## ${index + 1}. ${result.item.commandLabel}${keyLabel}\n\n${result.parsedResult.displayText}`;
             }).join('\n\n---\n\n') + keyReuseNote;
 
-            setAiResults(prev => ({ ...prev, gemini: displayText }));
+            setAiResults(prev => ({ ...prev, [provider]: displayText }));
             setAiInsertionPatches(prev => ({
                 ...prev,
-                gemini: results.flatMap(result => result.parsedResult.patches),
+                [provider]: results.flatMap(result => result.parsedResult.patches),
             }));
         } catch (e) {
-            setAiResults(prev => ({ ...prev, gemini: "فشل التحليل المتعدد." }));
+            setAiResults(prev => ({ ...prev, [provider]: "فشل التحليل المتعدد." }));
         } finally {
-            setIsAiLoading(prev => ({ ...prev, gemini: false }));
+            setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [apiKeys.gemini, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title]);
+    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title]);
 
-    const handleAiAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
+    const handleAiAnalyze = useCallback(async (
+        userPrompt: string,
+        options: any,
+        historyMeta?: ReadyCommandAnalysisHistoryMeta,
+        provider: GeminiPatchProvider = 'gemini',
+    ) => {
         if (!editor) return;
-        setIsAiLoading(prev => ({ ...prev, gemini: true }));
-        setAiInsertionPatches(prev => ({ ...prev, gemini: [] }));
+        setIsAiLoading(prev => ({ ...prev, [provider]: true }));
+        setAiResults(prev => ({ ...prev, [provider]: '' }));
+        setAiInsertionPatches(prev => ({ ...prev, [provider]: [] }));
         try {
             const finalPrompt = buildSmartAnalysisFinalPrompt(
                 generateContextAwarePrompt(userPrompt, options),
                 { skipPatchInstructions: historyMeta?.skipPatchInstructions },
             );
             const articleScope = getArticleChatStorageScope(articleKey, title);
-            const result = await callGeminiArticleChatAnalysis(finalPrompt, apiKeys.gemini, currentUser, articleScope);
+            const geminiKeys = provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini;
+            const result = await callGeminiArticleChatAnalysis(finalPrompt, geminiKeys, currentUser, articleScope, provider);
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result, patches: [] }
-                : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, 'gemini'), historyMeta?.commandId);
-            setAiResults(prev => ({ ...prev, gemini: parsedResult.displayText }));
-            setAiInsertionPatches(prev => ({ ...prev, gemini: parsedResult.patches }));
-            logReadyCommandAnalysis('gemini', parsedResult, historyMeta);
+                : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, provider), historyMeta?.commandId);
+            setAiResults(prev => ({ ...prev, [provider]: parsedResult.displayText }));
+            setAiInsertionPatches(prev => ({ ...prev, [provider]: parsedResult.patches }));
+            logReadyCommandAnalysis(provider, parsedResult, historyMeta);
         } catch (e) {
-            setAiResults(prev => ({ ...prev, gemini: "فشل التحليل." }));
+            setAiResults(prev => ({ ...prev, [provider]: "فشل التحليل." }));
         } finally {
-            setIsAiLoading(prev => ({ ...prev, gemini: false }));
+            setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.gemini, editor, logReadyCommandAnalysis, currentUser, articleKey, title]);
+    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -4970,12 +5003,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return result.text;
         }
 
-        return callGeminiAnalysis(prompt, apiKeys.gemini);
-    }, [apiKeys.chatgpt, apiKeys.gemini, articleKey, currentUser, quickAiProvider, title]);
+        const geminiProvider: GeminiPatchProvider = provider === 'geminiPaid' ? 'geminiPaid' : 'gemini';
+        const geminiKeys = geminiProvider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini;
+        return callGeminiAnalysis(prompt, geminiKeys, getGeminiModelForProvider(geminiProvider));
+    }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         const provider = quickAiProvider;
-        if (isAiCommandLoading || isAiLoading.gemini || isAiLoading.chatgpt || !editor) return;
+        if (isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt || !editor) return;
         setIsAiCommandLoading(true);
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         try {
@@ -5059,10 +5094,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 : prompt;
             const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً وباقتراحين مختلفين بالضبط، حتى إذا طلب نص الأمر اقتراحًا واحدًا. كل عنصر داخل suggestions يجب أن يكون النص المقترح النهائي فقط بلغة المقال دون شرح أو تسمية. الشكل: { "suggestions": ["...", "..."] }`;
             const resultJson = await callQuickProviderAnalysis(finalPrompt, provider);
+            if (isAiErrorResponseText(resultJson)) return;
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
                 const suggestions = parsed.suggestions
-                    .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
+                    .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0 && !isAiErrorResponseText(s))
                     .slice(0, 2);
                 if (suggestions.length > 0) {
                     let historyItemId: string | undefined;
@@ -5088,7 +5124,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleAnalyzeHeadings = useCallback(async () => {
         const provider = quickAiProvider;
-        if (isAiLoading.gemini || isAiLoading.chatgpt || !editor) return;
+        if (isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt || !editor) return;
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         try {
             const headings: any[] = [];
@@ -5107,6 +5143,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const promptTemplate = getEngineeringPrompt(engineeringPrompts, ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings);
             const prompt = `${buildComprehensivePrompt(promptTemplate)}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً. اجعل flaws ملاحظات عربية، واجعل suggestions عناوين مقترحة بلغة المقال فقط: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
             const resultJson = await callQuickProviderAnalysis(prompt, provider);
+            if (isAiErrorResponseText(resultJson)) return;
             const parsed = extractJson(resultJson);
             if (Array.isArray(parsed)) {
                 const usedHeadingIndexes = new Set<number>();
@@ -5193,6 +5230,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             { includeArticleTitle: false, includeArticleToc: false }
         );
         const res = await callQuickProviderAnalysis(prompt, provider);
+        if (isAiErrorResponseText(res)) {
+            throw new Error(res);
+        }
         const parsed = extractJson(res);
         const uniqueRules = getUniqueBulkFixRules(group.violations);
         const targetRules = uniqueRules.filter(itemRule => selectedRuleTitles.has(itemRule.title));
@@ -5364,6 +5404,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     { includeArticleTitle: false, includeArticleToc: false }
                 );
                 const res = await callQuickProviderAnalysis(prompt, provider);
+                if (isAiErrorResponseText(res)) {
+                    throw new Error(res);
+                }
                 const parsed = extractJson(res);
                 const uniqueRules = getUniqueBulkFixRules(group.violations);
                 const targetRules = uniqueRules.filter(rule => selectedRuleTitles.has(rule.title));

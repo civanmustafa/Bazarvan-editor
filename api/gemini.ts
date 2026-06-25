@@ -4,6 +4,8 @@ import { GoogleGenAI } from "@google/genai";
 // Keep the serverless function self-contained: Vercel executes this compiled
 // ESM file directly and cannot resolve extensionless frontend module imports.
 const GEMINI_ANALYSIS_MODEL = "gemini-2.5-flash";
+const GEMINI_PAID_ANALYSIS_MODEL = "gemini-3.1-pro-preview";
+const ALLOWED_GEMINI_MODELS = new Set([GEMINI_ANALYSIS_MODEL, GEMINI_PAID_ANALYSIS_MODEL]);
 
 type ApiResult = {
   status: number;
@@ -154,7 +156,10 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, apiKey, apiKeys, useUrlContext, history } = await readRequestBody(req) as any;
+    const { prompt, apiKey, apiKeys, useUrlContext, history, model } = await readRequestBody(req) as any;
+    const selectedModel = typeof model === "string" && ALLOWED_GEMINI_MODELS.has(model)
+      ? model
+      : GEMINI_ANALYSIS_MODEL;
     const requestKeys = Array.isArray(apiKeys)
       ? apiKeys
       : typeof apiKey === 'string'
@@ -188,7 +193,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
         try {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
-            model: GEMINI_ANALYSIS_MODEL,
+            model: selectedModel,
             contents,
             config: useUrlContext
               ? {
@@ -218,7 +223,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     return {
       status: responseStatus,
       body: {
-        error: `خطأ من Gemini API باستخدام النموذج ${GEMINI_ANALYSIS_MODEL}: ${lastError?.message || "فشلت كل مفاتيح Gemini."}`,
+        error: `خطأ من Gemini API باستخدام النموذج ${selectedModel}: ${lastError?.message || "فشلت كل مفاتيح Gemini."}`,
       },
     };
 

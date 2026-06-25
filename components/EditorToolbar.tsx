@@ -108,7 +108,7 @@ const EditorToolbar: React.FC = () => {
     const [isFindReplaceVisible, setIsFindReplaceVisible] = useState(false);
     const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   
-    const isAnyGeminiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.chatgpt;
+    const isAnyGeminiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt;
   
     const handleLanguageToggle = () => {
       const newLang = articleLanguage === 'ar' ? 'en' : 'ar';

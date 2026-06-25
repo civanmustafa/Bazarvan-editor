@@ -243,7 +243,7 @@ export interface HeadingAnalysisResult {
   suggestions: string[];
 }
 
-export type AiPatchProvider = 'gemini' | 'chatgpt';
+export type AiPatchProvider = 'gemini' | 'geminiPaid' | 'chatgpt';
 
 export type AiContentPatchOperation =
   | 'replace_block'

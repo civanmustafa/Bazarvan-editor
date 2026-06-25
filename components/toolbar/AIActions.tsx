@@ -1,5 +1,5 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
-import { BrainCircuit, Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, List, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight, ClipboardCheck, Heading1, Combine } from 'lucide-react';
+import { BadgeDollarSign, BrainCircuit, Loader2, Sparkles, PenLine, Wand2, Zap, Expand, BookText, HelpCircle, List, ListChecks, Table, Milestone, FileSignature, Tag, TestTube, ChevronRight, ClipboardCheck, Heading1, Combine } from 'lucide-react';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
 import { useUser } from '../../contexts/UserContext';
@@ -39,11 +39,14 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
 
     const TONES = [t.tones.professional, t.tones.friendly, t.tones.persuasive, t.tones.simple];
     const isChatGptQuickProvider = quickAiProvider === 'chatgpt';
-    const providerToggleTitle = isChatGptQuickProvider
-        ? (uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands')
-        : (uiLanguage === 'ar' ? 'Gemini للأوامر السريعة' : 'Gemini for quick commands');
-    const toggleQuickAiProvider = () => {
+    const isGeminiPaidQuickProvider = quickAiProvider === 'geminiPaid';
+    const chatGptToggleTitle = uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands';
+    const geminiPaidToggleTitle = uiLanguage === 'ar' ? 'Gemini Pro للأوامر السريعة' : 'Gemini Pro for quick commands';
+    const toggleChatGptProvider = () => {
         setQuickAiProvider(provider => provider === 'chatgpt' ? 'gemini' : 'chatgpt');
+    };
+    const toggleGeminiPaidProvider = () => {
+        setQuickAiProvider(provider => provider === 'geminiPaid' ? 'gemini' : 'geminiPaid');
     };
     const getPrompt = (id: string, variables: Record<string, string> = {}) => {
         const template = getEngineeringPrompt(engineeringPrompts, id);
@@ -100,12 +103,20 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                 {isAnyGeminiLoading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
             </ToolbarButton>
             <ToolbarButton
-                onClick={toggleQuickAiProvider}
-                title={providerToggleTitle}
+                onClick={toggleChatGptProvider}
+                title={chatGptToggleTitle}
                 isActive={isChatGptQuickProvider}
                 disabled={isAnyGeminiLoading}
             >
                 <BrainCircuit size={16} />
+            </ToolbarButton>
+            <ToolbarButton
+                onClick={toggleGeminiPaidProvider}
+                title={geminiPaidToggleTitle}
+                isActive={isGeminiPaidQuickProvider}
+                disabled={isAnyGeminiLoading}
+            >
+                <BadgeDollarSign size={16} />
             </ToolbarButton>
             {isAiMenuOpen && (
                 <div className={`absolute mt-2 max-h-[calc(100vh-5rem)] w-60 origin-top-left overflow-y-auto rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-[10000] ${uiLanguage === 'ar' ? 'left-0' : 'right-0'}`}>

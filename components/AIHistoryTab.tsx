@@ -98,6 +98,7 @@ const AIHistoryTab: React.FC = () => {
     };
     const providerLabel = (provider?: AIHistoryItem['provider']) => {
         if (provider === 'gemini') return 'Gemini';
+        if (provider === 'geminiPaid') return 'Gemini Pro';
         if (provider === 'chatgpt') return 'ChatGPT';
         return '';
     };

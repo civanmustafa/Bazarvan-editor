@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { BrainCircuit, PenLine, Wand2, Zap, Expand, BookText, List, ListChecks, HelpCircle, Loader2, MessageSquarePlus, Send, X, Heading1, Combine } from 'lucide-react';
+import { BadgeDollarSign, BrainCircuit, PenLine, Wand2, Zap, Expand, BookText, List, ListChecks, HelpCircle, Loader2, MessageSquarePlus, Send, X, Heading1, Combine } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
@@ -25,12 +25,15 @@ const SelectionToolbar: React.FC = () => {
   const manualTextareaRef = useRef<HTMLTextAreaElement>(null);
   const t = translations[uiLanguage];
   const isChatGptQuickProvider = quickAiProvider === 'chatgpt';
-  const providerToggleLabel = isChatGptQuickProvider
-    ? (uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands')
-    : (uiLanguage === 'ar' ? 'Gemini للأوامر السريعة' : 'Gemini for quick commands');
-  const isAnyAiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.chatgpt;
-  const toggleQuickAiProvider = () => {
+  const isGeminiPaidQuickProvider = quickAiProvider === 'geminiPaid';
+  const chatGptToggleLabel = uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands';
+  const geminiPaidToggleLabel = uiLanguage === 'ar' ? 'Gemini Pro للأوامر السريعة' : 'Gemini Pro for quick commands';
+  const isAnyAiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt;
+  const toggleChatGptProvider = () => {
     setQuickAiProvider(provider => provider === 'chatgpt' ? 'gemini' : 'chatgpt');
+  };
+  const toggleGeminiPaidProvider = () => {
+    setQuickAiProvider(provider => provider === 'geminiPaid' ? 'gemini' : 'geminiPaid');
   };
 
   const SELECTION_COMMANDS = [
@@ -206,9 +209,9 @@ const SelectionToolbar: React.FC = () => {
           </button>
         ))}
         <button
-          onClick={toggleQuickAiProvider}
+          onClick={toggleChatGptProvider}
           disabled={isAnyAiLoading || !!localLoadingAction}
-          aria-label={providerToggleLabel}
+          aria-label={chatGptToggleLabel}
           className={`group relative p-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37] disabled:text-gray-400 dark:disabled:text-gray-600 ${
             isChatGptQuickProvider
               ? 'bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
@@ -216,7 +219,20 @@ const SelectionToolbar: React.FC = () => {
           }`}
         >
           <BrainCircuit size={16} />
-          <IconTooltip label={providerToggleLabel} placement="top" />
+          <IconTooltip label={chatGptToggleLabel} placement="top" />
+        </button>
+        <button
+          onClick={toggleGeminiPaidProvider}
+          disabled={isAnyAiLoading || !!localLoadingAction}
+          aria-label={geminiPaidToggleLabel}
+          className={`group relative p-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37] disabled:text-gray-400 dark:disabled:text-gray-600 ${
+            isGeminiPaidQuickProvider
+              ? 'bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
+              : 'text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20'
+          }`}
+        >
+          <BadgeDollarSign size={16} />
+          <IconTooltip label={geminiPaidToggleLabel} placement="top" />
         </button>
         <button
           onClick={handleManualCommandToggle}

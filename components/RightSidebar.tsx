@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2, FileText, Trash2, ExternalLink, ClipboardPaste } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2, FileText, Trash2, ExternalLink, ClipboardPaste } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
@@ -10,6 +10,7 @@ import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUti
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
+import { GEMINI_ANALYSIS_MODEL, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
@@ -743,7 +744,9 @@ const RightSidebar: React.FC = () => {
     const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => loadStoredCompetitorExtractions());
     const [selectedReadyCommandIds, setSelectedReadyCommandIds] = useState<string[]>([]);
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
+    const [isGeminiPaidExpanded, setIsGeminiPaidExpanded] = useState(false);
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(false);
+    const [competitorGeminiProvider, setCompetitorGeminiProvider] = useState<'gemini' | 'geminiPaid'>('gemini');
     const [copiedPatchId, setCopiedPatchId] = useState('');
     const [manualBridgeImportText, setManualBridgeImportText] = useState('');
     const [manualBridgeStatus, setManualBridgeStatus] = useState('');
@@ -1105,6 +1108,20 @@ ${readyCommandCompetitorBlocks}`;
         handleAiAnalyze(request.userPrompt, request.options, request.historyMeta);
     };
 
+    const handleRunGeminiPaidAnalysis = () => {
+        if (selectedReadyCommands.length > 0) {
+            clearReadyCommandSelectionOnNextOpenRef.current = true;
+        }
+        setIsGeminiPaidExpanded(true);
+        if (selectedReadyCommands.length > 1) {
+            handleGeminiReadyCommandsAnalyze(readyCommandBatchItems, 'geminiPaid');
+            return;
+        }
+
+        const request = buildCurrentSmartAnalysisRequest();
+        handleAiAnalyze(request.userPrompt, request.options, request.historyMeta, 'geminiPaid');
+    };
+
     const handleRunChatGptAnalysis = () => {
         if (selectedReadyCommands.length > 0) {
             clearReadyCommandSelectionOnNextOpenRef.current = true;
@@ -1159,6 +1176,7 @@ ${readyCommandCompetitorBlocks}`;
         useUrlContext: boolean,
         source: CompetitorExtractionSource,
         fallbackUrl: string,
+        provider: 'gemini' | 'geminiPaid' = competitorGeminiProvider,
     ) => {
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), COMPETITOR_TIMEOUT_MS);
@@ -1175,7 +1193,8 @@ ${readyCommandCompetitorBlocks}`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt,
-                    apiKeys: apiKeys.gemini.filter(Boolean),
+                    apiKeys: (provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini).filter(Boolean),
+                    model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL,
                     useUrlContext,
                 }),
                 signal: controller.signal,
@@ -1580,8 +1599,8 @@ ${readyCommandCompetitorBlocks}`;
                             {selectedReadyCommands.length > 1 && (
                                 <p className="mt-1.5 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
                                     {t.locale === 'ar'
-                                        ? `سيتم إرسال ${selectedReadyCommands.length} أوامر إلى Gemini دفعة واحدة، مع توزيعها على ${Math.max(1, apiKeys.gemini.filter(Boolean).length)} مفاتيح API متاحة.`
-                                        : `${selectedReadyCommands.length} commands will be sent to Gemini together, distributed across ${Math.max(1, apiKeys.gemini.filter(Boolean).length)} available API keys.`}
+                                        ? `سيتم إرسال ${selectedReadyCommands.length} أوامر دفعة واحدة إلى مزود Gemini الذي تختاره، مع توزيعها على مفاتيح API المتاحة له.`
+                                        : `${selectedReadyCommands.length} commands will be sent together to the Gemini provider you choose, distributed across its available API keys.`}
                                 </p>
                             )}
                         </div>
@@ -1596,10 +1615,14 @@ ${readyCommandCompetitorBlocks}`;
                         </div>
 
                         <div className="flex flex-col gap-2">
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-4 gap-2">
                                 <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                     <span className="text-xs font-bold">Gemini</span>
+                                </button>
+                                <button onClick={handleRunGeminiPaidAnalysis} disabled={isAiLoading.geminiPaid} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
+                                    {isAiLoading.geminiPaid ? <Wand2 size={16} className="animate-spin" /> : <BadgeDollarSign size={16} />}
+                                    <span className="text-xs font-bold">Pro</span>
                                 </button>
                                 <button onClick={handleRunChatGptAnalysis} disabled={isAiLoading.chatgpt} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
@@ -1657,6 +1680,19 @@ ${readyCommandCompetitorBlocks}`;
                                     </div>
                                 )}
                             </div>
+                            {/* Results Gemini Pro */}
+                            <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
+                                <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsGeminiPaidExpanded(!isGeminiPaidExpanded)}>
+                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج Gemini Pro</span>
+                                    <ChevronDown size={14} className={isGeminiPaidExpanded ? 'rotate-180' : ''} />
+                                </div>
+                                {isGeminiPaidExpanded && (
+                                    <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
+                                        {isAiLoading.geminiPaid ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div> :
+                                         aiResults.geminiPaid ? renderAnalysisResult('geminiPaid', aiResults.geminiPaid) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
+                                    </div>
+                                )}
+                            </div>
                             {/* Results ChatGPT */}
                             <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
                                 <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsChatGptExpanded(!isChatGptExpanded)}>
@@ -1683,6 +1719,38 @@ ${readyCommandCompetitorBlocks}`;
                 <div>
                     <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">{tRs.competitors}</h3>
                     <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{tRs.competitorsHint}</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                    <div className="mb-2 text-xs font-bold text-gray-700 dark:text-gray-200">
+                        {t.locale === 'ar' ? 'نموذج Gemini لاستخراج المنافسين' : 'Gemini model for competitor extraction'}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setCompetitorGeminiProvider('gemini')}
+                            className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors ${
+                                competitorGeminiProvider === 'gemini'
+                                    ? 'bg-[#d4af37] text-white'
+                                    : 'border border-[#d4af37]/35 bg-[#d4af37]/10 text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]'
+                            }`}
+                        >
+                            <Sparkles size={14} />
+                            Gemini
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setCompetitorGeminiProvider('geminiPaid')}
+                            className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors ${
+                                competitorGeminiProvider === 'geminiPaid'
+                                    ? 'bg-[#d4af37] text-white'
+                                    : 'border border-[#d4af37]/35 bg-[#d4af37]/10 text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]'
+                            }`}
+                        >
+                            <BadgeDollarSign size={14} />
+                            Gemini Pro
+                        </button>
+                    </div>
                 </div>
 
                 <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
