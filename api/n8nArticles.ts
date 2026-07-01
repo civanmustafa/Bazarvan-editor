@@ -23,6 +23,8 @@ type IngestResolution = {
   assignedToId: string | null;
   accessProfiles: ResolvedProfile[];
   accessRole: AccessRole;
+  showTo: string;
+  visibleToEmailsCsv: string;
 };
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
@@ -157,15 +159,29 @@ const getFirstString = (source: Record<string, any>, keys: string[]): string => 
 };
 
 const normalizeToken = (value: unknown): string => toTrimmedString(value).toLowerCase().replace(/\s+/g, '-');
+const normalizeChoiceToken = (value: unknown): string => toTrimmedString(value)
+  .normalize('NFKC')
+  .toLowerCase()
+  .replace(/[ًٌٍَُِّْـ]/g, '')
+  .replace(/[أإآ]/g, 'ا')
+  .replace(/ة/g, 'ه')
+  .replace(/ى/g, 'ي')
+  .replace(/[\s_]+/g, '-')
+  .replace(/[|]+/g, '/')
+  .replace(/[()]/g, '')
+  .trim();
 
-const toStringList = (value: unknown): string[] => {
+const TERM_SEPARATOR_PATTERN = /[\n\r,،;؛|*\/#•·]+|(?<!\d)\.(?!\d)/g;
+const DEFAULT_LIST_SEPARATOR_PATTERN = /[\n\r,،;؛|]+/g;
+
+const toStringList = (value: unknown, separatorPattern: RegExp = DEFAULT_LIST_SEPARATOR_PATTERN): string[] => {
   if (Array.isArray(value)) {
-    return value.flatMap(item => toStringList(item));
+    return value.flatMap(item => toStringList(item, separatorPattern));
   }
 
   if (typeof value === 'string') {
     return value
-      .split(/[\n,،;؛|]+/)
+      .split(separatorPattern)
       .map(item => item.trim())
       .filter(Boolean);
   }
@@ -177,6 +193,58 @@ const toStringList = (value: unknown): string[] => {
   }
 
   return [];
+};
+
+const resolveMappedChoice = <T extends string>(
+  value: unknown,
+  aliases: Record<T, string[]>,
+  fallback: T,
+): T => {
+  const token = normalizeChoiceToken(value);
+  if (!token) return fallback;
+
+  for (const [targetValue, targetAliases] of Object.entries(aliases) as [T, string[]][]) {
+    const acceptedTokens = [targetValue, ...targetAliases].map(normalizeChoiceToken);
+    if (acceptedTokens.includes(token)) return targetValue;
+  }
+
+  return fallback;
+};
+
+const PAGE_TYPE_ALIASES: Record<string, string[]> = {
+  article: ['article', 'article/guide', 'مقالة/دليل', 'مقاله/دليل', 'مقالة', 'مقاله', 'مقال'],
+  news: ['news', 'خبر', 'اخبار', 'أخبار'],
+  service: ['service', 'service-page', 'خدمة', 'خدمه', 'صفحة خدمة', 'صفحه خدمه'],
+  category: ['category', 'category-page', 'Product/Service Category', 'تصنيف منتجات/خدمات', 'تصنيف', 'فئة', 'فئه'],
+  comparison: ['comparison', 'comparison-page', 'مقارنة', 'مقارنه', 'صفحة مقارنة', 'صفحه مقارنه'],
+  product: ['product', 'product-page', 'منتج', 'صفحة منتج', 'صفحه منتج'],
+  landing: ['landing', 'landing-page', 'هبوط', 'صفحة هبوط', 'صفحه هبوط'],
+  guide: ['guide', 'دليل', 'مرشد'],
+};
+
+const OBJECTIVE_ALIASES: Record<string, string[]> = {
+  educate: ['educate', 'Explain and educate', 'شرح وتثقيف', 'شرح', 'تثقيف', 'تعليم'],
+  compare: ['compare', 'Compare and help choose', 'مقارنة ومساعدة على الاختيار', 'اختيار', 'مقارنة', 'مقارنه'],
+  convert: ['convert', 'Direct conversion', 'تحويل مباشر', 'تحويل', 'بيع', 'شراء', 'حجز', 'leads', 'bookings', 'sell'],
+  'category-support': ['category-support', 'Support content for a category page', 'محتوى داعم لصفحة تصنيف', 'دعم التصنيف', 'داعم'],
+  trust: ['trust', 'Build trust and reduce objections', 'بناء الثقة وتقليل الاعتراضات', 'الثقة', 'ثقة', 'اعتراضات'],
+  support: ['support', 'Support after decision or use', 'دعم بعد القرار أو الاستخدام', 'دعم', 'مساعدة', 'retention'],
+};
+
+const AUDIENCE_SCOPE_ALIASES: Record<string, string[]> = {
+  local: ['local', 'City or local area', 'مدينة أو منطقة محلية', 'محلي', 'مدينة', 'مدينه', 'منطقة محلية', 'منطقه محليه'],
+  country: ['country', 'One specific country', 'دولة واحدة محددة', 'دولة', 'دوله', 'بلد'],
+  regional: ['regional', 'Region', 'إقليم', 'اقليم', 'منطقة', 'منطقه'],
+  global: ['global', 'Global', 'عالمي', 'عام'],
+};
+
+const SEARCH_INTENT_ALIASES: Record<string, string[]> = {
+  informational: ['informational', 'Explain and learn', 'شرح وتعلّم', 'شرح وتعلم', 'شرح', 'معلوماتي', 'تعليمي', 'info'],
+  commercial: ['commercial', 'Compare and choose', 'مقارنة واختيار', 'اختيار', 'تجاري', 'مقارنة'],
+  'commercial-support': ['commercial-support', 'Supportive commercial information', 'معلومات تجارية داعمة', 'تجاري داعم'],
+  transactional: ['transactional', 'Take an action / buy', 'تنفيذ إجراء/شراء', 'تنفيذ', 'شراء', 'حجز'],
+  navigational: ['navigational', 'Reach a specific brand or page', 'الوصول إلى علامة أو صفحة محددة', 'وصول', 'تنقل'],
+  'support-intent': ['support-intent', 'Solve a problem or learn usage', 'حل مشكلة أو معرفة طريقة الاستخدام', 'حل', 'مساعدة', 'استخدام'],
 };
 
 const uniqueStrings = (values: string[]): string[] => {
@@ -261,23 +329,23 @@ const getKeywordsPayload = (body: Record<string, any>) => {
   const primary = getFirstString(body, ['primaryKeyword', 'primary_keyword']) || getFirstString(keywords, ['primary', 'main', 'primaryKeyword', 'primary_keyword']);
   const company = getFirstString(body, ['company', 'companyName', 'company_name', 'brand']) || getFirstString(keywords, ['company', 'companyName', 'company_name', 'brand']);
   const secondaries = uniqueStrings([
-    ...toStringList(keywords.secondaries),
-    ...toStringList(keywords.synonyms),
-    ...toStringList(keywords.alternativeForms),
-    ...toStringList(keywords.alternatives),
-    ...toStringList(body.secondaries),
-    ...toStringList(body.synonyms),
-    ...toStringList(body.alternativeForms),
-    ...toStringList(body.alternative_forms),
-    ...toStringList(body.alternatives),
+    ...toStringList(keywords.secondaries, TERM_SEPARATOR_PATTERN),
+    ...toStringList(keywords.synonyms, TERM_SEPARATOR_PATTERN),
+    ...toStringList(keywords.alternativeForms, TERM_SEPARATOR_PATTERN),
+    ...toStringList(keywords.alternatives, TERM_SEPARATOR_PATTERN),
+    ...toStringList(body.secondaries, TERM_SEPARATOR_PATTERN),
+    ...toStringList(body.synonyms, TERM_SEPARATOR_PATTERN),
+    ...toStringList(body.alternativeForms, TERM_SEPARATOR_PATTERN),
+    ...toStringList(body.alternative_forms, TERM_SEPARATOR_PATTERN),
+    ...toStringList(body.alternatives, TERM_SEPARATOR_PATTERN),
   ]);
   const lsi = uniqueStrings([
-    ...toStringList(keywords.lsi),
-    ...toStringList(keywords.lsiKeywords),
-    ...toStringList(keywords.lsi_keywords),
-    ...toStringList(body.lsi),
-    ...toStringList(body.lsiKeywords),
-    ...toStringList(body.lsi_keywords),
+    ...toStringList(keywords.lsi, TERM_SEPARATOR_PATTERN),
+    ...toStringList(keywords.lsiKeywords, TERM_SEPARATOR_PATTERN),
+    ...toStringList(keywords.lsi_keywords, TERM_SEPARATOR_PATTERN),
+    ...toStringList(body.lsi, TERM_SEPARATOR_PATTERN),
+    ...toStringList(body.lsiKeywords, TERM_SEPARATOR_PATTERN),
+    ...toStringList(body.lsi_keywords, TERM_SEPARATOR_PATTERN),
   ]);
 
   return compactObject({
@@ -299,13 +367,17 @@ const getGoalContextPayload = (body: Record<string, any>) => {
           ? body.page_context
           : {};
 
+  const pageType = getFirstString(body, ['pageType', 'page_type']) || getFirstString(source, ['pageType', 'page_type', 'type']);
+  const objective = getFirstString(body, ['objective', 'pageObjective', 'page_objective']) || getFirstString(source, ['objective', 'pageObjective', 'page_objective']);
+  const audienceScope = getFirstString(body, ['audienceScope', 'audience_scope']) || getFirstString(source, ['audienceScope', 'audience_scope', 'scope']);
+  const searchIntent = getFirstString(body, ['searchIntent', 'search_intent', 'intent']) || getFirstString(source, ['searchIntent', 'search_intent', 'intent']);
+
   return compactObject({
-    pageType: getFirstString(body, ['pageType', 'page_type']) || getFirstString(source, ['pageType', 'page_type', 'type']),
-    objective: getFirstString(body, ['objective', 'pageObjective', 'page_objective']) || getFirstString(source, ['objective', 'pageObjective', 'page_objective']),
-    audienceScope: getFirstString(body, ['audienceScope', 'audience_scope']) || getFirstString(source, ['audienceScope', 'audience_scope', 'scope']),
+    pageType: resolveMappedChoice(pageType, PAGE_TYPE_ALIASES, 'article'),
+    objective: resolveMappedChoice(objective, OBJECTIVE_ALIASES, 'educate'),
+    audienceScope: resolveMappedChoice(audienceScope, AUDIENCE_SCOPE_ALIASES, 'global'),
     targetCountry: getFirstString(body, ['targetCountry', 'target_country', 'targetLocation', 'target_location']) || getFirstString(source, ['targetCountry', 'target_country', 'targetLocation', 'target_location', 'country']),
-    targetAudience: getFirstString(body, ['targetAudience', 'target_audience', 'audience']) || getFirstString(source, ['targetAudience', 'target_audience', 'audience']),
-    searchIntent: getFirstString(body, ['searchIntent', 'search_intent', 'intent']) || getFirstString(source, ['searchIntent', 'search_intent', 'intent']),
+    searchIntent: resolveMappedChoice(searchIntent, SEARCH_INTENT_ALIASES, 'informational'),
   });
 };
 
@@ -316,6 +388,8 @@ const getTargetIdentifiers = (body: Record<string, any>): string[] => uniqueStri
   ...toStringList(body.visible_to_users),
   ...toStringList(body.visibleToEmails),
   ...toStringList(body.visible_to_emails),
+  ...toStringList(body.visibleToEmailsCsv),
+  ...toStringList(body.visible_to_emails_csv),
   ...toStringList(body.userEmail),
   ...toStringList(body.user_email),
   ...toStringList(body.ownerEmail),
@@ -378,7 +452,8 @@ const resolveIngestAccess = async (
   supabase: SupabaseAdmin,
   body: Record<string, any>,
 ): Promise<IngestResolution> => {
-  const showToToken = normalizeToken(body.showTo || body.show_to || body.audienceVisibility || body.audience_visibility);
+  const rawShowTo = toTrimmedString(body.showTo || body.show_to || body.audienceVisibility || body.audience_visibility);
+  const showToToken = normalizeToken(rawShowTo);
   const explicitVisibility = normalizeVisibility(body.visibility);
   const selectedProfiles = await lookupProfiles(supabase, getTargetIdentifiers(body));
   const ownerProfile = await resolveProfileBySingleIdentifier(supabase, body.ownerId || body.owner_id || body.ownerEmail || body.owner_email);
@@ -395,6 +470,7 @@ const resolveIngestAccess = async (
   if (accessProfilesById.size > 0 && !PUBLIC_TARGETS.has(showToToken) && !SHARED_TARGETS.has(showToToken)) {
     visibility = 'private';
   }
+  const showTo = rawShowTo || (accessProfilesById.size > 0 ? 'selected-users' : 'all');
 
   return {
     visibility,
@@ -402,7 +478,58 @@ const resolveIngestAccess = async (
     assignedToId: assignedProfile?.id || null,
     accessProfiles: [...accessProfilesById.values()],
     accessRole: normalizeAccessRole(body.accessRole || body.access_role),
+    showTo,
+    visibleToEmailsCsv: [...accessProfilesById.values()].map(profile => profile.email).filter(Boolean).join(', '),
   };
+};
+
+const getListValue = (source: Record<string, any>, keys: string[]): string[] => {
+  for (const key of keys) {
+    const values = toStringList(source[key]);
+    if (values.length > 0) return values;
+  }
+  return [];
+};
+
+const normalizeCompetitorInputs = (body: Record<string, any>) => {
+  const competitorRows = Array.isArray(body.competitors) ? body.competitors : [];
+  const urlsFromLists = getListValue(body, ['competitorUrls', 'competitor_urls', 'competitorLinks', 'competitor_links']);
+  const htmlsFromLists = getListValue(body, ['competitorHtmls', 'competitor_htmls']);
+  const textsFromLists = getListValue(body, ['competitorTexts', 'competitor_texts']);
+  const urls: string[] = [];
+  const htmls: string[] = [];
+  const texts: string[] = [];
+
+  for (let index = 0; index < 3; index += 1) {
+    const row = isRecord(competitorRows[index]) ? competitorRows[index] : {};
+    urls[index] = toTrimmedString(
+      row.url ||
+      row.link ||
+      body[`competitor${index + 1}Url`] ||
+      body[`competitor_${index + 1}_url`] ||
+      urlsFromLists[index]
+    );
+    htmls[index] = toTrimmedString(
+      row.html ||
+      body[`competitor${index + 1}Html`] ||
+      body[`competitor_${index + 1}_html`] ||
+      htmlsFromLists[index]
+    );
+    texts[index] = toTrimmedString(
+      row.text ||
+      row.plainText ||
+      row.plain_text ||
+      body[`competitor${index + 1}Text`] ||
+      body[`competitor_${index + 1}_text`] ||
+      body[`competitor${index + 1}PlainText`] ||
+      body[`competitor_${index + 1}_plain_text`] ||
+      textsFromLists[index]
+    );
+  }
+
+  return urls.some(Boolean) || htmls.some(Boolean) || texts.some(Boolean)
+    ? { urls, htmls, texts }
+    : null;
 };
 
 const buildStats = (plainText: string, rawStats: unknown) => {
@@ -438,8 +565,10 @@ const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string,
   const executionId = getFirstString(body, ['executionId', 'execution_id']) || getFirstString(isRecord(body.metadata) ? body.metadata : {}, ['executionId', 'execution_id']);
   const access = await resolveIngestAccess(supabase, body);
   const pageContextRaw = toTrimmedString(body.pageContext || body.page_context);
-  const audienceRaw = toTrimmedString(body.audience);
   const contentJson = isRecord(body.contentJson) ? body.contentJson : isRecord(body.content_json) ? body.content_json : {};
+  const articleLanguage = normalizeLanguage(body.articleLanguage || body.article_language || body.language);
+  const articleStatus = normalizeStatus(body.status);
+  const competitors = normalizeCompetitorInputs(body);
 
   return {
     article: {
@@ -448,14 +577,14 @@ const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string,
       assigned_to: access.assignedToId,
       source: 'n8n',
       visibility: access.visibility,
-      status: normalizeStatus(body.status),
+      status: articleStatus,
       title,
       content_json: contentJson,
       content_html: contentHtml || null,
       plain_text: plainText || stripHtml(contentHtml),
       keywords: getKeywordsPayload(body),
       goal_context: getGoalContextPayload(body),
-      article_language: normalizeLanguage(body.articleLanguage || body.article_language || body.language),
+      article_language: articleLanguage,
       analysis: isRecord(body.analysis) ? body.analysis : null,
       stats: buildStats(plainText || stripHtml(contentHtml), body.stats),
       n8n_workflow_id: workflowId || null,
@@ -468,13 +597,23 @@ const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string,
         executionId,
         externalId,
         pageContextRaw,
-        audienceRaw,
+        n8nSettings: compactObject({
+          showTo: access.showTo,
+          visibility: access.visibility,
+          accessRole: access.accessRole,
+          visibleToEmailsCsv: access.visibleToEmailsCsv,
+          articleLanguage,
+          status: articleStatus,
+        }),
         visibleTo: access.accessProfiles.map(profile => compactObject({
           id: profile.id,
           email: profile.email,
           fullName: profile.full_name,
           role: access.accessRole,
         })),
+        attachments: compactObject({
+          competitors,
+        }),
         requestMetadata: isRecord(body.metadata) ? body.metadata : undefined,
       }),
     },

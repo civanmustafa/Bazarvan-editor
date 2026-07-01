@@ -24,6 +24,17 @@ article_access
 
 حتى يستطيع n8n اختيار من تظهر له المقالة.
 
+كما أصبحت لوحة الأدمن تعرض على بطاقة كل مقالة، وداخل تفاصيل المقالة، إعدادات n8n التالية:
+
+```text
+showTo
+visibility
+accessRole
+visibleToEmailsCsv
+articleLanguage
+status
+```
+
 ## كيف يتم اختيار من يرى المقالة؟
 
 لديك 3 طرق:
@@ -130,13 +141,143 @@ lsi_keywords
     "objective": "educate",
     "audienceScope": "global",
     "targetCountry": "",
-    "targetAudience": "أصحاب الشركات الصغيرة",
     "searchIntent": "informational"
   }
 }
 ```
 
 مهم: إذا كان أي حقل فارغا، لا تحتاج إرساله أصلا. وإذا أرسله n8n فارغا، سيقوم المحرر بتجاهله عند الحفظ.
+
+تم حذف `targetAudience` من مسار n8n، لذلك لا ترسله.
+
+## القيم التي يمكن إرسالها لسياق الصفحة
+
+يمكنك إرسال القيم الداخلية الإنجليزية أو نفس النص الظاهر في واجهة المحرر.
+
+`pageType` يقبل مثلا:
+
+```text
+article أو مقالة/دليل
+news أو خبر
+service أو خدمة
+category أو تصنيف منتجات/خدمات
+comparison أو مقارنة
+product أو منتج
+landing أو هبوط
+guide أو دليل
+```
+
+`objective` يقبل مثلا:
+
+```text
+educate أو شرح وتثقيف
+compare أو مقارنة ومساعدة على الاختيار
+convert أو تحويل مباشر
+category-support أو محتوى داعم لصفحة تصنيف
+trust أو بناء الثقة وتقليل الاعتراضات
+support أو دعم بعد القرار أو الاستخدام
+```
+
+`audienceScope` يقبل:
+
+```text
+local أو مدينة أو منطقة محلية
+country أو دولة واحدة محددة
+regional أو إقليم
+global أو عالمي
+```
+
+`searchIntent` يقبل:
+
+```text
+informational أو شرح وتعلّم
+commercial أو مقارنة واختيار
+commercial-support أو معلومات تجارية داعمة
+transactional أو تنفيذ إجراء/شراء
+navigational أو الوصول إلى علامة أو صفحة محددة
+support-intent أو حل مشكلة أو معرفة طريقة الاستخدام
+```
+
+## فواصل الصيغ البديلة و LSI
+
+حقلا:
+
+```text
+alternativeForms
+lsi
+```
+
+يمكن أن يصلا كقائمة JSON أو كنص واحد. إذا أرسلتهما كنص واحد، سيتعرف المحرر على الفواصل الشائعة مثل:
+
+```text
+,
+،
+;
+؛
+|
+*
+/
+#
+.
+سطر جديد
+```
+
+مثال:
+
+```json
+{
+  "alternativeForms": "صيغة أولى * صيغة ثانية / صيغة ثالثة، صيغة رابعة",
+  "lsi": "LSI 1 / LSI 2 * LSI 3. LSI 4"
+}
+```
+
+## إرسال المنافسين من n8n
+
+يمكن إرسال حتى 3 منافسين مع المقالة.
+
+الطريقة المنظمة:
+
+```json
+{
+  "competitors": [
+    {
+      "url": "https://example.com/competitor-1",
+      "text": "نص المنافس الأول"
+    },
+    {
+      "url": "https://example.com/competitor-2",
+      "text": "نص المنافس الثاني"
+    },
+    {
+      "url": "https://example.com/competitor-3",
+      "text": "نص المنافس الثالث"
+    }
+  ]
+}
+```
+
+أو يمكن إرسالها كحقول منفصلة:
+
+```json
+{
+  "competitor1Url": "https://example.com/1",
+  "competitor1Text": "نص المنافس الأول",
+  "competitor2Url": "https://example.com/2",
+  "competitor2Text": "نص المنافس الثاني",
+  "competitor3Url": "https://example.com/3",
+  "competitor3Text": "نص المنافس الثالث"
+}
+```
+
+يمكن أيضا إرسال HTML:
+
+```json
+{
+  "competitor1Html": "<main>HTML المنافس الأول</main>"
+}
+```
+
+عند فتح المقالة داخل المحرر، سيتم استعادة روابط ونصوص المنافسين داخل تبويب المنافسين.
 
 ## القيم المسموحة
 
@@ -321,8 +462,44 @@ Authorization: Bearer YOUR_N8N_INGEST_TOKEN
     "pageType": "article",
     "objective": "educate",
     "audienceScope": "global",
-    "targetAudience": "الجمهور المستهدف",
     "searchIntent": "informational"
+  },
+  "competitors": [
+    {
+      "url": "https://example.com/competitor-1",
+      "text": "نص المنافس الأول"
+    },
+    {
+      "url": "https://example.com/competitor-2",
+      "text": "نص المنافس الثاني"
+    },
+    {
+      "url": "https://example.com/competitor-3",
+      "text": "نص المنافس الثالث"
+    }
+  ]
+}
+```
+
+## مثال JSON يستخدم القيم العربية من واجهة المحرر
+
+```json
+{
+  "externalId": "arabic-values-example-001",
+  "title": "مقالة بقيم عربية",
+  "plainText": "هذا نص المقالة.",
+  "articleLanguage": "ar",
+  "showTo": "all",
+  "keywords": {
+    "primary": "الكلمة الرئيسية",
+    "alternativeForms": "صيغة بديلة 1 * صيغة بديلة 2 / صيغة بديلة 3",
+    "lsi": "كلمة LSI 1، كلمة LSI 2 / كلمة LSI 3"
+  },
+  "goalContext": {
+    "pageType": "مقالة/دليل",
+    "objective": "شرح وتثقيف",
+    "audienceScope": "عالمي",
+    "searchIntent": "شرح وتعلّم"
   }
 }
 ```

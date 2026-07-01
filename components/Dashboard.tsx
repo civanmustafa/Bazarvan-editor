@@ -92,6 +92,57 @@ const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   <h3 className="mb-3 text-sm font-black text-gray-700 dark:text-gray-200">{children}</h3>
 );
 
+const isRecord = (value: unknown): value is Record<string, any> => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
+);
+
+const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
+  const metadata = isRecord(article?.metadata) ? article.metadata : {};
+  const settings = isRecord(metadata.n8nSettings) ? metadata.n8nSettings : {};
+  const visibleTo = Array.isArray(metadata.visibleTo) ? metadata.visibleTo : [];
+  const visibleToEmailsCsv = typeof settings.visibleToEmailsCsv === 'string' && settings.visibleToEmailsCsv.trim()
+    ? settings.visibleToEmailsCsv.trim()
+    : visibleTo
+      .map(item => isRecord(item) && typeof item.email === 'string' ? item.email.trim() : '')
+      .filter(Boolean)
+      .join(', ');
+
+  return {
+    showTo: typeof settings.showTo === 'string' ? settings.showTo : '',
+    visibility: typeof settings.visibility === 'string' ? settings.visibility : article?.visibility || '',
+    accessRole: typeof settings.accessRole === 'string' ? settings.accessRole : '',
+    visibleToEmailsCsv,
+    articleLanguage: typeof settings.articleLanguage === 'string' ? settings.articleLanguage : article?.articleLanguage || '',
+    status: typeof settings.status === 'string' ? settings.status : article?.status || '',
+  };
+};
+
+const getArticleCompetitors = (
+  article: RemoteArticleActivity,
+  snapshot?: ArticleStorageSnapshot | null,
+) => {
+  const metadata = isRecord(article.metadata) ? article.metadata : {};
+  const metadataAttachments = isRecord(metadata.attachments) ? metadata.attachments : {};
+  const competitors = snapshot?.attachments?.competitors || (isRecord(metadataAttachments.competitors) ? metadataAttachments.competitors : null);
+  const urls = Array.isArray(competitors?.urls) ? competitors.urls : [];
+  const texts = Array.isArray(competitors?.texts) ? competitors.texts : [];
+  const htmls = Array.isArray(competitors?.htmls) ? competitors.htmls : [];
+
+  return [0, 1, 2].map(index => ({
+    index: index + 1,
+    url: typeof urls[index] === 'string' ? urls[index] : '',
+    text: typeof texts[index] === 'string' ? texts[index] : '',
+    html: typeof htmls[index] === 'string' ? htmls[index] : '',
+  })).filter(item => item.url.trim() || item.text.trim() || item.html.trim());
+};
+
+const N8nSettingChip: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+  <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-[#d4af37]/10 px-2 py-1 text-[11px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
+    <span className="shrink-0 text-gray-500 dark:text-gray-400">{label}:</span>
+    <span className="min-w-0 truncate">{value || '-'}</span>
+  </span>
+);
+
 const AdminUsersTable: React.FC<{
   profiles: RemoteProfile[];
   articles: RemoteArticleActivity[];
@@ -189,6 +240,8 @@ const ArticleDetailsModal: React.FC<{
   const analysisSummary = snapshot?.analysisSummary;
   const secondaryKeywords = keywords?.secondaries?.filter(keyword => keyword.trim()) || [];
   const lsiKeywords = keywords?.lsi?.filter(keyword => keyword.trim()) || [];
+  const n8nSettings = getN8nSettings(article);
+  const competitors = getArticleCompetitors(article, snapshot);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
@@ -225,6 +278,18 @@ const ArticleDetailsModal: React.FC<{
             <DetailRow label="عدد مرات الحفظ" value={article.saveCount} />
             <DetailRow label="آخر حفظ" value={article.lastSaved ? formatIstanbulDateTime(article.lastSaved, t.locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'} />
             <DetailRow label="الوقت المستغرق" value={formatSeconds(article.timeSpentSeconds, t)} />
+          </div>
+
+          <div className="mt-6">
+            <SectionTitle>إعدادات المقالة من n8n</SectionTitle>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+              <DetailRow label="showTo" value={n8nSettings.showTo} />
+              <DetailRow label="visibility" value={n8nSettings.visibility} />
+              <DetailRow label="accessRole" value={n8nSettings.accessRole} />
+              <DetailRow label="visibleToEmailsCsv" value={n8nSettings.visibleToEmailsCsv} />
+              <DetailRow label="articleLanguage" value={n8nSettings.articleLanguage} />
+              <DetailRow label="status" value={n8nSettings.status} />
+            </div>
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -270,6 +335,25 @@ const ArticleDetailsModal: React.FC<{
               </pre>
             </div>
           </div>
+
+          {competitors.length > 0 && (
+            <div className="mt-6">
+              <SectionTitle>محتوى المنافسين من n8n</SectionTitle>
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                {competitors.map(competitor => (
+                  <div key={competitor.index} className="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+                    <div className="text-xs font-black text-gray-700 dark:text-gray-200">المنافس {competitor.index}</div>
+                    <div className="mt-2 text-[11px] font-bold text-gray-400">الرابط</div>
+                    <div className="mt-1 break-words text-xs font-semibold text-[#8a6f1d] dark:text-[#f2d675]">{competitor.url || '-'}</div>
+                    <div className="mt-3 text-[11px] font-bold text-gray-400">النص</div>
+                    <div className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-6 text-gray-600 dark:text-gray-300">
+                      {competitor.text || (competitor.html ? 'تم استلام HTML فقط.' : '-')}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="mt-6">
             <SectionTitle>معاينة النص</SectionTitle>
@@ -324,10 +408,11 @@ interface ArticleItemProps {
     onDetails?: () => void;
     onDelete: () => void;
     onRename: (newTitle: string) => boolean | Promise<boolean>;
+    showAdminMetadata?: boolean;
     t: typeof translations.ar;
 }
 
-const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLabel, onLoad, onDetails, onDelete, onRename, t }) => {
+const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLabel, onLoad, onDetails, onDelete, onRename, showAdminMetadata = false, t }) => {
     const [isRenaming, setIsRenaming] = useState(false);
     const [newTitle, setNewTitle] = useState(title);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -404,6 +489,15 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLab
     
     const untranslatedTitle = title || t.untitled;
     const primaryKeyword = activity.keywords?.primary?.trim();
+    const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
+    const shouldShowN8nSettings = showAdminMetadata && (
+        Boolean(n8nSettings.showTo) ||
+        Boolean(n8nSettings.visibility) ||
+        Boolean(n8nSettings.accessRole) ||
+        Boolean(n8nSettings.visibleToEmailsCsv) ||
+        Boolean(n8nSettings.articleLanguage) ||
+        Boolean(n8nSettings.status)
+    );
 
     return (
         <li 
@@ -453,6 +547,16 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLab
                         </span>
                     )}
                 </div>
+                {shouldShowN8nSettings && (
+                    <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-2 dark:border-[#3a3a3a]">
+                        <N8nSettingChip label="showTo" value={n8nSettings.showTo} />
+                        <N8nSettingChip label="visibility" value={n8nSettings.visibility} />
+                        <N8nSettingChip label="accessRole" value={n8nSettings.accessRole} />
+                        <N8nSettingChip label="visibleToEmailsCsv" value={n8nSettings.visibleToEmailsCsv} />
+                        <N8nSettingChip label="articleLanguage" value={n8nSettings.articleLanguage} />
+                        <N8nSettingChip label="status" value={n8nSettings.status} />
+                    </div>
+                )}
             </div>
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex-shrink-0">
                 {onDetails && (
@@ -1014,6 +1118,7 @@ const Dashboard: React.FC = () => {
                                     onDetails={() => { void handleShowArticleDetails(activity); }}
                                     onDelete={() => { void handleDeleteArticle(activity.id); }}
                                     onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
+                                    showAdminMetadata={isAdmin}
                                     t={t}
                                 />
                             ))}

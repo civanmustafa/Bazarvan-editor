@@ -243,11 +243,12 @@ export const saveRemoteArticleSnapshot = async (
   if (options.articleId) {
     const { data: currentRow, error: readError } = await supabase
       .from('articles')
-      .select('save_count')
+      .select('save_count,metadata')
       .eq('id', options.articleId)
       .single();
 
     if (readError) throw readError;
+    const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
 
     const { data, error } = await supabase
       .from('articles')
@@ -262,7 +263,14 @@ export const saveRemoteArticleSnapshot = async (
         analysis: payload.analysis,
         stats: payload.stats,
         last_saved_at: payload.last_saved_at,
-        metadata: payload.metadata,
+        metadata: {
+          ...currentMetadata,
+          ...payload.metadata,
+          attachments: {
+            ...(isRecord(currentMetadata.attachments) ? currentMetadata.attachments : {}),
+            ...(isRecord(payload.metadata.attachments) ? payload.metadata.attachments : {}),
+          },
+        },
         save_count: (toNumber((currentRow as any)?.save_count) || 0) + 1,
       })
       .eq('id', options.articleId)
