@@ -44,6 +44,12 @@ export type RemoteArticleSettingsPatch = Partial<{
   visibleToEmailsCsv: string;
 }>;
 
+export type RemoteArticleTrashInfo = {
+  deletedAt: string;
+  deletedBy?: string;
+  deletedScope?: 'global' | 'user';
+};
+
 export type RemoteProfile = {
   id: string;
   email: string | null;
@@ -183,10 +189,22 @@ export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => 
   const { data, error } = await supabase
     .from('articles')
     .select('*')
-    .order('last_saved_at', { ascending: false });
+    .order('updated_at', { ascending: false });
 
   if (error) throw error;
   return ((data || []) as ArticleRow[]).map(toRemoteArticleActivity);
+};
+
+const getRemoteArticleById = async (articleId: string): Promise<RemoteArticleActivity> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('articles')
+    .select('*')
+    .eq('id', articleId)
+    .single();
+
+  if (error) throw error;
+  return toRemoteArticleActivity(data as ArticleRow);
 };
 
 export const listRemoteProfiles = async (): Promise<RemoteProfile[]> => {
@@ -536,6 +554,160 @@ export const updateRemoteArticleSettings = async (
   }
 
   return toRemoteArticleActivity(data as ArticleRow);
+};
+
+export const getArticleTrashInfo = (
+  article: Pick<RemoteArticleActivity, 'metadata'>,
+  userId?: string | null,
+): RemoteArticleTrashInfo | null => {
+  const metadata = isRecord(article.metadata) ? article.metadata : {};
+  const trash = isRecord(metadata.trash) ? metadata.trash : {};
+  const globalDeletedAt = typeof trash.deletedAt === 'string' ? trash.deletedAt : '';
+  if (globalDeletedAt) {
+    return {
+      deletedAt: globalDeletedAt,
+      deletedBy: typeof trash.deletedBy === 'string' ? trash.deletedBy : undefined,
+      deletedScope: 'global',
+    };
+  }
+
+  if (!userId) return null;
+  const deletedFor = isRecord(trash.deletedFor) ? trash.deletedFor : {};
+  const userTrash = isRecord(deletedFor[userId]) ? deletedFor[userId] : {};
+  const userDeletedAt = typeof userTrash.deletedAt === 'string' ? userTrash.deletedAt : '';
+  return userDeletedAt
+    ? {
+        deletedAt: userDeletedAt,
+        deletedBy: typeof userTrash.deletedBy === 'string' ? userTrash.deletedBy : undefined,
+        deletedScope: 'user',
+      }
+    : null;
+};
+
+const getCurrentArticleMetadata = async (articleId: string): Promise<Record<string, any>> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('articles')
+    .select('metadata')
+    .eq('id', articleId)
+    .single();
+
+  if (error) throw error;
+  return isRecord((data as any)?.metadata) ? (data as any).metadata : {};
+};
+
+const updateArticleMetadataFallback = async (
+  articleId: string,
+  metadata: Record<string, any>,
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from('articles')
+    .update({ metadata })
+    .eq('id', articleId);
+
+  if (error) throw error;
+};
+
+const getCurrentUserTrashContext = async (): Promise<{ userId: string; isAdmin: boolean }> => {
+  const supabase = getSupabaseClient();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user?.id) {
+    throw userError || new Error('Authentication is required.');
+  }
+
+  const { data: isAdminData } = await supabase.rpc('is_admin');
+  return {
+    userId: userData.user.id,
+    isAdmin: isAdminData === true,
+  };
+};
+
+export const moveRemoteArticleToTrash = async (articleId: string): Promise<RemoteArticleActivity> => {
+  const supabase = getSupabaseClient();
+
+  try {
+    const { error } = await supabase.rpc('move_article_to_dashboard_trash', {
+      target_article_id: articleId,
+    });
+    if (error) throw error;
+  } catch (error: any) {
+    if (error?.code !== 'PGRST202') throw error;
+
+    const { userId, isAdmin } = await getCurrentUserTrashContext();
+    const metadata = await getCurrentArticleMetadata(articleId);
+    const trash = isRecord(metadata.trash) ? metadata.trash : {};
+    const deletedAt = new Date().toISOString();
+    const deletedFor = isRecord(trash.deletedFor) ? trash.deletedFor : {};
+
+    await updateArticleMetadataFallback(articleId, {
+      ...metadata,
+      trash: isAdmin
+        ? {
+            ...trash,
+            deletedAt,
+            deletedBy: userId,
+            deletedScope: 'global',
+          }
+        : {
+            ...trash,
+            deletedFor: {
+              ...deletedFor,
+              [userId]: {
+                deletedAt,
+                deletedBy: userId,
+                deletedScope: 'user',
+              },
+            },
+          },
+    });
+  }
+
+  return getRemoteArticleById(articleId);
+};
+
+export const restoreRemoteArticleFromTrash = async (articleId: string): Promise<RemoteArticleActivity> => {
+  const supabase = getSupabaseClient();
+
+  try {
+    const { error } = await supabase.rpc('restore_article_from_dashboard_trash', {
+      target_article_id: articleId,
+    });
+    if (error) throw error;
+  } catch (error: any) {
+    if (error?.code !== 'PGRST202') throw error;
+
+    const { userId, isAdmin } = await getCurrentUserTrashContext();
+    const metadata = await getCurrentArticleMetadata(articleId);
+    const trash = isRecord(metadata.trash) ? metadata.trash : {};
+
+    if (isAdmin) {
+      const {
+        deletedAt: _deletedAt,
+        deletedBy: _deletedBy,
+        deletedScope: _deletedScope,
+        ...restTrash
+      } = trash;
+      const nextMetadata = Object.keys(restTrash).length > 0
+        ? { ...metadata, trash: restTrash }
+        : Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'trash'));
+      await updateArticleMetadataFallback(articleId, nextMetadata);
+    } else {
+      const deletedFor = isRecord(trash.deletedFor) ? trash.deletedFor : {};
+      const nextDeletedFor = Object.fromEntries(
+        Object.entries(deletedFor).filter(([deletedUserId]) => deletedUserId !== userId),
+      );
+      const nextTrash = Object.keys(nextDeletedFor).length > 0
+        ? { ...trash, deletedFor: nextDeletedFor }
+        : Object.fromEntries(Object.entries(trash).filter(([key]) => key !== 'deletedFor'));
+      const nextMetadata = Object.keys(nextTrash).length > 0
+        ? { ...metadata, trash: nextTrash }
+        : Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'trash'));
+      await updateArticleMetadataFallback(articleId, nextMetadata);
+    }
+  }
+
+  return getRemoteArticleById(articleId);
 };
 
 export const deleteRemoteArticle = async (articleId: string): Promise<void> => {

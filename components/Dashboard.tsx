@@ -10,11 +10,13 @@ import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
 import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
 import {
-    deleteRemoteArticle,
+    getArticleTrashInfo,
     listRemoteProfiles,
     listRemoteArticles,
     loadRemoteArticleSnapshot,
+    moveRemoteArticleToTrash,
     renameRemoteArticle,
+    restoreRemoteArticleFromTrash,
     updateRemoteArticleSettings,
     type RemoteProfile,
     type RemoteArticleActivity,
@@ -83,6 +85,16 @@ const getProfileKeywords = (articles: RemoteArticleActivity[]): string[] => {
   return Array.from(keywords).slice(0, 4);
 };
 
+const getArticleSortTime = (article: RemoteArticleActivity): number => Math.max(
+  new Date(article.updatedAt || 0).getTime(),
+  new Date(article.lastSaved || 0).getTime(),
+  new Date(article.createdAt || 0).getTime(),
+);
+
+const sortArticlesByLastChange = (articles: RemoteArticleActivity[]): RemoteArticleActivity[] => (
+  [...articles].sort((left, right) => getArticleSortTime(right) - getArticleSortTime(left))
+);
+
 const DetailRow: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
   <div className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
     <div className="text-[11px] font-bold text-gray-400">{label}</div>
@@ -119,6 +131,11 @@ const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
 };
 
 type N8nSettingFieldKey = keyof Pick<RemoteArticleSettingsPatch, 'visibility' | 'accessRole' | 'articleLanguage' | 'status'>;
+type N8nDisplayFieldKey = N8nSettingFieldKey | 'visibleToEmailsCsv';
+
+const isEditableN8nSettingField = (field: N8nDisplayFieldKey): field is N8nSettingFieldKey => (
+  field !== 'visibleToEmailsCsv'
+);
 
 const N8N_SETTING_OPTIONS: Record<N8nSettingFieldKey, { value: string; label: string }[]> = {
   visibility: [
@@ -163,7 +180,7 @@ const getArticleCompetitors = (
 };
 
 const N8nSettingChip: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-  <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-[#d4af37]/10 px-2 py-1 text-[11px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
+  <span className="inline-flex min-w-0 max-w-[210px] items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]" title={String(value || '-')}>
     <span className="shrink-0 text-gray-500 dark:text-gray-400">{label}:</span>
     <span className="min-w-0 truncate">{value || '-'}</span>
   </span>
@@ -176,7 +193,7 @@ const EditableN8nSettingField: React.FC<{
   onChange: (field: N8nSettingFieldKey, value: string) => void;
 }> = ({ field, value, disabled, onChange }) => (
   <label
-    className="inline-flex min-w-[132px] max-w-[190px] items-center gap-1 rounded-md bg-[#d4af37]/10 px-2 py-1 text-[11px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
+    className="inline-flex min-w-[116px] max-w-[170px] items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
     onClick={event => event.stopPropagation()}
   >
     <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
@@ -185,7 +202,7 @@ const EditableN8nSettingField: React.FC<{
       disabled={disabled}
       onClick={event => event.stopPropagation()}
       onChange={event => onChange(field, event.target.value)}
-      className="min-w-0 flex-1 cursor-pointer rounded border border-transparent bg-transparent text-[11px] font-black text-[#8a6f1d] outline-none focus:border-[#d4af37] disabled:cursor-wait disabled:opacity-60 dark:text-[#f2d675]"
+      className="min-w-0 flex-1 cursor-pointer rounded border border-transparent bg-transparent text-[10px] font-black text-[#8a6f1d] outline-none focus:border-[#d4af37] disabled:cursor-wait disabled:opacity-60 dark:text-[#f2d675]"
     >
       {!value && <option value="">-</option>}
       {N8N_SETTING_OPTIONS[field].map(option => (
@@ -445,9 +462,9 @@ const SeoScoreIndicator: React.FC<{ score: number }> = ({ score }) => {
   };
 
   return (
-    <div className={`flex items-center justify-center flex-col w-16 h-16 rounded-full border-2 ${getScoreColor()}`}>
-      <span className="text-xl font-bold">{Math.round(score)}</span>
-      <span className="text-xs font-medium -mt-1 opacity-80">SEO</span>
+    <div className={`flex h-10 w-10 flex-col items-center justify-center rounded-full border ${getScoreColor()}`}>
+      <span className="text-sm font-bold leading-4">{Math.round(score)}</span>
+      <span className="text-[9px] font-medium opacity-80">SEO</span>
     </div>
   );
 };
@@ -460,10 +477,12 @@ interface ArticleItemProps {
     onLoad: () => void;
     onDetails?: () => void;
     onDelete: () => void;
+    onRestore?: () => void;
     onRename: (newTitle: string) => boolean | Promise<boolean>;
     onUpdateSettings?: (articleId: string, patch: RemoteArticleSettingsPatch) => Promise<boolean>;
-    visibleSettingFields?: N8nSettingFieldKey[];
+    visibleSettingFields?: N8nDisplayFieldKey[];
     editableSettingFields?: N8nSettingFieldKey[];
+    isTrashView?: boolean;
     showAdminMetadata?: boolean;
     t: typeof translations.ar;
 }
@@ -475,10 +494,12 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     onLoad,
     onDetails,
     onDelete,
+    onRestore,
     onRename,
     onUpdateSettings,
     visibleSettingFields = [],
     editableSettingFields = [],
+    isTrashView = false,
     showAdminMetadata = false,
     t,
 }) => {
@@ -496,7 +517,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
 
     const handleDelete = (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (window.confirm(t.confirmDeleteArticle.replace('{title}', title))) {
+        if (window.confirm(`هل تريد نقل "${title}" إلى سلة المهملات؟`)) {
             onDelete();
         }
     };
@@ -549,7 +570,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
 
     if (isRenaming) {
       return (
-          <li className="p-3 bg-gray-100 dark:bg-[#3C3C3C] rounded-lg ring-2 ring-[#d4af37]">
+          <li className="p-2.5 bg-gray-100 dark:bg-[#3C3C3C] rounded-md ring-2 ring-[#d4af37]">
               <form onSubmit={handleRenameSubmit}>
                   <input
                       ref={inputRef}
@@ -584,24 +605,25 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const shouldShowN8nSettings = fieldsToShow.length > 0 && (
         Boolean(n8nSettings.visibility) ||
         Boolean(n8nSettings.accessRole) ||
+        Boolean(n8nSettings.visibleToEmailsCsv) ||
         Boolean(n8nSettings.articleLanguage) ||
         Boolean(n8nSettings.status)
     );
 
     return (
-        <li 
-            className="group flex items-center gap-4 p-4 bg-white dark:bg-[#2A2A2A] rounded-lg transition-all duration-200 hover:shadow-md hover:border-gray-300 dark:hover:border-[#4A4A4A] cursor-pointer border border-gray-200 dark:border-[#3C3C3C]"
+        <li
+            className="group flex items-center gap-2 p-2 bg-white dark:bg-[#2A2A2A] rounded-md transition-all duration-200 hover:shadow-md hover:border-gray-300 dark:hover:border-[#4A4A4A] cursor-pointer border border-gray-200 dark:border-[#3C3C3C]"
             onClick={onLoad}
             role="button"
             tabIndex={0}
             onKeyPress={(e) => e.key === 'Enter' && onLoad()}
         >
             <SeoScoreIndicator score={seoScore} />
-            <div className="flex-grow space-y-2">
-                <h4 className="font-bold text-md text-[#333333] dark:text-gray-200 truncate" title={untranslatedTitle}>
+            <div className="min-w-0 flex-grow space-y-0.5">
+                <h4 className="truncate text-[13px] font-bold text-[#333333] dark:text-gray-200" title={untranslatedTitle}>
                     {untranslatedTitle}
                 </h4>
-                <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
                     {activity.lastSaved && (
                          <span className="flex items-center gap-1.5" title={t.lastSaved}>
                             <RefreshCw size={12} />
@@ -617,7 +639,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{ownerLabel}</span>
                     )}
                 </div>
-                <div className="pt-2 border-t border-gray-100 dark:border-[#3a3a3a] flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <div className="flex items-center gap-2 border-t border-gray-100 pt-1 text-[10px] text-gray-500 dark:border-[#3a3a3a] dark:text-gray-400">
                     <span className="flex items-center gap-1.5" title={t.keywordViolations}>
                         <Key size={12} className="text-yellow-500" />
                         <span>{activity.stats?.keywordViolations ?? 0}</span>
@@ -637,53 +659,69 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     )}
                 </div>
                 {shouldShowN8nSettings && (
-                    <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-2 dark:border-[#3a3a3a]">
+                    <div className="flex flex-wrap items-center gap-1 border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
                         {fieldsToShow.map(field => {
-                            const isEditable = Boolean(onUpdateSettings && editableSettingFields.includes(field));
-                            return isEditable ? (
-                                <EditableN8nSettingField
-                                    key={field}
-                                    field={field}
-                                    value={String(n8nSettings[field] || '')}
-                                    disabled={savingSettingField !== null}
-                                    onChange={handleSettingChange}
-                                />
-                            ) : (
-                                <N8nSettingChip key={field} label={field} value={n8nSettings[field]} />
-                            );
+                            if (onUpdateSettings && isEditableN8nSettingField(field) && editableSettingFields.includes(field)) {
+                                return (
+                                    <EditableN8nSettingField
+                                        key={field}
+                                        field={field}
+                                        value={String(n8nSettings[field] || '')}
+                                        disabled={savingSettingField !== null}
+                                        onChange={handleSettingChange}
+                                    />
+                                );
+                            }
+                            return <N8nSettingChip key={field} label={field} value={n8nSettings[field]} />;
                         })}
                     </div>
                 )}
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex-shrink-0">
+            <div className="flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                {isTrashView && onRestore && (
+                    <button
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onRestore();
+                        }}
+                        className="p-1.5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                        title="استعادة المقالة"
+                    >
+                        <RefreshCw size={14} />
+                    </button>
+                )}
                 {onDetails && (
                     <button
                         onClick={(event) => {
                             event.stopPropagation();
                             onDetails();
                         }}
-                        className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                        className="p-1.5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
                         title="تفاصيل المقالة"
                     >
-                        <Eye size={16} />
+                        <Eye size={14} />
                     </button>
                 )}
-                 <button
-                    onClick={handleStartRename}
-                    className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
-                    title={t.renameArticle}
-                >
-                    <Edit size={16} />
-                </button>
-                <button
-                    onClick={handleDelete}
-                    className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-red-600 dark:hover:bg-[#d4af37]/20 dark:hover:text-red-400"
-                    title={t.deleteArticle}
-                >
-                    <Trash2 size={16} />
-                </button>
+                {!isTrashView && (
+                    <>
+                      <button
+                          onClick={handleStartRename}
+                          className="p-1.5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                          title={t.renameArticle}
+                      >
+                          <Edit size={14} />
+                      </button>
+                      <button
+                          onClick={handleDelete}
+                          className="p-1.5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-red-600 dark:hover:bg-[#d4af37]/20 dark:hover:text-red-400"
+                          title="نقل إلى سلة المهملات"
+                      >
+                          <Trash2 size={14} />
+                      </button>
+                    </>
+                )}
             </div>
-             <ChevronRight size={20} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
+             <ChevronRight size={18} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
         </li>
     );
 };
@@ -726,6 +764,7 @@ const Dashboard: React.FC = () => {
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
+  const [isTrashVisible, setIsTrashVisible] = useState(false);
   const [filters, setFilters] = useState({
     dateFrom: '',
     dateTo: '',
@@ -751,7 +790,7 @@ const Dashboard: React.FC = () => {
         listRemoteArticles(),
         isAdmin ? listRemoteProfiles() : Promise.resolve([]),
       ]);
-      setRemoteArticles(articles);
+      setRemoteArticles(sortArticlesByLastChange(articles));
       setProfiles(profileRows);
     } catch (error) {
       console.error('Failed to load Supabase articles:', error);
@@ -786,8 +825,29 @@ const Dashboard: React.FC = () => {
   };
   
   const handleDeleteArticle = async (articleId: string) => {
-    await deleteRemoteArticle(articleId);
-    await refreshData();
+    try {
+      const trashedArticle = await moveRemoteArticleToTrash(articleId);
+      setRemoteArticles(prev => sortArticlesByLastChange(prev.map(article => (
+        article.id === articleId ? trashedArticle : article
+      ))));
+      setDetailArticle(prev => (prev?.id === articleId ? trashedArticle : prev));
+    } catch (error) {
+      console.error(`Failed to move article "${articleId}" to trash:`, error);
+      alert('تعذر نقل المقالة إلى سلة المهملات. حاول مرة أخرى.');
+    }
+  };
+
+  const handleRestoreArticle = async (articleId: string) => {
+    try {
+      const restoredArticle = await restoreRemoteArticleFromTrash(articleId);
+      setRemoteArticles(prev => sortArticlesByLastChange(prev.map(article => (
+        article.id === articleId ? restoredArticle : article
+      ))));
+      setDetailArticle(prev => (prev?.id === articleId ? restoredArticle : prev));
+    } catch (error) {
+      console.error(`Failed to restore article "${articleId}" from trash:`, error);
+      alert('تعذر استعادة المقالة. حاول مرة أخرى.');
+    }
   };
   
   const handleRenameArticle = async (articleId: string, newTitle: string): Promise<boolean> => {
@@ -809,9 +869,9 @@ const Dashboard: React.FC = () => {
   ): Promise<boolean> => {
     try {
       const updatedArticle = await updateRemoteArticleSettings(articleId, patch);
-      setRemoteArticles(prev => prev.map(article => (
+      setRemoteArticles(prev => sortArticlesByLastChange(prev.map(article => (
         article.id === articleId ? updatedArticle : article
-      )));
+      ))));
       setDetailArticle(prev => (prev?.id === articleId ? updatedArticle : prev));
       return true;
     } catch (error) {
@@ -845,8 +905,8 @@ const Dashboard: React.FC = () => {
   const handleExportHtml = () => {
     if (!currentUser) return;
     const exportArticles = selectedProfileId
-      ? remoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
-      : remoteArticles;
+      ? activeRemoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
+      : activeRemoteArticles;
 
     const formatSecondsDetailed = (seconds: number): string => {
       if (!seconds || seconds < 60) return `${Math.floor(seconds || 0)} ${t.seconds}`;
@@ -880,7 +940,7 @@ const Dashboard: React.FC = () => {
           </thead>
           <tbody>
               ${[...exportArticles]
-              .sort((a, b) => new Date(b.lastSaved || 0).getTime() - new Date(a.lastSaved || 0).getTime())
+              .sort((a, b) => getArticleSortTime(b) - getArticleSortTime(a))
               .map((activity) => `
                   <tr>
                       <td>${activity.title || t.untitled}</td>
@@ -953,7 +1013,7 @@ const Dashboard: React.FC = () => {
   const handleConfirmClearData = async () => {
     if (!currentUserId) return;
     const ownedArticles = remoteArticles.filter(article => article.ownerId === currentUserId || article.createdBy === currentUserId);
-    await Promise.all(ownedArticles.map(article => deleteRemoteArticle(article.id)));
+    await Promise.all(ownedArticles.map(article => moveRemoteArticleToTrash(article.id)));
     await refreshData();
     setIsConfirmModalOpen(false);
   };
@@ -1012,11 +1072,18 @@ const Dashboard: React.FC = () => {
   }, [currentUserData, t.unsavedGeminiKey]);
   const totalGeminiUses = geminiUsageRows.reduce((sum, row) => sum + row.count, 0);
   const selectedProfile = selectedProfileId ? profiles.find(profile => profile.id === selectedProfileId) : undefined;
+  const activeRemoteArticles = useMemo(() => (
+    remoteArticles.filter(article => !getArticleTrashInfo(article, currentUserId))
+  ), [remoteArticles, currentUserId]);
+  const trashedRemoteArticles = useMemo(() => (
+    remoteArticles.filter(article => Boolean(getArticleTrashInfo(article, currentUserId)))
+  ), [remoteArticles, currentUserId]);
+  const displayedRemoteArticles = isTrashVisible ? trashedRemoteArticles : activeRemoteArticles;
   const scopedArticles = useMemo(() => (
     selectedProfileId
-      ? remoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
-      : remoteArticles
-  ), [remoteArticles, selectedProfileId]);
+      ? displayedRemoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
+      : displayedRemoteArticles
+  ), [displayedRemoteArticles, selectedProfileId]);
   const scopedLastSaved = getLatestSavedAt(scopedArticles);
   const scopedTotalTime = scopedArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
 
@@ -1120,7 +1187,7 @@ const Dashboard: React.FC = () => {
         {isAdmin && (
           <AdminUsersTable
             profiles={profiles}
-            articles={remoteArticles}
+            articles={activeRemoteArticles}
             selectedProfileId={selectedProfileId}
             onSelectProfile={setSelectedProfileId}
             t={t}
@@ -1132,7 +1199,11 @@ const Dashboard: React.FC = () => {
                 <div className="flex justify-between items-center mb-4">
                     <div>
                         <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
-                            {isAdmin ? `مقالات ${selectedProfile ? getProfileLabel(selectedProfile) : 'كل المستخدمين'}` : t.yourRecentArticles}
+                            {isTrashVisible
+                              ? `سلة المهملات ${selectedProfile ? `- ${getProfileLabel(selectedProfile)}` : ''}`
+                              : isAdmin
+                                ? `مقالات ${selectedProfile ? getProfileLabel(selectedProfile) : 'كل المستخدمين'}`
+                                : t.yourRecentArticles}
                         </h2>
                         {isAdmin && (
                             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -1141,6 +1212,14 @@ const Dashboard: React.FC = () => {
                         )}
                     </div>
                     <div className="flex items-center gap-4">
+                        <button
+                            onClick={() => setIsTrashVisible(prev => !prev)}
+                            className={`flex items-center gap-2 text-sm ${isTrashVisible ? 'font-bold text-[#8a6f1d] dark:text-[#f2d675]' : 'text-gray-500 hover:text-[#d4af37] dark:text-gray-400 dark:hover:text-[#f2d675]'}`}
+                            title={isTrashVisible ? 'عرض المقالات النشطة' : 'عرض سلة المهملات'}
+                        >
+                            <Trash2 size={14} />
+                            <span>{isTrashVisible ? 'المقالات' : `السلة (${trashedRemoteArticles.length})`}</span>
+                        </button>
                         <button
                             onClick={() => setIsFilterVisible(!isFilterVisible)}
                             className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-[#d4af37] dark:hover:text-[#f2d675]"
@@ -1219,9 +1298,9 @@ const Dashboard: React.FC = () => {
                 )}
 
                 {filteredArticles.length > 0 ? (
-                    <ul className="space-y-3">
+                    <ul className="space-y-2">
                          {filteredArticles
-                            .sort((a, b) => new Date(b.lastSaved || 0).getTime() - new Date(a.lastSaved || 0).getTime())
+                            .sort((a, b) => getArticleSortTime(b) - getArticleSortTime(a))
                             .map((activity) => (
                                 <ArticleListItem
                                     key={activity.id}
@@ -1231,14 +1310,16 @@ const Dashboard: React.FC = () => {
                                     onLoad={() => onLoadArticle(activity.title, activity)}
                                     onDetails={() => { void handleShowArticleDetails(activity); }}
                                     onDelete={() => { void handleDeleteArticle(activity.id); }}
+                                    onRestore={() => { void handleRestoreArticle(activity.id); }}
                                     onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
                                     onUpdateSettings={handleUpdateArticleSettings}
                                     visibleSettingFields={isAdmin
-                                      ? ['visibility', 'accessRole', 'articleLanguage', 'status']
-                                      : ['status', 'accessRole']}
+                                      ? ['visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage', 'status']
+                                      : ['status', 'accessRole', 'visibleToEmailsCsv']}
                                     editableSettingFields={isAdmin
                                       ? ['visibility', 'accessRole', 'articleLanguage', 'status']
                                       : ['status']}
+                                    isTrashView={isTrashVisible}
                                     showAdminMetadata={isAdmin}
                                     t={t}
                                 />
@@ -1248,10 +1329,12 @@ const Dashboard: React.FC = () => {
                     <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-300 dark:border-[#3C3C3C] rounded-lg text-center">
                         <Book size={40} className="text-gray-400 dark:text-gray-500 mb-2"/>
                         <h3 className="text-lg font-semibold text-gray-600 dark:text-gray-300">
-                            {scopedArticles.length > 0 ? t.noArticlesMatchFilter : (isArticlesLoading ? 'جار تحميل المقالات...' : t.noArticlesYet)}
+                            {scopedArticles.length > 0
+                              ? t.noArticlesMatchFilter
+                              : (isArticlesLoading ? 'جار تحميل المقالات...' : (isTrashVisible ? 'سلة المهملات فارغة' : t.noArticlesYet))}
                         </h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {scopedArticles.length > 0 ? t.tryAdjustingFilters : t.clickNewArticleToStart}
+                            {scopedArticles.length > 0 ? t.tryAdjustingFilters : (isTrashVisible ? 'المقالات التي تنقلها للسلة ستظهر هنا.' : t.clickNewArticleToStart)}
                         </p>
                     </div>
                 )}
