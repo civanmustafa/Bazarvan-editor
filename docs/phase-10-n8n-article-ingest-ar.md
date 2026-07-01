@@ -27,10 +27,8 @@ article_access
 كما أصبحت لوحة الأدمن تعرض على بطاقة كل مقالة، وداخل تفاصيل المقالة، إعدادات n8n التالية:
 
 ```text
-showTo
 visibility
 accessRole
-visibleToEmailsCsv
 articleLanguage
 status
 ```
@@ -42,14 +40,6 @@ status
 ### 1. تظهر لكل المستخدمين المسجلين
 
 أرسل:
-
-```json
-{
-  "showTo": "all"
-}
-```
-
-أو:
 
 ```json
 {
@@ -98,7 +88,7 @@ status
   "plainText": "نص المقالة بدون HTML",
   "articleLanguage": "ar",
   "status": "draft",
-  "showTo": "all"
+  "visibility": "shared"
 }
 ```
 
@@ -451,7 +441,7 @@ Authorization: Bearer YOUR_N8N_INGEST_TOKEN
   "contentHtml": "<h1>عنوان المقالة</h1><p>هذا نص المقالة.</p>",
   "articleLanguage": "ar",
   "status": "draft",
-  "showTo": "all",
+  "visibility": "shared",
   "keywords": {
     "primary": "الكلمة الرئيسية",
     "company": "اسم الشركة",
@@ -489,7 +479,7 @@ Authorization: Bearer YOUR_N8N_INGEST_TOKEN
   "title": "مقالة بقيم عربية",
   "plainText": "هذا نص المقالة.",
   "articleLanguage": "ar",
-  "showTo": "all",
+  "visibility": "shared",
   "keywords": {
     "primary": "الكلمة الرئيسية",
     "alternativeForms": "صيغة بديلة 1 * صيغة بديلة 2 / صيغة بديلة 3",
@@ -556,7 +546,7 @@ curl -X POST "https://YOUR_EDITOR_SUBDOMAIN/api/n8n/articles" \
     "title": "اختبار من curl",
     "plainText": "هذه مقالة اختبارية من السيرفر.",
     "articleLanguage": "ar",
-    "showTo": "all",
+    "visibility": "shared",
     "keywords": {
       "primary": "اختبار المحرر",
       "alternativeForms": ["تجربة المحرر"],
@@ -585,7 +575,7 @@ curl -X POST "https://YOUR_EDITOR_SUBDOMAIN/api/n8n/articles" \
 3. ادخل إلى لوحة التحكم.
 4. اضغط تحديث إذا لم تظهر مباشرة.
 5. ستظهر المقالة حسب اختيار الظهور:
-   - `showTo: all` تظهر للجميع.
+   - `visibility: shared` تظهر للجميع داخل المحرر.
    - `visibleToEmails` تظهر للمستخدمين المحددين.
    - الأدمن يراها دائما.
 

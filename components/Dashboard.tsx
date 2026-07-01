@@ -99,19 +99,10 @@ const isRecord = (value: unknown): value is Record<string, any> => (
 const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
   const metadata = isRecord(article?.metadata) ? article.metadata : {};
   const settings = isRecord(metadata.n8nSettings) ? metadata.n8nSettings : {};
-  const visibleTo = Array.isArray(metadata.visibleTo) ? metadata.visibleTo : [];
-  const visibleToEmailsCsv = typeof settings.visibleToEmailsCsv === 'string' && settings.visibleToEmailsCsv.trim()
-    ? settings.visibleToEmailsCsv.trim()
-    : visibleTo
-      .map(item => isRecord(item) && typeof item.email === 'string' ? item.email.trim() : '')
-      .filter(Boolean)
-      .join(', ');
 
   return {
-    showTo: typeof settings.showTo === 'string' ? settings.showTo : '',
     visibility: typeof settings.visibility === 'string' ? settings.visibility : article?.visibility || '',
     accessRole: typeof settings.accessRole === 'string' ? settings.accessRole : '',
-    visibleToEmailsCsv,
     articleLanguage: typeof settings.articleLanguage === 'string' ? settings.articleLanguage : article?.articleLanguage || '',
     status: typeof settings.status === 'string' ? settings.status : article?.status || '',
   };
@@ -283,10 +274,8 @@ const ArticleDetailsModal: React.FC<{
           <div className="mt-6">
             <SectionTitle>إعدادات المقالة من n8n</SectionTitle>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-              <DetailRow label="showTo" value={n8nSettings.showTo} />
               <DetailRow label="visibility" value={n8nSettings.visibility} />
               <DetailRow label="accessRole" value={n8nSettings.accessRole} />
-              <DetailRow label="visibleToEmailsCsv" value={n8nSettings.visibleToEmailsCsv} />
               <DetailRow label="articleLanguage" value={n8nSettings.articleLanguage} />
               <DetailRow label="status" value={n8nSettings.status} />
             </div>
@@ -491,10 +480,8 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLab
     const primaryKeyword = activity.keywords?.primary?.trim();
     const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
     const shouldShowN8nSettings = showAdminMetadata && (
-        Boolean(n8nSettings.showTo) ||
         Boolean(n8nSettings.visibility) ||
         Boolean(n8nSettings.accessRole) ||
-        Boolean(n8nSettings.visibleToEmailsCsv) ||
         Boolean(n8nSettings.articleLanguage) ||
         Boolean(n8nSettings.status)
     );
@@ -549,10 +536,8 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLab
                 </div>
                 {shouldShowN8nSettings && (
                     <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-2 dark:border-[#3a3a3a]">
-                        <N8nSettingChip label="showTo" value={n8nSettings.showTo} />
                         <N8nSettingChip label="visibility" value={n8nSettings.visibility} />
                         <N8nSettingChip label="accessRole" value={n8nSettings.accessRole} />
-                        <N8nSettingChip label="visibleToEmailsCsv" value={n8nSettings.visibleToEmailsCsv} />
                         <N8nSettingChip label="articleLanguage" value={n8nSettings.articleLanguage} />
                         <N8nSettingChip label="status" value={n8nSettings.status} />
                     </div>

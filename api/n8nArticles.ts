@@ -23,8 +23,6 @@ type IngestResolution = {
   assignedToId: string | null;
   accessProfiles: ResolvedProfile[];
   accessRole: AccessRole;
-  showTo: string;
-  visibleToEmailsCsv: string;
 };
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
@@ -42,8 +40,6 @@ class IngestError extends Error {
 const ALLOWED_VISIBILITIES = new Set<ArticleVisibility>(['private', 'shared', 'team', 'public']);
 const ALLOWED_STATUSES = new Set<ArticleStatus>(['draft', 'in_review', 'published', 'archived']);
 const ALLOWED_ACCESS_ROLES = new Set<AccessRole>(['viewer', 'editor']);
-const SHARED_TARGETS = new Set(['all', 'all-users', 'everyone', 'shared', 'team', 'كل المستخدمين', 'الجميع', 'مشترك']);
-const PUBLIC_TARGETS = new Set(['public', 'عام']);
 
 const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
@@ -388,8 +384,6 @@ const getTargetIdentifiers = (body: Record<string, any>): string[] => uniqueStri
   ...toStringList(body.visible_to_users),
   ...toStringList(body.visibleToEmails),
   ...toStringList(body.visible_to_emails),
-  ...toStringList(body.visibleToEmailsCsv),
-  ...toStringList(body.visible_to_emails_csv),
   ...toStringList(body.userEmail),
   ...toStringList(body.user_email),
   ...toStringList(body.ownerEmail),
@@ -452,8 +446,6 @@ const resolveIngestAccess = async (
   supabase: SupabaseAdmin,
   body: Record<string, any>,
 ): Promise<IngestResolution> => {
-  const rawShowTo = toTrimmedString(body.showTo || body.show_to || body.audienceVisibility || body.audience_visibility);
-  const showToToken = normalizeToken(rawShowTo);
   const explicitVisibility = normalizeVisibility(body.visibility);
   const selectedProfiles = await lookupProfiles(supabase, getTargetIdentifiers(body));
   const ownerProfile = await resolveProfileBySingleIdentifier(supabase, body.ownerId || body.owner_id || body.ownerEmail || body.owner_email);
@@ -464,13 +456,7 @@ const resolveIngestAccess = async (
   if (ownerProfile) accessProfilesById.set(ownerProfile.id, ownerProfile);
   if (assignedProfile) accessProfilesById.set(assignedProfile.id, assignedProfile);
 
-  let visibility: ArticleVisibility = explicitVisibility || 'shared';
-  if (PUBLIC_TARGETS.has(showToToken)) visibility = 'public';
-  if (SHARED_TARGETS.has(showToToken)) visibility = 'shared';
-  if (accessProfilesById.size > 0 && !PUBLIC_TARGETS.has(showToToken) && !SHARED_TARGETS.has(showToToken)) {
-    visibility = 'private';
-  }
-  const showTo = rawShowTo || (accessProfilesById.size > 0 ? 'selected-users' : 'all');
+  const visibility: ArticleVisibility = explicitVisibility || (accessProfilesById.size > 0 ? 'private' : 'shared');
 
   return {
     visibility,
@@ -478,8 +464,6 @@ const resolveIngestAccess = async (
     assignedToId: assignedProfile?.id || null,
     accessProfiles: [...accessProfilesById.values()],
     accessRole: normalizeAccessRole(body.accessRole || body.access_role),
-    showTo,
-    visibleToEmailsCsv: [...accessProfilesById.values()].map(profile => profile.email).filter(Boolean).join(', '),
   };
 };
 
@@ -598,10 +582,8 @@ const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string,
         externalId,
         pageContextRaw,
         n8nSettings: compactObject({
-          showTo: access.showTo,
           visibility: access.visibility,
           accessRole: access.accessRole,
-          visibleToEmailsCsv: access.visibleToEmailsCsv,
           articleLanguage,
           status: articleStatus,
         }),

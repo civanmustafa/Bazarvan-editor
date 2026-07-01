@@ -13,7 +13,7 @@ POST /api/n8n/articles
 | Header | `Content-Type` | `application/json` |
 | Header | `Authorization` | `Bearer YOUR_N8N_INGEST_TOKEN` |
 
-> ملاحظة مهمة: لا ترسل `targetAudience`. تم حذفه من مسار n8n ولا يعتمد عليه المحرر.
+> ملاحظة مهمة: لا ترسل الحقول القديمة المحذوفة من إعدادات الاستهداف. اعتمد على `visibility` و `visibleToEmails`.
 
 ## الحقول الأساسية للمقالة
 
@@ -36,7 +36,6 @@ POST /api/n8n/articles
 | `articleLanguage` | `article_language`, `language` | `ar` | `ar`, `en` | لغة المقالة. |
 | `status` | - | `draft` | `draft`, `in_review`, `published`, `archived` | حالة المقالة. |
 | `visibility` | - | `shared` أو `private` عند تحديد مستخدمين | `private`, `shared`, `team`, `public` | يتحكم في ظهور المقالة داخل قاعدة البيانات. |
-| `showTo` | `show_to`, `audienceVisibility`, `audience_visibility` | `all` أو `selected-users` عند إرسال مستخدمين | `all`, `all-users`, `everyone`, `shared`, `team`, `public`, `selected-users` | يستخدمه المحرر لعرض إعداد "لمن تظهر المقالة". |
 | `accessRole` | `access_role` | `viewer` | `viewer`, `editor` | صلاحية المستخدمين المحددين: مشاهدة فقط أو تعديل. |
 
 ## اختيار المستخدمين الذين تظهر لهم المقالة
@@ -46,7 +45,6 @@ POST /api/n8n/articles
 | `visibleTo` | `visible_to` | نص أو Array | بريد المستخدم أو ID المستخدم. |
 | `visibleToUsers` | `visible_to_users` | نص أو Array | قائمة مستخدمين. |
 | `visibleToEmails` | `visible_to_emails` | Array | قائمة إيميلات. |
-| `visibleToEmailsCsv` | `visible_to_emails_csv` | نص | إيميلات مفصولة بفواصل. |
 | `userEmail` | `user_email` | نص | بريد مستخدم واحد. |
 | `ownerEmail` | `owner_email` | نص | مالك المقالة. |
 | `ownerId` | `owner_id` | نص | ID مالك المقالة في Supabase. |
@@ -58,15 +56,15 @@ POST /api/n8n/articles
 
 ```json
 {
-  "showTo": "selected-users",
-  "visibleToEmailsCsv": "user1@example.com,user2@example.com",
+  "visibility": "private",
+  "visibleToEmails": ["user1@example.com", "user2@example.com"],
   "accessRole": "viewer"
 }
 ```
 
 ```json
 {
-  "showTo": "selected-users",
+  "visibility": "private",
   "visibleToEmails": ["user1@example.com", "user2@example.com"],
   "accessRole": "editor"
 }
@@ -243,8 +241,8 @@ POST /api/n8n/articles
   "contentHtml": "<h1>عنوان المقالة</h1><p>نص المقالة هنا.</p>",
   "articleLanguage": "ar",
   "status": "draft",
-  "showTo": "selected-users",
-  "visibleToEmailsCsv": "user1@example.com,user2@example.com",
+  "visibility": "private",
+  "visibleToEmails": ["user1@example.com", "user2@example.com"],
   "accessRole": "viewer",
   "keywords": {
     "primary": "الكلمة الرئيسية",
@@ -274,4 +272,3 @@ POST /api/n8n/articles
   ]
 }
 ```
-
