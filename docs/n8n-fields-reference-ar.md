@@ -13,7 +13,7 @@ POST /api/n8n/articles
 | Header | `Content-Type` | `application/json` |
 | Header | `Authorization` | `Bearer YOUR_N8N_INGEST_TOKEN` |
 
-> ملاحظة مهمة: لا ترسل الحقول القديمة المحذوفة من إعدادات الاستهداف. اعتمد على `visibility` و `visibleToEmails`.
+> ملاحظة مهمة: لا ترسل `targetAudience`. اعتمد في الاستهداف على `visibility` و `visibleToEmails` أو `visibleToEmailsCsv`.
 
 ## الحقول الأساسية للمقالة
 
@@ -38,7 +38,7 @@ POST /api/n8n/articles
 | `visibility` | - | `shared` أو `private` عند تحديد مستخدمين | `private`, `shared`, `team`, `public` | يتحكم في ظهور المقالة داخل قاعدة البيانات. |
 | `accessRole` | `access_role` | `viewer` | `viewer`, `editor` | صلاحية المستخدمين المحددين: مشاهدة فقط أو تعديل. |
 
-داخل لوحة التحكم، يستطيع الأدمن تعديل `visibility` و `accessRole` و `articleLanguage` و `status` من بطاقة المقالة. المستخدم العادي يستطيع تعديل `status` فقط.
+داخل لوحة التحكم، يستطيع الأدمن تعديل `visibility` و `accessRole` و `articleLanguage` و `status` من بطاقة المقالة. المستخدم العادي يستطيع تعديل `status` فقط، ويرى `accessRole` للمعرفة فقط.
 
 ## اختيار المستخدمين الذين تظهر لهم المقالة
 
@@ -47,6 +47,7 @@ POST /api/n8n/articles
 | `visibleTo` | `visible_to` | نص أو Array | بريد المستخدم أو ID المستخدم. |
 | `visibleToUsers` | `visible_to_users` | نص أو Array | قائمة مستخدمين. |
 | `visibleToEmails` | `visible_to_emails` | Array | قائمة إيميلات. |
+| `visibleToEmailsCsv` | `visible_to_emails_csv` | نص | إيميلات مفصولة بفواصل. |
 | `userEmail` | `user_email` | نص | بريد مستخدم واحد. |
 | `ownerEmail` | `owner_email` | نص | مالك المقالة. |
 | `ownerId` | `owner_id` | نص | ID مالك المقالة في Supabase. |
@@ -59,7 +60,7 @@ POST /api/n8n/articles
 ```json
 {
   "visibility": "private",
-  "visibleToEmails": ["user1@example.com", "user2@example.com"],
+  "visibleToEmailsCsv": "user1@example.com,user2@example.com",
   "accessRole": "viewer"
 }
 ```
@@ -244,7 +245,7 @@ POST /api/n8n/articles
   "articleLanguage": "ar",
   "status": "draft",
   "visibility": "private",
-  "visibleToEmails": ["user1@example.com", "user2@example.com"],
+  "visibleToEmailsCsv": "user1@example.com,user2@example.com",
   "accessRole": "viewer",
   "keywords": {
     "primary": "الكلمة الرئيسية",

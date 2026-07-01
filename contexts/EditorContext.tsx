@@ -179,6 +179,27 @@ const getRemoteArticleId = (article?: ArticleActivity | RemoteArticleActivity | 
     return typeof id === 'string' && id.trim() ? id : null;
 };
 
+export type ActiveArticleSettings = {
+    status: string;
+    accessRole: string;
+};
+
+const EMPTY_ACTIVE_ARTICLE_SETTINGS: ActiveArticleSettings = {
+    status: '',
+    accessRole: '',
+};
+
+const getActiveArticleSettings = (article?: ArticleActivity | RemoteArticleActivity | null): ActiveArticleSettings => {
+    const remoteArticle = article as RemoteArticleActivity | undefined;
+    const metadata = isRecord(remoteArticle?.metadata) ? remoteArticle.metadata : {};
+    const settings = isRecord(metadata.n8nSettings) ? metadata.n8nSettings : {};
+
+    return {
+        status: typeof settings.status === 'string' ? settings.status : remoteArticle?.status || '',
+        accessRole: typeof settings.accessRole === 'string' ? settings.accessRole : '',
+    };
+};
+
 const ALLOWED_EDITOR_NODE_TYPES = new Set([
     'doc',
     'paragraph',
@@ -687,6 +708,8 @@ interface EditorContextType {
     keywords: Keywords;
     setKeywords: React.Dispatch<React.SetStateAction<Keywords>>;
     articleLanguage: 'ar' | 'en';
+    activeArticleId: string | null;
+    activeArticleSettings: ActiveArticleSettings;
     goalContext: GoalContext;
     setGoalContext: React.Dispatch<React.SetStateAction<GoalContext>>;
     analysisResults: FullAnalysis;
@@ -723,6 +746,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [title, setTitle] = useState<string>(() => initialActiveArticleTitleRef.current || initialAutoDraftTitle);
     const [articleKey, setArticleKey] = useState<string>(() => initialActiveArticleTitleRef.current || initialAutoDraftTitle);
     const [activeArticleId, setActiveArticleId] = useState<string | null>(() => initialActiveArticleIdRef.current);
+    const [activeArticleSettings, setActiveArticleSettings] = useState<ActiveArticleSettings>(EMPTY_ACTIVE_ARTICLE_SETTINGS);
     const [editorState, setEditorState] = useState<any | null>(null);
     const [text, setText] = useState<string>('');
     const [keywords, setKeywords] = useState<Keywords>(() => {
@@ -922,6 +946,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 setTitle(restoredTitle);
                 setArticleKey(restoredTitle);
                 setActiveArticleId(remoteArticleId);
+                setActiveArticleSettings(getActiveArticleSettings(freshArticle));
                 setKeywords(nextKeywords);
                 setGoalContext(nextGoalContext);
                 setArticleLanguage(lang);
@@ -1180,6 +1205,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             userId: currentUserId,
         });
         setActiveArticleId(savedArticle.id);
+        setActiveArticleSettings(getActiveArticleSettings(savedArticle));
         setArticleKey(savedArticle.title || finalTitleToSave);
         writeSessionValue(ACTIVE_ARTICLE_ID_KEY, savedArticle.id);
         writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, savedArticle.title || finalTitleToSave);
@@ -1288,6 +1314,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setTitle('');
             setArticleKey('');
             setActiveArticleId(null);
+            setActiveArticleSettings(EMPTY_ACTIVE_ARTICLE_SETTINGS);
             setKeywords(INITIAL_KEYWORDS);
             setGoalContext(normalizeGoalContext());
             setEditorContentSafely(editor, createEmptyEditorContent(), createEmptyEditorContent());
@@ -1317,10 +1344,12 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setTitle(titleStr);
             setArticleKey(titleStr);
             setActiveArticleId(remoteArticleId);
+            setActiveArticleSettings(getActiveArticleSettings(article));
             setCurrentView('editor');
 
             try {
                 const latestArticle = getFreshArticleActivity(currentUser, titleStr, article) || article;
+                setActiveArticleSettings(getActiveArticleSettings(latestArticle));
                 // Loading prefers Supabase by stable article id, then falls back to older local dashboard/draft references.
                 // Snapshot attachments restore competitor URLs/HTML/text and content summary together with the editor.
                 const remoteSnapshot = remoteArticleId && currentUser
@@ -1392,6 +1421,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         keywords,
         setKeywords,
         articleLanguage,
+        activeArticleId,
+        activeArticleSettings,
         goalContext,
         setGoalContext,
         analysisResults,

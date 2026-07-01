@@ -22,6 +22,18 @@ import NewArticleLanguageModal from './NewArticleLanguageModal';
  *
  * Add a new toolbar command in the matching toolbar/* component, then pass only the needed handler here.
  */
+const ARTICLE_STATUS_LABELS: Record<string, string> = {
+  draft: 'مسودة',
+  in_review: 'مراجعة',
+  published: 'منشور',
+  archived: 'أرشيف',
+};
+
+const ARTICLE_ACCESS_ROLE_LABELS: Record<string, string> = {
+  viewer: 'عرض',
+  editor: 'تعديل',
+};
+
 const EditorToolbar: React.FC = () => {
     const {
         isDarkMode,
@@ -46,6 +58,7 @@ const EditorToolbar: React.FC = () => {
         handleNewArticle: onNewArticle,
         articleLanguage,
         handleLanguageChange: onLanguageChange,
+        activeArticleSettings,
     } = useEditor();
     
     const {
@@ -70,8 +83,13 @@ const EditorToolbar: React.FC = () => {
 
 
     const handleShowDashboard = useCallback(async () => {
-      await onSaveDraft();
-      setCurrentView('dashboard');
+      try {
+        await onSaveDraft();
+      } catch (error) {
+        console.error('Failed to save before opening dashboard:', error);
+      } finally {
+        setCurrentView('dashboard');
+      }
     }, [onSaveDraft, setCurrentView]);
 
     const handleLogout = useCallback(async () => {
@@ -109,6 +127,7 @@ const EditorToolbar: React.FC = () => {
     const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   
     const isAnyGeminiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt;
+    const hasArticleSettings = Boolean(activeArticleSettings.status || activeArticleSettings.accessRole);
   
     const handleLanguageToggle = () => {
       const newLang = articleLanguage === 'ar' ? 'en' : 'ar';
@@ -188,6 +207,20 @@ const EditorToolbar: React.FC = () => {
             className="title-input flex-grow py-0.5 px-2 text-base font-bold bg-transparent border-none rounded-md text-[#333333] placeholder:text-gray-400 focus:ring-0 focus:outline-none dark:text-gray-100 dark:placeholder:text-gray-500"
             aria-label={t.articleTitle}
           />
+          {hasArticleSettings && (
+            <div className="flex max-w-[280px] flex-wrap items-center gap-1">
+              {activeArticleSettings.status && (
+                <span className="rounded-md bg-[#d4af37]/10 px-2 py-1 text-[11px] font-black text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
+                  status: {ARTICLE_STATUS_LABELS[activeArticleSettings.status] || activeArticleSettings.status}
+                </span>
+              )}
+              {activeArticleSettings.accessRole && (
+                <span className="rounded-md bg-gray-200 px-2 py-1 text-[11px] font-black text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">
+                  accessRole: {ARTICLE_ACCESS_ROLE_LABELS[activeArticleSettings.accessRole] || activeArticleSettings.accessRole}
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex-shrink-0 flex items-center gap-4">
               <button
                 onClick={handleLanguageToggle}

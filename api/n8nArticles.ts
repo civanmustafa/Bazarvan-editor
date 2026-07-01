@@ -23,6 +23,7 @@ type IngestResolution = {
   assignedToId: string | null;
   accessProfiles: ResolvedProfile[];
   accessRole: AccessRole;
+  visibleToEmailsCsv: string;
 };
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
@@ -384,6 +385,8 @@ const getTargetIdentifiers = (body: Record<string, any>): string[] => uniqueStri
   ...toStringList(body.visible_to_users),
   ...toStringList(body.visibleToEmails),
   ...toStringList(body.visible_to_emails),
+  ...toStringList(body.visibleToEmailsCsv),
+  ...toStringList(body.visible_to_emails_csv),
   ...toStringList(body.userEmail),
   ...toStringList(body.user_email),
   ...toStringList(body.ownerEmail),
@@ -464,6 +467,7 @@ const resolveIngestAccess = async (
     assignedToId: assignedProfile?.id || null,
     accessProfiles: [...accessProfilesById.values()],
     accessRole: normalizeAccessRole(body.accessRole || body.access_role),
+    visibleToEmailsCsv: [...accessProfilesById.values()].map(profile => profile.email).filter(Boolean).join(', '),
   };
 };
 
@@ -584,6 +588,7 @@ const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string,
         n8nSettings: compactObject({
           visibility: access.visibility,
           accessRole: access.accessRole,
+          visibleToEmailsCsv: access.visibleToEmailsCsv,
           articleLanguage,
           status: articleStatus,
         }),

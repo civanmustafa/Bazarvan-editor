@@ -29,6 +29,7 @@ article_access
 ```text
 visibility
 accessRole
+visibleToEmailsCsv
 articleLanguage
 status
 ```
@@ -53,7 +54,7 @@ status
 
 ```json
 {
-  "visibleToEmails": ["user1@example.com", "user2@example.com"],
+  "visibleToEmailsCsv": "user1@example.com,user2@example.com",
   "accessRole": "viewer"
 }
 ```
@@ -576,7 +577,7 @@ curl -X POST "https://YOUR_EDITOR_SUBDOMAIN/api/n8n/articles" \
 4. اضغط تحديث إذا لم تظهر مباشرة.
 5. ستظهر المقالة حسب اختيار الظهور:
    - `visibility: shared` تظهر للجميع داخل المحرر.
-   - `visibleToEmails` تظهر للمستخدمين المحددين.
+   - `visibleToEmails` أو `visibleToEmailsCsv` تظهر للمستخدمين المحددين.
    - الأدمن يراها دائما.
 
 ## أخطاء شائعة
@@ -604,7 +605,7 @@ pm2 restart bazarvan-editor --update-env
 
 ### Could not find Supabase profiles
 
-يعني أنك أرسلت بريدا داخل `visibleToEmails` غير موجود في:
+يعني أنك أرسلت بريدا داخل `visibleToEmails` أو `visibleToEmailsCsv` غير موجود في:
 
 ```text
 Supabase > Authentication > Users

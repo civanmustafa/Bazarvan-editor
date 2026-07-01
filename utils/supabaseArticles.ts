@@ -41,6 +41,7 @@ export type RemoteArticleSettingsPatch = Partial<{
   status: RemoteArticleStatus;
   articleLanguage: RemoteArticleLanguage;
   accessRole: RemoteArticleAccessRole;
+  visibleToEmailsCsv: string;
 }>;
 
 export type RemoteProfile = {
@@ -87,6 +88,20 @@ const isRecord = (value: unknown): value is Record<string, any> => (
 const toNumber = (value: unknown, fallback = 0): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
 );
+
+const splitEmailCsv = (value: string): string[] => {
+  const seen = new Set<string>();
+  return value
+    .split(/[\n\r,،;؛|]+/g)
+    .map(email => email.trim().toLowerCase())
+    .filter(email => {
+      if (!email || seen.has(email)) return false;
+      seen.add(email);
+      return true;
+    });
+};
+
+const normalizeEmailCsv = (value: string): string => splitEmailCsv(value).join(', ');
 
 const normalizeStats = (value: unknown): ArticleStats => {
   const source = isRecord(value) ? value : {};
@@ -336,6 +351,60 @@ const updateArticleAccessRole = async (
   if (error && error.code !== '42P01') throw error;
 };
 
+const lookupProfilesByEmails = async (emails: string[]): Promise<Pick<RemoteProfile, 'id' | 'email' | 'fullName'>[]> => {
+  if (emails.length === 0) return [];
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id,email,full_name')
+    .in('email', emails);
+
+  if (error) throw error;
+
+  const profiles = (data || []).map(profile => ({
+    id: String(profile.id),
+    email: profile.email || null,
+    fullName: profile.full_name || null,
+  }));
+  const foundEmails = new Set(profiles.map(profile => profile.email?.toLowerCase()).filter(Boolean));
+  const missingEmails = emails.filter(email => !foundEmails.has(email));
+  if (missingEmails.length > 0) {
+    throw new Error(`Could not find Supabase profiles for: ${missingEmails.join(', ')}`);
+  }
+
+  return profiles;
+};
+
+const syncArticleAccessProfiles = async (
+  articleId: string,
+  profiles: Pick<RemoteProfile, 'id' | 'email' | 'fullName'>[],
+  accessRole: RemoteArticleAccessRole,
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const { error: deleteError } = await supabase
+    .from('article_access')
+    .delete()
+    .eq('article_id', articleId);
+
+  if (deleteError) {
+    if (deleteError.code === '42P01') return;
+    throw deleteError;
+  }
+
+  if (profiles.length === 0) return;
+
+  const { error } = await supabase
+    .from('article_access')
+    .insert(profiles.map(profile => ({
+      article_id: articleId,
+      user_id: profile.id,
+      role: accessRole,
+    })));
+
+  if (error) throw error;
+};
+
 const updateRemoteArticleStatus = async (
   articleId: string,
   status: RemoteArticleStatus,
@@ -411,6 +480,8 @@ export const updateRemoteArticleSettings = async (
   const currentSettings = isRecord(currentMetadata.n8nSettings) ? currentMetadata.n8nSettings : {};
   const n8nSettings = { ...currentSettings };
   const payload: Record<string, unknown> = {};
+  const nextAccessRole: RemoteArticleAccessRole = patch.accessRole || (currentSettings.accessRole === 'editor' ? 'editor' : 'viewer');
+  let nextVisibleProfiles: Pick<RemoteProfile, 'id' | 'email' | 'fullName'>[] | null = null;
 
   if (patch.visibility) {
     payload.visibility = patch.visibility;
@@ -427,10 +498,26 @@ export const updateRemoteArticleSettings = async (
   if (patch.accessRole) {
     n8nSettings.accessRole = patch.accessRole;
   }
+  if (patch.visibleToEmailsCsv !== undefined) {
+    const normalizedCsv = normalizeEmailCsv(patch.visibleToEmailsCsv);
+    nextVisibleProfiles = await lookupProfilesByEmails(splitEmailCsv(normalizedCsv));
+    n8nSettings.visibleToEmailsCsv = normalizedCsv;
+    n8nSettings.accessRole = nextAccessRole;
+  }
 
   payload.metadata = {
     ...currentMetadata,
     n8nSettings,
+    ...(nextVisibleProfiles
+      ? {
+          visibleTo: nextVisibleProfiles.map(profile => ({
+            id: profile.id,
+            email: profile.email,
+            fullName: profile.fullName,
+            role: nextAccessRole,
+          })),
+        }
+      : {}),
   };
 
   const { data, error } = await supabase
@@ -442,7 +529,9 @@ export const updateRemoteArticleSettings = async (
 
   if (error) throw error;
 
-  if (patch.accessRole) {
+  if (nextVisibleProfiles) {
+    await syncArticleAccessProfiles(articleId, nextVisibleProfiles, nextAccessRole);
+  } else if (patch.accessRole) {
     await updateArticleAccessRole(articleId, patch.accessRole);
   }
 

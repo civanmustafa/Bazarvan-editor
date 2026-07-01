@@ -101,10 +101,18 @@ const isRecord = (value: unknown): value is Record<string, any> => (
 const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
   const metadata = isRecord(article?.metadata) ? article.metadata : {};
   const settings = isRecord(metadata.n8nSettings) ? metadata.n8nSettings : {};
+  const visibleTo = Array.isArray(metadata.visibleTo) ? metadata.visibleTo : [];
+  const visibleToEmailsCsv = typeof settings.visibleToEmailsCsv === 'string' && settings.visibleToEmailsCsv.trim()
+    ? settings.visibleToEmailsCsv.trim()
+    : visibleTo
+      .map(item => isRecord(item) && typeof item.email === 'string' ? item.email.trim() : '')
+      .filter(Boolean)
+      .join(', ');
 
   return {
     visibility: typeof settings.visibility === 'string' ? settings.visibility : article?.visibility || '',
     accessRole: typeof settings.accessRole === 'string' ? settings.accessRole : '',
+    visibleToEmailsCsv,
     articleLanguage: typeof settings.articleLanguage === 'string' ? settings.articleLanguage : article?.articleLanguage || '',
     status: typeof settings.status === 'string' ? settings.status : article?.status || '',
   };
@@ -331,6 +339,7 @@ const ArticleDetailsModal: React.FC<{
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
               <DetailRow label="visibility" value={n8nSettings.visibility} />
               <DetailRow label="accessRole" value={n8nSettings.accessRole} />
+              <DetailRow label="visibleToEmailsCsv" value={n8nSettings.visibleToEmailsCsv} />
               <DetailRow label="articleLanguage" value={n8nSettings.articleLanguage} />
               <DetailRow label="status" value={n8nSettings.status} />
             </div>
@@ -453,6 +462,7 @@ interface ArticleItemProps {
     onDelete: () => void;
     onRename: (newTitle: string) => boolean | Promise<boolean>;
     onUpdateSettings?: (articleId: string, patch: RemoteArticleSettingsPatch) => Promise<boolean>;
+    visibleSettingFields?: N8nSettingFieldKey[];
     editableSettingFields?: N8nSettingFieldKey[];
     showAdminMetadata?: boolean;
     t: typeof translations.ar;
@@ -467,6 +477,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     onDelete,
     onRename,
     onUpdateSettings,
+    visibleSettingFields = [],
     editableSettingFields = [],
     showAdminMetadata = false,
     t,
@@ -565,8 +576,8 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const untranslatedTitle = title || t.untitled;
     const primaryKeyword = activity.keywords?.primary?.trim();
     const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
-    const fieldsToShow = editableSettingFields.length > 0
-        ? editableSettingFields
+    const fieldsToShow = visibleSettingFields.length > 0
+        ? visibleSettingFields
         : showAdminMetadata
           ? (['visibility', 'accessRole', 'articleLanguage', 'status'] as N8nSettingFieldKey[])
           : [];
@@ -627,8 +638,9 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                 </div>
                 {shouldShowN8nSettings && (
                     <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-2 dark:border-[#3a3a3a]">
-                        {fieldsToShow.map(field => (
-                            onUpdateSettings ? (
+                        {fieldsToShow.map(field => {
+                            const isEditable = Boolean(onUpdateSettings && editableSettingFields.includes(field));
+                            return isEditable ? (
                                 <EditableN8nSettingField
                                     key={field}
                                     field={field}
@@ -638,8 +650,8 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                                 />
                             ) : (
                                 <N8nSettingChip key={field} label={field} value={n8nSettings[field]} />
-                            )
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
@@ -1221,6 +1233,9 @@ const Dashboard: React.FC = () => {
                                     onDelete={() => { void handleDeleteArticle(activity.id); }}
                                     onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
                                     onUpdateSettings={handleUpdateArticleSettings}
+                                    visibleSettingFields={isAdmin
+                                      ? ['visibility', 'accessRole', 'articleLanguage', 'status']
+                                      : ['status', 'accessRole']}
                                     editableSettingFields={isAdmin
                                       ? ['visibility', 'accessRole', 'articleLanguage', 'status']
                                       : ['status']}
