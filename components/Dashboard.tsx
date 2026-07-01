@@ -1,15 +1,24 @@
 ﻿
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, ChevronRight, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink } from 'lucide-react';
-import { getActivityData, UserActivity, ArticleActivity, deleteArticleActivity, renameArticleActivity, clearUserActivity } from '../hooks/useUserActivity';
+import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, ChevronRight, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye } from 'lucide-react';
+import { getActivityData, UserActivity, ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
-import { useModal } from '../contexts/ModalContext';
 import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
 import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
+import {
+    deleteRemoteArticle,
+    listRemoteProfiles,
+    listRemoteArticles,
+    loadRemoteArticleSnapshot,
+    renameRemoteArticle,
+    type RemoteProfile,
+    type RemoteArticleActivity,
+} from '../utils/supabaseArticles';
+import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
 
 /*
  * Dashboard is the user workspace:
@@ -43,6 +52,236 @@ const SummaryStat: React.FC<{ icon: React.ReactNode; label: string; value: strin
     </div>
   </div>
 );
+
+const getProfileLabel = (profile?: RemoteProfile): string => (
+  profile?.fullName?.trim() || profile?.email?.trim() || 'مستخدم غير معروف'
+);
+
+const getArticleOwnerId = (article: RemoteArticleActivity): string | null => (
+  article.ownerId || article.createdBy || article.assignedTo || null
+);
+
+const articleBelongsToProfile = (article: RemoteArticleActivity, profileId: string): boolean => (
+  article.ownerId === profileId || article.createdBy === profileId || article.assignedTo === profileId
+);
+
+const getLatestSavedAt = (articles: RemoteArticleActivity[]): string => (
+  articles
+    .map(article => article.lastSaved)
+    .filter(Boolean)
+    .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] || ''
+);
+
+const getProfileKeywords = (articles: RemoteArticleActivity[]): string[] => {
+  const keywords = new Set<string>();
+  articles.forEach(article => {
+    const primary = article.keywords?.primary?.trim();
+    if (primary) keywords.add(primary);
+  });
+  return Array.from(keywords).slice(0, 4);
+};
+
+const DetailRow: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+  <div className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+    <div className="text-[11px] font-bold text-gray-400">{label}</div>
+    <div className="mt-1 break-words text-sm font-semibold text-gray-700 dark:text-gray-200">{value === null || value === undefined || value === '' ? '-' : value}</div>
+  </div>
+);
+
+const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <h3 className="mb-3 text-sm font-black text-gray-700 dark:text-gray-200">{children}</h3>
+);
+
+const AdminUsersTable: React.FC<{
+  profiles: RemoteProfile[];
+  articles: RemoteArticleActivity[];
+  selectedProfileId: string | null;
+  onSelectProfile: (profileId: string | null) => void;
+  t: typeof translations.ar;
+}> = ({ profiles, articles, selectedProfileId, onSelectProfile, t }) => {
+  const allArticlesLastSaved = getLatestSavedAt(articles);
+
+  return (
+    <div className="mb-8 rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-100">
+          <Users size={20} />
+          <span>جدول المستخدمين</span>
+        </h2>
+        <button
+          onClick={() => onSelectProfile(null)}
+          className={`rounded-md px-3 py-1.5 text-xs font-bold ${selectedProfileId === null ? 'bg-[#d4af37] text-white' : 'bg-gray-100 text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-300'}`}
+        >
+          كل المستخدمين
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-start text-sm">
+          <thead className="text-xs uppercase text-gray-400">
+            <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
+              <th className="px-3 py-2 text-start">المستخدم</th>
+              <th className="px-3 py-2 text-start">الدور</th>
+              <th className="px-3 py-2 text-start">عدد المقالات</th>
+              <th className="px-3 py-2 text-start">آخر حفظ</th>
+              <th className="px-3 py-2 text-start">الوقت</th>
+              <th className="px-3 py-2 text-start">كلمات مفتاحية</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              className={`cursor-pointer border-b border-gray-100 transition-colors hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:hover:bg-[#d4af37]/15 ${selectedProfileId === null ? 'bg-[#d4af37]/10' : ''}`}
+              onClick={() => onSelectProfile(null)}
+            >
+              <td className="px-3 py-3 font-black text-gray-700 dark:text-gray-100">كل المستخدمين</td>
+              <td className="px-3 py-3 text-gray-500">admin view</td>
+              <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{articles.length}</td>
+              <td className="px-3 py-3 text-gray-500">{allArticlesLastSaved ? formatIstanbulDateTime(allArticlesLastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+              <td className="px-3 py-3 text-gray-500">{formatSeconds(articles.reduce((sum, article) => sum + article.timeSpentSeconds, 0), t)}</td>
+              <td className="px-3 py-3 text-gray-500">{getProfileKeywords(articles).join('، ') || '-'}</td>
+            </tr>
+            {profiles.map(profile => {
+              const profileArticles = articles.filter(article => articleBelongsToProfile(article, profile.id));
+              const lastSaved = getLatestSavedAt(profileArticles);
+              const isSelected = selectedProfileId === profile.id;
+
+              return (
+                <tr
+                  key={profile.id}
+                  className={`cursor-pointer border-b border-gray-100 transition-colors hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:hover:bg-[#d4af37]/15 ${isSelected ? 'bg-[#d4af37]/10' : ''}`}
+                  onClick={() => onSelectProfile(profile.id)}
+                >
+                  <td className="px-3 py-3">
+                    <div className="font-black text-gray-700 dark:text-gray-100">{getProfileLabel(profile)}</div>
+                    <div className="text-xs text-gray-400">{profile.email}</div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className={`rounded-full px-2 py-1 text-xs font-black ${profile.role === 'admin' ? 'bg-[#d4af37]/15 text-[#8a6f1d] dark:text-[#f2d675]' : 'bg-gray-100 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-300'}`}>
+                      {profile.role}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{profileArticles.length}</td>
+                  <td className="px-3 py-3 text-gray-500">{lastSaved ? formatIstanbulDateTime(lastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                  <td className="px-3 py-3 text-gray-500">{formatSeconds(profileArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0), t)}</td>
+                  <td className="px-3 py-3 text-gray-500">{getProfileKeywords(profileArticles).join('، ') || '-'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+const ArticleDetailsModal: React.FC<{
+  article: RemoteArticleActivity;
+  snapshot: ArticleStorageSnapshot | null;
+  ownerLabel: string;
+  isLoading: boolean;
+  onClose: () => void;
+  onOpenArticle: () => void;
+  t: typeof translations.ar;
+}> = ({ article, snapshot, ownerLabel, isLoading, onClose, onOpenArticle, t }) => {
+  const keywords = snapshot?.keywords || article.keywords;
+  const goalContext = snapshot?.goalContext || article.goalContext;
+  const analysis = snapshot?.analysis || article.analysis;
+  const plainText = snapshot?.plainText || article.plainText || '';
+  const analysisSummary = snapshot?.analysisSummary;
+  const secondaryKeywords = keywords?.secondaries?.filter(keyword => keyword.trim()) || [];
+  const lsiKeywords = keywords?.lsi?.filter(keyword => keyword.trim()) || [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+      <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 p-5 dark:border-[#3C3C3C]">
+          <div className="min-w-0">
+            <div className="text-xs font-black text-[#d4af37]">تفاصيل المقالة</div>
+            <h2 className="mt-1 truncate text-2xl font-black text-gray-800 dark:text-gray-100">{article.title || t.untitled}</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{ownerLabel}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onOpenArticle} className="rounded-md bg-[#d4af37] px-3 py-2 text-sm font-bold text-white hover:bg-[#b8922e]">
+              فتح في المحرر
+            </button>
+            <button onClick={onClose} className="rounded-md border border-gray-200 p-2 text-gray-500 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#1F1F1F]" title="إغلاق">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto p-5">
+          {isLoading && (
+            <div className="mb-4 rounded-md border border-[#d4af37]/30 bg-[#d4af37]/10 p-3 text-sm font-bold text-[#8a6f1d] dark:text-[#f2d675]">
+              جار تحميل التفاصيل الكاملة...
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <DetailRow label="المالك" value={ownerLabel} />
+            <DetailRow label="الحالة" value={article.status} />
+            <DetailRow label="المصدر" value={article.source} />
+            <DetailRow label="الظهور" value={article.visibility} />
+            <DetailRow label="لغة المقال" value={(article.articleLanguage || 'ar').toUpperCase()} />
+            <DetailRow label="عدد مرات الحفظ" value={article.saveCount} />
+            <DetailRow label="آخر حفظ" value={article.lastSaved ? formatIstanbulDateTime(article.lastSaved, t.locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'} />
+            <DetailRow label="الوقت المستغرق" value={formatSeconds(article.timeSpentSeconds, t)} />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div>
+              <SectionTitle>الكلمات المفتاحية</SectionTitle>
+              <div className="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-[#3C3C3C]">
+                <DetailRow label="الرئيسية" value={keywords?.primary || '-'} />
+                <DetailRow label="الشركة" value={keywords?.company || '-'} />
+                <DetailRow label="الثانوية" value={secondaryKeywords.length ? secondaryKeywords.join('، ') : '-'} />
+                <DetailRow label="LSI" value={lsiKeywords.length ? lsiKeywords.join('، ') : '-'} />
+              </div>
+            </div>
+
+            <div>
+              <SectionTitle>نتائج التحليل</SectionTitle>
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-gray-100 p-4 dark:border-[#3C3C3C]">
+                <DetailRow label="عدد الكلمات" value={article.stats?.wordCount ?? 0} />
+                <DetailRow label="مخالفات الكلمات" value={article.stats?.keywordViolations ?? 0} />
+                <DetailRow label="معايير مخالفة" value={article.stats?.violatingCriteriaCount ?? 0} />
+                <DetailRow label="أخطاء الهيكل" value={article.stats?.totalErrorsCount ?? 0} />
+                <DetailRow label="إجمالي التكرارات" value={article.stats?.totalDuplicates ?? 0} />
+                <DetailRow label="تكرارات الكلمات" value={article.stats?.keywordDuplicatesCount ?? 0} />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div>
+              <SectionTitle>بيانات الهدف</SectionTitle>
+              <pre className="max-h-72 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-4 text-xs leading-6 text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200" dir="ltr">
+                {JSON.stringify(goalContext || {}, null, 2)}
+              </pre>
+            </div>
+            <div>
+              <SectionTitle>ملخص التحليل الكامل</SectionTitle>
+              <pre className="max-h-72 overflow-auto rounded-lg border border-gray-100 bg-gray-50 p-4 text-xs leading-6 text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200" dir="ltr">
+                {JSON.stringify({
+                  analysisSummary,
+                  structureStats: analysis?.structureStats,
+                  duplicateStats: analysis?.duplicateStats,
+                  wordCount: analysis?.wordCount,
+                }, null, 2)}
+              </pre>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <SectionTitle>معاينة النص</SectionTitle>
+            <div className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm leading-7 text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200">
+              {plainText.trim() || 'لا توجد معاينة نصية محفوظة.'}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const createApiKeyFingerprint = (key: string): string => {
   const normalizedKey = key.trim();
@@ -79,14 +318,16 @@ const SeoScoreIndicator: React.FC<{ score: number }> = ({ score }) => {
 
 interface ArticleItemProps {
     title: string;
-    activity: ArticleActivity;
+    activity: ArticleActivity | RemoteArticleActivity;
+    ownerLabel?: string;
     onLoad: () => void;
+    onDetails?: () => void;
     onDelete: () => void;
-    onRename: (oldTitle: string, newTitle: string) => boolean;
+    onRename: (newTitle: string) => boolean | Promise<boolean>;
     t: typeof translations.ar;
 }
 
-const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, onDelete, onRename, t }) => {
+const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLabel, onLoad, onDetails, onDelete, onRename, t }) => {
     const [isRenaming, setIsRenaming] = useState(false);
     const [newTitle, setNewTitle] = useState(title);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -115,10 +356,10 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
         setNewTitle(title);
     };
 
-    const handleRenameSubmit = (e: React.FormEvent) => {
+    const handleRenameSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        if (onRename(title, newTitle)) {
+        if (await onRename(newTitle)) {
             setIsRenaming(false);
         } else {
             alert(t.renameArticleError.replace('{title}', newTitle));
@@ -162,6 +403,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
     }
     
     const untranslatedTitle = title || t.untitled;
+    const primaryKeyword = activity.keywords?.primary?.trim();
 
     return (
         <li 
@@ -188,6 +430,9 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
                         <span className="flex items-center gap-1.5" title={t.wordCount}><FileText size={12} /> {activity.stats.wordCount}</span>
                     )}
                      <span className="font-bold text-gray-600 dark:text-gray-300">{(activity.articleLanguage || 'ar').toUpperCase()}</span>
+                    {ownerLabel && (
+                        <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{ownerLabel}</span>
+                    )}
                 </div>
                 <div className="pt-2 border-t border-gray-100 dark:border-[#3a3a3a] flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
                     <span className="flex items-center gap-1.5" title={t.keywordViolations}>
@@ -202,9 +447,26 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, onLoad, 
                         <Repeat size={12} className="text-[#d4af37]" />
                         <span>{activity.stats?.totalDuplicates ?? 0}</span>
                     </span>
+                    {primaryKeyword && (
+                        <span className="min-w-0 truncate font-semibold text-gray-600 dark:text-gray-300" title={primaryKeyword}>
+                            {primaryKeyword}
+                        </span>
+                    )}
                 </div>
             </div>
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex-shrink-0">
+                {onDetails && (
+                    <button
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onDetails();
+                        }}
+                        className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                        title="تفاصيل المقالة"
+                    >
+                        <Eye size={16} />
+                    </button>
+                )}
                  <button
                     onClick={handleStartRename}
                     className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
@@ -230,6 +492,8 @@ const Dashboard: React.FC = () => {
   const {
     setCurrentView,
     currentUser,
+    currentUserId,
+    currentUserRole,
     handleLogout: onLogout,
     isDarkMode,
     highlightStyle: preferredHighlightStyle,
@@ -247,11 +511,17 @@ const Dashboard: React.FC = () => {
     t,
   } = useUser();
   const { handleNewArticle: onNewArticle, handleLoadArticle: onLoadArticle } = useEditor();
-  const { openModal } = useModal();
 
   const onGoToEditor = () => setCurrentView('editor');
   
   const [activityData, setActivityData] = useState<ActivityData>(getActivityData());
+  const [remoteArticles, setRemoteArticles] = useState<RemoteArticleActivity[]>([]);
+  const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [detailArticle, setDetailArticle] = useState<RemoteArticleActivity | null>(null);
+  const [detailSnapshot, setDetailSnapshot] = useState<ArticleStorageSnapshot | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [isArticlesLoading, setIsArticlesLoading] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -265,39 +535,100 @@ const Dashboard: React.FC = () => {
     language: 'all',
   });
 
-  const refreshData = () => {
+  const refreshLocalActivityData = () => {
     setActivityData(getActivityData());
   };
 
-  const handleDeleteArticle = (articleTitle: string) => {
+  const isAdmin = currentUserRole === 'admin';
+
+  const refreshData = async () => {
+    refreshLocalActivityData();
     if (!currentUser) return;
-    deleteArticleActivity(currentUser, articleTitle);
-    refreshData();
+    setIsArticlesLoading(true);
+    try {
+      const [articles, profileRows] = await Promise.all([
+        listRemoteArticles(),
+        isAdmin ? listRemoteProfiles() : Promise.resolve([]),
+      ]);
+      setRemoteArticles(articles);
+      setProfiles(profileRows);
+    } catch (error) {
+      console.error('Failed to load Supabase articles:', error);
+    } finally {
+      setIsArticlesLoading(false);
+    }
+  };
+
+  const getOwnerLabel = (article: RemoteArticleActivity): string => {
+    const ownerId = getArticleOwnerId(article);
+    const profile = ownerId ? profiles.find(item => item.id === ownerId) : undefined;
+    return getProfileLabel(profile);
+  };
+
+  const handleShowArticleDetails = async (article: RemoteArticleActivity) => {
+    setDetailArticle(article);
+    setDetailSnapshot(null);
+    setIsDetailLoading(true);
+    try {
+      setDetailSnapshot(await loadRemoteArticleSnapshot(article.id, currentUser || 'admin'));
+    } catch (error) {
+      console.error(`Failed to load article details "${article.id}":`, error);
+    } finally {
+      setIsDetailLoading(false);
+    }
+  };
+
+  const handleCloseArticleDetails = () => {
+    setDetailArticle(null);
+    setDetailSnapshot(null);
+    setIsDetailLoading(false);
   };
   
-  const handleRenameArticle = (oldTitle: string, newTitle: string): boolean => {
-      if (!currentUser) return false;
-      const success = renameArticleActivity(currentUser, oldTitle, newTitle);
-      if (success) {
-          refreshData();
+  const handleDeleteArticle = async (articleId: string) => {
+    await deleteRemoteArticle(articleId);
+    await refreshData();
+  };
+  
+  const handleRenameArticle = async (articleId: string, newTitle: string): Promise<boolean> => {
+      const normalizedTitle = newTitle.trim();
+      if (!normalizedTitle) return false;
+      try {
+        await renameRemoteArticle(articleId, normalizedTitle);
+        await refreshData();
+        return true;
+      } catch (error) {
+        console.error(`Failed to rename article "${articleId}":`, error);
+        return false;
       }
-      return success;
   };
 
   useEffect(() => {
-    const intervalId = setInterval(refreshData, 10000);
-    const handleActivityUpdated = () => refreshData();
+    void refreshData();
+    const intervalId = setInterval(() => {
+      void refreshData();
+    }, 10000);
+    const handleActivityUpdated = () => {
+      void refreshData();
+    };
     window.addEventListener('smart-editor-activity-updated', handleActivityUpdated);
     return () => {
       clearInterval(intervalId);
       window.removeEventListener('smart-editor-activity-updated', handleActivityUpdated);
     };
-  }, []);
+  }, [currentUser, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setSelectedProfileId(null);
+      setProfiles([]);
+    }
+  }, [isAdmin]);
 
   const handleExportHtml = () => {
     if (!currentUser) return;
-    const currentUserData = activityData[currentUser];
-    if (!currentUserData) return;
+    const exportArticles = selectedProfileId
+      ? remoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
+      : remoteArticles;
 
     const formatSecondsDetailed = (seconds: number): string => {
       if (!seconds || seconds < 60) return `${Math.floor(seconds || 0)} ${t.seconds}`;
@@ -311,8 +642,8 @@ const Dashboard: React.FC = () => {
       ].filter(Boolean).join(' ').trim() || `0 ${t.seconds}`;
     };
 
-    const totalArticles = Object.keys(currentUserData.articles).length;
-    const totalTimeSpent = (Object.values(currentUserData.articles) as ArticleActivity[]).reduce((sum, article) => sum + article.timeSpentSeconds, 0);
+    const totalArticles = exportArticles.length;
+    const totalTimeSpent = exportArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
 
     const articlesHtml = `
       <table class="articles-table">
@@ -330,11 +661,11 @@ const Dashboard: React.FC = () => {
               </tr>
           </thead>
           <tbody>
-              ${(Object.entries(currentUserData.articles) as [string, ArticleActivity][])
-              .sort(([, a], [, b]) => new Date(b.lastSaved || 0).getTime() - new Date(a.lastSaved || 0).getTime())
-              .map(([title, activity]) => `
+              ${[...exportArticles]
+              .sort((a, b) => new Date(b.lastSaved || 0).getTime() - new Date(a.lastSaved || 0).getTime())
+              .map((activity) => `
                   <tr>
-                      <td>${title || t.untitled}</td>
+                      <td>${activity.title || t.untitled}</td>
                       <td>${formatSeconds(activity.timeSpentSeconds, t)}</td>
                       <td>${activity.stats?.wordCount ?? 'N/A'}</td>
                       <td>${activity.stats?.keywordViolations ?? 'N/A'}</td>
@@ -401,10 +732,11 @@ const Dashboard: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleConfirmClearData = () => {
-    if (!currentUser) return;
-    clearUserActivity(currentUser);
-    refreshData();
+  const handleConfirmClearData = async () => {
+    if (!currentUserId) return;
+    const ownedArticles = remoteArticles.filter(article => article.ownerId === currentUserId || article.createdBy === currentUserId);
+    await Promise.all(ownedArticles.map(article => deleteRemoteArticle(article.id)));
+    await refreshData();
     setIsConfirmModalOpen(false);
   };
 
@@ -461,12 +793,18 @@ const Dashboard: React.FC = () => {
     return [...currentRows, ...archivedRows];
   }, [currentUserData, t.unsavedGeminiKey]);
   const totalGeminiUses = geminiUsageRows.reduce((sum, row) => sum + row.count, 0);
+  const selectedProfile = selectedProfileId ? profiles.find(profile => profile.id === selectedProfileId) : undefined;
+  const scopedArticles = useMemo(() => (
+    selectedProfileId
+      ? remoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
+      : remoteArticles
+  ), [remoteArticles, selectedProfileId]);
+  const scopedLastSaved = getLatestSavedAt(scopedArticles);
+  const scopedTotalTime = scopedArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
 
-  // Article filters stay derived from activityData so refreshData remains the only reload path.
+  // Article filters stay derived from Supabase data so refreshData remains the only reload path.
   const filteredArticles = useMemo(() => {
-    if (!currentUserData) return [];
-
-    return (Object.entries(currentUserData.articles) as [string, ArticleActivity][]).filter(([, activity]) => {
+    return scopedArticles.filter((activity) => {
       if (filters.dateFrom) {
           if (!activity.lastSaved || new Date(activity.lastSaved) < getIstanbulDayStart(filters.dateFrom)) {
               return false;
@@ -498,7 +836,7 @@ const Dashboard: React.FC = () => {
 
       return true;
     });
-  }, [currentUserData, filters]);
+  }, [scopedArticles, filters]);
   
   const styleButtonClass = (isActive: boolean) =>
     `flex-1 flex items-center justify-center gap-2 p-2 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-100 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#d4af37] ${
@@ -561,10 +899,29 @@ const Dashboard: React.FC = () => {
           </div>
         </header>
 
+        {isAdmin && (
+          <AdminUsersTable
+            profiles={profiles}
+            articles={remoteArticles}
+            selectedProfileId={selectedProfileId}
+            onSelectProfile={setSelectedProfileId}
+            t={t}
+          />
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2">
                 <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">{t.yourRecentArticles}</h2>
+                    <div>
+                        <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
+                            {isAdmin ? `مقالات ${selectedProfile ? getProfileLabel(selectedProfile) : 'كل المستخدمين'}` : t.yourRecentArticles}
+                        </h2>
+                        {isAdmin && (
+                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                                {scopedArticles.length} مقال، آخر حفظ: {scopedLastSaved ? formatIstanbulDateTime(scopedLastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}، الوقت: {formatSeconds(scopedTotalTime, t)}
+                            </p>
+                        )}
+                    </div>
                     <div className="flex items-center gap-4">
                         <button
                             onClick={() => setIsFilterVisible(!isFilterVisible)}
@@ -643,18 +1000,20 @@ const Dashboard: React.FC = () => {
                     </div>
                 )}
 
-                {currentUserData && filteredArticles.length > 0 ? (
+                {filteredArticles.length > 0 ? (
                     <ul className="space-y-3">
                          {filteredArticles
-                            .sort(([, a], [, b]) => new Date(b.lastSaved || 0).getTime() - new Date(a.lastSaved || 0).getTime())
-                            .map(([title, activity]) => (
+                            .sort((a, b) => new Date(b.lastSaved || 0).getTime() - new Date(a.lastSaved || 0).getTime())
+                            .map((activity) => (
                                 <ArticleListItem
-                                    key={title}
-                                    title={title}
+                                    key={activity.id}
+                                    title={activity.title}
                                     activity={activity}
-                                    onLoad={() => onLoadArticle(title, activity)}
-                                    onDelete={() => handleDeleteArticle(title)}
-                                    onRename={handleRenameArticle}
+                                    ownerLabel={isAdmin ? getOwnerLabel(activity) : undefined}
+                                    onLoad={() => onLoadArticle(activity.title, activity)}
+                                    onDetails={() => { void handleShowArticleDetails(activity); }}
+                                    onDelete={() => { void handleDeleteArticle(activity.id); }}
+                                    onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
                                     t={t}
                                 />
                             ))}
@@ -663,10 +1022,10 @@ const Dashboard: React.FC = () => {
                     <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-300 dark:border-[#3C3C3C] rounded-lg text-center">
                         <Book size={40} className="text-gray-400 dark:text-gray-500 mb-2"/>
                         <h3 className="text-lg font-semibold text-gray-600 dark:text-gray-300">
-                            {currentUserData && Object.keys(currentUserData.articles).length > 0 ? t.noArticlesMatchFilter : t.noArticlesYet}
+                            {scopedArticles.length > 0 ? t.noArticlesMatchFilter : (isArticlesLoading ? 'جار تحميل المقالات...' : t.noArticlesYet)}
                         </h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {currentUserData && Object.keys(currentUserData.articles).length > 0 ? t.tryAdjustingFilters : t.clickNewArticleToStart}
+                            {scopedArticles.length > 0 ? t.tryAdjustingFilters : t.clickNewArticleToStart}
                         </p>
                     </div>
                 )}
@@ -676,8 +1035,8 @@ const Dashboard: React.FC = () => {
                 <div>
                      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4">{t.activitySummary}</h2>
                      <div className="space-y-3">
-                        <SummaryStat icon={<Book size={20} />} label={t.totalArticles} value={currentUserData ? Object.keys(currentUserData.articles).length : 0} />
-                        <SummaryStat icon={<Clock size={20} />} label={t.totalTime} value={formatSeconds(currentUserData ? (Object.values(currentUserData.articles) as ArticleActivity[]).reduce((sum, article) => sum + article.timeSpentSeconds, 0) : 0, t)} />
+                        <SummaryStat icon={<Book size={20} />} label={t.totalArticles} value={scopedArticles.length} />
+                        <SummaryStat icon={<Clock size={20} />} label={t.totalTime} value={formatSeconds(scopedTotalTime, t)} />
                     </div>
                 </div>
 
@@ -728,13 +1087,12 @@ const Dashboard: React.FC = () => {
                     <div className="p-4 bg-white dark:bg-[#2A2A2A] rounded-lg border border-gray-200 dark:border-[#3C3C3C] space-y-4">
                         <ClientGoalSettings />
                         <EngineeringPromptsSettings />
-                         <button
-                            onClick={() => openModal('apiKeys')}
-                            className="w-full flex items-center justify-center gap-2 p-2 bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675] font-bold rounded-lg hover:bg-[#d4af37]/20 transition-colors"
-                        >
+                        <div className="rounded-lg border border-[#d4af37]/20 bg-[#d4af37]/10 p-3 text-sm font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
+                          <div className="flex items-center gap-2">
                             <Key size={18} />
-                            <span>{t.manageApiKeys}</span>
-                        </button>
+                            <span>مفاتيح الذكاء الاصطناعي محفوظة على السيرفر فقط.</span>
+                          </div>
+                        </div>
                          <div>
                             <h4 className="font-bold text-sm text-gray-600 dark:text-gray-300 mb-2">{t.highlightStyle}</h4>
                             <div className="flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-[#1F1F1F] p-1">
@@ -844,6 +1202,21 @@ const Dashboard: React.FC = () => {
           t={t}
           uiLanguage={uiLanguage}
           onChoose={handleChooseNewArticleLanguage}
+        />
+      )}
+      {detailArticle && (
+        <ArticleDetailsModal
+          article={detailArticle}
+          snapshot={detailSnapshot}
+          ownerLabel={getOwnerLabel(detailArticle)}
+          isLoading={isDetailLoading}
+          t={t}
+          onClose={handleCloseArticleDetails}
+          onOpenArticle={() => {
+            const articleToOpen = detailArticle;
+            handleCloseArticleDetails();
+            void onLoadArticle(articleToOpen.title, articleToOpen);
+          }}
         />
       )}
     </div>

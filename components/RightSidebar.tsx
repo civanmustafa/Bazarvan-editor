@@ -717,7 +717,7 @@ ${url}
 }`;
 
 const RightSidebar: React.FC = () => {
-    const { t, engineeringPrompts, apiKeys, chatGptOpenMode } = useUser();
+    const { t, engineeringPrompts, chatGptOpenMode } = useUser();
     const { setIsStructureTabActive } = useEditor();
     const {
         handleAiAnalyze,
@@ -1193,7 +1193,6 @@ ${readyCommandCompetitorBlocks}`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt,
-                    apiKeys: (provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini).filter(Boolean),
                     model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL,
                     useUrlContext,
                 }),

@@ -1,26 +1,37 @@
 
 import React, { useState, useCallback, useEffect, createContext, useContext, useRef } from 'react';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { recordGeminiKeyUsage, recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
-import { USERS } from '../constants';
 import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
 import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
+import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 
 /*
  * UserContext is the owner of session-level app state:
  * login/logout, selected screen, theme, UI language, article language preference,
- * API keys, saved client goal contexts, and editable engineering prompts.
+ * server-only AI API mode, saved client goal contexts, and editable engineering prompts.
  *
  * Edit here when adding a user preference or anything that should survive per user.
  * Persistent writes are delegated to hooks/useUserActivity.ts.
  */
 type ApiKeys = { gemini: string[]; geminiPaid: string[]; chatgpt: string[] };
 type StoredApiKeys = { gemini?: string | string[]; geminiPaid?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
+type UserRole = 'admin' | 'user';
+type Profile = {
+    id: string;
+    email: string | null;
+    full_name: string | null;
+    role: UserRole;
+};
 
 interface UserContextType {
     currentUser: string | null;
+    currentUserId: string | null;
+    currentUserRole: UserRole;
     currentView: 'login' | 'dashboard' | 'editor';
+    isAuthLoading: boolean;
     isDarkMode: boolean;
     setIsDarkMode: React.Dispatch<React.SetStateAction<boolean>>;
     highlightStyle: 'background' | 'underline';
@@ -34,8 +45,8 @@ interface UserContextType {
     engineeringPrompts: EngineeringPrompts;
     t: typeof translations.ar;
     isIdle: boolean;
-    handleLogin: (username: string, password: string) => boolean;
-    handleLogout: () => void;
+    handleLogin: (username: string, password: string) => Promise<boolean>;
+    handleLogout: () => Promise<void>;
     setCurrentView: React.Dispatch<React.SetStateAction<'login' | 'dashboard' | 'editor'>>;
     handleHighlightStyleChange: (style: 'background' | 'underline') => void;
     handleChatGptOpenModeChange: (mode: ChatGptOpenMode) => void;
@@ -95,42 +106,72 @@ const getInitialTheme = () => {
     }
 };
 
-const normalizeApiKeys = (keys?: StoredApiKeys): ApiKeys => {
-    const geminiKeys = Array.isArray(keys?.gemini)
-        ? keys.gemini
-        : typeof keys?.gemini === 'string'
-          ? [keys.gemini]
-          : [''];
+const normalizeApiKeys = (_keys?: StoredApiKeys): ApiKeys => ({
+    gemini: [],
+    geminiPaid: [],
+    chatgpt: [],
+});
 
-    const geminiPaidKeys = Array.isArray(keys?.geminiPaid)
-        ? keys.geminiPaid
-        : typeof keys?.geminiPaid === 'string'
-          ? [keys.geminiPaid]
-          : [''];
+const getProfileLabel = (profile: Profile | null, user: SupabaseUser): string => (
+    profile?.full_name?.trim() ||
+    profile?.email?.trim() ||
+    user.email?.trim() ||
+    user.id
+);
 
-    const chatGptKeys = Array.isArray(keys?.chatgpt)
-        ? keys.chatgpt
-        : typeof keys?.chatgpt === 'string'
-          ? [keys.chatgpt]
-          : Array.isArray(keys?.openai)
-            ? keys.openai
-            : typeof keys?.openai === 'string'
-              ? [keys.openai]
-              : [''];
+const ensureUserProfile = async (user: SupabaseUser): Promise<Profile | null> => {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('id,email,full_name,role')
+        .eq('id', user.id)
+        .maybeSingle();
 
-    return {
-        gemini: geminiKeys.length > 0 ? geminiKeys : [''],
-        geminiPaid: geminiPaidKeys.length > 0 ? geminiPaidKeys : [''],
-        chatgpt: chatGptKeys.length > 0 ? chatGptKeys : [''],
-    };
+    if (error) {
+        throw error;
+    }
+
+    if (data) {
+        return {
+            id: data.id,
+            email: data.email,
+            full_name: data.full_name,
+            role: data.role === 'admin' ? 'admin' : 'user',
+        };
+    }
+
+    const { data: insertedProfile, error: insertError } = await supabase
+        .from('profiles')
+        .insert({
+            id: user.id,
+            email: user.email,
+            full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+            role: 'user',
+        })
+        .select('id,email,full_name,role')
+        .single();
+
+    if (insertError) {
+        throw insertError;
+    }
+
+    return insertedProfile
+        ? {
+            id: insertedProfile.id,
+            email: insertedProfile.email,
+            full_name: insertedProfile.full_name,
+            role: insertedProfile.role === 'admin' ? 'admin' : 'user',
+        }
+        : null;
 };
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     // Screen-level state. AppContent in App.tsx reads currentView to choose the visible page.
-    const [currentUser, setCurrentUser] = useState<string | null>(getStoredSessionUser);
-    const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'editor'>(
-      getStoredSessionUser() ? getStoredSessionView() : 'login'
-    );
+    const [currentUser, setCurrentUser] = useState<string | null>(null);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [currentUserRole, setCurrentUserRole] = useState<UserRole>('user');
+    const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'editor'>('login');
+    const [isAuthLoading, setIsAuthLoading] = useState(true);
     const [isDarkMode, setIsDarkMode] = useState(getInitialTheme);
     const [highlightStyle, setHighlightStyle] = useState<'background' | 'underline'>('background');
     const [chatGptOpenMode, setChatGptOpenMode] = useState<ChatGptOpenMode>('window');
@@ -148,6 +189,85 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isIdleRef = useRef(false);
 
     const t = translations[uiLanguage] || translations.ar;
+
+    const applyAuthenticatedUser = useCallback(async (
+        user: SupabaseUser | null,
+        options: { recordLoginActivity?: boolean } = {},
+    ): Promise<string | null> => {
+        if (!user) {
+            setCurrentUser(null);
+            setCurrentUserId(null);
+            setCurrentUserRole('user');
+            setApiKeys(normalizeApiKeys());
+            setClientGoalContexts({});
+            setEngineeringPrompts(normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
+            try {
+                sessionStorage.removeItem('currentUser');
+                sessionStorage.removeItem('currentUserId');
+                sessionStorage.removeItem('currentView');
+            } catch (error) {
+                console.error("Could not clear Supabase session mirror:", error);
+            }
+            setCurrentView('login');
+            return null;
+        }
+
+        const profile = await ensureUserProfile(user);
+        const label = getProfileLabel(profile, user);
+        setCurrentUser(label);
+        setCurrentUserId(user.id);
+        setCurrentUserRole(profile?.role === 'admin' ? 'admin' : 'user');
+        try {
+            sessionStorage.setItem('currentUser', label);
+            sessionStorage.setItem('currentUserId', user.id);
+            sessionStorage.setItem('currentView', getStoredSessionView());
+        } catch (error) {
+            console.error("Could not mirror Supabase session to sessionStorage:", error);
+        }
+        if (options.recordLoginActivity) {
+            recordLogin(label);
+        }
+        setCurrentView(getStoredSessionView());
+        return label;
+    }, []);
+
+    useEffect(() => {
+        if (!isSupabaseConfigured) {
+            setIsAuthLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        const supabase = getSupabaseClient();
+
+        supabase.auth.getSession()
+            .then(async ({ data }) => {
+                if (cancelled) return;
+                await applyAuthenticatedUser(data.session?.user ?? null);
+            })
+            .catch(error => {
+                console.error('Failed to restore Supabase session:', error);
+                if (!cancelled) {
+                    void applyAuthenticatedUser(null);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setIsAuthLoading(false);
+                }
+            });
+
+        const { data: subscriptionData } = supabase.auth.onAuthStateChange((_event, session) => {
+            void applyAuthenticatedUser(session?.user ?? null).catch(error => {
+                console.error('Failed to apply Supabase auth change:', error);
+            });
+        });
+
+        return () => {
+            cancelled = true;
+            subscriptionData.subscription.unsubscribe();
+        };
+    }, [applyAuthenticatedUser]);
 
     useEffect(() => {
         document.documentElement.lang = uiLanguage;
@@ -172,13 +292,17 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             if (currentUser && currentView !== 'login') {
                 sessionStorage.setItem('currentView', currentView);
+                if (currentUserId) {
+                    sessionStorage.setItem('currentUserId', currentUserId);
+                }
             } else {
                 sessionStorage.removeItem('currentView');
+                sessionStorage.removeItem('currentUserId');
             }
         } catch (error) {
             console.error("Could not persist current view to sessionStorage:", error);
         }
-    }, [currentUser, currentView]);
+    }, [currentUser, currentUserId, currentView]);
     
     useEffect(() => {
         if (isDarkMode) {
@@ -302,11 +426,9 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setStructureViewMode(userPrefs?.preferredStructureViewMode || 'grid');
             setPreferredLanguage(userPrefs?.preferredLanguage || 'ar');
             setUiLanguage(userPrefs?.preferredUILanguage || 'ar');
-            if (userPrefs?.apiKeys) {
-                const normalizedKeys = normalizeApiKeys(userPrefs.apiKeys as StoredApiKeys);
-                setApiKeys(normalizedKeys);
-                saveUserApiKeys(currentUser, normalizedKeys);
-            }
+            const serverOnlyApiKeys = normalizeApiKeys(userPrefs?.apiKeys as StoredApiKeys | undefined);
+            setApiKeys(serverOnlyApiKeys);
+            if (userPrefs?.apiKeys) saveUserApiKeys(currentUser, serverOnlyApiKeys);
             setClientGoalContexts(normalizeClientGoalContexts(userPrefs?.clientGoalContexts));
             const normalizedPrompts = normalizeEngineeringPrompts(userPrefs?.engineeringPrompts);
             setEngineeringPrompts(normalizedPrompts);
@@ -315,37 +437,41 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     }, [currentUser]);
 
-    const handleLogin = useCallback((username: string, password: string): boolean => {
-        const trimmedUsername = username.trim();
-        const trimmedPassword = password.trim();
-        const user = USERS.find(u => u.username === trimmedUsername && u.password === trimmedPassword);
-        if (user) {
-            setCurrentUser(user.username);
-            recordLogin(user.username);
-            try {
-                sessionStorage.setItem('currentUser', user.username);
-                sessionStorage.setItem('currentView', 'dashboard');
-            } catch (error) {
-                console.error("Could not write to sessionStorage:", error);
-            }
-            setCurrentView('dashboard');
-            return true;
+    const handleLogin = useCallback(async (username: string, password: string): Promise<boolean> => {
+        if (!isSupabaseConfigured) {
+            console.error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env.local.');
+            return false;
         }
-        return false;
-    }, []);
 
-    const handleLogout = useCallback(() => {
-        setCurrentUser(null);
-        setClientGoalContexts({});
-        setEngineeringPrompts(normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
-        try {
-            sessionStorage.removeItem('currentUser');
-            sessionStorage.removeItem('currentView');
-        } catch (error) {
-            console.error("Could not remove from sessionStorage:", error);
+        const trimmedEmail = username.trim();
+        const trimmedPassword = password.trim();
+        if (!trimmedEmail || !trimmedPassword) return false;
+
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: trimmedEmail,
+            password: trimmedPassword,
+        });
+
+        if (error || !data.user) {
+            if (error) console.error('Supabase login failed:', error);
+            return false;
         }
-        setCurrentView('login');
-    }, []);
+
+        await applyAuthenticatedUser(data.user, { recordLoginActivity: true });
+        setCurrentView('dashboard');
+        return true;
+    }, [applyAuthenticatedUser]);
+
+    const handleLogout = useCallback(async () => {
+        if (isSupabaseConfigured) {
+            const { error } = await getSupabaseClient().auth.signOut();
+            if (error) {
+                console.error('Supabase logout failed:', error);
+            }
+        }
+        await applyAuthenticatedUser(null);
+    }, [applyAuthenticatedUser]);
     
     const handleHighlightStyleChange = (style: 'background' | 'underline') => {
         setHighlightStyle(style);
@@ -421,7 +547,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const value = {
         currentUser,
+        currentUserId,
+        currentUserRole,
         currentView,
+        isAuthLoading,
         isDarkMode,
         setIsDarkMode,
         highlightStyle,

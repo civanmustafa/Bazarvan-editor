@@ -18,15 +18,18 @@ class OpenAiRequestError extends Error {
 }
 
 /*
- * Local OpenAI/ChatGPT API route used by the Vite dev middleware.
- * Keep browser code away from direct OpenAI calls; add request/response changes here.
+ * OpenAI/ChatGPT API route used by Vite dev middleware and the production Node server.
+ * API keys are read from server environment variables only.
  */
 const normalizeKeys = (apiKey?: unknown, apiKeys?: unknown): string[] => {
-  const rawKeys = Array.isArray(apiKeys)
-    ? apiKeys
-    : typeof apiKey === "string"
-      ? [apiKey]
-      : [];
+  const rawKeys = [
+    ...(typeof apiKey === "string" ? apiKey.split(/[\n,;]+/) : []),
+    ...(Array.isArray(apiKeys)
+      ? apiKeys
+      : typeof apiKeys === "string"
+        ? apiKeys.split(/[\n,;]+/)
+        : []),
+  ];
 
   return rawKeys
     .map(key => typeof key === "string" ? key.trim() : "")
@@ -209,16 +212,12 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, apiKey, apiKeys, model, conversationId } = await readRequestBody(req) as any;
+    const { prompt, model, conversationId } = await readRequestBody(req) as any;
     if (!prompt || typeof prompt !== "string") {
       return { status: 400, body: { error: "الموجه مطلوب" } };
     }
 
-    const openAiKeys = normalizeKeys(apiKey, apiKeys);
-    const serverKey = process.env.OPENAI_API_KEY;
-    if (openAiKeys.length === 0 && serverKey) {
-      openAiKeys.push(serverKey);
-    }
+    const openAiKeys = normalizeKeys(process.env.OPENAI_API_KEY, process.env.OPENAI_API_KEYS);
 
     if (openAiKeys.length === 0) {
       return { status: 500, body: { error: "لم يتم تكوين مفتاح ChatGPT API." } };

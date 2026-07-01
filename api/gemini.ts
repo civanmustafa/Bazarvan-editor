@@ -36,8 +36,8 @@ const createApiKeyFingerprint = (key: string): string => {
 };
 
 /*
- * Local Gemini API route used by the Vite dev middleware.
- * The UI may send user-provided keys; otherwise this route reads server keys.
+ * Gemini API route used by Vite dev middleware and the production Node server.
+ * API keys are read from server environment variables only.
  * Key attempts are randomized so quota errors on one key do not block the request.
  */
 const randomizeKeyOrder = (keys: string[]): string[] => {
@@ -156,21 +156,11 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, apiKey, apiKeys, useUrlContext, history, model } = await readRequestBody(req) as any;
+    const { prompt, useUrlContext, history, model } = await readRequestBody(req) as any;
     const selectedModel = typeof model === "string" && ALLOWED_GEMINI_MODELS.has(model)
       ? model
       : GEMINI_ANALYSIS_MODEL;
-    const requestKeys = Array.isArray(apiKeys)
-      ? apiKeys
-      : typeof apiKey === 'string'
-        ? [apiKey]
-        : [];
-    const GEMINI_API_KEYS = requestKeys
-      .map(key => typeof key === 'string' ? key.trim() : '')
-      .filter(Boolean);
-    if (GEMINI_API_KEYS.length === 0) {
-      GEMINI_API_KEYS.push(...parseEnvGeminiKeys());
-    }
+    const GEMINI_API_KEYS = parseEnvGeminiKeys();
 
     if (GEMINI_API_KEYS.length === 0) {
       return { status: 503, body: { error: "لم يتم تكوين مفتاح Gemini API على الخادم." } };

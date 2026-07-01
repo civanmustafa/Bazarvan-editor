@@ -106,9 +106,9 @@ export const normalizeKeywords = (value: unknown): Keywords => {
 const getDefaultUserActivity = (): UserActivity => ({
   logins: [],
   apiKeys: {
-    gemini: [''],
-    geminiPaid: [''],
-    chatgpt: [''],
+    gemini: [],
+    geminiPaid: [],
+    chatgpt: [],
   },
   geminiKeyUsage: {},
   articles: {},
@@ -178,7 +178,6 @@ const normalizeArticleActivity = (value: unknown): ArticleActivity => {
 const normalizeUserActivity = (value: unknown): UserActivity => {
   const source = isRecord(value) ? value : {};
   const defaults = getDefaultUserActivity();
-  const storedApiKeys = isRecord(source.apiKeys) ? source.apiKeys : {};
   const storedGeminiKeyUsage = isRecord(source.geminiKeyUsage) ? source.geminiKeyUsage : {};
   const articles = isRecord(source.articles)
     ? Object.entries(source.articles).reduce<UserActivity['articles']>((normalized, [title, article]) => {
@@ -192,11 +191,7 @@ const normalizeUserActivity = (value: unknown): UserActivity => {
   return {
     ...defaults,
     logins: toStringArray(source.logins),
-    apiKeys: {
-      gemini: toKeyList(storedApiKeys.gemini),
-      geminiPaid: toKeyList(storedApiKeys.geminiPaid),
-      chatgpt: toKeyList(storedApiKeys.chatgpt ?? storedApiKeys.openai),
-    },
+    apiKeys: defaults.apiKeys,
     geminiKeyUsage: Object.entries(storedGeminiKeyUsage).reduce<UserActivity['geminiKeyUsage']>((normalized, [fingerprint, value]) => {
       const record = isRecord(value) ? value : {};
       const legacyCount = typeof value === 'number' ? value : record.count;

@@ -1966,7 +1966,6 @@ const requestGeminiAnalysis = async (
     history?: GeminiChatMessage[],
     model: string = GEMINI_MODEL,
 ): Promise<GeminiAnalysisResult> => {
-    const trimmedUserKeys = normalizeGeminiKeys(userKeys);
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
 
@@ -1976,7 +1975,6 @@ const requestGeminiAnalysis = async (
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             prompt,
-            apiKeys: trimmedUserKeys.length > 0 ? randomizeApiKeyOrder(trimmedUserKeys) : undefined,
             history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
             model,
         }),
@@ -2100,7 +2098,6 @@ const callChatGptAnalysis = async (
     userKeys?: string | string[],
     conversationId?: string,
 ): Promise<ChatGptAnalysisResult> => {
-    const trimmedUserKeys = normalizeChatGptKeys(userKeys);
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
 
@@ -2111,7 +2108,6 @@ const callChatGptAnalysis = async (
             body: JSON.stringify({
                 prompt,
                 model: OPENAI_MODEL,
-                apiKeys: trimmedUserKeys.length > 0 ? randomizeApiKeyOrder(trimmedUserKeys) : undefined,
                 conversationId,
             }),
             signal: controller.signal,
