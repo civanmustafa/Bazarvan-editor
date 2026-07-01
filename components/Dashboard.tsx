@@ -214,6 +214,55 @@ const EditableN8nSettingField: React.FC<{
   </label>
 );
 
+const EditableN8nTextField: React.FC<{
+  field: 'visibleToEmailsCsv';
+  value?: string;
+  disabled: boolean;
+  onChange: (field: 'visibleToEmailsCsv', value: string) => void;
+}> = ({ field, value = '', disabled, onChange }) => {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const commit = () => {
+    const nextValue = draft.trim();
+    if (nextValue !== value.trim()) {
+      onChange(field, nextValue);
+    }
+  };
+
+  return (
+    <label
+      className="inline-flex min-w-[170px] max-w-[270px] items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
+      onClick={event => event.stopPropagation()}
+      title={draft || '-'}
+    >
+      <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
+      <input
+        type="text"
+        value={draft}
+        disabled={disabled}
+        onChange={event => setDraft(event.target.value)}
+        onBlur={commit}
+        onClick={event => event.stopPropagation()}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            event.currentTarget.blur();
+          }
+          if (event.key === 'Escape') {
+            setDraft(value);
+            event.currentTarget.blur();
+          }
+        }}
+        className="min-w-0 flex-1 rounded border border-transparent bg-transparent text-[10px] font-black text-[#8a6f1d] outline-none focus:border-[#d4af37] disabled:cursor-wait disabled:opacity-60 dark:text-[#f2d675]"
+        placeholder="-"
+      />
+    </label>
+  );
+};
+
 const AdminUsersTable: React.FC<{
   profiles: RemoteProfile[];
   articles: RemoteArticleActivity[];
@@ -481,7 +530,7 @@ interface ArticleItemProps {
     onRename: (newTitle: string) => boolean | Promise<boolean>;
     onUpdateSettings?: (articleId: string, patch: RemoteArticleSettingsPatch) => Promise<boolean>;
     visibleSettingFields?: N8nDisplayFieldKey[];
-    editableSettingFields?: N8nSettingFieldKey[];
+    editableSettingFields?: N8nDisplayFieldKey[];
     isTrashView?: boolean;
     showAdminMetadata?: boolean;
     t: typeof translations.ar;
@@ -505,7 +554,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
 }) => {
     const [isRenaming, setIsRenaming] = useState(false);
     const [newTitle, setNewTitle] = useState(title);
-    const [savingSettingField, setSavingSettingField] = useState<N8nSettingFieldKey | null>(null);
+    const [savingSettingField, setSavingSettingField] = useState<N8nDisplayFieldKey | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -543,13 +592,15 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         }
     };
 
-    const handleSettingChange = async (field: N8nSettingFieldKey, value: string) => {
+    const handleSettingChange = async (field: N8nDisplayFieldKey, value: string) => {
         const articleId = (activity as RemoteArticleActivity).id;
         if (!articleId || !onUpdateSettings || savingSettingField) return;
 
         const patch: RemoteArticleSettingsPatch = field === 'articleLanguage'
             ? { articleLanguage: value as RemoteArticleSettingsPatch['articleLanguage'] }
-            : { [field]: value } as RemoteArticleSettingsPatch;
+            : field === 'visibleToEmailsCsv'
+              ? { visibleToEmailsCsv: value }
+              : { [field]: value } as RemoteArticleSettingsPatch;
 
         setSavingSettingField(field);
         const isSaved = await onUpdateSettings(articleId, patch);
@@ -661,12 +712,24 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                 {shouldShowN8nSettings && (
                     <div className="flex flex-wrap items-center gap-1 border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
                         {fieldsToShow.map(field => {
-                            if (onUpdateSettings && isEditableN8nSettingField(field) && editableSettingFields.includes(field)) {
+                            const isEditable = Boolean(onUpdateSettings && editableSettingFields.includes(field));
+                            if (isEditable && isEditableN8nSettingField(field)) {
                                 return (
                                     <EditableN8nSettingField
                                         key={field}
                                         field={field}
                                         value={String(n8nSettings[field] || '')}
+                                        disabled={savingSettingField !== null}
+                                        onChange={handleSettingChange}
+                                    />
+                                );
+                            }
+                            if (isEditable && field === 'visibleToEmailsCsv') {
+                                return (
+                                    <EditableN8nTextField
+                                        key={field}
+                                        field={field}
+                                        value={n8nSettings.visibleToEmailsCsv}
                                         disabled={savingSettingField !== null}
                                         onChange={handleSettingChange}
                                     />
@@ -1317,7 +1380,7 @@ const Dashboard: React.FC = () => {
                                       ? ['visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage', 'status']
                                       : ['status', 'accessRole', 'visibleToEmailsCsv']}
                                     editableSettingFields={isAdmin
-                                      ? ['visibility', 'accessRole', 'articleLanguage', 'status']
+                                      ? ['visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage', 'status']
                                       : ['status']}
                                     isTrashView={isTrashVisible}
                                     showAdminMetadata={isAdmin}
