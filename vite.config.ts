@@ -3,6 +3,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import chatgptHandler from './api/chatgpt';
 import geminiHandler from './api/gemini';
+import n8nArticlesHandler from './api/n8nArticles';
 
 type ApiHandler = (req: Request) => Promise<Response | void>;
 
@@ -10,6 +11,7 @@ type ApiHandler = (req: Request) => Promise<Response | void>;
 const apiHandlers = new Map<string, ApiHandler>([
   ['/api/chatgpt', chatgptHandler],
   ['/api/gemini', geminiHandler],
+  ['/api/n8n/articles', n8nArticlesHandler],
 ]);
 
 const readRequestBody = (req: any): Promise<Buffer> => new Promise((resolve, reject) => {
@@ -50,7 +52,7 @@ const sendWebResponse = async (res: any, response: Response) => {
 
 export default defineConfig(({ mode }) => {
       const env = loadEnv(mode, process.cwd(), '');
-      ['GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY', 'OPENAI_API_KEY', 'OPENAI_API_KEYS'].forEach((key) => {
+      ['GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY', 'OPENAI_API_KEY', 'OPENAI_API_KEYS', 'N8N_INGEST_TOKEN', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_URL'].forEach((key) => {
         if (!process.env[key] && env[key]) {
           process.env[key] = env[key];
         }

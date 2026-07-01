@@ -1,0 +1,670 @@
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import crypto from 'node:crypto';
+
+type ApiResult = {
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+};
+
+type ArticleVisibility = 'private' | 'shared' | 'team' | 'public';
+type ArticleStatus = 'draft' | 'in_review' | 'published' | 'archived';
+type AccessRole = 'viewer' | 'editor';
+
+type ResolvedProfile = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+};
+
+type IngestResolution = {
+  visibility: ArticleVisibility;
+  ownerId: string | null;
+  assignedToId: string | null;
+  accessProfiles: ResolvedProfile[];
+  accessRole: AccessRole;
+};
+
+type SupabaseAdmin = SupabaseClient<any, 'public', any>;
+
+class IngestError extends Error {
+  status: number;
+
+  constructor(message: string, status = 400) {
+    super(message);
+    this.name = 'IngestError';
+    this.status = status;
+  }
+}
+
+const ALLOWED_VISIBILITIES = new Set<ArticleVisibility>(['private', 'shared', 'team', 'public']);
+const ALLOWED_STATUSES = new Set<ArticleStatus>(['draft', 'in_review', 'published', 'archived']);
+const ALLOWED_ACCESS_ROLES = new Set<AccessRole>(['viewer', 'editor']);
+const SHARED_TARGETS = new Set(['all', 'all-users', 'everyone', 'shared', 'team', 'كل المستخدمين', 'الجميع', 'مشترك']);
+const PUBLIC_TARGETS = new Set(['public', 'عام']);
+
+const isRecord = (value: unknown): value is Record<string, any> => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
+);
+
+const readNodeBody = async (req: any): Promise<unknown> => {
+  if (req.body !== undefined) {
+    if (typeof req.body === 'string') return req.body ? JSON.parse(req.body) : {};
+    if (Buffer.isBuffer(req.body)) return req.body.length ? JSON.parse(req.body.toString('utf8')) : {};
+    return req.body;
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const raw = Buffer.concat(chunks).toString('utf8');
+  return raw ? JSON.parse(raw) : {};
+};
+
+const readRequestBody = async (req: any): Promise<unknown> => {
+  if (typeof req.json === 'function' && typeof req.headers?.get === 'function') {
+    return req.json();
+  }
+  return readNodeBody(req);
+};
+
+const getHeaderValue = (req: any, headerName: string): string => {
+  if (typeof req.headers?.get === 'function') {
+    return req.headers.get(headerName) || '';
+  }
+
+  const directValue = req.headers?.[headerName.toLowerCase()] || req.headers?.[headerName];
+  return Array.isArray(directValue) ? String(directValue[0] || '') : String(directValue || '');
+};
+
+const getContentType = (req: any): string => getHeaderValue(req, 'content-type');
+
+const toWebResponse = (result: ApiResult): Response => new Response(
+  result.status === 204 ? null : JSON.stringify(result.body),
+  {
+    status: result.status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      ...(result.headers || {}),
+    },
+  },
+);
+
+const sendNodeResponse = (res: any, result: ApiResult) => {
+  res.statusCode = result.status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
+  res.end(result.status === 204 ? undefined : JSON.stringify(result.body));
+};
+
+const normalizeProjectUrl = (value: string): string => value
+  .trim()
+  .replace(/\/rest\/v1\/?$/i, '')
+  .replace(/\/+$/, '');
+
+const getSupabaseAdmin = (): SupabaseAdmin => {
+  const supabaseUrl = normalizeProjectUrl(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '');
+  const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+  if (!supabaseUrl) {
+    throw new IngestError('SUPABASE_URL or VITE_SUPABASE_URL is not configured on the server.', 503);
+  }
+  if (!serviceRoleKey) {
+    throw new IngestError('SUPABASE_SERVICE_ROLE_KEY is not configured on the server.', 503);
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+};
+
+const constantTimeEquals = (left: string, right: string): boolean => {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+const authenticateRequest = (req: any) => {
+  const configuredToken = String(process.env.N8N_INGEST_TOKEN || '').trim();
+  if (!configuredToken) {
+    throw new IngestError('N8N_INGEST_TOKEN is not configured on the server.', 503);
+  }
+
+  const authorization = getHeaderValue(req, 'authorization');
+  const bearerToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
+  const headerToken = getHeaderValue(req, 'x-n8n-token') || getHeaderValue(req, 'x-bazarvan-token');
+  const providedToken = bearerToken || headerToken.trim();
+
+  if (!providedToken || !constantTimeEquals(providedToken, configuredToken)) {
+    throw new IngestError('Unauthorized n8n ingest request.', 401);
+  }
+};
+
+const toTrimmedString = (value: unknown): string => (
+  typeof value === 'string' ? value.trim() : ''
+);
+
+const getFirstString = (source: Record<string, any>, keys: string[]): string => {
+  for (const key of keys) {
+    const value = toTrimmedString(source[key]);
+    if (value) return value;
+  }
+  return '';
+};
+
+const normalizeToken = (value: unknown): string => toTrimmedString(value).toLowerCase().replace(/\s+/g, '-');
+
+const toStringList = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.flatMap(item => toStringList(item));
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(/[\n,،;؛|]+/)
+      .map(item => item.trim())
+      .filter(Boolean);
+  }
+
+  if (isRecord(value)) {
+    const id = toTrimmedString(value.id || value.userId || value.user_id);
+    const email = toTrimmedString(value.email || value.userEmail || value.user_email);
+    return [id || email].filter(Boolean);
+  }
+
+  return [];
+};
+
+const uniqueStrings = (values: string[]): string[] => {
+  const seen = new Set<string>();
+  return values.filter(value => {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+};
+
+const compactObject = <T extends Record<string, any>>(value: T): Partial<T> => Object.entries(value)
+  .reduce<Partial<T>>((acc, [key, item]) => {
+    if (item === null || item === undefined) return acc;
+    if (typeof item === 'string' && !item.trim()) return acc;
+    if (Array.isArray(item) && item.length === 0) return acc;
+    if (isRecord(item) && Object.keys(compactObject(item)).length === 0) return acc;
+    (acc as Record<string, any>)[key] = item;
+    return acc;
+  }, {});
+
+const decodeHtmlEntities = (value: string): string => value
+  .replace(/&nbsp;/g, ' ')
+  .replace(/&amp;/g, '&')
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"')
+  .replace(/&#39;/g, "'");
+
+const stripHtml = (html: string): string => decodeHtmlEntities(html
+  .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+  .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  .replace(/<br\s*\/?>/gi, '\n')
+  .replace(/<\/(p|div|h[1-6]|li|tr|section|article)>/gi, '\n')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/[ \t]+\n/g, '\n')
+  .replace(/\n{3,}/g, '\n\n')
+  .replace(/[ \t]{2,}/g, ' ')
+  .trim());
+
+const escapeHtml = (value: string): string => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const plainTextToHtml = (text: string): string => text
+  .split(/\n{2,}/)
+  .map(paragraph => paragraph.trim())
+  .filter(Boolean)
+  .map(paragraph => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
+  .join('\n');
+
+const calculateWordCount = (text: string): number => (
+  text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0
+);
+
+const normalizeLanguage = (value: unknown): 'ar' | 'en' => {
+  const token = normalizeToken(value);
+  return token === 'en' || token === 'english' || token === 'انجليزي' || token === 'إنجليزي' ? 'en' : 'ar';
+};
+
+const normalizeStatus = (value: unknown): ArticleStatus => {
+  const token = normalizeToken(value);
+  return ALLOWED_STATUSES.has(token as ArticleStatus) ? token as ArticleStatus : 'draft';
+};
+
+const normalizeVisibility = (value: unknown): ArticleVisibility | null => {
+  const token = normalizeToken(value);
+  return ALLOWED_VISIBILITIES.has(token as ArticleVisibility) ? token as ArticleVisibility : null;
+};
+
+const normalizeAccessRole = (value: unknown): AccessRole => {
+  const token = normalizeToken(value);
+  return ALLOWED_ACCESS_ROLES.has(token as AccessRole) ? token as AccessRole : 'viewer';
+};
+
+const getKeywordsPayload = (body: Record<string, any>) => {
+  const keywords = isRecord(body.keywords) ? body.keywords : {};
+  const primary = getFirstString(body, ['primaryKeyword', 'primary_keyword']) || getFirstString(keywords, ['primary', 'main', 'primaryKeyword', 'primary_keyword']);
+  const company = getFirstString(body, ['company', 'companyName', 'company_name', 'brand']) || getFirstString(keywords, ['company', 'companyName', 'company_name', 'brand']);
+  const secondaries = uniqueStrings([
+    ...toStringList(keywords.secondaries),
+    ...toStringList(keywords.synonyms),
+    ...toStringList(keywords.alternativeForms),
+    ...toStringList(keywords.alternatives),
+    ...toStringList(body.secondaries),
+    ...toStringList(body.synonyms),
+    ...toStringList(body.alternativeForms),
+    ...toStringList(body.alternative_forms),
+    ...toStringList(body.alternatives),
+  ]);
+  const lsi = uniqueStrings([
+    ...toStringList(keywords.lsi),
+    ...toStringList(keywords.lsiKeywords),
+    ...toStringList(keywords.lsi_keywords),
+    ...toStringList(body.lsi),
+    ...toStringList(body.lsiKeywords),
+    ...toStringList(body.lsi_keywords),
+  ]);
+
+  return compactObject({
+    primary,
+    secondaries,
+    company,
+    lsi,
+  });
+};
+
+const getGoalContextPayload = (body: Record<string, any>) => {
+  const source = isRecord(body.goalContext)
+    ? body.goalContext
+    : isRecord(body.goal_context)
+      ? body.goal_context
+      : isRecord(body.pageContext)
+        ? body.pageContext
+        : isRecord(body.page_context)
+          ? body.page_context
+          : {};
+
+  return compactObject({
+    pageType: getFirstString(body, ['pageType', 'page_type']) || getFirstString(source, ['pageType', 'page_type', 'type']),
+    objective: getFirstString(body, ['objective', 'pageObjective', 'page_objective']) || getFirstString(source, ['objective', 'pageObjective', 'page_objective']),
+    audienceScope: getFirstString(body, ['audienceScope', 'audience_scope']) || getFirstString(source, ['audienceScope', 'audience_scope', 'scope']),
+    targetCountry: getFirstString(body, ['targetCountry', 'target_country', 'targetLocation', 'target_location']) || getFirstString(source, ['targetCountry', 'target_country', 'targetLocation', 'target_location', 'country']),
+    targetAudience: getFirstString(body, ['targetAudience', 'target_audience', 'audience']) || getFirstString(source, ['targetAudience', 'target_audience', 'audience']),
+    searchIntent: getFirstString(body, ['searchIntent', 'search_intent', 'intent']) || getFirstString(source, ['searchIntent', 'search_intent', 'intent']),
+  });
+};
+
+const getTargetIdentifiers = (body: Record<string, any>): string[] => uniqueStrings([
+  ...toStringList(body.visibleTo),
+  ...toStringList(body.visible_to),
+  ...toStringList(body.visibleToUsers),
+  ...toStringList(body.visible_to_users),
+  ...toStringList(body.visibleToEmails),
+  ...toStringList(body.visible_to_emails),
+  ...toStringList(body.userEmail),
+  ...toStringList(body.user_email),
+  ...toStringList(body.ownerEmail),
+  ...toStringList(body.owner_email),
+  ...toStringList(body.assignedToEmail),
+  ...toStringList(body.assigned_to_email),
+]);
+
+const lookupProfiles = async (supabase: SupabaseAdmin, identifiers: string[]): Promise<ResolvedProfile[]> => {
+  const normalizedIdentifiers = uniqueStrings(identifiers);
+  if (normalizedIdentifiers.length === 0) return [];
+
+  const ids = normalizedIdentifiers.filter(value => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
+  const emails = normalizedIdentifiers.filter(value => value.includes('@')).map(value => value.toLowerCase());
+  const profilesById = new Map<string, ResolvedProfile>();
+
+  if (ids.length > 0) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,email,full_name')
+      .in('id', ids);
+    if (error) throw error;
+    (data || []).forEach(profile => profilesById.set(profile.id, profile as ResolvedProfile));
+  }
+
+  if (emails.length > 0) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,email,full_name')
+      .in('email', emails);
+    if (error) throw error;
+    (data || []).forEach(profile => profilesById.set(profile.id, profile as ResolvedProfile));
+  }
+
+  const foundTokens = new Set<string>();
+  profilesById.forEach(profile => {
+    foundTokens.add(profile.id.toLowerCase());
+    if (profile.email) foundTokens.add(profile.email.toLowerCase());
+  });
+
+  const missing = normalizedIdentifiers.filter(identifier => !foundTokens.has(identifier.toLowerCase()));
+  if (missing.length > 0) {
+    throw new IngestError(`Could not find Supabase profiles for: ${missing.join(', ')}`, 400);
+  }
+
+  return [...profilesById.values()];
+};
+
+const resolveProfileBySingleIdentifier = async (
+  supabase: SupabaseAdmin,
+  value: unknown,
+): Promise<ResolvedProfile | null> => {
+  const identifiers = toStringList(value);
+  if (identifiers.length === 0) return null;
+  const profiles = await lookupProfiles(supabase, [identifiers[0]]);
+  return profiles[0] || null;
+};
+
+const resolveIngestAccess = async (
+  supabase: SupabaseAdmin,
+  body: Record<string, any>,
+): Promise<IngestResolution> => {
+  const showToToken = normalizeToken(body.showTo || body.show_to || body.audienceVisibility || body.audience_visibility);
+  const explicitVisibility = normalizeVisibility(body.visibility);
+  const selectedProfiles = await lookupProfiles(supabase, getTargetIdentifiers(body));
+  const ownerProfile = await resolveProfileBySingleIdentifier(supabase, body.ownerId || body.owner_id || body.ownerEmail || body.owner_email);
+  const assignedProfile = await resolveProfileBySingleIdentifier(supabase, body.assignedTo || body.assigned_to || body.assignedToId || body.assigned_to_id || body.assignedToEmail || body.assigned_to_email);
+
+  const accessProfilesById = new Map<string, ResolvedProfile>();
+  selectedProfiles.forEach(profile => accessProfilesById.set(profile.id, profile));
+  if (ownerProfile) accessProfilesById.set(ownerProfile.id, ownerProfile);
+  if (assignedProfile) accessProfilesById.set(assignedProfile.id, assignedProfile);
+
+  let visibility: ArticleVisibility = explicitVisibility || 'shared';
+  if (PUBLIC_TARGETS.has(showToToken)) visibility = 'public';
+  if (SHARED_TARGETS.has(showToToken)) visibility = 'shared';
+  if (accessProfilesById.size > 0 && !PUBLIC_TARGETS.has(showToToken) && !SHARED_TARGETS.has(showToToken)) {
+    visibility = 'private';
+  }
+
+  return {
+    visibility,
+    ownerId: ownerProfile?.id || (visibility === 'private' ? selectedProfiles[0]?.id || null : null),
+    assignedToId: assignedProfile?.id || null,
+    accessProfiles: [...accessProfilesById.values()],
+    accessRole: normalizeAccessRole(body.accessRole || body.access_role),
+  };
+};
+
+const buildStats = (plainText: string, rawStats: unknown) => {
+  const stats = isRecord(rawStats) ? rawStats : {};
+  return {
+    wordCount: typeof stats.wordCount === 'number' ? stats.wordCount : calculateWordCount(plainText),
+    keywordViolations: typeof stats.keywordViolations === 'number' ? stats.keywordViolations : 0,
+    violatingCriteriaCount: typeof stats.violatingCriteriaCount === 'number' ? stats.violatingCriteriaCount : 0,
+    totalErrorsCount: typeof stats.totalErrorsCount === 'number' ? stats.totalErrorsCount : 0,
+    keywordDuplicatesCount: typeof stats.keywordDuplicatesCount === 'number' ? stats.keywordDuplicatesCount : 0,
+    totalDuplicates: typeof stats.totalDuplicates === 'number' ? stats.totalDuplicates : 0,
+    commonDuplicatesCount: typeof stats.commonDuplicatesCount === 'number' ? stats.commonDuplicatesCount : 0,
+    uniqueWordsPercentage: typeof stats.uniqueWordsPercentage === 'number' ? stats.uniqueWordsPercentage : 0,
+  };
+};
+
+const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string, any>) => {
+  const title = getFirstString(body, ['title', 'articleTitle', 'article_title', 'headline']);
+  if (!title) throw new IngestError('Article title is required.', 400);
+
+  const providedHtml = getFirstString(body, ['contentHtml', 'content_html', 'html', 'articleHtml', 'article_html']);
+  const providedPlainText = getFirstString(body, ['plainText', 'plain_text', 'text', 'contentText', 'content_text', 'articleText', 'article_text']);
+  const fallbackContent = getFirstString(body, ['content', 'body']);
+  const contentHtml = providedHtml || (providedPlainText || fallbackContent ? plainTextToHtml(providedPlainText || fallbackContent) : '');
+  const plainText = providedPlainText || (providedHtml ? stripHtml(providedHtml) : fallbackContent);
+
+  if (!contentHtml && !plainText) {
+    throw new IngestError('Article contentHtml or plainText is required.', 400);
+  }
+
+  const externalId = getFirstString(body, ['externalId', 'external_id', 'id']);
+  const workflowId = getFirstString(body, ['workflowId', 'workflow_id']) || getFirstString(isRecord(body.metadata) ? body.metadata : {}, ['workflowId', 'workflow_id']);
+  const executionId = getFirstString(body, ['executionId', 'execution_id']) || getFirstString(isRecord(body.metadata) ? body.metadata : {}, ['executionId', 'execution_id']);
+  const access = await resolveIngestAccess(supabase, body);
+  const pageContextRaw = toTrimmedString(body.pageContext || body.page_context);
+  const audienceRaw = toTrimmedString(body.audience);
+  const contentJson = isRecord(body.contentJson) ? body.contentJson : isRecord(body.content_json) ? body.content_json : {};
+
+  return {
+    article: {
+      owner_id: access.ownerId,
+      created_by: access.ownerId,
+      assigned_to: access.assignedToId,
+      source: 'n8n',
+      visibility: access.visibility,
+      status: normalizeStatus(body.status),
+      title,
+      content_json: contentJson,
+      content_html: contentHtml || null,
+      plain_text: plainText || stripHtml(contentHtml),
+      keywords: getKeywordsPayload(body),
+      goal_context: getGoalContextPayload(body),
+      article_language: normalizeLanguage(body.articleLanguage || body.article_language || body.language),
+      analysis: isRecord(body.analysis) ? body.analysis : null,
+      stats: buildStats(plainText || stripHtml(contentHtml), body.stats),
+      n8n_workflow_id: workflowId || null,
+      n8n_execution_id: executionId || null,
+      external_id: externalId || null,
+      metadata: compactObject({
+        importedBy: 'n8n',
+        importedAt: new Date().toISOString(),
+        workflowId,
+        executionId,
+        externalId,
+        pageContextRaw,
+        audienceRaw,
+        visibleTo: access.accessProfiles.map(profile => compactObject({
+          id: profile.id,
+          email: profile.email,
+          fullName: profile.full_name,
+          role: access.accessRole,
+        })),
+        requestMetadata: isRecord(body.metadata) ? body.metadata : undefined,
+      }),
+    },
+    access,
+    externalId,
+  };
+};
+
+const syncArticleAccess = async (supabase: SupabaseAdmin, articleId: string, access: IngestResolution) => {
+  const { error: deleteError } = await supabase
+    .from('article_access')
+    .delete()
+    .eq('article_id', articleId);
+
+  if (deleteError && deleteError.code !== '42P01') throw deleteError;
+
+  if (access.accessProfiles.length === 0) return;
+
+  const { error } = await supabase
+    .from('article_access')
+    .insert(access.accessProfiles.map(profile => ({
+      article_id: articleId,
+      user_id: profile.id,
+      role: access.accessRole,
+    })));
+
+  if (error) throw error;
+};
+
+const createIngestLog = async (
+  supabase: SupabaseAdmin,
+  status: 'imported' | 'failed',
+  body: Record<string, any>,
+  options: {
+    articleId?: string | null;
+    errorMessage?: string;
+  } = {},
+) => {
+  const workflowId = getFirstString(body, ['workflowId', 'workflow_id']) || getFirstString(isRecord(body.metadata) ? body.metadata : {}, ['workflowId', 'workflow_id']);
+  const executionId = getFirstString(body, ['executionId', 'execution_id']) || getFirstString(isRecord(body.metadata) ? body.metadata : {}, ['executionId', 'execution_id']);
+  const externalId = getFirstString(body, ['externalId', 'external_id', 'id']);
+
+  await supabase
+    .from('n8n_ingest_logs')
+    .insert({
+      article_id: options.articleId || null,
+      workflow_id: workflowId || null,
+      execution_id: executionId || null,
+      external_id: externalId || null,
+      status,
+      payload: compactObject({
+        title: getFirstString(body, ['title', 'articleTitle', 'article_title', 'headline']),
+        externalId,
+        workflowId,
+        executionId,
+      }),
+      error_message: options.errorMessage || null,
+      processed_at: new Date().toISOString(),
+    });
+};
+
+const saveIngestedArticle = async (supabase: SupabaseAdmin, body: Record<string, any>) => {
+  const { article, access, externalId } = await buildArticlePayload(supabase, body);
+  const savedAt = new Date().toISOString();
+  const existingArticle = externalId
+    ? await supabase
+        .from('articles')
+        .select('id,save_count')
+        .eq('source', 'n8n')
+        .eq('external_id', externalId)
+        .maybeSingle()
+    : { data: null, error: null };
+
+  if (existingArticle.error) throw existingArticle.error;
+
+  if (existingArticle.data?.id) {
+    const nextSaveCount = Number(existingArticle.data.save_count || 0) + 1;
+    const { data, error } = await supabase
+      .from('articles')
+      .update({
+        ...article,
+        save_count: nextSaveCount,
+        last_saved_at: savedAt,
+      })
+      .eq('id', existingArticle.data.id)
+      .select('id,title,visibility,status,updated_at,last_saved_at')
+      .single();
+
+    if (error) throw error;
+    await syncArticleAccess(supabase, data.id, access);
+    await createIngestLog(supabase, 'imported', body, { articleId: data.id });
+    return { mode: 'updated' as const, article: data, access };
+  }
+
+  const { data, error } = await supabase
+    .from('articles')
+    .insert({
+      ...article,
+      save_count: 1,
+      time_spent_seconds: 0,
+      last_saved_at: savedAt,
+    })
+    .select('id,title,visibility,status,created_at,last_saved_at')
+    .single();
+
+  if (error) throw error;
+  await syncArticleAccess(supabase, data.id, access);
+  await createIngestLog(supabase, 'imported', body, { articleId: data.id });
+  return { mode: 'created' as const, article: data, access };
+};
+
+const handleN8nArticleRequest = async (req: any): Promise<ApiResult> => {
+  if (req.method === 'OPTIONS') {
+    return {
+      status: 204,
+      body: {},
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-N8N-Token, X-Bazarvan-Token',
+      },
+    };
+  }
+
+  if (req.method !== 'POST') {
+    return { status: 405, body: { error: 'Method not allowed. Use POST.' } };
+  }
+
+  let body: Record<string, any> = {};
+  let supabase: SupabaseAdmin | null = null;
+
+  try {
+    authenticateRequest(req);
+
+    if (!getContentType(req).includes('application/json')) {
+      return { status: 415, body: { error: 'Content-Type must be application/json.' } };
+    }
+
+    const parsedBody = await readRequestBody(req);
+    if (!isRecord(parsedBody)) {
+      return { status: 400, body: { error: 'JSON body must be an object.' } };
+    }
+
+    body = parsedBody;
+    supabase = getSupabaseAdmin();
+    const result = await saveIngestedArticle(supabase, body);
+
+    return {
+      status: result.mode === 'created' ? 201 : 200,
+      body: {
+        ok: true,
+        status: result.mode,
+        articleId: result.article.id,
+        title: result.article.title,
+        visibility: result.article.visibility,
+        articleStatus: result.article.status,
+        visibleTo: result.access.accessProfiles.map(profile => compactObject({
+          id: profile.id,
+          email: profile.email,
+          fullName: profile.full_name,
+          role: result.access.accessRole,
+        })),
+      },
+    };
+  } catch (error) {
+    const status = error instanceof IngestError ? error.status : 500;
+    const message = error instanceof Error ? error.message : 'Unknown n8n ingest error.';
+    console.error('n8n article ingest failed:', error);
+
+    if (supabase && Object.keys(body).length > 0 && status !== 401) {
+      await createIngestLog(supabase, 'failed', body, { errorMessage: message }).catch(logError => {
+        console.error('Failed to write n8n ingest error log:', logError);
+      });
+    }
+
+    return {
+      status,
+      body: {
+        ok: false,
+        error: message,
+      },
+    };
+  }
+};
+
+export default async function handler(req: any, res?: any): Promise<Response | void> {
+  const result = await handleN8nArticleRequest(req);
+  if (res) {
+    sendNodeResponse(res, result);
+    return;
+  }
+  return toWebResponse(result);
+}

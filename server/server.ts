@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chatgptHandler from '../api/chatgpt';
 import geminiHandler from '../api/gemini';
+import n8nArticlesHandler from '../api/n8nArticles';
 
 type ApiHandler = (req: unknown, res: unknown) => Promise<Response | void>;
 
@@ -41,12 +42,14 @@ app.get('/healthz', (_req, res) => {
     ai: {
       geminiConfigured: hasEnvValue('GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY'),
       openAiConfigured: hasEnvValue('OPENAI_API_KEY', 'OPENAI_API_KEYS'),
+      n8nConfigured: hasEnvValue('N8N_INGEST_TOKEN') && hasEnvValue('SUPABASE_SERVICE_ROLE_KEY'),
     },
   });
 });
 
 app.all('/api/gemini', runApiHandler(geminiHandler));
 app.all('/api/chatgpt', runApiHandler(chatgptHandler));
+app.all('/api/n8n/articles', runApiHandler(n8nArticlesHandler));
 
 app.use('/assets', express.static(path.join(distDir, 'assets'), {
   immutable: true,
