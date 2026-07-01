@@ -31,6 +31,18 @@ type ArticleRow = {
   last_saved_at: string;
 };
 
+export type RemoteArticleVisibility = ArticleRow['visibility'];
+export type RemoteArticleStatus = ArticleRow['status'];
+export type RemoteArticleLanguage = ArticleRow['article_language'];
+export type RemoteArticleAccessRole = 'viewer' | 'editor';
+
+export type RemoteArticleSettingsPatch = Partial<{
+  visibility: RemoteArticleVisibility;
+  status: RemoteArticleStatus;
+  articleLanguage: RemoteArticleLanguage;
+  accessRole: RemoteArticleAccessRole;
+}>;
+
 export type RemoteProfile = {
   id: string;
   email: string | null;
@@ -308,6 +320,132 @@ export const renameRemoteArticle = async (articleId: string, newTitle: string): 
     .single();
 
   if (error) throw error;
+  return toRemoteArticleActivity(data as ArticleRow);
+};
+
+const updateArticleAccessRole = async (
+  articleId: string,
+  accessRole: RemoteArticleAccessRole,
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from('article_access')
+    .update({ role: accessRole })
+    .eq('article_id', articleId);
+
+  if (error && error.code !== '42P01') throw error;
+};
+
+const updateRemoteArticleStatus = async (
+  articleId: string,
+  status: RemoteArticleStatus,
+): Promise<RemoteArticleActivity> => {
+  const supabase = getSupabaseClient();
+
+  try {
+    const { error: rpcError } = await supabase.rpc('update_article_dashboard_status', {
+      target_article_id: articleId,
+      next_status: status,
+    });
+
+    if (rpcError) throw rpcError;
+  } catch (error: any) {
+    if (error?.code !== 'PGRST202') throw error;
+
+    const { data: currentRow, error: readError } = await supabase
+      .from('articles')
+      .select('metadata')
+      .eq('id', articleId)
+      .single();
+
+    if (readError) throw readError;
+
+    const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
+    const currentSettings = isRecord(currentMetadata.n8nSettings) ? currentMetadata.n8nSettings : {};
+    const { error: updateError } = await supabase
+      .from('articles')
+      .update({
+        status,
+        metadata: {
+          ...currentMetadata,
+          n8nSettings: {
+            ...currentSettings,
+            status,
+          },
+        },
+      })
+      .eq('id', articleId);
+
+    if (updateError) throw updateError;
+  }
+
+  const { data, error } = await supabase
+    .from('articles')
+    .select('*')
+    .eq('id', articleId)
+    .single();
+
+  if (error) throw error;
+  return toRemoteArticleActivity(data as ArticleRow);
+};
+
+export const updateRemoteArticleSettings = async (
+  articleId: string,
+  patch: RemoteArticleSettingsPatch,
+): Promise<RemoteArticleActivity> => {
+  const keys = Object.keys(patch).filter(key => (patch as Record<string, unknown>)[key] !== undefined);
+  if (keys.length === 1 && patch.status) {
+    return updateRemoteArticleStatus(articleId, patch.status);
+  }
+
+  const supabase = getSupabaseClient();
+  const { data: currentRow, error: readError } = await supabase
+    .from('articles')
+    .select('metadata')
+    .eq('id', articleId)
+    .single();
+
+  if (readError) throw readError;
+
+  const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
+  const currentSettings = isRecord(currentMetadata.n8nSettings) ? currentMetadata.n8nSettings : {};
+  const n8nSettings = { ...currentSettings };
+  const payload: Record<string, unknown> = {};
+
+  if (patch.visibility) {
+    payload.visibility = patch.visibility;
+    n8nSettings.visibility = patch.visibility;
+  }
+  if (patch.status) {
+    payload.status = patch.status;
+    n8nSettings.status = patch.status;
+  }
+  if (patch.articleLanguage) {
+    payload.article_language = patch.articleLanguage;
+    n8nSettings.articleLanguage = patch.articleLanguage;
+  }
+  if (patch.accessRole) {
+    n8nSettings.accessRole = patch.accessRole;
+  }
+
+  payload.metadata = {
+    ...currentMetadata,
+    n8nSettings,
+  };
+
+  const { data, error } = await supabase
+    .from('articles')
+    .update(payload)
+    .eq('id', articleId)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+
+  if (patch.accessRole) {
+    await updateArticleAccessRole(articleId, patch.accessRole);
+  }
+
   return toRemoteArticleActivity(data as ArticleRow);
 };
 

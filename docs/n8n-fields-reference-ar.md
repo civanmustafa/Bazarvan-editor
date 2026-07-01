@@ -38,6 +38,8 @@ POST /api/n8n/articles
 | `visibility` | - | `shared` أو `private` عند تحديد مستخدمين | `private`, `shared`, `team`, `public` | يتحكم في ظهور المقالة داخل قاعدة البيانات. |
 | `accessRole` | `access_role` | `viewer` | `viewer`, `editor` | صلاحية المستخدمين المحددين: مشاهدة فقط أو تعديل. |
 
+داخل لوحة التحكم، يستطيع الأدمن تعديل `visibility` و `accessRole` و `articleLanguage` و `status` من بطاقة المقالة. المستخدم العادي يستطيع تعديل `status` فقط.
+
 ## اختيار المستخدمين الذين تظهر لهم المقالة
 
 | الحقل | أسماء بديلة مقبولة | النوع | ماذا يرسل؟ |

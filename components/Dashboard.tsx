@@ -15,8 +15,10 @@ import {
     listRemoteArticles,
     loadRemoteArticleSnapshot,
     renameRemoteArticle,
+    updateRemoteArticleSettings,
     type RemoteProfile,
     type RemoteArticleActivity,
+    type RemoteArticleSettingsPatch,
 } from '../utils/supabaseArticles';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
 
@@ -108,6 +110,31 @@ const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
   };
 };
 
+type N8nSettingFieldKey = keyof Pick<RemoteArticleSettingsPatch, 'visibility' | 'accessRole' | 'articleLanguage' | 'status'>;
+
+const N8N_SETTING_OPTIONS: Record<N8nSettingFieldKey, { value: string; label: string }[]> = {
+  visibility: [
+    { value: 'private', label: 'خاص' },
+    { value: 'shared', label: 'مشترك' },
+    { value: 'team', label: 'فريق' },
+    { value: 'public', label: 'عام' },
+  ],
+  accessRole: [
+    { value: 'viewer', label: 'عرض' },
+    { value: 'editor', label: 'تعديل' },
+  ],
+  articleLanguage: [
+    { value: 'ar', label: 'عربي' },
+    { value: 'en', label: 'English' },
+  ],
+  status: [
+    { value: 'draft', label: 'مسودة' },
+    { value: 'in_review', label: 'مراجعة' },
+    { value: 'published', label: 'منشور' },
+    { value: 'archived', label: 'أرشيف' },
+  ],
+};
+
 const getArticleCompetitors = (
   article: RemoteArticleActivity,
   snapshot?: ArticleStorageSnapshot | null,
@@ -132,6 +159,34 @@ const N8nSettingChip: React.FC<{ label: string; value: React.ReactNode }> = ({ l
     <span className="shrink-0 text-gray-500 dark:text-gray-400">{label}:</span>
     <span className="min-w-0 truncate">{value || '-'}</span>
   </span>
+);
+
+const EditableN8nSettingField: React.FC<{
+  field: N8nSettingFieldKey;
+  value: string;
+  disabled: boolean;
+  onChange: (field: N8nSettingFieldKey, value: string) => void;
+}> = ({ field, value, disabled, onChange }) => (
+  <label
+    className="inline-flex min-w-[132px] max-w-[190px] items-center gap-1 rounded-md bg-[#d4af37]/10 px-2 py-1 text-[11px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
+    onClick={event => event.stopPropagation()}
+  >
+    <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
+    <select
+      value={value || ''}
+      disabled={disabled}
+      onClick={event => event.stopPropagation()}
+      onChange={event => onChange(field, event.target.value)}
+      className="min-w-0 flex-1 cursor-pointer rounded border border-transparent bg-transparent text-[11px] font-black text-[#8a6f1d] outline-none focus:border-[#d4af37] disabled:cursor-wait disabled:opacity-60 dark:text-[#f2d675]"
+    >
+      {!value && <option value="">-</option>}
+      {N8N_SETTING_OPTIONS[field].map(option => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </label>
 );
 
 const AdminUsersTable: React.FC<{
@@ -397,13 +452,28 @@ interface ArticleItemProps {
     onDetails?: () => void;
     onDelete: () => void;
     onRename: (newTitle: string) => boolean | Promise<boolean>;
+    onUpdateSettings?: (articleId: string, patch: RemoteArticleSettingsPatch) => Promise<boolean>;
+    editableSettingFields?: N8nSettingFieldKey[];
     showAdminMetadata?: boolean;
     t: typeof translations.ar;
 }
 
-const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLabel, onLoad, onDetails, onDelete, onRename, showAdminMetadata = false, t }) => {
+const ArticleListItem: React.FC<ArticleItemProps> = ({
+    title,
+    activity,
+    ownerLabel,
+    onLoad,
+    onDetails,
+    onDelete,
+    onRename,
+    onUpdateSettings,
+    editableSettingFields = [],
+    showAdminMetadata = false,
+    t,
+}) => {
     const [isRenaming, setIsRenaming] = useState(false);
     const [newTitle, setNewTitle] = useState(title);
+    const [savingSettingField, setSavingSettingField] = useState<N8nSettingFieldKey | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -438,6 +508,22 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLab
         } else {
             alert(t.renameArticleError.replace('{title}', newTitle));
             inputRef.current?.focus();
+        }
+    };
+
+    const handleSettingChange = async (field: N8nSettingFieldKey, value: string) => {
+        const articleId = (activity as RemoteArticleActivity).id;
+        if (!articleId || !onUpdateSettings || savingSettingField) return;
+
+        const patch: RemoteArticleSettingsPatch = field === 'articleLanguage'
+            ? { articleLanguage: value as RemoteArticleSettingsPatch['articleLanguage'] }
+            : { [field]: value } as RemoteArticleSettingsPatch;
+
+        setSavingSettingField(field);
+        const isSaved = await onUpdateSettings(articleId, patch);
+        setSavingSettingField(null);
+        if (!isSaved) {
+            alert('تعذر حفظ إعداد المقالة. حاول مرة أخرى.');
         }
     };
     
@@ -479,7 +565,12 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLab
     const untranslatedTitle = title || t.untitled;
     const primaryKeyword = activity.keywords?.primary?.trim();
     const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
-    const shouldShowN8nSettings = showAdminMetadata && (
+    const fieldsToShow = editableSettingFields.length > 0
+        ? editableSettingFields
+        : showAdminMetadata
+          ? (['visibility', 'accessRole', 'articleLanguage', 'status'] as N8nSettingFieldKey[])
+          : [];
+    const shouldShowN8nSettings = fieldsToShow.length > 0 && (
         Boolean(n8nSettings.visibility) ||
         Boolean(n8nSettings.accessRole) ||
         Boolean(n8nSettings.articleLanguage) ||
@@ -536,10 +627,19 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({ title, activity, ownerLab
                 </div>
                 {shouldShowN8nSettings && (
                     <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-2 dark:border-[#3a3a3a]">
-                        <N8nSettingChip label="visibility" value={n8nSettings.visibility} />
-                        <N8nSettingChip label="accessRole" value={n8nSettings.accessRole} />
-                        <N8nSettingChip label="articleLanguage" value={n8nSettings.articleLanguage} />
-                        <N8nSettingChip label="status" value={n8nSettings.status} />
+                        {fieldsToShow.map(field => (
+                            onUpdateSettings ? (
+                                <EditableN8nSettingField
+                                    key={field}
+                                    field={field}
+                                    value={String(n8nSettings[field] || '')}
+                                    disabled={savingSettingField !== null}
+                                    onChange={handleSettingChange}
+                                />
+                            ) : (
+                                <N8nSettingChip key={field} label={field} value={n8nSettings[field]} />
+                            )
+                        ))}
                     </div>
                 )}
             </div>
@@ -689,6 +789,23 @@ const Dashboard: React.FC = () => {
         console.error(`Failed to rename article "${articleId}":`, error);
         return false;
       }
+  };
+
+  const handleUpdateArticleSettings = async (
+    articleId: string,
+    patch: RemoteArticleSettingsPatch,
+  ): Promise<boolean> => {
+    try {
+      const updatedArticle = await updateRemoteArticleSettings(articleId, patch);
+      setRemoteArticles(prev => prev.map(article => (
+        article.id === articleId ? updatedArticle : article
+      )));
+      setDetailArticle(prev => (prev?.id === articleId ? updatedArticle : prev));
+      return true;
+    } catch (error) {
+      console.error(`Failed to update article settings "${articleId}":`, error);
+      return false;
+    }
   };
 
   useEffect(() => {
@@ -1103,6 +1220,10 @@ const Dashboard: React.FC = () => {
                                     onDetails={() => { void handleShowArticleDetails(activity); }}
                                     onDelete={() => { void handleDeleteArticle(activity.id); }}
                                     onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
+                                    onUpdateSettings={handleUpdateArticleSettings}
+                                    editableSettingFields={isAdmin
+                                      ? ['visibility', 'accessRole', 'articleLanguage', 'status']
+                                      : ['status']}
                                     showAdminMetadata={isAdmin}
                                     t={t}
                                 />
