@@ -54,6 +54,7 @@ GEMINI_API_KEYS=free_key_1,free_key_2
 GEMINI_PAID_API_KEYS=paid_or_pro_key_1,paid_or_pro_key_2
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_PAID_MODEL=gemini-2.5-pro
+ASSIGNED_ARTICLE_AI_PAUSE_MS=5000
 ```
 
 لا تضع `SUPABASE_SERVICE_ROLE_KEY` أو مفاتيح Gemini المدفوعة داخل المتصفح أو داخل `VITE_`.
@@ -74,6 +75,6 @@ pm2 restart bazarvan-editor --update-env
 
 1. افتح لوحة التحكم.
 2. اختر مقالة `draft` غير مخصصة واضغط `احجز`، أو عيّن مستخدما من لوحة الأدمن.
-3. انتظر قليلا لأن Gemini قد يستغرق وقتا.
+3. انتظر قليلا لأن Gemini قد يستغرق وقتا. النظام ينتظر افتراضيا 5 ثوان بين توليد الصيغ و LSI وبين تحليل Gemini Pro.
 4. افتح المقالة وتأكد أن الصيغ و LSI أضيفت.
 5. إذا كانت نصوص المنافسين موجودة وبقية الشروط مكتملة، ستجد نتيجة Gemini Pro محفوظة في بيانات المقالة.
