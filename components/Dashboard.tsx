@@ -21,6 +21,7 @@ import {
     purgeExpiredRemoteArticleTrash,
     renameRemoteArticle,
     restoreRemoteArticleFromTrash,
+    triggerAssignedArticleAutomation,
     updateRemoteArticleSettings,
     type RemoteProfile,
     type RemoteArticleActivity,
@@ -93,8 +94,6 @@ const getProfileKeywords = (articles: RemoteArticleActivity[]): string[] => {
 };
 
 const ONLINE_WINDOW_MS = 10 * 60 * 1000;
-const CLAIMED_DRAFT_AUTO_AI_PREFIX = 'bazarvan:claimed-draft-auto-ai:';
-
 const isProfileOnline = (profile: RemoteProfile): boolean => (
   Boolean(profile.lastSeenAt && Date.now() - new Date(profile.lastSeenAt).getTime() <= ONLINE_WINDOW_MS)
 );
@@ -112,18 +111,6 @@ const getArticleCreatedTime = (article: RemoteArticleActivity): number => (
 const sortArticlesByLastChange = (articles: RemoteArticleActivity[]): RemoteArticleActivity[] => (
   [...articles].sort((left, right) => getArticleSortTime(right) - getArticleSortTime(left))
 );
-
-const markClaimedDraftForAutoAi = (articleId: string) => {
-  if (!articleId.trim()) return;
-  try {
-    const key = `${CLAIMED_DRAFT_AUTO_AI_PREFIX}${articleId}`;
-    const value = new Date().toISOString();
-    localStorage.setItem(key, value);
-    sessionStorage.setItem(key, value);
-  } catch (error) {
-    console.error('Could not mark claimed draft for automatic AI:', error);
-  }
-};
 
 const DetailRow: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
   <div className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
@@ -1303,6 +1290,16 @@ const Dashboard: React.FC = () => {
           detail: { articleId },
         }));
       }
+      if (patch.visibleToEmailsCsv !== undefined && patch.visibleToEmailsCsv.trim()) {
+        void triggerAssignedArticleAutomation(articleId)
+          .then(() => {
+            window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+            return refreshData();
+          })
+          .catch(error => {
+            console.error(`Assigned article automation failed for "${articleId}":`, error);
+          });
+      }
       return true;
     } catch (error) {
       console.error(`Failed to update article settings "${articleId}":`, error);
@@ -1313,9 +1310,6 @@ const Dashboard: React.FC = () => {
   const handleClaimArticle = async (articleId: string): Promise<boolean> => {
     try {
       const claimedArticle = await claimRemoteArticle(articleId);
-      if (claimedArticle.status === 'draft') {
-        markClaimedDraftForAutoAi(claimedArticle.id);
-      }
       setRemoteArticles(prev => sortArticlesByLastChange(prev.map(article => (
         article.id === articleId ? claimedArticle : article
       ))));
@@ -1324,11 +1318,14 @@ const Dashboard: React.FC = () => {
       window.dispatchEvent(new CustomEvent('bazarvan:article-claimed', {
         detail: { articleId: claimedArticle.id, status: claimedArticle.status },
       }));
-      if (claimedArticle.status === 'draft') {
-        window.setTimeout(() => {
-          void onLoadArticle(claimedArticle.title, claimedArticle);
-        }, 0);
-      }
+      void triggerAssignedArticleAutomation(claimedArticle.id)
+        .then(() => {
+          window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+          return refreshData();
+        })
+        .catch(error => {
+          console.error(`Assigned article automation failed for claimed article "${claimedArticle.id}":`, error);
+        });
       return true;
     } catch (error) {
       console.error(`Failed to claim article "${articleId}":`, error);

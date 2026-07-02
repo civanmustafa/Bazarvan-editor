@@ -78,6 +78,11 @@ export type ArticleStorageSnapshot = {
     competitors?: ArticleCompetitorSnapshot;
     contentSummary?: any;
   };
+  savedAiResults?: {
+    gemini?: string;
+    geminiPaid?: string;
+    chatgpt?: string;
+  };
   savedAt: string;
 };
 

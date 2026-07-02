@@ -310,6 +310,9 @@ export const loadRemoteArticleSnapshot = async (
 
   const row = data as ArticleRow;
   const metadata = isRecord(row.metadata) ? row.metadata : {};
+  const aiResults = isRecord(metadata.aiResults) ? metadata.aiResults : {};
+  const geminiPaidResults = isRecord(aiResults.geminiPaid) ? aiResults.geminiPaid : {};
+  const geminiPaidLatest = isRecord(geminiPaidResults.latest) ? geminiPaidResults.latest : {};
 
   return {
     kind: 'articleSnapshot',
@@ -325,6 +328,9 @@ export const loadRemoteArticleSnapshot = async (
     analysisSummary: metadata.analysisSummary,
     analysis: row.analysis || undefined,
     attachments: metadata.attachments,
+    savedAiResults: {
+      geminiPaid: typeof geminiPaidLatest.result === 'string' ? geminiPaidLatest.result : '',
+    },
     savedAt: row.last_saved_at,
   };
 };
@@ -712,6 +718,42 @@ export const clearRemoteArticleAiResults = async (articleId: string): Promise<vo
   const metadata = await getCurrentArticleMetadata(articleId);
   if (!isRecord(metadata.aiResults)) return;
   await updateArticleMetadataFallback(articleId, withoutAiResultsMetadata(metadata));
+};
+
+export type AssignedArticleAutomationResult = {
+  ok: boolean;
+  articleId: string;
+  semantic: 'generated' | 'skipped' | 'failed';
+  geminiPaid: 'analyzed' | 'skipped' | 'failed';
+  reasons: string[];
+};
+
+export const triggerAssignedArticleAutomation = async (
+  articleId: string,
+): Promise<AssignedArticleAutomationResult> => {
+  const supabase = getSupabaseClient();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token || '';
+
+  if (!accessToken) {
+    throw new Error('Supabase session is required to run assigned article automation.');
+  }
+
+  const response = await fetch('/api/articles/assigned-automation', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ articleId }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : `Assigned automation failed (${response.status}).`);
+  }
+
+  return payload as AssignedArticleAutomationResult;
 };
 
 const getCurrentUserTrashContext = async (): Promise<{ userId: string; isAdmin: boolean }> => {

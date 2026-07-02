@@ -142,6 +142,22 @@ const readCurrentArticleAttachments = (): ArticleStorageSnapshot['attachments'] 
     contentSummary: readJsonStorageValue(CONTENT_SUMMARY_STORAGE_KEY),
 });
 
+const ARTICLE_AI_RESULTS_RESTORE_EVENT = 'bazarvan:article-ai-results-restored';
+
+const dispatchSavedAiResults = (
+    articleId: string | null,
+    savedAiResults?: ArticleStorageSnapshot['savedAiResults'],
+) => {
+    if (!savedAiResults) return;
+    if (!savedAiResults.gemini && !savedAiResults.geminiPaid && !savedAiResults.chatgpt) return;
+    window.dispatchEvent(new CustomEvent(ARTICLE_AI_RESULTS_RESTORE_EVENT, {
+        detail: {
+            articleId,
+            aiResults: savedAiResults,
+        },
+    }));
+};
+
 const restoreArticleAttachments = (attachments?: ArticleStorageSnapshot['attachments']) => {
     const competitors = attachments?.competitors;
     if (competitors) {
@@ -964,6 +980,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 captureEditorSnapshot(editor, false);
                 applyArticleLanguageFormatting(editor, lang);
                 restoreArticleAttachments(articleSnapshot?.attachments);
+                dispatchSavedAiResults(remoteArticleId, articleSnapshot?.savedAiResults);
 
                 if (hasResolvedContent) {
                     await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(currentUser, restoredTitle), editor.getJSON(), {
@@ -1424,6 +1441,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 captureEditorSnapshot(editor, false);
                 applyArticleLanguageFormatting(editor, lang);
                 restoreArticleAttachments(articleSnapshot?.attachments);
+                dispatchSavedAiResults(remoteArticleId, articleSnapshot?.savedAiResults);
 
                 if (hasResolvedContent) {
                     await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(currentUser, titleStr), editor.getJSON(), {

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import chatgptHandler from '../api/chatgpt';
 import geminiHandler from '../api/gemini';
 import n8nArticlesHandler from '../api/n8nArticles';
+import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 
 type ApiHandler = (req: unknown, res: unknown) => Promise<Response | void>;
 
@@ -51,6 +52,7 @@ app.get('/healthz', (_req, res) => {
 app.all('/api/gemini', runApiHandler(geminiHandler));
 app.all('/api/chatgpt', runApiHandler(chatgptHandler));
 app.all('/api/n8n/articles', runApiHandler(n8nArticlesHandler));
+app.all('/api/articles/assigned-automation', runApiHandler(assignedArticleAutomationHandler));
 
 app.use('/assets', express.static(path.join(distDir, 'assets'), {
   immutable: true,
