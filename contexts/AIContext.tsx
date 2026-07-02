@@ -5329,7 +5329,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     useEffect(() => {
         if (!activeArticleId || !hasClaimedDraftSemanticRequirements) return;
         const runKey = getArticleMarkerKey(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId);
-        if (autoDraftRunRef.current.has(runKey) || hasLocalMarker(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId)) return;
+        const hasGeneratedSemanticTerms = keywords.secondaries.some(term => term.trim()) && keywords.lsi.some(term => term.trim());
+        if (
+            autoDraftRunRef.current.has(runKey) ||
+            (hasLocalMarker(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId) && hasGeneratedSemanticTerms)
+        ) return;
 
         autoDraftRunRef.current.add(runKey);
         const timerId = window.setTimeout(() => {
@@ -5370,6 +5374,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, [
         activeArticleId,
         hasClaimedDraftSemanticRequirements,
+        keywords.secondaries,
+        keywords.lsi,
         generateSemanticKeywords,
         generateDraftTitle,
         setKeywords,
@@ -5389,7 +5395,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     useEffect(() => {
         if (!activeArticleId || !hasClaimedDraftGeminiPaidRequirements) return;
         const runKey = getArticleMarkerKey(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId);
-        if (autoDraftRunRef.current.has(runKey) || hasLocalMarker(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId)) return;
+        if (
+            autoDraftRunRef.current.has(runKey) ||
+            (hasLocalMarker(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId) && aiResults.geminiPaid.trim())
+        ) return;
 
         const competitorTexts = readStoredStringList(COMPETITOR_TEXT_STORAGE_KEY);
         const competitorUrls = readStoredStringList(COMPETITOR_URLS_STORAGE_KEY);
@@ -5460,6 +5469,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         keywords.primary,
         keywords.secondaries,
         keywords.lsi,
+        aiResults.geminiPaid,
         goalContext,
         uiLanguage,
         engineeringPrompts,
