@@ -1084,6 +1084,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const updatedArticle = await updateRemoteArticleSettings(activeArticleId, { status });
             setActiveArticleSettings(getActiveArticleSettings(updatedArticle));
             window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+            if (status === 'in_review') {
+                window.dispatchEvent(new CustomEvent('bazarvan:article-ai-clear-request', {
+                    detail: { articleId: activeArticleId },
+                }));
+            }
             return true;
         } catch (error) {
             console.error(`Failed to update active article status "${activeArticleId}":`, error);

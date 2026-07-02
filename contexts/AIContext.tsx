@@ -26,7 +26,7 @@ import type {
 } from '../types';
 import { getArticleReplacementContent, parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
 import { GEMINI_ANALYSIS_MODEL, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
-import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
+import { CONTENT_SUMMARY_STORAGE_KEY, DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { normalizeGoalContext } from '../utils/goalContext';
@@ -51,6 +51,10 @@ const GEMINI_CHAT_MAX_MESSAGES = 8;
 const GEMINI_CHAT_MAX_TOTAL_CHARS = 48000;
 const GEMINI_CHAT_MESSAGE_CHAR_LIMIT = 12000;
 const CHATGPT_CONVERSATION_STORAGE_PREFIX = 'bazarvan:chatgpt-conversation';
+const CLAIMED_DRAFT_AUTO_AI_PREFIX = 'bazarvan:claimed-draft-auto-ai:';
+const CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX = 'bazarvan:auto-claimed-draft-keywords:';
+const CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX = 'bazarvan:auto-claimed-draft-gemini-paid:';
+const ARTICLE_AI_CLEAR_REQUEST_EVENT = 'bazarvan:article-ai-clear-request';
 type GeminiPatchProvider = Extract<AiPatchProvider, 'gemini' | 'geminiPaid'>;
 
 const getGeminiModelForProvider = (provider: GeminiPatchProvider = 'gemini'): string => (
@@ -2132,6 +2136,83 @@ const readStoredStringList = (storageKey: string): string[] => {
     } catch {
         return [];
     }
+};
+
+const getArticleMarkerKey = (prefix: string, articleId: string): string => `${prefix}${articleId}`;
+
+const hasLocalMarker = (prefix: string, articleId: string): boolean => {
+    if (!articleId.trim()) return false;
+    try {
+        const key = getArticleMarkerKey(prefix, articleId);
+        return Boolean(sessionStorage.getItem(key) || localStorage.getItem(key));
+    } catch {
+        return false;
+    }
+};
+
+const writeLocalMarker = (prefix: string, articleId: string, value = new Date().toISOString()) => {
+    if (!articleId.trim()) return;
+    try {
+        localStorage.setItem(getArticleMarkerKey(prefix, articleId), value);
+    } catch (error) {
+        console.error('Could not save article automation marker:', error);
+    }
+};
+
+const hasCompleteGoalContext = (context: GoalContext): boolean => Boolean(
+    context.pageType?.trim() &&
+    context.objective?.trim() &&
+    context.audienceScope?.trim() &&
+    context.searchIntent?.trim()
+);
+
+const countPromptWords = (value: string): number => value.split(/\s+/).filter(Boolean).length;
+
+const truncatePromptText = (value: string, maxLength = 9000): string => {
+    const trimmed = value.trim();
+    if (trimmed.length <= maxLength) return trimmed;
+    return `${trimmed.slice(0, maxLength).trim()}\n\n[The rest of the competitor text was shortened to keep the API request light.]`;
+};
+
+const formatCompetitorEvidenceParagraphs = (value: string): string => {
+    const paragraphs = truncatePromptText(value)
+        .split(/\n{2,}/)
+        .map(paragraph => paragraph.trim())
+        .filter(Boolean);
+
+    return paragraphs
+        .map((paragraph, index) => `[Paragraph ${index + 1}] ${paragraph}`)
+        .join('\n\n');
+};
+
+const stripExtractionLabels = (value: string): string => (
+    value
+        .split('\n')
+        .map(line => line.replace(/^\s*(?:H[1-6]|title|description|paragraph|list item|العنوان|الوصف|فقرة|قائمة)\s*[:：-]\s*/i, '').trim())
+        .filter(Boolean)
+        .join('\n')
+        .trim()
+);
+
+const buildAutomaticReadyCommandCompetitorBlocks = (plainTexts: string[], urls: string[]): string => {
+    const blocks = plainTexts
+        .map((value, index) => {
+            const text = stripExtractionLabels(value);
+            if (!text) return '';
+
+            return `### Competitor ${index + 1} - plain text
+URL: ${urls[index]?.trim() || 'not provided'}
+Word count: ${countPromptWords(text)}
+Citation format when using an idea from this text: source: competitor ${index + 1}; evidence paragraph: [Paragraph number] short excerpt.
+
+Numbered evidence text:
+---
+${formatCompetitorEvidenceParagraphs(text)}
+---`;
+        })
+        .filter(Boolean);
+
+    return blocks.join('\n\n');
 };
 
 const mergeUniqueTerms = (existing: string[], incoming: string[], maxItems: number): string[] => {
@@ -4580,6 +4661,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, [articleKey, title, currentView, currentUser, clearArticleAiRuntimeState]);
 
     useEffect(() => {
+        const clearCurrentArticleAi = (event: Event) => {
+            const requestedArticleId = (event as CustomEvent<{ articleId?: string }>).detail?.articleId;
+            if (requestedArticleId && activeArticleId && requestedArticleId !== activeArticleId) return;
+
+            const currentScope = currentView === 'editor'
+                ? getArticleChatStorageScope(articleKey, title)
+                : previousArticleScopeRef.current;
+            clearStoredArticleAiConversations(currentUser, currentScope || '');
+            clearArticleAiRuntimeState();
+        };
+
+        window.addEventListener(ARTICLE_AI_CLEAR_REQUEST_EVENT, clearCurrentArticleAi);
+        return () => window.removeEventListener(ARTICLE_AI_CLEAR_REQUEST_EVENT, clearCurrentArticleAi);
+    }, [activeArticleId, articleKey, title, currentView, currentUser, clearArticleAiRuntimeState]);
+
+    useEffect(() => {
         bulkFixReviewItemsRef.current = bulkFixReviewItems;
     }, [bulkFixReviewItems]);
 
@@ -4983,64 +5080,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return true;
     }, [apiKeys.gemini, articleLanguage, goalContext, keywords.primary, logToAiHistory, title]);
 
-    const hasAutoDraftRequirements = Boolean(
-        activeArticleId &&
-        activeArticleSettings.status === 'draft' &&
-        keywords.primary.trim() &&
-        goalContext.pageType &&
-        goalContext.objective &&
-        goalContext.audienceScope &&
-        goalContext.searchIntent
-    );
-
-    useEffect(() => {
-        if (!hasAutoDraftRequirements || !activeArticleId) return;
-        const storageKey = `bazarvan:auto-draft-ai:${activeArticleId}`;
-        if (autoDraftRunRef.current.has(activeArticleId) || localStorage.getItem(storageKey)) return;
-
-        autoDraftRunRef.current.add(activeArticleId);
-        const timerId = window.setTimeout(() => {
-            const runAutomation = async () => {
-                try {
-                    const semanticResult = await generateSemanticKeywords();
-                    if (!semanticResult.error) {
-                        setKeywords(prev => ({
-                            ...prev,
-                            secondaries: mergeUniqueTerms(prev.secondaries, semanticResult.secondaries, 10),
-                            lsi: mergeUniqueTerms(prev.lsi, semanticResult.lsi, 24),
-                        }));
-                    }
-
-                    const generatedTitle = await generateDraftTitle();
-                    if (generatedTitle) {
-                        setTitle(prev => isPlaceholderArticleTitle(prev) ? generatedTitle : prev);
-                    }
-
-                    await runAutomaticCompetitorGeminiAnalysis();
-                    localStorage.setItem(storageKey, new Date().toISOString());
-                    window.setTimeout(() => {
-                        window.dispatchEvent(new CustomEvent('bazarvan:auto-save-request'));
-                    }, 800);
-                } catch (error) {
-                    console.error('Automatic draft AI workflow failed:', error);
-                    localStorage.setItem(storageKey, `failed:${new Date().toISOString()}`);
-                }
-            };
-
-            void runAutomation();
-        }, 1400);
-
-        return () => window.clearTimeout(timerId);
-    }, [
-        activeArticleId,
-        hasAutoDraftRequirements,
-        generateSemanticKeywords,
-        generateDraftTitle,
-        runAutomaticCompetitorGeminiAnalysis,
-        setKeywords,
-        setTitle,
-    ]);
-    
     const logReadyCommandAnalysis = useCallback((
         provider: AiPatchProvider,
         parsedResult: SmartAnalysisParsedResult,
@@ -5165,6 +5204,149 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
     }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult]);
+
+    const hasClaimedDraftAutomationMarker = Boolean(
+        activeArticleId &&
+        hasLocalMarker(CLAIMED_DRAFT_AUTO_AI_PREFIX, activeArticleId)
+    );
+
+    const hasClaimedDraftSemanticRequirements = Boolean(
+        activeArticleId &&
+        hasClaimedDraftAutomationMarker &&
+        activeArticleSettings.status === 'draft' &&
+        keywords.primary.trim() &&
+        hasCompleteGoalContext(goalContext)
+    );
+
+    useEffect(() => {
+        if (!activeArticleId || !hasClaimedDraftSemanticRequirements) return;
+        const runKey = getArticleMarkerKey(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId);
+        if (autoDraftRunRef.current.has(runKey) || hasLocalMarker(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId)) return;
+
+        autoDraftRunRef.current.add(runKey);
+        const timerId = window.setTimeout(() => {
+            const runAutomation = async () => {
+                try {
+                    const semanticResult = await generateSemanticKeywords();
+                    if (!semanticResult.error) {
+                        setKeywords(prev => ({
+                            ...prev,
+                            secondaries: mergeUniqueTerms(prev.secondaries, semanticResult.secondaries, 10),
+                            lsi: mergeUniqueTerms(prev.lsi, semanticResult.lsi, 24),
+                        }));
+                    }
+
+                    const generatedTitle = await generateDraftTitle();
+                    if (generatedTitle) {
+                        setTitle(prev => isPlaceholderArticleTitle(prev) ? generatedTitle : prev);
+                    }
+
+                    writeLocalMarker(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId);
+                    window.setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('bazarvan:auto-save-request'));
+                    }, 800);
+                } catch (error) {
+                    console.error('Automatic claimed draft keyword workflow failed:', error);
+                    writeLocalMarker(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId, `failed:${new Date().toISOString()}`);
+                }
+            };
+
+            void runAutomation();
+        }, 1400);
+
+        return () => window.clearTimeout(timerId);
+    }, [
+        activeArticleId,
+        hasClaimedDraftSemanticRequirements,
+        generateSemanticKeywords,
+        generateDraftTitle,
+        setKeywords,
+        setTitle,
+    ]);
+
+    const hasClaimedDraftGeminiPaidRequirements = Boolean(
+        activeArticleId &&
+        hasClaimedDraftAutomationMarker &&
+        activeArticleSettings.status === 'draft' &&
+        keywords.primary.trim() &&
+        keywords.secondaries.some(term => term.trim()) &&
+        keywords.lsi.some(term => term.trim()) &&
+        hasCompleteGoalContext(goalContext)
+    );
+
+    useEffect(() => {
+        if (!activeArticleId || !hasClaimedDraftGeminiPaidRequirements) return;
+        const runKey = getArticleMarkerKey(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId);
+        if (autoDraftRunRef.current.has(runKey) || hasLocalMarker(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId)) return;
+
+        const competitorTexts = readStoredStringList(COMPETITOR_TEXT_STORAGE_KEY);
+        const competitorUrls = readStoredStringList(COMPETITOR_URLS_STORAGE_KEY);
+        if (competitorTexts.length === 0) return;
+
+        autoDraftRunRef.current.add(runKey);
+        const timerId = window.setTimeout(() => {
+            const runAutomation = async () => {
+                const latestCompetitorTexts = readStoredStringList(COMPETITOR_TEXT_STORAGE_KEY);
+                const latestCompetitorUrls = readStoredStringList(COMPETITOR_URLS_STORAGE_KEY);
+                const competitorBlocks = buildAutomaticReadyCommandCompetitorBlocks(latestCompetitorTexts, latestCompetitorUrls);
+                const hasRequiredKeywords = Boolean(
+                    keywords.primary.trim() &&
+                    keywords.secondaries.some(term => term.trim()) &&
+                    keywords.lsi.some(term => term.trim())
+                );
+                if (!competitorBlocks.trim() || !hasRequiredKeywords || !hasCompleteGoalContext(goalContext)) {
+                    autoDraftRunRef.current.delete(runKey);
+                    return;
+                }
+
+                try {
+                    const commandId = ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison;
+                    const definition = ENGINEERING_PROMPT_DEFINITIONS.find(item => item.id === commandId);
+                    const options = {
+                        ...DEFAULT_SMART_ANALYSIS_OPTIONS,
+                        ...(definition?.options || {}),
+                        competitorContent: true,
+                    };
+                    const commandLabel = uiLanguage === 'ar'
+                        ? 'أفكار جديدة/متضاربة مع منافسين'
+                        : 'New/conflicting competitor ideas';
+                    const commandPrompt = getEngineeringPrompt(engineeringPrompts, commandId);
+                    await handleGeminiReadyCommandsAnalyze([
+                        {
+                            commandId,
+                            commandLabel,
+                            userPrompt: `${commandPrompt}\n\n**Competitor content attached:**\n${competitorBlocks}`,
+                            options,
+                            skipPatchInstructions: definition?.skipPatchInstructions,
+                            savesContentSummary: definition?.savesContentSummary,
+                        },
+                    ], 'geminiPaid');
+                    writeLocalMarker(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId);
+                    window.setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('bazarvan:auto-save-request'));
+                    }, 800);
+                } catch (error) {
+                    console.error('Automatic claimed draft Gemini Pro comparison failed:', error);
+                    writeLocalMarker(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId, `failed:${new Date().toISOString()}`);
+                }
+            };
+
+            void runAutomation();
+        }, 2600);
+
+        return () => window.clearTimeout(timerId);
+    }, [
+        activeArticleId,
+        hasClaimedDraftGeminiPaidRequirements,
+        activeArticleSettings.status,
+        keywords.primary,
+        keywords.secondaries,
+        keywords.lsi,
+        goalContext,
+        uiLanguage,
+        engineeringPrompts,
+        handleGeminiReadyCommandsAnalyze,
+    ]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,

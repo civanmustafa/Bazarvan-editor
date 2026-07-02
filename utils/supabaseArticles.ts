@@ -125,6 +125,10 @@ const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
 );
 
+const withoutAiResultsMetadata = (metadata: Record<string, any>): Record<string, any> => (
+  Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'aiResults'))
+);
+
 const toNumber = (value: unknown, fallback = 0): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
 );
@@ -521,12 +525,15 @@ const updateRemoteArticleStatus = async (
 
     const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
     const currentSettings = isRecord(currentMetadata.n8nSettings) ? currentMetadata.n8nSettings : {};
+    const nextMetadataBase = status === 'in_review'
+      ? withoutAiResultsMetadata(currentMetadata)
+      : currentMetadata;
     const { error: updateError } = await supabase
       .from('articles')
       .update({
         status,
         metadata: {
-          ...currentMetadata,
+          ...nextMetadataBase,
           n8nSettings: {
             ...currentSettings,
             status,
@@ -536,6 +543,12 @@ const updateRemoteArticleStatus = async (
       .eq('id', articleId);
 
     if (updateError) throw updateError;
+  }
+
+  if (status === 'in_review') {
+    await clearRemoteArticleAiResults(articleId).catch(error => {
+      console.error(`Failed to clear saved AI results for ready article "${articleId}":`, error);
+    });
   }
 
   const { data, error } = await supabase
@@ -595,8 +608,12 @@ export const updateRemoteArticleSettings = async (
     n8nSettings.accessRole = nextAccessRole;
   }
 
+  const nextMetadataBase = patch.status === 'in_review'
+    ? withoutAiResultsMetadata(currentMetadata)
+    : currentMetadata;
+
   payload.metadata = {
-    ...currentMetadata,
+    ...nextMetadataBase,
     n8nSettings,
     ...(nextVisibleProfiles
       ? {
@@ -689,6 +706,12 @@ const updateArticleMetadataFallback = async (
     .eq('id', articleId);
 
   if (error) throw error;
+};
+
+export const clearRemoteArticleAiResults = async (articleId: string): Promise<void> => {
+  const metadata = await getCurrentArticleMetadata(articleId);
+  if (!isRecord(metadata.aiResults)) return;
+  await updateArticleMetadataFallback(articleId, withoutAiResultsMetadata(metadata));
 };
 
 const getCurrentUserTrashContext = async (): Promise<{ userId: string; isAdmin: boolean }> => {
