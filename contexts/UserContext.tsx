@@ -7,6 +7,7 @@ import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../con
 import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
+import { updateCurrentProfileLastSeen } from '../utils/supabaseArticles';
 
 /*
  * UserContext is the owner of session-level app state:
@@ -418,6 +419,20 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [currentUser, currentView]);
+
+    useEffect(() => {
+        if (!currentUserId || !isSupabaseConfigured) return;
+
+        const recordLastSeen = () => {
+            void updateCurrentProfileLastSeen(currentUserId).catch(error => {
+                console.error('Failed to update profile last_seen_at:', error);
+            });
+        };
+
+        recordLastSeen();
+        const intervalId = window.setInterval(recordLastSeen, 10 * 60 * 1000);
+        return () => window.clearInterval(intervalId);
+    }, [currentUserId]);
 
     // Load all saved preferences whenever a user logs in or changes.
     useEffect(() => {

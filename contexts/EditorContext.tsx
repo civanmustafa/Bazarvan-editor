@@ -34,7 +34,9 @@ import {
     loadRemoteArticleSnapshot,
     recordRemoteArticleTime,
     saveRemoteArticleSnapshot,
+    updateRemoteArticleSettings,
     type RemoteArticleActivity,
+    type RemoteArticleStatus,
 } from '../utils/supabaseArticles';
 
 /*
@@ -721,6 +723,7 @@ interface EditorContextType {
     draftExists: boolean;
     scrollContainerRef: React.RefObject<HTMLDivElement>;
     handleLanguageChange: (lang: 'ar' | 'en') => void;
+    handleActiveArticleStatusChange: (status: RemoteArticleStatus) => Promise<boolean>;
     handleClearKeywords: () => void;
     handleSaveDraft: () => Promise<void>;
     handleRestoreDraft: () => void;
@@ -1074,6 +1077,19 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (!editor || currentView !== 'editor') return;
         applyArticleLanguageFormatting(editor, lang, true);
     }, [editor, currentView]);
+
+    const handleActiveArticleStatusChange = useCallback(async (status: RemoteArticleStatus): Promise<boolean> => {
+        if (!activeArticleId) return false;
+        try {
+            const updatedArticle = await updateRemoteArticleSettings(activeArticleId, { status });
+            setActiveArticleSettings(getActiveArticleSettings(updatedArticle));
+            window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+            return true;
+        } catch (error) {
+            console.error(`Failed to update active article status "${activeArticleId}":`, error);
+            return false;
+        }
+    }, [activeArticleId]);
 
     useEffect(() => {
         if (!editor || editor.isDestroyed || currentView !== 'editor') return;
@@ -1434,6 +1450,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         draftExists,
         scrollContainerRef,
         handleLanguageChange,
+        handleActiveArticleStatusChange,
         handleClearKeywords,
         handleSaveDraft,
         handleRestoreDraft,

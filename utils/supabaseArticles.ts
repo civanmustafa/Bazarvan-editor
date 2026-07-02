@@ -12,7 +12,7 @@ type ArticleRow = {
   created_by: string | null;
   assigned_to: string | null;
   source: 'manual' | 'n8n' | 'import' | 'system';
-  visibility: 'private' | 'shared' | 'team' | 'public';
+  visibility: 'private' | 'public';
   status: 'draft' | 'in_review' | 'published' | 'archived';
   title: string;
   content_json: any;
@@ -278,6 +278,16 @@ export const listRemoteN8nIngestLogs = async (limit = 25): Promise<RemoteN8nInge
     throw error;
   }
   return ((data || []) as N8nIngestLogRow[]).map(toRemoteN8nIngestLog);
+};
+
+export const updateCurrentProfileLastSeen = async (userId: string): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from('profiles')
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq('id', userId);
+
+  if (error) throw error;
 };
 
 export const loadRemoteArticleSnapshot = async (

@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, ChevronRight, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye } from 'lucide-react';
+import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye } from 'lucide-react';
 import { getActivityData, UserActivity, ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -84,16 +84,26 @@ const getLatestSavedAt = (articles: RemoteArticleActivity[]): string => (
 const getProfileKeywords = (articles: RemoteArticleActivity[]): string[] => {
   const keywords = new Set<string>();
   articles.forEach(article => {
-    const primary = article.keywords?.primary?.trim();
-    if (primary) keywords.add(primary);
+    const title = article.title?.trim();
+    if (title) keywords.add(title);
   });
   return Array.from(keywords).slice(0, 4);
 };
+
+const ONLINE_WINDOW_MS = 10 * 60 * 1000;
+
+const isProfileOnline = (profile: RemoteProfile): boolean => (
+  Boolean(profile.lastSeenAt && Date.now() - new Date(profile.lastSeenAt).getTime() <= ONLINE_WINDOW_MS)
+);
 
 const getArticleSortTime = (article: RemoteArticleActivity): number => Math.max(
   new Date(article.updatedAt || 0).getTime(),
   new Date(article.lastSaved || 0).getTime(),
   new Date(article.createdAt || 0).getTime(),
+);
+
+const getArticleCreatedTime = (article: RemoteArticleActivity): number => (
+  new Date(article.createdAt || 0).getTime()
 );
 
 const sortArticlesByLastChange = (articles: RemoteArticleActivity[]): RemoteArticleActivity[] => (
@@ -114,6 +124,42 @@ const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
 );
+
+const normalizeSearchText = (value: unknown): string => (
+  String(value || '').toLowerCase().trim()
+);
+
+const getUniqueArticleValues = (
+  articles: RemoteArticleActivity[],
+  getter: (article: RemoteArticleActivity) => string | undefined | null,
+): string[] => Array.from(new Set(
+  articles
+    .map(article => getter(article)?.trim() || '')
+    .filter(Boolean)
+)).sort((left, right) => left.localeCompare(right));
+
+const getArticleSearchText = (article: RemoteArticleActivity, ownerLabel: string, ownerId: string): string => {
+  const keywords = article.keywords || { primary: '', secondaries: [], company: '', lsi: [] };
+  const goalContext = article.goalContext || {};
+  return [
+    article.title,
+    keywords.primary,
+    ...(Array.isArray(keywords.secondaries) ? keywords.secondaries : []),
+    ...(Array.isArray(keywords.lsi) ? keywords.lsi : []),
+    keywords.company,
+    goalContext.pageType,
+    goalContext.objective,
+    goalContext.audienceScope,
+    goalContext.targetCountry,
+    goalContext.searchIntent,
+    article.plainText,
+    article.source,
+    article.status,
+    article.visibility,
+    ownerLabel,
+    ownerId,
+  ].map(normalizeSearchText).join(' ');
+};
 
 const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
   const metadata = isRecord(article?.metadata) ? article.metadata : {};
@@ -145,8 +191,6 @@ const isEditableN8nSettingField = (field: N8nDisplayFieldKey): field is N8nSetti
 const N8N_SETTING_OPTIONS: Record<N8nSettingFieldKey, { value: string; label: string }[]> = {
   visibility: [
     { value: 'private', label: 'خاص' },
-    { value: 'shared', label: 'مشترك' },
-    { value: 'team', label: 'فريق' },
     { value: 'public', label: 'عام' },
   ],
   accessRole: [
@@ -185,7 +229,7 @@ const getArticleCompetitors = (
 };
 
 const N8nSettingChip: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-  <span className="inline-flex min-w-0 max-w-[210px] items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]" title={String(value || '-')}>
+  <span className="inline-flex min-w-0 max-w-[180px] shrink-0 items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]" title={String(value || '-')}>
     <span className="shrink-0 text-gray-500 dark:text-gray-400">{label}:</span>
     <span className="min-w-0 truncate">{value || '-'}</span>
   </span>
@@ -198,7 +242,7 @@ const EditableN8nSettingField: React.FC<{
   onChange: (field: N8nSettingFieldKey, value: string) => void;
 }> = ({ field, value, disabled, onChange }) => (
   <label
-    className="inline-flex min-w-[116px] max-w-[170px] items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
+    className="inline-flex min-w-[104px] max-w-[150px] shrink-0 items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
     onClick={event => event.stopPropagation()}
   >
     <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
@@ -240,7 +284,7 @@ const EditableN8nTextField: React.FC<{
 
   return (
     <label
-      className="inline-flex min-w-[170px] max-w-[270px] items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
+      className="inline-flex min-w-[145px] max-w-[220px] shrink-0 items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
       onClick={event => event.stopPropagation()}
       title={draft || '-'}
     >
@@ -276,6 +320,7 @@ const AdminUsersTable: React.FC<{
   t: typeof translations.ar;
 }> = ({ profiles, articles, selectedProfileId, onSelectProfile, t }) => {
   const allArticlesLastSaved = getLatestSavedAt(articles);
+  const allProfilesOnlineCount = profiles.filter(isProfileOnline).length;
 
   return (
     <div className="mb-8 rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
@@ -292,15 +337,16 @@ const AdminUsersTable: React.FC<{
         </button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-start text-sm">
+        <table className="w-full min-w-[900px] text-start text-sm">
           <thead className="text-xs uppercase text-gray-400">
             <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
               <th className="px-3 py-2 text-start">المستخدم</th>
+              <th className="px-3 py-2 text-start">الحالة</th>
               <th className="px-3 py-2 text-start">الدور</th>
               <th className="px-3 py-2 text-start">عدد المقالات</th>
-              <th className="px-3 py-2 text-start">آخر حفظ</th>
+              <th className="px-3 py-2 text-start">آخر عمل</th>
               <th className="px-3 py-2 text-start">الوقت</th>
-              <th className="px-3 py-2 text-start">كلمات مفتاحية</th>
+              <th className="px-3 py-2 text-start">العناوين</th>
             </tr>
           </thead>
           <tbody>
@@ -309,6 +355,11 @@ const AdminUsersTable: React.FC<{
               onClick={() => onSelectProfile(null)}
             >
               <td className="px-3 py-3 font-black text-gray-700 dark:text-gray-100">كل المستخدمين</td>
+              <td className="px-3 py-3">
+                <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-black text-green-700 dark:bg-green-500/15 dark:text-green-300">
+                  {allProfilesOnlineCount} أونلاين
+                </span>
+              </td>
               <td className="px-3 py-3 text-gray-500">admin view</td>
               <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{articles.length}</td>
               <td className="px-3 py-3 text-gray-500">{allArticlesLastSaved ? formatIstanbulDateTime(allArticlesLastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
@@ -319,6 +370,8 @@ const AdminUsersTable: React.FC<{
               const profileArticles = articles.filter(article => articleBelongsToProfile(article, profile.id));
               const lastSaved = getLatestSavedAt(profileArticles);
               const isSelected = selectedProfileId === profile.id;
+              const online = isProfileOnline(profile);
+              const lastWorkAt = profile.lastSeenAt || lastSaved;
 
               return (
                 <tr
@@ -331,12 +384,17 @@ const AdminUsersTable: React.FC<{
                     <div className="text-xs text-gray-400">{profile.email}</div>
                   </td>
                   <td className="px-3 py-3">
+                    <span className={`rounded-full px-2 py-1 text-xs font-black ${online ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-300'}`}>
+                      {online ? 'أونلاين' : 'غير متصل'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3">
                     <span className={`rounded-full px-2 py-1 text-xs font-black ${profile.role === 'admin' ? 'bg-[#d4af37]/15 text-[#8a6f1d] dark:text-[#f2d675]' : 'bg-gray-100 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-300'}`}>
                       {profile.role}
                     </span>
                   </td>
                   <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{profileArticles.length}</td>
-                  <td className="px-3 py-3 text-gray-500">{lastSaved ? formatIstanbulDateTime(lastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+                  <td className="px-3 py-3 text-gray-500">{lastWorkAt ? formatIstanbulDateTime(lastWorkAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                   <td className="px-3 py-3 text-gray-500">{formatSeconds(profileArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0), t)}</td>
                   <td className="px-3 py-3 text-gray-500">{getProfileKeywords(profileArticles).join('، ') || '-'}</td>
                 </tr>
@@ -478,6 +536,7 @@ const ArticleDetailsModal: React.FC<{
             <DetailRow label="الظهور" value={article.visibility} />
             <DetailRow label="لغة المقال" value={(article.articleLanguage || 'ar').toUpperCase()} />
             <DetailRow label="عدد مرات الحفظ" value={article.saveCount} />
+            <DetailRow label="تاريخ الإنشاء" value={article.createdAt ? formatIstanbulDateTime(article.createdAt, t.locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'} />
             <DetailRow label="آخر حفظ" value={article.lastSaved ? formatIstanbulDateTime(article.lastSaved, t.locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'} />
             <DetailRow label="الوقت المستغرق" value={formatSeconds(article.timeSpentSeconds, t)} />
             {trashInfo && (
@@ -773,7 +832,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const fieldsToShow = visibleSettingFields.length > 0
         ? visibleSettingFields
         : showAdminMetadata
-          ? (['visibility', 'accessRole', 'articleLanguage', 'status'] as N8nSettingFieldKey[])
+          ? (['status', 'visibility', 'accessRole', 'articleLanguage'] as N8nSettingFieldKey[])
           : [];
     const shouldShowN8nSettings = fieldsToShow.length > 0 && (
         Boolean(n8nSettings.visibility) ||
@@ -864,6 +923,12 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+                    {activity.createdAt && (
+                         <span className="flex items-center gap-1.5" title="تاريخ الإنشاء">
+                            <Calendar size={12} />
+                            {formatIstanbulDateTime(activity.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                    )}
                     {activity.lastSaved && (
                          <span className="flex items-center gap-1.5" title={t.lastSaved}>
                             <RefreshCw size={12} />
@@ -904,7 +969,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     )}
                 </div>
                 {shouldShowN8nSettings && (
-                    <div className="flex flex-wrap items-center gap-1 border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
+                    <div className="flex flex-nowrap items-center gap-1 overflow-x-auto border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
                         {fieldsToShow.map(field => {
                             const isEditable = Boolean(onUpdateSettings && editableSettingFields.includes(field));
                             if (isEditable && isEditableN8nSettingField(field)) {
@@ -934,7 +999,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     </div>
                 )}
             </div>
-             <ChevronRight size={18} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
         </li>
     );
 };
@@ -987,11 +1051,20 @@ const Dashboard: React.FC = () => {
   const [filters, setFilters] = useState({
     dateFrom: '',
     dateTo: '',
+    createdFrom: '',
+    createdTo: '',
     wordCountMin: '',
     wordCountMax: '',
     timeMin: '',
     timeMax: '',
     language: 'all',
+    status: 'all',
+    profileId: 'all',
+    visibility: 'all',
+    source: 'all',
+    company: 'all',
+    pageType: 'all',
+    audienceScope: 'all',
   });
 
   const refreshLocalActivityData = () => {
@@ -1172,7 +1245,7 @@ const Dashboard: React.FC = () => {
     void refreshData();
     const intervalId = setInterval(() => {
       void refreshData();
-    }, 10000);
+    }, 10 * 60 * 1000);
     const handleActivityUpdated = () => {
       void refreshData();
     };
@@ -1326,11 +1399,20 @@ const Dashboard: React.FC = () => {
     setFilters({
       dateFrom: '',
       dateTo: '',
+      createdFrom: '',
+      createdTo: '',
       wordCountMin: '',
       wordCountMax: '',
       timeMin: '',
       timeMax: '',
       language: 'all',
+      status: 'all',
+      profileId: 'all',
+      visibility: 'all',
+      source: 'all',
+      company: 'all',
+      pageType: 'all',
+      audienceScope: 'all',
     });
   };
 
@@ -1392,21 +1474,22 @@ const Dashboard: React.FC = () => {
   ), [displayedRemoteArticles, selectedProfileId]);
   const scopedLastSaved = getLatestSavedAt(scopedArticles);
   const scopedTotalTime = scopedArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
+  const filterOptions = useMemo(() => ({
+    companies: getUniqueArticleValues(displayedRemoteArticles, article => article.keywords?.company),
+    pageTypes: getUniqueArticleValues(displayedRemoteArticles, article => article.goalContext?.pageType),
+    audienceScopes: getUniqueArticleValues(displayedRemoteArticles, article => article.goalContext?.audienceScope),
+    sources: getUniqueArticleValues(displayedRemoteArticles, article => article.source),
+    visibilities: getUniqueArticleValues(displayedRemoteArticles, article => article.visibility),
+  }), [displayedRemoteArticles]);
 
   // Article filters stay derived from Supabase data so refreshData remains the only reload path.
   const filteredArticles = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
     return scopedArticles.filter((activity) => {
+      const ownerId = getArticleOwnerId(activity) || '';
       if (normalizedSearch) {
         const ownerLabel = getOwnerLabel(activity).toLowerCase();
-        const ownerId = getArticleOwnerId(activity) || '';
-        const searchText = [
-          activity.title,
-          activity.plainText,
-          activity.source,
-          ownerLabel,
-          ownerId,
-        ].join(' ').toLowerCase();
+        const searchText = getArticleSearchText(activity, ownerLabel, ownerId);
         if (!searchText.includes(normalizedSearch)) return false;
       }
       if (filters.dateFrom) {
@@ -1419,6 +1502,19 @@ const Dashboard: React.FC = () => {
           const articleDate = new Date(activity.lastSaved);
           const filterDate = getIstanbulDayEnd(filters.dateTo);
           if (articleDate > filterDate) {
+              return false;
+          }
+      }
+      if (filters.createdFrom) {
+          if (!activity.createdAt || getArticleCreatedTime(activity) < getIstanbulDayStart(filters.createdFrom).getTime()) {
+              return false;
+          }
+      }
+      if (filters.createdTo) {
+          if (!activity.createdAt) return false;
+          const createdDate = new Date(activity.createdAt);
+          const filterDate = getIstanbulDayEnd(filters.createdTo);
+          if (createdDate > filterDate) {
               return false;
           }
       }
@@ -1435,6 +1531,27 @@ const Dashboard: React.FC = () => {
       if (!isNaN(timeMax) && timeInMinutes > timeMax) return false;
       
       if (filters.language !== 'all' && (activity.articleLanguage || 'ar') !== filters.language) {
+          return false;
+      }
+      if (filters.status !== 'all' && activity.status !== filters.status) {
+          return false;
+      }
+      if (filters.profileId !== 'all' && !articleBelongsToProfile(activity, filters.profileId)) {
+          return false;
+      }
+      if (filters.visibility !== 'all' && activity.visibility !== filters.visibility) {
+          return false;
+      }
+      if (filters.source !== 'all' && activity.source !== filters.source) {
+          return false;
+      }
+      if (filters.company !== 'all' && activity.keywords?.company !== filters.company) {
+          return false;
+      }
+      if (filters.pageType !== 'all' && activity.goalContext?.pageType !== filters.pageType) {
+          return false;
+      }
+      if (filters.audienceScope !== 'all' && activity.goalContext?.audienceScope !== filters.audienceScope) {
           return false;
       }
 
@@ -1608,7 +1725,7 @@ const Dashboard: React.FC = () => {
                             type="search"
                             value={searchQuery}
                             onChange={event => setSearchQuery(event.target.value)}
-                            placeholder="بحث باسم المقالة أو المستخدم"
+                            placeholder="بحث في العنوان، المستخدم، الكلمات، الشركة، LSI، ومحتوى المقالة"
                             className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-[#333333] focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
                         />
                         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1696,6 +1813,17 @@ const Dashboard: React.FC = () => {
                                     <input type="date" name="dateTo" value={filters.dateTo} onChange={handleFilterChange} className={inputClass} />
                                 </div>
                             </div>
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
+                                    <Calendar size={16} className="text-[#d4af37]" />
+                                    <span>تاريخ الإنشاء</span>
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <input type="date" name="createdFrom" value={filters.createdFrom} onChange={handleFilterChange} className={inputClass} />
+                                    <span className="text-gray-400 dark:text-gray-500">-</span>
+                                    <input type="date" name="createdTo" value={filters.createdTo} onChange={handleFilterChange} className={inputClass} />
+                                </div>
+                            </div>
                              <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
                                     <FileText size={16} className="text-[#d4af37]" />
@@ -1729,6 +1857,92 @@ const Dashboard: React.FC = () => {
                                     <option value="en">{t.english}</option>
                                 </select>
                             </div>
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
+                                    <Settings size={16} className="text-[#d4af37]" />
+                                    <span>الحالة</span>
+                                </label>
+                                <select name="status" value={filters.status} onChange={handleFilterChange} className={inputClass}>
+                                    <option value="all">{t.all}</option>
+                                    {N8N_SETTING_OPTIONS.status.map(option => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            {isAdmin && (
+                                <div>
+                                    <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
+                                        <Users size={16} className="text-[#d4af37]" />
+                                        <span>المستخدم</span>
+                                    </label>
+                                    <select name="profileId" value={filters.profileId} onChange={handleFilterChange} className={inputClass}>
+                                        <option value="all">{t.all}</option>
+                                        {profiles.map(profile => (
+                                            <option key={profile.id} value={profile.id}>{getProfileLabel(profile)}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
+                                    <Eye size={16} className="text-[#d4af37]" />
+                                    <span>الظهور</span>
+                                </label>
+                                <select name="visibility" value={filters.visibility} onChange={handleFilterChange} className={inputClass}>
+                                    <option value="all">{t.all}</option>
+                                    {filterOptions.visibilities.map(value => (
+                                        <option key={value} value={value}>{value}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
+                                    <ExternalLink size={16} className="text-[#d4af37]" />
+                                    <span>المصدر</span>
+                                </label>
+                                <select name="source" value={filters.source} onChange={handleFilterChange} className={inputClass}>
+                                    <option value="all">{t.all}</option>
+                                    {filterOptions.sources.map(value => (
+                                        <option key={value} value={value}>{value}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
+                                    <Key size={16} className="text-[#d4af37]" />
+                                    <span>الشركة</span>
+                                </label>
+                                <select name="company" value={filters.company} onChange={handleFilterChange} className={inputClass}>
+                                    <option value="all">{t.all}</option>
+                                    {filterOptions.companies.map(value => (
+                                        <option key={value} value={value}>{value}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
+                                    <NotebookTabs size={16} className="text-[#d4af37]" />
+                                    <span>نوع الصفحة</span>
+                                </label>
+                                <select name="pageType" value={filters.pageType} onChange={handleFilterChange} className={inputClass}>
+                                    <option value="all">{t.all}</option>
+                                    {filterOptions.pageTypes.map(value => (
+                                        <option key={value} value={value}>{value}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
+                                    <AppWindow size={16} className="text-[#d4af37]" />
+                                    <span>النطاق الجغرافي</span>
+                                </label>
+                                <select name="audienceScope" value={filters.audienceScope} onChange={handleFilterChange} className={inputClass}>
+                                    <option value="all">{t.all}</option>
+                                    {filterOptions.audienceScopes.map(value => (
+                                        <option key={value} value={value}>{value}</option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -1758,10 +1972,10 @@ const Dashboard: React.FC = () => {
                                     onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
                                     onUpdateSettings={handleUpdateArticleSettings}
                                     visibleSettingFields={isAdmin
-                                      ? ['visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage', 'status']
+                                      ? ['status', 'visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage']
                                       : ['status', 'accessRole', 'visibleToEmailsCsv']}
                                     editableSettingFields={isAdmin
-                                      ? ['visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage', 'status']
+                                      ? ['status', 'visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage']
                                       : ['status']}
                                     isTrashView={isTrashVisible}
                                     showAdminMetadata={isAdmin}

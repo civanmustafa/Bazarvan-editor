@@ -59,6 +59,7 @@ const EditorToolbar: React.FC = () => {
         articleLanguage,
         handleLanguageChange: onLanguageChange,
         activeArticleSettings,
+        handleActiveArticleStatusChange,
     } = useEditor();
     
     const {
@@ -125,6 +126,7 @@ const EditorToolbar: React.FC = () => {
 
     const [isFindReplaceVisible, setIsFindReplaceVisible] = useState(false);
     const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
+    const [isStatusSaving, setIsStatusSaving] = useState(false);
   
     const isAnyGeminiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt;
     const hasArticleSettings = Boolean(activeArticleSettings.status || activeArticleSettings.accessRole);
@@ -146,6 +148,15 @@ const EditorToolbar: React.FC = () => {
         setIsNewArticleLanguageModalOpen(false);
         onNewArticle(lang);
     }, [onNewArticle]);
+
+    const handleStatusChange = useCallback(async (status: string) => {
+      setIsStatusSaving(true);
+      const saved = await handleActiveArticleStatusChange(status as any);
+      setIsStatusSaving(false);
+      if (!saved) {
+        alert('تعذر تغيير حالة المقالة من داخل المحرر. حاول مرة أخرى.');
+      }
+    }, [handleActiveArticleStatusChange]);
 
     // Mirror TipTap selection/formatting state into button active states and counters.
     useEffect(() => {
@@ -210,9 +221,19 @@ const EditorToolbar: React.FC = () => {
           {hasArticleSettings && (
             <div className="flex max-w-[280px] flex-wrap items-center gap-1">
               {activeArticleSettings.status && (
-                <span className="rounded-md bg-[#d4af37]/10 px-2 py-1 text-[11px] font-black text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
-                  status: {ARTICLE_STATUS_LABELS[activeArticleSettings.status] || activeArticleSettings.status}
-                </span>
+                <label className="inline-flex items-center gap-1 rounded-md bg-[#d4af37]/10 px-2 py-1 text-[11px] font-black text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
+                  <span>status:</span>
+                  <select
+                    value={activeArticleSettings.status}
+                    disabled={isStatusSaving}
+                    onChange={(event) => { void handleStatusChange(event.target.value); }}
+                    className="max-w-[92px] bg-transparent text-[11px] font-black outline-none disabled:opacity-60"
+                  >
+                    {Object.entries(ARTICLE_STATUS_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
               )}
               {activeArticleSettings.accessRole && (
                 <span className="rounded-md bg-gray-200 px-2 py-1 text-[11px] font-black text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">

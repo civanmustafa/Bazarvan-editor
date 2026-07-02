@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, Code2, FileText, Trash2, ExternalLink, ClipboardPaste } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, ExternalLink, ClipboardPaste } from 'lucide-react';
 import StructureTab from './StructureTab';
 import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
@@ -1786,11 +1786,9 @@ ${readyCommandCompetitorBlocks}`;
                 {competitorUrls.map((url, index) => {
                     const extraction = competitorExtractions[index] || createEmptyCompetitorState();
                     const content = extraction.source === 'text' ? null : extraction.content;
-                    const html = competitorHtmls[index] || '';
                     const plainText = competitorTexts[index] || '';
                     const isLoading = extraction.status === 'loading';
                     const isUrlLoading = isLoading && extraction.source === 'url';
-                    const isHtmlLoading = isLoading && extraction.source === 'html';
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
@@ -1818,27 +1816,6 @@ ${readyCommandCompetitorBlocks}`;
                                             <span>{isUrlLoading ? tRs.extractingCompetitor : tRs.extractCompetitorFromUrl}</span>
                                         </button>
                                     </div>
-                                </div>
-                                <div>
-                                    <div className="mb-1 text-[11px] font-bold text-gray-500 dark:text-gray-400">{tRs.competitorHtmlField}</div>
-                                    <textarea
-                                        value={html}
-                                        onChange={(event) => handleCompetitorHtmlChange(index, event.target.value)}
-                                        placeholder={tRs.competitorHtmlPlaceholder}
-                                        rows={5}
-                                        className="w-full rounded-md border border-gray-300 bg-gray-50 px-2 py-2 font-mono text-[11px] leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
-                                        dir="ltr"
-                                        spellCheck={false}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => handleExtractCompetitorHtml(index)}
-                                        disabled={isLoading}
-                                        className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#f2d675]"
-                                    >
-                                        {isHtmlLoading ? <Wand2 size={14} className="animate-spin" /> : <Code2 size={14} />}
-                                        <span>{isHtmlLoading ? tRs.extractingCompetitor : tRs.extractCompetitorFromHtml}</span>
-                                    </button>
                                 </div>
                                 <div>
                                     <div className="mb-1 text-[11px] font-bold text-gray-500 dark:text-gray-400">{tRs.competitorPlainTextField}</div>

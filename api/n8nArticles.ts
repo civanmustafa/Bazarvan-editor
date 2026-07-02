@@ -7,7 +7,7 @@ type ApiResult = {
   headers?: Record<string, string>;
 };
 
-type ArticleVisibility = 'private' | 'shared' | 'team' | 'public';
+type ArticleVisibility = 'private' | 'public';
 type ArticleStatus = 'draft' | 'in_review' | 'published' | 'archived';
 type AccessRole = 'viewer' | 'editor';
 
@@ -38,7 +38,7 @@ class IngestError extends Error {
   }
 }
 
-const ALLOWED_VISIBILITIES = new Set<ArticleVisibility>(['private', 'shared', 'team', 'public']);
+const ALLOWED_VISIBILITIES = new Set<ArticleVisibility>(['private', 'public']);
 const ALLOWED_STATUSES = new Set<ArticleStatus>(['draft', 'in_review', 'published', 'archived']);
 const ALLOWED_ACCESS_ROLES = new Set<AccessRole>(['viewer', 'editor']);
 
@@ -449,7 +449,11 @@ const resolveIngestAccess = async (
   supabase: SupabaseAdmin,
   body: Record<string, any>,
 ): Promise<IngestResolution> => {
-  const explicitVisibility = normalizeVisibility(body.visibility);
+  const rawVisibility = toTrimmedString(body.visibility);
+  const explicitVisibility = normalizeVisibility(rawVisibility);
+  if (rawVisibility && !explicitVisibility) {
+    throw new IngestError('Invalid visibility. Allowed values are: private, public.', 400);
+  }
   const selectedProfiles = await lookupProfiles(supabase, getTargetIdentifiers(body));
   const ownerProfile = await resolveProfileBySingleIdentifier(supabase, body.ownerId || body.owner_id || body.ownerEmail || body.owner_email);
   const assignedProfile = await resolveProfileBySingleIdentifier(supabase, body.assignedTo || body.assigned_to || body.assignedToId || body.assigned_to_id || body.assignedToEmail || body.assigned_to_email);
@@ -459,7 +463,7 @@ const resolveIngestAccess = async (
   if (ownerProfile) accessProfilesById.set(ownerProfile.id, ownerProfile);
   if (assignedProfile) accessProfilesById.set(assignedProfile.id, assignedProfile);
 
-  const visibility: ArticleVisibility = explicitVisibility || (accessProfilesById.size > 0 ? 'private' : 'shared');
+  const visibility: ArticleVisibility = explicitVisibility || (accessProfilesById.size > 0 ? 'private' : 'public');
 
   return {
     visibility,
