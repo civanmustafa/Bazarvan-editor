@@ -12,6 +12,20 @@ import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, Duplicate
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 import { parseGoalContextText } from '../utils/goalContext';
 
+const mergeUniqueKeywordTerms = (existing: string[], incoming: string[], maxItems: number): string[] => {
+  const seen = new Set<string>();
+  return [...existing, ...incoming]
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter(item => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, maxItems);
+};
+
 const getProgressBarColor = (status: AnalysisStatus) => {
     switch (status) {
         case 'pass': return '#d4af37';
@@ -598,8 +612,12 @@ const LeftSidebar: React.FC = () => {
       }
       setKeywords(prev => ({
         ...prev,
-        secondaries: result.secondaries.length > 0 ? result.secondaries : prev.secondaries,
-        lsi: result.lsi.length > 0 ? result.lsi : prev.lsi,
+        secondaries: result.secondaries.length > 0
+          ? mergeUniqueKeywordTerms(prev.secondaries, result.secondaries, 10)
+          : prev.secondaries,
+        lsi: result.lsi.length > 0
+          ? mergeUniqueKeywordTerms(prev.lsi, result.lsi, 24)
+          : prev.lsi,
       }));
       setLsiInputValue('');
       setSemanticGenerationStatus(tLk.semanticKeywordsGenerated);

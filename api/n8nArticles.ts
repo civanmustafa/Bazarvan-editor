@@ -41,6 +41,14 @@ class IngestError extends Error {
 const ALLOWED_VISIBILITIES = new Set<ArticleVisibility>(['private', 'public']);
 const ALLOWED_STATUSES = new Set<ArticleStatus>(['draft', 'in_review', 'published', 'archived']);
 const ALLOWED_ACCESS_ROLES = new Set<AccessRole>(['viewer', 'editor']);
+const STATUS_ALIASES: Record<string, ArticleStatus> = {
+  ready: 'in_review',
+  review: 'in_review',
+  reviewing: 'in_review',
+  'in review': 'in_review',
+  'جاهز': 'in_review',
+  'مراجعة': 'in_review',
+};
 
 const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
@@ -308,6 +316,7 @@ const normalizeLanguage = (value: unknown): 'ar' | 'en' => {
 
 const normalizeStatus = (value: unknown): ArticleStatus => {
   const token = normalizeToken(value);
+  if (STATUS_ALIASES[token]) return STATUS_ALIASES[token];
   return ALLOWED_STATUSES.has(token as ArticleStatus) ? token as ArticleStatus : 'draft';
 };
 

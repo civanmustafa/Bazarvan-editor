@@ -628,6 +628,16 @@ export const updateRemoteArticleSettings = async (
   return toRemoteArticleActivity(data as ArticleRow);
 };
 
+export const claimRemoteArticle = async (articleId: string): Promise<RemoteArticleActivity> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc('claim_available_article', {
+    target_article_id: articleId,
+  });
+
+  if (error) throw error;
+  return toRemoteArticleActivity(data as ArticleRow);
+};
+
 export const getArticleTrashInfo = (
   article: Pick<RemoteArticleActivity, 'metadata'>,
   userId?: string | null,

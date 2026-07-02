@@ -10,6 +10,7 @@ import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
 import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
 import {
+    claimRemoteArticle,
     deleteRemoteArticle,
     getArticleTrashInfo,
     listRemoteN8nIngestLogs,
@@ -27,6 +28,7 @@ import {
     type RemoteN8nIngestLog,
     type RemoteArticleSettingsPatch,
 } from '../utils/supabaseArticles';
+import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
 
 /*
@@ -203,11 +205,15 @@ const N8N_SETTING_OPTIONS: Record<N8nSettingFieldKey, { value: string; label: st
   ],
   status: [
     { value: 'draft', label: 'مسودة' },
-    { value: 'in_review', label: 'مراجعة' },
+    { value: 'in_review', label: 'جاهز' },
     { value: 'published', label: 'منشور' },
     { value: 'archived', label: 'أرشيف' },
   ],
 };
+
+const getN8nOptionLabel = (field: N8nSettingFieldKey, value: string): string => (
+  N8N_SETTING_OPTIONS[field].find(option => option.value === value)?.label || value
+);
 
 const getArticleCompetitors = (
   article: RemoteArticleActivity,
@@ -531,7 +537,7 @@ const ArticleDetailsModal: React.FC<{
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
             <DetailRow label="المالك" value={ownerLabel} />
-            <DetailRow label="الحالة" value={article.status} />
+            <DetailRow label="الحالة" value={getN8nOptionLabel('status', article.status)} />
             <DetailRow label="المصدر" value={article.source} />
             <DetailRow label="الظهور" value={article.visibility} />
             <DetailRow label="لغة المقال" value={(article.articleLanguage || 'ar').toUpperCase()} />
@@ -554,7 +560,7 @@ const ArticleDetailsModal: React.FC<{
               <DetailRow label="accessRole" value={n8nSettings.accessRole} />
               <DetailRow label="visibleToEmailsCsv" value={n8nSettings.visibleToEmailsCsv} />
               <DetailRow label="articleLanguage" value={n8nSettings.articleLanguage} />
-              <DetailRow label="status" value={n8nSettings.status} />
+              <DetailRow label="status" value={getN8nOptionLabel('status', n8nSettings.status)} />
             </div>
           </div>
 
@@ -696,6 +702,7 @@ interface ArticleItemProps {
     onRestore?: () => void;
     onRename: (newTitle: string) => boolean | Promise<boolean>;
     onUpdateSettings?: (articleId: string, patch: RemoteArticleSettingsPatch) => Promise<boolean>;
+    onClaim?: (articleId: string) => Promise<boolean>;
     visibleSettingFields?: N8nDisplayFieldKey[];
     editableSettingFields?: N8nDisplayFieldKey[];
     isTrashView?: boolean;
@@ -719,6 +726,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     onRestore,
     onRename,
     onUpdateSettings,
+    onClaim,
     visibleSettingFields = [],
     editableSettingFields = [],
     isTrashView = false,
@@ -790,6 +798,19 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
             alert('تعذر حفظ إعداد المقالة. حاول مرة أخرى.');
         }
     };
+
+    const handleClaimArticle = async (event: React.MouseEvent) => {
+        event.stopPropagation();
+        const articleId = (activity as RemoteArticleActivity).id;
+        if (!articleId || !onClaim || savingSettingField) return;
+
+        setSavingSettingField('visibleToEmailsCsv');
+        const isClaimed = await onClaim(articleId);
+        setSavingSettingField(null);
+        if (!isClaimed) {
+            alert('تعذر حجز المقالة. ربما قام مستخدم آخر بحجزها الآن.');
+        }
+    };
     
     const calculateSeoScore = () => {
         if (!activity.stats) return 0;
@@ -827,8 +848,16 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     }
     
     const untranslatedTitle = title || t.untitled;
-    const primaryKeyword = activity.keywords?.primary?.trim();
     const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
+    const remoteActivity = activity as RemoteArticleActivity;
+    const canClaimArticle = Boolean(
+        onClaim &&
+        !isTrashView &&
+        remoteActivity.visibility === 'public' &&
+        !remoteActivity.ownerId &&
+        !remoteActivity.assignedTo &&
+        !n8nSettings.visibleToEmailsCsv
+    );
     const fieldsToShow = visibleSettingFields.length > 0
         ? visibleSettingFields
         : showAdminMetadata
@@ -955,11 +984,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         <Repeat size={12} className="text-[#d4af37]" />
                         <span>{activity.stats?.totalDuplicates ?? 0}</span>
                     </span>
-                    {primaryKeyword && (
-                        <span className="min-w-0 truncate font-semibold text-gray-600 dark:text-gray-300" title={primaryKeyword}>
-                            {primaryKeyword}
-                        </span>
-                    )}
                     {trashInfo?.deletedAt && (
                         <span className="flex items-center gap-1.5 font-bold text-red-500 dark:text-red-300" title="تاريخ الحذف ومن حذفه">
                             <Trash2 size={12} />
@@ -972,6 +996,20 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     <div className="flex flex-nowrap items-center gap-1 overflow-x-auto border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
                         {fieldsToShow.map(field => {
                             const isEditable = Boolean(onUpdateSettings && editableSettingFields.includes(field));
+                            if (field === 'visibleToEmailsCsv' && canClaimArticle) {
+                                return (
+                                    <button
+                                        key={field}
+                                        type="button"
+                                        onClick={handleClaimArticle}
+                                        disabled={savingSettingField !== null}
+                                        className="inline-flex shrink-0 items-center gap-1 rounded-md bg-green-100 px-2 py-0.5 text-[10px] font-black text-green-700 hover:bg-green-200 disabled:cursor-wait disabled:opacity-60 dark:bg-green-500/15 dark:text-green-300 dark:hover:bg-green-500/25"
+                                        title="حجز المقالة وتحويلها إلى حسابك"
+                                    >
+                                        visibleToEmailsCsv: احجز
+                                    </button>
+                                );
+                            }
                             if (isEditable && isEditableN8nSettingField(field)) {
                                 return (
                                     <EditableN8nSettingField
@@ -994,7 +1032,13 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                                     />
                                 );
                             }
-                            return <N8nSettingChip key={field} label={field} value={n8nSettings[field]} />;
+                            return (
+                                <N8nSettingChip
+                                    key={field}
+                                    label={field}
+                                    value={isEditableN8nSettingField(field) ? getN8nOptionLabel(field, String(n8nSettings[field] || '')) : n8nSettings[field]}
+                                />
+                            );
                         })}
                     </div>
                 )}
@@ -1241,6 +1285,22 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handleClaimArticle = async (articleId: string): Promise<boolean> => {
+    try {
+      const claimedArticle = await claimRemoteArticle(articleId);
+      setRemoteArticles(prev => sortArticlesByLastChange(prev.map(article => (
+        article.id === articleId ? claimedArticle : article
+      ))));
+      setDetailArticle(prev => (prev?.id === articleId ? claimedArticle : prev));
+      window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+      return true;
+    } catch (error) {
+      console.error(`Failed to claim article "${articleId}":`, error);
+      await refreshData();
+      return false;
+    }
+  };
+
   useEffect(() => {
     void refreshData();
     const intervalId = setInterval(() => {
@@ -1253,6 +1313,21 @@ const Dashboard: React.FC = () => {
     return () => {
       clearInterval(intervalId);
       window.removeEventListener('smart-editor-activity-updated', handleActivityUpdated);
+    };
+  }, [currentUser, isAdmin]);
+
+  useEffect(() => {
+    if (!currentUser || !isSupabaseConfigured) return;
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel('dashboard-articles-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'articles' }, () => {
+        void refreshData();
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
     };
   }, [currentUser, isAdmin]);
 
@@ -1971,6 +2046,7 @@ const Dashboard: React.FC = () => {
                                     onRestore={() => { void handleRestoreArticle(activity.id); }}
                                     onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
                                     onUpdateSettings={handleUpdateArticleSettings}
+                                    onClaim={handleClaimArticle}
                                     visibleSettingFields={isAdmin
                                       ? ['status', 'visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage']
                                       : ['status', 'accessRole', 'visibleToEmailsCsv']}

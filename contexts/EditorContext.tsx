@@ -1246,6 +1246,15 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [handleSaveDraft]);
 
     useEffect(() => {
+        const handleAutoSaveRequest = () => {
+            void handleSaveDraftRef.current();
+        };
+
+        window.addEventListener('bazarvan:auto-save-request', handleAutoSaveRequest);
+        return () => window.removeEventListener('bazarvan:auto-save-request', handleAutoSaveRequest);
+    }, []);
+
+    useEffect(() => {
         if (currentView !== 'editor') return;
         const autosaveInterval = setInterval(() => {
             handleSaveDraftRef.current();

@@ -24,7 +24,7 @@ import NewArticleLanguageModal from './NewArticleLanguageModal';
  */
 const ARTICLE_STATUS_LABELS: Record<string, string> = {
   draft: 'مسودة',
-  in_review: 'مراجعة',
+  in_review: 'جاهز',
   published: 'منشور',
   archived: 'أرشيف',
 };

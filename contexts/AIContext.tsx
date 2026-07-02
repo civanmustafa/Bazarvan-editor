@@ -31,6 +31,7 @@ import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INT
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { normalizeGoalContext } from '../utils/goalContext';
 import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
+import { COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 
 /*
  * AIContext owns all AI workflows:
@@ -2109,6 +2110,47 @@ const saveStoredChatGptConversationId = (currentUser: string | null, articleKey:
     } catch (error) {
         console.error('Could not save ChatGPT conversation id to localStorage:', error);
     }
+};
+
+const clearStoredArticleAiConversations = (currentUser: string | null, articleScope: string) => {
+    if (!articleScope.trim()) return;
+    try {
+        localStorage.removeItem(getGeminiChatStorageKey(currentUser, articleScope, 'gemini'));
+        localStorage.removeItem(getGeminiChatStorageKey(currentUser, articleScope, 'geminiPaid'));
+        localStorage.removeItem(getChatGptConversationStorageKey(currentUser, articleScope));
+    } catch (error) {
+        console.error('Could not clear article AI conversation history:', error);
+    }
+};
+
+const readStoredStringList = (storageKey: string): string[] => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        return Array.isArray(parsed)
+            ? parsed.map(item => typeof item === 'string' ? item.trim() : '').filter(Boolean)
+            : [];
+    } catch {
+        return [];
+    }
+};
+
+const mergeUniqueTerms = (existing: string[], incoming: string[], maxItems: number): string[] => {
+    const seen = new Set<string>();
+    return [...existing, ...incoming]
+        .map(item => item.trim())
+        .filter(Boolean)
+        .filter(item => {
+            const key = item.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .slice(0, maxItems);
+};
+
+const isPlaceholderArticleTitle = (value: string): boolean => {
+    const normalized = value.trim().toLowerCase();
+    return !normalized || normalized === '(untitled)' || normalized === 'untitled' || normalized === 'بدون عنوان' || normalized === 'مسودة';
 };
 
 const callChatGptAnalysis = async (
@@ -4458,8 +4500,21 @@ export const useAI = () => {
 };
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { t, uiLanguage, apiKeys, engineeringPrompts, currentUser } = useUser();
-    const { editor, title, text, keywords, analysisResults, goalContext, articleLanguage, articleKey, activeArticleId } = useEditor();
+    const { t, uiLanguage, apiKeys, engineeringPrompts, currentUser, currentView } = useUser();
+    const {
+        editor,
+        title,
+        setTitle,
+        text,
+        keywords,
+        setKeywords,
+        analysisResults,
+        goalContext,
+        articleLanguage,
+        articleKey,
+        activeArticleId,
+        activeArticleSettings,
+    } = useEditor();
     const { openModal } = useModal();
     
     const [aiResults, setAiResults] = useState<Record<AiPatchProvider, string>>({ gemini: '', geminiPaid: '', chatgpt: '' });
@@ -4477,6 +4532,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [fixAllProgress, setFixAllProgress] = useState<FixAllProgress>({ current: 0, total: 0, running: false, failed: 0, errors: [] });
     
     const isInitialMount = useRef(true);
+    const previousArticleScopeRef = useRef<string>('');
+    const previousArticleUserRef = useRef<string | null>(currentUser);
+    const autoDraftRunRef = useRef<Set<string>>(new Set());
 
     const replaceBulkFixReviewItems = useCallback((items: BulkFixReviewItem[]) => {
         bulkFixReviewItemsRef.current = items;
@@ -4490,16 +4548,36 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return nextItems;
     }, []);
 
-    useEffect(() => {
-        if (isInitialMount.current) {
-            isInitialMount.current = false;
-            return;
-        }
+    const clearArticleAiRuntimeState = useCallback(() => {
+        setAiResults({ gemini: '', geminiPaid: '', chatgpt: '' });
         setAiHistory([]);
         replaceBulkFixReviewItems([]);
         setAiInsertionPatches({ gemini: [], geminiPaid: [], chatgpt: [] });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
-    }, [articleKey, replaceBulkFixReviewItems]);
+        setSuggestion(null);
+        setHeadingsAnalysis(null);
+        setIsHeadingsAnalysisMinimized(false);
+    }, [replaceBulkFixReviewItems]);
+
+    useEffect(() => {
+        const currentScope = currentView === 'editor'
+            ? getArticleChatStorageScope(articleKey, title)
+            : '';
+        const previousScope = previousArticleScopeRef.current;
+        const previousUser = previousArticleUserRef.current;
+        const scopeChanged = previousScope && previousScope !== currentScope;
+        const editorClosed = currentView !== 'editor' && previousScope;
+
+        if (scopeChanged || editorClosed) {
+            clearStoredArticleAiConversations(previousUser, previousScope);
+            clearArticleAiRuntimeState();
+        } else if (isInitialMount.current) {
+            isInitialMount.current = false;
+        }
+
+        previousArticleScopeRef.current = currentScope;
+        previousArticleUserRef.current = currentUser;
+    }, [articleKey, title, currentView, currentUser, clearArticleAiRuntimeState]);
 
     useEffect(() => {
         bulkFixReviewItemsRef.current = bulkFixReviewItems;
@@ -4829,6 +4907,139 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         return { context };
     }, [apiKeys.gemini, articleLanguage, goalContext, keywords.primary, keywords.secondaries, title]);
+
+    const generateDraftTitle = useCallback(async (): Promise<string> => {
+        const primary = keywords.primary.trim();
+        if (!primary) return '';
+
+        const prompt = [
+            'أنت خبير SEO ومحرر عناوين.',
+            'اكتب عنوانا واحدا فقط مناسبا للمقالة بناء على الكلمة المفتاحية الأساسية وسياق الصفحة وهدفها.',
+            '',
+            `الكلمة المفتاحية الأساسية: ${primary}`,
+            `لغة المقال: ${articleLanguage === 'ar' ? 'العربية' : 'English'}`,
+            '',
+            'سياق وهدف الصفحة:',
+            formatGoalContext(goalContext) || '-',
+            '',
+            keywords.secondaries.filter(Boolean).length ? `الصيغ البديلة الحالية: ${keywords.secondaries.filter(Boolean).join(', ')}` : '',
+            keywords.lsi.filter(Boolean).length ? `كلمات LSI الحالية: ${keywords.lsi.filter(Boolean).join(', ')}` : '',
+            '',
+            'الشروط:',
+            '- اجعل العنوان طبيعيا وغير محشو.',
+            '- راع نية البحث ونوع الصفحة وهدفها.',
+            '- لا تكتب أكثر من عنوان.',
+            '- أرجع JSON فقط دون Markdown.',
+            '{ "title": "..." }',
+        ].filter(Boolean).join('\n');
+
+        const result = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        const parsed = extractJson(result);
+        return typeof parsed?.title === 'string' ? parsed.title.trim() : '';
+    }, [apiKeys.gemini, articleLanguage, goalContext, keywords.lsi, keywords.primary, keywords.secondaries]);
+
+    const runAutomaticCompetitorGeminiAnalysis = useCallback(async (): Promise<boolean> => {
+        const competitorTexts = readStoredStringList(COMPETITOR_TEXT_STORAGE_KEY);
+        const competitorUrls = readStoredStringList(COMPETITOR_URLS_STORAGE_KEY);
+        const competitorBlocks = competitorTexts
+            .map((value, index) => value.trim() ? `المنافس ${index + 1}${competitorUrls[index] ? ` (${competitorUrls[index]})` : ''}:\n${value}` : '')
+            .filter(Boolean);
+
+        if (competitorBlocks.length === 0) return false;
+
+        const prompt = [
+            'أنت محلل محتوى SEO.',
+            'حلل محتوى المنافسين مقابل مسودة المقالة الحالية، واستخرج الفجوات والأفكار التي يجب الانتباه لها دون تعديل النص مباشرة.',
+            '',
+            `عنوان المقالة الحالي: ${title || '-'}`,
+            `الكلمة المفتاحية الأساسية: ${keywords.primary || '-'}`,
+            `لغة المقال: ${articleLanguage === 'ar' ? 'العربية' : 'English'}`,
+            '',
+            'سياق وهدف الصفحة:',
+            formatGoalContext(goalContext) || '-',
+            '',
+            'محتوى المنافسين:',
+            competitorBlocks.join('\n\n---\n\n'),
+            '',
+            'اكتب التحليل بنقاط واضحة تتضمن: الفجوات، الأفكار الجديدة، التحذيرات من التشابه، وما يجب إضافته للمقالة حسب الهدف والسياق.',
+        ].join('\n');
+
+        const result = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        if (!result.trim() || isAiErrorResponseText(result)) return false;
+
+        setAiResults(prev => ({ ...prev, gemini: result }));
+        logToAiHistory({
+            type: 'manual-analysis',
+            ruleTitle: 'تحليل المنافسين التلقائي',
+            originalText: '',
+            suggestions: [],
+            from: 0,
+            to: 0,
+            analysisResult: result,
+            analysisPatches: [],
+            provider: 'gemini',
+            commandId: ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis,
+        });
+        return true;
+    }, [apiKeys.gemini, articleLanguage, goalContext, keywords.primary, logToAiHistory, title]);
+
+    const hasAutoDraftRequirements = Boolean(
+        activeArticleId &&
+        activeArticleSettings.status === 'draft' &&
+        keywords.primary.trim() &&
+        goalContext.pageType &&
+        goalContext.objective &&
+        goalContext.audienceScope &&
+        goalContext.searchIntent
+    );
+
+    useEffect(() => {
+        if (!hasAutoDraftRequirements || !activeArticleId) return;
+        const storageKey = `bazarvan:auto-draft-ai:${activeArticleId}`;
+        if (autoDraftRunRef.current.has(activeArticleId) || localStorage.getItem(storageKey)) return;
+
+        autoDraftRunRef.current.add(activeArticleId);
+        const timerId = window.setTimeout(() => {
+            const runAutomation = async () => {
+                try {
+                    const semanticResult = await generateSemanticKeywords();
+                    if (!semanticResult.error) {
+                        setKeywords(prev => ({
+                            ...prev,
+                            secondaries: mergeUniqueTerms(prev.secondaries, semanticResult.secondaries, 10),
+                            lsi: mergeUniqueTerms(prev.lsi, semanticResult.lsi, 24),
+                        }));
+                    }
+
+                    const generatedTitle = await generateDraftTitle();
+                    if (generatedTitle) {
+                        setTitle(prev => isPlaceholderArticleTitle(prev) ? generatedTitle : prev);
+                    }
+
+                    await runAutomaticCompetitorGeminiAnalysis();
+                    localStorage.setItem(storageKey, new Date().toISOString());
+                    window.setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('bazarvan:auto-save-request'));
+                    }, 800);
+                } catch (error) {
+                    console.error('Automatic draft AI workflow failed:', error);
+                    localStorage.setItem(storageKey, `failed:${new Date().toISOString()}`);
+                }
+            };
+
+            void runAutomation();
+        }, 1400);
+
+        return () => window.clearTimeout(timerId);
+    }, [
+        activeArticleId,
+        hasAutoDraftRequirements,
+        generateSemanticKeywords,
+        generateDraftTitle,
+        runAutomaticCompetitorGeminiAnalysis,
+        setKeywords,
+        setTitle,
+    ]);
     
     const logReadyCommandAnalysis = useCallback((
         provider: AiPatchProvider,
