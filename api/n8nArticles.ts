@@ -746,6 +746,7 @@ const handleN8nArticleRequest = async (req: any): Promise<ApiResult> => {
 
     body = parsedBody;
     supabase = getSupabaseAdmin();
+    await createIngestLog(supabase, 'received', body);
     const result = await saveIngestedArticle(supabase, body);
 
     return {

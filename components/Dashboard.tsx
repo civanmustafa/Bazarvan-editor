@@ -12,15 +12,19 @@ import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstan
 import {
     deleteRemoteArticle,
     getArticleTrashInfo,
+    listRemoteN8nIngestLogs,
     listRemoteProfiles,
     listRemoteArticles,
     loadRemoteArticleSnapshot,
     moveRemoteArticleToTrash,
+    purgeExpiredRemoteArticleTrash,
     renameRemoteArticle,
     restoreRemoteArticleFromTrash,
     updateRemoteArticleSettings,
     type RemoteProfile,
     type RemoteArticleActivity,
+    type RemoteArticleTrashInfo,
+    type RemoteN8nIngestLog,
     type RemoteArticleSettingsPatch,
 } from '../utils/supabaseArticles';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
@@ -345,6 +349,80 @@ const AdminUsersTable: React.FC<{
   );
 };
 
+const getN8nLogTitle = (log: RemoteN8nIngestLog): string => {
+  const payload = log.payload && typeof log.payload === 'object' && !Array.isArray(log.payload) ? log.payload : {};
+  return String(payload.title || payload.articleTitle || payload.article_title || payload.headline || log.externalId || '-');
+};
+
+const N8nLogsPanel: React.FC<{
+  logs: RemoteN8nIngestLog[];
+  isLoading: boolean;
+  t: typeof translations.ar;
+}> = ({ logs, isLoading, t }) => {
+  const latestError = logs.find(log => log.status === 'failed' || log.errorMessage);
+
+  return (
+    <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-bold text-gray-800 dark:text-gray-100">سجل طلبات n8n</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400">آخر الطلبات الواردة من n8n وحالة إنشاء المقالات.</p>
+        </div>
+        <span className="rounded-full bg-[#d4af37]/10 px-2.5 py-1 text-[11px] font-black text-[#8a6f1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
+          {logs.length} طلب
+        </span>
+      </div>
+      {latestError && (
+        <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+          <div className="font-bold">آخر خطأ n8n</div>
+          <div className="mt-1">{latestError.errorMessage || 'فشل غير محدد.'}</div>
+          <div className="mt-1 text-red-500/80">
+            {formatIstanbulDateTime(latestError.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </div>
+        </div>
+      )}
+      <div className="max-h-72 overflow-auto">
+        <table className="w-full text-right text-xs">
+          <thead className="sticky top-0 bg-gray-50 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-400">
+            <tr>
+              <th className="px-2 py-2">الحالة</th>
+              <th className="px-2 py-2">العنوان</th>
+              <th className="px-2 py-2">External ID</th>
+              <th className="px-2 py-2">Workflow</th>
+              <th className="px-2 py-2">الوقت</th>
+              <th className="px-2 py-2">الخطأ</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-[#3C3C3C]">
+            {isLoading ? (
+              <tr><td colSpan={6} className="px-2 py-4 text-center text-gray-500">جار تحميل سجل n8n...</td></tr>
+            ) : logs.length > 0 ? logs.map(log => (
+              <tr key={log.id} className="align-top text-gray-600 dark:text-gray-300">
+                <td className="px-2 py-2">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                    log.status === 'failed'
+                      ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
+                      : 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
+                  }`}>
+                    {log.status}
+                  </span>
+                </td>
+                <td className="max-w-[180px] truncate px-2 py-2" title={getN8nLogTitle(log)}>{getN8nLogTitle(log)}</td>
+                <td className="max-w-[130px] truncate px-2 py-2" title={log.externalId || ''}>{log.externalId || '-'}</td>
+                <td className="max-w-[120px] truncate px-2 py-2" title={log.workflowId || ''}>{log.workflowId || '-'}</td>
+                <td className="whitespace-nowrap px-2 py-2">{formatIstanbulDateTime(log.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                <td className="max-w-[240px] truncate px-2 py-2 text-red-600 dark:text-red-300" title={log.errorMessage || ''}>{log.errorMessage || '-'}</td>
+              </tr>
+            )) : (
+              <tr><td colSpan={6} className="px-2 py-4 text-center text-gray-500">لا توجد طلبات n8n مسجلة بعد.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+};
+
 const ArticleDetailsModal: React.FC<{
   article: RemoteArticleActivity;
   snapshot: ArticleStorageSnapshot | null;
@@ -363,6 +441,9 @@ const ArticleDetailsModal: React.FC<{
   const lsiKeywords = keywords?.lsi?.filter(keyword => keyword.trim()) || [];
   const n8nSettings = getN8nSettings(article);
   const competitors = getArticleCompetitors(article, snapshot);
+  const metadata = article.metadata && typeof article.metadata === 'object' && !Array.isArray(article.metadata) ? article.metadata : {};
+  const geminiPaidLatest = metadata.aiResults?.geminiPaid?.latest;
+  const trashInfo = getArticleTrashInfo(article);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
@@ -399,6 +480,12 @@ const ArticleDetailsModal: React.FC<{
             <DetailRow label="عدد مرات الحفظ" value={article.saveCount} />
             <DetailRow label="آخر حفظ" value={article.lastSaved ? formatIstanbulDateTime(article.lastSaved, t.locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'} />
             <DetailRow label="الوقت المستغرق" value={formatSeconds(article.timeSpentSeconds, t)} />
+            {trashInfo && (
+              <>
+                <DetailRow label="تاريخ الحذف" value={formatIstanbulDateTime(trashInfo.deletedAt, t.locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} />
+                <DetailRow label="حذف بواسطة" value={trashInfo.deletedBy || '-'} />
+              </>
+            )}
           </div>
 
           <div className="mt-6">
@@ -475,6 +562,20 @@ const ArticleDetailsModal: React.FC<{
             </div>
           )}
 
+          {geminiPaidLatest?.result && (
+            <div className="mt-6">
+              <SectionTitle>آخر نتيجة Gemini Pro محفوظة</SectionTitle>
+              <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <DetailRow label="الموديل" value={geminiPaidLatest.model || '-'} />
+                <DetailRow label="بصمة المفتاح" value={geminiPaidLatest.keyFingerprint || '-'} />
+                <DetailRow label="وقت الحفظ" value={geminiPaidLatest.savedAt ? formatIstanbulDateTime(geminiPaidLatest.savedAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'} />
+              </div>
+              <div className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm leading-7 text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200">
+                {geminiPaidLatest.result}
+              </div>
+            </div>
+          )}
+
           <div className="mt-6">
             <SectionTitle>معاينة النص</SectionTitle>
             <div className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm leading-7 text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200">
@@ -524,6 +625,11 @@ interface ArticleItemProps {
     title: string;
     activity: ArticleActivity | RemoteArticleActivity;
     ownerLabel?: string;
+    trashInfo?: RemoteArticleTrashInfo | null;
+    deletedByLabel?: string;
+    isSelected?: boolean;
+    isSelectable?: boolean;
+    onToggleSelected?: () => void;
     onLoad: () => void;
     onDetails?: () => void;
     onDelete: () => void;
@@ -542,6 +648,11 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     title,
     activity,
     ownerLabel,
+    trashInfo,
+    deletedByLabel,
+    isSelected = false,
+    isSelectable = false,
+    onToggleSelected,
     onLoad,
     onDetails,
     onDelete,
@@ -680,6 +791,19 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
             tabIndex={0}
             onKeyPress={(e) => e.key === 'Enter' && onLoad()}
         >
+            {isSelectable && (
+                <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(event) => {
+                        event.stopPropagation();
+                        onToggleSelected?.();
+                    }}
+                    onClick={event => event.stopPropagation()}
+                    className="h-4 w-4 flex-shrink-0 rounded border-gray-300 text-[#d4af37] focus:ring-[#d4af37]"
+                    aria-label="تحديد المقالة"
+                />
+            )}
             <SeoScoreIndicator score={seoScore} />
             <div className="min-w-0 flex-grow space-y-0.5">
                 <div className="flex items-start justify-between gap-2">
@@ -771,6 +895,13 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                             {primaryKeyword}
                         </span>
                     )}
+                    {trashInfo?.deletedAt && (
+                        <span className="flex items-center gap-1.5 font-bold text-red-500 dark:text-red-300" title="تاريخ الحذف ومن حذفه">
+                            <Trash2 size={12} />
+                            {formatIstanbulDateTime(trashInfo.deletedAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            {deletedByLabel ? ` - ${deletedByLabel}` : ''}
+                        </span>
+                    )}
                 </div>
                 {shouldShowN8nSettings && (
                     <div className="flex flex-wrap items-center gap-1 border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
@@ -837,16 +968,22 @@ const Dashboard: React.FC = () => {
   
   const [activityData, setActivityData] = useState<ActivityData>(getActivityData());
   const [remoteArticles, setRemoteArticles] = useState<RemoteArticleActivity[]>([]);
+  const [n8nLogs, setN8nLogs] = useState<RemoteN8nIngestLog[]>([]);
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [detailArticle, setDetailArticle] = useState<RemoteArticleActivity | null>(null);
   const [detailSnapshot, setDetailSnapshot] = useState<ArticleStorageSnapshot | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isArticlesLoading, setIsArticlesLoading] = useState(false);
+  const [isN8nLogsLoading, setIsN8nLogsLoading] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isTrashVisible, setIsTrashVisible] = useState(false);
+  const [dashboardMode, setDashboardMode] = useState<'all' | 'n8n'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedArticleIds, setSelectedArticleIds] = useState<Set<string>>(() => new Set());
+  const [bulkStatus, setBulkStatus] = useState<RemoteArticleSettingsPatch['status']>('draft');
   const [filters, setFilters] = useState({
     dateFrom: '',
     dateTo: '',
@@ -867,17 +1004,24 @@ const Dashboard: React.FC = () => {
     refreshLocalActivityData();
     if (!currentUser) return;
     setIsArticlesLoading(true);
+    if (isAdmin) setIsN8nLogsLoading(true);
     try {
-      const [articles, profileRows] = await Promise.all([
+      await purgeExpiredRemoteArticleTrash(30).catch(error => {
+        console.warn('Could not purge expired dashboard trash:', error);
+      });
+      const [articles, profileRows, logRows] = await Promise.all([
         listRemoteArticles(),
         isAdmin ? listRemoteProfiles() : Promise.resolve([]),
+        isAdmin ? listRemoteN8nIngestLogs(40) : Promise.resolve([]),
       ]);
       setRemoteArticles(sortArticlesByLastChange(articles));
       setProfiles(profileRows);
+      setN8nLogs(logRows);
     } catch (error) {
       console.error('Failed to load Supabase articles:', error);
     } finally {
       setIsArticlesLoading(false);
+      setIsN8nLogsLoading(false);
     }
   };
 
@@ -945,6 +1089,54 @@ const Dashboard: React.FC = () => {
       alert('تعذر حذف المقالة نهائيا. الحذف النهائي متاح عادة للأدمن أو مالك المقالة فقط.');
     }
   };
+
+  const clearSelectedArticles = () => setSelectedArticleIds(new Set());
+
+  const toggleSelectedArticle = (articleId: string) => {
+    setSelectedArticleIds(prev => {
+      const next = new Set(prev);
+      if (next.has(articleId)) {
+        next.delete(articleId);
+      } else {
+        next.add(articleId);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkMoveToTrash = async () => {
+    const ids = [...selectedArticleIds];
+    if (ids.length === 0) return;
+    if (!window.confirm(`سيتم نقل ${ids.length} مقالات إلى سلة المهملات. هل تريد المتابعة؟`)) return;
+    await Promise.all(ids.map(id => moveRemoteArticleToTrash(id)));
+    clearSelectedArticles();
+    await refreshData();
+  };
+
+  const handleBulkRestore = async () => {
+    const ids = [...selectedArticleIds];
+    if (ids.length === 0) return;
+    await Promise.all(ids.map(id => restoreRemoteArticleFromTrash(id)));
+    clearSelectedArticles();
+    await refreshData();
+  };
+
+  const handleBulkPermanentDelete = async () => {
+    const ids = [...selectedArticleIds];
+    if (ids.length === 0) return;
+    if (!window.confirm(`سيتم حذف ${ids.length} مقالات نهائيا ولا يمكن استعادتها. هل أنت متأكد؟`)) return;
+    await Promise.all(ids.map(id => deleteRemoteArticle(id)));
+    clearSelectedArticles();
+    await refreshData();
+  };
+
+  const handleBulkStatusChange = async () => {
+    const ids = [...selectedArticleIds];
+    if (ids.length === 0 || !bulkStatus) return;
+    await Promise.all(ids.map(id => updateRemoteArticleSettings(id, { status: bulkStatus })));
+    clearSelectedArticles();
+    await refreshData();
+  };
   
   const handleRenameArticle = async (articleId: string, newTitle: string): Promise<boolean> => {
       const normalizedTitle = newTitle.trim();
@@ -995,8 +1187,14 @@ const Dashboard: React.FC = () => {
     if (!isAdmin) {
       setSelectedProfileId(null);
       setProfiles([]);
+      setDashboardMode('all');
+      setN8nLogs([]);
     }
   }, [isAdmin]);
+
+  useEffect(() => {
+    clearSelectedArticles();
+  }, [isTrashVisible, dashboardMode, selectedProfileId, searchQuery]);
 
   const handleExportHtml = () => {
     if (!currentUser) return;
@@ -1139,14 +1337,19 @@ const Dashboard: React.FC = () => {
   const currentUserData = currentUser ? activityData[currentUser] : undefined;
   const geminiUsageRows = useMemo(() => {
     const usage = currentUserData?.geminiKeyUsage || {};
-    const geminiKeys = (currentUserData?.apiKeys?.gemini || []).filter(key => key.trim());
-    const currentRows = geminiKeys.map((key, index) => {
-      const fingerprint = createApiKeyFingerprint(key);
+    const geminiKeys = [
+      ...(currentUserData?.apiKeys?.gemini || []).filter(key => key.trim()).map(key => ({ key, provider: 'gemini' as const })),
+      ...(currentUserData?.apiKeys?.geminiPaid || []).filter(key => key.trim()).map(key => ({ key, provider: 'geminiPaid' as const })),
+    ];
+    const currentRows = geminiKeys.map((item, index) => {
+      const fingerprint = createApiKeyFingerprint(item.key);
       const record = usage[fingerprint];
       return {
         id: fingerprint,
-        label: `Gemini #${index + 1}`,
-        keyPreview: maskApiKey(key),
+        label: `${item.provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini'} #${index + 1}`,
+        keyPreview: maskApiKey(item.key),
+        provider: record?.provider || item.provider,
+        model: record?.model || '',
         count: record?.count || 0,
         lastUsed: record?.lastUsed || '',
         isSavedKey: true,
@@ -1159,6 +1362,8 @@ const Dashboard: React.FC = () => {
         id: fingerprint,
         label: `${t.unsavedGeminiKey} #${index + 1}`,
         keyPreview: fingerprint,
+        provider: record.provider || 'gemini',
+        model: record.model || '',
         count: record.count,
         lastUsed: record.lastUsed,
         isSavedKey: false,
@@ -1174,7 +1379,12 @@ const Dashboard: React.FC = () => {
   const trashedRemoteArticles = useMemo(() => (
     remoteArticles.filter(article => Boolean(getArticleTrashInfo(article, currentUserId)))
   ), [remoteArticles, currentUserId]);
-  const displayedRemoteArticles = isTrashVisible ? trashedRemoteArticles : activeRemoteArticles;
+  const displayedRemoteArticles = useMemo(() => {
+    const baseArticles = isTrashVisible ? trashedRemoteArticles : activeRemoteArticles;
+    return dashboardMode === 'n8n'
+      ? baseArticles.filter(article => article.source === 'n8n')
+      : baseArticles;
+  }, [activeRemoteArticles, trashedRemoteArticles, isTrashVisible, dashboardMode]);
   const scopedArticles = useMemo(() => (
     selectedProfileId
       ? displayedRemoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
@@ -1185,7 +1395,20 @@ const Dashboard: React.FC = () => {
 
   // Article filters stay derived from Supabase data so refreshData remains the only reload path.
   const filteredArticles = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
     return scopedArticles.filter((activity) => {
+      if (normalizedSearch) {
+        const ownerLabel = getOwnerLabel(activity).toLowerCase();
+        const ownerId = getArticleOwnerId(activity) || '';
+        const searchText = [
+          activity.title,
+          activity.plainText,
+          activity.source,
+          ownerLabel,
+          ownerId,
+        ].join(' ').toLowerCase();
+        if (!searchText.includes(normalizedSearch)) return false;
+      }
       if (filters.dateFrom) {
           if (!activity.lastSaved || new Date(activity.lastSaved) < getIstanbulDayStart(filters.dateFrom)) {
               return false;
@@ -1217,7 +1440,30 @@ const Dashboard: React.FC = () => {
 
       return true;
     });
-  }, [scopedArticles, filters]);
+  }, [scopedArticles, filters, searchQuery, profiles]);
+
+  const selectedFilteredArticles = useMemo(() => (
+    filteredArticles.filter(article => selectedArticleIds.has(article.id))
+  ), [filteredArticles, selectedArticleIds]);
+  const areAllFilteredSelected = filteredArticles.length > 0 && filteredArticles.every(article => selectedArticleIds.has(article.id));
+  const toggleSelectAllFilteredArticles = () => {
+    setSelectedArticleIds(prev => {
+      const next = new Set(prev);
+      if (areAllFilteredSelected) {
+        filteredArticles.forEach(article => next.delete(article.id));
+      } else {
+        filteredArticles.forEach(article => next.add(article.id));
+      }
+      return next;
+    });
+  };
+
+  const getDeletedByLabel = (trashInfo?: RemoteArticleTrashInfo | null): string => {
+    if (!trashInfo?.deletedBy) return '';
+    if (trashInfo.deletedBy === currentUserId) return currentUser || 'أنت';
+    const profile = profiles.find(item => item.id === trashInfo.deletedBy);
+    return profile ? getProfileLabel(profile) : trashInfo.deletedBy;
+  };
   
   const styleButtonClass = (isActive: boolean) =>
     `flex-1 flex items-center justify-center gap-2 p-2 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-100 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#d4af37] ${
@@ -1281,13 +1527,32 @@ const Dashboard: React.FC = () => {
         </header>
 
         {isAdmin && (
-          <AdminUsersTable
-            profiles={profiles}
-            articles={activeRemoteArticles}
-            selectedProfileId={selectedProfileId}
-            onSelectProfile={setSelectedProfileId}
-            t={t}
-          />
+          <>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setDashboardMode('all')}
+                className={`rounded-md px-3 py-1.5 text-xs font-bold ${dashboardMode === 'all' ? 'bg-[#d4af37] text-white' : 'bg-white text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-300'}`}
+              >
+                كل المقالات
+              </button>
+              <button
+                onClick={() => setDashboardMode('n8n')}
+                className={`rounded-md px-3 py-1.5 text-xs font-bold ${dashboardMode === 'n8n' ? 'bg-[#d4af37] text-white' : 'bg-white text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-300'}`}
+              >
+                مقالات n8n
+              </button>
+            </div>
+            <AdminUsersTable
+              profiles={profiles}
+              articles={dashboardMode === 'n8n' ? activeRemoteArticles.filter(article => article.source === 'n8n') : activeRemoteArticles}
+              selectedProfileId={selectedProfileId}
+              onSelectProfile={setSelectedProfileId}
+              t={t}
+            />
+            {dashboardMode === 'n8n' && (
+              <N8nLogsPanel logs={n8nLogs} isLoading={isN8nLogsLoading} t={t} />
+            )}
+          </>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1297,6 +1562,8 @@ const Dashboard: React.FC = () => {
                         <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
                             {isTrashVisible
                               ? `سلة المهملات ${selectedProfile ? `- ${getProfileLabel(selectedProfile)}` : ''}`
+                              : dashboardMode === 'n8n'
+                                ? `مقالات n8n ${selectedProfile ? `- ${getProfileLabel(selectedProfile)}` : ''}`
                               : isAdmin
                                 ? `مقالات ${selectedProfile ? getProfileLabel(selectedProfile) : 'كل المستخدمين'}`
                                 : t.yourRecentArticles}
@@ -1333,6 +1600,79 @@ const Dashboard: React.FC = () => {
                             <span>{t.refresh}</span>
                         </button>
                     </div>
+                </div>
+
+                <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <input
+                            type="search"
+                            value={searchQuery}
+                            onChange={event => setSearchQuery(event.target.value)}
+                            placeholder="بحث باسم المقالة أو المستخدم"
+                            className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-[#333333] focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+                        />
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <button
+                                type="button"
+                                onClick={toggleSelectAllFilteredArticles}
+                                disabled={filteredArticles.length === 0}
+                                className="rounded-md bg-gray-100 px-3 py-1.5 font-bold text-gray-600 hover:bg-[#d4af37]/15 disabled:opacity-50 dark:bg-[#1F1F1F] dark:text-gray-300"
+                            >
+                                {areAllFilteredSelected ? 'إلغاء تحديد الكل' : 'تحديد النتائج'}
+                            </button>
+                            <span className="font-bold text-gray-500 dark:text-gray-400">
+                                المحدد: {selectedFilteredArticles.length}
+                            </span>
+                        </div>
+                    </div>
+                    {selectedFilteredArticles.length > 0 && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 dark:border-[#3C3C3C]">
+                            {!isTrashVisible ? (
+                                <button
+                                    type="button"
+                                    onClick={handleBulkMoveToTrash}
+                                    className="rounded-md bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-300"
+                                >
+                                    نقل المحدد للسلة
+                                </button>
+                            ) : (
+                                <>
+                                  <button
+                                      type="button"
+                                      onClick={handleBulkRestore}
+                                      className="rounded-md bg-[#d4af37]/10 px-3 py-1.5 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]"
+                                  >
+                                      استعادة المحدد
+                                  </button>
+                                  <button
+                                      type="button"
+                                      onClick={handleBulkPermanentDelete}
+                                      className="rounded-md bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-300"
+                                  >
+                                      حذف نهائي للمحدد
+                                  </button>
+                                </>
+                            )}
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={bulkStatus}
+                                    onChange={event => setBulkStatus(event.target.value as RemoteArticleSettingsPatch['status'])}
+                                    className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200"
+                                >
+                                    {N8N_SETTING_OPTIONS.status.map(option => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    type="button"
+                                    onClick={handleBulkStatusChange}
+                                    className="rounded-md bg-[#d4af37] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#b8922e]"
+                                >
+                                    تغيير حالة المحدد
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {isFilterVisible && (
@@ -1395,14 +1735,21 @@ const Dashboard: React.FC = () => {
 
                 {filteredArticles.length > 0 ? (
                     <ul className="space-y-2">
-                         {filteredArticles
+                          {filteredArticles
                             .sort((a, b) => getArticleSortTime(b) - getArticleSortTime(a))
-                            .map((activity) => (
+                            .map((activity) => {
+                              const trashInfo = getArticleTrashInfo(activity, currentUserId);
+                              return (
                                 <ArticleListItem
                                     key={activity.id}
                                     title={activity.title}
                                     activity={activity}
                                     ownerLabel={isAdmin ? getOwnerLabel(activity) : undefined}
+                                    trashInfo={trashInfo}
+                                    deletedByLabel={getDeletedByLabel(trashInfo)}
+                                    isSelectable
+                                    isSelected={selectedArticleIds.has(activity.id)}
+                                    onToggleSelected={() => toggleSelectedArticle(activity.id)}
                                     onLoad={() => onLoadArticle(activity.title, activity)}
                                     onDetails={() => { void handleShowArticleDetails(activity); }}
                                     onDelete={() => { void handleDeleteArticle(activity.id); }}
@@ -1420,7 +1767,8 @@ const Dashboard: React.FC = () => {
                                     showAdminMetadata={isAdmin}
                                     t={t}
                                 />
-                            ))}
+                              );
+                            })}
                     </ul>
                 ) : (
                     <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-300 dark:border-[#3C3C3C] rounded-lg text-center">
@@ -1465,10 +1813,20 @@ const Dashboard: React.FC = () => {
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="min-w-0">
                                                 <div className="text-xs font-black text-gray-700 dark:text-gray-200">{row.label}</div>
-                                                <div className="mt-0.5 truncate font-mono text-[10px] text-gray-400" title={row.keyPreview}>
-                                                    {row.keyPreview}
-                                                </div>
-                                            </div>
+                                                 <div className="mt-0.5 truncate font-mono text-[10px] text-gray-400" title={row.keyPreview}>
+                                                     {row.keyPreview}
+                                                 </div>
+                                                 <div className="mt-1 flex flex-wrap gap-1">
+                                                     <span className="rounded-full bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">
+                                                         {row.provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini'}
+                                                     </span>
+                                                     {row.model && (
+                                                         <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-500 dark:bg-[#2A2A2A] dark:text-gray-300">
+                                                             {row.model}
+                                                         </span>
+                                                     )}
+                                                 </div>
+                                             </div>
                                             <div className="text-end">
                                                 <div className="text-lg font-black text-[#d4af37]">{row.count}</div>
                                                 <div className="text-[10px] font-bold text-gray-400">{t.geminiUsageCount}</div>

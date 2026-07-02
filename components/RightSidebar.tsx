@@ -1209,7 +1209,11 @@ ${readyCommandCompetitorBlocks}`;
             }
             if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
                 window.dispatchEvent(new CustomEvent('gemini-key-used', {
-                    detail: { keyFingerprint: data.keyFingerprint.trim() },
+                    detail: {
+                        keyFingerprint: data.keyFingerprint.trim(),
+                        provider: data.provider,
+                        model: data.model,
+                    },
                 }));
             }
 

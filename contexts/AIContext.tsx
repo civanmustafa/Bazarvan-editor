@@ -30,6 +30,7 @@ import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringProm
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { normalizeGoalContext } from '../utils/goalContext';
+import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
 
 /*
  * AIContext owns all AI workflows:
@@ -1854,6 +1855,8 @@ type GeminiAnalysisResult = {
     text: string;
     ok: boolean;
     keyFingerprint?: string;
+    provider?: GeminiPatchProvider;
+    model?: string;
 };
 
 const getArticleChatStorageScope = (articleKey: string, title: string): string => {
@@ -2013,7 +2016,11 @@ const requestGeminiAnalysis = async (
 
       if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
           window.dispatchEvent(new CustomEvent('gemini-key-used', {
-              detail: { keyFingerprint: data.keyFingerprint.trim() },
+              detail: {
+                  keyFingerprint: data.keyFingerprint.trim(),
+                  provider: data.provider,
+                  model: data.model,
+              },
           }));
       }
 
@@ -2021,6 +2028,8 @@ const requestGeminiAnalysis = async (
           text: data.text,
           ok: true,
           keyFingerprint: typeof data.keyFingerprint === 'string' ? data.keyFingerprint : undefined,
+          provider: data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini',
+          model: typeof data.model === 'string' ? data.model : undefined,
       };
     } catch (error) {
       window.clearTimeout(timeoutId);
@@ -2039,8 +2048,14 @@ const requestGeminiAnalysis = async (
     }
 };
 
-const callGeminiAnalysis = async (prompt: string, userKeys?: string | string[], model: string = GEMINI_MODEL): Promise<string> => {
+const callGeminiAnalysis = async (
+    prompt: string,
+    userKeys?: string | string[],
+    model: string = GEMINI_MODEL,
+    onResult?: (result: GeminiAnalysisResult) => void,
+): Promise<string> => {
     const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model);
+    onResult?.(result);
     return result.text;
 };
 
@@ -2050,12 +2065,14 @@ const callGeminiArticleChatAnalysis = async (
     currentUser: string | null,
     articleScope: string,
     provider: GeminiPatchProvider = 'gemini',
+    onResult?: (result: GeminiAnalysisResult) => void,
 ): Promise<string> => {
     const history = readStoredGeminiChatHistory(currentUser, articleScope, provider);
     const result = await requestGeminiAnalysis(prompt, userKeys, history, getGeminiModelForProvider(provider));
     if (result.ok) {
         saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
+    onResult?.(result);
     return result.text;
 };
 
@@ -4442,7 +4459,7 @@ export const useAI = () => {
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { t, uiLanguage, apiKeys, engineeringPrompts, currentUser } = useUser();
-    const { editor, title, text, keywords, analysisResults, goalContext, articleLanguage, articleKey } = useEditor();
+    const { editor, title, text, keywords, analysisResults, goalContext, articleLanguage, articleKey, activeArticleId } = useEditor();
     const { openModal } = useModal();
     
     const [aiResults, setAiResults] = useState<Record<AiPatchProvider, string>>({ gemini: '', geminiPaid: '', chatgpt: '' });
@@ -4845,6 +4862,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         });
     }, [logToAiHistory]);
 
+    const persistGeminiPaidArticleResult = useCallback((result: GeminiAnalysisResult) => {
+        if (!activeArticleId || !result.ok || !result.text.trim()) return;
+        void saveRemoteArticleAiResult(activeArticleId, {
+            provider: 'geminiPaid',
+            result: result.text,
+            keyFingerprint: result.keyFingerprint,
+            model: result.model || GEMINI_PAID_MODEL,
+        }).then(() => {
+            window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+        }).catch(error => {
+            console.error('Failed to save Gemini Pro result to article metadata:', error);
+        });
+    }, [activeArticleId]);
+
     const buildSmartAnalysisPrompt = useCallback((
         userPrompt: string,
         options: any,
@@ -4881,7 +4912,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     generateContextAwarePrompt(item.userPrompt, item.options),
                     { skipPatchInstructions: item.skipPatchInstructions },
                 );
-                const result = await callGeminiArticleChatAnalysis(finalPrompt, assignedKey ? [assignedKey] : undefined, currentUser, articleScope, provider);
+                const result = await callGeminiArticleChatAnalysis(
+                    finalPrompt,
+                    assignedKey ? [assignedKey] : undefined,
+                    currentUser,
+                    articleScope,
+                    provider,
+                    provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
+                );
                 const parsedResult = item.skipPatchInstructions
                     ? { displayText: result, patches: [] }
                     : namespaceSmartAnalysisPatches(
@@ -4915,7 +4953,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title]);
+    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,
@@ -4934,7 +4972,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             );
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const geminiKeys = provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini;
-            const result = await callGeminiArticleChatAnalysis(finalPrompt, geminiKeys, currentUser, articleScope, provider);
+            const result = await callGeminiArticleChatAnalysis(
+                finalPrompt,
+                geminiKeys,
+                currentUser,
+                articleScope,
+                provider,
+                provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
+            );
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result, patches: [] }
                 : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result, provider), historyMeta?.commandId);
@@ -4946,7 +4991,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title]);
+    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -5002,8 +5047,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         const geminiProvider: GeminiPatchProvider = provider === 'geminiPaid' ? 'geminiPaid' : 'gemini';
         const geminiKeys = geminiProvider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini;
-        return callGeminiAnalysis(prompt, geminiKeys, getGeminiModelForProvider(geminiProvider));
-    }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title]);
+        return callGeminiAnalysis(
+            prompt,
+            geminiKeys,
+            getGeminiModelForProvider(geminiProvider),
+            geminiProvider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
+        );
+    }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         const provider = quickAiProvider;

@@ -278,9 +278,13 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     useEffect(() => {
         const handleGeminiKeyUsed = (event: Event) => {
             if (!currentUser) return;
-            const keyFingerprint = (event as CustomEvent<{ keyFingerprint?: unknown }>).detail?.keyFingerprint;
+            const detail = (event as CustomEvent<{ keyFingerprint?: unknown; provider?: unknown; model?: unknown }>).detail;
+            const keyFingerprint = detail?.keyFingerprint;
             if (typeof keyFingerprint !== 'string' || !keyFingerprint.trim()) return;
-            recordGeminiKeyUsage(currentUser, keyFingerprint);
+            recordGeminiKeyUsage(currentUser, keyFingerprint, {
+                provider: detail?.provider === 'geminiPaid' ? 'geminiPaid' : detail?.provider === 'gemini' ? 'gemini' : undefined,
+                model: typeof detail?.model === 'string' ? detail.model : undefined,
+            });
             window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
         };
 

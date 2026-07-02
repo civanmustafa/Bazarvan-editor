@@ -31,6 +31,19 @@ type ArticleRow = {
   last_saved_at: string;
 };
 
+type N8nIngestLogRow = {
+  id: string;
+  article_id: string | null;
+  workflow_id: string | null;
+  execution_id: string | null;
+  external_id: string | null;
+  status: 'received' | 'imported' | 'rejected' | 'failed';
+  payload: any;
+  error_message: string | null;
+  created_at: string;
+  processed_at: string | null;
+};
+
 export type RemoteArticleVisibility = ArticleRow['visibility'];
 export type RemoteArticleStatus = ArticleRow['status'];
 export type RemoteArticleLanguage = ArticleRow['article_language'];
@@ -48,6 +61,27 @@ export type RemoteArticleTrashInfo = {
   deletedAt: string;
   deletedBy?: string;
   deletedScope?: 'global' | 'user';
+};
+
+export type RemoteN8nIngestLog = {
+  id: string;
+  articleId: string | null;
+  workflowId: string | null;
+  executionId: string | null;
+  externalId: string | null;
+  status: N8nIngestLogRow['status'];
+  payload: any;
+  errorMessage: string | null;
+  createdAt: string;
+  processedAt: string | null;
+};
+
+export type RemoteArticleAiResultPatch = {
+  provider: 'geminiPaid';
+  result: string;
+  keyFingerprint?: string;
+  model?: string;
+  savedAt?: string;
 };
 
 export type RemoteProfile = {
@@ -162,6 +196,19 @@ const toRemoteProfile = (row: any): RemoteProfile => ({
   lastSeenAt: row.last_seen_at || null,
 });
 
+const toRemoteN8nIngestLog = (row: N8nIngestLogRow): RemoteN8nIngestLog => ({
+  id: row.id,
+  articleId: row.article_id,
+  workflowId: row.workflow_id,
+  executionId: row.execution_id,
+  externalId: row.external_id,
+  status: row.status,
+  payload: row.payload || {},
+  errorMessage: row.error_message || null,
+  createdAt: row.created_at,
+  processedAt: row.processed_at || null,
+});
+
 const buildStatsFromSnapshot = (snapshot: ArticleStorageSnapshot): ArticleStats => {
   const summary = snapshot.analysisSummary;
   const duplicateStats = summary?.duplicateStats;
@@ -216,6 +263,21 @@ export const listRemoteProfiles = async (): Promise<RemoteProfile[]> => {
 
   if (error) throw error;
   return (data || []).map(toRemoteProfile);
+};
+
+export const listRemoteN8nIngestLogs = async (limit = 25): Promise<RemoteN8nIngestLog[]> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('n8n_ingest_logs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return ((data || []) as N8nIngestLogRow[]).map(toRemoteN8nIngestLog);
 };
 
 export const loadRemoteArticleSnapshot = async (
@@ -706,6 +768,51 @@ export const restoreRemoteArticleFromTrash = async (articleId: string): Promise<
       await updateArticleMetadataFallback(articleId, nextMetadata);
     }
   }
+
+  return getRemoteArticleById(articleId);
+};
+
+export const purgeExpiredRemoteArticleTrash = async (retentionDays = 30): Promise<number> => {
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase.rpc('purge_expired_dashboard_trash', {
+      retention_days: retentionDays,
+    });
+    if (error) throw error;
+    return typeof data === 'number' ? data : 0;
+  } catch (error: any) {
+    if (error?.code === 'PGRST202') return 0;
+    throw error;
+  }
+};
+
+export const saveRemoteArticleAiResult = async (
+  articleId: string,
+  patch: RemoteArticleAiResultPatch,
+): Promise<RemoteArticleActivity> => {
+  const metadata = await getCurrentArticleMetadata(articleId);
+  const aiResults = isRecord(metadata.aiResults) ? metadata.aiResults : {};
+  const providerResults = isRecord(aiResults[patch.provider]) ? aiResults[patch.provider] : {};
+  const history = Array.isArray(providerResults.history) ? providerResults.history : [];
+  const savedAt = patch.savedAt || new Date().toISOString();
+  const entry = {
+    result: patch.result,
+    keyFingerprint: patch.keyFingerprint || '',
+    model: patch.model || '',
+    savedAt,
+  };
+
+  await updateArticleMetadataFallback(articleId, {
+    ...metadata,
+    aiResults: {
+      ...aiResults,
+      [patch.provider]: {
+        ...providerResults,
+        latest: entry,
+        history: [entry, ...history].slice(0, 10),
+      },
+    },
+  });
 
   return getRemoteArticleById(articleId);
 };

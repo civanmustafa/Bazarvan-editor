@@ -56,6 +56,8 @@ export type UserActivity = {
   geminiKeyUsage: Record<string, {
     count: number;
     lastUsed: string;
+    provider?: 'gemini' | 'geminiPaid';
+    model?: string;
   }>;
   articles: {
     [title: string]: ArticleActivity;
@@ -198,6 +200,8 @@ const normalizeUserActivity = (value: unknown): UserActivity => {
       normalized[fingerprint] = {
         count: toFiniteNumber(legacyCount),
         lastUsed: typeof record.lastUsed === 'string' ? record.lastUsed : '',
+        provider: record.provider === 'geminiPaid' ? 'geminiPaid' : record.provider === 'gemini' ? 'gemini' : undefined,
+        model: typeof record.model === 'string' ? record.model : undefined,
       };
       return normalized;
     }, {}),
@@ -451,7 +455,11 @@ export const saveUserApiKeys = (username: string, apiKeys: UserActivity['apiKeys
   });
 };
 
-export const recordGeminiKeyUsage = (username: string, keyFingerprint: string) => {
+export const recordGeminiKeyUsage = (
+  username: string,
+  keyFingerprint: string,
+  details: { provider?: 'gemini' | 'geminiPaid'; model?: string } = {},
+) => {
   const normalizedFingerprint = keyFingerprint.trim();
   if (!normalizedFingerprint) return;
 
@@ -460,6 +468,8 @@ export const recordGeminiKeyUsage = (username: string, keyFingerprint: string) =
     user.geminiKeyUsage[normalizedFingerprint] = {
       count: current.count + 1,
       lastUsed: getIstanbulTimestamp(),
+      provider: details.provider || current.provider,
+      model: details.model || current.model,
     };
   });
 };
