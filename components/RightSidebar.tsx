@@ -1193,6 +1193,7 @@ ${readyCommandCompetitorBlocks}`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt,
+                    provider,
                     model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL,
                     useUrlContext,
                 }),

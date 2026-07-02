@@ -3,9 +3,18 @@ import { GoogleGenAI } from "@google/genai";
 
 // Keep the serverless function self-contained: Vercel executes this compiled
 // ESM file directly and cannot resolve extensionless frontend module imports.
-const GEMINI_ANALYSIS_MODEL = "gemini-2.5-flash";
-const GEMINI_PAID_ANALYSIS_MODEL = "gemini-3.1-pro-preview";
-const ALLOWED_GEMINI_MODELS = new Set([GEMINI_ANALYSIS_MODEL, GEMINI_PAID_ANALYSIS_MODEL]);
+const DEFAULT_GEMINI_ANALYSIS_MODEL = "gemini-2.5-flash";
+const DEFAULT_GEMINI_PAID_ANALYSIS_MODEL = "gemini-2.5-pro";
+const GEMINI_ANALYSIS_MODEL = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_ANALYSIS_MODEL;
+const GEMINI_PAID_ANALYSIS_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || DEFAULT_GEMINI_PAID_ANALYSIS_MODEL;
+const ALLOWED_GEMINI_MODELS = new Set([
+  GEMINI_ANALYSIS_MODEL,
+  GEMINI_PAID_ANALYSIS_MODEL,
+  ...((process.env.GEMINI_ALLOWED_MODELS || "")
+    .split(/[\n,;]+/)
+    .map(model => model.trim())
+    .filter(Boolean)),
+]);
 
 type ApiResult = {
   status: number;
@@ -22,6 +31,8 @@ type GeminiHistoryContent = {
   role: "user" | "model";
   parts: { text: string }[];
 };
+
+type GeminiProvider = "gemini" | "geminiPaid";
 
 const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 
@@ -93,13 +104,58 @@ const sendNodeResponse = (res: any, result: ApiResult) => {
   res.end(JSON.stringify(result.body));
 };
 
-const parseEnvGeminiKeys = (): string[] => {
-  const raw = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || process.env.API_KEY || "";
-  return raw
+const parseGeminiKeyList = (raw: string): string[] => (
+  raw
     .split(/[\n,;]+/)
     .map(key => key.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+);
+
+const parseEnvGeminiKeys = (provider: GeminiProvider): string[] => {
+  const raw = provider === "geminiPaid"
+    ? (
+        process.env.GEMINI_PAID_API_KEYS ||
+        process.env.GEMINI_PAID_API_KEY ||
+        process.env.GEMINI_PRO_API_KEYS ||
+        process.env.GEMINI_PRO_API_KEY ||
+        ""
+      )
+    : (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || process.env.API_KEY || "");
+  return parseGeminiKeyList(raw);
 };
+
+const getProviderEnvHint = (provider: GeminiProvider): string => (
+  provider === "geminiPaid"
+    ? "GEMINI_PAID_API_KEYS أو GEMINI_PAID_API_KEY"
+    : "GEMINI_API_KEYS أو GEMINI_API_KEY"
+);
+
+const normalizeGeminiProvider = (value: unknown): GeminiProvider => (
+  value === "geminiPaid" ? "geminiPaid" : "gemini"
+);
+
+const selectGeminiProvider = (requestedProvider: GeminiProvider, selectedModel: string): GeminiProvider => (
+  requestedProvider === "geminiPaid" || selectedModel === GEMINI_PAID_ANALYSIS_MODEL
+    ? "geminiPaid"
+    : "gemini"
+);
+
+const selectGeminiModel = (model: unknown, provider: GeminiProvider): string => {
+  if (typeof model === "string" && ALLOWED_GEMINI_MODELS.has(model)) {
+    return model;
+  }
+
+  return provider === "geminiPaid" ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL;
+};
+
+const getSafeGeminiModel = (selectedModel: string, provider: GeminiProvider): string => {
+  if (ALLOWED_GEMINI_MODELS.has(selectedModel)) return selectedModel;
+  return provider === "geminiPaid" ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL;
+};
+
+const getGeminiProviderLabel = (provider: GeminiProvider): string => (
+  provider === "geminiPaid" ? "Gemini Pro" : "Gemini"
+);
 
 const normalizeGeminiHistory = (history: unknown): GeminiHistoryContent[] => {
   if (!Array.isArray(history)) return [];
@@ -156,14 +212,24 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, useUrlContext, history, model } = await readRequestBody(req) as any;
-    const selectedModel = typeof model === "string" && ALLOWED_GEMINI_MODELS.has(model)
-      ? model
-      : GEMINI_ANALYSIS_MODEL;
-    const GEMINI_API_KEYS = parseEnvGeminiKeys();
+    const { prompt, useUrlContext, history, model, provider } = await readRequestBody(req) as any;
+    const requestedProvider = normalizeGeminiProvider(provider);
+    const selectedModel = getSafeGeminiModel(
+      selectGeminiModel(model, requestedProvider),
+      requestedProvider,
+    );
+    const selectedProvider = selectGeminiProvider(requestedProvider, selectedModel);
+    const GEMINI_API_KEYS = parseEnvGeminiKeys(selectedProvider);
 
     if (GEMINI_API_KEYS.length === 0) {
-      return { status: 503, body: { error: "لم يتم تكوين مفتاح Gemini API على الخادم." } };
+      return {
+        status: 503,
+        body: {
+          error: `لم يتم تكوين مفاتيح ${getGeminiProviderLabel(selectedProvider)} على السيرفر. أضف ${getProviderEnvHint(selectedProvider)} ثم أعد تشغيل PM2.`,
+          provider: selectedProvider,
+          model: selectedModel,
+        },
+      };
     }
     
     if (!prompt) {
@@ -195,7 +261,15 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
 
           const text = response.text;
 
-          return { status: 200, body: { text, keyFingerprint: createApiKeyFingerprint(GEMINI_API_KEY) } };
+          return {
+            status: 200,
+            body: {
+              text,
+              keyFingerprint: createApiKeyFingerprint(GEMINI_API_KEY),
+              provider: selectedProvider,
+              model: selectedModel,
+            },
+          };
         } catch (error) {
           lastError = getGeminiErrorDetails(error);
           if (attempt === 0 && RETRIABLE_GEMINI_STATUSES.has(lastError.status)) {
@@ -213,7 +287,9 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     return {
       status: responseStatus,
       body: {
-        error: `خطأ من Gemini API باستخدام النموذج ${selectedModel}: ${lastError?.message || "فشلت كل مفاتيح Gemini."}`,
+        error: `خطأ من ${getGeminiProviderLabel(selectedProvider)} باستخدام النموذج ${selectedModel}: ${lastError?.message || "فشلت كل مفاتيح Gemini."}`,
+        provider: selectedProvider,
+        model: selectedModel,
       },
     };
 

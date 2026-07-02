@@ -41,6 +41,7 @@ app.get('/healthz', (_req, res) => {
     uptimeSeconds: Math.round(process.uptime()),
     ai: {
       geminiConfigured: hasEnvValue('GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY'),
+      geminiPaidConfigured: hasEnvValue('GEMINI_PAID_API_KEYS', 'GEMINI_PAID_API_KEY', 'GEMINI_PRO_API_KEYS', 'GEMINI_PRO_API_KEY'),
       openAiConfigured: hasEnvValue('OPENAI_API_KEY', 'OPENAI_API_KEYS'),
       n8nConfigured: hasEnvValue('N8N_INGEST_TOKEN') && hasEnvValue('SUPABASE_SERVICE_ROLE_KEY'),
     },

@@ -10,6 +10,7 @@ import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
 import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
 import {
+    deleteRemoteArticle,
     getArticleTrashInfo,
     listRemoteProfiles,
     listRemoteArticles,
@@ -526,6 +527,7 @@ interface ArticleItemProps {
     onLoad: () => void;
     onDetails?: () => void;
     onDelete: () => void;
+    onPermanentDelete?: () => void;
     onRestore?: () => void;
     onRename: (newTitle: string) => boolean | Promise<boolean>;
     onUpdateSettings?: (articleId: string, patch: RemoteArticleSettingsPatch) => Promise<boolean>;
@@ -543,6 +545,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     onLoad,
     onDetails,
     onDelete,
+    onPermanentDelete,
     onRestore,
     onRename,
     onUpdateSettings,
@@ -568,6 +571,14 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         e.stopPropagation();
         if (window.confirm(`هل تريد نقل "${title}" إلى سلة المهملات؟`)) {
             onDelete();
+        }
+    };
+
+    const handlePermanentDelete = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!onPermanentDelete) return;
+        if (window.confirm(`سيتم حذف "${title}" نهائيا ولا يمكن استعادتها. هل أنت متأكد؟`)) {
+            onPermanentDelete();
         }
     };
 
@@ -671,9 +682,63 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         >
             <SeoScoreIndicator score={seoScore} />
             <div className="min-w-0 flex-grow space-y-0.5">
-                <h4 className="truncate text-[13px] font-bold text-[#333333] dark:text-gray-200" title={untranslatedTitle}>
-                    {untranslatedTitle}
-                </h4>
+                <div className="flex items-start justify-between gap-2">
+                    <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#333333] dark:text-gray-200" title={untranslatedTitle}>
+                        {untranslatedTitle}
+                    </h4>
+                    <div className="flex flex-shrink-0 items-center gap-0.5 opacity-80 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                        {isTrashView && onRestore && (
+                            <button
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onRestore();
+                                }}
+                                className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                                title="استعادة المقالة"
+                            >
+                                <RefreshCw size={13} />
+                            </button>
+                        )}
+                        {onDetails && (
+                            <button
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onDetails();
+                                }}
+                                className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                                title="تفاصيل المقالة"
+                            >
+                                <Eye size={13} />
+                            </button>
+                        )}
+                        {!isTrashView ? (
+                            <>
+                              <button
+                                  onClick={handleStartRename}
+                                  className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                                  title={t.renameArticle}
+                              >
+                                  <Edit size={13} />
+                              </button>
+                              <button
+                                  onClick={handleDelete}
+                                  className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-red-600 dark:hover:bg-[#d4af37]/20 dark:hover:text-red-400"
+                                  title="نقل إلى سلة المهملات"
+                              >
+                                  <Trash2 size={13} />
+                              </button>
+                            </>
+                        ) : onPermanentDelete ? (
+                            <button
+                                onClick={handlePermanentDelete}
+                                className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                                title="حذف نهائي"
+                            >
+                                <Trash2 size={13} />
+                            </button>
+                        ) : null}
+                    </div>
+                </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
                     {activity.lastSaved && (
                          <span className="flex items-center gap-1.5" title={t.lastSaved}>
@@ -689,8 +754,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     {ownerLabel && (
                         <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{ownerLabel}</span>
                     )}
-                </div>
-                <div className="flex items-center gap-2 border-t border-gray-100 pt-1 text-[10px] text-gray-500 dark:border-[#3a3a3a] dark:text-gray-400">
                     <span className="flex items-center gap-1.5" title={t.keywordViolations}>
                         <Key size={12} className="text-yellow-500" />
                         <span>{activity.stats?.keywordViolations ?? 0}</span>
@@ -738,50 +801,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                             return <N8nSettingChip key={field} label={field} value={n8nSettings[field]} />;
                         })}
                     </div>
-                )}
-            </div>
-            <div className="flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                {isTrashView && onRestore && (
-                    <button
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            onRestore();
-                        }}
-                        className="p-1.5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
-                        title="استعادة المقالة"
-                    >
-                        <RefreshCw size={14} />
-                    </button>
-                )}
-                {onDetails && (
-                    <button
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            onDetails();
-                        }}
-                        className="p-1.5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
-                        title="تفاصيل المقالة"
-                    >
-                        <Eye size={14} />
-                    </button>
-                )}
-                {!isTrashView && (
-                    <>
-                      <button
-                          onClick={handleStartRename}
-                          className="p-1.5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
-                          title={t.renameArticle}
-                      >
-                          <Edit size={14} />
-                      </button>
-                      <button
-                          onClick={handleDelete}
-                          className="p-1.5 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-red-600 dark:hover:bg-[#d4af37]/20 dark:hover:text-red-400"
-                          title="نقل إلى سلة المهملات"
-                      >
-                          <Trash2 size={14} />
-                      </button>
-                    </>
                 )}
             </div>
              <ChevronRight size={18} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
@@ -910,6 +929,20 @@ const Dashboard: React.FC = () => {
     } catch (error) {
       console.error(`Failed to restore article "${articleId}" from trash:`, error);
       alert('تعذر استعادة المقالة. حاول مرة أخرى.');
+    }
+  };
+
+  const handlePermanentDeleteArticle = async (articleId: string) => {
+    try {
+      await deleteRemoteArticle(articleId);
+      setRemoteArticles(prev => prev.filter(article => article.id !== articleId));
+      if (detailArticle?.id === articleId) {
+        setDetailArticle(null);
+        setDetailSnapshot(null);
+      }
+    } catch (error) {
+      console.error(`Failed to permanently delete article "${articleId}":`, error);
+      alert('تعذر حذف المقالة نهائيا. الحذف النهائي متاح عادة للأدمن أو مالك المقالة فقط.');
     }
   };
   
@@ -1373,6 +1406,7 @@ const Dashboard: React.FC = () => {
                                     onLoad={() => onLoadArticle(activity.title, activity)}
                                     onDetails={() => { void handleShowArticleDetails(activity); }}
                                     onDelete={() => { void handleDeleteArticle(activity.id); }}
+                                    onPermanentDelete={() => { void handlePermanentDeleteArticle(activity.id); }}
                                     onRestore={() => { void handleRestoreArticle(activity.id); }}
                                     onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
                                     onUpdateSettings={handleUpdateArticleSettings}

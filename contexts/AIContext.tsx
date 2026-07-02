@@ -1977,6 +1977,7 @@ const requestGeminiAnalysis = async (
             prompt,
             history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
             model,
+            provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
         }),
         signal: controller.signal,
       });

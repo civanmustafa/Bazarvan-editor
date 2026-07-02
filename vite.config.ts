@@ -52,7 +52,7 @@ const sendWebResponse = async (res: any, response: Response) => {
 
 export default defineConfig(({ mode }) => {
       const env = loadEnv(mode, process.cwd(), '');
-      ['GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY', 'OPENAI_API_KEY', 'OPENAI_API_KEYS', 'N8N_INGEST_TOKEN', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_URL'].forEach((key) => {
+      ['GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY', 'GEMINI_PAID_API_KEYS', 'GEMINI_PAID_API_KEY', 'GEMINI_PRO_API_KEYS', 'GEMINI_PRO_API_KEY', 'GEMINI_MODEL', 'GEMINI_PAID_MODEL', 'GEMINI_ALLOWED_MODELS', 'OPENAI_API_KEY', 'OPENAI_API_KEYS', 'N8N_INGEST_TOKEN', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_URL'].forEach((key) => {
         if (!process.env[key] && env[key]) {
           process.env[key] = env[key];
         }
