@@ -54,6 +54,7 @@ const CHATGPT_CONVERSATION_STORAGE_PREFIX = 'bazarvan:chatgpt-conversation';
 const CLAIMED_DRAFT_AUTO_AI_PREFIX = 'bazarvan:claimed-draft-auto-ai:';
 const CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX = 'bazarvan:auto-claimed-draft-keywords:';
 const CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX = 'bazarvan:auto-claimed-draft-gemini-paid:';
+const ARTICLE_AI_RUNTIME_STORAGE_PREFIX = 'bazarvan:article-ai-runtime:';
 const ARTICLE_AI_CLEAR_REQUEST_EVENT = 'bazarvan:article-ai-clear-request';
 type GeminiPatchProvider = Extract<AiPatchProvider, 'gemini' | 'geminiPaid'>;
 
@@ -2138,13 +2139,78 @@ const readStoredStringList = (storageKey: string): string[] => {
     }
 };
 
+type StoredArticleAiRuntime = {
+    aiResults: Record<AiPatchProvider, string>;
+    aiHistory: AIHistoryItem[];
+    aiInsertionPatches: Record<AiPatchProvider, AiContentPatch[]>;
+};
+
+const EMPTY_AI_RESULTS: Record<AiPatchProvider, string> = { gemini: '', geminiPaid: '', chatgpt: '' };
+const EMPTY_AI_INSERTION_PATCHES: Record<AiPatchProvider, AiContentPatch[]> = { gemini: [], geminiPaid: [], chatgpt: [] };
+
+const getArticleAiRuntimeStorageKey = (currentUser: string | null, articleScope: string): string => {
+    const userPart = currentUser?.trim() || 'anonymous';
+    const articlePart = articleScope.trim() || 'default';
+    return `${ARTICLE_AI_RUNTIME_STORAGE_PREFIX}${userPart}:${articlePart}`;
+};
+
+const readStoredArticleAiRuntime = (currentUser: string | null, articleScope: string): StoredArticleAiRuntime | null => {
+    if (!articleScope.trim()) return null;
+    try {
+        const parsed = JSON.parse(localStorage.getItem(getArticleAiRuntimeStorageKey(currentUser, articleScope)) || 'null');
+        if (!parsed || typeof parsed !== 'object') return null;
+        return {
+            aiResults: {
+                gemini: typeof parsed.aiResults?.gemini === 'string' ? parsed.aiResults.gemini : '',
+                geminiPaid: typeof parsed.aiResults?.geminiPaid === 'string' ? parsed.aiResults.geminiPaid : '',
+                chatgpt: typeof parsed.aiResults?.chatgpt === 'string' ? parsed.aiResults.chatgpt : '',
+            },
+            aiHistory: Array.isArray(parsed.aiHistory) ? parsed.aiHistory : [],
+            aiInsertionPatches: {
+                gemini: Array.isArray(parsed.aiInsertionPatches?.gemini) ? parsed.aiInsertionPatches.gemini : [],
+                geminiPaid: Array.isArray(parsed.aiInsertionPatches?.geminiPaid) ? parsed.aiInsertionPatches.geminiPaid : [],
+                chatgpt: Array.isArray(parsed.aiInsertionPatches?.chatgpt) ? parsed.aiInsertionPatches.chatgpt : [],
+            },
+        };
+    } catch (error) {
+        console.error('Could not read article AI runtime state:', error);
+        return null;
+    }
+};
+
+const saveStoredArticleAiRuntime = (
+    currentUser: string | null,
+    articleScope: string,
+    runtime: StoredArticleAiRuntime,
+) => {
+    if (!articleScope.trim()) return;
+    try {
+        localStorage.setItem(
+            getArticleAiRuntimeStorageKey(currentUser, articleScope),
+            JSON.stringify(runtime),
+        );
+    } catch (error) {
+        console.error('Could not save article AI runtime state:', error);
+    }
+};
+
+const removeStoredArticleAiRuntime = (currentUser: string | null, articleScope: string) => {
+    if (!articleScope.trim()) return;
+    try {
+        localStorage.removeItem(getArticleAiRuntimeStorageKey(currentUser, articleScope));
+    } catch (error) {
+        console.error('Could not remove article AI runtime state:', error);
+    }
+};
+
 const getArticleMarkerKey = (prefix: string, articleId: string): string => `${prefix}${articleId}`;
 
 const hasLocalMarker = (prefix: string, articleId: string): boolean => {
     if (!articleId.trim()) return false;
     try {
         const key = getArticleMarkerKey(prefix, articleId);
-        return Boolean(sessionStorage.getItem(key) || localStorage.getItem(key));
+        const value = sessionStorage.getItem(key) || localStorage.getItem(key) || '';
+        return Boolean(value && !value.startsWith('failed:'));
     } catch {
         return false;
     }
@@ -4538,7 +4604,7 @@ interface AIContextType {
     handleAnalyzeHeadings: () => Promise<void>;
     handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta, provider?: GeminiPatchProvider) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
-    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[], provider?: GeminiPatchProvider) => Promise<void>;
+    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[], provider?: GeminiPatchProvider) => Promise<boolean>;
     buildSmartAnalysisPrompt: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => string;
     importManualChatGptResponse: (rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => void;
     parseAiPatchResponse: (
@@ -4598,8 +4664,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     } = useEditor();
     const { openModal } = useModal();
     
-    const [aiResults, setAiResults] = useState<Record<AiPatchProvider, string>>({ gemini: '', geminiPaid: '', chatgpt: '' });
-    const [aiInsertionPatches, setAiInsertionPatches] = useState<Record<AiPatchProvider, AiContentPatch[]>>({ gemini: [], geminiPaid: [], chatgpt: [] });
+    const [aiResults, setAiResults] = useState<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
+    const [aiInsertionPatches, setAiInsertionPatches] = useState<Record<AiPatchProvider, AiContentPatch[]>>(EMPTY_AI_INSERTION_PATCHES);
     const [isAiLoading, setIsAiLoading] = useState<Record<AiPatchProvider, boolean>>({ gemini: false, geminiPaid: false, chatgpt: false });
     const [quickAiProvider, setQuickAiProvider] = useState<AiPatchProvider>('gemini');
     const [isAiCommandLoading, setIsAiCommandLoading] = useState(false);
@@ -4608,6 +4674,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized] = useState(false);
     const [aiFixingInfo, setAiFixingInfo] = useState<{ title: string; from: number } | null>(null);
     const [aiHistory, setAiHistory] = useState<AIHistoryItem[]>([]);
+    const aiResultsRef = useRef<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
+    const aiInsertionPatchesRef = useRef<Record<AiPatchProvider, AiContentPatch[]>>(EMPTY_AI_INSERTION_PATCHES);
+    const aiHistoryRef = useRef<AIHistoryItem[]>([]);
     const [bulkFixReviewItems, setBulkFixReviewItems] = useState<BulkFixReviewItem[]>([]);
     const bulkFixReviewItemsRef = useRef<BulkFixReviewItem[]>([]);
     const [fixAllProgress, setFixAllProgress] = useState<FixAllProgress>({ current: 0, total: 0, running: false, failed: 0, errors: [] });
@@ -4629,11 +4698,34 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return nextItems;
     }, []);
 
+    useEffect(() => {
+        aiResultsRef.current = aiResults;
+    }, [aiResults]);
+
+    useEffect(() => {
+        aiInsertionPatchesRef.current = aiInsertionPatches;
+    }, [aiInsertionPatches]);
+
+    useEffect(() => {
+        aiHistoryRef.current = aiHistory;
+    }, [aiHistory]);
+
     const clearArticleAiRuntimeState = useCallback(() => {
-        setAiResults({ gemini: '', geminiPaid: '', chatgpt: '' });
+        setAiResults({ ...EMPTY_AI_RESULTS });
         setAiHistory([]);
         replaceBulkFixReviewItems([]);
-        setAiInsertionPatches({ gemini: [], geminiPaid: [], chatgpt: [] });
+        setAiInsertionPatches({ ...EMPTY_AI_INSERTION_PATCHES });
+        setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
+        setSuggestion(null);
+        setHeadingsAnalysis(null);
+        setIsHeadingsAnalysisMinimized(false);
+    }, [replaceBulkFixReviewItems]);
+
+    const restoreArticleAiRuntimeState = useCallback((runtime: StoredArticleAiRuntime | null) => {
+        setAiResults(runtime?.aiResults || { ...EMPTY_AI_RESULTS });
+        setAiHistory(runtime?.aiHistory || []);
+        replaceBulkFixReviewItems([]);
+        setAiInsertionPatches(runtime?.aiInsertionPatches || { ...EMPTY_AI_INSERTION_PATCHES });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
         setSuggestion(null);
         setHeadingsAnalysis(null);
@@ -4642,7 +4734,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     useEffect(() => {
         const currentScope = currentView === 'editor'
-            ? getArticleChatStorageScope(articleKey, title)
+            ? (activeArticleId || getArticleChatStorageScope(articleKey, title))
             : '';
         const previousScope = previousArticleScopeRef.current;
         const previousUser = previousArticleUserRef.current;
@@ -4650,15 +4742,24 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const editorClosed = currentView !== 'editor' && previousScope;
 
         if (scopeChanged || editorClosed) {
-            clearStoredArticleAiConversations(previousUser, previousScope);
-            clearArticleAiRuntimeState();
-        } else if (isInitialMount.current) {
+            saveStoredArticleAiRuntime(previousUser, previousScope, {
+                aiResults: aiResultsRef.current,
+                aiHistory: aiHistoryRef.current,
+                aiInsertionPatches: aiInsertionPatchesRef.current,
+            });
+        }
+
+        if (currentScope && (scopeChanged || isInitialMount.current)) {
+            restoreArticleAiRuntimeState(readStoredArticleAiRuntime(currentUser, currentScope));
+        }
+
+        if (isInitialMount.current) {
             isInitialMount.current = false;
         }
 
         previousArticleScopeRef.current = currentScope;
         previousArticleUserRef.current = currentUser;
-    }, [articleKey, title, currentView, currentUser, clearArticleAiRuntimeState]);
+    }, [activeArticleId, articleKey, title, currentView, currentUser, restoreArticleAiRuntimeState]);
 
     useEffect(() => {
         const clearCurrentArticleAi = (event: Event) => {
@@ -4669,6 +4770,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 ? getArticleChatStorageScope(articleKey, title)
                 : previousArticleScopeRef.current;
             clearStoredArticleAiConversations(currentUser, currentScope || '');
+            removeStoredArticleAiRuntime(currentUser, activeArticleId || currentScope || '');
             clearArticleAiRuntimeState();
         };
 
@@ -5141,7 +5243,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         items: ReadyCommandAnalysisBatchItem[],
         provider: GeminiPatchProvider = 'gemini',
     ) => {
-        if (!editor || items.length === 0) return;
+        if (!editor || items.length === 0) return false;
         const geminiKeys = normalizeGeminiKeys(provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini);
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         setAiResults(prev => ({ ...prev, [provider]: '' }));
@@ -5198,8 +5300,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 ...prev,
                 [provider]: results.flatMap(result => result.parsedResult.patches),
             }));
+            return true;
         } catch (e) {
             setAiResults(prev => ({ ...prev, [provider]: "فشل التحليل المتعدد." }));
+            return false;
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
@@ -5207,7 +5311,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const hasClaimedDraftAutomationMarker = Boolean(
         activeArticleId &&
-        hasLocalMarker(CLAIMED_DRAFT_AUTO_AI_PREFIX, activeArticleId)
+        (
+            hasLocalMarker(CLAIMED_DRAFT_AUTO_AI_PREFIX, activeArticleId) ||
+            activeArticleSettings.claimedAt ||
+            activeArticleSettings.claimedBy
+        )
     );
 
     const hasClaimedDraftSemanticRequirements = Boolean(
@@ -5228,13 +5336,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const runAutomation = async () => {
                 try {
                     const semanticResult = await generateSemanticKeywords();
-                    if (!semanticResult.error) {
-                        setKeywords(prev => ({
-                            ...prev,
-                            secondaries: mergeUniqueTerms(prev.secondaries, semanticResult.secondaries, 10),
-                            lsi: mergeUniqueTerms(prev.lsi, semanticResult.lsi, 24),
-                        }));
+                    if (semanticResult.error) {
+                        autoDraftRunRef.current.delete(runKey);
+                        writeLocalMarker(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId, `failed:${new Date().toISOString()}`);
+                        return;
                     }
+                    setKeywords(prev => ({
+                        ...prev,
+                        secondaries: mergeUniqueTerms(prev.secondaries, semanticResult.secondaries, 10),
+                        lsi: mergeUniqueTerms(prev.lsi, semanticResult.lsi, 24),
+                    }));
 
                     const generatedTitle = await generateDraftTitle();
                     if (generatedTitle) {
@@ -5247,6 +5358,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     }, 800);
                 } catch (error) {
                     console.error('Automatic claimed draft keyword workflow failed:', error);
+                    autoDraftRunRef.current.delete(runKey);
                     writeLocalMarker(CLAIMED_DRAFT_SEMANTIC_RUN_PREFIX, activeArticleId, `failed:${new Date().toISOString()}`);
                 }
             };
@@ -5311,7 +5423,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         ? 'أفكار جديدة/متضاربة مع منافسين'
                         : 'New/conflicting competitor ideas';
                     const commandPrompt = getEngineeringPrompt(engineeringPrompts, commandId);
-                    await handleGeminiReadyCommandsAnalyze([
+                    const didAnalyze = await handleGeminiReadyCommandsAnalyze([
                         {
                             commandId,
                             commandLabel,
@@ -5321,12 +5433,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                             savesContentSummary: definition?.savesContentSummary,
                         },
                     ], 'geminiPaid');
+                    if (!didAnalyze) {
+                        autoDraftRunRef.current.delete(runKey);
+                        writeLocalMarker(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId, `failed:${new Date().toISOString()}`);
+                        return;
+                    }
                     writeLocalMarker(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId);
                     window.setTimeout(() => {
                         window.dispatchEvent(new CustomEvent('bazarvan:auto-save-request'));
                     }, 800);
                 } catch (error) {
                     console.error('Automatic claimed draft Gemini Pro comparison failed:', error);
+                    autoDraftRunRef.current.delete(runKey);
                     writeLocalMarker(CLAIMED_DRAFT_GEMINI_PAID_RUN_PREFIX, activeArticleId, `failed:${new Date().toISOString()}`);
                 }
             };

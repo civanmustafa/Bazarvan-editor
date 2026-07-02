@@ -184,21 +184,28 @@ const getRemoteArticleId = (article?: ArticleActivity | RemoteArticleActivity | 
 export type ActiveArticleSettings = {
     status: string;
     accessRole: string;
+    claimedAt: string;
+    claimedBy: string;
 };
 
 const EMPTY_ACTIVE_ARTICLE_SETTINGS: ActiveArticleSettings = {
     status: '',
     accessRole: '',
+    claimedAt: '',
+    claimedBy: '',
 };
 
 const getActiveArticleSettings = (article?: ArticleActivity | RemoteArticleActivity | null): ActiveArticleSettings => {
     const remoteArticle = article as RemoteArticleActivity | undefined;
     const metadata = isRecord(remoteArticle?.metadata) ? remoteArticle.metadata : {};
     const settings = isRecord(metadata.n8nSettings) ? metadata.n8nSettings : {};
+    const claim = isRecord(metadata.claim) ? metadata.claim : {};
 
     return {
         status: typeof settings.status === 'string' ? settings.status : remoteArticle?.status || '',
         accessRole: typeof settings.accessRole === 'string' ? settings.accessRole : '',
+        claimedAt: typeof claim.claimedAt === 'string' ? claim.claimedAt : '',
+        claimedBy: typeof claim.claimedBy === 'string' ? claim.claimedBy : '',
     };
 };
 
