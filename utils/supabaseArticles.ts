@@ -95,6 +95,29 @@ type CreatorArticleDefaults = {
   }[];
 };
 
+const ARTICLE_LIST_SELECT = [
+  'id',
+  'owner_id',
+  'created_by',
+  'assigned_to',
+  'source',
+  'visibility',
+  'status',
+  'title',
+  'keywords',
+  'goal_context',
+  'article_language',
+  'stats',
+  'time_spent_seconds',
+  'save_count',
+  'metadata',
+  'created_at',
+  'updated_at',
+  'last_saved_at',
+].join(',');
+
+const REMOTE_ARTICLE_CACHE_PREFIX = 'bazarvan:remote-article-list:';
+
 export type RemoteArticleVisibility = ArticleRow['visibility'];
 export type RemoteArticleStatus = ArticleRow['status'];
 export type RemoteArticleLanguage = ArticleRow['article_language'];
@@ -214,9 +237,38 @@ const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
 );
 
+const canUseLocalStorage = (): boolean => (
+  typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
+);
+
 const withoutAiResultsMetadata = (metadata: Record<string, any>): Record<string, any> => (
   Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'aiResults'))
 );
+
+const lightweightArticleMetadata = (metadata: unknown): Record<string, any> => {
+  if (!isRecord(metadata)) return {};
+  const n8nSettings = isRecord(metadata.n8nSettings) ? metadata.n8nSettings : undefined;
+  const visibleTo = Array.isArray(metadata.visibleTo) ? metadata.visibleTo : undefined;
+  const trash = isRecord(metadata.trash) ? metadata.trash : undefined;
+  const claim = isRecord(metadata.claim) ? metadata.claim : undefined;
+  const importedAt = typeof metadata.importedAt === 'string' ? metadata.importedAt : undefined;
+  const importedBy = typeof metadata.importedBy === 'string' ? metadata.importedBy : undefined;
+  const workflowId = typeof metadata.workflowId === 'string' ? metadata.workflowId : undefined;
+  const executionId = typeof metadata.executionId === 'string' ? metadata.executionId : undefined;
+  const externalId = typeof metadata.externalId === 'string' ? metadata.externalId : undefined;
+
+  return Object.fromEntries(Object.entries({
+    n8nSettings,
+    visibleTo,
+    trash,
+    claim,
+    importedAt,
+    importedBy,
+    workflowId,
+    executionId,
+    externalId,
+  }).filter(([, value]) => value !== undefined));
+};
 
 const toNumber = (value: unknown, fallback = 0): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
@@ -290,7 +342,10 @@ const resolveCreatorArticleDefaults = async (
   };
 };
 
-const toRemoteArticleActivity = (row: ArticleRow): RemoteArticleActivity => ({
+const toRemoteArticleActivity = (
+  row: ArticleRow,
+  options: { lightweightMetadata?: boolean } = {},
+): RemoteArticleActivity => ({
   id: row.id,
   title: row.title,
   ownerId: row.owner_id,
@@ -301,7 +356,7 @@ const toRemoteArticleActivity = (row: ArticleRow): RemoteArticleActivity => ({
   status: row.status,
   plainText: row.plain_text || '',
   analysis: row.analysis || null,
-  metadata: row.metadata || {},
+  metadata: options.lightweightMetadata ? lightweightArticleMetadata(row.metadata) : row.metadata || {},
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   timeSpentSeconds: row.time_spent_seconds || 0,
@@ -432,15 +487,63 @@ const recordArticleVersion = async (
   }
 };
 
+const getArticleListCacheKey = async (): Promise<string> => {
+  const supabase = getSupabaseClient();
+  const { data } = await supabase.auth.getSession();
+  return `${REMOTE_ARTICLE_CACHE_PREFIX}${data.session?.user.id || 'anonymous'}`;
+};
+
+const readCachedRemoteArticles = async (): Promise<RemoteArticleActivity[] | null> => {
+  if (!canUseLocalStorage()) return null;
+
+  try {
+    const cacheKey = await getArticleListCacheKey();
+    const rawValue = window.localStorage.getItem(cacheKey);
+    if (!rawValue) return null;
+    const parsed = JSON.parse(rawValue);
+    if (!isRecord(parsed) || !Array.isArray(parsed.articles)) return null;
+    return parsed.articles as RemoteArticleActivity[];
+  } catch (error) {
+    console.warn('Could not read cached Supabase article list:', error);
+    return null;
+  }
+};
+
+const writeCachedRemoteArticles = async (articles: RemoteArticleActivity[]): Promise<void> => {
+  if (!canUseLocalStorage()) return;
+
+  try {
+    const cacheKey = await getArticleListCacheKey();
+    window.localStorage.setItem(cacheKey, JSON.stringify({
+      cachedAt: new Date().toISOString(),
+      articles,
+    }));
+  } catch (error) {
+    console.warn('Could not cache Supabase article list:', error);
+  }
+};
+
 export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('articles')
-    .select('*')
-    .order('updated_at', { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from('articles')
+      .select(ARTICLE_LIST_SELECT)
+      .order('updated_at', { ascending: false });
 
-  if (error) throw error;
-  return ((data || []) as ArticleRow[]).map(toRemoteArticleActivity);
+    if (error) throw error;
+
+    const articles = ((data || []) as ArticleRow[]).map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
+    void writeCachedRemoteArticles(articles);
+    return articles;
+  } catch (error) {
+    const cachedArticles = await readCachedRemoteArticles();
+    if (cachedArticles) {
+      console.warn('Using cached Supabase article list after load failure:', error);
+      return cachedArticles;
+    }
+    throw error;
+  }
 };
 
 export const getRemoteArticleById = async (articleId: string): Promise<RemoteArticleActivity> => {
