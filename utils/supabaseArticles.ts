@@ -44,6 +44,17 @@ type N8nIngestLogRow = {
   processed_at: string | null;
 };
 
+type CreatorArticleDefaults = {
+  email: string;
+  fullName: string | null;
+  visibleTo: {
+    id: string;
+    email: string;
+    fullName: string | null;
+    role: RemoteArticleAccessRole;
+  }[];
+};
+
 export type RemoteArticleVisibility = ArticleRow['visibility'];
 export type RemoteArticleStatus = ArticleRow['status'];
 export type RemoteArticleLanguage = ArticleRow['article_language'];
@@ -162,6 +173,44 @@ const normalizeStats = (value: unknown): ArticleStats => {
 };
 
 const normalizeTitle = (title: string): string => title.trim() || '(untitled)';
+
+const resolveCreatorArticleDefaults = async (
+  userId: string,
+): Promise<CreatorArticleDefaults> => {
+  const supabase = getSupabaseClient();
+  const { data: authData } = await supabase.auth.getUser().catch(() => ({ data: { user: null } as any }));
+  const authEmail = authData.user?.id === userId && typeof authData.user.email === 'string'
+    ? authData.user.email.trim()
+    : '';
+
+  const { data: profileData } = await supabase
+    .from('profiles')
+    .select('id,email,full_name')
+    .eq('id', userId)
+    .maybeSingle()
+    .catch(() => ({ data: null }));
+
+  const profile = isRecord(profileData) ? profileData : {};
+  const email = normalizeEmailCsv(typeof profile.email === 'string' && profile.email.trim()
+    ? profile.email
+    : authEmail);
+  const fullName = typeof profile.full_name === 'string' && profile.full_name.trim()
+    ? profile.full_name.trim()
+    : null;
+
+  return {
+    email,
+    fullName,
+    visibleTo: email
+      ? [{
+          id: userId,
+          email,
+          fullName,
+          role: 'editor',
+        }]
+      : [],
+  };
+};
 
 const toRemoteArticleActivity = (row: ArticleRow): RemoteArticleActivity => ({
   id: row.id,
@@ -345,11 +394,13 @@ export const saveRemoteArticleSnapshot = async (
   const supabase = getSupabaseClient();
   const savedAt = new Date().toISOString();
   const stats = buildStatsFromSnapshot(snapshot);
+  const creatorDefaults = await resolveCreatorArticleDefaults(options.userId);
   const payload = {
     owner_id: options.userId,
     created_by: options.userId,
+    assigned_to: options.userId,
     source: 'manual',
-    visibility: 'private',
+    visibility: 'public',
     status: 'draft',
     title: normalizeTitle(snapshot.title),
     content_json: snapshot.content || {},
@@ -364,6 +415,14 @@ export const saveRemoteArticleSnapshot = async (
     metadata: {
       attachments: snapshot.attachments || null,
       analysisSummary: snapshot.analysisSummary || null,
+      n8nSettings: {
+        visibility: 'public',
+        accessRole: 'editor',
+        visibleToEmailsCsv: creatorDefaults.email,
+        articleLanguage: snapshot.articleLanguage,
+        status: 'draft',
+      },
+      visibleTo: creatorDefaults.visibleTo,
     },
   };
 
@@ -392,7 +451,7 @@ export const saveRemoteArticleSnapshot = async (
         last_saved_at: payload.last_saved_at,
         metadata: {
           ...currentMetadata,
-          ...payload.metadata,
+          analysisSummary: payload.metadata.analysisSummary,
           attachments: {
             ...(isRecord(currentMetadata.attachments) ? currentMetadata.attachments : {}),
             ...(isRecord(payload.metadata.attachments) ? payload.metadata.attachments : {}),

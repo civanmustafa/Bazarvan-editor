@@ -1564,11 +1564,21 @@ const Dashboard: React.FC = () => {
   const totalGeminiUses = geminiUsageRows.reduce((sum, row) => sum + row.count, 0);
   const selectedProfile = selectedProfileId ? profiles.find(profile => profile.id === selectedProfileId) : undefined;
   const activeRemoteArticles = useMemo(() => (
-    remoteArticles.filter(article => !getArticleTrashInfo(article, currentUserId))
-  ), [remoteArticles, currentUserId]);
+    remoteArticles.filter(article => {
+      if (getArticleTrashInfo(article, currentUserId)) return false;
+      if (isAdmin || !currentUserId) return true;
+      if (articleBelongsToProfile(article, currentUserId)) return true;
+      return !getN8nSettings(article).visibleToEmailsCsv;
+    })
+  ), [remoteArticles, currentUserId, isAdmin]);
   const trashedRemoteArticles = useMemo(() => (
-    remoteArticles.filter(article => Boolean(getArticleTrashInfo(article, currentUserId)))
-  ), [remoteArticles, currentUserId]);
+    remoteArticles.filter(article => {
+      if (!getArticleTrashInfo(article, currentUserId)) return false;
+      if (isAdmin || !currentUserId) return true;
+      if (articleBelongsToProfile(article, currentUserId)) return true;
+      return !getN8nSettings(article).visibleToEmailsCsv;
+    })
+  ), [remoteArticles, currentUserId, isAdmin]);
   const displayedRemoteArticles = useMemo(() => {
     const baseArticles = isTrashVisible ? trashedRemoteArticles : activeRemoteArticles;
     return dashboardMode === 'n8n'
