@@ -38,6 +38,8 @@ import {
     type RemoteArticleActivity,
     type RemoteArticleStatus,
 } from '../utils/supabaseArticles';
+import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
+import { recordAppActivity } from '../utils/appActivity';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -1254,6 +1256,18 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setArticleKey(savedArticle.title || finalTitleToSave);
         writeSessionValue(ACTIVE_ARTICLE_ID_KEY, savedArticle.id);
         writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, savedArticle.title || finalTitleToSave);
+        navigateToAppPath(buildEditorArticlePath(savedArticle.id), { replace: true });
+        void recordAppActivity(currentUserId, {
+            eventType: 'article_save',
+            entityType: 'article',
+            entityId: savedArticle.id,
+            path: buildEditorArticlePath(savedArticle.id),
+            metadata: {
+                title: savedArticle.title,
+                status: savedArticle.status,
+                source: savedArticle.source,
+            },
+        });
         window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
         await persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON, {
             awaitBackup: true,
@@ -1399,7 +1413,18 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleKey(titleStr);
             setActiveArticleId(remoteArticleId);
             setActiveArticleSettings(getActiveArticleSettings(article));
-            setCurrentView('editor');
+            navigateToAppPath(buildEditorArticlePath(remoteArticleId));
+            if (remoteArticleId && currentUserId) {
+                void recordAppActivity(currentUserId, {
+                    eventType: 'article_open',
+                    entityType: 'article',
+                    entityId: remoteArticleId,
+                    path: buildEditorArticlePath(remoteArticleId),
+                    metadata: {
+                        title: titleStr,
+                    },
+                });
+            }
 
             try {
                 const latestArticle = getFreshArticleActivity(currentUser, titleStr, article) || article;
@@ -1465,7 +1490,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 }
             }
         }
-    }, [editor, currentUser, setCurrentView, captureEditorSnapshot, clearEditorSnapshotTimer, clearDraftPersistTimer]);
+    }, [editor, currentUser, currentUserId, captureEditorSnapshot, clearEditorSnapshotTimer, clearDraftPersistTimer]);
     
     const value: EditorContextType = {
         editor,

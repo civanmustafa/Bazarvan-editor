@@ -44,6 +44,46 @@ type N8nIngestLogRow = {
   processed_at: string | null;
 };
 
+type ArticleVersionRow = {
+  id: string;
+  article_id: string;
+  version_number: number;
+  created_by: string | null;
+  title: string;
+  content_json: any;
+  content_html: string | null;
+  plain_text: string;
+  keywords: any;
+  goal_context: any;
+  analysis: any;
+  stats: any;
+  note: string | null;
+  created_at: string;
+};
+
+type AppSessionRow = {
+  id: string;
+  user_id: string | null;
+  user_agent: string | null;
+  path: string | null;
+  started_at: string;
+  last_seen_at: string;
+  ended_at: string | null;
+  metadata: any;
+};
+
+type AppActivityEventRow = {
+  id: string;
+  user_id: string | null;
+  session_id: string | null;
+  event_type: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  path: string | null;
+  metadata: any;
+  created_at: string;
+};
+
 type CreatorArticleDefaults = {
   email: string;
   fullName: string | null;
@@ -85,6 +125,44 @@ export type RemoteN8nIngestLog = {
   errorMessage: string | null;
   createdAt: string;
   processedAt: string | null;
+};
+
+export type RemoteArticleVersion = {
+  id: string;
+  articleId: string;
+  versionNumber: number;
+  createdBy: string | null;
+  title: string;
+  plainText: string;
+  keywords: any;
+  goalContext: any;
+  analysis: any;
+  stats: any;
+  note: string | null;
+  createdAt: string;
+};
+
+export type RemoteAppSession = {
+  id: string;
+  userId: string | null;
+  userAgent: string;
+  path: string;
+  startedAt: string;
+  lastSeenAt: string;
+  endedAt: string | null;
+  metadata: any;
+};
+
+export type RemoteAppActivityEvent = {
+  id: string;
+  userId: string | null;
+  sessionId: string | null;
+  eventType: string;
+  entityType: string | null;
+  entityId: string | null;
+  path: string;
+  metadata: any;
+  createdAt: string;
 };
 
 export type RemoteArticleAiResultPatch = {
@@ -262,6 +340,44 @@ const toRemoteN8nIngestLog = (row: N8nIngestLogRow): RemoteN8nIngestLog => ({
   processedAt: row.processed_at || null,
 });
 
+const toRemoteArticleVersion = (row: ArticleVersionRow): RemoteArticleVersion => ({
+  id: row.id,
+  articleId: row.article_id,
+  versionNumber: row.version_number,
+  createdBy: row.created_by,
+  title: row.title,
+  plainText: row.plain_text || '',
+  keywords: row.keywords || {},
+  goalContext: row.goal_context || {},
+  analysis: row.analysis || null,
+  stats: row.stats || {},
+  note: row.note || null,
+  createdAt: row.created_at,
+});
+
+const toRemoteAppSession = (row: AppSessionRow): RemoteAppSession => ({
+  id: row.id,
+  userId: row.user_id,
+  userAgent: row.user_agent || '',
+  path: row.path || '',
+  startedAt: row.started_at,
+  lastSeenAt: row.last_seen_at,
+  endedAt: row.ended_at || null,
+  metadata: row.metadata || {},
+});
+
+const toRemoteAppActivityEvent = (row: AppActivityEventRow): RemoteAppActivityEvent => ({
+  id: row.id,
+  userId: row.user_id,
+  sessionId: row.session_id,
+  eventType: row.event_type,
+  entityType: row.entity_type,
+  entityId: row.entity_id,
+  path: row.path || '',
+  metadata: row.metadata || {},
+  createdAt: row.created_at,
+});
+
 const buildStatsFromSnapshot = (snapshot: ArticleStorageSnapshot): ArticleStats => {
   const summary = snapshot.analysisSummary;
   const duplicateStats = summary?.duplicateStats;
@@ -284,6 +400,38 @@ const buildStatsFromSnapshot = (snapshot: ArticleStorageSnapshot): ArticleStats 
   };
 };
 
+const recordArticleVersion = async (
+  articleId: string,
+  snapshot: ArticleStorageSnapshot,
+  options: {
+    userId: string;
+    versionNumber: number;
+    stats: ArticleStats;
+  },
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from('article_versions')
+    .insert({
+      article_id: articleId,
+      version_number: Math.max(1, options.versionNumber),
+      created_by: options.userId,
+      title: normalizeTitle(snapshot.title),
+      content_json: snapshot.content || {},
+      content_html: snapshot.contentHtml || null,
+      plain_text: snapshot.plainText || '',
+      keywords: snapshot.keywords || {},
+      goal_context: snapshot.goalContext || {},
+      analysis: snapshot.analysis || null,
+      stats: options.stats,
+      note: 'manual-save',
+    });
+
+  if (error) {
+    console.error(`Failed to record article version "${articleId}":`, error);
+  }
+};
+
 export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
@@ -295,7 +443,7 @@ export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => 
   return ((data || []) as ArticleRow[]).map(toRemoteArticleActivity);
 };
 
-const getRemoteArticleById = async (articleId: string): Promise<RemoteArticleActivity> => {
+export const getRemoteArticleById = async (articleId: string): Promise<RemoteArticleActivity> => {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('articles')
@@ -331,6 +479,93 @@ export const listRemoteN8nIngestLogs = async (limit = 25): Promise<RemoteN8nInge
     throw error;
   }
   return ((data || []) as N8nIngestLogRow[]).map(toRemoteN8nIngestLog);
+};
+
+export const listRemoteArticleVersions = async (
+  articleId: string,
+  limit = 20,
+): Promise<RemoteArticleVersion[]> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('article_versions')
+    .select('*')
+    .eq('article_id', articleId)
+    .order('version_number', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+
+  return ((data || []) as ArticleVersionRow[]).map(toRemoteArticleVersion);
+};
+
+export const listRemoteAppSessions = async (limit = 100): Promise<RemoteAppSession[]> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('app_sessions')
+    .select('*')
+    .order('last_seen_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+
+  return ((data || []) as AppSessionRow[]).map(toRemoteAppSession);
+};
+
+export const getRemoteAppSessionById = async (sessionId: string): Promise<RemoteAppSession | null> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('app_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === '42P01') return null;
+    throw error;
+  }
+
+  return data ? toRemoteAppSession(data as AppSessionRow) : null;
+};
+
+export const listRemoteAppActivityEvents = async (
+  options: {
+    limit?: number;
+    sessionId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  } = {},
+): Promise<RemoteAppActivityEvent[]> => {
+  const supabase = getSupabaseClient();
+  let query = supabase
+    .from('app_activity_events')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(options.limit || 150);
+
+  if (options.sessionId) {
+    query = query.eq('session_id', options.sessionId);
+  }
+  if (options.dateFrom) {
+    query = query.gte('created_at', options.dateFrom);
+  }
+  if (options.dateTo) {
+    query = query.lte('created_at', options.dateTo);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+
+  return ((data || []) as AppActivityEventRow[]).map(toRemoteAppActivityEvent);
 };
 
 export const updateCurrentProfileLastSeen = async (userId: string): Promise<void> => {
@@ -436,6 +671,7 @@ export const saveRemoteArticleSnapshot = async (
     if (readError) throw readError;
     const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
 
+    const nextSaveCount = (toNumber((currentRow as any)?.save_count) || 0) + 1;
     const { data, error } = await supabase
       .from('articles')
       .update({
@@ -457,13 +693,18 @@ export const saveRemoteArticleSnapshot = async (
             ...(isRecord(payload.metadata.attachments) ? payload.metadata.attachments : {}),
           },
         },
-        save_count: (toNumber((currentRow as any)?.save_count) || 0) + 1,
+        save_count: nextSaveCount,
       })
       .eq('id', options.articleId)
       .select('*')
       .single();
 
     if (error) throw error;
+    await recordArticleVersion((data as ArticleRow).id, snapshot, {
+      userId: options.userId,
+      versionNumber: nextSaveCount,
+      stats,
+    });
     return toRemoteArticleActivity(data as ArticleRow);
   }
 
@@ -478,6 +719,11 @@ export const saveRemoteArticleSnapshot = async (
     .single();
 
   if (error) throw error;
+  await recordArticleVersion((data as ArticleRow).id, snapshot, {
+    userId: options.userId,
+    versionNumber: 1,
+    stats,
+  });
   return toRemoteArticleActivity(data as ArticleRow);
 };
 

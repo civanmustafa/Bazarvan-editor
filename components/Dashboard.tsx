@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye } from 'lucide-react';
+import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy } from 'lucide-react';
 import { getActivityData, UserActivity, ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -31,6 +31,7 @@ import {
 } from '../utils/supabaseArticles';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
+import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
 
 /*
  * Dashboard is the user workspace:
@@ -182,6 +183,35 @@ const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
     status: typeof settings.status === 'string' ? settings.status : article?.status || '',
   };
 };
+
+const isPublicClaimOpportunity = (article: RemoteArticleActivity): boolean => (
+  article.visibility === 'public' &&
+  !article.ownerId &&
+  !article.createdBy &&
+  !article.assignedTo &&
+  !getN8nSettings(article).visibleToEmailsCsv
+);
+
+const canProfileSeeArticle = (
+  article: RemoteArticleActivity,
+  profileId: string,
+  isAdmin: boolean,
+): boolean => (
+  isAdmin ||
+  Boolean(profileId && (
+    articleBelongsToProfile(article, profileId) ||
+    isPublicClaimOpportunity(article)
+  ))
+);
+
+const canProfileSeeTrashedArticle = (
+  article: RemoteArticleActivity,
+  profileId: string,
+  isAdmin: boolean,
+): boolean => (
+  isAdmin ||
+  Boolean(profileId && articleBelongsToProfile(article, profileId))
+);
 
 type N8nSettingFieldKey = keyof Pick<RemoteArticleSettingsPatch, 'visibility' | 'accessRole' | 'articleLanguage' | 'status'>;
 type N8nDisplayFieldKey = N8nSettingFieldKey | 'visibleToEmailsCsv';
@@ -850,6 +880,9 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const untranslatedTitle = title || t.untitled;
     const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
     const remoteActivity = activity as RemoteArticleActivity;
+    const articleId = isRecord(activity) && typeof activity.id === 'string' ? activity.id : '';
+    const articlePath = articleId ? buildEditorArticlePath(articleId) : '';
+    const absoluteArticleUrl = articlePath ? `${window.location.origin}${articlePath}` : '';
     const canClaimArticle = Boolean(
         onClaim &&
         !isTrashView &&
@@ -870,6 +903,16 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         Boolean(n8nSettings.articleLanguage) ||
         Boolean(n8nSettings.status)
     );
+    const handleCopyArticleLink = async (event: React.MouseEvent) => {
+        event.stopPropagation();
+        if (!absoluteArticleUrl) return;
+        await navigator.clipboard?.writeText(absoluteArticleUrl);
+    };
+    const handleOpenArticleTab = (event: React.MouseEvent) => {
+        event.stopPropagation();
+        if (!absoluteArticleUrl) return;
+        window.open(absoluteArticleUrl, '_blank', 'noopener,noreferrer');
+    };
 
     return (
         <li
@@ -922,6 +965,24 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                             >
                                 <Eye size={13} />
                             </button>
+                        )}
+                        {articlePath && (
+                            <>
+                              <button
+                                  onClick={handleCopyArticleLink}
+                                  className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                                  title="نسخ رابط المقالة"
+                              >
+                                  <Copy size={13} />
+                              </button>
+                              <button
+                                  onClick={handleOpenArticleTab}
+                                  className="p-1 rounded-full text-gray-400 dark:text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] dark:hover:bg-[#d4af37]/20 dark:hover:text-[#f2d675]"
+                                  title="فتح المقالة في تبويب جديد"
+                              >
+                                  <ExternalLink size={13} />
+                              </button>
+                            </>
                         )}
                         {!isTrashView ? (
                             <>
@@ -1566,17 +1627,13 @@ const Dashboard: React.FC = () => {
   const activeRemoteArticles = useMemo(() => (
     remoteArticles.filter(article => {
       if (getArticleTrashInfo(article, currentUserId)) return false;
-      if (isAdmin || !currentUserId) return true;
-      if (articleBelongsToProfile(article, currentUserId)) return true;
-      return !getN8nSettings(article).visibleToEmailsCsv;
+      return canProfileSeeArticle(article, currentUserId, isAdmin);
     })
   ), [remoteArticles, currentUserId, isAdmin]);
   const trashedRemoteArticles = useMemo(() => (
     remoteArticles.filter(article => {
       if (!getArticleTrashInfo(article, currentUserId)) return false;
-      if (isAdmin || !currentUserId) return true;
-      if (articleBelongsToProfile(article, currentUserId)) return true;
-      return !getN8nSettings(article).visibleToEmailsCsv;
+      return canProfileSeeTrashedArticle(article, currentUserId, isAdmin);
     })
   ), [remoteArticles, currentUserId, isAdmin]);
   const displayedRemoteArticles = useMemo(() => {
@@ -1722,6 +1779,22 @@ const Dashboard: React.FC = () => {
             <p className="mt-1 text-gray-500 dark:text-gray-400">{t.welcomeBack}, <span className="font-bold text-[#d4af37]">{currentUser}</span>!</p>
           </div>
            <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button
+                onClick={() => navigateToAppPath('/admin')}
+                className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
+              >
+                <Shield size={18} />
+                <span>الأدمن</span>
+              </button>
+            )}
+            <button
+              onClick={() => navigateToAppPath('/settings')}
+              className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
+            >
+              <Settings size={18} />
+              <span>{t.settings}</span>
+            </button>
             <button
               onClick={() => setIsNewArticleLanguageModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"

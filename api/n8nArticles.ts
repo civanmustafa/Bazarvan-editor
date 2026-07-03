@@ -26,6 +26,18 @@ type IngestResolution = {
   visibleToEmailsCsv: string;
 };
 
+type IngestDefaults = {
+  visibility: ArticleVisibility;
+  status: ArticleStatus;
+  accessRole: AccessRole;
+  publicEditorUrl: string;
+};
+
+type ArticleLinks = {
+  articleUrl: string;
+  adminUrl: string;
+};
+
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
 class IngestError extends Error {
@@ -83,6 +95,32 @@ const getHeaderValue = (req: any, headerName: string): string => {
 
   const directValue = req.headers?.[headerName.toLowerCase()] || req.headers?.[headerName];
   return Array.isArray(directValue) ? String(directValue[0] || '') : String(directValue || '');
+};
+
+const getPublicBaseUrl = (req: any): string => {
+  const configuredUrl = String(
+    process.env.EDITOR_PUBLIC_URL ||
+    process.env.PUBLIC_EDITOR_URL ||
+    process.env.APP_BASE_URL ||
+    ''
+  ).trim().replace(/\/+$/, '');
+  if (configuredUrl) return configuredUrl;
+
+  const host = getHeaderValue(req, 'x-forwarded-host') || getHeaderValue(req, 'host');
+  const protocol = getHeaderValue(req, 'x-forwarded-proto') || 'https';
+  return host ? `${protocol.split(',')[0].trim()}://${host.split(',')[0].trim()}` : '';
+};
+
+const buildAppUrl = (baseUrl: string, path: string): string => (
+  baseUrl ? `${baseUrl}${path}` : path
+);
+
+const buildArticleLinks = (baseUrl: string, articleId: string): ArticleLinks => {
+  const encodedArticleId = encodeURIComponent(articleId);
+  return {
+    articleUrl: buildAppUrl(baseUrl, `/editor/${encodedArticleId}`),
+    adminUrl: buildAppUrl(baseUrl, `/admin/articles/${encodedArticleId}`),
+  };
 };
 
 const getContentType = (req: any): string => getHeaderValue(req, 'content-type');
@@ -314,10 +352,10 @@ const normalizeLanguage = (value: unknown): 'ar' | 'en' => {
   return token === 'en' || token === 'english' || token === 'انجليزي' || token === 'إنجليزي' ? 'en' : 'ar';
 };
 
-const normalizeStatus = (value: unknown): ArticleStatus => {
+const normalizeStatus = (value: unknown, fallback: ArticleStatus = 'draft'): ArticleStatus => {
   const token = normalizeToken(value);
   if (STATUS_ALIASES[token]) return STATUS_ALIASES[token];
-  return ALLOWED_STATUSES.has(token as ArticleStatus) ? token as ArticleStatus : 'draft';
+  return ALLOWED_STATUSES.has(token as ArticleStatus) ? token as ArticleStatus : fallback;
 };
 
 const normalizeVisibility = (value: unknown): ArticleVisibility | null => {
@@ -325,9 +363,41 @@ const normalizeVisibility = (value: unknown): ArticleVisibility | null => {
   return ALLOWED_VISIBILITIES.has(token as ArticleVisibility) ? token as ArticleVisibility : null;
 };
 
-const normalizeAccessRole = (value: unknown): AccessRole => {
+const normalizeAccessRole = (value: unknown, fallback: AccessRole = 'viewer'): AccessRole => {
   const token = normalizeToken(value);
-  return ALLOWED_ACCESS_ROLES.has(token as AccessRole) ? token as AccessRole : 'viewer';
+  return ALLOWED_ACCESS_ROLES.has(token as AccessRole) ? token as AccessRole : fallback;
+};
+
+const readAppSetting = async (supabase: SupabaseAdmin, key: string): Promise<Record<string, any>> => {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', key)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === '42P01') return {};
+    throw error;
+  }
+
+  return isRecord(data?.value) ? data.value : {};
+};
+
+const normalizeBaseUrl = (value: unknown): string => toTrimmedString(value).replace(/\/+$/, '');
+
+const resolveIngestDefaults = async (supabase: SupabaseAdmin): Promise<IngestDefaults> => {
+  const [n8nSettings, articleSettings, systemSettings] = await Promise.all([
+    readAppSetting(supabase, 'n8n'),
+    readAppSetting(supabase, 'articles'),
+    readAppSetting(supabase, 'system'),
+  ]);
+
+  return {
+    visibility: normalizeVisibility(n8nSettings.defaultVisibility || articleSettings.defaultVisibility) || 'public',
+    status: normalizeStatus(n8nSettings.defaultStatus || articleSettings.defaultStatus, 'draft'),
+    accessRole: normalizeAccessRole(n8nSettings.defaultAccessRole, 'editor'),
+    publicEditorUrl: normalizeBaseUrl(systemSettings.publicEditorUrl),
+  };
 };
 
 const getKeywordsPayload = (body: Record<string, any>) => {
@@ -457,6 +527,7 @@ const resolveProfileBySingleIdentifier = async (
 const resolveIngestAccess = async (
   supabase: SupabaseAdmin,
   body: Record<string, any>,
+  defaults: IngestDefaults,
 ): Promise<IngestResolution> => {
   const rawVisibility = toTrimmedString(body.visibility);
   const explicitVisibility = normalizeVisibility(rawVisibility);
@@ -472,14 +543,14 @@ const resolveIngestAccess = async (
   if (ownerProfile) accessProfilesById.set(ownerProfile.id, ownerProfile);
   if (assignedProfile) accessProfilesById.set(assignedProfile.id, assignedProfile);
 
-  const visibility: ArticleVisibility = explicitVisibility || (accessProfilesById.size > 0 ? 'private' : 'public');
+  const visibility: ArticleVisibility = explicitVisibility || (accessProfilesById.size > 0 ? 'private' : defaults.visibility);
 
   return {
     visibility,
     ownerId: ownerProfile?.id || (visibility === 'private' ? selectedProfiles[0]?.id || null : null),
     assignedToId: assignedProfile?.id || null,
     accessProfiles: [...accessProfilesById.values()],
-    accessRole: normalizeAccessRole(body.accessRole || body.access_role),
+    accessRole: normalizeAccessRole(body.accessRole || body.access_role, defaults.accessRole),
     visibleToEmailsCsv: [...accessProfilesById.values()].map(profile => profile.email).filter(Boolean).join(', '),
   };
 };
@@ -547,7 +618,7 @@ const buildStats = (plainText: string, rawStats: unknown) => {
   };
 };
 
-const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string, any>) => {
+const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string, any>, defaults: IngestDefaults) => {
   const title = getFirstString(body, ['title', 'articleTitle', 'article_title', 'headline']);
   if (!title) throw new IngestError('Article title is required.', 400);
 
@@ -564,11 +635,11 @@ const buildArticlePayload = async (supabase: SupabaseAdmin, body: Record<string,
   const externalId = getFirstString(body, ['externalId', 'external_id', 'id']);
   const workflowId = getFirstString(body, ['workflowId', 'workflow_id']) || getFirstString(isRecord(body.metadata) ? body.metadata : {}, ['workflowId', 'workflow_id']);
   const executionId = getFirstString(body, ['executionId', 'execution_id']) || getFirstString(isRecord(body.metadata) ? body.metadata : {}, ['executionId', 'execution_id']);
-  const access = await resolveIngestAccess(supabase, body);
+  const access = await resolveIngestAccess(supabase, body, defaults);
   const pageContextRaw = toTrimmedString(body.pageContext || body.page_context);
   const contentJson = isRecord(body.contentJson) ? body.contentJson : isRecord(body.content_json) ? body.content_json : {};
   const articleLanguage = normalizeLanguage(body.articleLanguage || body.article_language || body.language);
-  const articleStatus = normalizeStatus(body.status);
+  const articleStatus = normalizeStatus(body.status, defaults.status);
   const competitors = normalizeCompetitorInputs(body);
 
   return {
@@ -645,10 +716,12 @@ const syncArticleAccess = async (supabase: SupabaseAdmin, articleId: string, acc
 
 const createIngestLog = async (
   supabase: SupabaseAdmin,
-  status: 'imported' | 'failed',
+  status: 'received' | 'imported' | 'failed',
   body: Record<string, any>,
   options: {
     articleId?: string | null;
+    articleUrl?: string;
+    adminUrl?: string;
     errorMessage?: string;
   } = {},
 ) => {
@@ -669,14 +742,21 @@ const createIngestLog = async (
         externalId,
         workflowId,
         executionId,
+        articleUrl: options.articleUrl,
+        adminUrl: options.adminUrl,
       }),
       error_message: options.errorMessage || null,
       processed_at: new Date().toISOString(),
     });
 };
 
-const saveIngestedArticle = async (supabase: SupabaseAdmin, body: Record<string, any>) => {
-  const { article, access, externalId } = await buildArticlePayload(supabase, body);
+const saveIngestedArticle = async (
+  supabase: SupabaseAdmin,
+  body: Record<string, any>,
+  defaults: IngestDefaults,
+  publicBaseUrl: string,
+) => {
+  const { article, access, externalId } = await buildArticlePayload(supabase, body, defaults);
   const savedAt = new Date().toISOString();
   const existingArticle = externalId
     ? await supabase
@@ -704,8 +784,9 @@ const saveIngestedArticle = async (supabase: SupabaseAdmin, body: Record<string,
 
     if (error) throw error;
     await syncArticleAccess(supabase, data.id, access);
-    await createIngestLog(supabase, 'imported', body, { articleId: data.id });
-    return { mode: 'updated' as const, article: data, access };
+    const links = buildArticleLinks(publicBaseUrl, data.id);
+    await createIngestLog(supabase, 'imported', body, { articleId: data.id, ...links });
+    return { mode: 'updated' as const, article: data, access, links };
   }
 
   const { data, error } = await supabase
@@ -721,8 +802,9 @@ const saveIngestedArticle = async (supabase: SupabaseAdmin, body: Record<string,
 
   if (error) throw error;
   await syncArticleAccess(supabase, data.id, access);
-  await createIngestLog(supabase, 'imported', body, { articleId: data.id });
-  return { mode: 'created' as const, article: data, access };
+  const links = buildArticleLinks(publicBaseUrl, data.id);
+  await createIngestLog(supabase, 'imported', body, { articleId: data.id, ...links });
+  return { mode: 'created' as const, article: data, access, links };
 };
 
 const handleN8nArticleRequest = async (req: any): Promise<ApiResult> => {
@@ -760,17 +842,25 @@ const handleN8nArticleRequest = async (req: any): Promise<ApiResult> => {
     body = parsedBody;
     supabase = getSupabaseAdmin();
     await createIngestLog(supabase, 'received', body);
-    const result = await saveIngestedArticle(supabase, body);
+    const defaults = await resolveIngestDefaults(supabase);
+    const publicBaseUrl = defaults.publicEditorUrl || getPublicBaseUrl(req);
+    const result = await saveIngestedArticle(supabase, body, defaults, publicBaseUrl);
 
     return {
       status: result.mode === 'created' ? 201 : 200,
       body: {
+        success: true,
         ok: true,
         status: result.mode,
+        mode: result.mode,
         articleId: result.article.id,
+        articleUrl: result.links.articleUrl,
+        adminUrl: result.links.adminUrl,
         title: result.article.title,
         visibility: result.article.visibility,
         articleStatus: result.article.status,
+        defaultVisibility: defaults.visibility,
+        defaultAccessRole: defaults.accessRole,
         visibleTo: result.access.accessProfiles.map(profile => compactObject({
           id: profile.id,
           email: profile.email,

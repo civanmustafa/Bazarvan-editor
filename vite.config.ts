@@ -5,6 +5,7 @@ import chatgptHandler from './api/chatgpt';
 import geminiHandler from './api/gemini';
 import n8nArticlesHandler from './api/n8nArticles';
 import assignedArticleAutomationHandler from './api/assignedArticleAutomation';
+import systemSettingsHandler from './api/systemSettings';
 
 type ApiHandler = (req: Request) => Promise<Response | void>;
 
@@ -14,6 +15,7 @@ const apiHandlers = new Map<string, ApiHandler>([
   ['/api/gemini', geminiHandler],
   ['/api/n8n/articles', n8nArticlesHandler],
   ['/api/articles/assigned-automation', assignedArticleAutomationHandler],
+  ['/api/system/settings', systemSettingsHandler],
 ]);
 
 const readRequestBody = (req: any): Promise<Buffer> => new Promise((resolve, reject) => {
@@ -54,7 +56,7 @@ const sendWebResponse = async (res: any, response: Response) => {
 
 export default defineConfig(({ mode }) => {
       const env = loadEnv(mode, process.cwd(), '');
-      ['GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY', 'GEMINI_PAID_API_KEYS', 'GEMINI_PAID_API_KEY', 'GEMINI_PRO_API_KEYS', 'GEMINI_PRO_API_KEY', 'GEMINI_MODEL', 'GEMINI_PAID_MODEL', 'GEMINI_ALLOWED_MODELS', 'OPENAI_API_KEY', 'OPENAI_API_KEYS', 'N8N_INGEST_TOKEN', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_URL', 'VITE_SUPABASE_URL'].forEach((key) => {
+      ['GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY', 'GEMINI_PAID_API_KEYS', 'GEMINI_PAID_API_KEY', 'GEMINI_PRO_API_KEYS', 'GEMINI_PRO_API_KEY', 'GEMINI_MODEL', 'GEMINI_PAID_MODEL', 'GEMINI_ALLOWED_MODELS', 'OPENAI_API_KEY', 'OPENAI_API_KEYS', 'OPENAI_MODEL', 'N8N_INGEST_TOKEN', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_URL', 'VITE_SUPABASE_URL', 'EDITOR_PUBLIC_URL', 'PUBLIC_EDITOR_URL', 'APP_BASE_URL'].forEach((key) => {
         if (!process.env[key] && env[key]) {
           process.env[key] = env[key];
         }

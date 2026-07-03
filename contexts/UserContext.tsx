@@ -8,6 +8,8 @@ import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalConte
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import { updateCurrentProfileLastSeen } from '../utils/supabaseArticles';
+import { APP_NAVIGATION_EVENT, getRouteView, navigateToAppPath, parseAppRoute } from '../utils/appRoutes';
+import { endAppSession, ensureAppSession, recordAppActivity, recordPathActivityIfChanged } from '../utils/appActivity';
 
 /*
  * UserContext is the owner of session-level app state:
@@ -20,6 +22,7 @@ import { updateCurrentProfileLastSeen } from '../utils/supabaseArticles';
 type ApiKeys = { gemini: string[]; geminiPaid: string[]; chatgpt: string[] };
 type StoredApiKeys = { gemini?: string | string[]; geminiPaid?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
 type UserRole = 'admin' | 'user';
+type AppView = 'login' | 'dashboard' | 'editor' | 'admin' | 'settings' | 'notFound';
 type Profile = {
     id: string;
     email: string | null;
@@ -31,7 +34,7 @@ interface UserContextType {
     currentUser: string | null;
     currentUserId: string | null;
     currentUserRole: UserRole;
-    currentView: 'login' | 'dashboard' | 'editor';
+    currentView: AppView;
     isAuthLoading: boolean;
     isDarkMode: boolean;
     setIsDarkMode: React.Dispatch<React.SetStateAction<boolean>>;
@@ -48,7 +51,7 @@ interface UserContextType {
     isIdle: boolean;
     handleLogin: (username: string, password: string) => Promise<boolean>;
     handleLogout: () => Promise<void>;
-    setCurrentView: React.Dispatch<React.SetStateAction<'login' | 'dashboard' | 'editor'>>;
+    setCurrentView: React.Dispatch<React.SetStateAction<AppView>>;
     handleHighlightStyleChange: (style: 'background' | 'underline') => void;
     handleChatGptOpenModeChange: (mode: ChatGptOpenMode) => void;
     handleKeywordViewModeChange: (mode: 'classic' | 'modern') => void;
@@ -79,13 +82,36 @@ const getStoredSessionUser = (): string | null => {
     }
 };
 
-const getStoredSessionView = (): 'dashboard' | 'editor' => {
+const getStoredSessionView = (): Exclude<AppView, 'login'> => {
     try {
         const savedView = sessionStorage.getItem('currentView');
-        return savedView === 'editor' || savedView === 'dashboard' ? savedView : 'dashboard';
+        return savedView === 'editor' ||
+            savedView === 'dashboard' ||
+            savedView === 'admin' ||
+            savedView === 'settings' ||
+            savedView === 'notFound'
+            ? savedView
+            : 'dashboard';
     } catch (error) {
         console.error("Could not read current view from sessionStorage:", error);
         return 'dashboard';
+    }
+};
+
+const getViewPath = (view: AppView): string | null => {
+    switch (view) {
+        case 'dashboard':
+            return '/dashboard';
+        case 'editor':
+            return '/editor';
+        case 'admin':
+            return '/admin';
+        case 'settings':
+            return '/settings';
+        case 'notFound':
+        case 'login':
+        default:
+            return null;
     }
 };
 
@@ -171,7 +197,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [currentUser, setCurrentUser] = useState<string | null>(null);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [currentUserRole, setCurrentUserRole] = useState<UserRole>('user');
-    const [currentView, setCurrentView] = useState<'login' | 'dashboard' | 'editor'>('login');
+    const [currentView, setCurrentViewState] = useState<AppView>('login');
     const [isAuthLoading, setIsAuthLoading] = useState(true);
     const [isDarkMode, setIsDarkMode] = useState(getInitialTheme);
     const [highlightStyle, setHighlightStyle] = useState<'background' | 'underline'>('background');
@@ -188,6 +214,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const idleTimerRef = useRef<number | null>(null);
     const hiddenTimerRef = useRef<number | null>(null);
     const isIdleRef = useRef(false);
+    const currentViewRef = useRef<AppView>('login');
+    const sessionUserIdRef = useRef<string | null>(null);
 
     const t = translations[uiLanguage] || translations.ar;
 
@@ -209,7 +237,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             } catch (error) {
                 console.error("Could not clear Supabase session mirror:", error);
             }
-            setCurrentView('login');
+            setCurrentViewState('login');
             return null;
         }
 
@@ -221,16 +249,44 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             sessionStorage.setItem('currentUser', label);
             sessionStorage.setItem('currentUserId', user.id);
-            sessionStorage.setItem('currentView', getStoredSessionView());
+            sessionStorage.setItem('currentView', getRouteView(parseAppRoute()));
         } catch (error) {
             console.error("Could not mirror Supabase session to sessionStorage:", error);
         }
         if (options.recordLoginActivity) {
             recordLogin(label);
         }
-        setCurrentView(getStoredSessionView());
+        setCurrentViewState(getRouteView(parseAppRoute()));
         return label;
     }, []);
+
+    useEffect(() => {
+        currentViewRef.current = currentView;
+    }, [currentView]);
+
+    const setCurrentView = useCallback<React.Dispatch<React.SetStateAction<AppView>>>((value) => {
+        const nextView = typeof value === 'function'
+            ? value(currentViewRef.current)
+            : value;
+        const nextPath = getViewPath(nextView);
+        if (nextPath) {
+            navigateToAppPath(nextPath);
+        }
+        setCurrentViewState(nextView);
+    }, []);
+
+    useEffect(() => {
+        const syncViewFromRoute = () => {
+            setCurrentViewState(currentUser ? getRouteView(parseAppRoute()) : 'login');
+        };
+
+        window.addEventListener('popstate', syncViewFromRoute);
+        window.addEventListener(APP_NAVIGATION_EVENT, syncViewFromRoute);
+        return () => {
+            window.removeEventListener('popstate', syncViewFromRoute);
+            window.removeEventListener(APP_NAVIGATION_EVENT, syncViewFromRoute);
+        };
+    }, [currentUser]);
 
     useEffect(() => {
         if (!isSupabaseConfigured) {
@@ -434,6 +490,45 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return () => window.clearInterval(intervalId);
     }, [currentUserId]);
 
+    useEffect(() => {
+        if (!currentUserId || !isSupabaseConfigured) {
+            sessionUserIdRef.current = null;
+            return;
+        }
+
+        if (sessionUserIdRef.current === currentUserId) return;
+        sessionUserIdRef.current = currentUserId;
+
+        void ensureAppSession(currentUserId)
+            .then(() => recordAppActivity(currentUserId, {
+                eventType: 'session_start',
+                path: window.location.pathname,
+            }))
+            .catch(error => {
+                console.error('Failed to start tracked app session:', error);
+            });
+    }, [currentUserId]);
+
+    useEffect(() => {
+        if (!currentUserId || !isSupabaseConfigured) return;
+
+        const recordRoute = () => {
+            void ensureAppSession(currentUserId)
+                .then(() => recordPathActivityIfChanged(currentUserId, window.location.pathname))
+                .catch(error => {
+                    console.error('Failed to record route activity:', error);
+                });
+        };
+
+        recordRoute();
+        window.addEventListener('popstate', recordRoute);
+        window.addEventListener(APP_NAVIGATION_EVENT, recordRoute);
+        return () => {
+            window.removeEventListener('popstate', recordRoute);
+            window.removeEventListener(APP_NAVIGATION_EVENT, recordRoute);
+        };
+    }, [currentUserId]);
+
     // Load all saved preferences whenever a user logs in or changes.
     useEffect(() => {
         if (currentUser) {
@@ -478,11 +573,20 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         await applyAuthenticatedUser(data.user, { recordLoginActivity: true });
-        setCurrentView('dashboard');
         return true;
     }, [applyAuthenticatedUser]);
 
     const handleLogout = useCallback(async () => {
+        const userIdForActivity = currentUserId;
+        if (userIdForActivity) {
+            await recordAppActivity(userIdForActivity, {
+                eventType: 'logout',
+                path: window.location.pathname,
+            }).catch(error => {
+                console.error('Failed to record logout activity:', error);
+            });
+        }
+        await endAppSession();
         if (isSupabaseConfigured) {
             const { error } = await getSupabaseClient().auth.signOut();
             if (error) {
@@ -490,7 +594,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         }
         await applyAuthenticatedUser(null);
-    }, [applyAuthenticatedUser]);
+    }, [applyAuthenticatedUser, currentUserId]);
     
     const handleHighlightStyleChange = (style: 'background' | 'underline') => {
         setHighlightStyle(style);

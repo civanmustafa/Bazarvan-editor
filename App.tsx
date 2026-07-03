@@ -1,5 +1,5 @@
 ﻿
-import React, { Component } from 'react';
+import React, { Component, useEffect, useState } from 'react';
 import { EditorContent } from '@tiptap/react';
 import { ArrowUp, Sparkles } from 'lucide-react';
 
@@ -16,8 +16,12 @@ import SelectionToolbar from './components/SelectionToolbar';
 import TipsCarousel from './components/TipsCarousel';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
+import AdminApp from './components/AdminApp';
+import SettingsPage from './components/SettingsPage';
 import ModalManager from './components/ModalManager';
 import SpotlightSearch from './components/SpotlightSearch';
+import { APP_NAVIGATION_EVENT, navigateToAppPath, parseAppRoute, type AppRoute } from './utils/appRoutes';
+import { getRemoteArticleById } from './utils/supabaseArticles';
 import {
     AUTO_DRAFT_GOAL_CONTEXT_KEY,
     AUTO_DRAFT_KEY,
@@ -294,9 +298,120 @@ const EditorView: React.FC = () => {
     );
 };
 
+const useAppRoute = (): AppRoute => {
+    const [route, setRoute] = useState<AppRoute>(() => parseAppRoute());
+
+    useEffect(() => {
+        const syncRoute = () => setRoute(parseAppRoute());
+        window.addEventListener('popstate', syncRoute);
+        window.addEventListener(APP_NAVIGATION_EVENT, syncRoute);
+        return () => {
+            window.removeEventListener('popstate', syncRoute);
+            window.removeEventListener(APP_NAVIGATION_EVENT, syncRoute);
+        };
+    }, []);
+
+    return route;
+};
+
+const RouteMessage: React.FC<{
+    title: string;
+    body?: string;
+    actionLabel?: string;
+    onAction?: () => void;
+}> = ({ title, body, actionLabel, onAction }) => {
+    const { isDarkMode } = useUser();
+
+    return (
+        <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'dark' : ''} bg-[#FAFAFA] p-4 dark:bg-[#181818]`}>
+            <div className="w-full max-w-lg rounded-lg border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                <h1 className="text-2xl font-black text-gray-900 dark:text-gray-100">{title}</h1>
+                {body && <p className="mt-3 text-sm font-semibold leading-7 text-gray-500 dark:text-gray-300">{body}</p>}
+                {actionLabel && onAction && (
+                    <button
+                        type="button"
+                        onClick={onAction}
+                        className="mt-5 rounded-md bg-[#d4af37] px-4 py-2 text-sm font-bold text-white hover:bg-[#b8922e]"
+                    >
+                        {actionLabel}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const EditorRoute: React.FC<{ articleId: string | null }> = ({ articleId }) => {
+    const { currentUser } = useUser();
+    const { editor, activeArticleId, handleLoadArticle } = useEditor();
+    const [loadingArticleId, setLoadingArticleId] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState('');
+
+    useEffect(() => {
+        if (!articleId || !editor || !currentUser) {
+            setLoadError('');
+            setLoadingArticleId(null);
+            return;
+        }
+        if (activeArticleId === articleId) {
+            setLoadError('');
+            setLoadingArticleId(null);
+            return;
+        }
+
+        let cancelled = false;
+        setLoadError('');
+        setLoadingArticleId(articleId);
+
+        const loadArticle = async () => {
+            try {
+                const article = await getRemoteArticleById(articleId);
+                if (cancelled) return;
+                await handleLoadArticle(article.title, article);
+            } catch (error) {
+                console.error(`Failed to open routed article "${articleId}":`, error);
+                if (!cancelled) {
+                    setLoadError('لا يمكن فتح هذه المقالة. قد يكون الرابط غير صحيح أو لا تملك صلاحية الوصول.');
+                }
+            } finally {
+                if (!cancelled) {
+                    setLoadingArticleId(null);
+                }
+            }
+        };
+
+        void loadArticle();
+        return () => {
+            cancelled = true;
+        };
+    }, [activeArticleId, articleId, currentUser, editor, handleLoadArticle]);
+
+    if (loadError) {
+        return (
+            <RouteMessage
+                title="تعذر فتح المقالة"
+                body={loadError}
+                actionLabel="العودة للوحة التحكم"
+                onAction={() => navigateToAppPath('/dashboard')}
+            />
+        );
+    }
+
+    return (
+        <>
+            <EditorView />
+            {loadingArticleId && (
+                <div className="fixed left-1/2 top-4 z-[10000] -translate-x-1/2 rounded-md border border-[#d4af37]/30 bg-white px-4 py-2 text-sm font-bold text-[#8a6f1d] shadow-lg dark:bg-[#2A2A2A] dark:text-[#f2d675]">
+                    جار تحميل المقالة من Supabase...
+                </div>
+            )}
+        </>
+    );
+};
 
 const AppContent: React.FC = () => {
     const { currentView, isAuthLoading, isDarkMode } = useUser();
+    const route = useAppRoute();
     
     // Keep route-like screen switching centralized here.
     const renderView = () => {
@@ -313,8 +428,31 @@ const AppContent: React.FC = () => {
         if (currentView === 'login') {
             return <Login />;
         }
+
+        if (route.name === 'notFound') {
+            return (
+                <RouteMessage
+                    title="الصفحة غير موجودة"
+                    body="الرابط المطلوب غير مسجل داخل التطبيق."
+                    actionLabel="فتح لوحة التحكم"
+                    onAction={() => navigateToAppPath('/dashboard')}
+                />
+            );
+        }
+
+        if (route.name === 'admin') {
+            return <AdminApp section={route.section} id={route.id} date={route.date} />;
+        }
+
+        if (route.name === 'settings') {
+            return <SettingsPage section={route.section} />;
+        }
+
+        if (route.name === 'editor') {
+            return <EditorRoute articleId={route.articleId} />;
+        }
         
-        if (currentView === 'dashboard') {
+        if (route.name === 'dashboard' || currentView === 'dashboard') {
             return <Dashboard />;
         }
         
