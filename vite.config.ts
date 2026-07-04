@@ -6,6 +6,7 @@ import geminiHandler from './api/gemini';
 import n8nArticlesHandler from './api/n8nArticles';
 import assignedArticleAutomationHandler from './api/assignedArticleAutomation';
 import systemSettingsHandler from './api/systemSettings';
+import adminUsersHandler from './api/adminUsers';
 
 type ApiHandler = (req: Request) => Promise<Response | void>;
 
@@ -16,6 +17,7 @@ const apiHandlers = new Map<string, ApiHandler>([
   ['/api/n8n/articles', n8nArticlesHandler],
   ['/api/articles/assigned-automation', assignedArticleAutomationHandler],
   ['/api/system/settings', systemSettingsHandler],
+  ['/api/admin/users', adminUsersHandler],
 ]);
 
 const readRequestBody = (req: any): Promise<Buffer> => new Promise((resolve, reject) => {

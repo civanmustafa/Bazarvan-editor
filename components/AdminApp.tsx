@@ -16,6 +16,7 @@ import {
   Shield,
   Trash2,
   Users,
+  UserPlus,
   Workflow,
   X,
 } from 'lucide-react';
@@ -49,6 +50,7 @@ import {
   navigateToAppPath,
   type AdminRouteSection,
 } from '../utils/appRoutes';
+import { createRemoteAdminUser, type CreateAdminUserInput } from '../utils/adminUsers';
 import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
 
 type AdminAppProps = {
@@ -79,6 +81,10 @@ type AdminArticleFilters = {
   dateTo: string;
 };
 
+type CreateUserFormState = CreateAdminUserInput & {
+  confirmPassword: string;
+};
+
 const EMPTY_ADMIN_ARTICLE_FILTERS: AdminArticleFilters = {
   profileId: 'all',
   status: 'all',
@@ -87,6 +93,15 @@ const EMPTY_ADMIN_ARTICLE_FILTERS: AdminArticleFilters = {
   company: 'all',
   dateFrom: '',
   dateTo: '',
+};
+
+const EMPTY_CREATE_USER_FORM: CreateUserFormState = {
+  email: '',
+  password: '',
+  confirmPassword: '',
+  fullName: '',
+  role: 'user',
+  isActive: true,
 };
 
 const formatSeconds = (seconds: number, t: typeof translations.ar): string => {
@@ -844,6 +859,10 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [articleFilters, setArticleFilters] = useState<AdminArticleFilters>(EMPTY_ADMIN_ARTICLE_FILTERS);
+  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
+  const [createUserForm, setCreateUserForm] = useState<CreateUserFormState>(EMPTY_CREATE_USER_FORM);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [createUserError, setCreateUserError] = useState('');
 
   const isAdmin = currentUserRole === 'admin';
 
@@ -1069,6 +1088,61 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     setQuery('');
   };
 
+  const updateCreateUserForm = (field: keyof CreateUserFormState, value: string | boolean) => {
+    setCreateUserForm(prev => ({ ...prev, [field]: value }));
+    setCreateUserError('');
+  };
+
+  const closeCreateUserForm = () => {
+    if (isCreatingUser) return;
+    setIsCreateUserOpen(false);
+    setCreateUserForm(EMPTY_CREATE_USER_FORM);
+    setCreateUserError('');
+  };
+
+  const handleCreateUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (isCreatingUser) return;
+
+    const email = createUserForm.email.trim().toLowerCase();
+    const fullName = createUserForm.fullName.trim();
+    const password = createUserForm.password.trim();
+    const confirmPassword = createUserForm.confirmPassword.trim();
+
+    if (!email || !password) {
+      setCreateUserError('البريد الإلكتروني وكلمة المرور مطلوبان.');
+      return;
+    }
+    if (password.length < 8) {
+      setCreateUserError('كلمة المرور المؤقتة يجب أن تكون 8 أحرف على الأقل.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setCreateUserError('كلمة المرور وتأكيدها غير متطابقين.');
+      return;
+    }
+
+    setIsCreatingUser(true);
+    setCreateUserError('');
+    try {
+      await createRemoteAdminUser({
+        email,
+        fullName,
+        password,
+        role: createUserForm.role,
+        isActive: createUserForm.isActive,
+      });
+      setIsCreateUserOpen(false);
+      setCreateUserForm(EMPTY_CREATE_USER_FORM);
+      await refreshData();
+    } catch (createError) {
+      console.error('Failed to create admin user:', createError);
+      setCreateUserError(createError instanceof Error ? createError.message : 'تعذر إنشاء المستخدم.');
+    } finally {
+      setIsCreatingUser(false);
+    }
+  };
+
   const totalTime = activeArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
   const selectedReportDate = date || getIstanbulDateKey();
 
@@ -1149,8 +1223,118 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
 
     if (section === 'users') {
       return (
-        <section>
-          <SectionTitle>المستخدمون</SectionTitle>
+        <section className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <SectionTitle>المستخدمون</SectionTitle>
+            <button
+              type="button"
+              onClick={() => setIsCreateUserOpen(prev => !prev)}
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-[#d4af37] px-3 py-2 text-sm font-bold text-white hover:bg-[#b8922e]"
+            >
+              {isCreateUserOpen ? <X size={16} /> : <UserPlus size={16} />}
+              <span>{isCreateUserOpen ? 'إغلاق النموذج' : 'إنشاء مستخدم'}</span>
+            </button>
+          </div>
+
+          {isCreateUserOpen && (
+            <form
+              onSubmit={handleCreateUser}
+              className="rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]"
+            >
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <label className="space-y-1">
+                  <span className="text-xs font-black text-gray-500 dark:text-gray-400">الاسم</span>
+                  <input
+                    type="text"
+                    value={createUserForm.fullName}
+                    onChange={event => updateCreateUserForm('fullName', event.target.value)}
+                    className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+                    placeholder="اسم المستخدم"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-black text-gray-500 dark:text-gray-400">البريد الإلكتروني</span>
+                  <input
+                    type="email"
+                    value={createUserForm.email}
+                    onChange={event => updateCreateUserForm('email', event.target.value)}
+                    className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+                    placeholder="user@example.com"
+                    dir="ltr"
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-black text-gray-500 dark:text-gray-400">الدور</span>
+                  <select
+                    value={createUserForm.role}
+                    onChange={event => updateCreateUserForm('role', event.target.value as CreateUserFormState['role'])}
+                    className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+                  >
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-black text-gray-500 dark:text-gray-400">كلمة مرور مؤقتة</span>
+                  <input
+                    type="password"
+                    value={createUserForm.password}
+                    onChange={event => updateCreateUserForm('password', event.target.value)}
+                    className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+                    minLength={8}
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-black text-gray-500 dark:text-gray-400">تأكيد كلمة المرور</span>
+                  <input
+                    type="password"
+                    value={createUserForm.confirmPassword}
+                    onChange={event => updateCreateUserForm('confirmPassword', event.target.value)}
+                    className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+                    minLength={8}
+                    required
+                  />
+                </label>
+                <label className="flex items-center gap-2 self-end rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+                  <input
+                    type="checkbox"
+                    checked={createUserForm.isActive}
+                    onChange={event => updateCreateUserForm('isActive', event.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-[#d4af37] focus:ring-[#d4af37]"
+                  />
+                  <span>مستخدم فعال</span>
+                </label>
+              </div>
+
+              {createUserError && (
+                <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-2 text-sm font-bold text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-200">
+                  {createUserError}
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeCreateUserForm}
+                  disabled={isCreatingUser}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingUser}
+                  className="inline-flex items-center gap-2 rounded-md bg-[#d4af37] px-3 py-2 text-sm font-bold text-white hover:bg-[#b8922e] disabled:opacity-60"
+                >
+                  <UserPlus size={16} />
+                  <span>{isCreatingUser ? 'جار الإنشاء...' : 'إنشاء المستخدم'}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
           <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
             <table className="w-full min-w-[900px] text-start text-sm">
               <thead className="text-xs uppercase text-gray-400">
