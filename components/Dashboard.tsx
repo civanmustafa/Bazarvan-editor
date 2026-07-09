@@ -1,12 +1,10 @@
 ﻿
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, PaintRoller, Baseline, LayoutGrid, ListTree, List, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy } from 'lucide-react';
-import { getActivityData, UserActivity, ArticleActivity } from '../hooks/useUserActivity';
+import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy } from 'lucide-react';
+import { ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
-import ClientGoalSettings from './ClientGoalSettings';
-import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
 import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
 import {
@@ -42,10 +40,6 @@ const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
  * Edit here for dashboard layout or article list actions.
  * Edit hooks/useUserActivity.ts for the saved data shape and persistence behavior.
  */
-type ActivityData = {
-  [username: string]: UserActivity;
-};
-
 const formatSeconds = (seconds: number, t: typeof translations.ar): string => {
   if (!seconds || seconds < 60) return `${Math.floor(seconds || 0)} ${t.secondsAbbr}`;
   const h = Math.floor(seconds / 3600);
@@ -85,20 +79,6 @@ const getLatestSavedAt = (articles: RemoteArticleActivity[]): string => (
     .map(article => article.lastSaved)
     .filter(Boolean)
     .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] || ''
-);
-
-const getProfileKeywords = (articles: RemoteArticleActivity[]): string[] => {
-  const keywords = new Set<string>();
-  articles.forEach(article => {
-    const title = article.title?.trim();
-    if (title) keywords.add(title);
-  });
-  return Array.from(keywords).slice(0, 4);
-};
-
-const ONLINE_WINDOW_MS = 10 * 60 * 1000;
-const isProfileOnline = (profile: RemoteProfile): boolean => (
-  Boolean(profile.lastSeenAt && Date.now() - new Date(profile.lastSeenAt).getTime() <= ONLINE_WINDOW_MS)
 );
 
 const getArticleSortTime = (article: RemoteArticleActivity): number => Math.max(
@@ -350,101 +330,6 @@ const EditableN8nTextField: React.FC<{
   );
 };
 
-const AdminUsersTable: React.FC<{
-  profiles: RemoteProfile[];
-  articles: RemoteArticleActivity[];
-  selectedProfileId: string | null;
-  onSelectProfile: (profileId: string | null) => void;
-  t: typeof translations.ar;
-}> = ({ profiles, articles, selectedProfileId, onSelectProfile, t }) => {
-  const allArticlesLastSaved = getLatestSavedAt(articles);
-  const allProfilesOnlineCount = profiles.filter(isProfileOnline).length;
-
-  return (
-    <div className="mb-8 rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-100">
-          <Users size={20} />
-          <span>جدول المستخدمين</span>
-        </h2>
-        <button
-          onClick={() => onSelectProfile(null)}
-          className={`rounded-md px-3 py-1.5 text-xs font-bold ${selectedProfileId === null ? 'bg-[#d4af37] text-white' : 'bg-gray-100 text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-300'}`}
-        >
-          كل المستخدمين
-        </button>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] text-start text-sm">
-          <thead className="text-xs uppercase text-gray-400">
-            <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
-              <th className="px-3 py-2 text-start">المستخدم</th>
-              <th className="px-3 py-2 text-start">الحالة</th>
-              <th className="px-3 py-2 text-start">الدور</th>
-              <th className="px-3 py-2 text-start">عدد المقالات</th>
-              <th className="px-3 py-2 text-start">آخر عمل</th>
-              <th className="px-3 py-2 text-start">الوقت</th>
-              <th className="px-3 py-2 text-start">العناوين</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              className={`cursor-pointer border-b border-gray-100 transition-colors hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:hover:bg-[#d4af37]/15 ${selectedProfileId === null ? 'bg-[#d4af37]/10' : ''}`}
-              onClick={() => onSelectProfile(null)}
-            >
-              <td className="px-3 py-3 font-black text-gray-700 dark:text-gray-100">كل المستخدمين</td>
-              <td className="px-3 py-3">
-                <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-black text-green-700 dark:bg-green-500/15 dark:text-green-300">
-                  {allProfilesOnlineCount} أونلاين
-                </span>
-              </td>
-              <td className="px-3 py-3 text-gray-500">admin view</td>
-              <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{articles.length}</td>
-              <td className="px-3 py-3 text-gray-500">{allArticlesLastSaved ? formatIstanbulDateTime(allArticlesLastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-              <td className="px-3 py-3 text-gray-500">{formatSeconds(articles.reduce((sum, article) => sum + article.timeSpentSeconds, 0), t)}</td>
-              <td className="px-3 py-3 text-gray-500">{getProfileKeywords(articles).join('، ') || '-'}</td>
-            </tr>
-            {profiles.map(profile => {
-              const profileArticles = articles.filter(article => articleBelongsToProfile(article, profile.id));
-              const lastSaved = getLatestSavedAt(profileArticles);
-              const isSelected = selectedProfileId === profile.id;
-              const online = isProfileOnline(profile);
-              const lastWorkAt = profile.lastSeenAt || lastSaved;
-
-              return (
-                <tr
-                  key={profile.id}
-                  className={`cursor-pointer border-b border-gray-100 transition-colors hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:hover:bg-[#d4af37]/15 ${isSelected ? 'bg-[#d4af37]/10' : ''}`}
-                  onClick={() => onSelectProfile(profile.id)}
-                >
-                  <td className="px-3 py-3">
-                    <div className="font-black text-gray-700 dark:text-gray-100">{getProfileLabel(profile)}</div>
-                    <div className="text-xs text-gray-400">{profile.email}</div>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span className={`rounded-full px-2 py-1 text-xs font-black ${online ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-300'}`}>
-                      {online ? 'أونلاين' : 'غير متصل'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span className={`rounded-full px-2 py-1 text-xs font-black ${profile.role === 'admin' ? 'bg-[#d4af37]/15 text-[#8a6f1d] dark:text-[#f2d675]' : 'bg-gray-100 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-300'}`}>
-                      {profile.role}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{profileArticles.length}</td>
-                  <td className="px-3 py-3 text-gray-500">{lastWorkAt ? formatIstanbulDateTime(lastWorkAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-                  <td className="px-3 py-3 text-gray-500">{formatSeconds(profileArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0), t)}</td>
-                  <td className="px-3 py-3 text-gray-500">{getProfileKeywords(profileArticles).join('، ') || '-'}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
 const getN8nLogTitle = (log: RemoteN8nIngestLog): string => {
   const payload = log.payload && typeof log.payload === 'object' && !Array.isArray(log.payload) ? log.payload : {};
   return String(payload.title || payload.articleTitle || payload.article_title || payload.headline || log.externalId || '-');
@@ -683,23 +568,6 @@ const ArticleDetailsModal: React.FC<{
       </div>
     </div>
   );
-};
-
-const createApiKeyFingerprint = (key: string): string => {
-  const normalizedKey = key.trim();
-  let hash = 2166136261;
-  for (let index = 0; index < normalizedKey.length; index += 1) {
-    hash ^= normalizedKey.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-};
-
-const maskApiKey = (key: string): string => {
-  const trimmedKey = key.trim();
-  if (!trimmedKey) return '';
-  const tail = trimmedKey.slice(-4);
-  return `**** ${tail}`;
 };
 
 const SeoScoreIndicator: React.FC<{ score: number }> = ({ score }) => {
@@ -1119,29 +987,16 @@ const Dashboard: React.FC = () => {
     currentUserRole,
     handleLogout: onLogout,
     isDarkMode,
-    highlightStyle: preferredHighlightStyle,
-    handleHighlightStyleChange: onHighlightStyleChange,
-    chatGptOpenMode,
-    handleChatGptOpenModeChange: onChatGptOpenModeChange,
-    keywordViewMode: preferredKeywordViewMode,
-    handleKeywordViewModeChange: onKeywordViewModeChange,
-    structureViewMode: preferredStructureViewMode,
-    handleStructureViewModeChange: onStructureViewModeChange,
-    preferredLanguage,
-    handlePreferredLanguageChange: onPreferredLanguageChange,
     uiLanguage,
-    handleUiLanguageChange: onUiLanguageChange,
     t,
   } = useUser();
   const { handleNewArticle: onNewArticle, handleLoadArticle: onLoadArticle } = useEditor();
 
   const onGoToEditor = () => setCurrentView('editor');
   
-  const [activityData, setActivityData] = useState<ActivityData>(getActivityData());
   const [remoteArticles, setRemoteArticles] = useState<RemoteArticleActivity[]>([]);
   const [n8nLogs, setN8nLogs] = useState<RemoteN8nIngestLog[]>([]);
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [detailArticle, setDetailArticle] = useState<RemoteArticleActivity | null>(null);
   const [detailSnapshot, setDetailSnapshot] = useState<ArticleStorageSnapshot | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
@@ -1177,14 +1032,9 @@ const Dashboard: React.FC = () => {
     audienceScope: 'all',
   });
 
-  const refreshLocalActivityData = () => {
-    setActivityData(getActivityData());
-  };
-
   const isAdmin = currentUserRole === 'admin';
 
   const refreshData = async () => {
-    refreshLocalActivityData();
     if (!currentUser) return;
     setIsArticlesLoading(true);
     if (isAdmin) setIsN8nLogsLoading(true);
@@ -1441,7 +1291,6 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     if (!isAdmin) {
-      setSelectedProfileId(null);
       setProfiles([]);
       setDashboardMode('all');
       setN8nLogs([]);
@@ -1450,17 +1299,15 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     clearSelectedArticles();
-  }, [isTrashVisible, dashboardMode, selectedProfileId, searchQuery, filters, articlesPage]);
+  }, [isTrashVisible, dashboardMode, searchQuery, filters, articlesPage]);
 
   useEffect(() => {
     setArticlesPage(1);
-  }, [isTrashVisible, dashboardMode, selectedProfileId, searchQuery, filters]);
+  }, [isTrashVisible, dashboardMode, searchQuery, filters]);
 
   const handleExportHtml = () => {
     if (!currentUser) return;
-    const exportArticles = selectedProfileId
-      ? activeRemoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
-      : activeRemoteArticles;
+    const exportArticles = activeRemoteArticles;
 
     const formatSecondsDetailed = (seconds: number): string => {
       if (!seconds || seconds < 60) return `${Math.floor(seconds || 0)} ${t.seconds}`;
@@ -1603,45 +1450,6 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  const currentUserData = currentUser ? activityData[currentUser] : undefined;
-  const geminiUsageRows = useMemo(() => {
-    const usage = currentUserData?.geminiKeyUsage || {};
-    const geminiKeys = [
-      ...(currentUserData?.apiKeys?.gemini || []).filter(key => key.trim()).map(key => ({ key, provider: 'gemini' as const })),
-      ...(currentUserData?.apiKeys?.geminiPaid || []).filter(key => key.trim()).map(key => ({ key, provider: 'geminiPaid' as const })),
-    ];
-    const currentRows = geminiKeys.map((item, index) => {
-      const fingerprint = createApiKeyFingerprint(item.key);
-      const record = usage[fingerprint];
-      return {
-        id: fingerprint,
-        label: `${item.provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini'} #${index + 1}`,
-        keyPreview: maskApiKey(item.key),
-        provider: record?.provider || item.provider,
-        model: record?.model || '',
-        count: record?.count || 0,
-        lastUsed: record?.lastUsed || '',
-        isSavedKey: true,
-      };
-    });
-    const currentFingerprints = new Set(currentRows.map(row => row.id));
-    const archivedRows = Object.entries(usage)
-      .filter(([fingerprint, record]) => !currentFingerprints.has(fingerprint) && (record?.count || 0) > 0)
-      .map(([fingerprint, record], index) => ({
-        id: fingerprint,
-        label: `${t.unsavedGeminiKey} #${index + 1}`,
-        keyPreview: fingerprint,
-        provider: record.provider || 'gemini',
-        model: record.model || '',
-        count: record.count,
-        lastUsed: record.lastUsed,
-        isSavedKey: false,
-      }));
-
-    return [...currentRows, ...archivedRows];
-  }, [currentUserData, t.unsavedGeminiKey]);
-  const totalGeminiUses = geminiUsageRows.reduce((sum, row) => sum + row.count, 0);
-  const selectedProfile = selectedProfileId ? profiles.find(profile => profile.id === selectedProfileId) : undefined;
   const activeRemoteArticles = useMemo(() => (
     remoteArticles.filter(article => {
       if (getArticleTrashInfo(article, currentUserId)) return false;
@@ -1660,11 +1468,10 @@ const Dashboard: React.FC = () => {
       ? baseArticles.filter(article => article.source === 'n8n')
       : baseArticles;
   }, [activeRemoteArticles, trashedRemoteArticles, isTrashVisible, dashboardMode]);
-  const scopedArticles = useMemo(() => (
-    selectedProfileId
-      ? displayedRemoteArticles.filter(article => articleBelongsToProfile(article, selectedProfileId))
-      : displayedRemoteArticles
-  ), [displayedRemoteArticles, selectedProfileId]);
+  const scopedArticles = displayedRemoteArticles;
+  const selectedFilterProfile = filters.profileId !== 'all'
+    ? profiles.find(profile => profile.id === filters.profileId)
+    : undefined;
   const scopedLastSaved = getLatestSavedAt(scopedArticles);
   const scopedTotalTime = scopedArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
   const filterOptions = useMemo(() => ({
@@ -1778,13 +1585,6 @@ const Dashboard: React.FC = () => {
     return profile ? getProfileLabel(profile) : trashInfo.deletedBy;
   };
   
-  const styleButtonClass = (isActive: boolean) =>
-    `flex-1 flex items-center justify-center gap-2 p-2 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-100 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#d4af37] ${
-      isActive
-        ? 'bg-[#d4af37] text-white shadow-sm'
-        : 'bg-white hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 text-[#333333] dark:text-[#8d8d8d]'
-    }`;
-
   const inputClass = "w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0]";
 
   if (!currentUser) {
@@ -1871,13 +1671,6 @@ const Dashboard: React.FC = () => {
                 مقالات n8n
               </button>
             </div>
-            <AdminUsersTable
-              profiles={profiles}
-              articles={dashboardMode === 'n8n' ? activeRemoteArticles.filter(article => article.source === 'n8n') : activeRemoteArticles}
-              selectedProfileId={selectedProfileId}
-              onSelectProfile={setSelectedProfileId}
-              t={t}
-            />
             {dashboardMode === 'n8n' && (
               <N8nLogsPanel logs={n8nLogs} isLoading={isN8nLogsLoading} t={t} />
             )}
@@ -1890,11 +1683,11 @@ const Dashboard: React.FC = () => {
                     <div>
                         <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
                             {isTrashVisible
-                              ? `سلة المهملات ${selectedProfile ? `- ${getProfileLabel(selectedProfile)}` : ''}`
+                              ? `سلة المهملات ${selectedFilterProfile ? `- ${getProfileLabel(selectedFilterProfile)}` : ''}`
                               : dashboardMode === 'n8n'
-                                ? `مقالات n8n ${selectedProfile ? `- ${getProfileLabel(selectedProfile)}` : ''}`
+                                ? `مقالات n8n ${selectedFilterProfile ? `- ${getProfileLabel(selectedFilterProfile)}` : ''}`
                               : isAdmin
-                                ? `مقالات ${selectedProfile ? getProfileLabel(selectedProfile) : 'كل المستخدمين'}`
+                                ? `مقالات ${selectedFilterProfile ? getProfileLabel(selectedFilterProfile) : 'كل المستخدمين'}`
                                 : t.yourRecentArticles}
                         </h2>
                         {isAdmin && (
@@ -2253,130 +2046,6 @@ const Dashboard: React.FC = () => {
                     </div>
                 </div>
 
-                <div>
-                    <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center gap-2">
-                        <Key size={20} />
-                        <span>{t.geminiKeyUsage}</span>
-                    </h2>
-                    <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-                        <div className="mb-3 flex items-center justify-between gap-3 text-sm">
-                            <span className="font-bold text-gray-600 dark:text-gray-300">{t.geminiTotalUses}</span>
-                            <span className="rounded-full bg-[#d4af37]/10 px-2.5 py-1 text-xs font-black text-[#8a6f1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
-                                {totalGeminiUses}
-                            </span>
-                        </div>
-                        {geminiUsageRows.length > 0 ? (
-                            <div className="space-y-2">
-                                {geminiUsageRows.map(row => (
-                                    <div key={row.id} className="rounded-md border border-gray-100 bg-gray-50 p-2.5 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div className="min-w-0">
-                                                <div className="text-xs font-black text-gray-700 dark:text-gray-200">{row.label}</div>
-                                                 <div className="mt-0.5 truncate font-mono text-[10px] text-gray-400" title={row.keyPreview}>
-                                                     {row.keyPreview}
-                                                 </div>
-                                                 <div className="mt-1 flex flex-wrap gap-1">
-                                                     <span className="rounded-full bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">
-                                                         {row.provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini'}
-                                                     </span>
-                                                     {row.model && (
-                                                         <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-500 dark:bg-[#2A2A2A] dark:text-gray-300">
-                                                             {row.model}
-                                                         </span>
-                                                     )}
-                                                 </div>
-                                             </div>
-                                            <div className="text-end">
-                                                <div className="text-lg font-black text-[#d4af37]">{row.count}</div>
-                                                <div className="text-[10px] font-bold text-gray-400">{t.geminiUsageCount}</div>
-                                            </div>
-                                        </div>
-                                        {row.lastUsed && (
-                                            <div className="mt-2 border-t border-gray-100 pt-1.5 text-[10px] font-semibold text-gray-400 dark:border-[#333]">
-                                                {t.geminiLastUsed}: {formatIstanbulDateTime(row.lastUsed, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t.noGeminiUsageYet}</p>
-                        )}
-                    </div>
-                </div>
-
-                <div>
-                    <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center gap-2"><Settings size={20} /><span>{t.settings}</span></h2>
-                    <div className="p-4 bg-white dark:bg-[#2A2A2A] rounded-lg border border-gray-200 dark:border-[#3C3C3C] space-y-4">
-                        <ClientGoalSettings />
-                        <EngineeringPromptsSettings />
-                        <div className="rounded-lg border border-[#d4af37]/20 bg-[#d4af37]/10 p-3 text-sm font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
-                          <div className="flex items-center gap-2">
-                            <Key size={18} />
-                            <span>مفاتيح الذكاء الاصطناعي محفوظة على السيرفر فقط.</span>
-                          </div>
-                        </div>
-                         <div>
-                            <h4 className="font-bold text-sm text-gray-600 dark:text-gray-300 mb-2">{t.highlightStyle}</h4>
-                            <div className="flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-[#1F1F1F] p-1">
-                                <button onClick={() => onHighlightStyleChange('background')} className={styleButtonClass(preferredHighlightStyle === 'background')} title={t.background}><PaintRoller size={16} /></button>
-                                <button onClick={() => onHighlightStyleChange('underline')} className={styleButtonClass(preferredHighlightStyle === 'underline')} title={t.wavyUnderline}><Baseline size={16} /></button>
-                            </div>
-                            <div className="mt-3">
-                                <div className="mb-2 flex items-center gap-2 text-xs font-bold text-gray-500 dark:text-gray-400">
-                                    <ExternalLink size={14} className="text-[#d4af37]" />
-                                    <span>{t.chatGptOpenPreference}</span>
-                                </div>
-                                <div className="grid grid-cols-1 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-[#1F1F1F] sm:grid-cols-2">
-                                    <button onClick={() => onChatGptOpenModeChange('window')} className={styleButtonClass(chatGptOpenMode === 'window')} title={t.chatGptOpenSeparateWindow}>
-                                        <AppWindow size={16} />
-                                        <span>{t.chatGptOpenSeparateWindow}</span>
-                                    </button>
-                                    <button onClick={() => onChatGptOpenModeChange('tab')} className={styleButtonClass(chatGptOpenMode === 'tab')} title={t.chatGptOpenNewTab}>
-                                        <NotebookTabs size={16} />
-                                        <span>{t.chatGptOpenNewTab}</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 className="font-bold text-sm text-gray-600 dark:text-gray-300 mb-2">{t.keywordView}</h4>
-                            <div className="flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-[#1F1F1F] p-1">
-                                <button onClick={() => onKeywordViewModeChange('classic')} className={styleButtonClass(preferredKeywordViewMode === 'classic')} title={t.detailedCards}><LayoutGrid size={16} /></button>
-                                <button onClick={() => onKeywordViewModeChange('modern')} className={styleButtonClass(preferredKeywordViewMode === 'modern')} title={t.modernList}><ListTree size={16} /></button>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 className="font-bold text-sm text-gray-600 dark:text-gray-300 mb-2">{t.structureView}</h4>
-                            <div className="flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-[#1F1F1F] p-1">
-                                <button onClick={() => onStructureViewModeChange('grid')} className={styleButtonClass(preferredStructureViewMode === 'grid')} title={t.grid}><LayoutGrid size={16} /></button>
-                                <button onClick={() => onStructureViewModeChange('list')} className={styleButtonClass(preferredStructureViewMode === 'list')} title={t.list}><List size={16} /></button>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 className="font-bold text-sm text-gray-600 dark:text-gray-300 mb-2">{t.defaultArticleLanguage}</h4>
-                            <div className="flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-[#1F1F1F] p-1">
-                                <button onClick={() => onPreferredLanguageChange('ar')} className={styleButtonClass(preferredLanguage === 'ar')} title={t.arabic}>
-                                    <Languages size={16} /> <span>{t.arabic}</span>
-                                </button>
-                                <button onClick={() => onPreferredLanguageChange('en')} className={styleButtonClass(preferredLanguage === 'en')} title={t.english}>
-                                    <Languages size={16} /> <span>{t.english}</span>
-                                </button>
-                            </div>
-                        </div>
-                         <div>
-                            <h4 className="font-bold text-sm text-gray-600 dark:text-gray-300 mb-2">{t.interfaceLanguage}</h4>
-                            <div className="flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-[#1F1F1F] p-1">
-                                <button onClick={() => onUiLanguageChange('ar')} className={styleButtonClass(uiLanguage === 'ar')} title={t.arabic}>
-                                    <Languages size={16} /> <span>{t.arabic}</span>
-                                </button>
-                                <button onClick={() => onUiLanguageChange('en')} className={styleButtonClass(uiLanguage === 'en')} title={t.english}>
-                                    <Languages size={16} /> <span>{t.english}</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
         <footer className="mt-10 border-t border-gray-200 pt-4 text-center text-xs font-semibold text-gray-500 dark:border-[#3C3C3C] dark:text-gray-400">

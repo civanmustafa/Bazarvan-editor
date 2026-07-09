@@ -13,6 +13,7 @@ export type AdminRouteSection =
   | 'userDetail'
   | 'trash'
   | 'n8n'
+  | 'settings'
   | 'reports'
   | 'dailyReport'
   | 'sessions'
@@ -69,6 +70,7 @@ export const parseAppRoute = (path = window.location.pathname): AppRoute => {
     }
     if (second === 'trash') return { name: 'admin', section: 'trash', id: null, date: null };
     if (second === 'n8n') return { name: 'admin', section: 'n8n', id: null, date: null };
+    if (second === 'settings') return { name: 'admin', section: 'settings', id: null, date: null };
     if (second === 'activity') return { name: 'admin', section: 'activity', id: null, date: null };
     if (second === 'sessions') {
       return third

@@ -21,7 +21,6 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
-import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
 import {
@@ -702,11 +701,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
 
         <div className="space-y-6">
           {renderSelectedSection()}
-          {selectedSection !== 'ai' && selectedSection !== 'users' && (
-            <SettingsSection title="إعدادات العملاء">
-              <ClientGoalSettings />
-            </SettingsSection>
-          )}
         </div>
       </div>
     </div>
