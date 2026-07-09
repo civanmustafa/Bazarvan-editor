@@ -321,12 +321,18 @@ const resolveCreatorArticleDefaults = async (
     ? authData.user.email.trim()
     : '';
 
-  const { data: profileData } = await supabase
-    .from('profiles')
-    .select('id,email,full_name')
-    .eq('id', userId)
-    .maybeSingle()
-    .catch(() => ({ data: null }));
+  let profileData: unknown = null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,email,full_name')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    profileData = data;
+  } catch (error) {
+    console.warn(`Could not load creator profile "${userId}" before saving. Falling back to auth email.`, error);
+  }
 
   const profile = isRecord(profileData) ? profileData : {};
   const email = normalizeEmailCsv(typeof profile.email === 'string' && profile.email.trim()
