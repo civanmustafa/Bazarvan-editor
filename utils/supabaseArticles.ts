@@ -222,6 +222,14 @@ export type RemoteArticleActivity = ArticleActivity & {
   createdAt: string;
 };
 
+export type RemoteArticlesPage = {
+  articles: RemoteArticleActivity[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  fromCache: boolean;
+};
+
 const DEFAULT_STATS: ArticleStats = {
   wordCount: 0,
   keywordViolations: 0,
@@ -487,36 +495,46 @@ const recordArticleVersion = async (
   }
 };
 
-const getArticleListCacheKey = async (): Promise<string> => {
+const getArticleListCacheKey = async (scope = 'all'): Promise<string> => {
   const supabase = getSupabaseClient();
   const { data } = await supabase.auth.getSession();
-  return `${REMOTE_ARTICLE_CACHE_PREFIX}${data.session?.user.id || 'anonymous'}`;
+  return `${REMOTE_ARTICLE_CACHE_PREFIX}${data.session?.user.id || 'anonymous'}:${scope}`;
 };
 
-const readCachedRemoteArticles = async (): Promise<RemoteArticleActivity[] | null> => {
+const readCachedRemoteArticlePage = async (scope = 'all'): Promise<Pick<RemoteArticlesPage, 'articles' | 'totalCount'> | null> => {
   if (!canUseLocalStorage()) return null;
 
   try {
-    const cacheKey = await getArticleListCacheKey();
+    const cacheKey = await getArticleListCacheKey(scope);
     const rawValue = window.localStorage.getItem(cacheKey);
     if (!rawValue) return null;
     const parsed = JSON.parse(rawValue);
     if (!isRecord(parsed) || !Array.isArray(parsed.articles)) return null;
-    return parsed.articles as RemoteArticleActivity[];
+    return {
+      articles: parsed.articles as RemoteArticleActivity[],
+      totalCount: typeof parsed.totalCount === 'number'
+        ? parsed.totalCount
+        : parsed.articles.length,
+    };
   } catch (error) {
     console.warn('Could not read cached Supabase article list:', error);
     return null;
   }
 };
 
-const writeCachedRemoteArticles = async (articles: RemoteArticleActivity[]): Promise<void> => {
+const writeCachedRemoteArticlePage = async (
+  scope: string,
+  articles: RemoteArticleActivity[],
+  totalCount: number,
+): Promise<void> => {
   if (!canUseLocalStorage()) return;
 
   try {
-    const cacheKey = await getArticleListCacheKey();
+    const cacheKey = await getArticleListCacheKey(scope);
     window.localStorage.setItem(cacheKey, JSON.stringify({
       cachedAt: new Date().toISOString(),
       articles,
+      totalCount,
     }));
   } catch (error) {
     console.warn('Could not cache Supabase article list:', error);
@@ -534,13 +552,62 @@ export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => 
     if (error) throw error;
 
     const articles = ((data || []) as ArticleRow[]).map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
-    void writeCachedRemoteArticles(articles);
+    void writeCachedRemoteArticlePage('all', articles, articles.length);
     return articles;
   } catch (error) {
-    const cachedArticles = await readCachedRemoteArticles();
-    if (cachedArticles) {
+    const cached = await readCachedRemoteArticlePage('all');
+    if (cached) {
       console.warn('Using cached Supabase article list after load failure:', error);
-      return cachedArticles;
+      return cached.articles;
+    }
+    throw error;
+  }
+};
+
+export const listRemoteArticlesPage = async (
+  options: {
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<RemoteArticlesPage> => {
+  const pageSize = Math.max(1, Math.min(50, Math.floor(options.pageSize || 10)));
+  const page = Math.max(1, Math.floor(options.page || 1));
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const cacheScope = `page:${page}:size:${pageSize}`;
+  const supabase = getSupabaseClient();
+
+  try {
+    const { data, error, count } = await supabase
+      .from('articles')
+      .select(ARTICLE_LIST_SELECT, { count: 'exact' })
+      .order('updated_at', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const articles = ((data || []) as ArticleRow[]).map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
+    const totalCount = typeof count === 'number' ? count : from + articles.length;
+    void writeCachedRemoteArticlePage(cacheScope, articles, totalCount);
+
+    return {
+      articles,
+      totalCount,
+      page,
+      pageSize,
+      fromCache: false,
+    };
+  } catch (error) {
+    const cached = await readCachedRemoteArticlePage(cacheScope);
+    if (cached) {
+      console.warn('Using cached Supabase article page after load failure:', error);
+      return {
+        articles: cached.articles,
+        totalCount: cached.totalCount,
+        page,
+        pageSize,
+        fromCache: true,
+      };
     }
     throw error;
   }

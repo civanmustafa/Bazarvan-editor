@@ -13,9 +13,9 @@ import {
     claimRemoteArticle,
     deleteRemoteArticle,
     getArticleTrashInfo,
+    listRemoteArticlesPage,
     listRemoteN8nIngestLogs,
     listRemoteProfiles,
-    listRemoteArticles,
     loadRemoteArticleSnapshot,
     moveRemoteArticleToTrash,
     purgeExpiredRemoteArticleTrash,
@@ -32,6 +32,8 @@ import {
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
 import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
+
+const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
 
 /*
  * Dashboard is the user workspace:
@@ -1144,6 +1146,9 @@ const Dashboard: React.FC = () => {
   const [detailSnapshot, setDetailSnapshot] = useState<ArticleStorageSnapshot | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isArticlesLoading, setIsArticlesLoading] = useState(false);
+  const [articlesPage, setArticlesPage] = useState(1);
+  const [articlesTotalCount, setArticlesTotalCount] = useState(0);
+  const [isArticlesPageFromCache, setIsArticlesPageFromCache] = useState(false);
   const [isN8nLogsLoading, setIsN8nLogsLoading] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
@@ -1187,12 +1192,21 @@ const Dashboard: React.FC = () => {
       await purgeExpiredRemoteArticleTrash(30).catch(error => {
         console.warn('Could not purge expired dashboard trash:', error);
       });
-      const [articles, profileRows, logRows] = await Promise.all([
-        listRemoteArticles(),
+      const [articlesPageResult, profileRows, logRows] = await Promise.all([
+        listRemoteArticlesPage({
+          page: articlesPage,
+          pageSize: DASHBOARD_ARTICLES_PAGE_SIZE,
+        }),
         isAdmin ? listRemoteProfiles() : Promise.resolve([]),
         isAdmin ? listRemoteN8nIngestLogs(40) : Promise.resolve([]),
       ]);
-      setRemoteArticles(sortArticlesByLastChange(articles));
+      if (articlesPageResult.articles.length === 0 && articlesPage > 1 && articlesPageResult.totalCount > 0) {
+        setArticlesPage(prev => Math.max(1, prev - 1));
+        return;
+      }
+      setRemoteArticles(sortArticlesByLastChange(articlesPageResult.articles));
+      setArticlesTotalCount(articlesPageResult.totalCount);
+      setIsArticlesPageFromCache(articlesPageResult.fromCache);
       setProfiles(profileRows);
       setN8nLogs(logRows);
     } catch (error) {
@@ -1408,7 +1422,7 @@ const Dashboard: React.FC = () => {
       clearInterval(intervalId);
       window.removeEventListener('smart-editor-activity-updated', handleActivityUpdated);
     };
-  }, [currentUser, isAdmin]);
+  }, [currentUser, isAdmin, articlesPage]);
 
   useEffect(() => {
     if (!currentUser || !isSupabaseConfigured) return;
@@ -1423,7 +1437,7 @@ const Dashboard: React.FC = () => {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [currentUser, isAdmin]);
+  }, [currentUser, isAdmin, articlesPage]);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -1436,7 +1450,11 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     clearSelectedArticles();
-  }, [isTrashVisible, dashboardMode, selectedProfileId, searchQuery]);
+  }, [isTrashVisible, dashboardMode, selectedProfileId, searchQuery, filters, articlesPage]);
+
+  useEffect(() => {
+    setArticlesPage(1);
+  }, [isTrashVisible, dashboardMode, selectedProfileId, searchQuery, filters]);
 
   const handleExportHtml = () => {
     if (!currentUser) return;
@@ -1737,6 +1755,9 @@ const Dashboard: React.FC = () => {
   const selectedFilteredArticles = useMemo(() => (
     filteredArticles.filter(article => selectedArticleIds.has(article.id))
   ), [filteredArticles, selectedArticleIds]);
+  const articlesTotalPages = Math.max(1, Math.ceil(Math.max(articlesTotalCount, filteredArticles.length) / DASHBOARD_ARTICLES_PAGE_SIZE));
+  const canGoToPreviousArticlesPage = articlesPage > 1 && !isArticlesLoading;
+  const canGoToNextArticlesPage = articlesPage < articlesTotalPages && !isArticlesLoading;
   const areAllFilteredSelected = filteredArticles.length > 0 && filteredArticles.every(article => selectedArticleIds.has(article.id));
   const toggleSelectAllFilteredArticles = () => {
     setSelectedArticleIds(prev => {
@@ -2138,9 +2159,41 @@ const Dashboard: React.FC = () => {
                     </div>
                 )}
 
+                <div className="mb-3 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A] sm:flex-row sm:items-center sm:justify-between">
+                    <div className="font-bold text-gray-600 dark:text-gray-300">
+                        عرض {filteredArticles.length} من أصل {articlesTotalCount || filteredArticles.length} مقالة، 10 مقالات في كل صفحة
+                        {isArticlesPageFromCache && (
+                            <span className="ms-2 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-black text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-300">
+                                بيانات محفوظة مؤقتاً
+                            </span>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setArticlesPage(page => Math.max(1, page - 1))}
+                            disabled={!canGoToPreviousArticlesPage}
+                            className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300"
+                        >
+                            السابق
+                        </button>
+                        <span className="min-w-24 text-center text-xs font-black text-gray-500 dark:text-gray-400">
+                            صفحة {articlesPage} / {articlesTotalPages}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setArticlesPage(page => Math.min(articlesTotalPages, page + 1))}
+                            disabled={!canGoToNextArticlesPage}
+                            className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300"
+                        >
+                            التالي
+                        </button>
+                    </div>
+                </div>
+
                 {filteredArticles.length > 0 ? (
                     <ul className="space-y-2">
-                          {filteredArticles
+                          {[...filteredArticles]
                             .sort((a, b) => getArticleSortTime(b) - getArticleSortTime(a))
                             .map((activity) => {
                               const trashInfo = getArticleTrashInfo(activity, currentUserId);
