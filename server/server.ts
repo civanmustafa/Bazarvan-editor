@@ -1,3 +1,4 @@
+import './loadEnv';
 import compression from 'compression';
 import express, { type RequestHandler } from 'express';
 import fs from 'node:fs';
@@ -22,6 +23,16 @@ const distDir = process.env.STATIC_DIR
 const port = Number.parseInt(process.env.PORT || '8080', 10) || 8080;
 
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
+const firstEnvValue = (...keys: string[]): string => (
+  keys.map(key => process.env[key]?.trim() || '').find(Boolean) || ''
+);
+const countSecretList = (...keys: string[]): number => (
+  firstEnvValue(...keys)
+    .split(/[\n,;]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+    .length
+);
 
 const runApiHandler = (handler: ApiHandler): RequestHandler => async (req, res, next) => {
   try {
@@ -45,10 +56,14 @@ app.get('/healthz', (_req, res) => {
     uptimeSeconds: Math.round(process.uptime()),
     ai: {
       geminiConfigured: hasEnvValue('GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY'),
+      geminiKeyCount: countSecretList('GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY'),
       geminiPaidConfigured: hasEnvValue('GEMINI_PAID_API_KEYS', 'GEMINI_PAID_API_KEY', 'GEMINI_PRO_API_KEYS', 'GEMINI_PRO_API_KEY'),
+      geminiPaidKeyCount: countSecretList('GEMINI_PAID_API_KEYS', 'GEMINI_PAID_API_KEY', 'GEMINI_PRO_API_KEYS', 'GEMINI_PRO_API_KEY'),
       openAiConfigured: hasEnvValue('OPENAI_API_KEY', 'OPENAI_API_KEYS'),
+      openAiKeyCount: countSecretList('OPENAI_API_KEY', 'OPENAI_API_KEYS'),
       n8nConfigured: hasEnvValue('N8N_INGEST_TOKEN') && hasEnvValue('SUPABASE_SERVICE_ROLE_KEY'),
     },
+    envFilesLoaded: process.env.BAZARVAN_ENV_FILES_LOADED || '',
   });
 });
 
@@ -81,6 +96,7 @@ app.use((req, res, next) => {
     return;
   }
 
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.sendFile(indexFile);
 });
 
