@@ -991,49 +991,214 @@ const ActivityTable: React.FC<{
   );
 };
 
-const SessionsTable: React.FC<{
+type SessionActivityRow = {
+  id: string;
+  session: RemoteAppSession | null;
+  events: RemoteAppActivityEvent[];
+  userIds: Set<string>;
+  startedAt: string;
+  lastSeenAt: string;
+  endedAt: string | null;
+  path: string;
+};
+
+const SessionsActivityTable: React.FC<{
   sessions: RemoteAppSession[];
+  events: RemoteAppActivityEvent[];
   profiles: RemoteProfile[];
   t: typeof translations.ar;
-}> = ({ sessions, profiles, t }) => {
+  query: string;
+}> = ({ sessions, events, profiles, t, query }) => {
   const getUserLabel = (userId?: string | null): string => {
     const profile = userId ? profiles.find(item => item.id === userId) : null;
     return getProfileLabel(profile);
   };
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const rows = useMemo(() => {
+    const rowMap = new Map<string, SessionActivityRow>();
+
+    sessions.forEach(session => {
+      rowMap.set(session.id, {
+        id: session.id,
+        session,
+        events: [],
+        userIds: new Set(session.userId ? [session.userId] : []),
+        startedAt: session.startedAt,
+        lastSeenAt: session.lastSeenAt,
+        endedAt: session.endedAt,
+        path: session.path,
+      });
+    });
+
+    events.forEach(event => {
+      const rowId = event.sessionId || `no-session:${event.userId || 'unknown'}`;
+      const existing = rowMap.get(rowId);
+      const row = existing || {
+        id: rowId,
+        session: null,
+        events: [],
+        userIds: new Set<string>(),
+        startedAt: event.createdAt,
+        lastSeenAt: event.createdAt,
+        endedAt: null,
+        path: event.path,
+      };
+
+      row.events.push(event);
+      if (event.userId) row.userIds.add(event.userId);
+      if (!row.path && event.path) row.path = event.path;
+      if (new Date(event.createdAt).getTime() < new Date(row.startedAt).getTime()) {
+        row.startedAt = event.createdAt;
+      }
+      if (new Date(event.createdAt).getTime() > new Date(row.lastSeenAt).getTime()) {
+        row.lastSeenAt = event.createdAt;
+      }
+      rowMap.set(rowId, row);
+    });
+
+    return Array.from(rowMap.values())
+      .map(row => ({
+        ...row,
+        events: [...row.events].sort((left, right) => (
+          new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+        )),
+      }))
+      .filter(row => {
+        if (!normalizedQuery) return true;
+        const userLabels = Array.from(row.userIds).map(getUserLabel);
+        const eventText = row.events.map(event => [
+          event.eventType,
+          event.entityType,
+          event.entityId,
+          event.path,
+          event.sessionId,
+          JSON.stringify(event.metadata || {}),
+        ].join(' ')).join(' ');
+        return [
+          row.id,
+          row.session?.userAgent,
+          row.path,
+          row.endedAt ? 'منتهية ended' : 'نشطة active',
+          ...userLabels,
+          eventText,
+        ].map(value => String(value || '').toLowerCase()).join(' ').includes(normalizedQuery);
+      })
+      .sort((left, right) => (
+        new Date(right.lastSeenAt).getTime() - new Date(left.lastSeenAt).getTime()
+      ));
+  }, [events, getUserLabel, normalizedQuery, sessions]);
+
+  const getUsersLabel = (row: SessionActivityRow): string => {
+    const labels = Array.from(row.userIds).map(getUserLabel).filter(Boolean);
+    if (labels.length === 0) return '-';
+    return `${labels.slice(0, 2).join('، ')}${labels.length > 2 ? ` +${labels.length - 2}` : ''}`;
+  };
+
+  const getEventEntityLabel = (event: RemoteAppActivityEvent): string => (
+    event.entityType ? `${event.entityType}:${event.entityId || '-'}` : '-'
+  );
+
+  const getEventTypeCounts = (row: SessionActivityRow): string[] => {
+    const counts = new Map<string, number>();
+    row.events.forEach(event => counts.set(event.eventType, (counts.get(event.eventType) || 0) + 1));
+    return Array.from(counts.entries())
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 4)
+      .map(([eventType, count]) => `${eventType} (${count})`);
+  };
+
+  const renderRecentEvents = (row: SessionActivityRow) => {
+    const recentEvents = row.events.slice(0, 4);
+    if (recentEvents.length === 0) {
+      return <span className="text-gray-400">لا توجد أحداث مسجلة.</span>;
+    }
+
+    return (
+      <div className="space-y-2">
+        {recentEvents.map(event => (
+          <div key={event.id} className="rounded-md bg-gray-50 px-2 py-1.5 text-xs leading-5 text-gray-600 dark:bg-[#232323] dark:text-gray-300">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-mono text-gray-500">{formatIstanbulDateTime(event.createdAt, t.locale, { hour: '2-digit', minute: '2-digit' })}</span>
+              <span className="font-black text-[#8a6f1d] dark:text-[#f2d675]">{event.eventType}</span>
+              <span className="font-mono text-gray-400">{getEventEntityLabel(event)}</span>
+            </div>
+            {event.path ? (
+              <div className="mt-0.5 truncate text-gray-400" title={event.path}>{event.path}</div>
+            ) : null}
+          </div>
+        ))}
+        {row.events.length > recentEvents.length ? (
+          <div className="text-xs font-bold text-gray-400">+{row.events.length - recentEvents.length} أحداث أخرى</div>
+        ) : null}
+      </div>
+    );
+  };
+
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <table className="w-full min-w-[900px] text-start text-sm">
+      <table className="w-full min-w-[1320px] text-start text-sm">
         <thead className="text-xs uppercase text-gray-400">
           <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
             <th className="px-3 py-2 text-start">الجلسة</th>
-            <th className="px-3 py-2 text-start">المستخدم</th>
+            <th className="px-3 py-2 text-start">المستخدمون</th>
+            <th className="px-3 py-2 text-start">الحالة</th>
             <th className="px-3 py-2 text-start">بدأت</th>
             <th className="px-3 py-2 text-start">آخر نشاط</th>
-            <th className="px-3 py-2 text-start">الحالة</th>
-            <th className="px-3 py-2 text-start">الرابط</th>
+            <th className="px-3 py-2 text-start">المدة</th>
+            <th className="px-3 py-2 text-start">المسار</th>
+            <th className="px-3 py-2 text-start">ملخص النشاط</th>
+            <th className="px-3 py-2 text-start">آخر الأحداث</th>
+            <th className="px-3 py-2 text-start">فتح</th>
           </tr>
         </thead>
         <tbody>
-          {sessions.length > 0 ? sessions.map(session => (
-            <tr
-              key={session.id}
-              className="cursor-pointer border-b border-gray-100 hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:hover:bg-[#d4af37]/15"
-              onClick={() => navigateToAppPath(buildAdminSessionPath(session.id))}
-            >
-              <td className="px-3 py-3 font-mono text-xs font-bold text-gray-700 dark:text-gray-200">{session.id.slice(0, 8)}</td>
-              <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getUserLabel(session.userId)}</td>
-              <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(session.startedAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-              <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(session.lastSeenAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+          {rows.length > 0 ? rows.map(row => {
+            const durationSeconds = Math.max(0, Math.floor((new Date(row.lastSeenAt).getTime() - new Date(row.startedAt).getTime()) / 1000));
+            const eventTypeCounts = getEventTypeCounts(row);
+            const canOpenSession = Boolean(row.session);
+
+            return (
+            <tr key={row.id} className="border-b border-gray-100 dark:border-[#3C3C3C]">
               <td className="px-3 py-3">
-                <span className={`rounded-full px-2 py-1 text-xs font-black ${session.endedAt ? 'bg-gray-100 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-300' : 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'}`}>
-                  {session.endedAt ? 'منتهية' : 'نشطة'}
+                <div className="font-mono text-xs font-bold text-gray-700 dark:text-gray-200">
+                  {row.session ? row.id.slice(0, 8) : row.id.startsWith('no-session') ? 'بدون جلسة' : row.id.slice(0, 8)}
+                </div>
+                {!row.session && !row.id.startsWith('no-session') ? (
+                  <div className="mt-1 text-xs text-gray-400">جلسة غير محملة</div>
+                ) : null}
+              </td>
+              <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getUsersLabel(row)}</td>
+              <td className="px-3 py-3">
+                <span className={`rounded-full px-2 py-1 text-xs font-black ${row.session && !row.endedAt ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-300'}`}>
+                  {row.session ? (row.endedAt ? 'منتهية' : 'نشطة') : 'أحداث فقط'}
                 </span>
               </td>
-              <td className="max-w-[220px] truncate px-3 py-3 text-gray-500" title={session.path}>{session.path || '-'}</td>
+              <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(row.startedAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+              <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(row.lastSeenAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+              <td className="px-3 py-3 text-gray-500">{formatSeconds(durationSeconds, t)}</td>
+              <td className="max-w-[240px] truncate px-3 py-3 text-gray-500" title={row.path}>{row.path || '-'}</td>
+              <td className="max-w-[260px] px-3 py-3 text-gray-500" title={eventTypeCounts.join('، ')}>
+                <div className="font-black text-gray-700 dark:text-gray-200">{row.events.length} حدث</div>
+                <div className="mt-1 text-xs">{eventTypeCounts.join('، ') || '-'}</div>
+              </td>
+              <td className="max-w-[380px] px-3 py-3">{renderRecentEvents(row)}</td>
+              <td className="px-3 py-3">
+                {canOpenSession ? (
+                  <button
+                    type="button"
+                    onClick={() => navigateToAppPath(buildAdminSessionPath(row.id))}
+                    className="inline-flex items-center gap-1 rounded-md border border-[#d4af37]/40 px-2 py-1 text-xs font-black text-[#8a6f1d] hover:bg-[#d4af37]/10 dark:text-[#f2d675]"
+                  >
+                    <ExternalLink size={12} />
+                    فتح
+                  </button>
+                ) : '-'}
+              </td>
             </tr>
-          )) : (
-            <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-500">لا توجد جلسات مسجلة.</td></tr>
+            );
+          }) : (
+            <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-500">لا توجد جلسات أو أحداث نشاط.</td></tr>
           )}
         </tbody>
       </table>
@@ -1614,36 +1779,6 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     })
   ), [logs, normalizedQuery]);
 
-  const filteredActivityEvents = useMemo(() => (
-    activityEvents.filter(event => {
-      if (!normalizedQuery) return true;
-      const profile = event.userId ? profiles.find(item => item.id === event.userId) : null;
-      return [
-        getProfileLabel(profile),
-        event.eventType,
-        event.entityType,
-        event.entityId,
-        event.path,
-        event.sessionId,
-        JSON.stringify(event.metadata || {}),
-      ].map(value => String(value || '').toLowerCase()).join(' ').includes(normalizedQuery);
-    })
-  ), [activityEvents, normalizedQuery, profiles]);
-
-  const filteredSessions = useMemo(() => (
-    sessions.filter(session => {
-      if (!normalizedQuery) return true;
-      const profile = session.userId ? profiles.find(item => item.id === session.userId) : null;
-      return [
-        session.id,
-        getProfileLabel(profile),
-        session.userAgent,
-        session.path,
-        JSON.stringify(session.metadata || {}),
-      ].map(value => String(value || '').toLowerCase()).join(' ').includes(normalizedQuery);
-    })
-  ), [normalizedQuery, profiles, sessions]);
-
   const handleArticleFilterChange = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = event.target;
     setArticleFilters(prev => ({ ...prev, [name]: value }));
@@ -1996,12 +2131,8 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       return (
         <div className="space-y-6">
           <section>
-            <SectionTitle>الجلسات</SectionTitle>
-            <SessionsTable sessions={filteredSessions} profiles={profiles} t={t} />
-          </section>
-          <section>
-            <SectionTitle>النشاط</SectionTitle>
-            <ActivityTable events={filteredActivityEvents} profiles={profiles} t={t} />
+            <SectionTitle>الجلسات والنشاط</SectionTitle>
+            <SessionsActivityTable sessions={sessions} events={activityEvents} profiles={profiles} t={t} query={normalizedQuery} />
           </section>
         </div>
       );
