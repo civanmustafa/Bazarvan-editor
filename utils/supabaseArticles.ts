@@ -245,6 +245,12 @@ const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
 );
 
+const isRowLevelSecurityError = (error: unknown): boolean => {
+  const source = isRecord(error) ? error : {};
+  const message = String(source.message || '').toLowerCase();
+  return source.code === '42501' || message.includes('row-level security');
+};
+
 const canUseLocalStorage = (): boolean => (
   typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
 );
@@ -424,6 +430,43 @@ const toRemoteArticleActivity = (
   articleLanguage: row.article_language === 'en' ? 'en' : 'ar',
   stats: normalizeStats(row.stats),
 });
+
+const saveRemoteArticleSnapshotViaServer = async (
+  snapshot: ArticleStorageSnapshot,
+  options: {
+    articleId?: string | null;
+    userId: string;
+  },
+): Promise<RemoteArticleActivity> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token;
+  if (error || !accessToken) {
+    throw error || new Error('Supabase session is required to save the article.');
+  }
+
+  const response = await fetch('/api/articles/save', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      articleId: options.articleId || null,
+      snapshot,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : `Article save failed (${response.status}).`);
+  }
+  if (!isRecord(payload.article)) {
+    throw new Error('Article save API did not return an article.');
+  }
+
+  return payload.article as RemoteArticleActivity;
+};
 
 const toRemoteProfile = (row: any): RemoteProfile => ({
   id: row.id,
@@ -885,7 +928,13 @@ export const saveRemoteArticleSnapshot = async (
       .select('*')
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (isRowLevelSecurityError(error)) {
+        console.warn('Direct article insert was blocked by RLS; retrying through the authenticated server save API.', error);
+        return saveRemoteArticleSnapshotViaServer(snapshot, options);
+      }
+      throw error;
+    }
     await recordArticleVersion((data as ArticleRow).id, snapshot, {
       userId: options.userId,
       versionNumber: 1,

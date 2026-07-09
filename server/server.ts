@@ -9,6 +9,7 @@ import n8nArticlesHandler from '../api/n8nArticles';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import systemSettingsHandler from '../api/systemSettings';
 import adminUsersHandler from '../api/adminUsers';
+import articlesSaveHandler from '../api/articlesSave';
 
 type ApiHandler = (req: unknown, res: unknown) => Promise<Response | void>;
 
@@ -54,6 +55,7 @@ app.get('/healthz', (_req, res) => {
 app.all('/api/gemini', runApiHandler(geminiHandler));
 app.all('/api/chatgpt', runApiHandler(chatgptHandler));
 app.all('/api/n8n/articles', runApiHandler(n8nArticlesHandler));
+app.all('/api/articles/save', runApiHandler(articlesSaveHandler));
 app.all('/api/articles/assigned-automation', runApiHandler(assignedArticleAutomationHandler));
 app.all('/api/system/settings', runApiHandler(systemSettingsHandler));
 app.all('/api/admin/users', runApiHandler(adminUsersHandler));
