@@ -689,11 +689,10 @@ const ReportsPage: React.FC<{
   articles: RemoteArticleActivity[];
   logs: RemoteN8nIngestLog[];
   activityEvents: RemoteAppActivityEvent[];
-  sessions: RemoteAppSession[];
   profiles: RemoteProfile[];
   date: string;
   t: typeof translations.ar;
-}> = ({ articles, logs, activityEvents, sessions, profiles, date, t }) => {
+}> = ({ articles, logs, activityEvents, profiles, date, t }) => {
   const start = getIstanbulDayStart(date);
   const end = getIstanbulDayEnd(date);
   const inDay = (value?: string | null) => {
@@ -707,7 +706,6 @@ const ReportsPage: React.FC<{
   const n8nArticles = articles.filter(article => article.source === 'n8n' && inDay(article.createdAt));
   const n8nLogs = logs.filter(log => inDay(log.createdAt));
   const dayActivityEvents = activityEvents.filter(event => inDay(event.createdAt));
-  const daySessions = sessions.filter(session => inDay(session.startedAt) || inDay(session.lastSeenAt));
   const apiUsageEvents = getApiUsageEvents(dayActivityEvents);
   const apiUsageSummary = buildApiUsageSummary(apiUsageEvents);
   const apiKeyCount = new Set(apiUsageEvents.map(event => getActivityMetadata(event).keyFingerprint || event.entityId).filter(Boolean)).size;
@@ -716,11 +714,6 @@ const ReportsPage: React.FC<{
   const openAiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'openai' || getActivityMetadata(event).service === 'openai').length;
   const aiErrors = articles.filter(article => JSON.stringify(article.metadata || {}).toLowerCase().includes('error'));
   const activeUserIds = new Set(dayActivityEvents.map(event => event.userId).filter(Boolean));
-  const getOwnerLabel = (article: RemoteArticleActivity): string => {
-    const ownerId = getArticleOwnerId(article);
-    const owner = ownerId ? profiles.find(profile => profile.id === ownerId) : null;
-    return getProfileLabel(owner);
-  };
 
   return (
     <div className="space-y-6">
@@ -753,42 +746,15 @@ const ReportsPage: React.FC<{
         <AdminStat icon={<BrainCircuit size={18} />} label="OpenAI / Pro" value={paidGeminiApiCalls + openAiApiCalls} />
       </div>
 
-      <section>
+      <section className="space-y-4">
         <SectionTitle>استخدام مفاتيح API</SectionTitle>
         <ApiUsageSummaryTable summaries={apiUsageSummary} profiles={profiles} t={t} />
-      </section>
-
-      <section>
-        <SectionTitle>تفاصيل استدعاءات API</SectionTitle>
         <ApiUsageEventsTable events={apiUsageEvents} profiles={profiles} t={t} />
-      </section>
-
-      <section>
-        <SectionTitle>نشاط اليوم</SectionTitle>
-        {changedArticles.length > 0 ? (
-          <ul className="space-y-2">
-            {changedArticles.map(article => (
-              <ArticleRow key={article.id} article={article} ownerLabel={getOwnerLabel(article)} t={t} />
-            ))}
-          </ul>
-        ) : (
-          <EmptyState icon={<Calendar size={24} />} title="لا توجد مقالات معدلة في هذا اليوم" />
-        )}
       </section>
 
       <section>
         <SectionTitle>طلبات n8n</SectionTitle>
         <LogsTable logs={n8nLogs} t={t} />
-      </section>
-
-      <section>
-        <SectionTitle>آخر نشاط لكل مستخدم</SectionTitle>
-        <ActivityTable events={dayActivityEvents} profiles={profiles} t={t} />
-      </section>
-
-      <section>
-        <SectionTitle>جلسات اليوم</SectionTitle>
-        <SessionsTable sessions={daySessions} profiles={profiles} t={t} />
       </section>
     </div>
   );
@@ -1744,14 +1710,11 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
 
   const navActions: AdminAction[] = [
     { label: 'نظرة عامة', icon: <BarChart3 size={16} />, path: '/admin', active: section === 'overview' },
-    { label: 'المقالات', icon: <BookOpen size={16} />, path: '/admin/articles', active: section === 'articles' || section === 'articleDetail' },
     { label: 'المستخدمون', icon: <Users size={16} />, path: '/admin/users', active: section === 'users' || section === 'userDetail' },
     { label: 'السلة', icon: <Trash2 size={16} />, path: '/admin/trash', active: section === 'trash' },
-    { label: 'n8n', icon: <Workflow size={16} />, path: '/admin/n8n', active: section === 'n8n' },
     { label: 'الإعدادات', icon: <Settings size={16} />, path: '/admin/settings', active: section === 'settings' },
     { label: 'التقارير', icon: <Calendar size={16} />, path: buildDailyReportPath(selectedReportDate), active: section === 'reports' || section === 'dailyReport' },
-    { label: 'النشاط', icon: <Activity size={16} />, path: '/admin/activity', active: section === 'activity' },
-    { label: 'الجلسات', icon: <Monitor size={16} />, path: '/admin/sessions', active: section === 'sessions' || section === 'sessionDetail' },
+    { label: 'الجلسات والنشاط', icon: <Monitor size={16} />, path: '/admin/sessions', active: section === 'sessions' || section === 'activity' || section === 'sessionDetail' },
   ];
 
   const breadcrumbs = useMemo<BreadcrumbItem[]>(() => {
@@ -1772,11 +1735,10 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     if (section === 'trash') return [...items, { label: 'السلة' }];
     if (section === 'n8n') return [...items, { label: 'n8n' }];
     if (section === 'settings') return [...items, { label: 'الإعدادات' }];
-    if (section === 'activity') return [...items, { label: 'النشاط' }];
-    if (section === 'sessions') return [...items, { label: 'الجلسات' }];
+    if (section === 'activity' || section === 'sessions') return [...items, { label: 'الجلسات والنشاط' }];
     if (section === 'sessionDetail') return [
       ...items,
-      { label: 'الجلسات', path: '/admin/sessions' },
+      { label: 'الجلسات والنشاط', path: '/admin/sessions' },
       { label: id || 'جلسة' },
     ];
     if (section === 'reports' || section === 'dailyReport') return [
@@ -2026,21 +1988,18 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       );
     }
 
-    if (section === 'activity') {
+    if (section === 'activity' || section === 'sessions') {
       return (
-        <section>
-          <SectionTitle>النشاط</SectionTitle>
-          <ActivityTable events={filteredActivityEvents} profiles={profiles} t={t} />
-        </section>
-      );
-    }
-
-    if (section === 'sessions') {
-      return (
-        <section>
-          <SectionTitle>الجلسات</SectionTitle>
-          <SessionsTable sessions={filteredSessions} profiles={profiles} t={t} />
-        </section>
+        <div className="space-y-6">
+          <section>
+            <SectionTitle>الجلسات</SectionTitle>
+            <SessionsTable sessions={filteredSessions} profiles={profiles} t={t} />
+          </section>
+          <section>
+            <SectionTitle>النشاط</SectionTitle>
+            <ActivityTable events={filteredActivityEvents} profiles={profiles} t={t} />
+          </section>
+        </div>
       );
     }
 
@@ -2057,7 +2016,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     }
 
     if (section === 'reports' || section === 'dailyReport') {
-      return <ReportsPage articles={articles} logs={logs} activityEvents={activityEvents} sessions={sessions} profiles={profiles} date={selectedReportDate} t={t} />;
+      return <ReportsPage articles={articles} logs={logs} activityEvents={activityEvents} profiles={profiles} date={selectedReportDate} t={t} />;
     }
 
     if (section === 'overview') {
@@ -2073,6 +2032,14 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
           <section>
             <SectionTitle>{isArticleFilterActive ? 'نتائج البحث والفلاتر' : 'آخر المقالات'}</SectionTitle>
             <ArticleList articles={(isArticleFilterActive ? filteredArticles : activeArticles).slice(0, 24)} profiles={profiles} t={t} />
+          </section>
+          <section>
+            <SectionTitle>مقالات n8n</SectionTitle>
+            <ArticleList articles={n8nArticles.slice(0, 12)} profiles={profiles} t={t} />
+          </section>
+          <section>
+            <SectionTitle>سجلات n8n</SectionTitle>
+            <LogsTable logs={logs.slice(0, 12)} t={t} />
           </section>
         </div>
       );
