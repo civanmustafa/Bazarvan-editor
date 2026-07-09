@@ -291,6 +291,9 @@ export interface AiContentPatch {
 
 export interface AIHistoryItem {
   id: string;
+  articleScope?: string;
+  articleId?: string | null;
+  articleKey?: string;
   type: 'fix-violation' | 'user-command' | 'manual-analysis';
   ruleTitle?: string; // For 'fix-violation'
   originalText: string;
@@ -365,6 +368,9 @@ export interface BulkFixTargetFingerprint {
 
 export interface BulkFixReviewItem {
   id: string;
+  articleScope?: string;
+  articleId?: string | null;
+  articleKey?: string;
   ruleTitle: string;
   ruleTitles?: string[];
   criteria?: BulkFixCriterionSummary[];

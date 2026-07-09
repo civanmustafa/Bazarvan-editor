@@ -2231,6 +2231,7 @@ const readStoredStringList = (storageKey: string): string[] => {
 type StoredArticleAiRuntime = {
     aiResults: Record<AiPatchProvider, string>;
     aiHistory: AIHistoryItem[];
+    bulkFixReviewItems: BulkFixReviewItem[];
     aiInsertionPatches: Record<AiPatchProvider, AiContentPatch[]>;
 };
 
@@ -2255,6 +2256,7 @@ const readStoredArticleAiRuntime = (currentUser: string | null, articleScope: st
                 chatgpt: typeof parsed.aiResults?.chatgpt === 'string' ? parsed.aiResults.chatgpt : '',
             },
             aiHistory: Array.isArray(parsed.aiHistory) ? parsed.aiHistory : [],
+            bulkFixReviewItems: Array.isArray(parsed.bulkFixReviewItems) ? parsed.bulkFixReviewItems : [],
             aiInsertionPatches: {
                 gemini: Array.isArray(parsed.aiInsertionPatches?.gemini) ? parsed.aiInsertionPatches.gemini : [],
                 geminiPaid: Array.isArray(parsed.aiInsertionPatches?.geminiPaid) ? parsed.aiInsertionPatches.geminiPaid : [],
@@ -4791,6 +4793,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const previousArticleScopeRef = useRef<string>('');
     const previousArticleUserRef = useRef<string | null>(currentUser);
 
+    const getCurrentArticleAiScope = useCallback(() => (
+        activeArticleId || getArticleChatStorageScope(articleKey, title)
+    ), [activeArticleId, articleKey, title]);
+
+    const getCurrentArticleAiIdentity = useCallback(() => ({
+        articleScope: getCurrentArticleAiScope(),
+        articleId: activeArticleId || null,
+        articleKey: articleKey?.trim() || undefined,
+    }), [activeArticleId, articleKey, getCurrentArticleAiScope]);
+
     const buildApiUsageContext = useCallback((source: string, extra: AiApiUsageContext = {}): AiApiUsageContext => ({
         source,
         articleId: activeArticleId || undefined,
@@ -4837,7 +4849,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const restoreArticleAiRuntimeState = useCallback((runtime: StoredArticleAiRuntime | null) => {
         setAiResults(runtime?.aiResults || { ...EMPTY_AI_RESULTS });
         setAiHistory(runtime?.aiHistory || []);
-        replaceBulkFixReviewItems([]);
+        replaceBulkFixReviewItems(runtime?.bulkFixReviewItems || []);
         setAiInsertionPatches(runtime?.aiInsertionPatches || { ...EMPTY_AI_INSERTION_PATCHES });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
         setSuggestion(null);
@@ -4847,7 +4859,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     useEffect(() => {
         const currentScope = currentView === 'editor'
-            ? (activeArticleId || getArticleChatStorageScope(articleKey, title))
+            ? getCurrentArticleAiScope()
             : '';
         const previousScope = previousArticleScopeRef.current;
         const previousUser = previousArticleUserRef.current;
@@ -4858,6 +4870,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             saveStoredArticleAiRuntime(previousUser, previousScope, {
                 aiResults: aiResultsRef.current,
                 aiHistory: aiHistoryRef.current,
+                bulkFixReviewItems: bulkFixReviewItemsRef.current,
                 aiInsertionPatches: aiInsertionPatchesRef.current,
             });
         }
@@ -4872,7 +4885,24 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         previousArticleScopeRef.current = currentScope;
         previousArticleUserRef.current = currentUser;
-    }, [activeArticleId, articleKey, title, currentView, currentUser, restoreArticleAiRuntimeState]);
+    }, [currentView, currentUser, getCurrentArticleAiScope, restoreArticleAiRuntimeState]);
+
+    useEffect(() => {
+        if (currentView !== 'editor') return;
+        const currentScope = getCurrentArticleAiScope();
+        if (!currentScope.trim()) return;
+
+        const timeoutId = window.setTimeout(() => {
+            saveStoredArticleAiRuntime(currentUser, currentScope, {
+                aiResults: aiResultsRef.current,
+                aiHistory: aiHistoryRef.current,
+                bulkFixReviewItems: bulkFixReviewItemsRef.current,
+                aiInsertionPatches: aiInsertionPatchesRef.current,
+            });
+        }, 400);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [aiHistory, aiInsertionPatches, aiResults, bulkFixReviewItems, currentUser, currentView, getCurrentArticleAiScope]);
 
     useEffect(() => {
         const clearCurrentArticleAi = (event: Event) => {
@@ -4916,10 +4946,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, [bulkFixReviewItems]);
 
     const logToAiHistory = useCallback((item: Omit<AIHistoryItem, 'id'>) => {
-        const newItem: AIHistoryItem = { ...item, id: `${Date.now()}-${Math.random()}` };
+        const newItem: AIHistoryItem = { ...getCurrentArticleAiIdentity(), ...item, id: `${Date.now()}-${Math.random()}` };
         setAiHistory(prev => [newItem, ...prev]);
         return newItem.id;
-    }, []);
+    }, [getCurrentArticleAiIdentity]);
 
     const normalizeRangeText = useCallback((value: string) => value.replace(/\s+/g, ' ').trim(), []);
 
@@ -5812,6 +5842,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const ruleTitles = fallbackTargetRules.map(rule => rule.title);
         return {
             id: `bulk-fix-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
+            ...getCurrentArticleAiIdentity(),
             ruleTitle: ruleTitles.length > 1 ? `${ruleTitles.length} معايير: ${ruleTitles.join('، ')}` : ruleTitles[0],
             ruleTitles,
             criteria,
@@ -5827,7 +5858,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 .join(' | '),
             status: 'pending',
         };
-    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext]);
+    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, getCurrentArticleAiIdentity]);
 
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
         if (!editor || !analysisResults.structureAnalysis) return;
