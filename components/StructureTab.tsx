@@ -8,6 +8,12 @@ import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
 import { isProductPageContext } from '../utils/goalContext';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
+import {
+    buildGeminiFreeModelOptions,
+    GEMINI_FREE_MODEL_CHANGED_EVENT,
+    getSelectedGeminiFreeModel,
+    normalizeGeminiFreeModel,
+} from '../utils/geminiModelPreference';
 
 type StructureViolationItem = NonNullable<CheckResult['violatingItems']>[number];
 
@@ -334,16 +340,25 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
 const FixAllModal: React.FC<{
     groups: { [title: string]: number };
     onClose: () => void;
-    onConfirm: (selectedRules: string[], includeRelatedRules: boolean) => void;
+    onConfirm: (selectedRules: string[], includeRelatedRules: boolean, maxViolationsPerRule: number) => void;
     getRelatedRules: (selectedRules: string[]) => BulkFixRelatedRule[];
     uiLanguage: 'ar' | 'en';
     t: typeof translations.ar;
 }> = ({ groups, onClose, onConfirm, getRelatedRules, uiLanguage, t }) => {
     const [selectedRules, setSelectedRules] = useState<string[]>(() => Object.keys(groups));
     const [includeRelatedRules, setIncludeRelatedRules] = useState(true);
+    const [maxViolationsPerRule, setMaxViolationsPerRule] = useState(3);
     const isArabic = uiLanguage === 'ar';
     const relatedRules = useMemo(() => getRelatedRules(selectedRules), [getRelatedRules, selectedRules]);
     const relatedRulesCount = relatedRules.reduce((sum, rule) => sum + rule.count, 0);
+    const normalizedBatchSize = Math.max(1, Math.min(50, Math.floor(maxViolationsPerRule) || 1));
+    const selectedBatchCount = selectedRules.reduce((sum, ruleTitle) => (
+        sum + Math.min(groups[ruleTitle] || 0, normalizedBatchSize)
+    ), 0);
+    const relatedBatchCount = includeRelatedRules
+        ? relatedRules.reduce((sum, rule) => sum + Math.min(rule.count, normalizedBatchSize), 0)
+        : 0;
+    const estimatedBatchCount = selectedBatchCount + relatedBatchCount;
 
     const handleToggleRule = (ruleTitle: string) => {
         setSelectedRules(prev =>
@@ -375,6 +390,27 @@ const FixAllModal: React.FC<{
                         ? 'سيتم إنشاء قائمة إصلاحات مقترحة للمراجعة فقط. لن يتم تعديل النص قبل أن تطبق الاقتراحات بنفسك.'
                         : 'This creates reviewable fix proposals only. The editor text will not change until you apply them.'}
                 </p>
+                <div className="mb-4 rounded-xl border border-[#d4af37]/25 bg-[#d4af37]/5 p-3 dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10">
+                    <label className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <span className="text-xs font-black text-gray-800 dark:text-gray-100">
+                            {isArabic ? 'عدد المخالفات لكل معيار في هذه الدفعة' : 'Violations per criterion in this batch'}
+                        </span>
+                        <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            step={1}
+                            value={maxViolationsPerRule}
+                            onChange={event => setMaxViolationsPerRule(Math.max(1, Math.min(50, Number.parseInt(event.target.value || '1', 10) || 1)))}
+                            className="h-10 w-24 rounded-lg border border-[#d4af37]/40 bg-white px-3 text-center text-sm font-black text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+                        />
+                    </label>
+                    <p className="mt-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                        {isArabic
+                            ? `سيتم إرسال حتى ${normalizedBatchSize} مخالفة من كل معيار محدد. تقدير هذه الدفعة: ${estimatedBatchCount} مخالفة.`
+                            : `Up to ${normalizedBatchSize} violations from each selected criterion will be sent. Estimated batch: ${estimatedBatchCount} violations.`}
+                    </p>
+                </div>
                 <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
                     <div
                         className="flex items-center gap-3 p-3 cursor-pointer rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 border border-transparent hover:border-gray-100 dark:hover:border-[#444]"
@@ -429,8 +465,8 @@ const FixAllModal: React.FC<{
                     <button onClick={onClose} className="px-5 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 rounded-lg hover:bg-[#d4af37]/15 dark:bg-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#d4af37]/25 transition-colors">
                         {t.cancel}
                     </button>
-                    <button onClick={() => onConfirm(selectedRules, includeRelatedRules && relatedRules.length > 0)} disabled={selectedRules.length === 0} className="px-5 py-2.5 text-sm font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] disabled:bg-gray-300 shadow-md shadow-[#d4af37]/20 transition-all">
-                        {isArabic ? 'إنشاء الاقتراحات' : 'Create Proposals'} ({selectedRules.length}{includeRelatedRules && relatedRules.length > 0 ? ` + ${relatedRules.length}` : ''})
+                    <button onClick={() => onConfirm(selectedRules, includeRelatedRules && relatedRules.length > 0, normalizedBatchSize)} disabled={selectedRules.length === 0} className="px-5 py-2.5 text-sm font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] disabled:bg-gray-300 shadow-md shadow-[#d4af37]/20 transition-all">
+                        {isArabic ? 'إنشاء الدفعة' : 'Create Batch'} ({estimatedBatchCount})
                     </button>
                 </div>
             </div>
@@ -748,6 +784,11 @@ const StructureTab: React.FC = () => {
     const [isFixModalOpen, setIsFixModalOpen] = useState(false);
     const [selectedBulkFixIds, setSelectedBulkFixIds] = useState<string[]>([]);
     const [isBulkFixReviewVisible, setIsBulkFixReviewVisible] = useState(true);
+    const geminiFreeModelOptions = useMemo(() => buildGeminiFreeModelOptions(), []);
+    const geminiFreeModelValues = useMemo(() => geminiFreeModelOptions.map(option => option.value), [geminiFreeModelOptions]);
+    const [selectedBulkFixGeminiModel, setSelectedBulkFixGeminiModel] = useState(() => (
+        normalizeGeminiFreeModel(getSelectedGeminiFreeModel(), geminiFreeModelValues)
+    ));
     const t = translations[uiLanguage];
     const tSt = t.structureTab;
     const criteriaMiniStats = uiLanguage === 'ar'
@@ -776,10 +817,19 @@ const StructureTab: React.FC = () => {
     const pendingBulkFixIds = useMemo(() => bulkFixReviewItems.filter(item => item.status === 'pending').map(item => item.id), [bulkFixReviewItems]);
     const bulkFixReviewIdsKey = useMemo(() => bulkFixReviewItems.map(item => item.id).join('|'), [bulkFixReviewItems]);
 
-    const handleStartFixing = (selectedRules: string[], includeRelatedRules: boolean) => {
-        handleFixAllViolations(selectedRules, { includeRelatedRules });
+    const handleStartFixing = (selectedRules: string[], includeRelatedRules: boolean, maxViolationsPerRule: number) => {
+        handleFixAllViolations(selectedRules, { includeRelatedRules, geminiModel: selectedBulkFixGeminiModel, maxViolationsPerRule });
         setIsFixModalOpen(false);
     };
+
+    useEffect(() => {
+        const syncSelectedGeminiModel = () => {
+            setSelectedBulkFixGeminiModel(normalizeGeminiFreeModel(getSelectedGeminiFreeModel(), geminiFreeModelValues));
+        };
+
+        window.addEventListener(GEMINI_FREE_MODEL_CHANGED_EVENT, syncSelectedGeminiModel);
+        return () => window.removeEventListener(GEMINI_FREE_MODEL_CHANGED_EVENT, syncSelectedGeminiModel);
+    }, [geminiFreeModelValues]);
 
     useEffect(() => {
         setSelectedBulkFixIds(bulkFixReviewItems.filter(item => item.status === 'pending').map(item => item.id));
@@ -962,31 +1012,45 @@ const StructureTab: React.FC = () => {
          <SpiderStats metrics={criteriaSpiderMetrics} compact />
        </div>
        <div className="px-1">
-          <button
-              onClick={() => setIsFixModalOpen(true)}
-              disabled={fixAllProgress.running || fixableViolationsCount === 0}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 text-xs font-black uppercase tracking-widest text-white bg-gradient-to-r from-[#d4af37] to-[#b8922e] rounded-2xl hover:shadow-lg disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all"
-          >
-              {fixAllProgress.running ? (
-                  <>
-                      <Loader2 size={16} className="animate-spin" />
-                      <span>
-                          {uiLanguage === 'ar'
-                              ? `جاري إنشاء الاقتراحات ${fixAllProgress.current}/${fixAllProgress.total}`
-                              : `Creating proposals ${fixAllProgress.current}/${fixAllProgress.total}`}
-                      </span>
-                  </>
-              ) : (
-                  <>
-                      <Wand2 size={16} />
-                      <span>
-                          {uiLanguage === 'ar'
-                              ? 'الاصلاح المتعدد'
-                              : `Create proposed fixes (${fixableViolationsCount})`}
-                      </span>
-                  </>
-              )}
-          </button>
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(112px,0.46fr)] gap-2">
+              <button
+                  onClick={() => setIsFixModalOpen(true)}
+                  disabled={fixAllProgress.running || fixableViolationsCount === 0}
+                  className="flex min-h-12 min-w-0 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#d4af37] to-[#b8922e] px-3 py-3 text-xs font-black uppercase tracking-widest text-white transition-all hover:shadow-lg disabled:cursor-not-allowed disabled:from-gray-400 disabled:to-gray-500"
+              >
+                  {fixAllProgress.running ? (
+                      <>
+                          <Loader2 size={16} className="animate-spin" />
+                          <span className="min-w-0 truncate">
+                              {uiLanguage === 'ar'
+                                  ? `جاري إنشاء الاقتراحات ${fixAllProgress.current}/${fixAllProgress.total}`
+                                  : `Creating proposals ${fixAllProgress.current}/${fixAllProgress.total}`}
+                          </span>
+                      </>
+                  ) : (
+                      <>
+                          <Wand2 size={16} />
+                          <span className="min-w-0 truncate">
+                              {uiLanguage === 'ar'
+                                  ? 'الاصلاح المتعدد'
+                                  : `Create proposed fixes (${fixableViolationsCount})`}
+                          </span>
+                      </>
+                  )}
+              </button>
+              <select
+                  value={selectedBulkFixGeminiModel}
+                  onChange={event => setSelectedBulkFixGeminiModel(normalizeGeminiFreeModel(event.target.value, geminiFreeModelValues))}
+                  disabled={fixAllProgress.running}
+                  title={uiLanguage === 'ar' ? 'اختيار موديل Gemini للإصلاح المتعدد' : 'Choose Gemini model for bulk fixes'}
+                  dir="ltr"
+                  className="min-h-12 min-w-0 rounded-2xl border border-[#d4af37]/40 bg-white px-2 py-2 text-[10px] font-black text-gray-700 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-100"
+              >
+                  {geminiFreeModelOptions.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+              </select>
+          </div>
           {fixAllProgress.failed > 0 && !fixAllProgress.running && (
               <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
                   <p className="font-bold">

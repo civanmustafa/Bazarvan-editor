@@ -11,7 +11,12 @@ import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_ST
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
 import { GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
-import { getSelectedGeminiFreeModel } from '../utils/geminiModelPreference';
+import {
+    buildGeminiFreeModelOptions,
+    GEMINI_FREE_MODEL_CHANGED_EVENT,
+    getSelectedGeminiFreeModel,
+    normalizeGeminiFreeModel,
+} from '../utils/geminiModelPreference';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
@@ -751,6 +756,11 @@ const RightSidebar: React.FC = () => {
     const [copiedPatchId, setCopiedPatchId] = useState('');
     const [manualBridgeImportText, setManualBridgeImportText] = useState('');
     const [manualBridgeStatus, setManualBridgeStatus] = useState('');
+    const geminiFreeModelOptions = useMemo(() => buildGeminiFreeModelOptions(), []);
+    const geminiFreeModelValues = useMemo(() => geminiFreeModelOptions.map(option => option.value), [geminiFreeModelOptions]);
+    const [selectedSmartGeminiModel, setSelectedSmartGeminiModel] = useState(() => (
+        normalizeGeminiFreeModel(getSelectedGeminiFreeModel(), geminiFreeModelValues)
+    ));
     
     // Custom Dropdown State
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
@@ -766,6 +776,15 @@ const RightSidebar: React.FC = () => {
         setIsStructureTabActive(activeTab === 'structure');
         return () => setIsStructureTabActive(false);
     }, [activeTab, setIsStructureTabActive]);
+
+    useEffect(() => {
+        const syncSelectedGeminiModel = () => {
+            setSelectedSmartGeminiModel(normalizeGeminiFreeModel(getSelectedGeminiFreeModel(), geminiFreeModelValues));
+        };
+
+        window.addEventListener(GEMINI_FREE_MODEL_CHANGED_EVENT, syncSelectedGeminiModel);
+        return () => window.removeEventListener(GEMINI_FREE_MODEL_CHANGED_EVENT, syncSelectedGeminiModel);
+    }, [geminiFreeModelValues]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -1101,12 +1120,12 @@ ${readyCommandCompetitorBlocks}`;
             clearReadyCommandSelectionOnNextOpenRef.current = true;
         }
         if (selectedReadyCommands.length > 1) {
-            handleGeminiReadyCommandsAnalyze(readyCommandBatchItems);
+            handleGeminiReadyCommandsAnalyze(readyCommandBatchItems, 'gemini', selectedSmartGeminiModel);
             return;
         }
 
         const request = buildCurrentSmartAnalysisRequest();
-        handleAiAnalyze(request.userPrompt, request.options, request.historyMeta);
+        handleAiAnalyze(request.userPrompt, request.options, request.historyMeta, 'gemini', selectedSmartGeminiModel);
     };
 
     const handleRunGeminiPaidAnalysis = () => {
@@ -1654,10 +1673,25 @@ ${readyCommandCompetitorBlocks}`;
 
                         <div className="flex flex-col gap-2">
                             <div className="grid grid-cols-4 gap-2">
-                                <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
-                                    {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                                    <span className="text-xs font-bold">Gemini</span>
-                                </button>
+                                <div className="flex min-w-0 flex-col overflow-hidden rounded-lg bg-[#d4af37] text-white">
+                                    <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex min-h-9 items-center justify-center gap-1.5 px-1.5 py-1.5 hover:bg-[#b8922e] disabled:opacity-50">
+                                        {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                                        <span className="text-xs font-bold">Gemini</span>
+                                    </button>
+                                    <select
+                                        value={selectedSmartGeminiModel}
+                                        onChange={event => setSelectedSmartGeminiModel(normalizeGeminiFreeModel(event.target.value, geminiFreeModelValues))}
+                                        onClick={event => event.stopPropagation()}
+                                        disabled={isAiLoading.gemini}
+                                        title={t.locale === 'ar' ? 'اختيار موديل Gemini المجاني' : 'Choose free Gemini model'}
+                                        dir="ltr"
+                                        className="mx-1 mb-1 min-w-0 rounded-md border border-white/40 bg-white/95 px-1 py-0.5 text-[10px] font-bold text-[#333] outline-none focus:ring-1 focus:ring-white disabled:opacity-70"
+                                    >
+                                        {geminiFreeModelOptions.map(option => (
+                                            <option key={option.value} value={option.value}>{option.label}</option>
+                                        ))}
+                                    </select>
+                                </div>
                                 <button onClick={handleRunGeminiPaidAnalysis} disabled={isAiLoading.geminiPaid} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
                                     {isAiLoading.geminiPaid ? <Wand2 size={16} className="animate-spin" /> : <BadgeDollarSign size={16} />}
                                     <span className="text-xs font-bold">Pro</span>

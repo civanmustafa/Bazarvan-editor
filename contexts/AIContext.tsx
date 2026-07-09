@@ -2140,9 +2140,13 @@ const callGeminiArticleChatAnalysis = async (
     provider: GeminiPatchProvider = 'gemini',
     onResult?: (result: GeminiAnalysisResult) => void,
     usageContext?: AiApiUsageContext,
+    model?: string,
 ): Promise<string> => {
     const history = readStoredGeminiChatHistory(currentUser, articleScope, provider);
-    const result = await requestGeminiAnalysis(prompt, userKeys, history, getGeminiModelForProvider(provider), usageContext);
+    const selectedModel = provider === 'geminiPaid'
+        ? GEMINI_PAID_MODEL
+        : model?.trim() || getGeminiModelForProvider(provider);
+    const result = await requestGeminiAnalysis(prompt, userKeys, history, selectedModel, usageContext);
     if (result.ok) {
         saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
@@ -4689,9 +4693,9 @@ interface AIContextType {
     fixAllProgress: FixAllProgress;
     handleAiRequest: (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => Promise<void>;
     handleAnalyzeHeadings: () => Promise<void>;
-    handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta, provider?: GeminiPatchProvider) => Promise<void>;
+    handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta, provider?: GeminiPatchProvider, geminiModel?: string) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
-    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[], provider?: GeminiPatchProvider) => Promise<boolean>;
+    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[], provider?: GeminiPatchProvider, geminiModel?: string) => Promise<boolean>;
     buildSmartAnalysisPrompt: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => string;
     importManualChatGptResponse: (rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => void;
     parseAiPatchResponse: (
@@ -4702,7 +4706,7 @@ interface AIContextType {
     generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string }>;
     generateGoalContext: () => Promise<{ context?: GoalContext; error?: string }>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
-    handleFixAllViolations: (rulesToFix: string[], options?: { includeRelatedRules?: boolean }) => Promise<void>;
+    handleFixAllViolations: (rulesToFix: string[], options?: { includeRelatedRules?: boolean; geminiModel?: string; maxViolationsPerRule?: number }) => Promise<void>;
     getRelatedBulkFixRules: (rulesToFix: string[]) => BulkFixRelatedRule[];
     applyBulkFixReviewItem: (itemId: string, variantId?: string) => void;
     applySelectedBulkFixReviewItems: (itemIds: string[]) => void;
@@ -5328,6 +5332,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const handleGeminiReadyCommandsAnalyze = useCallback(async (
         items: ReadyCommandAnalysisBatchItem[],
         provider: GeminiPatchProvider = 'gemini',
+        geminiModel?: string,
     ) => {
         if (!editor || items.length === 0) return false;
         const geminiKeys = normalizeGeminiKeys(provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini);
@@ -5363,6 +5368,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         batchIndex: index + 1,
                         batchTotal: items.length,
                     }),
+                    provider === 'gemini' ? geminiModel : undefined,
                 );
                 const parsedResult = item.skipPatchInstructions
                     ? { displayText: result, patches: [] }
@@ -5406,6 +5412,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         options: any,
         historyMeta?: ReadyCommandAnalysisHistoryMeta,
         provider: GeminiPatchProvider = 'gemini',
+        geminiModel?: string,
     ) => {
         if (!editor) return;
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
@@ -5429,6 +5436,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     commandId: historyMeta?.commandId,
                     commandLabel: historyMeta?.commandLabel,
                 }),
+                provider === 'gemini' ? geminiModel : undefined,
             );
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result, patches: [] }
@@ -5490,6 +5498,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         prompt: string,
         provider: AiPatchProvider = quickAiProvider,
         usageContext: AiApiUsageContext = buildApiUsageContext('quick_provider'),
+        geminiModel?: string,
     ): Promise<string> => {
         if (provider === 'chatgpt') {
             const articleScope = getArticleChatStorageScope(articleKey, title);
@@ -5504,7 +5513,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return callGeminiAnalysis(
             prompt,
             geminiKeys,
-            getGeminiModelForProvider(geminiProvider),
+            geminiProvider === 'geminiPaid'
+                ? getGeminiModelForProvider(geminiProvider)
+                : geminiModel?.trim() || getGeminiModelForProvider(geminiProvider),
             geminiProvider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
             usageContext,
         );
@@ -5714,6 +5725,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         selectedRuleTitles: Set<string>,
         index: number,
         provider: AiPatchProvider = quickAiProvider,
+        geminiModel?: string,
     ): Promise<BulkFixReviewItem> => {
         if (!editor || !analysisResults.structureAnalysis) {
             throw new Error('Editor or analysis data is not ready.');
@@ -5735,7 +5747,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         );
         const res = await callQuickProviderAnalysis(prompt, provider, buildApiUsageContext('bulk_fix_review', {
             rules: Array.from(selectedRuleTitles),
-        }));
+        }), provider === 'gemini' ? geminiModel : undefined);
         if (isAiErrorResponseText(res)) {
             throw new Error(res);
         }
@@ -5858,9 +5870,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return summarizeRelatedBulkFixRules(editor, allViolations, selectedRuleTitles);
     }, [editor, analysisResults.structureAnalysis]);
 
-    const handleFixAllViolations = useCallback(async (rulesToFix: string[], options: { includeRelatedRules?: boolean } = {}) => {
+    const handleFixAllViolations = useCallback(async (rulesToFix: string[], options: { includeRelatedRules?: boolean; geminiModel?: string; maxViolationsPerRule?: number } = {}) => {
         if (!editor || !analysisResults.structureAnalysis) return;
         const provider = quickAiProvider;
+        const maxViolationsPerRule = Number.isFinite(options.maxViolationsPerRule)
+            ? Math.max(1, Math.min(50, Math.floor(options.maxViolationsPerRule || 1)))
+            : BULK_FIX_MAX_VIOLATIONS_PER_RULE;
         replaceBulkFixReviewItems([]);
         setFixAllProgress({ current: 0, total: 0, running: true, failed: 0, errors: [] });
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
@@ -5870,7 +5885,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const relatedViolations = options.includeRelatedRules
             ? getRelatedBulkFixViolations(editor, allViolations, selectedRuleTitles)
             : [];
-        const requestViolations = limitBulkFixViolationsPerRule([...selectedViolations, ...relatedViolations]);
+        const requestViolations = limitBulkFixViolationsPerRule([...selectedViolations, ...relatedViolations], maxViolationsPerRule);
         const groupedViolations = groupBulkFixViolationsByTextUnit(editor, requestViolations);
         const groupedTargets = groupedViolations
             .map(group => {
@@ -5913,7 +5928,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     batchIndex: i + 1,
                     batchTotal: groupedTargets.length,
                     rules: Array.from(selectedRuleTitles),
-                }));
+                }), provider === 'gemini' ? options.geminiModel : undefined);
                 if (isAiErrorResponseText(res)) {
                     throw new Error(res);
                 }
