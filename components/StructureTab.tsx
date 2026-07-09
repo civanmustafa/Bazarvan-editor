@@ -377,63 +377,64 @@ const FixAllModal: React.FC<{
     };
 
     return (
-        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-white dark:bg-[#2A2A2A] rounded-2xl shadow-2xl w-full max-w-md p-6 border dark:border-[#3C3C3C]" onClick={e => e.stopPropagation()}>
-                <div className="flex justify-between items-center mb-6">
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-2 sm:p-3 backdrop-blur-sm" onClick={onClose}>
+            <div className="flex max-h-[calc(100vh-1rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border bg-white shadow-2xl dark:border-[#3C3C3C] dark:bg-[#2A2A2A]" onClick={e => e.stopPropagation()}>
+                <div className="flex shrink-0 justify-between items-center px-4 py-3 border-b border-gray-100 dark:border-[#3C3C3C]">
                     <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">{t.fixAllModalTitle}</h3>
                     <button onClick={onClose} className="p-1 rounded-full text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20">
                         <X size={20} />
                     </button>
                 </div>
-                <p className="mb-4 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                    {isArabic
-                        ? 'سيتم إنشاء قائمة إصلاحات مقترحة للمراجعة فقط. لن يتم تعديل النص قبل أن تطبق الاقتراحات بنفسك.'
-                        : 'This creates reviewable fix proposals only. The editor text will not change until you apply them.'}
-                </p>
-                <div className="mb-4 rounded-xl border border-[#d4af37]/25 bg-[#d4af37]/5 p-3 dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10">
-                    <label className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <span className="text-xs font-black text-gray-800 dark:text-gray-100">
-                            {isArabic ? 'عدد المخالفات لكل معيار في هذه الدفعة' : 'Violations per criterion in this batch'}
-                        </span>
-                        <input
-                            type="number"
-                            min={1}
-                            max={50}
-                            step={1}
-                            value={maxViolationsPerRule}
-                            onChange={event => setMaxViolationsPerRule(Math.max(1, Math.min(50, Number.parseInt(event.target.value || '1', 10) || 1)))}
-                            className="h-10 w-24 rounded-lg border border-[#d4af37]/40 bg-white px-3 text-center text-sm font-black text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
-                        />
-                    </label>
-                    <p className="mt-2 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar px-3 py-3 sm:px-4">
+                    <p className="mb-3 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
                         {isArabic
-                            ? `سيتم إرسال حتى ${normalizedBatchSize} مخالفة من كل معيار محدد. تقدير هذه الدفعة: ${estimatedBatchCount} مخالفة.`
-                            : `Up to ${normalizedBatchSize} violations from each selected criterion will be sent. Estimated batch: ${estimatedBatchCount} violations.`}
+                            ? 'سيتم إنشاء قائمة إصلاحات مقترحة للمراجعة فقط. لن يتم تعديل النص قبل أن تطبق الاقتراحات بنفسك.'
+                            : 'This creates reviewable fix proposals only. The editor text will not change until you apply them.'}
                     </p>
-                </div>
-                <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
-                    <div
-                        className="flex items-center gap-3 p-3 cursor-pointer rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 border border-transparent hover:border-gray-100 dark:hover:border-[#444]"
-                        onClick={handleToggleAll}
-                    >
-                        {selectedRules.length === Object.keys(groups).length ? <CheckSquare size={20} className="text-[#d4af37]" /> : <Square size={20} className="text-gray-300" />}
-                        <span className="font-bold text-sm text-gray-800 dark:text-gray-200">{t.all}</span>
+                    <div className="mb-3 rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/5 p-2 dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10">
+                        <label className="flex items-center justify-between gap-2">
+                            <span className="min-w-0 text-[11px] font-black leading-tight text-gray-800 dark:text-gray-100">
+                                {isArabic ? 'عدد المخالفات لكل معيار' : 'Violations per criterion'}
+                            </span>
+                            <input
+                                type="number"
+                                min={1}
+                                max={50}
+                                step={1}
+                                value={maxViolationsPerRule}
+                                onChange={event => setMaxViolationsPerRule(Math.max(1, Math.min(50, Number.parseInt(event.target.value || '1', 10) || 1)))}
+                                className="h-8 w-16 shrink-0 rounded-lg border border-[#d4af37]/40 bg-white px-2 text-center text-xs font-black text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+                            />
+                        </label>
+                        <p className="mt-1.5 text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                            {isArabic
+                                ? `حتى ${normalizedBatchSize} من كل معيار. تقدير الدفعة: ${estimatedBatchCount} مخالفة.`
+                                : `Up to ${normalizedBatchSize} per criterion. Estimated batch: ${estimatedBatchCount} violations.`}
+                        </p>
                     </div>
-                    <div className="h-px bg-gray-100 dark:bg-[#3C3C3C] my-2"></div>
-                    {Object.entries(groups).map(([title, count]) => (
+                    <div className="space-y-1.5 pr-1">
                         <div
-                            key={title}
-                            className="flex items-center gap-3 p-2.5 cursor-pointer rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
-                            onClick={() => handleToggleRule(title)}
+                            className="flex items-center gap-2.5 p-2.5 cursor-pointer rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 border border-transparent hover:border-gray-100 dark:hover:border-[#444]"
+                            onClick={handleToggleAll}
                         >
-                            {selectedRules.includes(title) ? <CheckSquare size={20} className="text-[#d4af37]" /> : <Square size={20} className="text-gray-300" />}
-                            <span className="flex-grow text-sm text-gray-700 dark:text-gray-300">{title}</span>
-                            <span className="text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 px-2 py-0.5 rounded-full">{count}</span>
+                            {selectedRules.length === Object.keys(groups).length ? <CheckSquare size={20} className="text-[#d4af37]" /> : <Square size={20} className="text-gray-300" />}
+                            <span className="font-bold text-sm text-gray-800 dark:text-gray-200">{t.all}</span>
                         </div>
-                    ))}
-                </div>
+                        <div className="h-px bg-gray-100 dark:bg-[#3C3C3C] my-2"></div>
+                        {Object.entries(groups).map(([title, count]) => (
+                            <div
+                                key={title}
+                                className="flex items-center gap-2.5 p-2 cursor-pointer rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
+                                onClick={() => handleToggleRule(title)}
+                            >
+                                {selectedRules.includes(title) ? <CheckSquare size={20} className="text-[#d4af37]" /> : <Square size={20} className="text-gray-300" />}
+                                <span className="flex-grow text-sm text-gray-700 dark:text-gray-300">{title}</span>
+                                <span className="text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 px-2 py-0.5 rounded-full">{count}</span>
+                            </div>
+                        ))}
+                    </div>
                 {relatedRules.length > 0 && (
-                    <div className="mt-4 rounded-xl border border-[#d4af37]/25 bg-[#d4af37]/5 p-3 dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10">
+                    <div className="mt-3 rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/5 p-2.5 dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10">
                         <button
                             type="button"
                             onClick={() => setIncludeRelatedRules(prev => !prev)}
@@ -451,7 +452,7 @@ const FixAllModal: React.FC<{
                                 </span>
                             </span>
                         </button>
-                        <div className="mt-3 max-h-28 overflow-y-auto custom-scrollbar space-y-1.5">
+                        <div className="mt-2 max-h-24 overflow-y-auto custom-scrollbar space-y-1.5">
                             {relatedRules.map((rule) => (
                                 <div key={rule.title} className="flex items-center gap-2 rounded-lg bg-white/70 px-2 py-1.5 text-[10px] font-bold text-gray-600 dark:bg-[#1F1F1F]/70 dark:text-gray-300">
                                     <span className="min-w-0 flex-1 truncate">{rule.title}</span>
@@ -461,11 +462,12 @@ const FixAllModal: React.FC<{
                         </div>
                     </div>
                 )}
-                <div className="mt-8 flex justify-end gap-3">
-                    <button onClick={onClose} className="px-5 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 rounded-lg hover:bg-[#d4af37]/15 dark:bg-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#d4af37]/25 transition-colors">
+                    </div>
+                <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-gray-100 bg-white px-3 py-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-gray-600 bg-gray-100 rounded-lg hover:bg-[#d4af37]/15 dark:bg-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#d4af37]/25 transition-colors">
                         {t.cancel}
                     </button>
-                    <button onClick={() => onConfirm(selectedRules, includeRelatedRules && relatedRules.length > 0, normalizedBatchSize)} disabled={selectedRules.length === 0} className="px-5 py-2.5 text-sm font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] disabled:bg-gray-300 shadow-md shadow-[#d4af37]/20 transition-all">
+                    <button onClick={() => onConfirm(selectedRules, includeRelatedRules && relatedRules.length > 0, normalizedBatchSize)} disabled={selectedRules.length === 0} className="px-4 py-2 text-sm font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] disabled:bg-gray-300 shadow-md shadow-[#d4af37]/20 transition-all">
                         {isArabic ? 'إنشاء الدفعة' : 'Create Batch'} ({estimatedBatchCount})
                     </button>
                 </div>
