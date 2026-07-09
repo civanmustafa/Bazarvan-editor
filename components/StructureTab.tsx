@@ -998,6 +998,33 @@ const StructureTab: React.FC = () => {
         };
     });
 
+  const geminiProgress = fixAllProgress.geminiProgress;
+  const runningBulkFixLabel = fixAllProgress.running
+      ? geminiProgress?.currentKeyIndex && geminiProgress?.keyCount
+          ? (uiLanguage === 'ar'
+              ? `Gemini مفتاح ${geminiProgress.currentKeyIndex}/${geminiProgress.keyCount}`
+              : `Gemini key ${geminiProgress.currentKeyIndex}/${geminiProgress.keyCount}`)
+          : (uiLanguage === 'ar'
+              ? `جاري إنشاء الاقتراحات ${fixAllProgress.current}/${fixAllProgress.total}`
+              : `Creating proposals ${fixAllProgress.current}/${fixAllProgress.total}`)
+      : '';
+  const geminiProgressMeta = [
+      geminiProgress?.attemptedKeyCount && geminiProgress?.keyCount
+          ? (uiLanguage === 'ar'
+              ? `تمت تجربة ${geminiProgress.attemptedKeyCount}/${geminiProgress.keyCount}`
+              : `Tried ${geminiProgress.attemptedKeyCount}/${geminiProgress.keyCount}`)
+          : '',
+      geminiProgress?.keySuffix
+          ? `...${geminiProgress.keySuffix}`
+          : '',
+      geminiProgress?.status
+          ? `HTTP ${geminiProgress.status}`
+          : '',
+      geminiProgress?.reason
+          ? geminiProgress.reason
+          : '',
+  ].filter(Boolean).join(' | ');
+
   return (
     <div className="min-w-0 overflow-x-hidden p-2 space-y-3">
        {/* Criteria tab stats:
@@ -1020,13 +1047,11 @@ const StructureTab: React.FC = () => {
               >
                   {fixAllProgress.running ? (
                       <>
-                          <Loader2 size={16} className="animate-spin" />
-                          <span className="min-w-0 truncate">
-                              {uiLanguage === 'ar'
-                                  ? `جاري إنشاء الاقتراحات ${fixAllProgress.current}/${fixAllProgress.total}`
-                                  : `Creating proposals ${fixAllProgress.current}/${fixAllProgress.total}`}
-                          </span>
-                      </>
+                           <Loader2 size={16} className="animate-spin" />
+                           <span className="min-w-0 truncate">
+                               {runningBulkFixLabel}
+                           </span>
+                       </>
                   ) : (
                       <>
                           <Wand2 size={16} />
@@ -1049,10 +1074,25 @@ const StructureTab: React.FC = () => {
                   {geminiFreeModelOptions.map(option => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
-              </select>
-          </div>
-          {fixAllProgress.failed > 0 && !fixAllProgress.running && (
-              <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
+               </select>
+           </div>
+           {fixAllProgress.running && (
+               <div className="mt-2 rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/10 p-2 text-[11px] font-bold text-gray-700 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/15 dark:text-gray-200">
+                   <div className="flex items-center gap-2">
+                       <Loader2 size={13} className="shrink-0 animate-spin text-[#b8922e]" />
+                       <span className="min-w-0 break-words">
+                           {fixAllProgress.detail || (uiLanguage === 'ar' ? 'جاري تنفيذ الإصلاح المتعدد...' : 'Bulk fix is running...')}
+                       </span>
+                   </div>
+                   {geminiProgressMeta && (
+                       <div className="mt-1 ps-5 text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400" dir="ltr">
+                           {geminiProgressMeta}
+                       </div>
+                   )}
+               </div>
+           )}
+           {fixAllProgress.failed > 0 && !fixAllProgress.running && (
+               <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
                   <p className="font-bold">
                       {uiLanguage === 'ar' ? 'تعذر إنشاء بعض الاقتراحات.' : 'Some proposals could not be created.'}
                   </p>

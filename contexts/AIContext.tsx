@@ -1969,6 +1969,24 @@ type GeminiServerAttempt = {
     attempt?: unknown;
 };
 
+type GeminiProgressSnapshot = {
+    stage?: string;
+    provider?: GeminiPatchProvider;
+    model?: string;
+    keyCount?: number;
+    attemptedKeyCount?: number;
+    currentKeyIndex?: number;
+    currentAttempt?: number;
+    keySuffix?: string;
+    status?: number;
+    reason?: string;
+    message?: string;
+    updatedAt?: string;
+    completed?: boolean;
+};
+
+type GeminiProgressCallback = (progress: GeminiProgressSnapshot) => void;
+
 const getArticleChatStorageScope = (articleKey: string, title: string): string => {
     const rawScope = articleKey?.trim() || title?.trim() || 'draft';
     return rawScope.slice(0, 200);
@@ -2073,15 +2091,60 @@ const appendGeminiChatExchange = (
     { role: 'model', text: truncateGeminiChatText(response) },
 ]);
 
+const createGeminiProgressId = (): string => (
+    `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+);
+
+const startGeminiProgressPolling = (
+    progressId: string,
+    onProgress: GeminiProgressCallback,
+): (() => void) => {
+    let stopped = false;
+    let timerId: number | undefined;
+
+    const poll = async () => {
+        if (stopped) return;
+        try {
+            const response = await fetch(`/api/gemini/progress/${encodeURIComponent(progressId)}`, {
+                cache: 'no-store',
+            });
+            if (response.ok) {
+                const progress = await response.json() as GeminiProgressSnapshot;
+                onProgress(progress);
+                if (progress.completed) return;
+            }
+        } catch {
+            // Polling is diagnostic only; the main Gemini request still controls success/failure.
+        }
+
+        if (!stopped) {
+            timerId = window.setTimeout(poll, 600);
+        }
+    };
+
+    timerId = window.setTimeout(poll, 250);
+    return () => {
+        stopped = true;
+        if (timerId !== undefined) {
+            window.clearTimeout(timerId);
+        }
+    };
+};
+
 const requestGeminiAnalysis = async (
     prompt: string,
     userKeys?: string | string[],
     history?: GeminiChatMessage[],
     model: string = getSelectedGeminiFreeModel(),
     usageContext: AiApiUsageContext = {},
+    progressCallback?: GeminiProgressCallback,
 ): Promise<GeminiAnalysisResult> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
+    const progressId = progressCallback ? createGeminiProgressId() : undefined;
+    const stopProgressPolling = progressId && progressCallback
+        ? startGeminiProgressPolling(progressId, progressCallback)
+        : undefined;
 
     try {
       const response = await fetch('/api/gemini', {
@@ -2092,6 +2155,7 @@ const requestGeminiAnalysis = async (
             history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
             model,
             provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
+            progressId,
         }),
         signal: controller.signal,
       });
@@ -2125,6 +2189,17 @@ const requestGeminiAnalysis = async (
           const fallbackError = response.status === 504
               ? `انتهت مهلة طلب Gemini أو أعاد الخادم 504 للنموذج الحالي (${model}). أعد المحاولة بدفعة أصغر أو اختر موديلا آخر.`
               : `Gemini request failed with status ${response.status}`;
+          progressCallback?.({
+              stage: 'failed',
+              provider: data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini',
+              model: typeof data.model === 'string' ? data.model : model,
+              keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+              attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+              status: response.status,
+              message: serverError || fallbackError,
+              completed: true,
+          });
+          stopProgressPolling?.();
           throw new Error(`${serverError || fallbackError}${attemptSuffix}`);
       }
 
@@ -2145,6 +2220,20 @@ const requestGeminiAnalysis = async (
               ...usageContext,
           });
       }
+      progressCallback?.({
+          stage: 'success',
+          provider: data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini',
+          model: typeof data.model === 'string' ? data.model : model,
+          keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+          attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+          keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
+          status: response.status,
+          message: typeof data.keySuffix === 'string'
+              ? `تم تلقي رد Gemini بنجاح من مفتاح ينتهي بـ ...${data.keySuffix}.`
+              : 'تم تلقي رد Gemini بنجاح.',
+          completed: true,
+      });
+      stopProgressPolling?.();
 
       return {
           text: data.text,
@@ -2156,6 +2245,7 @@ const requestGeminiAnalysis = async (
       };
     } catch (error) {
       window.clearTimeout(timeoutId);
+      stopProgressPolling?.();
       console.error("Error calling Gemini API:", error);
       if (error instanceof Error && error.name === 'AbortError') {
           return {
@@ -2177,8 +2267,9 @@ const callGeminiAnalysis = async (
     model: string = getSelectedGeminiFreeModel(),
     onResult?: (result: GeminiAnalysisResult) => void,
     usageContext?: AiApiUsageContext,
+    progressCallback?: GeminiProgressCallback,
 ): Promise<string> => {
-    const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model, usageContext);
+    const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model, usageContext, progressCallback);
     onResult?.(result);
     return result.text;
 };
@@ -2192,12 +2283,13 @@ const callGeminiArticleChatAnalysis = async (
     onResult?: (result: GeminiAnalysisResult) => void,
     usageContext?: AiApiUsageContext,
     model?: string,
+    progressCallback?: GeminiProgressCallback,
 ): Promise<string> => {
     const history = readStoredGeminiChatHistory(currentUser, articleScope, provider);
     const selectedModel = provider === 'geminiPaid'
         ? GEMINI_PAID_MODEL
         : model?.trim() || getGeminiModelForProvider(provider);
-    const result = await requestGeminiAnalysis(prompt, userKeys, history, selectedModel, usageContext);
+    const result = await requestGeminiAnalysis(prompt, userKeys, history, selectedModel, usageContext, progressCallback);
     if (result.ok) {
         saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
@@ -4728,6 +4820,9 @@ type FixAllProgress = {
     running: boolean;
     failed: number;
     errors: string[];
+    stage?: string;
+    detail?: string;
+    geminiProgress?: GeminiProgressSnapshot | null;
 };
 
 interface AIContextType {
@@ -5608,6 +5703,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         provider: AiPatchProvider = quickAiProvider,
         usageContext: AiApiUsageContext = buildApiUsageContext('quick_provider'),
         geminiModel?: string,
+        progressCallback?: GeminiProgressCallback,
     ): Promise<string> => {
         if (provider === 'chatgpt') {
             const articleScope = getArticleChatStorageScope(articleKey, title);
@@ -5627,6 +5723,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 : geminiModel?.trim() || getGeminiModelForProvider(geminiProvider),
             geminiProvider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
             usageContext,
+            progressCallback,
         );
     }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext]);
     
@@ -5836,6 +5933,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         index: number,
         provider: AiPatchProvider = quickAiProvider,
         geminiModel?: string,
+        progressCallback?: GeminiProgressCallback,
     ): Promise<BulkFixReviewItem> => {
         if (!editor || !analysisResults.structureAnalysis) {
             throw new Error('Editor or analysis data is not ready.');
@@ -5857,7 +5955,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         );
         const res = await callQuickProviderAnalysis(prompt, provider, buildApiUsageContext('bulk_fix_review', {
             rules: Array.from(selectedRuleTitles),
-        }), provider === 'gemini' ? geminiModel : undefined);
+        }), provider === 'gemini' ? geminiModel : undefined, progressCallback);
         if (isAiErrorResponseText(res)) {
             throw new Error(res);
         }
@@ -5929,7 +6027,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const provider = quickAiProvider;
         setAiFixingInfo({ title: rule.title, from: item.from });
         replaceBulkFixReviewItems([]);
-        setFixAllProgress({ current: 0, total: 1, running: true, failed: 0, errors: [] });
+        setFixAllProgress({
+            current: 0,
+            total: 1,
+            running: true,
+            failed: 0,
+            errors: [],
+            stage: 'preparing',
+            detail: 'تحضير طلب الإصلاح...',
+            geminiProgress: null,
+        });
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         try {
             const groups = groupBulkFixViolationsByTextUnit(editor, [{ rule, item }]);
@@ -5938,8 +6045,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 throw new Error('Could not identify the violating text unit.');
             }
 
-            setFixAllProgress(p => ({ ...p, current: 1 }));
-            const proposedItem = await createBulkFixReviewItemForGroup(group, new Set([rule.title]), 0, provider);
+            setFixAllProgress(p => ({ ...p, current: 1, stage: 'requesting', detail: 'إرسال النص إلى Gemini لإنشاء اقتراح الإصلاح...' }));
+            const proposedItem = await createBulkFixReviewItemForGroup(
+                group,
+                new Set([rule.title]),
+                0,
+                provider,
+                undefined,
+                progress => setFixAllProgress(p => ({
+                    ...p,
+                    stage: progress.stage || p.stage,
+                    detail: progress.message || p.detail,
+                    geminiProgress: progress,
+                })),
+            );
             replaceBulkFixReviewItems([proposedItem]);
             const suggestions = (proposedItem.variants && proposedItem.variants.length > 0
                 ? proposedItem.variants.map(variant => variant.fixedText)
@@ -5964,11 +6083,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     historyItemId,
                 });
             }
-            setFixAllProgress(p => ({ ...p, running: false }));
+            setFixAllProgress(p => ({ ...p, running: false, stage: 'done', detail: 'تم إنشاء اقتراح الإصلاح.' }));
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown fix error';
             console.error('Single fix proposal failed:', rule.title, error);
-            setFixAllProgress({ current: 1, total: 1, running: false, failed: 1, errors: [`${rule.title}: ${message}`] });
+            setFixAllProgress({ current: 1, total: 1, running: false, failed: 1, errors: [`${rule.title}: ${message}`], stage: 'failed', detail: message });
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setAiFixingInfo(null);
@@ -5990,7 +6109,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             ? Math.max(1, Math.min(50, Math.floor(options.maxViolationsPerRule || 1)))
             : BULK_FIX_MAX_VIOLATIONS_PER_RULE;
         replaceBulkFixReviewItems([]);
-        setFixAllProgress({ current: 0, total: 0, running: true, failed: 0, errors: [] });
+        setFixAllProgress({
+            current: 0,
+            total: 0,
+            running: true,
+            failed: 0,
+            errors: [],
+            stage: 'preparing',
+            detail: 'تحضير مجموعات الإصلاح المتعدد...',
+            geminiProgress: null,
+        });
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         const selectedRuleTitles = new Set(rulesToFix);
         const allViolations = collectBulkFixViolations(analysisResults.structureAnalysis);
@@ -6014,13 +6142,25 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     : null;
             })
             .filter((target): target is { group: BulkFixTargetGroup; originalText: string; from: number; to: number; targetFingerprint?: BulkFixTargetFingerprint } => Boolean(target));
-        setFixAllProgress(p => ({ ...p, total: groupedTargets.length }));
+        setFixAllProgress(p => ({
+            ...p,
+            total: groupedTargets.length,
+            detail: groupedTargets.length > 0
+                ? `تم تجهيز ${groupedTargets.length} دفعة إصلاح.`
+                : 'لا توجد دفعات قابلة للإرسال.',
+        }));
 
         const proposedItems: BulkFixReviewItem[] = [];
         for (let i = 0; i < groupedTargets.length; i++) {
             const targetSnapshot = groupedTargets[i];
             const originalGroup = targetSnapshot.group;
-            setFixAllProgress(p => ({ ...p, current: i + 1 }));
+            setFixAllProgress(p => ({
+                ...p,
+                current: i + 1,
+                stage: 'requesting',
+                detail: `إرسال الدفعة ${i + 1} من ${groupedTargets.length} إلى Gemini...`,
+                geminiProgress: null,
+            }));
             try {
                 const resolvedStartRange = resolveBulkFixReviewRange(targetSnapshot);
                 if (!resolvedStartRange) {
@@ -6041,7 +6181,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     batchIndex: i + 1,
                     batchTotal: groupedTargets.length,
                     rules: Array.from(selectedRuleTitles),
-                }), provider === 'gemini' ? options.geminiModel : undefined);
+                }), provider === 'gemini' ? options.geminiModel : undefined, progress => setFixAllProgress(p => ({
+                    ...p,
+                    stage: progress.stage || p.stage,
+                    detail: progress.message || p.detail,
+                    geminiProgress: progress,
+                })));
                 if (isAiErrorResponseText(res)) {
                     throw new Error(res);
                 }
@@ -6101,6 +6246,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                             .join(' | '),
                         status: 'pending',
                     });
+                    setFixAllProgress(p => ({
+                        ...p,
+                        stage: 'received',
+                        detail: `تم إنشاء اقتراح الدفعة ${i + 1} من ${groupedTargets.length}.`,
+                    }));
                 } else {
                     throw new Error('AI did not return usable suggestions.');
                 }
@@ -6110,6 +6260,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 setFixAllProgress(p => ({
                     ...p,
                     failed: p.failed + 1,
+                    stage: 'failed',
+                    detail: `تعذر إنشاء اقتراح الدفعة ${i + 1}. سيتم الانتقال للدفعة التالية إن وجدت.`,
                     errors: [...p.errors, `${originalGroup.violations.map(violation => violation.rule.title).join(', ')}: ${message}`].slice(-3),
                 }));
             }
@@ -6129,7 +6281,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 bulkFixReviewItem: item,
             });
         });
-        setFixAllProgress(p => ({ ...p, running: false }));
+        setFixAllProgress(p => ({
+            ...p,
+            running: false,
+            stage: p.failed > 0 ? 'done-with-errors' : 'done',
+            detail: p.failed > 0
+                ? `انتهى الإصلاح المتعدد مع ${p.failed} دفعة متعثرة.`
+                : 'انتهى الإصلاح المتعدد وتم إنشاء الاقتراحات.',
+        }));
         setIsAiLoading(prev => ({ ...prev, [provider]: false }));
     }, [editor, analysisResults, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 

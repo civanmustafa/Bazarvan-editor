@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chatgptHandler from '../api/chatgpt';
-import geminiHandler from '../api/gemini';
+import geminiHandler, { geminiProgressHandler } from '../api/gemini';
 import n8nArticlesHandler from '../api/n8nArticles';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import systemSettingsHandler from '../api/systemSettings';
@@ -71,6 +71,7 @@ const healthzHandler: RequestHandler = (_req, res) => {
 app.get('/healthz', healthzHandler);
 app.get('/api/healthz', healthzHandler);
 
+app.all('/api/gemini/progress/:progressId', runApiHandler(geminiProgressHandler));
 app.all('/api/gemini', runApiHandler(geminiHandler));
 app.all('/api/chatgpt', runApiHandler(chatgptHandler));
 app.all('/api/n8n/articles', runApiHandler(n8nArticlesHandler));

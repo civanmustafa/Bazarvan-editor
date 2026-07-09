@@ -2,7 +2,7 @@ import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import chatgptHandler from './api/chatgpt';
-import geminiHandler from './api/gemini';
+import geminiHandler, { geminiProgressHandler } from './api/gemini';
 import n8nArticlesHandler from './api/n8nArticles';
 import assignedArticleAutomationHandler from './api/assignedArticleAutomation';
 import systemSettingsHandler from './api/systemSettings';
@@ -83,7 +83,8 @@ export default defineConfig(({ mode }) => {
 
               const origin = `http://${req.headers.host || 'localhost'}`;
               const url = new URL(req.url, origin);
-              const handler = apiHandlers.get(url.pathname);
+              const handler = apiHandlers.get(url.pathname)
+                || (url.pathname.startsWith('/api/gemini/progress/') ? geminiProgressHandler : undefined);
 
               if (!handler) {
                 next();

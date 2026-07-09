@@ -49,8 +49,28 @@ type GeminiHistoryContent = {
 };
 
 type GeminiProvider = "gemini" | "geminiPaid";
+type GeminiProgressStage = "queued" | "attempting" | "retrying" | "failed-key" | "switching-key" | "success" | "failed";
+
+type GeminiProgressState = {
+  id: string;
+  stage: GeminiProgressStage;
+  provider: GeminiProvider;
+  model: string;
+  keyCount: number;
+  attemptedKeyCount: number;
+  currentKeyIndex?: number;
+  currentAttempt?: number;
+  keySuffix?: string;
+  status?: number;
+  reason?: GeminiAttemptFailureReason;
+  message: string;
+  updatedAt: string;
+  completed: boolean;
+};
 
 const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
+const GEMINI_PROGRESS_TTL_MS = 10 * 60 * 1000;
+const geminiProgressStore = new Map<string, GeminiProgressState>();
 
 const createApiKeyFingerprint = (key: string): string => {
   const normalizedKey = key.trim();
@@ -65,6 +85,57 @@ const createApiKeyFingerprint = (key: string): string => {
 const getApiKeySuffix = (key: string): string => (
   key.trim().slice(-4)
 );
+
+const normalizeProgressId = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  const normalized = value.trim();
+  return /^[A-Za-z0-9_-]{8,80}$/.test(normalized) ? normalized : "";
+};
+
+const cleanupGeminiProgressStore = () => {
+  const cutoff = Date.now() - GEMINI_PROGRESS_TTL_MS;
+  for (const [id, progress] of geminiProgressStore.entries()) {
+    const updatedAt = Date.parse(progress.updatedAt);
+    if (Number.isFinite(updatedAt) && updatedAt < cutoff) {
+      geminiProgressStore.delete(id);
+    }
+  }
+};
+
+const setGeminiProgress = (
+  progressId: string,
+  patch: Omit<Partial<GeminiProgressState>, "id" | "updatedAt">,
+) => {
+  if (!progressId) return;
+  cleanupGeminiProgressStore();
+  const previous = geminiProgressStore.get(progressId);
+  geminiProgressStore.set(progressId, {
+    id: progressId,
+    stage: "queued",
+    provider: "gemini",
+    model: GEMINI_ANALYSIS_MODEL,
+    keyCount: 0,
+    attemptedKeyCount: 0,
+    message: "",
+    completed: false,
+    ...previous,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+};
+
+const getProgressIdFromRequest = (req: any): string => {
+  const routeProgressId = req?.params?.progressId || req?.query?.progressId;
+  const normalizedRouteId = normalizeProgressId(routeProgressId);
+  if (normalizedRouteId) return normalizedRouteId;
+
+  try {
+    const pathname = new URL(String(req?.url || ""), "http://localhost").pathname;
+    return normalizeProgressId(pathname.split("/").filter(Boolean).pop());
+  } catch {
+    return "";
+  }
+};
 
 /*
  * Gemini API route used by Vite dev middleware and the production Node server.
@@ -257,6 +328,21 @@ const getGeminiFailureReason = (details: GeminiErrorDetails): GeminiAttemptFailu
   return "unknown";
 };
 
+const getGeminiFailureReasonLabel = (reason: GeminiAttemptFailureReason): string => {
+  switch (reason) {
+    case "quota":
+      return "تجاوز الحصة أو 429";
+    case "auth":
+      return "مفتاح غير صالح أو غير مصرح";
+    case "server":
+      return "خطأ خادم مؤقت";
+    case "blocked":
+      return "حظر أمان من Gemini";
+    default:
+      return "سبب غير معروف";
+  }
+};
+
 const getUniqueAttemptCount = (attempts: GeminiAttemptDetail[]): number => (
   new Set(attempts.map(attempt => attempt.keyFingerprint)).size
 );
@@ -329,7 +415,8 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, useUrlContext, history, model, provider } = await readRequestBody(req) as any;
+    const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId } = await readRequestBody(req) as any;
+    const progressId = normalizeProgressId(rawProgressId);
     const requestedProvider = normalizeGeminiProvider(provider);
     const selectedModel = getSafeGeminiModel(
       selectGeminiModel(model, requestedProvider),
@@ -339,17 +426,36 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     const GEMINI_API_KEYS = parseEnvGeminiKeys(selectedProvider);
 
     if (GEMINI_API_KEYS.length === 0) {
+      setGeminiProgress(progressId, {
+        stage: "failed",
+        provider: selectedProvider,
+        model: selectedModel,
+        keyCount: 0,
+        attemptedKeyCount: 0,
+        completed: true,
+        message: `لم يتم العثور على مفاتيح ${getGeminiProviderLabel(selectedProvider)} في بيئة السيرفر.`,
+      });
       return {
         status: 503,
         body: {
           error: `لم يتم تكوين مفاتيح ${getGeminiProviderLabel(selectedProvider)} على السيرفر. أضف ${getProviderEnvHint(selectedProvider)} ثم أعد تشغيل PM2.`,
           provider: selectedProvider,
           model: selectedModel,
+          progressId,
         },
       };
     }
     
     if (!prompt) {
+      setGeminiProgress(progressId, {
+        stage: "failed",
+        provider: selectedProvider,
+        model: selectedModel,
+        keyCount: GEMINI_API_KEYS.length,
+        attemptedKeyCount: 0,
+        completed: true,
+        message: "الموجه مطلوب قبل إرسال طلب Gemini.",
+      });
       return { status: 400, body: { error: "الموجه مطلوب" } };
     }
 
@@ -361,10 +467,42 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
 
     let lastError: GeminiErrorDetails | null = null;
     const attempts: GeminiAttemptDetail[] = [];
-    for (const GEMINI_API_KEY of getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS)) {
+    const orderedKeys = getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS);
+    setGeminiProgress(progressId, {
+      stage: "queued",
+      provider: selectedProvider,
+      model: selectedModel,
+      keyCount: orderedKeys.length,
+      attemptedKeyCount: 0,
+      completed: false,
+      message: `بدء طلب ${getGeminiProviderLabel(selectedProvider)} للنموذج ${selectedModel}.`,
+    });
+
+    for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
+      const GEMINI_API_KEY = orderedKeys[keyIndex];
       const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
       const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
       for (let attempt = 0; attempt < 2; attempt += 1) {
+        const attemptedKeyCount = new Set([
+          ...attempts.map(item => item.keyFingerprint),
+          keyFingerprint,
+        ]).size;
+        setGeminiProgress(progressId, {
+          stage: attempt > 0 ? "retrying" : "attempting",
+          provider: selectedProvider,
+          model: selectedModel,
+          keyCount: orderedKeys.length,
+          attemptedKeyCount,
+          currentKeyIndex: keyIndex + 1,
+          currentAttempt: attempt + 1,
+          keySuffix,
+          status: undefined,
+          reason: undefined,
+          completed: false,
+          message: attempt > 0
+            ? `إعادة محاولة المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) للنموذج ${selectedModel}.`
+            : `تجربة المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) للنموذج ${selectedModel}.`,
+        });
         try {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
@@ -379,6 +517,19 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
           });
 
           const text = response.text;
+          setGeminiProgress(progressId, {
+            stage: "success",
+            provider: selectedProvider,
+            model: selectedModel,
+            keyCount: orderedKeys.length,
+            attemptedKeyCount,
+            currentKeyIndex: keyIndex + 1,
+            currentAttempt: attempt + 1,
+            keySuffix,
+            status: 200,
+            completed: true,
+            message: `تم تلقي رد Gemini بنجاح من المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}).`,
+          });
 
           return {
             status: 200,
@@ -393,6 +544,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
                 ...attempts.map(item => item.keyFingerprint),
                 keyFingerprint,
               ]).size,
+              progressId,
             },
           };
         } catch (error) {
@@ -405,6 +557,25 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
             reason,
             attempt: attempt + 1,
           });
+          const failedAttemptedKeyCount = getUniqueAttemptCount(attempts);
+          const hasServerRetry = attempt === 0 && reason === "server";
+          const hasNextKey = keyIndex < orderedKeys.length - 1;
+          setGeminiProgress(progressId, {
+            stage: hasServerRetry ? "retrying" : "failed-key",
+            provider: selectedProvider,
+            model: selectedModel,
+            keyCount: orderedKeys.length,
+            attemptedKeyCount: failedAttemptedKeyCount,
+            currentKeyIndex: keyIndex + 1,
+            currentAttempt: attempt + 1,
+            keySuffix,
+            status: lastError.status,
+            reason,
+            completed: false,
+            message: hasServerRetry
+              ? `خطأ خادم مؤقت مع المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}). سيتم إعادة المحاولة مرة واحدة.`
+              : `فشل المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : ""}`,
+          });
           console.warn('Gemini key attempt failed', {
             provider: selectedProvider,
             model: selectedModel,
@@ -416,6 +587,22 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
           if (attempt === 0 && reason === "server") {
             await wait(400);
             continue;
+          }
+          if (hasNextKey) {
+            setGeminiProgress(progressId, {
+              stage: "switching-key",
+              provider: selectedProvider,
+              model: selectedModel,
+              keyCount: orderedKeys.length,
+              attemptedKeyCount: failedAttemptedKeyCount,
+              currentKeyIndex: keyIndex + 2,
+              currentAttempt: 1,
+              keySuffix: getApiKeySuffix(orderedKeys[keyIndex + 1]),
+              status: undefined,
+              reason: undefined,
+              completed: false,
+              message: `تم تبديل المفتاح. الانتقال إلى المفتاح ${keyIndex + 2} من ${orderedKeys.length}.`,
+            });
           }
           break;
         }
@@ -439,7 +626,18 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       attemptedKeyCount: getUniqueAttemptCount(attempts),
       attempts,
       attemptSummary: summarizeAttemptReasons(attempts),
+      progressId,
     };
+    setGeminiProgress(progressId, {
+      stage: "failed",
+      provider: selectedProvider,
+      model: selectedModel,
+      keyCount: orderedKeys.length,
+      attemptedKeyCount: getUniqueAttemptCount(attempts),
+      currentKeyIndex: orderedKeys.length,
+      completed: true,
+      message: `فشل طلب Gemini بعد تجربة ${getUniqueAttemptCount(attempts)} من ${orderedKeys.length} مفتاح.`,
+    });
     return {
       status: responseStatus,
       body: failureBody,
@@ -454,6 +652,36 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     return { status: 500, body: { error: `خطأ من Gemini API: ${errorMessage}` } };
   }
 };
+
+const handleGeminiProgressRequest = async (req: any): Promise<ApiResult> => {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return { status: 405, body: { error: "Method not allowed" } };
+  }
+
+  cleanupGeminiProgressStore();
+  const progressId = getProgressIdFromRequest(req);
+  const progress = progressId ? geminiProgressStore.get(progressId) : undefined;
+  if (!progress) {
+    return {
+      status: 404,
+      body: {
+        error: "Gemini progress not found",
+        progressId,
+      },
+    };
+  }
+
+  return { status: 200, body: progress };
+};
+
+export async function geminiProgressHandler(req: any, res?: any): Promise<Response | void> {
+  const result = await handleGeminiProgressRequest(req);
+  if (res) {
+    sendNodeResponse(res, result);
+    return;
+  }
+  return toWebResponse(result);
+}
 
 export default async function handler(req: any, res?: any): Promise<Response | void> {
   const result = await handleGeminiRequest(req);
