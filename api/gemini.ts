@@ -131,24 +131,28 @@ const sendNodeResponse = (res: any, result: ApiResult) => {
   res.end(JSON.stringify(result.body));
 };
 
-const parseGeminiKeyList = (raw: string): string[] => (
-  raw
-    .split(/[\n,;]+/)
-    .map(key => key.trim())
-    .filter(Boolean)
+const parseGeminiKeyList = (...rawValues: Array<string | undefined>): string[] => (
+  Array.from(new Set(
+    rawValues
+      .flatMap(raw => String(raw || '').split(/[\n,;]+/))
+      .map(key => key.trim())
+      .filter(Boolean)
+  ))
 );
 
 const parseEnvGeminiKeys = (provider: GeminiProvider): string[] => {
-  const raw = provider === "geminiPaid"
-    ? (
-        process.env.GEMINI_PAID_API_KEYS ||
-        process.env.GEMINI_PAID_API_KEY ||
-        process.env.GEMINI_PRO_API_KEYS ||
-        process.env.GEMINI_PRO_API_KEY ||
-        ""
+  return provider === "geminiPaid"
+    ? parseGeminiKeyList(
+        process.env.GEMINI_PAID_API_KEYS,
+        process.env.GEMINI_PAID_API_KEY,
+        process.env.GEMINI_PRO_API_KEYS,
+        process.env.GEMINI_PRO_API_KEY,
       )
-    : (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || process.env.API_KEY || "");
-  return parseGeminiKeyList(raw);
+    : parseGeminiKeyList(
+        process.env.GEMINI_API_KEYS,
+        process.env.GEMINI_API_KEY,
+        process.env.API_KEY,
+      );
 };
 
 const getProviderEnvHint = (provider: GeminiProvider): string => (

@@ -38,6 +38,8 @@ const parseEnvLine = (line: string): [string, string] | null => {
   return [key, unquoteValue(trimmed.slice(separatorIndex + 1))];
 };
 
+const loadedEnvKeys = new Set<string>();
+
 const loadEnvFile = (fileName: string): boolean => {
   const envPath = path.join(projectRoot, fileName);
   if (!fs.existsSync(envPath)) return false;
@@ -48,8 +50,9 @@ const loadEnvFile = (fileName: string): boolean => {
     if (!parsed) return;
 
     const [key, value] = parsed;
-    if (process.env[key] === undefined || process.env[key] === '') {
+    if (!loadedEnvKeys.has(key)) {
       process.env[key] = value;
+      loadedEnvKeys.add(key);
     }
   });
 

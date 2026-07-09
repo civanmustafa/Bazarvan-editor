@@ -156,6 +156,10 @@ const uniqueList = (items: string[]): string[] => (
   Array.from(new Set(items.map(item => item.trim()).filter(Boolean)))
 );
 
+const collectSecretList = (...values: Array<string | undefined>): string[] => (
+  uniqueList(values.flatMap(value => splitSecretList(value)))
+);
+
 const getAllowedGeminiFreeModels = (): string[] => (
   uniqueList([
     process.env.GEMINI_MODEL || DEFAULT_GEMINI_FREE_MODELS[0],
@@ -189,14 +193,18 @@ const getPublicBaseUrl = (req: any): string => {
 };
 
 const getSecretStatus = (req: any) => {
-  const geminiKeys = splitSecretList(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || process.env.API_KEY);
-  const geminiPaidKeys = splitSecretList(
-    process.env.GEMINI_PAID_API_KEYS ||
-    process.env.GEMINI_PAID_API_KEY ||
-    process.env.GEMINI_PRO_API_KEYS ||
-    process.env.GEMINI_PRO_API_KEY
+  const geminiKeys = collectSecretList(
+    process.env.GEMINI_API_KEYS,
+    process.env.GEMINI_API_KEY,
+    process.env.API_KEY,
   );
-  const openAiKeys = splitSecretList(process.env.OPENAI_API_KEYS || process.env.OPENAI_API_KEY);
+  const geminiPaidKeys = collectSecretList(
+    process.env.GEMINI_PAID_API_KEYS,
+    process.env.GEMINI_PAID_API_KEY,
+    process.env.GEMINI_PRO_API_KEYS,
+    process.env.GEMINI_PRO_API_KEY,
+  );
+  const openAiKeys = collectSecretList(process.env.OPENAI_API_KEYS, process.env.OPENAI_API_KEY);
   const publicBaseUrl = getPublicBaseUrl(req);
 
   return {

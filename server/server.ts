@@ -23,15 +23,16 @@ const distDir = process.env.STATIC_DIR
 const port = Number.parseInt(process.env.PORT || '8080', 10) || 8080;
 
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
-const firstEnvValue = (...keys: string[]): string => (
-  keys.map(key => process.env[key]?.trim() || '').find(Boolean) || ''
+const secretList = (...keys: string[]): string[] => (
+  Array.from(new Set(
+    keys
+      .flatMap(key => String(process.env[key] || '').split(/[\n,;]+/))
+      .map(item => item.trim())
+      .filter(Boolean)
+  ))
 );
 const countSecretList = (...keys: string[]): number => (
-  firstEnvValue(...keys)
-    .split(/[\n,;]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
-    .length
+  secretList(...keys).length
 );
 
 const runApiHandler = (handler: ApiHandler): RequestHandler => async (req, res, next) => {
