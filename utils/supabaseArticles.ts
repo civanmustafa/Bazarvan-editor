@@ -312,6 +312,45 @@ const normalizeStats = (value: unknown): ArticleStats => {
 
 const normalizeTitle = (title: string): string => title.trim() || '(untitled)';
 
+const ensureCreatorProfileForArticleInsert = async (userId: string): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  const authUser = authData.user;
+
+  if (authError || !authUser || authUser.id !== userId) return;
+
+  const { data: existingProfile, error: readError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (readError) {
+    console.warn(`Could not verify creator profile "${userId}" before article insert.`, readError);
+    return;
+  }
+  if (existingProfile) return;
+
+  const fullName = typeof authUser.user_metadata?.full_name === 'string' && authUser.user_metadata.full_name.trim()
+    ? authUser.user_metadata.full_name.trim()
+    : typeof authUser.user_metadata?.name === 'string' && authUser.user_metadata.name.trim()
+      ? authUser.user_metadata.name.trim()
+      : null;
+
+  const { error: insertError } = await supabase
+    .from('profiles')
+    .insert({
+      id: userId,
+      email: authUser.email || null,
+      full_name: fullName,
+      role: 'user',
+    });
+
+  if (insertError && insertError.code !== '23505') {
+    console.warn(`Could not create missing creator profile "${userId}" before article insert.`, insertError);
+  }
+};
+
 const resolveCreatorArticleDefaults = async (
   userId: string,
 ): Promise<CreatorArticleDefaults> => {
@@ -796,6 +835,9 @@ export const saveRemoteArticleSnapshot = async (
   const supabase = getSupabaseClient();
   const savedAt = new Date().toISOString();
   const stats = buildStatsFromSnapshot(snapshot);
+  if (!options.articleId) {
+    await ensureCreatorProfileForArticleInsert(options.userId);
+  }
   const creatorDefaults = await resolveCreatorArticleDefaults(options.userId);
   const payload = {
     owner_id: options.userId,

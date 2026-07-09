@@ -899,7 +899,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     {activity.stats && (
                         <span className="flex items-center gap-1.5" title={t.wordCount}><FileText size={12} /> {activity.stats.wordCount}</span>
                     )}
-                     <span className="font-bold text-gray-600 dark:text-gray-300">{(activity.articleLanguage || 'ar').toUpperCase()}</span>
                     {ownerLabel && (
                         <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{ownerLabel}</span>
                     )}

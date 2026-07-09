@@ -1274,7 +1274,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus('idle'), 2000);
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'تعذر حفظ المقالة.';
+            const message = error instanceof Error
+                ? error.message
+                : isRecord(error) && typeof error.message === 'string'
+                    ? error.message
+                    : 'تعذر حفظ المقالة.';
             console.error('Failed to save article draft:', error);
             setSaveError(message);
             setSaveStatus('error');
