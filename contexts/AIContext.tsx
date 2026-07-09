@@ -1806,7 +1806,8 @@ const normalizeBulkFixVariants = (raw: unknown, originalText: string, criteria: 
     return sortBulkFixVariantsByCriteria(variants).slice(0, 2);
 };
 
-const getGeminiErrorMessage = (error: unknown): string => {
+const getGeminiErrorMessage = (error: unknown, modelForMessage: string = GEMINI_MODEL): string => {
+    const displayModel = modelForMessage.trim() || GEMINI_MODEL;
     const rawMessage = error instanceof Error
         ? error.message
         : typeof error === 'string'
@@ -1819,7 +1820,7 @@ const getGeminiErrorMessage = (error: unknown): string => {
             const parsed = JSON.parse(rawMessage.slice(jsonStart));
             const apiError = parsed?.error;
             if (apiError?.code === 429 || apiError?.status === 'RESOURCE_EXHAUSTED') {
-                return `تم تجاوز حصة Gemini أو لا توجد حصة متاحة للنموذج الحالي (${GEMINI_MODEL}). انتظر قليلا ثم أعد المحاولة، أو استخدم مفتاحا من مشروع Google مختلف لديه حصة متاحة.`;
+                return `تم تجاوز حصة Gemini أو لا توجد حصة متاحة للنموذج الحالي (${displayModel}). انتظر قليلا ثم أعد المحاولة، أو استخدم مفتاحا من مشروع Google مختلف لديه حصة متاحة.`;
             }
             if (typeof apiError?.message === 'string') {
                 return apiError.message;
@@ -1833,8 +1834,12 @@ const getGeminiErrorMessage = (error: unknown): string => {
         return rawMessage;
     }
 
+    if (/504|gateway timeout|timeout/i.test(rawMessage)) {
+        return `انتهت مهلة طلب Gemini أو أعاد الخادم 504 للنموذج الحالي (${displayModel}). أعد المحاولة بدفعة أصغر أو اختر موديلا آخر.`;
+    }
+
     if (/429|quota|RESOURCE_EXHAUSTED/i.test(rawMessage)) {
-        return `تم تجاوز حصة Gemini أو لا توجد حصة متاحة للنموذج الحالي (${GEMINI_MODEL}). انتظر قليلا ثم أعد المحاولة، أو استخدم مفتاحا من مشروع Google مختلف لديه حصة متاحة.`;
+        return `تم تجاوز حصة Gemini أو لا توجد حصة متاحة للنموذج الحالي (${displayModel}). انتظر قليلا ثم أعد المحاولة، أو استخدم مفتاحا من مشروع Google مختلف لديه حصة متاحة.`;
     }
 
     return rawMessage;
@@ -2076,7 +2081,10 @@ const requestGeminiAnalysis = async (
           const attemptSuffix = typeof data.attemptedKeyCount === 'number' && typeof data.keyCount === 'number' && !/تمت تجربة|attempted/i.test(serverError)
               ? ` تمت تجربة ${data.attemptedKeyCount} من ${data.keyCount} مفتاح.`
               : '';
-          throw new Error(`${serverError || `Gemini request failed with status ${response.status}`}${attemptSuffix}`);
+          const fallbackError = response.status === 504
+              ? `انتهت مهلة طلب Gemini أو أعاد الخادم 504 للنموذج الحالي (${model}). أعد المحاولة بدفعة أصغر أو اختر موديلا آخر.`
+              : `Gemini request failed with status ${response.status}`;
+          throw new Error(`${serverError || fallbackError}${attemptSuffix}`);
       }
 
       if (typeof data.text !== 'string') {
@@ -2112,7 +2120,7 @@ const requestGeminiAnalysis = async (
               ok: false,
           };
       }
-      const errorMessage = getGeminiErrorMessage(error);
+      const errorMessage = getGeminiErrorMessage(error, model);
       return {
           text: `حدث خطأ أثناء الاتصال بـ Gemini: ${errorMessage}`,
           ok: false,
