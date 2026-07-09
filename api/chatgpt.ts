@@ -89,6 +89,16 @@ const randomizeKeyOrder = (keys: string[]): string[] => {
   return shuffled;
 };
 
+const createApiKeyFingerprint = (key: string): string => {
+  const normalizedKey = key.trim();
+  let hash = 2166136261;
+  for (let index = 0; index < normalizedKey.length; index += 1) {
+    hash ^= normalizedKey.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+
 const normalizeConversationId = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -241,7 +251,13 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
 
         return {
           status: 200,
-          body: { text, conversationId: activeConversationId },
+          body: {
+            text,
+            conversationId: activeConversationId,
+            keyFingerprint: createApiKeyFingerprint(openAiKey),
+            provider: "openai",
+            model: selectedModel,
+          },
           headers: {
             "Access-Control-Allow-Origin": "*",
           },
@@ -272,7 +288,14 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
 
           return {
             status: 200,
-            body: { text, conversationId: activeConversationId, conversationReset: true },
+            body: {
+              text,
+              conversationId: activeConversationId,
+              conversationReset: true,
+              keyFingerprint: createApiKeyFingerprint(openAiKey),
+              provider: "openai",
+              model: selectedModel,
+            },
             headers: {
               "Access-Control-Allow-Origin": "*",
             },

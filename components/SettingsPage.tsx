@@ -259,11 +259,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   ], []);
   const selectedTabLabel = tabs.find(item => item.key === selectedSection)?.label || 'النظام';
   const geminiFreeModelOptions = useMemo(() => (
-    buildGeminiFreeModelOptions([
-      secretStatus.ai.gemini.model,
-      ...(secretStatus.ai.gemini.allowedModels || []),
-    ])
-  ), [secretStatus.ai.gemini.allowedModels, secretStatus.ai.gemini.model]);
+    buildGeminiFreeModelOptions()
+  ), []);
   const geminiFreeModelValues = useMemo(() => (
     geminiFreeModelOptions.map(option => option.value)
   ), [geminiFreeModelOptions]);

@@ -6,6 +6,7 @@ import {
   BarChart3,
   Baseline,
   BookOpen,
+  BrainCircuit,
   Calendar,
   CheckCircle2,
   Clock,
@@ -26,6 +27,7 @@ import {
   Settings,
   Shield,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
   Users,
   UserPlus,
@@ -585,6 +587,90 @@ const EmptyState: React.FC<{ icon: React.ReactNode; title: string; subtitle?: st
   </div>
 );
 
+type ApiUsageSummary = {
+  id: string;
+  service: string;
+  provider: string;
+  model: string;
+  keyFingerprint: string;
+  count: number;
+  users: Set<string>;
+  sources: Set<string>;
+  lastUsedAt: string;
+};
+
+const getActivityMetadata = (event: RemoteAppActivityEvent): Record<string, any> => (
+  isRecord(event.metadata) ? event.metadata : {}
+);
+
+const getApiProviderLabel = (service?: string, provider?: string): string => {
+  if (provider === 'geminiPaid') return 'Gemini Pro';
+  if (provider === 'gemini') return 'Gemini المجاني';
+  if (provider === 'openai' || service === 'openai') return 'OpenAI';
+  return provider || service || '-';
+};
+
+const getApiSourceLabel = (source?: string): string => {
+  const labels: Record<string, string> = {
+    semantic_keywords_lsi: 'توليد الصيغ و LSI',
+    goal_context_generation: 'توليد سياق الأهداف',
+    draft_title_generation: 'اقتراح عنوان',
+    smart_analysis: 'التحليل الذكي',
+    ready_commands_batch: 'الأوامر الجاهزة',
+    floating_toolbar: 'القائمة العائمة',
+    heading_analysis: 'تحليل العناوين',
+    bulk_fix_review: 'الإصلاح المتعدد',
+    bulk_fix_all: 'الإصلاح المجمع',
+    competitor_extraction: 'استخراج المنافسين',
+    quick_provider: 'أمر سريع',
+    unknown: 'غير محدد',
+  };
+  return labels[source || 'unknown'] || source || 'غير محدد';
+};
+
+const getApiUsageEvents = (events: RemoteAppActivityEvent[]): RemoteAppActivityEvent[] => (
+  events.filter(event => event.eventType === 'api_key_used')
+);
+
+const buildApiUsageSummary = (events: RemoteAppActivityEvent[]): ApiUsageSummary[] => {
+  const summaries = new Map<string, ApiUsageSummary>();
+
+  events.forEach(event => {
+    const metadata = getActivityMetadata(event);
+    const keyFingerprint = typeof metadata.keyFingerprint === 'string' && metadata.keyFingerprint.trim()
+      ? metadata.keyFingerprint.trim()
+      : event.entityId || 'unknown';
+    const service = typeof metadata.service === 'string' && metadata.service.trim() ? metadata.service.trim() : 'ai';
+    const provider = typeof metadata.provider === 'string' && metadata.provider.trim() ? metadata.provider.trim() : service;
+    const model = typeof metadata.model === 'string' && metadata.model.trim() ? metadata.model.trim() : '-';
+    const source = typeof metadata.source === 'string' && metadata.source.trim() ? metadata.source.trim() : 'unknown';
+    const id = `${service}:${provider}:${model}:${keyFingerprint}`;
+    const summary = summaries.get(id) || {
+      id,
+      service,
+      provider,
+      model,
+      keyFingerprint,
+      count: 0,
+      users: new Set<string>(),
+      sources: new Set<string>(),
+      lastUsedAt: event.createdAt,
+    };
+
+    summary.count += 1;
+    if (event.userId) summary.users.add(event.userId);
+    summary.sources.add(source);
+    if (new Date(event.createdAt).getTime() > new Date(summary.lastUsedAt).getTime()) {
+      summary.lastUsedAt = event.createdAt;
+    }
+    summaries.set(id, summary);
+  });
+
+  return Array.from(summaries.values()).sort((left, right) => (
+    right.count - left.count || new Date(right.lastUsedAt).getTime() - new Date(left.lastUsedAt).getTime()
+  ));
+};
+
 const ReportsPage: React.FC<{
   articles: RemoteArticleActivity[];
   logs: RemoteN8nIngestLog[];
@@ -608,6 +694,12 @@ const ReportsPage: React.FC<{
   const n8nLogs = logs.filter(log => inDay(log.createdAt));
   const dayActivityEvents = activityEvents.filter(event => inDay(event.createdAt));
   const daySessions = sessions.filter(session => inDay(session.startedAt) || inDay(session.lastSeenAt));
+  const apiUsageEvents = getApiUsageEvents(dayActivityEvents);
+  const apiUsageSummary = buildApiUsageSummary(apiUsageEvents);
+  const apiKeyCount = new Set(apiUsageEvents.map(event => getActivityMetadata(event).keyFingerprint || event.entityId).filter(Boolean)).size;
+  const freeGeminiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'gemini').length;
+  const paidGeminiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'geminiPaid').length;
+  const openAiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'openai' || getActivityMetadata(event).service === 'openai').length;
   const aiErrors = articles.filter(article => JSON.stringify(article.metadata || {}).toLowerCase().includes('error'));
   const activeUserIds = new Set(dayActivityEvents.map(event => event.userId).filter(Boolean));
   const getOwnerLabel = (article: RemoteArticleActivity): string => {
@@ -640,6 +732,23 @@ const ReportsPage: React.FC<{
         <AdminStat icon={<Activity size={18} />} label="مستخدمون عملوا" value={activeUserIds.size} />
       </div>
 
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <AdminStat icon={<Key size={18} />} label="استدعاءات API" value={apiUsageEvents.length} />
+        <AdminStat icon={<Shield size={18} />} label="مفاتيح مستخدمة" value={apiKeyCount} />
+        <AdminStat icon={<Sparkles size={18} />} label="Gemini المجاني" value={freeGeminiApiCalls} />
+        <AdminStat icon={<BrainCircuit size={18} />} label="OpenAI / Pro" value={paidGeminiApiCalls + openAiApiCalls} />
+      </div>
+
+      <section>
+        <SectionTitle>استخدام مفاتيح API</SectionTitle>
+        <ApiUsageSummaryTable summaries={apiUsageSummary} profiles={profiles} t={t} />
+      </section>
+
+      <section>
+        <SectionTitle>تفاصيل استدعاءات API</SectionTitle>
+        <ApiUsageEventsTable events={apiUsageEvents} profiles={profiles} t={t} />
+      </section>
+
       <section>
         <SectionTitle>نشاط اليوم</SectionTitle>
         {changedArticles.length > 0 ? (
@@ -667,6 +776,124 @@ const ReportsPage: React.FC<{
         <SectionTitle>جلسات اليوم</SectionTitle>
         <SessionsTable sessions={daySessions} profiles={profiles} t={t} />
       </section>
+    </div>
+  );
+};
+
+const ApiUsageSummaryTable: React.FC<{
+  summaries: ApiUsageSummary[];
+  profiles: RemoteProfile[];
+  t: typeof translations.ar;
+}> = ({ summaries, profiles, t }) => {
+  const getUserLabel = (userId: string): string => {
+    const profile = profiles.find(item => item.id === userId);
+    return getProfileLabel(profile);
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+      <table className="w-full min-w-[980px] text-start text-sm">
+        <thead className="text-xs uppercase text-gray-400">
+          <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
+            <th className="px-3 py-2 text-start">API</th>
+            <th className="px-3 py-2 text-start">الموديل</th>
+            <th className="px-3 py-2 text-start">بصمة المفتاح</th>
+            <th className="px-3 py-2 text-start">الاستدعاءات</th>
+            <th className="px-3 py-2 text-start">المستخدمون</th>
+            <th className="px-3 py-2 text-start">المصادر</th>
+            <th className="px-3 py-2 text-start">آخر استخدام</th>
+          </tr>
+        </thead>
+        <tbody>
+          {summaries.length > 0 ? summaries.map(summary => (
+            <tr key={summary.id} className="border-b border-gray-100 dark:border-[#3C3C3C]">
+              <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getApiProviderLabel(summary.service, summary.provider)}</td>
+              <td className="px-3 py-3 font-mono text-xs text-gray-500">{summary.model}</td>
+              <td className="px-3 py-3 font-mono text-xs text-gray-500">{summary.keyFingerprint}</td>
+              <td className="px-3 py-3 font-black text-[#8a6f1d] dark:text-[#f2d675]">{summary.count}</td>
+              <td className="max-w-[220px] px-3 py-3 text-gray-500" title={Array.from(summary.users).map(getUserLabel).join(', ')}>
+                {summary.users.size > 0 ? Array.from(summary.users).slice(0, 2).map(getUserLabel).join(', ') : '-'}
+                {summary.users.size > 2 ? ` +${summary.users.size - 2}` : ''}
+              </td>
+              <td className="max-w-[260px] px-3 py-3 text-gray-500" title={Array.from(summary.sources).map(getApiSourceLabel).join(', ')}>
+                {Array.from(summary.sources).slice(0, 3).map(getApiSourceLabel).join(', ') || '-'}
+                {summary.sources.size > 3 ? ` +${summary.sources.size - 3}` : ''}
+              </td>
+              <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(summary.lastUsedAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+            </tr>
+          )) : (
+            <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const ApiUsageEventsTable: React.FC<{
+  events: RemoteAppActivityEvent[];
+  profiles: RemoteProfile[];
+  t: typeof translations.ar;
+}> = ({ events, profiles, t }) => {
+  const getUserLabel = (userId?: string | null): string => {
+    const profile = userId ? profiles.find(item => item.id === userId) : null;
+    return getProfileLabel(profile);
+  };
+  const sortedEvents = [...events].sort((left, right) => (
+    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+  ));
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+      <table className="w-full min-w-[1120px] text-start text-sm">
+        <thead className="text-xs uppercase text-gray-400">
+          <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
+            <th className="px-3 py-2 text-start">الوقت</th>
+            <th className="px-3 py-2 text-start">المستخدم</th>
+            <th className="px-3 py-2 text-start">المصدر</th>
+            <th className="px-3 py-2 text-start">API</th>
+            <th className="px-3 py-2 text-start">الموديل</th>
+            <th className="px-3 py-2 text-start">بصمة المفتاح</th>
+            <th className="px-3 py-2 text-start">المقالة/الأمر</th>
+            <th className="px-3 py-2 text-start">الجلسة</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedEvents.length > 0 ? sortedEvents.map(event => {
+            const metadata = getActivityMetadata(event);
+            const keyFingerprint = typeof metadata.keyFingerprint === 'string' ? metadata.keyFingerprint : event.entityId || '-';
+            const articleLabel = [metadata.articleTitle, metadata.commandLabel || metadata.action]
+              .map(value => typeof value === 'string' ? value.trim() : '')
+              .filter(Boolean)
+              .join(' / ') || '-';
+
+            return (
+              <tr key={event.id} className="border-b border-gray-100 dark:border-[#3C3C3C]">
+                <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(event.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getUserLabel(event.userId)}</td>
+                <td className="px-3 py-3 text-gray-500">{getApiSourceLabel(typeof metadata.source === 'string' ? metadata.source : undefined)}</td>
+                <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getApiProviderLabel(metadata.service, metadata.provider)}</td>
+                <td className="px-3 py-3 font-mono text-xs text-gray-500">{typeof metadata.model === 'string' ? metadata.model : '-'}</td>
+                <td className="px-3 py-3 font-mono text-xs text-gray-500">{keyFingerprint}</td>
+                <td className="max-w-[260px] truncate px-3 py-3 text-gray-500" title={articleLabel}>{articleLabel}</td>
+                <td className="px-3 py-3">
+                  {event.sessionId ? (
+                    <button
+                      type="button"
+                      onClick={() => navigateToAppPath(buildAdminSessionPath(event.sessionId || ''))}
+                      className="font-mono text-xs font-bold text-[#8a6f1d] hover:underline dark:text-[#f2d675]"
+                    >
+                      {event.sessionId.slice(0, 8)}
+                    </button>
+                  ) : '-'}
+                </td>
+              </tr>
+            );
+          }) : (
+            <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-500">لا توجد تفاصيل API لهذا اليوم.</td></tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 };
@@ -1204,7 +1431,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
         listRemoteProfiles(),
         listRemoteN8nIngestLogs(80),
         listRemoteAppSessions(120),
-        listRemoteAppActivityEvents({ limit: 250 }),
+        listRemoteAppActivityEvents({ limit: 1000 }),
       ]);
       setArticles(sortArticles(articleRows));
       setProfiles(profileRows);

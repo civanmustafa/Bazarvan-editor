@@ -1863,6 +1863,20 @@ type GeminiAnalysisResult = {
     model?: string;
 };
 
+type AiApiUsageContext = {
+    source?: string;
+    articleId?: string;
+    articleTitle?: string;
+    articleKey?: string;
+    commandId?: string;
+    commandLabel?: string;
+    action?: string;
+    batchIndex?: number;
+    batchTotal?: number;
+    ruleTitle?: string;
+    rules?: string[];
+};
+
 const getArticleChatStorageScope = (articleKey: string, title: string): string => {
     const rawScope = articleKey?.trim() || title?.trim() || 'draft';
     return rawScope.slice(0, 200);
@@ -1972,6 +1986,7 @@ const requestGeminiAnalysis = async (
     userKeys?: string | string[],
     history?: GeminiChatMessage[],
     model: string = getSelectedGeminiFreeModel(),
+    usageContext: AiApiUsageContext = {},
 ): Promise<GeminiAnalysisResult> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
@@ -2019,11 +2034,13 @@ const requestGeminiAnalysis = async (
       }
 
       if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
-          window.dispatchEvent(new CustomEvent('gemini-key-used', {
+          window.dispatchEvent(new CustomEvent('api-key-used', {
               detail: {
+                  service: 'gemini',
                   keyFingerprint: data.keyFingerprint.trim(),
                   provider: data.provider,
                   model: data.model,
+                  ...usageContext,
               },
           }));
       }
@@ -2057,8 +2074,9 @@ const callGeminiAnalysis = async (
     userKeys?: string | string[],
     model: string = getSelectedGeminiFreeModel(),
     onResult?: (result: GeminiAnalysisResult) => void,
+    usageContext?: AiApiUsageContext,
 ): Promise<string> => {
-    const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model);
+    const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model, usageContext);
     onResult?.(result);
     return result.text;
 };
@@ -2070,9 +2088,10 @@ const callGeminiArticleChatAnalysis = async (
     articleScope: string,
     provider: GeminiPatchProvider = 'gemini',
     onResult?: (result: GeminiAnalysisResult) => void,
+    usageContext?: AiApiUsageContext,
 ): Promise<string> => {
     const history = readStoredGeminiChatHistory(currentUser, articleScope, provider);
-    const result = await requestGeminiAnalysis(prompt, userKeys, history, getGeminiModelForProvider(provider));
+    const result = await requestGeminiAnalysis(prompt, userKeys, history, getGeminiModelForProvider(provider), usageContext);
     if (result.ok) {
         saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
@@ -2088,6 +2107,9 @@ const normalizeChatGptKeys = (keys?: string | string[]): string[] => {
 type ChatGptAnalysisResult = {
     text: string;
     conversationId?: string;
+    keyFingerprint?: string;
+    provider?: 'openai';
+    model?: string;
 };
 
 const getChatGptConversationStorageKey = (currentUser: string | null, articleKey: string): string => {
@@ -2302,6 +2324,7 @@ const callChatGptAnalysis = async (
     prompt: string,
     userKeys?: string | string[],
     conversationId?: string,
+    usageContext: AiApiUsageContext = {},
 ): Promise<ChatGptAnalysisResult> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
@@ -2335,9 +2358,24 @@ const callChatGptAnalysis = async (
             throw new Error('ChatGPT server route did not return a valid text response.');
         }
 
+        if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
+            window.dispatchEvent(new CustomEvent('api-key-used', {
+                detail: {
+                    service: 'openai',
+                    provider: 'openai',
+                    keyFingerprint: data.keyFingerprint.trim(),
+                    model: typeof data.model === 'string' ? data.model : OPENAI_MODEL,
+                    ...usageContext,
+                },
+            }));
+        }
+
         return {
             text: data.text,
             conversationId: typeof data.conversationId === 'string' ? data.conversationId : conversationId,
+            keyFingerprint: typeof data.keyFingerprint === 'string' ? data.keyFingerprint : undefined,
+            provider: 'openai',
+            model: typeof data.model === 'string' ? data.model : OPENAI_MODEL,
         };
     } catch (error) {
         window.clearTimeout(timeoutId);
@@ -4682,6 +4720,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const previousArticleScopeRef = useRef<string>('');
     const previousArticleUserRef = useRef<string | null>(currentUser);
 
+    const buildApiUsageContext = useCallback((source: string, extra: AiApiUsageContext = {}): AiApiUsageContext => ({
+        source,
+        articleId: activeArticleId || undefined,
+        articleTitle: title.trim() || undefined,
+        articleKey: articleKey?.trim() || undefined,
+        ...extra,
+    }), [activeArticleId, articleKey, title]);
+
     const replaceBulkFixReviewItems = useCallback((items: BulkFixReviewItem[]) => {
         bulkFixReviewItemsRef.current = items;
         setBulkFixReviewItems(items);
@@ -4996,7 +5042,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '{ "secondaries": ["صيغة بديلة 1", "صيغة بديلة 2"], "lsi": ["كلمة LSI 1", "كلمة LSI 2"] }',
         ].filter(Boolean).join('\n');
 
-        const result = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        const result = await callGeminiAnalysis(
+            prompt,
+            apiKeys.gemini,
+            undefined,
+            undefined,
+            buildApiUsageContext('semantic_keywords_lsi'),
+        );
         if (/^حدث خطأ أثناء الاتصال بـ Gemini/.test(result)) {
             return { secondaries: [], lsi: [], error: result };
         }
@@ -5066,7 +5118,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         return { secondaries, lsi };
-    }, [apiKeys.gemini, articleLanguage, goalContext, keywords.company, keywords.primary, title]);
+    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.company, keywords.primary, title]);
 
     const generateGoalContext = useCallback(async (): Promise<{ context?: GoalContext; error?: string }> => {
         const primary = keywords.primary.trim();
@@ -5107,7 +5159,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '{ "pageType": "service", "objective": "convert", "audienceScope": "global", "targetCountry": "", "searchIntent": "transactional" }',
         ].join('\n');
 
-        const result = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        const result = await callGeminiAnalysis(
+            prompt,
+            apiKeys.gemini,
+            undefined,
+            undefined,
+            buildApiUsageContext('goal_context_generation'),
+        );
         const parsed = extractJson(result);
         const context = normalizeGeneratedGoalContext(parsed, goalContext);
 
@@ -5121,7 +5179,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         return { context };
-    }, [apiKeys.gemini, articleLanguage, goalContext, keywords.primary, keywords.secondaries, title]);
+    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.primary, keywords.secondaries, title]);
 
     const generateDraftTitle = useCallback(async (): Promise<string> => {
         const primary = keywords.primary.trim();
@@ -5148,10 +5206,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '{ "title": "..." }',
         ].filter(Boolean).join('\n');
 
-        const result = await callGeminiAnalysis(prompt, apiKeys.gemini);
+        const result = await callGeminiAnalysis(
+            prompt,
+            apiKeys.gemini,
+            undefined,
+            undefined,
+            buildApiUsageContext('draft_title_generation'),
+        );
         const parsed = extractJson(result);
         return typeof parsed?.title === 'string' ? parsed.title.trim() : '';
-    }, [apiKeys.gemini, articleLanguage, goalContext, keywords.lsi, keywords.primary, keywords.secondaries]);
+    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.lsi, keywords.primary, keywords.secondaries]);
 
     const logReadyCommandAnalysis = useCallback((
         provider: AiPatchProvider,
@@ -5242,6 +5306,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     articleScope,
                     provider,
                     provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
+                    buildApiUsageContext('ready_commands_batch', {
+                        commandId: item.commandId,
+                        commandLabel: item.commandLabel,
+                        batchIndex: index + 1,
+                        batchTotal: items.length,
+                    }),
                 );
                 const parsedResult = item.skipPatchInstructions
                     ? { displayText: result, patches: [] }
@@ -5278,7 +5348,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult]);
+    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,
@@ -5304,6 +5374,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 articleScope,
                 provider,
                 provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
+                buildApiUsageContext('smart_analysis', {
+                    commandId: historyMeta?.commandId,
+                    commandLabel: historyMeta?.commandLabel,
+                }),
             );
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result, patches: [] }
@@ -5316,7 +5390,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult]);
+    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -5330,7 +5404,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             );
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
-            const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt, storedConversationId);
+            const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt, storedConversationId, buildApiUsageContext('smart_analysis', {
+                commandId: historyMeta?.commandId,
+                commandLabel: historyMeta?.commandLabel,
+            }));
             saveStoredChatGptConversationId(currentUser, articleScope, result.conversationId);
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result.text, patches: [] }
@@ -5343,7 +5420,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey, title]);
+    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext]);
 
     const importManualChatGptResponse = useCallback((rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         const responseText = rawResponse.trim();
@@ -5361,11 +5438,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const callQuickProviderAnalysis = useCallback(async (
         prompt: string,
         provider: AiPatchProvider = quickAiProvider,
+        usageContext: AiApiUsageContext = buildApiUsageContext('quick_provider'),
     ): Promise<string> => {
         if (provider === 'chatgpt') {
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
-            const result = await callChatGptAnalysis(prompt, apiKeys.chatgpt, storedConversationId);
+            const result = await callChatGptAnalysis(prompt, apiKeys.chatgpt, storedConversationId, usageContext);
             saveStoredChatGptConversationId(currentUser, articleScope, result.conversationId);
             return result.text;
         }
@@ -5377,8 +5455,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             geminiKeys,
             getGeminiModelForProvider(geminiProvider),
             geminiProvider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
+            usageContext,
         );
-    }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult]);
+    }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         const provider = quickAiProvider;
@@ -5465,7 +5544,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 ].filter(Boolean).join('\n\n')
                 : prompt;
             const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً وباقتراحين مختلفين بالضبط، حتى إذا طلب نص الأمر اقتراحًا واحدًا. كل عنصر داخل suggestions يجب أن يكون النص المقترح النهائي فقط بلغة المقال دون شرح أو تسمية. الشكل: { "suggestions": ["...", "..."] }`;
-            const resultJson = await callQuickProviderAnalysis(finalPrompt, provider);
+            const resultJson = await callQuickProviderAnalysis(finalPrompt, provider, buildApiUsageContext('floating_toolbar', {
+                action,
+            }));
             if (isAiErrorResponseText(resultJson)) return;
             const parsed = extractJson(resultJson);
             if (parsed?.suggestions) {
@@ -5492,7 +5573,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setIsAiCommandLoading(false);
         }
-    }, [editor, title, text, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis]);
+    }, [editor, title, text, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext]);
 
     const handleAnalyzeHeadings = useCallback(async () => {
         const provider = quickAiProvider;
@@ -5514,7 +5595,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }).join('\n\n---\n\n');
             const promptTemplate = getEngineeringPrompt(engineeringPrompts, ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings);
             const prompt = `${buildComprehensivePrompt(promptTemplate)}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً. اجعل flaws ملاحظات عربية، واجعل suggestions عناوين مقترحة بلغة المقال فقط: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
-            const resultJson = await callQuickProviderAnalysis(prompt, provider);
+            const resultJson = await callQuickProviderAnalysis(prompt, provider, buildApiUsageContext('heading_analysis'));
             if (isAiErrorResponseText(resultJson)) return;
             const parsed = extractJson(resultJson);
             if (Array.isArray(parsed)) {
@@ -5575,7 +5656,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [editor, buildComprehensivePrompt, engineeringPrompts, isAiLoading, quickAiProvider, callQuickProviderAnalysis]);
+    }, [editor, buildComprehensivePrompt, engineeringPrompts, isAiLoading, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext]);
 
     const createBulkFixReviewItemForGroup = useCallback(async (
         group: BulkFixTargetGroup,
@@ -5601,7 +5682,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             targetContext.sectionHeading,
             { includeArticleTitle: false, includeArticleToc: false }
         );
-        const res = await callQuickProviderAnalysis(prompt, provider);
+        const res = await callQuickProviderAnalysis(prompt, provider, buildApiUsageContext('bulk_fix_review', {
+            rules: Array.from(selectedRuleTitles),
+        }));
         if (isAiErrorResponseText(res)) {
             throw new Error(res);
         }
@@ -5664,7 +5747,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 .join(' | '),
             status: 'pending',
         };
-    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis]);
+    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext]);
 
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
         if (!editor || !analysisResults.structureAnalysis) return;
@@ -5775,7 +5858,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     targetContext.sectionHeading,
                     { includeArticleTitle: false, includeArticleToc: false }
                 );
-                const res = await callQuickProviderAnalysis(prompt, provider);
+                const res = await callQuickProviderAnalysis(prompt, provider, buildApiUsageContext('bulk_fix_all', {
+                    batchIndex: i + 1,
+                    batchTotal: groupedTargets.length,
+                    rules: Array.from(selectedRuleTitles),
+                }));
                 if (isAiErrorResponseText(res)) {
                     throw new Error(res);
                 }
@@ -5865,7 +5952,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         });
         setFixAllProgress(p => ({ ...p, running: false }));
         setIsAiLoading(prev => ({ ...prev, [provider]: false }));
-    }, [editor, analysisResults, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis]);
+    }, [editor, analysisResults, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext]);
 
     const updateBulkFixReviewItem = useCallback((itemId: string, updates: Partial<BulkFixReviewItem>) => {
         updateBulkFixReviewItems(items => items.map(item => (

@@ -1209,11 +1209,16 @@ ${readyCommandCompetitorBlocks}`;
                 throw new Error(data.error || `${tRs.competitorExtractionFailed} (${response.status})`);
             }
             if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
-                window.dispatchEvent(new CustomEvent('gemini-key-used', {
+                window.dispatchEvent(new CustomEvent('api-key-used', {
                     detail: {
+                        service: 'gemini',
                         keyFingerprint: data.keyFingerprint.trim(),
                         provider: data.provider,
                         model: data.model,
+                        source: 'competitor_extraction',
+                        action: source,
+                        batchIndex: index + 1,
+                        batchTotal: competitorExtractions.length,
                     },
                 }));
             }

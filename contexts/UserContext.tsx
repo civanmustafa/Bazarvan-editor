@@ -23,6 +23,23 @@ type ApiKeys = { gemini: string[]; geminiPaid: string[]; chatgpt: string[] };
 type StoredApiKeys = { gemini?: string | string[]; geminiPaid?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
 type UserRole = 'admin' | 'user';
 type AppView = 'login' | 'dashboard' | 'editor' | 'admin' | 'settings' | 'notFound';
+type ApiKeyUsedDetail = {
+    keyFingerprint?: unknown;
+    service?: unknown;
+    provider?: unknown;
+    model?: unknown;
+    source?: unknown;
+    articleId?: unknown;
+    articleTitle?: unknown;
+    articleKey?: unknown;
+    commandId?: unknown;
+    commandLabel?: unknown;
+    action?: unknown;
+    batchIndex?: unknown;
+    batchTotal?: unknown;
+    ruleTitle?: unknown;
+    rules?: unknown;
+};
 type Profile = {
     id: string;
     email: string | null;
@@ -333,21 +350,73 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [uiLanguage, t]);
 
     useEffect(() => {
-        const handleGeminiKeyUsed = (event: Event) => {
+        const toOptionalString = (value: unknown): string | undefined => (
+            typeof value === 'string' && value.trim() ? value.trim() : undefined
+        );
+        const toOptionalNumber = (value: unknown): number | undefined => (
+            typeof value === 'number' && Number.isFinite(value) ? value : undefined
+        );
+
+        const handleApiKeyUsed = (event: Event) => {
             if (!currentUser) return;
-            const detail = (event as CustomEvent<{ keyFingerprint?: unknown; provider?: unknown; model?: unknown }>).detail;
+            const detail = (event as CustomEvent<ApiKeyUsedDetail>).detail || {};
             const keyFingerprint = detail?.keyFingerprint;
             if (typeof keyFingerprint !== 'string' || !keyFingerprint.trim()) return;
-            recordGeminiKeyUsage(currentUser, keyFingerprint, {
-                provider: detail?.provider === 'geminiPaid' ? 'geminiPaid' : detail?.provider === 'gemini' ? 'gemini' : undefined,
-                model: typeof detail?.model === 'string' ? detail.model : undefined,
-            });
+            const provider = detail?.provider === 'geminiPaid'
+                ? 'geminiPaid'
+                : detail?.provider === 'gemini'
+                  ? 'gemini'
+                  : detail?.provider === 'openai'
+                    ? 'openai'
+                    : undefined;
+            const service = toOptionalString(detail.service) || (provider === 'openai' ? 'openai' : 'gemini');
+            const model = toOptionalString(detail.model);
+
+            if (provider === 'gemini' || provider === 'geminiPaid') {
+                recordGeminiKeyUsage(currentUser, keyFingerprint, {
+                    provider,
+                    model,
+                });
+            }
+
+            if (currentUserId) {
+                void recordAppActivity(currentUserId, {
+                    eventType: 'api_key_used',
+                    entityType: 'api_key',
+                    entityId: `${service}:${provider || 'unknown'}:${keyFingerprint.trim()}`,
+                    metadata: {
+                        service,
+                        provider: provider || toOptionalString(detail.provider) || service,
+                        model,
+                        keyFingerprint: keyFingerprint.trim(),
+                        source: toOptionalString(detail.source) || 'unknown',
+                        articleId: toOptionalString(detail.articleId),
+                        articleTitle: toOptionalString(detail.articleTitle),
+                        articleKey: toOptionalString(detail.articleKey),
+                        commandId: toOptionalString(detail.commandId),
+                        commandLabel: toOptionalString(detail.commandLabel),
+                        action: toOptionalString(detail.action),
+                        batchIndex: toOptionalNumber(detail.batchIndex),
+                        batchTotal: toOptionalNumber(detail.batchTotal),
+                        ruleTitle: toOptionalString(detail.ruleTitle),
+                        rules: Array.isArray(detail.rules)
+                            ? detail.rules.filter((item): item is string => typeof item === 'string' && item.trim()).map(item => item.trim()).slice(0, 12)
+                            : undefined,
+                    },
+                }).catch(error => {
+                    console.error('Failed to record API key usage activity:', error);
+                });
+            }
             window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
         };
 
-        window.addEventListener('gemini-key-used', handleGeminiKeyUsed);
-        return () => window.removeEventListener('gemini-key-used', handleGeminiKeyUsed);
-    }, [currentUser]);
+        window.addEventListener('api-key-used', handleApiKeyUsed);
+        window.addEventListener('gemini-key-used', handleApiKeyUsed);
+        return () => {
+            window.removeEventListener('api-key-used', handleApiKeyUsed);
+            window.removeEventListener('gemini-key-used', handleApiKeyUsed);
+        };
+    }, [currentUser, currentUserId]);
 
     useEffect(() => {
         try {
