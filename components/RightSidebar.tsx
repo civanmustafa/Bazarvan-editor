@@ -1206,6 +1206,30 @@ ${readyCommandCompetitorBlocks}`;
                 throw new Error(tRs.competitorApiUnavailable);
             }
             if (!response.ok) {
+                if (Array.isArray(data.attempts)) {
+                    data.attempts.forEach((attempt: Record<string, unknown>, attemptIndex: number) => {
+                        const keyFingerprint = typeof attempt.keyFingerprint === 'string' ? attempt.keyFingerprint.trim() : '';
+                        if (!keyFingerprint) return;
+                        window.dispatchEvent(new CustomEvent('api-key-used', {
+                            detail: {
+                                service: 'gemini',
+                                keyFingerprint,
+                                provider: data.provider || provider,
+                                model: data.model,
+                                outcome: 'failed',
+                                status: typeof attempt.status === 'number' ? attempt.status : undefined,
+                                reason: typeof attempt.reason === 'string' ? attempt.reason : undefined,
+                                attemptNumber: typeof attempt.attempt === 'number' ? attempt.attempt : attemptIndex + 1,
+                                keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+                                attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+                                source: 'competitor_extraction',
+                                action: source,
+                                batchIndex: index + 1,
+                                batchTotal: competitorExtractions.length,
+                            },
+                        }));
+                    });
+                }
                 throw new Error(data.error || `${tRs.competitorExtractionFailed} (${response.status})`);
             }
             if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
@@ -1215,6 +1239,10 @@ ${readyCommandCompetitorBlocks}`;
                         keyFingerprint: data.keyFingerprint.trim(),
                         provider: data.provider,
                         model: data.model,
+                        outcome: 'success',
+                        status: response.status,
+                        keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+                        attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
                         source: 'competitor_extraction',
                         action: source,
                         batchIndex: index + 1,

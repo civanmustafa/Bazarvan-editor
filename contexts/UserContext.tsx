@@ -39,6 +39,12 @@ type ApiKeyUsedDetail = {
     batchTotal?: unknown;
     ruleTitle?: unknown;
     rules?: unknown;
+    outcome?: unknown;
+    status?: unknown;
+    reason?: unknown;
+    attemptNumber?: unknown;
+    keyCount?: unknown;
+    attemptedKeyCount?: unknown;
 };
 type Profile = {
     id: string;
@@ -402,6 +408,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         rules: Array.isArray(detail.rules)
                             ? detail.rules.filter((item): item is string => typeof item === 'string' && item.trim()).map(item => item.trim()).slice(0, 12)
                             : undefined,
+                        outcome: toOptionalString(detail.outcome),
+                        status: toOptionalNumber(detail.status),
+                        reason: toOptionalString(detail.reason),
+                        attemptNumber: toOptionalNumber(detail.attemptNumber),
+                        keyCount: toOptionalNumber(detail.keyCount),
+                        attemptedKeyCount: toOptionalNumber(detail.attemptedKeyCount),
                     },
                 }).catch(error => {
                     console.error('Failed to record API key usage activity:', error);

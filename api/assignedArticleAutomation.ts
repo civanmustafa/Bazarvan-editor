@@ -213,7 +213,9 @@ const callGemini = async (
   }
 
   let lastError: unknown = null;
+  const attemptedFingerprints = new Set<string>();
   for (const apiKey of getRoundRobinKeyOrder(provider, keys)) {
+    const keyFingerprint = createApiKeyFingerprint(apiKey);
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const ai = new GoogleGenAI({ apiKey });
@@ -223,12 +225,21 @@ const callGemini = async (
         });
         return {
           text: response.text || '',
-          keyFingerprint: createApiKeyFingerprint(apiKey),
+          keyFingerprint,
           model,
         };
       } catch (error) {
         lastError = error;
-        if (attempt === 0 && RETRIABLE_GEMINI_STATUSES.has(getGeminiErrorStatus(error))) {
+        const status = getGeminiErrorStatus(error);
+        attemptedFingerprints.add(keyFingerprint);
+        console.warn('Assigned automation Gemini key attempt failed', {
+          provider,
+          model,
+          keyFingerprint,
+          status,
+          attempt: attempt + 1,
+        });
+        if (attempt === 0 && RETRIABLE_GEMINI_STATUSES.has(status)) {
           await wait(400);
           continue;
         }
@@ -238,7 +249,7 @@ const callGemini = async (
   }
 
   throw new AssignedAutomationError(
-    `Gemini request failed: ${getGeminiErrorMessage(lastError)}`,
+    `Gemini request failed after trying ${attemptedFingerprints.size}/${keys.length} keys: ${getGeminiErrorMessage(lastError)}`,
     getGeminiErrorStatus(lastError),
   );
 };

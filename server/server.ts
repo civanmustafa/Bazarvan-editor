@@ -49,7 +49,7 @@ app.set('trust proxy', true);
 app.use(compression());
 app.use(express.json({ limit: '25mb' }));
 
-app.get('/healthz', (_req, res) => {
+const healthzHandler: RequestHandler = (_req, res) => {
   res.json({
     ok: true,
     service: 'bazarvan-editor',
@@ -65,7 +65,10 @@ app.get('/healthz', (_req, res) => {
     },
     envFilesLoaded: process.env.BAZARVAN_ENV_FILES_LOADED || '',
   });
-});
+};
+
+app.get('/healthz', healthzHandler);
+app.get('/api/healthz', healthzHandler);
 
 app.all('/api/gemini', runApiHandler(geminiHandler));
 app.all('/api/chatgpt', runApiHandler(chatgptHandler));

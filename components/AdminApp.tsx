@@ -594,6 +594,9 @@ type ApiUsageSummary = {
   model: string;
   keyFingerprint: string;
   count: number;
+  successCount: number;
+  failureCount: number;
+  reasons: Set<string>;
   users: Set<string>;
   sources: Set<string>;
   lastUsedAt: string;
@@ -652,12 +655,23 @@ const buildApiUsageSummary = (events: RemoteAppActivityEvent[]): ApiUsageSummary
       model,
       keyFingerprint,
       count: 0,
+      successCount: 0,
+      failureCount: 0,
+      reasons: new Set<string>(),
       users: new Set<string>(),
       sources: new Set<string>(),
       lastUsedAt: event.createdAt,
     };
 
     summary.count += 1;
+    if (metadata.outcome === 'failed') {
+      summary.failureCount += 1;
+      if (typeof metadata.reason === 'string' && metadata.reason.trim()) {
+        summary.reasons.add(metadata.reason.trim());
+      }
+    } else {
+      summary.successCount += 1;
+    }
     if (event.userId) summary.users.add(event.userId);
     summary.sources.add(source);
     if (new Date(event.createdAt).getTime() > new Date(summary.lastUsedAt).getTime()) {
@@ -792,13 +806,16 @@ const ApiUsageSummaryTable: React.FC<{
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <table className="w-full min-w-[980px] text-start text-sm">
+      <table className="w-full min-w-[1180px] text-start text-sm">
         <thead className="text-xs uppercase text-gray-400">
           <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
             <th className="px-3 py-2 text-start">API</th>
             <th className="px-3 py-2 text-start">الموديل</th>
             <th className="px-3 py-2 text-start">بصمة المفتاح</th>
             <th className="px-3 py-2 text-start">الاستدعاءات</th>
+            <th className="px-3 py-2 text-start">النجاح</th>
+            <th className="px-3 py-2 text-start">الفشل</th>
+            <th className="px-3 py-2 text-start">الأسباب</th>
             <th className="px-3 py-2 text-start">المستخدمون</th>
             <th className="px-3 py-2 text-start">المصادر</th>
             <th className="px-3 py-2 text-start">آخر استخدام</th>
@@ -811,6 +828,11 @@ const ApiUsageSummaryTable: React.FC<{
               <td className="px-3 py-3 font-mono text-xs text-gray-500">{summary.model}</td>
               <td className="px-3 py-3 font-mono text-xs text-gray-500">{summary.keyFingerprint}</td>
               <td className="px-3 py-3 font-black text-[#8a6f1d] dark:text-[#f2d675]">{summary.count}</td>
+              <td className="px-3 py-3 font-black text-emerald-600 dark:text-emerald-300">{summary.successCount}</td>
+              <td className="px-3 py-3 font-black text-red-600 dark:text-red-300">{summary.failureCount}</td>
+              <td className="max-w-[220px] px-3 py-3 text-gray-500" title={Array.from(summary.reasons).join(', ')}>
+                {Array.from(summary.reasons).join(', ') || '-'}
+              </td>
               <td className="max-w-[220px] px-3 py-3 text-gray-500" title={Array.from(summary.users).map(getUserLabel).join(', ')}>
                 {summary.users.size > 0 ? Array.from(summary.users).slice(0, 2).map(getUserLabel).join(', ') : '-'}
                 {summary.users.size > 2 ? ` +${summary.users.size - 2}` : ''}
@@ -822,7 +844,7 @@ const ApiUsageSummaryTable: React.FC<{
               <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(summary.lastUsedAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
             </tr>
           )) : (
-            <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
+            <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
           )}
         </tbody>
       </table>
@@ -845,7 +867,7 @@ const ApiUsageEventsTable: React.FC<{
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <table className="w-full min-w-[1120px] text-start text-sm">
+      <table className="w-full min-w-[1320px] text-start text-sm">
         <thead className="text-xs uppercase text-gray-400">
           <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
             <th className="px-3 py-2 text-start">الوقت</th>
@@ -854,6 +876,9 @@ const ApiUsageEventsTable: React.FC<{
             <th className="px-3 py-2 text-start">API</th>
             <th className="px-3 py-2 text-start">الموديل</th>
             <th className="px-3 py-2 text-start">بصمة المفتاح</th>
+            <th className="px-3 py-2 text-start">الحالة</th>
+            <th className="px-3 py-2 text-start">السبب</th>
+            <th className="px-3 py-2 text-start">المحاولة</th>
             <th className="px-3 py-2 text-start">المقالة/الأمر</th>
             <th className="px-3 py-2 text-start">الجلسة</th>
           </tr>
@@ -862,6 +887,14 @@ const ApiUsageEventsTable: React.FC<{
           {sortedEvents.length > 0 ? sortedEvents.map(event => {
             const metadata = getActivityMetadata(event);
             const keyFingerprint = typeof metadata.keyFingerprint === 'string' ? metadata.keyFingerprint : event.entityId || '-';
+            const outcome = typeof metadata.outcome === 'string' ? metadata.outcome : 'success';
+            const reason = typeof metadata.reason === 'string' ? metadata.reason : '-';
+            const attemptLabel = [
+              typeof metadata.attemptNumber === 'number' ? metadata.attemptNumber : null,
+              typeof metadata.attemptedKeyCount === 'number' && typeof metadata.keyCount === 'number'
+                ? `${metadata.attemptedKeyCount}/${metadata.keyCount}`
+                : null,
+            ].filter(Boolean).join(' / ') || '-';
             const articleLabel = [metadata.articleTitle, metadata.commandLabel || metadata.action]
               .map(value => typeof value === 'string' ? value.trim() : '')
               .filter(Boolean)
@@ -875,6 +908,9 @@ const ApiUsageEventsTable: React.FC<{
                 <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getApiProviderLabel(metadata.service, metadata.provider)}</td>
                 <td className="px-3 py-3 font-mono text-xs text-gray-500">{typeof metadata.model === 'string' ? metadata.model : '-'}</td>
                 <td className="px-3 py-3 font-mono text-xs text-gray-500">{keyFingerprint}</td>
+                <td className={`px-3 py-3 font-black ${outcome === 'failed' ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300'}`}>{outcome === 'failed' ? 'فشل' : 'نجاح'}</td>
+                <td className="px-3 py-3 text-gray-500">{reason}</td>
+                <td className="px-3 py-3 font-mono text-xs text-gray-500">{attemptLabel}</td>
                 <td className="max-w-[260px] truncate px-3 py-3 text-gray-500" title={articleLabel}>{articleLabel}</td>
                 <td className="px-3 py-3">
                   {event.sessionId ? (
@@ -890,7 +926,7 @@ const ApiUsageEventsTable: React.FC<{
               </tr>
             );
           }) : (
-            <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-500">لا توجد تفاصيل API لهذا اليوم.</td></tr>
+            <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-500">لا توجد تفاصيل API لهذا اليوم.</td></tr>
           )}
         </tbody>
       </table>

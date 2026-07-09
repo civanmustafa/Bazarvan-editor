@@ -1829,11 +1829,50 @@ const getGeminiErrorMessage = (error: unknown): string => {
         }
     }
 
+    if (/تمت تجربة|فشل طلب .*Gemini|attempted .*key/i.test(rawMessage)) {
+        return rawMessage;
+    }
+
     if (/429|quota|RESOURCE_EXHAUSTED/i.test(rawMessage)) {
         return `تم تجاوز حصة Gemini أو لا توجد حصة متاحة للنموذج الحالي (${GEMINI_MODEL}). انتظر قليلا ثم أعد المحاولة، أو استخدم مفتاحا من مشروع Google مختلف لديه حصة متاحة.`;
     }
 
     return rawMessage;
+};
+
+const dispatchGeminiApiUsage = (
+    detail: Record<string, unknown>,
+) => {
+    window.dispatchEvent(new CustomEvent('api-key-used', {
+        detail: {
+            service: 'gemini',
+            ...detail,
+        },
+    }));
+};
+
+const dispatchGeminiFailedAttempts = (
+    data: Record<string, any>,
+    usageContext: AiApiUsageContext,
+) => {
+    const attempts = Array.isArray(data.attempts) ? data.attempts as GeminiServerAttempt[] : [];
+    attempts.forEach((attempt, index) => {
+        const keyFingerprint = typeof attempt.keyFingerprint === 'string' ? attempt.keyFingerprint.trim() : '';
+        if (!keyFingerprint) return;
+
+        dispatchGeminiApiUsage({
+            keyFingerprint,
+            provider: data.provider,
+            model: data.model,
+            outcome: 'failed',
+            status: typeof attempt.status === 'number' ? attempt.status : undefined,
+            reason: typeof attempt.reason === 'string' ? attempt.reason : undefined,
+            attemptNumber: typeof attempt.attempt === 'number' ? attempt.attempt : index + 1,
+            keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+            attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+            ...usageContext,
+        });
+    });
 };
 
 const normalizeGeminiKeys = (keys?: string | string[]): string[] => {
@@ -1875,6 +1914,13 @@ type AiApiUsageContext = {
     batchTotal?: number;
     ruleTitle?: string;
     rules?: string[];
+};
+
+type GeminiServerAttempt = {
+    keyFingerprint?: unknown;
+    status?: unknown;
+    reason?: unknown;
+    attempt?: unknown;
 };
 
 const getArticleChatStorageScope = (articleKey: string, title: string): string => {
@@ -2019,6 +2065,7 @@ const requestGeminiAnalysis = async (
       }
 
       if (!response.ok) {
+          dispatchGeminiFailedAttempts(data, usageContext);
           const serverError = typeof data.error === 'string'
               ? data.error
               : typeof data.error?.message === 'string'
@@ -2026,7 +2073,10 @@ const requestGeminiAnalysis = async (
                 : rawBody.trim() && !rawBody.trim().startsWith('<')
                   ? rawBody.trim().slice(0, 500)
                   : '';
-          throw new Error(serverError || `Gemini request failed with status ${response.status}`);
+          const attemptSuffix = typeof data.attemptedKeyCount === 'number' && typeof data.keyCount === 'number' && !/تمت تجربة|attempted/i.test(serverError)
+              ? ` تمت تجربة ${data.attemptedKeyCount} من ${data.keyCount} مفتاح.`
+              : '';
+          throw new Error(`${serverError || `Gemini request failed with status ${response.status}`}${attemptSuffix}`);
       }
 
       if (typeof data.text !== 'string') {
@@ -2034,15 +2084,16 @@ const requestGeminiAnalysis = async (
       }
 
       if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
-          window.dispatchEvent(new CustomEvent('api-key-used', {
-              detail: {
-                  service: 'gemini',
-                  keyFingerprint: data.keyFingerprint.trim(),
-                  provider: data.provider,
-                  model: data.model,
-                  ...usageContext,
-              },
-          }));
+          dispatchGeminiApiUsage({
+              keyFingerprint: data.keyFingerprint.trim(),
+              provider: data.provider,
+              model: data.model,
+              outcome: 'success',
+              status: response.status,
+              keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+              attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+              ...usageContext,
+          });
       }
 
       return {

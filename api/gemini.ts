@@ -33,6 +33,15 @@ type GeminiErrorDetails = {
   message: string;
 };
 
+type GeminiAttemptFailureReason = "quota" | "auth" | "server" | "blocked" | "unknown";
+
+type GeminiAttemptDetail = {
+  keyFingerprint: string;
+  status: number;
+  reason: GeminiAttemptFailureReason;
+  attempt: number;
+};
+
 type GeminiHistoryContent = {
   role: "user" | "model";
   parts: { text: string }[];
@@ -220,6 +229,87 @@ const getGeminiErrorDetails = (error: unknown): GeminiErrorDetails => {
 
 const wait = (duration: number) => new Promise(resolve => setTimeout(resolve, duration));
 
+const getGeminiFailureReason = (details: GeminiErrorDetails): GeminiAttemptFailureReason => {
+  if (
+    details.status === 429 ||
+    /quota|RESOURCE_EXHAUSTED|rate.?limit|too many requests|exceeded/i.test(details.message)
+  ) {
+    return "quota";
+  }
+  if (
+    details.status === 401 ||
+    details.status === 403 ||
+    /API key not valid|API_KEY_INVALID|invalid api key|PERMISSION_DENIED|forbidden|unauthorized/i.test(details.message)
+  ) {
+    return "auth";
+  }
+  if (RETRIABLE_GEMINI_STATUSES.has(details.status)) return "server";
+  if (/blocked|safety|SAFETY|RECITATION/i.test(details.message)) return "blocked";
+  return "unknown";
+};
+
+const getUniqueAttemptCount = (attempts: GeminiAttemptDetail[]): number => (
+  new Set(attempts.map(attempt => attempt.keyFingerprint)).size
+);
+
+const summarizeAttemptReasons = (attempts: GeminiAttemptDetail[]): Record<GeminiAttemptFailureReason, number> => {
+  const grouped = attempts.reduce<Record<GeminiAttemptFailureReason, Set<string>>>((groups, attempt) => {
+    groups[attempt.reason].add(attempt.keyFingerprint);
+    return groups;
+  }, {
+    quota: new Set<string>(),
+    auth: new Set<string>(),
+    server: new Set<string>(),
+    blocked: new Set<string>(),
+    unknown: new Set<string>(),
+  });
+
+  return {
+    quota: grouped.quota.size,
+    auth: grouped.auth.size,
+    server: grouped.server.size,
+    blocked: grouped.blocked.size,
+    unknown: grouped.unknown.size,
+  };
+};
+
+const buildGeminiFailureMessage = (
+  provider: GeminiProvider,
+  model: string,
+  keyCount: number,
+  attempts: GeminiAttemptDetail[],
+  lastError: GeminiErrorDetails | null,
+): string => {
+  const providerLabel = getGeminiProviderLabel(provider);
+  const attemptedKeyCount = getUniqueAttemptCount(attempts);
+  const summary = summarizeAttemptReasons(attempts);
+  const parts = [
+    `فشل طلب ${providerLabel} للنموذج ${model}.`,
+    `تمت تجربة ${attemptedKeyCount} من ${keyCount} مفتاح.`,
+  ];
+
+  const reasonParts = [
+    summary.quota ? `${summary.quota} حصة/429` : '',
+    summary.auth ? `${summary.auth} غير صالح/غير مصرح` : '',
+    summary.server ? `${summary.server} خطأ خادم` : '',
+    summary.blocked ? `${summary.blocked} حظر أمان` : '',
+    summary.unknown ? `${summary.unknown} غير معروف` : '',
+  ].filter(Boolean);
+
+  if (reasonParts.length > 0) {
+    parts.push(`الأسباب: ${reasonParts.join('، ')}.`);
+  }
+
+  if (summary.quota > 0 && summary.quota === attemptedKeyCount) {
+    parts.push('إذا كانت هذه المفاتيح من نفس مشروع Google فهي غالبا تشترك في نفس حصة المشروع، وتبديل المفاتيح لن يزيد الحصة.');
+    parts.push('استخدم مفاتيح من مشاريع Google مختلفة لديها حصة متاحة، أو اختر موديل Gemini آخر من الإعدادات.');
+  } else if (lastError?.message) {
+    parts.push(`آخر خطأ: ${lastError.message.slice(0, 300)}`);
+  }
+
+  return parts.join(' ');
+};
+
 const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
   if (req.method !== "POST") {
     return { status: 405, body: { error: "الطريقة غير مسموح بها" } };
@@ -260,9 +350,10 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       ? [...normalizedHistory, { role: "user" as const, parts: [{ text: normalizedPrompt }] }]
       : normalizedPrompt;
 
-    // Flash has a free-tier quota, while Pro can return limit 0 on unpaid projects.
     let lastError: GeminiErrorDetails | null = null;
+    const attempts: GeminiAttemptDetail[] = [];
     for (const GEMINI_API_KEY of getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS)) {
+      const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
@@ -283,14 +374,34 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
             status: 200,
             body: {
               text,
-              keyFingerprint: createApiKeyFingerprint(GEMINI_API_KEY),
+              keyFingerprint,
               provider: selectedProvider,
               model: selectedModel,
+              keyCount: GEMINI_API_KEYS.length,
+              attemptedKeyCount: new Set([
+                ...attempts.map(item => item.keyFingerprint),
+                keyFingerprint,
+              ]).size,
             },
           };
         } catch (error) {
           lastError = getGeminiErrorDetails(error);
-          if (attempt === 0 && RETRIABLE_GEMINI_STATUSES.has(lastError.status)) {
+          const reason = getGeminiFailureReason(lastError);
+          attempts.push({
+            keyFingerprint,
+            status: lastError.status,
+            reason,
+            attempt: attempt + 1,
+          });
+          console.warn('Gemini key attempt failed', {
+            provider: selectedProvider,
+            model: selectedModel,
+            keyFingerprint,
+            status: lastError.status,
+            reason,
+            attempt: attempt + 1,
+          });
+          if (attempt === 0 && reason === "server") {
             await wait(400);
             continue;
           }
@@ -302,13 +413,24 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     const responseStatus = lastError && lastError.status >= 400 && lastError.status < 500
       ? lastError.status
       : 502;
+    const failureBody = {
+      error: buildGeminiFailureMessage(
+        selectedProvider,
+        selectedModel,
+        GEMINI_API_KEYS.length,
+        attempts,
+        lastError,
+      ),
+      provider: selectedProvider,
+      model: selectedModel,
+      keyCount: GEMINI_API_KEYS.length,
+      attemptedKeyCount: getUniqueAttemptCount(attempts),
+      attempts,
+      attemptSummary: summarizeAttemptReasons(attempts),
+    };
     return {
       status: responseStatus,
-      body: {
-        error: `خطأ من ${getGeminiProviderLabel(selectedProvider)} باستخدام النموذج ${selectedModel}: ${lastError?.message || "فشلت كل مفاتيح Gemini."}`,
-        provider: selectedProvider,
-        model: selectedModel,
-      },
+      body: failureBody,
     };
 
   } catch (error) {
