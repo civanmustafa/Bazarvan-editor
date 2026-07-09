@@ -442,24 +442,13 @@ const toRemoteAppActivityEvent = (row: AppActivityEventRow): RemoteAppActivityEv
 });
 
 const buildStatsFromSnapshot = (snapshot: ArticleStorageSnapshot): ArticleStats => {
-  const summary = snapshot.analysisSummary;
-  const duplicateStats = summary?.duplicateStats;
-  const structureStats = summary?.structureStats;
-  const analysis = snapshot.analysis;
-  const uniqueWordsPercentage = duplicateStats && duplicateStats.totalWords > 0
-    ? (duplicateStats.uniqueWords / duplicateStats.totalWords) * 100
-    : 0;
-
   return {
     ...DEFAULT_STATS,
-    wordCount: summary?.wordCount ?? analysis?.wordCount ?? 0,
-    keywordViolations: 0,
-    violatingCriteriaCount: structureStats?.violatingCriteriaCount ?? analysis?.structureStats?.violatingCriteriaCount ?? 0,
-    totalErrorsCount: structureStats?.totalErrorsCount ?? analysis?.structureStats?.totalErrorsCount ?? 0,
-    keywordDuplicatesCount: duplicateStats?.keywordDuplicatesCount ?? analysis?.duplicateStats?.keywordDuplicatesCount ?? 0,
-    totalDuplicates: duplicateStats?.totalDuplicates ?? analysis?.duplicateStats?.totalDuplicates ?? 0,
-    commonDuplicatesCount: duplicateStats?.commonDuplicatesCount ?? analysis?.duplicateStats?.commonDuplicatesCount ?? 0,
-    uniqueWordsPercentage,
+    wordCount: snapshot.analysisSummary?.wordCount ?? (
+      snapshot.plainText.trim()
+        ? snapshot.plainText.trim().split(/\s+/).filter(Boolean).length
+        : 0
+    ),
   };
 };
 
@@ -485,8 +474,10 @@ const recordArticleVersion = async (
       plain_text: snapshot.plainText || '',
       keywords: snapshot.keywords || {},
       goal_context: snapshot.goalContext || {},
-      analysis: snapshot.analysis || null,
-      stats: options.stats,
+      analysis: null,
+      stats: {
+        wordCount: options.stats.wordCount,
+      },
       note: 'manual-save',
     });
 
@@ -805,7 +796,7 @@ export const saveRemoteArticleSnapshot = async (
     created_by: options.userId,
     assigned_to: options.userId,
     source: 'manual',
-    visibility: 'public',
+    visibility: 'private',
     status: 'draft',
     title: normalizeTitle(snapshot.title),
     content_json: snapshot.content || {},
@@ -814,14 +805,18 @@ export const saveRemoteArticleSnapshot = async (
     keywords: snapshot.keywords || {},
     goal_context: snapshot.goalContext || {},
     article_language: snapshot.articleLanguage,
-    analysis: snapshot.analysis || null,
-    stats,
+    analysis: null,
+    stats: {
+      wordCount: stats.wordCount,
+    },
     last_saved_at: savedAt,
     metadata: {
       attachments: snapshot.attachments || null,
-      analysisSummary: snapshot.analysisSummary || null,
+      analysisSummary: {
+        wordCount: stats.wordCount,
+      },
       n8nSettings: {
-        visibility: 'public',
+        visibility: 'private',
         accessRole: 'editor',
         visibleToEmailsCsv: creatorDefaults.email,
         articleLanguage: snapshot.articleLanguage,
@@ -831,6 +826,26 @@ export const saveRemoteArticleSnapshot = async (
     },
   };
 
+  const insertNewArticle = async (): Promise<RemoteArticleActivity> => {
+    const { data, error } = await supabase
+      .from('articles')
+      .insert({
+        ...payload,
+        save_count: 1,
+        time_spent_seconds: 0,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    await recordArticleVersion((data as ArticleRow).id, snapshot, {
+      userId: options.userId,
+      versionNumber: 1,
+      stats,
+    });
+    return toRemoteArticleActivity(data as ArticleRow);
+  };
+
   if (options.articleId) {
     const { data: currentRow, error: readError } = await supabase
       .from('articles')
@@ -838,7 +853,10 @@ export const saveRemoteArticleSnapshot = async (
       .eq('id', options.articleId)
       .single();
 
-    if (readError) throw readError;
+    if (readError) {
+      console.warn(`Could not read article "${options.articleId}" before saving; creating a new article instead.`, readError);
+      return insertNewArticle();
+    }
     const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
 
     const nextSaveCount = (toNumber((currentRow as any)?.save_count) || 0) + 1;
@@ -878,23 +896,7 @@ export const saveRemoteArticleSnapshot = async (
     return toRemoteArticleActivity(data as ArticleRow);
   }
 
-  const { data, error } = await supabase
-    .from('articles')
-    .insert({
-      ...payload,
-      save_count: 1,
-      time_spent_seconds: 0,
-    })
-    .select('*')
-    .single();
-
-  if (error) throw error;
-  await recordArticleVersion((data as ArticleRow).id, snapshot, {
-    userId: options.userId,
-    versionNumber: 1,
-    stats,
-  });
-  return toRemoteArticleActivity(data as ArticleRow);
+  return insertNewArticle();
 };
 
 export const renameRemoteArticle = async (articleId: string, newTitle: string): Promise<RemoteArticleActivity> => {

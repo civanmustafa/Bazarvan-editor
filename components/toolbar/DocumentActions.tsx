@@ -8,7 +8,8 @@ interface DocumentActionsProps {
     t: typeof translations.ar;
     restoreStatus: 'idle' | 'restored';
     draftExists: boolean;
-    saveStatus: 'idle' | 'saved';
+    saveStatus: 'idle' | 'saving' | 'saved' | 'error';
+    saveError?: string;
     onRestoreDraft: () => void | Promise<void>;
     onSaveDraft: () => void | Promise<void>;
     onNewArticle: () => void | Promise<void>;
@@ -23,6 +24,7 @@ const DocumentActions: React.FC<DocumentActionsProps> = ({
     restoreStatus,
     draftExists,
     saveStatus,
+    saveError,
     onRestoreDraft,
     onSaveDraft,
     onNewArticle,
@@ -35,8 +37,12 @@ const DocumentActions: React.FC<DocumentActionsProps> = ({
             <ToolbarButton onClick={onRestoreDraft} title={restoreStatus === 'restored' ? t.restored : t.restore} disabled={!draftExists || restoreStatus === 'restored'}>
                 <History size={16} className={restoreStatus === 'restored' ? 'text-[#d4af37]' : ''} />
             </ToolbarButton>
-            <ToolbarButton onClick={onSaveDraft} title={saveStatus === 'saved' ? t.saved : t.saveDraft} disabled={saveStatus === 'saved'}>
-                <Save size={16} className={saveStatus === 'saved' ? 'text-green-500' : ''} />
+            <ToolbarButton
+                onClick={onSaveDraft}
+                title={saveStatus === 'saved' ? t.saved : saveStatus === 'saving' ? 'جار الحفظ...' : saveStatus === 'error' ? (saveError || 'تعذر الحفظ. اضغط للمحاولة مرة أخرى.') : t.saveDraft}
+                disabled={saveStatus === 'saving'}
+            >
+                <Save size={16} className={saveStatus === 'saved' ? 'text-green-500' : saveStatus === 'error' ? 'text-red-500' : saveStatus === 'saving' ? 'animate-pulse text-[#d4af37]' : ''} />
             </ToolbarButton>
             <ToolbarButton onClick={onNewArticle} title={t.newArticle}><PlusSquare size={16} /></ToolbarButton>
             <ToolbarButton onClick={onShowDashboard} title={t.dashboard}><LayoutDashboard size={16} /></ToolbarButton>

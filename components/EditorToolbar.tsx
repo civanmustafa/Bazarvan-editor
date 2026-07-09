@@ -53,6 +53,7 @@ const EditorToolbar: React.FC = () => {
         handleSaveDraft: onSaveDraft,
         handleRestoreDraft: onRestoreDraft,
         saveStatus,
+        saveError,
         restoreStatus,
         draftExists,
         handleNewArticle: onNewArticle,
@@ -310,6 +311,7 @@ const EditorToolbar: React.FC = () => {
                     restoreStatus={restoreStatus}
                     draftExists={draftExists}
                     saveStatus={saveStatus}
+                    saveError={saveError}
                     onRestoreDraft={onRestoreDraft}
                     onSaveDraft={onSaveDraft}
                     onNewArticle={handleStartNewArticle}

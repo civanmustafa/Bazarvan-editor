@@ -743,7 +743,8 @@ interface EditorContextType {
     isDuplicatesTabActive: boolean;
     setIsDuplicatesTabActive: React.Dispatch<React.SetStateAction<boolean>>;
     setIsStructureTabActive: React.Dispatch<React.SetStateAction<boolean>>;
-    saveStatus: 'idle' | 'saved';
+    saveStatus: 'idle' | 'saving' | 'saved' | 'error';
+    saveError: string;
     restoreStatus: 'idle' | 'restored';
     draftExists: boolean;
     scrollContainerRef: React.RefObject<HTMLDivElement>;
@@ -785,7 +786,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
     const [articleLanguage, setArticleLanguage] = useState<'ar' | 'en'>('ar');
     const [goalContext, setGoalContext] = useState<GoalContext>(() => getStoredGoalContext(AUTO_DRAFT_GOAL_CONTEXT_KEY));
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    const [saveError, setSaveError] = useState('');
     const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restored'>('idle');
     const [draftExists, setDraftExists] = useState(false);
     const [activeAnalysisPanels, setActiveAnalysisPanels] = useState<ContentAnalysisRefreshScope>({
@@ -1191,97 +1193,93 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             console.warn('Skipped saving empty editor content for a titled article to avoid overwriting saved content.');
             return;
         }
-        clearEditorSnapshotTimer();
-        clearDraftPersistTimer();
-        setEditorState(contentJSON);
-        setText(currentText);
-        const currentWordCount = countWordsInText(currentText);
-        const analysisForSave: FullAnalysis = {
-            ...analysisResults,
-            duplicateStats: {
-                ...analysisResults.duplicateStats,
-                totalWords: currentWordCount,
-            },
-            wordCount: currentWordCount,
-        };
-        const newTitle = title.trim();
-        const finalTitleToSave = newTitle || articleKey || '(untitled)';
+        setSaveStatus('saving');
+        setSaveError('');
 
-        if (!articleKey && newTitle) {
-            setArticleKey(newTitle);
-        } else if (articleKey && newTitle && articleKey !== newTitle) {
-            setArticleKey(newTitle);
+        try {
+            clearEditorSnapshotTimer();
+            clearDraftPersistTimer();
+            setEditorState(contentJSON);
+            setText(currentText);
+            const currentWordCount = countWordsInText(currentText);
+            const newTitle = title.trim();
+            const finalTitleToSave = newTitle || articleKey || '(untitled)';
+
+            if (!articleKey && newTitle) {
+                setArticleKey(newTitle);
+            } else if (articleKey && newTitle && articleKey !== newTitle) {
+                setArticleKey(newTitle);
+            }
+
+            writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, finalTitleToSave);
+            if (activeArticleId) {
+                writeSessionValue(ACTIVE_ARTICLE_ID_KEY, activeArticleId);
+            }
+            await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(currentUser, finalTitleToSave), contentJSON, {
+                awaitBackup: true,
+                localTextFallback: true,
+                textFallback: currentText,
+            });
+
+            const manualDraftContentKey = getManualDraftContentKey();
+            const articleSnapshot: ArticleStorageSnapshot = {
+                kind: 'articleSnapshot',
+                version: 1,
+                username: currentUser,
+                title: finalTitleToSave,
+                content: contentJSON,
+                contentHtml: contentHTML,
+                plainText: currentText,
+                keywords,
+                goalContext,
+                articleLanguage,
+                analysisSummary: {
+                    wordCount: currentWordCount,
+                },
+                attachments: readCurrentArticleAttachments(),
+                savedAt: new Date().toISOString(),
+            };
+            const savedArticle = await saveRemoteArticleSnapshot(articleSnapshot, {
+                articleId: activeArticleId,
+                userId: currentUserId,
+            });
+            setActiveArticleId(savedArticle.id);
+            setActiveArticleSettings(getActiveArticleSettings(savedArticle));
+            setArticleKey(savedArticle.title || finalTitleToSave);
+            writeSessionValue(ACTIVE_ARTICLE_ID_KEY, savedArticle.id);
+            writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, savedArticle.title || finalTitleToSave);
+            navigateToAppPath(buildEditorArticlePath(savedArticle.id), { replace: true });
+            void recordAppActivity(currentUserId, {
+                eventType: 'article_save',
+                entityType: 'article',
+                entityId: savedArticle.id,
+                path: buildEditorArticlePath(savedArticle.id),
+                metadata: {
+                    title: savedArticle.title,
+                    status: savedArticle.status,
+                    source: savedArticle.source,
+                },
+            });
+            window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+            await persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON, {
+                awaitBackup: true,
+                localTextFallback: true,
+                textFallback: currentText,
+            });
+            writeStorageValue(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
+            writeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
+            writeStorageValue(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
+            writeStorageValue(MANUAL_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
+            setDraftExists(true);
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 2000);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'تعذر حفظ المقالة.';
+            console.error('Failed to save article draft:', error);
+            setSaveError(message);
+            setSaveStatus('error');
         }
-
-        writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, finalTitleToSave);
-        if (activeArticleId) {
-            writeSessionValue(ACTIVE_ARTICLE_ID_KEY, activeArticleId);
-        }
-        await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(currentUser, finalTitleToSave), contentJSON, {
-            awaitBackup: true,
-            localTextFallback: true,
-            textFallback: currentText,
-        });
-
-        const manualDraftContentKey = getManualDraftContentKey();
-        // One article save writes every reviewable article field:
-        // editor content, formatted HTML, plain text fallback, keywords, goal context,
-        // competitor attachments, summary counters, and full analysis criteria/errors.
-        const articleSnapshot: ArticleStorageSnapshot = {
-            kind: 'articleSnapshot',
-            version: 1,
-            username: currentUser,
-            title: finalTitleToSave,
-            content: contentJSON,
-            contentHtml: contentHTML,
-            plainText: currentText,
-            keywords,
-            goalContext,
-            articleLanguage,
-            analysisSummary: {
-                wordCount: currentWordCount,
-                structureStats: analysisForSave.structureStats,
-                duplicateStats: analysisForSave.duplicateStats,
-            },
-            analysis: analysisForSave,
-            attachments: readCurrentArticleAttachments(),
-            savedAt: new Date().toISOString(),
-        };
-        const savedArticle = await saveRemoteArticleSnapshot(articleSnapshot, {
-            articleId: activeArticleId,
-            userId: currentUserId,
-        });
-        setActiveArticleId(savedArticle.id);
-        setActiveArticleSettings(getActiveArticleSettings(savedArticle));
-        setArticleKey(savedArticle.title || finalTitleToSave);
-        writeSessionValue(ACTIVE_ARTICLE_ID_KEY, savedArticle.id);
-        writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, savedArticle.title || finalTitleToSave);
-        navigateToAppPath(buildEditorArticlePath(savedArticle.id), { replace: true });
-        void recordAppActivity(currentUserId, {
-            eventType: 'article_save',
-            entityType: 'article',
-            entityId: savedArticle.id,
-            path: buildEditorArticlePath(savedArticle.id),
-            metadata: {
-                title: savedArticle.title,
-                status: savedArticle.status,
-                source: savedArticle.source,
-            },
-        });
-        window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
-        await persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON, {
-            awaitBackup: true,
-            localTextFallback: true,
-            textFallback: currentText,
-        });
-        writeStorageValue(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
-        writeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
-        writeStorageValue(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
-        writeStorageValue(MANUAL_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
-        setDraftExists(true);
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
-    }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, analysisResults, articleLanguage, goalContext, clearEditorSnapshotTimer, clearDraftPersistTimer]);
+    }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, articleLanguage, goalContext, clearEditorSnapshotTimer, clearDraftPersistTimer]);
     
     const handleSaveDraftRef = useRef(handleSaveDraft);
     useEffect(() => {
@@ -1510,6 +1508,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsDuplicatesTabActive,
         setIsStructureTabActive,
         saveStatus,
+        saveError,
         restoreStatus,
         draftExists,
         scrollContainerRef,
