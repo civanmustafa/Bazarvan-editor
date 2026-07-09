@@ -37,6 +37,7 @@ type GeminiAttemptFailureReason = "quota" | "auth" | "server" | "blocked" | "unk
 
 type GeminiAttemptDetail = {
   keyFingerprint: string;
+  keySuffix: string;
   status: number;
   reason: GeminiAttemptFailureReason;
   attempt: number;
@@ -60,6 +61,10 @@ const createApiKeyFingerprint = (key: string): string => {
   }
   return (hash >>> 0).toString(36);
 };
+
+const getApiKeySuffix = (key: string): string => (
+  key.trim().slice(-4)
+);
 
 /*
  * Gemini API route used by Vite dev middleware and the production Node server.
@@ -358,6 +363,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     const attempts: GeminiAttemptDetail[] = [];
     for (const GEMINI_API_KEY of getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS)) {
       const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
+      const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
@@ -379,6 +385,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
             body: {
               text,
               keyFingerprint,
+              keySuffix,
               provider: selectedProvider,
               model: selectedModel,
               keyCount: GEMINI_API_KEYS.length,
@@ -393,6 +400,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
           const reason = getGeminiFailureReason(lastError);
           attempts.push({
             keyFingerprint,
+            keySuffix,
             status: lastError.status,
             reason,
             attempt: attempt + 1,

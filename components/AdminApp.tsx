@@ -516,7 +516,7 @@ const ArticleDetailPage: React.FC<{
           <SectionTitle>بيانات Gemini</SectionTitle>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <DetailRow label="الموديل" value={geminiPaidLatest?.model || '-'} />
-            <DetailRow label="بصمة المفتاح" value={geminiPaidLatest?.keyFingerprint || '-'} />
+            <DetailRow label="آخر أحرف المفتاح" value={formatApiKeySuffixLabel(geminiPaidLatest?.keySuffix)} />
             <DetailRow label="وقت الحفظ" value={geminiPaidLatest?.savedAt ? formatIstanbulDateTime(geminiPaidLatest.savedAt, t.locale) : '-'} />
           </div>
           {geminiPaidLatest?.result && (
@@ -592,13 +592,15 @@ type ApiUsageSummary = {
   service: string;
   provider: string;
   model: string;
-  keyFingerprint: string;
+  keyIdentity: string;
+  keySuffixLabel: string;
   count: number;
   successCount: number;
   failureCount: number;
   reasons: Set<string>;
   users: Set<string>;
   sources: Set<string>;
+  events: RemoteAppActivityEvent[];
   lastUsedAt: string;
 };
 
@@ -631,6 +633,28 @@ const getApiSourceLabel = (source?: string): string => {
   return labels[source || 'unknown'] || source || 'غير محدد';
 };
 
+const getApiKeyIdentity = (event: RemoteAppActivityEvent, metadata: Record<string, any>): string => {
+  const keyFingerprint = typeof metadata.keyFingerprint === 'string' && metadata.keyFingerprint.trim()
+    ? metadata.keyFingerprint.trim()
+    : '';
+  const entityId = typeof event.entityId === 'string' && event.entityId.trim()
+    ? event.entityId.trim()
+    : '';
+  const keySuffix = typeof metadata.keySuffix === 'string' && metadata.keySuffix.trim()
+    ? metadata.keySuffix.trim()
+    : '';
+  return keyFingerprint || entityId || keySuffix || 'unknown';
+};
+
+const formatApiKeySuffixLabel = (value: unknown): string => {
+  const keySuffix = typeof value === 'string' && value.trim() ? value.trim() : '';
+  return keySuffix ? `••••${keySuffix.slice(-6)}` : 'غير متاح';
+};
+
+const getApiKeySuffixLabel = (metadata: Record<string, any>): string => (
+  formatApiKeySuffixLabel(metadata.keySuffix)
+);
+
 const getApiUsageEvents = (events: RemoteAppActivityEvent[]): RemoteAppActivityEvent[] => (
   events.filter(event => event.eventType === 'api_key_used')
 );
@@ -640,29 +664,33 @@ const buildApiUsageSummary = (events: RemoteAppActivityEvent[]): ApiUsageSummary
 
   events.forEach(event => {
     const metadata = getActivityMetadata(event);
-    const keyFingerprint = typeof metadata.keyFingerprint === 'string' && metadata.keyFingerprint.trim()
-      ? metadata.keyFingerprint.trim()
-      : event.entityId || 'unknown';
+    const keyIdentity = getApiKeyIdentity(event, metadata);
+    const keySuffixLabel = getApiKeySuffixLabel(metadata);
     const service = typeof metadata.service === 'string' && metadata.service.trim() ? metadata.service.trim() : 'ai';
     const provider = typeof metadata.provider === 'string' && metadata.provider.trim() ? metadata.provider.trim() : service;
     const model = typeof metadata.model === 'string' && metadata.model.trim() ? metadata.model.trim() : '-';
     const source = typeof metadata.source === 'string' && metadata.source.trim() ? metadata.source.trim() : 'unknown';
-    const id = `${service}:${provider}:${model}:${keyFingerprint}`;
+    const id = `${service}:${provider}:${model}:${keyIdentity}`;
     const summary = summaries.get(id) || {
       id,
       service,
       provider,
       model,
-      keyFingerprint,
+      keyIdentity,
+      keySuffixLabel,
       count: 0,
       successCount: 0,
       failureCount: 0,
       reasons: new Set<string>(),
       users: new Set<string>(),
       sources: new Set<string>(),
+      events: [],
       lastUsedAt: event.createdAt,
     };
 
+    if (summary.keySuffixLabel === 'غير متاح' && keySuffixLabel !== 'غير متاح') {
+      summary.keySuffixLabel = keySuffixLabel;
+    }
     summary.count += 1;
     if (metadata.outcome === 'failed') {
       summary.failureCount += 1;
@@ -674,6 +702,7 @@ const buildApiUsageSummary = (events: RemoteAppActivityEvent[]): ApiUsageSummary
     }
     if (event.userId) summary.users.add(event.userId);
     summary.sources.add(source);
+    summary.events.push(event);
     if (new Date(event.createdAt).getTime() > new Date(summary.lastUsedAt).getTime()) {
       summary.lastUsedAt = event.createdAt;
     }
@@ -708,7 +737,7 @@ const ReportsPage: React.FC<{
   const dayActivityEvents = activityEvents.filter(event => inDay(event.createdAt));
   const apiUsageEvents = getApiUsageEvents(dayActivityEvents);
   const apiUsageSummary = buildApiUsageSummary(apiUsageEvents);
-  const apiKeyCount = new Set(apiUsageEvents.map(event => getActivityMetadata(event).keyFingerprint || event.entityId).filter(Boolean)).size;
+  const apiKeyCount = new Set(apiUsageEvents.map(event => getApiKeyIdentity(event, getActivityMetadata(event))).filter(Boolean)).size;
   const freeGeminiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'gemini').length;
   const paidGeminiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'geminiPaid').length;
   const openAiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'openai' || getActivityMetadata(event).service === 'openai').length;
@@ -749,7 +778,6 @@ const ReportsPage: React.FC<{
       <section className="space-y-4">
         <SectionTitle>استخدام مفاتيح API</SectionTitle>
         <ApiUsageSummaryTable summaries={apiUsageSummary} profiles={profiles} t={t} />
-        <ApiUsageEventsTable events={apiUsageEvents} profiles={profiles} t={t} />
       </section>
 
       <section>
@@ -770,20 +798,77 @@ const ApiUsageSummaryTable: React.FC<{
     return getProfileLabel(profile);
   };
 
+  const getEventUserLabel = (userId?: string | null): string => {
+    const profile = userId ? profiles.find(item => item.id === userId) : null;
+    return getProfileLabel(profile);
+  };
+
+  const getAttemptLabel = (metadata: Record<string, any>): string => {
+    const parts = [
+      typeof metadata.attemptNumber === 'number' ? `محاولة ${metadata.attemptNumber}` : '',
+      typeof metadata.attemptedKeyCount === 'number' && typeof metadata.keyCount === 'number'
+        ? `${metadata.attemptedKeyCount}/${metadata.keyCount}`
+        : '',
+    ].filter(Boolean);
+    return parts.join(' / ');
+  };
+
+  const renderRecentEvents = (summary: ApiUsageSummary) => {
+    const recentEvents = [...summary.events]
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+      .slice(0, 4);
+
+    return (
+      <div className="space-y-2">
+        {recentEvents.map(event => {
+          const metadata = getActivityMetadata(event);
+          const outcome = typeof metadata.outcome === 'string' ? metadata.outcome : 'success';
+          const statusLabel = outcome === 'failed' ? 'فشل' : 'نجاح';
+          const attemptLabel = getAttemptLabel(metadata);
+          const articleLabel = [metadata.articleTitle, metadata.commandLabel || metadata.action]
+            .map(value => typeof value === 'string' ? value.trim() : '')
+            .filter(Boolean)
+            .join(' / ');
+
+          return (
+            <div key={event.id} className="rounded-md bg-gray-50 px-2 py-1.5 text-xs leading-5 text-gray-600 dark:bg-[#232323] dark:text-gray-300">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-mono text-gray-500">{formatIstanbulDateTime(event.createdAt, t.locale, { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="font-bold text-gray-700 dark:text-gray-200">{getEventUserLabel(event.userId)}</span>
+                <span>{getApiSourceLabel(typeof metadata.source === 'string' ? metadata.source : undefined)}</span>
+                <span className={outcome === 'failed' ? 'font-black text-red-600 dark:text-red-300' : 'font-black text-emerald-600 dark:text-emerald-300'}>
+                  {statusLabel}
+                </span>
+                {attemptLabel ? <span className="font-mono text-gray-400">{attemptLabel}</span> : null}
+              </div>
+              {articleLabel ? (
+                <div className="mt-0.5 truncate text-gray-400" title={articleLabel}>{articleLabel}</div>
+              ) : null}
+            </div>
+          );
+        })}
+        {summary.events.length > recentEvents.length ? (
+          <div className="text-xs font-bold text-gray-400">+{summary.events.length - recentEvents.length} استدعاءات أخرى</div>
+        ) : null}
+      </div>
+    );
+  };
+
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <table className="w-full min-w-[1180px] text-start text-sm">
+      <table className="w-full min-w-[1360px] text-start text-sm">
         <thead className="text-xs uppercase text-gray-400">
           <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
             <th className="px-3 py-2 text-start">API</th>
             <th className="px-3 py-2 text-start">الموديل</th>
-            <th className="px-3 py-2 text-start">بصمة المفتاح</th>
+            <th className="px-3 py-2 text-start">آخر أحرف المفتاح</th>
             <th className="px-3 py-2 text-start">الاستدعاءات</th>
             <th className="px-3 py-2 text-start">النجاح</th>
             <th className="px-3 py-2 text-start">الفشل</th>
             <th className="px-3 py-2 text-start">الأسباب</th>
             <th className="px-3 py-2 text-start">المستخدمون</th>
             <th className="px-3 py-2 text-start">المصادر</th>
+            <th className="px-3 py-2 text-start">آخر الاستدعاءات</th>
             <th className="px-3 py-2 text-start">آخر استخدام</th>
           </tr>
         </thead>
@@ -792,7 +877,7 @@ const ApiUsageSummaryTable: React.FC<{
             <tr key={summary.id} className="border-b border-gray-100 dark:border-[#3C3C3C]">
               <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getApiProviderLabel(summary.service, summary.provider)}</td>
               <td className="px-3 py-3 font-mono text-xs text-gray-500">{summary.model}</td>
-              <td className="px-3 py-3 font-mono text-xs text-gray-500">{summary.keyFingerprint}</td>
+              <td className="px-3 py-3 font-mono text-xs font-black text-gray-600 dark:text-gray-300">{summary.keySuffixLabel}</td>
               <td className="px-3 py-3 font-black text-[#8a6f1d] dark:text-[#f2d675]">{summary.count}</td>
               <td className="px-3 py-3 font-black text-emerald-600 dark:text-emerald-300">{summary.successCount}</td>
               <td className="px-3 py-3 font-black text-red-600 dark:text-red-300">{summary.failureCount}</td>
@@ -807,92 +892,11 @@ const ApiUsageSummaryTable: React.FC<{
                 {Array.from(summary.sources).slice(0, 3).map(getApiSourceLabel).join(', ') || '-'}
                 {summary.sources.size > 3 ? ` +${summary.sources.size - 3}` : ''}
               </td>
+              <td className="max-w-[380px] px-3 py-3">{renderRecentEvents(summary)}</td>
               <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(summary.lastUsedAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
             </tr>
           )) : (
-            <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
-const ApiUsageEventsTable: React.FC<{
-  events: RemoteAppActivityEvent[];
-  profiles: RemoteProfile[];
-  t: typeof translations.ar;
-}> = ({ events, profiles, t }) => {
-  const getUserLabel = (userId?: string | null): string => {
-    const profile = userId ? profiles.find(item => item.id === userId) : null;
-    return getProfileLabel(profile);
-  };
-  const sortedEvents = [...events].sort((left, right) => (
-    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
-  ));
-
-  return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <table className="w-full min-w-[1320px] text-start text-sm">
-        <thead className="text-xs uppercase text-gray-400">
-          <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
-            <th className="px-3 py-2 text-start">الوقت</th>
-            <th className="px-3 py-2 text-start">المستخدم</th>
-            <th className="px-3 py-2 text-start">المصدر</th>
-            <th className="px-3 py-2 text-start">API</th>
-            <th className="px-3 py-2 text-start">الموديل</th>
-            <th className="px-3 py-2 text-start">بصمة المفتاح</th>
-            <th className="px-3 py-2 text-start">الحالة</th>
-            <th className="px-3 py-2 text-start">السبب</th>
-            <th className="px-3 py-2 text-start">المحاولة</th>
-            <th className="px-3 py-2 text-start">المقالة/الأمر</th>
-            <th className="px-3 py-2 text-start">الجلسة</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortedEvents.length > 0 ? sortedEvents.map(event => {
-            const metadata = getActivityMetadata(event);
-            const keyFingerprint = typeof metadata.keyFingerprint === 'string' ? metadata.keyFingerprint : event.entityId || '-';
-            const outcome = typeof metadata.outcome === 'string' ? metadata.outcome : 'success';
-            const reason = typeof metadata.reason === 'string' ? metadata.reason : '-';
-            const attemptLabel = [
-              typeof metadata.attemptNumber === 'number' ? metadata.attemptNumber : null,
-              typeof metadata.attemptedKeyCount === 'number' && typeof metadata.keyCount === 'number'
-                ? `${metadata.attemptedKeyCount}/${metadata.keyCount}`
-                : null,
-            ].filter(Boolean).join(' / ') || '-';
-            const articleLabel = [metadata.articleTitle, metadata.commandLabel || metadata.action]
-              .map(value => typeof value === 'string' ? value.trim() : '')
-              .filter(Boolean)
-              .join(' / ') || '-';
-
-            return (
-              <tr key={event.id} className="border-b border-gray-100 dark:border-[#3C3C3C]">
-                <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(event.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-                <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getUserLabel(event.userId)}</td>
-                <td className="px-3 py-3 text-gray-500">{getApiSourceLabel(typeof metadata.source === 'string' ? metadata.source : undefined)}</td>
-                <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getApiProviderLabel(metadata.service, metadata.provider)}</td>
-                <td className="px-3 py-3 font-mono text-xs text-gray-500">{typeof metadata.model === 'string' ? metadata.model : '-'}</td>
-                <td className="px-3 py-3 font-mono text-xs text-gray-500">{keyFingerprint}</td>
-                <td className={`px-3 py-3 font-black ${outcome === 'failed' ? 'text-red-600 dark:text-red-300' : 'text-emerald-600 dark:text-emerald-300'}`}>{outcome === 'failed' ? 'فشل' : 'نجاح'}</td>
-                <td className="px-3 py-3 text-gray-500">{reason}</td>
-                <td className="px-3 py-3 font-mono text-xs text-gray-500">{attemptLabel}</td>
-                <td className="max-w-[260px] truncate px-3 py-3 text-gray-500" title={articleLabel}>{articleLabel}</td>
-                <td className="px-3 py-3">
-                  {event.sessionId ? (
-                    <button
-                      type="button"
-                      onClick={() => navigateToAppPath(buildAdminSessionPath(event.sessionId || ''))}
-                      className="font-mono text-xs font-bold text-[#8a6f1d] hover:underline dark:text-[#f2d675]"
-                    >
-                      {event.sessionId.slice(0, 8)}
-                    </button>
-                  ) : '-'}
-                </td>
-              </tr>
-            );
-          }) : (
-            <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-500">لا توجد تفاصيل API لهذا اليوم.</td></tr>
+            <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
           )}
         </tbody>
       </table>

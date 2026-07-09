@@ -1233,6 +1233,7 @@ ${readyCommandCompetitorBlocks}`;
                             detail: {
                                 service: 'gemini',
                                 keyFingerprint,
+                                keySuffix: typeof attempt.keySuffix === 'string' ? attempt.keySuffix.trim() : undefined,
                                 provider: data.provider || provider,
                                 model: data.model,
                                 outcome: 'failed',
@@ -1256,6 +1257,7 @@ ${readyCommandCompetitorBlocks}`;
                     detail: {
                         service: 'gemini',
                         keyFingerprint: data.keyFingerprint.trim(),
+                        keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix.trim() : undefined,
                         provider: data.provider,
                         model: data.model,
                         outcome: 'success',

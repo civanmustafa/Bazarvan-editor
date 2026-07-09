@@ -25,6 +25,7 @@ type UserRole = 'admin' | 'user';
 type AppView = 'login' | 'dashboard' | 'editor' | 'admin' | 'settings' | 'notFound';
 type ApiKeyUsedDetail = {
     keyFingerprint?: unknown;
+    keySuffix?: unknown;
     service?: unknown;
     provider?: unknown;
     model?: unknown;
@@ -395,6 +396,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         provider: provider || toOptionalString(detail.provider) || service,
                         model,
                         keyFingerprint: keyFingerprint.trim(),
+                        keySuffix: toOptionalString(detail.keySuffix),
                         source: toOptionalString(detail.source) || 'unknown',
                         articleId: toOptionalString(detail.articleId),
                         articleTitle: toOptionalString(detail.articleTitle),

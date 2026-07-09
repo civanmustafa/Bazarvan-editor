@@ -1867,6 +1867,7 @@ const dispatchGeminiFailedAttempts = (
 
         dispatchGeminiApiUsage({
             keyFingerprint,
+            keySuffix: typeof attempt.keySuffix === 'string' ? attempt.keySuffix.trim() : undefined,
             provider: data.provider,
             model: data.model,
             outcome: 'failed',
@@ -1903,6 +1904,7 @@ type GeminiAnalysisResult = {
     text: string;
     ok: boolean;
     keyFingerprint?: string;
+    keySuffix?: string;
     provider?: GeminiPatchProvider;
     model?: string;
 };
@@ -1923,6 +1925,7 @@ type AiApiUsageContext = {
 
 type GeminiServerAttempt = {
     keyFingerprint?: unknown;
+    keySuffix?: unknown;
     status?: unknown;
     reason?: unknown;
     attempt?: unknown;
@@ -2094,6 +2097,7 @@ const requestGeminiAnalysis = async (
       if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
           dispatchGeminiApiUsage({
               keyFingerprint: data.keyFingerprint.trim(),
+              keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix.trim() : undefined,
               provider: data.provider,
               model: data.model,
               outcome: 'success',
@@ -2108,6 +2112,7 @@ const requestGeminiAnalysis = async (
           text: data.text,
           ok: true,
           keyFingerprint: typeof data.keyFingerprint === 'string' ? data.keyFingerprint : undefined,
+          keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
           provider: data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini',
           model: typeof data.model === 'string' ? data.model : undefined,
       };
@@ -2171,6 +2176,7 @@ type ChatGptAnalysisResult = {
     text: string;
     conversationId?: string;
     keyFingerprint?: string;
+    keySuffix?: string;
     provider?: 'openai';
     model?: string;
 };
@@ -2427,6 +2433,7 @@ const callChatGptAnalysis = async (
                     service: 'openai',
                     provider: 'openai',
                     keyFingerprint: data.keyFingerprint.trim(),
+                    keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix.trim() : undefined,
                     model: typeof data.model === 'string' ? data.model : OPENAI_MODEL,
                     ...usageContext,
                 },
@@ -2437,6 +2444,7 @@ const callChatGptAnalysis = async (
             text: data.text,
             conversationId: typeof data.conversationId === 'string' ? data.conversationId : conversationId,
             keyFingerprint: typeof data.keyFingerprint === 'string' ? data.keyFingerprint : undefined,
+            keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
             provider: 'openai',
             model: typeof data.model === 'string' ? data.model : OPENAI_MODEL,
         };
@@ -5318,6 +5326,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             provider: 'geminiPaid',
             result: result.text,
             keyFingerprint: result.keyFingerprint,
+            keySuffix: result.keySuffix,
             model: result.model || GEMINI_PAID_MODEL,
         }).then(() => {
             window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));

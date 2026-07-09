@@ -99,6 +99,10 @@ const createApiKeyFingerprint = (key: string): string => {
   return (hash >>> 0).toString(36);
 };
 
+const getApiKeySuffix = (key: string): string => (
+  key.trim().slice(-4)
+);
+
 const normalizeConversationId = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -255,6 +259,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
             text,
             conversationId: activeConversationId,
             keyFingerprint: createApiKeyFingerprint(openAiKey),
+            keySuffix: getApiKeySuffix(openAiKey),
             provider: "openai",
             model: selectedModel,
           },
@@ -293,6 +298,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
               conversationId: activeConversationId,
               conversationReset: true,
               keyFingerprint: createApiKeyFingerprint(openAiKey),
+              keySuffix: getApiKeySuffix(openAiKey),
               provider: "openai",
               model: selectedModel,
             },

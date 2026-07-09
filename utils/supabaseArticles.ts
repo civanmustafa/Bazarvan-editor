@@ -196,6 +196,7 @@ export type RemoteArticleAiResultPatch = {
   provider: 'geminiPaid';
   result: string;
   keyFingerprint?: string;
+  keySuffix?: string;
   model?: string;
   savedAt?: string;
 };
@@ -1584,6 +1585,7 @@ export const saveRemoteArticleAiResult = async (
   const entry = {
     result: patch.result,
     keyFingerprint: patch.keyFingerprint || '',
+    keySuffix: patch.keySuffix || '',
     model: patch.model || '',
     savedAt,
   };

@@ -174,6 +174,10 @@ const createApiKeyFingerprint = (key: string): string => {
   return (hash >>> 0).toString(36);
 };
 
+const getApiKeySuffix = (key: string): string => (
+  key.trim().slice(-4)
+);
+
 const getGeminiErrorStatus = (error: unknown): number => {
   const value = error && typeof error === 'object' ? error as Record<string, any> : {};
   const nestedError = isRecord(value.error) ? value.error : {};
@@ -206,7 +210,7 @@ const wait = (duration: number) => new Promise(resolve => setTimeout(resolve, du
 const callGemini = async (
   prompt: string,
   provider: GeminiProvider,
-): Promise<{ text: string; keyFingerprint: string; model: string }> => {
+): Promise<{ text: string; keyFingerprint: string; keySuffix: string; model: string }> => {
   const keys = getGeminiKeys(provider);
   const model = provider === 'geminiPaid' ? DEFAULT_GEMINI_PAID_MODEL : DEFAULT_GEMINI_MODEL;
 
@@ -219,6 +223,7 @@ const callGemini = async (
   const attemptedFingerprints = new Set<string>();
   for (const apiKey of getRoundRobinKeyOrder(provider, keys)) {
     const keyFingerprint = createApiKeyFingerprint(apiKey);
+    const keySuffix = getApiKeySuffix(apiKey);
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const ai = new GoogleGenAI({ apiKey });
@@ -229,6 +234,7 @@ const callGemini = async (
         return {
           text: response.text || '',
           keyFingerprint,
+          keySuffix,
           model,
         };
       } catch (error) {
@@ -533,6 +539,7 @@ const saveGeminiPaidResultInMetadata = (
   result: {
     text: string;
     keyFingerprint: string;
+    keySuffix: string;
     model: string;
     savedAt: string;
   },
@@ -543,6 +550,7 @@ const saveGeminiPaidResultInMetadata = (
   const entry = {
     result: result.text,
     keyFingerprint: result.keyFingerprint,
+    keySuffix: result.keySuffix,
     model: result.model,
     savedAt: result.savedAt,
     commandId: 'smartAnalysis.competitorContentComparison',
@@ -719,6 +727,7 @@ const runSemanticGeneration = async (
         provider: 'gemini',
         model: gemini.model,
         keyFingerprint: gemini.keyFingerprint,
+        keySuffix: gemini.keySuffix,
         addedSecondaries: nextKeywords.secondaries.length - keywords.secondaries.length,
         addedLsi: nextKeywords.lsi.length - keywords.lsi.length,
       },
@@ -797,6 +806,7 @@ const runGeminiPaidCompetitorAnalysis = async (
     const metadataWithResult = saveGeminiPaidResultInMetadata(metadata, {
       text: gemini.text,
       keyFingerprint: gemini.keyFingerprint,
+      keySuffix: gemini.keySuffix,
       model: gemini.model,
       savedAt: now,
     });
@@ -807,6 +817,7 @@ const runGeminiPaidCompetitorAnalysis = async (
         provider: 'geminiPaid',
         model: gemini.model,
         keyFingerprint: gemini.keyFingerprint,
+        keySuffix: gemini.keySuffix,
         commandId: 'smartAnalysis.competitorContentComparison',
       },
     });
