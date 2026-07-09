@@ -347,11 +347,11 @@ const FixAllModal: React.FC<{
 }> = ({ groups, onClose, onConfirm, getRelatedRules, uiLanguage, t }) => {
     const [selectedRules, setSelectedRules] = useState<string[]>(() => Object.keys(groups));
     const [includeRelatedRules, setIncludeRelatedRules] = useState(true);
-    const [maxViolationsPerRule, setMaxViolationsPerRule] = useState(3);
+    const [maxViolationsPerRuleInput, setMaxViolationsPerRuleInput] = useState('3');
     const isArabic = uiLanguage === 'ar';
     const relatedRules = useMemo(() => getRelatedRules(selectedRules), [getRelatedRules, selectedRules]);
     const relatedRulesCount = relatedRules.reduce((sum, rule) => sum + rule.count, 0);
-    const normalizedBatchSize = Math.max(1, Math.min(50, Math.floor(maxViolationsPerRule) || 1));
+    const normalizedBatchSize = Math.max(1, Math.min(50, Math.floor(Number.parseInt(maxViolationsPerRuleInput, 10)) || 1));
     const selectedBatchCount = selectedRules.reduce((sum, ruleTitle) => (
         sum + Math.min(groups[ruleTitle] || 0, normalizedBatchSize)
     ), 0);
@@ -401,8 +401,9 @@ const FixAllModal: React.FC<{
                                 min={1}
                                 max={50}
                                 step={1}
-                                value={maxViolationsPerRule}
-                                onChange={event => setMaxViolationsPerRule(Math.max(1, Math.min(50, Number.parseInt(event.target.value || '1', 10) || 1)))}
+                                value={maxViolationsPerRuleInput}
+                                onChange={event => setMaxViolationsPerRuleInput(event.target.value.replace(/\D/g, ''))}
+                                onBlur={() => setMaxViolationsPerRuleInput(String(normalizedBatchSize))}
                                 className="h-8 w-16 shrink-0 rounded-lg border border-[#d4af37]/40 bg-white px-2 text-center text-xs font-black text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
                             />
                         </label>
