@@ -16,6 +16,7 @@ const LOCAL_HTML_PREFIX = 'bazarvan-editor-html:';
 const LOCAL_TEXT_PREFIX = 'bazarvan-editor-text:';
 const LOCAL_ANALYSIS_PREFIX = 'bazarvan-editor-analysis:';
 const LOCAL_ARTICLE_META_PREFIX = 'bazarvan-article-meta:';
+const REMOTE_ARTICLE_CACHE_PREFIX = 'remoteArticle:';
 const LEGACY_CONTENT_PREFIX = 'bazarvan-editor-content-chunk:';
 const LEGACY_TEXT_PREFIX = 'bazarvan-editor-content-text-chunk:';
 const LEGACY_SNAPSHOT_PREFIX = 'bazarvan-article-snapshot-chunk:';
@@ -254,6 +255,14 @@ export const getArticleSnapshotKey = (username: string, title: string) => (
   `articleSnapshot:${username}:${title.trim() || '(untitled)'}`
 );
 
+const getRemoteArticleSnapshotKey = (articleId: string) => (
+  `${REMOTE_ARTICLE_CACHE_PREFIX}${articleId.trim()}`
+);
+
+const getRemoteArticleContentKey = (articleId: string) => (
+  `${REMOTE_ARTICLE_CACHE_PREFIX}content:${articleId.trim()}`
+);
+
 export const createEditorContentReference = (key: string): EditorContentReference => ({
   storage: 'localStorage',
   key,
@@ -454,11 +463,11 @@ export const createArticleSnapshotReference = (username: string, title: string):
   createEditorContentReference(getArticleSnapshotKey(username, title))
 );
 
-export const saveArticleSnapshotDurably = async (
+const saveArticleSnapshotToKeys = async (
   snapshot: ArticleStorageSnapshot,
+  snapshotKey: string,
+  contentKey: string,
 ): Promise<{ indexedDb: boolean; localChunkCount: number; reference: EditorContentReference }> => {
-  const snapshotKey = getArticleSnapshotKey(snapshot.username, snapshot.title);
-  const contentKey = getArticleContentKey(snapshot.username, snapshot.title);
   // Save large fields first. The dashboard is updated only after these chunks exist.
   const contentChunkCount = saveEditorContentChunks(contentKey, snapshot.content);
   const htmlChunkCount = snapshot.contentHtml ? saveEditorHtmlChunks(contentKey, snapshot.contentHtml) : 0;
@@ -480,27 +489,47 @@ export const saveArticleSnapshotDurably = async (
   };
 };
 
-export const loadArticleSnapshot = async (username: string, title: string): Promise<ArticleStorageSnapshot | null> => {
-  const snapshotKey = getArticleSnapshotKey(username, title);
+export const saveArticleSnapshotDurably = async (
+  snapshot: ArticleStorageSnapshot,
+): Promise<{ indexedDb: boolean; localChunkCount: number; reference: EditorContentReference }> => (
+  saveArticleSnapshotToKeys(
+    snapshot,
+    getArticleSnapshotKey(snapshot.username, snapshot.title),
+    getArticleContentKey(snapshot.username, snapshot.title),
+  )
+);
+
+const loadArticleSnapshotFromKeys = async (
+  snapshotKey: string,
+  fallback: Pick<ArticleStorageSnapshot, 'username' | 'title'>,
+): Promise<ArticleStorageSnapshot | null> => {
   const meta = readArticleMeta(snapshotKey);
 
-  if (meta) {
-    // Restore in the same priority used by the editor: HTML preserves H2/H3/H4,
-    // JSON preserves full TipTap structure, and plain text is the final fallback.
-    const content = loadEditorContentChunks(meta.contentKey);
-    const contentHtml = loadEditorHtml(meta.contentKey) || undefined;
-    const plainText = loadEditorPlainText(meta.contentKey) || extractPlainTextFromEditorContent(content);
-    const analysis = meta.hasAnalysis ? loadArticleAnalysisChunks(meta.contentKey) : undefined;
-    if (contentHtml || content || plainText.trim()) {
-      return {
-        ...meta,
-        content: contentHtml || content || createEditorContentFromPlainText(plainText),
-        contentHtml,
-        plainText,
-        analysis,
-      };
-    }
-  }
+  if (!meta) return null;
+
+  // Restore in the same priority used by the editor: HTML preserves H2/H3/H4,
+  // JSON preserves full TipTap structure, and plain text is the final fallback.
+  const content = loadEditorContentChunks(meta.contentKey);
+  const contentHtml = loadEditorHtml(meta.contentKey) || undefined;
+  const plainText = loadEditorPlainText(meta.contentKey) || extractPlainTextFromEditorContent(content);
+  const analysis = meta.hasAnalysis ? loadArticleAnalysisChunks(meta.contentKey) : undefined;
+  if (!contentHtml && !content && !plainText.trim()) return null;
+
+  return {
+    ...meta,
+    username: meta.username || fallback.username,
+    title: meta.title || fallback.title,
+    content: contentHtml || content || createEditorContentFromPlainText(plainText),
+    contentHtml,
+    plainText,
+    analysis,
+  };
+};
+
+export const loadArticleSnapshot = async (username: string, title: string): Promise<ArticleStorageSnapshot | null> => {
+  const snapshotKey = getArticleSnapshotKey(username, title);
+  const metaSnapshot = await loadArticleSnapshotFromKeys(snapshotKey, { username, title });
+  if (metaSnapshot) return metaSnapshot;
 
   const legacySnapshot = loadLegacyArticleSnapshotChunks(snapshotKey);
   if (legacySnapshot) return legacySnapshot;
@@ -530,6 +559,42 @@ export const loadArticleSnapshot = async (username: string, title: string): Prom
     articleLanguage: 'ar',
     savedAt: new Date().toISOString(),
   };
+};
+
+export const saveRemoteArticleSnapshotCache = async (
+  articleId: string,
+  snapshot: ArticleStorageSnapshot,
+): Promise<void> => {
+  const normalizedArticleId = articleId.trim();
+  if (!normalizedArticleId) return;
+  await saveArticleSnapshotToKeys(
+    snapshot,
+    getRemoteArticleSnapshotKey(normalizedArticleId),
+    getRemoteArticleContentKey(normalizedArticleId),
+  );
+};
+
+export const loadRemoteArticleSnapshotCache = async (
+  articleId: string,
+): Promise<ArticleStorageSnapshot | null> => {
+  const normalizedArticleId = articleId.trim();
+  if (!normalizedArticleId) return null;
+  return loadArticleSnapshotFromKeys(
+    getRemoteArticleSnapshotKey(normalizedArticleId),
+    { username: '', title: '' },
+  );
+};
+
+export const deleteRemoteArticleSnapshotCache = async (articleId: string): Promise<void> => {
+  const normalizedArticleId = articleId.trim();
+  if (!normalizedArticleId) return;
+  const snapshotKey = getRemoteArticleSnapshotKey(normalizedArticleId);
+  const contentKey = getRemoteArticleContentKey(normalizedArticleId);
+  deleteArticleMeta(snapshotKey);
+  deleteEditorContentChunks(contentKey);
+  deleteEditorHtmlChunks(contentKey);
+  deleteEditorTextChunks(contentKey);
+  deleteArticleAnalysisChunks(contentKey);
 };
 
 export const deleteArticleSnapshot = async (username: string, title: string): Promise<void> => {

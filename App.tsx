@@ -21,7 +21,7 @@ import SettingsPage from './components/SettingsPage';
 import ModalManager from './components/ModalManager';
 import SpotlightSearch from './components/SpotlightSearch';
 import { APP_NAVIGATION_EVENT, navigateToAppPath, parseAppRoute, type AppRoute } from './utils/appRoutes';
-import { getRemoteArticleById } from './utils/supabaseArticles';
+import { getCachedRemoteArticleById, getRemoteArticleById } from './utils/supabaseArticles';
 import {
     AUTO_DRAFT_GOAL_CONTEXT_KEY,
     AUTO_DRAFT_KEY,
@@ -364,14 +364,30 @@ const EditorRoute: React.FC<{ articleId: string | null }> = ({ articleId }) => {
         setLoadingArticleId(articleId);
 
         const loadArticle = async () => {
+            let openedFromCache = false;
             try {
+                const cachedArticle = await getCachedRemoteArticleById(articleId).catch(error => {
+                    console.warn(`Could not read cached routed article "${articleId}":`, error);
+                    return null;
+                });
+                if (cachedArticle && !cancelled) {
+                    openedFromCache = true;
+                    await handleLoadArticle(cachedArticle.title, cachedArticle);
+                }
+
                 const article = await getRemoteArticleById(articleId);
                 if (cancelled) return;
-                await handleLoadArticle(article.title, article);
+                if (!openedFromCache) {
+                    await handleLoadArticle(article.title, article);
+                }
             } catch (error) {
                 console.error(`Failed to open routed article "${articleId}":`, error);
                 if (!cancelled) {
-                    setLoadError('لا يمكن فتح هذه المقالة. قد يكون الرابط غير صحيح أو لا تملك صلاحية الوصول.');
+                    if (openedFromCache) {
+                        setLoadError('');
+                    } else {
+                        setLoadError('لا يمكن فتح هذه المقالة. قد يكون الرابط غير صحيح أو لا تملك صلاحية الوصول.');
+                    }
                 }
             } finally {
                 if (!cancelled) {

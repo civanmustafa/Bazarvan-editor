@@ -17,12 +17,14 @@ import {
     loadRemoteArticleSnapshot,
     moveRemoteArticleToTrash,
     purgeExpiredRemoteArticleTrash,
+    readCachedRemoteArticlesPage,
     renameRemoteArticle,
     restoreRemoteArticleFromTrash,
     triggerAssignedArticleAutomation,
     updateRemoteArticleSettings,
     type RemoteProfile,
     type RemoteArticleActivity,
+    type RemoteArticlesPage,
     type RemoteArticleTrashInfo,
     type RemoteN8nIngestLog,
     type RemoteArticleSettingsPatch,
@@ -1002,6 +1004,7 @@ const Dashboard: React.FC = () => {
   const [isArticlesLoading, setIsArticlesLoading] = useState(false);
   const [articlesPage, setArticlesPage] = useState(1);
   const [articlesTotalCount, setArticlesTotalCount] = useState(0);
+  const [articlesHasNextPage, setArticlesHasNextPage] = useState(false);
   const [isArticlesPageFromCache, setIsArticlesPageFromCache] = useState(false);
   const [isN8nLogsLoading, setIsN8nLogsLoading] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -1032,37 +1035,88 @@ const Dashboard: React.FC = () => {
   });
 
   const isAdmin = currentUserRole === 'admin';
+  const dashboardRefreshRequestRef = useRef(0);
 
   const refreshData = async () => {
     if (!currentUser) return;
-    setIsArticlesLoading(true);
-    if (isAdmin) setIsN8nLogsLoading(true);
-    try {
-      await purgeExpiredRemoteArticleTrash(30).catch(error => {
-        console.warn('Could not purge expired dashboard trash:', error);
-      });
-      const [articlesPageResult, profileRows, logRows] = await Promise.all([
-        listRemoteArticlesPage({
-          page: articlesPage,
-          pageSize: DASHBOARD_ARTICLES_PAGE_SIZE,
-        }),
-        isAdmin ? listRemoteProfiles() : Promise.resolve([]),
-        isAdmin ? listRemoteN8nIngestLogs(40) : Promise.resolve([]),
-      ]);
-      if (articlesPageResult.articles.length === 0 && articlesPage > 1 && articlesPageResult.totalCount > 0) {
+    const requestId = dashboardRefreshRequestRef.current + 1;
+    dashboardRefreshRequestRef.current = requestId;
+    const page = articlesPage;
+    const pageSize = DASHBOARD_ARTICLES_PAGE_SIZE;
+
+    const applyArticlesPageResult = (articlesPageResult: RemoteArticlesPage): boolean => {
+      if (dashboardRefreshRequestRef.current !== requestId) return false;
+      if (!articlesPageResult.fromCache && articlesPageResult.articles.length === 0 && page > 1) {
         setArticlesPage(prev => Math.max(1, prev - 1));
-        return;
+        return false;
       }
+
       setRemoteArticles(sortArticlesByLastChange(articlesPageResult.articles));
       setArticlesTotalCount(articlesPageResult.totalCount);
+      setArticlesHasNextPage(articlesPageResult.hasNextPage);
       setIsArticlesPageFromCache(articlesPageResult.fromCache);
-      setProfiles(profileRows);
-      setN8nLogs(logRows);
+      return true;
+    };
+
+    setIsArticlesLoading(true);
+    if (isAdmin) setIsN8nLogsLoading(true);
+
+    const cachedArticlesPage = await readCachedRemoteArticlesPage({
+      page,
+      pageSize,
+    }).catch(error => {
+      console.warn('Could not read cached dashboard articles before refresh:', error);
+      return null;
+    });
+    if (cachedArticlesPage) {
+      applyArticlesPageResult(cachedArticlesPage);
+    }
+
+    void purgeExpiredRemoteArticleTrash(30).catch(error => {
+      console.warn('Could not purge expired dashboard trash:', error);
+    });
+
+    if (isAdmin) {
+      void listRemoteProfiles()
+        .then(profileRows => {
+          if (dashboardRefreshRequestRef.current === requestId) {
+            setProfiles(profileRows);
+          }
+        })
+        .catch(error => {
+          console.error('Failed to load dashboard profiles:', error);
+        });
+
+      void listRemoteN8nIngestLogs(40)
+        .then(logRows => {
+          if (dashboardRefreshRequestRef.current === requestId) {
+            setN8nLogs(logRows);
+          }
+        })
+        .catch(error => {
+          console.error('Failed to load dashboard n8n logs:', error);
+        })
+        .finally(() => {
+          if (dashboardRefreshRequestRef.current === requestId) {
+            setIsN8nLogsLoading(false);
+          }
+        });
+    } else {
+      setIsN8nLogsLoading(false);
+    }
+
+    try {
+      const articlesPageResult = await listRemoteArticlesPage({
+        page,
+        pageSize,
+      });
+      applyArticlesPageResult(articlesPageResult);
     } catch (error) {
       console.error('Failed to load Supabase articles:', error);
     } finally {
-      setIsArticlesLoading(false);
-      setIsN8nLogsLoading(false);
+      if (dashboardRefreshRequestRef.current === requestId) {
+        setIsArticlesLoading(false);
+      }
     }
   };
 
@@ -1562,8 +1616,14 @@ const Dashboard: React.FC = () => {
     filteredArticles.filter(article => selectedArticleIds.has(article.id))
   ), [filteredArticles, selectedArticleIds]);
   const articlesTotalPages = Math.max(1, Math.ceil(Math.max(articlesTotalCount, filteredArticles.length) / DASHBOARD_ARTICLES_PAGE_SIZE));
+  const articlesTotalLabel = articlesHasNextPage
+    ? `أكثر من ${articlesPage * DASHBOARD_ARTICLES_PAGE_SIZE}`
+    : String(articlesTotalCount || filteredArticles.length);
+  const articlesPageLabel = articlesHasNextPage
+    ? `صفحة ${articlesPage} / ${articlesPage + 1}+`
+    : `صفحة ${articlesPage} / ${articlesTotalPages}`;
   const canGoToPreviousArticlesPage = articlesPage > 1 && !isArticlesLoading;
-  const canGoToNextArticlesPage = articlesPage < articlesTotalPages && !isArticlesLoading;
+  const canGoToNextArticlesPage = articlesHasNextPage && !isArticlesLoading;
   const areAllFilteredSelected = filteredArticles.length > 0 && filteredArticles.every(article => selectedArticleIds.has(article.id));
   const toggleSelectAllFilteredArticles = () => {
     setSelectedArticleIds(prev => {
@@ -1953,7 +2013,7 @@ const Dashboard: React.FC = () => {
 
                 <div className="mb-3 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A] sm:flex-row sm:items-center sm:justify-between">
                     <div className="font-bold text-gray-600 dark:text-gray-300">
-                        عرض {filteredArticles.length} من أصل {articlesTotalCount || filteredArticles.length} مقالة، 10 مقالات في كل صفحة
+                        عرض {filteredArticles.length} من أصل {articlesTotalLabel} مقالة، 10 مقالات في كل صفحة
                         {isArticlesPageFromCache && (
                             <span className="ms-2 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-black text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-300">
                                 بيانات محفوظة مؤقتاً
@@ -1970,11 +2030,11 @@ const Dashboard: React.FC = () => {
                             السابق
                         </button>
                         <span className="min-w-24 text-center text-xs font-black text-gray-500 dark:text-gray-400">
-                            صفحة {articlesPage} / {articlesTotalPages}
+                            {articlesPageLabel}
                         </span>
                         <button
                             type="button"
-                            onClick={() => setArticlesPage(page => Math.min(articlesTotalPages, page + 1))}
+                            onClick={() => setArticlesPage(page => page + 1)}
                             disabled={!canGoToNextArticlesPage}
                             className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300"
                         >

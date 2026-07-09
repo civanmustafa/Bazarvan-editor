@@ -1,6 +1,10 @@
 import type { ArticleActivity } from '../hooks/useUserActivity';
 import { normalizeKeywords } from '../hooks/useUserActivity';
-import type { ArticleStorageSnapshot } from './editorContentStore';
+import {
+  loadRemoteArticleSnapshotCache,
+  saveRemoteArticleSnapshotCache,
+  type ArticleStorageSnapshot,
+} from './editorContentStore';
 import { getSupabaseClient } from './supabaseClient';
 import { normalizeGoalContext } from './goalContext';
 
@@ -227,7 +231,12 @@ export type RemoteArticlesPage = {
   totalCount: number;
   page: number;
   pageSize: number;
+  hasNextPage: boolean;
   fromCache: boolean;
+};
+
+type CachedRemoteArticlesPage = Pick<RemoteArticlesPage, 'articles' | 'totalCount'> & {
+  hasNextPage?: boolean;
 };
 
 const DEFAULT_STATS: ArticleStats = {
@@ -431,6 +440,82 @@ const toRemoteArticleActivity = (
   stats: normalizeStats(row.stats),
 });
 
+const normalizeArticleSnapshotContent = (row: Pick<ArticleRow, 'content_json' | 'content_html' | 'plain_text'>): any => (
+  row.content_json || row.content_html || row.plain_text || ''
+);
+
+const toArticleStorageSnapshot = (
+  row: ArticleRow,
+  username: string,
+): ArticleStorageSnapshot => {
+  const metadata = isRecord(row.metadata) ? row.metadata : {};
+  const aiResults = isRecord(metadata.aiResults) ? metadata.aiResults : {};
+  const geminiPaidResults = isRecord(aiResults.geminiPaid) ? aiResults.geminiPaid : {};
+  const geminiPaidLatest = isRecord(geminiPaidResults.latest) ? geminiPaidResults.latest : {};
+
+  return {
+    kind: 'articleSnapshot',
+    version: 1,
+    username,
+    title: row.title,
+    content: normalizeArticleSnapshotContent(row),
+    contentHtml: row.content_html || undefined,
+    plainText: row.plain_text || '',
+    keywords: normalizeKeywords(row.keywords),
+    goalContext: normalizeGoalContext(row.goal_context),
+    articleLanguage: row.article_language === 'en' ? 'en' : 'ar',
+    analysisSummary: metadata.analysisSummary,
+    analysis: row.analysis || undefined,
+    attachments: metadata.attachments,
+    savedAiResults: {
+      geminiPaid: typeof geminiPaidLatest.result === 'string' ? geminiPaidLatest.result : '',
+    },
+    savedAt: row.last_saved_at,
+  };
+};
+
+const cacheRemoteArticleSnapshot = (
+  articleId: string,
+  snapshot: ArticleStorageSnapshot,
+): void => {
+  void saveRemoteArticleSnapshotCache(articleId, snapshot).catch(error => {
+    console.warn(`Could not cache remote article snapshot "${articleId}".`, error);
+  });
+};
+
+const remoteActivityFromCachedSnapshot = (
+  articleId: string,
+  snapshot: ArticleStorageSnapshot,
+): RemoteArticleActivity => ({
+  id: articleId,
+  title: snapshot.title,
+  ownerId: null,
+  createdBy: null,
+  assignedTo: null,
+  source: 'manual',
+  visibility: 'private',
+  status: 'draft',
+  plainText: snapshot.plainText || '',
+  analysis: snapshot.analysis || null,
+  metadata: {
+    attachments: snapshot.attachments || null,
+    analysisSummary: snapshot.analysisSummary || null,
+  },
+  createdAt: snapshot.savedAt,
+  updatedAt: snapshot.savedAt,
+  timeSpentSeconds: 0,
+  saveCount: 0,
+  lastSaved: snapshot.savedAt,
+  content: {
+    storage: 'supabase',
+    key: articleId,
+  },
+  keywords: normalizeKeywords(snapshot.keywords),
+  goalContext: normalizeGoalContext(snapshot.goalContext),
+  articleLanguage: snapshot.articleLanguage === 'en' ? 'en' : 'ar',
+  stats: buildStatsFromSnapshot(snapshot),
+});
+
 const saveRemoteArticleSnapshotViaServer = async (
   snapshot: ArticleStorageSnapshot,
   options: {
@@ -465,7 +550,13 @@ const saveRemoteArticleSnapshotViaServer = async (
     throw new Error('Article save API did not return an article.');
   }
 
-  return payload.article as RemoteArticleActivity;
+  const savedArticle = payload.article as RemoteArticleActivity;
+  cacheRemoteArticleSnapshot(savedArticle.id, {
+    ...snapshot,
+    title: savedArticle.title || snapshot.title,
+    savedAt: savedArticle.lastSaved || snapshot.savedAt,
+  });
+  return savedArticle;
 };
 
 const toRemoteProfile = (row: any): RemoteProfile => ({
@@ -580,7 +671,7 @@ const getArticleListCacheKey = async (scope = 'all'): Promise<string> => {
   return `${REMOTE_ARTICLE_CACHE_PREFIX}${data.session?.user.id || 'anonymous'}:${scope}`;
 };
 
-const readCachedRemoteArticlePage = async (scope = 'all'): Promise<Pick<RemoteArticlesPage, 'articles' | 'totalCount'> | null> => {
+const readCachedRemoteArticlePage = async (scope = 'all'): Promise<CachedRemoteArticlesPage | null> => {
   if (!canUseLocalStorage()) return null;
 
   try {
@@ -594,6 +685,9 @@ const readCachedRemoteArticlePage = async (scope = 'all'): Promise<Pick<RemoteAr
       totalCount: typeof parsed.totalCount === 'number'
         ? parsed.totalCount
         : parsed.articles.length,
+      hasNextPage: typeof parsed.hasNextPage === 'boolean'
+        ? parsed.hasNextPage
+        : undefined,
     };
   } catch (error) {
     console.warn('Could not read cached Supabase article list:', error);
@@ -605,6 +699,7 @@ const writeCachedRemoteArticlePage = async (
   scope: string,
   articles: RemoteArticleActivity[],
   totalCount: number,
+  hasNextPage = false,
 ): Promise<void> => {
   if (!canUseLocalStorage()) return;
 
@@ -614,10 +709,48 @@ const writeCachedRemoteArticlePage = async (
       cachedAt: new Date().toISOString(),
       articles,
       totalCount,
+      hasNextPage,
     }));
   } catch (error) {
     console.warn('Could not cache Supabase article list:', error);
   }
+};
+
+const normalizeRemoteArticlesPageOptions = (
+  options: {
+    page?: number;
+    pageSize?: number;
+  } = {},
+) => {
+  const pageSize = Math.max(1, Math.min(50, Math.floor(options.pageSize || 10)));
+  const page = Math.max(1, Math.floor(options.page || 1));
+  const from = (page - 1) * pageSize;
+  const cacheScope = `page:${page}:size:${pageSize}`;
+  return { page, pageSize, from, cacheScope };
+};
+
+export const readCachedRemoteArticlesPage = async (
+  options: {
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<RemoteArticlesPage | null> => {
+  const { page, pageSize, from, cacheScope } = normalizeRemoteArticlesPageOptions(options);
+  const cached = await readCachedRemoteArticlePage(cacheScope);
+  if (!cached) return null;
+
+  const hasNextPage = typeof cached.hasNextPage === 'boolean'
+    ? cached.hasNextPage
+    : from + cached.articles.length < cached.totalCount;
+
+  return {
+    articles: cached.articles,
+    totalCount: cached.totalCount,
+    page,
+    pageSize,
+    hasNextPage,
+    fromCache: true,
+  };
 };
 
 export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => {
@@ -631,7 +764,7 @@ export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => 
     if (error) throw error;
 
     const articles = ((data || []) as ArticleRow[]).map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
-    void writeCachedRemoteArticlePage('all', articles, articles.length);
+    void writeCachedRemoteArticlePage('all', articles, articles.length, false);
     return articles;
   } catch (error) {
     const cached = await readCachedRemoteArticlePage('all');
@@ -649,31 +782,32 @@ export const listRemoteArticlesPage = async (
     pageSize?: number;
   } = {},
 ): Promise<RemoteArticlesPage> => {
-  const pageSize = Math.max(1, Math.min(50, Math.floor(options.pageSize || 10)));
-  const page = Math.max(1, Math.floor(options.page || 1));
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-  const cacheScope = `page:${page}:size:${pageSize}`;
+  const { page, pageSize, from, cacheScope } = normalizeRemoteArticlesPageOptions(options);
   const supabase = getSupabaseClient();
 
   try {
-    const { data, error, count } = await supabase
+    const { data, error } = await supabase
       .from('articles')
-      .select(ARTICLE_LIST_SELECT, { count: 'exact' })
+      .select(ARTICLE_LIST_SELECT)
       .order('updated_at', { ascending: false })
-      .range(from, to);
+      .range(from, from + pageSize);
 
     if (error) throw error;
 
-    const articles = ((data || []) as ArticleRow[]).map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
-    const totalCount = typeof count === 'number' ? count : from + articles.length;
-    void writeCachedRemoteArticlePage(cacheScope, articles, totalCount);
+    const rows = ((data || []) as ArticleRow[]);
+    const hasNextPage = rows.length > pageSize;
+    const articles = rows
+      .slice(0, pageSize)
+      .map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
+    const totalCount = hasNextPage ? from + pageSize + 1 : from + articles.length;
+    void writeCachedRemoteArticlePage(cacheScope, articles, totalCount, hasNextPage);
 
     return {
       articles,
       totalCount,
       page,
       pageSize,
+      hasNextPage,
       fromCache: false,
     };
   } catch (error) {
@@ -685,6 +819,9 @@ export const listRemoteArticlesPage = async (
         totalCount: cached.totalCount,
         page,
         pageSize,
+        hasNextPage: typeof cached.hasNextPage === 'boolean'
+          ? cached.hasNextPage
+          : from + cached.articles.length < cached.totalCount,
         fromCache: true,
       };
     }
@@ -701,7 +838,14 @@ export const getRemoteArticleById = async (articleId: string): Promise<RemoteArt
     .single();
 
   if (error) throw error;
-  return toRemoteArticleActivity(data as ArticleRow);
+  const row = data as ArticleRow;
+  cacheRemoteArticleSnapshot(articleId, toArticleStorageSnapshot(row, ''));
+  return toRemoteArticleActivity(row);
+};
+
+export const getCachedRemoteArticleById = async (articleId: string): Promise<RemoteArticleActivity | null> => {
+  const snapshot = await loadRemoteArticleSnapshotCache(articleId);
+  return snapshot ? remoteActivityFromCachedSnapshot(articleId, snapshot) : null;
 };
 
 export const listRemoteProfiles = async (): Promise<RemoteProfile[]> => {
@@ -842,30 +986,9 @@ export const loadRemoteArticleSnapshot = async (
   if (!data) return null;
 
   const row = data as ArticleRow;
-  const metadata = isRecord(row.metadata) ? row.metadata : {};
-  const aiResults = isRecord(metadata.aiResults) ? metadata.aiResults : {};
-  const geminiPaidResults = isRecord(aiResults.geminiPaid) ? aiResults.geminiPaid : {};
-  const geminiPaidLatest = isRecord(geminiPaidResults.latest) ? geminiPaidResults.latest : {};
-
-  return {
-    kind: 'articleSnapshot',
-    version: 1,
-    username,
-    title: row.title,
-    content: row.content_html || row.content_json || row.plain_text || '',
-    contentHtml: row.content_html || undefined,
-    plainText: row.plain_text || '',
-    keywords: normalizeKeywords(row.keywords),
-    goalContext: normalizeGoalContext(row.goal_context),
-    articleLanguage: row.article_language === 'en' ? 'en' : 'ar',
-    analysisSummary: metadata.analysisSummary,
-    analysis: row.analysis || undefined,
-    attachments: metadata.attachments,
-    savedAiResults: {
-      geminiPaid: typeof geminiPaidLatest.result === 'string' ? geminiPaidLatest.result : '',
-    },
-    savedAt: row.last_saved_at,
-  };
+  const snapshot = toArticleStorageSnapshot(row, username);
+  cacheRemoteArticleSnapshot(articleId, snapshot);
+  return snapshot;
 };
 
 export const saveRemoteArticleSnapshot = async (
@@ -940,7 +1063,9 @@ export const saveRemoteArticleSnapshot = async (
       versionNumber: 1,
       stats,
     });
-    return toRemoteArticleActivity(data as ArticleRow);
+    const savedArticle = toRemoteArticleActivity(data as ArticleRow);
+    cacheRemoteArticleSnapshot(savedArticle.id, toArticleStorageSnapshot(data as ArticleRow, snapshot.username));
+    return savedArticle;
   };
 
   if (options.articleId) {
@@ -990,7 +1115,9 @@ export const saveRemoteArticleSnapshot = async (
       versionNumber: nextSaveCount,
       stats,
     });
-    return toRemoteArticleActivity(data as ArticleRow);
+    const savedArticle = toRemoteArticleActivity(data as ArticleRow);
+    cacheRemoteArticleSnapshot(savedArticle.id, toArticleStorageSnapshot(data as ArticleRow, snapshot.username));
+    return savedArticle;
   }
 
   return insertNewArticle();

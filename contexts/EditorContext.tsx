@@ -27,7 +27,9 @@ import {
     getManualDraftContentKey,
     isEditorContentReference,
     loadArticleSnapshot,
+    loadRemoteArticleSnapshotCache,
     resolveEditorContentReference,
+    saveArticleSnapshotDurably,
     saveEditorContentDurably,
 } from '../utils/editorContentStore';
 import {
@@ -51,10 +53,12 @@ import { recordAppActivity } from '../utils/appActivity';
  */
 
 // --- Local timing helpers ---
-const EDITOR_SNAPSHOT_DELAY_MS = 700;
-const DRAFT_PERSIST_DELAY_MS = 2500;
-const ANALYSIS_DEBOUNCE_MS = 600;
+const EDITOR_SNAPSHOT_DELAY_MS = 900;
+const DRAFT_PERSIST_DELAY_MS = 4500;
+const ANALYSIS_DEBOUNCE_MS = 900;
 const AUTOSAVE_INTERVAL_MS = 60 * 1000;
+const ARTICLE_TIME_TICK_SECONDS = 10;
+const ARTICLE_TIME_FLUSH_SECONDS = 60;
 const MAX_DOCUMENT_LANGUAGE_FORMATTING_SIZE = 60_000;
 const ACTIVE_ARTICLE_TITLE_KEY = 'bazarvan-active-article-title';
 const ACTIVE_ARTICLE_ID_KEY = 'bazarvan-active-article-id';
@@ -572,6 +576,46 @@ const resolveDraftContentForTitle = async (titleStr: string, username?: string |
     return null;
 };
 
+const getSnapshotSavedAtTime = (snapshot?: ArticleStorageSnapshot | null): number => {
+    const time = snapshot?.savedAt ? new Date(snapshot.savedAt).getTime() : 0;
+    return Number.isFinite(time) ? time : 0;
+};
+
+const sortForSignature = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sortForSignature);
+    if (!isRecord(value)) return value;
+    return Object.fromEntries(
+        Object.keys(value)
+            .sort()
+            .map(key => [key, sortForSignature(value[key])])
+    );
+};
+
+const createArticleSaveSignature = (input: {
+    title: string;
+    content: unknown;
+    plainText: string;
+    keywords: Keywords;
+    goalContext?: GoalContext;
+    articleLanguage: 'ar' | 'en';
+    attachments?: ArticleStorageSnapshot['attachments'];
+}): string => JSON.stringify(sortForSignature({
+    title: input.title.trim() || '(untitled)',
+    content: input.content,
+    plainText: input.plainText,
+    keywords: input.keywords,
+    goalContext: input.goalContext || null,
+    articleLanguage: input.articleLanguage,
+    attachments: input.attachments || null,
+}));
+
+type SaveDraftReason = 'manual' | 'auto' | 'lifecycle';
+
+type SaveDraftOptions = {
+    reason?: SaveDraftReason;
+    force?: boolean;
+};
+
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
     const saved = readStorageValue(key);
     return saved === 'ar' || saved === 'en' ? saved : null;
@@ -751,7 +795,7 @@ interface EditorContextType {
     handleLanguageChange: (lang: 'ar' | 'en') => void;
     handleActiveArticleStatusChange: (status: RemoteArticleStatus) => Promise<boolean>;
     handleClearKeywords: () => void;
-    handleSaveDraft: () => Promise<void>;
+    handleSaveDraft: (options?: SaveDraftOptions) => Promise<void>;
     handleRestoreDraft: () => void;
     handleNewArticle: (lang: 'ar' | 'en') => Promise<void>;
     handleLoadArticle: (title: string, article: ArticleActivity | RemoteArticleActivity) => Promise<void>;
@@ -801,6 +845,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const draftPersistTimerRef = useRef<number | null>(null);
     const articleLoadRequestIdRef = useRef(0);
     const isArticleContentLoadingRef = useRef(false);
+    const hasEditorChangedAfterArticleLoadRef = useRef(false);
+    const loadedArticleSnapshotSavedAtRef = useRef(0);
+    const saveInFlightRef = useRef<Promise<void> | null>(null);
+    const queuedForcedSaveRef = useRef<SaveDraftOptions | null>(null);
+    const lastSavedArticleSignatureRef = useRef('');
     const skipNextAutoDraftMetadataWriteRef = useRef(false);
     const latestDraftMetaRef = useRef({ title, keywords, articleLanguage, goalContext });
     const pendingInitialArticleRestoreRef = useRef<string | null>(initialActiveArticleTitleRef.current);
@@ -886,7 +935,6 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [clearDraftPersistTimer, persistEditorSnapshotNow]);
 
     const scheduleEditorSnapshot = useCallback((targetEditor: Editor) => {
-        updateEditorAnalysisSnapshot(targetEditor);
         clearEditorSnapshotTimer();
         editorSnapshotTimerRef.current = window.setTimeout(() => {
             updateEditorAnalysisSnapshot(targetEditor);
@@ -921,6 +969,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         onUpdate: ({ editor, transaction }) => {
             if (transaction.getMeta('preventUpdate')) return;
             if (isArticleContentLoadingRef.current) return;
+            hasEditorChangedAfterArticleLoadRef.current = true;
             scheduleEditorSnapshot(editor);
         },
         onCreate: ({ editor }) => {
@@ -930,6 +979,141 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleLanguage(targetLang);
         },
     });
+
+    const applyArticleSnapshotToEditor = useCallback(async (
+        targetEditor: Editor,
+        options: {
+            requestId: number;
+            titleToUse: string;
+            article?: ArticleActivity | RemoteArticleActivity | null;
+            snapshot?: ArticleStorageSnapshot | null;
+            remoteArticleId?: string | null;
+            clearWhenEmpty?: boolean;
+        },
+    ): Promise<boolean> => {
+        if (articleLoadRequestIdRef.current !== options.requestId || targetEditor.isDestroyed) return false;
+
+        const snapshot = options.snapshot || null;
+        const latestArticle = options.article || null;
+        const resolvedTitle = snapshot?.title || options.titleToUse;
+        const snapshotContent = snapshot?.content;
+        const snapshotPlainText = snapshot?.plainText?.trim();
+        let resolvedContent = isUsableEditorContent(snapshotContent) ? snapshotContent : null;
+
+        if (!resolvedContent && snapshotPlainText) {
+            resolvedContent = snapshotPlainText;
+        }
+        if (!resolvedContent && currentUser) {
+            resolvedContent = await resolveArticleContentByTitle(currentUser, resolvedTitle);
+        }
+        if (!resolvedContent && latestArticle) {
+            resolvedContent = await resolveArticleContent(latestArticle);
+        }
+        if (!resolvedContent) {
+            resolvedContent = await resolveDraftContentForTitle(resolvedTitle, currentUser);
+        }
+        if (articleLoadRequestIdRef.current !== options.requestId || targetEditor.isDestroyed) return false;
+
+        const lang = snapshot?.articleLanguage || latestArticle?.articleLanguage || 'ar';
+        const nextKeywords = normalizeKeywords(snapshot?.keywords || latestArticle?.keywords || INITIAL_KEYWORDS);
+        const nextGoalContext = normalizeGoalContext(snapshot?.goalContext || latestArticle?.goalContext);
+        const hasResolvedContent = isUsableEditorContent(resolvedContent);
+
+        if (!hasResolvedContent && (latestArticle?.stats?.wordCount || 0) > 0) {
+            console.warn(`Article "${resolvedTitle}" has saved stats but no recoverable editor content.`);
+        }
+
+        const previousLoading = isArticleContentLoadingRef.current;
+        isArticleContentLoadingRef.current = true;
+        try {
+            setTitle(resolvedTitle);
+            setArticleKey(resolvedTitle);
+            setActiveArticleId(options.remoteArticleId || null);
+            setActiveArticleSettings(getActiveArticleSettings(latestArticle));
+            setKeywords(nextKeywords);
+            setGoalContext(nextGoalContext);
+            setArticleLanguage(lang);
+
+            if (hasResolvedContent || options.clearWhenEmpty !== false) {
+                setEditorContentSafely(
+                    targetEditor,
+                    hasResolvedContent ? resolvedContent : createEmptyEditorContent(),
+                    createEmptyEditorContent(),
+                );
+                captureEditorSnapshot(targetEditor, false);
+                applyArticleLanguageFormatting(targetEditor, lang);
+            }
+
+            restoreArticleAttachments(snapshot?.attachments);
+            dispatchSavedAiResults(options.remoteArticleId || null, snapshot?.savedAiResults);
+            loadedArticleSnapshotSavedAtRef.current = getSnapshotSavedAtTime(snapshot);
+            hasEditorChangedAfterArticleLoadRef.current = false;
+            if (hasResolvedContent) {
+                lastSavedArticleSignatureRef.current = createArticleSaveSignature({
+                    title: resolvedTitle,
+                    content: targetEditor.getJSON(),
+                    plainText: targetEditor.getText(),
+                    keywords: nextKeywords,
+                    goalContext: nextGoalContext,
+                    articleLanguage: lang,
+                    attachments: snapshot?.attachments,
+                });
+            }
+        } finally {
+            isArticleContentLoadingRef.current = previousLoading;
+        }
+
+        if (hasResolvedContent && currentUser) {
+            await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(currentUser, resolvedTitle), targetEditor.getJSON(), {
+                localTextFallback: true,
+                textFallback: targetEditor.getText(),
+            });
+            writeStorageValue(AUTO_DRAFT_TITLE_KEY, resolvedTitle);
+            writeStorageValue(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(nextKeywords));
+            writeStorageValue(AUTO_DRAFT_LANGUAGE_KEY, lang);
+            writeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(nextGoalContext));
+        } else if (options.clearWhenEmpty !== false) {
+            removeStorageValue(AUTO_DRAFT_KEY);
+            removeStorageValue(AUTO_DRAFT_TITLE_KEY);
+            removeStorageValue(AUTO_DRAFT_KEYWORDS_KEY);
+            removeStorageValue(AUTO_DRAFT_LANGUAGE_KEY);
+            removeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY);
+        }
+
+        return hasResolvedContent;
+    }, [captureEditorSnapshot, currentUser]);
+
+    const refreshArticleFromRemoteInBackground = useCallback((
+        targetEditor: Editor,
+        options: {
+            requestId: number;
+            remoteArticleId: string;
+            username: string;
+            article?: ArticleActivity | RemoteArticleActivity | null;
+            fallbackTitle: string;
+            baseSavedAt: number;
+        },
+    ) => {
+        void loadRemoteArticleSnapshot(options.remoteArticleId, options.username)
+            .then(async remoteSnapshot => {
+                if (!remoteSnapshot) return;
+                if (articleLoadRequestIdRef.current !== options.requestId || targetEditor.isDestroyed) return;
+                if (hasEditorChangedAfterArticleLoadRef.current) return;
+                const remoteSavedAt = getSnapshotSavedAtTime(remoteSnapshot);
+                if (remoteSavedAt <= Math.max(options.baseSavedAt, loadedArticleSnapshotSavedAtRef.current)) return;
+
+                await applyArticleSnapshotToEditor(targetEditor, {
+                    requestId: options.requestId,
+                    titleToUse: remoteSnapshot.title || options.fallbackTitle,
+                    article: options.article,
+                    snapshot: remoteSnapshot,
+                    remoteArticleId: options.remoteArticleId,
+                });
+            })
+            .catch(error => {
+                console.error(`Failed to refresh article "${options.remoteArticleId}" from Supabase in the background:`, error);
+            });
+    }, [applyArticleSnapshotToEditor]);
 
     useEffect(() => {
         if (!editor || !currentUser || !pendingInitialArticleRestoreRef.current) return;
@@ -944,63 +1128,60 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const restoreInitialArticle = async () => {
             try {
                 const remoteArticleId = initialActiveArticleIdRef.current;
-                const remoteSnapshot = remoteArticleId
-                    ? await loadRemoteArticleSnapshot(remoteArticleId, currentUser)
-                    : null;
-                const restoredTitle = remoteSnapshot?.title || titleToRestore;
-                const freshArticle = getFreshArticleActivity(currentUser, restoredTitle);
-                const articleSnapshot = remoteSnapshot || await loadArticleSnapshot(currentUser, restoredTitle);
-                const snapshotContent = articleSnapshot?.content;
-                const snapshotPlainText = articleSnapshot?.plainText?.trim();
-                let resolvedContent = isUsableEditorContent(snapshotContent) ? snapshotContent : null;
-
-                if (!resolvedContent && snapshotPlainText) {
-                    resolvedContent = snapshotPlainText;
-                }
-                if (!resolvedContent) {
-                    resolvedContent = await resolveArticleContentByTitle(currentUser, restoredTitle);
-                }
-                if (!resolvedContent && freshArticle) {
-                    resolvedContent = await resolveArticleContent(freshArticle);
-                }
-                if (!resolvedContent) {
-                    resolvedContent = await resolveDraftContentForTitle(restoredTitle, currentUser);
-                }
                 if (cancelled || articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
 
-                const lang = articleSnapshot?.articleLanguage || freshArticle?.articleLanguage || 'ar';
-                const nextKeywords = normalizeKeywords(articleSnapshot?.keywords || freshArticle?.keywords || INITIAL_KEYWORDS);
-                const nextGoalContext = normalizeGoalContext(articleSnapshot?.goalContext || freshArticle?.goalContext);
-                const hasResolvedContent = isUsableEditorContent(resolvedContent);
+                const cachedRemoteSnapshot = remoteArticleId
+                    ? await loadRemoteArticleSnapshotCache(remoteArticleId)
+                    : null;
+                const cachedTitle = cachedRemoteSnapshot?.title || titleToRestore;
+                const freshArticle = getFreshArticleActivity(currentUser, cachedTitle);
+                const localSnapshot = cachedRemoteSnapshot || await loadArticleSnapshot(currentUser, cachedTitle);
+                const hasLocalContent = await applyArticleSnapshotToEditor(editor, {
+                    requestId,
+                    titleToUse: cachedTitle,
+                    article: freshArticle,
+                    snapshot: localSnapshot,
+                    remoteArticleId,
+                });
 
-                setTitle(restoredTitle);
-                setArticleKey(restoredTitle);
-                setActiveArticleId(remoteArticleId);
-                setActiveArticleSettings(getActiveArticleSettings(freshArticle));
-                setKeywords(nextKeywords);
-                setGoalContext(nextGoalContext);
-                setArticleLanguage(lang);
-                setEditorContentSafely(editor, hasResolvedContent ? resolvedContent : createEmptyEditorContent(), createEmptyEditorContent());
-                captureEditorSnapshot(editor, false);
-                applyArticleLanguageFormatting(editor, lang);
-                restoreArticleAttachments(articleSnapshot?.attachments);
-                dispatchSavedAiResults(remoteArticleId, articleSnapshot?.savedAiResults);
+                if (cancelled || articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
 
-                if (hasResolvedContent) {
-                    await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(currentUser, restoredTitle), editor.getJSON(), {
-                        localTextFallback: true,
-                        textFallback: editor.getText(),
+                if (remoteArticleId) {
+                    if (hasLocalContent) {
+                        isArticleContentLoadingRef.current = false;
+                        refreshArticleFromRemoteInBackground(editor, {
+                            requestId,
+                            remoteArticleId,
+                            username: currentUser,
+                            article: freshArticle,
+                            fallbackTitle: cachedTitle,
+                            baseSavedAt: getSnapshotSavedAtTime(localSnapshot),
+                        });
+                        return;
+                    }
+
+                    const remoteSnapshot = await loadRemoteArticleSnapshot(remoteArticleId, currentUser);
+                    if (cancelled || articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
+                    if (remoteSnapshot) {
+                        await applyArticleSnapshotToEditor(editor, {
+                            requestId,
+                            titleToUse: remoteSnapshot.title || cachedTitle,
+                            article: freshArticle,
+                            snapshot: remoteSnapshot,
+                            remoteArticleId,
+                        });
+                        return;
+                    }
+                }
+
+                if (!hasLocalContent) {
+                    await applyArticleSnapshotToEditor(editor, {
+                        requestId,
+                        titleToUse: cachedTitle,
+                        article: freshArticle,
+                        snapshot: null,
+                        remoteArticleId,
                     });
-                    writeStorageValue(AUTO_DRAFT_TITLE_KEY, restoredTitle);
-                    writeStorageValue(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(nextKeywords));
-                    writeStorageValue(AUTO_DRAFT_LANGUAGE_KEY, lang);
-                    writeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(nextGoalContext));
-                } else {
-                    removeStorageValue(AUTO_DRAFT_KEY);
-                    removeStorageValue(AUTO_DRAFT_TITLE_KEY);
-                    removeStorageValue(AUTO_DRAFT_KEYWORDS_KEY);
-                    removeStorageValue(AUTO_DRAFT_LANGUAGE_KEY);
-                    removeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY);
                 }
             } catch (error) {
                 console.error(`Failed to restore active article "${titleToRestore}" after refresh:`, error);
@@ -1017,7 +1198,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return () => {
             cancelled = true;
         };
-    }, [editor, currentUser, captureEditorSnapshot]);
+    }, [editor, currentUser, applyArticleSnapshotToEditor, refreshArticleFromRemoteInBackground]);
 
     useEffect(() => {
         if (!editor || !pendingAutoDraftRestoreRef.current) return;
@@ -1166,22 +1347,48 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     useEffect(() => {
         if (!currentUser || !activeArticleId) return;
-        const intervalId = setInterval(() => {
-          if (currentView === 'editor' && !document.hidden && !isIdle) {
-            void recordRemoteArticleTime(activeArticleId, 10).catch(error => {
+        let pendingSeconds = 0;
+        const flushPendingTime = () => {
+            if (pendingSeconds <= 0) return;
+            const secondsToRecord = pendingSeconds;
+            pendingSeconds = 0;
+            void recordRemoteArticleTime(activeArticleId, secondsToRecord).catch(error => {
+                pendingSeconds += secondsToRecord;
                 console.error(`Failed to record article time for "${activeArticleId}":`, error);
             });
+        };
+        const intervalId = setInterval(() => {
+          if (currentView === 'editor' && !document.hidden && !isIdle) {
+            pendingSeconds += ARTICLE_TIME_TICK_SECONDS;
+            if (pendingSeconds >= ARTICLE_TIME_FLUSH_SECONDS) {
+                flushPendingTime();
+            }
           }
-        }, 10 * 1000);
-        return () => clearInterval(intervalId);
+        }, ARTICLE_TIME_TICK_SECONDS * 1000);
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                flushPendingTime();
+            }
+        };
+        window.addEventListener('pagehide', flushPendingTime);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            clearInterval(intervalId);
+            window.removeEventListener('pagehide', flushPendingTime);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            flushPendingTime();
+        };
       }, [currentUser, activeArticleId, isIdle, currentView]);
 
     const handleClearKeywords = useCallback(() => {
         setKeywords(INITIAL_KEYWORDS);
     }, []);
 
-    // Manual save writes the canonical article to Supabase and keeps a local manual draft as recovery.
-    const handleSaveDraft = useCallback(async () => {
+    // Writes the canonical article to Supabase. The public wrapper below handles overlap and unchanged autosaves.
+    const performSaveDraft = useCallback(async (options: SaveDraftOptions = {}) => {
+        const reason = options.reason || 'manual';
+        const forceSave = options.force ?? reason === 'manual';
+        const showStatus = reason === 'manual';
         if (!editor || !currentUser || !currentUserId) return;
         if (isArticleContentLoadingRef.current) return;
         const contentJSON = editor.getJSON();
@@ -1193,8 +1400,10 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             console.warn('Skipped saving empty editor content for a titled article to avoid overwriting saved content.');
             return;
         }
-        setSaveStatus('saving');
-        setSaveError('');
+        if (showStatus) {
+            setSaveStatus('saving');
+            setSaveError('');
+        }
 
         try {
             clearEditorSnapshotTimer();
@@ -1204,6 +1413,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const currentWordCount = countWordsInText(currentText);
             const newTitle = title.trim();
             const finalTitleToSave = newTitle || articleKey || '(untitled)';
+            const attachments = readCurrentArticleAttachments();
 
             if (!articleKey && newTitle) {
                 setArticleKey(newTitle);
@@ -1211,17 +1421,29 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 setArticleKey(newTitle);
             }
 
+            const saveSignature = createArticleSaveSignature({
+                title: finalTitleToSave,
+                content: contentJSON,
+                plainText: currentText,
+                keywords,
+                goalContext,
+                articleLanguage,
+                attachments,
+            });
+            if (!forceSave && saveSignature === lastSavedArticleSignatureRef.current) {
+                return;
+            }
+
             writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, finalTitleToSave);
             if (activeArticleId) {
                 writeSessionValue(ACTIVE_ARTICLE_ID_KEY, activeArticleId);
             }
             await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(currentUser, finalTitleToSave), contentJSON, {
-                awaitBackup: true,
+                awaitBackup: reason !== 'auto',
                 localTextFallback: true,
                 textFallback: currentText,
             });
 
-            const manualDraftContentKey = getManualDraftContentKey();
             const articleSnapshot: ArticleStorageSnapshot = {
                 kind: 'articleSnapshot',
                 version: 1,
@@ -1236,9 +1458,12 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 analysisSummary: {
                     wordCount: currentWordCount,
                 },
-                attachments: readCurrentArticleAttachments(),
+                attachments,
                 savedAt: new Date().toISOString(),
             };
+            void saveArticleSnapshotDurably(articleSnapshot).catch(error => {
+                console.error(`Failed to save local article snapshot "${finalTitleToSave}":`, error);
+            });
             const savedArticle = await saveRemoteArticleSnapshot(articleSnapshot, {
                 articleId: activeArticleId,
                 userId: currentUserId,
@@ -1249,30 +1474,37 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             writeSessionValue(ACTIVE_ARTICLE_ID_KEY, savedArticle.id);
             writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, savedArticle.title || finalTitleToSave);
             navigateToAppPath(buildEditorArticlePath(savedArticle.id), { replace: true });
-            void recordAppActivity(currentUserId, {
-                eventType: 'article_save',
-                entityType: 'article',
-                entityId: savedArticle.id,
-                path: buildEditorArticlePath(savedArticle.id),
-                metadata: {
-                    title: savedArticle.title,
-                    status: savedArticle.status,
-                    source: savedArticle.source,
-                },
-            });
-            window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
-            await persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON, {
-                awaitBackup: true,
-                localTextFallback: true,
-                textFallback: currentText,
-            });
-            writeStorageValue(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
-            writeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
-            writeStorageValue(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
-            writeStorageValue(MANUAL_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
-            setDraftExists(true);
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus('idle'), 2000);
+            if (reason === 'manual') {
+                void recordAppActivity(currentUserId, {
+                    eventType: 'article_save',
+                    entityType: 'article',
+                    entityId: savedArticle.id,
+                    path: buildEditorArticlePath(savedArticle.id),
+                    metadata: {
+                        title: savedArticle.title,
+                        status: savedArticle.status,
+                        source: savedArticle.source,
+                    },
+                });
+                window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+
+                const manualDraftContentKey = getManualDraftContentKey();
+                await persistEditorContentValue(MANUAL_DRAFT_KEY, manualDraftContentKey, contentJSON, {
+                    awaitBackup: true,
+                    localTextFallback: true,
+                    textFallback: currentText,
+                });
+                writeStorageValue(MANUAL_DRAFT_TITLE_KEY, finalTitleToSave);
+                writeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY, JSON.stringify(keywords));
+                writeStorageValue(MANUAL_DRAFT_LANGUAGE_KEY, articleLanguage);
+                writeStorageValue(MANUAL_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(goalContext));
+                setDraftExists(true);
+            }
+            lastSavedArticleSignatureRef.current = saveSignature;
+            if (showStatus) {
+                setSaveStatus('saved');
+                setTimeout(() => setSaveStatus('idle'), 2000);
+            }
         } catch (error) {
             const message = error instanceof Error
                 ? error.message
@@ -1280,11 +1512,43 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     ? error.message
                     : 'تعذر حفظ المقالة.';
             console.error('Failed to save article draft:', error);
-            setSaveError(message);
-            setSaveStatus('error');
+            if (showStatus) {
+                setSaveError(message);
+                setSaveStatus('error');
+            }
         }
     }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, articleLanguage, goalContext, clearEditorSnapshotTimer, clearDraftPersistTimer]);
-    
+
+    const handleSaveDraft = useCallback(async (options: SaveDraftOptions = {}) => {
+        const reason = options.reason || 'manual';
+        const forceSave = options.force ?? reason === 'manual';
+
+        if (saveInFlightRef.current) {
+            if (forceSave) {
+                queuedForcedSaveRef.current = { reason: 'manual', force: true };
+                await saveInFlightRef.current.catch(() => undefined);
+                const queuedSave = queuedForcedSaveRef.current;
+                if (queuedSave) {
+                    queuedForcedSaveRef.current = null;
+                    await handleSaveDraft(queuedSave);
+                }
+            }
+            return;
+        }
+
+        const savePromise = performSaveDraft({ reason, force: forceSave }).finally(() => {
+            saveInFlightRef.current = null;
+        });
+        saveInFlightRef.current = savePromise;
+        await savePromise;
+
+        const queuedSave = queuedForcedSaveRef.current;
+        if (queuedSave) {
+            queuedForcedSaveRef.current = null;
+            await handleSaveDraft(queuedSave);
+        }
+    }, [performSaveDraft]);
+
     const handleSaveDraftRef = useRef(handleSaveDraft);
     useEffect(() => {
         handleSaveDraftRef.current = handleSaveDraft;
@@ -1292,7 +1556,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     useEffect(() => {
         const handleAutoSaveRequest = () => {
-            void handleSaveDraftRef.current();
+            void handleSaveDraftRef.current({ reason: 'auto', force: false });
         };
 
         window.addEventListener('bazarvan:auto-save-request', handleAutoSaveRequest);
@@ -1302,7 +1566,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     useEffect(() => {
         if (currentView !== 'editor') return;
         const autosaveInterval = setInterval(() => {
-            handleSaveDraftRef.current();
+            void handleSaveDraftRef.current({ reason: 'auto', force: false });
         }, AUTOSAVE_INTERVAL_MS);
         return () => clearInterval(autosaveInterval);
     }, [currentView]);
@@ -1311,7 +1575,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (currentView !== 'editor') return;
 
         const saveCurrentArticle = () => {
-            void handleSaveDraftRef.current();
+            void handleSaveDraftRef.current({ reason: 'lifecycle', force: false });
         };
         const handleVisibilityChange = () => {
             if (document.hidden) {
@@ -1409,8 +1673,6 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
             clearEditorSnapshotTimer();
             clearDraftPersistTimer();
-            setEditorContentSafely(editor, createEmptyEditorContent(), createEmptyEditorContent());
-            captureEditorSnapshot(editor, false);
             setTitle(titleStr);
             setArticleKey(titleStr);
             setActiveArticleId(remoteArticleId);
@@ -1431,60 +1693,58 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             try {
                 const latestArticle = getFreshArticleActivity(currentUser, titleStr, article) || article;
                 setActiveArticleSettings(getActiveArticleSettings(latestArticle));
-                // Loading prefers Supabase by stable article id, then falls back to older local dashboard/draft references.
-                // Snapshot attachments restore competitor URLs/HTML/text and content summary together with the editor.
-                const remoteSnapshot = remoteArticleId && currentUser
-                    ? await loadRemoteArticleSnapshot(remoteArticleId, currentUser)
-                    : null;
-                const articleSnapshot = remoteSnapshot || (currentUser ? await loadArticleSnapshot(currentUser, titleStr) : null);
-                const snapshotContent = articleSnapshot?.content;
-                const snapshotPlainText = articleSnapshot?.plainText?.trim();
-                let resolvedContent = isUsableEditorContent(snapshotContent) ? snapshotContent : null;
-                if (!resolvedContent && snapshotPlainText) {
-                    resolvedContent = snapshotPlainText;
-                }
-                if (!resolvedContent && currentUser) {
-                    resolvedContent = await resolveArticleContentByTitle(currentUser, titleStr);
-                }
-                if (!resolvedContent) {
-                    resolvedContent = await resolveArticleContent(latestArticle);
-                }
-                if (!resolvedContent) {
-                    resolvedContent = await resolveDraftContentForTitle(titleStr, currentUser);
-                }
                 if (articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
-                const lang = articleSnapshot?.articleLanguage || latestArticle.articleLanguage || 'ar';
-                const nextKeywords = normalizeKeywords(articleSnapshot?.keywords || latestArticle.keywords || INITIAL_KEYWORDS);
-                const nextGoalContext = normalizeGoalContext(articleSnapshot?.goalContext || latestArticle.goalContext);
-                const hasResolvedContent = isUsableEditorContent(resolvedContent);
-                if (!hasResolvedContent && (latestArticle.stats?.wordCount || 0) > 0) {
-                    console.warn(`Article "${titleStr}" has saved stats but no recoverable editor content.`);
+
+                const cachedRemoteSnapshot = remoteArticleId
+                    ? await loadRemoteArticleSnapshotCache(remoteArticleId)
+                    : null;
+                const localSnapshot = cachedRemoteSnapshot || (currentUser ? await loadArticleSnapshot(currentUser, titleStr) : null);
+                const hasLocalContent = await applyArticleSnapshotToEditor(editor, {
+                    requestId,
+                    titleToUse: localSnapshot?.title || titleStr,
+                    article: latestArticle,
+                    snapshot: localSnapshot,
+                    remoteArticleId,
+                });
+
+                if (articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
+
+                if (remoteArticleId && currentUser) {
+                    if (hasLocalContent) {
+                        isArticleContentLoadingRef.current = false;
+                        refreshArticleFromRemoteInBackground(editor, {
+                            requestId,
+                            remoteArticleId,
+                            username: currentUser,
+                            article: latestArticle,
+                            fallbackTitle: localSnapshot?.title || titleStr,
+                            baseSavedAt: getSnapshotSavedAtTime(localSnapshot),
+                        });
+                        return;
+                    }
+
+                    const remoteSnapshot = await loadRemoteArticleSnapshot(remoteArticleId, currentUser);
+                    if (articleLoadRequestIdRef.current !== requestId || editor.isDestroyed) return;
+                    if (remoteSnapshot) {
+                        await applyArticleSnapshotToEditor(editor, {
+                            requestId,
+                            titleToUse: remoteSnapshot.title || titleStr,
+                            article: latestArticle,
+                            snapshot: remoteSnapshot,
+                            remoteArticleId,
+                        });
+                        return;
+                    }
                 }
 
-                setKeywords(nextKeywords);
-                setGoalContext(nextGoalContext);
-                setArticleLanguage(lang);
-                setEditorContentSafely(editor, hasResolvedContent ? resolvedContent : createEmptyEditorContent(), createEmptyEditorContent());
-                captureEditorSnapshot(editor, false);
-                applyArticleLanguageFormatting(editor, lang);
-                restoreArticleAttachments(articleSnapshot?.attachments);
-                dispatchSavedAiResults(remoteArticleId, articleSnapshot?.savedAiResults);
-
-                if (hasResolvedContent) {
-                    await persistEditorContentValue(AUTO_DRAFT_KEY, getAutoDraftContentKey(currentUser, titleStr), editor.getJSON(), {
-                        localTextFallback: true,
-                        textFallback: editor.getText(),
+                if (!hasLocalContent) {
+                    await applyArticleSnapshotToEditor(editor, {
+                        requestId,
+                        titleToUse: titleStr,
+                        article: latestArticle,
+                        snapshot: null,
+                        remoteArticleId,
                     });
-                    writeStorageValue(AUTO_DRAFT_TITLE_KEY, titleStr);
-                    writeStorageValue(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(nextKeywords));
-                    writeStorageValue(AUTO_DRAFT_LANGUAGE_KEY, lang);
-                    writeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(nextGoalContext));
-                } else {
-                    removeStorageValue(AUTO_DRAFT_KEY);
-                    removeStorageValue(AUTO_DRAFT_TITLE_KEY);
-                    removeStorageValue(AUTO_DRAFT_KEYWORDS_KEY);
-                    removeStorageValue(AUTO_DRAFT_LANGUAGE_KEY);
-                    removeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY);
                 }
             } finally {
                 if (articleLoadRequestIdRef.current === requestId) {
@@ -1492,7 +1752,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 }
             }
         }
-    }, [editor, currentUser, currentUserId, captureEditorSnapshot, clearEditorSnapshotTimer, clearDraftPersistTimer]);
+    }, [editor, currentUser, currentUserId, applyArticleSnapshotToEditor, refreshArticleFromRemoteInBackground, clearEditorSnapshotTimer, clearDraftPersistTimer]);
     
     const value: EditorContextType = {
         editor,

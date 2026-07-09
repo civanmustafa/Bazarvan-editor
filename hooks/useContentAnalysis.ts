@@ -8,6 +8,12 @@ type ContentAnalysisWorkerResponse =
   | { requestId: number; result: FullAnalysis; error?: never }
   | { requestId: number; result?: never; error: string };
 
+type ContentAnalysisWorkerJob = {
+  requestId: number;
+  input: ContentAnalysisInput;
+  refreshScope: ContentAnalysisRefreshScope;
+};
+
 export type ContentAnalysisRefreshScope = {
   keywords: boolean;
   structure: boolean;
@@ -269,6 +275,9 @@ export const useContentAnalysis = (
   );
   const [workerDisabled, setWorkerDisabled] = useState(false);
   const activeWorkerRef = useRef<Worker | null>(null);
+  const workerBusyRef = useRef(false);
+  const inFlightWorkerJobRef = useRef<ContentAnalysisWorkerJob | null>(null);
+  const pendingWorkerJobRef = useRef<ContentAnalysisWorkerJob | null>(null);
   const latestRequestIdRef = useRef(0);
   const latestAnalysisRef = useRef<FullAnalysis>(analysisResults);
 
@@ -281,6 +290,9 @@ export const useContentAnalysis = (
     return () => {
       activeWorkerRef.current?.terminate();
       activeWorkerRef.current = null;
+      workerBusyRef.current = false;
+      inFlightWorkerJobRef.current = null;
+      pendingWorkerJobRef.current = null;
     };
   }, []);
 
@@ -294,60 +306,82 @@ export const useContentAnalysis = (
     const input = createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, refreshScope, latestAnalysisRef.current);
     const requestId = latestRequestIdRef.current + 1;
     latestRequestIdRef.current = requestId;
+    const job: ContentAnalysisWorkerJob = {
+      requestId,
+      input,
+      refreshScope: { ...refreshScope },
+    };
 
-    const runFallbackAnalysis = () => {
-      const result = runContentAnalysisSafely(input, latestAnalysisRef.current);
-      setLatestAnalysisResults(mergeInactiveAnalysisResults(result, latestAnalysisRef.current, refreshScope));
+    const runFallbackAnalysis = (targetJob: ContentAnalysisWorkerJob) => {
+      const previousAnalysis = latestAnalysisRef.current;
+      const result = runContentAnalysisSafely(targetJob.input, previousAnalysis);
+      setLatestAnalysisResults(mergeInactiveAnalysisResults(result, previousAnalysis, targetJob.refreshScope));
     };
 
     if (workerDisabled || typeof Worker === 'undefined') {
-      runFallbackAnalysis();
+      runFallbackAnalysis(job);
       return;
     }
 
-    activeWorkerRef.current?.terminate();
+    const startWorkerJob = (targetJob: ContentAnalysisWorkerJob) => {
+      if (!activeWorkerRef.current) {
+        activeWorkerRef.current = new Worker(new URL('../workers/contentAnalysis.worker.ts', import.meta.url), { type: 'module' });
+      }
 
-    let disposed = false;
-    const worker = new Worker(new URL('../workers/contentAnalysis.worker.ts', import.meta.url), { type: 'module' });
+      workerBusyRef.current = true;
+      inFlightWorkerJobRef.current = targetJob;
+      activeWorkerRef.current.postMessage({ requestId: targetJob.requestId, input: targetJob.input });
+    };
+
+    const startPendingWorkerJob = () => {
+      if (workerBusyRef.current) return;
+      const nextJob = pendingWorkerJobRef.current;
+      pendingWorkerJobRef.current = null;
+      if (nextJob) startWorkerJob(nextJob);
+    };
+
+    const worker = activeWorkerRef.current || new Worker(new URL('../workers/contentAnalysis.worker.ts', import.meta.url), { type: 'module' });
     activeWorkerRef.current = worker;
 
     worker.onmessage = (event: MessageEvent<ContentAnalysisWorkerResponse>) => {
-      if (disposed || event.data.requestId !== latestRequestIdRef.current) return;
-      worker.terminate();
-      if (activeWorkerRef.current === worker) {
-        activeWorkerRef.current = null;
+      const completedJob = inFlightWorkerJobRef.current;
+      workerBusyRef.current = false;
+      inFlightWorkerJobRef.current = null;
+
+      if (completedJob && event.data.requestId === latestRequestIdRef.current) {
+        if (event.data.result) {
+          const previousAnalysis = latestAnalysisRef.current;
+          setLatestAnalysisResults(mergeInactiveAnalysisResults(event.data.result, previousAnalysis, completedJob.refreshScope));
+        } else {
+          console.error('Content analysis worker failed:', event.data.error);
+          setWorkerDisabled(true);
+          activeWorkerRef.current?.terminate();
+          activeWorkerRef.current = null;
+          pendingWorkerJobRef.current = null;
+          runFallbackAnalysis(completedJob);
+          return;
+        }
       }
 
-      if (event.data.result) {
-        setLatestAnalysisResults(mergeInactiveAnalysisResults(event.data.result, latestAnalysisRef.current, refreshScope));
-        return;
-      }
-
-      console.error('Content analysis worker failed:', event.data.error);
-      setWorkerDisabled(true);
-      runFallbackAnalysis();
+      startPendingWorkerJob();
     };
 
     worker.onerror = (event) => {
-      if (disposed) return;
-      worker.terminate();
-      if (activeWorkerRef.current === worker) {
-        activeWorkerRef.current = null;
-      }
+      const failedJob = pendingWorkerJobRef.current || inFlightWorkerJobRef.current || job;
+      activeWorkerRef.current?.terminate();
+      activeWorkerRef.current = null;
+      workerBusyRef.current = false;
+      inFlightWorkerJobRef.current = null;
+      pendingWorkerJobRef.current = null;
       console.error('Content analysis worker error:', event.message || event);
       setWorkerDisabled(true);
-      runFallbackAnalysis();
-    };
-
-    worker.postMessage({ requestId, input });
-
-    return () => {
-      disposed = true;
-      worker.terminate();
-      if (activeWorkerRef.current === worker) {
-        activeWorkerRef.current = null;
+      if (failedJob && failedJob.requestId === latestRequestIdRef.current) {
+        runFallbackAnalysis(failedJob);
       }
     };
+
+    pendingWorkerJobRef.current = job;
+    startPendingWorkerJob();
   }, [
     editorState,
     textContent,
