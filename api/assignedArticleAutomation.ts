@@ -141,13 +141,24 @@ const getGeminiKeys = (provider: GeminiProvider): string[] => {
   return parseGeminiKeyList(raw);
 };
 
-const randomizeKeyOrder = (keys: string[]): string[] => {
-  const shuffled = [...keys];
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+const keyRotationState: Record<GeminiProvider, { signature: string; nextIndex: number }> = {
+  gemini: { signature: '', nextIndex: 0 },
+  geminiPaid: { signature: '', nextIndex: 0 },
+};
+
+const getRoundRobinKeyOrder = (provider: GeminiProvider, keys: string[]): string[] => {
+  if (keys.length <= 1) return [...keys];
+
+  const signature = keys.join('\n');
+  const state = keyRotationState[provider];
+  if (state.signature !== signature) {
+    state.signature = signature;
+    state.nextIndex = 0;
   }
-  return shuffled;
+
+  const startIndex = state.nextIndex % keys.length;
+  state.nextIndex = (startIndex + 1) % keys.length;
+  return [...keys.slice(startIndex), ...keys.slice(0, startIndex)];
 };
 
 const createApiKeyFingerprint = (key: string): string => {
@@ -202,7 +213,7 @@ const callGemini = async (
   }
 
   let lastError: unknown = null;
-  for (const apiKey of randomizeKeyOrder(keys)) {
+  for (const apiKey of getRoundRobinKeyOrder(provider, keys)) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const ai = new GoogleGenAI({ apiKey });

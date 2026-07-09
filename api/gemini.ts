@@ -55,15 +55,27 @@ const createApiKeyFingerprint = (key: string): string => {
 /*
  * Gemini API route used by Vite dev middleware and the production Node server.
  * API keys are read from server environment variables only.
- * Key attempts are randomized so quota errors on one key do not block the request.
+ * Key attempts start with the next key in a round-robin order so repeated
+ * analyses spread load across server-side keys, then fall back through the rest.
  */
-const randomizeKeyOrder = (keys: string[]): string[] => {
-  const shuffled = [...keys];
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+const keyRotationState: Record<GeminiProvider, { signature: string; nextIndex: number }> = {
+  gemini: { signature: "", nextIndex: 0 },
+  geminiPaid: { signature: "", nextIndex: 0 },
+};
+
+const getRoundRobinKeyOrder = (provider: GeminiProvider, keys: string[]): string[] => {
+  if (keys.length <= 1) return [...keys];
+
+  const signature = keys.join("\n");
+  const state = keyRotationState[provider];
+  if (state.signature !== signature) {
+    state.signature = signature;
+    state.nextIndex = 0;
   }
-  return shuffled;
+
+  const startIndex = state.nextIndex % keys.length;
+  state.nextIndex = (startIndex + 1) % keys.length;
+  return [...keys.slice(startIndex), ...keys.slice(0, startIndex)];
 };
 
 const readNodeBody = async (req: any): Promise<unknown> => {
@@ -250,7 +262,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
 
     // Flash has a free-tier quota, while Pro can return limit 0 on unpaid projects.
     let lastError: GeminiErrorDetails | null = null;
-    for (const GEMINI_API_KEY of randomizeKeyOrder(GEMINI_API_KEYS)) {
+    for (const GEMINI_API_KEY of getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS)) {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });

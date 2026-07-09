@@ -156,6 +156,22 @@ const uniqueList = (items: string[]): string[] => (
   Array.from(new Set(items.map(item => item.trim()).filter(Boolean)))
 );
 
+const getAllowedGeminiFreeModels = (): string[] => (
+  uniqueList([
+    process.env.GEMINI_MODEL || DEFAULT_GEMINI_FREE_MODELS[0],
+    ...DEFAULT_GEMINI_FREE_MODELS,
+    ...splitSecretList(process.env.GEMINI_ALLOWED_MODELS),
+  ])
+);
+
+const normalizeGeminiFreeModel = (value: unknown): string => {
+  const allowedModels = getAllowedGeminiFreeModels();
+  const requestedModel = typeof value === 'string' ? value.trim() : '';
+  return allowedModels.includes(requestedModel)
+    ? requestedModel
+    : allowedModels[0] || DEFAULT_GEMINI_FREE_MODELS[0];
+};
+
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
 
 const getPublicBaseUrl = (req: any): string => {
@@ -189,11 +205,7 @@ const getSecretStatus = (req: any) => {
         configured: geminiKeys.length > 0,
         keyCount: geminiKeys.length,
         model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-        allowedModels: uniqueList([
-          ...DEFAULT_GEMINI_FREE_MODELS,
-          process.env.GEMINI_MODEL || '',
-          ...splitSecretList(process.env.GEMINI_ALLOWED_MODELS),
-        ]),
+        allowedModels: getAllowedGeminiFreeModels(),
       },
       geminiPaid: {
         configured: geminiPaidKeys.length > 0,
@@ -240,7 +252,12 @@ const sanitizeSettingsPatch = (value: unknown): Partial<Record<SettingKey, Recor
   return Object.entries(value).reduce<Partial<Record<SettingKey, Record<string, unknown>>>>((patch, [key, settingValue]) => {
     if (!SETTING_KEYS.has(key as SettingKey)) return patch;
     if (!isRecord(settingValue)) throw new SettingsError(`settings.${key} must be an object.`, 400);
-    patch[key as SettingKey] = settingValue;
+    patch[key as SettingKey] = key === 'ai'
+      ? {
+          ...settingValue,
+          defaultGeminiModel: normalizeGeminiFreeModel(settingValue.defaultGeminiModel),
+        }
+      : settingValue;
     return patch;
   }, {});
 };
