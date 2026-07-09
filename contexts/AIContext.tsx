@@ -54,6 +54,7 @@ const CHATGPT_CONVERSATION_STORAGE_PREFIX = 'bazarvan:chatgpt-conversation';
 const ARTICLE_AI_RUNTIME_STORAGE_PREFIX = 'bazarvan:article-ai-runtime:';
 const ARTICLE_AI_CLEAR_REQUEST_EVENT = 'bazarvan:article-ai-clear-request';
 const ARTICLE_AI_RESULTS_RESTORE_EVENT = 'bazarvan:article-ai-results-restored';
+const AI_CONTEXT_NOTICE_TIMEOUT_MS = 8000;
 type GeminiPatchProvider = Extract<AiPatchProvider, 'gemini' | 'geminiPaid'>;
 
 const getGeminiModelForProvider = (provider: GeminiPatchProvider = 'gemini'): string => (
@@ -98,6 +99,43 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     navigational: 'الوصول إلى علامة أو صفحة محددة',
     'support-intent': 'حل مشكلة أو معرفة طريقة الاستخدام',
     'local-intent': 'شرح وتعلّم',
+};
+
+const GOAL_CONTEXT_LOCATION_SCOPES = new Set(['local', 'country', 'regional']);
+
+const hasRequiredTerm = (value: string | undefined | null): boolean => (
+    Boolean(String(value || '').trim())
+);
+
+const hasRequiredTermList = (values: string[] | undefined | null): boolean => (
+    Array.isArray(values) && values.some(value => hasRequiredTerm(value))
+);
+
+const getMissingRequiredArticleAiFields = (
+    title: string,
+    keywords: { primary?: string; secondaries?: string[]; company?: string; lsi?: string[] },
+    goalContext: Partial<GoalContext>,
+): string[] => {
+    const missingFields: string[] = [];
+
+    if (!hasRequiredTerm(title)) missingFields.push('عنوان المقالة');
+    if (!hasRequiredTerm(keywords.primary)) missingFields.push('الكلمة المفتاحية الأساسية');
+    if (!hasRequiredTermList(keywords.secondaries)) missingFields.push('الصيغ البديلة');
+    if (!hasRequiredTerm(keywords.company)) missingFields.push('اسم الشركة');
+    if (!hasRequiredTermList(keywords.lsi)) missingFields.push('كلمات LSI');
+
+    const rawAudienceScope = String(goalContext.audienceScope || '').trim();
+    const goalContextMissing = (
+        !hasRequiredTerm(goalContext.pageType) ||
+        !hasRequiredTerm(goalContext.objective) ||
+        !hasRequiredTerm(goalContext.audienceScope) ||
+        !hasRequiredTerm(goalContext.searchIntent) ||
+        (GOAL_CONTEXT_LOCATION_SCOPES.has(rawAudienceScope) && !hasRequiredTerm(goalContext.targetCountry))
+    );
+
+    if (goalContextMissing) missingFields.push('سياق وهدف الصفحة');
+
+    return missingFields;
 };
 
 const GOAL_CONTEXT_ALLOWED_VALUES = {
@@ -4782,6 +4820,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized] = useState(false);
     const [aiFixingInfo, setAiFixingInfo] = useState<{ title: string; from: number } | null>(null);
     const [aiHistory, setAiHistory] = useState<AIHistoryItem[]>([]);
+    const [aiContextNotice, setAiContextNotice] = useState<{ id: number; flowLabel: string; missingFields: string[] } | null>(null);
     const aiResultsRef = useRef<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
     const aiInsertionPatchesRef = useRef<Record<AiPatchProvider, AiContentPatch[]>>(EMPTY_AI_INSERTION_PATCHES);
     const aiHistoryRef = useRef<AIHistoryItem[]>([]);
@@ -4810,6 +4849,26 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         articleKey: articleKey?.trim() || undefined,
         ...extra,
     }), [activeArticleId, articleKey, title]);
+
+    const stopAiRequestIfArticleContextMissing = useCallback((flowLabel: string): boolean => {
+        const missingFields = getMissingRequiredArticleAiFields(title, keywords, goalContext);
+        if (missingFields.length === 0) return false;
+
+        setAiContextNotice({
+            id: Date.now(),
+            flowLabel,
+            missingFields,
+        });
+        return true;
+    }, [goalContext, keywords, title]);
+
+    useEffect(() => {
+        if (!aiContextNotice) return undefined;
+        const timeoutId = window.setTimeout(() => {
+            setAiContextNotice(current => current?.id === aiContextNotice.id ? null : current);
+        }, AI_CONTEXT_NOTICE_TIMEOUT_MS);
+        return () => window.clearTimeout(timeoutId);
+    }, [aiContextNotice]);
 
     const replaceBulkFixReviewItems = useCallback((items: BulkFixReviewItem[]) => {
         bulkFixReviewItemsRef.current = items;
@@ -5382,6 +5441,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         geminiModel?: string,
     ) => {
         if (!editor || items.length === 0) return false;
+        if (stopAiRequestIfArticleContextMissing('الأوامر السريعة')) return false;
         const geminiKeys = normalizeGeminiKeys(provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini);
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         setAiResults(prev => ({ ...prev, [provider]: '' }));
@@ -5452,7 +5512,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext]);
+    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,
@@ -5462,6 +5522,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         geminiModel?: string,
     ) => {
         if (!editor) return;
+        if (stopAiRequestIfArticleContextMissing('التحليل الذكي')) return;
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         setAiResults(prev => ({ ...prev, [provider]: '' }));
         setAiInsertionPatches(prev => ({ ...prev, [provider]: [] }));
@@ -5496,10 +5557,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext]);
+    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
+        if (stopAiRequestIfArticleContextMissing('التحليل الذكي')) return;
         setIsAiLoading(prev => ({ ...prev, chatgpt: true }));
         setAiResults(prev => ({ ...prev, chatgpt: '' }));
         setAiInsertionPatches(prev => ({ ...prev, chatgpt: [] }));
@@ -5526,7 +5588,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext]);
+    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 
     const importManualChatGptResponse = useCallback((rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         const responseText = rawResponse.trim();
@@ -5571,6 +5633,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         const provider = quickAiProvider;
         if (isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt || !editor) return;
+        if (stopAiRequestIfArticleContextMissing('القائمة العائمة')) return;
         setIsAiCommandLoading(true);
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         try {
@@ -5682,7 +5745,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setIsAiCommandLoading(false);
         }
-    }, [editor, title, text, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext]);
+    }, [editor, title, text, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 
     const handleAnalyzeHeadings = useCallback(async () => {
         const provider = quickAiProvider;
@@ -5862,6 +5925,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
         if (!editor || !analysisResults.structureAnalysis) return;
+        if (stopAiRequestIfArticleContextMissing('الإصلاح المتعدد')) return;
         const provider = quickAiProvider;
         setAiFixingInfo({ title: rule.title, from: item.from });
         replaceBulkFixReviewItems([]);
@@ -5909,7 +5973,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setAiFixingInfo(null);
         }
-    }, [editor, analysisResults.structureAnalysis, createBulkFixReviewItemForGroup, logToAiHistory, replaceBulkFixReviewItems, quickAiProvider]);
+    }, [editor, analysisResults.structureAnalysis, createBulkFixReviewItemForGroup, logToAiHistory, replaceBulkFixReviewItems, quickAiProvider, stopAiRequestIfArticleContextMissing]);
 
     const getRelatedBulkFixRules = useCallback((rulesToFix: string[]): BulkFixRelatedRule[] => {
         if (!editor || !analysisResults.structureAnalysis || rulesToFix.length === 0) return [];
@@ -5920,6 +5984,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleFixAllViolations = useCallback(async (rulesToFix: string[], options: { includeRelatedRules?: boolean; geminiModel?: string; maxViolationsPerRule?: number } = {}) => {
         if (!editor || !analysisResults.structureAnalysis) return;
+        if (stopAiRequestIfArticleContextMissing('الإصلاح المتعدد')) return;
         const provider = quickAiProvider;
         const maxViolationsPerRule = Number.isFinite(options.maxViolationsPerRule)
             ? Math.max(1, Math.min(50, Math.floor(options.maxViolationsPerRule || 1)))
@@ -6066,7 +6131,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         });
         setFixAllProgress(p => ({ ...p, running: false }));
         setIsAiLoading(prev => ({ ...prev, [provider]: false }));
-    }, [editor, analysisResults, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext]);
+    }, [editor, analysisResults, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 
     const updateBulkFixReviewItem = useCallback((itemId: string, updates: Partial<BulkFixReviewItem>) => {
         updateBulkFixReviewItems(items => items.map(item => (
@@ -6421,5 +6486,30 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         generateContextAwarePrompt, openGoogleSearch
     };
 
-    return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
+    return (
+        <AIContext.Provider value={value}>
+            {children}
+            {aiContextNotice && (
+                <div
+                    role="alert"
+                    className="fixed right-4 top-4 z-[10000] w-[min(420px,calc(100vw-2rem))] rounded-lg border border-amber-300 bg-amber-50 p-4 text-right text-sm shadow-xl dark:border-amber-500/40 dark:bg-[#2A2417]"
+                    dir="rtl"
+                >
+                    <div className="font-black text-amber-900 dark:text-amber-100">
+                        لا يمكن تشغيل {aiContextNotice.flowLabel} قبل إكمال بيانات المقال الأساسية.
+                    </div>
+                    <div className="mt-2 leading-6 text-amber-800 dark:text-amber-200">
+                        الحقول الناقصة: {aiContextNotice.missingFields.join('، ')}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setAiContextNotice(null)}
+                        className="mt-3 rounded-md border border-amber-300 px-3 py-1 text-xs font-black text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:text-amber-100 dark:hover:bg-amber-500/10"
+                    >
+                        إغلاق
+                    </button>
+                </div>
+            )}
+        </AIContext.Provider>
+    );
 };
