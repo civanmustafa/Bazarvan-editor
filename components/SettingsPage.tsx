@@ -30,6 +30,12 @@ import {
   type SystemSettingKey,
   type SystemSettingsMap,
 } from '../utils/systemSettings';
+import {
+  buildGeminiFreeModelOptions,
+  getSelectedGeminiFreeModel,
+  normalizeGeminiFreeModel,
+  setSelectedGeminiFreeModel,
+} from '../utils/geminiModelPreference';
 
 type SettingsPageProps = {
   section: string | null;
@@ -242,6 +248,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
+  const [selectedGeminiFreeModel, setSelectedGeminiFreeModelState] = useState(() => getSelectedGeminiFreeModel());
 
   const tabs: SettingsTab[] = useMemo(() => [
     { key: 'system', label: 'النظام', path: '/settings/system', icon: <Shield size={16} /> },
@@ -251,6 +258,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     { key: 'roles', label: 'الصلاحيات', path: '/settings/roles', icon: <SlidersHorizontal size={16} /> },
   ], []);
   const selectedTabLabel = tabs.find(item => item.key === selectedSection)?.label || 'النظام';
+  const geminiFreeModelOptions = useMemo(() => (
+    buildGeminiFreeModelOptions([
+      String(settings.ai.defaultGeminiModel || ''),
+      secretStatus.ai.gemini.model,
+      ...(secretStatus.ai.gemini.allowedModels || []),
+    ])
+  ), [secretStatus.ai.gemini.allowedModels, secretStatus.ai.gemini.model, settings.ai.defaultGeminiModel]);
+  const geminiFreeModelValues = useMemo(() => (
+    geminiFreeModelOptions.map(option => option.value)
+  ), [geminiFreeModelOptions]);
 
   const buttonClass = (isActive: boolean) =>
     `flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
@@ -279,6 +296,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     void loadSettings();
   }, [loadSettings]);
 
+  useEffect(() => {
+    const normalizedModel = normalizeGeminiFreeModel(selectedGeminiFreeModel, geminiFreeModelValues);
+    if (normalizedModel === selectedGeminiFreeModel) return;
+    setSelectedGeminiFreeModelState(normalizedModel);
+    setSelectedGeminiFreeModel(normalizedModel, geminiFreeModelValues);
+  }, [geminiFreeModelValues, selectedGeminiFreeModel]);
+
   const updateSetting = <K extends SystemSettingKey>(key: K, field: string, value: unknown) => {
     setSettings(prev => ({
       ...prev,
@@ -288,6 +312,16 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       },
     }));
     setSavedMessage('');
+  };
+
+  const handleGeminiFreeModelPreferenceChange = (value: string, shouldShowMessage = true) => {
+    const selectedModel = setSelectedGeminiFreeModel(value, geminiFreeModelValues);
+    setSelectedGeminiFreeModelState(selectedModel);
+    if (shouldShowMessage) {
+      setError('');
+      setSavedMessage('تم حفظ موديل Gemini الافتراضي لهذا المتصفح.');
+    }
+    return selectedModel;
   };
 
   const handleSave = async () => {
@@ -394,6 +428,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             </button>
           </div>
         </div>
+
+        <FieldLabel label="موديل Gemini الافتراضي">
+          <SelectInput
+            value={selectedGeminiFreeModel}
+            onChange={value => handleGeminiFreeModelPreferenceChange(value)}
+            options={geminiFreeModelOptions}
+          />
+        </FieldLabel>
       </div>
     </SettingsSection>
   );
@@ -437,7 +479,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             />
           </FieldLabel>
           <FieldLabel label="موديل Gemini الافتراضي">
-            <TextInput value={String(settings.ai.defaultGeminiModel || '')} onChange={value => updateSetting('ai', 'defaultGeminiModel', value)} dir="ltr" />
+            <SelectInput
+              value={normalizeGeminiFreeModel(String(settings.ai.defaultGeminiModel || selectedGeminiFreeModel), geminiFreeModelValues)}
+              onChange={value => {
+                updateSetting('ai', 'defaultGeminiModel', value);
+                handleGeminiFreeModelPreferenceChange(value, false);
+              }}
+              options={geminiFreeModelOptions}
+            />
           </FieldLabel>
           <FieldLabel label="موديل Gemini Pro الافتراضي">
             <TextInput value={String(settings.ai.defaultGeminiPaidModel || '')} onChange={value => updateSetting('ai', 'defaultGeminiPaidModel', value)} dir="ltr" />

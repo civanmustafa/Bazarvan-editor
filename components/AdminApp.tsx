@@ -68,6 +68,12 @@ import {
 import { createRemoteAdminUser, type CreateAdminUserInput } from '../utils/adminUsers';
 import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
 import { loadSystemSettings, type SecretStatus } from '../utils/systemSettings';
+import {
+  buildGeminiFreeModelOptions,
+  getSelectedGeminiFreeModel,
+  normalizeGeminiFreeModel,
+  setSelectedGeminiFreeModel,
+} from '../utils/geminiModelPreference';
 
 type AdminAppProps = {
   section: AdminRouteSection;
@@ -938,6 +944,27 @@ const AdminSettingsPage: React.FC<AdminSettingsPageProps> = ({
         ? 'bg-[#d4af37] text-white'
         : 'bg-gray-100 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-200 dark:hover:bg-[#d4af37]/20'
     }`;
+  const [selectedGeminiFreeModel, setSelectedGeminiFreeModelState] = useState(() => getSelectedGeminiFreeModel());
+  const geminiFreeModelOptions = useMemo(() => (
+    buildGeminiFreeModelOptions([
+      secretStatus.ai.gemini.model,
+      ...(secretStatus.ai.gemini.allowedModels || []),
+    ])
+  ), [secretStatus.ai.gemini.allowedModels, secretStatus.ai.gemini.model]);
+  const geminiFreeModelValues = useMemo(() => (
+    geminiFreeModelOptions.map(option => option.value)
+  ), [geminiFreeModelOptions]);
+
+  useEffect(() => {
+    const normalizedModel = normalizeGeminiFreeModel(selectedGeminiFreeModel, geminiFreeModelValues);
+    if (normalizedModel === selectedGeminiFreeModel) return;
+    setSelectedGeminiFreeModelState(normalizedModel);
+    setSelectedGeminiFreeModel(normalizedModel, geminiFreeModelValues);
+  }, [geminiFreeModelValues, selectedGeminiFreeModel]);
+
+  const handleGeminiFreeModelChange = (value: string) => {
+    setSelectedGeminiFreeModelState(setSelectedGeminiFreeModel(value, geminiFreeModelValues));
+  };
 
   const keyCards = [
     {
@@ -998,6 +1025,18 @@ const AdminSettingsPage: React.FC<AdminSettingsPageProps> = ({
             </div>
           ))}
         </div>
+        <label className="mt-4 block max-w-md">
+          <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">موديل Gemini المجاني الافتراضي</span>
+          <select
+            value={selectedGeminiFreeModel}
+            onChange={event => handleGeminiFreeModelChange(event.target.value)}
+            className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+          >
+            {geminiFreeModelOptions.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
       </AdminSettingsSection>
 
       <AdminSettingsSection title="إعدادات العملاء" icon={<Users size={18} />}>

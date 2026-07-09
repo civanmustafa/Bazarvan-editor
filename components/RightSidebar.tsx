@@ -10,7 +10,8 @@ import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUti
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
-import { GEMINI_ANALYSIS_MODEL, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
+import { GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
+import { getSelectedGeminiFreeModel } from '../utils/geminiModelPreference';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 
 type ReadyCommand = {
@@ -1194,7 +1195,7 @@ ${readyCommandCompetitorBlocks}`;
                 body: JSON.stringify({
                     prompt,
                     provider,
-                    model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL,
+                    model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : getSelectedGeminiFreeModel(),
                     useUrlContext,
                 }),
                 signal: controller.signal,

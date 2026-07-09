@@ -31,6 +31,7 @@ import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INT
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { normalizeGoalContext } from '../utils/goalContext';
 import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
+import { getSelectedGeminiFreeModel } from '../utils/geminiModelPreference';
 
 /*
  * AIContext owns all AI workflows:
@@ -56,7 +57,7 @@ const ARTICLE_AI_RESULTS_RESTORE_EVENT = 'bazarvan:article-ai-results-restored';
 type GeminiPatchProvider = Extract<AiPatchProvider, 'gemini' | 'geminiPaid'>;
 
 const getGeminiModelForProvider = (provider: GeminiPatchProvider = 'gemini'): string => (
-    provider === 'geminiPaid' ? GEMINI_PAID_MODEL : GEMINI_MODEL
+    provider === 'geminiPaid' ? GEMINI_PAID_MODEL : getSelectedGeminiFreeModel()
 );
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
@@ -1970,7 +1971,7 @@ const requestGeminiAnalysis = async (
     prompt: string,
     userKeys?: string | string[],
     history?: GeminiChatMessage[],
-    model: string = GEMINI_MODEL,
+    model: string = getSelectedGeminiFreeModel(),
 ): Promise<GeminiAnalysisResult> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
@@ -2054,7 +2055,7 @@ const requestGeminiAnalysis = async (
 const callGeminiAnalysis = async (
     prompt: string,
     userKeys?: string | string[],
-    model: string = GEMINI_MODEL,
+    model: string = getSelectedGeminiFreeModel(),
     onResult?: (result: GeminiAnalysisResult) => void,
 ): Promise<string> => {
     const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model);

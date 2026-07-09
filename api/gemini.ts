@@ -5,9 +5,15 @@ import { GoogleGenAI } from "@google/genai";
 // ESM file directly and cannot resolve extensionless frontend module imports.
 const DEFAULT_GEMINI_ANALYSIS_MODEL = "gemini-2.5-flash";
 const DEFAULT_GEMINI_PAID_ANALYSIS_MODEL = "gemini-2.5-pro";
+const DEFAULT_GEMINI_FREE_MODELS = [
+  DEFAULT_GEMINI_ANALYSIS_MODEL,
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+];
 const GEMINI_ANALYSIS_MODEL = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_ANALYSIS_MODEL;
 const GEMINI_PAID_ANALYSIS_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || DEFAULT_GEMINI_PAID_ANALYSIS_MODEL;
 const ALLOWED_GEMINI_MODELS = new Set([
+  ...DEFAULT_GEMINI_FREE_MODELS,
   GEMINI_ANALYSIS_MODEL,
   GEMINI_PAID_ANALYSIS_MODEL,
   ...((process.env.GEMINI_ALLOWED_MODELS || "")

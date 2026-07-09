@@ -21,6 +21,11 @@ class SettingsError extends Error {
 }
 
 const SETTING_KEYS = new Set<SettingKey>(['ai', 'n8n', 'articles', 'roles', 'system']);
+const DEFAULT_GEMINI_FREE_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-3.5-flash',
+  'gemini-3-flash-preview',
+];
 
 const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
   ai: {
@@ -147,6 +152,10 @@ const splitSecretList = (value: string | undefined): string[] => (
     .filter(Boolean)
 );
 
+const uniqueList = (items: string[]): string[] => (
+  Array.from(new Set(items.map(item => item.trim()).filter(Boolean)))
+);
+
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
 
 const getPublicBaseUrl = (req: any): string => {
@@ -180,7 +189,11 @@ const getSecretStatus = (req: any) => {
         configured: geminiKeys.length > 0,
         keyCount: geminiKeys.length,
         model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-        allowedModels: splitSecretList(process.env.GEMINI_ALLOWED_MODELS),
+        allowedModels: uniqueList([
+          ...DEFAULT_GEMINI_FREE_MODELS,
+          process.env.GEMINI_MODEL || '',
+          ...splitSecretList(process.env.GEMINI_ALLOWED_MODELS),
+        ]),
       },
       geminiPaid: {
         configured: geminiPaidKeys.length > 0,
