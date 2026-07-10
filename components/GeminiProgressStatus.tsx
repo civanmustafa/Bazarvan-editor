@@ -57,28 +57,23 @@ const GeminiProgressStatus: React.FC<GeminiProgressStatusProps> = ({
         failed: 'Failed',
       };
   const stageLabel = progress.stage ? stageLabels[progress.stage] || progress.stage : (isArabic ? 'Gemini' : 'Gemini');
-  const modelStep = progress.currentModelIndex && progress.modelCount && progress.modelCount > 1
-    ? (isArabic ? `الموديل ${progress.currentModelIndex}/${progress.modelCount}` : `model ${progress.currentModelIndex}/${progress.modelCount}`)
+  const modelPosition = progress.currentModelIndex && progress.modelCount
+    ? `${progress.currentModelIndex}/${progress.modelCount}`
     : '';
-  const triedModelsStep = progress.attemptedModels?.length && progress.modelCount && progress.modelCount > 1
-    ? (isArabic
-        ? `الموديلات المجربة ${progress.attemptedModels.length}/${progress.modelCount}`
-        : `models tried ${progress.attemptedModels.length}/${progress.modelCount}`)
+  const modelStep = progress.model
+    ? `${isArabic ? 'الموديل' : 'Model'} ${progress.model}${modelPosition ? ` (${modelPosition})` : ''}`
     : '';
   const keyStep = progress.currentKeyIndex && progress.keyCount
-    ? (isArabic ? `المفتاح ${progress.currentKeyIndex}/${progress.keyCount}` : `key ${progress.currentKeyIndex}/${progress.keyCount}`)
+    ? `${isArabic ? 'المفتاح' : 'Key'} ${progress.currentKeyIndex}/${progress.keyCount}`
     : '';
   const triedStep = attemptedModelKeyCount && progress.keyCount
     ? (isArabic ? `جُرّب ${attemptedModelKeyCount}/${progress.keyCount}` : `tried ${attemptedModelKeyCount}/${progress.keyCount}`)
     : '';
   const suffixStep = progress.keySuffix ? `...${progress.keySuffix}` : '';
   const statusStep = progress.status ? `HTTP ${progress.status}` : '';
-  const progressLine = [
+  const primaryLine = [modelStep, keyStep].filter(Boolean).join(isArabic ? '، ' : ', ');
+  const detailLine = [
     stageLabel,
-    keyStep,
-    progress.model ? (isArabic ? `على ${progress.model}` : `on ${progress.model}`) : '',
-    modelStep,
-    triedModelsStep,
     triedStep,
     suffixStep,
     statusStep,
@@ -86,11 +81,16 @@ const GeminiProgressStatus: React.FC<GeminiProgressStatusProps> = ({
 
   return (
     <div className={`rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/10 text-gray-700 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/15 dark:text-gray-200 ${compact ? 'p-2 text-[10px]' : 'p-2.5 text-[11px]'}`}>
-      <div className="flex items-center gap-2 font-bold">
+      <div className="flex items-start gap-2">
         {progress.active && <Loader2 size={compact ? 12 : 14} className="shrink-0 animate-spin text-[#b8922e]" />}
-        <span className="min-w-0 break-words">
-          {progressLine || progress.message || (isArabic ? 'جاري الاتصال بـ Gemini...' : 'Contacting Gemini...')}
-        </span>
+        <div className="min-w-0 break-words" title={progress.message}>
+          <div className="font-bold">
+            {primaryLine || progress.message || (isArabic ? 'جاري الاتصال بـ Gemini...' : 'Contacting Gemini...')}
+          </div>
+          {primaryLine && detailLine && (
+            <div className="mt-1 text-gray-600 dark:text-gray-300">{detailLine}</div>
+          )}
+        </div>
       </div>
     </div>
   );

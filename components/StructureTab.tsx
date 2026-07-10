@@ -8,6 +8,7 @@ import { useInteraction } from '../contexts/InteractionContext';
 import { useAI } from '../contexts/AIContext';
 import { isProductPageContext } from '../utils/goalContext';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
+import GeminiProgressStatus from './GeminiProgressStatus';
 import {
     buildGeminiFreeModelOptions,
     GEMINI_FREE_MODEL_CHANGED_EVENT,
@@ -1002,50 +1003,6 @@ const StructureTab: React.FC = () => {
     });
 
   const geminiProgress = fixAllProgress.geminiProgress;
-  const getBulkFixGeminiProgressLine = () => {
-      if (!geminiProgress) return '';
-      const stageLabels: Record<string, string> = uiLanguage === 'ar'
-          ? {
-              queued: 'بدء الطلب',
-              attempting: 'تجربة',
-              retrying: 'إعادة محاولة',
-              'failed-key': 'فشل المفتاح',
-              'switching-key': 'تبديل المفتاح',
-              'switching-model': 'تبديل الموديل',
-              success: 'نجاح',
-              failed: 'فشل',
-            }
-          : {
-              queued: 'Queued',
-              attempting: 'Trying',
-              retrying: 'Retrying',
-              'failed-key': 'Key failed',
-              'switching-key': 'Switching key',
-              'switching-model': 'Switching model',
-              success: 'Success',
-              failed: 'Failed',
-            };
-      const attemptedModelKeyCount = geminiProgress.attemptedModelKeyCount || geminiProgress.attemptedKeyCount;
-      const parts = [
-          geminiProgress.stage ? stageLabels[geminiProgress.stage] || geminiProgress.stage : 'Gemini',
-          geminiProgress.currentKeyIndex && geminiProgress.keyCount
-              ? (uiLanguage === 'ar' ? `المفتاح ${geminiProgress.currentKeyIndex}/${geminiProgress.keyCount}` : `key ${geminiProgress.currentKeyIndex}/${geminiProgress.keyCount}`)
-              : '',
-          geminiProgress.model ? (uiLanguage === 'ar' ? `على ${geminiProgress.model}` : `on ${geminiProgress.model}`) : '',
-          geminiProgress.currentModelIndex && geminiProgress.modelCount && geminiProgress.modelCount > 1
-              ? (uiLanguage === 'ar' ? `الموديل ${geminiProgress.currentModelIndex}/${geminiProgress.modelCount}` : `model ${geminiProgress.currentModelIndex}/${geminiProgress.modelCount}`)
-              : '',
-          geminiProgress.attemptedModels?.length && geminiProgress.modelCount && geminiProgress.modelCount > 1
-              ? (uiLanguage === 'ar' ? `الموديلات المجربة ${geminiProgress.attemptedModels.length}/${geminiProgress.modelCount}` : `models tried ${geminiProgress.attemptedModels.length}/${geminiProgress.modelCount}`)
-              : '',
-          attemptedModelKeyCount && geminiProgress.keyCount
-              ? (uiLanguage === 'ar' ? `جُرّب ${attemptedModelKeyCount}/${geminiProgress.keyCount}` : `tried ${attemptedModelKeyCount}/${geminiProgress.keyCount}`)
-              : '',
-          geminiProgress.keySuffix ? `...${geminiProgress.keySuffix}` : '',
-          geminiProgress.status ? `HTTP ${geminiProgress.status}` : '',
-      ].filter(Boolean);
-      return parts.join(uiLanguage === 'ar' ? '، ' : ', ');
-  };
   const runningBulkFixLabel = fixAllProgress.running
       ? geminiProgress?.currentKeyIndex && geminiProgress?.keyCount
           ? (uiLanguage === 'ar'
@@ -1055,7 +1012,6 @@ const StructureTab: React.FC = () => {
               ? `جاري إنشاء الاقتراحات ${fixAllProgress.current}/${fixAllProgress.total}`
               : `Creating proposals ${fixAllProgress.current}/${fixAllProgress.total}`)
       : '';
-  const geminiProgressLine = getBulkFixGeminiProgressLine();
 
   return (
     <div className="min-w-0 overflow-x-hidden p-2 space-y-3">
@@ -1109,13 +1065,18 @@ const StructureTab: React.FC = () => {
                </select>
            </div>
            {fixAllProgress.running && (
-               <div className="mt-2 rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/10 p-2 text-[11px] font-bold text-gray-700 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/15 dark:text-gray-200">
-                   <div className="flex items-center gap-2">
-                       <Loader2 size={13} className="shrink-0 animate-spin text-[#b8922e]" />
-                       <span className="min-w-0 break-words">
-                           {geminiProgressLine || fixAllProgress.detail || (uiLanguage === 'ar' ? 'جاري تنفيذ الإصلاح المتعدد...' : 'Bulk fix is running...')}
-                       </span>
-                   </div>
+               <div className="mt-2">
+                   {geminiProgress ? (
+                       <GeminiProgressStatus
+                           progress={{ ...geminiProgress, active: true }}
+                           isArabic={uiLanguage === 'ar'}
+                           compact
+                       />
+                   ) : (
+                       <div className="rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/10 p-2 text-[11px] font-bold text-gray-700 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/15 dark:text-gray-200">
+                           {fixAllProgress.detail || (uiLanguage === 'ar' ? 'جاري تنفيذ الإصلاح المتعدد...' : 'Bulk fix is running...')}
+                       </div>
+                   )}
                </div>
            )}
            {fixAllProgress.failed > 0 && !fixAllProgress.running && (
