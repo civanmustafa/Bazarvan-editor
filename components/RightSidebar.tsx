@@ -20,6 +20,7 @@ import {
 } from '../utils/geminiModelPreference';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 import GeminiProgressStatus from './GeminiProgressStatus';
+import { runGeminiAnalysisEngine, type GeminiProgressSnapshot } from '../utils/geminiAnalysisEngine';
 
 type ReadyCommand = {
     id: string;
@@ -55,21 +56,7 @@ type CompetitorExtractionState = {
     error: string;
 };
 
-type LocalGeminiProgressSnapshot = {
-    stage?: string;
-    provider?: 'gemini' | 'geminiPaid';
-    model?: string;
-    requestedModel?: string;
-    keyCount?: number;
-    attemptedKeyCount?: number;
-    currentKeyIndex?: number;
-    currentAttempt?: number;
-    keySuffix?: string;
-    status?: number;
-    reason?: string;
-    message?: string;
-    updatedAt?: string;
-    completed?: boolean;
+type LocalGeminiProgressSnapshot = GeminiProgressSnapshot & {
     active?: boolean;
 };
 
@@ -89,48 +76,6 @@ type CompetitorTextStats = {
     uniqueWords: number;
     topWords: CompetitorWordFrequency[];
     repeatedPhrases: CompetitorRepeatedPhrase[];
-};
-
-const COMPETITOR_TIMEOUT_MS = 180000;
-
-const createSidebarGeminiProgressId = (): string => (
-    `gemini-sidebar-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
-);
-
-const startSidebarGeminiProgressPolling = (
-    progressId: string,
-    onProgress: (progress: LocalGeminiProgressSnapshot) => void,
-): (() => void) => {
-    let stopped = false;
-    let timerId: number | undefined;
-
-    const poll = async () => {
-        if (stopped) return;
-        try {
-            const response = await fetch(`/api/gemini/progress/${encodeURIComponent(progressId)}`, {
-                cache: 'no-store',
-            });
-            if (response.ok) {
-                const progress = await response.json() as LocalGeminiProgressSnapshot;
-                onProgress(progress);
-                if (progress.completed) return;
-            }
-        } catch {
-            // Progress polling is informational; the main request still decides the result.
-        }
-
-        if (!stopped) {
-            timerId = window.setTimeout(poll, 600);
-        }
-    };
-
-    timerId = window.setTimeout(poll, 250);
-    return () => {
-        stopped = true;
-        if (timerId !== undefined) {
-            window.clearTimeout(timerId);
-        }
-    };
 };
 
 const COMPETITOR_STOP_WORDS = new Set([
@@ -1264,18 +1209,6 @@ ${readyCommandCompetitorBlocks}`;
         fallbackUrl: string,
         provider: 'gemini' | 'geminiPaid' = competitorGeminiProvider,
     ) => {
-        const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), COMPETITOR_TIMEOUT_MS);
-        const progressId = createSidebarGeminiProgressId();
-        const stopProgressPolling = startSidebarGeminiProgressPolling(progressId, progress => {
-            setCompetitorGeminiProgress(prev => ({
-                ...prev,
-                [index]: {
-                    ...progress,
-                    active: !progress.completed,
-                },
-            }));
-        });
         setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
             ...item,
             status: 'loading',
@@ -1294,25 +1227,29 @@ ${readyCommandCompetitorBlocks}`;
         }));
 
         try {
-            const response = await fetch('/api/gemini', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const engineResult = await runGeminiAnalysisEngine({
+                request: {
                     prompt,
                     provider,
                     model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : getSelectedGeminiFreeModel(),
                     useUrlContext,
-                    progressId,
                     allowModelFallback: provider === 'gemini' && isGeminiFreeModelFallbackEnabled(),
-                }),
-                signal: controller.signal,
+                },
+                onProgress: progress => {
+                    setCompetitorGeminiProgress(prev => ({
+                        ...prev,
+                        [index]: {
+                            ...progress,
+                            active: !progress.completed,
+                        },
+                    }));
+                },
             });
-            window.clearTimeout(timeoutId);
-            const data = await response.json().catch(() => ({}));
-            if (response.status === 404) {
+            const { status, data } = engineResult;
+            if (status === 404) {
                 throw new Error(tRs.competitorApiUnavailable);
             }
-            if (!response.ok) {
+            if (status < 200 || status >= 300) {
                 if (Array.isArray(data.attempts)) {
                     data.attempts.forEach((attempt: Record<string, unknown>, attemptIndex: number) => {
                         const keyFingerprint = typeof attempt.keyFingerprint === 'string' ? attempt.keyFingerprint.trim() : '';
@@ -1338,7 +1275,7 @@ ${readyCommandCompetitorBlocks}`;
                         }));
                     });
                 }
-                throw new Error(data.error || `${tRs.competitorExtractionFailed} (${response.status})`);
+                throw new Error(data.error || `${tRs.competitorExtractionFailed} (${status})`);
             }
             if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
                 window.dispatchEvent(new CustomEvent('api-key-used', {
@@ -1349,7 +1286,7 @@ ${readyCommandCompetitorBlocks}`;
                         provider: data.provider,
                         model: data.model,
                         outcome: 'success',
-                        status: response.status,
+                        status,
                         keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
                         attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
                         source: 'competitor_extraction',
@@ -1369,7 +1306,7 @@ ${readyCommandCompetitorBlocks}`;
                     keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
                     attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
                     keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
-                    status: response.status,
+                    status,
                     completed: true,
                     active: false,
                     message: isArabicLocale ? 'تم تلقي رد Gemini بنجاح.' : 'Gemini responded successfully.',
@@ -1393,14 +1330,11 @@ ${readyCommandCompetitorBlocks}`;
                 error: '',
             } : item));
         } catch (error) {
-            window.clearTimeout(timeoutId);
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
                 status: 'error',
                 source,
                 content: null,
-                error: error instanceof Error && error.name === 'AbortError'
-                    ? tRs.competitorExtractionTimeout
-                    : error instanceof Error ? error.message : tRs.competitorExtractionFailed,
+                error: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
             } : item));
             setCompetitorGeminiProgress(prev => {
                 const current = prev[index];
@@ -1413,11 +1347,8 @@ ${readyCommandCompetitorBlocks}`;
                             completed: true,
                             message: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
                         },
-                };
+                    };
             });
-        } finally {
-            window.clearTimeout(timeoutId);
-            stopProgressPolling();
         }
     };
 

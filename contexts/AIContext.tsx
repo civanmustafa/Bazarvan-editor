@@ -32,6 +32,11 @@ import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText }
 import { normalizeGoalContext } from '../utils/goalContext';
 import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
 import { getSelectedGeminiFreeModel, isGeminiFreeModelFallbackEnabled } from '../utils/geminiModelPreference';
+import {
+    runGeminiAnalysisEngine,
+    type GeminiProgressCallback,
+    type GeminiProgressSnapshot,
+} from '../utils/geminiAnalysisEngine';
 
 /*
  * AIContext owns all AI workflows:
@@ -1970,29 +1975,6 @@ type GeminiServerAttempt = {
     model?: unknown;
 };
 
-type GeminiProgressSnapshot = {
-    stage?: string;
-    provider?: GeminiPatchProvider;
-    model?: string;
-    requestedModel?: string;
-    currentModelIndex?: number;
-    modelCount?: number;
-    keyCount?: number;
-    attemptedKeyCount?: number;
-    attemptedModelKeyCount?: number;
-    totalAttemptCount?: number;
-    currentKeyIndex?: number;
-    currentAttempt?: number;
-    keySuffix?: string;
-    status?: number;
-    reason?: string;
-    message?: string;
-    updatedAt?: string;
-    completed?: boolean;
-};
-
-type GeminiProgressCallback = (progress: GeminiProgressSnapshot) => void;
-
 type AiRequestProgress = GeminiProgressSnapshot & {
     source?: string;
     active?: boolean;
@@ -2102,95 +2084,6 @@ const appendGeminiChatExchange = (
     { role: 'model', text: truncateGeminiChatText(response) },
 ]);
 
-const createGeminiProgressId = (): string => (
-    `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
-);
-
-const startGeminiProgressPolling = (
-    progressId: string,
-    onProgress: GeminiProgressCallback,
-): (() => void) => {
-    let stopped = false;
-    let timerId: number | undefined;
-
-    const poll = async () => {
-        if (stopped) return;
-        try {
-            const response = await fetch(`/api/gemini/progress/${encodeURIComponent(progressId)}`, {
-                cache: 'no-store',
-            });
-            if (response.ok) {
-                const progress = await response.json() as GeminiProgressSnapshot;
-                onProgress(progress);
-                if (progress.completed) return;
-            }
-        } catch {
-            // Polling is diagnostic only; the main Gemini request still controls success/failure.
-        }
-
-        if (!stopped) {
-            timerId = window.setTimeout(poll, 600);
-        }
-    };
-
-    timerId = window.setTimeout(poll, 250);
-    return () => {
-        stopped = true;
-        if (timerId !== undefined) {
-            window.clearTimeout(timerId);
-        }
-    };
-};
-
-const readLatestGeminiProgress = async (
-    progressId?: string,
-): Promise<GeminiProgressSnapshot | null> => {
-    if (!progressId) return null;
-    try {
-        const response = await fetch(`/api/gemini/progress/${encodeURIComponent(progressId)}`, {
-            cache: 'no-store',
-        });
-        if (!response.ok) return null;
-        return await response.json() as GeminiProgressSnapshot;
-    } catch {
-        return null;
-    }
-};
-
-const buildGeminiInterruptedMessage = (
-    baseMessage: string,
-    progress: GeminiProgressSnapshot | null,
-    fallbackModel: string,
-): string => {
-    if (!progress) return baseMessage;
-
-    const keyCount = typeof progress.keyCount === 'number' ? progress.keyCount : undefined;
-    const attemptedKeyCount = typeof progress.attemptedKeyCount === 'number' ? progress.attemptedKeyCount : undefined;
-    const attemptedModelKeyCount = typeof progress.attemptedModelKeyCount === 'number'
-        ? progress.attemptedModelKeyCount
-        : attemptedKeyCount;
-    const currentKeyIndex = typeof progress.currentKeyIndex === 'number' ? progress.currentKeyIndex : undefined;
-    const currentModelIndex = typeof progress.currentModelIndex === 'number' ? progress.currentModelIndex : undefined;
-    const modelCount = typeof progress.modelCount === 'number' ? progress.modelCount : undefined;
-    const totalAttemptCount = typeof progress.totalAttemptCount === 'number' ? progress.totalAttemptCount : undefined;
-    const modelLabel = progress.model || fallbackModel;
-    const modelPosition = currentModelIndex && modelCount && modelCount > 1
-        ? `الموديل ${currentModelIndex} من ${modelCount}: ${modelLabel}`
-        : `النموذج ${modelLabel}`;
-    const progressParts = [
-        baseMessage,
-        keyCount
-            ? attemptedModelKeyCount && attemptedModelKeyCount >= keyCount
-                ? `آخر حالة مسجلة: تمت تجربة ${attemptedModelKeyCount} من ${keyCount} مفتاح داخل ${modelPosition}.`
-                : `آخر حالة مسجلة قبل انقطاع الطلب: كان النظام عند المفتاح ${currentKeyIndex || attemptedModelKeyCount || 1} من ${keyCount} داخل ${modelPosition}. هذا لا يؤكد أن كل المفاتيح أو كل الموديلات اكتملت.`
-            : '',
-        totalAttemptCount ? `إجمالي محاولات مفتاح/موديل المسجلة حتى الانقطاع: ${totalAttemptCount}.` : '',
-        progress.message ? `آخر خطوة: ${progress.message}` : '',
-    ].filter(Boolean);
-
-    return progressParts.join('\n');
-};
-
 const requestGeminiAnalysis = async (
     prompt: string,
     userKeys?: string | string[],
@@ -2199,43 +2092,27 @@ const requestGeminiAnalysis = async (
     usageContext: AiApiUsageContext = {},
     progressCallback?: GeminiProgressCallback,
 ): Promise<GeminiAnalysisResult> => {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
-    const progressId = progressCallback ? createGeminiProgressId() : undefined;
-    const stopProgressPolling = progressId && progressCallback
-        ? startGeminiProgressPolling(progressId, progressCallback)
-        : undefined;
-
+    // Gemini keys stay server-side. Every UI workflow uses the same background
+    // engine so proxy timeouts cannot interrupt key/model rotation.
+    void userKeys;
     try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            prompt,
-            history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
-            model,
-            provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
-            progressId,
-            allowModelFallback: model !== GEMINI_PAID_MODEL && isGeminiFreeModelFallbackEnabled(),
-        }),
-        signal: controller.signal,
+      const engineResult = await runGeminiAnalysisEngine({
+          request: {
+              prompt,
+              history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
+              model,
+              provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
+              allowModelFallback: model !== GEMINI_PAID_MODEL && isGeminiFreeModelFallbackEnabled(),
+          },
+          onProgress: progressCallback,
       });
+      const { status, data, rawBody, progress } = engineResult;
 
-      window.clearTimeout(timeoutId);
-
-      const rawBody = await response.text().catch(() => '');
-      let data: Record<string, any> = {};
-      try {
-          data = rawBody ? JSON.parse(rawBody) : {};
-      } catch {
-          // Some proxies return plain-text errors; use the raw response below.
-      }
-
-      if (response.status === 404) {
+      if (status === 404) {
           throw new Error('Gemini API route is not enabled locally. Restart the Vite dev server so it can load the local API middleware.');
       }
 
-      if (!response.ok) {
+      if (status < 200 || status >= 300) {
           dispatchGeminiFailedAttempts(data, usageContext);
           const serverError = typeof data.error === 'string'
               ? data.error
@@ -2247,26 +2124,22 @@ const requestGeminiAnalysis = async (
           const attemptSuffix = typeof data.attemptedKeyCount === 'number' && typeof data.keyCount === 'number' && !/تمت تجربة|attempted/i.test(serverError)
               ? ` تمت تجربة ${data.attemptedKeyCount} من ${data.keyCount} مفتاح.`
               : '';
-          const fallbackError = response.status === 504
+          const fallbackError = status === 504
               ? `انتهت مهلة طلب Gemini أو أعاد الخادم 504 للنموذج الحالي (${model}). أعد المحاولة بدفعة أصغر أو اختر موديلا آخر.`
-              : `Gemini request failed with status ${response.status}`;
-          const latestProgress = await readLatestGeminiProgress(progressId);
-          const finalErrorMessage = response.status === 504 || (latestProgress && !latestProgress.completed)
-              ? buildGeminiInterruptedMessage(serverError || fallbackError, latestProgress, model)
-              : serverError || fallbackError;
+              : `Gemini request failed with status ${status}`;
+          const finalErrorMessage = serverError || fallbackError;
           progressCallback?.({
-              ...(latestProgress || {}),
+              ...(progress || {}),
               stage: 'failed',
-              provider: latestProgress?.provider || (data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini'),
-              model: latestProgress?.model || (typeof data.model === 'string' ? data.model : model),
-              requestedModel: latestProgress?.requestedModel || (typeof data.requestedModel === 'string' ? data.requestedModel : model),
-              keyCount: latestProgress?.keyCount || (typeof data.keyCount === 'number' ? data.keyCount : undefined),
-              attemptedKeyCount: latestProgress?.attemptedKeyCount || (typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined),
-              status: response.status,
+              provider: progress?.provider || (data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini'),
+              model: progress?.model || (typeof data.model === 'string' ? data.model : model),
+              requestedModel: progress?.requestedModel || (typeof data.requestedModel === 'string' ? data.requestedModel : model),
+              keyCount: progress?.keyCount || (typeof data.keyCount === 'number' ? data.keyCount : undefined),
+              attemptedKeyCount: progress?.attemptedKeyCount || (typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined),
+              status,
               message: finalErrorMessage,
               completed: true,
           });
-          stopProgressPolling?.();
           throw new Error(`${finalErrorMessage}${attemptSuffix}`);
       }
 
@@ -2281,13 +2154,14 @@ const requestGeminiAnalysis = async (
               provider: data.provider,
               model: data.model,
               outcome: 'success',
-              status: response.status,
+              status,
               keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
               attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
               ...usageContext,
           });
       }
       progressCallback?.({
+          ...(progress || {}),
           stage: 'success',
           provider: data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini',
           model: typeof data.model === 'string' ? data.model : model,
@@ -2295,13 +2169,12 @@ const requestGeminiAnalysis = async (
           keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
           attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
           keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
-          status: response.status,
+          status,
           message: typeof data.keySuffix === 'string'
               ? `تم تلقي رد Gemini بنجاح من مفتاح ينتهي بـ ...${data.keySuffix}.`
               : 'تم تلقي رد Gemini بنجاح.',
           completed: true,
       });
-      stopProgressPolling?.();
 
       return {
           text: data.text,
@@ -2312,32 +2185,16 @@ const requestGeminiAnalysis = async (
           model: typeof data.model === 'string' ? data.model : undefined,
       };
     } catch (error) {
-      window.clearTimeout(timeoutId);
       console.error("Error calling Gemini API:", error);
-      const latestProgress = await readLatestGeminiProgress(progressId);
-      if (error instanceof Error && error.name === 'AbortError') {
-          const timeoutMessage = buildGeminiInterruptedMessage(
-              `انتهت مهلة الاتصال بـ Gemini (${model}). قد يكون الطلب توقف قبل اكتمال تجربة كل المفاتيح أو كل الموديلات.`,
-              latestProgress,
-              model,
-          );
-          progressCallback?.({
-              ...(latestProgress || {}),
-              stage: 'failed',
-              provider: latestProgress?.provider || (model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini'),
-              model: latestProgress?.model || model,
-              requestedModel: latestProgress?.requestedModel || model,
-              message: timeoutMessage,
-              completed: true,
-          });
-          stopProgressPolling?.();
-          return {
-              text: timeoutMessage,
-              ok: false,
-          };
-      }
       const errorMessage = getGeminiErrorMessage(error, model);
-      stopProgressPolling?.();
+      progressCallback?.({
+          stage: 'failed',
+          provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
+          model,
+          requestedModel: model,
+          message: errorMessage,
+          completed: true,
+      });
       return {
           text: `حدث خطأ أثناء الاتصال بـ Gemini: ${errorMessage}`,
           ok: false,

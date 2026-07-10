@@ -74,9 +74,17 @@ type GeminiProgressState = {
   completed: boolean;
 };
 
+type GeminiJobState = {
+  status: "running" | "completed";
+  startedAt: string;
+  updatedAt: string;
+  result?: ApiResult;
+};
+
 const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 const GEMINI_PROGRESS_TTL_MS = 10 * 60 * 1000;
 const geminiProgressStore = new Map<string, GeminiProgressState>();
+const geminiJobStore = new Map<string, GeminiJobState>();
 
 const createApiKeyFingerprint = (key: string): string => {
   const normalizedKey = key.trim();
@@ -104,6 +112,12 @@ const cleanupGeminiProgressStore = () => {
     const updatedAt = Date.parse(progress.updatedAt);
     if (Number.isFinite(updatedAt) && updatedAt < cutoff) {
       geminiProgressStore.delete(id);
+    }
+  }
+  for (const [id, job] of geminiJobStore.entries()) {
+    const updatedAt = Date.parse(job.updatedAt);
+    if (job.status === "completed" && Number.isFinite(updatedAt) && updatedAt < cutoff) {
+      geminiJobStore.delete(id);
     }
   }
 };
@@ -501,17 +515,9 @@ const buildGeminiFailureMessage = (
   return parts.join(' ');
 };
 
-const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
-  if (req.method !== "POST") {
-    return { status: 405, body: { error: "الطريقة غير مسموح بها" } };
-  }
-
+const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
   try {
-    if (!getContentType(req).includes("application/json")) {
-      return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
-    }
-
-    const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId, allowModelFallback } = await readRequestBody(req) as any;
+    const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId, allowModelFallback } = requestBody || {};
     const progressId = normalizeProgressId(rawProgressId);
     const requestedProvider = normalizeGeminiProvider(provider);
     const selectedModel = getSafeGeminiModel(
@@ -830,6 +836,144 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
   }
 };
 
+const getInitialJobProgress = (requestBody: any) => {
+  const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
+  const selectedModel = getSafeGeminiModel(
+    selectGeminiModel(requestBody?.model, requestedProvider),
+    requestedProvider,
+  );
+  const selectedProvider = selectGeminiProvider(requestedProvider, selectedModel);
+  const modelOrder = getGeminiModelOrder(
+    selectedProvider,
+    selectedModel,
+    requestBody?.allowModelFallback === true,
+  );
+
+  return {
+    provider: selectedProvider,
+    model: selectedModel,
+    modelCount: modelOrder.length,
+    keyCount: parseEnvGeminiKeys(selectedProvider).length,
+  };
+};
+
+const ensureGeminiJobCompletedProgress = (
+  progressId: string,
+  requestBody: any,
+  result: ApiResult,
+) => {
+  const currentProgress = geminiProgressStore.get(progressId);
+  if (currentProgress?.completed) return;
+
+  const initial = getInitialJobProgress(requestBody);
+  const resultBody = result.body && typeof result.body === "object"
+    ? result.body as Record<string, unknown>
+    : {};
+  const succeeded = result.status >= 200 && result.status < 300 && typeof resultBody.text === "string";
+  const errorMessage = typeof resultBody.error === "string"
+    ? resultBody.error
+    : succeeded
+      ? "تم تلقي رد Gemini بنجاح."
+      : `انتهت مهمة Gemini بالحالة ${result.status}.`;
+
+  setGeminiProgress(progressId, {
+    stage: succeeded ? "success" : "failed",
+    provider: initial.provider,
+    model: typeof resultBody.model === "string" ? resultBody.model : initial.model,
+    requestedModel: initial.model,
+    modelCount: initial.modelCount,
+    keyCount: initial.keyCount,
+    attemptedKeyCount: typeof resultBody.attemptedKeyCount === "number"
+      ? resultBody.attemptedKeyCount
+      : currentProgress?.attemptedKeyCount || 0,
+    status: result.status,
+    completed: true,
+    message: errorMessage,
+  });
+};
+
+const startGeminiJob = (progressId: string, requestBody: any): GeminiJobState => {
+  const existingJob = geminiJobStore.get(progressId);
+  if (existingJob) return existingJob;
+
+  const now = new Date().toISOString();
+  const initial = getInitialJobProgress(requestBody);
+  const job: GeminiJobState = {
+    status: "running",
+    startedAt: now,
+    updatedAt: now,
+  };
+  geminiJobStore.set(progressId, job);
+  setGeminiProgress(progressId, {
+    stage: "queued",
+    provider: initial.provider,
+    model: initial.model,
+    requestedModel: initial.model,
+    currentModelIndex: 1,
+    modelCount: initial.modelCount,
+    keyCount: initial.keyCount,
+    attemptedKeyCount: 0,
+    attemptedModelKeyCount: 0,
+    totalAttemptCount: 0,
+    completed: false,
+    message: "تم إنشاء مهمة Gemini، ويجري تجهيز أول محاولة.",
+  });
+
+  void executeGeminiRequest(requestBody)
+    .catch((error): ApiResult => ({
+      status: 500,
+      body: {
+        error: `خطأ غير متوقع داخل محرك Gemini: ${getGeminiErrorDetails(error).message}`,
+        progressId,
+      },
+    }))
+    .then(result => {
+      job.status = "completed";
+      job.result = result;
+      job.updatedAt = new Date().toISOString();
+      ensureGeminiJobCompletedProgress(progressId, requestBody, result);
+    });
+
+  return job;
+};
+
+const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
+  if (req.method !== "POST") {
+    return { status: 405, body: { error: "الطريقة غير مسموح بها" } };
+  }
+
+  try {
+    if (!getContentType(req).includes("application/json")) {
+      return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
+    }
+
+    const requestBody = await readRequestBody(req) as any;
+    const progressId = normalizeProgressId(requestBody?.progressId);
+    if (requestBody?.async === true && progressId) {
+      const job = startGeminiJob(progressId, requestBody);
+      return {
+        status: 202,
+        body: {
+          accepted: true,
+          progressId,
+          jobStatus: job.status,
+        },
+      };
+    }
+
+    return executeGeminiRequest(requestBody);
+  } catch (error) {
+    console.error("Error starting Gemini request:", error);
+    if (error instanceof SyntaxError) {
+      return { status: 400, body: { error: "طلب JSON غير صالح" } };
+    }
+    return {
+      status: 500,
+      body: { error: `خطأ من Gemini API: ${getGeminiErrorDetails(error).message}` },
+    };
+  }
+};
+
 const handleGeminiProgressRequest = async (req: any): Promise<ApiResult> => {
   if (req.method !== "GET" && req.method !== "HEAD") {
     return { status: 405, body: { error: "Method not allowed" } };
@@ -838,7 +982,8 @@ const handleGeminiProgressRequest = async (req: any): Promise<ApiResult> => {
   cleanupGeminiProgressStore();
   const progressId = getProgressIdFromRequest(req);
   const progress = progressId ? geminiProgressStore.get(progressId) : undefined;
-  if (!progress) {
+  const job = progressId ? geminiJobStore.get(progressId) : undefined;
+  if (!progress && !job) {
     return {
       status: 404,
       body: {
@@ -848,7 +993,16 @@ const handleGeminiProgressRequest = async (req: any): Promise<ApiResult> => {
     };
   }
 
-  return { status: 200, body: progress };
+  return {
+    status: 200,
+    body: {
+      ...(progress || {}),
+      progressId,
+      jobStatus: job?.status,
+      resultStatus: job?.result?.status,
+      result: job?.result?.body,
+    },
+  };
 };
 
 export async function geminiProgressHandler(req: any, res?: any): Promise<Response | void> {
