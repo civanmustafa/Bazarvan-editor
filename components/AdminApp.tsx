@@ -659,6 +659,12 @@ const getApiUsageEvents = (events: RemoteAppActivityEvent[]): RemoteAppActivityE
   events.filter(event => event.eventType === 'api_key_used')
 );
 
+const sortActivityEventsNewestFirst = <T extends { createdAt: string }>(events: T[]): T[] => (
+  [...events].sort((left, right) => (
+    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+  ))
+);
+
 const buildApiUsageSummary = (events: RemoteAppActivityEvent[]): ApiUsageSummary[] => {
   const summaries = new Map<string, ApiUsageSummary>();
 
@@ -814,9 +820,7 @@ const ApiUsageSummaryTable: React.FC<{
   };
 
   const renderRecentEvents = (summary: ApiUsageSummary) => {
-    const recentEvents = [...summary.events]
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-      .slice(0, 4);
+    const recentEvents = sortActivityEventsNewestFirst(summary.events).slice(0, 4);
 
     return (
       <div className="space-y-2">

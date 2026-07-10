@@ -1002,6 +1002,47 @@ const StructureTab: React.FC = () => {
     });
 
   const geminiProgress = fixAllProgress.geminiProgress;
+  const getBulkFixGeminiProgressLine = () => {
+      if (!geminiProgress) return '';
+      const stageLabels: Record<string, string> = uiLanguage === 'ar'
+          ? {
+              queued: 'بدء الطلب',
+              attempting: 'تجربة',
+              retrying: 'إعادة محاولة',
+              'failed-key': 'فشل المفتاح',
+              'switching-key': 'تبديل المفتاح',
+              'switching-model': 'تبديل الموديل',
+              success: 'نجاح',
+              failed: 'فشل',
+            }
+          : {
+              queued: 'Queued',
+              attempting: 'Trying',
+              retrying: 'Retrying',
+              'failed-key': 'Key failed',
+              'switching-key': 'Switching key',
+              'switching-model': 'Switching model',
+              success: 'Success',
+              failed: 'Failed',
+            };
+      const attemptedModelKeyCount = geminiProgress.attemptedModelKeyCount || geminiProgress.attemptedKeyCount;
+      const parts = [
+          geminiProgress.stage ? stageLabels[geminiProgress.stage] || geminiProgress.stage : 'Gemini',
+          geminiProgress.currentKeyIndex && geminiProgress.keyCount
+              ? (uiLanguage === 'ar' ? `المفتاح ${geminiProgress.currentKeyIndex}/${geminiProgress.keyCount}` : `key ${geminiProgress.currentKeyIndex}/${geminiProgress.keyCount}`)
+              : '',
+          geminiProgress.model ? (uiLanguage === 'ar' ? `على ${geminiProgress.model}` : `on ${geminiProgress.model}`) : '',
+          geminiProgress.currentModelIndex && geminiProgress.modelCount && geminiProgress.modelCount > 1
+              ? (uiLanguage === 'ar' ? `الموديل ${geminiProgress.currentModelIndex}/${geminiProgress.modelCount}` : `model ${geminiProgress.currentModelIndex}/${geminiProgress.modelCount}`)
+              : '',
+          attemptedModelKeyCount && geminiProgress.keyCount
+              ? (uiLanguage === 'ar' ? `جُرّب ${attemptedModelKeyCount}/${geminiProgress.keyCount}` : `tried ${attemptedModelKeyCount}/${geminiProgress.keyCount}`)
+              : '',
+          geminiProgress.keySuffix ? `...${geminiProgress.keySuffix}` : '',
+          geminiProgress.status ? `HTTP ${geminiProgress.status}` : '',
+      ].filter(Boolean);
+      return parts.join(uiLanguage === 'ar' ? '، ' : ', ');
+  };
   const runningBulkFixLabel = fixAllProgress.running
       ? geminiProgress?.currentKeyIndex && geminiProgress?.keyCount
           ? (uiLanguage === 'ar'
@@ -1011,39 +1052,7 @@ const StructureTab: React.FC = () => {
               ? `جاري إنشاء الاقتراحات ${fixAllProgress.current}/${fixAllProgress.total}`
               : `Creating proposals ${fixAllProgress.current}/${fixAllProgress.total}`)
       : '';
-  const geminiProgressMeta = [
-      geminiProgress?.model
-          ? `Model: ${geminiProgress.model}`
-          : '',
-      geminiProgress?.requestedModel && geminiProgress.requestedModel !== geminiProgress.model
-          ? `Requested: ${geminiProgress.requestedModel}`
-          : '',
-      geminiProgress?.currentModelIndex && geminiProgress?.modelCount && geminiProgress.modelCount > 1
-          ? `Model step: ${geminiProgress.currentModelIndex}/${geminiProgress.modelCount}`
-          : '',
-      geminiProgress?.stage
-          ? `Stage: ${geminiProgress.stage}`
-          : '',
-      (geminiProgress?.attemptedModelKeyCount || geminiProgress?.attemptedKeyCount) && geminiProgress?.keyCount
-          ? (uiLanguage === 'ar'
-              ? `مفاتيح هذا الموديل ${(geminiProgress.attemptedModelKeyCount || geminiProgress.attemptedKeyCount)}/${geminiProgress.keyCount}`
-              : `Model keys ${(geminiProgress.attemptedModelKeyCount || geminiProgress.attemptedKeyCount)}/${geminiProgress.keyCount}`)
-          : '',
-      geminiProgress?.totalAttemptCount
-          ? (uiLanguage === 'ar'
-              ? `إجمالي المحاولات ${geminiProgress.totalAttemptCount}`
-              : `Total attempts ${geminiProgress.totalAttemptCount}`)
-          : '',
-      geminiProgress?.keySuffix
-          ? `...${geminiProgress.keySuffix}`
-          : '',
-      geminiProgress?.status
-          ? `HTTP ${geminiProgress.status}`
-          : '',
-      geminiProgress?.reason
-          ? geminiProgress.reason
-          : '',
-  ].filter(Boolean).join(' | ');
+  const geminiProgressLine = getBulkFixGeminiProgressLine();
 
   return (
     <div className="min-w-0 overflow-x-hidden p-2 space-y-3">
@@ -1101,14 +1110,9 @@ const StructureTab: React.FC = () => {
                    <div className="flex items-center gap-2">
                        <Loader2 size={13} className="shrink-0 animate-spin text-[#b8922e]" />
                        <span className="min-w-0 break-words">
-                           {fixAllProgress.detail || (uiLanguage === 'ar' ? 'جاري تنفيذ الإصلاح المتعدد...' : 'Bulk fix is running...')}
+                           {geminiProgressLine || fixAllProgress.detail || (uiLanguage === 'ar' ? 'جاري تنفيذ الإصلاح المتعدد...' : 'Bulk fix is running...')}
                        </span>
                    </div>
-                   {geminiProgressMeta && (
-                       <div className="mt-1 ps-5 text-[10px] font-black uppercase tracking-wide text-gray-500 dark:text-gray-400" dir="ltr">
-                           {geminiProgressMeta}
-                       </div>
-                   )}
                </div>
            )}
            {fixAllProgress.failed > 0 && !fixAllProgress.running && (

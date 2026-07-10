@@ -678,11 +678,11 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               model: activeModel,
             });
             const failedModelAttemptedKeyCount = getUniqueAttemptCountForModel(attempts, activeModel);
-            const hasServerRetry = attempt === 0 && reason === "server";
+            const shouldRetrySameKey = attempt === 0 && reason === "server" && lastError.status !== 504;
             const hasNextKey = keyIndex < orderedKeys.length - 1;
             const hasNextModel = modelIndex < modelOrder.length - 1;
             setGeminiProgress(progressId, {
-              stage: hasServerRetry ? "retrying" : "failed-key",
+              stage: shouldRetrySameKey ? "retrying" : "failed-key",
               provider: selectedProvider,
               model: activeModel,
               requestedModel: selectedModel,
@@ -698,7 +698,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               status: lastError.status,
               reason,
               completed: false,
-              message: hasServerRetry
+              message: shouldRetrySameKey
                 ? `خطأ خادم مؤقت مع المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel}. سيتم إعادة المحاولة مرة واحدة.`
                 : `فشل المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel} بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : hasNextModel ? " سيتم الانتقال لموديل مجاني آخر." : ""}`,
             });
@@ -710,7 +710,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               reason,
               attempt: attempt + 1,
             });
-            if (attempt === 0 && reason === "server") {
+            if (shouldRetrySameKey) {
               await wait(400);
               continue;
             }
