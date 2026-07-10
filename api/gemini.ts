@@ -335,6 +335,30 @@ const getGeminiErrorDetails = (error: unknown): GeminiErrorDetails => {
 
 const wait = (duration: number) => new Promise(resolve => setTimeout(resolve, duration));
 
+const getGeminiProgressDelay = (envName: string, fallback: number): number => {
+  const rawValue = process.env[envName];
+  const parsedValue = rawValue ? Number(rawValue) : fallback;
+  if (!Number.isFinite(parsedValue)) return fallback;
+  return Math.max(0, Math.min(2000, Math.floor(parsedValue)));
+};
+
+const GEMINI_PROGRESS_MIN_ATTEMPT_MS = getGeminiProgressDelay("GEMINI_PROGRESS_MIN_ATTEMPT_MS", 250);
+const GEMINI_PROGRESS_STEP_DELAY_MS = getGeminiProgressDelay("GEMINI_PROGRESS_STEP_DELAY_MS", 350);
+const GEMINI_PROGRESS_SWITCH_DELAY_MS = getGeminiProgressDelay("GEMINI_PROGRESS_SWITCH_DELAY_MS", 250);
+
+const waitForVisibleGeminiProgress = async (
+  progressId: string,
+  minimumDelayMs: number,
+  startedAt?: number,
+) => {
+  if (!progressId || minimumDelayMs <= 0) return;
+  const elapsed = typeof startedAt === "number" ? Date.now() - startedAt : 0;
+  const remainingDelay = Math.max(0, minimumDelayMs - elapsed);
+  if (remainingDelay > 0) {
+    await wait(remainingDelay);
+  }
+};
+
 const getGeminiFailureReason = (details: GeminiErrorDetails): GeminiAttemptFailureReason => {
   if (
     details.status === 429 ||
@@ -527,6 +551,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
           completed: false,
           message: `فشلت مفاتيح الموديل السابق. تم التبديل إلى النموذج ${activeModel} وتجربة المفاتيح من جديد.`,
         });
+        await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_SWITCH_DELAY_MS);
       }
 
       for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
@@ -534,6 +559,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
         const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
         const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
         for (let attempt = 0; attempt < 2; attempt += 1) {
+          const attemptStartedAt = Date.now();
           const attemptedKeyCount = new Set([
             ...attempts.map(item => item.keyFingerprint),
             keyFingerprint,
@@ -603,6 +629,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
           } catch (error) {
             lastError = getGeminiErrorDetails(error);
             const reason = getGeminiFailureReason(lastError);
+            await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_MIN_ATTEMPT_MS, attemptStartedAt);
             attempts.push({
               keyFingerprint,
               keySuffix,
@@ -644,6 +671,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               continue;
             }
             if (hasNextKey) {
+              await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_STEP_DELAY_MS);
               setGeminiProgress(progressId, {
                 stage: "switching-key",
                 provider: selectedProvider,
@@ -658,6 +686,9 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
                 completed: false,
                 message: `تم تبديل المفتاح. الانتقال إلى المفتاح ${keyIndex + 2} من ${orderedKeys.length} على النموذج ${activeModel}.`,
               });
+              await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_SWITCH_DELAY_MS);
+            } else if (hasNextModel) {
+              await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_STEP_DELAY_MS);
             }
             break;
           }

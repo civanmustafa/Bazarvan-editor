@@ -1012,6 +1012,15 @@ const StructureTab: React.FC = () => {
               : `Creating proposals ${fixAllProgress.current}/${fixAllProgress.total}`)
       : '';
   const geminiProgressMeta = [
+      geminiProgress?.model
+          ? `Model: ${geminiProgress.model}`
+          : '',
+      geminiProgress?.requestedModel && geminiProgress.requestedModel !== geminiProgress.model
+          ? `Requested: ${geminiProgress.requestedModel}`
+          : '',
+      geminiProgress?.stage
+          ? `Stage: ${geminiProgress.stage}`
+          : '',
       geminiProgress?.attemptedKeyCount && geminiProgress?.keyCount
           ? (uiLanguage === 'ar'
               ? `تمت تجربة ${geminiProgress.attemptedKeyCount}/${geminiProgress.keyCount}`
