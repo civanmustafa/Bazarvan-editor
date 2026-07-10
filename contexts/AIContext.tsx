@@ -31,7 +31,7 @@ import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INT
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { normalizeGoalContext } from '../utils/goalContext';
 import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
-import { getSelectedGeminiFreeModel } from '../utils/geminiModelPreference';
+import { getSelectedGeminiFreeModel, isGeminiFreeModelFallbackEnabled } from '../utils/geminiModelPreference';
 
 /*
  * AIContext owns all AI workflows:
@@ -1907,7 +1907,7 @@ const dispatchGeminiFailedAttempts = (
             keyFingerprint,
             keySuffix: typeof attempt.keySuffix === 'string' ? attempt.keySuffix.trim() : undefined,
             provider: data.provider,
-            model: data.model,
+            model: typeof attempt.model === 'string' ? attempt.model : data.model,
             outcome: 'failed',
             status: typeof attempt.status === 'number' ? attempt.status : undefined,
             reason: typeof attempt.reason === 'string' ? attempt.reason : undefined,
@@ -1967,12 +1967,14 @@ type GeminiServerAttempt = {
     status?: unknown;
     reason?: unknown;
     attempt?: unknown;
+    model?: unknown;
 };
 
 type GeminiProgressSnapshot = {
     stage?: string;
     provider?: GeminiPatchProvider;
     model?: string;
+    requestedModel?: string;
     keyCount?: number;
     attemptedKeyCount?: number;
     currentKeyIndex?: number;
@@ -1986,6 +1988,11 @@ type GeminiProgressSnapshot = {
 };
 
 type GeminiProgressCallback = (progress: GeminiProgressSnapshot) => void;
+
+type AiRequestProgress = GeminiProgressSnapshot & {
+    source?: string;
+    active?: boolean;
+};
 
 const getArticleChatStorageScope = (articleKey: string, title: string): string => {
     const rawScope = articleKey?.trim() || title?.trim() || 'draft';
@@ -2156,6 +2163,7 @@ const requestGeminiAnalysis = async (
             model,
             provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
             progressId,
+            allowModelFallback: model !== GEMINI_PAID_MODEL && isGeminiFreeModelFallbackEnabled(),
         }),
         signal: controller.signal,
       });
@@ -2193,6 +2201,7 @@ const requestGeminiAnalysis = async (
               stage: 'failed',
               provider: data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini',
               model: typeof data.model === 'string' ? data.model : model,
+              requestedModel: typeof data.requestedModel === 'string' ? data.requestedModel : model,
               keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
               attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
               status: response.status,
@@ -2224,6 +2233,7 @@ const requestGeminiAnalysis = async (
           stage: 'success',
           provider: data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini',
           model: typeof data.model === 'string' ? data.model : model,
+          requestedModel: typeof data.requestedModel === 'string' ? data.requestedModel : model,
           keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
           attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
           keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
@@ -4842,6 +4852,7 @@ interface AIContextType {
     aiHistory: AIHistoryItem[];
     bulkFixReviewItems: BulkFixReviewItem[];
     fixAllProgress: FixAllProgress;
+    aiRequestProgress: AiRequestProgress | null;
     handleAiRequest: (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => Promise<void>;
     handleAnalyzeHeadings: () => Promise<void>;
     handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta, provider?: GeminiPatchProvider, geminiModel?: string) => Promise<void>;
@@ -4916,6 +4927,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [aiFixingInfo, setAiFixingInfo] = useState<{ title: string; from: number } | null>(null);
     const [aiHistory, setAiHistory] = useState<AIHistoryItem[]>([]);
     const [aiContextNotice, setAiContextNotice] = useState<{ id: number; flowLabel: string; missingFields: string[] } | null>(null);
+    const [aiRequestProgress, setAiRequestProgress] = useState<AiRequestProgress | null>(null);
     const aiResultsRef = useRef<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
     const aiInsertionPatchesRef = useRef<Record<AiPatchProvider, AiContentPatch[]>>(EMPTY_AI_INSERTION_PATCHES);
     const aiHistoryRef = useRef<AIHistoryItem[]>([]);
@@ -4944,6 +4956,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         articleKey: articleKey?.trim() || undefined,
         ...extra,
     }), [activeArticleId, articleKey, title]);
+
+    const trackGeminiProgress = useCallback((
+        usageContext: AiApiUsageContext,
+        extraCallback?: GeminiProgressCallback,
+    ): GeminiProgressCallback => (
+        progress: GeminiProgressSnapshot
+    ) => {
+        setAiRequestProgress({
+            ...progress,
+            source: usageContext.source,
+            active: !progress.completed,
+        });
+        extraCallback?.(progress);
+    }, []);
 
     const stopAiRequestIfArticleContextMissing = useCallback((flowLabel: string): boolean => {
         const missingFields = getMissingRequiredArticleAiFields(title, keywords, goalContext);
@@ -5297,12 +5323,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '{ "secondaries": ["صيغة بديلة 1", "صيغة بديلة 2"], "lsi": ["كلمة LSI 1", "كلمة LSI 2"] }',
         ].filter(Boolean).join('\n');
 
+        const usageContext = buildApiUsageContext('semantic_keywords_lsi');
         const result = await callGeminiAnalysis(
             prompt,
             apiKeys.gemini,
             undefined,
             undefined,
-            buildApiUsageContext('semantic_keywords_lsi'),
+            usageContext,
+            trackGeminiProgress(usageContext),
         );
         if (/^حدث خطأ أثناء الاتصال بـ Gemini/.test(result)) {
             return { secondaries: [], lsi: [], error: result };
@@ -5373,7 +5401,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         return { secondaries, lsi };
-    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.company, keywords.primary, title]);
+    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.company, keywords.primary, title, trackGeminiProgress]);
 
     const generateGoalContext = useCallback(async (): Promise<{ context?: GoalContext; error?: string }> => {
         const primary = keywords.primary.trim();
@@ -5414,12 +5442,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '{ "pageType": "service", "objective": "convert", "audienceScope": "global", "targetCountry": "", "searchIntent": "transactional" }',
         ].join('\n');
 
+        const usageContext = buildApiUsageContext('goal_context_generation');
         const result = await callGeminiAnalysis(
             prompt,
             apiKeys.gemini,
             undefined,
             undefined,
-            buildApiUsageContext('goal_context_generation'),
+            usageContext,
+            trackGeminiProgress(usageContext),
         );
         const parsed = extractJson(result);
         const context = normalizeGeneratedGoalContext(parsed, goalContext);
@@ -5434,7 +5464,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         return { context };
-    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.primary, keywords.secondaries, title]);
+    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.primary, keywords.secondaries, title, trackGeminiProgress]);
 
     const generateDraftTitle = useCallback(async (): Promise<string> => {
         const primary = keywords.primary.trim();
@@ -5461,16 +5491,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             '{ "title": "..." }',
         ].filter(Boolean).join('\n');
 
+        const usageContext = buildApiUsageContext('draft_title_generation');
         const result = await callGeminiAnalysis(
             prompt,
             apiKeys.gemini,
             undefined,
             undefined,
-            buildApiUsageContext('draft_title_generation'),
+            usageContext,
+            trackGeminiProgress(usageContext),
         );
         const parsed = extractJson(result);
         return typeof parsed?.title === 'string' ? parsed.title.trim() : '';
-    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.lsi, keywords.primary, keywords.secondaries]);
+    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.lsi, keywords.primary, keywords.secondaries, trackGeminiProgress]);
 
     const logReadyCommandAnalysis = useCallback((
         provider: AiPatchProvider,
@@ -5557,6 +5589,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     generateContextAwarePrompt(item.userPrompt, item.options),
                     { skipPatchInstructions: item.skipPatchInstructions },
                 );
+                const usageContext = buildApiUsageContext('ready_commands_batch', {
+                    commandId: item.commandId,
+                    commandLabel: item.commandLabel,
+                    batchIndex: index + 1,
+                    batchTotal: items.length,
+                });
                 const result = await callGeminiArticleChatAnalysis(
                     finalPrompt,
                     assignedKey ? [assignedKey] : undefined,
@@ -5564,13 +5602,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     articleScope,
                     provider,
                     provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
-                    buildApiUsageContext('ready_commands_batch', {
-                        commandId: item.commandId,
-                        commandLabel: item.commandLabel,
-                        batchIndex: index + 1,
-                        batchTotal: items.length,
-                    }),
+                    usageContext,
                     provider === 'gemini' ? geminiModel : undefined,
+                    trackGeminiProgress(usageContext),
                 );
                 const parsedResult = item.skipPatchInstructions
                     ? { displayText: result, patches: [] }
@@ -5607,7 +5641,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
+    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,
@@ -5628,6 +5662,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             );
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const geminiKeys = provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini;
+            const usageContext = buildApiUsageContext('smart_analysis', {
+                commandId: historyMeta?.commandId,
+                commandLabel: historyMeta?.commandLabel,
+            });
             const result = await callGeminiArticleChatAnalysis(
                 finalPrompt,
                 geminiKeys,
@@ -5635,11 +5673,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 articleScope,
                 provider,
                 provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
-                buildApiUsageContext('smart_analysis', {
-                    commandId: historyMeta?.commandId,
-                    commandLabel: historyMeta?.commandLabel,
-                }),
+                usageContext,
                 provider === 'gemini' ? geminiModel : undefined,
+                trackGeminiProgress(usageContext),
             );
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result, patches: [] }
@@ -5652,7 +5688,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
+    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -5715,6 +5751,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         const geminiProvider: GeminiPatchProvider = provider === 'geminiPaid' ? 'geminiPaid' : 'gemini';
         const geminiKeys = geminiProvider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini;
+        const mergedProgressCallback = trackGeminiProgress(usageContext, progressCallback);
         return callGeminiAnalysis(
             prompt,
             geminiKeys,
@@ -5723,9 +5760,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 : geminiModel?.trim() || getGeminiModelForProvider(geminiProvider),
             geminiProvider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
             usageContext,
-            progressCallback,
+            mergedProgressCallback,
         );
-    }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext]);
+    }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext, trackGeminiProgress]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         const provider = quickAiProvider;
@@ -6631,7 +6668,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const value = {
         aiResults, aiInsertionPatches, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
-        aiHistory, bulkFixReviewItems, fixAllProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
+        aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         buildSmartAnalysisPrompt, importManualChatGptResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
         handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,

@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
     openAiEnabled: false,
     defaultProvider: 'gemini',
     defaultGeminiModel: 'gemini-2.5-flash',
+    geminiFreeModelFallbackEnabled: false,
     defaultGeminiPaidModel: 'gemini-2.5-pro',
     defaultOpenAiModel: 'gpt-4.1-mini',
   },

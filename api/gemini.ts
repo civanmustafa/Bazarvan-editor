@@ -41,6 +41,7 @@ type GeminiAttemptDetail = {
   status: number;
   reason: GeminiAttemptFailureReason;
   attempt: number;
+  model?: string;
 };
 
 type GeminiHistoryContent = {
@@ -49,7 +50,7 @@ type GeminiHistoryContent = {
 };
 
 type GeminiProvider = "gemini" | "geminiPaid";
-type GeminiProgressStage = "queued" | "attempting" | "retrying" | "failed-key" | "switching-key" | "success" | "failed";
+type GeminiProgressStage = "queued" | "attempting" | "retrying" | "failed-key" | "switching-key" | "switching-model" | "success" | "failed";
 
 type GeminiProgressState = {
   id: string;
@@ -255,6 +256,31 @@ const selectGeminiModel = (model: unknown, provider: GeminiProvider): string => 
   return provider === "geminiPaid" ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL;
 };
 
+const getAllowedGeminiFreeModels = (): string[] => (
+  Array.from(new Set([
+    GEMINI_ANALYSIS_MODEL,
+    ...DEFAULT_GEMINI_FREE_MODELS,
+    ...((process.env.GEMINI_ALLOWED_MODELS || "")
+      .split(/[\n,;]+/)
+      .map(model => model.trim())
+      .filter(Boolean)
+      .filter(model => model !== GEMINI_PAID_ANALYSIS_MODEL)),
+  ].filter(Boolean)))
+);
+
+const getGeminiModelOrder = (
+  selectedProvider: GeminiProvider,
+  selectedModel: string,
+  allowModelFallback: boolean,
+): string[] => {
+  if (selectedProvider !== "gemini" || !allowModelFallback) return [selectedModel];
+  const freeModels = getAllowedGeminiFreeModels();
+  return Array.from(new Set([
+    selectedModel,
+    ...freeModels.filter(model => model !== selectedModel),
+  ]));
+};
+
 const getSafeGeminiModel = (selectedModel: string, provider: GeminiProvider): string => {
   if (ALLOWED_GEMINI_MODELS.has(selectedModel)) return selectedModel;
   return provider === "geminiPaid" ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL;
@@ -415,7 +441,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId } = await readRequestBody(req) as any;
+    const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId, allowModelFallback } = await readRequestBody(req) as any;
     const progressId = normalizeProgressId(rawProgressId);
     const requestedProvider = normalizeGeminiProvider(provider);
     const selectedModel = getSafeGeminiModel(
@@ -423,6 +449,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       requestedProvider,
     );
     const selectedProvider = selectGeminiProvider(requestedProvider, selectedModel);
+    const modelOrder = getGeminiModelOrder(selectedProvider, selectedModel, allowModelFallback === true);
     const GEMINI_API_KEYS = parseEnvGeminiKeys(selectedProvider);
 
     if (GEMINI_API_KEYS.length === 0) {
@@ -467,144 +494,173 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
 
     let lastError: GeminiErrorDetails | null = null;
     const attempts: GeminiAttemptDetail[] = [];
-    const orderedKeys = getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS);
+    let lastAttemptedModel = selectedModel;
+    let lastOrderedKeys = GEMINI_API_KEYS;
     setGeminiProgress(progressId, {
       stage: "queued",
       provider: selectedProvider,
       model: selectedModel,
-      keyCount: orderedKeys.length,
+      keyCount: GEMINI_API_KEYS.length,
       attemptedKeyCount: 0,
       completed: false,
-      message: `بدء طلب ${getGeminiProviderLabel(selectedProvider)} للنموذج ${selectedModel}.`,
+      message: modelOrder.length > 1
+        ? `بدء طلب ${getGeminiProviderLabel(selectedProvider)} للنموذج ${selectedModel}. عند فشل كل المفاتيح سيتم تجربة موديل مجاني آخر.`
+        : `بدء طلب ${getGeminiProviderLabel(selectedProvider)} للنموذج ${selectedModel}.`,
     });
 
-    for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
-      const GEMINI_API_KEY = orderedKeys[keyIndex];
-      const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
-      const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const attemptedKeyCount = new Set([
-          ...attempts.map(item => item.keyFingerprint),
-          keyFingerprint,
-        ]).size;
+    for (let modelIndex = 0; modelIndex < modelOrder.length; modelIndex += 1) {
+      const activeModel = modelOrder[modelIndex];
+      lastAttemptedModel = activeModel;
+      const orderedKeys = getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS);
+      lastOrderedKeys = orderedKeys;
+      if (modelIndex > 0) {
         setGeminiProgress(progressId, {
-          stage: attempt > 0 ? "retrying" : "attempting",
+          stage: "switching-model",
           provider: selectedProvider,
-          model: selectedModel,
+          model: activeModel,
           keyCount: orderedKeys.length,
-          attemptedKeyCount,
-          currentKeyIndex: keyIndex + 1,
-          currentAttempt: attempt + 1,
-          keySuffix,
+          attemptedKeyCount: getUniqueAttemptCount(attempts),
+          currentKeyIndex: 1,
+          currentAttempt: 1,
           status: undefined,
           reason: undefined,
           completed: false,
-          message: attempt > 0
-            ? `إعادة محاولة المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) للنموذج ${selectedModel}.`
-            : `تجربة المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) للنموذج ${selectedModel}.`,
+          message: `فشلت مفاتيح الموديل السابق. تم التبديل إلى النموذج ${activeModel} وتجربة المفاتيح من جديد.`,
         });
-        try {
-          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-          const response = await ai.models.generateContent({
-            model: selectedModel,
-            contents,
-            config: useUrlContext
-              ? {
-                  tools: [{ urlContext: {} }],
-                  toolConfig: { includeServerSideToolInvocations: true },
-                }
-              : undefined,
-          });
+      }
 
-          const text = response.text;
+      for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
+        const GEMINI_API_KEY = orderedKeys[keyIndex];
+        const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
+        const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const attemptedKeyCount = new Set([
+            ...attempts.map(item => item.keyFingerprint),
+            keyFingerprint,
+          ]).size;
           setGeminiProgress(progressId, {
-            stage: "success",
+            stage: attempt > 0 ? "retrying" : "attempting",
             provider: selectedProvider,
-            model: selectedModel,
+            model: activeModel,
             keyCount: orderedKeys.length,
             attemptedKeyCount,
             currentKeyIndex: keyIndex + 1,
             currentAttempt: attempt + 1,
             keySuffix,
-            status: 200,
-            completed: true,
-            message: `تم تلقي رد Gemini بنجاح من المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}).`,
+            status: undefined,
+            reason: undefined,
+            completed: false,
+            message: attempt > 0
+              ? `إعادة محاولة المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) للنموذج ${activeModel}.`
+              : `تجربة المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) للنموذج ${activeModel}.`,
           });
+          try {
+            const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+            const response = await ai.models.generateContent({
+              model: activeModel,
+              contents,
+              config: useUrlContext
+                ? {
+                    tools: [{ urlContext: {} }],
+                    toolConfig: { includeServerSideToolInvocations: true },
+                  }
+                : undefined,
+            });
 
-          return {
-            status: 200,
-            body: {
-              text,
+            const text = response.text;
+            setGeminiProgress(progressId, {
+              stage: "success",
+              provider: selectedProvider,
+              model: activeModel,
+              keyCount: orderedKeys.length,
+              attemptedKeyCount,
+              currentKeyIndex: keyIndex + 1,
+              currentAttempt: attempt + 1,
+              keySuffix,
+              status: 200,
+              completed: true,
+              message: `تم تلقي رد Gemini بنجاح من المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel}.`,
+            });
+
+            return {
+              status: 200,
+              body: {
+                text,
+                keyFingerprint,
+                keySuffix,
+                provider: selectedProvider,
+                model: activeModel,
+                requestedModel: selectedModel,
+                modelFallbackUsed: activeModel !== selectedModel,
+                keyCount: GEMINI_API_KEYS.length,
+                attemptedKeyCount: new Set([
+                  ...attempts.map(item => item.keyFingerprint),
+                  keyFingerprint,
+                ]).size,
+                progressId,
+              },
+            };
+          } catch (error) {
+            lastError = getGeminiErrorDetails(error);
+            const reason = getGeminiFailureReason(lastError);
+            attempts.push({
               keyFingerprint,
               keySuffix,
-              provider: selectedProvider,
-              model: selectedModel,
-              keyCount: GEMINI_API_KEYS.length,
-              attemptedKeyCount: new Set([
-                ...attempts.map(item => item.keyFingerprint),
-                keyFingerprint,
-              ]).size,
-              progressId,
-            },
-          };
-        } catch (error) {
-          lastError = getGeminiErrorDetails(error);
-          const reason = getGeminiFailureReason(lastError);
-          attempts.push({
-            keyFingerprint,
-            keySuffix,
-            status: lastError.status,
-            reason,
-            attempt: attempt + 1,
-          });
-          const failedAttemptedKeyCount = getUniqueAttemptCount(attempts);
-          const hasServerRetry = attempt === 0 && reason === "server";
-          const hasNextKey = keyIndex < orderedKeys.length - 1;
-          setGeminiProgress(progressId, {
-            stage: hasServerRetry ? "retrying" : "failed-key",
-            provider: selectedProvider,
-            model: selectedModel,
-            keyCount: orderedKeys.length,
-            attemptedKeyCount: failedAttemptedKeyCount,
-            currentKeyIndex: keyIndex + 1,
-            currentAttempt: attempt + 1,
-            keySuffix,
-            status: lastError.status,
-            reason,
-            completed: false,
-            message: hasServerRetry
-              ? `خطأ خادم مؤقت مع المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}). سيتم إعادة المحاولة مرة واحدة.`
-              : `فشل المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : ""}`,
-          });
-          console.warn('Gemini key attempt failed', {
-            provider: selectedProvider,
-            model: selectedModel,
-            keyFingerprint,
-            status: lastError.status,
-            reason,
-            attempt: attempt + 1,
-          });
-          if (attempt === 0 && reason === "server") {
-            await wait(400);
-            continue;
-          }
-          if (hasNextKey) {
+              status: lastError.status,
+              reason,
+              attempt: attempt + 1,
+              model: activeModel,
+            });
+            const failedAttemptedKeyCount = getUniqueAttemptCount(attempts);
+            const hasServerRetry = attempt === 0 && reason === "server";
+            const hasNextKey = keyIndex < orderedKeys.length - 1;
+            const hasNextModel = modelIndex < modelOrder.length - 1;
             setGeminiProgress(progressId, {
-              stage: "switching-key",
+              stage: hasServerRetry ? "retrying" : "failed-key",
               provider: selectedProvider,
-              model: selectedModel,
+              model: activeModel,
               keyCount: orderedKeys.length,
               attemptedKeyCount: failedAttemptedKeyCount,
-              currentKeyIndex: keyIndex + 2,
-              currentAttempt: 1,
-              keySuffix: getApiKeySuffix(orderedKeys[keyIndex + 1]),
-              status: undefined,
-              reason: undefined,
+              currentKeyIndex: keyIndex + 1,
+              currentAttempt: attempt + 1,
+              keySuffix,
+              status: lastError.status,
+              reason,
               completed: false,
-              message: `تم تبديل المفتاح. الانتقال إلى المفتاح ${keyIndex + 2} من ${orderedKeys.length}.`,
+              message: hasServerRetry
+                ? `خطأ خادم مؤقت مع المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel}. سيتم إعادة المحاولة مرة واحدة.`
+                : `فشل المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel} بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : hasNextModel ? " سيتم الانتقال لموديل مجاني آخر." : ""}`,
             });
+            console.warn('Gemini key attempt failed', {
+              provider: selectedProvider,
+              model: activeModel,
+              keyFingerprint,
+              status: lastError.status,
+              reason,
+              attempt: attempt + 1,
+            });
+            if (attempt === 0 && reason === "server") {
+              await wait(400);
+              continue;
+            }
+            if (hasNextKey) {
+              setGeminiProgress(progressId, {
+                stage: "switching-key",
+                provider: selectedProvider,
+                model: activeModel,
+                keyCount: orderedKeys.length,
+                attemptedKeyCount: failedAttemptedKeyCount,
+                currentKeyIndex: keyIndex + 2,
+                currentAttempt: 1,
+                keySuffix: getApiKeySuffix(orderedKeys[keyIndex + 1]),
+                status: undefined,
+                reason: undefined,
+                completed: false,
+                message: `تم تبديل المفتاح. الانتقال إلى المفتاح ${keyIndex + 2} من ${orderedKeys.length} على النموذج ${activeModel}.`,
+              });
+            }
+            break;
           }
-          break;
         }
       }
     }
@@ -615,13 +671,17 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     const failureBody = {
       error: buildGeminiFailureMessage(
         selectedProvider,
-        selectedModel,
+        lastAttemptedModel,
         GEMINI_API_KEYS.length,
         attempts,
         lastError,
       ),
       provider: selectedProvider,
-      model: selectedModel,
+      model: lastAttemptedModel,
+      requestedModel: selectedModel,
+      modelFallbackEnabled: modelOrder.length > 1,
+      modelCount: modelOrder.length,
+      attemptedModels: Array.from(new Set(attempts.map(item => item.model).filter(Boolean))),
       keyCount: GEMINI_API_KEYS.length,
       attemptedKeyCount: getUniqueAttemptCount(attempts),
       attempts,
@@ -631,12 +691,14 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     setGeminiProgress(progressId, {
       stage: "failed",
       provider: selectedProvider,
-      model: selectedModel,
-      keyCount: orderedKeys.length,
+      model: lastAttemptedModel,
+      keyCount: lastOrderedKeys.length,
       attemptedKeyCount: getUniqueAttemptCount(attempts),
-      currentKeyIndex: orderedKeys.length,
+      currentKeyIndex: lastOrderedKeys.length,
       completed: true,
-      message: `فشل طلب Gemini بعد تجربة ${getUniqueAttemptCount(attempts)} من ${orderedKeys.length} مفتاح.`,
+      message: modelOrder.length > 1
+        ? `فشل طلب Gemini بعد تجربة ${modelOrder.length} موديل و ${getUniqueAttemptCount(attempts)} مفتاح.`
+        : `فشل طلب Gemini بعد تجربة ${getUniqueAttemptCount(attempts)} من ${lastOrderedKeys.length} مفتاح.`,
     });
     return {
       status: responseStatus,

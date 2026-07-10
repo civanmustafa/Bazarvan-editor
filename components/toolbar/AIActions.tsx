@@ -6,6 +6,7 @@ import { useUser } from '../../contexts/UserContext';
 import { useAI } from '../../contexts/AIContext';
 import { AI_PROMPTS } from '../../constants/aiPrompts';
 import { DEFAULT_ENGINEERING_PROMPTS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../../constants/engineeringPrompts';
+import GeminiProgressStatus from '../GeminiProgressStatus';
 
 interface AIActionsProps {
     hasSelection: boolean;
@@ -30,7 +31,7 @@ const AiMenuItem: React.FC<{ onClick: () => void; disabled: boolean; children: R
 
 const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading, uiLanguage, t, onAiRequest, onAnalyzeHeadings }) => {
     const { engineeringPrompts } = useUser();
-    const { quickAiProvider, setQuickAiProvider } = useAI();
+    const { quickAiProvider, setQuickAiProvider, aiRequestProgress } = useAI();
     const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
     const [isToneMenuOpen, setIsToneMenuOpen] = useState(false);
     const [isExpandMenuOpen, setIsExpandMenuOpen] = useState(false);
@@ -118,6 +119,11 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
             >
                 <BadgeDollarSign size={16} />
             </ToolbarButton>
+            {isAnyGeminiLoading && (aiRequestProgress?.source === 'floating_toolbar' || aiRequestProgress?.source === 'heading_analysis') && (
+                <div className="absolute top-full z-[1000] mt-1 w-72 max-w-[calc(100vw-2rem)]">
+                    <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact />
+                </div>
+            )}
             {isAiMenuOpen && (
                 <div className={`absolute mt-2 max-h-[calc(100vh-5rem)] w-60 origin-top-left overflow-y-auto rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-[10000] ${uiLanguage === 'ar' ? 'left-0' : 'right-0'}`}>
                     <AiMenuItem onClick={handleAnalyzeHeadings} disabled={isAnyGeminiLoading}><FileSignature size={14} /> <span>{t.aiMenu.suggestHeadings}</span></AiMenuItem>

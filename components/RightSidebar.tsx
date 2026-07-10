@@ -15,9 +15,11 @@ import {
     buildGeminiFreeModelOptions,
     GEMINI_FREE_MODEL_CHANGED_EVENT,
     getSelectedGeminiFreeModel,
+    isGeminiFreeModelFallbackEnabled,
     normalizeGeminiFreeModel,
 } from '../utils/geminiModelPreference';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
+import GeminiProgressStatus from './GeminiProgressStatus';
 
 type ReadyCommand = {
     id: string;
@@ -53,6 +55,24 @@ type CompetitorExtractionState = {
     error: string;
 };
 
+type LocalGeminiProgressSnapshot = {
+    stage?: string;
+    provider?: 'gemini' | 'geminiPaid';
+    model?: string;
+    requestedModel?: string;
+    keyCount?: number;
+    attemptedKeyCount?: number;
+    currentKeyIndex?: number;
+    currentAttempt?: number;
+    keySuffix?: string;
+    status?: number;
+    reason?: string;
+    message?: string;
+    updatedAt?: string;
+    completed?: boolean;
+    active?: boolean;
+};
+
 type CompetitorRepeatedPhrase = {
     text: string;
     size: number;
@@ -72,6 +92,46 @@ type CompetitorTextStats = {
 };
 
 const COMPETITOR_TIMEOUT_MS = 180000;
+
+const createSidebarGeminiProgressId = (): string => (
+    `gemini-sidebar-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+);
+
+const startSidebarGeminiProgressPolling = (
+    progressId: string,
+    onProgress: (progress: LocalGeminiProgressSnapshot) => void,
+): (() => void) => {
+    let stopped = false;
+    let timerId: number | undefined;
+
+    const poll = async () => {
+        if (stopped) return;
+        try {
+            const response = await fetch(`/api/gemini/progress/${encodeURIComponent(progressId)}`, {
+                cache: 'no-store',
+            });
+            if (response.ok) {
+                const progress = await response.json() as LocalGeminiProgressSnapshot;
+                onProgress(progress);
+                if (progress.completed) return;
+            }
+        } catch {
+            // Progress polling is informational; the main request still decides the result.
+        }
+
+        if (!stopped) {
+            timerId = window.setTimeout(poll, 600);
+        }
+    };
+
+    timerId = window.setTimeout(poll, 250);
+    return () => {
+        stopped = true;
+        if (timerId !== undefined) {
+            window.clearTimeout(timerId);
+        }
+    };
+};
 
 const COMPETITOR_STOP_WORDS = new Set([
     'في', 'من', 'إلى', 'الى', 'عن', 'على', 'علي', 'مع', 'حتى', 'ثم', 'أو', 'او', 'أم', 'ام', 'بل', 'لا', 'نعم',
@@ -734,6 +794,7 @@ const RightSidebar: React.FC = () => {
         aiResults,
         aiInsertionPatches,
         isAiLoading,
+        aiRequestProgress,
         applyAiInsertionPatch,
         selectAiInsertionPatchTarget,
         deleteAiInsertionPatchMergeDeleteTarget,
@@ -748,6 +809,7 @@ const RightSidebar: React.FC = () => {
     const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
     const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => loadStoredCompetitorTexts());
     const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => loadStoredCompetitorExtractions());
+    const [competitorGeminiProgress, setCompetitorGeminiProgress] = useState<Record<number, LocalGeminiProgressSnapshot>>({});
     const [selectedReadyCommandIds, setSelectedReadyCommandIds] = useState<string[]>([]);
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isGeminiPaidExpanded, setIsGeminiPaidExpanded] = useState(false);
@@ -771,6 +833,10 @@ const RightSidebar: React.FC = () => {
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
     const tRs = t.rightSidebar;
+    const isGeminiSmartProgress = Boolean(
+        aiRequestProgress &&
+        (aiRequestProgress.source === 'smart_analysis' || aiRequestProgress.source === 'ready_commands_batch')
+    );
 
     useEffect(() => {
         setIsStructureTabActive(activeTab === 'structure');
@@ -1200,12 +1266,32 @@ ${readyCommandCompetitorBlocks}`;
     ) => {
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), COMPETITOR_TIMEOUT_MS);
+        const progressId = createSidebarGeminiProgressId();
+        const stopProgressPolling = startSidebarGeminiProgressPolling(progressId, progress => {
+            setCompetitorGeminiProgress(prev => ({
+                ...prev,
+                [index]: {
+                    ...progress,
+                    active: !progress.completed,
+                },
+            }));
+        });
         setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
             ...item,
             status: 'loading',
             source,
             error: '',
         } : item));
+        setCompetitorGeminiProgress(prev => ({
+            ...prev,
+            [index]: {
+                provider,
+                model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : getSelectedGeminiFreeModel(),
+                active: true,
+                completed: false,
+                message: isArabicLocale ? 'بدء الاتصال بـ Gemini...' : 'Starting Gemini request...',
+            },
+        }));
 
         try {
             const response = await fetch('/api/gemini', {
@@ -1216,6 +1302,8 @@ ${readyCommandCompetitorBlocks}`;
                     provider,
                     model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : getSelectedGeminiFreeModel(),
                     useUrlContext,
+                    progressId,
+                    allowModelFallback: provider === 'gemini' && isGeminiFreeModelFallbackEnabled(),
                 }),
                 signal: controller.signal,
             });
@@ -1235,7 +1323,7 @@ ${readyCommandCompetitorBlocks}`;
                                 keyFingerprint,
                                 keySuffix: typeof attempt.keySuffix === 'string' ? attempt.keySuffix.trim() : undefined,
                                 provider: data.provider || provider,
-                                model: data.model,
+                                model: typeof attempt.model === 'string' ? attempt.model : data.model,
                                 outcome: 'failed',
                                 status: typeof attempt.status === 'number' ? attempt.status : undefined,
                                 reason: typeof attempt.reason === 'string' ? attempt.reason : undefined,
@@ -1271,6 +1359,22 @@ ${readyCommandCompetitorBlocks}`;
                     },
                 }));
             }
+            setCompetitorGeminiProgress(prev => ({
+                ...prev,
+                [index]: {
+                    ...(prev[index] || {}),
+                    provider: data.provider || provider,
+                    model: data.model,
+                    requestedModel: data.requestedModel,
+                    keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+                    attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+                    keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
+                    status: response.status,
+                    completed: true,
+                    active: false,
+                    message: isArabicLocale ? 'تم تلقي رد Gemini بنجاح.' : 'Gemini responded successfully.',
+                },
+            }));
 
             const parsed = extractJsonFromGeminiText(typeof data.text === 'string' ? data.text : '');
             if (!parsed || typeof parsed !== 'object') {
@@ -1298,6 +1402,22 @@ ${readyCommandCompetitorBlocks}`;
                     ? tRs.competitorExtractionTimeout
                     : error instanceof Error ? error.message : tRs.competitorExtractionFailed,
             } : item));
+            setCompetitorGeminiProgress(prev => {
+                const current = prev[index];
+                return {
+                    ...prev,
+                    [index]: current
+                        ? { ...current, active: false, completed: true }
+                        : {
+                            active: false,
+                            completed: true,
+                            message: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
+                        },
+                };
+            });
+        } finally {
+            window.clearTimeout(timeoutId);
+            stopProgressPolling();
         }
     };
 
@@ -1749,7 +1869,11 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                                 {isGeminiExpanded && (
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {isAiLoading.gemini ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div> :
+                                        {isAiLoading.gemini ? (
+                                            isGeminiSmartProgress && aiRequestProgress?.provider !== 'geminiPaid'
+                                                ? <GeminiProgressStatus progress={aiRequestProgress} isArabic={isArabicLocale} compact />
+                                                : <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div>
+                                        ) :
                                          aiResults.gemini ? renderAnalysisResult('gemini', aiResults.gemini) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
@@ -1762,7 +1886,11 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                                 {isGeminiPaidExpanded && (
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {isAiLoading.geminiPaid ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div> :
+                                        {isAiLoading.geminiPaid ? (
+                                            isGeminiSmartProgress && aiRequestProgress?.provider === 'geminiPaid'
+                                                ? <GeminiProgressStatus progress={aiRequestProgress} isArabic={isArabicLocale} compact />
+                                                : <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div>
+                                        ) :
                                          aiResults.geminiPaid ? renderAnalysisResult('geminiPaid', aiResults.geminiPaid) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
@@ -1899,6 +2027,12 @@ ${readyCommandCompetitorBlocks}`;
                                     />
                                 </div>
                             </div>
+
+                            {isLoading && competitorGeminiProgress[index] && (
+                                <div className="mt-2">
+                                    <GeminiProgressStatus progress={competitorGeminiProgress[index]} isArabic={isArabicLocale} compact />
+                                </div>
+                            )}
 
                             {extraction.status === 'error' && (
                                 <div className="mt-2 flex items-start gap-2 rounded-md bg-red-50 px-2 py-2 text-[11px] font-semibold text-red-700 dark:bg-red-900/20 dark:text-red-300">

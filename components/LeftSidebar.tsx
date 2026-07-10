@@ -11,6 +11,7 @@ import { useAI } from '../contexts/AIContext';
 import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis, GoalContext } from '../types';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 import { parseGoalContextText } from '../utils/goalContext';
+import GeminiProgressStatus from './GeminiProgressStatus';
 
 const mergeUniqueKeywordTerms = (existing: string[], incoming: string[], maxItems: number): string[] => {
   const seen = new Set<string>();
@@ -323,7 +324,7 @@ const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
   const { keywords, setKeywords, setGoalContext, analysisResults, setIsDuplicatesTabActive } = useEditor();
   const { applyHighlights, clearAllHighlights, highlightedItem, setHighlightedItem } = useInteraction();
-  const { generateSemanticKeywords } = useAI();
+  const { generateSemanticKeywords, aiRequestProgress } = useAI();
   
   const { keywordAnalysis, duplicateAnalysis, duplicateStats } = analysisResults;
 
@@ -640,6 +641,9 @@ const LeftSidebar: React.FC = () => {
         {isGeneratingSemanticKeywords ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
         <span>{isGeneratingSemanticKeywords ? tLk.generatingSemanticKeywords : tLk.generateSemanticKeywords}</span>
       </button>
+      {isGeneratingSemanticKeywords && aiRequestProgress?.source === 'semantic_keywords_lsi' && (
+        <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact />
+      )}
       {semanticGenerationStatus && (
         <p className={`text-xs font-bold ${semanticGenerationStatus === tLk.semanticKeywordsGenerated ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} aria-live="polite">
           {semanticGenerationStatus}
