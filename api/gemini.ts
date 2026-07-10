@@ -50,7 +50,7 @@ type GeminiHistoryContent = {
 };
 
 type GeminiProvider = "gemini" | "geminiPaid";
-type GeminiProgressStage = "queued" | "attempting" | "retrying" | "failed-key" | "switching-key" | "switching-model" | "success" | "failed";
+type GeminiProgressStage = "queued" | "attempting" | "failed-key" | "switching-key" | "switching-model" | "success" | "failed";
 
 type GeminiProgressState = {
   id: string;
@@ -351,6 +351,37 @@ const GEMINI_PROGRESS_MIN_ATTEMPT_MS = getGeminiProgressDelay("GEMINI_PROGRESS_M
 const GEMINI_PROGRESS_STEP_DELAY_MS = getGeminiProgressDelay("GEMINI_PROGRESS_STEP_DELAY_MS", 350);
 const GEMINI_PROGRESS_SWITCH_DELAY_MS = getGeminiProgressDelay("GEMINI_PROGRESS_SWITCH_DELAY_MS", 250);
 
+const getGeminiRequestTimeout = (): number => {
+  const rawValue = process.env.GEMINI_PER_KEY_TIMEOUT_MS;
+  const parsedValue = rawValue ? Number(rawValue) : 30000;
+  if (!Number.isFinite(parsedValue)) return 30000;
+  return Math.max(5000, Math.min(120000, Math.floor(parsedValue)));
+};
+
+const GEMINI_PER_KEY_TIMEOUT_MS = getGeminiRequestTimeout();
+
+const withGeminiKeyTimeout = async <T,>(
+  request: Promise<T>,
+  model: string,
+  keySuffix: string,
+): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Gemini request timed out after ${GEMINI_PER_KEY_TIMEOUT_MS}ms for model ${model} and key ...${keySuffix} (504)`));
+        }, GEMINI_PER_KEY_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
+
 const waitForVisibleGeminiProgress = async (
   progressId: string,
   minimumDelayMs: number,
@@ -583,14 +614,14 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
         const GEMINI_API_KEY = orderedKeys[keyIndex];
         const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
         const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
-        for (let attempt = 0; attempt < 2; attempt += 1) {
+        for (let attempt = 0; attempt < 1; attempt += 1) {
           const attemptStartedAt = Date.now();
           const attemptedKeyCount = new Set([
             ...attempts.filter(item => item.model === activeModel).map(item => item.keyFingerprint),
             keyFingerprint,
           ]).size;
           setGeminiProgress(progressId, {
-            stage: attempt > 0 ? "retrying" : "attempting",
+            stage: "attempting",
             provider: selectedProvider,
             model: activeModel,
             requestedModel: selectedModel,
@@ -612,16 +643,20 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
           });
           try {
             const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-            const response = await ai.models.generateContent({
-              model: activeModel,
-              contents,
-              config: useUrlContext
-                ? {
-                    tools: [{ urlContext: {} }],
-                    toolConfig: { includeServerSideToolInvocations: true },
-                  }
-                : undefined,
-            });
+            const response = await withGeminiKeyTimeout(
+              ai.models.generateContent({
+                model: activeModel,
+                contents,
+                config: useUrlContext
+                  ? {
+                      tools: [{ urlContext: {} }],
+                      toolConfig: { includeServerSideToolInvocations: true },
+                    }
+                  : undefined,
+              }),
+              activeModel,
+              keySuffix,
+            );
 
             const text = response.text;
             const successAttemptedKeyCount = new Set([
@@ -678,11 +713,10 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               model: activeModel,
             });
             const failedModelAttemptedKeyCount = getUniqueAttemptCountForModel(attempts, activeModel);
-            const shouldRetrySameKey = attempt === 0 && reason === "server" && lastError.status !== 504;
             const hasNextKey = keyIndex < orderedKeys.length - 1;
             const hasNextModel = modelIndex < modelOrder.length - 1;
             setGeminiProgress(progressId, {
-              stage: shouldRetrySameKey ? "retrying" : "failed-key",
+              stage: "failed-key",
               provider: selectedProvider,
               model: activeModel,
               requestedModel: selectedModel,
@@ -698,9 +732,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               status: lastError.status,
               reason,
               completed: false,
-              message: shouldRetrySameKey
-                ? `خطأ خادم مؤقت مع المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel}. سيتم إعادة المحاولة مرة واحدة.`
-                : `فشل المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel} بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : hasNextModel ? " سيتم الانتقال لموديل مجاني آخر." : ""}`,
+              message: `فشل المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel} بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : hasNextModel ? " سيتم الانتقال لموديل مجاني آخر." : ""}`,
             });
             console.warn('Gemini key attempt failed', {
               provider: selectedProvider,
@@ -710,10 +742,6 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               reason,
               attempt: attempt + 1,
             });
-            if (shouldRetrySameKey) {
-              await wait(400);
-              continue;
-            }
             if (hasNextKey) {
               await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_STEP_DELAY_MS);
               setGeminiProgress(progressId, {
