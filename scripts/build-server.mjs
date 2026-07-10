@@ -1,14 +1,29 @@
 import { build } from 'esbuild';
 
-await build({
-  entryPoints: ['server/server.ts'],
-  outfile: 'server-dist/server.mjs',
+const targets = [
+  {
+    entryPoint: 'server/server.ts',
+    outfile: 'server-dist/server.mjs',
+    label: 'production server',
+  },
+  {
+    entryPoint: 'server/externalAnalysisWorker.ts',
+    outfile: 'server-dist/external-analysis-worker.mjs',
+    label: 'external analysis worker',
+  },
+];
+
+await Promise.all(targets.map(({ entryPoint, outfile }) => build({
+  entryPoints: [entryPoint],
+  outfile,
   bundle: true,
   platform: 'node',
   target: 'node20',
   format: 'esm',
   packages: 'external',
   sourcemap: false,
-});
+})));
 
-console.log('Built production server: server-dist/server.mjs');
+targets.forEach(({ label, outfile }) => {
+  console.log(`Built ${label}: ${outfile}`);
+});

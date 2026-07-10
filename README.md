@@ -25,14 +25,15 @@ Canonical server path:
 
 ```bash
 cd /var/www/bazarvan-editor
-git pull origin main
+git pull --ff-only origin main
 set -a
-source .env.server
+source .env.production
 set +a
+npm ci
 npm run build
-pm2 restart bazarvan-editor --update-env
+pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 save
-curl -I https://smarteditor.bazarvan.com/admin
+curl -fsS https://smarteditor.bazarvan.com/healthz
 ```
 
-PM2 currently points to `/var/www/bazarvan-editor`; do not use `/var/www/bazarvan-smarteditor` unless PM2 is intentionally reconfigured.
+PM2 runs the web server and the external-analysis worker from `/var/www/bazarvan-editor`; do not use `/var/www/bazarvan-smarteditor` unless PM2 is intentionally reconfigured.

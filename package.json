@@ -9,7 +9,8 @@
     "build:web": "vite build",
     "build:server": "node scripts/build-server.mjs",
     "preview": "vite preview",
-    "start": "node server-dist/server.mjs"
+    "start": "node server-dist/server.mjs",
+    "start:worker": "node server-dist/external-analysis-worker.mjs"
   },
   "dependencies": {
     "@fontsource/cairo": "^5.2.7",
