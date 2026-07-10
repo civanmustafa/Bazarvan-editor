@@ -1,5 +1,6 @@
 import './loadEnv';
 import './externalSemanticAnalysisExecutor';
+import './externalEngineeringAnalysisExecutor';
 
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';

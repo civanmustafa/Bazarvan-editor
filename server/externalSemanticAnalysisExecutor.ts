@@ -1,8 +1,4 @@
 import {
-  executeGeminiRequest,
-  type GeminiExecutionProgress,
-} from '../api/gemini';
-import {
   ExternalAnalysisRetryError,
   registerExternalAnalysisJobExecutor,
   type ExternalAnalysisExecutionContext,
@@ -11,6 +7,11 @@ import {
   getExternalAnalysisSupabaseAdmin,
   type ExternalAnalysisJson,
 } from './externalAnalysisQueue';
+import { readExternalGeminiSettings } from './externalAnalysisSettings';
+import {
+  reportExternalGeminiCall,
+  runExternalGeminiCall,
+} from './externalGeminiRunner';
 import {
   buildExternalSemanticPrompt,
   buildExternalSemanticRepairPrompt,
@@ -43,17 +44,6 @@ type SemanticTargetState = {
   needsLsi: boolean;
 };
 
-type GeminiCallResult = {
-  ok: boolean;
-  status: number;
-  text: string;
-  error: string;
-  provider: string;
-  model: string;
-  keySuffix: string;
-  attempts: ExternalAnalysisJson[];
-};
-
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -66,10 +56,6 @@ const toStringList = (value: unknown): string[] => (
   Array.isArray(value)
     ? value.map(toTrimmedString).filter(Boolean)
     : []
-);
-
-const compactJson = (value: Record<string, unknown>): ExternalAnalysisJson => (
-  Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined))
 );
 
 const normalizeKeywords = (value: unknown): ExternalSemanticKeywords => {
@@ -125,29 +111,6 @@ const readArticleAndState = async (articleId: string): Promise<{
   };
 };
 
-const readSemanticAiSettings = async (): Promise<{
-  enabled: boolean;
-  model: string;
-  allowModelFallback: boolean;
-}> => {
-  const supabase = getExternalAnalysisSupabaseAdmin();
-  const { data, error } = await supabase
-    .from('app_settings')
-    .select('value')
-    .eq('key', 'ai')
-    .maybeSingle();
-
-  if (error && error.code !== '42P01') throw error;
-  const settings = isRecord(data?.value) ? data.value : {};
-  return {
-    enabled: settings.geminiFreeEnabled !== false,
-    model: toTrimmedString(settings.defaultGeminiModel)
-      || process.env.GEMINI_MODEL?.trim()
-      || 'gemini-3.5-flash',
-    allowModelFallback: settings.geminiFreeModelFallbackEnabled !== false,
-  };
-};
-
 const toArticleInput = (article: ExternalSemanticArticleRow): ExternalSemanticArticleInput => ({
   title: toTrimmedString(article.title),
   plainText: toTrimmedString(article.plain_text),
@@ -155,143 +118,6 @@ const toArticleInput = (article: ExternalSemanticArticleRow): ExternalSemanticAr
   keywords: normalizeKeywords(article.keywords),
   goalContext: isRecord(article.goal_context) ? article.goal_context : {},
 });
-
-const toVisibleGeminiProgress = (
-  progress: GeminiExecutionProgress,
-): ExternalAnalysisJson => compactJson({
-  stage: `gemini_${progress.stage || 'running'}`,
-  gemini: compactJson({
-    stage: progress.stage,
-    provider: progress.provider,
-    model: progress.model,
-    requestedModel: progress.requestedModel,
-    currentModelIndex: progress.currentModelIndex,
-    modelCount: progress.modelCount,
-    currentKeyIndex: progress.currentKeyIndex,
-    keyCount: progress.keyCount,
-    attemptedKeyCount: progress.attemptedKeyCount,
-    totalAttemptCount: progress.totalAttemptCount,
-    keySuffix: progress.keySuffix,
-    status: progress.status,
-    reason: progress.reason,
-    message: progress.message,
-    completed: progress.completed,
-    updatedAt: progress.updatedAt,
-  }),
-});
-
-const createProgressForwarder = (context: ExternalAnalysisExecutionContext) => {
-  let latest: GeminiExecutionProgress | null = null;
-  let running: Promise<void> | null = null;
-
-  const drain = async (): Promise<void> => {
-    while (latest) {
-      const current = latest;
-      latest = null;
-      try {
-        await context.reportProgress({
-          progress: toVisibleGeminiProgress(current),
-          provider: current.provider,
-          model: current.model,
-        });
-      } catch (error) {
-        console.warn('[external-semantic] Could not persist intermediate Gemini progress', {
-          jobId: context.job.id,
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-  };
-
-  const start = (): void => {
-    if (running) return;
-    running = drain().finally(() => {
-      running = null;
-      if (latest) start();
-    });
-  };
-
-  return {
-    push(progress: GeminiExecutionProgress) {
-      latest = progress;
-      start();
-    },
-    async flush() {
-      while (running || latest) {
-        start();
-        if (running) await running;
-      }
-    },
-  };
-};
-
-const sanitizeGeminiAttempts = (
-  body: Record<string, unknown>,
-  requestIndex: number,
-  succeeded: boolean,
-): ExternalAnalysisJson[] => {
-  const failed = Array.isArray(body.attempts)
-    ? body.attempts.filter(isRecord).map((attempt): ExternalAnalysisJson => compactJson({
-        requestIndex,
-        outcome: 'failed',
-        model: toTrimmedString(attempt.model),
-        keySuffix: toTrimmedString(attempt.keySuffix),
-        status: typeof attempt.status === 'number' ? attempt.status : undefined,
-        reason: toTrimmedString(attempt.reason) || 'unknown',
-        attempt: typeof attempt.attempt === 'number' ? attempt.attempt : 1,
-      }))
-    : [];
-
-  if (succeeded) {
-    failed.push(compactJson({
-      requestIndex,
-      outcome: 'success',
-      model: toTrimmedString(body.model),
-      keySuffix: toTrimmedString(body.keySuffix),
-      status: 200,
-      reason: 'success',
-      attempt: 1,
-    }));
-  }
-
-  return failed;
-};
-
-const runGeminiCall = async (options: {
-  context: ExternalAnalysisExecutionContext;
-  prompt: string;
-  model: string;
-  allowModelFallback: boolean;
-  requestIndex: number;
-  progressForwarder: ReturnType<typeof createProgressForwarder>;
-}): Promise<GeminiCallResult> => {
-  const progressId = `external-${options.context.job.id}-${options.context.job.attempt_count}-${options.requestIndex}`;
-  const result = await executeGeminiRequest({
-    prompt: options.prompt,
-    provider: 'gemini',
-    model: options.model,
-    allowModelFallback: options.allowModelFallback,
-    progressId,
-  }, {
-    signal: options.context.signal,
-    onProgress: progress => options.progressForwarder.push(progress),
-  });
-  await options.progressForwarder.flush();
-
-  const body = isRecord(result.body) ? result.body : {};
-  const text = toTrimmedString(body.text);
-  const ok = result.status >= 200 && result.status < 300 && Boolean(text);
-  return {
-    ok,
-    status: result.status,
-    text,
-    error: toTrimmedString(body.error) || `Gemini request failed with status ${result.status}.`,
-    provider: toTrimmedString(body.provider) || 'gemini',
-    model: toTrimmedString(body.model) || options.model,
-    keySuffix: toTrimmedString(body.keySuffix),
-    attempts: sanitizeGeminiAttempts(body, options.requestIndex, ok),
-  };
-};
 
 const createRetryError = (options: {
   code: string;
@@ -302,34 +128,6 @@ const createRetryError = (options: {
   message: options.message.slice(0, 2_000),
   progress: options.progress,
 });
-
-const reportFinalGeminiCall = async (
-  context: ExternalAnalysisExecutionContext,
-  call: GeminiCallResult,
-  attempts: ExternalAnalysisJson[],
-): Promise<void> => {
-  const persisted = await context.reportProgress({
-    progress: {
-      stage: call.ok ? 'gemini_response_received' : 'gemini_failed',
-      gemini: {
-        provider: call.provider,
-        model: call.model,
-        keySuffix: call.keySuffix,
-        status: call.status,
-        requestCount: new Set(attempts.map(attempt => attempt.requestIndex)).size,
-      },
-    },
-    provider: call.provider,
-    model: call.model,
-    keyAttempts: attempts,
-  });
-  if (!persisted) {
-    throw createRetryError({
-      code: 'semantic_job_lease_lost',
-      message: 'The semantic job lease was lost while recording Gemini progress.',
-    });
-  }
-};
 
 const applySemanticTerms = async (options: {
   context: ExternalAnalysisExecutionContext;
@@ -443,7 +241,7 @@ const executeExternalSemanticAnalysis = async (
     };
   }
 
-  const aiSettings = await readSemanticAiSettings();
+  const aiSettings = await readExternalGeminiSettings();
   if (!aiSettings.enabled) {
     throw createRetryError({
       code: 'gemini_free_disabled',
@@ -452,18 +250,16 @@ const executeExternalSemanticAnalysis = async (
     });
   }
 
-  const progressForwarder = createProgressForwarder(context);
   const attempts: ExternalAnalysisJson[] = [];
-  let finalCall = await runGeminiCall({
+  let finalCall = await runExternalGeminiCall({
     context,
     prompt: buildExternalSemanticPrompt(articleInput),
     model: aiSettings.model,
     allowModelFallback: aiSettings.allowModelFallback,
     requestIndex: 1,
-    progressForwarder,
   });
   attempts.push(...finalCall.attempts);
-  await reportFinalGeminiCall(context, finalCall, attempts);
+  await reportExternalGeminiCall(context, finalCall, attempts);
 
   if (!finalCall.ok) {
     throw createRetryError({
@@ -495,16 +291,15 @@ const executeExternalSemanticAnalysis = async (
       model: finalCall.model,
       keyAttempts: attempts,
     });
-    finalCall = await runGeminiCall({
+    finalCall = await runExternalGeminiCall({
       context,
       prompt: buildExternalSemanticRepairPrompt(articleInput, finalCall.text),
       model: aiSettings.model,
       allowModelFallback: aiSettings.allowModelFallback,
       requestIndex: 2,
-      progressForwarder,
     });
     attempts.push(...finalCall.attempts);
-    await reportFinalGeminiCall(context, finalCall, attempts);
+    await reportExternalGeminiCall(context, finalCall, attempts);
 
     if (!finalCall.ok) {
       throw createRetryError({
