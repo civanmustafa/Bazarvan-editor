@@ -80,6 +80,13 @@ type GeminiProgressState = {
   completed: boolean;
 };
 
+export type GeminiExecutionProgress = GeminiProgressState;
+
+export type GeminiExecutionOptions = {
+  signal?: AbortSignal;
+  onProgress?: (progress: GeminiExecutionProgress) => void;
+};
+
 type GeminiJobState = {
   status: "running" | "completed" | "cancelled";
   startedAt: string;
@@ -101,6 +108,7 @@ const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 const GEMINI_PROGRESS_TTL_MS = 10 * 60 * 1000;
 const geminiProgressStore = new Map<string, GeminiProgressState>();
 const geminiJobStore = new Map<string, GeminiJobState>();
+const geminiProgressListeners = new Map<string, (progress: GeminiExecutionProgress) => void>();
 
 const createApiKeyFingerprint = (key: string): string => {
   const normalizedKey = key.trim();
@@ -147,7 +155,7 @@ const setGeminiProgress = (
   const previous = geminiProgressStore.get(progressId);
   const job = geminiJobStore.get(progressId);
   if (job?.cancelRequested && patch.stage !== "cancelled") return;
-  geminiProgressStore.set(progressId, {
+  const nextProgress: GeminiProgressState = {
     id: progressId,
     stage: "queued",
     provider: "gemini",
@@ -159,7 +167,16 @@ const setGeminiProgress = (
     ...previous,
     ...patch,
     updatedAt: new Date().toISOString(),
-  });
+  };
+  geminiProgressStore.set(progressId, nextProgress);
+  try {
+    geminiProgressListeners.get(progressId)?.(nextProgress);
+  } catch (error) {
+    console.warn('Gemini progress listener failed', {
+      progressId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
 
 const getProgressIdFromRequest = (req: any): string => {
@@ -419,6 +436,29 @@ const throwIfGeminiJobCancelled = (progressId: string) => {
   }
 };
 
+const throwIfGeminiExecutionCancelled = (
+  progressId: string,
+  signal?: AbortSignal,
+) => {
+  throwIfGeminiJobCancelled(progressId);
+  if (signal?.aborted) throw new GeminiJobCancelledError();
+};
+
+const connectGeminiAbortSignal = (
+  signal: AbortSignal | undefined,
+  controller: AbortController,
+): (() => void) => {
+  if (!signal) return () => undefined;
+  if (signal.aborted) {
+    controller.abort();
+    return () => undefined;
+  }
+
+  const abort = () => controller.abort();
+  signal.addEventListener('abort', abort, { once: true });
+  return () => signal.removeEventListener('abort', abort);
+};
+
 const raceWithGeminiCancellation = async <T,>(
   request: Promise<T>,
   progressId: string,
@@ -604,11 +644,14 @@ const buildGeminiFailureMessage = (
   return parts.join(' ');
 };
 
-const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
+const executeGeminiRequestInternal = async (
+  requestBody: any,
+  options: GeminiExecutionOptions,
+): Promise<ApiResult> => {
   try {
     const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId, allowModelFallback, fallbackModels } = requestBody || {};
     const progressId = normalizeProgressId(rawProgressId);
-    throwIfGeminiJobCancelled(progressId);
+    throwIfGeminiExecutionCancelled(progressId, options.signal);
     const requestedProvider = normalizeGeminiProvider(provider);
     const selectedModel = getSafeGeminiModel(
       selectGeminiModel(model, requestedProvider),
@@ -687,7 +730,7 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
     });
 
     for (let modelIndex = 0; modelIndex < modelOrder.length; modelIndex += 1) {
-      throwIfGeminiJobCancelled(progressId);
+      throwIfGeminiExecutionCancelled(progressId, options.signal);
       const activeModel = modelOrder[modelIndex];
       lastAttemptedModel = activeModel;
       const orderedKeys = getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS);
@@ -717,12 +760,12 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
       }
 
       for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
-        throwIfGeminiJobCancelled(progressId);
+        throwIfGeminiExecutionCancelled(progressId, options.signal);
         const GEMINI_API_KEY = orderedKeys[keyIndex];
         const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
         const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
         for (let attempt = 0; attempt < 1; attempt += 1) {
-          throwIfGeminiJobCancelled(progressId);
+          throwIfGeminiExecutionCancelled(progressId, options.signal);
           const attemptStartedAt = Date.now();
           const attemptedKeyCount = new Set([
             ...attempts.filter(item => item.model === activeModel).map(item => item.keyFingerprint),
@@ -754,6 +797,7 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
           try {
             const abortController = new AbortController();
             const unregisterAbortController = registerGeminiRequestAbortController(progressId, abortController);
+            const disconnectExternalAbort = connectGeminiAbortSignal(options.signal, abortController);
             const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
             let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
             try {
@@ -777,9 +821,10 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
                 abortController,
               );
             } finally {
+              disconnectExternalAbort();
               unregisterAbortController();
             }
-            throwIfGeminiJobCancelled(progressId);
+            throwIfGeminiExecutionCancelled(progressId, options.signal);
 
             const text = typeof response.text === "string" ? response.text.trim() : "";
             if (!text) {
@@ -838,6 +883,7 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
             if (isGeminiJobCancelledError(error)) {
               throw error;
             }
+            if (options.signal?.aborted) throw new GeminiJobCancelledError();
             lastError = getGeminiErrorDetails(error);
             const reason = getGeminiFailureReason(lastError);
             await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_MIN_ATTEMPT_MS, attemptStartedAt);
@@ -914,6 +960,7 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
       }
     }
 
+    throwIfGeminiExecutionCancelled(progressId, options.signal);
     const responseStatus = lastError && lastError.status >= 400 && lastError.status < 500
       ? lastError.status
       : 502;
@@ -1006,6 +1053,28 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
     }
     const errorMessage = getGeminiErrorDetails(error).message;
     return { status: 500, body: { error: `خطأ من Gemini API: ${errorMessage}` } };
+  }
+};
+
+export const executeGeminiRequest = async (
+  requestBody: any,
+  options: GeminiExecutionOptions = {},
+): Promise<ApiResult> => {
+  const progressId = normalizeProgressId(requestBody?.progressId);
+  if (progressId && options.onProgress) {
+    geminiProgressListeners.set(progressId, options.onProgress);
+  }
+
+  try {
+    return await executeGeminiRequestInternal(requestBody, options);
+  } finally {
+    if (
+      progressId
+      && options.onProgress
+      && geminiProgressListeners.get(progressId) === options.onProgress
+    ) {
+      geminiProgressListeners.delete(progressId);
+    }
   }
 };
 

@@ -1,4 +1,5 @@
 import './loadEnv';
+import './externalSemanticAnalysisExecutor';
 
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +9,7 @@ import {
   recoverStaleExternalAnalysisJobs,
   renewExternalAnalysisJobLease,
   scheduleExternalAnalysisJobRetry,
+  updateExternalAnalysisJobProgress,
   type ExternalAnalysisJob,
 } from './externalAnalysisQueue';
 import {
@@ -173,6 +175,11 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
         jobId: job.id,
         workerId,
         leaseSeconds,
+      }),
+      reportProgress: update => updateExternalAnalysisJobProgress({
+        jobId: job.id,
+        workerId,
+        ...update,
       }),
     });
 

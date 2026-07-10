@@ -9,6 +9,14 @@ export interface ExternalAnalysisExecutionContext {
   workerId: string;
   signal: AbortSignal;
   renewLease: () => Promise<boolean>;
+  reportProgress: (update: ExternalAnalysisProgressUpdate) => Promise<boolean>;
+}
+
+export interface ExternalAnalysisProgressUpdate {
+  progress: ExternalAnalysisJson;
+  provider?: string;
+  model?: string;
+  keyAttempts?: ExternalAnalysisJson[];
 }
 
 export interface ExternalAnalysisExecutionResult {

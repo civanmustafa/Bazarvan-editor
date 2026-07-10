@@ -59,7 +59,7 @@ const getRequiredEnv = (name: string, fallbacks: string[] = []): string => {
   throw new Error(`Missing required external analysis worker environment variable: ${name}`);
 };
 
-const getQueueClient = (): SupabaseClient => {
+export const getExternalAnalysisSupabaseAdmin = (): SupabaseClient => {
   if (queueClient) return queueClient;
 
   const supabaseUrl = getRequiredEnv('SUPABASE_URL', ['VITE_SUPABASE_URL']);
@@ -84,7 +84,7 @@ const callQueueRpc = async <T>(
   functionName: string,
   parameters: ExternalAnalysisJson,
 ): Promise<T> => {
-  const { data, error } = await getQueueClient().rpc(functionName, parameters);
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(functionName, parameters);
   if (error) {
     const details = [error.message, error.details, error.hint]
       .filter(Boolean)
@@ -172,6 +172,24 @@ export const completeExternalAnalysisJob = async (options: {
   if (!job) throw new Error('Completion RPC returned no external analysis job.');
   return job;
 };
+
+export const updateExternalAnalysisJobProgress = async (options: {
+  jobId: string;
+  workerId: string;
+  progress: ExternalAnalysisJson;
+  provider?: string;
+  model?: string;
+  keyAttempts?: ExternalAnalysisJson[];
+}): Promise<boolean> => (
+  callQueueRpc<boolean>('update_external_analysis_job_progress', {
+    p_job_id: options.jobId,
+    p_worker_id: options.workerId,
+    p_progress: options.progress,
+    p_provider: options.provider ?? null,
+    p_model: options.model ?? null,
+    p_key_attempts: options.keyAttempts ?? null,
+  })
+);
 
 export const recoverStaleExternalAnalysisJobs = async (
   retryDelayMinutes: number,
