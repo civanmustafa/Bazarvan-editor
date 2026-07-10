@@ -44,8 +44,6 @@ const GeminiProgressStatus: React.FC<GeminiProgressStatusProps> = ({
   }, [progressId, progress?.stage]);
 
   if (!progress || (!progress.active && !progress.message)) return null;
-  const attemptedModelKeyCount = progress.attemptedModelKeyCount ?? progress.attemptedKeyCount;
-
   const stageLabels: Record<string, string> = isArabic
     ? {
         queued: 'بدء الطلب',
@@ -79,18 +77,11 @@ const GeminiProgressStatus: React.FC<GeminiProgressStatusProps> = ({
   const keyStep = progress.currentKeyIndex && progress.keyCount
     ? `${isArabic ? 'المفتاح' : 'Key'} ${progress.currentKeyIndex}/${progress.keyCount}`
     : '';
-  const triedStep = attemptedModelKeyCount && progress.keyCount
-    ? (isArabic ? `جُرّب ${attemptedModelKeyCount}/${progress.keyCount}` : `tried ${attemptedModelKeyCount}/${progress.keyCount}`)
-    : '';
   const suffixStep = progress.keySuffix ? `...${progress.keySuffix}` : '';
   const statusStep = progress.status ? `HTTP ${progress.status}` : '';
-  const primaryLine = [modelStep, keyStep].filter(Boolean).join(isArabic ? '، ' : ', ');
-  const detailLine = [
-    stageLabel,
-    triedStep,
-    suffixStep,
-    statusStep,
-  ].filter(Boolean).join(isArabic ? '، ' : ', ');
+  const singleLine = [modelStep, keyStep, suffixStep, stageLabel, statusStep]
+    .filter(Boolean)
+    .join(isArabic ? '، ' : ', ');
   const canCancel = Boolean(progress.active && !progress.completed && progressId && onCancel);
   const handleCancel = async () => {
     if (!canCancel || isCancelling || !onCancel) return;
@@ -108,13 +99,10 @@ const GeminiProgressStatus: React.FC<GeminiProgressStatusProps> = ({
     <div className={`rounded-lg border ${progress.stage === 'cancelled' ? 'border-red-300 bg-red-50/80 dark:border-red-500/40 dark:bg-red-500/10' : 'border-[#d4af37]/25 bg-[#d4af37]/10 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/15'} text-gray-700 dark:text-gray-200 ${compact ? 'p-2 text-[10px]' : 'p-2.5 text-[11px]'}`}>
       <div className="flex items-start gap-2">
         {progress.active && <Loader2 size={compact ? 12 : 14} className="shrink-0 animate-spin text-[#b8922e]" />}
-        <div className="min-w-0 flex-1 break-words" title={progress.message}>
-          <div className="font-bold">
-            {primaryLine || progress.message || (isArabic ? 'جاري الاتصال بـ Gemini...' : 'Contacting Gemini...')}
+        <div className="min-w-0 flex-1 truncate" title={[singleLine, progress.message].filter(Boolean).join('\n')}>
+          <div className="truncate whitespace-nowrap font-bold">
+            {singleLine || progress.message || (isArabic ? 'جاري الاتصال بـ Gemini...' : 'Contacting Gemini...')}
           </div>
-          {primaryLine && detailLine && (
-            <div className="mt-1 text-gray-600 dark:text-gray-300">{detailLine}</div>
-          )}
         </div>
         {canCancel && (
           <button
