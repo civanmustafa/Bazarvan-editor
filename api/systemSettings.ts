@@ -22,9 +22,13 @@ class SettingsError extends Error {
 
 const SETTING_KEYS = new Set<SettingKey>(['ai', 'n8n', 'articles', 'roles', 'system']);
 const DEFAULT_GEMINI_FREE_MODELS = [
-  'gemini-2.5-flash',
   'gemini-3.5-flash',
+  'gemini-2.5-pro',
   'gemini-3-flash-preview',
+  'gemini-2.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash-lite-preview-09-2025',
+  'gemini-2.5-flash-lite',
 ];
 
 const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
@@ -33,8 +37,8 @@ const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
     geminiProEnabled: true,
     openAiEnabled: false,
     defaultProvider: 'gemini',
-    defaultGeminiModel: 'gemini-2.5-flash',
-    geminiFreeModelFallbackEnabled: false,
+    defaultGeminiModel: 'gemini-3.5-flash',
+    geminiFreeModelFallbackEnabled: true,
     defaultGeminiPaidModel: 'gemini-2.5-pro',
     defaultOpenAiModel: 'gpt-4.1-mini',
   },
@@ -213,7 +217,7 @@ const getSecretStatus = (req: any) => {
       gemini: {
         configured: geminiKeys.length > 0,
         keyCount: geminiKeys.length,
-        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        model: process.env.GEMINI_MODEL || DEFAULT_GEMINI_FREE_MODELS[0],
         allowedModels: getAllowedGeminiFreeModels(),
       },
       geminiPaid: {

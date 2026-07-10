@@ -2104,6 +2104,7 @@ const requestGeminiAnalysis = async (
     model: string = getSelectedGeminiFreeModel(),
     usageContext: AiApiUsageContext = {},
     progressCallback?: GeminiProgressCallback,
+    provider: GeminiPatchProvider = 'gemini',
 ): Promise<GeminiAnalysisResult> => {
     // Gemini keys stay server-side. Every UI workflow uses the same background
     // engine so proxy timeouts cannot interrupt key/model rotation.
@@ -2114,9 +2115,9 @@ const requestGeminiAnalysis = async (
               prompt,
               history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
               model,
-              provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
-              allowModelFallback: model !== GEMINI_PAID_MODEL && isGeminiFreeModelFallbackEnabled(),
-              fallbackModels: model !== GEMINI_PAID_MODEL ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
+              provider,
+              allowModelFallback: provider === 'gemini' && isGeminiFreeModelFallbackEnabled(),
+              fallbackModels: provider === 'gemini' ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
           },
           onProgress: progressCallback,
       });
@@ -2225,7 +2226,7 @@ const requestGeminiAnalysis = async (
       const errorMessage = getGeminiErrorMessage(error, model);
       progressCallback?.({
           stage: 'failed',
-          provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
+          provider,
           model,
           requestedModel: model,
           message: errorMessage,
@@ -2245,8 +2246,9 @@ const callGeminiAnalysis = async (
     onResult?: (result: GeminiAnalysisResult) => void,
     usageContext?: AiApiUsageContext,
     progressCallback?: GeminiProgressCallback,
+    provider: GeminiPatchProvider = 'gemini',
 ): Promise<string> => {
-    const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model, usageContext, progressCallback);
+    const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model, usageContext, progressCallback, provider);
     onResult?.(result);
     if (result.cancelled) throw new GeminiAnalysisCancelledError();
     return result.text;
@@ -2267,7 +2269,7 @@ const callGeminiArticleChatAnalysis = async (
     const selectedModel = provider === 'geminiPaid'
         ? GEMINI_PAID_MODEL
         : model?.trim() || getGeminiModelForProvider(provider);
-    const result = await requestGeminiAnalysis(prompt, userKeys, history, selectedModel, usageContext, progressCallback);
+    const result = await requestGeminiAnalysis(prompt, userKeys, history, selectedModel, usageContext, progressCallback, provider);
     if (result.ok) {
         saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
@@ -5787,6 +5789,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             geminiProvider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
             usageContext,
             mergedProgressCallback,
+            geminiProvider,
         );
     }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext, trackGeminiProgress]);
     

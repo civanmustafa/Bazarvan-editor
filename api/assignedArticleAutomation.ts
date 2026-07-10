@@ -36,7 +36,7 @@ class AssignedAutomationError extends Error {
   }
 }
 
-const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
 const DEFAULT_GEMINI_PAID_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || 'gemini-2.5-pro';
 const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 

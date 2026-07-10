@@ -37,7 +37,7 @@ export const normalizeGeminiFreeModel = (
 export const getSelectedGeminiFreeModel = (): string => {
   if (typeof window === 'undefined') return GEMINI_ANALYSIS_MODEL;
   try {
-    return localStorage.getItem(GEMINI_FREE_MODEL_STORAGE_KEY)?.trim() || GEMINI_ANALYSIS_MODEL;
+    return normalizeGeminiFreeModel(localStorage.getItem(GEMINI_FREE_MODEL_STORAGE_KEY));
   } catch {
     return GEMINI_ANALYSIS_MODEL;
   }
@@ -66,11 +66,11 @@ export const setSelectedGeminiFreeModel = (
 };
 
 export const isGeminiFreeModelFallbackEnabled = (): boolean => {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') return true;
   try {
-    return localStorage.getItem(GEMINI_FREE_MODEL_FALLBACK_STORAGE_KEY) === 'true';
+    return localStorage.getItem(GEMINI_FREE_MODEL_FALLBACK_STORAGE_KEY) !== 'false';
   } catch {
-    return false;
+    return true;
   }
 };
 

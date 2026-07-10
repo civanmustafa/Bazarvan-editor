@@ -3,12 +3,16 @@ import { GoogleGenAI } from "@google/genai";
 
 // Keep the serverless function self-contained: Vercel executes this compiled
 // ESM file directly and cannot resolve extensionless frontend module imports.
-const DEFAULT_GEMINI_ANALYSIS_MODEL = "gemini-2.5-flash";
+const DEFAULT_GEMINI_ANALYSIS_MODEL = "gemini-3.5-flash";
 const DEFAULT_GEMINI_PAID_ANALYSIS_MODEL = "gemini-2.5-pro";
 const DEFAULT_GEMINI_FREE_MODELS = [
   DEFAULT_GEMINI_ANALYSIS_MODEL,
-  "gemini-3.5-flash",
+  "gemini-2.5-pro",
   "gemini-3-flash-preview",
+  "gemini-2.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash-lite-preview-09-2025",
+  "gemini-2.5-flash-lite",
 ];
 const GEMINI_ANALYSIS_MODEL = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_ANALYSIS_MODEL;
 const GEMINI_PAID_ANALYSIS_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || DEFAULT_GEMINI_PAID_ANALYSIS_MODEL;
@@ -83,6 +87,7 @@ type GeminiJobState = {
   result?: ApiResult;
   cancelRequested: boolean;
   cancelListeners: Set<() => void>;
+  abortControllers: Set<AbortController>;
 };
 
 class GeminiJobCancelledError extends Error {
@@ -278,11 +283,9 @@ const normalizeGeminiProvider = (value: unknown): GeminiProvider => (
   value === "geminiPaid" ? "geminiPaid" : "gemini"
 );
 
-const selectGeminiProvider = (requestedProvider: GeminiProvider, selectedModel: string): GeminiProvider => (
-  requestedProvider === "geminiPaid" || selectedModel === GEMINI_PAID_ANALYSIS_MODEL
-    ? "geminiPaid"
-    : "gemini"
-);
+// A model can have both free-tier and paid-tier access. The caller's selected
+// provider decides which server-side key pool is used, not the model name.
+const selectGeminiProvider = (requestedProvider: GeminiProvider): GeminiProvider => requestedProvider;
 
 const selectGeminiModel = (model: unknown, provider: GeminiProvider): string => {
   if (typeof model === "string" && ALLOWED_GEMINI_MODELS.has(model)) {
@@ -299,8 +302,7 @@ const getAllowedGeminiFreeModels = (): string[] => (
     ...((process.env.GEMINI_ALLOWED_MODELS || "")
       .split(/[\n,;]+/)
       .map(model => model.trim())
-      .filter(Boolean)
-      .filter(model => model !== GEMINI_PAID_ANALYSIS_MODEL)),
+      .filter(Boolean)),
   ].filter(Boolean)))
 );
 
@@ -311,7 +313,6 @@ const normalizeRequestedGeminiFreeModels = (value: unknown): string[] => {
       .map(model => typeof model === "string" ? model.trim() : "")
       .filter(model => (
         Boolean(model) &&
-        model !== GEMINI_PAID_ANALYSIS_MODEL &&
         ALLOWED_GEMINI_MODELS.has(model)
       )),
   ));
@@ -442,11 +443,24 @@ const raceWithGeminiCancellation = async <T,>(
   }
 };
 
+const registerGeminiRequestAbortController = (
+  progressId: string,
+  controller: AbortController,
+): (() => void) => {
+  if (!progressId) return () => undefined;
+  const job = geminiJobStore.get(progressId);
+  if (!job) return () => undefined;
+  throwIfGeminiJobCancelled(progressId);
+  job.abortControllers.add(controller);
+  return () => job.abortControllers.delete(controller);
+};
+
 const withGeminiKeyTimeout = async <T,>(
   request: Promise<T>,
   model: string,
   keySuffix: string,
   progressId: string,
+  abortController: AbortController,
 ): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -455,6 +469,7 @@ const withGeminiKeyTimeout = async <T,>(
         request,
         new Promise<T>((_, reject) => {
           timeoutId = setTimeout(() => {
+            abortController.abort();
             reject(new Error(`Gemini request timed out after ${GEMINI_PER_KEY_TIMEOUT_MS}ms for model ${model} and key ...${keySuffix} (504)`));
           }, GEMINI_PER_KEY_TIMEOUT_MS);
         }),
@@ -599,7 +614,7 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
       selectGeminiModel(model, requestedProvider),
       requestedProvider,
     );
-    const selectedProvider = selectGeminiProvider(requestedProvider, selectedModel);
+    const selectedProvider = selectGeminiProvider(requestedProvider);
     const modelOrder = getGeminiModelOrder(
       selectedProvider,
       selectedModel,
@@ -737,22 +752,33 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
               : `تجربة المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) للنموذج ${activeModel}.`,
           });
           try {
+            const abortController = new AbortController();
+            const unregisterAbortController = registerGeminiRequestAbortController(progressId, abortController);
             const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-            const response = await withGeminiKeyTimeout(
-              ai.models.generateContent({
-                model: activeModel,
-                contents,
-                config: useUrlContext
-                  ? {
-                      tools: [{ urlContext: {} }],
-                      toolConfig: { includeServerSideToolInvocations: true },
-                    }
-                  : undefined,
-              }),
-              activeModel,
-              keySuffix,
-              progressId,
-            );
+            let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
+            try {
+              response = await withGeminiKeyTimeout(
+                ai.models.generateContent({
+                  model: activeModel,
+                  contents,
+                  config: {
+                    ...(useUrlContext
+                      ? {
+                          tools: [{ urlContext: {} }],
+                          toolConfig: { includeServerSideToolInvocations: true },
+                        }
+                      : {}),
+                    abortSignal: abortController.signal,
+                  },
+                }),
+                activeModel,
+                keySuffix,
+                progressId,
+                abortController,
+              );
+            } finally {
+              unregisterAbortController();
+            }
             throwIfGeminiJobCancelled(progressId);
 
             const text = typeof response.text === "string" ? response.text.trim() : "";
@@ -985,7 +1011,7 @@ const getInitialJobProgress = (requestBody: any) => {
     selectGeminiModel(requestBody?.model, requestedProvider),
     requestedProvider,
   );
-  const selectedProvider = selectGeminiProvider(requestedProvider, selectedModel);
+  const selectedProvider = selectGeminiProvider(requestedProvider);
   const modelOrder = getGeminiModelOrder(
     selectedProvider,
     selectedModel,
@@ -1053,6 +1079,7 @@ const startGeminiJob = (progressId: string, requestBody: any): GeminiJobState =>
     updatedAt: now,
     cancelRequested: false,
     cancelListeners: new Set(),
+    abortControllers: new Set(),
   };
   geminiJobStore.set(progressId, job);
   setGeminiProgress(progressId, {
@@ -1153,6 +1180,10 @@ const handleGeminiCancelRequest = async (req: any): Promise<ApiResult> => {
   job.status = "cancelled";
   job.result = cancellationResult;
   job.updatedAt = new Date().toISOString();
+  for (const controller of job.abortControllers) {
+    controller.abort();
+  }
+  job.abortControllers.clear();
   setGeminiProgress(progressId, {
     stage: "cancelled",
     provider: progress?.provider || "gemini",
