@@ -57,8 +57,13 @@ type GeminiProgressState = {
   stage: GeminiProgressStage;
   provider: GeminiProvider;
   model: string;
+  requestedModel?: string;
+  currentModelIndex?: number;
+  modelCount?: number;
   keyCount: number;
   attemptedKeyCount: number;
+  attemptedModelKeyCount?: number;
+  totalAttemptCount?: number;
   currentKeyIndex?: number;
   currentAttempt?: number;
   keySuffix?: string;
@@ -397,6 +402,16 @@ const getUniqueAttemptCount = (attempts: GeminiAttemptDetail[]): number => (
   new Set(attempts.map(attempt => attempt.keyFingerprint)).size
 );
 
+const getUniqueAttemptCountForModel = (attempts: GeminiAttemptDetail[], model: string): number => (
+  new Set(attempts
+    .filter(attempt => attempt.model === model)
+    .map(attempt => attempt.keyFingerprint)).size
+);
+
+const getUniqueKeyModelAttemptCount = (attempts: GeminiAttemptDetail[]): number => (
+  new Set(attempts.map(attempt => `${attempt.model || "-"}:${attempt.keyFingerprint}`)).size
+);
+
 const summarizeAttemptReasons = (attempts: GeminiAttemptDetail[]): Record<GeminiAttemptFailureReason, number> => {
   const grouped = attempts.reduce<Record<GeminiAttemptFailureReason, Set<string>>>((groups, attempt) => {
     groups[attempt.reason].add(attempt.keyFingerprint);
@@ -524,8 +539,13 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       stage: "queued",
       provider: selectedProvider,
       model: selectedModel,
+      requestedModel: selectedModel,
+      currentModelIndex: 1,
+      modelCount: modelOrder.length,
       keyCount: GEMINI_API_KEYS.length,
       attemptedKeyCount: 0,
+      attemptedModelKeyCount: 0,
+      totalAttemptCount: 0,
       completed: false,
       message: modelOrder.length > 1
         ? `بدء طلب ${getGeminiProviderLabel(selectedProvider)} للنموذج ${selectedModel}. عند فشل كل المفاتيح سيتم تجربة موديل مجاني آخر.`
@@ -542,8 +562,13 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
           stage: "switching-model",
           provider: selectedProvider,
           model: activeModel,
+          requestedModel: selectedModel,
+          currentModelIndex: modelIndex + 1,
+          modelCount: modelOrder.length,
           keyCount: orderedKeys.length,
-          attemptedKeyCount: getUniqueAttemptCount(attempts),
+          attemptedKeyCount: 0,
+          attemptedModelKeyCount: 0,
+          totalAttemptCount: attempts.length,
           currentKeyIndex: 1,
           currentAttempt: 1,
           status: undefined,
@@ -561,15 +586,20 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           const attemptStartedAt = Date.now();
           const attemptedKeyCount = new Set([
-            ...attempts.map(item => item.keyFingerprint),
+            ...attempts.filter(item => item.model === activeModel).map(item => item.keyFingerprint),
             keyFingerprint,
           ]).size;
           setGeminiProgress(progressId, {
             stage: attempt > 0 ? "retrying" : "attempting",
             provider: selectedProvider,
             model: activeModel,
+            requestedModel: selectedModel,
+            currentModelIndex: modelIndex + 1,
+            modelCount: modelOrder.length,
             keyCount: orderedKeys.length,
             attemptedKeyCount,
+            attemptedModelKeyCount: attemptedKeyCount,
+            totalAttemptCount: attempts.length + 1,
             currentKeyIndex: keyIndex + 1,
             currentAttempt: attempt + 1,
             keySuffix,
@@ -594,12 +624,21 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
             });
 
             const text = response.text;
+            const successAttemptedKeyCount = new Set([
+              ...attempts.filter(item => item.model === activeModel).map(item => item.keyFingerprint),
+              keyFingerprint,
+            ]).size;
             setGeminiProgress(progressId, {
               stage: "success",
               provider: selectedProvider,
               model: activeModel,
+              requestedModel: selectedModel,
+              currentModelIndex: modelIndex + 1,
+              modelCount: modelOrder.length,
               keyCount: orderedKeys.length,
-              attemptedKeyCount,
+              attemptedKeyCount: successAttemptedKeyCount,
+              attemptedModelKeyCount: successAttemptedKeyCount,
+              totalAttemptCount: attempts.length + 1,
               currentKeyIndex: keyIndex + 1,
               currentAttempt: attempt + 1,
               keySuffix,
@@ -638,7 +677,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               attempt: attempt + 1,
               model: activeModel,
             });
-            const failedAttemptedKeyCount = getUniqueAttemptCount(attempts);
+            const failedModelAttemptedKeyCount = getUniqueAttemptCountForModel(attempts, activeModel);
             const hasServerRetry = attempt === 0 && reason === "server";
             const hasNextKey = keyIndex < orderedKeys.length - 1;
             const hasNextModel = modelIndex < modelOrder.length - 1;
@@ -646,8 +685,13 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
               stage: hasServerRetry ? "retrying" : "failed-key",
               provider: selectedProvider,
               model: activeModel,
+              requestedModel: selectedModel,
+              currentModelIndex: modelIndex + 1,
+              modelCount: modelOrder.length,
               keyCount: orderedKeys.length,
-              attemptedKeyCount: failedAttemptedKeyCount,
+              attemptedKeyCount: failedModelAttemptedKeyCount,
+              attemptedModelKeyCount: failedModelAttemptedKeyCount,
+              totalAttemptCount: attempts.length,
               currentKeyIndex: keyIndex + 1,
               currentAttempt: attempt + 1,
               keySuffix,
@@ -676,8 +720,13 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
                 stage: "switching-key",
                 provider: selectedProvider,
                 model: activeModel,
+                requestedModel: selectedModel,
+                currentModelIndex: modelIndex + 1,
+                modelCount: modelOrder.length,
                 keyCount: orderedKeys.length,
-                attemptedKeyCount: failedAttemptedKeyCount,
+                attemptedKeyCount: failedModelAttemptedKeyCount,
+                attemptedModelKeyCount: failedModelAttemptedKeyCount,
+                totalAttemptCount: attempts.length,
                 currentKeyIndex: keyIndex + 2,
                 currentAttempt: 1,
                 keySuffix: getApiKeySuffix(orderedKeys[keyIndex + 1]),
@@ -715,6 +764,8 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       attemptedModels: Array.from(new Set(attempts.map(item => item.model).filter(Boolean))),
       keyCount: GEMINI_API_KEYS.length,
       attemptedKeyCount: getUniqueAttemptCount(attempts),
+      keyModelAttemptCount: getUniqueKeyModelAttemptCount(attempts),
+      totalAttemptCount: attempts.length,
       attempts,
       attemptSummary: summarizeAttemptReasons(attempts),
       progressId,
@@ -723,12 +774,17 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       stage: "failed",
       provider: selectedProvider,
       model: lastAttemptedModel,
+      requestedModel: selectedModel,
+      currentModelIndex: modelOrder.length,
+      modelCount: modelOrder.length,
       keyCount: lastOrderedKeys.length,
-      attemptedKeyCount: getUniqueAttemptCount(attempts),
+      attemptedKeyCount: getUniqueAttemptCountForModel(attempts, lastAttemptedModel),
+      attemptedModelKeyCount: getUniqueAttemptCountForModel(attempts, lastAttemptedModel),
+      totalAttemptCount: getUniqueKeyModelAttemptCount(attempts),
       currentKeyIndex: lastOrderedKeys.length,
       completed: true,
       message: modelOrder.length > 1
-        ? `فشل طلب Gemini بعد تجربة ${modelOrder.length} موديل و ${getUniqueAttemptCount(attempts)} مفتاح.`
+        ? `فشل طلب Gemini بعد تجربة ${modelOrder.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل.`
         : `فشل طلب Gemini بعد تجربة ${getUniqueAttemptCount(attempts)} من ${lastOrderedKeys.length} مفتاح.`,
     });
     return {

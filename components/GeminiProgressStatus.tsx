@@ -7,8 +7,12 @@ type GeminiProgressLike = {
   message?: string;
   model?: string;
   requestedModel?: string;
+  currentModelIndex?: number;
+  modelCount?: number;
   keyCount?: number;
   attemptedKeyCount?: number;
+  attemptedModelKeyCount?: number;
+  totalAttemptCount?: number;
   currentKeyIndex?: number;
   keySuffix?: string;
   status?: number;
@@ -27,12 +31,15 @@ const GeminiProgressStatus: React.FC<GeminiProgressStatusProps> = ({
   compact = false,
 }) => {
   if (!progress || (!progress.active && !progress.message)) return null;
+  const attemptedModelKeyCount = progress.attemptedModelKeyCount ?? progress.attemptedKeyCount;
 
   const meta = [
     progress.model ? `${isArabic ? 'الموديل' : 'Model'}: ${progress.model}` : '',
     progress.requestedModel && progress.requestedModel !== progress.model ? `${isArabic ? 'المطلوب' : 'Requested'}: ${progress.requestedModel}` : '',
+    progress.currentModelIndex && progress.modelCount && progress.modelCount > 1 ? `${isArabic ? 'ترتيب الموديل' : 'Model step'} ${progress.currentModelIndex}/${progress.modelCount}` : '',
     progress.currentKeyIndex && progress.keyCount ? `${isArabic ? 'المفتاح' : 'Key'} ${progress.currentKeyIndex}/${progress.keyCount}` : '',
-    progress.attemptedKeyCount && progress.keyCount ? `${isArabic ? 'تمت تجربة' : 'Tried'} ${progress.attemptedKeyCount}/${progress.keyCount}` : '',
+    attemptedModelKeyCount && progress.keyCount ? `${isArabic ? 'مفاتيح هذا الموديل' : 'Model keys tried'} ${attemptedModelKeyCount}/${progress.keyCount}` : '',
+    progress.totalAttemptCount ? `${isArabic ? 'إجمالي المحاولات' : 'Total attempts'} ${progress.totalAttemptCount}` : '',
     progress.keySuffix ? `...${progress.keySuffix}` : '',
     progress.status ? `HTTP ${progress.status}` : '',
     progress.reason || '',

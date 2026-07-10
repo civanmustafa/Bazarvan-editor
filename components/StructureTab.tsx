@@ -1018,13 +1018,21 @@ const StructureTab: React.FC = () => {
       geminiProgress?.requestedModel && geminiProgress.requestedModel !== geminiProgress.model
           ? `Requested: ${geminiProgress.requestedModel}`
           : '',
+      geminiProgress?.currentModelIndex && geminiProgress?.modelCount && geminiProgress.modelCount > 1
+          ? `Model step: ${geminiProgress.currentModelIndex}/${geminiProgress.modelCount}`
+          : '',
       geminiProgress?.stage
           ? `Stage: ${geminiProgress.stage}`
           : '',
-      geminiProgress?.attemptedKeyCount && geminiProgress?.keyCount
+      (geminiProgress?.attemptedModelKeyCount || geminiProgress?.attemptedKeyCount) && geminiProgress?.keyCount
           ? (uiLanguage === 'ar'
-              ? `تمت تجربة ${geminiProgress.attemptedKeyCount}/${geminiProgress.keyCount}`
-              : `Tried ${geminiProgress.attemptedKeyCount}/${geminiProgress.keyCount}`)
+              ? `مفاتيح هذا الموديل ${(geminiProgress.attemptedModelKeyCount || geminiProgress.attemptedKeyCount)}/${geminiProgress.keyCount}`
+              : `Model keys ${(geminiProgress.attemptedModelKeyCount || geminiProgress.attemptedKeyCount)}/${geminiProgress.keyCount}`)
+          : '',
+      geminiProgress?.totalAttemptCount
+          ? (uiLanguage === 'ar'
+              ? `إجمالي المحاولات ${geminiProgress.totalAttemptCount}`
+              : `Total attempts ${geminiProgress.totalAttemptCount}`)
           : '',
       geminiProgress?.keySuffix
           ? `...${geminiProgress.keySuffix}`

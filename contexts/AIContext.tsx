@@ -1975,8 +1975,12 @@ type GeminiProgressSnapshot = {
     provider?: GeminiPatchProvider;
     model?: string;
     requestedModel?: string;
+    currentModelIndex?: number;
+    modelCount?: number;
     keyCount?: number;
     attemptedKeyCount?: number;
+    attemptedModelKeyCount?: number;
+    totalAttemptCount?: number;
     currentKeyIndex?: number;
     currentAttempt?: number;
     keySuffix?: string;
@@ -2162,15 +2166,25 @@ const buildGeminiInterruptedMessage = (
 
     const keyCount = typeof progress.keyCount === 'number' ? progress.keyCount : undefined;
     const attemptedKeyCount = typeof progress.attemptedKeyCount === 'number' ? progress.attemptedKeyCount : undefined;
+    const attemptedModelKeyCount = typeof progress.attemptedModelKeyCount === 'number'
+        ? progress.attemptedModelKeyCount
+        : attemptedKeyCount;
     const currentKeyIndex = typeof progress.currentKeyIndex === 'number' ? progress.currentKeyIndex : undefined;
+    const currentModelIndex = typeof progress.currentModelIndex === 'number' ? progress.currentModelIndex : undefined;
+    const modelCount = typeof progress.modelCount === 'number' ? progress.modelCount : undefined;
+    const totalAttemptCount = typeof progress.totalAttemptCount === 'number' ? progress.totalAttemptCount : undefined;
     const modelLabel = progress.model || fallbackModel;
+    const modelPosition = currentModelIndex && modelCount && modelCount > 1
+        ? `الموديل ${currentModelIndex} من ${modelCount}: ${modelLabel}`
+        : `النموذج ${modelLabel}`;
     const progressParts = [
         baseMessage,
         keyCount
-            ? attemptedKeyCount && attemptedKeyCount >= keyCount
-                ? `آخر حالة مسجلة: تمت تجربة ${attemptedKeyCount} من ${keyCount} مفتاح على النموذج ${modelLabel}.`
-                : `آخر حالة مسجلة قبل انقطاع الطلب: كان النظام عند المفتاح ${currentKeyIndex || attemptedKeyCount || 1} من ${keyCount} على النموذج ${modelLabel}. هذا لا يؤكد أن كل المفاتيح اكتملت.`
+            ? attemptedModelKeyCount && attemptedModelKeyCount >= keyCount
+                ? `آخر حالة مسجلة: تمت تجربة ${attemptedModelKeyCount} من ${keyCount} مفتاح داخل ${modelPosition}.`
+                : `آخر حالة مسجلة قبل انقطاع الطلب: كان النظام عند المفتاح ${currentKeyIndex || attemptedModelKeyCount || 1} من ${keyCount} داخل ${modelPosition}. هذا لا يؤكد أن كل المفاتيح أو كل الموديلات اكتملت.`
             : '',
+        totalAttemptCount ? `إجمالي محاولات مفتاح/موديل المسجلة حتى الانقطاع: ${totalAttemptCount}.` : '',
         progress.message ? `آخر خطوة: ${progress.message}` : '',
     ].filter(Boolean);
 
