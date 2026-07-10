@@ -827,6 +827,10 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
                   ...attempts.map(item => item.keyFingerprint),
                   keyFingerprint,
                 ]).size,
+                // Keep failed key/model attempts with a successful response so the
+                // admin activity log can describe one complete AI request.
+                attempts,
+                keyModelAttemptCount: getUniqueKeyModelAttemptCount(attempts),
                 progressId,
               },
             };

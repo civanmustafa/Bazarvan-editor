@@ -7,6 +7,15 @@ type ApiResult = {
   headers?: Record<string, string>;
 };
 
+type OpenAiAttemptDetail = {
+  keyFingerprint: string;
+  keySuffix: string;
+  status: number;
+  reason: string;
+  attempt: number;
+  model: string;
+};
+
 class OpenAiRequestError extends Error {
   status: number;
 
@@ -168,6 +177,32 @@ const isMissingConversationError = (error: unknown): boolean => (
   && error.message.toLowerCase().includes("conversation")
 );
 
+const getOpenAiAttemptFailure = (
+  key: string,
+  model: string,
+  attempt: number,
+  error: unknown,
+): OpenAiAttemptDetail => {
+  const isTimeout = error instanceof Error && error.name === "AbortError";
+  const status = error instanceof OpenAiRequestError
+    ? error.status
+    : isTimeout
+      ? 504
+      : 500;
+  const reason = error instanceof Error && error.message.trim()
+    ? error.message.trim()
+    : "OpenAI request failed";
+
+  return {
+    keyFingerprint: createApiKeyFingerprint(key),
+    keySuffix: getApiKeySuffix(key),
+    status,
+    reason,
+    attempt,
+    model,
+  };
+};
+
 const createOpenAiResponse = async (
   openAiKey: string,
   signal: AbortSignal,
@@ -221,6 +256,9 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
     return { status: 405, body: { error: "الطريقة غير مسموح بها" } };
   }
 
+  const attempts: OpenAiAttemptDetail[] = [];
+  let selectedModel = OPENAI_MODEL;
+
   try {
     if (!getContentType(req).includes("application/json")) {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
@@ -237,7 +275,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
       return { status: 500, body: { error: "لم يتم تكوين مفتاح ChatGPT API." } };
     }
 
-    const selectedModel = typeof model === "string" && model.trim()
+    selectedModel = typeof model === "string" && model.trim()
       ? model.trim()
       : OPENAI_MODEL;
     const requestedConversationId = normalizeConversationId(conversationId);
@@ -262,6 +300,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
             keySuffix: getApiKeySuffix(openAiKey),
             provider: "openai",
             model: selectedModel,
+            attempts,
           },
           headers: {
             "Access-Control-Allow-Origin": "*",
@@ -274,6 +313,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
           continue;
         }
 
+        attempts.push(getOpenAiAttemptFailure(openAiKey, selectedModel, attempts.length + 1, error));
         lastError = error instanceof Error && error.name === "AbortError"
           ? new Error("انتهت مهلة اتصال الخادم بـ OpenAI قبل وصول رد.")
           : error;
@@ -301,12 +341,14 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
               keySuffix: getApiKeySuffix(openAiKey),
               provider: "openai",
               model: selectedModel,
+              attempts,
             },
             headers: {
               "Access-Control-Allow-Origin": "*",
             },
           };
         } catch (error) {
+          attempts.push(getOpenAiAttemptFailure(openAiKey, selectedModel, attempts.length + 1, error));
           lastError = error instanceof Error && error.name === "AbortError"
             ? new Error("انتهت مهلة اتصال الخادم بـ OpenAI قبل وصول رد.")
             : error;
@@ -324,7 +366,18 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
     }
 
     const errorMessage = error instanceof Error ? error.message : "خطأ غير معروف";
-    return { status: 500, body: { error: `خطأ من ChatGPT API: ${errorMessage}` } };
+    const lastAttempt = attempts[attempts.length - 1];
+    return {
+      status: lastAttempt?.status && lastAttempt.status >= 400 && lastAttempt.status < 500 ? lastAttempt.status : 500,
+      body: {
+        error: `خطأ من ChatGPT API: ${errorMessage}`,
+        provider: "openai",
+        model: selectedModel,
+        keyFingerprint: lastAttempt?.keyFingerprint,
+        keySuffix: lastAttempt?.keySuffix,
+        attempts,
+      },
+    };
   }
 };
 

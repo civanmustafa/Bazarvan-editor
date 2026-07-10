@@ -24,6 +24,7 @@ type StoredApiKeys = { gemini?: string | string[]; geminiPaid?: string | string[
 type UserRole = 'admin' | 'user';
 type AppView = 'login' | 'dashboard' | 'editor' | 'admin' | 'settings' | 'notFound';
 type ApiKeyUsedDetail = {
+    requestId?: unknown;
     keyFingerprint?: unknown;
     keySuffix?: unknown;
     service?: unknown;
@@ -46,6 +47,7 @@ type ApiKeyUsedDetail = {
     attemptNumber?: unknown;
     keyCount?: unknown;
     attemptedKeyCount?: unknown;
+    failedAttempts?: unknown;
 };
 type Profile = {
     id: string;
@@ -363,12 +365,30 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const toOptionalNumber = (value: unknown): number | undefined => (
             typeof value === 'number' && Number.isFinite(value) ? value : undefined
         );
+        const toOptionalRecord = (value: unknown): Record<string, unknown> | null => (
+            value && typeof value === 'object' && !Array.isArray(value)
+                ? value as Record<string, unknown>
+                : null
+        );
+        const normalizeFailedAttempts = (value: unknown) => (
+            Array.isArray(value)
+                ? value.map(toOptionalRecord).filter((attempt): attempt is Record<string, unknown> => Boolean(attempt)).map(attempt => ({
+                    keyFingerprint: toOptionalString(attempt.keyFingerprint),
+                    keySuffix: toOptionalString(attempt.keySuffix),
+                    model: toOptionalString(attempt.model),
+                    status: toOptionalNumber(attempt.status),
+                    reason: toOptionalString(attempt.reason),
+                    attempt: toOptionalNumber(attempt.attempt),
+                })).slice(0, 160)
+                : []
+        );
 
         const handleApiKeyUsed = (event: Event) => {
             if (!currentUser) return;
             const detail = (event as CustomEvent<ApiKeyUsedDetail>).detail || {};
-            const keyFingerprint = detail?.keyFingerprint;
-            if (typeof keyFingerprint !== 'string' || !keyFingerprint.trim()) return;
+            const keyFingerprint = toOptionalString(detail?.keyFingerprint);
+            const requestId = toOptionalString(detail?.requestId);
+            if (!keyFingerprint && !requestId) return;
             const provider = detail?.provider === 'geminiPaid'
                 ? 'geminiPaid'
                 : detail?.provider === 'gemini'
@@ -379,7 +399,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const service = toOptionalString(detail.service) || (provider === 'openai' ? 'openai' : 'gemini');
             const model = toOptionalString(detail.model);
 
-            if (provider === 'gemini' || provider === 'geminiPaid') {
+            if (keyFingerprint && (provider === 'gemini' || provider === 'geminiPaid')) {
                 recordGeminiKeyUsage(currentUser, keyFingerprint, {
                     provider,
                     model,
@@ -390,12 +410,13 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 void recordAppActivity(currentUserId, {
                     eventType: 'api_key_used',
                     entityType: 'api_key',
-                    entityId: `${service}:${provider || 'unknown'}:${keyFingerprint.trim()}`,
+                    entityId: `${service}:${provider || 'unknown'}:${requestId || keyFingerprint || 'request'}`,
                     metadata: {
                         service,
                         provider: provider || toOptionalString(detail.provider) || service,
                         model,
-                        keyFingerprint: keyFingerprint.trim(),
+                        requestId,
+                        keyFingerprint,
                         keySuffix: toOptionalString(detail.keySuffix),
                         source: toOptionalString(detail.source) || 'unknown',
                         articleId: toOptionalString(detail.articleId),
@@ -416,6 +437,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         attemptNumber: toOptionalNumber(detail.attemptNumber),
                         keyCount: toOptionalNumber(detail.keyCount),
                         attemptedKeyCount: toOptionalNumber(detail.attemptedKeyCount),
+                        failedAttempts: normalizeFailedAttempts(detail.failedAttempts),
                     },
                 }).catch(error => {
                     console.error('Failed to record API key usage activity:', error);

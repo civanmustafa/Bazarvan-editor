@@ -1272,31 +1272,30 @@ ${readyCommandCompetitorBlocks}`;
                 return;
             }
             if (status < 200 || status >= 300) {
-                if (Array.isArray(data.attempts)) {
-                    data.attempts.forEach((attempt: Record<string, unknown>, attemptIndex: number) => {
-                        const keyFingerprint = typeof attempt.keyFingerprint === 'string' ? attempt.keyFingerprint.trim() : '';
-                        if (!keyFingerprint) return;
-                        window.dispatchEvent(new CustomEvent('api-key-used', {
-                            detail: {
-                                service: 'gemini',
-                                keyFingerprint,
-                                keySuffix: typeof attempt.keySuffix === 'string' ? attempt.keySuffix.trim() : undefined,
-                                provider: data.provider || provider,
-                                model: typeof attempt.model === 'string' ? attempt.model : data.model,
-                                outcome: 'failed',
-                                status: typeof attempt.status === 'number' ? attempt.status : undefined,
-                                reason: typeof attempt.reason === 'string' ? attempt.reason : undefined,
-                                attemptNumber: typeof attempt.attempt === 'number' ? attempt.attempt : attemptIndex + 1,
-                                keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
-                                attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
-                                source: 'competitor_extraction',
-                                action: source,
-                                batchIndex: index + 1,
-                                batchTotal: competitorExtractions.length,
-                            },
-                        }));
-                    });
-                }
+                const failedAttempts = Array.isArray(data.attempts)
+                    ? data.attempts.filter((attempt: unknown): attempt is Record<string, unknown> => Boolean(attempt) && typeof attempt === 'object' && !Array.isArray(attempt))
+                    : [];
+                const lastAttempt = failedAttempts[failedAttempts.length - 1];
+                window.dispatchEvent(new CustomEvent('api-key-used', {
+                    detail: {
+                        service: 'gemini',
+                        requestId: typeof data.progressId === 'string' ? data.progressId : engineResult.progressId,
+                        keyFingerprint: typeof lastAttempt?.keyFingerprint === 'string' ? lastAttempt.keyFingerprint.trim() : undefined,
+                        keySuffix: typeof lastAttempt?.keySuffix === 'string' ? lastAttempt.keySuffix.trim() : undefined,
+                        provider: data.provider || provider,
+                        model: typeof lastAttempt?.model === 'string' ? lastAttempt.model : data.model,
+                        outcome: 'failed',
+                        status: typeof lastAttempt?.status === 'number' ? lastAttempt.status : undefined,
+                        reason: typeof lastAttempt?.reason === 'string' ? lastAttempt.reason : undefined,
+                        keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+                        attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+                        failedAttempts,
+                        source: 'competitor_extraction',
+                        action: source,
+                        batchIndex: index + 1,
+                        batchTotal: competitorExtractions.length,
+                    },
+                }));
                 throw new Error(data.error || `${tRs.competitorExtractionFailed} (${status})`);
             }
             if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
@@ -1311,6 +1310,8 @@ ${readyCommandCompetitorBlocks}`;
                         status,
                         keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
                         attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+                        requestId: typeof data.progressId === 'string' ? data.progressId : engineResult.progressId,
+                        failedAttempts: Array.isArray(data.attempts) ? data.attempts : [],
                         source: 'competitor_extraction',
                         action: source,
                         batchIndex: index + 1,

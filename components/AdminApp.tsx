@@ -587,21 +587,24 @@ const EmptyState: React.FC<{ icon: React.ReactNode; title: string; subtitle?: st
   </div>
 );
 
-type ApiUsageSummary = {
+type ApiUsageFailedAttempt = {
+  keySuffixLabel: string;
+  model: string;
+  status?: number;
+  reason?: string;
+};
+
+type ApiUsageRequest = {
   id: string;
   service: string;
   provider: string;
   model: string;
-  keyIdentity: string;
   keySuffixLabel: string;
-  count: number;
-  successCount: number;
-  failureCount: number;
-  reasons: Set<string>;
-  users: Set<string>;
-  sources: Set<string>;
-  events: RemoteAppActivityEvent[];
-  lastUsedAt: string;
+  outcome: 'success' | 'failed' | 'cancelled';
+  userId: string | null;
+  source: string;
+  createdAt: string;
+  failedAttempts: ApiUsageFailedAttempt[];
 };
 
 const getActivityMetadata = (event: RemoteAppActivityEvent): Record<string, any> => (
@@ -633,92 +636,75 @@ const getApiSourceLabel = (source?: string): string => {
   return labels[source || 'unknown'] || source || 'غير محدد';
 };
 
-const getApiKeyIdentity = (event: RemoteAppActivityEvent, metadata: Record<string, any>): string => {
-  const keyFingerprint = typeof metadata.keyFingerprint === 'string' && metadata.keyFingerprint.trim()
-    ? metadata.keyFingerprint.trim()
-    : '';
-  const entityId = typeof event.entityId === 'string' && event.entityId.trim()
-    ? event.entityId.trim()
-    : '';
-  const keySuffix = typeof metadata.keySuffix === 'string' && metadata.keySuffix.trim()
-    ? metadata.keySuffix.trim()
-    : '';
-  return keyFingerprint || entityId || keySuffix || 'unknown';
-};
-
 const formatApiKeySuffixLabel = (value: unknown): string => {
   const keySuffix = typeof value === 'string' && value.trim() ? value.trim() : '';
   return keySuffix ? `••••${keySuffix.slice(-6)}` : 'غير متاح';
 };
 
-const getApiKeySuffixLabel = (metadata: Record<string, any>): string => (
-  formatApiKeySuffixLabel(metadata.keySuffix)
-);
-
 const getApiUsageEvents = (events: RemoteAppActivityEvent[]): RemoteAppActivityEvent[] => (
   events.filter(event => event.eventType === 'api_key_used')
 );
 
-const sortActivityEventsNewestFirst = <T extends { createdAt: string }>(events: T[]): T[] => (
-  [...events].sort((left, right) => (
-    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
-  ))
-);
+const getApiAttemptReasonLabel = (reason?: string): string => {
+  const labels: Record<string, string> = {
+    quota: 'الحصة مستنفدة',
+    auth: 'المفتاح غير صالح أو غير مصرح',
+    server: 'خطأ مؤقت من الخادم',
+    blocked: 'محظور من خدمة Gemini',
+    unknown: 'سبب غير معروف',
+  };
+  return labels[reason || ''] || reason || 'فشل الطلب';
+};
 
-const buildApiUsageSummary = (events: RemoteAppActivityEvent[]): ApiUsageSummary[] => {
-  const summaries = new Map<string, ApiUsageSummary>();
+const normalizeApiUsageFailedAttempts = (metadata: Record<string, any>): ApiUsageFailedAttempt[] => {
+  const attempts = Array.isArray(metadata.failedAttempts)
+    ? metadata.failedAttempts.filter(isRecord).map((attempt): ApiUsageFailedAttempt => ({
+      keySuffixLabel: formatApiKeySuffixLabel(attempt.keySuffix),
+      model: typeof attempt.model === 'string' && attempt.model.trim() ? attempt.model.trim() : '-',
+      status: typeof attempt.status === 'number' ? attempt.status : undefined,
+      reason: typeof attempt.reason === 'string' && attempt.reason.trim() ? attempt.reason.trim() : undefined,
+    }))
+    : [];
 
-  events.forEach(event => {
+  if (attempts.length > 0) return attempts;
+  if (metadata.outcome !== 'failed') return [];
+  if (!metadata.keySuffix && !metadata.keyFingerprint && !metadata.reason) return [];
+
+  return [{
+    keySuffixLabel: formatApiKeySuffixLabel(metadata.keySuffix),
+    model: typeof metadata.model === 'string' && metadata.model.trim() ? metadata.model.trim() : '-',
+    status: typeof metadata.status === 'number' ? metadata.status : undefined,
+    reason: typeof metadata.reason === 'string' && metadata.reason.trim() ? metadata.reason.trim() : undefined,
+  }];
+};
+
+const buildApiUsageRequests = (events: RemoteAppActivityEvent[]): ApiUsageRequest[] => (
+  events.map(event => {
     const metadata = getActivityMetadata(event);
-    const keyIdentity = getApiKeyIdentity(event, metadata);
-    const keySuffixLabel = getApiKeySuffixLabel(metadata);
     const service = typeof metadata.service === 'string' && metadata.service.trim() ? metadata.service.trim() : 'ai';
     const provider = typeof metadata.provider === 'string' && metadata.provider.trim() ? metadata.provider.trim() : service;
-    const model = typeof metadata.model === 'string' && metadata.model.trim() ? metadata.model.trim() : '-';
+    const failedAttempts = normalizeApiUsageFailedAttempts(metadata);
+    const lastFailedAttempt = failedAttempts[failedAttempts.length - 1];
+    const model = typeof metadata.model === 'string' && metadata.model.trim()
+      ? metadata.model.trim()
+      : lastFailedAttempt?.model || '-';
     const source = typeof metadata.source === 'string' && metadata.source.trim() ? metadata.source.trim() : 'unknown';
-    const id = `${service}:${provider}:${model}:${keyIdentity}`;
-    const summary = summaries.get(id) || {
-      id,
+    const rawOutcome = typeof metadata.outcome === 'string' ? metadata.outcome : 'success';
+
+    return {
+      id: event.id,
       service,
       provider,
       model,
-      keyIdentity,
-      keySuffixLabel,
-      count: 0,
-      successCount: 0,
-      failureCount: 0,
-      reasons: new Set<string>(),
-      users: new Set<string>(),
-      sources: new Set<string>(),
-      events: [],
-      lastUsedAt: event.createdAt,
+      keySuffixLabel: formatApiKeySuffixLabel(metadata.keySuffix),
+      outcome: rawOutcome === 'failed' ? 'failed' : rawOutcome === 'cancelled' ? 'cancelled' : 'success',
+      userId: event.userId || null,
+      source,
+      createdAt: event.createdAt,
+      failedAttempts,
     };
-
-    if (summary.keySuffixLabel === 'غير متاح' && keySuffixLabel !== 'غير متاح') {
-      summary.keySuffixLabel = keySuffixLabel;
-    }
-    summary.count += 1;
-    if (metadata.outcome === 'failed') {
-      summary.failureCount += 1;
-      if (typeof metadata.reason === 'string' && metadata.reason.trim()) {
-        summary.reasons.add(metadata.reason.trim());
-      }
-    } else {
-      summary.successCount += 1;
-    }
-    if (event.userId) summary.users.add(event.userId);
-    summary.sources.add(source);
-    summary.events.push(event);
-    if (new Date(event.createdAt).getTime() > new Date(summary.lastUsedAt).getTime()) {
-      summary.lastUsedAt = event.createdAt;
-    }
-    summaries.set(id, summary);
-  });
-
-  return Array.from(summaries.values()).sort((left, right) => (
-    right.count - left.count || new Date(right.lastUsedAt).getTime() - new Date(left.lastUsedAt).getTime()
-  ));
-};
+  }).sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+);
 
 const ReportsPage: React.FC<{
   articles: RemoteArticleActivity[];
@@ -742,11 +728,14 @@ const ReportsPage: React.FC<{
   const n8nLogs = logs.filter(log => inDay(log.createdAt));
   const dayActivityEvents = activityEvents.filter(event => inDay(event.createdAt));
   const apiUsageEvents = getApiUsageEvents(dayActivityEvents);
-  const apiUsageSummary = buildApiUsageSummary(apiUsageEvents);
-  const apiKeyCount = new Set(apiUsageEvents.map(event => getApiKeyIdentity(event, getActivityMetadata(event))).filter(Boolean)).size;
-  const freeGeminiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'gemini').length;
-  const paidGeminiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'geminiPaid').length;
-  const openAiApiCalls = apiUsageEvents.filter(event => getActivityMetadata(event).provider === 'openai' || getActivityMetadata(event).service === 'openai').length;
+  const apiUsageRequests = buildApiUsageRequests(apiUsageEvents);
+  const apiKeyCount = new Set(apiUsageRequests.flatMap(request => [
+    request.keySuffixLabel,
+    ...request.failedAttempts.map(attempt => attempt.keySuffixLabel),
+  ]).filter(label => label !== 'غير متاح')).size;
+  const freeGeminiApiCalls = apiUsageRequests.filter(request => request.provider === 'gemini').length;
+  const paidGeminiApiCalls = apiUsageRequests.filter(request => request.provider === 'geminiPaid').length;
+  const openAiApiCalls = apiUsageRequests.filter(request => request.provider === 'openai' || request.service === 'openai').length;
   const aiErrors = articles.filter(article => JSON.stringify(article.metadata || {}).toLowerCase().includes('error'));
   const activeUserIds = new Set(dayActivityEvents.map(event => event.userId).filter(Boolean));
 
@@ -775,7 +764,7 @@ const ReportsPage: React.FC<{
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-        <AdminStat icon={<Key size={18} />} label="استدعاءات API" value={apiUsageEvents.length} />
+        <AdminStat icon={<Key size={18} />} label="استدعاءات API" value={apiUsageRequests.length} />
         <AdminStat icon={<Shield size={18} />} label="مفاتيح مستخدمة" value={apiKeyCount} />
         <AdminStat icon={<Sparkles size={18} />} label="Gemini المجاني" value={freeGeminiApiCalls} />
         <AdminStat icon={<BrainCircuit size={18} />} label="OpenAI / Pro" value={paidGeminiApiCalls + openAiApiCalls} />
@@ -783,7 +772,7 @@ const ReportsPage: React.FC<{
 
       <section className="space-y-4">
         <SectionTitle>استخدام مفاتيح API</SectionTitle>
-        <ApiUsageSummaryTable summaries={apiUsageSummary} profiles={profiles} t={t} />
+        <ApiUsageRequestTable requests={apiUsageRequests} profiles={profiles} t={t} />
       </section>
 
       <section>
@@ -794,113 +783,74 @@ const ReportsPage: React.FC<{
   );
 };
 
-const ApiUsageSummaryTable: React.FC<{
-  summaries: ApiUsageSummary[];
+const ApiUsageRequestTable: React.FC<{
+  requests: ApiUsageRequest[];
   profiles: RemoteProfile[];
   t: typeof translations.ar;
-}> = ({ summaries, profiles, t }) => {
-  const getUserLabel = (userId: string): string => {
-    const profile = profiles.find(item => item.id === userId);
-    return getProfileLabel(profile);
-  };
-
-  const getEventUserLabel = (userId?: string | null): string => {
+}> = ({ requests, profiles, t }) => {
+  const getUserLabel = (userId?: string | null): string => {
     const profile = userId ? profiles.find(item => item.id === userId) : null;
     return getProfileLabel(profile);
   };
 
-  const getAttemptLabel = (metadata: Record<string, any>): string => {
-    const parts = [
-      typeof metadata.attemptNumber === 'number' ? `محاولة ${metadata.attemptNumber}` : '',
-      typeof metadata.attemptedKeyCount === 'number' && typeof metadata.keyCount === 'number'
-        ? `${metadata.attemptedKeyCount}/${metadata.keyCount}`
-        : '',
-    ].filter(Boolean);
-    return parts.join(' / ');
-  };
-
-  const renderRecentEvents = (summary: ApiUsageSummary) => {
-    const recentEvents = sortActivityEventsNewestFirst(summary.events).slice(0, 4);
+  const renderFailedAttempts = (attempts: ApiUsageFailedAttempt[]) => {
+    if (attempts.length === 0) return <span className="text-gray-400">-</span>;
 
     return (
-      <div className="space-y-2">
-        {recentEvents.map(event => {
-          const metadata = getActivityMetadata(event);
-          const outcome = typeof metadata.outcome === 'string' ? metadata.outcome : 'success';
-          const statusLabel = outcome === 'failed' ? 'فشل' : 'نجاح';
-          const attemptLabel = getAttemptLabel(metadata);
-          const articleLabel = [metadata.articleTitle, metadata.commandLabel || metadata.action]
-            .map(value => typeof value === 'string' ? value.trim() : '')
-            .filter(Boolean)
-            .join(' / ');
-
-          return (
-            <div key={event.id} className="rounded-md bg-gray-50 px-2 py-1.5 text-xs leading-5 text-gray-600 dark:bg-[#232323] dark:text-gray-300">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="font-mono text-gray-500">{formatIstanbulDateTime(event.createdAt, t.locale, { hour: '2-digit', minute: '2-digit' })}</span>
-                <span className="font-bold text-gray-700 dark:text-gray-200">{getEventUserLabel(event.userId)}</span>
-                <span>{getApiSourceLabel(typeof metadata.source === 'string' ? metadata.source : undefined)}</span>
-                <span className={outcome === 'failed' ? 'font-black text-red-600 dark:text-red-300' : 'font-black text-emerald-600 dark:text-emerald-300'}>
-                  {statusLabel}
-                </span>
-                {attemptLabel ? <span className="font-mono text-gray-400">{attemptLabel}</span> : null}
-              </div>
-              {articleLabel ? (
-                <div className="mt-0.5 truncate text-gray-400" title={articleLabel}>{articleLabel}</div>
-              ) : null}
-            </div>
-          );
-        })}
-        {summary.events.length > recentEvents.length ? (
-          <div className="text-xs font-bold text-gray-400">+{summary.events.length - recentEvents.length} استدعاءات أخرى</div>
-        ) : null}
-      </div>
+      <details className="max-w-[360px] rounded-md bg-red-50 px-2 py-1.5 text-xs text-red-800 dark:bg-red-950/30 dark:text-red-200">
+        <summary className="cursor-pointer font-black">{attempts.length} مفاتيح فاشلة</summary>
+        <ul className="mt-2 space-y-1.5 border-t border-red-100 pt-2 dark:border-red-900/50">
+          {attempts.map((attempt, index) => (
+            <li key={`${attempt.keySuffixLabel}-${attempt.model}-${index}`} className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+              <span className="font-mono font-black">{attempt.keySuffixLabel}</span>
+              <span className="min-w-0 break-words">{getApiAttemptReasonLabel(attempt.reason)}</span>
+              <span className="col-span-2 text-[11px] text-red-600/80 dark:text-red-300/80">
+                {attempt.model}{typeof attempt.status === 'number' ? ` · HTTP ${attempt.status}` : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
     );
   };
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <table className="w-full min-w-[1360px] text-start text-sm">
+      <table className="w-full min-w-[1320px] text-start text-sm">
         <thead className="text-xs uppercase text-gray-400">
           <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
-            <th className="px-3 py-2 text-start">API</th>
+            <th className="px-3 py-2 text-start">نوع النموذج</th>
             <th className="px-3 py-2 text-start">الموديل</th>
             <th className="px-3 py-2 text-start">آخر أحرف المفتاح</th>
-            <th className="px-3 py-2 text-start">الاستدعاءات</th>
-            <th className="px-3 py-2 text-start">النجاح</th>
-            <th className="px-3 py-2 text-start">الفشل</th>
-            <th className="px-3 py-2 text-start">الأسباب</th>
-            <th className="px-3 py-2 text-start">المستخدمون</th>
-            <th className="px-3 py-2 text-start">المصادر</th>
-            <th className="px-3 py-2 text-start">آخر الاستدعاءات</th>
-            <th className="px-3 py-2 text-start">آخر استخدام</th>
+            <th className="px-3 py-2 text-start">النتيجة</th>
+            <th className="px-3 py-2 text-start">المفاتيح الفاشلة</th>
+            <th className="px-3 py-2 text-start">المستخدم</th>
+            <th className="px-3 py-2 text-start">المصدر</th>
+            <th className="px-3 py-2 text-start">تاريخ ووقت الاستدعاء</th>
           </tr>
         </thead>
         <tbody>
-          {summaries.length > 0 ? summaries.map(summary => (
-            <tr key={summary.id} className="border-b border-gray-100 dark:border-[#3C3C3C]">
-              <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getApiProviderLabel(summary.service, summary.provider)}</td>
-              <td className="px-3 py-3 font-mono text-xs text-gray-500">{summary.model}</td>
-              <td className="px-3 py-3 font-mono text-xs font-black text-gray-600 dark:text-gray-300">{summary.keySuffixLabel}</td>
-              <td className="px-3 py-3 font-black text-[#8a6f1d] dark:text-[#f2d675]">{summary.count}</td>
-              <td className="px-3 py-3 font-black text-emerald-600 dark:text-emerald-300">{summary.successCount}</td>
-              <td className="px-3 py-3 font-black text-red-600 dark:text-red-300">{summary.failureCount}</td>
-              <td className="max-w-[220px] px-3 py-3 text-gray-500" title={Array.from(summary.reasons).join(', ')}>
-                {Array.from(summary.reasons).join(', ') || '-'}
+          {requests.length > 0 ? requests.map(request => (
+            <tr key={request.id} className="border-b border-gray-100 align-top dark:border-[#3C3C3C]">
+              <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getApiProviderLabel(request.service, request.provider)}</td>
+              <td className="px-3 py-3 font-mono text-xs text-gray-500">{request.model}</td>
+              <td className="px-3 py-3 font-mono text-xs font-black text-gray-600 dark:text-gray-300">{request.keySuffixLabel}</td>
+              <td className="px-3 py-3">
+                <span className={request.outcome === 'success'
+                  ? 'font-black text-emerald-600 dark:text-emerald-300'
+                  : request.outcome === 'cancelled'
+                    ? 'font-black text-gray-500 dark:text-gray-300'
+                    : 'font-black text-red-600 dark:text-red-300'}>
+                  {request.outcome === 'success' ? 'نجح' : request.outcome === 'cancelled' ? 'تم الإيقاف' : 'فشل'}
+                </span>
               </td>
-              <td className="max-w-[220px] px-3 py-3 text-gray-500" title={Array.from(summary.users).map(getUserLabel).join(', ')}>
-                {summary.users.size > 0 ? Array.from(summary.users).slice(0, 2).map(getUserLabel).join(', ') : '-'}
-                {summary.users.size > 2 ? ` +${summary.users.size - 2}` : ''}
-              </td>
-              <td className="max-w-[260px] px-3 py-3 text-gray-500" title={Array.from(summary.sources).map(getApiSourceLabel).join(', ')}>
-                {Array.from(summary.sources).slice(0, 3).map(getApiSourceLabel).join(', ') || '-'}
-                {summary.sources.size > 3 ? ` +${summary.sources.size - 3}` : ''}
-              </td>
-              <td className="max-w-[380px] px-3 py-3">{renderRecentEvents(summary)}</td>
-              <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(summary.lastUsedAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+              <td className="px-3 py-3">{renderFailedAttempts(request.failedAttempts)}</td>
+              <td className="max-w-[220px] px-3 py-3 text-gray-600 dark:text-gray-300">{getUserLabel(request.userId)}</td>
+              <td className="max-w-[220px] px-3 py-3 text-gray-600 dark:text-gray-300">{getApiSourceLabel(request.source)}</td>
+              <td className="whitespace-nowrap px-3 py-3 text-gray-500">{formatIstanbulDateTime(request.createdAt, t.locale, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
             </tr>
           )) : (
-            <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
+            <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
           )}
         </tbody>
       </table>

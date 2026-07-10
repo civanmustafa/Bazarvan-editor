@@ -1900,28 +1900,31 @@ const dispatchGeminiApiUsage = (
     }));
 };
 
-const dispatchGeminiFailedAttempts = (
+const getGeminiFailedAttempts = (data: Record<string, any>): GeminiServerAttempt[] => (
+    Array.isArray(data.attempts) ? data.attempts as GeminiServerAttempt[] : []
+);
+
+const dispatchGeminiRequestFailure = (
     data: Record<string, any>,
     usageContext: AiApiUsageContext,
+    requestId?: string,
 ) => {
-    const attempts = Array.isArray(data.attempts) ? data.attempts as GeminiServerAttempt[] : [];
-    attempts.forEach((attempt, index) => {
-        const keyFingerprint = typeof attempt.keyFingerprint === 'string' ? attempt.keyFingerprint.trim() : '';
-        if (!keyFingerprint) return;
+    const failedAttempts = getGeminiFailedAttempts(data);
+    const lastAttempt = failedAttempts[failedAttempts.length - 1];
 
-        dispatchGeminiApiUsage({
-            keyFingerprint,
-            keySuffix: typeof attempt.keySuffix === 'string' ? attempt.keySuffix.trim() : undefined,
-            provider: data.provider,
-            model: typeof attempt.model === 'string' ? attempt.model : data.model,
-            outcome: 'failed',
-            status: typeof attempt.status === 'number' ? attempt.status : undefined,
-            reason: typeof attempt.reason === 'string' ? attempt.reason : undefined,
-            attemptNumber: typeof attempt.attempt === 'number' ? attempt.attempt : index + 1,
-            keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
-            attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
-            ...usageContext,
-        });
+    dispatchGeminiApiUsage({
+        requestId: typeof data.progressId === 'string' ? data.progressId : requestId,
+        keyFingerprint: typeof lastAttempt?.keyFingerprint === 'string' ? lastAttempt.keyFingerprint.trim() : undefined,
+        keySuffix: typeof lastAttempt?.keySuffix === 'string' ? lastAttempt.keySuffix.trim() : undefined,
+        provider: data.provider,
+        model: typeof lastAttempt?.model === 'string' ? lastAttempt.model : data.model,
+        outcome: 'failed',
+        status: typeof lastAttempt?.status === 'number' ? lastAttempt.status : undefined,
+        reason: typeof lastAttempt?.reason === 'string' ? lastAttempt.reason : undefined,
+        keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
+        attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+        failedAttempts,
+        ...usageContext,
     });
 };
 
@@ -2121,7 +2124,7 @@ const requestGeminiAnalysis = async (
           },
           onProgress: progressCallback,
       });
-      const { status, data, rawBody, progress } = engineResult;
+      const { status, data, rawBody, progress, progressId } = engineResult;
 
       if (status === 404) {
           throw new Error('Gemini API route is not enabled locally. Restart the Vite dev server so it can load the local API middleware.');
@@ -2150,7 +2153,7 @@ const requestGeminiAnalysis = async (
       }
 
       if (status < 200 || status >= 300) {
-          dispatchGeminiFailedAttempts(data, usageContext);
+          dispatchGeminiRequestFailure(data, usageContext, progressId);
           const serverError = typeof data.error === 'string'
               ? data.error
               : typeof data.error?.message === 'string'
@@ -2194,6 +2197,8 @@ const requestGeminiAnalysis = async (
               status,
               keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
               attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
+              requestId: typeof data.progressId === 'string' ? data.progressId : progressId,
+              failedAttempts: getGeminiFailedAttempts(data),
               ...usageContext,
           });
       }
@@ -2510,6 +2515,7 @@ const callChatGptAnalysis = async (
 ): Promise<ChatGptAnalysisResult> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
+    const requestId = `openai-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 
     try {
         const response = await fetch('/api/chatgpt', {
@@ -2533,6 +2539,25 @@ const callChatGptAnalysis = async (
         }
 
         if (!response.ok) {
+            const failedAttempts = Array.isArray(data.attempts)
+                ? data.attempts.filter((attempt: unknown): attempt is Record<string, unknown> => Boolean(attempt) && typeof attempt === 'object' && !Array.isArray(attempt))
+                : [];
+            const lastAttempt = failedAttempts[failedAttempts.length - 1];
+            window.dispatchEvent(new CustomEvent('api-key-used', {
+                detail: {
+                    service: 'openai',
+                    provider: 'openai',
+                    requestId,
+                    keyFingerprint: typeof lastAttempt?.keyFingerprint === 'string' ? lastAttempt.keyFingerprint.trim() : undefined,
+                    keySuffix: typeof lastAttempt?.keySuffix === 'string' ? lastAttempt.keySuffix.trim() : undefined,
+                    model: typeof lastAttempt?.model === 'string' ? lastAttempt.model : data.model || OPENAI_MODEL,
+                    outcome: 'failed',
+                    status: typeof lastAttempt?.status === 'number' ? lastAttempt.status : response.status,
+                    reason: typeof lastAttempt?.reason === 'string' ? lastAttempt.reason : undefined,
+                    failedAttempts,
+                    ...usageContext,
+                },
+            }));
             throw new Error(data.error?.message || data.error || `ChatGPT request failed with status ${response.status}`);
         }
 
@@ -2545,9 +2570,13 @@ const callChatGptAnalysis = async (
                 detail: {
                     service: 'openai',
                     provider: 'openai',
+                    requestId,
                     keyFingerprint: data.keyFingerprint.trim(),
                     keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix.trim() : undefined,
                     model: typeof data.model === 'string' ? data.model : OPENAI_MODEL,
+                    outcome: 'success',
+                    status: response.status,
+                    failedAttempts: Array.isArray(data.attempts) ? data.attempts : [],
                     ...usageContext,
                 },
             }));
