@@ -25,9 +25,12 @@ supabase/migrations/20260703010000_manual_article_public_defaults.sql
 نفذ:
 
 ```bash
-cd /path/to/editor
+cd /var/www/bazarvan-editor
 git pull origin main
-npm ci
+set -a
+source .env.server
+set +a
 npm run build
 pm2 restart bazarvan-editor --update-env
+pm2 save
 ```

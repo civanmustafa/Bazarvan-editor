@@ -47,14 +47,17 @@ supabase/migrations/20260702010000_limit_article_visibility_options.sql
 ادخل إلى السيرفر عبر SSH ثم نفذ:
 
 ```bash
-cd /path/to/editor
+cd /var/www/bazarvan-editor
 git pull origin main
-npm ci
+set -a
+source .env.server
+set +a
 npm run build
 pm2 restart bazarvan-editor --update-env
+pm2 save
 ```
 
-استبدل `/path/to/editor` بمسار مشروع المحرر على السيرفر.
+المسار المعتمد على Hostinger هو `/var/www/bazarvan-editor` حسب إعداد PM2 الحالي.
 
 ## 4. التحقق بعد النشر
 
@@ -63,4 +66,3 @@ pm2 restart bazarvan-editor --update-env
 - تأكد أن حقل `visibility` لا يعرض خيارات `shared` أو `team`.
 - افتح مقالة من لوحة التحكم وجرب تغيير `status` من شريط عنوان المحرر.
 - افتح تبويب المنافسين وتأكد أن خانات HTML لم تعد تظهر.
-

@@ -69,11 +69,14 @@ OPENAI_API_KEY=...
 
 ## 4. نشر الكود على Hostinger
 
-على السيرفر داخل مجلد المشروع:
+على السيرفر داخل المسار المعتمد للمشروع:
 
 ```bash
+cd /var/www/bazarvan-editor
 git pull origin main
-npm ci
+set -a
+source .env.server
+set +a
 npm run build
 pm2 restart bazarvan-editor --update-env
 pm2 save

@@ -64,11 +64,14 @@ ASSIGNED_ARTICLE_AI_PAUSE_MS=5000
 نفذ على السيرفر:
 
 ```bash
-cd /path/to/editor
+cd /var/www/bazarvan-editor
 git pull origin main
-npm ci
+set -a
+source .env.server
+set +a
 npm run build
 pm2 restart bazarvan-editor --update-env
+pm2 save
 ```
 
 بعدها جرّب:

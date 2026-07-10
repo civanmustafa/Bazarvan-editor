@@ -18,3 +18,21 @@ View your app in AI Studio: https://ai.studio/apps/drive/1fFOcvdpfbinFoVmTjLpdhQ
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Hostinger Deploy
+
+Canonical server path:
+
+```bash
+cd /var/www/bazarvan-editor
+git pull origin main
+set -a
+source .env.server
+set +a
+npm run build
+pm2 restart bazarvan-editor --update-env
+pm2 save
+curl -I https://smarteditor.bazarvan.com/admin
+```
+
+PM2 currently points to `/var/www/bazarvan-editor`; do not use `/var/www/bazarvan-smarteditor` unless PM2 is intentionally reconfigured.

@@ -62,11 +62,14 @@ export GEMINI_ALLOWED_MODELS="model_1,model_2"
 بعدها حدّث المشروع وشغّله:
 
 ```bash
-cd /مسار/المحرر/على/السيرفر
+cd /var/www/bazarvan-editor
 git pull origin main
-npm ci
+set -a
+source .env.server
+set +a
 npm run build
 pm2 restart bazarvan-editor --update-env
+pm2 save
 ```
 
 إذا كان اسم تطبيق PM2 مختلفًا عن `bazarvan-editor`، اعرف الاسم بهذا الأمر:
