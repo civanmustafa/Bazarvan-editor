@@ -324,7 +324,7 @@ const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
   const { keywords, setKeywords, setGoalContext, analysisResults, setIsDuplicatesTabActive } = useEditor();
   const { applyHighlights, clearAllHighlights, highlightedItem, setHighlightedItem } = useInteraction();
-  const { generateSemanticKeywords, aiRequestProgress } = useAI();
+  const { generateSemanticKeywords, aiRequestProgress, cancelAiRequest } = useAI();
   
   const { keywordAnalysis, duplicateAnalysis, duplicateStats } = analysisResults;
 
@@ -607,6 +607,7 @@ const LeftSidebar: React.FC = () => {
     setSemanticGenerationStatus('');
     try {
       const result = await generateSemanticKeywords();
+      if (result.cancelled) return;
       if (result.error) {
         setSemanticGenerationStatus(result.error);
         return;
@@ -642,7 +643,7 @@ const LeftSidebar: React.FC = () => {
         <span>{isGeneratingSemanticKeywords ? tLk.generatingSemanticKeywords : tLk.generateSemanticKeywords}</span>
       </button>
       {isGeneratingSemanticKeywords && aiRequestProgress?.source === 'semantic_keywords_lsi' && (
-        <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact />
+        <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact onCancel={cancelAiRequest} />
       )}
       {semanticGenerationStatus && (
         <p className={`text-xs font-bold ${semanticGenerationStatus === tLk.semanticKeywordsGenerated ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} aria-live="polite">

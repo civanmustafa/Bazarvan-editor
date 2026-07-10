@@ -31,7 +31,7 @@ const AiMenuItem: React.FC<{ onClick: () => void; disabled: boolean; children: R
 
 const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading, uiLanguage, t, onAiRequest, onAnalyzeHeadings }) => {
     const { engineeringPrompts } = useUser();
-    const { quickAiProvider, setQuickAiProvider, aiRequestProgress } = useAI();
+    const { quickAiProvider, setQuickAiProvider, aiRequestProgress, cancelAiRequest } = useAI();
     const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
     const [isToneMenuOpen, setIsToneMenuOpen] = useState(false);
     const [isExpandMenuOpen, setIsExpandMenuOpen] = useState(false);
@@ -121,7 +121,7 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
             </ToolbarButton>
             {isAnyGeminiLoading && (aiRequestProgress?.source === 'floating_toolbar' || aiRequestProgress?.source === 'heading_analysis') && (
                 <div className="absolute top-full z-[1000] mt-1 w-72 max-w-[calc(100vw-2rem)]">
-                    <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact />
+                    <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact onCancel={cancelAiRequest} />
                 </div>
             )}
             {isAiMenuOpen && (

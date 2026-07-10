@@ -14,7 +14,7 @@ const MANUAL_COMMAND_PREFIX = 'أنت خبير محتوى SEO/AEO/GEO/LLM SEO.';
 const SelectionToolbar: React.FC = () => {
   const { uiLanguage } = useUser();
   const { editor, scrollContainerRef } = useEditor();
-  const { handleAiRequest: onAiRequest, isAiCommandLoading, isAiLoading, quickAiProvider, setQuickAiProvider, aiRequestProgress } = useAI();
+  const { handleAiRequest: onAiRequest, isAiCommandLoading, isAiLoading, quickAiProvider, setQuickAiProvider, aiRequestProgress, cancelAiRequest } = useAI();
   
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -251,7 +251,7 @@ const SelectionToolbar: React.FC = () => {
       </div>
       {isAiCommandLoading && aiRequestProgress?.source === 'floating_toolbar' && (
         <div className="mt-1 w-72 max-w-[calc(100vw-2rem)]">
-          <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact />
+          <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact onCancel={cancelAiRequest} />
         </div>
       )}
       {isManualCommandOpen && (

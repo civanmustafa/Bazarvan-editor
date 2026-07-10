@@ -781,6 +781,7 @@ const StructureTab: React.FC = () => {
         clearBulkFixReviewItems,
         handleAiFix,
         aiFixingInfo,
+        cancelAiRequest,
     } = useAI();
     
     const { structureAnalysis: analysis, structureStats: stats } = analysisResults;
@@ -1071,6 +1072,7 @@ const StructureTab: React.FC = () => {
                            progress={{ ...geminiProgress, active: true }}
                            isArabic={uiLanguage === 'ar'}
                            compact
+                           onCancel={cancelAiRequest}
                        />
                    ) : (
                        <div className="rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/10 p-2 text-[11px] font-bold text-gray-700 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/15 dark:text-gray-200">

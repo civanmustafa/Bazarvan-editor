@@ -740,6 +740,7 @@ const RightSidebar: React.FC = () => {
         aiInsertionPatches,
         isAiLoading,
         aiRequestProgress,
+        cancelAiRequest,
         applyAiInsertionPatch,
         selectAiInsertionPatchTarget,
         deleteAiInsertionPatchMergeDeleteTarget,
@@ -1249,6 +1250,26 @@ ${readyCommandCompetitorBlocks}`;
             const { status, data } = engineResult;
             if (status === 404) {
                 throw new Error(tRs.competitorApiUnavailable);
+            }
+            if (status === 499 || data.cancelled === true) {
+                setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                    status: 'idle',
+                    source,
+                    content: null,
+                    error: '',
+                } : item));
+                setCompetitorGeminiProgress(prev => ({
+                    ...prev,
+                    [index]: {
+                        ...(prev[index] || {}),
+                        stage: 'cancelled',
+                        status: 499,
+                        active: false,
+                        completed: true,
+                        message: isArabicLocale ? 'تم إيقاف التحليل يدويًا.' : 'Analysis stopped manually.',
+                    },
+                }));
+                return;
             }
             if (status < 200 || status >= 300) {
                 if (Array.isArray(data.attempts)) {
@@ -1803,7 +1824,7 @@ ${readyCommandCompetitorBlocks}`;
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
                                         {isAiLoading.gemini ? (
                                             isGeminiSmartProgress && aiRequestProgress?.provider !== 'geminiPaid'
-                                                ? <GeminiProgressStatus progress={aiRequestProgress} isArabic={isArabicLocale} compact />
+                                                ? <GeminiProgressStatus progress={aiRequestProgress} isArabic={isArabicLocale} compact onCancel={cancelAiRequest} />
                                                 : <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div>
                                         ) :
                                          aiResults.gemini ? renderAnalysisResult('gemini', aiResults.gemini) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
@@ -1820,7 +1841,7 @@ ${readyCommandCompetitorBlocks}`;
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
                                         {isAiLoading.geminiPaid ? (
                                             isGeminiSmartProgress && aiRequestProgress?.provider === 'geminiPaid'
-                                                ? <GeminiProgressStatus progress={aiRequestProgress} isArabic={isArabicLocale} compact />
+                                                ? <GeminiProgressStatus progress={aiRequestProgress} isArabic={isArabicLocale} compact onCancel={cancelAiRequest} />
                                                 : <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div>
                                         ) :
                                          aiResults.geminiPaid ? renderAnalysisResult('geminiPaid', aiResults.geminiPaid) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
@@ -1962,7 +1983,7 @@ ${readyCommandCompetitorBlocks}`;
 
                             {isLoading && competitorGeminiProgress[index] && (
                                 <div className="mt-2">
-                                    <GeminiProgressStatus progress={competitorGeminiProgress[index]} isArabic={isArabicLocale} compact />
+                                    <GeminiProgressStatus progress={competitorGeminiProgress[index]} isArabic={isArabicLocale} compact onCancel={cancelAiRequest} />
                                 </div>
                             )}
 

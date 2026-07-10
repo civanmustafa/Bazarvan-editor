@@ -33,6 +33,7 @@ import { normalizeGoalContext } from '../utils/goalContext';
 import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
 import { getSelectedGeminiFreeModel, isGeminiFreeModelFallbackEnabled } from '../utils/geminiModelPreference';
 import {
+    cancelGeminiAnalysisEngine,
     runGeminiAnalysisEngine,
     type GeminiProgressCallback,
     type GeminiProgressSnapshot,
@@ -1946,11 +1947,23 @@ type GeminiChatMessage = {
 type GeminiAnalysisResult = {
     text: string;
     ok: boolean;
+    cancelled?: boolean;
     keyFingerprint?: string;
     keySuffix?: string;
     provider?: GeminiPatchProvider;
     model?: string;
 };
+
+class GeminiAnalysisCancelledError extends Error {
+    constructor() {
+        super('تم إيقاف التحليل يدويًا.');
+        this.name = 'GeminiAnalysisCancelledError';
+    }
+}
+
+const isGeminiAnalysisCancelledError = (error: unknown): error is GeminiAnalysisCancelledError => (
+    error instanceof GeminiAnalysisCancelledError
+);
 
 type AiApiUsageContext = {
     source?: string;
@@ -2113,6 +2126,28 @@ const requestGeminiAnalysis = async (
           throw new Error('Gemini API route is not enabled locally. Restart the Vite dev server so it can load the local API middleware.');
       }
 
+      if (status === 499 || data.cancelled === true) {
+          progressCallback?.({
+              ...(progress || {}),
+              stage: 'cancelled',
+              provider: progress?.provider || (data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini'),
+              model: progress?.model || (typeof data.model === 'string' ? data.model : model),
+              requestedModel: progress?.requestedModel || model,
+              keyCount: progress?.keyCount || (typeof data.keyCount === 'number' ? data.keyCount : undefined),
+              attemptedKeyCount: progress?.attemptedKeyCount || (typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined),
+              status: 499,
+              message: 'تم إيقاف التحليل يدويًا.',
+              completed: true,
+          });
+          return {
+              text: '',
+              ok: false,
+              cancelled: true,
+              provider: data.provider === 'geminiPaid' ? 'geminiPaid' : 'gemini',
+              model: typeof data.model === 'string' ? data.model : undefined,
+          };
+      }
+
       if (status < 200 || status >= 300) {
           dispatchGeminiFailedAttempts(data, usageContext);
           const serverError = typeof data.error === 'string'
@@ -2213,6 +2248,7 @@ const callGeminiAnalysis = async (
 ): Promise<string> => {
     const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model, usageContext, progressCallback);
     onResult?.(result);
+    if (result.cancelled) throw new GeminiAnalysisCancelledError();
     return result.text;
 };
 
@@ -2236,6 +2272,7 @@ const callGeminiArticleChatAnalysis = async (
         saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
     onResult?.(result);
+    if (result.cancelled) throw new GeminiAnalysisCancelledError();
     return result.text;
 };
 
@@ -4785,6 +4822,7 @@ interface AIContextType {
     bulkFixReviewItems: BulkFixReviewItem[];
     fixAllProgress: FixAllProgress;
     aiRequestProgress: AiRequestProgress | null;
+    cancelAiRequest: (progressId: string) => Promise<void>;
     handleAiRequest: (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => Promise<void>;
     handleAnalyzeHeadings: () => Promise<void>;
     handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta, provider?: GeminiPatchProvider, geminiModel?: string) => Promise<void>;
@@ -4797,8 +4835,8 @@ interface AIContextType {
         provider: AiPatchProvider,
         options?: { namespace?: string; titlePrefix?: string; commandId?: string }
     ) => SmartAnalysisParsedResult;
-    generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string }>;
-    generateGoalContext: () => Promise<{ context?: GoalContext; error?: string }>;
+    generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string; cancelled?: boolean }>;
+    generateGoalContext: () => Promise<{ context?: GoalContext; error?: string; cancelled?: boolean }>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[], options?: { includeRelatedRules?: boolean; geminiModel?: string; maxViolationsPerRule?: number }) => Promise<void>;
     getRelatedBulkFixRules: (rulesToFix: string[]) => BulkFixRelatedRule[];
@@ -4901,6 +4939,38 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             active: !progress.completed,
         });
         extraCallback?.(progress);
+    }, []);
+
+    const cancelAiRequest = useCallback(async (progressId: string) => {
+        await cancelGeminiAnalysisEngine(progressId);
+        setAiRequestProgress(previous => {
+            const previousProgressId = previous?.progressId || previous?.id;
+            if (!previous || previousProgressId !== progressId) return previous;
+            return {
+                ...previous,
+                stage: 'cancelled',
+                status: 499,
+                message: 'تم إيقاف التحليل يدويًا.',
+                completed: true,
+                active: false,
+            };
+        });
+        setFixAllProgress(previous => {
+            const previousProgressId = previous.geminiProgress?.progressId || previous.geminiProgress?.id;
+            if (previousProgressId !== progressId) return previous;
+            return {
+                ...previous,
+                stage: 'cancelled',
+                detail: 'تم إيقاف التحليل يدويًا.',
+                geminiProgress: {
+                    ...previous.geminiProgress,
+                    stage: 'cancelled',
+                    status: 499,
+                    message: 'تم إيقاف التحليل يدويًا.',
+                    completed: true,
+                },
+            };
+        });
     }, []);
 
     const stopAiRequestIfArticleContextMissing = useCallback((flowLabel: string): boolean => {
@@ -5217,7 +5287,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return parts.join('\n\n');
     }, [editor, title, keywords, text, goalContext, articleLanguage, analysisResults, t]);
 
-    const generateSemanticKeywords = useCallback(async (): Promise<{ secondaries: string[]; lsi: string[]; error?: string }> => {
+    const generateSemanticKeywords = useCallback(async (): Promise<{ secondaries: string[]; lsi: string[]; error?: string; cancelled?: boolean }> => {
         const primary = keywords.primary.trim();
         if (!primary) {
             return { secondaries: [], lsi: [], error: 'أدخل الكلمة المفتاحية الأساسية أولًا.' };
@@ -5256,14 +5326,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         ].filter(Boolean).join('\n');
 
         const usageContext = buildApiUsageContext('semantic_keywords_lsi');
-        const result = await callGeminiAnalysis(
-            prompt,
-            apiKeys.gemini,
-            undefined,
-            undefined,
-            usageContext,
-            trackGeminiProgress(usageContext),
-        );
+        let result: string;
+        try {
+            result = await callGeminiAnalysis(
+                prompt,
+                apiKeys.gemini,
+                undefined,
+                undefined,
+                usageContext,
+                trackGeminiProgress(usageContext),
+            );
+        } catch (error) {
+            if (isGeminiAnalysisCancelledError(error)) {
+                return { secondaries: [], lsi: [], cancelled: true };
+            }
+            throw error;
+        }
         if (/^حدث خطأ أثناء الاتصال بـ Gemini/.test(result)) {
             return { secondaries: [], lsi: [], error: result };
         }
@@ -5335,7 +5413,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return { secondaries, lsi };
     }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.company, keywords.primary, title, trackGeminiProgress]);
 
-    const generateGoalContext = useCallback(async (): Promise<{ context?: GoalContext; error?: string }> => {
+    const generateGoalContext = useCallback(async (): Promise<{ context?: GoalContext; error?: string; cancelled?: boolean }> => {
         const primary = keywords.primary.trim();
         const secondaries = keywords.secondaries.map(term => term.trim()).filter(Boolean);
         const articleTitle = title.trim();
@@ -5375,14 +5453,22 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         ].join('\n');
 
         const usageContext = buildApiUsageContext('goal_context_generation');
-        const result = await callGeminiAnalysis(
-            prompt,
-            apiKeys.gemini,
-            undefined,
-            undefined,
-            usageContext,
-            trackGeminiProgress(usageContext),
-        );
+        let result: string;
+        try {
+            result = await callGeminiAnalysis(
+                prompt,
+                apiKeys.gemini,
+                undefined,
+                undefined,
+                usageContext,
+                trackGeminiProgress(usageContext),
+            );
+        } catch (error) {
+            if (isGeminiAnalysisCancelledError(error)) {
+                return { cancelled: true };
+            }
+            throw error;
+        }
         const parsed = extractJson(result);
         const context = normalizeGeneratedGoalContext(parsed, goalContext);
 
@@ -5424,14 +5510,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         ].filter(Boolean).join('\n');
 
         const usageContext = buildApiUsageContext('draft_title_generation');
-        const result = await callGeminiAnalysis(
-            prompt,
-            apiKeys.gemini,
-            undefined,
-            undefined,
-            usageContext,
-            trackGeminiProgress(usageContext),
-        );
+        let result: string;
+        try {
+            result = await callGeminiAnalysis(
+                prompt,
+                apiKeys.gemini,
+                undefined,
+                undefined,
+                usageContext,
+                trackGeminiProgress(usageContext),
+            );
+        } catch (error) {
+            if (isGeminiAnalysisCancelledError(error)) return '';
+            throw error;
+        }
         const parsed = extractJson(result);
         return typeof parsed?.title === 'string' ? parsed.title.trim() : '';
     }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.lsi, keywords.primary, keywords.secondaries, trackGeminiProgress]);
@@ -5568,6 +5660,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }));
             return true;
         } catch (e) {
+            if (isGeminiAnalysisCancelledError(e)) return false;
             setAiResults(prev => ({ ...prev, [provider]: "فشل التحليل المتعدد." }));
             return false;
         } finally {
@@ -5616,6 +5709,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setAiInsertionPatches(prev => ({ ...prev, [provider]: parsedResult.patches }));
             logReadyCommandAnalysis(provider, parsedResult, historyMeta);
         } catch (e) {
+            if (isGeminiAnalysisCancelledError(e)) return;
             setAiResults(prev => ({ ...prev, [provider]: "فشل التحليل." }));
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
@@ -5806,7 +5900,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
             }
         } catch (e) {
-            console.error(e);
+            if (!isGeminiAnalysisCancelledError(e)) console.error(e);
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setIsAiCommandLoading(false);
@@ -5890,7 +5984,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 setHeadingsAnalysis(mappedAnalysis.length > 0 ? mappedAnalysis : null);
             }
         } catch (e) {
-            console.error(e);
+            if (!isGeminiAnalysisCancelledError(e)) console.error(e);
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
@@ -6054,6 +6148,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
             setFixAllProgress(p => ({ ...p, running: false, stage: 'done', detail: 'تم إنشاء اقتراح الإصلاح.' }));
         } catch (error) {
+            if (isGeminiAnalysisCancelledError(error)) {
+                setFixAllProgress(previous => ({
+                    ...previous,
+                    running: false,
+                    stage: 'cancelled',
+                    detail: 'تم إيقاف التحليل يدويًا.',
+                }));
+                return;
+            }
             const message = error instanceof Error ? error.message : 'Unknown fix error';
             console.error('Single fix proposal failed:', rule.title, error);
             setFixAllProgress({ current: 1, total: 1, running: false, failed: 1, errors: [`${rule.title}: ${message}`], stage: 'failed', detail: message });
@@ -6120,6 +6223,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }));
 
         const proposedItems: BulkFixReviewItem[] = [];
+        let wasCancelled = false;
         for (let i = 0; i < groupedTargets.length; i++) {
             const targetSnapshot = groupedTargets[i];
             const originalGroup = targetSnapshot.group;
@@ -6224,6 +6328,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     throw new Error('AI did not return usable suggestions.');
                 }
             } catch (e) {
+                if (isGeminiAnalysisCancelledError(e)) {
+                    wasCancelled = true;
+                    break;
+                }
                 const message = e instanceof Error ? e.message : 'Unknown fix error';
                 console.error('Fix all proposal failed:', originalGroup.id, e);
                 setFixAllProgress(p => ({
@@ -6253,10 +6361,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setFixAllProgress(p => ({
             ...p,
             running: false,
-            stage: p.failed > 0 ? 'done-with-errors' : 'done',
-            detail: p.failed > 0
-                ? `انتهى الإصلاح المتعدد مع ${p.failed} دفعة متعثرة.`
-                : 'انتهى الإصلاح المتعدد وتم إنشاء الاقتراحات.',
+            stage: wasCancelled ? 'cancelled' : p.failed > 0 ? 'done-with-errors' : 'done',
+            detail: wasCancelled
+                ? 'تم إيقاف التحليل يدويًا.'
+                : p.failed > 0
+                  ? `انتهى الإصلاح المتعدد مع ${p.failed} دفعة متعثرة.`
+                  : 'انتهى الإصلاح المتعدد وتم إنشاء الاقتراحات.',
         }));
         setIsAiLoading(prev => ({ ...prev, [provider]: false }));
     }, [editor, analysisResults, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
@@ -6600,7 +6710,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const value = {
         aiResults, aiInsertionPatches, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
-        aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
+        aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, cancelAiRequest, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         buildSmartAnalysisPrompt, importManualChatGptResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
         handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,

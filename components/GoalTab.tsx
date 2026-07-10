@@ -75,6 +75,7 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
     try {
       const result = await generateGoalContext();
+      if (result.cancelled) return;
       if (result.error || !result.context) {
         setIsGoalContextGenerationSuccess(false);
         setGoalContextGenerationStatus(result.error || t.goalContextGenerationFailed);

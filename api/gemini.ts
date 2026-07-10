@@ -50,7 +50,7 @@ type GeminiHistoryContent = {
 };
 
 type GeminiProvider = "gemini" | "geminiPaid";
-type GeminiProgressStage = "queued" | "attempting" | "failed-key" | "switching-key" | "switching-model" | "success" | "failed";
+type GeminiProgressStage = "queued" | "attempting" | "failed-key" | "switching-key" | "switching-model" | "success" | "failed" | "cancelled";
 
 type GeminiProgressState = {
   id: string;
@@ -77,11 +77,20 @@ type GeminiProgressState = {
 };
 
 type GeminiJobState = {
-  status: "running" | "completed";
+  status: "running" | "completed" | "cancelled";
   startedAt: string;
   updatedAt: string;
   result?: ApiResult;
+  cancelRequested: boolean;
+  cancelListeners: Set<() => void>;
 };
+
+class GeminiJobCancelledError extends Error {
+  constructor() {
+    super("Gemini analysis was cancelled by the user");
+    this.name = "GeminiJobCancelledError";
+  }
+}
 
 const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 const GEMINI_PROGRESS_TTL_MS = 10 * 60 * 1000;
@@ -118,7 +127,7 @@ const cleanupGeminiProgressStore = () => {
   }
   for (const [id, job] of geminiJobStore.entries()) {
     const updatedAt = Date.parse(job.updatedAt);
-    if (job.status === "completed" && Number.isFinite(updatedAt) && updatedAt < cutoff) {
+    if (job.status !== "running" && Number.isFinite(updatedAt) && updatedAt < cutoff) {
       geminiJobStore.delete(id);
     }
   }
@@ -131,6 +140,8 @@ const setGeminiProgress = (
   if (!progressId) return;
   cleanupGeminiProgressStore();
   const previous = geminiProgressStore.get(progressId);
+  const job = geminiJobStore.get(progressId);
+  if (job?.cancelRequested && patch.stage !== "cancelled") return;
   geminiProgressStore.set(progressId, {
     id: progressId,
     stage: "queued",
@@ -153,7 +164,11 @@ const getProgressIdFromRequest = (req: any): string => {
 
   try {
     const pathname = new URL(String(req?.url || ""), "http://localhost").pathname;
-    return normalizeProgressId(pathname.split("/").filter(Boolean).pop());
+    const pathParts = pathname.split("/").filter(Boolean);
+    const idPart = pathParts[pathParts.length - 1] === "cancel"
+      ? pathParts[pathParts.length - 2]
+      : pathParts[pathParts.length - 1];
+    return normalizeProgressId(idPart);
   } catch {
     return "";
   }
@@ -393,21 +408,59 @@ const getGeminiRequestTimeout = (): number => {
 
 const GEMINI_PER_KEY_TIMEOUT_MS = getGeminiRequestTimeout();
 
+const isGeminiJobCancelledError = (error: unknown): error is GeminiJobCancelledError => (
+  error instanceof GeminiJobCancelledError
+);
+
+const throwIfGeminiJobCancelled = (progressId: string) => {
+  if (progressId && geminiJobStore.get(progressId)?.cancelRequested) {
+    throw new GeminiJobCancelledError();
+  }
+};
+
+const raceWithGeminiCancellation = async <T,>(
+  request: Promise<T>,
+  progressId: string,
+): Promise<T> => {
+  if (!progressId) return request;
+  const job = geminiJobStore.get(progressId);
+  if (!job) return request;
+  throwIfGeminiJobCancelled(progressId);
+
+  let cancelListener: (() => void) | undefined;
+  const cancelled = new Promise<T>((_, reject) => {
+    cancelListener = () => reject(new GeminiJobCancelledError());
+    job.cancelListeners.add(cancelListener);
+  });
+
+  try {
+    return await Promise.race([request, cancelled]);
+  } finally {
+    if (cancelListener) {
+      job.cancelListeners.delete(cancelListener);
+    }
+  }
+};
+
 const withGeminiKeyTimeout = async <T,>(
   request: Promise<T>,
   model: string,
   keySuffix: string,
+  progressId: string,
 ): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
-      request,
-      new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error(`Gemini request timed out after ${GEMINI_PER_KEY_TIMEOUT_MS}ms for model ${model} and key ...${keySuffix} (504)`));
-        }, GEMINI_PER_KEY_TIMEOUT_MS);
-      }),
-    ]);
+    return await raceWithGeminiCancellation(
+      Promise.race([
+        request,
+        new Promise<T>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`Gemini request timed out after ${GEMINI_PER_KEY_TIMEOUT_MS}ms for model ${model} and key ...${keySuffix} (504)`));
+          }, GEMINI_PER_KEY_TIMEOUT_MS);
+        }),
+      ]),
+      progressId,
+    );
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId);
@@ -420,12 +473,14 @@ const waitForVisibleGeminiProgress = async (
   minimumDelayMs: number,
   startedAt?: number,
 ) => {
+  throwIfGeminiJobCancelled(progressId);
   if (!progressId || minimumDelayMs <= 0) return;
   const elapsed = typeof startedAt === "number" ? Date.now() - startedAt : 0;
   const remainingDelay = Math.max(0, minimumDelayMs - elapsed);
   if (remainingDelay > 0) {
-    await wait(remainingDelay);
+    await raceWithGeminiCancellation(wait(remainingDelay), progressId);
   }
+  throwIfGeminiJobCancelled(progressId);
 };
 
 const getGeminiFailureReason = (details: GeminiErrorDetails): GeminiAttemptFailureReason => {
@@ -538,6 +593,7 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
   try {
     const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId, allowModelFallback, fallbackModels } = requestBody || {};
     const progressId = normalizeProgressId(rawProgressId);
+    throwIfGeminiJobCancelled(progressId);
     const requestedProvider = normalizeGeminiProvider(provider);
     const selectedModel = getSafeGeminiModel(
       selectGeminiModel(model, requestedProvider),
@@ -616,6 +672,7 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
     });
 
     for (let modelIndex = 0; modelIndex < modelOrder.length; modelIndex += 1) {
+      throwIfGeminiJobCancelled(progressId);
       const activeModel = modelOrder[modelIndex];
       lastAttemptedModel = activeModel;
       const orderedKeys = getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS);
@@ -645,10 +702,12 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
       }
 
       for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
+        throwIfGeminiJobCancelled(progressId);
         const GEMINI_API_KEY = orderedKeys[keyIndex];
         const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
         const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
         for (let attempt = 0; attempt < 1; attempt += 1) {
+          throwIfGeminiJobCancelled(progressId);
           const attemptStartedAt = Date.now();
           const attemptedKeyCount = new Set([
             ...attempts.filter(item => item.model === activeModel).map(item => item.keyFingerprint),
@@ -692,7 +751,9 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
               }),
               activeModel,
               keySuffix,
+              progressId,
             );
+            throwIfGeminiJobCancelled(progressId);
 
             const text = typeof response.text === "string" ? response.text.trim() : "";
             if (!text) {
@@ -744,6 +805,9 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
               },
             };
           } catch (error) {
+            if (isGeminiJobCancelledError(error)) {
+              throw error;
+            }
             lastError = getGeminiErrorDetails(error);
             const reason = getGeminiFailureReason(lastError);
             await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_MIN_ATTEMPT_MS, attemptStartedAt);
@@ -871,6 +935,41 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
     };
 
   } catch (error) {
+    if (isGeminiJobCancelledError(error)) {
+      const progressId = normalizeProgressId(requestBody?.progressId);
+      const currentProgress = progressId ? geminiProgressStore.get(progressId) : undefined;
+      setGeminiProgress(progressId, {
+        stage: "cancelled",
+        provider: currentProgress?.provider || normalizeGeminiProvider(requestBody?.provider),
+        model: currentProgress?.model || selectGeminiModel(requestBody?.model, normalizeGeminiProvider(requestBody?.provider)),
+        requestedModel: currentProgress?.requestedModel,
+        currentModelIndex: currentProgress?.currentModelIndex,
+        modelCount: currentProgress?.modelCount,
+        modelOrder: currentProgress?.modelOrder,
+        attemptedModels: currentProgress?.attemptedModels,
+        keyCount: currentProgress?.keyCount || 0,
+        attemptedKeyCount: currentProgress?.attemptedKeyCount || 0,
+        attemptedModelKeyCount: currentProgress?.attemptedModelKeyCount || 0,
+        totalAttemptCount: currentProgress?.totalAttemptCount || 0,
+        currentKeyIndex: currentProgress?.currentKeyIndex,
+        keySuffix: currentProgress?.keySuffix,
+        status: 499,
+        completed: true,
+        message: "تم إيقاف التحليل يدويًا.",
+      });
+      return {
+        status: 499,
+        body: {
+          error: "تم إيقاف التحليل يدويًا.",
+          cancelled: true,
+          progressId,
+          provider: currentProgress?.provider,
+          model: currentProgress?.model,
+          attemptedKeyCount: currentProgress?.attemptedKeyCount || 0,
+          keyCount: currentProgress?.keyCount || 0,
+        },
+      };
+    }
     console.error("Error processing request:", error);
     if (error instanceof SyntaxError) {
       return { status: 400, body: { error: "طلب JSON غير صالح" } };
@@ -952,6 +1051,8 @@ const startGeminiJob = (progressId: string, requestBody: any): GeminiJobState =>
     status: "running",
     startedAt: now,
     updatedAt: now,
+    cancelRequested: false,
+    cancelListeners: new Set(),
   };
   geminiJobStore.set(progressId, job);
   setGeminiProgress(progressId, {
@@ -980,6 +1081,11 @@ const startGeminiJob = (progressId: string, requestBody: any): GeminiJobState =>
       },
     }))
     .then(result => {
+      if (job.cancelRequested || job.status === "cancelled") {
+        job.status = "cancelled";
+        job.updatedAt = new Date().toISOString();
+        return;
+      }
       job.status = "completed";
       job.result = result;
       job.updatedAt = new Date().toISOString();
@@ -987,6 +1093,98 @@ const startGeminiJob = (progressId: string, requestBody: any): GeminiJobState =>
     });
 
   return job;
+};
+
+const handleGeminiCancelRequest = async (req: any): Promise<ApiResult> => {
+  if (req.method !== "POST") {
+    return { status: 405, body: { error: "Method not allowed" } };
+  }
+
+  cleanupGeminiProgressStore();
+  const progressId = getProgressIdFromRequest(req);
+  const job = progressId ? geminiJobStore.get(progressId) : undefined;
+  const progress = progressId ? geminiProgressStore.get(progressId) : undefined;
+  if (!job) {
+    return {
+      status: 404,
+      body: {
+        error: "Gemini job not found",
+        progressId,
+      },
+    };
+  }
+
+  if (job.status === "completed") {
+    return {
+      status: 409,
+      body: {
+        error: "Gemini job is already completed",
+        progressId,
+        jobStatus: job.status,
+        resultStatus: job.result?.status,
+      },
+    };
+  }
+
+  if (job.status === "cancelled") {
+    return {
+      status: 200,
+      body: {
+        cancelled: true,
+        progressId,
+        jobStatus: job.status,
+      },
+    };
+  }
+
+  const cancellationResult: ApiResult = {
+    status: 499,
+    body: {
+      error: "تم إيقاف التحليل يدويًا.",
+      cancelled: true,
+      progressId,
+      provider: progress?.provider,
+      model: progress?.model,
+      attemptedKeyCount: progress?.attemptedKeyCount || 0,
+      keyCount: progress?.keyCount || 0,
+    },
+  };
+  job.cancelRequested = true;
+  job.status = "cancelled";
+  job.result = cancellationResult;
+  job.updatedAt = new Date().toISOString();
+  setGeminiProgress(progressId, {
+    stage: "cancelled",
+    provider: progress?.provider || "gemini",
+    model: progress?.model || GEMINI_ANALYSIS_MODEL,
+    requestedModel: progress?.requestedModel,
+    currentModelIndex: progress?.currentModelIndex,
+    modelCount: progress?.modelCount,
+    modelOrder: progress?.modelOrder,
+    attemptedModels: progress?.attemptedModels,
+    keyCount: progress?.keyCount || 0,
+    attemptedKeyCount: progress?.attemptedKeyCount || 0,
+    attemptedModelKeyCount: progress?.attemptedModelKeyCount || 0,
+    totalAttemptCount: progress?.totalAttemptCount || 0,
+    currentKeyIndex: progress?.currentKeyIndex,
+    keySuffix: progress?.keySuffix,
+    status: 499,
+    completed: true,
+    message: "تم إيقاف التحليل يدويًا.",
+  });
+  for (const listener of job.cancelListeners) {
+    listener();
+  }
+  job.cancelListeners.clear();
+
+  return {
+    status: 200,
+    body: {
+      cancelled: true,
+      progressId,
+      jobStatus: job.status,
+    },
+  };
 };
 
 const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
@@ -1058,7 +1256,16 @@ const handleGeminiProgressRequest = async (req: any): Promise<ApiResult> => {
 };
 
 export async function geminiProgressHandler(req: any, res?: any): Promise<Response | void> {
-  const result = await handleGeminiProgressRequest(req);
+  const pathname = (() => {
+    try {
+      return new URL(String(req?.url || ""), "http://localhost").pathname;
+    } catch {
+      return "";
+    }
+  })();
+  const result = pathname.endsWith("/cancel")
+    ? await handleGeminiCancelRequest(req)
+    : await handleGeminiProgressRequest(req);
   if (res) {
     sendNodeResponse(res, result);
     return;

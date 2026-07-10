@@ -23,7 +23,7 @@ export type GeminiProgressSnapshot = {
     message?: string;
     updatedAt?: string;
     completed?: boolean;
-    jobStatus?: 'running' | 'completed';
+    jobStatus?: 'running' | 'completed' | 'cancelled';
     resultStatus?: number;
     result?: unknown;
 };
@@ -175,4 +175,23 @@ export const runGeminiAnalysisEngine = async ({
         rawBody,
         progressId,
     };
+};
+
+export const cancelGeminiAnalysisEngine = async (progressId: string): Promise<void> => {
+    const normalizedProgressId = progressId.trim();
+    if (!normalizedProgressId) return;
+
+    const response = await fetch(`/api/gemini/progress/${encodeURIComponent(normalizedProgressId)}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    const rawBody = await response.text().catch(() => '');
+    const data = parseJsonRecord(rawBody);
+    if (response.status === 409 && data.jobStatus === 'completed') return;
+    if (!response.ok || data.cancelled !== true) {
+        const message = typeof data.error === 'string'
+            ? data.error
+            : `تعذر إيقاف مهمة Gemini (HTTP ${response.status}).`;
+        throw new Error(message);
+    }
 };

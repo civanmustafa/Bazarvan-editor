@@ -71,6 +71,7 @@ const healthzHandler: RequestHandler = (_req, res) => {
 app.get('/healthz', healthzHandler);
 app.get('/api/healthz', healthzHandler);
 
+app.post('/api/gemini/progress/:progressId/cancel', runApiHandler(geminiProgressHandler));
 app.all('/api/gemini/progress/:progressId', runApiHandler(geminiProgressHandler));
 app.all('/api/gemini', runApiHandler(geminiHandler));
 app.all('/api/chatgpt', runApiHandler(chatgptHandler));
