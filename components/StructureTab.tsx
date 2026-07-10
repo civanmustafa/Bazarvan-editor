@@ -1035,6 +1035,9 @@ const StructureTab: React.FC = () => {
           geminiProgress.currentModelIndex && geminiProgress.modelCount && geminiProgress.modelCount > 1
               ? (uiLanguage === 'ar' ? `الموديل ${geminiProgress.currentModelIndex}/${geminiProgress.modelCount}` : `model ${geminiProgress.currentModelIndex}/${geminiProgress.modelCount}`)
               : '',
+          geminiProgress.attemptedModels?.length && geminiProgress.modelCount && geminiProgress.modelCount > 1
+              ? (uiLanguage === 'ar' ? `الموديلات المجربة ${geminiProgress.attemptedModels.length}/${geminiProgress.modelCount}` : `models tried ${geminiProgress.attemptedModels.length}/${geminiProgress.modelCount}`)
+              : '',
           attemptedModelKeyCount && geminiProgress.keyCount
               ? (uiLanguage === 'ar' ? `جُرّب ${attemptedModelKeyCount}/${geminiProgress.keyCount}` : `tried ${attemptedModelKeyCount}/${geminiProgress.keyCount}`)
               : '',

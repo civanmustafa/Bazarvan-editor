@@ -9,6 +9,8 @@ export type GeminiProgressSnapshot = {
     requestedModel?: string;
     currentModelIndex?: number;
     modelCount?: number;
+    modelOrder?: string[];
+    attemptedModels?: string[];
     keyCount?: number;
     attemptedKeyCount?: number;
     attemptedModelKeyCount?: number;
@@ -35,6 +37,7 @@ export type GeminiEngineRequest = {
     provider: GeminiEngineProvider;
     useUrlContext?: boolean;
     allowModelFallback?: boolean;
+    fallbackModels?: string[];
 };
 
 export type GeminiEngineResult = {

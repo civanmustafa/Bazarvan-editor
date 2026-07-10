@@ -25,7 +25,7 @@ import type {
     StructureAnalysis,
 } from '../types';
 import { getArticleReplacementContent, parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
-import { GEMINI_ANALYSIS_MODEL, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
+import { GEMINI_ANALYSIS_MODEL, GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
 import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
@@ -2103,6 +2103,7 @@ const requestGeminiAnalysis = async (
               model,
               provider: model === GEMINI_PAID_MODEL ? 'geminiPaid' : 'gemini',
               allowModelFallback: model !== GEMINI_PAID_MODEL && isGeminiFreeModelFallbackEnabled(),
+              fallbackModels: model !== GEMINI_PAID_MODEL ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
           },
           onProgress: progressCallback,
       });

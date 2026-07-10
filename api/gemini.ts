@@ -60,6 +60,8 @@ type GeminiProgressState = {
   requestedModel?: string;
   currentModelIndex?: number;
   modelCount?: number;
+  modelOrder?: string[];
+  attemptedModels?: string[];
   keyCount: number;
   attemptedKeyCount: number;
   attemptedModelKeyCount?: number;
@@ -287,13 +289,30 @@ const getAllowedGeminiFreeModels = (): string[] => (
   ].filter(Boolean)))
 );
 
+const normalizeRequestedGeminiFreeModels = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value
+      .map(model => typeof model === "string" ? model.trim() : "")
+      .filter(model => (
+        Boolean(model) &&
+        model !== GEMINI_PAID_ANALYSIS_MODEL &&
+        ALLOWED_GEMINI_MODELS.has(model)
+      )),
+  ));
+};
+
 const getGeminiModelOrder = (
   selectedProvider: GeminiProvider,
   selectedModel: string,
   allowModelFallback: boolean,
+  requestedFallbackModels?: unknown,
 ): string[] => {
   if (selectedProvider !== "gemini" || !allowModelFallback) return [selectedModel];
-  const freeModels = getAllowedGeminiFreeModels();
+  const freeModels = Array.from(new Set([
+    ...normalizeRequestedGeminiFreeModels(requestedFallbackModels),
+    ...getAllowedGeminiFreeModels(),
+  ]));
   return Array.from(new Set([
     selectedModel,
     ...freeModels.filter(model => model !== selectedModel),
@@ -517,7 +536,7 @@ const buildGeminiFailureMessage = (
 
 const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
   try {
-    const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId, allowModelFallback } = requestBody || {};
+    const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId, allowModelFallback, fallbackModels } = requestBody || {};
     const progressId = normalizeProgressId(rawProgressId);
     const requestedProvider = normalizeGeminiProvider(provider);
     const selectedModel = getSafeGeminiModel(
@@ -525,7 +544,12 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
       requestedProvider,
     );
     const selectedProvider = selectGeminiProvider(requestedProvider, selectedModel);
-    const modelOrder = getGeminiModelOrder(selectedProvider, selectedModel, allowModelFallback === true);
+    const modelOrder = getGeminiModelOrder(
+      selectedProvider,
+      selectedModel,
+      allowModelFallback === true,
+      fallbackModels,
+    );
     const GEMINI_API_KEYS = parseEnvGeminiKeys(selectedProvider);
 
     if (GEMINI_API_KEYS.length === 0) {
@@ -579,6 +603,8 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
       requestedModel: selectedModel,
       currentModelIndex: 1,
       modelCount: modelOrder.length,
+      modelOrder,
+      attemptedModels: [],
       keyCount: GEMINI_API_KEYS.length,
       attemptedKeyCount: 0,
       attemptedModelKeyCount: 0,
@@ -602,6 +628,8 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
           requestedModel: selectedModel,
           currentModelIndex: modelIndex + 1,
           modelCount: modelOrder.length,
+          modelOrder,
+          attemptedModels: modelOrder.slice(0, modelIndex + 1),
           keyCount: orderedKeys.length,
           attemptedKeyCount: 0,
           attemptedModelKeyCount: 0,
@@ -633,6 +661,8 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
             requestedModel: selectedModel,
             currentModelIndex: modelIndex + 1,
             modelCount: modelOrder.length,
+            modelOrder,
+            attemptedModels: modelOrder.slice(0, modelIndex + 1),
             keyCount: orderedKeys.length,
             attemptedKeyCount,
             attemptedModelKeyCount: attemptedKeyCount,
@@ -664,7 +694,10 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
               keySuffix,
             );
 
-            const text = response.text;
+            const text = typeof response.text === "string" ? response.text.trim() : "";
+            if (!text) {
+              throw new Error(`Gemini returned an empty response for model ${activeModel} (502)`);
+            }
             const successAttemptedKeyCount = new Set([
               ...attempts.filter(item => item.model === activeModel).map(item => item.keyFingerprint),
               keyFingerprint,
@@ -676,6 +709,8 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
               requestedModel: selectedModel,
               currentModelIndex: modelIndex + 1,
               modelCount: modelOrder.length,
+              modelOrder,
+              attemptedModels: modelOrder.slice(0, modelIndex + 1),
               keyCount: orderedKeys.length,
               attemptedKeyCount: successAttemptedKeyCount,
               attemptedModelKeyCount: successAttemptedKeyCount,
@@ -698,6 +733,8 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
                 model: activeModel,
                 requestedModel: selectedModel,
                 modelFallbackUsed: activeModel !== selectedModel,
+                modelOrder,
+                attemptedModels: modelOrder.slice(0, modelIndex + 1),
                 keyCount: GEMINI_API_KEYS.length,
                 attemptedKeyCount: new Set([
                   ...attempts.map(item => item.keyFingerprint),
@@ -728,6 +765,8 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
               requestedModel: selectedModel,
               currentModelIndex: modelIndex + 1,
               modelCount: modelOrder.length,
+              modelOrder,
+              attemptedModels: modelOrder.slice(0, modelIndex + 1),
               keyCount: orderedKeys.length,
               attemptedKeyCount: failedModelAttemptedKeyCount,
               attemptedModelKeyCount: failedModelAttemptedKeyCount,
@@ -757,6 +796,8 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
                 requestedModel: selectedModel,
                 currentModelIndex: modelIndex + 1,
                 modelCount: modelOrder.length,
+                modelOrder,
+                attemptedModels: modelOrder.slice(0, modelIndex + 1),
                 keyCount: orderedKeys.length,
                 attemptedKeyCount: failedModelAttemptedKeyCount,
                 attemptedModelKeyCount: failedModelAttemptedKeyCount,
@@ -795,6 +836,7 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
       requestedModel: selectedModel,
       modelFallbackEnabled: modelOrder.length > 1,
       modelCount: modelOrder.length,
+      modelOrder,
       attemptedModels: Array.from(new Set(attempts.map(item => item.model).filter(Boolean))),
       keyCount: GEMINI_API_KEYS.length,
       attemptedKeyCount: getUniqueAttemptCount(attempts),
@@ -811,6 +853,8 @@ const executeGeminiRequest = async (requestBody: any): Promise<ApiResult> => {
       requestedModel: selectedModel,
       currentModelIndex: modelOrder.length,
       modelCount: modelOrder.length,
+      modelOrder,
+      attemptedModels: Array.from(new Set(attempts.map(item => item.model).filter((model): model is string => Boolean(model)))),
       keyCount: lastOrderedKeys.length,
       attemptedKeyCount: getUniqueAttemptCountForModel(attempts, lastAttemptedModel),
       attemptedModelKeyCount: getUniqueAttemptCountForModel(attempts, lastAttemptedModel),
@@ -847,12 +891,14 @@ const getInitialJobProgress = (requestBody: any) => {
     selectedProvider,
     selectedModel,
     requestBody?.allowModelFallback === true,
+    requestBody?.fallbackModels,
   );
 
   return {
     provider: selectedProvider,
     model: selectedModel,
     modelCount: modelOrder.length,
+    modelOrder,
     keyCount: parseEnvGeminiKeys(selectedProvider).length,
   };
 };
@@ -882,6 +928,10 @@ const ensureGeminiJobCompletedProgress = (
     model: typeof resultBody.model === "string" ? resultBody.model : initial.model,
     requestedModel: initial.model,
     modelCount: initial.modelCount,
+    modelOrder: initial.modelOrder,
+    attemptedModels: Array.isArray(resultBody.attemptedModels)
+      ? resultBody.attemptedModels.filter((model): model is string => typeof model === "string")
+      : currentProgress?.attemptedModels || [],
     keyCount: initial.keyCount,
     attemptedKeyCount: typeof resultBody.attemptedKeyCount === "number"
       ? resultBody.attemptedKeyCount
@@ -911,6 +961,8 @@ const startGeminiJob = (progressId: string, requestBody: any): GeminiJobState =>
     requestedModel: initial.model,
     currentModelIndex: 1,
     modelCount: initial.modelCount,
+    modelOrder: initial.modelOrder,
+    attemptedModels: [],
     keyCount: initial.keyCount,
     attemptedKeyCount: 0,
     attemptedModelKeyCount: 0,

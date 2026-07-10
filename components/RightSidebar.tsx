@@ -10,7 +10,7 @@ import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUti
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
-import { GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
+import { GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
 import {
     buildGeminiFreeModelOptions,
     GEMINI_FREE_MODEL_CHANGED_EVENT,
@@ -1234,6 +1234,7 @@ ${readyCommandCompetitorBlocks}`;
                     model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : getSelectedGeminiFreeModel(),
                     useUrlContext,
                     allowModelFallback: provider === 'gemini' && isGeminiFreeModelFallbackEnabled(),
+                    fallbackModels: provider === 'gemini' ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
                 },
                 onProgress: progress => {
                     setCompetitorGeminiProgress(prev => ({

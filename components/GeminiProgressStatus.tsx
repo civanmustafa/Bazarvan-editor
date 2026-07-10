@@ -10,6 +10,7 @@ type GeminiProgressLike = {
   requestedModel?: string;
   currentModelIndex?: number;
   modelCount?: number;
+  attemptedModels?: string[];
   keyCount?: number;
   attemptedKeyCount?: number;
   attemptedModelKeyCount?: number;
@@ -59,6 +60,11 @@ const GeminiProgressStatus: React.FC<GeminiProgressStatusProps> = ({
   const modelStep = progress.currentModelIndex && progress.modelCount && progress.modelCount > 1
     ? (isArabic ? `الموديل ${progress.currentModelIndex}/${progress.modelCount}` : `model ${progress.currentModelIndex}/${progress.modelCount}`)
     : '';
+  const triedModelsStep = progress.attemptedModels?.length && progress.modelCount && progress.modelCount > 1
+    ? (isArabic
+        ? `الموديلات المجربة ${progress.attemptedModels.length}/${progress.modelCount}`
+        : `models tried ${progress.attemptedModels.length}/${progress.modelCount}`)
+    : '';
   const keyStep = progress.currentKeyIndex && progress.keyCount
     ? (isArabic ? `المفتاح ${progress.currentKeyIndex}/${progress.keyCount}` : `key ${progress.currentKeyIndex}/${progress.keyCount}`)
     : '';
@@ -72,6 +78,7 @@ const GeminiProgressStatus: React.FC<GeminiProgressStatusProps> = ({
     keyStep,
     progress.model ? (isArabic ? `على ${progress.model}` : `on ${progress.model}`) : '',
     modelStep,
+    triedModelsStep,
     triedStep,
     suffixStep,
     statusStep,
