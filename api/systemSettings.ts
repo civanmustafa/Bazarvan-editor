@@ -1,4 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  EXTERNAL_AUTOMATIC_COMMAND_IDS,
+  EXTERNAL_READY_COMMAND_DEFINITIONS,
+} from '../constants/externalAnalysisCommands';
 
 type ApiResult = {
   status: number;
@@ -30,6 +34,9 @@ const DEFAULT_GEMINI_FREE_MODELS = [
   'gemini-2.5-flash-lite-preview-09-2025',
   'gemini-2.5-flash-lite',
 ];
+const ALLOWED_EXTERNAL_COMMAND_IDS = new Set(
+  EXTERNAL_READY_COMMAND_DEFINITIONS.map(definition => definition.id),
+);
 
 const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
   ai: {
@@ -40,6 +47,7 @@ const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
     defaultGeminiModel: 'gemini-3.5-flash',
     geminiFreeModelFallbackEnabled: true,
     externalAnalysisRetryMinutes: 30,
+    externalAnalysisDefaultCommandIds: [...EXTERNAL_AUTOMATIC_COMMAND_IDS],
     defaultGeminiPaidModel: 'gemini-2.5-pro',
     defaultOpenAiModel: 'gpt-4.1-mini',
   },
@@ -190,6 +198,19 @@ const normalizeExternalAnalysisRetryMinutes = (value: unknown): number => {
   return Math.max(5, Math.min(Math.round(parsed), 1_440));
 };
 
+const normalizeExternalAnalysisDefaultCommandIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [...EXTERNAL_AUTOMATIC_COMMAND_IDS];
+  const normalized = Array.from(new Set(
+    value
+      .filter((item): item is string => typeof item === 'string')
+      .map(item => item.trim())
+      .filter(item => ALLOWED_EXTERNAL_COMMAND_IDS.has(item)),
+  ));
+  return normalized.length > 0
+    ? normalized
+    : [...EXTERNAL_AUTOMATIC_COMMAND_IDS];
+};
+
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
 
 const getPublicBaseUrl = (req: any): string => {
@@ -288,6 +309,9 @@ const sanitizeSettingsPatch = (value: unknown): Partial<Record<SettingKey, Recor
           defaultGeminiModel: normalizeGeminiFreeModel(settingValue.defaultGeminiModel),
           externalAnalysisRetryMinutes: normalizeExternalAnalysisRetryMinutes(
             settingValue.externalAnalysisRetryMinutes,
+          ),
+          externalAnalysisDefaultCommandIds: normalizeExternalAnalysisDefaultCommandIds(
+            settingValue.externalAnalysisDefaultCommandIds,
           ),
         }
       : settingValue;

@@ -7,6 +7,7 @@ import {
   ListChecks,
   LoaderCircle,
   Play,
+  RotateCcw,
   Square,
   Tags,
   XCircle,
@@ -24,6 +25,7 @@ import {
   externalJobHasActiveStatus,
   getExternalMissingFieldLabels,
   type ExternalAnalysisDashboardSummary,
+  useDefaultExternalEngineeringCommands,
 } from '../utils/externalAnalysis';
 
 type NoticeState = {
@@ -81,7 +83,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedCommandIds, setSelectedCommandIds] = useState<string[]>([]);
   const [requirementsOpen, setRequirementsOpen] = useState<'semantic' | 'engineering' | null>(null);
-  const [busyAction, setBusyAction] = useState<'semantic' | 'engineering' | 'cancel' | null>(null);
+  const [busyAction, setBusyAction] = useState<'semantic' | 'engineering' | 'default' | 'cancel' | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -93,6 +95,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
 
   const semanticJobActive = externalJobHasActiveStatus(summary?.latestSemanticJob);
   const engineeringActive = (summary?.activeEngineeringCount || 0) > 0;
+  const customCommandMode = summary?.state?.engineering_command_mode === 'custom';
   const semanticTermsReady = hasAlternativeKeywords && hasLsiKeywords;
   const readinessState = summary?.state || null;
   const semanticMissingFields = new Set(readinessState?.semantic_missing_fields || []);
@@ -146,6 +149,20 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     setRequirementsOpen(null);
     setNotice(null);
   }, [articleId]);
+
+  useEffect(() => {
+    if (
+      menuOpen
+      || selectedCommandIds.length > 0
+      || summary?.state?.engineering_command_mode !== 'custom'
+    ) return;
+    setSelectedCommandIds(summary.state.custom_engineering_command_ids || []);
+  }, [
+    menuOpen,
+    selectedCommandIds.length,
+    summary?.state?.custom_engineering_command_ids,
+    summary?.state?.engineering_command_mode,
+  ]);
 
   const formatRequestError = (error: unknown): string => {
     if (error instanceof ExternalAnalysisRequestError) {
@@ -239,6 +256,28 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     }
   };
 
+  const handleUseDefaultCommands = async () => {
+    if (busyAction || !customCommandMode) return;
+    setBusyAction('default');
+    setNotice(null);
+    try {
+      await useDefaultExternalEngineeringCommands(articleId);
+      setSelectedCommandIds([]);
+      setMenuOpen(false);
+      setNotice({
+        tone: 'success',
+        message: locale === 'ar'
+          ? 'عادت المقالة إلى أوامر التحليل الخارجي الافتراضية التي حددها الأدمن.'
+          : 'This article now uses the admin default external analysis commands.',
+      });
+      await refreshAfterRequest();
+    } catch (error) {
+      setNotice({ tone: 'error', message: formatRequestError(error) });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const handleCancelAll = async () => {
     if (busyAction || (!semanticJobActive && !engineeringActive)) return;
     setBusyAction('cancel');
@@ -324,6 +363,11 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           >
             {busyAction === 'engineering' ? <LoaderCircle size={12} className="animate-spin" /> : <ListChecks size={12} />}
             <span>{locale === 'ar' ? 'الأوامر اليدوية الجاهزة' : 'Ready manual commands'}</span>
+            {customCommandMode && (
+              <span className="rounded bg-blue-100 px-1 text-[9px] text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                {locale === 'ar' ? 'اختيار خاص' : 'Custom'}
+              </span>
+            )}
             {selectedCommandIds.length > 0 && (
               <span className="rounded bg-[#d4af37] px-1 text-[9px] text-white">{selectedCommandIds.length}</span>
             )}
@@ -362,6 +406,19 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
                   <Play size={12} />
                   {locale === 'ar' ? `تشغيل المحدد (${selectedCommandIds.length})` : `Run selected (${selectedCommandIds.length})`}
                 </button>
+                {customCommandMode && (
+                  <button
+                    type="button"
+                    onClick={() => void handleUseDefaultCommands()}
+                    disabled={Boolean(busyAction)}
+                    className="mt-1 flex w-full items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-black text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-500/10"
+                  >
+                    {busyAction === 'default'
+                      ? <LoaderCircle size={12} className="animate-spin" />
+                      : <RotateCcw size={12} />}
+                    <span>{locale === 'ar' ? 'استخدام أوامر الأدمن الافتراضية' : 'Use admin defaults'}</span>
+                  </button>
+                )}
               </div>
             )}
           </div>

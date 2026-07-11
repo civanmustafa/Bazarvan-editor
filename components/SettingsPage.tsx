@@ -38,6 +38,7 @@ import {
   setGeminiFreeModelFallbackEnabled,
   setSelectedGeminiFreeModel,
 } from '../utils/geminiModelPreference';
+import { EXTERNAL_AUTOMATIC_COMMAND_IDS } from '../constants/externalAnalysisCommands';
 
 type SettingsPageProps = {
   section: string | null;
@@ -59,6 +60,7 @@ const DEFAULT_SETTINGS: SystemSettingsMap = {
     defaultGeminiModel: 'gemini-3.5-flash',
     geminiFreeModelFallbackEnabled: true,
     externalAnalysisRetryMinutes: 30,
+    externalAnalysisDefaultCommandIds: [...EXTERNAL_AUTOMATIC_COMMAND_IDS],
     defaultGeminiPaidModel: 'gemini-2.5-pro',
     defaultOpenAiModel: 'gpt-4.1-mini',
   },

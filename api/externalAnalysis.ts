@@ -34,6 +34,8 @@ type AnalysisStateRow = {
   external_analysis_missing_fields: unknown;
   semantic_readiness_signature: string;
   external_analysis_readiness_signature: string;
+  engineering_command_mode: 'default' | 'custom';
+  custom_engineering_command_ids: unknown;
 };
 
 const ACTIVE_JOB_STATUSES = [
@@ -162,7 +164,7 @@ const readArticleAndState = async (
       .maybeSingle(),
     supabase
       .from('ai_external_analysis_article_state')
-      .select('article_id,semantic_ready,external_analysis_ready,semantic_missing_fields,external_analysis_missing_fields,semantic_readiness_signature,external_analysis_readiness_signature')
+      .select('article_id,semantic_ready,external_analysis_ready,semantic_missing_fields,external_analysis_missing_fields,semantic_readiness_signature,external_analysis_readiness_signature,engineering_command_mode,custom_engineering_command_ids')
       .eq('article_id', articleId)
       .maybeSingle(),
   ]);
@@ -357,6 +359,7 @@ const enqueueEngineeringJobs = async (
     .select('id,command_id,status')
     .eq('article_id', article.id)
     .eq('job_type', 'engineering_command')
+    .eq('origin', 'manual')
     .in('command_id', normalizedIds)
     .in('status', ACTIVE_JOB_STATUSES);
   if (activeError) throw activeError;
@@ -370,6 +373,13 @@ const enqueueEngineeringJobs = async (
       },
     });
   }
+
+  const { error: preferenceError } = await supabase.rpc('set_external_analysis_custom_commands', {
+    p_article_id: article.id,
+    p_requested_by: requestedBy,
+    p_command_ids: normalizedIds,
+  });
+  if (preferenceError) throw preferenceError;
 
   const needsSemanticPrerequisite = toStringList(keywords.secondaries).length === 0
     || toStringList(keywords.lsi).length === 0;
@@ -397,7 +407,7 @@ const enqueueEngineeringJobs = async (
     job_type: 'engineering_command',
     origin: 'manual',
     status: 'queued',
-    idempotency_key: `engineering:${command!.id}:${state.external_analysis_readiness_signature}`,
+    idempotency_key: `manual-engineering:${batchId}:${command!.id}:${state.external_analysis_readiness_signature}`,
     batch_key: `manual-engineering:${article.id}:${batchId}`,
     sequence_number: index + 1,
     command_id: command!.id,
@@ -439,8 +449,26 @@ const enqueueEngineeringJobs = async (
   return {
     batchId,
     jobs: jobs || [],
+    commandSelectionMode: 'custom',
+    customCommandIds: normalizedIds,
     semanticPrerequisiteQueued: Boolean(semanticDependencyId),
     semanticPrerequisiteJobId: semanticDependencyId,
+  };
+};
+
+const useDefaultEngineeringCommands = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+  requestedBy: string,
+) => {
+  const { data, error } = await supabase.rpc('reset_external_analysis_command_preferences', {
+    p_article_id: articleId,
+    p_requested_by: requestedBy,
+  });
+  if (error) throw error;
+  return {
+    commandSelectionMode: 'default',
+    state: Array.isArray(data) ? data[0] || null : data || null,
   };
 };
 
@@ -602,6 +630,14 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
     );
     return { status: 201, body: { ok: true, action, ...result } };
   }
+  if (action === 'use_default_commands') {
+    const result = await useDefaultEngineeringCommands(
+      supabase,
+      article.id,
+      profile.id,
+    );
+    return { status: 200, body: { ok: true, action, ...result } };
+  }
   if (action === 'cancel') {
     const result = await cancelExternalAnalysisJob(
       supabase,
@@ -617,7 +653,7 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new ExternalAnalysisApiError({
-    message: 'action must be semantic, engineering, cancel, or cancel_all.',
+    message: 'action must be semantic, engineering, use_default_commands, cancel, or cancel_all.',
     code: 'invalid_action',
   });
 };

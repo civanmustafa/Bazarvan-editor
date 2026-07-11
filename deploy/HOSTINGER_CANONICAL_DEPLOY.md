@@ -11,6 +11,7 @@ Before the first external-analysis worker deployment, apply these migrations in 
 5. `supabase/migrations/20260711000000_external_analysis_job_controls.sql`
 6. `supabase/migrations/20260711010000_dashboard_filtered_pagination.sql`
 7. `supabase/migrations/20260711020000_external_analysis_scheduler_settings.sql`
+8. `supabase/migrations/20260711030000_external_analysis_command_preferences.sql`
 
 ```bash
 cd /var/www/bazarvan-editor

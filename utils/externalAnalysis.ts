@@ -51,6 +51,9 @@ export type ExternalAnalysisArticleState = {
   external_analysis_ready: boolean;
   semantic_missing_fields: string[];
   external_analysis_missing_fields: string[];
+  engineering_command_mode: 'default' | 'custom';
+  custom_engineering_command_ids: string[];
+  engineering_command_selection_updated_at: string | null;
   updated_at: string;
 };
 
@@ -267,7 +270,7 @@ export const listExternalAnalysisDashboardSummaries = async (
   const [stateResult, jobsResult] = await Promise.all([
     supabase
       .from('ai_external_analysis_article_state')
-      .select('article_id,semantic_ready,external_analysis_ready,semantic_missing_fields,external_analysis_missing_fields,updated_at')
+      .select('article_id,semantic_ready,external_analysis_ready,semantic_missing_fields,external_analysis_missing_fields,engineering_command_mode,custom_engineering_command_ids,engineering_command_selection_updated_at,updated_at')
       .in('article_id', ids),
     supabase
       .from('ai_external_analysis_jobs')
@@ -287,6 +290,9 @@ export const listExternalAnalysisDashboardSummaries = async (
       external_analysis_ready: row.external_analysis_ready === true,
       semantic_missing_fields: toStringList(row.semantic_missing_fields),
       external_analysis_missing_fields: toStringList(row.external_analysis_missing_fields),
+      engineering_command_mode: row.engineering_command_mode === 'custom' ? 'custom' : 'default',
+      custom_engineering_command_ids: toStringList(row.custom_engineering_command_ids),
+      engineering_command_selection_updated_at: row.engineering_command_selection_updated_at || null,
       updated_at: String(row.updated_at || ''),
     });
   });
@@ -497,6 +503,10 @@ export const enqueueExternalEngineeringAnalysis = (
   articleId: string,
   commandIds: string[],
 ) => requestExternalAnalysis(articleId, { action: 'engineering', commandIds });
+
+export const useDefaultExternalEngineeringCommands = (
+  articleId: string,
+) => requestExternalAnalysis(articleId, { action: 'use_default_commands' });
 
 export const cancelExternalAnalysisJob = (
   articleId: string,

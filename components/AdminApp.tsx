@@ -39,6 +39,7 @@ import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
+import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import ExternalAnalysisReportsTable from './ExternalAnalysisReportsTable';
 import {
   getArticleTrashInfo,
@@ -1423,6 +1424,10 @@ const AdminSettingsPage: React.FC<AdminSettingsPageProps> = ({
 
       <AdminSettingsSection title="إعدادات العملاء" icon={<Users size={18} />}>
         <ClientGoalSettings />
+      </AdminSettingsSection>
+
+      <AdminSettingsSection title="الأوامر الافتراضية للتحليل الخارجي" icon={<ListTree size={18} />}>
+        <ExternalAnalysisDefaultCommandsSettings />
       </AdminSettingsSection>
 
       <AdminSettingsSection title="قوالب التحرير والتحليل" icon={<SlidersHorizontal size={18} />}>
