@@ -6,7 +6,7 @@ import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditor } from '../contexts/EditorContext';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
-import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
+import { formatIstanbulDateTime, getIstanbulDateKey } from '../utils/dateTime';
 import {
     claimRemoteArticle,
     deleteRemoteArticle,
@@ -24,7 +24,9 @@ import {
     updateRemoteArticleSettings,
     type RemoteProfile,
     type RemoteArticleActivity,
+    type RemoteArticleFilterOptions,
     type RemoteArticlesPage,
+    type RemoteArticlesPageOptions,
     type RemoteArticleTrashInfo,
     type RemoteN8nIngestLog,
     type RemoteArticleSettingsPatch,
@@ -94,10 +96,6 @@ const getArticleSortTime = (article: RemoteArticleActivity): number => Math.max(
   new Date(article.createdAt || 0).getTime(),
 );
 
-const getArticleCreatedTime = (article: RemoteArticleActivity): number => (
-  new Date(article.createdAt || 0).getTime()
-);
-
 const sortArticlesByLastChange = (articles: RemoteArticleActivity[]): RemoteArticleActivity[] => (
   [...articles].sort((left, right) => getArticleSortTime(right) - getArticleSortTime(left))
 );
@@ -116,42 +114,6 @@ const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
 );
-
-const normalizeSearchText = (value: unknown): string => (
-  String(value || '').toLowerCase().trim()
-);
-
-const getUniqueArticleValues = (
-  articles: RemoteArticleActivity[],
-  getter: (article: RemoteArticleActivity) => string | undefined | null,
-): string[] => Array.from(new Set(
-  articles
-    .map(article => getter(article)?.trim() || '')
-    .filter(Boolean)
-)).sort((left, right) => left.localeCompare(right));
-
-const getArticleSearchText = (article: RemoteArticleActivity, ownerLabel: string, ownerId: string): string => {
-  const keywords = article.keywords || { primary: '', secondaries: [], company: '', lsi: [] };
-  const goalContext = article.goalContext || {};
-  return [
-    article.title,
-    keywords.primary,
-    ...(Array.isArray(keywords.secondaries) ? keywords.secondaries : []),
-    ...(Array.isArray(keywords.lsi) ? keywords.lsi : []),
-    keywords.company,
-    goalContext.pageType,
-    goalContext.objective,
-    goalContext.audienceScope,
-    goalContext.targetCountry,
-    goalContext.searchIntent,
-    article.plainText,
-    article.source,
-    article.status,
-    article.visibility,
-    ownerLabel,
-    ownerId,
-  ].map(normalizeSearchText).join(' ');
-};
 
 const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
   const metadata = isRecord(article?.metadata) ? article.metadata : {};
@@ -191,15 +153,6 @@ const canProfileSeeArticle = (
     articleBelongsToProfile(article, profileId) ||
     isPublicClaimOpportunity(article)
   ))
-);
-
-const canProfileSeeTrashedArticle = (
-  article: RemoteArticleActivity,
-  profileId: string,
-  isAdmin: boolean,
-): boolean => (
-  isAdmin ||
-  Boolean(profileId && articleBelongsToProfile(article, profileId))
 );
 
 type N8nSettingFieldKey = keyof Pick<RemoteArticleSettingsPatch, 'visibility' | 'accessRole' | 'articleLanguage' | 'status'>;
@@ -1037,6 +990,14 @@ const Dashboard: React.FC = () => {
   const [isTrashVisible, setIsTrashVisible] = useState(false);
   const [dashboardMode, setDashboardMode] = useState<'all' | 'n8n'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [remoteFilterOptions, setRemoteFilterOptions] = useState<RemoteArticleFilterOptions>({
+    companies: [],
+    pageTypes: [],
+    audienceScopes: [],
+    sources: [],
+    visibilities: [],
+  });
   const [selectedArticleIds, setSelectedArticleIds] = useState<Set<string>>(() => new Set());
   const [bulkStatus, setBulkStatus] = useState<RemoteArticleSettingsPatch['status']>('draft');
   const [filters, setFilters] = useState({
@@ -1058,6 +1019,11 @@ const Dashboard: React.FC = () => {
     audienceScope: 'all',
   });
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
   const isAdmin = currentUserRole === 'admin';
   const dashboardRefreshRequestRef = useRef(0);
   const externalAnalysisRefreshRequestRef = useRef(0);
@@ -1066,6 +1032,18 @@ const Dashboard: React.FC = () => {
     [remoteArticles],
   );
   const dashboardArticleIdsKey = dashboardArticleIds.join('|');
+  const articlesPageOptions = useMemo<RemoteArticlesPageOptions>(() => ({
+    page: articlesPage,
+    pageSize: DASHBOARD_ARTICLES_PAGE_SIZE,
+    search: debouncedSearchQuery,
+    mode: dashboardMode,
+    trash: isTrashVisible,
+    filters,
+  }), [articlesPage, debouncedSearchQuery, dashboardMode, isTrashVisible, filters]);
+  const articlesPageQueryKey = useMemo(
+    () => JSON.stringify(articlesPageOptions),
+    [articlesPageOptions],
+  );
 
   const refreshExternalAnalysisSummaries = useCallback(async () => {
     const requestId = externalAnalysisRefreshRequestRef.current + 1;
@@ -1090,8 +1068,7 @@ const Dashboard: React.FC = () => {
     if (!currentUser) return;
     const requestId = dashboardRefreshRequestRef.current + 1;
     dashboardRefreshRequestRef.current = requestId;
-    const page = articlesPage;
-    const pageSize = DASHBOARD_ARTICLES_PAGE_SIZE;
+    const page = articlesPageOptions.page || 1;
 
     const applyArticlesPageResult = (articlesPageResult: RemoteArticlesPage): boolean => {
       if (dashboardRefreshRequestRef.current !== requestId) return false;
@@ -1103,6 +1080,7 @@ const Dashboard: React.FC = () => {
       setRemoteArticles(sortArticlesByLastChange(articlesPageResult.articles));
       setArticlesTotalCount(articlesPageResult.totalCount);
       setArticlesHasNextPage(articlesPageResult.hasNextPage);
+      setRemoteFilterOptions(articlesPageResult.filterOptions);
       setIsArticlesPageFromCache(articlesPageResult.fromCache);
       return true;
     };
@@ -1110,10 +1088,7 @@ const Dashboard: React.FC = () => {
     setIsArticlesLoading(true);
     if (isAdmin) setIsN8nLogsLoading(true);
 
-    const cachedArticlesPage = await readCachedRemoteArticlesPage({
-      page,
-      pageSize,
-    }).catch(error => {
+    const cachedArticlesPage = await readCachedRemoteArticlesPage(articlesPageOptions).catch(error => {
       console.warn('Could not read cached dashboard articles before refresh:', error);
       return null;
     });
@@ -1155,10 +1130,7 @@ const Dashboard: React.FC = () => {
     }
 
     try {
-      const articlesPageResult = await listRemoteArticlesPage({
-        page,
-        pageSize,
-      });
+      const articlesPageResult = await listRemoteArticlesPage(articlesPageOptions);
       applyArticlesPageResult(articlesPageResult);
     } catch (error) {
       console.error('Failed to load Supabase articles:', error);
@@ -1374,7 +1346,7 @@ const Dashboard: React.FC = () => {
       clearInterval(intervalId);
       window.removeEventListener('smart-editor-activity-updated', handleActivityUpdated);
     };
-  }, [currentUser, isAdmin, articlesPage]);
+  }, [currentUser, isAdmin, articlesPageQueryKey]);
 
   useEffect(() => {
     if (!currentUser || !isSupabaseConfigured) return;
@@ -1389,7 +1361,7 @@ const Dashboard: React.FC = () => {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [currentUser, isAdmin, articlesPage]);
+  }, [currentUser, isAdmin, articlesPageQueryKey]);
 
   useEffect(() => {
     void refreshExternalAnalysisSummaries();
@@ -1591,119 +1563,23 @@ const Dashboard: React.FC = () => {
       return canProfileSeeArticle(article, currentUserId, isAdmin);
     })
   ), [remoteArticles, currentUserId, isAdmin]);
-  const trashedRemoteArticles = useMemo(() => (
-    remoteArticles.filter(article => {
-      if (!getArticleTrashInfo(article, currentUserId)) return false;
-      return canProfileSeeTrashedArticle(article, currentUserId, isAdmin);
-    })
-  ), [remoteArticles, currentUserId, isAdmin]);
-  const displayedRemoteArticles = useMemo(() => {
-    const baseArticles = isTrashVisible ? trashedRemoteArticles : activeRemoteArticles;
-    return dashboardMode === 'n8n'
-      ? baseArticles.filter(article => article.source === 'n8n')
-      : baseArticles;
-  }, [activeRemoteArticles, trashedRemoteArticles, isTrashVisible, dashboardMode]);
+  // Supabase applies visibility, trash, mode, search, and filters before pagination.
+  const displayedRemoteArticles = remoteArticles;
   const scopedArticles = displayedRemoteArticles;
   const selectedFilterProfile = filters.profileId !== 'all'
     ? profiles.find(profile => profile.id === filters.profileId)
     : undefined;
   const scopedLastSaved = getLatestSavedAt(scopedArticles);
   const scopedTotalTime = scopedArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
-  const filterOptions = useMemo(() => ({
-    companies: getUniqueArticleValues(displayedRemoteArticles, article => article.keywords?.company),
-    pageTypes: getUniqueArticleValues(displayedRemoteArticles, article => article.goalContext?.pageType),
-    audienceScopes: getUniqueArticleValues(displayedRemoteArticles, article => article.goalContext?.audienceScope),
-    sources: getUniqueArticleValues(displayedRemoteArticles, article => article.source),
-    visibilities: getUniqueArticleValues(displayedRemoteArticles, article => article.visibility),
-  }), [displayedRemoteArticles]);
-
-  // Article filters stay derived from Supabase data so refreshData remains the only reload path.
-  const filteredArticles = useMemo(() => {
-    const normalizedSearch = searchQuery.trim().toLowerCase();
-    return scopedArticles.filter((activity) => {
-      const ownerId = getArticleOwnerId(activity) || '';
-      if (normalizedSearch) {
-        const ownerLabel = getOwnerLabel(activity).toLowerCase();
-        const searchText = getArticleSearchText(activity, ownerLabel, ownerId);
-        if (!searchText.includes(normalizedSearch)) return false;
-      }
-      if (filters.dateFrom) {
-          if (!activity.lastSaved || new Date(activity.lastSaved) < getIstanbulDayStart(filters.dateFrom)) {
-              return false;
-          }
-      }
-      if (filters.dateTo) {
-          if (!activity.lastSaved) return false;
-          const articleDate = new Date(activity.lastSaved);
-          const filterDate = getIstanbulDayEnd(filters.dateTo);
-          if (articleDate > filterDate) {
-              return false;
-          }
-      }
-      if (filters.createdFrom) {
-          if (!activity.createdAt || getArticleCreatedTime(activity) < getIstanbulDayStart(filters.createdFrom).getTime()) {
-              return false;
-          }
-      }
-      if (filters.createdTo) {
-          if (!activity.createdAt) return false;
-          const createdDate = new Date(activity.createdAt);
-          const filterDate = getIstanbulDayEnd(filters.createdTo);
-          if (createdDate > filterDate) {
-              return false;
-          }
-      }
-      const wordCount = activity.stats?.wordCount ?? 0;
-      const wordMin = parseInt(filters.wordCountMin, 10);
-      const wordMax = parseInt(filters.wordCountMax, 10);
-      if (!isNaN(wordMin) && wordCount < wordMin) return false;
-      if (!isNaN(wordMax) && wordCount > wordMax) return false;
-      
-      const timeInMinutes = Math.floor(activity.timeSpentSeconds / 60);
-      const timeMin = parseInt(filters.timeMin, 10);
-      const timeMax = parseInt(filters.timeMax, 10);
-      if (!isNaN(timeMin) && timeInMinutes < timeMin) return false;
-      if (!isNaN(timeMax) && timeInMinutes > timeMax) return false;
-      
-      if (filters.language !== 'all' && (activity.articleLanguage || 'ar') !== filters.language) {
-          return false;
-      }
-      if (filters.status !== 'all' && activity.status !== filters.status) {
-          return false;
-      }
-      if (filters.profileId !== 'all' && !articleBelongsToProfile(activity, filters.profileId)) {
-          return false;
-      }
-      if (filters.visibility !== 'all' && activity.visibility !== filters.visibility) {
-          return false;
-      }
-      if (filters.source !== 'all' && activity.source !== filters.source) {
-          return false;
-      }
-      if (filters.company !== 'all' && activity.keywords?.company !== filters.company) {
-          return false;
-      }
-      if (filters.pageType !== 'all' && activity.goalContext?.pageType !== filters.pageType) {
-          return false;
-      }
-      if (filters.audienceScope !== 'all' && activity.goalContext?.audienceScope !== filters.audienceScope) {
-          return false;
-      }
-
-      return true;
-    });
-  }, [scopedArticles, filters, searchQuery, profiles]);
+  const filterOptions = remoteFilterOptions;
+  const filteredArticles = scopedArticles;
 
   const selectedFilteredArticles = useMemo(() => (
     filteredArticles.filter(article => selectedArticleIds.has(article.id))
   ), [filteredArticles, selectedArticleIds]);
-  const articlesTotalPages = Math.max(1, Math.ceil(Math.max(articlesTotalCount, filteredArticles.length) / DASHBOARD_ARTICLES_PAGE_SIZE));
-  const articlesTotalLabel = articlesHasNextPage
-    ? `أكثر من ${articlesPage * DASHBOARD_ARTICLES_PAGE_SIZE}`
-    : String(articlesTotalCount || filteredArticles.length);
-  const articlesPageLabel = articlesHasNextPage
-    ? `صفحة ${articlesPage} / ${articlesPage + 1}+`
-    : `صفحة ${articlesPage} / ${articlesTotalPages}`;
+  const articlesTotalPages = Math.max(1, Math.ceil(articlesTotalCount / DASHBOARD_ARTICLES_PAGE_SIZE));
+  const articlesTotalLabel = String(articlesTotalCount);
+  const articlesPageLabel = `صفحة ${articlesPage} / ${articlesTotalPages}`;
   const canGoToPreviousArticlesPage = articlesPage > 1 && !isArticlesLoading;
   const canGoToNextArticlesPage = articlesHasNextPage && !isArticlesLoading;
   const areAllFilteredSelected = filteredArticles.length > 0 && filteredArticles.every(article => selectedArticleIds.has(article.id));
@@ -1833,7 +1709,7 @@ const Dashboard: React.FC = () => {
                         </h2>
                         {isAdmin && (
                             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                                {scopedArticles.length} مقال، آخر حفظ: {scopedLastSaved ? formatIstanbulDateTime(scopedLastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}، الوقت: {formatSeconds(scopedTotalTime, t)}
+                                {articlesTotalCount} مقال، آخر حفظ في الصفحة: {scopedLastSaved ? formatIstanbulDateTime(scopedLastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}، وقت الصفحة: {formatSeconds(scopedTotalTime, t)}
                             </p>
                         )}
                     </div>
@@ -1844,7 +1720,7 @@ const Dashboard: React.FC = () => {
                             title={isTrashVisible ? 'عرض المقالات النشطة' : 'عرض سلة المهملات'}
                         >
                             <Trash2 size={14} />
-                            <span>{isTrashVisible ? 'المقالات' : `السلة (${trashedRemoteArticles.length})`}</span>
+                            <span>{isTrashVisible ? 'المقالات' : 'السلة'}</span>
                         </button>
                         <button
                             onClick={() => setIsFilterVisible(!isFilterVisible)}

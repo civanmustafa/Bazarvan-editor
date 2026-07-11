@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
     defaultProvider: 'gemini',
     defaultGeminiModel: 'gemini-3.5-flash',
     geminiFreeModelFallbackEnabled: true,
+    externalAnalysisRetryMinutes: 30,
     defaultGeminiPaidModel: 'gemini-2.5-pro',
     defaultOpenAiModel: 'gpt-4.1-mini',
   },
@@ -181,6 +182,14 @@ const normalizeGeminiFreeModel = (value: unknown): string => {
     : allowedModels[0] || DEFAULT_GEMINI_FREE_MODELS[0];
 };
 
+const normalizeExternalAnalysisRetryMinutes = (value: unknown): number => {
+  const parsed = typeof value === 'number'
+    ? value
+    : Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return 30;
+  return Math.max(5, Math.min(Math.round(parsed), 1_440));
+};
+
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
 
 const getPublicBaseUrl = (req: any): string => {
@@ -249,10 +258,18 @@ const readSettings = async (supabase: SupabaseAdmin) => {
 
     if (error) throw error;
 
+    const defaults = Object.fromEntries(
+      Array.from(SETTING_KEYS).map(key => [key, { ...DEFAULT_SETTINGS[key] }]),
+    );
     return (data || []).reduce<Record<string, unknown>>((settings, row) => {
-      settings[String(row.key)] = isRecord(row.value) ? row.value : {};
+      const key = String(row.key) as SettingKey;
+      if (!SETTING_KEYS.has(key)) return settings;
+      settings[key] = {
+        ...DEFAULT_SETTINGS[key],
+        ...(isRecord(row.value) ? row.value : {}),
+      };
       return settings;
-    }, { ...DEFAULT_SETTINGS });
+    }, defaults);
   } catch (error: any) {
     if (error?.code === '42P01') return { ...DEFAULT_SETTINGS };
     throw error;
@@ -269,6 +286,9 @@ const sanitizeSettingsPatch = (value: unknown): Partial<Record<SettingKey, Recor
       ? {
           ...settingValue,
           defaultGeminiModel: normalizeGeminiFreeModel(settingValue.defaultGeminiModel),
+          externalAnalysisRetryMinutes: normalizeExternalAnalysisRetryMinutes(
+            settingValue.externalAnalysisRetryMinutes,
+          ),
         }
       : settingValue;
     return patch;

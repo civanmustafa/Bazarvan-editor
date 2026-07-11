@@ -58,6 +58,7 @@ const DEFAULT_SETTINGS: SystemSettingsMap = {
     defaultProvider: 'gemini',
     defaultGeminiModel: 'gemini-3.5-flash',
     geminiFreeModelFallbackEnabled: true,
+    externalAnalysisRetryMinutes: 30,
     defaultGeminiPaidModel: 'gemini-2.5-pro',
     defaultOpenAiModel: 'gpt-4.1-mini',
   },
@@ -167,11 +168,15 @@ const TextInput: React.FC<{
 const NumberInput: React.FC<{
   value: number;
   min?: number;
+  max?: number;
+  step?: number;
   onChange: (value: number) => void;
-}> = ({ value, min = 0, onChange }) => (
+}> = ({ value, min = 0, max, step = 1, onChange }) => (
   <input
     type="number"
     min={min}
+    max={max}
+    step={step}
     value={Number.isFinite(value) ? value : 0}
     onChange={event => onChange(Number(event.target.value))}
     className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
@@ -507,6 +512,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
                 handleGeminiFreeModelPreferenceChange(value, false);
               }}
               options={geminiFreeModelOptions}
+            />
+          </FieldLabel>
+          <FieldLabel label="مهلة التشغيل الدوري الخارجي للذكاء الاصطناعي (بالدقائق)">
+            <NumberInput
+              value={Number(settings.ai.externalAnalysisRetryMinutes || 30)}
+              min={5}
+              max={1440}
+              step={5}
+              onChange={value => updateSetting('ai', 'externalAnalysisRetryMinutes', value)}
             />
           </FieldLabel>
           <FieldLabel label="موديل Gemini Pro الافتراضي">

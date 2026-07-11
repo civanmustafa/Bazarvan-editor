@@ -285,7 +285,7 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
 
 const runWorker = async (): Promise<void> => {
   console.log(
-    `[external-analysis-worker] Started ${workerId}; poll=${pollIntervalMs}ms, lease=${leaseSeconds}s, retry=${retryDelayMinutes}m.`,
+    `[external-analysis-worker] Started ${workerId}; poll=${pollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m (global setting takes precedence).`,
   );
 
   while (!shuttingDown) {

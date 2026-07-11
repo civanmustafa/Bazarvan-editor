@@ -146,12 +146,16 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     setBusyAction('engineering');
     setNotice(null);
     try {
-      await enqueueExternalEngineeringAnalysis(articleId, orderedCommandIds);
+      const result = await enqueueExternalEngineeringAnalysis(articleId, orderedCommandIds);
       setNotice({
         tone: 'success',
-        message: locale === 'ar'
-          ? `تم تعيين ${orderedCommandIds.length} أمر بالتتابع في الخلفية.`
-          : `${orderedCommandIds.length} command(s) queued sequentially in the background.`,
+        message: result.semanticPrerequisiteQueued
+          ? (locale === 'ar'
+              ? `تم تعيين توليد الصيغ وLSI أولاً، ثم ${orderedCommandIds.length} أمر بالتتابع.`
+              : `Alternatives and LSI were queued first, followed by ${orderedCommandIds.length} command(s).`)
+          : (locale === 'ar'
+              ? `تم تعيين ${orderedCommandIds.length} أمر بالتتابع في الخلفية.`
+              : `${orderedCommandIds.length} command(s) queued sequentially in the background.`),
       });
       setSelectedCommandIds([]);
       setMenuOpen(false);
@@ -205,7 +209,11 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             : semanticTermsReady
               ? <CheckCircle2 size={12} />
               : <Tags size={12} />}
-          <span>{semanticTermsReady ? (locale === 'ar' ? 'الصيغ جاهزة' : 'Terms ready') : (locale === 'ar' ? 'الصيغ وLSI' : 'Alternatives + LSI')}</span>
+          <span>{semanticTermsReady
+            ? (locale === 'ar' ? 'الصيغ جاهزة' : 'Terms ready')
+            : semanticJobActive
+              ? (locale === 'ar' ? 'جاري توليد الصيغ' : 'Generating terms')
+              : (locale === 'ar' ? 'توليد الصيغ وLSI' : 'Generate alternatives + LSI')}</span>
         </button>
 
         <div ref={menuRef} className="relative">
@@ -217,7 +225,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             title={locale === 'ar' ? 'اختيار أوامر جاهزة لتشغيلها بالتتابع' : 'Choose ready commands to run sequentially'}
           >
             {busyAction === 'engineering' ? <LoaderCircle size={12} className="animate-spin" /> : <ListChecks size={12} />}
-            <span>{locale === 'ar' ? 'التحليل الخارجي' : 'External analysis'}</span>
+            <span>{locale === 'ar' ? 'الأوامر اليدوية الجاهزة' : 'Ready manual commands'}</span>
             {selectedCommandIds.length > 0 && (
               <span className="rounded bg-[#d4af37] px-1 text-[9px] text-white">{selectedCommandIds.length}</span>
             )}

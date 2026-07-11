@@ -227,17 +227,63 @@ export type RemoteArticleActivity = ArticleActivity & {
   createdAt: string;
 };
 
+export type RemoteArticleFilterOptions = {
+  companies: string[];
+  pageTypes: string[];
+  audienceScopes: string[];
+  sources: string[];
+  visibilities: string[];
+};
+
+export type RemoteArticlesPageFilters = Partial<Record<
+  | 'dateFrom'
+  | 'dateTo'
+  | 'createdFrom'
+  | 'createdTo'
+  | 'wordCountMin'
+  | 'wordCountMax'
+  | 'timeMin'
+  | 'timeMax'
+  | 'language'
+  | 'status'
+  | 'profileId'
+  | 'visibility'
+  | 'source'
+  | 'company'
+  | 'pageType'
+  | 'audienceScope',
+  string
+>>;
+
+export type RemoteArticlesPageOptions = {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  mode?: 'all' | 'n8n';
+  trash?: boolean;
+  filters?: RemoteArticlesPageFilters;
+};
+
 export type RemoteArticlesPage = {
   articles: RemoteArticleActivity[];
   totalCount: number;
   page: number;
   pageSize: number;
   hasNextPage: boolean;
+  filterOptions: RemoteArticleFilterOptions;
   fromCache: boolean;
 };
 
-type CachedRemoteArticlesPage = Pick<RemoteArticlesPage, 'articles' | 'totalCount'> & {
+type CachedRemoteArticlesPage = Pick<RemoteArticlesPage, 'articles' | 'totalCount' | 'filterOptions'> & {
   hasNextPage?: boolean;
+};
+
+const EMPTY_REMOTE_ARTICLE_FILTER_OPTIONS: RemoteArticleFilterOptions = {
+  companies: [],
+  pageTypes: [],
+  audienceScopes: [],
+  sources: [],
+  visibilities: [],
 };
 
 const DEFAULT_STATS: ArticleStats = {
@@ -672,6 +718,25 @@ const getArticleListCacheKey = async (scope = 'all'): Promise<string> => {
   return `${REMOTE_ARTICLE_CACHE_PREFIX}${data.session?.user.id || 'anonymous'}:${scope}`;
 };
 
+const normalizeRemoteArticleFilterOptions = (value: unknown): RemoteArticleFilterOptions => {
+  const source = isRecord(value) ? value : {};
+  const readList = (key: keyof RemoteArticleFilterOptions): string[] => (
+    Array.isArray(source[key])
+      ? Array.from(new Set(source[key]
+          .map((item: unknown) => typeof item === 'string' ? item.trim() : '')
+          .filter(Boolean)))
+      : []
+  );
+
+  return {
+    companies: readList('companies'),
+    pageTypes: readList('pageTypes'),
+    audienceScopes: readList('audienceScopes'),
+    sources: readList('sources'),
+    visibilities: readList('visibilities'),
+  };
+};
+
 const readCachedRemoteArticlePage = async (scope = 'all'): Promise<CachedRemoteArticlesPage | null> => {
   if (!canUseLocalStorage()) return null;
 
@@ -689,6 +754,7 @@ const readCachedRemoteArticlePage = async (scope = 'all'): Promise<CachedRemoteA
       hasNextPage: typeof parsed.hasNextPage === 'boolean'
         ? parsed.hasNextPage
         : undefined,
+      filterOptions: normalizeRemoteArticleFilterOptions(parsed.filterOptions),
     };
   } catch (error) {
     console.warn('Could not read cached Supabase article list:', error);
@@ -701,6 +767,7 @@ const writeCachedRemoteArticlePage = async (
   articles: RemoteArticleActivity[],
   totalCount: number,
   hasNextPage = false,
+  filterOptions: RemoteArticleFilterOptions = EMPTY_REMOTE_ARTICLE_FILTER_OPTIONS,
 ): Promise<void> => {
   if (!canUseLocalStorage()) return;
 
@@ -711,30 +778,44 @@ const writeCachedRemoteArticlePage = async (
       articles,
       totalCount,
       hasNextPage,
+      filterOptions,
     }));
   } catch (error) {
     console.warn('Could not cache Supabase article list:', error);
   }
 };
 
+const hashCacheScope = (value: string): string => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+
 const normalizeRemoteArticlesPageOptions = (
-  options: {
-    page?: number;
-    pageSize?: number;
-  } = {},
+  options: RemoteArticlesPageOptions = {},
 ) => {
   const pageSize = Math.max(1, Math.min(50, Math.floor(options.pageSize || 10)));
   const page = Math.max(1, Math.floor(options.page || 1));
   const from = (page - 1) * pageSize;
-  const cacheScope = `page:${page}:size:${pageSize}`;
-  return { page, pageSize, from, cacheScope };
+  const search = typeof options.search === 'string' ? options.search.trim() : '';
+  const mode = options.mode === 'n8n' ? 'n8n' : 'all';
+  const trash = options.trash === true;
+  const filters = Object.fromEntries(
+    Object.entries(options.filters || {})
+      .filter(([, value]) => typeof value === 'string')
+      .map(([key, value]) => [key, value.trim()])
+      .sort(([left], [right]) => left.localeCompare(right)),
+  ) as RemoteArticlesPageFilters;
+  const queryScope = hashCacheScope(JSON.stringify({ search, mode, trash, filters }));
+  const cacheScope = `page:${page}:size:${pageSize}:query:${queryScope}`;
+  return { page, pageSize, from, search, mode, trash, filters, cacheScope };
 };
 
 export const readCachedRemoteArticlesPage = async (
-  options: {
-    page?: number;
-    pageSize?: number;
-  } = {},
+  options: RemoteArticlesPageOptions = {},
 ): Promise<RemoteArticlesPage | null> => {
   const { page, pageSize, from, cacheScope } = normalizeRemoteArticlesPageOptions(options);
   const cached = await readCachedRemoteArticlePage(cacheScope);
@@ -750,6 +831,7 @@ export const readCachedRemoteArticlesPage = async (
     page,
     pageSize,
     hasNextPage,
+    filterOptions: cached.filterOptions,
     fromCache: true,
   };
 };
@@ -778,30 +860,42 @@ export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => 
 };
 
 export const listRemoteArticlesPage = async (
-  options: {
-    page?: number;
-    pageSize?: number;
-  } = {},
+  options: RemoteArticlesPageOptions = {},
 ): Promise<RemoteArticlesPage> => {
-  const { page, pageSize, from, cacheScope } = normalizeRemoteArticlesPageOptions(options);
+  const {
+    page,
+    pageSize,
+    from,
+    search,
+    mode,
+    trash,
+    filters,
+    cacheScope,
+  } = normalizeRemoteArticlesPageOptions(options);
   const supabase = getSupabaseClient();
 
   try {
-    const { data, error } = await supabase
-      .from('articles')
-      .select(ARTICLE_LIST_SELECT)
-      .order('updated_at', { ascending: false })
-      .range(from, from + pageSize);
+    const { data, error } = await supabase.rpc('list_dashboard_articles_page', {
+      p_page: page,
+      p_page_size: pageSize,
+      p_search: search,
+      p_mode: mode,
+      p_trash: trash,
+      p_filters: filters,
+    });
 
     if (error) throw error;
 
-    const rows = ((data || []) as ArticleRow[]);
-    const hasNextPage = rows.length > pageSize;
+    const payload = isRecord(data) ? data : {};
+    const rows = Array.isArray(payload.articles) ? payload.articles as ArticleRow[] : [];
     const articles = rows
-      .slice(0, pageSize)
       .map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
-    const totalCount = hasNextPage ? from + pageSize + 1 : from + articles.length;
-    void writeCachedRemoteArticlePage(cacheScope, articles, totalCount, hasNextPage);
+    const totalCount = Math.max(0, Math.floor(toNumber(payload.totalCount, articles.length)));
+    const hasNextPage = typeof payload.hasNextPage === 'boolean'
+      ? payload.hasNextPage
+      : from + articles.length < totalCount;
+    const filterOptions = normalizeRemoteArticleFilterOptions(payload.filterOptions);
+    void writeCachedRemoteArticlePage(cacheScope, articles, totalCount, hasNextPage, filterOptions);
 
     return {
       articles,
@@ -809,6 +903,7 @@ export const listRemoteArticlesPage = async (
       page,
       pageSize,
       hasNextPage,
+      filterOptions,
       fromCache: false,
     };
   } catch (error) {
@@ -823,6 +918,7 @@ export const listRemoteArticlesPage = async (
         hasNextPage: typeof cached.hasNextPage === 'boolean'
           ? cached.hasNextPage
           : from + cached.articles.length < cached.totalCount,
+        filterOptions: cached.filterOptions,
         fromCache: true,
       };
     }

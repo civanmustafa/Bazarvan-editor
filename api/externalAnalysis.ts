@@ -294,11 +294,20 @@ const enqueueSemanticJob = async (
     .select('id,article_id,job_type,status,progress,next_attempt_at,created_at,updated_at')
     .single();
   if (error?.code === '23505') {
-    throw new ExternalAnalysisApiError({
-      message: 'A semantic analysis task is already active for this article.',
-      status: 409,
-      code: 'semantic_already_active',
-    });
+    const { data: conflictingJob, error: conflictReadError } = await supabase
+      .from('ai_external_analysis_jobs')
+      .select('id,article_id,job_type,status,progress,next_attempt_at,created_at,updated_at')
+      .eq('article_id', article.id)
+      .eq('job_type', 'semantic_keywords_lsi')
+      .in('status', ACTIVE_JOB_STATUSES)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (conflictReadError) throw conflictReadError;
+    if (conflictingJob) {
+      return { alreadyReady: false, job: conflictingJob, alreadyActive: true };
+    }
+    throw error;
   }
   if (error) throw error;
   return { alreadyReady: false, job, alreadyActive: false };
@@ -332,8 +341,6 @@ const enqueueEngineeringJobs = async (
   const missingFields = [
     ...toStringList(state.external_analysis_missing_fields),
     !toTrimmedString(article.plain_text) ? 'editor_text' : '',
-    toStringList(keywords.secondaries).length === 0 ? 'alternative_keywords' : '',
-    toStringList(keywords.lsi).length === 0 ? 'lsi_keywords' : '',
     !hasCompetitorInput(article.metadata) ? 'competitor_content_or_url' : '',
   ].filter(Boolean);
   if (!state.external_analysis_ready || !state.external_analysis_readiness_signature || missingFields.length > 0) {
@@ -364,6 +371,21 @@ const enqueueEngineeringJobs = async (
     });
   }
 
+  const needsSemanticPrerequisite = toStringList(keywords.secondaries).length === 0
+    || toStringList(keywords.lsi).length === 0;
+  const semanticResult = needsSemanticPrerequisite
+    ? await enqueueSemanticJob(supabase, article, state, requestedBy)
+    : null;
+  const semanticDependencyId = semanticResult?.job?.id || null;
+  if (needsSemanticPrerequisite && !semanticDependencyId && !semanticResult?.alreadyReady) {
+    throw new ExternalAnalysisApiError({
+      message: 'The semantic prerequisite could not be queued.',
+      status: 409,
+      code: 'semantic_prerequisite_unavailable',
+      details: { missingFields: ['alternative_keywords', 'lsi_keywords'] },
+    });
+  }
+
   const batchId = randomUUID();
   const now = new Date().toISOString();
   const jobIds = commands.map(() => randomUUID());
@@ -380,7 +402,7 @@ const enqueueEngineeringJobs = async (
     sequence_number: index + 1,
     command_id: command!.id,
     command_label: command!.label,
-    depends_on_job_id: index > 0 ? jobIds[index - 1] : null,
+    depends_on_job_id: index > 0 ? jobIds[index - 1] : semanticDependencyId,
     readiness_signature: state.external_analysis_readiness_signature,
     input_snapshot: {
       ...snapshot,
@@ -395,6 +417,7 @@ const enqueueEngineeringJobs = async (
       source: 'dashboard',
       commandSequence: index + 1,
       commandTotal: commands.length,
+      semanticPrerequisiteJobId: semanticDependencyId,
       updatedAt: now,
     },
     next_attempt_at: now,
@@ -413,7 +436,12 @@ const enqueueEngineeringJobs = async (
     });
   }
   if (error) throw error;
-  return { batchId, jobs: jobs || [] };
+  return {
+    batchId,
+    jobs: jobs || [],
+    semanticPrerequisiteQueued: Boolean(semanticDependencyId),
+    semanticPrerequisiteJobId: semanticDependencyId,
+  };
 };
 
 const cancelExternalAnalysisJob = async (
