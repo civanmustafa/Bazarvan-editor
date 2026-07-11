@@ -257,32 +257,73 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   };
 
   const renderPatch = (patch: AiContentPatch) => {
-    const actionLabel = patch.operation === 'replace_block' || patch.operation === 'replace_text'
+    const isDeletePatch = patch.operation === 'delete_block';
+    const isReplacePatch = patch.operation === 'replace_block' || patch.operation === 'replace_text';
+    const actionLabel = isReplacePatch
       ? (locale === 'ar' ? 'استبدال' : 'Replace')
-      : patch.operation === 'delete_block'
+      : isDeletePatch
         ? (locale === 'ar' ? 'حذف' : 'Delete')
         : (locale === 'ar' ? 'إضافة' : 'Insert');
+    const cleanTitle = (patch.title || (locale === 'ar' ? 'نص مقترح' : 'Suggested text'))
+      .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|insert|replace|delete)\s*[-:–]\s*/i, '')
+      .trim() || (locale === 'ar' ? 'نص مقترح' : 'Suggested text');
+    const reason = patch.reason || (locale === 'ar' ? 'سبب الاقتراح غير محدد.' : 'No reason was provided.');
+    const reasonLabel = isDeletePatch
+      ? (locale === 'ar' ? 'سبب الحذف' : 'Deletion reason')
+      : isReplacePatch
+        ? (locale === 'ar' ? 'سبب الاستبدال' : 'Replacement reason')
+        : (locale === 'ar' ? 'سبب إضافة النص المقترح' : 'Reason for adding');
     const hasMergeDeleteTarget = Boolean(
-      patch.mergeDeleteTargetText || patch.mergeDeleteAnchorText || patch.mergeDeletePlacementLabel,
+      patch.mergeDeleteTargetText?.trim()
+      || patch.mergeDeleteAnchorText?.trim()
+      || patch.mergeDeletePlacementLabel?.trim(),
     );
     const location = patch.placementLabel || patch.anchorText || patch.targetText
       || (locale === 'ar' ? 'لم يتم تحديد موضع نصي دقيق.' : 'No exact text location was provided.');
+    const copyText = isDeletePatch
+      ? (patch.targetText || patch.anchorText || patch.placementLabel || '')
+      : patch.contentMarkdown;
 
     return (
-      <div key={patch.id} className="my-3 border-s-2 border-[#d4af37] bg-[#d4af37]/5 px-2.5 py-2">
+      <div key={patch.id} className="my-3 rounded-md border border-[#d4af37]/25 bg-white/80 p-2 dark:border-[#d4af37]/30 dark:bg-[#1F1F1F]/80">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-xs font-black text-gray-800 dark:text-gray-100">{actionLabel}: {patch.title}</div>
-            {patch.reason && <div className="mt-1 text-[11px] leading-5 text-gray-600 dark:text-gray-300">{patch.reason}</div>}
-            <div className="mt-1 break-words text-[10px] text-gray-500 dark:text-gray-400">{location}</div>
+            <div className="text-xs font-black text-gray-800 dark:text-gray-100">{actionLabel} - {cleanTitle}</div>
+            <div className="mt-1.5 text-[11px] leading-5 text-gray-600 dark:text-gray-300">
+              <span className="font-black text-[#8a6f1d] dark:text-[#f2d675]">{reasonLabel}: </span>
+              {reason}
+            </div>
+            <div className="mt-1 break-words text-[10px] leading-5 text-gray-500 dark:text-gray-400">
+              <span className="font-bold">{locale === 'ar' ? 'مكان النص في المحرر' : 'Editor location'}: </span>
+              {location}
+            </div>
           </div>
-          {patch.status === 'applied' && <CheckCircle2 size={15} className="shrink-0 text-emerald-600" />}
-          {patch.status === 'failed' && <AlertTriangle size={15} className="shrink-0 text-red-600" />}
+          {patch.status === 'applied' && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-black text-emerald-600 dark:text-emerald-300">
+              <CheckCircle2 size={13} /> {locale === 'ar' ? 'تم' : 'Done'}
+            </span>
+          )}
+          {patch.status === 'failed' && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-black text-red-600 dark:text-red-300">
+              <AlertTriangle size={13} /> {locale === 'ar' ? 'تعذر' : 'Failed'}
+            </span>
+          )}
         </div>
 
-        {patch.contentMarkdown && (
-          <div className="ai-output mt-2 border-t border-[#d4af37]/20 pt-2 text-xs leading-6 text-gray-700 dark:text-gray-200" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }} />
-        )}
+        <div className={`mt-2 rounded-md border p-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] ${isDeletePatch ? 'border-red-100 bg-red-50/60' : 'border-gray-100 bg-gray-50/80'}`}>
+          <div className="mb-1 text-[10px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+            {isDeletePatch
+              ? (locale === 'ar' ? 'النص المراد حذفه' : 'Text to delete')
+              : (locale === 'ar' ? 'النص المقترح' : 'Suggested text')}
+          </div>
+          {isDeletePatch ? (
+            <div className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-gray-800 dark:text-gray-100">
+              {patch.targetText || location}
+            </div>
+          ) : (
+            <div className="ai-output text-[11px] leading-6 text-gray-800 dark:text-gray-100" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }} />
+          )}
+        </div>
 
         {hasMergeDeleteTarget && (
           <div className="mt-2 border-t border-red-200 pt-2 text-[11px] dark:border-red-900/40">
@@ -305,11 +346,11 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
           <button type="button" onClick={() => handleSelectPatch(patch)} className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#333] dark:text-gray-200">
             <LocateFixed size={12} /> {locale === 'ar' ? 'الموضع' : 'Locate'}
           </button>
-          <button type="button" onClick={() => handleCopy(patch.id, patch.contentMarkdown)} className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#333] dark:text-gray-200">
+          <button type="button" onClick={() => handleCopy(patch.id, copyText)} disabled={!copyText} className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 hover:bg-[#d4af37]/15 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-[#333] dark:text-gray-200">
             <Copy size={12} /> {copiedId === patch.id ? (locale === 'ar' ? 'تم النسخ' : 'Copied') : (locale === 'ar' ? 'نسخ' : 'Copy')}
           </button>
           <button type="button" onClick={() => handleApplyPatch(patch)} disabled={patch.status !== 'pending'} className="inline-flex items-center gap-1 rounded bg-[#d4af37] px-2 py-1 text-[10px] font-black text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50">
-            <FilePlus2 size={12} /> {actionLabel}
+            {isDeletePatch ? <Trash2 size={12} /> : <FilePlus2 size={12} />} {actionLabel}
           </button>
         </div>
       </div>
