@@ -65,6 +65,37 @@ export type ExternalAnalysisDashboardSummary = {
   latestUpdatedAt: string | null;
 };
 
+export type ExternalAnalysisKeyAttempt = {
+  requestIndex: number;
+  outcome: 'success' | 'failed' | 'cancelled' | 'unknown';
+  model: string;
+  keySuffix: string;
+  status: number | null;
+  reason: string;
+  attempt: number;
+};
+
+export type ExternalAnalysisRunRow = {
+  id: string;
+  jobId: string;
+  runNumber: number;
+  status: string;
+  provider: string;
+  model: string;
+  progress: Record<string, unknown>;
+  keyAttempts: ExternalAnalysisKeyAttempt[];
+  errorCode: string;
+  errorMessage: string;
+  startedAt: string;
+  finishedAt: string | null;
+  createdAt: string;
+};
+
+export type ExternalAnalysisReportJob = ExternalAnalysisJobRow & {
+  reportActivityAt: string;
+  runs: ExternalAnalysisRunRow[];
+};
+
 export const EXTERNAL_ANALYSIS_ACTIVE_STATUSES: ExternalAnalysisJobStatus[] = [
   'waiting_for_prerequisites',
   'queued',
@@ -173,6 +204,60 @@ const FULL_JOB_SELECT = [
   'result',
 ].join(',');
 
+const REPORT_RUN_SELECT = [
+  'id',
+  'job_id',
+  'run_number',
+  'status',
+  'provider',
+  'model',
+  'progress',
+  'key_attempts',
+  'error_code',
+  'error_message',
+  'started_at',
+  'finished_at',
+  'created_at',
+].join(',');
+
+const toKeyAttempt = (value: unknown): ExternalAnalysisKeyAttempt | null => {
+  if (!isRecord(value)) return null;
+  const rawOutcome = toTrimmedString(value.outcome);
+  return {
+    requestIndex: toNumber(value.requestIndex),
+    outcome: rawOutcome === 'success'
+      ? 'success'
+      : rawOutcome === 'failed'
+        ? 'failed'
+        : rawOutcome === 'cancelled'
+          ? 'cancelled'
+          : 'unknown',
+    model: toTrimmedString(value.model),
+    keySuffix: toTrimmedString(value.keySuffix),
+    status: typeof value.status === 'number' && Number.isFinite(value.status) ? value.status : null,
+    reason: toTrimmedString(value.reason),
+    attempt: Math.max(1, toNumber(value.attempt, 1)),
+  };
+};
+
+const toRunRow = (row: Record<string, any>): ExternalAnalysisRunRow => ({
+  id: String(row.id || ''),
+  jobId: String(row.job_id || ''),
+  runNumber: Math.max(1, toNumber(row.run_number, 1)),
+  status: toTrimmedString(row.status),
+  provider: toTrimmedString(row.provider),
+  model: toTrimmedString(row.model),
+  progress: isRecord(row.progress) ? row.progress : {},
+  keyAttempts: Array.isArray(row.key_attempts)
+    ? row.key_attempts.map(toKeyAttempt).filter((attempt): attempt is ExternalAnalysisKeyAttempt => Boolean(attempt))
+    : [],
+  errorCode: toTrimmedString(row.error_code),
+  errorMessage: toTrimmedString(row.error_message),
+  startedAt: String(row.started_at || row.created_at || ''),
+  finishedAt: row.finished_at ? String(row.finished_at) : null,
+  createdAt: String(row.created_at || row.started_at || ''),
+});
+
 export const listExternalAnalysisDashboardSummaries = async (
   articleIds: string[],
 ): Promise<Record<string, ExternalAnalysisDashboardSummary>> => {
@@ -247,6 +332,122 @@ export const listExternalAnalysisJobs = async (
     .limit(Math.max(1, Math.min(limit, 250)));
   if (error) throw error;
   return (data || []).map(row => toJobRow(row as Record<string, any>));
+};
+
+export const listExternalAnalysisReportJobs = async (options: {
+  from: string;
+  to: string;
+  limit?: number;
+}): Promise<ExternalAnalysisReportJob[]> => {
+  const from = options.from.trim();
+  const to = options.to.trim();
+  if (!from || !to) return [];
+  const fromTime = new Date(from).getTime();
+  const toTime = new Date(to).getTime();
+  if (!Number.isFinite(fromTime) || !Number.isFinite(toTime)) return [];
+
+  const limit = Math.max(1, Math.min(Math.floor(options.limit || 500), 500));
+  const runLimit = Math.max(250, Math.min(limit * 8, 4_000));
+  const supabase = getSupabaseClient();
+  const [startedRunsResult, finishedRunsResult, createdJobsResult, updatedJobsResult] = await Promise.all([
+    supabase
+      .from('ai_external_analysis_runs')
+      .select(REPORT_RUN_SELECT)
+      .gte('started_at', from)
+      .lte('started_at', to)
+      .order('started_at', { ascending: false })
+      .limit(runLimit),
+    supabase
+      .from('ai_external_analysis_runs')
+      .select(REPORT_RUN_SELECT)
+      .gte('finished_at', from)
+      .lte('finished_at', to)
+      .order('finished_at', { ascending: false })
+      .limit(runLimit),
+    supabase
+      .from('ai_external_analysis_jobs')
+      .select(FULL_JOB_SELECT)
+      .gte('created_at', from)
+      .lte('created_at', to)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    supabase
+      .from('ai_external_analysis_jobs')
+      .select(FULL_JOB_SELECT)
+      .gte('updated_at', from)
+      .lte('updated_at', to)
+      .order('updated_at', { ascending: false })
+      .limit(limit),
+  ]);
+
+  if (startedRunsResult.error) throw startedRunsResult.error;
+  if (finishedRunsResult.error) throw finishedRunsResult.error;
+  if (createdJobsResult.error) throw createdJobsResult.error;
+  if (updatedJobsResult.error) throw updatedJobsResult.error;
+
+  const runsById = new Map<string, ExternalAnalysisRunRow>();
+  [...(startedRunsResult.data || []), ...(finishedRunsResult.data || [])]
+    .map(row => toRunRow(row as Record<string, any>))
+    .forEach(run => {
+      if (run.id) runsById.set(run.id, run);
+    });
+  const reportRuns = Array.from(runsById.values());
+  const runJobIds = Array.from(new Set(reportRuns.map(run => run.jobId).filter(Boolean)));
+
+  const jobsById = new Map<string, ExternalAnalysisJobRow>();
+  [...(createdJobsResult.data || []), ...(updatedJobsResult.data || [])]
+    .map(row => toJobRow(row as Record<string, any>))
+    .forEach(job => jobsById.set(job.id, job));
+
+  const missingJobIds = runJobIds.filter(jobId => !jobsById.has(jobId));
+  const chunks: string[][] = [];
+  for (let index = 0; index < missingJobIds.length; index += 100) {
+    chunks.push(missingJobIds.slice(index, index + 100));
+  }
+  const missingJobResults = await Promise.all(chunks.map(jobIds => (
+    supabase
+      .from('ai_external_analysis_jobs')
+      .select(FULL_JOB_SELECT)
+      .in('id', jobIds)
+  )));
+  missingJobResults.forEach(result => {
+    if (result.error) throw result.error;
+    (result.data || [])
+      .map(row => toJobRow(row as Record<string, any>))
+      .forEach(job => jobsById.set(job.id, job));
+  });
+
+  const runsByJobId = new Map<string, ExternalAnalysisRunRow[]>();
+  reportRuns.forEach(run => {
+    const runs = runsByJobId.get(run.jobId) || [];
+    runs.push(run);
+    runsByJobId.set(run.jobId, runs);
+  });
+
+  return Array.from(jobsById.values())
+    .map(job => {
+      const runs = (runsByJobId.get(job.id) || [])
+        .sort((left, right) => right.runNumber - left.runNumber);
+      const reportActivityAt = [
+        ...runs.flatMap(run => [run.finishedAt, run.startedAt]),
+        job.completed_at,
+        job.updated_at,
+        job.started_at,
+        job.created_at,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .filter(value => {
+          const timestamp = new Date(value).getTime();
+          return Number.isFinite(timestamp) && timestamp >= fromTime && timestamp <= toTime;
+        })
+        .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
+        || runs[0]?.startedAt
+        || job.updated_at
+        || job.created_at;
+      return { ...job, reportActivityAt, runs };
+    })
+    .sort((left, right) => new Date(right.reportActivityAt).getTime() - new Date(left.reportActivityAt).getTime())
+    .slice(0, limit);
 };
 
 export class ExternalAnalysisRequestError extends Error {

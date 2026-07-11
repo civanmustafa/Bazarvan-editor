@@ -39,6 +39,7 @@ import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
+import ExternalAnalysisReportsTable from './ExternalAnalysisReportsTable';
 import {
   getArticleTrashInfo,
   getRemoteAppSessionById,
@@ -76,6 +77,10 @@ import {
   normalizeGeminiFreeModel,
   setSelectedGeminiFreeModel,
 } from '../utils/geminiModelPreference';
+import {
+  listExternalAnalysisReportJobs,
+  type ExternalAnalysisReportJob,
+} from '../utils/externalAnalysis';
 
 type AdminAppProps = {
   section: AdminRouteSection;
@@ -711,9 +716,22 @@ const ReportsPage: React.FC<{
   logs: RemoteN8nIngestLog[];
   activityEvents: RemoteAppActivityEvent[];
   profiles: RemoteProfile[];
+  externalAnalysisJobs: ExternalAnalysisReportJob[];
+  isExternalAnalysisLoading: boolean;
+  externalAnalysisError: string;
   date: string;
   t: typeof translations.ar;
-}> = ({ articles, logs, activityEvents, profiles, date, t }) => {
+}> = ({
+  articles,
+  logs,
+  activityEvents,
+  profiles,
+  externalAnalysisJobs,
+  isExternalAnalysisLoading,
+  externalAnalysisError,
+  date,
+  t,
+}) => {
   const start = getIstanbulDayStart(date);
   const end = getIstanbulDayEnd(date);
   const inDay = (value?: string | null) => {
@@ -769,6 +787,18 @@ const ReportsPage: React.FC<{
         <AdminStat icon={<Sparkles size={18} />} label="Gemini المجاني" value={freeGeminiApiCalls} />
         <AdminStat icon={<BrainCircuit size={18} />} label="OpenAI / Pro" value={paidGeminiApiCalls + openAiApiCalls} />
       </div>
+
+      <section className="space-y-4">
+        <SectionTitle>تقارير التحليل الخارجي</SectionTitle>
+        <ExternalAnalysisReportsTable
+          jobs={externalAnalysisJobs}
+          articles={articles}
+          profiles={profiles}
+          isLoading={isExternalAnalysisLoading}
+          error={externalAnalysisError}
+          locale={t.locale === 'en' ? 'en' : 'ar'}
+        />
+      </section>
 
       <section className="space-y-4">
         <SectionTitle>استخدام مفاتيح API</SectionTitle>
@@ -1514,6 +1544,9 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   const [logs, setLogs] = useState<RemoteN8nIngestLog[]>([]);
   const [sessions, setSessions] = useState<RemoteAppSession[]>([]);
   const [activityEvents, setActivityEvents] = useState<RemoteAppActivityEvent[]>([]);
+  const [externalAnalysisJobs, setExternalAnalysisJobs] = useState<ExternalAnalysisReportJob[]>([]);
+  const [isExternalAnalysisLoading, setIsExternalAnalysisLoading] = useState(false);
+  const [externalAnalysisError, setExternalAnalysisError] = useState('');
   const [sessionDetail, setSessionDetail] = useState<RemoteAppSession | null>(null);
   const [sessionDetailEvents, setSessionDetailEvents] = useState<RemoteAppActivityEvent[]>([]);
   const [snapshot, setSnapshot] = useState<ArticleStorageSnapshot | null>(null);
@@ -1531,6 +1564,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   const [isSecretStatusLoading, setIsSecretStatusLoading] = useState(false);
 
   const isAdmin = currentUserRole === 'admin';
+  const selectedReportDate = date || getIstanbulDateKey();
 
   const refreshSecretStatus = useCallback(async () => {
     if (!currentUser || !isAdmin) return;
@@ -1550,26 +1584,45 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     if (!currentUser || !isAdmin) return;
     setIsLoading(true);
     setError('');
+    const shouldLoadExternalAnalysis = section === 'reports' || section === 'dailyReport';
+    setIsExternalAnalysisLoading(shouldLoadExternalAnalysis);
+    if (shouldLoadExternalAnalysis) setExternalAnalysisError('');
     try {
-      const [articleRows, profileRows, logRows, sessionRows, activityRows] = await Promise.all([
+      let externalReportLoadError = '';
+      const externalReportPromise = shouldLoadExternalAnalysis
+        ? listExternalAnalysisReportJobs({
+            from: getIstanbulDayStart(selectedReportDate).toISOString(),
+            to: getIstanbulDayEnd(selectedReportDate).toISOString(),
+            limit: 500,
+          }).catch(reportError => {
+            console.error('Failed to load external analysis reports:', reportError);
+            externalReportLoadError = 'تعذر تحميل تقارير التحليل الخارجي من Supabase.';
+            return [] as ExternalAnalysisReportJob[];
+          })
+        : Promise.resolve(null);
+      const [articleRows, profileRows, logRows, sessionRows, activityRows, externalReportRows] = await Promise.all([
         listRemoteArticles(),
         listRemoteProfiles(),
         listRemoteN8nIngestLogs(80),
         listRemoteAppSessions(120),
         listRemoteAppActivityEvents({ limit: 1000 }),
+        externalReportPromise,
       ]);
       setArticles(sortArticles(articleRows));
       setProfiles(profileRows);
       setLogs(logRows);
       setSessions(sessionRows);
       setActivityEvents(activityRows);
+      if (externalReportRows) setExternalAnalysisJobs(externalReportRows);
+      if (shouldLoadExternalAnalysis) setExternalAnalysisError(externalReportLoadError);
     } catch (loadError) {
       console.error('Failed to load admin data:', loadError);
       setError('تعذر تحميل بيانات الأدمن من Supabase.');
     } finally {
       setIsLoading(false);
+      setIsExternalAnalysisLoading(false);
     }
-  }, [currentUser, isAdmin]);
+  }, [currentUser, isAdmin, section, selectedReportDate]);
 
   useEffect(() => {
     void refreshData();
@@ -1799,8 +1852,6 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   };
 
   const totalTime = activeArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
-  const selectedReportDate = date || getIstanbulDateKey();
-
   const navActions: AdminAction[] = [
     { label: 'نظرة عامة', icon: <BarChart3 size={16} />, path: '/admin', active: section === 'overview' },
     { label: 'المستخدمون', icon: <Users size={16} />, path: '/admin/users', active: section === 'users' || section === 'userDetail' },
@@ -2105,7 +2156,19 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     }
 
     if (section === 'reports' || section === 'dailyReport') {
-      return <ReportsPage articles={articles} logs={logs} activityEvents={activityEvents} profiles={profiles} date={selectedReportDate} t={t} />;
+      return (
+        <ReportsPage
+          articles={articles}
+          logs={logs}
+          activityEvents={activityEvents}
+          profiles={profiles}
+          externalAnalysisJobs={externalAnalysisJobs}
+          isExternalAnalysisLoading={isExternalAnalysisLoading}
+          externalAnalysisError={externalAnalysisError}
+          date={selectedReportDate}
+          t={t}
+        />
+      );
     }
 
     if (section === 'overview') {
