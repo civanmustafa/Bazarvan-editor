@@ -1,5 +1,5 @@
 ﻿
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy } from 'lucide-react';
 import { ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
@@ -32,6 +32,11 @@ import {
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
 import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
+import ExternalAnalysisCardControls from './ExternalAnalysisCardControls';
+import {
+    listExternalAnalysisDashboardSummaries,
+    type ExternalAnalysisDashboardSummary,
+} from '../utils/externalAnalysis';
 
 const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
 
@@ -609,6 +614,9 @@ interface ArticleItemProps {
     editableSettingFields?: N8nDisplayFieldKey[];
     isTrashView?: boolean;
     showAdminMetadata?: boolean;
+    showExternalAnalysisControls?: boolean;
+    externalAnalysisSummary?: ExternalAnalysisDashboardSummary;
+    onRefreshExternalAnalysis?: () => Promise<void> | void;
     t: typeof translations.ar;
 }
 
@@ -633,6 +641,9 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     editableSettingFields = [],
     isTrashView = false,
     showAdminMetadata = false,
+    showExternalAnalysisControls = false,
+    externalAnalysisSummary,
+    onRefreshExternalAnalysis,
     t,
 }) => {
     const [isRenaming, setIsRenaming] = useState(false);
@@ -785,6 +796,10 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         if (!absoluteArticleUrl) return;
         window.open(absoluteArticleUrl, '_blank', 'noopener,noreferrer');
     };
+    const semanticTermsReady = Array.isArray(remoteActivity.keywords?.secondaries)
+        && remoteActivity.keywords.secondaries.some((item: unknown) => typeof item === 'string' && item.trim())
+        && Array.isArray(remoteActivity.keywords?.lsi)
+        && remoteActivity.keywords.lsi.some((item: unknown) => typeof item === 'string' && item.trim());
 
     return (
         <li
@@ -974,6 +989,14 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         })}
                     </div>
                 )}
+                {showExternalAnalysisControls && articleId && onRefreshExternalAnalysis && (
+                    <ExternalAnalysisCardControls
+                        articleId={articleId}
+                        semanticTermsReady={semanticTermsReady}
+                        summary={externalAnalysisSummary}
+                        onRefresh={onRefreshExternalAnalysis}
+                    />
+                )}
             </div>
         </li>
     );
@@ -1009,6 +1032,7 @@ const Dashboard: React.FC = () => {
   const [isN8nLogsLoading, setIsN8nLogsLoading] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
+  const [externalAnalysisSummaries, setExternalAnalysisSummaries] = useState<Record<string, ExternalAnalysisDashboardSummary>>({});
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isTrashVisible, setIsTrashVisible] = useState(false);
   const [dashboardMode, setDashboardMode] = useState<'all' | 'n8n'>('all');
@@ -1036,6 +1060,31 @@ const Dashboard: React.FC = () => {
 
   const isAdmin = currentUserRole === 'admin';
   const dashboardRefreshRequestRef = useRef(0);
+  const externalAnalysisRefreshRequestRef = useRef(0);
+  const dashboardArticleIds = useMemo(
+    () => remoteArticles.map(article => article.id).filter(Boolean),
+    [remoteArticles],
+  );
+  const dashboardArticleIdsKey = dashboardArticleIds.join('|');
+
+  const refreshExternalAnalysisSummaries = useCallback(async () => {
+    const requestId = externalAnalysisRefreshRequestRef.current + 1;
+    externalAnalysisRefreshRequestRef.current = requestId;
+    if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0) {
+      if (externalAnalysisRefreshRequestRef.current === requestId) {
+        setExternalAnalysisSummaries({});
+      }
+      return;
+    }
+    try {
+      const summaries = await listExternalAnalysisDashboardSummaries(dashboardArticleIds);
+      if (externalAnalysisRefreshRequestRef.current === requestId) {
+        setExternalAnalysisSummaries(summaries);
+      }
+    } catch (error) {
+      console.error('Failed to load external analysis summaries:', error);
+    }
+  }, [currentUser, dashboardArticleIdsKey]);
 
   const refreshData = async () => {
     if (!currentUser) return;
@@ -1341,6 +1390,39 @@ const Dashboard: React.FC = () => {
       void supabase.removeChannel(channel);
     };
   }, [currentUser, isAdmin, articlesPage]);
+
+  useEffect(() => {
+    void refreshExternalAnalysisSummaries();
+    if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0) return;
+
+    const intervalId = window.setInterval(() => {
+      void refreshExternalAnalysisSummaries();
+    }, 20_000);
+    return () => window.clearInterval(intervalId);
+  }, [currentUser, dashboardArticleIdsKey, refreshExternalAnalysisSummaries]);
+
+  useEffect(() => {
+    if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0) return;
+    const supabase = getSupabaseClient();
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refreshExternalAnalysisSummaries();
+      }, 350);
+    };
+    const channel = supabase
+      .channel(`dashboard-external-analysis-${currentUserId || 'profile'}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ai_external_analysis_jobs' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ai_external_analysis_article_state' }, scheduleRefresh)
+      .subscribe();
+
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      void supabase.removeChannel(channel);
+    };
+  }, [currentUser, currentUserId, dashboardArticleIdsKey, refreshExternalAnalysisSummaries]);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -2076,6 +2158,11 @@ const Dashboard: React.FC = () => {
                                       : ['status']}
                                     isTrashView={isTrashVisible}
                                     showAdminMetadata={isAdmin}
+                                    showExternalAnalysisControls={!isTrashVisible && (
+                                      isAdmin || activity.ownerId === currentUserId || activity.assignedTo === currentUserId
+                                    )}
+                                    externalAnalysisSummary={externalAnalysisSummaries[activity.id]}
+                                    onRefreshExternalAnalysis={refreshExternalAnalysisSummaries}
                                     t={t}
                                 />
                               );

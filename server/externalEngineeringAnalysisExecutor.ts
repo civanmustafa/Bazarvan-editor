@@ -166,17 +166,23 @@ const assertEngineeringInputs = (
   }
 };
 
+const getJobCommandPosition = (
+  context: ExternalAnalysisExecutionContext,
+  fallbackSequence: number,
+): { sequence: number; total: number } => {
+  const snapshotTotal = Number(context.job.input_snapshot?.commandTotal);
+  const sequence = Math.max(1, context.job.sequence_number || fallbackSequence);
+  const total = Number.isFinite(snapshotTotal) && snapshotTotal > 0
+    ? Math.max(sequence, Math.floor(snapshotTotal))
+    : context.job.origin === 'auto'
+      ? 5
+      : sequence;
+  return { sequence, total };
+};
+
 const executeExternalEngineeringAnalysis = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
-  await context.reportProgress({
-    progress: {
-      stage: 'loading_engineering_context',
-      commandSequence: context.job.sequence_number,
-      commandTotal: 5,
-    },
-  });
-
   const command = getExternalEngineeringCommand(context.job.command_id);
   if (!command) {
     throw createRetryError({
@@ -185,6 +191,14 @@ const executeExternalEngineeringAnalysis = async (
       progress: { stage: 'retry_scheduled', reason: 'command_not_registered' },
     });
   }
+  const commandPosition = getJobCommandPosition(context, command.sequence);
+  await context.reportProgress({
+    progress: {
+      stage: 'loading_engineering_context',
+      commandSequence: commandPosition.sequence,
+      commandTotal: commandPosition.total,
+    },
+  });
 
   const initial = await readArticleAndState(context.job.article_id);
   if (!isCurrentEngineeringJob(context, initial.state)) {
@@ -194,12 +208,12 @@ const executeExternalEngineeringAnalysis = async (
         reason: 'external_readiness_changed',
         commandId: command.id,
         commandLabel: command.label,
-        commandSequence: command.sequence,
+        commandSequence: commandPosition.sequence,
       },
       progress: {
         stage: 'superseded',
-        commandSequence: command.sequence,
-        commandTotal: 5,
+        commandSequence: commandPosition.sequence,
+        commandTotal: commandPosition.total,
       },
     };
   }
@@ -219,7 +233,7 @@ const executeExternalEngineeringAnalysis = async (
   const attempts: ExternalAnalysisJson[] = [];
   let finalCall = await runExternalGeminiCall({
     context,
-    prompt: buildExternalEngineeringPrompt(command, input),
+    prompt: buildExternalEngineeringPrompt(command, input, commandPosition),
     model: aiSettings.model,
     allowModelFallback: aiSettings.allowModelFallback,
     useUrlContext: input.competitorUrls.some(Boolean),
@@ -234,7 +248,7 @@ const executeExternalEngineeringAnalysis = async (
       message: finalCall.error,
       progress: {
         stage: 'retry_scheduled',
-        commandSequence: command.sequence,
+        commandSequence: commandPosition.sequence,
         provider: finalCall.provider,
         model: finalCall.model,
         keyAttemptCount: attempts.length,
@@ -245,15 +259,15 @@ const executeExternalEngineeringAnalysis = async (
   let parsed = parseExternalEngineeringResult(
     finalCall.text,
     command.id,
-    command.sequence,
+    commandPosition.sequence,
   );
 
   if (!hasUsableExternalEngineeringResult(parsed)) {
     await context.reportProgress({
       progress: {
         stage: 'repairing_engineering_response',
-        commandSequence: command.sequence,
-        commandTotal: 5,
+        commandSequence: commandPosition.sequence,
+        commandTotal: commandPosition.total,
       },
       provider: finalCall.provider,
       model: finalCall.model,
@@ -275,7 +289,7 @@ const executeExternalEngineeringAnalysis = async (
         message: finalCall.error,
         progress: {
           stage: 'retry_scheduled',
-          commandSequence: command.sequence,
+          commandSequence: commandPosition.sequence,
           provider: finalCall.provider,
           model: finalCall.model,
           keyAttemptCount: attempts.length,
@@ -286,7 +300,7 @@ const executeExternalEngineeringAnalysis = async (
     parsed = parseExternalEngineeringResult(
       finalCall.text,
       command.id,
-      command.sequence,
+      commandPosition.sequence,
     );
   }
 
@@ -296,7 +310,7 @@ const executeExternalEngineeringAnalysis = async (
       message: 'Gemini did not return a usable engineering report after one repair request.',
       progress: {
         stage: 'retry_scheduled',
-        commandSequence: command.sequence,
+        commandSequence: commandPosition.sequence,
         reason: 'engineering_response_invalid',
         keyAttemptCount: attempts.length,
       },
@@ -311,13 +325,13 @@ const executeExternalEngineeringAnalysis = async (
         reason: 'external_readiness_changed_during_analysis',
         commandId: command.id,
         commandLabel: command.label,
-        commandSequence: command.sequence,
+        commandSequence: commandPosition.sequence,
         generated: parsed,
       },
       progress: {
         stage: 'superseded',
-        commandSequence: command.sequence,
-        commandTotal: 5,
+        commandSequence: commandPosition.sequence,
+        commandTotal: commandPosition.total,
       },
     };
   }
@@ -327,7 +341,7 @@ const executeExternalEngineeringAnalysis = async (
       message: 'The article or competitor input changed while the engineering command was running.',
       progress: {
         stage: 'retry_scheduled',
-        commandSequence: command.sequence,
+        commandSequence: commandPosition.sequence,
         reason: 'engineering_input_changed',
       },
     });
@@ -338,8 +352,8 @@ const executeExternalEngineeringAnalysis = async (
       status: 'completed',
       commandId: command.id,
       commandLabel: command.label,
-      commandSequence: command.sequence,
-      commandTotal: 5,
+      commandSequence: commandPosition.sequence,
+      commandTotal: commandPosition.total,
       analysisMarkdown: parsed.analysisMarkdown,
       patches: parsed.patches,
       rawResponse: finalCall.text.slice(0, 60_000),
@@ -352,8 +366,8 @@ const executeExternalEngineeringAnalysis = async (
     },
     progress: {
       stage: 'engineering_completed',
-      commandSequence: command.sequence,
-      commandTotal: 5,
+      commandSequence: commandPosition.sequence,
+      commandTotal: commandPosition.total,
       provider: finalCall.provider,
       model: finalCall.model,
       keySuffix: finalCall.keySuffix,

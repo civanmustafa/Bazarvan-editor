@@ -11,6 +11,7 @@ import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import systemSettingsHandler from '../api/systemSettings';
 import adminUsersHandler from '../api/adminUsers';
 import articlesSaveHandler from '../api/articlesSave';
+import externalAnalysisHandler from '../api/externalAnalysis';
 
 type ApiHandler = (req: unknown, res: unknown) => Promise<Response | void>;
 
@@ -77,6 +78,7 @@ app.all('/api/gemini', runApiHandler(geminiHandler));
 app.all('/api/chatgpt', runApiHandler(chatgptHandler));
 app.all('/api/n8n/articles', runApiHandler(n8nArticlesHandler));
 app.all('/api/articles/save', runApiHandler(articlesSaveHandler));
+app.all('/api/external-analysis', runApiHandler(externalAnalysisHandler));
 app.all('/api/articles/assigned-automation', runApiHandler(assignedArticleAutomationHandler));
 app.all('/api/system/settings', runApiHandler(systemSettingsHandler));
 app.all('/api/admin/users', runApiHandler(adminUsersHandler));

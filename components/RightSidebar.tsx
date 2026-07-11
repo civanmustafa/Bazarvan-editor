@@ -21,6 +21,7 @@ import {
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 import GeminiProgressStatus from './GeminiProgressStatus';
 import { runGeminiAnalysisEngine, type GeminiProgressSnapshot } from '../utils/geminiAnalysisEngine';
+import ExternalAnalysisResultsTab from './ExternalAnalysisResultsTab';
 
 type ReadyCommand = {
     id: string;
@@ -729,7 +730,7 @@ ${url}
 
 const RightSidebar: React.FC = () => {
     const { t, engineeringPrompts, chatGptOpenMode } = useUser();
-    const { setIsStructureTabActive } = useEditor();
+    const { setIsStructureTabActive, activeArticleId } = useEditor();
     const {
         handleAiAnalyze,
         handleChatGptAnalyze,
@@ -748,7 +749,7 @@ const RightSidebar: React.FC = () => {
     } = useAI();
     
     const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors'>('structure');
-    const [aiSubTab, setAiSubTab] = useState<'new' | 'history'>('new');
+    const [aiSubTab, setAiSubTab] = useState<'new' | 'history' | 'external'>('new');
     const [aiCommand, setAiCommand] = useState('');
     const [bulkCompetitorText, setBulkCompetitorText] = useState('');
     const [competitorUrls, setCompetitorUrls] = useState<string[]>(() => loadStoredCompetitorUrls());
@@ -1662,6 +1663,7 @@ ${readyCommandCompetitorBlocks}`;
             <div className="flex p-2 mx-2 mt-2 mb-1 bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
                 <button onClick={() => setAiSubTab('new')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'new' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{tRs.newAnalysis}</button>
                 <button onClick={() => setAiSubTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'history' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.aiHistory.title}</button>
+                <button onClick={() => setAiSubTab('external')} className={`flex-1 px-1 py-1.5 text-[10px] font-bold leading-4 rounded-md transition-all ${aiSubTab === 'external' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.locale === 'ar' ? 'نتائج التحليل الخارجي' : 'External results'}</button>
             </div>
 
             <div className="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-4">
@@ -1864,7 +1866,7 @@ ${readyCommandCompetitorBlocks}`;
                             </div>
                         </div>
                     </>
-                ) : <AIHistoryTab />}
+                ) : aiSubTab === 'history' ? <AIHistoryTab /> : <ExternalAnalysisResultsTab articleId={activeArticleId} />}
             </div>
         </div>
     );
@@ -2117,7 +2119,16 @@ ${readyCommandCompetitorBlocks}`;
         <aside className="basis-[18.7%] flex flex-col h-full min-w-0 bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg overflow-hidden border-s border-gray-300 dark:border-[#333]">
             <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
                 {(['structure', 'ai', 'competitors'] as const).map(tab => (
-                    <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15'}`}>
+                    <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        aria-label={tab === 'structure'
+                            ? (t.locale === 'ar' ? 'تحليل الهيكل' : 'Structure analysis')
+                            : tab === 'ai'
+                              ? (t.locale === 'ar' ? 'التحليل الذكي' : 'Smart analysis')
+                              : (t.locale === 'ar' ? 'المنافسون' : 'Competitors')}
+                        className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15'}`}
+                    >
                         {tab === 'structure' ? <LayoutTemplate size={18} /> : tab === 'ai' ? <BrainCircuit size={18} /> : <Users size={18} />}
                     </button>
                 ))}

@@ -64,9 +64,13 @@ export const EXTERNAL_ENGINEERING_OUTPUT_CONTRACT = [
 export const buildExternalEngineeringPrompt = (
   command: ExternalEngineeringCommand,
   input: ExternalEngineeringPromptInput,
+  execution: { sequence: number; total: number } = {
+    sequence: command.sequence,
+    total: 5,
+  },
 ): string => [
   'You are running a saved engineering command for an external article analysis job.',
-  `Command ${command.sequence} of 5: ${command.label}`,
+  `Command ${execution.sequence} of ${execution.total}: ${command.label}`,
   '',
   'Saved command instructions:',
   '---',
