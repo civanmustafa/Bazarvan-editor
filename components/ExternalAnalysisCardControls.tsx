@@ -6,6 +6,7 @@ import {
   ListChecks,
   LoaderCircle,
   Play,
+  Square,
   Tags,
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
@@ -14,6 +15,7 @@ import {
   getExternalReadyCommandLabel,
 } from '../constants/externalAnalysisCommands';
 import {
+  cancelAllExternalAnalysisJobs,
   ExternalAnalysisRequestError,
   enqueueExternalEngineeringAnalysis,
   enqueueExternalSemanticAnalysis,
@@ -44,7 +46,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const locale = t.locale === 'en' ? 'en' : 'ar';
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedCommandIds, setSelectedCommandIds] = useState<string[]>([]);
-  const [busyAction, setBusyAction] = useState<'semantic' | 'engineering' | null>(null);
+  const [busyAction, setBusyAction] = useState<'semantic' | 'engineering' | 'cancel' | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -161,6 +163,29 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     }
   };
 
+  const handleCancelAll = async () => {
+    if (busyAction || (!semanticJobActive && !engineeringActive)) return;
+    setBusyAction('cancel');
+    setNotice(null);
+    try {
+      const result = await cancelAllExternalAnalysisJobs(articleId);
+      const cancelledCount = Number(result.cancelledCount || 0);
+      setNotice({
+        tone: 'success',
+        message: locale === 'ar'
+          ? `تم طلب إيقاف ${cancelledCount} مهمة خلفية لهذه المقالة.`
+          : `Cancellation requested for ${cancelledCount} background task(s) for this article.`,
+      });
+      setSelectedCommandIds([]);
+      setMenuOpen(false);
+      await refreshAfterRequest();
+    } catch (error) {
+      setNotice({ tone: 'error', message: formatRequestError(error) });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   return (
     <div
       className="relative mt-1.5 border-t border-gray-100 pt-1.5 dark:border-[#3a3a3a]"
@@ -229,6 +254,19 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             </div>
           )}
         </div>
+
+        {(semanticJobActive || engineeringActive) && (
+          <button
+            type="button"
+            onClick={() => void handleCancelAll()}
+            disabled={Boolean(busyAction)}
+            className="inline-flex min-h-7 items-center gap-1 rounded-md px-2 py-1 text-[10px] font-black text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
+            title={locale === 'ar' ? 'إيقاف مهام التحليل الخارجي لهذه المقالة' : 'Stop external analysis tasks for this article'}
+          >
+            {busyAction === 'cancel' ? <LoaderCircle size={12} className="animate-spin" /> : <Square size={10} fill="currentColor" />}
+            <span>{locale === 'ar' ? 'إيقاف الكل' : 'Stop all'}</span>
+          </button>
+        )}
 
         {engineeringActive && (
           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-300">

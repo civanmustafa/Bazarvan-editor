@@ -416,6 +416,86 @@ const enqueueEngineeringJobs = async (
   return { batchId, jobs: jobs || [] };
 };
 
+const cancelExternalAnalysisJob = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+  requestedBy: string,
+  jobId: string,
+) => {
+  if (!jobId) {
+    throw new ExternalAnalysisApiError({
+      message: 'jobId is required for cancellation.',
+      code: 'job_id_required',
+    });
+  }
+
+  const { data: existingJob, error: readError } = await supabase
+    .from('ai_external_analysis_jobs')
+    .select('id,article_id,job_type,status,command_id,depends_on_job_id,progress,updated_at')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!existingJob || existingJob.article_id !== articleId) {
+    throw new ExternalAnalysisApiError({
+      message: 'External analysis job was not found for this article.',
+      status: 404,
+      code: 'external_analysis_job_not_found',
+    });
+  }
+
+  if (!ACTIVE_JOB_STATUSES.includes(existingJob.status)) {
+    return { job: existingJob, alreadyTerminal: true };
+  }
+
+  const { data, error } = await supabase.rpc('request_external_analysis_job_cancel', {
+    p_job_id: jobId,
+    p_requested_by: requestedBy,
+  });
+  if (error) throw error;
+  const job = Array.isArray(data) ? data[0] : data;
+  return { job: job || existingJob, alreadyTerminal: false };
+};
+
+const cancelAllExternalAnalysisJobs = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+  requestedBy: string,
+) => {
+  const { data: activeJobs, error: readError } = await supabase
+    .from('ai_external_analysis_jobs')
+    .select('id,depends_on_job_id,status')
+    .eq('article_id', articleId)
+    .in('status', ACTIVE_JOB_STATUSES);
+  if (readError) throw readError;
+
+  const rows = activeJobs || [];
+  if (rows.length === 0) {
+    return { cancelledCount: 0, rootJobIds: [], alreadyTerminal: true };
+  }
+
+  const activeIds = new Set(rows.map(job => String(job.id)));
+  const detectedRootJobIds = rows
+    .filter(job => !job.depends_on_job_id || !activeIds.has(String(job.depends_on_job_id)))
+    .map(job => String(job.id));
+  const rootJobIds = detectedRootJobIds.length > 0
+    ? detectedRootJobIds
+    : rows.map(job => String(job.id));
+
+  for (const rootJobId of rootJobIds) {
+    const { error } = await supabase.rpc('request_external_analysis_job_cancel', {
+      p_job_id: rootJobId,
+      p_requested_by: requestedBy,
+    });
+    if (error) throw error;
+  }
+
+  return {
+    cancelledCount: rows.length,
+    rootJobIds,
+    alreadyTerminal: false,
+  };
+};
+
 const toWebResponse = (result: ApiResult): Response => new Response(
   result.status === 204 ? null : JSON.stringify(result.body),
   {
@@ -494,9 +574,22 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
     );
     return { status: 201, body: { ok: true, action, ...result } };
   }
+  if (action === 'cancel') {
+    const result = await cancelExternalAnalysisJob(
+      supabase,
+      article.id,
+      profile.id,
+      toTrimmedString(body.jobId),
+    );
+    return { status: 200, body: { ok: true, action, ...result } };
+  }
+  if (action === 'cancel_all') {
+    const result = await cancelAllExternalAnalysisJobs(supabase, article.id, profile.id);
+    return { status: 200, body: { ok: true, action, ...result } };
+  }
 
   throw new ExternalAnalysisApiError({
-    message: 'action must be semantic or engineering.',
+    message: 'action must be semantic, engineering, cancel, or cancel_all.',
     code: 'invalid_action',
   });
 };

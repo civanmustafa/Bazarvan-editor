@@ -9,6 +9,8 @@ import {
   LocateFixed,
   LoaderCircle,
   RefreshCw,
+  RotateCcw,
+  Square,
   Tags,
   Trash2,
 } from 'lucide-react';
@@ -18,6 +20,9 @@ import { getExternalReadyCommandLabel } from '../constants/externalAnalysisComma
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import {
+  cancelExternalAnalysisJob,
+  enqueueExternalEngineeringAnalysis,
+  enqueueExternalSemanticAnalysis,
   EXTERNAL_ANALYSIS_ACTIVE_STATUSES,
   getExternalJobAnalysisMarkdown,
   listExternalAnalysisJobs,
@@ -86,6 +91,8 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(() => new Set());
   const [patchOverrides, setPatchOverrides] = useState<Record<string, Partial<AiContentPatch>>>({});
   const [copiedId, setCopiedId] = useState('');
+  const [jobActionId, setJobActionId] = useState('');
+  const [controlNotice, setControlNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const refreshRequestRef = useRef(0);
 
   const refreshJobs = useCallback(async (showLoading = false) => {
@@ -123,6 +130,8 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     setPatchOverrides({});
     setExpandedJobIds(new Set());
     setFilter('all');
+    setJobActionId('');
+    setControlNotice(null);
     void refreshJobs(true);
   }, [articleId, refreshJobs]);
 
@@ -223,6 +232,62 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
       window.setTimeout(() => setCopiedId(current => current === id ? '' : current), 1500);
     } catch (copyError) {
       console.error('Could not copy external analysis content:', copyError);
+    }
+  };
+
+  const handleCancelJob = async (job: ExternalAnalysisJobRow) => {
+    if (!articleId || jobActionId || !EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status)) return;
+    setJobActionId(job.id);
+    setControlNotice(null);
+    try {
+      await cancelExternalAnalysisJob(articleId, job.id);
+      setControlNotice({
+        tone: 'success',
+        message: locale === 'ar'
+          ? 'تم طلب إيقاف المهمة. ستتوقف المهمة الجارية خلال ثوانٍ، وألغيت المهام التابعة المنتظرة.'
+          : 'Cancellation requested. The running task will stop shortly, and queued dependent tasks were cancelled.',
+      });
+      await refreshJobs(false);
+    } catch (cancelError) {
+      setControlNotice({
+        tone: 'error',
+        message: cancelError instanceof Error
+          ? cancelError.message
+          : (locale === 'ar' ? 'تعذر إيقاف المهمة.' : 'Could not cancel the task.'),
+      });
+    } finally {
+      setJobActionId('');
+    }
+  };
+
+  const handleRetryJob = async (job: ExternalAnalysisJobRow) => {
+    if (!articleId || jobActionId || !['failed', 'blocked', 'cancelled'].includes(job.status)) return;
+    setJobActionId(job.id);
+    setControlNotice(null);
+    try {
+      if (job.job_type === 'semantic_keywords_lsi') {
+        await enqueueExternalSemanticAnalysis(articleId);
+      } else if (job.command_id) {
+        await enqueueExternalEngineeringAnalysis(articleId, [job.command_id]);
+      } else {
+        throw new Error(locale === 'ar' ? 'لا يوجد أمر محفوظ لإعادة تشغيل هذه المهمة.' : 'No saved command is available for this task.');
+      }
+      setControlNotice({
+        tone: 'success',
+        message: locale === 'ar'
+          ? 'تم إنشاء محاولة جديدة وستعمل في الخلفية.'
+          : 'A new attempt was queued and will run in the background.',
+      });
+      await refreshJobs(false);
+    } catch (retryError) {
+      setControlNotice({
+        tone: 'error',
+        message: retryError instanceof Error
+          ? retryError.message
+          : (locale === 'ar' ? 'تعذر إعادة تشغيل المهمة.' : 'Could not restart the task.'),
+      });
+    } finally {
+      setJobActionId('');
     }
   };
 
@@ -387,6 +452,9 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   };
 
   const progressText = (job: ExternalAnalysisJobRow): string => {
+    if (job.status === 'running' && job.cancel_requested_at) {
+      return locale === 'ar' ? 'جار إيقاف المهمة الخلفية...' : 'Stopping the background task...';
+    }
     const gemini = isRecord(job.progress.gemini) ? job.progress.gemini : {};
     const model = toTrimmedString(gemini.model) || toTrimmedString(job.result?.model);
     const keyIndex = Number(gemini.currentKeyIndex || 0);
@@ -397,6 +465,43 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
       keyIndex > 0 && keyCount > 0 ? `${locale === 'ar' ? 'المفتاح' : 'key'} ${keyIndex}/${keyCount}` : '',
       keySuffix ? `...${keySuffix.replace(/^\.+/, '')}` : '',
     ].filter(Boolean).join(' | ');
+  };
+
+  const renderJobControls = (job: ExternalAnalysisJobRow) => {
+    const active = EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status);
+    const canRetry = ['failed', 'blocked', 'cancelled'].includes(job.status);
+    if (!active && !canRetry) return null;
+    const busy = jobActionId === job.id;
+    const cancellationPending = job.status === 'running' && Boolean(job.cancel_requested_at);
+
+    return (
+      <div className="flex shrink-0 items-center gap-1">
+        {active && (
+          <button
+            type="button"
+            onClick={() => void handleCancelJob(job)}
+            disabled={Boolean(jobActionId || cancellationPending)}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[9px] font-black text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
+            title={locale === 'ar' ? 'إيقاف المهمة الخلفية' : 'Stop background task'}
+          >
+            {busy ? <LoaderCircle size={11} className="animate-spin" /> : <Square size={10} fill="currentColor" />}
+            <span>{cancellationPending ? (locale === 'ar' ? 'جار الإيقاف' : 'Stopping') : (locale === 'ar' ? 'إيقاف' : 'Stop')}</span>
+          </button>
+        )}
+        {canRetry && (
+          <button
+            type="button"
+            onClick={() => void handleRetryJob(job)}
+            disabled={Boolean(jobActionId)}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[9px] font-black text-[#8a6f1d] hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-[#f2d675]"
+            title={locale === 'ar' ? 'إنشاء محاولة جديدة' : 'Queue a new attempt'}
+          >
+            {busy ? <LoaderCircle size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+            <span>{locale === 'ar' ? 'إعادة التشغيل' : 'Retry'}</span>
+          </button>
+        )}
+      </div>
+    );
   };
 
   if (!articleId) {
@@ -412,11 +517,20 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
         </button>
       </div>
 
+      {controlNotice && (
+        <div className={`border-s-2 px-2.5 py-1.5 text-[10px] font-bold leading-5 ${controlNotice.tone === 'error' ? 'border-red-500 bg-red-50 text-red-700 dark:bg-red-900/10 dark:text-red-300' : 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/10 dark:text-emerald-300'}`}>
+          {controlNotice.message}
+        </div>
+      )}
+
       {latestSemanticJob && (
         <section className="border-b border-gray-200 pb-3 dark:border-[#3C3C3C]">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 text-xs font-black text-gray-700 dark:text-gray-200"><Tags size={14} className="text-[#d4af37]" /> {locale === 'ar' ? 'الصيغ البديلة وكلمات LSI' : 'Alternative forms and LSI'}</div>
-            <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${statusClassName(latestSemanticJob.status)}`}>{STATUS_LABELS[latestSemanticJob.status][locale]}</span>
+            <div className="flex items-center gap-1">
+              <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${statusClassName(latestSemanticJob.status)}`}>{STATUS_LABELS[latestSemanticJob.status][locale]}</span>
+              {renderJobControls(latestSemanticJob)}
+            </div>
           </div>
           <div className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">{progressText(latestSemanticJob) || formatDate(latestSemanticJob.updated_at)}</div>
           {latestSemanticGenerated && (
@@ -510,6 +624,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                         <div className="mb-2 text-[10px] text-amber-700 dark:text-amber-300">{locale === 'ar' ? 'المحاولة التالية' : 'Next attempt'}: {formatDate(job.next_attempt_at)}</div>
                       )}
                       {job.last_error && <div className="mb-2 border-s-2 border-red-500 bg-red-50 px-2 py-1.5 text-[10px] leading-5 text-red-700 dark:bg-red-900/10 dark:text-red-300">{job.last_error}</div>}
+                      <div className="mb-2 flex justify-end">{renderJobControls(job)}</div>
                       {hasResult ? (
                         <>
                           <div className="mb-1 flex justify-end">

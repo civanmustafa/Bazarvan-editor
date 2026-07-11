@@ -47,6 +47,14 @@ export interface ExternalAnalysisJob {
   updated_at: string;
 }
 
+export type ExternalAnalysisHeartbeat = {
+  owned: boolean;
+  cancelRequested: boolean;
+  status: string;
+  errorCode: string;
+  errorMessage: string;
+};
+
 let queueClient: SupabaseClient | null = null;
 
 const getRequiredEnv = (name: string, fallbacks: string[] = []): string => {
@@ -134,6 +142,45 @@ export const renewExternalAnalysisJobLease = async (options: {
     p_lease_seconds: options.leaseSeconds,
   })
 );
+
+export const heartbeatExternalAnalysisJob = async (options: {
+  jobId: string;
+  workerId: string;
+  leaseSeconds: number;
+}): Promise<ExternalAnalysisHeartbeat> => {
+  const value = await callQueueRpc<unknown>('heartbeat_external_analysis_job', {
+    p_job_id: options.jobId,
+    p_worker_id: options.workerId,
+    p_lease_seconds: options.leaseSeconds,
+  });
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    owned: source.owned === true,
+    cancelRequested: source.cancelRequested === true,
+    status: typeof source.status === 'string' ? source.status : '',
+    errorCode: typeof source.errorCode === 'string' ? source.errorCode : '',
+    errorMessage: typeof source.errorMessage === 'string' ? source.errorMessage : '',
+  };
+};
+
+export const finalizeExternalAnalysisJobCancel = async (options: {
+  jobId: string;
+  workerId: string;
+  errorCode?: string;
+  errorMessage?: string;
+}): Promise<ExternalAnalysisJob> => {
+  const data = await callQueueRpc<unknown>('finalize_external_analysis_job_cancel', {
+    p_job_id: options.jobId,
+    p_worker_id: options.workerId,
+    p_error_code: options.errorCode ?? 'cancelled_by_user',
+    p_error_message: options.errorMessage ?? 'The external analysis task was cancelled by the user.',
+  });
+  const job = firstJob(data);
+  if (!job) throw new Error('Cancellation RPC returned no external analysis job.');
+  return job;
+};
 
 export const scheduleExternalAnalysisJobRetry = async (options: {
   jobId: string;

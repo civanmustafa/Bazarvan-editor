@@ -38,6 +38,7 @@ export type ExternalAnalysisJobRow = {
   attempt_count: number;
   retry_count: number;
   next_attempt_at: string | null;
+  cancel_requested_at: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -134,6 +135,7 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   attempt_count: toNumber(row.attempt_count),
   retry_count: toNumber(row.retry_count),
   next_attempt_at: row.next_attempt_at || null,
+  cancel_requested_at: row.cancel_requested_at || null,
   started_at: row.started_at || null,
   completed_at: row.completed_at || null,
   created_at: String(row.created_at || ''),
@@ -156,6 +158,7 @@ const SUMMARY_JOB_SELECT = [
   'attempt_count',
   'retry_count',
   'next_attempt_at',
+  'cancel_requested_at',
   'started_at',
   'completed_at',
   'created_at',
@@ -293,6 +296,15 @@ export const enqueueExternalEngineeringAnalysis = (
   articleId: string,
   commandIds: string[],
 ) => requestExternalAnalysis(articleId, { action: 'engineering', commandIds });
+
+export const cancelExternalAnalysisJob = (
+  articleId: string,
+  jobId: string,
+) => requestExternalAnalysis(articleId, { action: 'cancel', jobId });
+
+export const cancelAllExternalAnalysisJobs = (
+  articleId: string,
+) => requestExternalAnalysis(articleId, { action: 'cancel_all' });
 
 export const getExternalMissingFieldLabels = (
   fields: string[],

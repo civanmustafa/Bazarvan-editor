@@ -8,6 +8,7 @@ Before the first external-analysis worker deployment, apply these migrations in 
 2. `supabase/migrations/20260710010000_external_analysis_worker_queue.sql`
 3. `supabase/migrations/20260710020000_external_semantic_generation.sql`
 4. `supabase/migrations/20260710030000_external_engineering_commands.sql`
+5. `supabase/migrations/20260711000000_external_analysis_job_controls.sql`
 
 ```bash
 cd /var/www/bazarvan-editor

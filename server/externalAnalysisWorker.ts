@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 import {
   claimNextExternalAnalysisJob,
   completeExternalAnalysisJob,
+  finalizeExternalAnalysisJobCancel,
+  heartbeatExternalAnalysisJob,
   recoverStaleExternalAnalysisJobs,
   renewExternalAnalysisJobLease,
   scheduleExternalAnalysisJobRetry,
@@ -58,6 +60,16 @@ let idleNoticeShown = false;
 let lastLoggedError = '';
 let lastLoggedErrorAt = 0;
 
+class ExternalAnalysisCancellationError extends Error {
+  code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'ExternalAnalysisCancellationError';
+    this.code = code;
+  }
+}
+
 const sleep = (milliseconds: number): Promise<void> => (
   new Promise((resolve) => setTimeout(resolve, milliseconds))
 );
@@ -92,7 +104,10 @@ const startLeaseHeartbeat = (
   job: ExternalAnalysisJob,
   controller: AbortController,
 ): (() => void) => {
-  const heartbeatIntervalMs = Math.max(10_000, Math.floor((leaseSeconds * 1_000) / 3));
+  const heartbeatIntervalMs = Math.min(
+    10_000,
+    Math.max(3_000, Math.floor((leaseSeconds * 1_000) / 3)),
+  );
   let leaseDeadline = Date.now() + (leaseSeconds * 1_000);
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
@@ -101,12 +116,19 @@ const startLeaseHeartbeat = (
     if (stopped || controller.signal.aborted) return;
 
     try {
-      const renewed = await renewExternalAnalysisJobLease({
+      const heartbeatState = await heartbeatExternalAnalysisJob({
         jobId: job.id,
         workerId,
         leaseSeconds,
       });
-      if (!renewed) {
+      if (heartbeatState.cancelRequested) {
+        controller.abort(new ExternalAnalysisCancellationError(
+          heartbeatState.errorCode || 'cancelled_by_user',
+          heartbeatState.errorMessage || 'The external analysis task was cancelled.',
+        ));
+        return;
+      }
+      if (!heartbeatState.owned) {
         controller.abort(new Error('The worker no longer owns this job lease.'));
         return;
       }
@@ -188,14 +210,53 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
       throw controller.signal.reason ?? new Error('External analysis execution was aborted.');
     }
 
-    await completeExternalAnalysisJob({
+    const heartbeatState = await heartbeatExternalAnalysisJob({
+      jobId: job.id,
+      workerId,
+      leaseSeconds,
+    });
+    if (heartbeatState.cancelRequested) {
+      throw new ExternalAnalysisCancellationError(
+        heartbeatState.errorCode || 'cancelled_by_user',
+        heartbeatState.errorMessage || 'The external analysis task was cancelled.',
+      );
+    }
+    if (!heartbeatState.owned) {
+      throw new Error('The worker no longer owns this job lease.');
+    }
+
+    const completed = await completeExternalAnalysisJob({
       jobId: job.id,
       workerId,
       result: execution.result,
       progress: execution.progress,
     });
-    console.log(`[external-analysis-worker] Completed job ${job.id} (${job.job_type}).`);
+    if (completed.status === 'cancelled') {
+      console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
+    } else {
+      console.log(`[external-analysis-worker] Completed job ${job.id} (${job.job_type}).`);
+    }
   } catch (error) {
+    const cancellation = error instanceof ExternalAnalysisCancellationError
+      ? error
+      : controller.signal.reason instanceof ExternalAnalysisCancellationError
+        ? controller.signal.reason
+        : null;
+    if (cancellation) {
+      try {
+        await finalizeExternalAnalysisJobCancel({
+          jobId: job.id,
+          workerId,
+          errorCode: cancellation.code,
+          errorMessage: cancellation.message,
+        });
+        console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
+      } catch (cancelError) {
+        logThrottledError(`Could not finalize cancellation for job ${job.id}`, cancelError);
+      }
+      return;
+    }
+
     const retry = retryDetails(error);
     try {
       const scheduled = await scheduleExternalAnalysisJobRetry({
@@ -206,9 +267,13 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
         retryDelayMinutes: retry.delayMinutes,
         progress: retry.progress,
       });
-      console.warn(
-        `[external-analysis-worker] Job ${job.id} will retry at ${scheduled.next_attempt_at}.`,
-      );
+      if (scheduled.status === 'cancelled') {
+        console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
+      } else {
+        console.warn(
+          `[external-analysis-worker] Job ${job.id} will retry at ${scheduled.next_attempt_at}.`,
+        );
+      }
     } catch (scheduleError) {
       logThrottledError(`Could not schedule retry for job ${job.id}`, scheduleError);
     }
