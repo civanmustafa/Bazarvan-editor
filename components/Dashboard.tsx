@@ -749,9 +749,9 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         if (!absoluteArticleUrl) return;
         window.open(absoluteArticleUrl, '_blank', 'noopener,noreferrer');
     };
-    const semanticTermsReady = Array.isArray(remoteActivity.keywords?.secondaries)
-        && remoteActivity.keywords.secondaries.some((item: unknown) => typeof item === 'string' && item.trim())
-        && Array.isArray(remoteActivity.keywords?.lsi)
+    const hasAlternativeKeywords = Array.isArray(remoteActivity.keywords?.secondaries)
+        && remoteActivity.keywords.secondaries.some((item: unknown) => typeof item === 'string' && item.trim());
+    const hasLsiKeywords = Array.isArray(remoteActivity.keywords?.lsi)
         && remoteActivity.keywords.lsi.some((item: unknown) => typeof item === 'string' && item.trim());
 
     return (
@@ -945,7 +945,8 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                 {showExternalAnalysisControls && articleId && onRefreshExternalAnalysis && (
                     <ExternalAnalysisCardControls
                         articleId={articleId}
-                        semanticTermsReady={semanticTermsReady}
+                        hasAlternativeKeywords={hasAlternativeKeywords}
+                        hasLsiKeywords={hasLsiKeywords}
                         summary={externalAnalysisSummary}
                         onRefresh={onRefreshExternalAnalysis}
                     />
