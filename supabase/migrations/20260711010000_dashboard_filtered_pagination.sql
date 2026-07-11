@@ -75,6 +75,7 @@ declare
   v_offset integer;
   v_filters jsonb := case when jsonb_typeof(p_filters) = 'object' then p_filters else '{}'::jsonb end;
   v_search text := lower(btrim(coalesce(p_search, '')));
+  v_result jsonb;
 begin
   if v_user_id is null then
     raise exception 'authentication is required' using errcode = '42501';
@@ -82,8 +83,7 @@ begin
 
   v_offset := (v_page - 1) * v_page_size;
 
-  return (
-    with visible_scope as materialized (
+  with visible_scope as materialized (
       select article.*
       from public.articles as article
       where public.dashboard_article_is_trashed(article.metadata, v_user_id) = coalesce(p_trash, false)
@@ -245,7 +245,7 @@ begin
     ), totals as (
       select count(*)::integer as total_count from filtered
     )
-    select jsonb_build_object(
+  select jsonb_build_object(
       'articles', coalesce((
         select jsonb_agg(to_jsonb(paged) - '_sort_at' order by paged._sort_at desc, paged.id desc)
         from paged
@@ -294,8 +294,11 @@ begin
           ) as options
         ), '[]'::jsonb)
       )
-    from totals
-  );
+    )
+  into v_result
+  from totals;
+
+  return v_result;
 end;
 $$;
 
