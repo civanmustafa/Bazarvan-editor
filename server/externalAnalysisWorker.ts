@@ -50,11 +50,17 @@ const retryDelayMinutes = parseBoundedInteger(
   1,
   1_440,
 );
+const workerConcurrency = parseBoundedInteger(
+  process.env.EXTERNAL_ANALYSIS_WORKER_CONCURRENCY,
+  5,
+  1,
+  5,
+);
 const recoveryIntervalMs = 60_000;
 const workerId = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
 let shuttingDown = false;
-let activeController: AbortController | null = null;
+const activeControllers = new Map<string, AbortController>();
 let lastRecoveryAt = 0;
 let idleNoticeShown = false;
 let lastLoggedError = '';
@@ -103,6 +109,7 @@ const recoverStaleJobsIfDue = async (): Promise<void> => {
 const startLeaseHeartbeat = (
   job: ExternalAnalysisJob,
   controller: AbortController,
+  slotWorkerId: string,
 ): (() => void) => {
   const heartbeatIntervalMs = Math.min(
     10_000,
@@ -118,7 +125,7 @@ const startLeaseHeartbeat = (
     try {
       const heartbeatState = await heartbeatExternalAnalysisJob({
         jobId: job.id,
-        workerId,
+        workerId: slotWorkerId,
         leaseSeconds,
       });
       if (heartbeatState.cancelRequested) {
@@ -176,11 +183,14 @@ const retryDetails = (error: unknown): {
   };
 };
 
-const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
+const executeClaimedJob = async (
+  job: ExternalAnalysisJob,
+  slotWorkerId: string,
+): Promise<void> => {
   const executor = getExternalAnalysisJobExecutor(job.job_type);
   const controller = new AbortController();
-  activeController = controller;
-  const stopHeartbeat = startLeaseHeartbeat(job, controller);
+  activeControllers.set(slotWorkerId, controller);
+  const stopHeartbeat = startLeaseHeartbeat(job, controller, slotWorkerId);
 
   try {
     if (!executor) {
@@ -192,16 +202,16 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
 
     const execution = await executor({
       job,
-      workerId,
+      workerId: slotWorkerId,
       signal: controller.signal,
       renewLease: () => renewExternalAnalysisJobLease({
         jobId: job.id,
-        workerId,
+        workerId: slotWorkerId,
         leaseSeconds,
       }),
       reportProgress: update => updateExternalAnalysisJobProgress({
         jobId: job.id,
-        workerId,
+        workerId: slotWorkerId,
         ...update,
       }),
     });
@@ -212,7 +222,7 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
 
     const heartbeatState = await heartbeatExternalAnalysisJob({
       jobId: job.id,
-      workerId,
+      workerId: slotWorkerId,
       leaseSeconds,
     });
     if (heartbeatState.cancelRequested) {
@@ -227,7 +237,7 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
 
     const completed = await completeExternalAnalysisJob({
       jobId: job.id,
-      workerId,
+      workerId: slotWorkerId,
       result: execution.result,
       progress: execution.progress,
     });
@@ -246,7 +256,7 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
       try {
         await finalizeExternalAnalysisJobCancel({
           jobId: job.id,
-          workerId,
+          workerId: slotWorkerId,
           errorCode: cancellation.code,
           errorMessage: cancellation.message,
         });
@@ -261,7 +271,7 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
     try {
       const scheduled = await scheduleExternalAnalysisJobRetry({
         jobId: job.id,
-        workerId,
+        workerId: slotWorkerId,
         errorCode: retry.code,
         errorMessage: retry.message,
         retryDelayMinutes: retry.delayMinutes,
@@ -279,18 +289,17 @@ const executeClaimedJob = async (job: ExternalAnalysisJob): Promise<void> => {
     }
   } finally {
     stopHeartbeat();
-    if (activeController === controller) activeController = null;
+    if (activeControllers.get(slotWorkerId) === controller) {
+      activeControllers.delete(slotWorkerId);
+    }
   }
 };
 
-const runWorker = async (): Promise<void> => {
-  console.log(
-    `[external-analysis-worker] Started ${workerId}; poll=${pollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m (global setting takes precedence).`,
-  );
-
+const runWorkerSlot = async (slotIndex: number): Promise<void> => {
+  const slotWorkerId = `${workerId}:slot-${slotIndex + 1}`;
   while (!shuttingDown) {
     try {
-      await recoverStaleJobsIfDue();
+      if (slotIndex === 0) await recoverStaleJobsIfDue();
 
       const supportedJobTypes = getSupportedExternalAnalysisJobTypes();
       if (supportedJobTypes.length === 0) {
@@ -304,7 +313,7 @@ const runWorker = async (): Promise<void> => {
 
       idleNoticeShown = false;
       const job = await claimNextExternalAnalysisJob({
-        workerId,
+        workerId: slotWorkerId,
         supportedJobTypes,
         leaseSeconds,
       });
@@ -314,12 +323,22 @@ const runWorker = async (): Promise<void> => {
         continue;
       }
 
-      await executeClaimedJob(job);
+      await executeClaimedJob(job, slotWorkerId);
     } catch (error) {
       logThrottledError('Worker loop failed', error);
       await sleep(pollIntervalMs);
     }
   }
+};
+
+const runWorker = async (): Promise<void> => {
+  console.log(
+    `[external-analysis-worker] Started ${workerId}; concurrency=${workerConcurrency}, poll=${pollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m (global setting takes precedence).`,
+  );
+
+  await Promise.all(
+    Array.from({ length: workerConcurrency }, (_, index) => runWorkerSlot(index)),
+  );
 
   console.log('[external-analysis-worker] Stopped.');
 };
@@ -328,7 +347,9 @@ const requestShutdown = (signal: NodeJS.Signals): void => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[external-analysis-worker] Received ${signal}; stopping.`);
-  activeController?.abort(new Error(`Worker stopped by ${signal}.`));
+  activeControllers.forEach(controller => {
+    controller.abort(new Error(`Worker stopped by ${signal}.`));
+  });
 };
 
 process.on('SIGINT', () => requestShutdown('SIGINT'));

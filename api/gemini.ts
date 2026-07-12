@@ -1,5 +1,9 @@
 
 import { GoogleGenAI } from "@google/genai";
+import {
+  claimGeminiApiKey,
+  getGeminiKeyFailureCooldownSeconds,
+} from "../server/geminiKeyCoordinator";
 
 // Keep the serverless function self-contained: Vercel executes this compiled
 // ESM file directly and cannot resolve extensionless frontend module imports.
@@ -110,20 +114,6 @@ const geminiProgressStore = new Map<string, GeminiProgressState>();
 const geminiJobStore = new Map<string, GeminiJobState>();
 const geminiProgressListeners = new Map<string, (progress: GeminiExecutionProgress) => void>();
 
-const createApiKeyFingerprint = (key: string): string => {
-  const normalizedKey = key.trim();
-  let hash = 2166136261;
-  for (let index = 0; index < normalizedKey.length; index += 1) {
-    hash ^= normalizedKey.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-};
-
-const getApiKeySuffix = (key: string): string => (
-  key.trim().slice(-4)
-);
-
 const normalizeProgressId = (value: unknown): string => {
   if (typeof value !== "string") return "";
   const normalized = value.trim();
@@ -194,32 +184,6 @@ const getProgressIdFromRequest = (req: any): string => {
   } catch {
     return "";
   }
-};
-
-/*
- * Gemini API route used by Vite dev middleware and the production Node server.
- * API keys are read from server environment variables only.
- * Key attempts start with the next key in a round-robin order so repeated
- * analyses spread load across server-side keys, then fall back through the rest.
- */
-const keyRotationState: Record<GeminiProvider, { signature: string; nextIndex: number }> = {
-  gemini: { signature: "", nextIndex: 0 },
-  geminiPaid: { signature: "", nextIndex: 0 },
-};
-
-const getRoundRobinKeyOrder = (provider: GeminiProvider, keys: string[]): string[] => {
-  if (keys.length <= 1) return [...keys];
-
-  const signature = keys.join("\n");
-  const state = keyRotationState[provider];
-  if (state.signature !== signature) {
-    state.signature = signature;
-    state.nextIndex = 0;
-  }
-
-  const startIndex = state.nextIndex % keys.length;
-  state.nextIndex = (startIndex + 1) % keys.length;
-  return [...keys.slice(startIndex), ...keys.slice(0, startIndex)];
 };
 
 const readNodeBody = async (req: any): Promise<unknown> => {
@@ -733,7 +697,7 @@ const executeGeminiRequestInternal = async (
       throwIfGeminiExecutionCancelled(progressId, options.signal);
       const activeModel = modelOrder[modelIndex];
       lastAttemptedModel = activeModel;
-      const orderedKeys = getRoundRobinKeyOrder(selectedProvider, GEMINI_API_KEYS);
+      const orderedKeys = GEMINI_API_KEYS;
       lastOrderedKeys = orderedKeys;
       if (modelIndex > 0) {
         setGeminiProgress(progressId, {
@@ -761,9 +725,31 @@ const executeGeminiRequestInternal = async (
 
       for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
         throwIfGeminiExecutionCancelled(progressId, options.signal);
-        const GEMINI_API_KEY = orderedKeys[keyIndex];
-        const keyFingerprint = createApiKeyFingerprint(GEMINI_API_KEY);
-        const keySuffix = getApiKeySuffix(GEMINI_API_KEY);
+        const attemptedForModel = new Set(
+          attempts
+            .filter(item => item.model === activeModel)
+            .map(item => item.keyFingerprint),
+        );
+        const keyLease = await claimGeminiApiKey({
+          provider: selectedProvider,
+          model: activeModel,
+          keys: GEMINI_API_KEYS,
+          excludedFingerprints: attemptedForModel,
+          leaseOwner: progressId
+            ? `${progressId}:${modelIndex + 1}:${keyIndex + 1}`
+            : undefined,
+          leaseSeconds: Math.ceil(GEMINI_PER_KEY_TIMEOUT_MS / 1_000) + 30,
+        });
+        if (!keyLease) {
+          lastError = {
+            status: 429,
+            message: `No eligible ${selectedProvider} API key is currently available for ${activeModel}.`,
+          };
+          break;
+        }
+        const GEMINI_API_KEY = keyLease.apiKey;
+        const keyFingerprint = keyLease.fingerprint;
+        const keySuffix = keyLease.suffix;
         for (let attempt = 0; attempt < 1; attempt += 1) {
           throwIfGeminiExecutionCancelled(progressId, options.signal);
           const attemptStartedAt = Date.now();
@@ -855,6 +841,12 @@ const executeGeminiRequestInternal = async (
               message: `تم تلقي رد Gemini بنجاح من المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel}.`,
             });
 
+            await keyLease.complete({
+              outcome: 'success',
+              status: 200,
+              cooldownSeconds: 0,
+            });
+
             return {
               status: 200,
               body: {
@@ -881,11 +873,31 @@ const executeGeminiRequestInternal = async (
             };
           } catch (error) {
             if (isGeminiJobCancelledError(error)) {
+              await keyLease.complete({
+                outcome: 'cancelled',
+                status: 499,
+                reason: 'cancelled',
+                cooldownSeconds: 0,
+              });
               throw error;
             }
-            if (options.signal?.aborted) throw new GeminiJobCancelledError();
+            if (options.signal?.aborted) {
+              await keyLease.complete({
+                outcome: 'cancelled',
+                status: 499,
+                reason: 'cancelled',
+                cooldownSeconds: 0,
+              });
+              throw new GeminiJobCancelledError();
+            }
             lastError = getGeminiErrorDetails(error);
             const reason = getGeminiFailureReason(lastError);
+            await keyLease.complete({
+              outcome: 'failed',
+              status: lastError.status,
+              reason,
+              cooldownSeconds: getGeminiKeyFailureCooldownSeconds(reason, lastError.status),
+            });
             await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_MIN_ATTEMPT_MS, attemptStartedAt);
             attempts.push({
               keyFingerprint,
@@ -944,11 +956,11 @@ const executeGeminiRequestInternal = async (
                 totalAttemptCount: attempts.length,
                 currentKeyIndex: keyIndex + 2,
                 currentAttempt: 1,
-                keySuffix: getApiKeySuffix(orderedKeys[keyIndex + 1]),
+                keySuffix: undefined,
                 status: undefined,
                 reason: undefined,
                 completed: false,
-                message: `تم تبديل المفتاح. الانتقال إلى المفتاح ${keyIndex + 2} من ${orderedKeys.length} على النموذج ${activeModel}.`,
+                message: `تم تبديل المفتاح. الانتقال إلى المفتاح المتاح التالي على النموذج ${activeModel}.`,
               });
               await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_SWITCH_DELAY_MS);
             } else if (hasNextModel) {

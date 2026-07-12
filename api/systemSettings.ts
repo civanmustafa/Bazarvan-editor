@@ -48,6 +48,7 @@ const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
     geminiFreeModelFallbackEnabled: true,
     externalAnalysisRetryMinutes: 30,
     externalAnalysisDefaultCommandIds: [...EXTERNAL_AUTOMATIC_COMMAND_IDS],
+    externalAnalysisCommandExecutionMode: 'independent_batch',
     defaultGeminiPaidModel: 'gemini-2.5-pro',
     defaultOpenAiModel: 'gpt-4.1-mini',
   },
@@ -211,6 +212,10 @@ const normalizeExternalAnalysisDefaultCommandIds = (value: unknown): string[] =>
     : [...EXTERNAL_AUTOMATIC_COMMAND_IDS];
 };
 
+const normalizeExternalAnalysisCommandExecutionMode = (value: unknown): string => (
+  value === 'sequential' ? 'sequential' : 'independent_batch'
+);
+
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
 
 const getPublicBaseUrl = (req: any): string => {
@@ -312,6 +317,9 @@ const sanitizeSettingsPatch = (value: unknown): Partial<Record<SettingKey, Recor
           ),
           externalAnalysisDefaultCommandIds: normalizeExternalAnalysisDefaultCommandIds(
             settingValue.externalAnalysisDefaultCommandIds,
+          ),
+          externalAnalysisCommandExecutionMode: normalizeExternalAnalysisCommandExecutionMode(
+            settingValue.externalAnalysisCommandExecutionMode,
           ),
         }
       : settingValue;

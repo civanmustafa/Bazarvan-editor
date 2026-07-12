@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS: SystemSettingsMap = {
     geminiFreeModelFallbackEnabled: true,
     externalAnalysisRetryMinutes: 30,
     externalAnalysisDefaultCommandIds: [...EXTERNAL_AUTOMATIC_COMMAND_IDS],
+    externalAnalysisCommandExecutionMode: 'independent_batch',
     defaultGeminiPaidModel: 'gemini-2.5-pro',
     defaultOpenAiModel: 'gpt-4.1-mini',
   },

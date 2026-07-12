@@ -1,5 +1,10 @@
 import { GoogleGenAI } from '@google/genai';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  claimGeminiApiKey,
+  getGeminiKeyFailureCooldownSeconds,
+  type GeminiKeyFailureReason,
+} from '../server/geminiKeyCoordinator';
 
 type ApiResult = {
   status: number;
@@ -38,7 +43,6 @@ class AssignedAutomationError extends Error {
 
 const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
 const DEFAULT_GEMINI_PAID_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || 'gemini-2.5-pro';
-const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 
 const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
@@ -144,40 +148,6 @@ const getGeminiKeys = (provider: GeminiProvider): string[] => {
       );
 };
 
-const keyRotationState: Record<GeminiProvider, { signature: string; nextIndex: number }> = {
-  gemini: { signature: '', nextIndex: 0 },
-  geminiPaid: { signature: '', nextIndex: 0 },
-};
-
-const getRoundRobinKeyOrder = (provider: GeminiProvider, keys: string[]): string[] => {
-  if (keys.length <= 1) return [...keys];
-
-  const signature = keys.join('\n');
-  const state = keyRotationState[provider];
-  if (state.signature !== signature) {
-    state.signature = signature;
-    state.nextIndex = 0;
-  }
-
-  const startIndex = state.nextIndex % keys.length;
-  state.nextIndex = (startIndex + 1) % keys.length;
-  return [...keys.slice(startIndex), ...keys.slice(0, startIndex)];
-};
-
-const createApiKeyFingerprint = (key: string): string => {
-  const normalizedKey = key.trim();
-  let hash = 2166136261;
-  for (let index = 0; index < normalizedKey.length; index += 1) {
-    hash ^= normalizedKey.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-};
-
-const getApiKeySuffix = (key: string): string => (
-  key.trim().slice(-4)
-);
-
 const getGeminiErrorStatus = (error: unknown): number => {
   const value = error && typeof error === 'object' ? error as Record<string, any> : {};
   const nestedError = isRecord(value.error) ? value.error : {};
@@ -205,6 +175,13 @@ const getGeminiErrorMessage = (error: unknown): string => {
   return toTrimmedString(nestedError.message) || toTrimmedString(value.message) || 'Unknown Gemini error.';
 };
 
+const getGeminiFailureReason = (status: number): GeminiKeyFailureReason => {
+  if (status === 429) return 'quota';
+  if (status === 401 || status === 403) return 'auth';
+  if (status >= 500) return 'server';
+  return 'unknown';
+};
+
 const wait = (duration: number) => new Promise(resolve => setTimeout(resolve, duration));
 
 const callGemini = async (
@@ -221,39 +198,49 @@ const callGemini = async (
 
   let lastError: unknown = null;
   const attemptedFingerprints = new Set<string>();
-  for (const apiKey of getRoundRobinKeyOrder(provider, keys)) {
-    const keyFingerprint = createApiKeyFingerprint(apiKey);
-    const keySuffix = getApiKeySuffix(apiKey);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-        });
-        return {
-          text: response.text || '',
-          keyFingerprint,
-          keySuffix,
-          model,
-        };
-      } catch (error) {
-        lastError = error;
-        const status = getGeminiErrorStatus(error);
-        attemptedFingerprints.add(keyFingerprint);
-        console.warn('Assigned automation Gemini key attempt failed', {
-          provider,
-          model,
-          keyFingerprint,
-          status,
-          attempt: attempt + 1,
-        });
-        if (attempt === 0 && RETRIABLE_GEMINI_STATUSES.has(status)) {
-          await wait(400);
-          continue;
-        }
-        break;
-      }
+  for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
+    const keyLease = await claimGeminiApiKey({
+      provider,
+      model,
+      keys,
+      excludedFingerprints: attemptedFingerprints,
+      leaseSeconds: 150,
+    });
+    if (!keyLease) {
+      lastError = new Error(`No eligible ${provider} API key is currently available (429).`);
+      break;
+    }
+    attemptedFingerprints.add(keyLease.fingerprint);
+    try {
+      const ai = new GoogleGenAI({ apiKey: keyLease.apiKey });
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+      await keyLease.complete({ outcome: 'success', status: 200, cooldownSeconds: 0 });
+      return {
+        text: response.text || '',
+        keyFingerprint: keyLease.fingerprint,
+        keySuffix: keyLease.suffix,
+        model,
+      };
+    } catch (error) {
+      lastError = error;
+      const status = getGeminiErrorStatus(error);
+      const reason = getGeminiFailureReason(status);
+      await keyLease.complete({
+        outcome: 'failed',
+        status,
+        reason,
+        cooldownSeconds: getGeminiKeyFailureCooldownSeconds(reason, status),
+      });
+      console.warn('Assigned automation Gemini key attempt failed', {
+        provider,
+        model,
+        keyFingerprint: keyLease.fingerprint,
+        status,
+        attempt: 1,
+      });
     }
   }
 

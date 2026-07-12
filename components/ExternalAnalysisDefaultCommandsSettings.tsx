@@ -3,6 +3,8 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  Layers,
+  ListOrdered,
   LoaderCircle,
   RotateCcw,
   Save,
@@ -16,6 +18,7 @@ import {
 import { loadSystemSettings, saveSystemSettings } from '../utils/systemSettings';
 
 const DEFAULT_COMMAND_IDS = [...EXTERNAL_AUTOMATIC_COMMAND_IDS];
+type ExecutionMode = 'independent_batch' | 'sequential';
 const ALLOWED_COMMAND_IDS = new Set(
   EXTERNAL_READY_COMMAND_DEFINITIONS.map(definition => definition.id),
 );
@@ -31,12 +34,18 @@ const normalizeCommandIds = (value: unknown): string[] => {
   return normalized.length > 0 ? normalized : DEFAULT_COMMAND_IDS;
 };
 
+const normalizeExecutionMode = (value: unknown): ExecutionMode => (
+  value === 'sequential' ? 'sequential' : 'independent_batch'
+);
+
 const ExternalAnalysisDefaultCommandsSettings: React.FC = () => {
   const { t } = useUser();
   const locale = t.locale === 'en' ? 'en' : 'ar';
   const [aiSettings, setAiSettings] = useState<Record<string, any>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>(DEFAULT_COMMAND_IDS);
   const [savedIds, setSavedIds] = useState<string[]>(DEFAULT_COMMAND_IDS);
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>('independent_batch');
+  const [savedExecutionMode, setSavedExecutionMode] = useState<ExecutionMode>('independent_batch');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
@@ -61,7 +70,8 @@ const ExternalAnalysisDefaultCommandsSettings: React.FC = () => {
     return [...selected, ...unselected];
   }, [commandsById, selectedIds]);
 
-  const isDirty = selectedIds.join('|') !== savedIds.join('|');
+  const isDirty = selectedIds.join('|') !== savedIds.join('|')
+    || executionMode !== savedExecutionMode;
 
   useEffect(() => {
     let cancelled = false;
@@ -73,9 +83,14 @@ const ExternalAnalysisDefaultCommandsSettings: React.FC = () => {
         if (cancelled) return;
         const nextAiSettings = response.settings?.ai || {};
         const nextIds = normalizeCommandIds(nextAiSettings.externalAnalysisDefaultCommandIds);
+        const nextExecutionMode = normalizeExecutionMode(
+          nextAiSettings.externalAnalysisCommandExecutionMode,
+        );
         setAiSettings(nextAiSettings);
         setSelectedIds(nextIds);
         setSavedIds(nextIds);
+        setExecutionMode(nextExecutionMode);
+        setSavedExecutionMode(nextExecutionMode);
       } catch (error) {
         if (!cancelled) {
           setMessage({
@@ -130,13 +145,19 @@ const ExternalAnalysisDefaultCommandsSettings: React.FC = () => {
         ai: {
           ...aiSettings,
           externalAnalysisDefaultCommandIds: selectedIds,
+          externalAnalysisCommandExecutionMode: executionMode,
         },
       });
       const nextAiSettings = response.settings?.ai || {};
       const nextIds = normalizeCommandIds(nextAiSettings.externalAnalysisDefaultCommandIds);
+      const nextExecutionMode = normalizeExecutionMode(
+        nextAiSettings.externalAnalysisCommandExecutionMode,
+      );
       setAiSettings(nextAiSettings);
       setSelectedIds(nextIds);
       setSavedIds(nextIds);
+      setExecutionMode(nextExecutionMode);
+      setSavedExecutionMode(nextExecutionMode);
       setMessage({
         tone: 'success',
         text: 'تم حفظ الأوامر الافتراضية وترتيبها. لن تتأثر المقالات ذات الاختيار الخاص.',
@@ -162,6 +183,39 @@ const ExternalAnalysisDefaultCommandsSettings: React.FC = () => {
 
   return (
     <div>
+      <div className="mb-4">
+        <div className="mb-2 text-sm font-black text-gray-700 dark:text-gray-200">
+          نمط تشغيل الأوامر
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="group" aria-label="نمط تشغيل أوامر التحليل الخارجي">
+          <button
+            type="button"
+            onClick={() => setExecutionMode('independent_batch')}
+            className={`flex min-h-12 items-center gap-2 rounded-md border px-3 py-2 text-start text-sm font-bold ${executionMode === 'independent_batch' ? 'border-[#d4af37] bg-[#d4af37]/10 text-[#8a6f1d] dark:text-[#f2d675]' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#333]'}`}
+          >
+            <Layers size={17} className="shrink-0" />
+            <span>
+              <span className="block">دفعة مستقلة بمفاتيح مختلفة</span>
+              <span className="mt-0.5 block text-xs font-semibold opacity-75">حتى 5 طلبات، ونتيجة منفصلة لكل أمر</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setExecutionMode('sequential')}
+            className={`flex min-h-12 items-center gap-2 rounded-md border px-3 py-2 text-start text-sm font-bold ${executionMode === 'sequential' ? 'border-[#d4af37] bg-[#d4af37]/10 text-[#8a6f1d] dark:text-[#f2d675]' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#333]'}`}
+          >
+            <ListOrdered size={17} className="shrink-0" />
+            <span>
+              <span className="block">تسلسلي محافظ</span>
+              <span className="mt-0.5 block text-xs font-semibold opacity-75">لا يبدأ الأمر التالي قبل نجاح السابق</span>
+            </span>
+          </button>
+        </div>
+        <p className="mt-2 text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">
+          يطبق النمط على الدفعات الجديدة. في الدفعة المستقلة يُحجز مفتاح مختلف لكل طلب، بينما تبقى نتائج الأوامر وسجلاتها منفصلة.
+        </p>
+      </div>
+
       <p className="mb-3 text-sm font-semibold leading-6 text-gray-500 dark:text-gray-400">
         تُنفذ الأوامر المحددة من الأعلى إلى الأسفل. اختيار أوامر يدويًا من بطاقة مقالة يحولها إلى حالة خاصة ولا يطبق عليها هذا الإعداد.
       </p>

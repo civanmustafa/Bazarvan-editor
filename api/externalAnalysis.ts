@@ -397,6 +397,7 @@ const enqueueEngineeringJobs = async (
   }
 
   const batchId = randomUUID();
+  const batchKey = `manual-engineering:${article.id}:${batchId}`;
   const now = new Date().toISOString();
   const jobIds = commands.map(() => randomUUID());
   const snapshot = toArticleSnapshot(article);
@@ -408,7 +409,7 @@ const enqueueEngineeringJobs = async (
     origin: 'manual',
     status: 'queued',
     idempotency_key: `manual-engineering:${batchId}:${command!.id}:${state.external_analysis_readiness_signature}`,
-    batch_key: `manual-engineering:${article.id}:${batchId}`,
+    batch_key: batchKey,
     sequence_number: index + 1,
     command_id: command!.id,
     command_label: command!.label,
@@ -446,8 +447,16 @@ const enqueueEngineeringJobs = async (
     });
   }
   if (error) throw error;
+  const { data: batch, error: batchError } = await supabase.rpc(
+    'apply_external_analysis_execution_mode_to_batch',
+    { p_batch_key: batchKey },
+  );
+  if (batchError && !['42883', 'PGRST202'].includes(String(batchError.code || ''))) {
+    throw batchError;
+  }
   return {
     batchId,
+    batch: Array.isArray(batch) ? batch[0] || null : batch || null,
     jobs: jobs || [],
     commandSelectionMode: 'custom',
     customCommandIds: normalizedIds,
