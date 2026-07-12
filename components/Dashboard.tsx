@@ -12,7 +12,6 @@ import {
     deleteRemoteArticle,
     getArticleTrashInfo,
     listRemoteArticlesPage,
-    listRemoteN8nIngestLogs,
     listRemoteProfiles,
     loadRemoteArticleSnapshot,
     moveRemoteArticleToTrash,
@@ -28,7 +27,6 @@ import {
     type RemoteArticlesPage,
     type RemoteArticlesPageOptions,
     type RemoteArticleTrashInfo,
-    type RemoteN8nIngestLog,
     type RemoteArticleSettingsPatch,
 } from '../utils/supabaseArticles';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
@@ -69,6 +67,36 @@ const SummaryStat: React.FC<{ icon: React.ReactNode; label: string; value: strin
       <div className="text-sm text-gray-500 dark:text-gray-400">{label}</div>
     </div>
   </div>
+);
+
+const ArticlePaginationControls: React.FC<{
+  pageLabel: string;
+  canGoPrevious: boolean;
+  canGoNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}> = ({ pageLabel, canGoPrevious, canGoNext, onPrevious, onNext }) => (
+  <nav className="flex items-center justify-center gap-2" aria-label="تنقل صفحات المقالات">
+    <button
+      type="button"
+      onClick={onPrevious}
+      disabled={!canGoPrevious}
+      className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300"
+    >
+      السابق
+    </button>
+    <span className="min-w-24 text-center text-xs font-black text-gray-500 dark:text-gray-400">
+      {pageLabel}
+    </span>
+    <button
+      type="button"
+      onClick={onNext}
+      disabled={!canGoNext}
+      className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300"
+    >
+      التالي
+    </button>
+  </nav>
 );
 
 const getProfileLabel = (profile?: RemoteProfile): string => (
@@ -241,126 +269,114 @@ const EditableN8nSettingField: React.FC<{
   </label>
 );
 
-const EditableN8nTextField: React.FC<{
+const parseVisibleUserEmails = (value: string): string[] => (
+  Array.from(new Set(value
+    .split(/[\n\r,،;؛|]+/g)
+    .map(email => email.trim().toLowerCase())
+    .filter(Boolean)))
+);
+
+const EditableN8nUsersField: React.FC<{
   field: 'visibleToEmailsCsv';
   value?: string;
+  profiles: RemoteProfile[];
   disabled: boolean;
   onChange: (field: 'visibleToEmailsCsv', value: string) => void;
-}> = ({ field, value = '', disabled, onChange }) => {
-  const [draft, setDraft] = useState(value);
+}> = ({ field, value = '', profiles, disabled, onChange }) => {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const [draftEmails, setDraftEmails] = useState<string[]>(() => parseVisibleUserEmails(value));
+  const availableProfiles = useMemo(() => (
+    profiles
+      .filter(profile => profile.email)
+      .sort((left, right) => getProfileLabel(left).localeCompare(getProfileLabel(right)))
+  ), [profiles]);
 
   useEffect(() => {
-    setDraft(value);
+    setDraftEmails(parseVisibleUserEmails(value));
   }, [value]);
 
+  const savedEmails = parseVisibleUserEmails(value);
+  const savedSignature = [...savedEmails].sort().join(',');
+  const draftSignature = [...draftEmails].sort().join(',');
+  const selectedCount = draftEmails.length;
+  const toggleEmail = (email: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    setDraftEmails(current => current.includes(normalizedEmail)
+      ? current.filter(item => item !== normalizedEmail)
+      : [...current, normalizedEmail]);
+  };
+  const closeMenu = () => {
+    if (detailsRef.current) detailsRef.current.open = false;
+  };
   const commit = () => {
-    const nextValue = draft.trim();
-    if (nextValue !== value.trim()) {
-      onChange(field, nextValue);
+    if (draftSignature !== savedSignature) {
+      onChange(field, draftEmails.join(', '));
     }
+    closeMenu();
+  };
+  const cancel = () => {
+    setDraftEmails(savedEmails);
+    closeMenu();
   };
 
   return (
-    <label
-      className="inline-flex min-w-[145px] max-w-[220px] shrink-0 items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
+    <details
+      ref={detailsRef}
+      className="group/users relative shrink-0"
       onClick={event => event.stopPropagation()}
-      title={draft || '-'}
+      onToggle={event => {
+        if (disabled && event.currentTarget.open) event.currentTarget.open = false;
+      }}
     >
-      <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
-      <input
-        type="text"
-        value={draft}
-        disabled={disabled}
-        onChange={event => setDraft(event.target.value)}
-        onBlur={commit}
-        onClick={event => event.stopPropagation()}
-        onKeyDown={event => {
-          if (event.key === 'Enter') {
-            event.currentTarget.blur();
-          }
-          if (event.key === 'Escape') {
-            setDraft(value);
-            event.currentTarget.blur();
-          }
-        }}
-        className="min-w-0 flex-1 rounded border border-transparent bg-transparent text-[10px] font-black text-[#8a6f1d] outline-none focus:border-[#d4af37] disabled:cursor-wait disabled:opacity-60 dark:text-[#f2d675]"
-        placeholder="-"
-      />
-    </label>
-  );
-};
-
-const getN8nLogTitle = (log: RemoteN8nIngestLog): string => {
-  const payload = log.payload && typeof log.payload === 'object' && !Array.isArray(log.payload) ? log.payload : {};
-  return String(payload.title || payload.articleTitle || payload.article_title || payload.headline || log.externalId || '-');
-};
-
-const N8nLogsPanel: React.FC<{
-  logs: RemoteN8nIngestLog[];
-  isLoading: boolean;
-  t: typeof translations.ar;
-}> = ({ logs, isLoading, t }) => {
-  const latestError = logs.find(log => log.status === 'failed' || log.errorMessage);
-
-  return (
-    <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-base font-bold text-gray-800 dark:text-gray-100">سجل طلبات n8n</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400">آخر الطلبات الواردة من n8n وحالة إنشاء المقالات.</p>
-        </div>
-        <span className="rounded-full bg-[#d4af37]/10 px-2.5 py-1 text-[11px] font-black text-[#8a6f1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
-          {logs.length} طلب
-        </span>
-      </div>
-      {latestError && (
-        <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
-          <div className="font-bold">آخر خطأ n8n</div>
-          <div className="mt-1">{latestError.errorMessage || 'فشل غير محدد.'}</div>
-          <div className="mt-1 text-red-500/80">
-            {formatIstanbulDateTime(latestError.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-          </div>
-        </div>
-      )}
-      <div className="max-h-72 overflow-auto">
-        <table className="w-full text-right text-xs">
-          <thead className="sticky top-0 bg-gray-50 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-400">
-            <tr>
-              <th className="px-2 py-2">الحالة</th>
-              <th className="px-2 py-2">العنوان</th>
-              <th className="px-2 py-2">External ID</th>
-              <th className="px-2 py-2">Workflow</th>
-              <th className="px-2 py-2">الوقت</th>
-              <th className="px-2 py-2">الخطأ</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-[#3C3C3C]">
-            {isLoading ? (
-              <tr><td colSpan={6} className="px-2 py-4 text-center text-gray-500">جار تحميل سجل n8n...</td></tr>
-            ) : logs.length > 0 ? logs.map(log => (
-              <tr key={log.id} className="align-top text-gray-600 dark:text-gray-300">
-                <td className="px-2 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
-                    log.status === 'failed'
-                      ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
-                      : 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
-                  }`}>
-                    {log.status}
+      <summary
+        className={`inline-flex min-w-[170px] max-w-[230px] list-none items-center gap-1 rounded-md bg-[#d4af37]/10 px-2 py-1 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675] ${disabled ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
+        title={draftEmails.join(', ') || 'اختيار المستخدمين'}
+      >
+        <Users size={12} className="shrink-0" />
+        <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
+        <span className="min-w-0 truncate">{selectedCount > 0 ? `${selectedCount} مستخدم` : 'اختيار المستخدمين'}</span>
+      </summary>
+      <div className="absolute end-0 top-full z-40 mt-1 w-72 rounded-md border border-gray-200 bg-white p-2 shadow-xl dark:border-[#3C3C3C] dark:bg-[#242424]">
+        <div className="mb-2 text-xs font-black text-gray-700 dark:text-gray-200">المستخدمون المسموح لهم</div>
+        <div className="max-h-52 space-y-1 overflow-y-auto">
+          {availableProfiles.length > 0 ? availableProfiles.map(profile => {
+            const email = profile.email!.trim().toLowerCase();
+            return (
+              <label key={profile.id} className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 hover:bg-[#d4af37]/10">
+                <input
+                  type="checkbox"
+                  checked={draftEmails.includes(email)}
+                  onChange={() => toggleEmail(email)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#d4af37] focus:ring-[#d4af37]"
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-bold text-gray-700 dark:text-gray-200">
+                    {getProfileLabel(profile)}{profile.isActive === false ? ' (غير فعال)' : ''}
                   </span>
-                </td>
-                <td className="max-w-[180px] truncate px-2 py-2" title={getN8nLogTitle(log)}>{getN8nLogTitle(log)}</td>
-                <td className="max-w-[130px] truncate px-2 py-2" title={log.externalId || ''}>{log.externalId || '-'}</td>
-                <td className="max-w-[120px] truncate px-2 py-2" title={log.workflowId || ''}>{log.workflowId || '-'}</td>
-                <td className="whitespace-nowrap px-2 py-2">{formatIstanbulDateTime(log.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-                <td className="max-w-[240px] truncate px-2 py-2 text-red-600 dark:text-red-300" title={log.errorMessage || ''}>{log.errorMessage || '-'}</td>
-              </tr>
-            )) : (
-              <tr><td colSpan={6} className="px-2 py-4 text-center text-gray-500">لا توجد طلبات n8n مسجلة بعد.</td></tr>
-            )}
-          </tbody>
-        </table>
+                  <span className="block truncate text-[10px] text-gray-400" dir="ltr">{email}</span>
+                </span>
+              </label>
+            );
+          }) : (
+            <div className="px-2 py-4 text-center text-xs text-gray-500">لا يوجد مستخدمون.</div>
+          )}
+        </div>
+        <div className="mt-2 flex justify-end gap-2 border-t border-gray-100 pt-2 dark:border-[#3C3C3C]">
+          <button type="button" onClick={cancel} className="rounded-md px-2 py-1 text-xs font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-[#333]">
+            إلغاء
+          </button>
+          <button
+            type="button"
+            onClick={commit}
+            disabled={disabled || draftSignature === savedSignature}
+            className="inline-flex items-center gap-1 rounded-md bg-[#d4af37] px-2 py-1 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Save size={12} />
+            حفظ
+          </button>
+        </div>
       </div>
-    </section>
+    </details>
   );
 };
 
@@ -530,22 +546,6 @@ const ArticleDetailsModal: React.FC<{
   );
 };
 
-const SeoScoreIndicator: React.FC<{ score: number }> = ({ score }) => {
-  const getScoreColor = () => {
-    if (score >= 85) return 'text-green-500 bg-green-500/10 border-green-500/20';
-    if (score >= 60) return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
-    return 'text-red-500 bg-red-500/10 border-red-500/20';
-  };
-
-  return (
-    <div className={`flex h-10 w-10 flex-col items-center justify-center rounded-full border ${getScoreColor()}`}>
-      <span className="text-sm font-bold leading-4">{Math.round(score)}</span>
-      <span className="text-[9px] font-medium opacity-80">SEO</span>
-    </div>
-  );
-};
-
-
 interface ArticleItemProps {
     title: string;
     activity: ArticleActivity | RemoteArticleActivity;
@@ -563,6 +563,7 @@ interface ArticleItemProps {
     onRename: (newTitle: string) => boolean | Promise<boolean>;
     onUpdateSettings?: (articleId: string, patch: RemoteArticleSettingsPatch) => Promise<boolean>;
     onClaim?: (articleId: string) => Promise<boolean>;
+    profiles?: RemoteProfile[];
     visibleSettingFields?: N8nDisplayFieldKey[];
     editableSettingFields?: N8nDisplayFieldKey[];
     isTrashView?: boolean;
@@ -590,6 +591,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     onRename,
     onUpdateSettings,
     onClaim,
+    profiles = [],
     visibleSettingFields = [],
     editableSettingFields = [],
     isTrashView = false,
@@ -678,15 +680,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         }
     };
     
-    const calculateSeoScore = () => {
-        if (!activity.stats) return 0;
-        const { violatingCriteriaCount = 0, totalErrorsCount = 0, keywordViolations = 0 } = activity.stats;
-        const deductions = (violatingCriteriaCount * 3) + (totalErrorsCount * 0.5) + (keywordViolations * 2);
-        const score = Math.max(0, 100 - deductions);
-        return score;
-    };
-    const seoScore = calculateSeoScore();
-
     if (isRenaming) {
       return (
           <li className="p-2.5 bg-gray-100 dark:bg-[#3C3C3C] rounded-md ring-2 ring-[#d4af37]">
@@ -716,7 +709,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const untranslatedTitle = title || t.untitled;
     const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
     const remoteActivity = activity as RemoteArticleActivity;
-    const articleId = isRecord(activity) && typeof activity.id === 'string' ? activity.id : '';
+    const articleId = typeof remoteActivity.id === 'string' ? remoteActivity.id : '';
     const articlePath = articleId ? buildEditorArticlePath(articleId) : '';
     const absoluteArticleUrl = articlePath ? `${window.location.origin}${articlePath}` : '';
     const canClaimArticle = Boolean(
@@ -775,7 +768,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     aria-label="تحديد المقالة"
                 />
             )}
-            <SeoScoreIndicator score={seoScore} />
             <div className="min-w-0 flex-grow space-y-0.5">
                 <div className="flex items-start justify-between gap-2">
                     <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#333333] dark:text-gray-200" title={untranslatedTitle}>
@@ -853,10 +845,10 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
-                    {activity.createdAt && (
+                    {remoteActivity.createdAt && (
                          <span className="flex items-center gap-1.5" title="تاريخ الإنشاء">
                             <Calendar size={12} />
-                            {formatIstanbulDateTime(activity.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            {formatIstanbulDateTime(remoteActivity.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                         </span>
                     )}
                     {activity.lastSaved && (
@@ -893,7 +885,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     )}
                 </div>
                 {shouldShowN8nSettings && (
-                    <div className="flex flex-nowrap items-center gap-1 overflow-x-auto border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
+                    <div className="relative flex flex-wrap items-center gap-1 overflow-visible border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
                         {fieldsToShow.map(field => {
                             const isEditable = Boolean(onUpdateSettings && editableSettingFields.includes(field));
                             if (field === 'visibleToEmailsCsv' && canClaimArticle) {
@@ -923,10 +915,11 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                             }
                             if (isEditable && field === 'visibleToEmailsCsv') {
                                 return (
-                                    <EditableN8nTextField
+                                    <EditableN8nUsersField
                                         key={field}
                                         field={field}
                                         value={n8nSettings.visibleToEmailsCsv}
+                                        profiles={profiles}
                                         disabled={savingSettingField !== null}
                                         onChange={handleSettingChange}
                                     />
@@ -973,7 +966,6 @@ const Dashboard: React.FC = () => {
   const onGoToEditor = () => setCurrentView('editor');
   
   const [remoteArticles, setRemoteArticles] = useState<RemoteArticleActivity[]>([]);
-  const [n8nLogs, setN8nLogs] = useState<RemoteN8nIngestLog[]>([]);
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
   const [detailArticle, setDetailArticle] = useState<RemoteArticleActivity | null>(null);
   const [detailSnapshot, setDetailSnapshot] = useState<ArticleStorageSnapshot | null>(null);
@@ -983,13 +975,11 @@ const Dashboard: React.FC = () => {
   const [articlesTotalCount, setArticlesTotalCount] = useState(0);
   const [articlesHasNextPage, setArticlesHasNextPage] = useState(false);
   const [isArticlesPageFromCache, setIsArticlesPageFromCache] = useState(false);
-  const [isN8nLogsLoading, setIsN8nLogsLoading] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   const [externalAnalysisSummaries, setExternalAnalysisSummaries] = useState<Record<string, ExternalAnalysisDashboardSummary>>({});
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isTrashVisible, setIsTrashVisible] = useState(false);
-  const [dashboardMode, setDashboardMode] = useState<'all' | 'n8n'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [remoteFilterOptions, setRemoteFilterOptions] = useState<RemoteArticleFilterOptions>({
@@ -1037,10 +1027,10 @@ const Dashboard: React.FC = () => {
     page: articlesPage,
     pageSize: DASHBOARD_ARTICLES_PAGE_SIZE,
     search: debouncedSearchQuery,
-    mode: dashboardMode,
+    mode: 'all',
     trash: isTrashVisible,
     filters,
-  }), [articlesPage, debouncedSearchQuery, dashboardMode, isTrashVisible, filters]);
+  }), [articlesPage, debouncedSearchQuery, isTrashVisible, filters]);
   const articlesPageQueryKey = useMemo(
     () => JSON.stringify(articlesPageOptions),
     [articlesPageOptions],
@@ -1087,7 +1077,6 @@ const Dashboard: React.FC = () => {
     };
 
     setIsArticlesLoading(true);
-    if (isAdmin) setIsN8nLogsLoading(true);
 
     const cachedArticlesPage = await readCachedRemoteArticlesPage(articlesPageOptions).catch(error => {
       console.warn('Could not read cached dashboard articles before refresh:', error);
@@ -1112,22 +1101,6 @@ const Dashboard: React.FC = () => {
           console.error('Failed to load dashboard profiles:', error);
         });
 
-      void listRemoteN8nIngestLogs(40)
-        .then(logRows => {
-          if (dashboardRefreshRequestRef.current === requestId) {
-            setN8nLogs(logRows);
-          }
-        })
-        .catch(error => {
-          console.error('Failed to load dashboard n8n logs:', error);
-        })
-        .finally(() => {
-          if (dashboardRefreshRequestRef.current === requestId) {
-            setIsN8nLogsLoading(false);
-          }
-        });
-    } else {
-      setIsN8nLogsLoading(false);
     }
 
     try {
@@ -1400,18 +1373,16 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) {
       setProfiles([]);
-      setDashboardMode('all');
-      setN8nLogs([]);
     }
   }, [isAdmin]);
 
   useEffect(() => {
     clearSelectedArticles();
-  }, [isTrashVisible, dashboardMode, searchQuery, filters, articlesPage]);
+  }, [isTrashVisible, searchQuery, filters, articlesPage]);
 
   useEffect(() => {
     setArticlesPage(1);
-  }, [isTrashVisible, dashboardMode, searchQuery, filters]);
+  }, [isTrashVisible, searchQuery, filters]);
 
   const handleExportHtml = () => {
     if (!currentUser) return;
@@ -1624,7 +1595,7 @@ const Dashboard: React.FC = () => {
                 className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
               >
                 <Shield size={18} />
-                <span>الأدمن</span>
+                <span>مركز المتابعة</span>
               </button>
             )}
             <button
@@ -1673,28 +1644,6 @@ const Dashboard: React.FC = () => {
           </div>
         </header>
 
-        {isAdmin && (
-          <>
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => setDashboardMode('all')}
-                className={`rounded-md px-3 py-1.5 text-xs font-bold ${dashboardMode === 'all' ? 'bg-[#d4af37] text-white' : 'bg-white text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-300'}`}
-              >
-                كل المقالات
-              </button>
-              <button
-                onClick={() => setDashboardMode('n8n')}
-                className={`rounded-md px-3 py-1.5 text-xs font-bold ${dashboardMode === 'n8n' ? 'bg-[#d4af37] text-white' : 'bg-white text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#2A2A2A] dark:text-gray-300'}`}
-              >
-                مقالات n8n
-              </button>
-            </div>
-            {dashboardMode === 'n8n' && (
-              <N8nLogsPanel logs={n8nLogs} isLoading={isN8nLogsLoading} t={t} />
-            )}
-          </>
-        )}
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2">
                 <div className="flex justify-between items-center mb-4">
@@ -1702,8 +1651,6 @@ const Dashboard: React.FC = () => {
                         <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">
                             {isTrashVisible
                               ? `سلة المهملات ${selectedFilterProfile ? `- ${getProfileLabel(selectedFilterProfile)}` : ''}`
-                              : dashboardMode === 'n8n'
-                                ? `مقالات n8n ${selectedFilterProfile ? `- ${getProfileLabel(selectedFilterProfile)}` : ''}`
                               : isAdmin
                                 ? `مقالات ${selectedFilterProfile ? getProfileLabel(selectedFilterProfile) : 'كل المستخدمين'}`
                                 : t.yourRecentArticles}
@@ -1979,27 +1926,13 @@ const Dashboard: React.FC = () => {
                             </span>
                         )}
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
-                            onClick={() => setArticlesPage(page => Math.max(1, page - 1))}
-                            disabled={!canGoToPreviousArticlesPage}
-                            className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300"
-                        >
-                            السابق
-                        </button>
-                        <span className="min-w-24 text-center text-xs font-black text-gray-500 dark:text-gray-400">
-                            {articlesPageLabel}
-                        </span>
-                        <button
-                            type="button"
-                            onClick={() => setArticlesPage(page => page + 1)}
-                            disabled={!canGoToNextArticlesPage}
-                            className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300"
-                        >
-                            التالي
-                        </button>
-                    </div>
+                    <ArticlePaginationControls
+                      pageLabel={articlesPageLabel}
+                      canGoPrevious={canGoToPreviousArticlesPage}
+                      canGoNext={canGoToNextArticlesPage}
+                      onPrevious={() => setArticlesPage(page => Math.max(1, page - 1))}
+                      onNext={() => setArticlesPage(page => page + 1)}
+                    />
                 </div>
 
                 {filteredArticles.length > 0 ? (
@@ -2027,6 +1960,7 @@ const Dashboard: React.FC = () => {
                                     onRename={(newTitle) => handleRenameArticle(activity.id, newTitle)}
                                     onUpdateSettings={handleUpdateArticleSettings}
                                     onClaim={handleClaimArticle}
+                                    profiles={profiles}
                                     visibleSettingFields={isAdmin
                                       ? ['status', 'visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage']
                                       : ['status', 'accessRole', 'visibleToEmailsCsv']}
@@ -2058,6 +1992,15 @@ const Dashboard: React.FC = () => {
                         </p>
                     </div>
                 )}
+                <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                  <ArticlePaginationControls
+                    pageLabel={articlesPageLabel}
+                    canGoPrevious={canGoToPreviousArticlesPage}
+                    canGoNext={canGoToNextArticlesPage}
+                    onPrevious={() => setArticlesPage(page => Math.max(1, page - 1))}
+                    onNext={() => setArticlesPage(page => page + 1)}
+                  />
+                </div>
             </div>
 
             <div className="space-y-8">

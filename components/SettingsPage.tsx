@@ -3,7 +3,6 @@ import {
   AppWindow,
   Baseline,
   BookOpen,
-  CheckCircle2,
   Copy,
   Key,
   Languages,
@@ -18,10 +17,11 @@ import {
   SlidersHorizontal,
   Users,
   Workflow,
-  XCircle,
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
+import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
+import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
 import {
   loadSystemSettings,
@@ -44,8 +44,10 @@ type SettingsPageProps = {
   section: string | null;
 };
 
+type SettingsSectionKey = SystemSettingKey | 'clients' | 'users';
+
 type SettingsTab = {
-  key: SystemSettingKey;
+  key: SettingsSectionKey;
   label: string;
   path: string;
   icon: React.ReactNode;
@@ -116,18 +118,6 @@ const FieldLabel: React.FC<{ label: string; children: React.ReactNode }> = ({ la
     <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">{label}</span>
     {children}
   </label>
-);
-
-const StatusPill: React.FC<{ active: boolean; label: string; count?: number }> = ({ active, label, count }) => (
-  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-black ${
-    active
-      ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
-      : 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
-  }`}>
-    {active ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-    <span>{label}</span>
-    {typeof count === 'number' && <span>({count})</span>}
-  </span>
 );
 
 const SettingsBreadcrumbs: React.FC<{ currentLabel: string }> = ({ currentLabel }) => (
@@ -252,7 +242,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   } = useUser();
 
   const isAdmin = currentUserRole === 'admin';
-  const selectedSection = (section || 'system') as SystemSettingKey;
+  const selectedSection = (section || 'system') as SettingsSectionKey;
   const [settings, setSettings] = useState<SystemSettingsMap>(() => mergeSettings());
   const [secretStatus, setSecretStatus] = useState<SecretStatus>(EMPTY_SECRET_STATUS);
   const [isLoading, setIsLoading] = useState(false);
@@ -266,6 +256,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     { key: 'system', label: 'النظام', path: '/settings/system', icon: <Shield size={16} /> },
     { key: 'ai', label: 'الذكاء الاصطناعي', path: '/settings/ai', icon: <Key size={16} /> },
     { key: 'n8n', label: 'n8n', path: '/settings/n8n', icon: <Workflow size={16} /> },
+    { key: 'clients', label: 'العملاء', path: '/settings/clients', icon: <Users size={16} /> },
     { key: 'users', label: 'المستخدمون', path: '/settings/users', icon: <Users size={16} /> },
     { key: 'roles', label: 'الصلاحيات', path: '/settings/roles', icon: <SlidersHorizontal size={16} /> },
   ], []);
@@ -470,26 +461,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
 
   const renderAiSettings = () => (
     <div className="space-y-6">
-      <SettingsSection title="حالة مفاتيح السيرفر">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-            <div className="mb-2 text-sm font-black text-gray-700 dark:text-gray-200">Gemini المجاني</div>
-            <StatusPill active={secretStatus.ai.gemini.configured} label={secretStatus.ai.gemini.configured ? 'مفعل' : 'غير مفعل'} count={secretStatus.ai.gemini.keyCount} />
-            <div className="mt-2 text-xs font-semibold text-gray-500">{secretStatus.ai.gemini.model || '-'}</div>
-          </div>
-          <div className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-            <div className="mb-2 text-sm font-black text-gray-700 dark:text-gray-200">Gemini Pro</div>
-            <StatusPill active={secretStatus.ai.geminiPaid.configured} label={secretStatus.ai.geminiPaid.configured ? 'مفعل' : 'غير مفعل'} count={secretStatus.ai.geminiPaid.keyCount} />
-            <div className="mt-2 text-xs font-semibold text-gray-500">{secretStatus.ai.geminiPaid.model || '-'}</div>
-          </div>
-          <div className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-            <div className="mb-2 text-sm font-black text-gray-700 dark:text-gray-200">OpenAI</div>
-            <StatusPill active={secretStatus.ai.openAi.configured} label={secretStatus.ai.openAi.configured ? 'مفعل' : 'غير مفعل'} count={secretStatus.ai.openAi.keyCount} />
-            <div className="mt-2 text-xs font-semibold text-gray-500">{secretStatus.ai.openAi.model || '-'}</div>
-          </div>
-        </div>
-      </SettingsSection>
-
       <SettingsSection title="إعدادات الذكاء الاصطناعي">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <ToggleField label="Gemini المجاني" checked={Boolean(settings.ai.geminiFreeEnabled)} onChange={value => updateSetting('ai', 'geminiFreeEnabled', value)} />
@@ -538,6 +509,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       <SettingsSection title="قوالب التحرير والتحليل">
         <EngineeringPromptsSettings />
       </SettingsSection>
+
+      <SettingsSection title="الأوامر الافتراضية للتحليل الخارجي">
+        <ExternalAnalysisDefaultCommandsSettings />
+      </SettingsSection>
     </div>
   );
 
@@ -545,14 +520,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     <div className="space-y-6">
       <SettingsSection title="n8n">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-            <div className="mb-2 text-sm font-black text-gray-700 dark:text-gray-200">N8N_INGEST_TOKEN</div>
-            <StatusPill active={secretStatus.n8n.tokenConfigured} label={secretStatus.n8n.tokenConfigured ? 'مفعل' : 'غير مفعل'} />
-          </div>
-          <div className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-            <div className="mb-2 text-sm font-black text-gray-700 dark:text-gray-200">SUPABASE_SERVICE_ROLE_KEY</div>
-            <StatusPill active={secretStatus.n8n.serviceRoleConfigured} label={secretStatus.n8n.serviceRoleConfigured ? 'مفعل' : 'غير مفعل'} />
-          </div>
           <div className="md:col-span-2">
             <FieldLabel label="رابط API">
               <div className="flex gap-2">
@@ -662,6 +629,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     </SettingsSection>
   );
 
+  const renderClientSettings = () => (
+    <SettingsSection title="إعدادات العملاء">
+      <ClientGoalSettings />
+    </SettingsSection>
+  );
+
   const renderUsersSettings = () => (
     <div className="space-y-6">
       {renderPersonalPreferences()}
@@ -689,12 +662,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   );
 
   const renderSelectedSection = () => {
-    if (!isAdmin && selectedSection !== 'users') {
+    if (!isAdmin && selectedSection !== 'users' && selectedSection !== 'clients') {
       return renderPersonalPreferences();
     }
 
     if (selectedSection === 'ai') return renderAiSettings();
     if (selectedSection === 'n8n') return renderN8nSettings();
+    if (selectedSection === 'clients') return renderClientSettings();
     if (selectedSection === 'roles') return renderRoleSettings();
     if (selectedSection === 'users') return renderUsersSettings();
     return renderSystemSettings();
@@ -727,7 +701,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
                   className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-200"
                 >
                   <Shield size={16} />
-                  <span>الأدمن</span>
+                  <span>مركز المتابعة</span>
                 </button>
                 <button
                   type="button"

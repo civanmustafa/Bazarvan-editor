@@ -292,7 +292,7 @@ const ExternalAnalysisReportsTable: React.FC<{
                       type="button"
                       onClick={() => navigateToAppPath(buildAdminArticlePath(job.article_id))}
                       className="inline-flex max-w-full items-start gap-1.5 text-start font-black text-gray-800 hover:text-[#8a6f1d] dark:text-gray-100 dark:hover:text-[#f2d675]"
-                      title="فتح المقالة في لوحة الأدمن"
+                      title="فتح المقالة في مركز المتابعة"
                     >
                       <span className="break-words">{articleTitle}</span>
                       <ExternalLink size={12} className="mt-1 shrink-0" />

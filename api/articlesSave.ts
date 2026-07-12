@@ -97,7 +97,22 @@ const normalizeStats = (snapshot: ArticleStorageSnapshot) => {
       ? plainText.trim().split(/\s+/).filter(Boolean).length
       : 0;
 
-  return { wordCount };
+  const compactNumber = (value: unknown): number => (
+    typeof value === 'number' && Number.isFinite(value) ? value : 0
+  );
+
+  return {
+    wordCount,
+    keywordViolations: compactNumber(snapshot.analysisSummary?.keywordViolations),
+    violatingCriteriaCount: compactNumber(
+      snapshot.analysisSummary?.structureViolations
+        ?? snapshot.analysisSummary?.structureStats?.violatingCriteriaCount,
+    ),
+    totalDuplicates: compactNumber(
+      snapshot.analysisSummary?.totalDuplicates
+        ?? snapshot.analysisSummary?.duplicateStats?.totalDuplicates,
+    ),
+  };
 };
 
 const authenticateUser = async (supabase: SupabaseAdmin, req: any) => {

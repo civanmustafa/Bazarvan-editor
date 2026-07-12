@@ -21,7 +21,7 @@ export type AdminRouteSection =
   | 'activity';
 
 export const APP_NAVIGATION_EVENT = 'bazarvan:navigation';
-const SETTINGS_ROUTE_SECTIONS = new Set(['system', 'ai', 'n8n', 'users', 'roles']);
+const SETTINGS_ROUTE_SECTIONS = new Set(['system', 'ai', 'n8n', 'clients', 'users', 'roles']);
 
 const cleanPath = (path: string): string => {
   const normalized = path.split('?')[0].split('#')[0].replace(/\/{2,}/g, '/');

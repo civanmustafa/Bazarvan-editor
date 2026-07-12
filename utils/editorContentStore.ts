@@ -71,6 +71,9 @@ export type ArticleStorageSnapshot = {
   articleLanguage: 'ar' | 'en';
   analysisSummary?: {
     wordCount: number;
+    keywordViolations?: number;
+    structureViolations?: number;
+    totalDuplicates?: number;
     structureStats?: StructureStats;
     duplicateStats?: DuplicateStats;
   };

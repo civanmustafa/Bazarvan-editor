@@ -668,12 +668,20 @@ const toRemoteAppActivityEvent = (row: AppActivityEventRow): RemoteAppActivityEv
 });
 
 const buildStatsFromSnapshot = (snapshot: ArticleStorageSnapshot): ArticleStats => {
+  const summary = snapshot.analysisSummary;
   return {
     ...DEFAULT_STATS,
-    wordCount: snapshot.analysisSummary?.wordCount ?? (
+    wordCount: summary?.wordCount ?? (
       snapshot.plainText.trim()
         ? snapshot.plainText.trim().split(/\s+/).filter(Boolean).length
         : 0
+    ),
+    keywordViolations: toNumber(summary?.keywordViolations),
+    violatingCriteriaCount: toNumber(
+      summary?.structureViolations ?? summary?.structureStats?.violatingCriteriaCount,
+    ),
+    totalDuplicates: toNumber(
+      summary?.totalDuplicates ?? summary?.duplicateStats?.totalDuplicates,
     ),
   };
 };
@@ -846,7 +854,7 @@ export const listRemoteArticles = async (): Promise<RemoteArticleActivity[]> => 
 
     if (error) throw error;
 
-    const articles = ((data || []) as ArticleRow[]).map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
+    const articles = ((data || []) as unknown as ArticleRow[]).map(row => toRemoteArticleActivity(row, { lightweightMetadata: true }));
     void writeCachedRemoteArticlePage('all', articles, articles.length, false);
     return articles;
   } catch (error) {
@@ -1119,12 +1127,18 @@ export const saveRemoteArticleSnapshot = async (
     analysis: null,
     stats: {
       wordCount: stats.wordCount,
+      keywordViolations: stats.keywordViolations,
+      violatingCriteriaCount: stats.violatingCriteriaCount,
+      totalDuplicates: stats.totalDuplicates,
     },
     last_saved_at: savedAt,
     metadata: {
       attachments: snapshot.attachments || null,
       analysisSummary: {
         wordCount: stats.wordCount,
+        keywordViolations: stats.keywordViolations,
+        structureViolations: stats.violatingCriteriaCount,
+        totalDuplicates: stats.totalDuplicates,
       },
       n8nSettings: {
         visibility: 'private',

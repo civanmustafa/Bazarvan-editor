@@ -42,6 +42,7 @@ import {
 } from '../utils/supabaseArticles';
 import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
 import { recordAppActivity } from '../utils/appActivity';
+import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -322,7 +323,7 @@ const isValidEditorNode = (value: unknown): boolean => {
     if (value.type === 'heading') {
         const level = value.attrs?.level;
         const normalizedLevel = typeof level === 'string' ? Number(level) : level;
-        if (normalizedLevel !== undefined && (![1, 2, 3, 4] as const).includes(normalizedLevel)) return false;
+        if (normalizedLevel !== undefined && ![1, 2, 3, 4].includes(Number(normalizedLevel))) return false;
     }
 
     if (value.type === 'hardBreak' || value.type === 'horizontalRule') {
@@ -608,6 +609,19 @@ const createArticleSaveSignature = (input: {
     articleLanguage: input.articleLanguage,
     attachments: input.attachments || null,
 }));
+
+const countKeywordViolations = (analysis: FullAnalysis): number => {
+    const keywordAnalysis = analysis.keywordAnalysis;
+    let count = keywordAnalysis.primary.status === 'fail' ? 1 : 0;
+    count += keywordAnalysis.primary.checks.filter(check => !check.isMet).length;
+    if (keywordAnalysis.secondariesDistribution.status === 'fail') count += 1;
+    keywordAnalysis.secondaries.forEach(secondary => {
+        if (secondary.status === 'fail') count += 1;
+        count += secondary.checks.filter(check => !check.isMet).length;
+    });
+    if (keywordAnalysis.company.status === 'fail') count += 1;
+    return count;
+};
 
 type SaveDraftReason = 'manual' | 'auto' | 'lifecycle';
 
@@ -1411,6 +1425,17 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setEditorState(contentJSON);
             setText(currentText);
             const currentWordCount = countWordsInText(currentText);
+            let totalDuplicates = analysisResults.duplicateStats.totalDuplicates;
+            try {
+                totalDuplicates = runDuplicateAnalysis(
+                    currentText,
+                    keywords,
+                    currentWordCount,
+                    articleLanguage,
+                ).duplicateStats.totalDuplicates;
+            } catch (duplicateError) {
+                console.warn('Could not refresh the compact duplicate count before saving.', duplicateError);
+            }
             const newTitle = title.trim();
             const finalTitleToSave = newTitle || articleKey || '(untitled)';
             const attachments = readCurrentArticleAttachments();
@@ -1457,6 +1482,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 articleLanguage,
                 analysisSummary: {
                     wordCount: currentWordCount,
+                    keywordViolations: countKeywordViolations(analysisResults),
+                    structureViolations: analysisResults.structureStats.violatingCriteriaCount,
+                    totalDuplicates,
                 },
                 attachments,
                 savedAt: new Date().toISOString(),
@@ -1517,7 +1545,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 setSaveStatus('error');
             }
         }
-    }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, articleLanguage, goalContext, clearEditorSnapshotTimer, clearDraftPersistTimer]);
+    }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, articleLanguage, goalContext, analysisResults, clearEditorSnapshotTimer, clearDraftPersistTimer]);
 
     const handleSaveDraft = useCallback(async (options: SaveDraftOptions = {}) => {
         const reason = options.reason || 'manual';

@@ -192,7 +192,7 @@ const getN8nSettings = (article?: Partial<RemoteArticleActivity> | null) => {
 
 const getArticleSearchText = (article: RemoteArticleActivity, ownerLabel: string): string => {
   const keywords = article.keywords || { primary: '', secondaries: [], company: '', lsi: [] };
-  const goalContext = article.goalContext || {};
+  const goalContext: Record<string, any> = isRecord(article.goalContext) ? article.goalContext : {};
   return [
     article.title,
     keywords.primary,
@@ -361,7 +361,7 @@ const ArticleRow: React.FC<{
             type="button"
             onClick={() => copyAbsoluteLink(adminPath)}
             className="rounded-md border border-gray-200 p-2 text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#8a6f1d] dark:border-[#3C3C3C] dark:text-gray-300"
-            title="نسخ رابط الأدمن"
+            title="نسخ رابط المتابعة"
           >
             <Copy size={15} />
           </button>
@@ -441,7 +441,7 @@ const ArticleDetailPage: React.FC<{
     <div className="space-y-6">
       <div className="flex flex-col gap-3 border-b border-gray-200 pb-5 dark:border-[#3C3C3C] md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
-          <div className="text-xs font-black text-[#d4af37]">لوحة التحكم / المقالات / {article.id}</div>
+          <div className="text-xs font-black text-[#d4af37]">مركز المتابعة / المقالات / {article.id}</div>
           <h1 className="mt-1 text-2xl font-black text-gray-900 dark:text-gray-100">{article.title || t.untitled}</h1>
           <p className="mt-1 text-sm font-semibold text-gray-500 dark:text-gray-400">{ownerLabel}</p>
         </div>
@@ -696,6 +696,11 @@ const buildApiUsageRequests = (events: RemoteAppActivityEvent[]): ApiUsageReques
       : lastFailedAttempt?.model || '-';
     const source = typeof metadata.source === 'string' && metadata.source.trim() ? metadata.source.trim() : 'unknown';
     const rawOutcome = typeof metadata.outcome === 'string' ? metadata.outcome : 'success';
+    const outcome: ApiUsageRequest['outcome'] = rawOutcome === 'failed'
+      ? 'failed'
+      : rawOutcome === 'cancelled'
+        ? 'cancelled'
+        : 'success';
 
     return {
       id: event.id,
@@ -703,7 +708,7 @@ const buildApiUsageRequests = (events: RemoteAppActivityEvent[]): ApiUsageReques
       provider,
       model,
       keySuffixLabel: formatApiKeySuffixLabel(metadata.keySuffix),
-      outcome: rawOutcome === 'failed' ? 'failed' : rawOutcome === 'cancelled' ? 'cancelled' : 'success',
+      outcome,
       userId: event.userId || null,
       source,
       createdAt: event.createdAt,
@@ -711,6 +716,79 @@ const buildApiUsageRequests = (events: RemoteAppActivityEvent[]): ApiUsageReques
     };
   }).sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
 );
+
+const ServerSecretsStatusPanel: React.FC<{
+  secretStatus: SecretStatus;
+  isLoading: boolean;
+  onRefresh: () => void;
+}> = ({ secretStatus, isLoading, onRefresh }) => {
+  const cards = [
+    {
+      title: 'Gemini المجاني',
+      configured: secretStatus.ai.gemini.configured,
+      count: secretStatus.ai.gemini.keyCount,
+      detail: secretStatus.ai.gemini.model || '-',
+    },
+    {
+      title: 'Gemini Pro',
+      configured: secretStatus.ai.geminiPaid.configured,
+      count: secretStatus.ai.geminiPaid.keyCount,
+      detail: secretStatus.ai.geminiPaid.model || '-',
+    },
+    {
+      title: 'OpenAI',
+      configured: secretStatus.ai.openAi.configured,
+      count: secretStatus.ai.openAi.keyCount,
+      detail: secretStatus.ai.openAi.model || '-',
+    },
+    {
+      title: 'N8N_INGEST_TOKEN',
+      configured: secretStatus.n8n.tokenConfigured,
+      detail: secretStatus.n8n.ingestUrl || '/api/n8n/articles',
+    },
+    {
+      title: 'SUPABASE_SERVICE_ROLE_KEY',
+      configured: secretStatus.n8n.serviceRoleConfigured,
+      detail: secretStatus.n8n.publicEditorUrl || '-',
+    },
+  ];
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SectionTitle>مفاتيح API المحفوظة على السيرفر فقط</SectionTitle>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={isLoading}
+          className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:cursor-wait disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-200"
+        >
+          <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+          <span>{isLoading ? 'جار التحديث...' : 'تحديث الحالة'}</span>
+        </button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {cards.map(card => (
+          <div key={card.title} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+            <div className="mb-2 text-sm font-black text-gray-700 dark:text-gray-200">{card.title}</div>
+            <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-black ${
+              card.configured
+                ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
+                : 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
+            }`}>
+              {card.configured ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+              <span>{card.configured ? 'مفعل' : 'غير مفعل'}</span>
+              {typeof card.count === 'number' && <span>({card.count})</span>}
+            </div>
+            <div className="mt-2 truncate text-xs font-semibold text-gray-500" dir="ltr" title={card.detail}>
+              {card.detail}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
 
 const ReportsPage: React.FC<{
   articles: RemoteArticleActivity[];
@@ -720,6 +798,9 @@ const ReportsPage: React.FC<{
   externalAnalysisJobs: ExternalAnalysisReportJob[];
   isExternalAnalysisLoading: boolean;
   externalAnalysisError: string;
+  secretStatus: SecretStatus;
+  isSecretStatusLoading: boolean;
+  onRefreshSecretStatus: () => void;
   date: string;
   t: typeof translations.ar;
 }> = ({
@@ -730,6 +811,9 @@ const ReportsPage: React.FC<{
   externalAnalysisJobs,
   isExternalAnalysisLoading,
   externalAnalysisError,
+  secretStatus,
+  isSecretStatusLoading,
+  onRefreshSecretStatus,
   date,
   t,
 }) => {
@@ -762,7 +846,7 @@ const ReportsPage: React.FC<{
     <div className="space-y-6">
       <div className="flex flex-col gap-3 border-b border-gray-200 pb-5 dark:border-[#3C3C3C] md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="text-xs font-black text-[#d4af37]">لوحة التحكم / التقارير / {date}</div>
+          <div className="text-xs font-black text-[#d4af37]">مركز المتابعة / التقارير / {date}</div>
           <h1 className="mt-1 text-2xl font-black text-gray-900 dark:text-gray-100">تقرير يومي</h1>
         </div>
         <input
@@ -788,6 +872,12 @@ const ReportsPage: React.FC<{
         <AdminStat icon={<Sparkles size={18} />} label="Gemini المجاني" value={freeGeminiApiCalls} />
         <AdminStat icon={<BrainCircuit size={18} />} label="OpenAI / Pro" value={paidGeminiApiCalls + openAiApiCalls} />
       </div>
+
+      <ServerSecretsStatusPanel
+        secretStatus={secretStatus}
+        isLoading={isSecretStatusLoading}
+        onRefresh={onRefreshSecretStatus}
+      />
 
       <section className="space-y-4">
         <SectionTitle>تقارير التحليل الخارجي</SectionTitle>
@@ -906,7 +996,19 @@ const LogsTable: React.FC<{ logs: RemoteN8nIngestLog[]; t: typeof translations.a
         {logs.length > 0 ? logs.map(log => (
           <tr key={log.id} className="border-b border-gray-100 dark:border-[#3C3C3C]">
             <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{log.status}</td>
-            <td className="px-3 py-3 font-mono text-xs text-gray-500">{log.articleId || '-'}</td>
+            <td className="px-3 py-3 font-mono text-xs text-gray-500">
+              {log.articleId ? (
+                <button
+                  type="button"
+                  onClick={() => navigateToAppPath(buildAdminArticlePath(log.articleId!))}
+                  className="inline-flex max-w-[220px] items-center gap-1 text-[#8a6f1d] hover:underline dark:text-[#f2d675]"
+                  title="فتح مقالة طلب n8n"
+                >
+                  <ExternalLink size={12} className="shrink-0" />
+                  <span className="truncate">{log.articleId}</span>
+                </button>
+              ) : '-'}
+            </td>
             <td className="px-3 py-3 text-gray-500">{log.externalId || '-'}</td>
             <td className="px-3 py-3 text-gray-500">{log.workflowId || '-'}</td>
             <td className="px-3 py-3 text-gray-500">{formatIstanbulDateTime(log.createdAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
@@ -1215,7 +1317,7 @@ const SessionDetailPage: React.FC<{
   return (
     <div className="space-y-6">
       <div className="border-b border-gray-200 pb-5 dark:border-[#3C3C3C]">
-        <div className="text-xs font-black text-[#d4af37]">لوحة التحكم / الجلسات / {session.id}</div>
+        <div className="text-xs font-black text-[#d4af37]">مركز المتابعة / الجلسات / {session.id}</div>
         <h1 className="mt-1 text-2xl font-black text-gray-900 dark:text-gray-100">{getProfileLabel(profile)}</h1>
         <p className="mt-1 font-mono text-xs font-semibold text-gray-500">{session.id}</p>
       </div>
@@ -1622,7 +1724,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       if (shouldLoadExternalAnalysis) setExternalAnalysisError(externalReportLoadError);
     } catch (loadError) {
       console.error('Failed to load admin data:', loadError);
-      setError('تعذر تحميل بيانات الأدمن من Supabase.');
+      setError('تعذر تحميل بيانات مركز المتابعة من Supabase.');
     } finally {
       setIsLoading(false);
       setIsExternalAnalysisLoading(false);
@@ -1639,9 +1741,14 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   }, [refreshData]);
 
   useEffect(() => {
-    if (section !== 'settings') return;
+    if (section !== 'reports' && section !== 'dailyReport') return;
     void refreshSecretStatus();
   }, [refreshSecretStatus, section]);
+
+  useEffect(() => {
+    if (section !== 'settings') return;
+    navigateToAppPath('/settings', { replace: true });
+  }, [section]);
 
   useEffect(() => {
     if (!currentUser || !isAdmin || section !== 'articleDetail' || !id) return;
@@ -1861,14 +1968,13 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     { label: 'نظرة عامة', icon: <BarChart3 size={16} />, path: '/admin', active: section === 'overview' },
     { label: 'المستخدمون', icon: <Users size={16} />, path: '/admin/users', active: section === 'users' || section === 'userDetail' },
     { label: 'السلة', icon: <Trash2 size={16} />, path: '/admin/trash', active: section === 'trash' },
-    { label: 'الإعدادات', icon: <Settings size={16} />, path: '/admin/settings', active: section === 'settings' },
     { label: 'التقارير', icon: <Calendar size={16} />, path: buildDailyReportPath(selectedReportDate), active: section === 'reports' || section === 'dailyReport' },
     { label: 'الجلسات والنشاط', icon: <Monitor size={16} />, path: '/admin/sessions', active: section === 'sessions' || section === 'activity' || section === 'sessionDetail' },
   ];
 
   const breadcrumbs = useMemo<BreadcrumbItem[]>(() => {
-    const items: BreadcrumbItem[] = [{ label: 'لوحة الأدمن', path: '/admin' }];
-    if (section === 'overview') return [{ label: 'لوحة الأدمن' }];
+    const items: BreadcrumbItem[] = [{ label: 'مركز المتابعة', path: '/admin' }];
+    if (section === 'overview') return [{ label: 'مركز المتابعة' }];
     if (section === 'articles') return [...items, { label: 'المقالات' }];
     if (section === 'articleDetail') return [
       ...items,
@@ -1919,24 +2025,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   const renderMain = () => {
     if (section === 'settings') {
       return (
-        <AdminSettingsPage
-          secretStatus={secretStatus}
-          isSecretStatusLoading={isSecretStatusLoading}
-          onRefreshSecretStatus={refreshSecretStatus}
-          t={t}
-          highlightStyle={highlightStyle}
-          handleHighlightStyleChange={handleHighlightStyleChange}
-          chatGptOpenMode={chatGptOpenMode}
-          handleChatGptOpenModeChange={handleChatGptOpenModeChange}
-          keywordViewMode={keywordViewMode}
-          handleKeywordViewModeChange={handleKeywordViewModeChange}
-          structureViewMode={structureViewMode}
-          handleStructureViewModeChange={handleStructureViewModeChange}
-          preferredLanguage={preferredLanguage}
-          handlePreferredLanguageChange={handlePreferredLanguageChange}
-          uiLanguage={uiLanguage}
-          handleUiLanguageChange={handleUiLanguageChange}
-        />
+        <EmptyState icon={<Settings size={24} />} title="جار فتح الإعدادات الرئيسية..." />
       );
     }
 
@@ -2103,7 +2192,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       return (
         <div className="space-y-6">
           <div className="border-b border-gray-200 pb-5 dark:border-[#3C3C3C]">
-            <div className="text-xs font-black text-[#d4af37]">لوحة التحكم / المستخدمون / {currentProfile?.id}</div>
+            <div className="text-xs font-black text-[#d4af37]">مركز المتابعة / المستخدمون / {currentProfile?.id}</div>
             <h1 className="mt-1 text-2xl font-black text-gray-900 dark:text-gray-100">{getProfileLabel(currentProfile)}</h1>
             <p className="mt-1 text-sm font-semibold text-gray-500 dark:text-gray-400">{currentProfile?.email || '-'}</p>
           </div>
@@ -2170,6 +2259,9 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
           externalAnalysisJobs={externalAnalysisJobs}
           isExternalAnalysisLoading={isExternalAnalysisLoading}
           externalAnalysisError={externalAnalysisError}
+          secretStatus={secretStatus}
+          isSecretStatusLoading={isSecretStatusLoading}
+          onRefreshSecretStatus={refreshSecretStatus}
           date={selectedReportDate}
           t={t}
         />
@@ -2216,8 +2308,8 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
         <header className="mb-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <div className="text-xs font-black text-[#d4af37]">Bazarvan Admin</div>
-              <h1 className="mt-1 text-3xl font-black text-gray-900 dark:text-gray-100">لوحة الأدمن</h1>
+              <div className="text-xs font-black text-[#d4af37]">Bazarvan Monitor</div>
+              <h1 className="mt-1 text-3xl font-black text-gray-900 dark:text-gray-100">مركز المتابعة</h1>
               <p className="mt-1 text-sm font-semibold text-gray-500 dark:text-gray-400">{currentUser}</p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -2231,7 +2323,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
               </button>
               <button
                 type="button"
-                onClick={() => navigateToAppPath('/admin/settings')}
+                onClick={() => navigateToAppPath('/settings')}
                 className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-200"
               >
                 <Settings size={16} />
@@ -2266,7 +2358,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
               type="search"
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder="بحث عام داخل الأدمن: مقالة، مستخدم، شركة، n8n، جلسة، نشاط..."
+              placeholder="بحث عام داخل مركز المتابعة: مقالة، مستخدم، شركة، n8n، جلسة، نشاط..."
               className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-gray-700 outline-none placeholder:text-gray-400 dark:text-gray-100"
             />
             {(query || hasActiveArticleFilters(articleFilters)) && (
