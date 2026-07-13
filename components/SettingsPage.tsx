@@ -32,13 +32,18 @@ import {
 } from '../utils/systemSettings';
 import {
   buildGeminiFreeModelOptions,
+  GEMINI_FREE_MODEL_CHANGED_EVENT,
+  GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT,
   getSelectedGeminiFreeModel,
   isGeminiFreeModelFallbackEnabled,
   normalizeGeminiFreeModel,
   setGeminiFreeModelFallbackEnabled,
   setSelectedGeminiFreeModel,
 } from '../utils/geminiModelPreference';
-import { EXTERNAL_AUTOMATIC_COMMAND_IDS } from '../constants/externalAnalysisCommands';
+import {
+  getDefaultSystemSettings,
+  normalizeSystemSettingsMap,
+} from '../constants/settingsRegistry';
 
 type SettingsPageProps = {
   section: string | null;
@@ -51,45 +56,6 @@ type SettingsTab = {
   label: string;
   path: string;
   icon: React.ReactNode;
-};
-
-const DEFAULT_SETTINGS: SystemSettingsMap = {
-  ai: {
-    geminiFreeEnabled: true,
-    geminiProEnabled: true,
-    openAiEnabled: false,
-    defaultProvider: 'gemini',
-    defaultGeminiModel: 'gemini-3.5-flash',
-    geminiFreeModelFallbackEnabled: true,
-    externalAnalysisRetryMinutes: 30,
-    externalAnalysisDefaultCommandIds: [...EXTERNAL_AUTOMATIC_COMMAND_IDS],
-    externalAnalysisCommandExecutionMode: 'independent_batch',
-    defaultGeminiPaidModel: 'gemini-2.5-pro',
-    defaultOpenAiModel: 'gpt-4.1-mini',
-  },
-  n8n: {
-    enabled: true,
-    defaultVisibility: 'public',
-    defaultAccessRole: 'editor',
-    autoRunAssignedAutomation: true,
-  },
-  articles: {
-    defaultStatus: 'draft',
-    defaultVisibility: 'public',
-    defaultLanguage: 'ar',
-    trashRetentionDays: 30,
-  },
-  roles: {
-    adminCanSeeAll: true,
-    usersCanClaimPublicArticles: true,
-    usersCanSeeOnlyAssignedAfterClaim: true,
-  },
-  system: {
-    timezone: 'Europe/Istanbul',
-    publicEditorUrl: '',
-    dailyReportEnabled: true,
-    activityTrackingEnabled: true,
-  },
 };
 
 const EMPTY_SECRET_STATUS: SecretStatus = {
@@ -213,13 +179,14 @@ const copyText = async (value: string) => {
   await navigator.clipboard?.writeText(value);
 };
 
-const mergeSettings = (settings?: Partial<SystemSettingsMap>): SystemSettingsMap => ({
-  ai: { ...DEFAULT_SETTINGS.ai, ...(settings?.ai || {}) },
-  n8n: { ...DEFAULT_SETTINGS.n8n, ...(settings?.n8n || {}) },
-  articles: { ...DEFAULT_SETTINGS.articles, ...(settings?.articles || {}) },
-  roles: { ...DEFAULT_SETTINGS.roles, ...(settings?.roles || {}) },
-  system: { ...DEFAULT_SETTINGS.system, ...(settings?.system || {}) },
-});
+const mergeSettings = (
+  settings?: Partial<SystemSettingsMap>,
+  allowedGeminiModels?: string[],
+): SystemSettingsMap => (
+  settings
+    ? normalizeSystemSettingsMap(settings, { allowedGeminiModels })
+    : getDefaultSystemSettings()
+);
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const {
@@ -262,8 +229,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   ], []);
   const selectedTabLabel = tabs.find(item => item.key === selectedSection)?.label || 'النظام';
   const geminiFreeModelOptions = useMemo(() => (
-    buildGeminiFreeModelOptions()
-  ), []);
+    buildGeminiFreeModelOptions(secretStatus.ai.gemini.allowedModels || [])
+  ), [secretStatus.ai.gemini.allowedModels]);
   const geminiFreeModelValues = useMemo(() => (
     geminiFreeModelOptions.map(option => option.value)
   ), [geminiFreeModelOptions]);
@@ -281,11 +248,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     setError('');
     try {
       const response = await loadSystemSettings();
-      const mergedSettings = mergeSettings(response.settings);
+      const mergedSettings = mergeSettings(
+        response.settings,
+        response.secretStatus?.ai?.gemini?.allowedModels,
+      );
       setSettings(mergedSettings);
-      if (typeof mergedSettings.ai.geminiFreeModelFallbackEnabled === 'boolean') {
-        setIsGeminiModelFallbackEnabled(setGeminiFreeModelFallbackEnabled(Boolean(mergedSettings.ai.geminiFreeModelFallbackEnabled)));
-      }
       setSecretStatus(response.secretStatus || EMPTY_SECRET_STATUS);
     } catch (loadError) {
       console.error('Failed to load system settings:', loadError);
@@ -306,6 +273,24 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     setSelectedGeminiFreeModel(normalizedModel, geminiFreeModelValues);
   }, [geminiFreeModelValues, selectedGeminiFreeModel]);
 
+  useEffect(() => {
+    const syncModelPreference = () => {
+      setSelectedGeminiFreeModelState(normalizeGeminiFreeModel(
+        getSelectedGeminiFreeModel(),
+        geminiFreeModelValues,
+      ));
+    };
+    const syncFallbackPreference = () => {
+      setIsGeminiModelFallbackEnabled(isGeminiFreeModelFallbackEnabled());
+    };
+    window.addEventListener(GEMINI_FREE_MODEL_CHANGED_EVENT, syncModelPreference);
+    window.addEventListener(GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT, syncFallbackPreference);
+    return () => {
+      window.removeEventListener(GEMINI_FREE_MODEL_CHANGED_EVENT, syncModelPreference);
+      window.removeEventListener(GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT, syncFallbackPreference);
+    };
+  }, [geminiFreeModelValues]);
+
   const updateSetting = <K extends SystemSettingKey>(key: K, field: string, value: unknown) => {
     setSettings(prev => ({
       ...prev,
@@ -322,19 +307,18 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     setSelectedGeminiFreeModelState(selectedModel);
     if (shouldShowMessage) {
       setError('');
-      setSavedMessage('تم حفظ موديل Gemini الافتراضي لهذا المتصفح.');
+      setSavedMessage('تم حفظ موديل Gemini الافتراضي لحسابك.');
     }
     return selectedModel;
   };
 
   const handleGeminiModelFallbackPreferenceChange = (enabled: boolean, shouldShowMessage = true) => {
     setIsGeminiModelFallbackEnabled(setGeminiFreeModelFallbackEnabled(enabled));
-    updateSetting('ai', 'geminiFreeModelFallbackEnabled', enabled);
     if (shouldShowMessage) {
       setError('');
       setSavedMessage(enabled
-        ? 'تم تفعيل التبديل التلقائي بين نماذج Gemini المجانية لهذا المتصفح.'
-        : 'تم إيقاف التبديل التلقائي بين نماذج Gemini المجانية لهذا المتصفح.');
+        ? 'تم تفعيل التبديل التلقائي بين نماذج Gemini المجانية لحسابك.'
+        : 'تم إيقاف التبديل التلقائي بين نماذج Gemini المجانية لحسابك.');
     }
   };
 
@@ -345,7 +329,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     setSavedMessage('');
     try {
       const response = await saveSystemSettings(settings);
-      setSettings(mergeSettings(response.settings));
+      setSettings(mergeSettings(
+        response.settings,
+        response.secretStatus?.ai?.gemini?.allowedModels,
+      ));
       setSecretStatus(response.secretStatus || EMPTY_SECRET_STATUS);
       setSavedMessage('تم حفظ الإعدادات.');
     } catch (saveError) {
@@ -464,7 +451,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       <SettingsSection title="إعدادات الذكاء الاصطناعي">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <ToggleField label="Gemini المجاني" checked={Boolean(settings.ai.geminiFreeEnabled)} onChange={value => updateSetting('ai', 'geminiFreeEnabled', value)} />
-          <ToggleField label="التبديل بين نماذج جيميني المجانية" checked={Boolean(settings.ai.geminiFreeModelFallbackEnabled)} onChange={value => handleGeminiModelFallbackPreferenceChange(value, false)} />
+          <ToggleField label="التبديل بين نماذج جيميني المجانية للعامل الخارجي" checked={Boolean(settings.ai.geminiFreeModelFallbackEnabled)} onChange={value => updateSetting('ai', 'geminiFreeModelFallbackEnabled', value)} />
           <ToggleField label="Gemini Pro" checked={Boolean(settings.ai.geminiProEnabled)} onChange={value => updateSetting('ai', 'geminiProEnabled', value)} />
           <ToggleField label="OpenAI" checked={Boolean(settings.ai.openAiEnabled)} onChange={value => updateSetting('ai', 'openAiEnabled', value)} />
           <FieldLabel label="المزود الافتراضي">
@@ -478,13 +465,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
               ]}
             />
           </FieldLabel>
-          <FieldLabel label="موديل Gemini الافتراضي">
+          <FieldLabel label="موديل Gemini الافتراضي للتحليل الخارجي">
             <SelectInput
               value={normalizeGeminiFreeModel(String(settings.ai.defaultGeminiModel || selectedGeminiFreeModel), geminiFreeModelValues)}
-              onChange={value => {
-                updateSetting('ai', 'defaultGeminiModel', value);
-                handleGeminiFreeModelPreferenceChange(value, false);
-              }}
+              onChange={value => updateSetting('ai', 'defaultGeminiModel', value)}
               options={geminiFreeModelOptions}
             />
           </FieldLabel>

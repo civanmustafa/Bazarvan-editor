@@ -1,5 +1,9 @@
 import { GoogleGenAI } from '@google/genai';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  GEMINI_ANALYSIS_MODEL,
+  GEMINI_PAID_ANALYSIS_MODEL,
+} from '../constants/modelRegistry';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import {
   claimGeminiApiKey,
@@ -42,8 +46,8 @@ class AssignedAutomationError extends Error {
   }
 }
 
-const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash';
-const DEFAULT_GEMINI_PAID_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || 'gemini-2.5-pro';
+const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || GEMINI_ANALYSIS_MODEL;
+const DEFAULT_GEMINI_PAID_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || GEMINI_PAID_ANALYSIS_MODEL;
 
 const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)

@@ -1,8 +1,11 @@
 import { getSupabaseClient } from './supabaseClient';
+import {
+  normalizeSystemSettingsMap,
+  type SystemSettingKey,
+  type SystemSettingsMap,
+} from '../constants/settingsRegistry';
 
-export type SystemSettingKey = 'ai' | 'n8n' | 'articles' | 'roles' | 'system';
-
-export type SystemSettingsMap = Record<SystemSettingKey, Record<string, any>>;
+export type { SystemSettingKey, SystemSettingsMap } from '../constants/settingsRegistry';
 
 export type SecretStatus = {
   ai: {
@@ -69,7 +72,9 @@ const requestSystemSettings = async (
   }
 
   return {
-    settings: payload.settings,
+    settings: normalizeSystemSettingsMap(payload.settings, {
+      allowedGeminiModels: payload.secretStatus?.ai?.gemini?.allowedModels,
+    }),
     secretStatus: payload.secretStatus,
   } as SystemSettingsResponse;
 };

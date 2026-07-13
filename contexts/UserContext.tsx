@@ -10,6 +10,18 @@ import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient
 import { updateCurrentProfileLastSeen } from '../utils/supabaseArticles';
 import { APP_NAVIGATION_EVENT, getRouteView, navigateToAppPath, parseAppRoute } from '../utils/appRoutes';
 import { endAppSession, ensureAppSession, recordAppActivity, recordPathActivityIfChanged } from '../utils/appActivity';
+import { createLegacyUserPreferences, type UserPreferencesPatch } from '../constants/settingsRegistry';
+import {
+    clearLegacyGeminiModelPreferences,
+    hydrateGeminiModelPreferences,
+    readLegacyGeminiModelPreferences,
+    resetGeminiModelPreferences,
+} from '../utils/geminiModelPreference';
+import {
+    hydrateCurrentUserPreferences,
+    resetUserPreferencesCache,
+    saveCurrentUserPreferencesPatch,
+} from '../utils/userPreferences';
 
 /*
  * UserContext is the owner of session-level app state:
@@ -17,7 +29,7 @@ import { endAppSession, ensureAppSession, recordAppActivity, recordPathActivityI
  * server-only AI API mode, saved client goal contexts, and editable engineering prompts.
  *
  * Edit here when adding a user preference or anything that should survive per user.
- * Persistent writes are delegated to hooks/useUserActivity.ts.
+ * Durable preferences use Supabase; hooks/useUserActivity.ts remains a local startup cache.
  */
 type ApiKeys = { gemini: string[]; geminiPaid: string[]; chatgpt: string[] };
 type StoredApiKeys = { gemini?: string | string[]; geminiPaid?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
@@ -235,6 +247,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [apiKeys, setApiKeys] = useState<ApiKeys>(() => normalizeApiKeys());
     const [clientGoalContexts, setClientGoalContexts] = useState<ClientGoalContexts>({});
     const [engineeringPrompts, setEngineeringPrompts] = useState<EngineeringPrompts>(() => normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
+    const [preferencesReadyUserId, setPreferencesReadyUserId] = useState<string | null>(null);
     
     const [isIdle, setIsIdle] = useState(false);
     const idleTimerRef = useRef<number | null>(null);
@@ -250,6 +263,9 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         options: { recordLoginActivity?: boolean } = {},
     ): Promise<string | null> => {
         if (!user) {
+            setPreferencesReadyUserId(null);
+            resetUserPreferencesCache();
+            resetGeminiModelPreferences();
             setCurrentUser(null);
             setCurrentUserId(null);
             setCurrentUserRole('user');
@@ -429,7 +445,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         batchTotal: toOptionalNumber(detail.batchTotal),
                         ruleTitle: toOptionalString(detail.ruleTitle),
                         rules: Array.isArray(detail.rules)
-                            ? detail.rules.filter((item): item is string => typeof item === 'string' && item.trim()).map(item => item.trim()).slice(0, 12)
+                            ? detail.rules.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map(item => item.trim()).slice(0, 12)
                             : undefined,
                         outcome: toOptionalString(detail.outcome),
                         status: toOptionalNumber(detail.status),
@@ -480,12 +496,19 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (currentUser) {
             saveUserPreference(currentUser, { preferredTheme: theme });
         }
+        if (currentUserId && preferencesReadyUserId === currentUserId) {
+            void saveCurrentUserPreferencesPatch({
+                appearance: { theme },
+            }).catch(error => {
+                console.error('Failed to save theme preference to Supabase:', error);
+            });
+        }
         try {
             localStorage.setItem('editor-theme', theme);
         } catch (error) {
             console.error("Could not save theme to localStorage:", error);
         }
-    }, [isDarkMode, currentUser]);
+    }, [isDarkMode, currentUser, currentUserId, preferencesReadyUserId]);
 
      // Idle tracking feeds EditorContext time tracking so inactive tabs do not inflate article time.
      useEffect(() => {
@@ -634,27 +657,69 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, [currentUserId]);
 
-    // Load all saved preferences whenever a user logs in or changes.
+    // Supabase is authoritative. Existing browser values are imported once, then kept as a startup cache.
     useEffect(() => {
-        if (currentUser) {
-            const data = getActivityData();
-            const userPrefs = data[currentUser];
-            setHighlightStyle(userPrefs?.preferredHighlightStyle || 'background');
-            setChatGptOpenMode(userPrefs?.preferredChatGptOpenMode === 'tab' ? 'tab' : 'window');
-            setKeywordViewMode(userPrefs?.preferredKeywordViewMode || 'classic');
-            setStructureViewMode(userPrefs?.preferredStructureViewMode || 'grid');
-            setPreferredLanguage(userPrefs?.preferredLanguage || 'ar');
-            setUiLanguage(userPrefs?.preferredUILanguage || 'ar');
-            const serverOnlyApiKeys = normalizeApiKeys(userPrefs?.apiKeys as StoredApiKeys | undefined);
+        if (!currentUser || !currentUserId) return;
+        let cancelled = false;
+        setPreferencesReadyUserId(null);
+
+        const activity = getActivityData()[currentUser];
+        const legacyPreferences = createLegacyUserPreferences(
+            activity,
+            readLegacyGeminiModelPreferences(),
+        );
+
+        const applyPreferences = (preferences: typeof legacyPreferences) => {
+            if (cancelled) return;
+            setHighlightStyle(preferences.appearance.highlightStyle);
+            setChatGptOpenMode(preferences.editor.chatGptOpenMode);
+            setKeywordViewMode(preferences.appearance.keywordViewMode);
+            setStructureViewMode(preferences.appearance.structureViewMode);
+            setPreferredLanguage(preferences.editor.preferredLanguage);
+            setUiLanguage(preferences.editor.uiLanguage);
+            setIsDarkMode(preferences.appearance.theme === 'dark');
+            hydrateGeminiModelPreferences(preferences.ai);
+
+            const serverOnlyApiKeys = normalizeApiKeys(activity?.apiKeys as StoredApiKeys | undefined);
             setApiKeys(serverOnlyApiKeys);
-            if (userPrefs?.apiKeys) saveUserApiKeys(currentUser, serverOnlyApiKeys);
-            setClientGoalContexts(normalizeClientGoalContexts(userPrefs?.clientGoalContexts));
-            const normalizedPrompts = normalizeEngineeringPrompts(userPrefs?.engineeringPrompts);
+            if (activity?.apiKeys) saveUserApiKeys(currentUser, serverOnlyApiKeys);
+
+            const normalizedContexts = normalizeClientGoalContexts(preferences.clientGoalContexts);
+            const normalizedPrompts = normalizeEngineeringPrompts(
+                preferences.engineeringPrompts as unknown as Partial<EngineeringPrompts>,
+            );
+            setClientGoalContexts(normalizedContexts);
             setEngineeringPrompts(normalizedPrompts);
+
+            // Temporary local mirror keeps first paint and offline startup fast.
+            saveUserPreference(currentUser, {
+                preferredHighlightStyle: preferences.appearance.highlightStyle,
+                preferredKeywordViewMode: preferences.appearance.keywordViewMode,
+                preferredStructureViewMode: preferences.appearance.structureViewMode,
+                preferredChatGptOpenMode: preferences.editor.chatGptOpenMode,
+                preferredTheme: preferences.appearance.theme,
+                preferredLanguage: preferences.editor.preferredLanguage,
+                preferredUILanguage: preferences.editor.uiLanguage,
+            });
+            saveUserClientGoalContexts(currentUser, normalizedContexts);
             saveUserEngineeringPrompts(currentUser, normalizedPrompts);
-            if (userPrefs?.preferredTheme) setIsDarkMode(userPrefs.preferredTheme === 'dark');
-        }
-    }, [currentUser]);
+            setPreferencesReadyUserId(currentUserId);
+        };
+
+        void hydrateCurrentUserPreferences(currentUserId, legacyPreferences)
+            .then(result => {
+                applyPreferences(result.preferences);
+                if (result.persistedOnline) clearLegacyGeminiModelPreferences();
+            })
+            .catch(error => {
+                console.error('Failed to load user preferences from Supabase:', error);
+                applyPreferences(legacyPreferences);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentUser, currentUserId]);
 
     const handleLogin = useCallback(async (username: string, password: string): Promise<boolean> => {
         if (!isSupabaseConfigured) {
@@ -700,35 +765,48 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         await applyAuthenticatedUser(null);
     }, [applyAuthenticatedUser, currentUserId]);
+
+    const persistUserPreferencePatch = useCallback((patch: UserPreferencesPatch) => {
+        if (!currentUserId || preferencesReadyUserId !== currentUserId) return;
+        void saveCurrentUserPreferencesPatch(patch).catch(error => {
+            console.error('Failed to save user preferences to Supabase:', error);
+        });
+    }, [currentUserId, preferencesReadyUserId]);
     
     const handleHighlightStyleChange = (style: 'background' | 'underline') => {
         setHighlightStyle(style);
         if (currentUser) saveUserPreference(currentUser, { preferredHighlightStyle: style });
+        persistUserPreferencePatch({ appearance: { highlightStyle: style } });
     };
 
     const handleChatGptOpenModeChange = (mode: ChatGptOpenMode) => {
         setChatGptOpenMode(mode);
         if (currentUser) saveUserPreference(currentUser, { preferredChatGptOpenMode: mode });
+        persistUserPreferencePatch({ editor: { chatGptOpenMode: mode } });
     };
 
     const handleKeywordViewModeChange = (mode: 'classic' | 'modern') => {
         setKeywordViewMode(mode);
         if (currentUser) saveUserPreference(currentUser, { preferredKeywordViewMode: mode });
+        persistUserPreferencePatch({ appearance: { keywordViewMode: mode } });
     };
 
     const handleStructureViewModeChange = (mode: 'grid' | 'list') => {
         setStructureViewMode(mode);
         if (currentUser) saveUserPreference(currentUser, { preferredStructureViewMode: mode });
+        persistUserPreferencePatch({ appearance: { structureViewMode: mode } });
     };
 
     const handlePreferredLanguageChange = (lang: 'ar' | 'en') => {
         setPreferredLanguage(lang);
         if (currentUser) saveUserPreference(currentUser, { preferredLanguage: lang });
+        persistUserPreferencePatch({ editor: { preferredLanguage: lang } });
     };
 
     const handleUiLanguageChange = (lang: 'ar' | 'en') => {
         setUiLanguage(lang);
         if (currentUser) saveUserPreference(currentUser, { preferredUILanguage: lang });
+        persistUserPreferencePatch({ editor: { uiLanguage: lang } });
     };
 
     const handleSaveApiKeys = (keys: ApiKeys) => {
@@ -741,7 +819,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const normalizedContexts = normalizeClientGoalContexts(nextContexts);
         setClientGoalContexts(normalizedContexts);
         if (currentUser) saveUserClientGoalContexts(currentUser, normalizedContexts);
-    }, [currentUser]);
+        persistUserPreferencePatch({
+            clientGoalContexts: normalizedContexts as unknown as Record<string, unknown>,
+        });
+    }, [currentUser, persistUserPreferencePatch]);
 
     const handleSaveClientGoalContext = useCallback((companyName: string, context: GoalContext) => {
         const normalizedCompanyName = companyName.trim();
@@ -771,7 +852,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const normalizedPrompts = normalizeEngineeringPrompts(prompts);
         setEngineeringPrompts(normalizedPrompts);
         if (currentUser) saveUserEngineeringPrompts(currentUser, normalizedPrompts);
-    }, [currentUser]);
+        persistUserPreferencePatch({
+            engineeringPrompts: normalizedPrompts as unknown as Record<string, unknown>,
+        });
+    }, [currentUser, persistUserPreferencePatch]);
 
     const value = {
         currentUser,

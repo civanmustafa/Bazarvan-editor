@@ -1,8 +1,18 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
-  EXTERNAL_AUTOMATIC_COMMAND_IDS,
-  EXTERNAL_READY_COMMAND_DEFINITIONS,
-} from '../constants/externalAnalysisCommands';
+  GEMINI_ANALYSIS_MODEL,
+  GEMINI_FREE_MODEL_VALUES,
+  GEMINI_PAID_ANALYSIS_MODEL,
+  OPENAI_ANALYSIS_MODEL,
+} from '../constants/modelRegistry';
+import {
+  SYSTEM_SETTING_KEYS,
+  getDefaultSystemSettings,
+  isSettingsRecord,
+  normalizeSystemSettingsMap,
+  normalizeSystemSettingsPatch,
+  type SystemSettingKey,
+} from '../constants/settingsRegistry';
 
 type ApiResult = {
   status: number;
@@ -11,8 +21,6 @@ type ApiResult = {
 };
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
-
-type SettingKey = 'ai' | 'n8n' | 'articles' | 'roles' | 'system';
 
 class SettingsError extends Error {
   status: number;
@@ -24,62 +32,9 @@ class SettingsError extends Error {
   }
 }
 
-const SETTING_KEYS = new Set<SettingKey>(['ai', 'n8n', 'articles', 'roles', 'system']);
-const DEFAULT_GEMINI_FREE_MODELS = [
-  'gemini-3.5-flash',
-  'gemini-2.5-pro',
-  'gemini-3-flash-preview',
-  'gemini-2.5-flash',
-  'gemini-3.1-flash-lite',
-  'gemini-2.5-flash-lite-preview-09-2025',
-  'gemini-2.5-flash-lite',
-];
-const ALLOWED_EXTERNAL_COMMAND_IDS = new Set(
-  EXTERNAL_READY_COMMAND_DEFINITIONS.map(definition => definition.id),
-);
+const SETTING_KEYS = new Set<SystemSettingKey>(SYSTEM_SETTING_KEYS);
 
-const DEFAULT_SETTINGS: Record<SettingKey, Record<string, unknown>> = {
-  ai: {
-    geminiFreeEnabled: true,
-    geminiProEnabled: true,
-    openAiEnabled: false,
-    defaultProvider: 'gemini',
-    defaultGeminiModel: 'gemini-3.5-flash',
-    geminiFreeModelFallbackEnabled: true,
-    externalAnalysisRetryMinutes: 30,
-    externalAnalysisDefaultCommandIds: [...EXTERNAL_AUTOMATIC_COMMAND_IDS],
-    externalAnalysisCommandExecutionMode: 'independent_batch',
-    defaultGeminiPaidModel: 'gemini-2.5-pro',
-    defaultOpenAiModel: 'gpt-4.1-mini',
-  },
-  n8n: {
-    enabled: true,
-    defaultVisibility: 'public',
-    defaultAccessRole: 'editor',
-    autoRunAssignedAutomation: true,
-  },
-  articles: {
-    defaultStatus: 'draft',
-    defaultVisibility: 'public',
-    defaultLanguage: 'ar',
-    trashRetentionDays: 30,
-  },
-  roles: {
-    adminCanSeeAll: true,
-    usersCanClaimPublicArticles: true,
-    usersCanSeeOnlyAssignedAfterClaim: true,
-  },
-  system: {
-    timezone: 'Europe/Istanbul',
-    publicEditorUrl: '',
-    dailyReportEnabled: true,
-    activityTrackingEnabled: true,
-  },
-};
-
-const isRecord = (value: unknown): value is Record<string, any> => (
-  !!value && typeof value === 'object' && !Array.isArray(value)
-);
+const isRecord = isSettingsRecord;
 
 const readNodeBody = async (req: any): Promise<unknown> => {
   if (req.body !== undefined) {
@@ -177,43 +132,10 @@ const collectSecretList = (...values: Array<string | undefined>): string[] => (
 
 const getAllowedGeminiFreeModels = (): string[] => (
   uniqueList([
-    process.env.GEMINI_MODEL || DEFAULT_GEMINI_FREE_MODELS[0],
-    ...DEFAULT_GEMINI_FREE_MODELS,
+    process.env.GEMINI_MODEL || GEMINI_ANALYSIS_MODEL,
+    ...GEMINI_FREE_MODEL_VALUES,
     ...splitSecretList(process.env.GEMINI_ALLOWED_MODELS),
   ])
-);
-
-const normalizeGeminiFreeModel = (value: unknown): string => {
-  const allowedModels = getAllowedGeminiFreeModels();
-  const requestedModel = typeof value === 'string' ? value.trim() : '';
-  return allowedModels.includes(requestedModel)
-    ? requestedModel
-    : allowedModels[0] || DEFAULT_GEMINI_FREE_MODELS[0];
-};
-
-const normalizeExternalAnalysisRetryMinutes = (value: unknown): number => {
-  const parsed = typeof value === 'number'
-    ? value
-    : Number.parseInt(String(value ?? ''), 10);
-  if (!Number.isFinite(parsed)) return 30;
-  return Math.max(5, Math.min(Math.round(parsed), 1_440));
-};
-
-const normalizeExternalAnalysisDefaultCommandIds = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return [...EXTERNAL_AUTOMATIC_COMMAND_IDS];
-  const normalized = Array.from(new Set(
-    value
-      .filter((item): item is string => typeof item === 'string')
-      .map(item => item.trim())
-      .filter(item => ALLOWED_EXTERNAL_COMMAND_IDS.has(item)),
-  ));
-  return normalized.length > 0
-    ? normalized
-    : [...EXTERNAL_AUTOMATIC_COMMAND_IDS];
-};
-
-const normalizeExternalAnalysisCommandExecutionMode = (value: unknown): string => (
-  value === 'sequential' ? 'sequential' : 'independent_batch'
 );
 
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
@@ -252,18 +174,18 @@ const getSecretStatus = (req: any) => {
       gemini: {
         configured: geminiKeys.length > 0,
         keyCount: geminiKeys.length,
-        model: process.env.GEMINI_MODEL || DEFAULT_GEMINI_FREE_MODELS[0],
+        model: process.env.GEMINI_MODEL || GEMINI_ANALYSIS_MODEL,
         allowedModels: getAllowedGeminiFreeModels(),
       },
       geminiPaid: {
         configured: geminiPaidKeys.length > 0,
         keyCount: geminiPaidKeys.length,
-        model: process.env.GEMINI_PAID_MODEL || process.env.GEMINI_PRO_MODEL || 'gemini-2.5-pro',
+        model: process.env.GEMINI_PAID_MODEL || process.env.GEMINI_PRO_MODEL || GEMINI_PAID_ANALYSIS_MODEL,
       },
       openAi: {
         configured: openAiKeys.length > 0,
         keyCount: openAiKeys.length,
-        model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+        model: process.env.OPENAI_MODEL || OPENAI_ANALYSIS_MODEL,
       },
     },
     n8n: {
@@ -284,63 +206,64 @@ const readSettings = async (supabase: SupabaseAdmin) => {
 
     if (error) throw error;
 
-    const defaults = Object.fromEntries(
-      Array.from(SETTING_KEYS).map(key => [key, { ...DEFAULT_SETTINGS[key] }]),
-    );
-    return (data || []).reduce<Record<string, unknown>>((settings, row) => {
-      const key = String(row.key) as SettingKey;
-      if (!SETTING_KEYS.has(key)) return settings;
-      settings[key] = {
-        ...DEFAULT_SETTINGS[key],
-        ...(isRecord(row.value) ? row.value : {}),
-      };
+    const storedSettings = (data || []).reduce<Record<string, unknown>>((settings, row) => {
+      const key = String(row.key) as SystemSettingKey;
+      if (SETTING_KEYS.has(key)) settings[key] = row.value;
       return settings;
-    }, defaults);
+    }, {});
+    return normalizeSystemSettingsMap(storedSettings, {
+      allowedGeminiModels: getAllowedGeminiFreeModels(),
+    });
   } catch (error: any) {
-    if (error?.code === '42P01') return { ...DEFAULT_SETTINGS };
+    if (error?.code === '42P01') return getDefaultSystemSettings();
     throw error;
   }
 };
 
-const sanitizeSettingsPatch = (value: unknown): Partial<Record<SettingKey, Record<string, unknown>>> => {
+const sanitizeSettingsPatch = (value: unknown): Partial<Record<SystemSettingKey, Record<string, unknown>>> => {
   if (!isRecord(value)) throw new SettingsError('settings must be an object.', 400);
-
-  return Object.entries(value).reduce<Partial<Record<SettingKey, Record<string, unknown>>>>((patch, [key, settingValue]) => {
-    if (!SETTING_KEYS.has(key as SettingKey)) return patch;
-    if (!isRecord(settingValue)) throw new SettingsError(`settings.${key} must be an object.`, 400);
-    patch[key as SettingKey] = key === 'ai'
-      ? {
-          ...settingValue,
-          defaultGeminiModel: normalizeGeminiFreeModel(settingValue.defaultGeminiModel),
-          externalAnalysisRetryMinutes: normalizeExternalAnalysisRetryMinutes(
-            settingValue.externalAnalysisRetryMinutes,
-          ),
-          externalAnalysisDefaultCommandIds: normalizeExternalAnalysisDefaultCommandIds(
-            settingValue.externalAnalysisDefaultCommandIds,
-          ),
-          externalAnalysisCommandExecutionMode: normalizeExternalAnalysisCommandExecutionMode(
-            settingValue.externalAnalysisCommandExecutionMode,
-          ),
-        }
-      : settingValue;
-    return patch;
-  }, {});
+  Object.entries(value).forEach(([key, settingValue]) => {
+    if (SETTING_KEYS.has(key as SystemSettingKey) && !isRecord(settingValue)) {
+      throw new SettingsError(`settings.${key} must be an object.`, 400);
+    }
+  });
+  return normalizeSystemSettingsPatch(value, {
+    allowedGeminiModels: getAllowedGeminiFreeModels(),
+  });
 };
 
 const saveSettings = async (
   supabase: SupabaseAdmin,
   userId: string,
-  patch: Partial<Record<SettingKey, Record<string, unknown>>>,
+  patch: Partial<Record<SystemSettingKey, Record<string, unknown>>>,
 ) => {
-  const rows = Object.entries(patch).map(([key, value]) => ({
+  const keys = Object.keys(patch) as SystemSettingKey[];
+  if (keys.length === 0) return;
+
+  const { data: existingRows, error: readError } = await supabase
+    .from('app_settings')
+    .select('key,value')
+    .in('key', keys);
+  if (readError && readError.code !== '42P01') throw readError;
+
+  const existing = (existingRows || []).reduce<Record<string, Record<string, unknown>>>((result, row) => {
+    if (isRecord(row.value)) result[String(row.key)] = row.value;
+    return result;
+  }, {});
+  const mergedSettings = normalizeSystemSettingsMap(
+    Object.fromEntries(keys.map(key => [key, {
+      ...(existing[key] || {}),
+      ...(patch[key] || {}),
+    }])),
+    { allowedGeminiModels: getAllowedGeminiFreeModels() },
+  );
+  const rows = keys.map(key => ({
     key,
-    value,
+    value: mergedSettings[key],
     is_secret: false,
     updated_by: userId,
     updated_at: new Date().toISOString(),
   }));
-
-  if (rows.length === 0) return;
 
   const { error } = await supabase
     .from('app_settings')

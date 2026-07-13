@@ -13,7 +13,7 @@
     "start": "node server-dist/server.mjs",
     "start:worker": "node server-dist/external-analysis-worker.mjs",
     "typecheck": "tsc --noEmit",
-    "test:security": "node --experimental-strip-types --test tests/apiSecurity.test.ts tests/articleAccessAndSave.test.ts",
+    "test:security": "node --experimental-strip-types --test tests/apiSecurity.test.ts tests/articleAccessAndSave.test.ts tests/settingsRegistry.test.ts",
     "check:secrets": "node scripts/check-secrets.mjs",
     "verify:security": "npm run check:secrets && npm run test:security"
   },

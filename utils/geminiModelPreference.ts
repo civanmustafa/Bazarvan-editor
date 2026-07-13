@@ -1,23 +1,61 @@
 import {
   GEMINI_ANALYSIS_MODEL,
-  GEMINI_FREE_MODEL_OPTIONS,
   GEMINI_FREE_MODEL_VALUES,
   getGeminiFreeModelLabel,
-} from '../constants/aiModels';
+  normalizeGeminiFreeModelId,
+  uniqueModelIds,
+} from '../constants/modelRegistry';
+import type { UserPreferences } from '../constants/settingsRegistry';
+import { saveCurrentUserPreferencesPatch } from './userPreferences';
 
 export const GEMINI_FREE_MODEL_STORAGE_KEY = 'bazarvan:gemini-free-default-model';
 export const GEMINI_FREE_MODEL_CHANGED_EVENT = 'bazarvan:gemini-free-model-changed';
 export const GEMINI_FREE_MODEL_FALLBACK_STORAGE_KEY = 'bazarvan:gemini-free-model-fallback-enabled';
 export const GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT = 'bazarvan:gemini-free-model-fallback-changed';
 
-const uniqueModels = (models: string[]): string[] => (
-  Array.from(new Set(models.map(model => model.trim()).filter(Boolean)))
+const readLegacyStorageValue = (key: string): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+let selectedModel = normalizeGeminiFreeModelId(
+  readLegacyStorageValue(GEMINI_FREE_MODEL_STORAGE_KEY),
 );
+let allowModelFallback = readLegacyStorageValue(GEMINI_FREE_MODEL_FALLBACK_STORAGE_KEY) !== 'false';
+
+const emitModelChanged = () => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(GEMINI_FREE_MODEL_CHANGED_EVENT, {
+    detail: { model: selectedModel },
+  }));
+};
+
+const emitFallbackChanged = () => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT, {
+    detail: { enabled: allowModelFallback },
+  }));
+};
+
+const persistAiPreferences = () => {
+  void saveCurrentUserPreferencesPatch({
+    ai: {
+      defaultGeminiModel: selectedModel,
+      allowGeminiModelFallback: allowModelFallback,
+    },
+  }).catch(error => {
+    console.error('Failed to save Gemini user preferences to Supabase:', error);
+  });
+};
 
 export const buildGeminiFreeModelOptions = (
   extraModels: string[] = [],
 ): { value: string; label: string }[] => (
-  uniqueModels([...GEMINI_FREE_MODEL_VALUES, ...extraModels])
+  uniqueModelIds([...GEMINI_FREE_MODEL_VALUES, ...extraModels])
     .map(model => ({
       value: model,
       label: getGeminiFreeModelLabel(model),
@@ -27,64 +65,57 @@ export const buildGeminiFreeModelOptions = (
 export const normalizeGeminiFreeModel = (
   value: unknown,
   allowedModels: string[] = GEMINI_FREE_MODEL_VALUES,
-): string => {
-  const normalized = typeof value === 'string' ? value.trim() : '';
-  const allowed = uniqueModels(allowedModels);
-  if (normalized && allowed.includes(normalized)) return normalized;
-  return allowed[0] || GEMINI_ANALYSIS_MODEL;
-};
+): string => normalizeGeminiFreeModelId(value, allowedModels);
 
-export const getSelectedGeminiFreeModel = (): string => {
-  if (typeof window === 'undefined') return GEMINI_ANALYSIS_MODEL;
+export const readLegacyGeminiModelPreferences = (): {
+  model: string;
+  allowModelFallback: boolean;
+} => ({
+  model: normalizeGeminiFreeModelId(readLegacyStorageValue(GEMINI_FREE_MODEL_STORAGE_KEY)),
+  allowModelFallback: readLegacyStorageValue(GEMINI_FREE_MODEL_FALLBACK_STORAGE_KEY) !== 'false',
+});
+
+export const clearLegacyGeminiModelPreferences = () => {
+  if (typeof window === 'undefined') return;
   try {
-    return normalizeGeminiFreeModel(localStorage.getItem(GEMINI_FREE_MODEL_STORAGE_KEY));
+    localStorage.removeItem(GEMINI_FREE_MODEL_STORAGE_KEY);
+    localStorage.removeItem(GEMINI_FREE_MODEL_FALLBACK_STORAGE_KEY);
   } catch {
-    return GEMINI_ANALYSIS_MODEL;
+    // The online preferences are already saved; an unavailable cache can be ignored.
   }
 };
+
+export const hydrateGeminiModelPreferences = (preferences: UserPreferences['ai']) => {
+  selectedModel = normalizeGeminiFreeModelId(preferences.defaultGeminiModel);
+  allowModelFallback = preferences.allowGeminiModelFallback !== false;
+  emitModelChanged();
+  emitFallbackChanged();
+};
+
+export const resetGeminiModelPreferences = () => {
+  selectedModel = GEMINI_ANALYSIS_MODEL;
+  allowModelFallback = true;
+  emitModelChanged();
+  emitFallbackChanged();
+};
+
+export const getSelectedGeminiFreeModel = (): string => selectedModel;
 
 export const setSelectedGeminiFreeModel = (
   value: string,
   allowedModels?: string[],
 ): string => {
-  const selectedModel = allowedModels
-    ? normalizeGeminiFreeModel(value, allowedModels)
-    : value.trim() || GEMINI_ANALYSIS_MODEL;
-
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(GEMINI_FREE_MODEL_STORAGE_KEY, selectedModel);
-      window.dispatchEvent(new CustomEvent(GEMINI_FREE_MODEL_CHANGED_EVENT, {
-        detail: { model: selectedModel },
-      }));
-    } catch {
-      // Ignore storage failures; the server still falls back to its default model.
-    }
-  }
-
+  selectedModel = normalizeGeminiFreeModelId(value, allowedModels || GEMINI_FREE_MODEL_VALUES);
+  emitModelChanged();
+  persistAiPreferences();
   return selectedModel;
 };
 
-export const isGeminiFreeModelFallbackEnabled = (): boolean => {
-  if (typeof window === 'undefined') return true;
-  try {
-    return localStorage.getItem(GEMINI_FREE_MODEL_FALLBACK_STORAGE_KEY) !== 'false';
-  } catch {
-    return true;
-  }
-};
+export const isGeminiFreeModelFallbackEnabled = (): boolean => allowModelFallback;
 
 export const setGeminiFreeModelFallbackEnabled = (enabled: boolean): boolean => {
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(GEMINI_FREE_MODEL_FALLBACK_STORAGE_KEY, enabled ? 'true' : 'false');
-      window.dispatchEvent(new CustomEvent(GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT, {
-        detail: { enabled },
-      }));
-    } catch {
-      // Ignore storage failures; requests will keep using the explicit selected model.
-    }
-  }
-
-  return enabled;
+  allowModelFallback = enabled;
+  emitFallbackChanged();
+  persistAiPreferences();
+  return allowModelFallback;
 };

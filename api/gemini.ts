@@ -1,6 +1,11 @@
 
 import { GoogleGenAI } from "@google/genai";
 import {
+  GEMINI_ANALYSIS_MODEL as REGISTRY_GEMINI_ANALYSIS_MODEL,
+  GEMINI_FREE_MODEL_VALUES,
+  GEMINI_PAID_ANALYSIS_MODEL as REGISTRY_GEMINI_PAID_ANALYSIS_MODEL,
+} from "../constants/modelRegistry";
+import {
   claimGeminiApiKey,
   getGeminiKeyFailureCooldownSeconds,
 } from "../server/geminiKeyCoordinator";
@@ -16,23 +21,10 @@ import {
   toApiSecurityResult,
 } from "./apiSecurity";
 
-// Keep the serverless function self-contained: Vercel executes this compiled
-// ESM file directly and cannot resolve extensionless frontend module imports.
-const DEFAULT_GEMINI_ANALYSIS_MODEL = "gemini-3.5-flash";
-const DEFAULT_GEMINI_PAID_ANALYSIS_MODEL = "gemini-2.5-pro";
-const DEFAULT_GEMINI_FREE_MODELS = [
-  DEFAULT_GEMINI_ANALYSIS_MODEL,
-  "gemini-2.5-pro",
-  "gemini-3-flash-preview",
-  "gemini-2.5-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-2.5-flash-lite-preview-09-2025",
-  "gemini-2.5-flash-lite",
-];
-const GEMINI_ANALYSIS_MODEL = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_ANALYSIS_MODEL;
-const GEMINI_PAID_ANALYSIS_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || DEFAULT_GEMINI_PAID_ANALYSIS_MODEL;
+const GEMINI_ANALYSIS_MODEL = process.env.GEMINI_MODEL?.trim() || REGISTRY_GEMINI_ANALYSIS_MODEL;
+const GEMINI_PAID_ANALYSIS_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || REGISTRY_GEMINI_PAID_ANALYSIS_MODEL;
 const ALLOWED_GEMINI_MODELS = new Set([
-  ...DEFAULT_GEMINI_FREE_MODELS,
+  ...GEMINI_FREE_MODEL_VALUES,
   GEMINI_ANALYSIS_MODEL,
   GEMINI_PAID_ANALYSIS_MODEL,
   ...((process.env.GEMINI_ALLOWED_MODELS || "")
@@ -305,7 +297,7 @@ const selectGeminiModel = (model: unknown, provider: GeminiProvider): string => 
 const getAllowedGeminiFreeModels = (): string[] => (
   Array.from(new Set([
     GEMINI_ANALYSIS_MODEL,
-    ...DEFAULT_GEMINI_FREE_MODELS,
+    ...GEMINI_FREE_MODEL_VALUES,
     ...((process.env.GEMINI_ALLOWED_MODELS || "")
       .split(/[\n,;]+/)
       .map(model => model.trim())

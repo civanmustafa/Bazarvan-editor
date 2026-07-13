@@ -1,0 +1,142 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import {
+  GEMINI_ANALYSIS_MODEL,
+  GEMINI_FREE_MODEL_VALUES,
+  MODEL_REGISTRY,
+  normalizeGeminiFreeModelId,
+} from '../constants/modelRegistry.ts';
+
+const readWorkspaceFile = (relativePath: string): Promise<string> => (
+  readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
+);
+
+const assertBalancedSqlParentheses = (sql: string): void => {
+  let depth = 0;
+  let quote: "'" | '"' | null = null;
+  for (let index = 0; index < sql.length; index += 1) {
+    const character = sql[index];
+    const next = sql[index + 1];
+    if (!quote && character === '-' && next === '-') {
+      index = sql.indexOf('\n', index);
+      if (index < 0) break;
+      continue;
+    }
+    if (quote) {
+      if (character === quote && next === quote) index += 1;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"') quote = character;
+    else if (character === '(') depth += 1;
+    else if (character === ')') depth -= 1;
+    assert.ok(depth >= 0, `Unexpected closing parenthesis at character ${index}.`);
+  }
+  assert.equal(quote, null, 'SQL contains an unterminated quoted value.');
+  assert.equal(depth, 0, 'SQL contains mismatched parentheses.');
+};
+
+const importSettingsRegistry = async (): Promise<any> => {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL('../constants/settingsRegistry.ts', import.meta.url))],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node20',
+    write: false,
+  });
+  const source = result.outputFiles[0].text;
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+};
+
+test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
+  assert.equal(GEMINI_ANALYSIS_MODEL, MODEL_REGISTRY.gemini.free[0].id);
+  assert.deepEqual(
+    GEMINI_FREE_MODEL_VALUES,
+    MODEL_REGISTRY.gemini.free.map((model: { id: string }) => model.id),
+  );
+  assert.equal(new Set(GEMINI_FREE_MODEL_VALUES).size, GEMINI_FREE_MODEL_VALUES.length);
+  assert.equal(normalizeGeminiFreeModelId('not-a-model'), GEMINI_ANALYSIS_MODEL);
+});
+
+test('SettingsRegistry validates system settings and discards unknown fields', async () => {
+  const registry = await importSettingsRegistry();
+  const normalized = registry.normalizeSystemSettingsMap({
+    ai: {
+      defaultGeminiModel: 'unknown-model',
+      externalAnalysisRetryMinutes: 1,
+      unknownSecret: 'must-not-survive',
+    },
+    articles: {
+      trashRetentionDays: 99_999,
+      defaultLanguage: 'invalid',
+    },
+  });
+
+  assert.equal(normalized.ai.defaultGeminiModel, GEMINI_ANALYSIS_MODEL);
+  assert.equal(normalized.ai.externalAnalysisRetryMinutes, 5);
+  assert.equal(normalized.ai.unknownSecret, undefined);
+  assert.equal(normalized.articles.trashRetentionDays, 3_650);
+  assert.equal(normalized.articles.defaultLanguage, 'ar');
+});
+
+test('legacy browser preferences migrate without replacing existing online values', async () => {
+  const registry = await importSettingsRegistry();
+  const legacy = registry.createLegacyUserPreferences({
+    preferredTheme: 'light',
+    preferredHighlightStyle: 'underline',
+    preferredLanguage: 'en',
+    clientGoalContexts: { Acme: { objective: 'legacy objective' } },
+    engineeringPrompts: { analyzeFull: 'legacy prompt' },
+  }, {
+    model: 'gemini-2.5-flash',
+    allowModelFallback: false,
+  });
+  const migrated = registry.migrateLegacyUserPreferences({
+    appearance: { theme: 'dark' },
+    ai: { defaultGeminiModel: 'gemini-2.5-pro' },
+  }, legacy);
+
+  assert.equal(migrated.appearance.theme, 'dark');
+  assert.equal(migrated.appearance.highlightStyle, 'underline');
+  assert.equal(migrated.editor.preferredLanguage, 'en');
+  assert.equal(migrated.ai.defaultGeminiModel, 'gemini-2.5-pro');
+  assert.equal(migrated.ai.allowGeminiModelFallback, false);
+  assert.equal(migrated.clientGoalContexts.Acme.objective, 'legacy objective');
+  assert.equal(migrated.engineeringPrompts.analyzeFull, 'legacy prompt');
+});
+
+test('browser, API, and worker consume the shared registries', async () => {
+  const [geminiApi, settingsApi, assignedAutomation, externalSettings, settingsPage] = await Promise.all([
+    readWorkspaceFile('api/gemini.ts'),
+    readWorkspaceFile('api/systemSettings.ts'),
+    readWorkspaceFile('api/assignedArticleAutomation.ts'),
+    readWorkspaceFile('server/externalAnalysisSettings.ts'),
+    readWorkspaceFile('components/SettingsPage.tsx'),
+  ]);
+
+  assert.match(geminiApi, /constants\/modelRegistry/);
+  assert.match(settingsApi, /constants\/settingsRegistry/);
+  assert.match(assignedAutomation, /constants\/modelRegistry/);
+  assert.match(externalSettings, /constants\/settingsRegistry/);
+  assert.match(settingsPage, /constants\/settingsRegistry/);
+  [geminiApi, settingsApi, assignedAutomation, externalSettings, settingsPage].forEach(source => {
+    assert.doesNotMatch(source, /\['gemini-3\.5-flash'/);
+  });
+});
+
+test('phase 4 migration creates protected durable user preferences', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260713020000_phase_4_settings_and_model_registry.sql',
+  );
+  assert.match(migration, /create table if not exists public\.user_preferences/);
+  assert.match(migration, /alter table public\.user_preferences enable row level security/);
+  assert.match(migration, /using \(user_id = auth\.uid\(\)\)/);
+  assert.match(migration, /function public\.merge_current_user_preferences\(p_patch jsonb\)/);
+  assert.match(migration, /coalesce\(public\.user_preferences\.preferences, '\{\}'::jsonb\)\s*\|\| excluded\.preferences/);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
+  assertBalancedSqlParentheses(migration);
+});
