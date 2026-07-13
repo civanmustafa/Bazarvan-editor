@@ -16,10 +16,12 @@
     "typecheck": "tsc --noEmit",
     "test:security": "node --experimental-strip-types --test tests/apiSecurity.test.ts tests/articleAccessAndSave.test.ts tests/settingsRegistry.test.ts tests/aiExecutionEngine.test.ts tests/aiJobService.test.ts",
     "test:performance": "node --experimental-strip-types --test tests/performanceArchitecture.test.ts",
+    "test:architecture": "node --experimental-strip-types --test tests/codeArchitecture.test.ts",
     "check:bundle": "node scripts/check-web-performance.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "verify:security": "npm run check:secrets && npm run test:security",
-    "verify:performance": "npm run test:performance && npm run build:web && npm run check:bundle"
+    "verify:performance": "npm run test:performance && npm run build:web && npm run check:bundle",
+    "verify:architecture": "npm run test:architecture && npm run build"
   },
   "dependencies": {
     "@fontsource/cairo": "^5.2.7",

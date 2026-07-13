@@ -1,5 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
+import { getHeaderValue } from './http.ts';
+
+export { getHeaderValue } from './http.ts';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
@@ -34,15 +37,6 @@ type AuthenticationCacheEntry = {
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
 const authenticationCache = new Map<string, AuthenticationCacheEntry>();
 let supabaseAdmin: SupabaseAdmin | null = null;
-
-export const getHeaderValue = (req: any, headerName: string): string => {
-  if (typeof req?.headers?.get === 'function') {
-    return req.headers.get(headerName) || '';
-  }
-
-  const value = req?.headers?.[headerName.toLowerCase()] ?? req?.headers?.[headerName];
-  return Array.isArray(value) ? String(value[0] || '') : String(value || '');
-};
 
 const normalizeProjectUrl = (value: string): string => value
   .trim()

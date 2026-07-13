@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useEffect, createContext, useContext, useMemo, useRef } from 'react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
+import { recordLogin, getActivityData, saveUserPreference, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
 import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
 import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
@@ -31,8 +31,6 @@ import {
  * Edit here when adding a user preference or anything that should survive per user.
  * Durable preferences use Supabase; hooks/useUserActivity.ts remains a local startup cache.
  */
-type ApiKeys = { gemini: string[]; geminiPaid: string[]; chatgpt: string[] };
-type StoredApiKeys = { gemini?: string | string[]; geminiPaid?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
 type UserRole = 'admin' | 'user';
 type AppView = 'login' | 'dashboard' | 'editor' | 'admin' | 'settings' | 'notFound';
 type Profile = {
@@ -56,7 +54,6 @@ interface UserContextType {
     structureViewMode: 'grid' | 'list';
     preferredLanguage: 'ar' | 'en';
     uiLanguage: 'ar' | 'en';
-    apiKeys: ApiKeys;
     clientGoalContexts: ClientGoalContexts;
     engineeringPrompts: EngineeringPrompts;
     t: typeof translations.ar;
@@ -70,7 +67,6 @@ interface UserContextType {
     handleStructureViewModeChange: (mode: 'grid' | 'list') => void;
     handlePreferredLanguageChange: (lang: 'ar' | 'en') => void;
     handleUiLanguageChange: (lang: 'ar' | 'en') => void;
-    handleSaveApiKeys: (keys: ApiKeys) => void;
     handleSaveClientGoalContext: (companyName: string, goalContext: GoalContext) => void;
     handleDeleteClientGoalContext: (companyName: string) => void;
     handleMergeClientGoalContexts: (contexts: ClientGoalContexts) => void;
@@ -145,12 +141,6 @@ const getInitialTheme = () => {
     }
 };
 
-const normalizeApiKeys = (_keys?: StoredApiKeys): ApiKeys => ({
-    gemini: [],
-    geminiPaid: [],
-    chatgpt: [],
-});
-
 const getProfileLabel = (profile: Profile | null, user: SupabaseUser): string => (
     profile?.full_name?.trim() ||
     profile?.email?.trim() ||
@@ -218,7 +208,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [structureViewMode, setStructureViewMode] = useState<'grid' | 'list'>('grid');
     const [preferredLanguage, setPreferredLanguage] = useState<'ar' | 'en'>('ar');
     const [uiLanguage, setUiLanguage] = useState<'ar' | 'en'>('ar');
-    const [apiKeys, setApiKeys] = useState<ApiKeys>(() => normalizeApiKeys());
     const [clientGoalContexts, setClientGoalContexts] = useState<ClientGoalContexts>({});
     const [engineeringPrompts, setEngineeringPrompts] = useState<EngineeringPrompts>(() => normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
     const [preferencesReadyUserId, setPreferencesReadyUserId] = useState<string | null>(null);
@@ -243,7 +232,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setCurrentUser(null);
             setCurrentUserId(null);
             setCurrentUserRole('user');
-            setApiKeys(normalizeApiKeys());
             setClientGoalContexts({});
             setEngineeringPrompts(normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
             try {
@@ -558,10 +546,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setIsDarkMode(preferences.appearance.theme === 'dark');
             hydrateGeminiModelPreferences(preferences.ai);
 
-            const serverOnlyApiKeys = normalizeApiKeys(activity?.apiKeys as StoredApiKeys | undefined);
-            setApiKeys(serverOnlyApiKeys);
-            if (activity?.apiKeys) saveUserApiKeys(currentUser, serverOnlyApiKeys);
-
             const normalizedContexts = normalizeClientGoalContexts(preferences.clientGoalContexts);
             const normalizedPrompts = normalizeEngineeringPrompts(
                 preferences.engineeringPrompts as unknown as Partial<EngineeringPrompts>,
@@ -687,12 +671,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         persistUserPreferencePatch({ editor: { uiLanguage: lang } });
     }, [currentUser, persistUserPreferencePatch]);
 
-    const handleSaveApiKeys = useCallback((keys: ApiKeys) => {
-        const normalizedKeys = normalizeApiKeys(keys);
-        setApiKeys(normalizedKeys);
-        if (currentUser) saveUserApiKeys(currentUser, normalizedKeys);
-    }, [currentUser]);
-
     const persistClientGoalContexts = useCallback((nextContexts: ClientGoalContexts) => {
         const normalizedContexts = normalizeClientGoalContexts(nextContexts);
         setClientGoalContexts(normalizedContexts);
@@ -749,7 +727,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         structureViewMode,
         preferredLanguage,
         uiLanguage,
-        apiKeys,
         clientGoalContexts,
         engineeringPrompts,
         t,
@@ -763,7 +740,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleStructureViewModeChange,
         handlePreferredLanguageChange,
         handleUiLanguageChange,
-        handleSaveApiKeys,
         handleSaveClientGoalContext,
         handleDeleteClientGoalContext,
         handleMergeClientGoalContexts,
@@ -781,7 +757,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         structureViewMode,
         preferredLanguage,
         uiLanguage,
-        apiKeys,
         clientGoalContexts,
         engineeringPrompts,
         t,
@@ -795,7 +770,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleStructureViewModeChange,
         handlePreferredLanguageChange,
         handleUiLanguageChange,
-        handleSaveApiKeys,
         handleSaveClientGoalContext,
         handleDeleteClientGoalContext,
         handleMergeClientGoalContexts,

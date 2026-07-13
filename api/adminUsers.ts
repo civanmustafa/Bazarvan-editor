@@ -1,10 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-
-type ApiResult = {
-  status: number;
-  body: unknown;
-  headers?: Record<string, string>;
-};
+import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 type UserRole = 'admin' | 'user';
@@ -18,41 +13,6 @@ class AdminUsersError extends Error {
     this.status = status;
   }
 }
-
-const isRecord = (value: unknown): value is Record<string, any> => (
-  !!value && typeof value === 'object' && !Array.isArray(value)
-);
-
-const readNodeBody = async (req: any): Promise<unknown> => {
-  if (req.body !== undefined) {
-    if (typeof req.body === 'string') return req.body ? JSON.parse(req.body) : {};
-    if (Buffer.isBuffer(req.body)) return req.body.length ? JSON.parse(req.body.toString('utf8')) : {};
-    return req.body;
-  }
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
-};
-
-const readRequestBody = async (req: any): Promise<unknown> => {
-  if (typeof req.json === 'function' && typeof req.headers?.get === 'function') {
-    return req.json();
-  }
-  return readNodeBody(req);
-};
-
-const getHeaderValue = (req: any, headerName: string): string => {
-  if (typeof req.headers?.get === 'function') {
-    return req.headers.get(headerName) || '';
-  }
-
-  const directValue = req.headers?.[headerName.toLowerCase()] || req.headers?.[headerName];
-  return Array.isArray(directValue) ? String(directValue[0] || '') : String(directValue || '');
-};
 
 const getBearerToken = (req: any): string => {
   const authorization = getHeaderValue(req, 'authorization');
@@ -166,24 +126,6 @@ const createAdminUser = async (supabase: SupabaseAdmin, body: unknown) => {
   return profile;
 };
 
-const toWebResponse = (result: ApiResult): Response => new Response(
-  result.status === 204 ? null : JSON.stringify(result.body),
-  {
-    status: result.status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      ...(result.headers || {}),
-    },
-  },
-);
-
-const sendNodeResponse = (res: any, result: ApiResult) => {
-  res.statusCode = result.status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
-  res.end(result.status === 204 ? undefined : JSON.stringify(result.body));
-};
-
 const handleAdminUsersRequest = async (req: any): Promise<ApiResult> => {
   if (req.method === 'OPTIONS') {
     return {
@@ -218,20 +160,11 @@ const handleAdminUsersRequest = async (req: any): Promise<ApiResult> => {
 export default async function handler(req: any, res?: any): Promise<Response | void> {
   try {
     const result = await handleAdminUsersRequest(req);
-    if (res) {
-      sendNodeResponse(res, result);
-      return;
-    }
-    return toWebResponse(result);
+    return deliverApiResult(result, res);
   } catch (error) {
     const status = error instanceof AdminUsersError ? error.status : 500;
     const message = error instanceof Error ? error.message : 'Unknown admin users error.';
     console.error('Admin users request failed:', error);
-    const result = { status, body: { ok: false, error: message } };
-    if (res) {
-      sendNodeResponse(res, result);
-      return;
-    }
-    return toWebResponse(result);
+    return deliverApiResult({ status, body: { ok: false, error: message } }, res);
   }
 }

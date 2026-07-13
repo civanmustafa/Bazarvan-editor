@@ -13,12 +13,7 @@ import {
   normalizeSystemSettingsPatch,
   type SystemSettingKey,
 } from '../constants/settingsRegistry';
-
-type ApiResult = {
-  status: number;
-  body: unknown;
-  headers?: Record<string, string>;
-};
+import { deliverApiResult, getHeaderValue, readRequestBody, type ApiResult } from './http.ts';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
@@ -35,37 +30,6 @@ class SettingsError extends Error {
 const SETTING_KEYS = new Set<SystemSettingKey>(SYSTEM_SETTING_KEYS);
 
 const isRecord = isSettingsRecord;
-
-const readNodeBody = async (req: any): Promise<unknown> => {
-  if (req.body !== undefined) {
-    if (typeof req.body === 'string') return req.body ? JSON.parse(req.body) : {};
-    if (Buffer.isBuffer(req.body)) return req.body.length ? JSON.parse(req.body.toString('utf8')) : {};
-    return req.body;
-  }
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
-};
-
-const readRequestBody = async (req: any): Promise<unknown> => {
-  if (typeof req.json === 'function' && typeof req.headers?.get === 'function') {
-    return req.json();
-  }
-  return readNodeBody(req);
-};
-
-const getHeaderValue = (req: any, headerName: string): string => {
-  if (typeof req.headers?.get === 'function') {
-    return req.headers.get(headerName) || '';
-  }
-
-  const directValue = req.headers?.[headerName.toLowerCase()] || req.headers?.[headerName];
-  return Array.isArray(directValue) ? String(directValue[0] || '') : String(directValue || '');
-};
 
 const getBearerToken = (req: any): string => {
   const authorization = getHeaderValue(req, 'authorization');
@@ -272,24 +236,6 @@ const saveSettings = async (
   if (error) throw error;
 };
 
-const toWebResponse = (result: ApiResult): Response => new Response(
-  JSON.stringify(result.body),
-  {
-    status: result.status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      ...(result.headers || {}),
-    },
-  },
-);
-
-const sendNodeResponse = (res: any, result: ApiResult) => {
-  res.statusCode = result.status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
-  res.end(JSON.stringify(result.body));
-};
-
 const handleSettingsRequest = async (req: any): Promise<ApiResult> => {
   if (req.method === 'OPTIONS') {
     return {
@@ -331,20 +277,11 @@ const handleSettingsRequest = async (req: any): Promise<ApiResult> => {
 export default async function handler(req: any, res?: any): Promise<Response | void> {
   try {
     const result = await handleSettingsRequest(req);
-    if (res) {
-      sendNodeResponse(res, result);
-      return;
-    }
-    return toWebResponse(result);
+    return deliverApiResult(result, res);
   } catch (error) {
     const status = error instanceof SettingsError ? error.status : 500;
     const message = error instanceof Error ? error.message : 'Unknown settings error.';
     console.error('System settings request failed:', error);
-    const result = { status, body: { ok: false, error: message } };
-    if (res) {
-      sendNodeResponse(res, result);
-      return;
-    }
-    return toWebResponse(result);
+    return deliverApiResult({ status, body: { ok: false, error: message } }, res);
   }
 }

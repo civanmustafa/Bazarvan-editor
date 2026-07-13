@@ -467,8 +467,6 @@ export const VIOLATION_PRIORITY: { [key: string]: number } = {
   'Paragraph Pair': 6,
   'طول الجمل': 6,
   'Sentence Length': 6,
-  'جداول وقوائم': 7,
-  'Tables and Lists': 7,
   'تكرار مباشر': 7,
   'Direct Repetition': 7,
   'تكرار بالفقرة': 7,

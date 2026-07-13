@@ -1891,11 +1891,6 @@ const getGeminiErrorMessage = (error: unknown, modelForMessage: string = GEMINI_
     return rawMessage;
 };
 
-const normalizeGeminiKeys = (keys?: string | string[]): string[] => {
-    const keyList = Array.isArray(keys) ? keys : keys ? [keys] : [];
-    return keyList.map(key => key.trim()).filter(Boolean);
-};
-
 type GeminiChatMessage = {
     role: 'user' | 'model';
     text: string;
@@ -2047,16 +2042,14 @@ const appendGeminiChatExchange = (
 
 const requestGeminiAnalysis = async (
     prompt: string,
-    userKeys?: string | string[],
     history?: GeminiChatMessage[],
     model: string = getSelectedGeminiFreeModel(),
     usageContext: AiApiUsageContext = {},
     progressCallback?: GeminiProgressCallback,
     provider: GeminiPatchProvider = 'gemini',
 ): Promise<GeminiAnalysisResult> => {
-    // Gemini keys stay server-side. Every UI workflow uses the same background
-    // engine so proxy timeouts cannot interrupt key/model rotation.
-    void userKeys;
+    // Every UI workflow uses the server-side engine so proxy timeouts cannot
+    // interrupt key/model rotation and browser code never handles secret keys.
     try {
       const engineResult = await runGeminiAnalysisEngine({
           request: {
@@ -2070,7 +2063,7 @@ const requestGeminiAnalysis = async (
           },
           onProgress: progressCallback,
       });
-      const { status, data, rawBody, progress, progressId } = engineResult;
+      const { status, data, rawBody, progress } = engineResult;
 
       if (status === 404) {
           throw new Error('Gemini API route is not enabled locally. Restart the Vite dev server so it can load the local API middleware.');
@@ -2176,14 +2169,13 @@ const requestGeminiAnalysis = async (
 
 const callGeminiAnalysis = async (
     prompt: string,
-    userKeys?: string | string[],
     model: string = getSelectedGeminiFreeModel(),
     onResult?: (result: GeminiAnalysisResult) => void,
     usageContext?: AiApiUsageContext,
     progressCallback?: GeminiProgressCallback,
     provider: GeminiPatchProvider = 'gemini',
 ): Promise<string> => {
-    const result = await requestGeminiAnalysis(prompt, userKeys, undefined, model, usageContext, progressCallback, provider);
+    const result = await requestGeminiAnalysis(prompt, undefined, model, usageContext, progressCallback, provider);
     onResult?.(result);
     if (result.cancelled) throw new GeminiAnalysisCancelledError();
     return result.text;
@@ -2191,7 +2183,6 @@ const callGeminiAnalysis = async (
 
 const callGeminiArticleChatAnalysis = async (
     prompt: string,
-    userKeys: string | string[] | undefined,
     currentUser: string | null,
     articleScope: string,
     provider: GeminiPatchProvider = 'gemini',
@@ -2204,18 +2195,13 @@ const callGeminiArticleChatAnalysis = async (
     const selectedModel = provider === 'geminiPaid'
         ? GEMINI_PAID_MODEL
         : model?.trim() || getGeminiModelForProvider(provider);
-    const result = await requestGeminiAnalysis(prompt, userKeys, history, selectedModel, usageContext, progressCallback, provider);
+    const result = await requestGeminiAnalysis(prompt, history, selectedModel, usageContext, progressCallback, provider);
     if (result.ok) {
         saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
     onResult?.(result);
     if (result.cancelled) throw new GeminiAnalysisCancelledError();
     return result.text;
-};
-
-const normalizeChatGptKeys = (keys?: string | string[]): string[] => {
-    const keyList = Array.isArray(keys) ? keys : keys ? [keys] : [];
-    return keyList.map(key => key.trim()).filter(Boolean);
 };
 
 type ChatGptAnalysisResult = {
@@ -2439,7 +2425,6 @@ const isPlaceholderArticleTitle = (value: string): boolean => {
 
 const callChatGptAnalysis = async (
     prompt: string,
-    userKeys?: string | string[],
     conversationId?: string,
     usageContext: AiApiUsageContext = {},
 ): Promise<ChatGptAnalysisResult> => {
@@ -4799,7 +4784,7 @@ export const useAI = () => {
 };
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { t, uiLanguage, apiKeys, engineeringPrompts, currentUser, currentView } = useUser();
+    const { t, uiLanguage, engineeringPrompts, currentUser, currentView } = useUser();
     const editor = useEditorSelector(context => context.editor);
     const title = useEditorSelector(context => context.title);
     const setTitle = useEditorSelector(context => context.setTitle);
@@ -5257,7 +5242,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         try {
             result = await callGeminiAnalysis(
                 prompt,
-                apiKeys.gemini,
                 undefined,
                 undefined,
                 usageContext,
@@ -5338,7 +5322,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         return { secondaries, lsi };
-    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.company, keywords.primary, title, trackGeminiProgress]);
+    }, [articleLanguage, buildApiUsageContext, goalContext, keywords.company, keywords.primary, title, trackGeminiProgress]);
 
     const generateGoalContext = useCallback(async (): Promise<{ context?: GoalContext; error?: string; cancelled?: boolean }> => {
         const primary = keywords.primary.trim();
@@ -5384,7 +5368,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         try {
             result = await callGeminiAnalysis(
                 prompt,
-                apiKeys.gemini,
                 undefined,
                 undefined,
                 usageContext,
@@ -5409,7 +5392,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         return { context };
-    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.primary, keywords.secondaries, title, trackGeminiProgress]);
+    }, [articleLanguage, buildApiUsageContext, goalContext, keywords.primary, keywords.secondaries, title, trackGeminiProgress]);
 
     const generateDraftTitle = useCallback(async (): Promise<string> => {
         const primary = keywords.primary.trim();
@@ -5441,7 +5424,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         try {
             result = await callGeminiAnalysis(
                 prompt,
-                apiKeys.gemini,
                 undefined,
                 undefined,
                 usageContext,
@@ -5453,7 +5435,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
         const parsed = extractJson(result);
         return typeof parsed?.title === 'string' ? parsed.title.trim() : '';
-    }, [apiKeys.gemini, articleLanguage, buildApiUsageContext, goalContext, keywords.lsi, keywords.primary, keywords.secondaries, trackGeminiProgress]);
+    }, [articleLanguage, buildApiUsageContext, goalContext, keywords.lsi, keywords.primary, keywords.secondaries, trackGeminiProgress]);
 
     const logReadyCommandAnalysis = useCallback((
         provider: AiPatchProvider,
@@ -5520,22 +5502,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     ) => {
         if (!editor || items.length === 0) return false;
         if (stopAiRequestIfArticleContextMissing('الأوامر السريعة')) return false;
-        const geminiKeys = normalizeGeminiKeys(provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini);
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         setAiResults(prev => ({ ...prev, [provider]: '' }));
         setAiInsertionPatches(prev => ({ ...prev, [provider]: [] }));
 
         try {
             const articleScope = getArticleChatStorageScope(articleKey, title);
-            const providerDisplayName = provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini';
             const results: {
                 item: ReadyCommandAnalysisBatchItem;
                 parsedResult: SmartAnalysisParsedResult;
-                keyIndex?: number;
             }[] = [];
             for (let index = 0; index < items.length; index += 1) {
                 const item = items[index];
-                const assignedKey = geminiKeys.length > 0 ? geminiKeys[index % geminiKeys.length] : undefined;
                 const finalPrompt = buildSmartAnalysisFinalPrompt(
                     generateContextAwarePrompt(item.userPrompt, item.options),
                     { skipPatchInstructions: item.skipPatchInstructions },
@@ -5548,7 +5526,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 });
                 const result = await callGeminiArticleChatAnalysis(
                     finalPrompt,
-                    assignedKey ? [assignedKey] : undefined,
                     currentUser,
                     articleScope,
                     provider,
@@ -5568,17 +5545,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 results.push({
                     item,
                     parsedResult,
-                    keyIndex: assignedKey ? (index % geminiKeys.length) + 1 : undefined,
                 });
             }
 
-            const keyReuseNote = geminiKeys.length > 0 && items.length > geminiKeys.length
-                ? `\n\n> ملاحظة: تم توزيع ${items.length} أوامر على ${geminiKeys.length} مفاتيح ${providerDisplayName} متاحة، لذلك تمت إعادة استخدام بعض المفاتيح.`
-                : '';
-            const displayText = results.map((result, index) => {
-                const keyLabel = result.keyIndex ? `\n\n> ${providerDisplayName} API #${result.keyIndex}` : '';
-                return `## ${index + 1}. ${result.item.commandLabel}${keyLabel}\n\n${result.parsedResult.displayText}`;
-            }).join('\n\n---\n\n') + keyReuseNote;
+            const displayText = results.map((result, index) => (
+                `## ${index + 1}. ${result.item.commandLabel}\n\n${result.parsedResult.displayText}`
+            )).join('\n\n---\n\n');
 
             setAiResults(prev => ({ ...prev, [provider]: displayText }));
             setAiInsertionPatches(prev => ({
@@ -5593,7 +5565,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [apiKeys.gemini, apiKeys.geminiPaid, editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress]);
+    }, [editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,
@@ -5613,14 +5585,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 { skipPatchInstructions: historyMeta?.skipPatchInstructions },
             );
             const articleScope = getArticleChatStorageScope(articleKey, title);
-            const geminiKeys = provider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini;
             const usageContext = buildApiUsageContext('smart_analysis', {
                 commandId: historyMeta?.commandId,
                 commandLabel: historyMeta?.commandLabel,
             });
             const result = await callGeminiArticleChatAnalysis(
                 finalPrompt,
-                geminiKeys,
                 currentUser,
                 articleScope,
                 provider,
@@ -5641,7 +5611,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.gemini, apiKeys.geminiPaid, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress]);
+    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -5656,7 +5626,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             );
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
-            const result = await callChatGptAnalysis(finalPrompt, apiKeys.chatgpt, storedConversationId, buildApiUsageContext('smart_analysis', {
+            const result = await callChatGptAnalysis(finalPrompt, storedConversationId, buildApiUsageContext('smart_analysis', {
                 commandId: historyMeta?.commandId,
                 commandLabel: historyMeta?.commandLabel,
             }));
@@ -5672,7 +5642,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, apiKeys.chatgpt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
+    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 
     const importManualChatGptResponse = useCallback((rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         const responseText = rawResponse.trim();
@@ -5697,17 +5667,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (provider === 'chatgpt') {
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
-            const result = await callChatGptAnalysis(prompt, apiKeys.chatgpt, storedConversationId, usageContext);
+            const result = await callChatGptAnalysis(prompt, storedConversationId, usageContext);
             saveStoredChatGptConversationId(currentUser, articleScope, result.conversationId);
             return result.text;
         }
 
         const geminiProvider: GeminiPatchProvider = provider === 'geminiPaid' ? 'geminiPaid' : 'gemini';
-        const geminiKeys = geminiProvider === 'geminiPaid' ? apiKeys.geminiPaid : apiKeys.gemini;
         const mergedProgressCallback = trackGeminiProgress(usageContext, progressCallback);
         return callGeminiAnalysis(
             prompt,
-            geminiKeys,
             geminiProvider === 'geminiPaid'
                 ? getGeminiModelForProvider(geminiProvider)
                 : geminiModel?.trim() || getGeminiModelForProvider(geminiProvider),
@@ -5716,7 +5684,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             mergedProgressCallback,
             geminiProvider,
         );
-    }, [apiKeys.chatgpt, apiKeys.gemini, apiKeys.geminiPaid, articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext, trackGeminiProgress]);
+    }, [articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext, trackGeminiProgress]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         const provider = quickAiProvider;

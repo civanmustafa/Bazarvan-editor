@@ -2,9 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   Activity,
-  AppWindow,
   BarChart3,
-  Baseline,
   BookOpen,
   BrainCircuit,
   Calendar,
@@ -15,18 +13,12 @@ import {
   ExternalLink,
   FileText,
   Key,
-  Languages,
-  LayoutGrid,
-  List,
   ListTree,
   Monitor,
-  NotebookTabs,
-  PaintRoller,
   RefreshCw,
   Search,
   Settings,
   Shield,
-  SlidersHorizontal,
   Sparkles,
   Trash2,
   Users,
@@ -37,9 +29,6 @@ import {
 } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
-import ClientGoalSettings from './ClientGoalSettings';
-import EngineeringPromptsSettings from './EngineeringPromptsSettings';
-import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import ExternalAnalysisReportsTable from './ExternalAnalysisReportsTable';
 import {
   getArticleTrashInfo,
@@ -72,12 +61,6 @@ import {
 import { createRemoteAdminUser, type CreateAdminUserInput } from '../utils/adminUsers';
 import { formatIstanbulDateTime, getIstanbulDateKey, getIstanbulDayEnd, getIstanbulDayStart } from '../utils/dateTime';
 import { loadSystemSettings, type SecretStatus } from '../utils/systemSettings';
-import {
-  buildGeminiFreeModelOptions,
-  getSelectedGeminiFreeModel,
-  normalizeGeminiFreeModel,
-  setSelectedGeminiFreeModel,
-} from '../utils/geminiModelPreference';
 import {
   listExternalAnalysisReportJobs,
   type ExternalAnalysisReportJob,
@@ -1368,286 +1351,11 @@ const EMPTY_SECRET_STATUS: SecretStatus = {
   },
 };
 
-const StatusPill: React.FC<{ active: boolean; label: string; count?: number }> = ({ active, label, count }) => (
-  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-black ${
-    active
-      ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
-      : 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
-  }`}>
-    {active ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-    <span>{label}</span>
-    {typeof count === 'number' && <span>({count})</span>}
-  </span>
-);
-
-const AdminSettingsSection: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode }> = ({ title, icon, children }) => (
-  <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-    <div className="mb-4 flex items-center gap-2">
-      <div className="rounded-md bg-[#d4af37]/10 p-2 text-[#d4af37] dark:bg-[#d4af37]/20">{icon}</div>
-      <h2 className="text-lg font-black text-gray-800 dark:text-gray-100">{title}</h2>
-    </div>
-    {children}
-  </section>
-);
-
-type AdminSettingsPageProps = {
-  secretStatus: SecretStatus;
-  isSecretStatusLoading: boolean;
-  onRefreshSecretStatus: () => void;
-  t: typeof translations.ar;
-  highlightStyle: 'background' | 'underline';
-  handleHighlightStyleChange: (style: 'background' | 'underline') => void;
-  chatGptOpenMode: 'window' | 'tab';
-  handleChatGptOpenModeChange: (mode: 'window' | 'tab') => void;
-  keywordViewMode: 'classic' | 'modern';
-  handleKeywordViewModeChange: (mode: 'classic' | 'modern') => void;
-  structureViewMode: 'grid' | 'list';
-  handleStructureViewModeChange: (mode: 'grid' | 'list') => void;
-  preferredLanguage: 'ar' | 'en';
-  handlePreferredLanguageChange: (lang: 'ar' | 'en') => void;
-  uiLanguage: 'ar' | 'en';
-  handleUiLanguageChange: (lang: 'ar' | 'en') => void;
-};
-
-const AdminSettingsPage: React.FC<AdminSettingsPageProps> = ({
-  secretStatus,
-  isSecretStatusLoading,
-  onRefreshSecretStatus,
-  t,
-  highlightStyle,
-  handleHighlightStyleChange,
-  chatGptOpenMode,
-  handleChatGptOpenModeChange,
-  keywordViewMode,
-  handleKeywordViewModeChange,
-  structureViewMode,
-  handleStructureViewModeChange,
-  preferredLanguage,
-  handlePreferredLanguageChange,
-  uiLanguage,
-  handleUiLanguageChange,
-}) => {
-  const buttonClass = (isActive: boolean) =>
-    `flex min-h-10 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
-      isActive
-        ? 'bg-[#d4af37] text-white'
-        : 'bg-gray-100 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-200 dark:hover:bg-[#d4af37]/20'
-    }`;
-  const [selectedGeminiFreeModel, setSelectedGeminiFreeModelState] = useState(() => getSelectedGeminiFreeModel());
-  const geminiFreeModelOptions = useMemo(() => (
-    buildGeminiFreeModelOptions([
-      secretStatus.ai.gemini.model,
-      ...(secretStatus.ai.gemini.allowedModels || []),
-    ])
-  ), [secretStatus.ai.gemini.allowedModels, secretStatus.ai.gemini.model]);
-  const geminiFreeModelValues = useMemo(() => (
-    geminiFreeModelOptions.map(option => option.value)
-  ), [geminiFreeModelOptions]);
-
-  useEffect(() => {
-    const normalizedModel = normalizeGeminiFreeModel(selectedGeminiFreeModel, geminiFreeModelValues);
-    if (normalizedModel === selectedGeminiFreeModel) return;
-    setSelectedGeminiFreeModelState(normalizedModel);
-    setSelectedGeminiFreeModel(normalizedModel, geminiFreeModelValues);
-  }, [geminiFreeModelValues, selectedGeminiFreeModel]);
-
-  const handleGeminiFreeModelChange = (value: string) => {
-    setSelectedGeminiFreeModelState(setSelectedGeminiFreeModel(value, geminiFreeModelValues));
-  };
-
-  const keyCards = [
-    {
-      title: 'Gemini المجاني',
-      configured: secretStatus.ai.gemini.configured,
-      count: secretStatus.ai.gemini.keyCount,
-      detail: secretStatus.ai.gemini.model || '-',
-    },
-    {
-      title: 'Gemini Pro',
-      configured: secretStatus.ai.geminiPaid.configured,
-      count: secretStatus.ai.geminiPaid.keyCount,
-      detail: secretStatus.ai.geminiPaid.model || '-',
-    },
-    {
-      title: 'OpenAI',
-      configured: secretStatus.ai.openAi.configured,
-      count: secretStatus.ai.openAi.keyCount,
-      detail: secretStatus.ai.openAi.model || '-',
-    },
-    {
-      title: 'N8N_INGEST_TOKEN',
-      configured: secretStatus.n8n.tokenConfigured,
-      detail: secretStatus.n8n.ingestUrl || '/api/n8n/articles',
-    },
-    {
-      title: 'SUPABASE_SERVICE_ROLE_KEY',
-      configured: secretStatus.n8n.serviceRoleConfigured,
-      detail: secretStatus.n8n.publicEditorUrl || '-',
-    },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <AdminSettingsSection title="مفاتيح API المحفوظة على السيرفر فقط" icon={<Key size={18} />}>
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm font-semibold text-gray-500 dark:text-gray-400">
-            يتم عرض الحالة وعدد المفاتيح فقط. القيم الفعلية تبقى في Environment Variables على السيرفر ولا تظهر داخل المتصفح.
-          </p>
-          <button
-            type="button"
-            onClick={onRefreshSecretStatus}
-            disabled={isSecretStatusLoading}
-            className="inline-flex items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200"
-          >
-            <RefreshCw size={16} />
-            <span>{isSecretStatusLoading ? 'جار التحديث...' : 'تحديث الحالة'}</span>
-          </button>
-        </div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {keyCards.map(card => (
-            <div key={card.title} className="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-              <div className="mb-2 text-sm font-black text-gray-700 dark:text-gray-200">{card.title}</div>
-              <StatusPill active={card.configured} label={card.configured ? 'مفعل' : 'غير مفعل'} count={card.count} />
-              <div className="mt-2 truncate text-xs font-semibold text-gray-500" dir="ltr" title={card.detail}>
-                {card.detail}
-              </div>
-            </div>
-          ))}
-        </div>
-        <label className="mt-4 block max-w-md">
-          <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">موديل Gemini المجاني الافتراضي</span>
-          <select
-            value={selectedGeminiFreeModel}
-            onChange={event => handleGeminiFreeModelChange(event.target.value)}
-            className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
-          >
-            {geminiFreeModelOptions.map(option => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </label>
-      </AdminSettingsSection>
-
-      <AdminSettingsSection title="إعدادات العملاء" icon={<Users size={18} />}>
-        <ClientGoalSettings />
-      </AdminSettingsSection>
-
-      <AdminSettingsSection title="الأوامر الافتراضية للتحليل الخارجي" icon={<ListTree size={18} />}>
-        <ExternalAnalysisDefaultCommandsSettings />
-      </AdminSettingsSection>
-
-      <AdminSettingsSection title="قوالب التحرير والتحليل" icon={<SlidersHorizontal size={18} />}>
-        <EngineeringPromptsSettings />
-      </AdminSettingsSection>
-
-      <AdminSettingsSection title="أسلوب التمييز وتفضيلات التحرير" icon={<PaintRoller size={18} />}>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <div className="mb-2 text-sm font-bold text-gray-600 dark:text-gray-300">{t.highlightStyle}</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => handleHighlightStyleChange('background')} className={buttonClass(highlightStyle === 'background')} title={t.background}>
-                <PaintRoller size={16} />
-                <span>{t.background}</span>
-              </button>
-              <button type="button" onClick={() => handleHighlightStyleChange('underline')} className={buttonClass(highlightStyle === 'underline')} title={t.wavyUnderline}>
-                <Baseline size={16} />
-                <span>{t.wavyUnderline}</span>
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-sm font-bold text-gray-600 dark:text-gray-300">{t.chatGptOpenPreference}</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => handleChatGptOpenModeChange('window')} className={buttonClass(chatGptOpenMode === 'window')} title={t.chatGptOpenSeparateWindow}>
-                <AppWindow size={16} />
-                <span>{t.chatGptOpenSeparateWindow}</span>
-              </button>
-              <button type="button" onClick={() => handleChatGptOpenModeChange('tab')} className={buttonClass(chatGptOpenMode === 'tab')} title={t.chatGptOpenNewTab}>
-                <NotebookTabs size={16} />
-                <span>{t.chatGptOpenNewTab}</span>
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-sm font-bold text-gray-600 dark:text-gray-300">{t.keywordView}</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => handleKeywordViewModeChange('classic')} className={buttonClass(keywordViewMode === 'classic')} title={t.detailedCards}>
-                <LayoutGrid size={16} />
-                <span>{t.detailedCards}</span>
-              </button>
-              <button type="button" onClick={() => handleKeywordViewModeChange('modern')} className={buttonClass(keywordViewMode === 'modern')} title={t.modernList}>
-                <ListTree size={16} />
-                <span>{t.modernList}</span>
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-sm font-bold text-gray-600 dark:text-gray-300">{t.structureView}</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => handleStructureViewModeChange('grid')} className={buttonClass(structureViewMode === 'grid')} title={t.grid}>
-                <LayoutGrid size={16} />
-                <span>{t.grid}</span>
-              </button>
-              <button type="button" onClick={() => handleStructureViewModeChange('list')} className={buttonClass(structureViewMode === 'list')} title={t.list}>
-                <List size={16} />
-                <span>{t.list}</span>
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-sm font-bold text-gray-600 dark:text-gray-300">{t.defaultArticleLanguage}</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => handlePreferredLanguageChange('ar')} className={buttonClass(preferredLanguage === 'ar')} title={t.arabic}>
-                <Languages size={16} />
-                <span>{t.arabic}</span>
-              </button>
-              <button type="button" onClick={() => handlePreferredLanguageChange('en')} className={buttonClass(preferredLanguage === 'en')} title={t.english}>
-                <Languages size={16} />
-                <span>{t.english}</span>
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-sm font-bold text-gray-600 dark:text-gray-300">{t.interfaceLanguage}</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => handleUiLanguageChange('ar')} className={buttonClass(uiLanguage === 'ar')} title={t.arabic}>
-                <Languages size={16} />
-                <span>{t.arabic}</span>
-              </button>
-              <button type="button" onClick={() => handleUiLanguageChange('en')} className={buttonClass(uiLanguage === 'en')} title={t.english}>
-                <Languages size={16} />
-                <span>{t.english}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </AdminSettingsSection>
-    </div>
-  );
-};
-
 const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   const {
     currentUser,
     currentUserRole,
     isDarkMode,
-    highlightStyle,
-    handleHighlightStyleChange,
-    chatGptOpenMode,
-    handleChatGptOpenModeChange,
-    keywordViewMode,
-    handleKeywordViewModeChange,
-    structureViewMode,
-    handleStructureViewModeChange,
-    preferredLanguage,
-    handlePreferredLanguageChange,
-    uiLanguage,
-    handleUiLanguageChange,
     t,
   } = useUser();
   const [articles, setArticles] = useState<RemoteArticleActivity[]>([]);

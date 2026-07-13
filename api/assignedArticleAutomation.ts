@@ -5,12 +5,7 @@ import {
 } from '../constants/modelRegistry';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { aiExecutionEngine, type AiExecutionTelemetryContext } from '../server/aiExecutionEngine';
-
-type ApiResult = {
-  status: number;
-  body: unknown;
-  headers?: Record<string, string>;
-};
+import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type AutomationStatus = 'generated' | 'analyzed' | 'skipped' | 'failed';
 type GeminiProvider = 'gemini' | 'geminiPaid';
@@ -44,10 +39,6 @@ class AssignedAutomationError extends Error {
 const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || GEMINI_ANALYSIS_MODEL;
 const DEFAULT_GEMINI_PAID_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || GEMINI_PAID_ANALYSIS_MODEL;
 
-const isRecord = (value: unknown): value is Record<string, any> => (
-  !!value && typeof value === 'object' && !Array.isArray(value)
-);
-
 const toTrimmedString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
@@ -76,53 +67,7 @@ const getSupabaseAdmin = (): SupabaseAdmin => {
   });
 };
 
-const readNodeBody = async (req: any): Promise<unknown> => {
-  if (req.body !== undefined) {
-    if (typeof req.body === 'string') return req.body ? JSON.parse(req.body) : {};
-    if (Buffer.isBuffer(req.body)) return req.body.length ? JSON.parse(req.body.toString('utf8')) : {};
-    return req.body;
-  }
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
-};
-
-const readRequestBody = async (req: any): Promise<unknown> => {
-  if (typeof req.json === 'function' && typeof req.headers?.get === 'function') {
-    return req.json();
-  }
-  return readNodeBody(req);
-};
-
-const getHeaderValue = (req: any, headerName: string): string => {
-  if (typeof req.headers?.get === 'function') {
-    return req.headers.get(headerName) || '';
-  }
-
-  const directValue = req.headers?.[headerName.toLowerCase()] || req.headers?.[headerName];
-  return Array.isArray(directValue) ? String(directValue[0] || '') : String(directValue || '');
-};
-
 const getContentType = (req: any): string => getHeaderValue(req, 'content-type');
-
-const toWebResponse = (result: ApiResult): Response => new Response(JSON.stringify(result.body), {
-  status: result.status,
-  headers: {
-    'Content-Type': 'application/json; charset=utf-8',
-    ...(result.headers || {}),
-  },
-});
-
-const sendNodeResponse = (res: any, result: ApiResult) => {
-  res.statusCode = result.status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
-  res.end(JSON.stringify(result.body));
-};
 
 const wait = (duration: number) => new Promise(resolve => setTimeout(resolve, duration));
 
@@ -830,9 +775,5 @@ const handleAssignedArticleAutomationRequest = async (req: any): Promise<ApiResu
 
 export default async function handler(req: any, res?: any): Promise<Response | void> {
   const result = await handleAssignedArticleAutomationRequest(req);
-  if (res) {
-    sendNodeResponse(res, result);
-    return;
-  }
-  return toWebResponse(result);
+  return deliverApiResult(result, res);
 }

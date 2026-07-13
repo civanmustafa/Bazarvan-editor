@@ -14,6 +14,7 @@ import {
   type AiExecutionTelemetryContext,
 } from '../server/aiExecutionEngine';
 import { recordAiExecutionTelemetry } from '../server/aiExecutionTelemetry';
+import { deliverApiResult, getHeaderValue, readRequestBody, type ApiResult } from './http.ts';
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-5.4";
 const ALLOWED_OPENAI_MODELS = new Set([
@@ -24,12 +25,6 @@ const ALLOWED_OPENAI_MODELS = new Set([
     .filter(Boolean),
 ]);
 const OPENAI_TIMEOUT_MS = 300000;
-
-type ApiResult = {
-  status: number;
-  body: unknown;
-  headers?: Record<string, string>;
-};
 
 type OpenAiAttemptDetail = {
   keyFingerprint: string;
@@ -69,49 +64,7 @@ const normalizeKeys = (apiKey?: unknown, apiKeys?: unknown): string[] => {
     .filter(Boolean);
 };
 
-const readNodeBody = async (req: any): Promise<unknown> => {
-  if (req.body !== undefined) {
-    if (typeof req.body === "string") return req.body ? JSON.parse(req.body) : {};
-    if (Buffer.isBuffer(req.body)) return req.body.length ? JSON.parse(req.body.toString("utf8")) : {};
-    return req.body;
-  }
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
-};
-
-const readRequestBody = async (req: any): Promise<unknown> => {
-  if (typeof req.json === "function" && typeof req.headers?.get === "function") {
-    return req.json();
-  }
-  return readNodeBody(req);
-};
-
-const getContentType = (req: any): string => {
-  if (typeof req.headers?.get === "function") {
-    return req.headers.get("content-type") || "";
-  }
-  return String(req.headers?.["content-type"] || req.headers?.["Content-Type"] || "");
-};
-
-const toWebResponse = (result: ApiResult): Response => new Response(result.status === 204 ? null : JSON.stringify(result.body), {
-  status: result.status,
-  headers: {
-    "Content-Type": "application/json; charset=utf-8",
-    ...(result.headers || {}),
-  },
-});
-
-const sendNodeResponse = (res: any, result: ApiResult) => {
-  res.statusCode = result.status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
-  res.end(result.status === 204 ? undefined : JSON.stringify(result.body));
-};
+const getContentType = (req: any): string => getHeaderValue(req, 'content-type');
 
 const withCorsResponseHeaders = (req: any, result: ApiResult): ApiResult => {
   try {
@@ -477,9 +430,5 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
 
 export default async function handler(req: any, res?: any): Promise<Response | void> {
   const result = withCorsResponseHeaders(req, await handleChatGptRequest(req));
-  if (res) {
-    sendNodeResponse(res, result);
-    return;
-  }
-  return toWebResponse(result);
+  return deliverApiResult(result, res);
 }

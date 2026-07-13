@@ -3,12 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
-
-type ApiResult = {
-  status: number;
-  body: unknown;
-  headers?: Record<string, string>;
-};
+import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
@@ -63,10 +58,6 @@ class ExternalAnalysisApiError extends Error {
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, any> => (
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-);
-
 const toTrimmedString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
@@ -80,36 +71,6 @@ const toStringList = (value: unknown): string[] => (
 const uniqueStrings = (items: string[]): string[] => (
   Array.from(new Set(items.map(item => item.trim()).filter(Boolean)))
 );
-
-const readNodeBody = async (req: any): Promise<unknown> => {
-  if (req.body !== undefined) {
-    if (typeof req.body === 'string') return req.body ? JSON.parse(req.body) : {};
-    if (Buffer.isBuffer(req.body)) return req.body.length ? JSON.parse(req.body.toString('utf8')) : {};
-    return req.body;
-  }
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
-};
-
-const readRequestBody = async (req: any): Promise<unknown> => {
-  if (typeof req.json === 'function' && typeof req.headers?.get === 'function') {
-    return req.json();
-  }
-  return readNodeBody(req);
-};
-
-const getHeaderValue = (req: any, headerName: string): string => {
-  if (typeof req.headers?.get === 'function') {
-    return req.headers.get(headerName) || '';
-  }
-  const directValue = req.headers?.[headerName.toLowerCase()] || req.headers?.[headerName];
-  return Array.isArray(directValue) ? String(directValue[0] || '') : String(directValue || '');
-};
 
 const getBearerToken = (req: any): string => (
   getHeaderValue(req, 'authorization').match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || ''
@@ -542,24 +503,6 @@ const cancelAllExternalAnalysisJobs = async (
   };
 };
 
-const toWebResponse = (result: ApiResult): Response => new Response(
-  result.status === 204 ? null : JSON.stringify(result.body),
-  {
-    status: result.status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      ...(result.headers || {}),
-    },
-  },
-);
-
-const sendNodeResponse = (res: any, result: ApiResult) => {
-  res.statusCode = result.status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
-  res.end(result.status === 204 ? undefined : JSON.stringify(result.body));
-};
-
 const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   if (req.method === 'OPTIONS') {
     return {
@@ -651,11 +594,7 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
 export default async function handler(req: any, res?: any): Promise<Response | void> {
   try {
     const result = await handleExternalAnalysisRequest(req);
-    if (res) {
-      sendNodeResponse(res, result);
-      return;
-    }
-    return toWebResponse(result);
+    return deliverApiResult(result, res);
   } catch (error) {
     const status = error instanceof ExternalAnalysisApiError || error instanceof ArticleAccessPolicyError
       ? error.status
@@ -668,10 +607,6 @@ export default async function handler(req: any, res?: any): Promise<Response | v
       status,
       body: { ok: false, code, error: message, ...(details || {}) },
     };
-    if (res) {
-      sendNodeResponse(res, result);
-      return;
-    }
-    return toWebResponse(result);
+    return deliverApiResult(result, res);
   }
 }

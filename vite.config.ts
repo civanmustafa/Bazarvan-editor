@@ -1,62 +1,8 @@
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import chatgptHandler from './api/chatgpt';
-import geminiHandler, { geminiProgressHandler } from './api/gemini';
-import n8nArticlesHandler from './api/n8nArticles';
-import assignedArticleAutomationHandler from './api/assignedArticleAutomation';
-import systemSettingsHandler from './api/systemSettings';
-import adminUsersHandler from './api/adminUsers';
-import articlesSaveHandler from './api/articlesSave';
-
-type ApiHandler = (req: Request) => Promise<Response | void>;
-
-// Add local browser-facing API routes here, then implement their handler in api/*.
-const apiHandlers = new Map<string, ApiHandler>([
-  ['/api/chatgpt', chatgptHandler],
-  ['/api/gemini', geminiHandler],
-  ['/api/n8n/articles', n8nArticlesHandler],
-  ['/api/articles/assigned-automation', assignedArticleAutomationHandler],
-  ['/api/system/settings', systemSettingsHandler],
-  ['/api/admin/users', adminUsersHandler],
-  ['/api/articles/save', articlesSaveHandler],
-]);
-
-const readRequestBody = (req: any): Promise<Buffer> => new Promise((resolve, reject) => {
-  const chunks: Buffer[] = [];
-  req.on('data', (chunk: Buffer | string) => {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  });
-  req.on('end', () => resolve(Buffer.concat(chunks)));
-  req.on('error', reject);
-});
-
-const createWebRequest = async (req: any, url: string): Promise<Request> => {
-  const headers = new Headers();
-  Object.entries(req.headers || {}).forEach(([key, value]) => {
-    if (Array.isArray(value)) {
-      value.forEach(item => headers.append(key, String(item)));
-    } else if (value !== undefined) {
-      headers.set(key, String(value));
-    }
-  });
-
-  const hasBody = req.method && !['GET', 'HEAD'].includes(req.method);
-  const body = hasBody ? await readRequestBody(req) : undefined;
-
-  return new Request(url, {
-    method: req.method,
-    headers,
-    body: body && body.length > 0 ? body : undefined,
-  });
-};
-
-const sendWebResponse = async (res: any, response: Response) => {
-  res.statusCode = response.status;
-  response.headers.forEach((value, key) => res.setHeader(key, value));
-  const body = Buffer.from(await response.arrayBuffer());
-  res.end(body);
-};
+import { findApiRoute } from './server/apiRouteRegistry';
+import { createWebRequest, sendWebResponse } from './server/viteApiAdapter';
 
 export default defineConfig(({ mode }) => {
       const env = loadEnv(mode, process.cwd(), '');
@@ -85,17 +31,16 @@ export default defineConfig(({ mode }) => {
 
               const origin = `http://${req.headers.host || 'localhost'}`;
               const url = new URL(req.url, origin);
-              const handler = apiHandlers.get(url.pathname)
-                || (url.pathname.startsWith('/api/gemini/progress/') ? geminiProgressHandler : undefined);
+              const route = findApiRoute(url.pathname, req.method || 'GET');
 
-              if (!handler) {
+              if (!route) {
                 next();
                 return;
               }
 
               try {
                 const request = await createWebRequest(req, url.toString());
-                const response = await handler(request);
+                const response = await route.handler(request);
                 if (!response) {
                   throw new Error(`Local API route did not return a response for ${url.pathname}`);
                 }
