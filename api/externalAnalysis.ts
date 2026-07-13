@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 
@@ -13,9 +14,6 @@ type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
 type ArticleRow = {
   id: string;
-  owner_id: string | null;
-  created_by: string | null;
-  assigned_to: string | null;
   status: string;
   title: string | null;
   plain_text: string | null;
@@ -159,7 +157,7 @@ const readArticleAndState = async (
   const [articleResult, stateResult] = await Promise.all([
     supabase
       .from('articles')
-      .select('id,owner_id,created_by,assigned_to,status,title,plain_text,keywords,goal_context,metadata,article_language,updated_at')
+      .select('id,status,title,plain_text,keywords,goal_context,metadata,article_language,updated_at')
       .eq('id', articleId)
       .maybeSingle(),
     supabase
@@ -188,23 +186,6 @@ const readArticleAndState = async (
     article: articleResult.data as ArticleRow,
     state: stateResult.data as AnalysisStateRow,
   };
-};
-
-const assertCanManageArticle = (
-  article: ArticleRow,
-  profile: { id: string; role: 'admin' | 'user' },
-): void => {
-  if (
-    profile.role === 'admin'
-    || article.owner_id === profile.id
-    || article.assigned_to === profile.id
-  ) return;
-
-  throw new ExternalAnalysisApiError({
-    message: 'You do not have permission to start analysis for this article.',
-    status: 403,
-    code: 'article_analysis_forbidden',
-  });
 };
 
 const toArticleSnapshot = (article: ArticleRow) => ({
@@ -622,7 +603,7 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   const supabase = getExternalAnalysisSupabaseAdmin() as SupabaseAdmin;
   const profile = await authenticateProfile(supabase, req);
   const { article, state } = await readArticleAndState(supabase, articleId);
-  assertCanManageArticle(article, profile);
+  await requireArticleWriteAccess(supabase, article.id, profile.id);
   const action = toTrimmedString(body.action);
 
   if (action === 'semantic') {
@@ -676,7 +657,9 @@ export default async function handler(req: any, res?: any): Promise<Response | v
     }
     return toWebResponse(result);
   } catch (error) {
-    const status = error instanceof ExternalAnalysisApiError ? error.status : 500;
+    const status = error instanceof ExternalAnalysisApiError || error instanceof ArticleAccessPolicyError
+      ? error.status
+      : 500;
     const code = error instanceof ExternalAnalysisApiError ? error.code : 'external_analysis_request_failed';
     const details = error instanceof ExternalAnalysisApiError ? error.details : undefined;
     const message = error instanceof Error ? error.message : 'Unknown external analysis error.';

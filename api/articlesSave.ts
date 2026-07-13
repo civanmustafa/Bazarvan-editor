@@ -1,5 +1,18 @@
+import { createHash } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
+import {
+  ApiSecurityError,
+  assertAllowedOrigin,
+  assertRequestContentLength,
+  authenticateApiRequest,
+  consumeApiRateLimit,
+  getCorsPreflightHeaders,
+  getCorsResponseHeaders,
+  getHeaderValue,
+  getPositiveIntegerEnv,
+  toApiSecurityResult,
+} from './apiSecurity';
 
 type ApiResult = {
   status: number;
@@ -7,9 +20,9 @@ type ApiResult = {
   headers?: Record<string, string>;
 };
 
-type SupabaseAdmin = SupabaseClient<any, 'public', any>;
-type ArticleStatus = 'draft' | 'in_review' | 'published' | 'archived';
+type SupabaseUserClient = SupabaseClient<any, 'public', any>;
 type ArticleLanguage = 'ar' | 'en';
+type ArticleSaveReason = 'manual' | 'auto' | 'lifecycle' | 'recovery';
 
 class ArticleSaveError extends Error {
   status: number;
@@ -22,7 +35,7 @@ class ArticleSaveError extends Error {
 }
 
 const isRecord = (value: unknown): value is Record<string, any> => (
-  !!value && typeof value === 'object' && !Array.isArray(value)
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
 
 const readNodeBody = async (req: any): Promise<unknown> => {
@@ -47,36 +60,38 @@ const readRequestBody = async (req: any): Promise<unknown> => {
   return readNodeBody(req);
 };
 
-const getHeaderValue = (req: any, headerName: string): string => {
-  if (typeof req.headers?.get === 'function') {
-    return req.headers.get(headerName) || '';
-  }
-
-  const directValue = req.headers?.[headerName.toLowerCase()] || req.headers?.[headerName];
-  return Array.isArray(directValue) ? String(directValue[0] || '') : String(directValue || '');
-};
-
-const getBearerToken = (req: any): string => {
-  const authorization = getHeaderValue(req, 'authorization');
-  return authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
-};
-
 const normalizeProjectUrl = (value: string): string => value
   .trim()
   .replace(/\/rest\/v1\/?$/i, '')
   .replace(/\/+$/, '');
 
-const getSupabaseAdmin = (): SupabaseAdmin => {
+const getBearerToken = (req: any): string => (
+  getHeaderValue(req, 'authorization').match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || ''
+);
+
+const getSupabaseUserClient = (req: any): SupabaseUserClient => {
   const supabaseUrl = normalizeProjectUrl(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '');
-  const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  const anonKey = String(
+    process.env.SUPABASE_ANON_KEY
+      || process.env.VITE_SUPABASE_ANON_KEY
+      || '',
+  ).trim();
+  const token = getBearerToken(req);
 
-  if (!supabaseUrl) throw new ArticleSaveError('SUPABASE_URL or VITE_SUPABASE_URL is not configured.', 503);
-  if (!serviceRoleKey) throw new ArticleSaveError('SUPABASE_SERVICE_ROLE_KEY is not configured.', 503);
+  if (!supabaseUrl || !anonKey) {
+    throw new ArticleSaveError('The authenticated Supabase save service is not configured.', 503);
+  }
+  if (!token) throw new ArticleSaveError('Authentication is required.', 401);
 
-  return createClient(supabaseUrl, serviceRoleKey, {
+  return createClient(supabaseUrl, anonKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     },
   });
 };
@@ -89,77 +104,9 @@ const normalizeLanguage = (value: unknown): ArticleLanguage => (
   value === 'en' ? 'en' : 'ar'
 );
 
-const normalizeStats = (snapshot: ArticleStorageSnapshot) => {
-  const plainText = typeof snapshot.plainText === 'string' ? snapshot.plainText : '';
-  const wordCount = Number.isFinite(snapshot.analysisSummary?.wordCount)
-    ? Number(snapshot.analysisSummary?.wordCount)
-    : plainText.trim()
-      ? plainText.trim().split(/\s+/).filter(Boolean).length
-      : 0;
-
-  const compactNumber = (value: unknown): number => (
-    typeof value === 'number' && Number.isFinite(value) ? value : 0
-  );
-
-  return {
-    wordCount,
-    keywordViolations: compactNumber(snapshot.analysisSummary?.keywordViolations),
-    violatingCriteriaCount: compactNumber(
-      snapshot.analysisSummary?.structureViolations
-        ?? snapshot.analysisSummary?.structureStats?.violatingCriteriaCount,
-    ),
-    totalDuplicates: compactNumber(
-      snapshot.analysisSummary?.totalDuplicates
-        ?? snapshot.analysisSummary?.duplicateStats?.totalDuplicates,
-    ),
-  };
-};
-
-const authenticateUser = async (supabase: SupabaseAdmin, req: any) => {
-  const token = getBearerToken(req);
-  if (!token) throw new ArticleSaveError('Authentication is required.', 401);
-
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !userData.user?.id) {
-    throw new ArticleSaveError('Invalid Supabase session.', 401);
-  }
-
-  const user = userData.user;
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('id,email,full_name,role,is_active')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (profileError) throw profileError;
-
-  if (!profile) {
-    const fullName = typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name.trim()
-      ? user.user_metadata.full_name.trim()
-      : typeof user.user_metadata?.name === 'string' && user.user_metadata.name.trim()
-        ? user.user_metadata.name.trim()
-        : null;
-
-    const { data: insertedProfile, error: insertError } = await supabase
-      .from('profiles')
-      .insert({
-        id: user.id,
-        email: user.email || null,
-        full_name: fullName,
-        role: 'user',
-      })
-      .select('id,email,full_name,role,is_active')
-      .single();
-
-    if (insertError) throw insertError;
-    return { user, profile: insertedProfile };
-  }
-
-  if (profile.is_active === false) {
-    throw new ArticleSaveError('User profile is inactive.', 403);
-  }
-
-  return { user, profile };
+const normalizeSaveReason = (value: unknown): ArticleSaveReason => {
+  if (value === 'auto' || value === 'lifecycle' || value === 'recovery') return value;
+  return 'manual';
 };
 
 const sanitizeSnapshot = (value: unknown): ArticleStorageSnapshot => {
@@ -177,16 +124,40 @@ const sanitizeSnapshot = (value: unknown): ArticleStorageSnapshot => {
     goalContext: isRecord(value.goalContext) ? value.goalContext : {},
     articleLanguage: normalizeLanguage(value.articleLanguage),
     analysisSummary: isRecord(value.analysisSummary) ? value.analysisSummary : undefined,
-    attachments: value.attachments,
-    savedAt: new Date().toISOString(),
+    attachments: isRecord(value.attachments) ? value.attachments : undefined,
+    savedAt: typeof value.savedAt === 'string' && value.savedAt.trim()
+      ? value.savedAt
+      : new Date().toISOString(),
   } as ArticleStorageSnapshot;
 };
 
-const canUpdateArticle = (article: Record<string, any>, profile: Record<string, any>): boolean => (
-  profile.role === 'admin' ||
-  article.owner_id === profile.id ||
-  article.assigned_to === profile.id
-);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9:_-]{16,160}$/;
+
+const normalizeArticleId = (value: unknown): string | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const articleId = typeof value === 'string' ? value.trim() : '';
+  if (!UUID_PATTERN.test(articleId)) throw new ArticleSaveError('articleId must be a valid UUID.', 400);
+  return articleId;
+};
+
+const resolveIdempotencyKey = (
+  value: unknown,
+  fallbackSource: Record<string, unknown>,
+): string => {
+  if (typeof value === 'string' && value.trim()) {
+    const key = value.trim();
+    if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
+      throw new ArticleSaveError('idempotencyKey has an invalid format.', 400);
+    }
+    return key;
+  }
+
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify(fallbackSource))
+    .digest('hex');
+  return `legacy:${fingerprint}`;
+};
 
 const toRemoteArticleActivity = (row: Record<string, any>) => ({
   id: row.id,
@@ -209,139 +180,102 @@ const toRemoteArticleActivity = (row: Record<string, any>) => ({
   keywords: row.keywords || {},
   goalContext: row.goal_context || {},
   articleLanguage: row.article_language === 'en' ? 'en' : 'ar',
+  content: {
+    storage: 'supabase',
+    key: row.id,
+  },
 });
 
-const recordArticleVersion = async (
-  supabase: SupabaseAdmin,
-  articleId: string,
-  snapshot: ArticleStorageSnapshot,
-  userId: string,
-  versionNumber: number,
-  stats: Record<string, number>,
-) => {
-  const { error } = await supabase
-    .from('article_versions')
-    .insert({
-      article_id: articleId,
-      version_number: Math.max(1, versionNumber),
-      created_by: userId,
-      title: normalizeTitle(snapshot.title),
-      content_json: snapshot.content || {},
-      content_html: snapshot.contentHtml || null,
-      plain_text: snapshot.plainText || '',
-      keywords: snapshot.keywords || {},
-      goal_context: snapshot.goalContext || {},
-      analysis: null,
-      stats,
-      note: 'manual-save',
-    });
+const throwRpcError = (error: Record<string, any>): never => {
+  const code = String(error.code || '');
+  const message = typeof error.message === 'string' && error.message.trim()
+    ? error.message.trim()
+    : 'Article save transaction failed.';
 
-  if (error) {
-    console.error(`Failed to record article version "${articleId}" from API save:`, error);
-  }
+  if (code === '42501') throw new ArticleSaveError(message, 403);
+  if (code === 'P0002') throw new ArticleSaveError(message, 404);
+  if (code === '22023' || code === '23514') throw new ArticleSaveError(message, 400);
+
+  console.error('Atomic article save RPC failed:', {
+    code,
+    details: error.details,
+    hint: error.hint,
+  });
+  throw new ArticleSaveError('The article save service is temporarily unavailable.', 503);
 };
 
-const saveArticle = async (
-  supabase: SupabaseAdmin,
-  snapshot: ArticleStorageSnapshot,
-  profile: Record<string, any>,
-  articleId?: string | null,
-) => {
-  const savedAt = new Date().toISOString();
-  const stats = normalizeStats(snapshot);
-  const title = normalizeTitle(snapshot.title);
-  const email = typeof profile.email === 'string' ? profile.email.trim() : '';
-  const fullName = typeof profile.full_name === 'string' ? profile.full_name.trim() : null;
-
-  if (articleId) {
-    const { data: currentRow, error: readError } = await supabase
-      .from('articles')
-      .select('id,owner_id,assigned_to,save_count,metadata')
-      .eq('id', articleId)
-      .single();
-
-    if (readError || !currentRow) throw readError || new ArticleSaveError('Article was not found.', 404);
-    if (!canUpdateArticle(currentRow, profile)) {
-      throw new ArticleSaveError('You do not have permission to update this article.', 403);
-    }
-
-    const currentMetadata = isRecord(currentRow.metadata) ? currentRow.metadata : {};
-    const nextSaveCount = Number(currentRow.save_count || 0) + 1;
-    const { data, error } = await supabase
-      .from('articles')
-      .update({
-        title,
-        content_json: snapshot.content || {},
-        content_html: snapshot.contentHtml || null,
-        plain_text: snapshot.plainText || '',
-        keywords: snapshot.keywords || {},
-        goal_context: snapshot.goalContext || {},
-        article_language: normalizeLanguage(snapshot.articleLanguage),
-        analysis: null,
-        stats,
-        last_saved_at: savedAt,
-        metadata: {
-          ...currentMetadata,
-          analysisSummary: stats,
-          attachments: {
-            ...(isRecord(currentMetadata.attachments) ? currentMetadata.attachments : {}),
-            ...(isRecord(snapshot.attachments) ? snapshot.attachments : {}),
-          },
-        },
-        save_count: nextSaveCount,
-      })
-      .eq('id', articleId)
-      .select('*')
-      .single();
-
-    if (error) throw error;
-    await recordArticleVersion(supabase, data.id, snapshot, profile.id, nextSaveCount, stats);
-    return toRemoteArticleActivity(data);
+const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
+  if (req.method === 'OPTIONS') {
+    return {
+      status: 204,
+      body: {},
+      headers: getCorsPreflightHeaders(req, 'POST, OPTIONS'),
+    };
   }
 
-  const visibleTo = email
-    ? [{ id: profile.id, email, fullName, role: 'editor' }]
-    : [];
-  const { data, error } = await supabase
-    .from('articles')
-    .insert({
-      owner_id: profile.id,
-      created_by: profile.id,
-      assigned_to: profile.id,
-      source: 'manual',
-      visibility: 'private',
-      status: 'draft' satisfies ArticleStatus,
-      title,
-      content_json: snapshot.content || {},
-      content_html: snapshot.contentHtml || null,
-      plain_text: snapshot.plainText || '',
-      keywords: snapshot.keywords || {},
-      goal_context: snapshot.goalContext || {},
-      article_language: normalizeLanguage(snapshot.articleLanguage),
-      analysis: null,
-      stats,
-      last_saved_at: savedAt,
-      save_count: 1,
-      time_spent_seconds: 0,
-      metadata: {
-        attachments: snapshot.attachments || null,
-        analysisSummary: stats,
-        n8nSettings: {
-          visibility: 'private',
-          accessRole: 'editor',
-          visibleToEmailsCsv: email,
-          articleLanguage: normalizeLanguage(snapshot.articleLanguage),
-          status: 'draft',
-        },
-        visibleTo,
-      },
-    })
-    .select('*')
-    .single();
+  assertAllowedOrigin(req);
+  const corsHeaders = getCorsResponseHeaders(req);
+  if (req.method !== 'POST') {
+    return {
+      status: 405,
+      body: { ok: false, error: 'Method not allowed. Use POST.' },
+      headers: corsHeaders,
+    };
+  }
 
-  if (error) throw error;
-  await recordArticleVersion(supabase, data.id, snapshot, profile.id, 1, stats);
-  return toRemoteArticleActivity(data);
+  const maximumBytes = getPositiveIntegerEnv('ARTICLE_SAVE_MAX_BYTES', 12 * 1024 * 1024, 25 * 1024 * 1024);
+  assertRequestContentLength(req, maximumBytes);
+  const principal = await authenticateApiRequest(req);
+  consumeApiRateLimit(
+    'articles:save',
+    principal.userId,
+    getPositiveIntegerEnv('ARTICLE_SAVE_RATE_LIMIT_PER_MINUTE', 120, 1_000),
+  );
+
+  if (!getHeaderValue(req, 'content-type').toLowerCase().includes('application/json')) {
+    throw new ArticleSaveError('Content-Type must be application/json.', 415);
+  }
+  let body: unknown;
+  try {
+    body = await readRequestBody(req);
+  } catch {
+    throw new ArticleSaveError('Request body must contain valid JSON.', 400);
+  }
+  if (!isRecord(body)) throw new ArticleSaveError('JSON body must be an object.', 400);
+
+  const snapshot = sanitizeSnapshot(body.snapshot);
+  const articleId = normalizeArticleId(body.articleId);
+  const saveReason = normalizeSaveReason(body.saveReason);
+  const idempotencyKey = resolveIdempotencyKey(body.idempotencyKey, {
+    userId: principal.userId,
+    articleId,
+    saveReason,
+    snapshot: body.snapshot,
+  });
+  const supabase = getSupabaseUserClient(req);
+  const { data, error } = await supabase.rpc('save_article_snapshot', {
+    p_article_id: articleId,
+    p_idempotency_key: idempotencyKey,
+    p_snapshot: snapshot,
+    p_save_reason: saveReason,
+  });
+
+  if (error) throwRpcError(error as Record<string, any>);
+  if (!isRecord(data) || !isRecord(data.article)) {
+    throw new ArticleSaveError('Article save transaction returned an invalid result.', 503);
+  }
+
+  const article = toRemoteArticleActivity(data.article);
+  return {
+    status: data.replayed === true || articleId ? 200 : 201,
+    body: {
+      ok: true,
+      article,
+      versionNumber: Number(data.versionNumber || article.saveCount || 1),
+      replayed: data.replayed === true,
+    },
+    headers: corsHeaders,
+  };
 };
 
 const toWebResponse = (result: ApiResult): Response => new Response(
@@ -362,43 +296,6 @@ const sendNodeResponse = (res: any, result: ApiResult) => {
   res.end(result.status === 204 ? undefined : JSON.stringify(result.body));
 };
 
-const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
-  if (req.method === 'OPTIONS') {
-    return {
-      status: 204,
-      body: {},
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      },
-    };
-  }
-
-  if (req.method !== 'POST') {
-    return { status: 405, body: { ok: false, error: 'Method not allowed. Use POST.' } };
-  }
-
-  const supabase = getSupabaseAdmin();
-  const { profile } = await authenticateUser(supabase, req);
-  const body = await readRequestBody(req);
-  if (!isRecord(body)) throw new ArticleSaveError('JSON body must be an object.', 400);
-
-  const snapshot = sanitizeSnapshot(body.snapshot);
-  const articleId = typeof body.articleId === 'string' && body.articleId.trim()
-    ? body.articleId.trim()
-    : null;
-  const article = await saveArticle(supabase, snapshot, profile, articleId);
-
-  return {
-    status: articleId ? 200 : 201,
-    body: {
-      ok: true,
-      article,
-    },
-  };
-};
-
 export default async function handler(req: any, res?: any): Promise<Response | void> {
   try {
     const result = await handleArticleSaveRequest(req);
@@ -408,10 +305,25 @@ export default async function handler(req: any, res?: any): Promise<Response | v
     }
     return toWebResponse(result);
   } catch (error) {
-    const status = error instanceof ArticleSaveError ? error.status : 500;
-    const message = error instanceof Error ? error.message : 'Unknown article save error.';
-    console.error('Article save request failed:', error);
-    const result = { status, body: { ok: false, error: message } };
+    const securityResult = toApiSecurityResult(error);
+    const status = securityResult?.status
+      ?? (error instanceof ArticleSaveError ? error.status : 500);
+    const message = securityResult?.body.error
+      ?? (error instanceof Error ? error.message : 'Unknown article save error.');
+    if (!(error instanceof ApiSecurityError) && !(error instanceof ArticleSaveError)) {
+      console.error('Article save request failed:', error);
+    }
+    const result: ApiResult = {
+      status,
+      body: { ok: false, error: message },
+      headers: securityResult?.headers || (() => {
+        try {
+          return getCorsResponseHeaders(req);
+        } catch {
+          return undefined;
+        }
+      })(),
+    };
     if (res) {
       sendNodeResponse(res, result);
       return;

@@ -13,6 +13,10 @@ Before the first external-analysis worker deployment, apply these migrations in 
 7. `supabase/migrations/20260711020000_external_analysis_scheduler_settings.sql`
 8. `supabase/migrations/20260711030000_external_analysis_command_preferences.sql`
 9. `supabase/migrations/20260712000000_external_analysis_independent_batches.sql`
+10. `supabase/migrations/20260713000000_phase_0_1_security_hardening.sql`
+11. `supabase/migrations/20260713010000_phase_2_3_access_and_atomic_article_save.sql`
+
+Apply migrations 10 and 11 before deploying the matching web/server build. The new article-save endpoint depends on the `save_article_snapshot` RPC introduced by migration 11.
 
 ```bash
 cd /var/www/bazarvan-editor

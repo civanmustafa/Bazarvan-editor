@@ -88,17 +88,6 @@ type AppActivityEventRow = {
   created_at: string;
 };
 
-type CreatorArticleDefaults = {
-  email: string;
-  fullName: string | null;
-  visibleTo: {
-    id: string;
-    email: string;
-    fullName: string | null;
-    role: RemoteArticleAccessRole;
-  }[];
-};
-
 const ARTICLE_LIST_SELECT = [
   'id',
   'owner_id',
@@ -301,12 +290,6 @@ const isRecord = (value: unknown): value is Record<string, any> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
 );
 
-const isRowLevelSecurityError = (error: unknown): boolean => {
-  const source = isRecord(error) ? error : {};
-  const message = String(source.message || '').toLowerCase();
-  return source.code === '42501' || message.includes('row-level security');
-};
-
 const canUseLocalStorage = (): boolean => (
   typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
 );
@@ -373,89 +356,6 @@ const normalizeStats = (value: unknown): ArticleStats => {
 };
 
 const normalizeTitle = (title: string): string => title.trim() || '(untitled)';
-
-const ensureCreatorProfileForArticleInsert = async (userId: string): Promise<void> => {
-  const supabase = getSupabaseClient();
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  const authUser = authData.user;
-
-  if (authError || !authUser || authUser.id !== userId) return;
-
-  const { data: existingProfile, error: readError } = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (readError) {
-    console.warn(`Could not verify creator profile "${userId}" before article insert.`, readError);
-    return;
-  }
-  if (existingProfile) return;
-
-  const fullName = typeof authUser.user_metadata?.full_name === 'string' && authUser.user_metadata.full_name.trim()
-    ? authUser.user_metadata.full_name.trim()
-    : typeof authUser.user_metadata?.name === 'string' && authUser.user_metadata.name.trim()
-      ? authUser.user_metadata.name.trim()
-      : null;
-
-  const { error: insertError } = await supabase
-    .from('profiles')
-    .insert({
-      id: userId,
-      email: authUser.email || null,
-      full_name: fullName,
-      role: 'user',
-    });
-
-  if (insertError && insertError.code !== '23505') {
-    console.warn(`Could not create missing creator profile "${userId}" before article insert.`, insertError);
-  }
-};
-
-const resolveCreatorArticleDefaults = async (
-  userId: string,
-): Promise<CreatorArticleDefaults> => {
-  const supabase = getSupabaseClient();
-  const { data: authData } = await supabase.auth.getUser().catch(() => ({ data: { user: null } as any }));
-  const authEmail = authData.user?.id === userId && typeof authData.user.email === 'string'
-    ? authData.user.email.trim()
-    : '';
-
-  let profileData: unknown = null;
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id,email,full_name')
-      .eq('id', userId)
-      .maybeSingle();
-    if (error) throw error;
-    profileData = data;
-  } catch (error) {
-    console.warn(`Could not load creator profile "${userId}" before saving. Falling back to auth email.`, error);
-  }
-
-  const profile = isRecord(profileData) ? profileData : {};
-  const email = normalizeEmailCsv(typeof profile.email === 'string' && profile.email.trim()
-    ? profile.email
-    : authEmail);
-  const fullName = typeof profile.full_name === 'string' && profile.full_name.trim()
-    ? profile.full_name.trim()
-    : null;
-
-  return {
-    email,
-    fullName,
-    visibleTo: email
-      ? [{
-          id: userId,
-          email,
-          fullName,
-          role: 'editor',
-        }]
-      : [],
-  };
-};
 
 const toRemoteArticleActivity = (
   row: ArticleRow,
@@ -567,7 +467,8 @@ const saveRemoteArticleSnapshotViaServer = async (
   snapshot: ArticleStorageSnapshot,
   options: {
     articleId?: string | null;
-    userId: string;
+    idempotencyKey: string;
+    saveReason?: 'manual' | 'auto' | 'lifecycle' | 'recovery';
   },
 ): Promise<RemoteArticleActivity> => {
   const supabase = getSupabaseClient();
@@ -577,17 +478,34 @@ const saveRemoteArticleSnapshotViaServer = async (
     throw error || new Error('Supabase session is required to save the article.');
   }
 
-  const response = await fetch('/api/articles/save', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      articleId: options.articleId || null,
-      snapshot,
-    }),
+  const requestBody = JSON.stringify({
+    articleId: options.articleId || null,
+    idempotencyKey: options.idempotencyKey,
+    saveReason: options.saveReason || 'manual',
+    snapshot,
   });
+  let response: Response | null = null;
+  let networkError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      response = await fetch('/api/articles/save', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: requestBody,
+      });
+      if (response.status < 500 || attempt === 2) break;
+    } catch (error) {
+      networkError = error;
+      if (attempt === 2) throw error;
+    }
+  }
+
+  if (!response) {
+    throw networkError || new Error('Article save API did not respond.');
+  }
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -684,40 +602,6 @@ const buildStatsFromSnapshot = (snapshot: ArticleStorageSnapshot): ArticleStats 
       summary?.totalDuplicates ?? summary?.duplicateStats?.totalDuplicates,
     ),
   };
-};
-
-const recordArticleVersion = async (
-  articleId: string,
-  snapshot: ArticleStorageSnapshot,
-  options: {
-    userId: string;
-    versionNumber: number;
-    stats: ArticleStats;
-  },
-): Promise<void> => {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('article_versions')
-    .insert({
-      article_id: articleId,
-      version_number: Math.max(1, options.versionNumber),
-      created_by: options.userId,
-      title: normalizeTitle(snapshot.title),
-      content_json: snapshot.content || {},
-      content_html: snapshot.contentHtml || null,
-      plain_text: snapshot.plainText || '',
-      keywords: snapshot.keywords || {},
-      goal_context: snapshot.goalContext || {},
-      analysis: null,
-      stats: {
-        wordCount: options.stats.wordCount,
-      },
-      note: 'manual-save',
-    });
-
-  if (error) {
-    console.error(`Failed to record article version "${articleId}":`, error);
-  }
 };
 
 const getArticleListCacheKey = async (scope = 'all'): Promise<string> => {
@@ -1100,139 +984,10 @@ export const saveRemoteArticleSnapshot = async (
   snapshot: ArticleStorageSnapshot,
   options: {
     articleId?: string | null;
-    userId: string;
+    idempotencyKey: string;
+    saveReason?: 'manual' | 'auto' | 'lifecycle' | 'recovery';
   },
-): Promise<RemoteArticleActivity> => {
-  const supabase = getSupabaseClient();
-  const savedAt = new Date().toISOString();
-  const stats = buildStatsFromSnapshot(snapshot);
-  if (!options.articleId) {
-    await ensureCreatorProfileForArticleInsert(options.userId);
-  }
-  const creatorDefaults = await resolveCreatorArticleDefaults(options.userId);
-  const payload = {
-    owner_id: options.userId,
-    created_by: options.userId,
-    assigned_to: options.userId,
-    source: 'manual',
-    visibility: 'private',
-    status: 'draft',
-    title: normalizeTitle(snapshot.title),
-    content_json: snapshot.content || {},
-    content_html: snapshot.contentHtml || null,
-    plain_text: snapshot.plainText || '',
-    keywords: snapshot.keywords || {},
-    goal_context: snapshot.goalContext || {},
-    article_language: snapshot.articleLanguage,
-    analysis: null,
-    stats: {
-      wordCount: stats.wordCount,
-      keywordViolations: stats.keywordViolations,
-      violatingCriteriaCount: stats.violatingCriteriaCount,
-      totalDuplicates: stats.totalDuplicates,
-    },
-    last_saved_at: savedAt,
-    metadata: {
-      attachments: snapshot.attachments || null,
-      analysisSummary: {
-        wordCount: stats.wordCount,
-        keywordViolations: stats.keywordViolations,
-        structureViolations: stats.violatingCriteriaCount,
-        totalDuplicates: stats.totalDuplicates,
-      },
-      n8nSettings: {
-        visibility: 'private',
-        accessRole: 'editor',
-        visibleToEmailsCsv: creatorDefaults.email,
-        articleLanguage: snapshot.articleLanguage,
-        status: 'draft',
-      },
-      visibleTo: creatorDefaults.visibleTo,
-    },
-  };
-
-  const insertNewArticle = async (): Promise<RemoteArticleActivity> => {
-    const { data, error } = await supabase
-      .from('articles')
-      .insert({
-        ...payload,
-        save_count: 1,
-        time_spent_seconds: 0,
-      })
-      .select('*')
-      .single();
-
-    if (error) {
-      if (isRowLevelSecurityError(error)) {
-        console.warn('Direct article insert was blocked by RLS; retrying through the authenticated server save API.', error);
-        return saveRemoteArticleSnapshotViaServer(snapshot, options);
-      }
-      throw error;
-    }
-    await recordArticleVersion((data as ArticleRow).id, snapshot, {
-      userId: options.userId,
-      versionNumber: 1,
-      stats,
-    });
-    const savedArticle = toRemoteArticleActivity(data as ArticleRow);
-    cacheRemoteArticleSnapshot(savedArticle.id, toArticleStorageSnapshot(data as ArticleRow, snapshot.username));
-    return savedArticle;
-  };
-
-  if (options.articleId) {
-    const { data: currentRow, error: readError } = await supabase
-      .from('articles')
-      .select('save_count,metadata')
-      .eq('id', options.articleId)
-      .single();
-
-    if (readError) {
-      console.warn(`Could not read article "${options.articleId}" before saving; creating a new article instead.`, readError);
-      return insertNewArticle();
-    }
-    const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
-
-    const nextSaveCount = (toNumber((currentRow as any)?.save_count) || 0) + 1;
-    const { data, error } = await supabase
-      .from('articles')
-      .update({
-        title: payload.title,
-        content_json: payload.content_json,
-        content_html: payload.content_html,
-        plain_text: payload.plain_text,
-        keywords: payload.keywords,
-        goal_context: payload.goal_context,
-        article_language: payload.article_language,
-        analysis: payload.analysis,
-        stats: payload.stats,
-        last_saved_at: payload.last_saved_at,
-        metadata: {
-          ...currentMetadata,
-          analysisSummary: payload.metadata.analysisSummary,
-          attachments: {
-            ...(isRecord(currentMetadata.attachments) ? currentMetadata.attachments : {}),
-            ...(isRecord(payload.metadata.attachments) ? payload.metadata.attachments : {}),
-          },
-        },
-        save_count: nextSaveCount,
-      })
-      .eq('id', options.articleId)
-      .select('*')
-      .single();
-
-    if (error) throw error;
-    await recordArticleVersion((data as ArticleRow).id, snapshot, {
-      userId: options.userId,
-      versionNumber: nextSaveCount,
-      stats,
-    });
-    const savedArticle = toRemoteArticleActivity(data as ArticleRow);
-    cacheRemoteArticleSnapshot(savedArticle.id, toArticleStorageSnapshot(data as ArticleRow, snapshot.username));
-    return savedArticle;
-  }
-
-  return insertNewArticle();
-};
+): Promise<RemoteArticleActivity> => saveRemoteArticleSnapshotViaServer(snapshot, options);
 
 export const renameRemoteArticle = async (articleId: string, newTitle: string): Promise<RemoteArticleActivity> => {
   const supabase = getSupabaseClient();

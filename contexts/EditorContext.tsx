@@ -610,6 +610,13 @@ const createArticleSaveSignature = (input: {
     attachments: input.attachments || null,
 }));
 
+const createArticleSaveIdempotencyKey = (): string => {
+    const requestId = typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    return `article-save:${requestId}`;
+};
+
 const countKeywordViolations = (analysis: FullAnalysis): number => {
     const keywordAnalysis = analysis.keywordAnalysis;
     let count = keywordAnalysis.primary.status === 'fail' ? 1 : 0;
@@ -628,6 +635,12 @@ type SaveDraftReason = 'manual' | 'auto' | 'lifecycle';
 type SaveDraftOptions = {
     reason?: SaveDraftReason;
     force?: boolean;
+};
+
+type PendingRemoteSaveRequest = {
+    articleId: string | null;
+    signature: string;
+    idempotencyKey: string;
 };
 
 const getStoredLanguage = (key: string): 'ar' | 'en' | null => {
@@ -864,6 +877,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const saveInFlightRef = useRef<Promise<void> | null>(null);
     const queuedForcedSaveRef = useRef<SaveDraftOptions | null>(null);
     const lastSavedArticleSignatureRef = useRef('');
+    const pendingRemoteSaveRequestRef = useRef<PendingRemoteSaveRequest | null>(null);
     const skipNextAutoDraftMetadataWriteRef = useRef(false);
     const latestDraftMetaRef = useRef({ title, keywords, articleLanguage, goalContext });
     const pendingInitialArticleRestoreRef = useRef<string | null>(initialActiveArticleTitleRef.current);
@@ -1492,10 +1506,23 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             void saveArticleSnapshotDurably(articleSnapshot).catch(error => {
                 console.error(`Failed to save local article snapshot "${finalTitleToSave}":`, error);
             });
+            const currentPendingRequest = pendingRemoteSaveRequestRef.current;
+            const pendingRequest = currentPendingRequest
+                && currentPendingRequest.articleId === activeArticleId
+                && currentPendingRequest.signature === saveSignature
+                ? currentPendingRequest
+                : {
+                    articleId: activeArticleId,
+                    signature: saveSignature,
+                    idempotencyKey: createArticleSaveIdempotencyKey(),
+                };
+            pendingRemoteSaveRequestRef.current = pendingRequest;
             const savedArticle = await saveRemoteArticleSnapshot(articleSnapshot, {
                 articleId: activeArticleId,
-                userId: currentUserId,
+                idempotencyKey: pendingRequest.idempotencyKey,
+                saveReason: reason,
             });
+            pendingRemoteSaveRequestRef.current = null;
             setActiveArticleId(savedArticle.id);
             setActiveArticleSettings(getActiveArticleSettings(savedArticle));
             setArticleKey(savedArticle.title || finalTitleToSave);

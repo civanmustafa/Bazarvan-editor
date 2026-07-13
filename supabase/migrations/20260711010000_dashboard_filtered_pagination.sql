@@ -69,7 +69,6 @@ set search_path = public
 as $$
 declare
   v_user_id uuid := auth.uid();
-  v_is_admin boolean := public.is_admin();
   v_page integer := greatest(coalesce(p_page, 1), 1);
   v_page_size integer := greatest(1, least(coalesce(p_page_size, 10), 50));
   v_offset integer;
@@ -88,22 +87,7 @@ begin
       from public.articles as article
       where public.dashboard_article_is_trashed(article.metadata, v_user_id) = coalesce(p_trash, false)
         and (coalesce(p_mode, 'all') <> 'n8n' or article.source = 'n8n')
-        and (
-          v_is_admin
-          or article.owner_id = v_user_id
-          or article.created_by = v_user_id
-          or article.assigned_to = v_user_id
-          or (
-            not coalesce(p_trash, false)
-            and public.dashboard_article_is_public_opportunity(
-              article.visibility,
-              article.owner_id,
-              article.created_by,
-              article.assigned_to,
-              article.metadata
-            )
-          )
-        )
+        and public.can_read_article(article.id)
     ), filtered as materialized (
       select article.*
       from visible_scope as article

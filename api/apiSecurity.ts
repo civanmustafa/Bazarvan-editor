@@ -88,7 +88,7 @@ export const authenticateApiRequest = async (req: any): Promise<AuthenticatedApi
     throw new ApiSecurityError('Invalid or expired Supabase session.', 401);
   }
 
-  const { data: profile, error: profileError } = await supabase
+  const { data: profileData, error: profileError } = await supabase
     .from('profiles')
     .select('role,is_active')
     .eq('id', user.id)
@@ -100,6 +100,46 @@ export const authenticateApiRequest = async (req: any): Promise<AuthenticatedApi
       code: profileError.code,
     });
     throw new ApiSecurityError('Could not validate the user profile.', 503);
+  }
+  let profile = profileData;
+  if (!profile) {
+    const fullName = typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name.trim()
+      ? user.user_metadata.full_name.trim()
+      : typeof user.user_metadata?.name === 'string' && user.user_metadata.name.trim()
+        ? user.user_metadata.name.trim()
+        : null;
+    const { data: insertedProfile, error: insertError } = await supabase
+      .from('profiles')
+      .insert({
+        id: user.id,
+        email: user.email || null,
+        full_name: fullName,
+        role: 'user',
+      })
+      .select('role,is_active')
+      .maybeSingle();
+
+    if (insertError && insertError.code !== '23505') {
+      console.error('Could not create a missing API user profile:', {
+        userId: user.id,
+        code: insertError.code,
+      });
+      throw new ApiSecurityError('Could not initialize the user profile.', 503);
+    }
+
+    if (insertedProfile) {
+      profile = insertedProfile;
+    } else {
+      const { data: concurrentProfile, error: concurrentReadError } = await supabase
+        .from('profiles')
+        .select('role,is_active')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (concurrentReadError || !concurrentProfile) {
+        throw new ApiSecurityError('Could not initialize the user profile.', 503);
+      }
+      profile = concurrentProfile;
+    }
   }
   if (profile?.is_active === false) {
     throw new ApiSecurityError('This user account is inactive.', 403);
@@ -232,7 +272,7 @@ export const assertRequestContentLength = (req: any, maximumBytes: number): void
   if (!rawLength) return;
   const contentLength = Number.parseInt(rawLength, 10);
   if (Number.isFinite(contentLength) && contentLength > maximumBytes) {
-    throw new ApiSecurityError('The AI request body is too large.', 413);
+    throw new ApiSecurityError('The request body is too large.', 413);
   }
 };
 

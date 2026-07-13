@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import {
   claimGeminiApiKey,
   getGeminiKeyFailureCooldownSeconds,
@@ -577,32 +578,7 @@ const authorizeArticleAutomation = async (
   userId: string,
   article: Record<string, any>,
 ): Promise<void> => {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id,role,is_active')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (!isRecord(profile) || profile.is_active === false) {
-    throw new AssignedAutomationError('An active user profile is required.', 403);
-  }
-
-  const isAdmin = profile.role === 'admin';
-  if (isAdmin) return;
-
-  if ([article.owner_id, article.created_by, article.assigned_to].includes(userId)) return;
-
-  const { data: accessRow, error } = await supabase
-    .from('article_access')
-    .select('article_id,role')
-    .eq('article_id', article.id)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error && error.code !== '42P01') throw error;
-  if (accessRow?.role === 'editor') return;
-
-  throw new AssignedAutomationError('You are not allowed to run automation for this article.', 403);
+  await requireArticleWriteAccess(supabase, String(article.id || ''), userId);
 };
 
 const updateArticle = async (
@@ -902,7 +878,9 @@ const handleAssignedArticleAutomationRequest = async (req: any): Promise<ApiResu
       },
     };
   } catch (error) {
-    const status = error instanceof AssignedAutomationError ? error.status : 500;
+    const status = error instanceof AssignedAutomationError || error instanceof ArticleAccessPolicyError
+      ? error.status
+      : 500;
     const message = error instanceof Error ? error.message : 'Unknown assigned article automation error.';
     console.error('Assigned article automation failed:', error);
     return {
