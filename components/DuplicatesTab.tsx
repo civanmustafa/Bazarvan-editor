@@ -4,8 +4,8 @@ import { ChevronDown, Eye, Copy, Key } from 'lucide-react';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
-import { useInteraction } from '../contexts/InteractionContext';
+import { useEditorSelector } from '../contexts/EditorContext';
+import { useInteractionSelector } from '../contexts/InteractionContext';
 
 const INITIAL_VISIBLE_PHRASES = 80;
 const PHRASE_BATCH_SIZE = 80;
@@ -106,8 +106,12 @@ const usePrevious = <T,>(value: T): T | undefined => {
 
 const DuplicatesTab: React.FC = () => {
   const { uiLanguage } = useUser();
-  const { editor, analysisResults } = useEditor();
-  const { clearAllHighlights, applyHighlights, highlightedItem, setHighlightedItem } = useInteraction();
+  const editor = useEditorSelector(context => context.editor);
+  const analysisResults = useEditorSelector(context => context.analysisResults);
+  const clearAllHighlights = useInteractionSelector(context => context.clearAllHighlights);
+  const applyHighlights = useInteractionSelector(context => context.applyHighlights);
+  const highlightedItem = useInteractionSelector(context => context.highlightedItem);
+  const setHighlightedItem = useInteractionSelector(context => context.setHighlightedItem);
   
   const { duplicateAnalysis: analysis } = analysisResults;
   

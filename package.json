@@ -15,8 +15,11 @@
     "start:ai-jobs": "node server-dist/ai-job-worker.mjs",
     "typecheck": "tsc --noEmit",
     "test:security": "node --experimental-strip-types --test tests/apiSecurity.test.ts tests/articleAccessAndSave.test.ts tests/settingsRegistry.test.ts tests/aiExecutionEngine.test.ts tests/aiJobService.test.ts",
+    "test:performance": "node --experimental-strip-types --test tests/performanceArchitecture.test.ts",
+    "check:bundle": "node scripts/check-web-performance.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
-    "verify:security": "npm run check:secrets && npm run test:security"
+    "verify:security": "npm run check:secrets && npm run test:security",
+    "verify:performance": "npm run test:performance && npm run build:web && npm run check:bundle"
   },
   "dependencies": {
     "@fontsource/cairo": "^5.2.7",
@@ -35,7 +38,8 @@
     "express": "^5.2.1",
     "lucide-react": "^0.546.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "use-context-selector": "^2.0.0"
   },
   "devDependencies": {
     "@types/compression": "^1.8.1",

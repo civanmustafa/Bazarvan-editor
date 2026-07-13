@@ -3,7 +3,7 @@ import { BadgeDollarSign, BrainCircuit, Loader2, Sparkles, PenLine, Wand2, Zap, 
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
 import { useUser } from '../../contexts/UserContext';
-import { useAI } from '../../contexts/AIContext';
+import { useAISelector } from '../../contexts/AIContext';
 import { AI_PROMPTS } from '../../constants/aiPrompts';
 import { DEFAULT_ENGINEERING_PROMPTS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../../constants/engineeringPrompts';
 import GeminiProgressStatus from '../GeminiProgressStatus';
@@ -31,7 +31,10 @@ const AiMenuItem: React.FC<{ onClick: () => void; disabled: boolean; children: R
 
 const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading, uiLanguage, t, onAiRequest, onAnalyzeHeadings }) => {
     const { engineeringPrompts } = useUser();
-    const { quickAiProvider, setQuickAiProvider, aiRequestProgress, cancelAiRequest } = useAI();
+    const quickAiProvider = useAISelector(context => context.quickAiProvider);
+    const setQuickAiProvider = useAISelector(context => context.setQuickAiProvider);
+    const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
+    const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
     const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
     const [isToneMenuOpen, setIsToneMenuOpen] = useState(false);
     const [isExpandMenuOpen, setIsExpandMenuOpen] = useState(false);

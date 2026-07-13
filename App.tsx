@@ -1,27 +1,9 @@
 ﻿
-import React, { Component, useEffect, useState } from 'react';
-import { EditorContent } from '@tiptap/react';
-import { ArrowUp, Sparkles } from 'lucide-react';
+import React, { Component, Suspense, lazy, useEffect, useState } from 'react';
 
 import { useUser } from './contexts/UserContext';
-import { useEditor } from './contexts/EditorContext';
-import { useInteraction } from './contexts/InteractionContext';
-import { useAI } from './contexts/AIContext';
-import { useModal } from './contexts/ModalContext';
 import { AppProviders } from './contexts/Providers';
-import LeftSidebar from './components/LeftSidebar';
-import RightSidebar from './components/RightSidebar';
-import EditorToolbar from './components/EditorToolbar';
-import SelectionToolbar from './components/SelectionToolbar';
-import TipsCarousel from './components/TipsCarousel';
-import Login from './components/Login';
-import Dashboard from './components/Dashboard';
-import AdminApp from './components/AdminApp';
-import SettingsPage from './components/SettingsPage';
-import ModalManager from './components/ModalManager';
-import SpotlightSearch from './components/SpotlightSearch';
 import { APP_NAVIGATION_EVENT, navigateToAppPath, parseAppRoute, type AppRoute } from './utils/appRoutes';
-import { getCachedRemoteArticleById, getRemoteArticleById } from './utils/supabaseArticles';
 import {
     AUTO_DRAFT_GOAL_CONTEXT_KEY,
     AUTO_DRAFT_KEY,
@@ -41,17 +23,22 @@ import {
     COMPETITOR_URLS_STORAGE_KEY,
 } from './utils/competitorStorage';
 import './styles/global.css';
-import './styles/editor.css';
 import './styles/components.css';
+
+const Login = lazy(() => import('./components/Login'));
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const AdminApp = lazy(() => import('./components/AdminApp'));
+const SettingsPage = lazy(() => import('./components/SettingsPage'));
+const EditorApp = lazy(() => import('./components/EditorApp'));
 
 /*
  * App shell map:
- * - AppProviders wires all global state providers.
- * - AppContent decides which screen is visible: login, dashboard, or editor.
- * - EditorView owns the three-column editor layout and shared floating UI.
+ * - AppProviders owns session and user preferences shared by every route.
+ * - AppContent lazy-loads the requested full-page screen.
+ * - EditorApp owns editor-only providers, layout, and floating UI.
  *
  * When adding a new full page, edit AppContent.
- * When changing editor layout, edit EditorView and the sidebar/toolbar components.
+ * When changing editor layout, edit EditorApp and the sidebar/toolbar components.
  */
 type AppErrorBoundaryState = { hasError: boolean; errorMessage?: string };
 
@@ -214,90 +201,6 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppError
     }
 }
 
-const EditorView: React.FC = () => {
-    const { isDarkMode, t } = useUser();
-    const { editor, scrollContainerRef } = useEditor();
-    const {
-        handleScrollToTop,
-        tooltip,
-        tooltipRef,
-        pinnedTooltip,
-    } = useInteraction();
-    const {
-        isHeadingsAnalysisMinimized,
-        setIsHeadingsAnalysisMinimized,
-        headingsAnalysis,
-    } = useAI();
-    const { openModal } = useModal();
-
-    const displayTooltip = pinnedTooltip || tooltip;
-    
-    return (
-        <div className={`h-screen overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
-            <main className="flex h-full p-2 gap-2 bg-[#FAFAFA] dark:bg-[#181818]">
-                <LeftSidebar />
-                <div className="relative basis-[60.73%] flex flex-col h-full min-w-0">
-                    <TipsCarousel />
-                    <EditorToolbar />
-                    <div
-                        ref={scrollContainerRef}
-                        data-bazarvan-editor-panel="true"
-                        className="relative flex-grow overflow-y-auto custom-scrollbar border-t border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F]"
-                    >
-                        <EditorContent editor={editor} />
-                        {editor && (
-                          <SelectionToolbar />
-                        )}
-                    </div>
-                    <button
-                        onClick={handleScrollToTop}
-                        className="absolute bottom-4 end-4 z-40 p-2 bg-[#d4af37] text-white rounded-full shadow-lg hover:bg-[#b8922e] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#d4af37] dark:focus:ring-offset-gray-800 transition-opacity duration-300"
-                        title={t.scrollToTop}
-                        aria-label={t.scrollToTop}
-                    >
-                        <ArrowUp size={16} />
-                    </button>
-                </div>
-                <RightSidebar />
-                {displayTooltip && (
-                    <div
-                        ref={tooltipRef}
-                        className="fixed bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] text-[#333333] dark:text-gray-200 text-xs rounded-lg py-2 px-3 pointer-events-auto z-[10000] shadow-xl flex flex-col items-start gap-2"
-                        style={{ 
-                            top: displayTooltip.top, 
-                            left: displayTooltip.left, 
-                            width: displayTooltip.fixedWidth ? `${displayTooltip.fixedWidth}px` : undefined,
-                            maxWidth: 'calc(100vw - 24px)',
-                            boxSizing: 'border-box',
-                            overflowWrap: 'anywhere',
-                            transform: 'translate(-50%, calc(-100% - 16px))' 
-                        }}
-                        dangerouslySetInnerHTML={{ __html: displayTooltip.content }}
-                    >
-                    </div>
-                )}
-                
-                {isHeadingsAnalysisMinimized && (
-                    <div 
-                        className="fixed bottom-4 start-4 z-50"
-                        onClick={() => {
-                            setIsHeadingsAnalysisMinimized(false);
-                            openModal('headingsAnalysis');
-                        }}
-                    >
-                        <button className="flex items-center gap-2 px-4 py-2 bg-[#d4af37] text-white rounded-full shadow-lg hover:bg-[#b8922e] focus:outline-none focus:ring-2 ring-offset-2 ring-[#d4af37] dark:ring-offset-gray-800">
-                        <Sparkles size={16} />
-                        <span>{`${t.headingsAnalysis} (${headingsAnalysis?.length || 0})`}</span>
-                        </button>
-                    </div>
-                )}
-                
-                <SpotlightSearch />
-            </main>
-        </div>
-    );
-};
-
 const useAppRoute = (): AppRoute => {
     const [route, setRoute] = useState<AppRoute>(() => parseAppRoute());
 
@@ -341,90 +244,6 @@ const RouteMessage: React.FC<{
     );
 };
 
-const EditorRoute: React.FC<{ articleId: string | null }> = ({ articleId }) => {
-    const { currentUser } = useUser();
-    const { editor, activeArticleId, handleLoadArticle } = useEditor();
-    const [loadingArticleId, setLoadingArticleId] = useState<string | null>(null);
-    const [loadError, setLoadError] = useState('');
-
-    useEffect(() => {
-        if (!articleId || !editor || !currentUser) {
-            setLoadError('');
-            setLoadingArticleId(null);
-            return;
-        }
-        if (activeArticleId === articleId) {
-            setLoadError('');
-            setLoadingArticleId(null);
-            return;
-        }
-
-        let cancelled = false;
-        setLoadError('');
-        setLoadingArticleId(articleId);
-
-        const loadArticle = async () => {
-            let openedFromCache = false;
-            try {
-                const cachedArticle = await getCachedRemoteArticleById(articleId).catch(error => {
-                    console.warn(`Could not read cached routed article "${articleId}":`, error);
-                    return null;
-                });
-                if (cachedArticle && !cancelled) {
-                    openedFromCache = true;
-                    await handleLoadArticle(cachedArticle.title, cachedArticle);
-                }
-
-                const article = await getRemoteArticleById(articleId);
-                if (cancelled) return;
-                if (!openedFromCache) {
-                    await handleLoadArticle(article.title, article);
-                }
-            } catch (error) {
-                console.error(`Failed to open routed article "${articleId}":`, error);
-                if (!cancelled) {
-                    if (openedFromCache) {
-                        setLoadError('');
-                    } else {
-                        setLoadError('لا يمكن فتح هذه المقالة. قد يكون الرابط غير صحيح أو لا تملك صلاحية الوصول.');
-                    }
-                }
-            } finally {
-                if (!cancelled) {
-                    setLoadingArticleId(null);
-                }
-            }
-        };
-
-        void loadArticle();
-        return () => {
-            cancelled = true;
-        };
-    }, [activeArticleId, articleId, currentUser, editor, handleLoadArticle]);
-
-    if (loadError) {
-        return (
-            <RouteMessage
-                title="تعذر فتح المقالة"
-                body={loadError}
-                actionLabel="العودة للوحة التحكم"
-                onAction={() => navigateToAppPath('/dashboard')}
-            />
-        );
-    }
-
-    return (
-        <>
-            <EditorView />
-            {loadingArticleId && (
-                <div className="fixed left-1/2 top-4 z-[10000] -translate-x-1/2 rounded-md border border-[#d4af37]/30 bg-white px-4 py-2 text-sm font-bold text-[#8a6f1d] shadow-lg dark:bg-[#2A2A2A] dark:text-[#f2d675]">
-                    جار تحميل المقالة من Supabase...
-                </div>
-            )}
-        </>
-    );
-};
-
 const AppContent: React.FC = () => {
     const { currentView, isAuthLoading, isDarkMode } = useUser();
     const route = useAppRoute();
@@ -465,21 +284,28 @@ const AppContent: React.FC = () => {
         }
 
         if (route.name === 'editor') {
-            return <EditorRoute articleId={route.articleId} />;
+            return <EditorApp articleId={route.articleId} />;
         }
         
         if (route.name === 'dashboard' || currentView === 'dashboard') {
             return <Dashboard />;
         }
         
-        return <EditorView />;
+        return <Dashboard />;
     };
 
     return (
-      <>
+      <Suspense
+        fallback={(
+          <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'dark' : ''} bg-[#FAFAFA] dark:bg-[#181818]`}>
+            <div className="rounded-lg border border-gray-200 bg-white px-5 py-4 text-sm font-bold text-[#333333] shadow-sm dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+              جار تحميل الصفحة...
+            </div>
+          </div>
+        )}
+      >
         {renderView()}
-        {currentView !== 'login' && <ModalManager />}
-      </>
+      </Suspense>
     );
 }
 

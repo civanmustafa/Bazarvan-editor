@@ -2,10 +2,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, ExternalLink, ClipboardPaste } from 'lucide-react';
 import StructureTab from './StructureTab';
-import AIHistoryTab from './AIHistoryTab';
 import { useUser } from '../contexts/UserContext';
-import { useAI } from '../contexts/AIContext';
-import { useEditor } from '../contexts/EditorContext';
+import { useAISelector } from '../contexts/AIContext';
+import { useEditorSelector } from '../contexts/EditorContext';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
@@ -21,7 +20,9 @@ import {
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 import GeminiProgressStatus from './GeminiProgressStatus';
 import { runGeminiAnalysisEngine, type GeminiProgressSnapshot } from '../utils/geminiAnalysisEngine';
-import ExternalAnalysisResultsTab from './ExternalAnalysisResultsTab';
+
+const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
+const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
 
 type ReadyCommand = {
     id: string;
@@ -730,23 +731,22 @@ ${url}
 
 const RightSidebar: React.FC = () => {
     const { t, engineeringPrompts, chatGptOpenMode } = useUser();
-    const { setIsStructureTabActive, activeArticleId } = useEditor();
-    const {
-        handleAiAnalyze,
-        handleChatGptAnalyze,
-        handleGeminiReadyCommandsAnalyze,
-        buildSmartAnalysisPrompt,
-        importManualChatGptResponse,
-        aiResults,
-        aiInsertionPatches,
-        isAiLoading,
-        aiRequestProgress,
-        cancelAiRequest,
-        applyAiInsertionPatch,
-        selectAiInsertionPatchTarget,
-        deleteAiInsertionPatchMergeDeleteTarget,
-        selectAiInsertionPatchMergeDeleteTarget,
-    } = useAI();
+    const setIsStructureTabActive = useEditorSelector(context => context.setIsStructureTabActive);
+    const activeArticleId = useEditorSelector(context => context.activeArticleId);
+    const handleAiAnalyze = useAISelector(context => context.handleAiAnalyze);
+    const handleChatGptAnalyze = useAISelector(context => context.handleChatGptAnalyze);
+    const handleGeminiReadyCommandsAnalyze = useAISelector(context => context.handleGeminiReadyCommandsAnalyze);
+    const buildSmartAnalysisPrompt = useAISelector(context => context.buildSmartAnalysisPrompt);
+    const importManualChatGptResponse = useAISelector(context => context.importManualChatGptResponse);
+    const aiResults = useAISelector(context => context.aiResults);
+    const aiInsertionPatches = useAISelector(context => context.aiInsertionPatches);
+    const isAiLoading = useAISelector(context => context.isAiLoading);
+    const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
+    const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
+    const applyAiInsertionPatch = useAISelector(context => context.applyAiInsertionPatch);
+    const selectAiInsertionPatchTarget = useAISelector(context => context.selectAiInsertionPatchTarget);
+    const deleteAiInsertionPatchMergeDeleteTarget = useAISelector(context => context.deleteAiInsertionPatchMergeDeleteTarget);
+    const selectAiInsertionPatchMergeDeleteTarget = useAISelector(context => context.selectAiInsertionPatchMergeDeleteTarget);
     
     const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors'>('structure');
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history' | 'external'>('new');
@@ -1414,7 +1414,7 @@ ${readyCommandCompetitorBlocks}`;
         const actionLabel = getPatchActionLabel(patch.operation);
         const isCopied = copiedPatchId === patch.id;
         const cleanPatchTitle = (patch.title || 'نص مقترح')
-            .replace(/^(?:إضافة|اضافة|استبدال)\s*[-:–]\s*/i, '')
+            .replace(/^(?:إضافة|اضافة|استبدال)\s*(?:-|:|\u2013)\s*/i, '')
             .trim() || 'نص مقترح';
         const patchLocationText = patch.placementLabel || patch.anchorText || patch.targetText || 'لم يتم تحديد موضع نصي دقيق.';
         const patchReason = patch.reason || 'سبب الاقتراح غير محدد.';
@@ -1827,7 +1827,11 @@ ${readyCommandCompetitorBlocks}`;
                             </div>
                         </div>
                     </>
-                ) : aiSubTab === 'history' ? <AIHistoryTab /> : <ExternalAnalysisResultsTab articleId={activeArticleId} />}
+                ) : (
+                    <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">جار تحميل النتائج...</div>}>
+                        {aiSubTab === 'history' ? <AIHistoryTab /> : <ExternalAnalysisResultsTab articleId={activeArticleId} />}
+                    </React.Suspense>
+                )}
             </div>
         </div>
     );

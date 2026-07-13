@@ -1,8 +1,8 @@
 ﻿import React, { useEffect, useState, useCallback } from 'react';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
-import { useInteraction } from '../contexts/InteractionContext';
-import { useAI } from '../contexts/AIContext';
+import { useEditorSelector } from '../contexts/EditorContext';
+import { useInteractionSelector } from '../contexts/InteractionContext';
+import { useAISelector } from '../contexts/AIContext';
 import { Languages } from 'lucide-react';
 
 import { IconTooltip, Separator } from './toolbar/ToolbarItems';
@@ -45,43 +45,37 @@ const EditorToolbar: React.FC = () => {
         isIdle,
     } = useUser();
 
-    const {
-        editor,
-        title,
-        setTitle,
-        analysisResults,
-        handleSaveDraft: onSaveDraft,
-        handleRestoreDraft: onRestoreDraft,
-        saveStatus,
-        saveError,
-        restoreStatus,
-        draftExists,
-        handleNewArticle: onNewArticle,
-        articleLanguage,
-        handleLanguageChange: onLanguageChange,
-        activeArticleSettings,
-        handleActiveArticleStatusChange,
-    } = useEditor();
-    
-    const {
-        clearAllHighlights,
-        handleToggleAllKeywordsHighlight: onToggleAllKeywordsHighlight,
-        handleRemoveEmptyLines: onRemoveEmptyLines,
-        handleFixParagraphs: onFixParagraphs,
-        handleClearFormatting: onClearFormatting,
-        highlightedItem,
-        handleToggleToc: onToggleToc,
-        isTocVisible,
-        isTooltipAlwaysOn,
-        setIsTooltipAlwaysOn,
-    } = useInteraction();
+    const editor = useEditorSelector(context => context.editor);
+    const title = useEditorSelector(context => context.title);
+    const setTitle = useEditorSelector(context => context.setTitle);
+    const analysisResults = useEditorSelector(context => context.analysisResults);
+    const onSaveDraft = useEditorSelector(context => context.handleSaveDraft);
+    const onRestoreDraft = useEditorSelector(context => context.handleRestoreDraft);
+    const saveStatus = useEditorSelector(context => context.saveStatus);
+    const saveError = useEditorSelector(context => context.saveError);
+    const restoreStatus = useEditorSelector(context => context.restoreStatus);
+    const draftExists = useEditorSelector(context => context.draftExists);
+    const onNewArticle = useEditorSelector(context => context.handleNewArticle);
+    const articleLanguage = useEditorSelector(context => context.articleLanguage);
+    const onLanguageChange = useEditorSelector(context => context.handleLanguageChange);
+    const activeArticleSettings = useEditorSelector(context => context.activeArticleSettings);
+    const handleActiveArticleStatusChange = useEditorSelector(context => context.handleActiveArticleStatusChange);
 
-    const {
-        handleAiRequest: onAiRequest,
-        isAiLoading,
-        isAiCommandLoading,
-        handleAnalyzeHeadings: onAnalyzeHeadings,
-    } = useAI();
+    const clearAllHighlights = useInteractionSelector(context => context.clearAllHighlights);
+    const onToggleAllKeywordsHighlight = useInteractionSelector(context => context.handleToggleAllKeywordsHighlight);
+    const onRemoveEmptyLines = useInteractionSelector(context => context.handleRemoveEmptyLines);
+    const onFixParagraphs = useInteractionSelector(context => context.handleFixParagraphs);
+    const onClearFormatting = useInteractionSelector(context => context.handleClearFormatting);
+    const highlightedItem = useInteractionSelector(context => context.highlightedItem);
+    const onToggleToc = useInteractionSelector(context => context.handleToggleToc);
+    const isTocVisible = useInteractionSelector(context => context.isTocVisible);
+    const isTooltipAlwaysOn = useInteractionSelector(context => context.isTooltipAlwaysOn);
+    const setIsTooltipAlwaysOn = useInteractionSelector(context => context.setIsTooltipAlwaysOn);
+
+    const onAiRequest = useAISelector(context => context.handleAiRequest);
+    const isAiLoading = useAISelector(context => context.isAiLoading);
+    const isAiCommandLoading = useAISelector(context => context.isAiCommandLoading);
+    const onAnalyzeHeadings = useAISelector(context => context.handleAnalyzeHeadings);
 
 
     const handleShowDashboard = useCallback(async () => {

@@ -2,8 +2,8 @@
 import { BadgeDollarSign, BrainCircuit, PenLine, Wand2, Zap, Expand, BookText, List, ListChecks, HelpCircle, Loader2, MessageSquarePlus, Send, X, Heading1, Combine } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
-import { useAI } from '../contexts/AIContext';
+import { useEditorSelector } from '../contexts/EditorContext';
+import { useAISelector } from '../contexts/AIContext';
 import { AI_PROMPTS } from '../constants/aiPrompts';
 import { IconTooltip } from './toolbar/ToolbarItems';
 import GeminiProgressStatus from './GeminiProgressStatus';
@@ -13,8 +13,15 @@ const MANUAL_COMMAND_PREFIX = 'أنت خبير محتوى SEO/AEO/GEO/LLM SEO.';
 
 const SelectionToolbar: React.FC = () => {
   const { uiLanguage } = useUser();
-  const { editor, scrollContainerRef } = useEditor();
-  const { handleAiRequest: onAiRequest, isAiCommandLoading, isAiLoading, quickAiProvider, setQuickAiProvider, aiRequestProgress, cancelAiRequest } = useAI();
+  const editor = useEditorSelector(context => context.editor);
+  const scrollContainerRef = useEditorSelector(context => context.scrollContainerRef);
+  const onAiRequest = useAISelector(context => context.handleAiRequest);
+  const isAiCommandLoading = useAISelector(context => context.isAiCommandLoading);
+  const isAiLoading = useAISelector(context => context.isAiLoading);
+  const quickAiProvider = useAISelector(context => context.quickAiProvider);
+  const setQuickAiProvider = useAISelector(context => context.setQuickAiProvider);
+  const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
+  const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
   
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });

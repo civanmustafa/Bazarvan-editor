@@ -1,13 +1,14 @@
 ﻿
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X } from 'lucide-react';
-import { useInteraction } from '../contexts/InteractionContext';
-import { useAI } from '../contexts/AIContext';
+import { useInteractionSelector } from '../contexts/InteractionContext';
+import { useAISelector } from '../contexts/AIContext';
 import { useUser } from '../contexts/UserContext';
 
 const SpotlightSearch: React.FC = () => {
-    const { isSpotlightVisible, setIsSpotlightVisible } = useInteraction();
-    const { openGoogleSearch } = useAI();
+    const isSpotlightVisible = useInteractionSelector(context => context.isSpotlightVisible);
+    const setIsSpotlightVisible = useInteractionSelector(context => context.setIsSpotlightVisible);
+    const openGoogleSearch = useAISelector(context => context.openGoogleSearch);
     const { t, uiLanguage } = useUser();
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);

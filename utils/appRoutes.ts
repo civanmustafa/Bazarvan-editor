@@ -21,6 +21,7 @@ export type AdminRouteSection =
   | 'activity';
 
 export const APP_NAVIGATION_EVENT = 'bazarvan:navigation';
+const NEW_ARTICLE_REQUEST_KEY = 'bazarvan:new-article-request';
 const SETTINGS_ROUTE_SECTIONS = new Set(['system', 'ai', 'n8n', 'clients', 'users', 'roles']);
 
 const cleanPath = (path: string): string => {
@@ -126,4 +127,36 @@ export const navigateToAppPath = (path: string, options: { replace?: boolean } =
     window.history.pushState({}, '', normalizedPath);
   }
   window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, { detail: { path: normalizedPath } }));
+};
+
+export const navigateToNewEditorArticle = (language: 'ar' | 'en') => {
+  try {
+    sessionStorage.setItem(NEW_ARTICLE_REQUEST_KEY, JSON.stringify({
+      language,
+      requestedAt: Date.now(),
+    }));
+  } catch (error) {
+    console.warn('Could not queue the new article request:', error);
+  }
+  navigateToAppPath('/editor');
+};
+
+export const consumeNewEditorArticleRequest = (): 'ar' | 'en' | null => {
+  try {
+    const rawRequest = sessionStorage.getItem(NEW_ARTICLE_REQUEST_KEY);
+    if (!rawRequest) return null;
+    sessionStorage.removeItem(NEW_ARTICLE_REQUEST_KEY);
+    const request = JSON.parse(rawRequest) as { language?: unknown; requestedAt?: unknown };
+    const requestedAt = Number(request.requestedAt || 0);
+    if (!Number.isFinite(requestedAt) || Date.now() - requestedAt > 5 * 60 * 1000) return null;
+    return request.language === 'en' ? 'en' : 'ar';
+  } catch (error) {
+    console.warn('Could not consume the new article request:', error);
+    try {
+      sessionStorage.removeItem(NEW_ARTICLE_REQUEST_KEY);
+    } catch {
+      // Ignore storage cleanup failures.
+    }
+    return null;
+  }
 };

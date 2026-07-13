@@ -115,6 +115,7 @@ export default defineConfig(({ mode }) => {
         },
       ],
       build: {
+        manifest: true,
         rollupOptions: {
           output: {
             // Keep heavy editor dependencies in separate chunks for faster cached reloads.

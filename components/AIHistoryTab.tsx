@@ -1,8 +1,8 @@
 ﻿import React from 'react';
 import { useState } from 'react';
-import { useAI } from '../contexts/AIContext';
+import { useAISelector } from '../contexts/AIContext';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
+import { useEditorSelector } from '../contexts/EditorContext';
 import { BookCopy, Trash2, Check, Copy, MapPin, ChevronDown, AlertTriangle } from 'lucide-react';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import type { AiContentPatch, AiPatchResolvedTarget, AIHistoryItem, BulkFixReviewVariant } from '../types';
@@ -34,17 +34,15 @@ const getCriteriaStatusCounts = (checks?: BulkFixReviewVariant['criteriaChecks']
 );
 
 const AIHistoryTab: React.FC = () => {
-    const {
-        aiHistory,
-        applySuggestionFromHistory,
-        removeFromAiHistory,
-        selectAiContentPatchTarget,
-        applyAiContentPatch,
-        selectAiPatchMergeDeleteTarget,
-        deleteAiPatchMergeDeleteTarget,
-    } = useAI();
+    const aiHistory = useAISelector(context => context.aiHistory);
+    const applySuggestionFromHistory = useAISelector(context => context.applySuggestionFromHistory);
+    const removeFromAiHistory = useAISelector(context => context.removeFromAiHistory);
+    const selectAiContentPatchTarget = useAISelector(context => context.selectAiContentPatchTarget);
+    const applyAiContentPatch = useAISelector(context => context.applyAiContentPatch);
+    const selectAiPatchMergeDeleteTarget = useAISelector(context => context.selectAiPatchMergeDeleteTarget);
+    const deleteAiPatchMergeDeleteTarget = useAISelector(context => context.deleteAiPatchMergeDeleteTarget);
     const { t, uiLanguage } = useUser();
-    const { editor } = useEditor();
+    const editor = useEditorSelector(context => context.editor);
     const isArabic = uiLanguage === 'ar';
     const [expandedCriteriaKeys, setExpandedCriteriaKeys] = useState<Record<string, boolean>>({});
     const [manualPatchUiState, setManualPatchUiState] = useState<Record<string, { status?: 'applied' | 'failed'; error?: string }>>({});
@@ -114,7 +112,7 @@ const AIHistoryTab: React.FC = () => {
     };
     const getPatchTitle = (patch: AiContentPatch) => (
         (patch.title || 'نص مقترح')
-            .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|replace|delete)\s*[-:–]\s*/i, '')
+            .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|replace|delete)\s*(?:-|:|\u2013)\s*/i, '')
             .trim() || 'نص مقترح'
     );
     const normalizePatchMarkerForMatch = (value?: string): string => (

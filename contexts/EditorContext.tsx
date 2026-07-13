@@ -1,5 +1,6 @@
 
-import React, { useState, useCallback, useEffect, useRef, createContext, useContext, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { createContext, useContext, useContextSelector } from 'use-context-selector';
 import { useEditor as useTiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Highlight } from '@tiptap/extension-highlight';
@@ -835,6 +836,13 @@ export const useEditor = () => {
   if (!context) throw new Error("useEditor must be used within an EditorProvider");
   return context;
 };
+
+export const useEditorSelector = <Selected,>(
+  selector: (context: EditorContextType) => Selected,
+): Selected => useContextSelector(EditorContext, context => {
+  if (!context) throw new Error("useEditorSelector must be used within an EditorProvider");
+  return selector(context);
+});
 
 export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { currentUser, currentUserId, currentView, setCurrentView, preferredLanguage, uiLanguage, isIdle } = useUser();
@@ -1809,7 +1817,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
     }, [editor, currentUser, currentUserId, applyArticleSnapshotToEditor, refreshArticleFromRemoteInBackground, clearEditorSnapshotTimer, clearDraftPersistTimer]);
     
-    const value: EditorContextType = {
+    const value = useMemo<EditorContextType>(() => ({
         editor,
         title,
         setTitle,
@@ -1838,7 +1846,30 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleRestoreDraft,
         handleNewArticle,
         handleLoadArticle,
-    };
+    }), [
+        editor,
+        title,
+        articleKey,
+        text,
+        keywords,
+        articleLanguage,
+        activeArticleId,
+        activeArticleSettings,
+        goalContext,
+        analysisResults,
+        isDuplicatesTabActive,
+        saveStatus,
+        saveError,
+        restoreStatus,
+        draftExists,
+        handleLanguageChange,
+        handleActiveArticleStatusChange,
+        handleClearKeywords,
+        handleSaveDraft,
+        handleRestoreDraft,
+        handleNewArticle,
+        handleLoadArticle,
+    ]);
 
     return <EditorContext.Provider value={value}>{children}</EditorContext.Provider>;
 };

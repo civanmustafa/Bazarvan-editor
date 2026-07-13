@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FileSignature, Lightbulb, LocateFixed, Minus, ThumbsDown, X } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
-import { useAI } from '../contexts/AIContext';
+import { useEditorSelector } from '../contexts/EditorContext';
+import { useAISelector } from '../contexts/AIContext';
 import { useModal } from '../contexts/ModalContext';
 import type { HeadingAnalysisResult } from '../types';
 
@@ -29,8 +29,10 @@ const normalizeHeadingText = (value: string): string => value
 
 const HeadingsAnalysisModal: React.FC = () => {
   const { t } = useUser();
-  const { editor } = useEditor();
-  const { headingsAnalysis: analysis, setHeadingsAnalysis, setIsHeadingsAnalysisMinimized } = useAI();
+  const editor = useEditorSelector(context => context.editor);
+  const analysis = useAISelector(context => context.headingsAnalysis);
+  const setHeadingsAnalysis = useAISelector(context => context.setHeadingsAnalysis);
+  const setIsHeadingsAnalysisMinimized = useAISelector(context => context.setIsHeadingsAnalysisMinimized);
   const { closeModal } = useModal();
 
   const [position, setPosition] = useState({ x: 12, y: 72 });

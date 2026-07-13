@@ -3,9 +3,9 @@ import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewVariant, Check
 import { AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown, Hash, PackageCheck } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
-import { useInteraction } from '../contexts/InteractionContext';
-import { useAI } from '../contexts/AIContext';
+import { useEditorSelector } from '../contexts/EditorContext';
+import { useInteractionSelector } from '../contexts/InteractionContext';
+import { useAISelector } from '../contexts/AIContext';
 import { isProductPageContext } from '../utils/goalContext';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 import GeminiProgressStatus from './GeminiProgressStatus';
@@ -767,22 +767,22 @@ const BulkFixReviewPanel: React.FC<{
 
 const StructureTab: React.FC = () => {
     const { structureViewMode: viewMode, uiLanguage } = useUser();
-    const { analysisResults, goalContext } = useEditor();
-    const { highlightedItem, handleHighlightStructureItem: onHighlightStructureItem } = useInteraction();
-    const {
-        handleFixAllViolations,
-        fixAllProgress,
-        bulkFixReviewItems,
-        getRelatedBulkFixRules,
-        applyBulkFixReviewItem,
-        applySelectedBulkFixReviewItems,
-        selectBulkFixReviewItemTarget,
-        skipBulkFixReviewItem,
-        clearBulkFixReviewItems,
-        handleAiFix,
-        aiFixingInfo,
-        cancelAiRequest,
-    } = useAI();
+    const analysisResults = useEditorSelector(context => context.analysisResults);
+    const goalContext = useEditorSelector(context => context.goalContext);
+    const highlightedItem = useInteractionSelector(context => context.highlightedItem);
+    const onHighlightStructureItem = useInteractionSelector(context => context.handleHighlightStructureItem);
+    const handleFixAllViolations = useAISelector(context => context.handleFixAllViolations);
+    const fixAllProgress = useAISelector(context => context.fixAllProgress);
+    const bulkFixReviewItems = useAISelector(context => context.bulkFixReviewItems);
+    const getRelatedBulkFixRules = useAISelector(context => context.getRelatedBulkFixRules);
+    const applyBulkFixReviewItem = useAISelector(context => context.applyBulkFixReviewItem);
+    const applySelectedBulkFixReviewItems = useAISelector(context => context.applySelectedBulkFixReviewItems);
+    const selectBulkFixReviewItemTarget = useAISelector(context => context.selectBulkFixReviewItemTarget);
+    const skipBulkFixReviewItem = useAISelector(context => context.skipBulkFixReviewItem);
+    const clearBulkFixReviewItems = useAISelector(context => context.clearBulkFixReviewItems);
+    const handleAiFix = useAISelector(context => context.handleAiFix);
+    const aiFixingInfo = useAISelector(context => context.aiFixingInfo);
+    const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
     
     const { structureAnalysis: analysis, structureStats: stats } = analysisResults;
     const [modalContent, setModalContent] = useState<CheckResult | null>(null);

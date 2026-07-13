@@ -2,8 +2,8 @@
 import { AlertCircle, CheckCircle, Copy, Loader2, Save, Sparkles, Target } from 'lucide-react';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
-import { useAI } from '../contexts/AIContext';
+import { useEditorSelector } from '../contexts/EditorContext';
+import { useAISelector } from '../contexts/AIContext';
 import GoalContextFields from './GoalContextFields';
 import { formatGoalContextForCopy, updateGoalContextField } from '../utils/goalContext';
 
@@ -13,13 +13,11 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
         clientGoalContexts,
         handleSaveClientGoalContext,
     } = useUser();
-    const { 
-        goalContext,
-        setGoalContext,
-        keywords,
-        title,
-    } = useEditor();
-    const { generateGoalContext } = useAI();
+    const goalContext = useEditorSelector(context => context.goalContext);
+    const setGoalContext = useEditorSelector(context => context.setGoalContext);
+    const keywords = useEditorSelector(context => context.keywords);
+    const title = useEditorSelector(context => context.title);
+    const generateGoalContext = useAISelector(context => context.generateGoalContext);
     const [lastSavedCompany, setLastSavedCompany] = React.useState('');
     const [copyStatus, setCopyStatus] = React.useState('');
     const [isGeneratingGoalContext, setIsGeneratingGoalContext] = React.useState(false);

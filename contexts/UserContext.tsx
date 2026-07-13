@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect, createContext, useContext, useRef } from 'react';
+import React, { useState, useCallback, useEffect, createContext, useContext, useMemo, useRef } from 'react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
@@ -651,47 +651,47 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
     }, [currentUserId, preferencesReadyUserId]);
     
-    const handleHighlightStyleChange = (style: 'background' | 'underline') => {
+    const handleHighlightStyleChange = useCallback((style: 'background' | 'underline') => {
         setHighlightStyle(style);
         if (currentUser) saveUserPreference(currentUser, { preferredHighlightStyle: style });
         persistUserPreferencePatch({ appearance: { highlightStyle: style } });
-    };
+    }, [currentUser, persistUserPreferencePatch]);
 
-    const handleChatGptOpenModeChange = (mode: ChatGptOpenMode) => {
+    const handleChatGptOpenModeChange = useCallback((mode: ChatGptOpenMode) => {
         setChatGptOpenMode(mode);
         if (currentUser) saveUserPreference(currentUser, { preferredChatGptOpenMode: mode });
         persistUserPreferencePatch({ editor: { chatGptOpenMode: mode } });
-    };
+    }, [currentUser, persistUserPreferencePatch]);
 
-    const handleKeywordViewModeChange = (mode: 'classic' | 'modern') => {
+    const handleKeywordViewModeChange = useCallback((mode: 'classic' | 'modern') => {
         setKeywordViewMode(mode);
         if (currentUser) saveUserPreference(currentUser, { preferredKeywordViewMode: mode });
         persistUserPreferencePatch({ appearance: { keywordViewMode: mode } });
-    };
+    }, [currentUser, persistUserPreferencePatch]);
 
-    const handleStructureViewModeChange = (mode: 'grid' | 'list') => {
+    const handleStructureViewModeChange = useCallback((mode: 'grid' | 'list') => {
         setStructureViewMode(mode);
         if (currentUser) saveUserPreference(currentUser, { preferredStructureViewMode: mode });
         persistUserPreferencePatch({ appearance: { structureViewMode: mode } });
-    };
+    }, [currentUser, persistUserPreferencePatch]);
 
-    const handlePreferredLanguageChange = (lang: 'ar' | 'en') => {
+    const handlePreferredLanguageChange = useCallback((lang: 'ar' | 'en') => {
         setPreferredLanguage(lang);
         if (currentUser) saveUserPreference(currentUser, { preferredLanguage: lang });
         persistUserPreferencePatch({ editor: { preferredLanguage: lang } });
-    };
+    }, [currentUser, persistUserPreferencePatch]);
 
-    const handleUiLanguageChange = (lang: 'ar' | 'en') => {
+    const handleUiLanguageChange = useCallback((lang: 'ar' | 'en') => {
         setUiLanguage(lang);
         if (currentUser) saveUserPreference(currentUser, { preferredUILanguage: lang });
         persistUserPreferencePatch({ editor: { uiLanguage: lang } });
-    };
+    }, [currentUser, persistUserPreferencePatch]);
 
-    const handleSaveApiKeys = (keys: ApiKeys) => {
+    const handleSaveApiKeys = useCallback((keys: ApiKeys) => {
         const normalizedKeys = normalizeApiKeys(keys);
         setApiKeys(normalizedKeys);
         if (currentUser) saveUserApiKeys(currentUser, normalizedKeys);
-    };
+    }, [currentUser]);
 
     const persistClientGoalContexts = useCallback((nextContexts: ClientGoalContexts) => {
         const normalizedContexts = normalizeClientGoalContexts(nextContexts);
@@ -735,7 +735,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
     }, [currentUser, persistUserPreferencePatch]);
 
-    const value = {
+    const value = useMemo<UserContextType>(() => ({
         currentUser,
         currentUserId,
         currentUserRole,
@@ -768,7 +768,39 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleDeleteClientGoalContext,
         handleMergeClientGoalContexts,
         handleSaveEngineeringPrompts,
-    };
+    }), [
+        currentUser,
+        currentUserId,
+        currentUserRole,
+        currentView,
+        isAuthLoading,
+        isDarkMode,
+        highlightStyle,
+        chatGptOpenMode,
+        keywordViewMode,
+        structureViewMode,
+        preferredLanguage,
+        uiLanguage,
+        apiKeys,
+        clientGoalContexts,
+        engineeringPrompts,
+        t,
+        isIdle,
+        handleLogin,
+        handleLogout,
+        setCurrentView,
+        handleHighlightStyleChange,
+        handleChatGptOpenModeChange,
+        handleKeywordViewModeChange,
+        handleStructureViewModeChange,
+        handlePreferredLanguageChange,
+        handleUiLanguageChange,
+        handleSaveApiKeys,
+        handleSaveClientGoalContext,
+        handleDeleteClientGoalContext,
+        handleMergeClientGoalContexts,
+        handleSaveEngineeringPrompts,
+    ]);
 
     return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
 };

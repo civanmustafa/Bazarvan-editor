@@ -4,7 +4,6 @@ import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, R
 import { ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
 import { formatIstanbulDateTime, getIstanbulDateKey } from '../utils/dateTime';
 import {
@@ -31,7 +30,7 @@ import {
 } from '../utils/supabaseArticles';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
-import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
+import { buildEditorArticlePath, navigateToAppPath, navigateToNewEditorArticle } from '../utils/appRoutes';
 import ExternalAnalysisCardControls from './ExternalAnalysisCardControls';
 import {
     listExternalAnalysisDashboardSummaries,
@@ -952,7 +951,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
 
 const Dashboard: React.FC = () => {
   const {
-    setCurrentView,
     currentUser,
     currentUserId,
     currentUserRole,
@@ -961,9 +959,10 @@ const Dashboard: React.FC = () => {
     uiLanguage,
     t,
   } = useUser();
-  const { handleNewArticle: onNewArticle, handleLoadArticle: onLoadArticle } = useEditor();
-
-  const onGoToEditor = () => setCurrentView('editor');
+  const onGoToEditor = () => navigateToAppPath('/editor');
+  const onLoadArticle = (article: RemoteArticleActivity) => {
+    navigateToAppPath(buildEditorArticlePath(article.id));
+  };
   
   const [remoteArticles, setRemoteArticles] = useState<RemoteArticleActivity[]>([]);
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
@@ -1500,7 +1499,7 @@ const Dashboard: React.FC = () => {
 
   const handleChooseNewArticleLanguage = (lang: 'ar' | 'en') => {
     setIsNewArticleLanguageModalOpen(false);
-    onNewArticle(lang);
+    navigateToNewEditorArticle(lang);
   };
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -1952,7 +1951,7 @@ const Dashboard: React.FC = () => {
                                     isSelectable
                                     isSelected={selectedArticleIds.has(activity.id)}
                                     onToggleSelected={() => toggleSelectedArticle(activity.id)}
-                                    onLoad={() => onLoadArticle(activity.title, activity)}
+                                    onLoad={() => onLoadArticle(activity)}
                                     onDetails={() => { void handleShowArticleDetails(activity); }}
                                     onDelete={() => { void handleDeleteArticle(activity.id); }}
                                     onPermanentDelete={() => { void handlePermanentDeleteArticle(activity.id); }}
@@ -2073,7 +2072,7 @@ const Dashboard: React.FC = () => {
           onOpenArticle={() => {
             const articleToOpen = detailArticle;
             handleCloseArticleDetails();
-            void onLoadArticle(articleToOpen.title, articleToOpen);
+            onLoadArticle(articleToOpen);
           }}
         />
       )}

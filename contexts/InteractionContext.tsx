@@ -1,10 +1,11 @@
 
-import React, { useState, useCallback, useEffect, useRef, createContext, useContext, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { createContext, useContext, useContextSelector } from 'use-context-selector';
 import type { Editor as EditorClass } from '@tiptap/core';
 
 import { useUser } from './UserContext';
-import { useEditor } from './EditorContext';
-import { useAI } from './AIContext';
+import { useEditorSelector } from './EditorContext';
+import { useAISelector } from './AIContext';
 import type { CheckResult, StructureAnalysis } from '../types';
 import { SECONDARY_COLORS, VIOLATION_PRIORITY, DEFAULT_PRIORITY } from '../constants';
 
@@ -170,10 +171,23 @@ export const useInteraction = () => {
   return context;
 };
 
+export const useInteractionSelector = <Selected,>(
+  selector: (context: InteractionContextType) => Selected,
+): Selected => useContextSelector(InteractionContext, context => {
+  if (!context) throw new Error("useInteractionSelector must be used within an InteractionProvider");
+  return selector(context);
+});
+
 export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { highlightStyle, uiLanguage, t } = useUser();
-    const { editor, text, keywords, analysisResults, scrollContainerRef, articleLanguage } = useEditor();
-    const { aiFixingInfo, handleAiFix } = useAI();
+    const editor = useEditorSelector(context => context.editor);
+    const text = useEditorSelector(context => context.text);
+    const keywords = useEditorSelector(context => context.keywords);
+    const analysisResults = useEditorSelector(context => context.analysisResults);
+    const scrollContainerRef = useEditorSelector(context => context.scrollContainerRef);
+    const articleLanguage = useEditorSelector(context => context.articleLanguage);
+    const aiFixingInfo = useAISelector(context => context.aiFixingInfo);
+    const handleAiFix = useAISelector(context => context.handleAiFix);
     
     const [highlightedItem, setHighlightedItem] = useState<string | any[] | null>(null);
     const [tooltip, setTooltip] = useState<TooltipState>(null);
@@ -343,7 +357,9 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         };
 
         editor.on('transaction', handleTransaction);
-        return () => editor.off('transaction', handleTransaction);
+        return () => {
+            editor.off('transaction', handleTransaction);
+        };
     }, [editor]);
 
     const createArabicInsensitiveRegexString = (text: string): string => {
@@ -921,7 +937,7 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }, [editor, highlightedItem, isTooltipAlwaysOn, pinnedTooltip, tooltip, aiFixingInfo, t.fix, allViolations, uiLanguage, t.leftSidebar.current, handleAiFix]);
     
 
-    const value = {
+    const value = useMemo<InteractionContextType>(() => ({
         highlightedItem,
         setHighlightedItem,
         tooltip,
@@ -941,7 +957,23 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         handleClearFormatting,
         handleToggleToc,
         handleHighlightStructureItem,
-    };
+    }), [
+        highlightedItem,
+        tooltip,
+        pinnedTooltip,
+        isTooltipAlwaysOn,
+        isTocVisible,
+        isSpotlightVisible,
+        handleScrollToTop,
+        applyHighlights,
+        clearAllHighlights,
+        handleToggleAllKeywordsHighlight,
+        handleRemoveEmptyLines,
+        handleFixParagraphs,
+        handleClearFormatting,
+        handleToggleToc,
+        handleHighlightStructureItem,
+    ]);
 
     return <InteractionContext.Provider value={value}>{children}</InteractionContext.Provider>;
 };

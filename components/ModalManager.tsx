@@ -1,8 +1,9 @@
 
 import React from 'react';
 import { useModal } from '../contexts/ModalContext';
-import SuggestionModal from './SuggestionModal';
-import HeadingsAnalysisModal from './HeadingsAnalysisModal';
+
+const SuggestionModal = React.lazy(() => import('./SuggestionModal'));
+const HeadingsAnalysisModal = React.lazy(() => import('./HeadingsAnalysisModal'));
 
 // Register every ModalContext modal type here so rendering stays centralized.
 const MODALS = {
@@ -19,7 +20,11 @@ const ModalManager: React.FC = () => {
 
   const SpecificModal = MODALS[modalType as keyof typeof MODALS];
 
-  return <SpecificModal />;
+  return (
+    <React.Suspense fallback={null}>
+      <SpecificModal />
+    </React.Suspense>
+  );
 };
 
 export default ModalManager;

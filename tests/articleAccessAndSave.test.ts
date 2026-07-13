@@ -75,10 +75,11 @@ test('article save transaction is atomic and idempotent', async () => {
   assert.doesNotMatch(publicSaveImplementation, /recordArticleVersion/);
 });
 
-test('dashboard and phase 2/3 migrations have balanced SQL delimiters', async () => {
+test('dashboard, access/save, and performance migrations have balanced SQL delimiters', async () => {
   const migrations = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260711010000_dashboard_filtered_pagination.sql'),
     readWorkspaceFile('supabase/migrations/20260713010000_phase_2_3_access_and_atomic_article_save.sql'),
+    readWorkspaceFile('supabase/migrations/20260713050000_phase_7_dashboard_performance.sql'),
   ]);
 
   migrations.forEach((migration) => {

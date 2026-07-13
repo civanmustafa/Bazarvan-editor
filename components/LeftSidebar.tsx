@@ -1,17 +1,18 @@
 ﻿import React, { useState } from 'react';
 import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check, Sparkles, Loader2, Hash, Percent } from 'lucide-react';
-import DuplicatesTab from './DuplicatesTab';
 import GoalTab from './GoalTab';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
-import { useEditor } from '../contexts/EditorContext';
-import { useInteraction } from '../contexts/InteractionContext';
-import { useAI } from '../contexts/AIContext';
+import { useEditorSelector } from '../contexts/EditorContext';
+import { useInteractionSelector } from '../contexts/InteractionContext';
+import { useAISelector } from '../contexts/AIContext';
 import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis, GoalContext } from '../types';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 import { parseGoalContextText } from '../utils/goalContext';
 import GeminiProgressStatus from './GeminiProgressStatus';
+
+const DuplicatesTab = React.lazy(() => import('./DuplicatesTab'));
 
 const mergeUniqueKeywordTerms = (existing: string[], incoming: string[], maxItems: number): string[] => {
   const seen = new Set<string>();
@@ -322,9 +323,18 @@ const MiniStat: React.FC<{ icon: React.ReactNode; value: string | number; title:
 
 const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
-  const { keywords, setKeywords, setGoalContext, analysisResults, setIsDuplicatesTabActive } = useEditor();
-  const { applyHighlights, clearAllHighlights, highlightedItem, setHighlightedItem } = useInteraction();
-  const { generateSemanticKeywords, aiRequestProgress, cancelAiRequest } = useAI();
+  const keywords = useEditorSelector(context => context.keywords);
+  const setKeywords = useEditorSelector(context => context.setKeywords);
+  const setGoalContext = useEditorSelector(context => context.setGoalContext);
+  const analysisResults = useEditorSelector(context => context.analysisResults);
+  const setIsDuplicatesTabActive = useEditorSelector(context => context.setIsDuplicatesTabActive);
+  const applyHighlights = useInteractionSelector(context => context.applyHighlights);
+  const clearAllHighlights = useInteractionSelector(context => context.clearAllHighlights);
+  const highlightedItem = useInteractionSelector(context => context.highlightedItem);
+  const setHighlightedItem = useInteractionSelector(context => context.setHighlightedItem);
+  const generateSemanticKeywords = useAISelector(context => context.generateSemanticKeywords);
+  const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
+  const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
   
   const { keywordAnalysis, duplicateAnalysis, duplicateStats } = analysisResults;
 
@@ -1121,7 +1131,9 @@ const LeftSidebar: React.FC = () => {
         <div className="flex-grow overflow-y-auto custom-scrollbar">
             {activeTab === 'keywords' && renderKeywordsTab()}
             {activeTab === 'duplicates' && (
-                <DuplicatesTab />
+                <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">جار تحميل التكرارات...</div>}>
+                  <DuplicatesTab />
+                </React.Suspense>
             )}
         </div>
     </aside>

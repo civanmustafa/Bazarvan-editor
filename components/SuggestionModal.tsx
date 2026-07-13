@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, LocateFixed, Sparkles, X } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
-import { useAI } from '../contexts/AIContext';
+import { useAISelector } from '../contexts/AIContext';
 import { useModal } from '../contexts/ModalContext';
-import { useEditor } from '../contexts/EditorContext';
+import { useEditorSelector } from '../contexts/EditorContext';
 import { getArticleReplacementContent, parseMarkdownToHtml } from '../utils/editorUtils';
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -50,8 +50,12 @@ const resolveSuggestionRange = (
 
 const SuggestionModal: React.FC = () => {
   const { t } = useUser();
-  const { editor, setTitle, articleLanguage } = useEditor();
-  const { suggestion, setSuggestion, markHistorySuggestionApplied } = useAI();
+  const editor = useEditorSelector(context => context.editor);
+  const setTitle = useEditorSelector(context => context.setTitle);
+  const articleLanguage = useEditorSelector(context => context.articleLanguage);
+  const suggestion = useAISelector(context => context.suggestion);
+  const setSuggestion = useAISelector(context => context.setSuggestion);
+  const markHistorySuggestionApplied = useAISelector(context => context.markHistorySuggestionApplied);
   const { closeModal } = useModal();
 
   const [position, setPosition] = useState({ x: 12, y: 72 });

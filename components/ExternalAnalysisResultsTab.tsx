@@ -14,7 +14,7 @@ import {
   Tags,
   Trash2,
 } from 'lucide-react';
-import { useAI } from '../contexts/AIContext';
+import { useAISelector } from '../contexts/AIContext';
 import { useUser } from '../contexts/UserContext';
 import { getExternalReadyCommandLabel } from '../constants/externalAnalysisCommands';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
@@ -78,12 +78,10 @@ const normalizeMarker = (value?: string): string => (
 const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({ articleId }) => {
   const { t } = useUser();
   const locale = t.locale === 'en' ? 'en' : 'ar';
-  const {
-    applyAiContentPatch,
-    selectAiContentPatchTarget,
-    deleteAiPatchMergeDeleteTarget,
-    selectAiPatchMergeDeleteTarget,
-  } = useAI();
+  const applyAiContentPatch = useAISelector(context => context.applyAiContentPatch);
+  const selectAiContentPatchTarget = useAISelector(context => context.selectAiContentPatchTarget);
+  const deleteAiPatchMergeDeleteTarget = useAISelector(context => context.deleteAiPatchMergeDeleteTarget);
+  const selectAiPatchMergeDeleteTarget = useAISelector(context => context.selectAiPatchMergeDeleteTarget);
   const [jobs, setJobs] = useState<ExternalAnalysisJobRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -330,7 +328,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
         ? (locale === 'ar' ? 'حذف' : 'Delete')
         : (locale === 'ar' ? 'إضافة' : 'Insert');
     const cleanTitle = (patch.title || (locale === 'ar' ? 'نص مقترح' : 'Suggested text'))
-      .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|insert|replace|delete)\s*[-:–]\s*/i, '')
+      .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|insert|replace|delete)\s*(?:-|:|\u2013)\s*/i, '')
       .trim() || (locale === 'ar' ? 'نص مقترح' : 'Suggested text');
     const reason = patch.reason || (locale === 'ar' ? 'سبب الاقتراح غير محدد.' : 'No reason was provided.');
     const reasonLabel = isDeletePatch

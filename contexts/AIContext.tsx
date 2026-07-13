@@ -1,7 +1,8 @@
 
-import React, { useState, useCallback, createContext, useContext, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { createContext, useContext, useContextSelector } from 'use-context-selector';
 import { useUser } from './UserContext';
-import { useEditor } from './EditorContext';
+import { useEditorSelector } from './EditorContext';
 import { useModal } from './ModalContext';
 import type {
     AiAnalysisOptions,
@@ -4799,19 +4800,17 @@ export const useAI = () => {
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { t, uiLanguage, apiKeys, engineeringPrompts, currentUser, currentView } = useUser();
-    const {
-        editor,
-        title,
-        setTitle,
-        text,
-        keywords,
-        setKeywords,
-        analysisResults,
-        goalContext,
-        articleLanguage,
-        articleKey,
-        activeArticleId,
-    } = useEditor();
+    const editor = useEditorSelector(context => context.editor);
+    const title = useEditorSelector(context => context.title);
+    const setTitle = useEditorSelector(context => context.setTitle);
+    const text = useEditorSelector(context => context.text);
+    const keywords = useEditorSelector(context => context.keywords);
+    const setKeywords = useEditorSelector(context => context.setKeywords);
+    const analysisResults = useEditorSelector(context => context.analysisResults);
+    const goalContext = useEditorSelector(context => context.goalContext);
+    const articleLanguage = useEditorSelector(context => context.articleLanguage);
+    const articleKey = useEditorSelector(context => context.articleKey);
+    const activeArticleId = useEditorSelector(context => context.activeArticleId);
     const { openModal } = useModal();
     
     const [aiResults, setAiResults] = useState<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
@@ -6142,7 +6141,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     }
                     : null;
             })
-            .filter((target): target is { group: BulkFixTargetGroup; originalText: string; from: number; to: number; targetFingerprint?: BulkFixTargetFingerprint } => Boolean(target));
+            .filter((target): target is { group: BulkFixTargetGroup; originalText: string; from: number; to: number; targetFingerprint: BulkFixTargetFingerprint } => Boolean(target));
         setFixAllProgress(p => ({
             ...p,
             total: groupedTargets.length,
@@ -6596,13 +6595,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             .forEach(patch => applyAiInsertionPatch(provider, patch.id));
     }, [aiInsertionPatches, applyAiInsertionPatch]);
 
-    const markHistorySuggestionApplied = (id: string, text: string) => {
+    const markHistorySuggestionApplied = useCallback((id: string, text: string) => {
         setAiHistory(history => history.map(historyItem => (
             historyItem.id === id ? { ...historyItem, appliedSuggestion: text, applyError: undefined } : historyItem
         )));
-    };
+    }, []);
 
-    const applySuggestionFromHistory = (id: string, text: string) => {
+    const applySuggestionFromHistory = useCallback((id: string, text: string) => {
         if (!editor) return;
         const item = aiHistory.find(historyItem => historyItem.id === id);
         if (!item || item.appliedSuggestion) return;
@@ -6618,11 +6617,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const replacement = getArticleReplacementContent(editor, resolvedRange, text, articleLanguage);
         editor.chain().focus().insertContentAt(replacement.range, replacement.content).run();
         markHistorySuggestionApplied(id, text);
-    };
+    }, [aiHistory, articleLanguage, editor, markHistorySuggestionApplied]);
 
-    const openGoogleSearch = (query: string) => {
+    const openGoogleSearch = useCallback((query: string) => {
         window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
-    };
+    }, []);
+
+    const removeFromAiHistory = useCallback((id: string) => {
+        setAiHistory(history => history.filter(item => item.id !== id));
+    }, []);
 
     const parseAiPatchResponse = useCallback((
         rawResponse: string,
@@ -6636,7 +6639,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return parsedResult;
     }, []);
 
-    const value = {
+    const value = useMemo<AIContextType>(() => ({
         aiResults, aiInsertionPatches, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, cancelAiRequest, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
@@ -6649,9 +6652,56 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         deleteAiPatchMergeDeleteTarget, selectAiPatchMergeDeleteTarget,
         deleteAiInsertionPatchMergeDeleteTarget, selectAiInsertionPatchMergeDeleteTarget,
         markHistorySuggestionApplied,
-        removeFromAiHistory: (id: string) => setAiHistory(h => h.filter(x => x.id !== id)),
+        removeFromAiHistory,
         generateContextAwarePrompt, openGoogleSearch
-    };
+    }), [
+        aiResults,
+        aiInsertionPatches,
+        isAiLoading,
+        quickAiProvider,
+        isAiCommandLoading,
+        aiFixingInfo,
+        suggestion,
+        headingsAnalysis,
+        isHeadingsAnalysisMinimized,
+        aiHistory,
+        bulkFixReviewItems,
+        fixAllProgress,
+        aiRequestProgress,
+        cancelAiRequest,
+        handleAiRequest,
+        handleAnalyzeHeadings,
+        handleAiAnalyze,
+        buildSmartAnalysisPrompt,
+        importManualChatGptResponse,
+        parseAiPatchResponse,
+        generateSemanticKeywords,
+        generateGoalContext,
+        handleChatGptAnalyze,
+        handleGeminiReadyCommandsAnalyze,
+        handleAiFix,
+        handleFixAllViolations,
+        getRelatedBulkFixRules,
+        applyBulkFixReviewItem,
+        applySelectedBulkFixReviewItems,
+        selectBulkFixReviewItemTarget,
+        skipBulkFixReviewItem,
+        clearBulkFixReviewItems,
+        applySuggestionFromHistory,
+        applyAiInsertionPatch,
+        applyAllAiInsertionPatches,
+        selectAiInsertionPatchTarget,
+        applyAiContentPatch,
+        selectAiContentPatchTarget,
+        deleteAiPatchMergeDeleteTarget,
+        selectAiPatchMergeDeleteTarget,
+        deleteAiInsertionPatchMergeDeleteTarget,
+        selectAiInsertionPatchMergeDeleteTarget,
+        markHistorySuggestionApplied,
+        removeFromAiHistory,
+        generateContextAwarePrompt,
+        openGoogleSearch,
+    ]);
 
     return (
         <AIContext.Provider value={value}>
@@ -6680,3 +6730,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         </AIContext.Provider>
     );
 };
+
+export const useAISelector = <Selected,>(
+  selector: (context: AIContextType) => Selected,
+): Selected => useContextSelector(AIContext, context => {
+  if (!context) throw new Error("useAISelector must be used within an AIProvider");
+  return selector(context);
+});
