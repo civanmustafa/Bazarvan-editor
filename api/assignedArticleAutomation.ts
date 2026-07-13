@@ -583,20 +583,24 @@ const authorizeArticleAutomation = async (
     .eq('id', userId)
     .maybeSingle();
 
-  const isAdmin = isRecord(profile) && profile.role === 'admin' && profile.is_active !== false;
+  if (!isRecord(profile) || profile.is_active === false) {
+    throw new AssignedAutomationError('An active user profile is required.', 403);
+  }
+
+  const isAdmin = profile.role === 'admin';
   if (isAdmin) return;
 
   if ([article.owner_id, article.created_by, article.assigned_to].includes(userId)) return;
 
   const { data: accessRow, error } = await supabase
     .from('article_access')
-    .select('article_id')
+    .select('article_id,role')
     .eq('article_id', article.id)
     .eq('user_id', userId)
     .maybeSingle();
 
   if (error && error.code !== '42P01') throw error;
-  if (accessRow) return;
+  if (accessRow?.role === 'editor') return;
 
   throw new AssignedAutomationError('You are not allowed to run automation for this article.', 403);
 };

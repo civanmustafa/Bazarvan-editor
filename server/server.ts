@@ -23,19 +23,6 @@ const distDir = process.env.STATIC_DIR
   : path.join(projectRoot, 'dist');
 const port = Number.parseInt(process.env.PORT || '8080', 10) || 8080;
 
-const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));
-const secretList = (...keys: string[]): string[] => (
-  Array.from(new Set(
-    keys
-      .flatMap(key => String(process.env[key] || '').split(/[\n,;]+/))
-      .map(item => item.trim())
-      .filter(Boolean)
-  ))
-);
-const countSecretList = (...keys: string[]): number => (
-  secretList(...keys).length
-);
-
 const runApiHandler = (handler: ApiHandler): RequestHandler => async (req, res, next) => {
   try {
     await handler(req, res);
@@ -49,23 +36,20 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
 app.use(compression());
-app.use(express.json({ limit: '25mb' }));
+app.use((_, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+app.use(['/api/gemini', '/api/chatgpt'], express.json({ limit: '1500kb' }));
+app.use(express.json({ limit: process.env.API_JSON_LIMIT || '12mb' }));
 
 const healthzHandler: RequestHandler = (_req, res) => {
   res.json({
     ok: true,
     service: 'bazarvan-editor',
-    uptimeSeconds: Math.round(process.uptime()),
-    ai: {
-      geminiConfigured: hasEnvValue('GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY'),
-      geminiKeyCount: countSecretList('GEMINI_API_KEYS', 'GEMINI_API_KEY', 'API_KEY'),
-      geminiPaidConfigured: hasEnvValue('GEMINI_PAID_API_KEYS', 'GEMINI_PAID_API_KEY', 'GEMINI_PRO_API_KEYS', 'GEMINI_PRO_API_KEY'),
-      geminiPaidKeyCount: countSecretList('GEMINI_PAID_API_KEYS', 'GEMINI_PAID_API_KEY', 'GEMINI_PRO_API_KEYS', 'GEMINI_PRO_API_KEY'),
-      openAiConfigured: hasEnvValue('OPENAI_API_KEY', 'OPENAI_API_KEYS'),
-      openAiKeyCount: countSecretList('OPENAI_API_KEY', 'OPENAI_API_KEYS'),
-      n8nConfigured: hasEnvValue('N8N_INGEST_TOKEN') && hasEnvValue('SUPABASE_SERVICE_ROLE_KEY'),
-    },
-    envFilesLoaded: process.env.BAZARVAN_ENV_FILES_LOADED || '',
   });
 };
 
@@ -118,8 +102,16 @@ app.use((error: unknown, _req: express.Request, res: express.Response, next: exp
     next(error);
     return;
   }
-  res.status(500).json({
-    error: error instanceof Error ? error.message : 'Internal server error',
+  const status = typeof error === 'object' && error !== null && 'status' in error
+    ? Number((error as { status?: unknown }).status)
+    : 500;
+  const normalizedStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+  res.status(normalizedStatus).json({
+    error: normalizedStatus === 413
+      ? 'Request body is too large.'
+      : normalizedStatus === 400
+        ? 'Invalid request body.'
+        : 'Internal server error.',
   });
 });
 

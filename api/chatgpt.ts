@@ -1,4 +1,23 @@
-const OPENAI_MODEL = "gpt-5.4";
+import {
+  assertAiRequestPayload,
+  assertAllowedOrigin,
+  assertRequestContentLength,
+  authenticateApiRequest,
+  consumeApiRateLimit,
+  getCorsPreflightHeaders,
+  getCorsResponseHeaders,
+  getPositiveIntegerEnv,
+  toApiSecurityResult,
+} from "./apiSecurity";
+
+const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-5.4";
+const ALLOWED_OPENAI_MODELS = new Set([
+  OPENAI_MODEL,
+  ...String(process.env.OPENAI_ALLOWED_MODELS || '')
+    .split(/[\n,;]+/)
+    .map(model => model.trim())
+    .filter(Boolean),
+]);
 const OPENAI_TIMEOUT_MS = 300000;
 
 type ApiResult = {
@@ -86,7 +105,21 @@ const sendNodeResponse = (res: any, result: ApiResult) => {
   res.statusCode = result.status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
-  res.end(JSON.stringify(result.body));
+  res.end(result.status === 204 ? undefined : JSON.stringify(result.body));
+};
+
+const withCorsResponseHeaders = (req: any, result: ApiResult): ApiResult => {
+  try {
+    return {
+      ...result,
+      headers: {
+        ...getCorsResponseHeaders(req),
+        ...(result.headers || {}),
+      },
+    };
+  } catch {
+    return result;
+  }
 };
 
 const randomizeKeyOrder = (keys: string[]): string[] => {
@@ -240,15 +273,17 @@ const createOpenAiResponse = async (
 };
 
 const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
+  try {
+    assertAllowedOrigin(req);
+  } catch (error) {
+    return toApiSecurityResult(error) || { status: 403, body: { error: "Request origin is not allowed." } };
+  }
+
   if (req.method === "OPTIONS") {
     return {
       status: 204,
       body: {},
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
+      headers: getCorsPreflightHeaders(req, "POST, OPTIONS"),
     };
   }
 
@@ -260,14 +295,21 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
   let selectedModel = OPENAI_MODEL;
 
   try {
+    const principal = await authenticateApiRequest(req);
+    consumeApiRateLimit(
+      "openai:start",
+      principal.userId,
+      getPositiveIntegerEnv("OPENAI_START_RATE_LIMIT_PER_MINUTE", 20),
+    );
+    assertRequestContentLength(req, 1_500_000);
     if (!getContentType(req).includes("application/json")) {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
-    const { prompt, model, conversationId } = await readRequestBody(req) as any;
-    if (!prompt || typeof prompt !== "string") {
-      return { status: 400, body: { error: "الموجه مطلوب" } };
-    }
+    const requestBody = await readRequestBody(req) as any;
+    assertAiRequestPayload(requestBody);
+    const prompt = String(requestBody.prompt);
+    const { model, conversationId } = requestBody;
 
     const openAiKeys = normalizeKeys(process.env.OPENAI_API_KEY, process.env.OPENAI_API_KEYS);
 
@@ -275,7 +317,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
       return { status: 500, body: { error: "لم يتم تكوين مفتاح ChatGPT API." } };
     }
 
-    selectedModel = typeof model === "string" && model.trim()
+    selectedModel = typeof model === "string" && ALLOWED_OPENAI_MODELS.has(model.trim())
       ? model.trim()
       : OPENAI_MODEL;
     const requestedConversationId = normalizeConversationId(conversationId);
@@ -301,9 +343,6 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
             provider: "openai",
             model: selectedModel,
             attempts,
-          },
-          headers: {
-            "Access-Control-Allow-Origin": "*",
           },
         };
       } catch (error) {
@@ -343,9 +382,6 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
               model: selectedModel,
               attempts,
             },
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-            },
           };
         } catch (error) {
           attempts.push(getOpenAiAttemptFailure(openAiKey, selectedModel, attempts.length + 1, error));
@@ -360,6 +396,8 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
 
     throw lastError || new Error("فشلت كل مفاتيح ChatGPT.");
   } catch (error) {
+    const securityResult = toApiSecurityResult(error);
+    if (securityResult) return securityResult;
     console.error("ChatGPT API Error:", error);
     if (error instanceof SyntaxError) {
       return { status: 400, body: { error: "طلب JSON غير صالح" } };
@@ -382,7 +420,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
 };
 
 export default async function handler(req: any, res?: any): Promise<Response | void> {
-  const result = await handleChatGptRequest(req);
+  const result = withCorsResponseHeaders(req, await handleChatGptRequest(req));
   if (res) {
     sendNodeResponse(res, result);
     return;

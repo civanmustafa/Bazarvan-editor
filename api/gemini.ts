@@ -4,6 +4,17 @@ import {
   claimGeminiApiKey,
   getGeminiKeyFailureCooldownSeconds,
 } from "../server/geminiKeyCoordinator";
+import {
+  assertAiRequestPayload,
+  assertAllowedOrigin,
+  assertRequestContentLength,
+  authenticateApiRequest,
+  consumeApiRateLimit,
+  getCorsPreflightHeaders,
+  getCorsResponseHeaders,
+  getPositiveIntegerEnv,
+  toApiSecurityResult,
+} from "./apiSecurity";
 
 // Keep the serverless function self-contained: Vercel executes this compiled
 // ESM file directly and cannot resolve extensionless frontend module imports.
@@ -92,6 +103,7 @@ export type GeminiExecutionOptions = {
 };
 
 type GeminiJobState = {
+  ownerId: string;
   status: "running" | "completed" | "cancelled";
   startedAt: string;
   updatedAt: string;
@@ -215,7 +227,7 @@ const getContentType = (req: any): string => {
   return String(req.headers?.["content-type"] || req.headers?.["Content-Type"] || "");
 };
 
-const toWebResponse = (result: ApiResult): Response => new Response(JSON.stringify(result.body), {
+const toWebResponse = (result: ApiResult): Response => new Response(result.status === 204 ? null : JSON.stringify(result.body), {
   status: result.status,
   headers: {
     "Content-Type": "application/json; charset=utf-8",
@@ -227,7 +239,21 @@ const sendNodeResponse = (res: any, result: ApiResult) => {
   res.statusCode = result.status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
-  res.end(JSON.stringify(result.body));
+  res.end(result.status === 204 ? undefined : JSON.stringify(result.body));
+};
+
+const withCorsResponseHeaders = (req: any, result: ApiResult): ApiResult => {
+  try {
+    return {
+      ...result,
+      headers: {
+        ...getCorsResponseHeaders(req),
+        ...(result.headers || {}),
+      },
+    };
+  } catch {
+    return result;
+  }
 };
 
 const parseGeminiKeyList = (...rawValues: Array<string | undefined>): string[] => (
@@ -1152,13 +1178,14 @@ const ensureGeminiJobCompletedProgress = (
   });
 };
 
-const startGeminiJob = (progressId: string, requestBody: any): GeminiJobState => {
+const startGeminiJob = (progressId: string, requestBody: any, ownerId: string): GeminiJobState => {
   const existingJob = geminiJobStore.get(progressId);
   if (existingJob) return existingJob;
 
   const now = new Date().toISOString();
   const initial = getInitialJobProgress(requestBody);
   const job: GeminiJobState = {
+    ownerId,
     status: "running",
     startedAt: now,
     updatedAt: now,
@@ -1212,11 +1239,18 @@ const handleGeminiCancelRequest = async (req: any): Promise<ApiResult> => {
     return { status: 405, body: { error: "Method not allowed" } };
   }
 
+  assertAllowedOrigin(req);
+  const principal = await authenticateApiRequest(req);
+  consumeApiRateLimit(
+    "gemini:cancel",
+    principal.userId,
+    getPositiveIntegerEnv("GEMINI_CANCEL_RATE_LIMIT_PER_MINUTE", 30),
+  );
   cleanupGeminiProgressStore();
   const progressId = getProgressIdFromRequest(req);
   const job = progressId ? geminiJobStore.get(progressId) : undefined;
   const progress = progressId ? geminiProgressStore.get(progressId) : undefined;
-  if (!job) {
+  if (!job || job.ownerId !== principal.userId) {
     return {
       status: 404,
       body: {
@@ -1304,19 +1338,39 @@ const handleGeminiCancelRequest = async (req: any): Promise<ApiResult> => {
 };
 
 const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
-  if (req.method !== "POST") {
-    return { status: 405, body: { error: "الطريقة غير مسموح بها" } };
-  }
-
   try {
+    assertAllowedOrigin(req);
+    if (req.method === "OPTIONS") {
+      return {
+        status: 204,
+        body: {},
+        headers: getCorsPreflightHeaders(req, "POST, OPTIONS"),
+      };
+    }
+    if (req.method !== "POST") {
+      return { status: 405, body: { error: "الطريقة غير مسموح بها" } };
+    }
+
+    const principal = await authenticateApiRequest(req);
+    consumeApiRateLimit(
+      "gemini:start",
+      principal.userId,
+      getPositiveIntegerEnv("GEMINI_START_RATE_LIMIT_PER_MINUTE", 30),
+    );
+    assertRequestContentLength(req, 1_500_000);
     if (!getContentType(req).includes("application/json")) {
       return { status: 415, body: { error: "يجب أن يكون نوع المحتوى application/json" } };
     }
 
     const requestBody = await readRequestBody(req) as any;
+    assertAiRequestPayload(requestBody);
     const progressId = normalizeProgressId(requestBody?.progressId);
     if (requestBody?.async === true && progressId) {
-      const job = startGeminiJob(progressId, requestBody);
+      const existingJob = geminiJobStore.get(progressId);
+      if (existingJob && existingJob.ownerId !== principal.userId) {
+        return { status: 409, body: { error: "Gemini progress identifier is already in use." } };
+      }
+      const job = startGeminiJob(progressId, requestBody, principal.userId);
       return {
         status: 202,
         body: {
@@ -1329,6 +1383,8 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
 
     return executeGeminiRequest(requestBody);
   } catch (error) {
+    const securityResult = toApiSecurityResult(error);
+    if (securityResult) return securityResult;
     console.error("Error starting Gemini request:", error);
     if (error instanceof SyntaxError) {
       return { status: 400, body: { error: "طلب JSON غير صالح" } };
@@ -1345,11 +1401,18 @@ const handleGeminiProgressRequest = async (req: any): Promise<ApiResult> => {
     return { status: 405, body: { error: "Method not allowed" } };
   }
 
+  assertAllowedOrigin(req);
+  const principal = await authenticateApiRequest(req);
+  consumeApiRateLimit(
+    "gemini:progress",
+    principal.userId,
+    getPositiveIntegerEnv("GEMINI_PROGRESS_RATE_LIMIT_PER_MINUTE", 600),
+  );
   cleanupGeminiProgressStore();
   const progressId = getProgressIdFromRequest(req);
   const progress = progressId ? geminiProgressStore.get(progressId) : undefined;
   const job = progressId ? geminiJobStore.get(progressId) : undefined;
-  if (!progress && !job) {
+  if (!job || job.ownerId !== principal.userId || !progress) {
     return {
       status: 404,
       body: {
@@ -1379,9 +1442,29 @@ export async function geminiProgressHandler(req: any, res?: any): Promise<Respon
       return "";
     }
   })();
-  const result = pathname.endsWith("/cancel")
-    ? await handleGeminiCancelRequest(req)
-    : await handleGeminiProgressRequest(req);
+  let result: ApiResult;
+  try {
+    if (req.method === "OPTIONS") {
+      assertAllowedOrigin(req);
+      result = {
+        status: 204,
+        body: {},
+        headers: getCorsPreflightHeaders(req, "GET, HEAD, POST, OPTIONS"),
+      };
+    } else {
+      result = pathname.endsWith("/cancel")
+        ? await handleGeminiCancelRequest(req)
+        : await handleGeminiProgressRequest(req);
+    }
+  } catch (error) {
+    const securityResult = toApiSecurityResult(error);
+    result = securityResult || {
+      status: 500,
+      body: { error: "Could not process the Gemini progress request." },
+    };
+    if (!securityResult) console.error("Gemini progress route failed:", error);
+  }
+  result = withCorsResponseHeaders(req, result);
   if (res) {
     sendNodeResponse(res, result);
     return;
@@ -1390,7 +1473,7 @@ export async function geminiProgressHandler(req: any, res?: any): Promise<Respon
 }
 
 export default async function handler(req: any, res?: any): Promise<Response | void> {
-  const result = await handleGeminiRequest(req);
+  const result = withCorsResponseHeaders(req, await handleGeminiRequest(req));
   if (res) {
     sendNodeResponse(res, result);
     return;

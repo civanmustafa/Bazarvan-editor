@@ -1,3 +1,5 @@
+import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from './authenticatedApi';
+
 export type GeminiEngineProvider = 'gemini' | 'geminiPaid';
 
 export type GeminiProgressSnapshot = {
@@ -63,9 +65,16 @@ const wait = (duration: number): Promise<void> => new Promise(resolve => {
     window.setTimeout(resolve, duration);
 });
 
-const createGeminiProgressId = (): string => (
-    `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
-);
+const createGeminiProgressId = (): string => {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+        return `gemini-${globalThis.crypto.randomUUID()}`;
+    }
+
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    const randomPart = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `gemini-${randomPart}`;
+};
 
 const parseJsonRecord = (rawBody: string): Record<string, any> => {
     try {
@@ -96,6 +105,7 @@ const normalizeJobResult = (
 
 const waitForGeminiJob = async (
     progressId: string,
+    accessToken: string,
     onProgress: GeminiProgressCallback | undefined,
     timeoutMs: number,
 ): Promise<GeminiEngineResult> => {
@@ -107,6 +117,7 @@ const waitForGeminiJob = async (
         try {
             const response = await fetch(`/api/gemini/progress/${encodeURIComponent(progressId)}`, {
                 cache: 'no-store',
+                headers: getAuthenticatedApiHeaders(accessToken),
             });
             if (response.ok) {
                 const progress = await response.json() as GeminiProgressSnapshot;
@@ -139,6 +150,7 @@ export const runGeminiAnalysisEngine = async ({
     timeoutMs = GEMINI_JOB_TIMEOUT_MS,
 }: RunGeminiEngineOptions): Promise<GeminiEngineResult> => {
     const progressId = createGeminiProgressId();
+    const accessToken = await getAuthenticatedApiToken();
     const controller = new AbortController();
     const startTimeoutId = window.setTimeout(() => controller.abort(), GEMINI_JOB_START_TIMEOUT_MS);
 
@@ -146,7 +158,7 @@ export const runGeminiAnalysisEngine = async ({
     try {
         response = await fetch('/api/gemini', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthenticatedApiHeaders(accessToken, { 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 ...request,
                 progressId,
@@ -166,7 +178,7 @@ export const runGeminiAnalysisEngine = async ({
     const rawBody = await response.text().catch(() => '');
     const data = parseJsonRecord(rawBody);
     if (response.status === 202 && data.accepted === true) {
-        return waitForGeminiJob(progressId, onProgress, timeoutMs);
+        return waitForGeminiJob(progressId, accessToken, onProgress, timeoutMs);
     }
 
     return {
@@ -181,9 +193,10 @@ export const cancelGeminiAnalysisEngine = async (progressId: string): Promise<vo
     const normalizedProgressId = progressId.trim();
     if (!normalizedProgressId) return;
 
+    const accessToken = await getAuthenticatedApiToken();
     const response = await fetch(`/api/gemini/progress/${encodeURIComponent(normalizedProgressId)}/cancel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthenticatedApiHeaders(accessToken, { 'Content-Type': 'application/json' }),
     });
     const rawBody = await response.text().catch(() => '');
     const data = parseJsonRecord(rawBody);

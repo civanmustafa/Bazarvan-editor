@@ -18,6 +18,13 @@ dist-ssr
 !.env.production.example
 !deploy/env.server.example
 
+# Never track local operational notes or private key material.
+supabase/migrations/*.txt
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

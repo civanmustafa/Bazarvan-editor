@@ -32,6 +32,7 @@ import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText }
 import { normalizeGoalContext } from '../utils/goalContext';
 import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
 import { getSelectedGeminiFreeModel, isGeminiFreeModelFallbackEnabled } from '../utils/geminiModelPreference';
+import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from '../utils/authenticatedApi';
 import {
     cancelGeminiAnalysisEngine,
     runGeminiAnalysisEngine,
@@ -2518,9 +2519,10 @@ const callChatGptAnalysis = async (
     const requestId = `openai-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 
     try {
+        const accessToken = await getAuthenticatedApiToken();
         const response = await fetch('/api/chatgpt', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthenticatedApiHeaders(accessToken, { 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 prompt,
                 model: OPENAI_MODEL,
