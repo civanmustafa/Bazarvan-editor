@@ -22,6 +22,7 @@ import {
   reportExternalGeminiCall,
   runExternalGeminiCall,
 } from './externalGeminiRunner';
+import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 
 type ExternalEngineeringArticleRow = {
   id: string;
@@ -57,7 +58,7 @@ const toStringList = (value: unknown): string[] => (
 
 const toCompetitorSlots = (value: unknown): string[] => (
   Array.isArray(value)
-    ? value.slice(0, 3).map(toTrimmedString)
+    ? value.slice(0, MAX_ARTICLE_COMPETITORS).map(toTrimmedString)
     : []
 );
 

@@ -51,3 +51,15 @@ export const requireArticleWriteAccess = async (
   }
   return level;
 };
+
+export const requireArticleReadAccess = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+  userId: string,
+): Promise<'read' | 'write' | 'admin'> => {
+  const level = await getArticleAccessLevelForUser(supabase, articleId, userId);
+  if (level === 'none') {
+    throw new ArticleAccessPolicyError('You do not have permission to view this article.', 403);
+  }
+  return level;
+};

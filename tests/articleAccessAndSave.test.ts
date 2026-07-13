@@ -66,6 +66,7 @@ test('article save transaction is atomic and idempotent', async () => {
   assert.match(migration, /insert into public\.article_versions/);
   assert.match(migration, /insert into public\.article_save_requests/);
   assert.match(articleApi, /rpc\('save_article_snapshot'/);
+  assert.doesNotMatch(articleApi, /\.from\('article_competitors'\)/);
   assert.match(articleClient, /saveRemoteArticleSnapshotViaServer\(snapshot, options\)/);
 
   const publicSaveStart = articleClient.indexOf('export const saveRemoteArticleSnapshot = async');
@@ -80,12 +81,34 @@ test('dashboard, access/save, and performance migrations have balanced SQL delim
     readWorkspaceFile('supabase/migrations/20260711010000_dashboard_filtered_pagination.sql'),
     readWorkspaceFile('supabase/migrations/20260713010000_phase_2_3_access_and_atomic_article_save.sql'),
     readWorkspaceFile('supabase/migrations/20260713050000_phase_7_dashboard_performance.sql'),
+    readWorkspaceFile('supabase/migrations/20260714000000_competitor_discovery.sql'),
   ]);
 
   migrations.forEach((migration) => {
     assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL contains an unmatched $$ delimiter.');
     assertBalancedSqlParentheses(migration);
   });
+});
+
+test('competitor discovery is durable, RLS protected, and uses the canonical article policy', async () => {
+  const [migration, api, worker, registry] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260714000000_competitor_discovery.sql'),
+    readWorkspaceFile('api/competitors.ts'),
+    readWorkspaceFile('server/competitorExtractionExecutor.ts'),
+    readWorkspaceFile('server/apiRouteRegistry.ts'),
+  ]);
+
+  assert.match(migration, /create table if not exists public\.article_competitors/);
+  assert.match(migration, /using \(public\.can_read_article\(article_id\)\)/);
+  assert.match(migration, /article_access_level_for_user\(p_article_id, p_requested_by\)/);
+  assert.match(migration, /enqueue_competitor_extraction_job/);
+  assert.match(migration, /function public\.merge_article_competitors_metadata/);
+  assert.match(migration, /trigger preserve_article_competitors_metadata/);
+  assert.match(migration, /job_type = 'competitor_extraction'/);
+  assert.match(api, /requireArticleWriteAccess\(/);
+  assert.match(api, /authenticateApiRequest\(req\)/);
+  assert.match(worker, /registerExternalAnalysisJobExecutor\('competitor_extraction'/);
+  assert.match(registry, /path: '\/api\/competitors'/);
 });
 
 test('article save API authenticates before invoking the save transaction', async () => {

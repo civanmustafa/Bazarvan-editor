@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
+import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type ArticleVisibility = 'private' | 'public';
@@ -519,7 +520,7 @@ const normalizeCompetitorInputs = (body: Record<string, any>) => {
   const htmls: string[] = [];
   const texts: string[] = [];
 
-  for (let index = 0; index < 3; index += 1) {
+  for (let index = 0; index < MAX_ARTICLE_COMPETITORS; index += 1) {
     const row = isRecord(competitorRows[index]) ? competitorRows[index] : {};
     urls[index] = toTrimmedString(
       row.url ||

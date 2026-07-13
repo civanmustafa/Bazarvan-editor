@@ -1,5 +1,5 @@
 ﻿
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2 } from 'lucide-react';
 import StructureTab from './StructureTab';
 import { useUser } from '../contexts/UserContext';
@@ -20,7 +20,10 @@ import {
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 import GeminiProgressStatus from './GeminiProgressStatus';
 import ExternalAiBridgePanel from './ExternalAiBridgePanel';
+import CompetitorDiscoveryPanel from './CompetitorDiscoveryPanel';
 import { runGeminiAnalysisEngine, type GeminiProgressSnapshot } from '../utils/geminiAnalysisEngine';
+import { createEmptyCompetitorSlots, MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
+import type { CompetitorDiscoveryRow } from '../utils/competitorDiscovery';
 
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
 const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
@@ -99,15 +102,14 @@ const createEmptyCompetitorState = (): CompetitorExtractionState => ({
     error: '',
 });
 
-const createDefaultCompetitorUrls = () => ['', '', ''];
-const createDefaultCompetitorHtmls = () => ['', '', ''];
-const createDefaultCompetitorTexts = () => ['', '', ''];
+const createDefaultCompetitorUrls = createEmptyCompetitorSlots;
+const createDefaultCompetitorHtmls = createEmptyCompetitorSlots;
+const createDefaultCompetitorTexts = createEmptyCompetitorSlots;
 
-const createDefaultCompetitorExtractions = () => [
-    createEmptyCompetitorState(),
-    createEmptyCompetitorState(),
-    createEmptyCompetitorState(),
-];
+const createDefaultCompetitorExtractions = () => Array.from(
+    { length: MAX_ARTICLE_COMPETITORS },
+    createEmptyCompetitorState,
+);
 
 const isCompetitorTextSeparatorLine = (line: string): boolean => {
     const trimmed = line.trim();
@@ -132,7 +134,7 @@ const splitBulkCompetitorTexts = (value: string): string[] => {
     const lastSection = current.join('\n').trim();
     if (lastSection) sections.push(lastSection);
 
-    return sections.slice(0, 3);
+    return sections.slice(0, MAX_ARTICLE_COMPETITORS);
 };
 
 const countPromptWords = (value: string): number => value.split(/\s+/).filter(Boolean).length;
@@ -734,6 +736,9 @@ const RightSidebar: React.FC = () => {
     const { t, engineeringPrompts, chatGptOpenMode } = useUser();
     const setIsStructureTabActive = useEditorSelector(context => context.setIsStructureTabActive);
     const activeArticleId = useEditorSelector(context => context.activeArticleId);
+    const articleTitle = useEditorSelector(context => context.title);
+    const articleKeywords = useEditorSelector(context => context.keywords);
+    const articleLanguage = useEditorSelector(context => context.articleLanguage);
     const handleAiAnalyze = useAISelector(context => context.handleAiAnalyze);
     const handleChatGptAnalyze = useAISelector(context => context.handleChatGptAnalyze);
     const handleGeminiReadyCommandsAnalyze = useAISelector(context => context.handleGeminiReadyCommandsAnalyze);
@@ -823,7 +828,7 @@ const RightSidebar: React.FC = () => {
     useEffect(() => {
         const handleAutoDistributedCompetitors = (event: Event) => {
             const urls = (event as CustomEvent<{ urls?: string[] }>).detail?.urls || [];
-            const normalizedUrls = urls.map(url => url.trim()).filter(Boolean).slice(0, 3);
+            const normalizedUrls = urls.map(url => url.trim()).filter(Boolean).slice(0, MAX_ARTICLE_COMPETITORS);
             if (normalizedUrls.length === 0) return;
 
             setCompetitorUrls(prev => createDefaultCompetitorUrls().map((_, index) => normalizedUrls[index] || prev[index] || ''));
@@ -836,6 +841,57 @@ const RightSidebar: React.FC = () => {
         return () => {
             window.removeEventListener('bazarvan:auto-distribute-competitors', handleAutoDistributedCompetitors);
         };
+    }, []);
+
+    const handleDiscoveredCompetitors = useCallback((rows: CompetitorDiscoveryRow[]) => {
+        const rowsByPosition = new Map(rows.map(row => [row.position, row]));
+        setBulkCompetitorText('');
+        setCompetitorUrls(createDefaultCompetitorUrls().map((_, index) => {
+            const row = rowsByPosition.get(index + 1);
+            return row?.canonicalUrl || row?.sourceUrl || '';
+        }));
+        setCompetitorHtmls(createDefaultCompetitorHtmls());
+        setCompetitorTexts(createDefaultCompetitorTexts().map((_, index) => {
+            const row = rowsByPosition.get(index + 1);
+            return row?.status === 'completed' ? row.contentText : '';
+        }));
+        setCompetitorExtractions(createDefaultCompetitorExtractions().map((emptyState, index) => {
+            const row = rowsByPosition.get(index + 1);
+            if (!row) return emptyState;
+            if (row.status === 'completed') {
+                return {
+                    status: 'success',
+                    source: 'url',
+                    error: '',
+                    content: {
+                        url: row.canonicalUrl || row.sourceUrl,
+                        fetchedUrl: row.canonicalUrl || row.sourceUrl,
+                        title: row.title,
+                        description: row.description,
+                        headings: row.headings,
+                        paragraphs: row.contentText.split(/\n{2,}/).map(item => item.trim()).filter(Boolean),
+                        listItems: [],
+                        text: row.contentText,
+                        wordCount: row.wordCount,
+                    },
+                } satisfies CompetitorExtractionState;
+            }
+            if (row.status === 'failed' || row.status === 'cancelled') {
+                return {
+                    status: 'error',
+                    source: 'url',
+                    content: null,
+                    error: row.errorMessage || (row.status === 'cancelled' ? 'Extraction cancelled.' : 'Extraction failed.'),
+                } satisfies CompetitorExtractionState;
+            }
+            return {
+                status: 'loading',
+                source: 'url',
+                content: null,
+                error: '',
+            } satisfies CompetitorExtractionState;
+        }));
+        setCompetitorGeminiProgress({});
     }, []);
 
     useEffect(() => {
@@ -1753,6 +1809,15 @@ ${readyCommandCompetitorBlocks}`;
                     <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{tRs.competitorsHint}</p>
                 </div>
 
+                <CompetitorDiscoveryPanel
+                    articleId={activeArticleId}
+                    articleTitle={articleTitle}
+                    primaryKeyword={articleKeywords.primary}
+                    articleLanguage={articleLanguage}
+                    locale={t.locale === 'en' ? 'en' : 'ar'}
+                    onCompetitorsChange={handleDiscoveredCompetitors}
+                />
+
                 <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                     <div className="mb-2 text-xs font-bold text-gray-700 dark:text-gray-200">
                         {t.locale === 'ar' ? 'نموذج Gemini لاستخراج المنافسين' : 'Gemini model for competitor extraction'}
@@ -1791,8 +1856,8 @@ ${readyCommandCompetitorBlocks}`;
                         onChange={(event) => setBulkCompetitorText(event.target.value)}
                         onPaste={handleBulkCompetitorTextPaste}
                         placeholder={t.locale === 'ar'
-                            ? 'نص المنافس الأول...\n--\nنص المنافس الثاني...\n**\nنص المنافس الثالث...'
-                            : 'First competitor text...\n--\nSecond competitor text...\n**\nThird competitor text...'}
+                            ? 'نص المنافس الأول...\n--\nنص المنافس الثاني...\n--\nنص المنافس الثالث...\n--\nنص المنافس الرابع...\n--\nنص المنافس الخامس...'
+                            : 'First competitor text...\n--\nSecond competitor text...\n--\nThird competitor text...\n--\nFourth competitor text...\n--\nFifth competitor text...'}
                         rows={5}
                         className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
                         dir="auto"

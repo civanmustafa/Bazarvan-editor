@@ -32,6 +32,7 @@ import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
 import { buildEditorArticlePath, navigateToAppPath, navigateToNewEditorArticle } from '../utils/appRoutes';
 import ExternalAnalysisCardControls from './ExternalAnalysisCardControls';
+import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import {
     listExternalAnalysisDashboardSummaries,
     type ExternalAnalysisDashboardSummary,
@@ -225,7 +226,7 @@ const getArticleCompetitors = (
   const texts = Array.isArray(competitors?.texts) ? competitors.texts : [];
   const htmls = Array.isArray(competitors?.htmls) ? competitors.htmls : [];
 
-  return [0, 1, 2].map(index => ({
+  return Array.from({ length: MAX_ARTICLE_COMPETITORS }, (_, index) => ({
     index: index + 1,
     url: typeof urls[index] === 'string' ? urls[index] : '',
     text: typeof texts[index] === 'string' ? texts[index] : '',

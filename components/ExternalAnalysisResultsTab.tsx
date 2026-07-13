@@ -105,7 +105,8 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     }
     if (showLoading) setLoading(true);
     try {
-      const rows = await listExternalAnalysisJobs(articleId);
+      const rows = (await listExternalAnalysisJobs(articleId))
+        .filter(job => job.job_type !== 'competitor_extraction');
       if (refreshRequestRef.current !== requestId) return;
       setJobs(rows);
       setError('');

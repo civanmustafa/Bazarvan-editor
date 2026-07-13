@@ -35,6 +35,7 @@ const formatKeySuffix = (value: unknown): string => {
 };
 
 const providerLabel = (provider: string): string => {
+  if (provider === 'firecrawl') return 'Firecrawl';
   if (provider === 'geminiPaid') return 'Gemini Pro';
   if (provider === 'gemini') return 'Gemini المجاني';
   if (provider === 'openai') return 'OpenAI';
@@ -180,6 +181,23 @@ const ExternalAnalysisReportsTable: React.FC<{
         </div>
       );
     }
+    if (job.job_type === 'competitor_extraction') {
+      const sourceCount = Number(job.input_snapshot?.sourceCount) || 0;
+      const queryText = textValue(job.input_snapshot?.queryText);
+      return (
+        <div>
+          <div className="font-black text-gray-800 dark:text-gray-100">
+            {locale === 'ar' ? 'بحث وسحب المنافسين' : 'Competitor discovery'}
+          </div>
+          <div className="mt-1 max-w-[260px] break-words text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">
+            {queryText || '-'}
+          </div>
+          <div className="mt-1 text-[11px] text-gray-500">
+            {locale === 'ar' ? `المصادر المختارة: ${sourceCount}` : `Selected sources: ${sourceCount}`}
+          </div>
+        </div>
+      );
+    }
     const commandLabel = job.command_id
       ? getExternalReadyCommandLabel(job.command_id, locale)
       : job.command_label || '-';
@@ -280,7 +298,9 @@ const ExternalAnalysisReportsTable: React.FC<{
               const result = isRecord(job.result) ? job.result : {};
               const generatedCount = job.job_type === 'semantic_keywords_lsi'
                 ? (Array.isArray(result.appliedFields) ? result.appliedFields.length : 0)
-                : (Array.isArray(result.patches) ? result.patches.length : 0);
+                : job.job_type === 'competitor_extraction'
+                  ? Number(result.successfulCount) || 0
+                  : (Array.isArray(result.patches) ? result.patches.length : 0);
               return (
                 <tr key={job.id} className="border-b border-gray-100 align-top dark:border-[#3C3C3C]">
                   <td className="whitespace-nowrap px-3 py-3 text-gray-500">
@@ -318,7 +338,11 @@ const ExternalAnalysisReportsTable: React.FC<{
                     </div>
                     {generatedCount > 0 && (
                       <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-300">
-                        {job.job_type === 'semantic_keywords_lsi' ? `حقول مطبقة: ${generatedCount}` : `اقتراحات: ${generatedCount}`}
+                        {job.job_type === 'semantic_keywords_lsi'
+                          ? `حقول مطبقة: ${generatedCount}`
+                          : job.job_type === 'competitor_extraction'
+                            ? `مواقع مسحوبة: ${generatedCount}`
+                            : `اقتراحات: ${generatedCount}`}
                       </div>
                     )}
                   </td>

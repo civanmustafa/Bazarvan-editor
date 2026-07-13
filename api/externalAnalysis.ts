@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
+import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
@@ -179,8 +180,8 @@ const hasCompetitorInput = (metadata: unknown): boolean => {
     : isRecord(source.competitors)
       ? source.competitors
       : {};
-  return toStringList(competitors.urls).slice(0, 3).length > 0
-    || toStringList(competitors.texts).slice(0, 3).length > 0;
+  return toStringList(competitors.urls).slice(0, MAX_ARTICLE_COMPETITORS).length > 0
+    || toStringList(competitors.texts).slice(0, MAX_ARTICLE_COMPETITORS).length > 0;
 };
 
 const enqueueSemanticJob = async (

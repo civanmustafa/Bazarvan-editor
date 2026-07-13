@@ -5,7 +5,7 @@ import type {
 } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 
-export type ExternalAnalysisJobType = 'semantic_keywords_lsi' | 'engineering_command';
+export type ExternalAnalysisJobType = 'semantic_keywords_lsi' | 'engineering_command' | 'competitor_extraction';
 
 export type ExternalAnalysisJobStatus =
   | 'waiting_for_prerequisites'
@@ -153,7 +153,11 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   id: String(row.id),
   article_id: String(row.article_id),
   requested_by: row.requested_by || null,
-  job_type: row.job_type === 'semantic_keywords_lsi' ? 'semantic_keywords_lsi' : 'engineering_command',
+  job_type: row.job_type === 'semantic_keywords_lsi'
+    ? 'semantic_keywords_lsi'
+    : row.job_type === 'competitor_extraction'
+      ? 'competitor_extraction'
+      : 'engineering_command',
   origin: row.origin === 'manual' ? 'manual' : 'auto',
   status: row.status as ExternalAnalysisJobStatus,
   batch_key: row.batch_key || null,

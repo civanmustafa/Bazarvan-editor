@@ -11,6 +11,7 @@ import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, Duplicate
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 import { parseGoalContextText } from '../utils/goalContext';
 import GeminiProgressStatus from './GeminiProgressStatus';
+import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 
 const DuplicatesTab = React.lazy(() => import('./DuplicatesTab'));
 
@@ -710,7 +711,7 @@ const LeftSidebar: React.FC = () => {
 
         const competitorsPart = competitorParts.join('\n');
         const competitorUrls = competitorsPart
-            ? competitorsPart.split(/\r?\n/).map(url => url.trim()).filter(Boolean).slice(0, 3)
+            ? competitorsPart.split(/\r?\n/).map(url => url.trim()).filter(Boolean).slice(0, MAX_ARTICLE_COMPETITORS)
             : [];
         if (competitorUrls.length > 0) {
             window.dispatchEvent(new CustomEvent('bazarvan:auto-distribute-competitors', {
