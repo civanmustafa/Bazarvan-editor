@@ -20,6 +20,7 @@ import type {
     BulkFixReviewStats,
     BulkFixReviewVariant,
     BulkFixTargetFingerprint,
+    ExternalAiBridgeProvider,
     GoalContext,
     ReadyCommandAnalysisBatchItem,
     ReadyCommandAnalysisHistoryMeta,
@@ -4743,7 +4744,8 @@ interface AIContextType {
     handleChatGptAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
     handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[], provider?: GeminiPatchProvider, geminiModel?: string) => Promise<boolean>;
     buildSmartAnalysisPrompt: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => string;
-    importManualChatGptResponse: (rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => void;
+    validateAiArticleContext: (flowLabel: string) => boolean;
+    importManualAiResponse: (rawResponse: string, provider: ExternalAiBridgeProvider, historyMeta?: ReadyCommandAnalysisHistoryMeta) => void;
     parseAiPatchResponse: (
         rawResponse: string,
         provider: AiPatchProvider,
@@ -4896,6 +4898,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         });
         return true;
     }, [goalContext, keywords, title]);
+
+    const validateAiArticleContext = useCallback((flowLabel: string): boolean => (
+        !stopAiRequestIfArticleContextMissing(flowLabel)
+    ), [stopAiRequestIfArticleContextMissing]);
 
     useEffect(() => {
         if (!aiContextNotice) return undefined;
@@ -5644,17 +5650,21 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
     }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 
-    const importManualChatGptResponse = useCallback((rawResponse: string, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
+    const importManualAiResponse = useCallback((
+        rawResponse: string,
+        provider: ExternalAiBridgeProvider,
+        historyMeta?: ReadyCommandAnalysisHistoryMeta,
+    ) => {
         const responseText = rawResponse.trim();
         if (!responseText) return;
 
         const parsedResult = historyMeta?.skipPatchInstructions
             ? { displayText: responseText, patches: [] }
-            : applyReadyCommandPatchRules(parseSmartAnalysisResponse(responseText, 'chatgpt'), historyMeta?.commandId);
+            : applyReadyCommandPatchRules(parseSmartAnalysisResponse(responseText, provider), historyMeta?.commandId);
 
-        setAiResults(prev => ({ ...prev, chatgpt: parsedResult.displayText }));
-        setAiInsertionPatches(prev => ({ ...prev, chatgpt: parsedResult.patches }));
-        logReadyCommandAnalysis('chatgpt', parsedResult, historyMeta);
+        setAiResults(prev => ({ ...prev, [provider]: parsedResult.displayText }));
+        setAiInsertionPatches(prev => ({ ...prev, [provider]: parsedResult.patches }));
+        logReadyCommandAnalysis(provider, parsedResult, historyMeta);
     }, [logReadyCommandAnalysis]);
 
     const callQuickProviderAnalysis = useCallback(async (
@@ -6611,7 +6621,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         aiResults, aiInsertionPatches, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, cancelAiRequest, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
-        buildSmartAnalysisPrompt, importManualChatGptResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
+        buildSmartAnalysisPrompt, validateAiArticleContext, importManualAiResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
         handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
         clearBulkFixReviewItems, applySuggestionFromHistory,
@@ -6641,7 +6651,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         handleAnalyzeHeadings,
         handleAiAnalyze,
         buildSmartAnalysisPrompt,
-        importManualChatGptResponse,
+        validateAiArticleContext,
+        importManualAiResponse,
         parseAiPatchResponse,
         generateSemanticKeywords,
         generateGoalContext,

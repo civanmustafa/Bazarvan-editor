@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, ExternalLink, ClipboardPaste } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2 } from 'lucide-react';
 import StructureTab from './StructureTab';
 import { useUser } from '../contexts/UserContext';
 import { useAISelector } from '../contexts/AIContext';
@@ -8,7 +8,7 @@ import { useEditorSelector } from '../contexts/EditorContext';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
-import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
+import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ExternalAiBridgeProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
 import { GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
 import {
     buildGeminiFreeModelOptions,
@@ -19,6 +19,7 @@ import {
 } from '../utils/geminiModelPreference';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 import GeminiProgressStatus from './GeminiProgressStatus';
+import ExternalAiBridgePanel from './ExternalAiBridgePanel';
 import { runGeminiAnalysisEngine, type GeminiProgressSnapshot } from '../utils/geminiAnalysisEngine';
 
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
@@ -737,7 +738,8 @@ const RightSidebar: React.FC = () => {
     const handleChatGptAnalyze = useAISelector(context => context.handleChatGptAnalyze);
     const handleGeminiReadyCommandsAnalyze = useAISelector(context => context.handleGeminiReadyCommandsAnalyze);
     const buildSmartAnalysisPrompt = useAISelector(context => context.buildSmartAnalysisPrompt);
-    const importManualChatGptResponse = useAISelector(context => context.importManualChatGptResponse);
+    const validateAiArticleContext = useAISelector(context => context.validateAiArticleContext);
+    const importManualAiResponse = useAISelector(context => context.importManualAiResponse);
     const aiResults = useAISelector(context => context.aiResults);
     const aiInsertionPatches = useAISelector(context => context.aiInsertionPatches);
     const isAiLoading = useAISelector(context => context.isAiLoading);
@@ -763,8 +765,6 @@ const RightSidebar: React.FC = () => {
     const [isChatGptExpanded, setIsChatGptExpanded] = useState(false);
     const [competitorGeminiProvider, setCompetitorGeminiProvider] = useState<'gemini' | 'geminiPaid'>('gemini');
     const [copiedPatchId, setCopiedPatchId] = useState('');
-    const [manualBridgeImportText, setManualBridgeImportText] = useState('');
-    const [manualBridgeStatus, setManualBridgeStatus] = useState('');
     const geminiFreeModelOptions = useMemo(() => buildGeminiFreeModelOptions(), []);
     const geminiFreeModelValues = useMemo(() => geminiFreeModelOptions.map(option => option.value), [geminiFreeModelOptions]);
     const [selectedSmartGeminiModel, setSelectedSmartGeminiModel] = useState(() => (
@@ -776,6 +776,7 @@ const RightSidebar: React.FC = () => {
     const commandsMenuRef = useRef<HTMLDivElement>(null);
     const smartAnalysisTabRef = useRef<HTMLDivElement>(null);
     const clearReadyCommandSelectionOnNextOpenRef = useRef(false);
+    const manualBridgeHistoryMetaRef = useRef<Partial<Record<ExternalAiBridgeProvider, ReadyCommandAnalysisHistoryMeta>>>({});
 
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
@@ -980,95 +981,30 @@ ${readyCommandCompetitorBlocks}`;
                 ? `${selectedReadyCommands.length} أوامر محددة`
                 : `${selectedReadyCommands.length} commands selected`;
 
-    // Keep Gemini, ChatGPT, and the manual ChatGPT copy button aligned on attachments/options.
+    // Keep API analysis and both external bridges aligned on attachments/options.
     const buildCurrentSmartAnalysisRequest = () => ({
         userPrompt: appendSelectedAttachments(aiCommand, aiOptions),
         options: aiOptions,
         historyMeta: selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined,
     });
 
-    const buildManualBridgePrompt = (): string => {
-        const request = buildCurrentSmartAnalysisRequest();
-        return buildSmartAnalysisPrompt(request.userPrompt, request.options, request.historyMeta);
-    };
-
-    const openManualChatGptWindow = () => {
-        if (chatGptOpenMode === 'tab') {
-            window.open('https://chatgpt.com/', '_blank', 'noopener,noreferrer');
-            return;
-        }
-
-        const tabRect = smartAnalysisTabRef.current?.getBoundingClientRect();
-        const editorPanel = document.querySelector('[data-bazarvan-editor-panel="true"]') as HTMLElement | null;
-        const editorRect = editorPanel?.getBoundingClientRect();
-        const screenInfo = window.screen as Screen & { availLeft?: number; availTop?: number };
-        const availableLeft = screenInfo.availLeft ?? 0;
-        const availableTop = screenInfo.availTop ?? 0;
-        const availableWidth = screenInfo.availWidth || 1200;
-        const availableHeight = screenInfo.availHeight || 900;
-        const availableRight = availableLeft + availableWidth;
-        const availableBottom = availableTop + availableHeight;
-        const browserTop = window.screenY ?? window.screenTop ?? 0;
-        const fallbackWidth = Math.min(420, Math.max(320, Math.floor(availableWidth * 0.24)));
-        const measuredWidth = Math.round(tabRect?.width || fallbackWidth);
-        const popupWidth = Math.max(320, Math.min(availableWidth, measuredWidth));
-        const measuredTop = browserTop + Math.round(editorRect?.top ?? tabRect?.top ?? 0);
-        const popupTop = Math.max(availableTop, Math.min(availableBottom - 520, Math.floor(measuredTop)));
-        const popupHeight = Math.max(520, Math.min(availableHeight, availableBottom - popupTop));
-        const popupLeft = Math.max(availableLeft, Math.floor(availableRight - popupWidth));
-        const popupFeatures = [
-            'popup=yes',
-            `width=${popupWidth}`,
-            `height=${popupHeight}`,
-            `left=${popupLeft}`,
-            `top=${popupTop}`,
-            'resizable=yes',
-            'scrollbars=yes',
-            'noopener',
-            'noreferrer',
-        ].join(',');
-
-        window.open('https://chatgpt.com/', 'bazarvan-chatgpt-bridge', popupFeatures);
-    };
-
-    const handleCopyManualBridgePrompt = async (openChat = false) => {
+    const buildManualBridgePrompt = (provider: ExternalAiBridgeProvider): string | null => {
+        if (!validateAiArticleContext(isArabicLocale ? 'التحليل الذكي الخارجي' : 'External smart analysis')) return null;
         if (selectedReadyCommands.length > 0) {
             clearReadyCommandSelectionOnNextOpenRef.current = true;
         }
-
-        try {
-            const prompt = buildManualBridgePrompt();
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(prompt);
-            } else {
-                await copyMarkdownToClipboard(prompt);
-            }
-            setManualBridgeStatus(isArabicLocale ? 'تم نسخ الأمر.' : 'Prompt copied.');
-            if (openChat) {
-                openManualChatGptWindow();
-            }
-            window.setTimeout(() => setManualBridgeStatus(''), 2200);
-        } catch (error) {
-            console.error('Could not copy manual ChatGPT bridge prompt:', error);
-            setManualBridgeStatus(isArabicLocale ? 'تعذر نسخ الأمر.' : 'Could not copy prompt.');
-        }
+        const request = buildCurrentSmartAnalysisRequest();
+        manualBridgeHistoryMetaRef.current[provider] = request.historyMeta;
+        return buildSmartAnalysisPrompt(request.userPrompt, request.options, request.historyMeta);
     };
 
-    const handleImportManualChatGptResponse = () => {
-        const responseText = manualBridgeImportText.trim();
-        if (!responseText) {
-            setManualBridgeStatus(isArabicLocale ? 'ألصق رد ChatGPT أولا.' : 'Paste the ChatGPT response first.');
-            return;
-        }
-
-        importManualChatGptResponse(
-            responseText,
-            selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined
-        );
-        setIsChatGptExpanded(true);
-        setManualBridgeImportText('');
-        setManualBridgeStatus(isArabicLocale ? 'تم تنظيم الرد.' : 'Response organized.');
-        window.setTimeout(() => setManualBridgeStatus(''), 2200);
+    const handleImportManualAiResponse = (provider: ExternalAiBridgeProvider, responseText: string) => {
+        const historyMeta = manualBridgeHistoryMetaRef.current[provider]
+            || (selectedReadyCommands.length === 1 ? readyCommandHistoryMeta : undefined);
+        importManualAiResponse(responseText, provider, historyMeta);
+        manualBridgeHistoryMetaRef.current[provider] = undefined;
+        if (provider === 'gemini') setIsGeminiExpanded(true);
+        else setIsChatGptExpanded(true);
     };
 
     const getCommandIcon = (commandId: string) => {
@@ -1711,7 +1647,7 @@ ${readyCommandCompetitorBlocks}`;
                         </div>
 
                         <div className="flex flex-col gap-2">
-                            <div className="grid grid-cols-4 gap-2">
+                            <div className="grid grid-cols-3 gap-2">
                                 <div className="flex min-w-0 flex-col overflow-hidden rounded-lg bg-[#d4af37] text-white">
                                     <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex min-h-9 items-center justify-center gap-1.5 px-1.5 py-1.5 hover:bg-[#b8922e] disabled:opacity-50">
                                         {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
@@ -1739,42 +1675,15 @@ ${readyCommandCompetitorBlocks}`;
                                     {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
                                     <span className="text-xs font-bold">ChatGPT</span>
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => handleCopyManualBridgePrompt(true)}
-                                    className="flex min-w-0 items-center justify-center gap-1 rounded-lg bg-[#d4af37] px-1.5 py-2 text-center text-[11px] font-bold leading-4 text-white hover:bg-[#b8922e]"
-                                >
-                                    <ExternalLink size={14} />
-                                    <span className="min-w-0 whitespace-normal break-words">
-                                        {isArabicLocale ? 'نسخ وفتح ChatGPT' : 'Copy and open ChatGPT'}
-                                    </span>
-                                </button>
                             </div>
 
-                            <div className="space-y-2">
-                                <textarea
-                                    value={manualBridgeImportText}
-                                    onChange={(event) => setManualBridgeImportText(event.target.value)}
-                                    rows={5}
-                                    placeholder={isArabicLocale ? 'ألصق رد ChatGPT هنا...' : 'Paste the ChatGPT response here...'}
-                                    className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
-                                    dir="auto"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={handleImportManualChatGptResponse}
-                                    disabled={!manualBridgeImportText.trim()}
-                                    className="flex w-full items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <ClipboardPaste size={14} />
-                                    {isArabicLocale ? 'تنظيم الرد' : 'Organize response'}
-                                </button>
-                            </div>
-                            {manualBridgeStatus && (
-                                <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                                    {manualBridgeStatus}
-                                </div>
-                            )}
+                            <ExternalAiBridgePanel
+                                isArabic={isArabicLocale}
+                                openMode={chatGptOpenMode}
+                                anchorRef={smartAnalysisTabRef}
+                                getPrompt={buildManualBridgePrompt}
+                                onImportResponse={handleImportManualAiResponse}
+                            />
                         </div>
 
                         <div className="-mx-3 space-y-2 pt-3 border-t border-gray-200 dark:border-[#3C3C3C]">

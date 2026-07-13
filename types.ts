@@ -27,7 +27,11 @@ export interface GoalContext {
 
 export type ClientGoalContexts = Record<string, GoalContext>;
 
-export type ChatGptOpenMode = 'window' | 'tab';
+export type ExternalAiBridgeProvider = 'chatgpt' | 'gemini';
+export type ExternalAiOpenMode = 'window' | 'tab';
+
+// Kept as an alias because the persisted preference still uses the legacy key.
+export type ChatGptOpenMode = ExternalAiOpenMode;
 
 export interface AiAnalysisOptions {
   manualCommand: boolean;
