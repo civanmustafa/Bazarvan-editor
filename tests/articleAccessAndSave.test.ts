@@ -82,6 +82,7 @@ test('dashboard, access/save, and performance migrations have balanced SQL delim
     readWorkspaceFile('supabase/migrations/20260713010000_phase_2_3_access_and_atomic_article_save.sql'),
     readWorkspaceFile('supabase/migrations/20260713050000_phase_7_dashboard_performance.sql'),
     readWorkspaceFile('supabase/migrations/20260714000000_competitor_discovery.sql'),
+    readWorkspaceFile('supabase/migrations/20260714010000_competitor_preview_cache.sql'),
   ]);
 
   migrations.forEach((migration) => {
@@ -91,10 +92,13 @@ test('dashboard, access/save, and performance migrations have balanced SQL delim
 });
 
 test('competitor discovery is durable, RLS protected, and uses the canonical article policy', async () => {
-  const [migration, api, worker, registry] = await Promise.all([
+  const [migration, cacheMigration, api, worker, cacheService, previewModal, registry] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260714000000_competitor_discovery.sql'),
+    readWorkspaceFile('supabase/migrations/20260714010000_competitor_preview_cache.sql'),
     readWorkspaceFile('api/competitors.ts'),
     readWorkspaceFile('server/competitorExtractionExecutor.ts'),
+    readWorkspaceFile('server/competitorPreviewCache.ts'),
+    readWorkspaceFile('components/CompetitorPreviewModal.tsx'),
     readWorkspaceFile('server/apiRouteRegistry.ts'),
   ]);
 
@@ -105,9 +109,23 @@ test('competitor discovery is durable, RLS protected, and uses the canonical art
   assert.match(migration, /function public\.merge_article_competitors_metadata/);
   assert.match(migration, /trigger preserve_article_competitors_metadata/);
   assert.match(migration, /job_type = 'competitor_extraction'/);
+  assert.match(cacheMigration, /create table if not exists public\.competitor_page_cache/);
+  assert.match(cacheMigration, /enable row level security/);
+  assert.match(cacheMigration, /revoke all on public\.competitor_page_cache from public, anon, authenticated/);
+  assert.match(cacheMigration, /grant all on public\.competitor_page_cache to service_role/);
   assert.match(api, /requireArticleWriteAccess\(/);
   assert.match(api, /authenticateApiRequest\(req\)/);
+  assert.match(api, /action === 'preview'/);
+  assert.match(api, /consumeApiRateLimit\('competitors-preview'/);
+  assert.match(api, /getCompetitorPreview\(/);
   assert.match(worker, /registerExternalAnalysisJobExecutor\('competitor_extraction'/);
+  assert.match(worker, /getCompetitorPreview\(/);
+  assert.doesNotMatch(worker, /scrapeCompetitorWeb\(/);
+  assert.match(cacheService, /createHash\('sha256'\)/);
+  assert.match(cacheService, /COMPETITOR_PREVIEW_CACHE_HOURS/);
+  assert.match(previewModal, /createPortal\(/);
+  assert.match(previewModal, /aria-modal="true"/);
+  assert.match(previewModal, /event\.key === 'Escape'/);
   assert.match(registry, /path: '\/api\/competitors'/);
 });
 

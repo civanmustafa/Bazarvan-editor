@@ -1,7 +1,7 @@
 import {
   FirecrawlCompetitorError,
-  scrapeCompetitorWeb,
 } from './firecrawlCompetitorService';
+import { getCompetitorPreview } from './competitorPreviewCache';
 import {
   ExternalAnalysisRetryError,
   registerExternalAnalysisJobExecutor,
@@ -107,7 +107,7 @@ const executeCompetitorExtraction = async (
     }, ['queued', 'retry_scheduled', 'extracting']);
 
     try {
-      const content = await scrapeCompetitorWeb({
+      const content = await getCompetitorPreview({
         url: row.canonical_url || row.source_url,
         signal: context.signal,
       });
@@ -115,9 +115,10 @@ const executeCompetitorExtraction = async (
         requestIndex: row.position,
         outcome: 'success',
         model: FIRECRAWL_MODEL,
-        keySuffix: getFirecrawlKeySuffix(),
+        keySuffix: content.providerKeySuffix,
         status: 200,
-        reason: '',
+        reason: content.cacheHit ? 'preview_cache_hit' : '',
+        cacheHit: content.cacheHit,
         attempt: context.job.attempt_count,
       });
       await updateCompetitor(row.id, {
@@ -130,7 +131,7 @@ const executeCompetitorExtraction = async (
         content_text: content.text,
         word_count: content.wordCount,
         status: 'completed',
-        extraction_provider: 'firecrawl',
+        extraction_provider: content.cacheHit ? 'firecrawl_cache' : 'firecrawl',
         error_code: null,
         error_message: null,
         fetched_at: new Date().toISOString(),

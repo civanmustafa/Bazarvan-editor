@@ -3,13 +3,14 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
-  ExternalLink,
+  Eye,
   LoaderCircle,
   Search,
   Square,
   Trash2,
   XCircle,
 } from 'lucide-react';
+import type { CompetitorPreviewTarget } from './CompetitorPreviewModal';
 import {
   MAX_ARTICLE_COMPETITORS,
   type CompetitorSearchMode,
@@ -19,12 +20,16 @@ import {
   CompetitorDiscoveryRequestError,
   enqueueArticleCompetitorExtraction,
   listArticleCompetitors,
+  loadArticleCompetitorPreview,
   removeArticleCompetitor,
   searchArticleCompetitors,
   type CompetitorDiscoveryRow,
   type CompetitorDiscoveryState,
+  type CompetitorPreview,
   type CompetitorSearchResult,
 } from '../utils/competitorDiscovery';
+
+const CompetitorPreviewModal = React.lazy(() => import('./CompetitorPreviewModal'));
 
 type CompetitorDiscoveryPanelProps = {
   articleId: string | null;
@@ -43,6 +48,49 @@ const EMPTY_STATE: CompetitorDiscoveryState = {
 };
 
 const ACTIVE_JOB_STATUSES = new Set(['waiting_for_prerequisites', 'queued', 'running', 'retry_scheduled', 'paused']);
+
+type PreviewLocation = {
+  source: 'search' | 'saved';
+  index: number;
+};
+
+const searchResultToPreviewTarget = (result: CompetitorSearchResult): CompetitorPreviewTarget => ({
+  url: result.url,
+  canonicalUrl: result.canonicalUrl,
+  domain: result.domain,
+  title: result.title,
+  description: result.description,
+  position: result.position,
+});
+
+const discoveryRowToPreviewTarget = (row: CompetitorDiscoveryRow): CompetitorPreviewTarget => ({
+  url: row.sourceUrl,
+  canonicalUrl: row.canonicalUrl,
+  domain: row.domain,
+  title: row.title,
+  description: row.description,
+  position: row.position,
+});
+
+const discoveryRowToPreview = (row: CompetitorDiscoveryRow): CompetitorPreview | null => {
+  if (row.status !== 'completed' || !row.contentText.trim()) return null;
+  return {
+    url: row.sourceUrl || row.canonicalUrl,
+    canonicalUrl: row.canonicalUrl || row.sourceUrl,
+    fetchedUrl: row.canonicalUrl || row.sourceUrl,
+    domain: row.domain,
+    title: row.title,
+    description: row.description,
+    headings: row.headings,
+    text: row.contentText,
+    wordCount: row.wordCount,
+    provider: row.extractionProvider || 'firecrawl',
+    cacheHit: false,
+    persisted: true,
+    fetchedAt: row.fetchedAt || row.updatedAt,
+    expiresAt: '',
+  };
+};
 
 const progressNumber = (value: unknown): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : Number(value) || 0
@@ -89,6 +137,10 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const [actionId, setActionId] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [previewLocation, setPreviewLocation] = useState<PreviewLocation | null>(null);
+  const [previewByUrl, setPreviewByUrl] = useState<Record<string, CompetitorPreview>>({});
+  const [previewLoadingUrl, setPreviewLoadingUrl] = useState('');
+  const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
 
   const activeJob = state.activeJob && ACTIVE_JOB_STATUSES.has(state.activeJob.status)
     ? state.activeJob
@@ -96,6 +148,23 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const selectedResults = useMemo(() => (
     searchResults.filter(result => selectedUrls.has(result.canonicalUrl))
   ), [searchResults, selectedUrls]);
+  const previewCollection = previewLocation?.source === 'saved'
+    ? state.competitors
+    : searchResults;
+  const previewSourceItem = previewLocation
+    ? previewCollection[previewLocation.index] || null
+    : null;
+  const previewTarget = previewSourceItem
+    ? previewLocation?.source === 'saved'
+      ? discoveryRowToPreviewTarget(previewSourceItem as CompetitorDiscoveryRow)
+      : searchResultToPreviewTarget(previewSourceItem as CompetitorSearchResult)
+    : null;
+  const persistedPreview = previewLocation?.source === 'saved' && previewSourceItem
+    ? discoveryRowToPreview(previewSourceItem as CompetitorDiscoveryRow)
+    : null;
+  const activePreview = previewTarget
+    ? persistedPreview || previewByUrl[previewTarget.canonicalUrl] || null
+    : null;
 
   useEffect(() => {
     setQuery(mode === 'primary_keyword' ? primaryKeyword : articleTitle);
@@ -129,8 +198,15 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     setSearchResults([]);
     setSelectedUrls(new Set<string>());
     setNotice('');
+    setPreviewLocation(null);
+    setPreviewByUrl({});
+    setPreviewErrors({});
     void refresh(true);
   }, [articleId, refresh]);
+
+  useEffect(() => {
+    if (previewLocation && !previewSourceItem) setPreviewLocation(null);
+  }, [previewLocation, previewSourceItem]);
 
   useEffect(() => {
     if (!activeJob) return undefined;
@@ -148,6 +224,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     setIsSearching(true);
     setError('');
     setNotice('');
+    setPreviewLocation(null);
     try {
       const rows = await searchArticleCompetitors({
         articleId,
@@ -186,8 +263,46 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     });
   };
 
+  const closePreview = useCallback(() => {
+    setPreviewLocation(null);
+  }, []);
+
+  const navigatePreview = (direction: -1 | 1) => {
+    setPreviewLocation(current => {
+      if (!current) return current;
+      const total = current.source === 'saved' ? state.competitors.length : searchResults.length;
+      if (total <= 1) return current;
+      return {
+        ...current,
+        index: (current.index + direction + total) % total,
+      };
+    });
+  };
+
+  const handleLoadPreview = async () => {
+    if (!articleId || !previewTarget || previewLoadingUrl) return;
+    const previewUrl = previewTarget.canonicalUrl || previewTarget.url;
+    setPreviewLoadingUrl(previewUrl);
+    setPreviewErrors(current => ({ ...current, [previewUrl]: '' }));
+    try {
+      const loadedPreview = await loadArticleCompetitorPreview(articleId, previewUrl);
+      setPreviewByUrl(current => ({
+        ...current,
+        [previewUrl]: loadedPreview,
+        [loadedPreview.canonicalUrl]: loadedPreview,
+      }));
+    } catch (previewError) {
+      setPreviewErrors(current => ({
+        ...current,
+        [previewUrl]: requestErrorMessage(previewError, isArabic, 'Could not load competitor preview.'),
+      }));
+    } finally {
+      setPreviewLoadingUrl(current => current === previewUrl ? '' : current);
+    }
+  };
+
   const handleStart = async () => {
-    if (!articleId || selectedResults.length === 0) return;
+    if (!articleId || selectedResults.length === 0 || previewLoadingUrl) return;
     setIsStarting(true);
     setError('');
     try {
@@ -314,7 +429,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
             <span>{isArabic ? 'المحدد' : 'Selected'}: {selectedResults.length}/{MAX_ARTICLE_COMPETITORS}</span>
           </div>
           <div className="max-h-80 space-y-1.5 overflow-y-auto pe-1 custom-scrollbar">
-            {searchResults.map(result => {
+            {searchResults.map((result, index) => {
               const selected = selectedUrls.has(result.canonicalUrl);
               return (
                 <div
@@ -342,15 +457,14 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                       {result.description && <span className="mt-1 line-clamp-2 block text-[10px] leading-4 text-gray-500 dark:text-gray-400">{result.description}</span>}
                     </span>
                   </button>
-                  <a
-                    href={result.canonicalUrl || result.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={isArabic ? 'فتح الموقع قبل اختياره' : 'Open website before selecting'}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewLocation({ source: 'search', index })}
+                    title={isArabic ? 'معاينة الموقع داخل المحرر' : 'Preview website inside the editor'}
                     className="m-1 flex size-7 shrink-0 items-center justify-center self-start rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#8a6f1d] dark:hover:bg-[#333] dark:hover:text-[#f2d675]"
                   >
-                    <ExternalLink size={13} />
-                  </a>
+                    <Eye size={14} />
+                  </button>
                 </div>
               );
             })}
@@ -358,7 +472,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           <button
             type="button"
             onClick={() => void handleStart()}
-            disabled={selectedResults.length === 0 || isStarting || Boolean(activeJob)}
+            disabled={selectedResults.length === 0 || isStarting || Boolean(activeJob) || Boolean(previewLoadingUrl)}
             className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-black text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isStarting ? <LoaderCircle size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
@@ -400,7 +514,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           <div className="text-[11px] font-black text-gray-600 dark:text-gray-300">
             {isArabic ? 'المصادر المحفوظة في المقالة' : 'Saved article sources'}
           </div>
-          {state.competitors.map(row => (
+          {state.competitors.map((row, index) => (
             <div key={row.id} className="flex items-start gap-2 rounded-md border border-gray-200 bg-white px-2 py-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
               <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${statusTone(row.status)}`}>
                 {row.status === 'completed' ? <Check size={11} /> : row.status === 'failed' || row.status === 'cancelled' ? <XCircle size={11} /> : <LoaderCircle size={11} className={row.status === 'extracting' ? 'animate-spin' : ''} />}
@@ -411,15 +525,14 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 {row.status === 'completed' && <div className="mt-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">{row.wordCount} {isArabic ? 'كلمة' : 'words'}</div>}
                 {row.errorMessage && <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-red-600 dark:text-red-300">{row.errorMessage}</div>}
               </div>
-              <a
-                href={row.canonicalUrl || row.sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={isArabic ? 'فتح الموقع' : 'Open website'}
+              <button
+                type="button"
+                onClick={() => setPreviewLocation({ source: 'saved', index })}
+                title={isArabic ? 'معاينة المصدر داخل المحرر' : 'Preview source inside the editor'}
                 className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#8a6f1d] dark:hover:bg-[#333] dark:hover:text-[#f2d675]"
               >
-                <ExternalLink size={13} />
-              </a>
+                <Eye size={14} />
+              </button>
               <button
                 type="button"
                 onClick={() => void handleRemove(row.id)}
@@ -440,6 +553,36 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>
+      )}
+
+      {previewLocation && previewTarget && (
+        <React.Suspense fallback={(
+          <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/65">
+            <LoaderCircle size={28} className="animate-spin text-[#d4af37]" />
+          </div>
+        )}>
+          <CompetitorPreviewModal
+            target={previewTarget}
+            preview={activePreview}
+            isLoading={Boolean(previewLoadingUrl)}
+            error={previewErrors[previewTarget.canonicalUrl || previewTarget.url] || ''}
+            locale={locale}
+            currentIndex={previewLocation.index}
+            totalItems={previewCollection.length}
+            canSelect={previewLocation.source === 'search'}
+            isSelected={previewLocation.source === 'search'
+              && selectedUrls.has(previewTarget.canonicalUrl)}
+            onLoadPreview={() => void handleLoadPreview()}
+            onToggleSelection={() => {
+              if (previewLocation.source !== 'search') return;
+              const result = searchResults[previewLocation.index];
+              if (result) toggleResult(result);
+            }}
+            onPrevious={() => navigatePreview(-1)}
+            onNext={() => navigatePreview(1)}
+            onClose={closePreview}
+          />
+        </React.Suspense>
       )}
     </section>
   );

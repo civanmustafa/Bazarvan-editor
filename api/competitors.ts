@@ -11,6 +11,7 @@ import {
   searchCompetitorWeb,
   type CompetitorSearchResult,
 } from '../server/firecrawlCompetitorService';
+import { getCompetitorPreview } from '../server/competitorPreviewCache';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 import {
   ArticleAccessPolicyError,
@@ -312,6 +313,33 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       headers: getCorsResponseHeaders(req),
     };
   }
+  if (action === 'preview') {
+    consumeApiRateLimit('competitors-preview', principal.userId, 15);
+    const preview = await getCompetitorPreview({ url: toText(body.url) });
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        action,
+        preview: {
+          url: preview.url,
+          canonicalUrl: preview.canonicalUrl,
+          fetchedUrl: preview.fetchedUrl,
+          domain: preview.domain,
+          title: preview.title,
+          description: preview.description,
+          headings: preview.headings,
+          text: preview.text,
+          wordCount: preview.wordCount,
+          provider: preview.provider,
+          cacheHit: preview.cacheHit,
+          fetchedAt: preview.fetchedAt,
+          expiresAt: preview.expiresAt,
+        },
+      },
+      headers: getCorsResponseHeaders(req),
+    };
+  }
   if (action === 'extract') {
     consumeApiRateLimit('competitors-extract', principal.userId, 10);
     if (!isFirecrawlConfigured()) {
@@ -360,7 +388,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new CompetitorApiError({
-    message: 'action must be list, search, extract, cancel, or remove.',
+    message: 'action must be list, search, preview, extract, cancel, or remove.',
     code: 'invalid_action',
   });
 };

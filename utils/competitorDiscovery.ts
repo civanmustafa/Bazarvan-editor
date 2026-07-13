@@ -41,6 +41,23 @@ export type CompetitorSearchResult = {
   position: number;
 };
 
+export type CompetitorPreview = {
+  url: string;
+  canonicalUrl: string;
+  fetchedUrl: string;
+  domain: string;
+  title: string;
+  description: string;
+  headings: { h1: string[]; h2: string[]; h3: string[] };
+  text: string;
+  wordCount: number;
+  provider: string;
+  cacheHit: boolean;
+  persisted: boolean;
+  fetchedAt: string;
+  expiresAt: string;
+};
+
 export type CompetitorExtractionJob = {
   id: string;
   status: string;
@@ -143,6 +160,26 @@ const toJob = (value: unknown): CompetitorExtractionJob | null => {
   };
 };
 
+const toPreview = (value: unknown): CompetitorPreview | null => {
+  if (!isRecord(value) || !toText(value.canonicalUrl) || !toText(value.text)) return null;
+  return {
+    url: toText(value.url) || toText(value.canonicalUrl),
+    canonicalUrl: toText(value.canonicalUrl),
+    fetchedUrl: toText(value.fetchedUrl) || toText(value.canonicalUrl),
+    domain: toText(value.domain),
+    title: toText(value.title),
+    description: toText(value.description),
+    headings: toHeadings(value.headings),
+    text: toText(value.text),
+    wordCount: Math.max(0, Number(value.wordCount) || 0),
+    provider: toText(value.provider),
+    cacheHit: value.cacheHit === true,
+    persisted: false,
+    fetchedAt: toText(value.fetchedAt),
+    expiresAt: toText(value.expiresAt),
+  };
+};
+
 const requestCompetitors = async (body: Record<string, unknown>): Promise<Record<string, any>> => {
   const token = await getAuthenticatedApiToken();
   const response = await fetch('/api/competitors', {
@@ -197,6 +234,16 @@ export const searchArticleCompetitors = async (options: {
         }];
       })
     : [];
+};
+
+export const loadArticleCompetitorPreview = async (
+  articleId: string,
+  url: string,
+): Promise<CompetitorPreview> => {
+  const payload = await requestCompetitors({ action: 'preview', articleId, url });
+  const preview = toPreview(payload.preview);
+  if (!preview) throw new Error('Competitor preview response was invalid.');
+  return preview;
 };
 
 export const enqueueArticleCompetitorExtraction = async (options: {
