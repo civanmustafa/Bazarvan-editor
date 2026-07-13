@@ -660,7 +660,8 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const activeTitle = activeStructureHighlightTitleRef.current;
         if (!activeTitle || highlightedItem !== activeTitle) return;
 
-        const activeRule = Object.values(analysisResults.structureAnalysis).find(rule => rule?.title === activeTitle);
+        const activeRule = (Object.values(analysisResults.structureAnalysis) as CheckResult[])
+            .find(rule => rule.title === activeTitle);
         if (!activeRule || activeRule.status === 'pass' || !activeRule.violatingItems?.length) {
             activeStructureHighlightTitleRef.current = null;
             setHighlightedItem(null);

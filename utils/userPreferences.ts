@@ -148,7 +148,7 @@ export const saveCurrentUserPreferencesPatch = (
     return activeUserId === userId ? cachedPreferences : next;
   };
 
-  const operation = persistenceQueue.catch(() => undefined).then(persist);
+  const operation = persistenceQueue.catch((): void => {}).then(persist);
   persistenceQueue = operation;
   return operation;
 };

@@ -2,6 +2,7 @@ import {
   ExternalAnalysisRetryError,
   registerExternalAnalysisJobExecutor,
   type ExternalAnalysisExecutionContext,
+  type ExternalAnalysisExecutionResult,
 } from './externalAnalysisExecutor';
 import {
   getExternalAnalysisSupabaseAdmin,
@@ -211,7 +212,7 @@ const applySemanticTerms = async (options: {
 
 const executeExternalSemanticAnalysis = async (
   context: ExternalAnalysisExecutionContext,
-) => {
+): Promise<ExternalAnalysisExecutionResult> => {
   await context.reportProgress({
     progress: { stage: 'loading_article' },
   });

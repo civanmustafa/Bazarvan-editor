@@ -26,68 +26,15 @@ const DEFAULT_REFRESH_SCOPE: ContentAnalysisRefreshScope = {
   duplicates: false,
 };
 
-const STRUCTURE_ANALYSIS_KEYS: (keyof StructureAnalysis)[] = [
-  'wordCount',
-  'firstTitle',
-  'secondTitle',
-  'includesExcludes',
-  'preTravelH2',
-  'pricingH2',
-  'whoIsItForH2',
-  'summaryParagraph',
-  'secondParagraph',
-  'paragraphLength',
-  'paragraphPair',
-  'h2Structure',
-  'h2Count',
-  'h3Structure',
-  'h4Structure',
-  'betweenH2H3',
-  'faqSection',
-  'answerParagraph',
-  'ambiguousHeadings',
-  'ambiguousParagraphReferences',
-  'punctuation',
-  'paragraphEndings',
-  'interrogativeH2',
-  'differentTransitionalWords',
-  'immediateDuplicateWords',
-  'duplicateWordsInParagraph',
-  'duplicateWordsInHeading',
-  'sentenceLength',
-  'stepsIntroduction',
-  'automaticLists',
-  'ctaWords',
-  'interactiveLanguage',
-  'arabicOnly',
-  'lastH2IsConclusion',
-  'conclusionParagraph',
-  'conclusionWordCount',
-  'conclusionHasList',
-  'conclusionHasNumber',
-  'sentenceBeginnings',
-  'warningWords',
-  'punctuationSpacing',
-  'repeatedBigrams',
-  'slowWords',
-  'wordConsistency',
-  'commonEnglishTerms',
-  'wordsToDelete',
-  'keywordStuffing',
-  'productUsageHeading',
-  'productTechnicalSpecsHeading',
-  'productWarrantyContent',
-  'tablesCount',
-  'headingLength',
-];
+type StructureAnalysisTitleKey = keyof typeof translations.ar.structureAnalysis;
 
-const STRUCTURE_ANALYSIS_TITLE_KEYS: Record<keyof StructureAnalysis, keyof typeof translations.ar.structureAnalysis> = {
+const STRUCTURE_ANALYSIS_TITLE_KEYS = {
   wordCount: 'عدد الكلمات',
-  firstTitle: 'H2 الأول',
+  firstTitle: 'العنوان الاول',
   secondTitle: 'H2 الثاني',
-  includesExcludes: 'H2 التضمينات',
+  includesExcludes: 'يشمل/لايشمل',
   preTravelH2: 'H2 قبل السفر',
-  pricingH2: 'H2 الأسعار',
+  pricingH2: 'H2 سعر وحجز',
   whoIsItForH2: 'H2 المرشح',
   summaryParagraph: 'الفقرة التلخيصية',
   secondParagraph: 'الفقرة الثانية',
@@ -113,8 +60,8 @@ const STRUCTURE_ANALYSIS_TITLE_KEYS: Record<keyof StructureAnalysis, keyof typeo
   stepsIntroduction: 'تمهيد خطوات',
   automaticLists: 'التعداد الآلي',
   ctaWords: 'كلمات الحث',
-  interactiveLanguage: 'لغة تفاعلية',
-  arabicOnly: 'الأحرف العربية',
+  interactiveLanguage: '0.02% لغة تفاعلية',
+  arabicOnly: 'كلمات لاتينية',
   lastH2IsConclusion: 'عنوان الخاتمة',
   conclusionParagraph: 'فقرة الخاتمة',
   conclusionWordCount: 'طول الخاتمة',
@@ -129,12 +76,12 @@ const STRUCTURE_ANALYSIS_TITLE_KEYS: Record<keyof StructureAnalysis, keyof typeo
   commonEnglishTerms: 'مصطلحات إنجليزية شائعة',
   wordsToDelete: 'كلمات للحذف',
   keywordStuffing: 'حشو استهداف',
-  productUsageHeading: 'H2 الاستخدام',
-  productTechnicalSpecsHeading: 'H2 المواصفات',
+  productUsageHeading: 'الاستخدام',
+  productTechnicalSpecsHeading: 'المواصفات التقنية',
   productWarrantyContent: 'الضمان',
   tablesCount: 'جداول',
   headingLength: 'طول العناوين',
-};
+} satisfies Record<keyof StructureAnalysis, StructureAnalysisTitleKey>;
 
 const createFallbackAnalysis = (textContent = '', uiLanguage: 'ar' | 'en' = 'ar'): FullAnalysis => {
   const t = translations[uiLanguage] || translations.ar;
@@ -153,13 +100,12 @@ const createFallbackAnalysis = (textContent = '', uiLanguage: 'ar' | 'en' = 'ar'
     required: '-',
     progress: 0,
   });
-  const structureAnalysis = Object.fromEntries(
-    STRUCTURE_ANALYSIS_KEYS.map(key => {
-      const titleKey = STRUCTURE_ANALYSIS_TITLE_KEYS[key];
-      const translatedTitle = t.structureAnalysis[titleKey]?.title || titleKey || key;
-      return [key, fallbackCheck(translatedTitle)];
-    })
-  ) as StructureAnalysis;
+  const structureAnalysis = {} as StructureAnalysis;
+  (Object.keys(STRUCTURE_ANALYSIS_TITLE_KEYS) as Array<keyof StructureAnalysis>).forEach(key => {
+    const titleKey = STRUCTURE_ANALYSIS_TITLE_KEYS[key];
+    const translatedTitle = t.structureAnalysis[titleKey]?.title || titleKey;
+    structureAnalysis[key] = fallbackCheck(translatedTitle);
+  });
 
   return {
     keywordAnalysis: {

@@ -104,3 +104,32 @@ test('legacy browser API key and unreachable settings paths stay removed', async
     assertFileMissing('utils/analysis/rules/checkTableListOpportunities.ts'),
   ]);
 });
+
+test('repository quality gate covers types, tests, build, and security checks', async () => {
+  const [packageSource, tsconfigSource, workflow] = await Promise.all([
+    readWorkspaceFile('package.json'),
+    readWorkspaceFile('tsconfig.json'),
+    readWorkspaceFile('.github/workflows/quality-gates.yml'),
+  ]);
+  const packageJson = JSON.parse(packageSource) as {
+    scripts?: Record<string, string>;
+  };
+  const tsconfig = JSON.parse(tsconfigSource) as {
+    compilerOptions?: Record<string, unknown>;
+  };
+  const scripts = packageJson.scripts || {};
+  const compilerOptions = tsconfig.compilerOptions || {};
+
+  ['check:secrets', 'check:dependencies', 'typecheck', 'test', 'build', 'check:bundle']
+    .forEach(scriptName => assert.match(scripts.verify || '', new RegExp(`npm run ${scriptName.replace(':', '\\:')}`)));
+  assert.match(scripts['check:dependencies'] || '', /npm audit/);
+  assert.equal(compilerOptions.noImplicitAny, true);
+  assert.equal(compilerOptions.strictBindCallApply, true);
+  assert.equal(compilerOptions.strictFunctionTypes, true);
+  assert.equal(compilerOptions.noImplicitThis, true);
+  assert.equal(compilerOptions.useUnknownInCatchVariables, true);
+  assert.match(workflow, /npm ci/);
+  assert.match(workflow, /npm run verify/);
+  assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
+  assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
+});

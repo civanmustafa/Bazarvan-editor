@@ -31,6 +31,17 @@ type AnalysisStateRow = {
   custom_engineering_command_ids: unknown;
 };
 
+type EnqueuedSemanticJob = {
+  id: string;
+  [key: string]: unknown;
+};
+
+type EnqueueSemanticJobResult = {
+  alreadyReady: boolean;
+  alreadyActive: boolean;
+  job: EnqueuedSemanticJob | null;
+};
+
 const ACTIVE_JOB_STATUSES = [
   'waiting_for_prerequisites',
   'queued',
@@ -177,12 +188,12 @@ const enqueueSemanticJob = async (
   article: ArticleRow,
   state: AnalysisStateRow,
   requestedBy: string,
-) => {
+): Promise<EnqueueSemanticJobResult> => {
   const keywords = isRecord(article.keywords) ? article.keywords : {};
   const needsSecondaries = toStringList(keywords.secondaries).length === 0;
   const needsLsi = toStringList(keywords.lsi).length === 0;
   if (!needsSecondaries && !needsLsi) {
-    return { alreadyReady: true, job: null };
+    return { alreadyReady: true, alreadyActive: false, job: null };
   }
 
   if (!state.semantic_ready || !state.semantic_readiness_signature) {
@@ -204,7 +215,9 @@ const enqueueSemanticJob = async (
     .limit(1)
     .maybeSingle();
   if (activeError) throw activeError;
-  if (activeJob) return { alreadyReady: false, job: activeJob, alreadyActive: true };
+  if (activeJob) {
+    return { alreadyReady: false, job: activeJob as EnqueuedSemanticJob, alreadyActive: true };
+  }
 
   const jobId = randomUUID();
   const now = new Date().toISOString();
@@ -249,12 +262,13 @@ const enqueueSemanticJob = async (
       .maybeSingle();
     if (conflictReadError) throw conflictReadError;
     if (conflictingJob) {
-      return { alreadyReady: false, job: conflictingJob, alreadyActive: true };
+      return { alreadyReady: false, job: conflictingJob as EnqueuedSemanticJob, alreadyActive: true };
     }
     throw error;
   }
   if (error) throw error;
-  return { alreadyReady: false, job, alreadyActive: false };
+  if (!job) throw new Error('Semantic analysis job insert returned no row.');
+  return { alreadyReady: false, job: job as EnqueuedSemanticJob, alreadyActive: false };
 };
 
 const enqueueEngineeringJobs = async (

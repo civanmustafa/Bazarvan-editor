@@ -33,6 +33,11 @@ type ArticleLinks = {
   adminUrl: string;
 };
 
+type ExistingArticleLookup = {
+  data: { id: string; save_count: number | null } | null;
+  error: unknown | null;
+};
+
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
 class IngestError extends Error {
@@ -700,7 +705,7 @@ const saveIngestedArticle = async (
 ) => {
   const { article, access, externalId } = await buildArticlePayload(supabase, body, defaults);
   const savedAt = new Date().toISOString();
-  const existingArticle = externalId
+  const existingArticle: ExistingArticleLookup = externalId
     ? await supabase
         .from('articles')
         .select('id,save_count')

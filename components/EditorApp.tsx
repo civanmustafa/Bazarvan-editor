@@ -166,7 +166,7 @@ const EditorRouteContent: React.FC<{ articleId: string | null }> = ({ articleId 
     const loadArticle = async () => {
       let openedFromCache = false;
       try {
-        const cachedArticle = await getCachedRemoteArticleById(articleId).catch(error => {
+        const cachedArticle = await getCachedRemoteArticleById(articleId).catch((error: unknown): null => {
           console.warn(`Could not read cached routed article "${articleId}":`, error);
           return null;
         });

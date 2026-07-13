@@ -198,7 +198,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
 
   const refreshAfterRequest = async () => {
     await onRefresh();
-    window.setTimeout(() => void onRefresh(), 800);
+    window.setTimeout((): void => { void onRefresh(); }, 800);
   };
 
   const handleSemantic = async () => {

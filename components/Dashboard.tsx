@@ -1077,7 +1077,7 @@ const Dashboard: React.FC = () => {
 
     setIsArticlesLoading(true);
 
-    const cachedArticlesPage = await readCachedRemoteArticlesPage(articlesPageOptions).catch(error => {
+    const cachedArticlesPage = await readCachedRemoteArticlesPage(articlesPageOptions).catch((error: unknown): null => {
       console.warn('Could not read cached dashboard articles before refresh:', error);
       return null;
     });

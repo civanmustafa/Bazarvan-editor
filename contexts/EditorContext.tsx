@@ -1589,7 +1589,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (saveInFlightRef.current) {
             if (forceSave) {
                 queuedForcedSaveRef.current = { reason: 'manual', force: true };
-                await saveInFlightRef.current.catch(() => undefined);
+                await saveInFlightRef.current.catch((): void => {});
                 const queuedSave = queuedForcedSaveRef.current;
                 if (queuedSave) {
                     queuedForcedSaveRef.current = null;

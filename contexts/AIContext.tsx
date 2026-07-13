@@ -795,7 +795,7 @@ const getBulkFixTargetContext = (editor: any, group: BulkFixTargetGroup, article
 
 const collectBulkFixViolations = (structureAnalysis: StructureAnalysis): BulkFixViolationContext[] => {
     const violations: BulkFixViolationContext[] = [];
-    Object.entries(structureAnalysis).forEach(([key, rule]) => {
+    (Object.entries(structureAnalysis) as Array<[keyof StructureAnalysis, CheckResult]>).forEach(([key, rule]) => {
         if (key === 'paragraphPair') return;
         if (rule.status !== 'fail') return;
         if (rule.violatingItems?.length) {
@@ -3606,12 +3606,12 @@ const getLeadingPatchHeadingTitle = (value: string): string => {
 };
 
 const splitReadyCommandH2SectionPatches = (patches: AiContentPatch[]): AiContentPatch[] => (
-    patches.flatMap((patch) => {
+    patches.flatMap<AiContentPatch>((patch) => {
         const sections = splitContentMarkdownByH2Sections(patch.contentMarkdown);
         if (sections.length <= 1) return [patch];
 
         const baseMarker = patch.marker || patch.title || patch.id;
-        return sections.map((contentMarkdown, index) => ({
+        return sections.map((contentMarkdown, index): AiContentPatch => ({
             ...patch,
             id: index === 0 ? patch.id : `${patch.id}-h2-${index + 1}`,
             marker: baseMarker,

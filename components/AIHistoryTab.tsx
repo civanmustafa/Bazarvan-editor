@@ -5,7 +5,14 @@ import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { BookCopy, Trash2, Check, Copy, MapPin, ChevronDown, AlertTriangle } from 'lucide-react';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
-import type { AiContentPatch, AiPatchResolvedTarget, AIHistoryItem, BulkFixReviewVariant } from '../types';
+import type { AiContentPatch, AiPatchResolvedTarget, AIHistoryItem, BulkFixReviewStats, BulkFixReviewVariant } from '../types';
+
+const EMPTY_BULK_FIX_REVIEW_STATS: BulkFixReviewStats = {
+    words: 0,
+    sentences: 0,
+    paragraphs: 0,
+    characters: 0,
+};
 
 const getCriterionDisplayOrder = (status?: string): number => {
     if (status === 'pass') return 0;
@@ -452,10 +459,12 @@ const AIHistoryTab: React.FC = () => {
                             </div>
                             {(item.bulkFixReviewItem.variants?.length
                                 ? item.bulkFixReviewItem.variants
-                                : item.suggestions.map((suggestion, index) => ({
+                                : item.suggestions.map((suggestion, index): BulkFixReviewVariant => ({
                                     id: `history-${item.id}-${index}`,
                                     label: isArabic ? `اقتراح ${index + 1}` : `Suggestion ${index + 1}`,
                                     fixedText: suggestion,
+                                    statsBefore: EMPTY_BULK_FIX_REVIEW_STATS,
+                                    statsAfter: EMPTY_BULK_FIX_REVIEW_STATS,
                                     criteriaChecks: [],
                                 }))
                             ).map((variant, index) => {

@@ -166,10 +166,12 @@ const enrichStructureViolationText = (
   const entries = Object.entries(structureAnalysis).map(([key, result]) => {
     if (!result.violatingItems?.length) return [key, result];
 
-    const violatingItems: NonNullable<CheckResult['violatingItems']> = result.violatingItems.map(item => ({
+    const violatingItems: NonNullable<CheckResult['violatingItems']> = result.violatingItems.map(
+      (item: NonNullable<CheckResult['violatingItems']>[number]) => ({
       ...item,
       text: item.text || getViolationTextFromAnalysisNodes(nodes, item.from, item.to),
-    }));
+      }),
+    );
 
     return [key, { ...result, violatingItems }];
   });
