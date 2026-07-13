@@ -81,7 +81,7 @@ test('public AI responses remove key fingerprints while preserving safe attempt 
     readWorkspaceFile('api/chatgpt.ts'),
   ]);
 
-  assert.match(engine, /const toPublicGeminiResult/);
+  assert.match(engine, /export const sanitizeAiExecutionResult/);
   assert.match(engine, /keyFingerprint: _fingerprint/);
   assert.match(openAiApi, /const finalizeResult/);
   assert.match(openAiApi, /keyFingerprint: _fingerprint/);

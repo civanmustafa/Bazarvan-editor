@@ -25,7 +25,7 @@ export type GeminiProgressSnapshot = {
     message?: string;
     updatedAt?: string;
     completed?: boolean;
-    jobStatus?: 'running' | 'completed' | 'cancelled';
+    jobStatus?: 'queued' | 'running' | 'retry_scheduled' | 'completed' | 'failed' | 'cancelled';
     resultStatus?: number;
     result?: unknown;
 };
@@ -70,8 +70,9 @@ type RunGeminiEngineOptions = {
 };
 
 const GEMINI_JOB_POLL_INTERVAL_MS = 600;
-const GEMINI_JOB_TIMEOUT_MS = 30 * 60 * 1000;
+const GEMINI_JOB_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const GEMINI_JOB_START_TIMEOUT_MS = 30 * 1000;
+const GEMINI_CANCEL_CONFIRM_TIMEOUT_MS = 12 * 1000;
 const MAX_CONSECUTIVE_POLL_FAILURES = 50;
 
 const wait = (duration: number): Promise<void> => new Promise(resolve => {
@@ -219,5 +220,27 @@ export const cancelGeminiAnalysisEngine = async (progressId: string): Promise<vo
             ? data.error
             : `تعذر إيقاف مهمة Gemini (HTTP ${response.status}).`;
         throw new Error(message);
+    }
+
+    if (data.cancellationRequested === true) {
+        const confirmationStartedAt = Date.now();
+        while (Date.now() - confirmationStartedAt < GEMINI_CANCEL_CONFIRM_TIMEOUT_MS) {
+            await wait(250);
+            try {
+                const progressResponse = await fetch(
+                    `/api/gemini/progress/${encodeURIComponent(normalizedProgressId)}`,
+                    {
+                        cache: 'no-store',
+                        headers: getAuthenticatedApiHeaders(accessToken),
+                    },
+                );
+                if (!progressResponse.ok) continue;
+                const progress = await progressResponse.json() as GeminiProgressSnapshot;
+                if (progress.jobStatus === 'cancelled' || progress.resultStatus === 499) return;
+            } catch {
+                // A brief network interruption must not undo the persisted cancel request.
+            }
+        }
+        throw new Error('تم تسجيل طلب الإيقاف، لكن لم يصل تأكيد توقف العامل بعد. لن يعاد تشغيل المهمة بعد طلب الإلغاء.');
     }
 };

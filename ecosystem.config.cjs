@@ -28,5 +28,22 @@ module.exports = {
         EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: process.env.EXTERNAL_ANALYSIS_WORKER_CONCURRENCY || '5',
       },
     },
+    {
+      name: 'bazarvan-ai-job-worker',
+      script: 'server-dist/ai-job-worker.mjs',
+      cwd: __dirname,
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: true,
+      restart_delay: 2000,
+      kill_timeout: 10000,
+      env: {
+        NODE_ENV: 'production',
+        AI_JOB_WORKER_POLL_MS: process.env.AI_JOB_WORKER_POLL_MS || '1500',
+        AI_JOB_LEASE_SECONDS: process.env.AI_JOB_LEASE_SECONDS || '300',
+        AI_JOB_WORKER_CONCURRENCY: process.env.AI_JOB_WORKER_CONCURRENCY || '2',
+        EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
+      },
+    },
   ],
 };

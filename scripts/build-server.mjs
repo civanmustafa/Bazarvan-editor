@@ -11,6 +11,11 @@ const targets = [
     outfile: 'server-dist/external-analysis-worker.mjs',
     label: 'external analysis worker',
   },
+  {
+    entryPoint: 'server/aiJobWorker.ts',
+    outfile: 'server-dist/ai-job-worker.mjs',
+    label: 'durable AI job worker',
+  },
 ];
 
 await Promise.all(targets.map(({ entryPoint, outfile }) => build({
