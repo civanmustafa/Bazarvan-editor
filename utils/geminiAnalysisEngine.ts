@@ -40,6 +40,19 @@ export type GeminiEngineRequest = {
     useUrlContext?: boolean;
     allowModelFallback?: boolean;
     fallbackModels?: string[];
+    telemetry?: {
+        source?: string;
+        articleId?: string;
+        articleTitle?: string;
+        articleKey?: string;
+        commandId?: string;
+        commandLabel?: string;
+        action?: string;
+        batchIndex?: number;
+        batchTotal?: number;
+        ruleTitle?: string;
+        rules?: string[];
+    };
 };
 
 export type GeminiEngineResult = {
@@ -177,16 +190,16 @@ export const runGeminiAnalysisEngine = async ({
 
     const rawBody = await response.text().catch(() => '');
     const data = parseJsonRecord(rawBody);
-    if (response.status === 202 && data.accepted === true) {
-        return waitForGeminiJob(progressId, accessToken, onProgress, timeoutMs);
-    }
-
-    return {
-        status: response.status,
-        data,
-        rawBody,
-        progressId,
-    };
+    const result = response.status === 202 && data.accepted === true
+        ? await waitForGeminiJob(progressId, accessToken, onProgress, timeoutMs)
+        : {
+            status: response.status,
+            data,
+            rawBody,
+            progressId,
+        };
+    window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+    return result;
 };
 
 export const cancelGeminiAnalysisEngine = async (progressId: string): Promise<void> => {

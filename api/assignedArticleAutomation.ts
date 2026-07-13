@@ -1,15 +1,10 @@
-import { GoogleGenAI } from '@google/genai';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   GEMINI_ANALYSIS_MODEL,
   GEMINI_PAID_ANALYSIS_MODEL,
 } from '../constants/modelRegistry';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
-import {
-  claimGeminiApiKey,
-  getGeminiKeyFailureCooldownSeconds,
-  type GeminiKeyFailureReason,
-} from '../server/geminiKeyCoordinator';
+import { aiExecutionEngine, type AiExecutionTelemetryContext } from '../server/aiExecutionEngine';
 
 type ApiResult = {
   status: number;
@@ -129,130 +124,34 @@ const sendNodeResponse = (res: any, result: ApiResult) => {
   res.end(JSON.stringify(result.body));
 };
 
-const parseGeminiKeyList = (...rawValues: Array<string | undefined>): string[] => (
-  Array.from(new Set(
-    rawValues
-      .flatMap(raw => String(raw || '').split(/[\n,;]+/))
-      .map(key => key.trim())
-      .filter(Boolean)
-  ))
-);
-
-const getGeminiKeys = (provider: GeminiProvider): string[] => {
-  return provider === 'geminiPaid'
-    ? parseGeminiKeyList(
-        process.env.GEMINI_PAID_API_KEYS,
-        process.env.GEMINI_PAID_API_KEY,
-        process.env.GEMINI_PRO_API_KEYS,
-        process.env.GEMINI_PRO_API_KEY,
-      )
-    : parseGeminiKeyList(
-        process.env.GEMINI_API_KEYS,
-        process.env.GEMINI_API_KEY,
-        process.env.API_KEY,
-      );
-};
-
-const getGeminiErrorStatus = (error: unknown): number => {
-  const value = error && typeof error === 'object' ? error as Record<string, any> : {};
-  const nestedError = isRecord(value.error) ? value.error : {};
-  const message = error instanceof Error
-    ? error.message
-    : typeof nestedError.message === 'string'
-      ? nestedError.message
-      : typeof value.message === 'string'
-        ? value.message
-        : '';
-  const statusFromValue = typeof value.status === 'number'
-    ? value.status
-    : typeof nestedError.code === 'number'
-      ? nestedError.code
-      : undefined;
-  const statusFromMessage = message.match(/\b(400|401|403|404|408|429|500|502|503|504)\b/)?.[1];
-  return statusFromValue || (statusFromMessage ? Number(statusFromMessage) : 502);
-};
-
-const getGeminiErrorMessage = (error: unknown): string => {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  const value = error && typeof error === 'object' ? error as Record<string, any> : {};
-  const nestedError = isRecord(value.error) ? value.error : {};
-  return toTrimmedString(nestedError.message) || toTrimmedString(value.message) || 'Unknown Gemini error.';
-};
-
-const getGeminiFailureReason = (status: number): GeminiKeyFailureReason => {
-  if (status === 429) return 'quota';
-  if (status === 401 || status === 403) return 'auth';
-  if (status >= 500) return 'server';
-  return 'unknown';
-};
-
 const wait = (duration: number) => new Promise(resolve => setTimeout(resolve, duration));
 
 const callGemini = async (
   prompt: string,
   provider: GeminiProvider,
+  telemetry: AiExecutionTelemetryContext,
 ): Promise<{ text: string; keyFingerprint: string; keySuffix: string; model: string }> => {
-  const keys = getGeminiKeys(provider);
   const model = provider === 'geminiPaid' ? DEFAULT_GEMINI_PAID_MODEL : DEFAULT_GEMINI_MODEL;
-
-  if (keys.length === 0) {
-    const envName = provider === 'geminiPaid' ? 'GEMINI_PAID_API_KEYS' : 'GEMINI_API_KEYS';
-    throw new AssignedAutomationError(`${envName} is not configured on the server.`, 503);
+  const result = await aiExecutionEngine.executeGemini({
+    prompt,
+    provider,
+    model,
+    allowModelFallback: provider === 'gemini',
+  }, { telemetry });
+  const body = isRecord(result.body) ? result.body : {};
+  const text = toTrimmedString(body.text);
+  if (result.status < 200 || result.status >= 300 || !text) {
+    throw new AssignedAutomationError(
+      toTrimmedString(body.error) || `Gemini request failed with status ${result.status}.`,
+      result.status,
+    );
   }
-
-  let lastError: unknown = null;
-  const attemptedFingerprints = new Set<string>();
-  for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
-    const keyLease = await claimGeminiApiKey({
-      provider,
-      model,
-      keys,
-      excludedFingerprints: attemptedFingerprints,
-      leaseSeconds: 150,
-    });
-    if (!keyLease) {
-      lastError = new Error(`No eligible ${provider} API key is currently available (429).`);
-      break;
-    }
-    attemptedFingerprints.add(keyLease.fingerprint);
-    try {
-      const ai = new GoogleGenAI({ apiKey: keyLease.apiKey });
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-      });
-      await keyLease.complete({ outcome: 'success', status: 200, cooldownSeconds: 0 });
-      return {
-        text: response.text || '',
-        keyFingerprint: keyLease.fingerprint,
-        keySuffix: keyLease.suffix,
-        model,
-      };
-    } catch (error) {
-      lastError = error;
-      const status = getGeminiErrorStatus(error);
-      const reason = getGeminiFailureReason(status);
-      await keyLease.complete({
-        outcome: 'failed',
-        status,
-        reason,
-        cooldownSeconds: getGeminiKeyFailureCooldownSeconds(reason, status),
-      });
-      console.warn('Assigned automation Gemini key attempt failed', {
-        provider,
-        model,
-        keyFingerprint: keyLease.fingerprint,
-        status,
-        attempt: 1,
-      });
-    }
-  }
-
-  throw new AssignedAutomationError(
-    `Gemini request failed after trying ${attemptedFingerprints.size}/${keys.length} keys: ${getGeminiErrorMessage(lastError)}`,
-    getGeminiErrorStatus(lastError),
-  );
+  return {
+    text,
+    keyFingerprint: toTrimmedString(body.keyFingerprint),
+    keySuffix: toTrimmedString(body.keySuffix),
+    model: toTrimmedString(body.model) || model,
+  };
 };
 
 const extractJson = (text: string): any => {
@@ -626,6 +525,7 @@ const runSemanticGeneration = async (
   article: Record<string, any>,
   metadata: Record<string, any>,
   reasons: string[],
+  telemetry: AiExecutionTelemetryContext,
 ): Promise<{
   status: Exclude<AutomationStatus, 'analyzed'>;
   keywords: KeywordsPayload;
@@ -649,7 +549,11 @@ const runSemanticGeneration = async (
   }
 
   try {
-    let gemini = await callGemini(buildSemanticPrompt(article, keywords, goalContext), 'gemini');
+    let gemini = await callGemini(
+      buildSemanticPrompt(article, keywords, goalContext),
+      'gemini',
+      { ...telemetry, source: 'assigned_automation_semantic' },
+    );
     let semanticTerms = extractSemanticTerms(extractJson(gemini.text));
     let incomingSecondaries = mergeUniqueTerms([], semanticTerms.secondaries, 12);
     let incomingLsi = mergeUniqueTerms([], semanticTerms.lsi, 30);
@@ -659,7 +563,11 @@ const runSemanticGeneration = async (
     );
 
     if (!hasMergedTerms) {
-      const retry = await callGemini(buildSemanticRetryPrompt(article, keywords, goalContext, gemini.text), 'gemini');
+      const retry = await callGemini(
+        buildSemanticRetryPrompt(article, keywords, goalContext, gemini.text),
+        'gemini',
+        { ...telemetry, source: 'assigned_automation_semantic_retry' },
+      );
       const retryTerms = extractSemanticTerms(extractJson(retry.text));
       const retrySecondaries = mergeUniqueTerms([], retryTerms.secondaries, 12);
       const retryLsi = mergeUniqueTerms([], retryTerms.lsi, 30);
@@ -738,6 +646,7 @@ const runGeminiPaidCompetitorAnalysis = async (
   keywords: KeywordsPayload,
   metadata: Record<string, any>,
   reasons: string[],
+  telemetry: AiExecutionTelemetryContext,
 ): Promise<{
   status: Extract<AutomationStatus, 'analyzed' | 'skipped' | 'failed'>;
   metadata: Record<string, any>;
@@ -772,7 +681,16 @@ const runGeminiPaidCompetitorAnalysis = async (
   }
 
   try {
-    const gemini = await callGemini(buildProCompetitorPrompt(article, keywords, goalContext, competitorBlocks), 'geminiPaid');
+    const gemini = await callGemini(
+      buildProCompetitorPrompt(article, keywords, goalContext, competitorBlocks),
+      'geminiPaid',
+      {
+        ...telemetry,
+        source: 'assigned_automation_competitor',
+        commandId: 'smartAnalysis.competitorContentComparison',
+        commandLabel: 'New/conflicting competitor ideas',
+      },
+    );
     const now = new Date().toISOString();
     const metadataWithResult = saveGeminiPaidResultInMetadata(metadata, {
       text: gemini.text,
@@ -850,7 +768,19 @@ const handleAssignedArticleAutomationRequest = async (req: any): Promise<ApiResu
 
     const reasons: string[] = [];
     const metadata = isRecord((article as Record<string, any>).metadata) ? (article as Record<string, any>).metadata : {};
-    const semantic = await runSemanticGeneration(supabase, article as Record<string, any>, metadata, reasons);
+    const telemetry: AiExecutionTelemetryContext = {
+      actorUserId: user.id,
+      actorEmail: user.email || null,
+      articleId,
+      articleTitle: toTrimmedString((article as Record<string, any>).title),
+    };
+    const semantic = await runSemanticGeneration(
+      supabase,
+      article as Record<string, any>,
+      metadata,
+      reasons,
+      telemetry,
+    );
 
     if (semantic.status === 'generated') {
       const pauseMs = getAssignedAutomationPauseMs();
@@ -869,6 +799,7 @@ const handleAssignedArticleAutomationRequest = async (req: any): Promise<ApiResu
       latestKeywords,
       latestMetadata,
       reasons,
+      telemetry,
     );
 
     return {

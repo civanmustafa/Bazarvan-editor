@@ -9,6 +9,11 @@ import {
   getPositiveIntegerEnv,
   toApiSecurityResult,
 } from "./apiSecurity";
+import {
+  normalizeAiExecutionTelemetryContext,
+  type AiExecutionTelemetryContext,
+} from '../server/aiExecutionEngine';
+import { recordAiExecutionTelemetry } from '../server/aiExecutionTelemetry';
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-5.4";
 const ALLOWED_OPENAI_MODELS = new Set([
@@ -273,6 +278,10 @@ const createOpenAiResponse = async (
 };
 
 const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
+  const startedAt = Date.now();
+  let actorUserId = '';
+  let telemetry: AiExecutionTelemetryContext = {};
+  let requestId = '';
   try {
     assertAllowedOrigin(req);
   } catch (error) {
@@ -293,9 +302,49 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
 
   const attempts: OpenAiAttemptDetail[] = [];
   let selectedModel = OPENAI_MODEL;
+  const finalizeResult = async (result: ApiResult): Promise<ApiResult> => {
+    const body = result.body && typeof result.body === 'object' && !Array.isArray(result.body)
+      ? result.body as Record<string, unknown>
+      : {};
+    if (actorUserId) {
+      await recordAiExecutionTelemetry({
+        requestId,
+        actorUserId,
+        provider: 'openai',
+        model: typeof body.model === 'string' ? body.model : selectedModel,
+        source: telemetry.source,
+        articleId: telemetry.articleId,
+        status: result.status,
+        durationMs: Date.now() - startedAt,
+        body,
+        context: { ...telemetry },
+      }).catch(error => {
+        console.warn('[openai] Could not persist request telemetry', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+
+    const publicAttempts = Array.isArray(body.attempts)
+      ? body.attempts.map(attempt => {
+          if (!attempt || typeof attempt !== 'object' || Array.isArray(attempt)) return attempt;
+          const { keyFingerprint: _fingerprint, ...publicAttempt } = attempt as Record<string, unknown>;
+          return publicAttempt;
+        })
+      : body.attempts;
+    const { keyFingerprint: _fingerprint, ...publicBody } = body;
+    return {
+      ...result,
+      body: {
+        ...publicBody,
+        ...(publicAttempts !== undefined ? { attempts: publicAttempts } : {}),
+      },
+    };
+  };
 
   try {
     const principal = await authenticateApiRequest(req);
+    actorUserId = principal.userId;
     consumeApiRateLimit(
       "openai:start",
       principal.userId,
@@ -308,13 +357,20 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
 
     const requestBody = await readRequestBody(req) as any;
     assertAiRequestPayload(requestBody);
+    telemetry = normalizeAiExecutionTelemetryContext(requestBody?.telemetry, {
+      userId: principal.userId,
+      email: principal.email,
+    });
+    requestId = typeof requestBody?.requestId === 'string'
+      ? requestBody.requestId.trim().slice(0, 200)
+      : '';
     const prompt = String(requestBody.prompt);
     const { model, conversationId } = requestBody;
 
     const openAiKeys = normalizeKeys(process.env.OPENAI_API_KEY, process.env.OPENAI_API_KEYS);
 
     if (openAiKeys.length === 0) {
-      return { status: 500, body: { error: "لم يتم تكوين مفتاح ChatGPT API." } };
+      return finalizeResult({ status: 500, body: { error: "لم يتم تكوين مفتاح ChatGPT API.", provider: 'openai', model: selectedModel } });
     }
 
     selectedModel = typeof model === "string" && ALLOWED_OPENAI_MODELS.has(model.trim())
@@ -333,7 +389,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
         const activeConversationId = requestedConversationId || await createOpenAiConversation(openAiKey, controller.signal);
         const text = await createOpenAiResponse(openAiKey, controller.signal, selectedModel, activeConversationId, prompt);
 
-        return {
+        return finalizeResult({
           status: 200,
           body: {
             text,
@@ -344,7 +400,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
             model: selectedModel,
             attempts,
           },
-        };
+        });
       } catch (error) {
         if (requestedConversationId && isMissingConversationError(error)) {
           sawMissingConversationError = true;
@@ -370,7 +426,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
           const activeConversationId = await createOpenAiConversation(openAiKey, controller.signal);
           const text = await createOpenAiResponse(openAiKey, controller.signal, selectedModel, activeConversationId, prompt);
 
-          return {
+          return finalizeResult({
             status: 200,
             body: {
               text,
@@ -382,7 +438,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
               model: selectedModel,
               attempts,
             },
-          };
+          });
         } catch (error) {
           attempts.push(getOpenAiAttemptFailure(openAiKey, selectedModel, attempts.length + 1, error));
           lastError = error instanceof Error && error.name === "AbortError"
@@ -405,7 +461,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
 
     const errorMessage = error instanceof Error ? error.message : "خطأ غير معروف";
     const lastAttempt = attempts[attempts.length - 1];
-    return {
+    return finalizeResult({
       status: lastAttempt?.status && lastAttempt.status >= 400 && lastAttempt.status < 500 ? lastAttempt.status : 500,
       body: {
         error: `خطأ من ChatGPT API: ${errorMessage}`,
@@ -415,7 +471,7 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
         keySuffix: lastAttempt?.keySuffix,
         attempts,
       },
-    };
+    });
   }
 };
 

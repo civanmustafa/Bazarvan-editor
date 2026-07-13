@@ -636,6 +636,10 @@ const getApiSourceLabel = (source?: string): string => {
     bulk_fix_review: 'الإصلاح المتعدد',
     bulk_fix_all: 'الإصلاح المجمع',
     competitor_extraction: 'استخراج المنافسين',
+    engineering_command: 'أمر تحليل خارجي',
+    assigned_automation_semantic: 'أتمتة الصيغ و LSI',
+    assigned_automation_semantic_retry: 'إعادة أتمتة الصيغ و LSI',
+    assigned_automation_competitor: 'أتمتة تحليل المنافسين',
     quick_provider: 'أمر سريع',
     unknown: 'غير محدد',
   };

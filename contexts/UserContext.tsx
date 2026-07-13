@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useEffect, createContext, useContext, useRef } from 'react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-import { recordGeminiKeyUsage, recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
+import { recordLogin, getActivityData, saveUserPreference, saveUserApiKeys, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
 import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
 import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
@@ -35,32 +35,6 @@ type ApiKeys = { gemini: string[]; geminiPaid: string[]; chatgpt: string[] };
 type StoredApiKeys = { gemini?: string | string[]; geminiPaid?: string | string[]; chatgpt?: string | string[]; openai?: string | string[] };
 type UserRole = 'admin' | 'user';
 type AppView = 'login' | 'dashboard' | 'editor' | 'admin' | 'settings' | 'notFound';
-type ApiKeyUsedDetail = {
-    requestId?: unknown;
-    keyFingerprint?: unknown;
-    keySuffix?: unknown;
-    service?: unknown;
-    provider?: unknown;
-    model?: unknown;
-    source?: unknown;
-    articleId?: unknown;
-    articleTitle?: unknown;
-    articleKey?: unknown;
-    commandId?: unknown;
-    commandLabel?: unknown;
-    action?: unknown;
-    batchIndex?: unknown;
-    batchTotal?: unknown;
-    ruleTitle?: unknown;
-    rules?: unknown;
-    outcome?: unknown;
-    status?: unknown;
-    reason?: unknown;
-    attemptNumber?: unknown;
-    keyCount?: unknown;
-    attemptedKeyCount?: unknown;
-    failedAttempts?: unknown;
-};
 type Profile = {
     id: string;
     email: string | null;
@@ -373,102 +347,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         document.documentElement.dir = uiLanguage === 'ar' ? 'rtl' : 'ltr';
         document.title = t.appTitle;
     }, [uiLanguage, t]);
-
-    useEffect(() => {
-        const toOptionalString = (value: unknown): string | undefined => (
-            typeof value === 'string' && value.trim() ? value.trim() : undefined
-        );
-        const toOptionalNumber = (value: unknown): number | undefined => (
-            typeof value === 'number' && Number.isFinite(value) ? value : undefined
-        );
-        const toOptionalRecord = (value: unknown): Record<string, unknown> | null => (
-            value && typeof value === 'object' && !Array.isArray(value)
-                ? value as Record<string, unknown>
-                : null
-        );
-        const normalizeFailedAttempts = (value: unknown) => (
-            Array.isArray(value)
-                ? value.map(toOptionalRecord).filter((attempt): attempt is Record<string, unknown> => Boolean(attempt)).map(attempt => ({
-                    keyFingerprint: toOptionalString(attempt.keyFingerprint),
-                    keySuffix: toOptionalString(attempt.keySuffix),
-                    model: toOptionalString(attempt.model),
-                    status: toOptionalNumber(attempt.status),
-                    reason: toOptionalString(attempt.reason),
-                    attempt: toOptionalNumber(attempt.attempt),
-                })).slice(0, 160)
-                : []
-        );
-
-        const handleApiKeyUsed = (event: Event) => {
-            if (!currentUser) return;
-            const detail = (event as CustomEvent<ApiKeyUsedDetail>).detail || {};
-            const keyFingerprint = toOptionalString(detail?.keyFingerprint);
-            const requestId = toOptionalString(detail?.requestId);
-            if (!keyFingerprint && !requestId) return;
-            const provider = detail?.provider === 'geminiPaid'
-                ? 'geminiPaid'
-                : detail?.provider === 'gemini'
-                  ? 'gemini'
-                  : detail?.provider === 'openai'
-                    ? 'openai'
-                    : undefined;
-            const service = toOptionalString(detail.service) || (provider === 'openai' ? 'openai' : 'gemini');
-            const model = toOptionalString(detail.model);
-
-            if (keyFingerprint && (provider === 'gemini' || provider === 'geminiPaid')) {
-                recordGeminiKeyUsage(currentUser, keyFingerprint, {
-                    provider,
-                    model,
-                });
-            }
-
-            if (currentUserId) {
-                void recordAppActivity(currentUserId, {
-                    eventType: 'api_key_used',
-                    entityType: 'api_key',
-                    entityId: `${service}:${provider || 'unknown'}:${requestId || keyFingerprint || 'request'}`,
-                    metadata: {
-                        service,
-                        provider: provider || toOptionalString(detail.provider) || service,
-                        model,
-                        requestId,
-                        keyFingerprint,
-                        keySuffix: toOptionalString(detail.keySuffix),
-                        source: toOptionalString(detail.source) || 'unknown',
-                        articleId: toOptionalString(detail.articleId),
-                        articleTitle: toOptionalString(detail.articleTitle),
-                        articleKey: toOptionalString(detail.articleKey),
-                        commandId: toOptionalString(detail.commandId),
-                        commandLabel: toOptionalString(detail.commandLabel),
-                        action: toOptionalString(detail.action),
-                        batchIndex: toOptionalNumber(detail.batchIndex),
-                        batchTotal: toOptionalNumber(detail.batchTotal),
-                        ruleTitle: toOptionalString(detail.ruleTitle),
-                        rules: Array.isArray(detail.rules)
-                            ? detail.rules.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map(item => item.trim()).slice(0, 12)
-                            : undefined,
-                        outcome: toOptionalString(detail.outcome),
-                        status: toOptionalNumber(detail.status),
-                        reason: toOptionalString(detail.reason),
-                        attemptNumber: toOptionalNumber(detail.attemptNumber),
-                        keyCount: toOptionalNumber(detail.keyCount),
-                        attemptedKeyCount: toOptionalNumber(detail.attemptedKeyCount),
-                        failedAttempts: normalizeFailedAttempts(detail.failedAttempts),
-                    },
-                }).catch(error => {
-                    console.error('Failed to record API key usage activity:', error);
-                });
-            }
-            window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
-        };
-
-        window.addEventListener('api-key-used', handleApiKeyUsed);
-        window.addEventListener('gemini-key-used', handleApiKeyUsed);
-        return () => {
-            window.removeEventListener('api-key-used', handleApiKeyUsed);
-            window.removeEventListener('gemini-key-used', handleApiKeyUsed);
-        };
-    }, [currentUser, currentUserId]);
 
     useEffect(() => {
         try {

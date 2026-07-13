@@ -110,20 +110,22 @@ test('legacy browser preferences migrate without replacing existing online value
 });
 
 test('browser, API, and worker consume the shared registries', async () => {
-  const [geminiApi, settingsApi, assignedAutomation, externalSettings, settingsPage] = await Promise.all([
+  const [geminiApi, aiEngine, settingsApi, assignedAutomation, externalSettings, settingsPage] = await Promise.all([
     readWorkspaceFile('api/gemini.ts'),
+    readWorkspaceFile('server/aiExecutionEngine.ts'),
     readWorkspaceFile('api/systemSettings.ts'),
     readWorkspaceFile('api/assignedArticleAutomation.ts'),
     readWorkspaceFile('server/externalAnalysisSettings.ts'),
     readWorkspaceFile('components/SettingsPage.tsx'),
   ]);
 
-  assert.match(geminiApi, /constants\/modelRegistry/);
+  assert.match(geminiApi, /server\/aiExecutionEngine/);
+  assert.match(aiEngine, /constants\/modelRegistry/);
   assert.match(settingsApi, /constants\/settingsRegistry/);
   assert.match(assignedAutomation, /constants\/modelRegistry/);
   assert.match(externalSettings, /constants\/settingsRegistry/);
   assert.match(settingsPage, /constants\/settingsRegistry/);
-  [geminiApi, settingsApi, assignedAutomation, externalSettings, settingsPage].forEach(source => {
+  [geminiApi, aiEngine, settingsApi, assignedAutomation, externalSettings, settingsPage].forEach(source => {
     assert.doesNotMatch(source, /\['gemini-3\.5-flash'/);
   });
 });

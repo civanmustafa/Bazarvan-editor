@@ -1890,57 +1890,9 @@ const getGeminiErrorMessage = (error: unknown, modelForMessage: string = GEMINI_
     return rawMessage;
 };
 
-const dispatchGeminiApiUsage = (
-    detail: Record<string, unknown>,
-) => {
-    window.dispatchEvent(new CustomEvent('api-key-used', {
-        detail: {
-            service: 'gemini',
-            ...detail,
-        },
-    }));
-};
-
-const getGeminiFailedAttempts = (data: Record<string, any>): GeminiServerAttempt[] => (
-    Array.isArray(data.attempts) ? data.attempts as GeminiServerAttempt[] : []
-);
-
-const dispatchGeminiRequestFailure = (
-    data: Record<string, any>,
-    usageContext: AiApiUsageContext,
-    requestId?: string,
-) => {
-    const failedAttempts = getGeminiFailedAttempts(data);
-    const lastAttempt = failedAttempts[failedAttempts.length - 1];
-
-    dispatchGeminiApiUsage({
-        requestId: typeof data.progressId === 'string' ? data.progressId : requestId,
-        keyFingerprint: typeof lastAttempt?.keyFingerprint === 'string' ? lastAttempt.keyFingerprint.trim() : undefined,
-        keySuffix: typeof lastAttempt?.keySuffix === 'string' ? lastAttempt.keySuffix.trim() : undefined,
-        provider: data.provider,
-        model: typeof lastAttempt?.model === 'string' ? lastAttempt.model : data.model,
-        outcome: 'failed',
-        status: typeof lastAttempt?.status === 'number' ? lastAttempt.status : undefined,
-        reason: typeof lastAttempt?.reason === 'string' ? lastAttempt.reason : undefined,
-        keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
-        attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
-        failedAttempts,
-        ...usageContext,
-    });
-};
-
 const normalizeGeminiKeys = (keys?: string | string[]): string[] => {
     const keyList = Array.isArray(keys) ? keys : keys ? [keys] : [];
     return keyList.map(key => key.trim()).filter(Boolean);
-};
-
-const randomizeApiKeyOrder = (keys: string[]): string[] => {
-    const shuffled = [...keys];
-    for (let i = shuffled.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
 };
 
 type GeminiChatMessage = {
@@ -1981,15 +1933,6 @@ type AiApiUsageContext = {
     batchTotal?: number;
     ruleTitle?: string;
     rules?: string[];
-};
-
-type GeminiServerAttempt = {
-    keyFingerprint?: unknown;
-    keySuffix?: unknown;
-    status?: unknown;
-    reason?: unknown;
-    attempt?: unknown;
-    model?: unknown;
 };
 
 type AiRequestProgress = GeminiProgressSnapshot & {
@@ -2122,6 +2065,7 @@ const requestGeminiAnalysis = async (
               provider,
               allowModelFallback: provider === 'gemini' && isGeminiFreeModelFallbackEnabled(),
               fallbackModels: provider === 'gemini' ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
+              telemetry: usageContext,
           },
           onProgress: progressCallback,
       });
@@ -2154,7 +2098,6 @@ const requestGeminiAnalysis = async (
       }
 
       if (status < 200 || status >= 300) {
-          dispatchGeminiRequestFailure(data, usageContext, progressId);
           const serverError = typeof data.error === 'string'
               ? data.error
               : typeof data.error?.message === 'string'
@@ -2188,21 +2131,6 @@ const requestGeminiAnalysis = async (
           throw new Error('Gemini server route did not return a valid text response.');
       }
 
-      if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
-          dispatchGeminiApiUsage({
-              keyFingerprint: data.keyFingerprint.trim(),
-              keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix.trim() : undefined,
-              provider: data.provider,
-              model: data.model,
-              outcome: 'success',
-              status,
-              keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
-              attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
-              requestId: typeof data.progressId === 'string' ? data.progressId : progressId,
-              failedAttempts: getGeminiFailedAttempts(data),
-              ...usageContext,
-          });
-      }
       progressCallback?.({
           ...(progress || {}),
           stage: 'success',
@@ -2527,6 +2455,8 @@ const callChatGptAnalysis = async (
                 prompt,
                 model: OPENAI_MODEL,
                 conversationId,
+                requestId,
+                telemetry: usageContext,
             }),
             signal: controller.signal,
         });
@@ -2535,53 +2465,18 @@ const callChatGptAnalysis = async (
 
         const isJson = response.headers.get('content-type')?.includes('application/json');
         const data = isJson ? await response.json().catch(() => ({})) : {};
+        window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
 
         if (response.status === 404) {
             throw new Error('مسار ChatGPT API غير مفعّل محليًا. أعد تشغيل خادم التطوير حتى يقرأ إعدادات Vite الجديدة.');
         }
 
         if (!response.ok) {
-            const failedAttempts = Array.isArray(data.attempts)
-                ? data.attempts.filter((attempt: unknown): attempt is Record<string, unknown> => Boolean(attempt) && typeof attempt === 'object' && !Array.isArray(attempt))
-                : [];
-            const lastAttempt = failedAttempts[failedAttempts.length - 1];
-            window.dispatchEvent(new CustomEvent('api-key-used', {
-                detail: {
-                    service: 'openai',
-                    provider: 'openai',
-                    requestId,
-                    keyFingerprint: typeof lastAttempt?.keyFingerprint === 'string' ? lastAttempt.keyFingerprint.trim() : undefined,
-                    keySuffix: typeof lastAttempt?.keySuffix === 'string' ? lastAttempt.keySuffix.trim() : undefined,
-                    model: typeof lastAttempt?.model === 'string' ? lastAttempt.model : data.model || OPENAI_MODEL,
-                    outcome: 'failed',
-                    status: typeof lastAttempt?.status === 'number' ? lastAttempt.status : response.status,
-                    reason: typeof lastAttempt?.reason === 'string' ? lastAttempt.reason : undefined,
-                    failedAttempts,
-                    ...usageContext,
-                },
-            }));
             throw new Error(data.error?.message || data.error || `ChatGPT request failed with status ${response.status}`);
         }
 
         if (typeof data.text !== 'string') {
             throw new Error('ChatGPT server route did not return a valid text response.');
-        }
-
-        if (typeof data.keyFingerprint === 'string' && data.keyFingerprint.trim()) {
-            window.dispatchEvent(new CustomEvent('api-key-used', {
-                detail: {
-                    service: 'openai',
-                    provider: 'openai',
-                    requestId,
-                    keyFingerprint: data.keyFingerprint.trim(),
-                    keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix.trim() : undefined,
-                    model: typeof data.model === 'string' ? data.model : OPENAI_MODEL,
-                    outcome: 'success',
-                    status: response.status,
-                    failedAttempts: Array.isArray(data.attempts) ? data.attempts : [],
-                    ...usageContext,
-                },
-            }));
         }
 
         return {

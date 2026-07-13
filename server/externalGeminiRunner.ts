@@ -1,7 +1,7 @@
 import {
-  executeGeminiRequest,
-  type GeminiExecutionProgress,
-} from '../api/gemini';
+  aiExecutionEngine,
+  type AiExecutionProgress,
+} from './aiExecutionEngine';
 import {
   ExternalAnalysisRetryError,
   type ExternalAnalysisExecutionContext,
@@ -32,7 +32,7 @@ const compactJson = (value: Record<string, unknown>): ExternalAnalysisJson => (
 );
 
 const toVisibleGeminiProgress = (
-  progress: GeminiExecutionProgress,
+  progress: AiExecutionProgress,
 ): ExternalAnalysisJson => compactJson({
   stage: `gemini_${progress.stage || 'running'}`,
   gemini: compactJson({
@@ -56,7 +56,7 @@ const toVisibleGeminiProgress = (
 });
 
 const createProgressForwarder = (context: ExternalAnalysisExecutionContext) => {
-  let latest: GeminiExecutionProgress | null = null;
+  let latest: AiExecutionProgress | null = null;
   let running: Promise<void> | null = null;
 
   const drain = async (): Promise<void> => {
@@ -87,7 +87,7 @@ const createProgressForwarder = (context: ExternalAnalysisExecutionContext) => {
   };
 
   return {
-    push(progress: GeminiExecutionProgress) {
+    push(progress: AiExecutionProgress) {
       latest = progress;
       start();
     },
@@ -142,7 +142,7 @@ export const runExternalGeminiCall = async (options: {
 }): Promise<ExternalGeminiCallResult> => {
   const progressId = `external-${options.context.job.id}-${options.context.job.attempt_count}-${options.requestIndex}`;
   const progressForwarder = createProgressForwarder(options.context);
-  const result = await executeGeminiRequest({
+  const result = await aiExecutionEngine.executeGemini({
     prompt: options.prompt,
     provider: 'gemini',
     model: options.model,
@@ -152,6 +152,14 @@ export const runExternalGeminiCall = async (options: {
   }, {
     signal: options.context.signal,
     onProgress: progress => progressForwarder.push(progress),
+    telemetry: {
+      actorUserId: options.context.job.requested_by || undefined,
+      source: options.context.job.job_type,
+      articleId: options.context.job.article_id,
+      commandId: options.context.job.command_id || undefined,
+      commandLabel: options.context.job.command_label || undefined,
+      batchIndex: options.requestIndex,
+    },
   });
   await progressForwarder.flush();
 

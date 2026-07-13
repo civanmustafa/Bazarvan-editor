@@ -88,6 +88,23 @@ type AppActivityEventRow = {
   created_at: string;
 };
 
+type AiExecutionEventRow = {
+  id: string;
+  request_id: string;
+  user_id: string | null;
+  provider: string;
+  model: string;
+  key_suffix: string | null;
+  outcome: 'success' | 'failed' | 'cancelled';
+  status: number | null;
+  source: string;
+  article_id: string | null;
+  duration_ms: number;
+  attempts: any;
+  context: any;
+  created_at: string;
+};
+
 const ARTICLE_LIST_SELECT = [
   'id',
   'owner_id',
@@ -585,6 +602,36 @@ const toRemoteAppActivityEvent = (row: AppActivityEventRow): RemoteAppActivityEv
   createdAt: row.created_at,
 });
 
+const toRemoteAiExecutionEvent = (row: AiExecutionEventRow): RemoteAppActivityEvent => {
+  const context = row.context && typeof row.context === 'object' && !Array.isArray(row.context)
+    ? row.context
+    : {};
+  return {
+    id: `ai:${row.id}`,
+    userId: row.user_id,
+    sessionId: null,
+    eventType: 'api_key_used',
+    entityType: 'ai_execution',
+    entityId: row.request_id,
+    path: '',
+    metadata: {
+      service: row.provider === 'openai' ? 'openai' : 'gemini',
+      provider: row.provider,
+      model: row.model,
+      requestId: row.request_id,
+      keySuffix: row.key_suffix,
+      source: row.source,
+      articleId: row.article_id,
+      outcome: row.outcome,
+      status: row.status,
+      durationMs: row.duration_ms,
+      failedAttempts: Array.isArray(row.attempts) ? row.attempts : [],
+      ...context,
+    },
+    createdAt: row.created_at,
+  };
+};
+
 const buildStatsFromSnapshot = (snapshot: ArticleStorageSnapshot): ArticleStats => {
   const summary = snapshot.analysisSummary;
   return {
@@ -941,13 +988,29 @@ export const listRemoteAppActivityEvents = async (
   }
 
   const { data, error } = await query;
+  if (error && error.code !== '42P01') throw error;
+  const activityEvents = error
+    ? []
+    : ((data || []) as AppActivityEventRow[]).map(toRemoteAppActivityEvent);
 
-  if (error) {
-    if (error.code === '42P01') return [];
-    throw error;
-  }
+  if (options.sessionId) return activityEvents;
 
-  return ((data || []) as AppActivityEventRow[]).map(toRemoteAppActivityEvent);
+  let aiQuery = supabase
+    .from('ai_execution_events')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(options.limit || 150);
+  if (options.dateFrom) aiQuery = aiQuery.gte('created_at', options.dateFrom);
+  if (options.dateTo) aiQuery = aiQuery.lte('created_at', options.dateTo);
+  const { data: aiData, error: aiError } = await aiQuery;
+  if (aiError && aiError.code !== '42P01') throw aiError;
+  const aiEvents = aiError
+    ? []
+    : ((aiData || []) as AiExecutionEventRow[]).map(toRemoteAiExecutionEvent);
+
+  return [...activityEvents, ...aiEvents]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, options.limit || 150);
 };
 
 export const updateCurrentProfileLastSeen = async (userId: string): Promise<void> => {
