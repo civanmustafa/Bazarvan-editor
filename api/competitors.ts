@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  COMPETITOR_SEARCH_CANDIDATE_LIMIT,
   COMPETITOR_SEARCH_RESULT_LIMIT,
   MAX_ARTICLE_COMPETITORS,
   type CompetitorSearchMode,
@@ -11,6 +12,11 @@ import {
   searchCompetitorWeb,
   type CompetitorSearchResult,
 } from '../server/firecrawlCompetitorService';
+import {
+  analyzeAndSelectCompetitors,
+  extractCompetitorOwnDomains,
+  resolveCompetitorCountryCode,
+} from '../server/competitorSelectionEngine.ts';
 import { getCompetitorPreview } from '../server/competitorPreviewCache';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 import {
@@ -303,13 +309,51 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   if (action === 'search') {
     consumeApiRateLimit('competitors-search', principal.userId, 20);
     const query = toText(body.query);
-    const results = await searchCompetitorWeb({
+    const queryType = normalizeSearchMode(body.queryType);
+    const articleTitle = toText(body.articleTitle).slice(0, 500);
+    const primaryKeyword = toText(body.primaryKeyword).slice(0, 500);
+    const language = body.language === 'en' ? 'en' : 'ar';
+    const pageType = toText(body.pageType).slice(0, 100);
+    const searchIntent = toText(body.searchIntent).slice(0, 100);
+    const audienceScope = toText(body.audienceScope).slice(0, 100);
+    const targetCountry = toText(body.targetCountry).slice(0, 160);
+    const companyName = toText(body.companyName).slice(0, 500);
+    const ownDomains = extractCompetitorOwnDomains(companyName);
+    const candidates = await searchCompetitorWeb({
       query,
-      limit: COMPETITOR_SEARCH_RESULT_LIMIT,
+      limit: COMPETITOR_SEARCH_CANDIDATE_LIMIT,
+      country: resolveCompetitorCountryCode(targetCountry),
+      location: targetCountry,
+      excludeDomains: ownDomains,
+    });
+    const selection = analyzeAndSelectCompetitors({
+      context: {
+        query,
+        queryType,
+        articleTitle,
+        primaryKeyword,
+        language,
+        pageType,
+        searchIntent,
+        audienceScope,
+        targetCountry,
+        companyName,
+        ownDomains,
+      },
+      candidates,
+      maxResults: COMPETITOR_SEARCH_RESULT_LIMIT,
+      maxSelected: MAX_ARTICLE_COMPETITORS,
     });
     return {
       status: 200,
-      body: { ok: true, action, query, results },
+      body: {
+        ok: true,
+        action,
+        query,
+        queryType,
+        results: selection.results,
+        selection: selection.summary,
+      },
       headers: getCorsResponseHeaders(req),
     };
   }

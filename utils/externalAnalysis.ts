@@ -3,6 +3,7 @@ import type {
   AiContentPatchOperation,
   AiContentPatchStatus,
 } from '../types';
+import { deduplicateExternalAnalysisTasks } from './externalAnalysisTaskRegistry';
 import { getSupabaseClient } from './supabaseClient';
 
 export type ExternalAnalysisJobType = 'semantic_keywords_lsi' | 'engineering_command' | 'competitor_extraction';
@@ -30,6 +31,7 @@ export type ExternalAnalysisJobRow = {
   command_id: string | null;
   command_label: string | null;
   depends_on_job_id?: string | null;
+  readiness_signature: string | null;
   input_snapshot?: Record<string, unknown>;
   result: Record<string, unknown> | null;
   progress: Record<string, unknown>;
@@ -49,10 +51,13 @@ export type ExternalAnalysisArticleState = {
   article_id: string;
   semantic_ready: boolean;
   external_analysis_ready: boolean;
+  semantic_readiness_signature: string;
+  external_analysis_readiness_signature: string;
   semantic_missing_fields: string[];
   external_analysis_missing_fields: string[];
   engineering_command_mode: 'default' | 'custom';
   custom_engineering_command_ids: string[];
+  external_analysis_effective_command_ids: string[];
   engineering_command_selection_updated_at: string | null;
   updated_at: string;
 };
@@ -63,6 +68,7 @@ export type ExternalAnalysisDashboardSummary = {
   latestSemanticJob: ExternalAnalysisJobRow | null;
   activeEngineeringCount: number;
   completedEngineeringCount: number;
+  completedTaskCount: number;
   retryingEngineeringCount: number;
   latestEngineeringJob: ExternalAnalysisJobRow | null;
   latestUpdatedAt: string | null;
@@ -165,6 +171,7 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   command_id: row.command_id || null,
   command_label: row.command_label || null,
   depends_on_job_id: row.depends_on_job_id || null,
+  readiness_signature: row.readiness_signature || null,
   input_snapshot: isRecord(row.input_snapshot) ? row.input_snapshot : {},
   result: isRecord(row.result) ? row.result : null,
   progress: isRecord(row.progress) ? row.progress : {},
@@ -190,6 +197,7 @@ const SUMMARY_JOB_SELECT = [
   'sequence_number',
   'command_id',
   'command_label',
+  'readiness_signature',
   'progress',
   'last_error',
   'last_error_code',
@@ -274,7 +282,7 @@ export const listExternalAnalysisDashboardSummaries = async (
   const [stateResult, jobsResult] = await Promise.all([
     supabase
       .from('ai_external_analysis_article_state')
-      .select('article_id,semantic_ready,external_analysis_ready,semantic_missing_fields,external_analysis_missing_fields,engineering_command_mode,custom_engineering_command_ids,engineering_command_selection_updated_at,updated_at')
+      .select('article_id,semantic_ready,external_analysis_ready,semantic_readiness_signature,external_analysis_readiness_signature,semantic_missing_fields,external_analysis_missing_fields,engineering_command_mode,custom_engineering_command_ids,external_analysis_effective_command_ids,engineering_command_selection_updated_at,updated_at')
       .in('article_id', ids),
     supabase
       .from('ai_external_analysis_jobs')
@@ -292,17 +300,22 @@ export const listExternalAnalysisDashboardSummaries = async (
       article_id: String(row.article_id),
       semantic_ready: row.semantic_ready === true,
       external_analysis_ready: row.external_analysis_ready === true,
+      semantic_readiness_signature: String(row.semantic_readiness_signature || ''),
+      external_analysis_readiness_signature: String(row.external_analysis_readiness_signature || ''),
       semantic_missing_fields: toStringList(row.semantic_missing_fields),
       external_analysis_missing_fields: toStringList(row.external_analysis_missing_fields),
       engineering_command_mode: row.engineering_command_mode === 'custom' ? 'custom' : 'default',
       custom_engineering_command_ids: toStringList(row.custom_engineering_command_ids),
+      external_analysis_effective_command_ids: toStringList(row.external_analysis_effective_command_ids),
       engineering_command_selection_updated_at: row.engineering_command_selection_updated_at || null,
       updated_at: String(row.updated_at || ''),
     });
   });
 
   const jobsByArticle = new Map<string, ExternalAnalysisJobRow[]>();
-  (jobsResult.data || []).map(row => toJobRow(row as Record<string, any>)).forEach(job => {
+  deduplicateExternalAnalysisTasks(
+    (jobsResult.data || []).map(row => toJobRow(row as Record<string, any>)),
+  ).forEach(job => {
     const jobs = jobsByArticle.get(job.article_id) || [];
     jobs.push(job);
     jobsByArticle.set(job.article_id, jobs);
@@ -310,18 +323,38 @@ export const listExternalAnalysisDashboardSummaries = async (
 
   return Object.fromEntries(ids.map(articleId => {
     const jobs = jobsByArticle.get(articleId) || [];
-    const semanticJobs = jobs.filter(job => job.job_type === 'semantic_keywords_lsi');
-    const engineeringJobs = jobs.filter(job => job.job_type === 'engineering_command');
+    const state = stateByArticle.get(articleId) || null;
+    const effectiveCommandIds = new Set(state?.external_analysis_effective_command_ids || []);
+    const semanticJobs = jobs.filter(job => (
+      job.job_type === 'semantic_keywords_lsi'
+      && (
+        !state?.semantic_readiness_signature
+        || job.readiness_signature === state.semantic_readiness_signature
+      )
+    ));
+    const engineeringJobs = jobs.filter(job => (
+      job.job_type === 'engineering_command'
+      && (
+        !state?.external_analysis_readiness_signature
+        || job.readiness_signature === state.external_analysis_readiness_signature
+      )
+      && effectiveCommandIds.has(job.command_id || '')
+    ));
+    const latestSemanticJob = semanticJobs[0] || null;
     const activeEngineeringJobs = engineeringJobs.filter(job => EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status));
+    const completedEngineeringCount = engineeringJobs.filter(job => job.status === 'completed').length;
+    const completedTaskCount = completedEngineeringCount
+      + (latestSemanticJob?.status === 'completed' ? 1 : 0);
     const latestUpdatedAt = [stateByArticle.get(articleId)?.updated_at, ...jobs.map(job => job.updated_at)]
       .filter(Boolean)
       .sort((left, right) => new Date(right!).getTime() - new Date(left!).getTime())[0] || null;
     return [articleId, {
       articleId,
-      state: stateByArticle.get(articleId) || null,
-      latestSemanticJob: semanticJobs[0] || null,
+      state,
+      latestSemanticJob,
       activeEngineeringCount: activeEngineeringJobs.length,
-      completedEngineeringCount: engineeringJobs.filter(job => job.status === 'completed').length,
+      completedEngineeringCount,
+      completedTaskCount,
       retryingEngineeringCount: activeEngineeringJobs.filter(job => job.status === 'retry_scheduled').length,
       latestEngineeringJob: engineeringJobs[0] || null,
       latestUpdatedAt,
@@ -341,7 +374,9 @@ export const listExternalAnalysisJobs = async (
     .order('created_at', { ascending: false })
     .limit(Math.max(1, Math.min(limit, 250)));
   if (error) throw error;
-  return (data || []).map(row => toJobRow(row as Record<string, any>));
+  return deduplicateExternalAnalysisTasks(
+    (data || []).map(row => toJobRow(row as Record<string, any>)),
+  );
 };
 
 export const listExternalAnalysisReportJobs = async (options: {
@@ -434,7 +469,7 @@ export const listExternalAnalysisReportJobs = async (options: {
     runsByJobId.set(run.jobId, runs);
   });
 
-  return Array.from(jobsById.values())
+  return deduplicateExternalAnalysisTasks(Array.from(jobsById.values()))
     .map(job => {
       const runs = (runsByJobId.get(job.id) || [])
         .sort((left, right) => right.runNumber - left.runNumber);
@@ -520,6 +555,11 @@ export const cancelExternalAnalysisJob = (
 export const cancelAllExternalAnalysisJobs = (
   articleId: string,
 ) => requestExternalAnalysis(articleId, { action: 'cancel_all' });
+
+export const retryExternalAnalysisJob = (
+  articleId: string,
+  jobId: string,
+) => requestExternalAnalysis(articleId, { action: 'retry', jobId });
 
 export const getExternalMissingFieldLabels = (
   fields: string[],

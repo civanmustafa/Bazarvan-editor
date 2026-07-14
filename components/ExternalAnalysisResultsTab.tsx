@@ -21,11 +21,10 @@ import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUti
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import {
   cancelExternalAnalysisJob,
-  enqueueExternalEngineeringAnalysis,
-  enqueueExternalSemanticAnalysis,
   EXTERNAL_ANALYSIS_ACTIVE_STATUSES,
   getExternalJobAnalysisMarkdown,
   listExternalAnalysisJobs,
+  retryExternalAnalysisJob,
   toExternalAiPatches,
   type ExternalAnalysisJobRow,
   type ExternalAnalysisJobStatus,
@@ -264,18 +263,12 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     setJobActionId(job.id);
     setControlNotice(null);
     try {
-      if (job.job_type === 'semantic_keywords_lsi') {
-        await enqueueExternalSemanticAnalysis(articleId);
-      } else if (job.command_id) {
-        await enqueueExternalEngineeringAnalysis(articleId, [job.command_id]);
-      } else {
-        throw new Error(locale === 'ar' ? 'لا يوجد أمر محفوظ لإعادة تشغيل هذه المهمة.' : 'No saved command is available for this task.');
-      }
+      await retryExternalAnalysisJob(articleId, job.id);
       setControlNotice({
         tone: 'success',
         message: locale === 'ar'
-          ? 'تم إنشاء محاولة جديدة وستعمل في الخلفية.'
-          : 'A new attempt was queued and will run in the background.',
+          ? 'أُعيدت المهمة الفاشلة نفسها إلى الطابور، ولن تتكرر المهام الناجحة.'
+          : 'The same failed task was requeued; successful tasks will not be repeated.',
       });
       await refreshJobs(false);
     } catch (retryError) {
@@ -493,7 +486,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
             onClick={() => void handleRetryJob(job)}
             disabled={Boolean(jobActionId)}
             className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[9px] font-black text-[#8a6f1d] hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-[#f2d675]"
-            title={locale === 'ar' ? 'إنشاء محاولة جديدة' : 'Queue a new attempt'}
+            title={locale === 'ar' ? 'إعادة المهمة الفاشلة نفسها' : 'Retry the same failed task'}
           >
             {busy ? <LoaderCircle size={11} className="animate-spin" /> : <RotateCcw size={11} />}
             <span>{locale === 'ar' ? 'إعادة التشغيل' : 'Retry'}</span>

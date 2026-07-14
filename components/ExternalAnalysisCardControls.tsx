@@ -453,10 +453,10 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             {summary?.activeEngineeringCount} {locale === 'ar' ? 'قيد التنفيذ' : 'active'}
           </span>
         )}
-        {!engineeringActive && (summary?.completedEngineeringCount || 0) > 0 && (
+        {!semanticJobActive && !engineeringActive && (summary?.completedTaskCount || 0) > 0 && (
           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
             <CheckCircle2 size={11} />
-            {summary?.completedEngineeringCount} {locale === 'ar' ? 'نتيجة' : 'results'}
+            {summary?.completedTaskCount} {locale === 'ar' ? 'نتيجة' : 'results'}
           </span>
         )}
         {(summary?.retryingEngineeringCount || 0) > 0 && (

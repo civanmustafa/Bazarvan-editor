@@ -739,6 +739,7 @@ const RightSidebar: React.FC = () => {
     const articleTitle = useEditorSelector(context => context.title);
     const articleKeywords = useEditorSelector(context => context.keywords);
     const articleLanguage = useEditorSelector(context => context.articleLanguage);
+    const articleGoalContext = useEditorSelector(context => context.goalContext);
     const handleAiAnalyze = useAISelector(context => context.handleAiAnalyze);
     const handleChatGptAnalyze = useAISelector(context => context.handleChatGptAnalyze);
     const handleGeminiReadyCommandsAnalyze = useAISelector(context => context.handleGeminiReadyCommandsAnalyze);
@@ -1814,6 +1815,8 @@ ${readyCommandCompetitorBlocks}`;
                     articleTitle={articleTitle}
                     primaryKeyword={articleKeywords.primary}
                     articleLanguage={articleLanguage}
+                    goalContext={articleGoalContext}
+                    companyName={articleKeywords.company}
                     locale={t.locale === 'en' ? 'en' : 'ar'}
                     onCompetitorsChange={handleDiscoveredCompetitors}
                 />

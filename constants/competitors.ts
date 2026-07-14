@@ -1,5 +1,6 @@
 export const MAX_ARTICLE_COMPETITORS = 5;
-export const COMPETITOR_SEARCH_RESULT_LIMIT = 10;
+export const COMPETITOR_SEARCH_RESULT_LIMIT = 15;
+export const COMPETITOR_SEARCH_CANDIDATE_LIMIT = 20;
 export const COMPETITOR_CONTENT_MAX_CHARS = 120_000;
 
 export type CompetitorSearchMode = 'title' | 'primary_keyword';

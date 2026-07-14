@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 import {
   COMPETITOR_CONTENT_MAX_CHARS,
+  COMPETITOR_SEARCH_CANDIDATE_LIMIT,
   COMPETITOR_SEARCH_RESULT_LIMIT,
 } from '../constants/competitors.ts';
 
@@ -252,6 +253,9 @@ const readSearchItems = (payload: Record<string, unknown>): unknown[] => {
 export const searchCompetitorWeb = async (options: {
   query: string;
   limit?: number;
+  country?: string;
+  location?: string;
+  excludeDomains?: string[];
   signal?: AbortSignal;
 }): Promise<CompetitorSearchResult[]> => {
   const query = options.query.trim();
@@ -263,13 +267,27 @@ export const searchCompetitorWeb = async (options: {
       retryable: false,
     });
   }
-  const limit = Math.max(1, Math.min(options.limit ?? COMPETITOR_SEARCH_RESULT_LIMIT, COMPETITOR_SEARCH_RESULT_LIMIT));
+  const limit = Math.max(1, Math.min(
+    options.limit ?? COMPETITOR_SEARCH_RESULT_LIMIT,
+    COMPETITOR_SEARCH_CANDIDATE_LIMIT,
+  ));
+  const country = /^[a-z]{2}$/i.test(options.country?.trim() || '')
+    ? options.country!.trim().toUpperCase()
+    : '';
+  const location = options.location?.trim().slice(0, 160) || '';
+  const excludeDomains = Array.from(new Set((options.excludeDomains || [])
+    .map(domain => domain.trim().toLowerCase().replace(/^www\./, ''))
+    .filter(domain => /^(?:[a-z0-9-]+\.)+[a-z0-9-]+$/i.test(domain))))
+    .slice(0, 20);
   const payload = await firecrawlRequest('/v2/search', {
     query,
     limit,
     sources: ['web'],
     timeout: 45_000,
     ignoreInvalidURLs: true,
+    ...(country ? { country } : {}),
+    ...(location ? { location } : {}),
+    ...(excludeDomains.length > 0 ? { excludeDomains } : {}),
   }, { signal: options.signal, timeoutMs: 45_000 });
 
   const seenUrls = new Set<string>();

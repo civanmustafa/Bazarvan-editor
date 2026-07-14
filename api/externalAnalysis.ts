@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
@@ -50,6 +49,29 @@ const ACTIVE_JOB_STATUSES = [
   'retry_scheduled',
   'paused',
 ];
+
+const ENQUEUED_JOB_SELECT = [
+  'id',
+  'article_id',
+  'job_type',
+  'origin',
+  'status',
+  'batch_key',
+  'sequence_number',
+  'command_id',
+  'command_label',
+  'depends_on_job_id',
+  'readiness_signature',
+  'progress',
+  'last_error',
+  'last_error_code',
+  'attempt_count',
+  'retry_count',
+  'next_attempt_at',
+  'completed_at',
+  'created_at',
+  'updated_at',
+].join(',');
 
 class ExternalAnalysisApiError extends Error {
   status: number;
@@ -161,18 +183,6 @@ const readArticleAndState = async (
   };
 };
 
-const toArticleSnapshot = (article: ArticleRow) => ({
-  title: article.title,
-  plainText: article.plain_text,
-  keywords: isRecord(article.keywords) ? article.keywords : {},
-  goalContext: isRecord(article.goal_context) ? article.goal_context : {},
-  articleLanguage: article.article_language,
-  competitors: isRecord(article.metadata)
-    ? (article.metadata.attachments?.competitors || article.metadata.competitors || {})
-    : {},
-  articleUpdatedAt: article.updated_at,
-});
-
 const hasCompetitorInput = (metadata: unknown): boolean => {
   const source = isRecord(metadata) ? metadata : {};
   const competitors = isRecord(source.attachments?.competitors)
@@ -188,7 +198,6 @@ const enqueueSemanticJob = async (
   supabase: SupabaseAdmin,
   article: ArticleRow,
   state: AnalysisStateRow,
-  requestedBy: string,
 ): Promise<EnqueueSemanticJobResult> => {
   const keywords = isRecord(article.keywords) ? article.keywords : {};
   const needsSecondaries = toStringList(keywords.secondaries).length === 0;
@@ -206,70 +215,33 @@ const enqueueSemanticJob = async (
     });
   }
 
-  const { data: activeJob, error: activeError } = await supabase
-    .from('ai_external_analysis_jobs')
-    .select('id,article_id,job_type,status,progress,next_attempt_at,created_at,updated_at')
-    .eq('article_id', article.id)
-    .eq('job_type', 'semantic_keywords_lsi')
-    .in('status', ACTIVE_JOB_STATUSES)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (activeError) throw activeError;
-  if (activeJob) {
-    return { alreadyReady: false, job: activeJob as EnqueuedSemanticJob, alreadyActive: true };
+  const { data: jobId, error: enqueueError } = await supabase.rpc(
+    'enqueue_external_semantic_analysis_job',
+    { p_article_id: article.id },
+  );
+  if (enqueueError) throw enqueueError;
+  const normalizedJobId = toTrimmedString(Array.isArray(jobId) ? jobId[0] : jobId);
+  if (!normalizedJobId) {
+    throw new ExternalAnalysisApiError({
+      message: 'The semantic task could not be created or reused.',
+      status: 409,
+      code: 'semantic_task_unavailable',
+    });
   }
 
-  const jobId = randomUUID();
-  const now = new Date().toISOString();
-  const { data: job, error } = await supabase
+  const { data: job, error: jobError } = await supabase
     .from('ai_external_analysis_jobs')
-    .insert({
-      id: jobId,
-      article_id: article.id,
-      requested_by: requestedBy,
-      job_type: 'semantic_keywords_lsi',
-      origin: 'manual',
-      status: 'queued',
-      idempotency_key: `semantic_keywords_lsi:${state.semantic_readiness_signature}`,
-      batch_key: `manual-semantic:${article.id}:${jobId}`,
-      sequence_number: 0,
-      readiness_signature: state.semantic_readiness_signature,
-      input_snapshot: {
-        ...toArticleSnapshot(article),
-        readinessSignature: state.semantic_readiness_signature,
-        needsSecondaries,
-        needsLsi,
-        source: 'dashboard',
-      },
-      progress: {
-        stage: 'queued',
-        source: 'dashboard',
-        updatedAt: now,
-      },
-      next_attempt_at: now,
-    })
-    .select('id,article_id,job_type,status,progress,next_attempt_at,created_at,updated_at')
+    .select(ENQUEUED_JOB_SELECT)
+    .eq('id', normalizedJobId)
     .single();
-  if (error?.code === '23505') {
-    const { data: conflictingJob, error: conflictReadError } = await supabase
-      .from('ai_external_analysis_jobs')
-      .select('id,article_id,job_type,status,progress,next_attempt_at,created_at,updated_at')
-      .eq('article_id', article.id)
-      .eq('job_type', 'semantic_keywords_lsi')
-      .in('status', ACTIVE_JOB_STATUSES)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (conflictReadError) throw conflictReadError;
-    if (conflictingJob) {
-      return { alreadyReady: false, job: conflictingJob as EnqueuedSemanticJob, alreadyActive: true };
-    }
-    throw error;
-  }
-  if (error) throw error;
-  if (!job) throw new Error('Semantic analysis job insert returned no row.');
-  return { alreadyReady: false, job: job as EnqueuedSemanticJob, alreadyActive: false };
+  if (jobError) throw jobError;
+  if (!job) throw new Error('Semantic analysis queue returned no job.');
+  const normalizedJob = job as unknown as EnqueuedSemanticJob & { status: string };
+  return {
+    alreadyReady: false,
+    job: normalizedJob,
+    alreadyActive: ACTIVE_JOB_STATUSES.includes(normalizedJob.status),
+  };
 };
 
 const enqueueEngineeringJobs = async (
@@ -311,26 +283,6 @@ const enqueueEngineeringJobs = async (
     });
   }
 
-  const { data: activeJobs, error: activeError } = await supabase
-    .from('ai_external_analysis_jobs')
-    .select('id,command_id,status')
-    .eq('article_id', article.id)
-    .eq('job_type', 'engineering_command')
-    .eq('origin', 'manual')
-    .in('command_id', normalizedIds)
-    .in('status', ACTIVE_JOB_STATUSES);
-  if (activeError) throw activeError;
-  if ((activeJobs || []).length > 0) {
-    throw new ExternalAnalysisApiError({
-      message: 'One or more selected commands already have an active task.',
-      status: 409,
-      code: 'commands_already_active',
-      details: {
-        commandIds: uniqueStrings((activeJobs || []).map(job => toTrimmedString(job.command_id))),
-      },
-    });
-  }
-
   const { error: preferenceError } = await supabase.rpc('set_external_analysis_custom_commands', {
     p_article_id: article.id,
     p_requested_by: requestedBy,
@@ -340,85 +292,67 @@ const enqueueEngineeringJobs = async (
 
   const needsSemanticPrerequisite = toStringList(keywords.secondaries).length === 0
     || toStringList(keywords.lsi).length === 0;
-  const semanticResult = needsSemanticPrerequisite
-    ? await enqueueSemanticJob(supabase, article, state, requestedBy)
-    : null;
-  const semanticDependencyId = semanticResult?.job?.id || null;
-  if (needsSemanticPrerequisite && !semanticDependencyId && !semanticResult?.alreadyReady) {
+  const { data: enqueuedIds, error: enqueueError } = await supabase.rpc(
+    'enqueue_external_engineering_jobs',
+    { p_article_id: article.id },
+  );
+  if (enqueueError) throw enqueueError;
+  const jobIds = uniqueStrings(Array.isArray(enqueuedIds) ? enqueuedIds.map(String) : []);
+  if (jobIds.length === 0) {
     throw new ExternalAnalysisApiError({
-      message: 'The semantic prerequisite could not be queued.',
+      message: 'The selected engineering tasks could not be created or reused.',
       status: 409,
-      code: 'semantic_prerequisite_unavailable',
-      details: { missingFields: ['alternative_keywords', 'lsi_keywords'] },
-    });
-  }
-
-  const batchId = randomUUID();
-  const batchKey = `manual-engineering:${article.id}:${batchId}`;
-  const now = new Date().toISOString();
-  const jobIds = commands.map(() => randomUUID());
-  const snapshot = toArticleSnapshot(article);
-  const rows = commands.map((command, index) => ({
-    id: jobIds[index],
-    article_id: article.id,
-    requested_by: requestedBy,
-    job_type: 'engineering_command',
-    origin: 'manual',
-    status: 'queued',
-    idempotency_key: `manual-engineering:${batchId}:${command!.id}:${state.external_analysis_readiness_signature}`,
-    batch_key: batchKey,
-    sequence_number: index + 1,
-    command_id: command!.id,
-    command_label: command!.label,
-    depends_on_job_id: index > 0 ? jobIds[index - 1] : semanticDependencyId,
-    readiness_signature: state.external_analysis_readiness_signature,
-    input_snapshot: {
-      ...snapshot,
-      readinessSignature: state.external_analysis_readiness_signature,
-      commandSequence: index + 1,
-      commandTotal: commands.length,
-      commandId: command!.id,
-      source: 'dashboard',
-    },
-    progress: {
-      stage: 'queued',
-      source: 'dashboard',
-      commandSequence: index + 1,
-      commandTotal: commands.length,
-      semanticPrerequisiteJobId: semanticDependencyId,
-      updatedAt: now,
-    },
-    next_attempt_at: now,
-  }));
-
-  const { data: jobs, error } = await supabase
-    .from('ai_external_analysis_jobs')
-    .insert(rows)
-    .select('id,article_id,job_type,origin,status,batch_key,sequence_number,command_id,command_label,depends_on_job_id,progress,next_attempt_at,created_at,updated_at');
-  if (error?.code === '23505') {
-    throw new ExternalAnalysisApiError({
-      message: 'One or more selected commands already have an active task.',
-      status: 409,
-      code: 'commands_already_active',
+      code: 'engineering_tasks_unavailable',
       details: { commandIds: normalizedIds },
     });
   }
-  if (error) throw error;
-  const { data: batch, error: batchError } = await supabase.rpc(
-    'apply_external_analysis_execution_mode_to_batch',
-    { p_batch_key: batchKey },
-  );
-  if (batchError && !['42883', 'PGRST202'].includes(String(batchError.code || ''))) {
-    throw batchError;
+
+  const { data: queuedJobs, error: jobsError } = await supabase
+    .from('ai_external_analysis_jobs')
+    .select(ENQUEUED_JOB_SELECT)
+    .in('id', jobIds)
+    .order('sequence_number', { ascending: true });
+  if (jobsError) throw jobsError;
+  const jobs = ((queuedJobs || []) as unknown as Array<Record<string, any>>)
+    .filter(job => job.last_error_code !== 'duplicate_task_suppressed');
+  let semanticDependencyId = '';
+  let semanticDependencyStatus = '';
+  if (needsSemanticPrerequisite) {
+    const { data: semanticJobs, error: semanticError } = await supabase
+      .from('ai_external_analysis_jobs')
+      .select('id,status,last_error_code,created_at')
+      .eq('article_id', article.id)
+      .eq('job_type', 'semantic_keywords_lsi')
+      .eq('readiness_signature', state.semantic_readiness_signature)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (semanticError) throw semanticError;
+    const semanticRows = (semanticJobs || []) as unknown as Array<{
+      id: string;
+      status: string;
+      last_error_code: string | null;
+    }>;
+    const semanticDependency = semanticRows
+      .find(job => job.last_error_code !== 'duplicate_task_suppressed');
+    semanticDependencyId = toTrimmedString(semanticDependency?.id);
+    semanticDependencyStatus = toTrimmedString(semanticDependency?.status);
   }
+  const activeBatchKey = toTrimmedString(
+    jobs.find(job => ACTIVE_JOB_STATUSES.includes(String(job.status)))?.batch_key
+      || jobs[0]?.batch_key,
+  );
   return {
-    batchId,
-    batch: Array.isArray(batch) ? batch[0] || null : batch || null,
-    jobs: jobs || [],
+    batchId: activeBatchKey,
+    batch: null as Record<string, unknown> | null,
+    jobs,
     commandSelectionMode: 'custom',
     customCommandIds: normalizedIds,
-    semanticPrerequisiteQueued: Boolean(semanticDependencyId),
-    semanticPrerequisiteJobId: semanticDependencyId,
+    semanticPrerequisiteQueued: Boolean(
+      semanticDependencyId && ACTIVE_JOB_STATUSES.includes(semanticDependencyStatus),
+    ),
+    semanticPrerequisiteJobId: semanticDependencyId || null,
+    completedCount: jobs.filter(job => job.status === 'completed').length,
+    activeCount: jobs.filter(job => ACTIVE_JOB_STATUSES.includes(String(job.status))).length,
   };
 };
 
@@ -518,6 +452,54 @@ const cancelAllExternalAnalysisJobs = async (
   };
 };
 
+const retryExternalAnalysisJob = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+  requestedBy: string,
+  jobId: string,
+) => {
+  if (!jobId) {
+    throw new ExternalAnalysisApiError({
+      message: 'jobId is required for retry.',
+      code: 'job_id_required',
+    });
+  }
+
+  const { data: existingJob, error: readError } = await supabase
+    .from('ai_external_analysis_jobs')
+    .select('id,article_id,status,last_error_code')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!existingJob || existingJob.article_id !== articleId) {
+    throw new ExternalAnalysisApiError({
+      message: 'External analysis job was not found for this article.',
+      status: 404,
+      code: 'external_analysis_job_not_found',
+    });
+  }
+
+  const { data, error } = await supabase.rpc('retry_external_analysis_job', {
+    p_job_id: jobId,
+    p_requested_by: requestedBy,
+  });
+  if (error) throw error;
+  const job = Array.isArray(data) ? data[0] : data;
+  if (!job) {
+    throw new ExternalAnalysisApiError({
+      message: 'The external analysis task could not be retried.',
+      status: 409,
+      code: 'external_analysis_retry_unavailable',
+    });
+  }
+  return {
+    job,
+    reusedJobId: String(job.id || jobId),
+    alreadyCompleted: job.status === 'completed',
+    alreadyActive: ACTIVE_JOB_STATUSES.includes(String(job.status)),
+  };
+};
+
 const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   if (req.method === 'OPTIONS') {
     return {
@@ -565,7 +547,7 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   const action = toTrimmedString(body.action);
 
   if (action === 'semantic') {
-    const result = await enqueueSemanticJob(supabase, article, state, profile.id);
+    const result = await enqueueSemanticJob(supabase, article, state);
     return { status: result.job && !result.alreadyActive ? 201 : 200, body: { ok: true, action, ...result } };
   }
   if (action === 'engineering') {
@@ -599,9 +581,18 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
     const result = await cancelAllExternalAnalysisJobs(supabase, article.id, profile.id);
     return { status: 200, body: { ok: true, action, ...result } };
   }
+  if (action === 'retry') {
+    const result = await retryExternalAnalysisJob(
+      supabase,
+      article.id,
+      profile.id,
+      toTrimmedString(body.jobId),
+    );
+    return { status: 200, body: { ok: true, action, ...result } };
+  }
 
   throw new ExternalAnalysisApiError({
-    message: 'action must be semantic, engineering, use_default_commands, cancel, or cancel_all.',
+    message: 'action must be semantic, engineering, use_default_commands, cancel, cancel_all, or retry.',
     code: 'invalid_action',
   });
 };

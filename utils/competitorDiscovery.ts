@@ -39,6 +39,42 @@ export type CompetitorSearchResult = {
   title: string;
   description: string;
   position: number;
+  selectionRank: number;
+  selectionScore: number;
+  confidence: number;
+  autoSelected: boolean;
+  eligible: boolean;
+  inferredIntent: 'informational' | 'commercial' | 'transactional' | 'navigational' | 'local' | 'support' | 'unknown';
+  inferredPageType: 'article' | 'guide' | 'comparison' | 'service' | 'product' | 'category' | 'landing' | 'news' | 'forum' | 'video' | 'homepage' | 'unknown';
+  reasonCodes: string[];
+  warningCodes: string[];
+  signals: {
+    intentMatch: number;
+    relevance: number;
+    searchStrength: number;
+    pageTypeMatch: number;
+    languageMatch: number;
+    metadataQuality: number;
+    locationMatch: number;
+  };
+};
+
+export type CompetitorSelectionSummary = {
+  strategy: 'automatic_review';
+  engineVersion: string;
+  targetIntent: CompetitorSearchResult['inferredIntent'];
+  targetPageType: CompetitorSearchResult['inferredPageType'];
+  confidence: number;
+  candidateCount: number;
+  reviewedCount: number;
+  filteredCount: number;
+  autoSelectedCount: number;
+  autoSelectedUrls: string[];
+};
+
+export type CompetitorSearchResponse = {
+  results: CompetitorSearchResult[];
+  selection: CompetitorSelectionSummary;
 };
 
 export type CompetitorPreview = {
@@ -217,13 +253,21 @@ export const searchArticleCompetitors = async (options: {
   query: string;
   queryType: CompetitorSearchMode;
   language: 'ar' | 'en';
-}): Promise<CompetitorSearchResult[]> => {
+  articleTitle: string;
+  primaryKeyword: string;
+  pageType: string;
+  searchIntent: string;
+  audienceScope: string;
+  targetCountry: string;
+  companyName: string;
+}): Promise<CompetitorSearchResponse> => {
   const payload = await requestCompetitors({ action: 'search', ...options });
-  return Array.isArray(payload.results)
+  const results = Array.isArray(payload.results)
     ? payload.results.flatMap((value: unknown) => {
         if (!isRecord(value)) return [];
         const canonicalUrl = toText(value.canonicalUrl);
         if (!canonicalUrl) return [];
+        const signals = isRecord(value.signals) ? value.signals : {};
         return [{
           url: toText(value.url) || canonicalUrl,
           canonicalUrl,
@@ -231,9 +275,43 @@ export const searchArticleCompetitors = async (options: {
           title: toText(value.title),
           description: toText(value.description),
           position: Math.max(1, Number(value.position) || 1),
+          selectionRank: Math.max(1, Number(value.selectionRank) || 1),
+          selectionScore: Math.max(0, Math.min(100, Number(value.selectionScore) || 0)),
+          confidence: Math.max(0, Math.min(100, Number(value.confidence) || 0)),
+          autoSelected: value.autoSelected === true,
+          eligible: value.eligible === true,
+          inferredIntent: toText(value.inferredIntent) as CompetitorSearchResult['inferredIntent'] || 'unknown',
+          inferredPageType: toText(value.inferredPageType) as CompetitorSearchResult['inferredPageType'] || 'unknown',
+          reasonCodes: toStringList(value.reasonCodes),
+          warningCodes: toStringList(value.warningCodes),
+          signals: {
+            intentMatch: Math.max(0, Math.min(100, Number(signals.intentMatch) || 0)),
+            relevance: Math.max(0, Math.min(100, Number(signals.relevance) || 0)),
+            searchStrength: Math.max(0, Math.min(100, Number(signals.searchStrength) || 0)),
+            pageTypeMatch: Math.max(0, Math.min(100, Number(signals.pageTypeMatch) || 0)),
+            languageMatch: Math.max(0, Math.min(100, Number(signals.languageMatch) || 0)),
+            metadataQuality: Math.max(0, Math.min(100, Number(signals.metadataQuality) || 0)),
+            locationMatch: Math.max(0, Math.min(100, Number(signals.locationMatch) || 0)),
+          },
         }];
       })
     : [];
+  const selection = isRecord(payload.selection) ? payload.selection : {};
+  return {
+    results,
+    selection: {
+      strategy: 'automatic_review',
+      engineVersion: toText(selection.engineVersion),
+      targetIntent: (toText(selection.targetIntent) || 'unknown') as CompetitorSelectionSummary['targetIntent'],
+      targetPageType: (toText(selection.targetPageType) || 'unknown') as CompetitorSelectionSummary['targetPageType'],
+      confidence: Math.max(0, Math.min(100, Number(selection.confidence) || 0)),
+      candidateCount: Math.max(0, Number(selection.candidateCount) || 0),
+      reviewedCount: Math.max(0, Number(selection.reviewedCount) || results.length),
+      filteredCount: Math.max(0, Number(selection.filteredCount) || 0),
+      autoSelectedCount: Math.max(0, Number(selection.autoSelectedCount) || 0),
+      autoSelectedUrls: toStringList(selection.autoSelectedUrls),
+    },
+  };
 };
 
 export const loadArticleCompetitorPreview = async (

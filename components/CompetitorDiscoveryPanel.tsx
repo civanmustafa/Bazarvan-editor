@@ -5,11 +5,14 @@ import {
   CheckCircle2,
   Eye,
   LoaderCircle,
+  RotateCcw,
   Search,
+  Sparkles,
   Square,
   Trash2,
   XCircle,
 } from 'lucide-react';
+import type { GoalContext } from '../types';
 import type { CompetitorPreviewTarget } from './CompetitorPreviewModal';
 import {
   MAX_ARTICLE_COMPETITORS,
@@ -27,6 +30,7 @@ import {
   type CompetitorDiscoveryState,
   type CompetitorPreview,
   type CompetitorSearchResult,
+  type CompetitorSelectionSummary,
 } from '../utils/competitorDiscovery';
 
 const CompetitorPreviewModal = React.lazy(() => import('./CompetitorPreviewModal'));
@@ -36,6 +40,8 @@ type CompetitorDiscoveryPanelProps = {
   articleTitle: string;
   primaryKeyword: string;
   articleLanguage: 'ar' | 'en';
+  goalContext: GoalContext;
+  companyName: string;
   locale: 'ar' | 'en';
   onCompetitorsChange: (rows: CompetitorDiscoveryRow[]) => void;
 };
@@ -48,6 +54,51 @@ const EMPTY_STATE: CompetitorDiscoveryState = {
 };
 
 const ACTIVE_JOB_STATUSES = new Set(['waiting_for_prerequisites', 'queued', 'running', 'retry_scheduled', 'paused']);
+
+const intentLabels: Record<CompetitorSearchResult['inferredIntent'], { ar: string; en: string }> = {
+  informational: { ar: 'معلوماتية', en: 'Informational' },
+  commercial: { ar: 'تجارية', en: 'Commercial' },
+  transactional: { ar: 'شرائية', en: 'Transactional' },
+  navigational: { ar: 'وصول مباشر', en: 'Navigational' },
+  local: { ar: 'محلية', en: 'Local' },
+  support: { ar: 'دعم وحل مشكلة', en: 'Support' },
+  unknown: { ar: 'غير محددة', en: 'Unknown' },
+};
+
+const pageTypeLabels: Record<CompetitorSearchResult['inferredPageType'], { ar: string; en: string }> = {
+  article: { ar: 'مقالة', en: 'Article' },
+  guide: { ar: 'دليل', en: 'Guide' },
+  comparison: { ar: 'مقارنة', en: 'Comparison' },
+  service: { ar: 'خدمة', en: 'Service' },
+  product: { ar: 'منتج', en: 'Product' },
+  category: { ar: 'تصنيف', en: 'Category' },
+  landing: { ar: 'صفحة هبوط', en: 'Landing page' },
+  news: { ar: 'خبر', en: 'News' },
+  forum: { ar: 'نقاش', en: 'Forum' },
+  video: { ar: 'فيديو', en: 'Video' },
+  homepage: { ar: 'صفحة رئيسية', en: 'Homepage' },
+  unknown: { ar: 'غير محدد', en: 'Unknown' },
+};
+
+const selectionReasonLabels: Record<string, { ar: string; en: string }> = {
+  'auto-selected': { ar: 'مختار تلقائيًا', en: 'Auto-selected' },
+  'direct-intent-match': { ar: 'مطابق لنية البحث', en: 'Intent match' },
+  'page-type-match': { ar: 'نوع صفحة مناسب', en: 'Page type match' },
+  'high-query-relevance': { ar: 'صلة قوية بالموضوع', en: 'Highly relevant' },
+  'strong-search-position': { ar: 'ترتيب بحث قوي', en: 'Strong search position' },
+  'target-location-match': { ar: 'مطابق للسوق المستهدف', en: 'Target market match' },
+  'complete-search-metadata': { ar: 'بيانات نتيجة مكتملة', en: 'Complete metadata' },
+  'diverse-source': { ar: 'مصدر متنوع', en: 'Diverse source' },
+};
+
+const selectionWarningLabels: Record<string, { ar: string; en: string }> = {
+  'intent-mismatch': { ar: 'نية مختلفة جزئيًا', en: 'Intent differs' },
+  'page-type-mismatch': { ar: 'نوع صفحة مختلف', en: 'Different page type' },
+  'language-mismatch': { ar: 'لغة مختلفة', en: 'Different language' },
+  'low-query-relevance': { ar: 'صلة محدودة', en: 'Limited relevance' },
+  'homepage-result': { ar: 'صفحة رئيسية', en: 'Homepage result' },
+  'forum-or-video-result': { ar: 'ليس صفحة منافس مباشرة', en: 'Not a direct page competitor' },
+};
 
 type PreviewLocation = {
   source: 'search' | 'saved';
@@ -122,6 +173,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   articleTitle,
   primaryKeyword,
   articleLanguage,
+  goalContext,
+  companyName,
   locale,
   onCompetitorsChange,
 }) => {
@@ -129,6 +182,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const [mode, setMode] = useState<CompetitorSearchMode>('title');
   const [query, setQuery] = useState(articleTitle);
   const [searchResults, setSearchResults] = useState<CompetitorSearchResult[]>([]);
+  const [selectionSummary, setSelectionSummary] = useState<CompetitorSelectionSummary | null>(null);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(() => new Set());
   const [state, setState] = useState<CompetitorDiscoveryState>(EMPTY_STATE);
   const [isLoadingState, setIsLoadingState] = useState(false);
@@ -196,6 +250,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
 
   useEffect(() => {
     setSearchResults([]);
+    setSelectionSummary(null);
     setSelectedUrls(new Set<string>());
     setNotice('');
     setPreviewLocation(null);
@@ -226,16 +281,29 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     setNotice('');
     setPreviewLocation(null);
     try {
-      const rows = await searchArticleCompetitors({
+      const response = await searchArticleCompetitors({
         articleId,
         query: query.trim(),
         queryType: mode,
         language: articleLanguage,
+        articleTitle,
+        primaryKeyword,
+        pageType: goalContext.pageType,
+        searchIntent: goalContext.searchIntent,
+        audienceScope: goalContext.audienceScope,
+        targetCountry: goalContext.targetCountry,
+        companyName,
       });
+      const rows = response.results;
       setSearchResults(rows);
-      setSelectedUrls(new Set());
+      setSelectionSummary(response.selection);
+      setSelectedUrls(new Set(rows.filter(row => row.autoSelected).map(row => row.canonicalUrl)));
       if (rows.length === 0) {
         setNotice(isArabic ? 'لم يعثر محرك البحث على نتائج مناسبة.' : 'No suitable search results were found.');
+      } else if (response.selection.autoSelectedCount > 0) {
+        setNotice(isArabic
+          ? `تم تحديد أفضل ${response.selection.autoSelectedCount} نتائج تلقائيًا. راجعها وعدّل الاختيار قبل السحب.`
+          : `The best ${response.selection.autoSelectedCount} results were selected automatically. Review them before importing.`);
       }
     } catch (searchError) {
       setError(requestErrorMessage(searchError, isArabic, 'Competitor search failed.'));
@@ -299,6 +367,15 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     } finally {
       setPreviewLoadingUrl(current => current === previewUrl ? '' : current);
     }
+  };
+
+  const restoreAutomaticSelection = () => {
+    setError('');
+    setSelectedUrls(new Set(
+      searchResults
+        .filter(result => result.autoSelected)
+        .map(result => result.canonicalUrl),
+    ));
   };
 
   const handleStart = async () => {
@@ -424,6 +501,30 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
 
       {searchResults.length > 0 && (
         <div className="space-y-2">
+          {selectionSummary && (
+            <div className="border-y border-[#d4af37]/35 bg-[#d4af37]/5 px-2 py-2 dark:bg-[#d4af37]/10">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                  <Sparkles size={13} className="shrink-0" />
+                  <span>{isArabic ? 'اختيار تلقائي مع مراجعتك' : 'Automatic selection with review'}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={restoreAutomaticSelection}
+                  title={isArabic ? 'استعادة أفضل النتائج المحددة تلقائيًا' : 'Restore automatic selection'}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-[#8a6f1d] hover:bg-[#d4af37]/15 dark:text-[#f2d675]"
+                >
+                  <RotateCcw size={13} />
+                </button>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold text-gray-600 dark:text-gray-300">
+                <span>{isArabic ? 'النية' : 'Intent'}: {intentLabels[selectionSummary.targetIntent]?.[locale] || intentLabels.unknown[locale]}</span>
+                <span>{isArabic ? 'نوع الصفحة' : 'Page type'}: {pageTypeLabels[selectionSummary.targetPageType]?.[locale] || pageTypeLabels.unknown[locale]}</span>
+                <span>{isArabic ? 'الثقة' : 'Confidence'}: {selectionSummary.confidence}%</span>
+                <span>{isArabic ? 'فُحص' : 'Reviewed'}: {selectionSummary.reviewedCount}/{selectionSummary.candidateCount}</span>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 dark:text-gray-400">
             <span>{isArabic ? 'نتائج البحث' : 'Search results'}: {searchResults.length}</span>
             <span>{isArabic ? 'المحدد' : 'Selected'}: {selectedResults.length}/{MAX_ARTICLE_COMPETITORS}</span>
@@ -431,6 +532,10 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           <div className="max-h-80 space-y-1.5 overflow-y-auto pe-1 custom-scrollbar">
             {searchResults.map((result, index) => {
               const selected = selectedUrls.has(result.canonicalUrl);
+              const visibleReasons = result.reasonCodes
+                .filter(code => code !== 'auto-selected' && code !== 'diverse-source')
+                .slice(0, 2);
+              const visibleWarning = result.warningCodes[0] || '';
               return (
                 <div
                   key={result.canonicalUrl}
@@ -452,9 +557,40 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                       {selected && <Check size={11} />}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="line-clamp-2 block text-xs font-black text-gray-800 dark:text-gray-100">{result.title || result.domain}</span>
-                      <span className="mt-0.5 block truncate text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]" dir="ltr">{result.domain}</span>
+                      <span className="flex items-start gap-2">
+                        <span className="line-clamp-2 min-w-0 flex-1 text-xs font-black text-gray-800 dark:text-gray-100">{result.title || result.domain}</span>
+                        <span
+                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black ${result.selectionScore >= 75
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                            : result.selectionScore >= 55
+                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                          }`}
+                          title={`${isArabic ? 'درجة الاختيار' : 'Selection score'}: ${result.selectionScore}/100`}
+                        >
+                          {result.selectionScore}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-bold">
+                        <span className="max-w-full truncate text-[#8a6f1d] dark:text-[#f2d675]" dir="ltr">{result.domain}</span>
+                        <span className="text-gray-500 dark:text-gray-400">{intentLabels[result.inferredIntent]?.[locale] || intentLabels.unknown[locale]}</span>
+                        <span className="text-gray-500 dark:text-gray-400">{pageTypeLabels[result.inferredPageType]?.[locale] || pageTypeLabels.unknown[locale]}</span>
+                      </span>
                       {result.description && <span className="mt-1 line-clamp-2 block text-[10px] leading-4 text-gray-500 dark:text-gray-400">{result.description}</span>}
+                      {(visibleReasons.length > 0 || visibleWarning) && (
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {visibleReasons.map(code => (
+                            <span key={code} className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                              {selectionReasonLabels[code]?.[locale] || code}
+                            </span>
+                          ))}
+                          {visibleWarning && (
+                            <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                              {selectionWarningLabels[visibleWarning]?.[locale] || visibleWarning}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </span>
                   </button>
                   <button

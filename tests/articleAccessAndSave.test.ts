@@ -83,6 +83,7 @@ test('dashboard, access/save, and performance migrations have balanced SQL delim
     readWorkspaceFile('supabase/migrations/20260713050000_phase_7_dashboard_performance.sql'),
     readWorkspaceFile('supabase/migrations/20260714000000_competitor_discovery.sql'),
     readWorkspaceFile('supabase/migrations/20260714010000_competitor_preview_cache.sql'),
+    readWorkspaceFile('supabase/migrations/20260714020000_external_analysis_exactly_once.sql'),
   ]);
 
   migrations.forEach((migration) => {
