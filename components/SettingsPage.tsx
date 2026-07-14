@@ -44,6 +44,10 @@ import {
   getDefaultSystemSettings,
   normalizeSystemSettingsMap,
 } from '../constants/settingsRegistry';
+import {
+  GEMINI_PAID_MODEL_OPTIONS,
+  normalizeGeminiPaidModelId,
+} from '../constants/modelRegistry';
 
 type SettingsPageProps = {
   section: string | null;
@@ -482,7 +486,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             />
           </FieldLabel>
           <FieldLabel label="موديل Gemini Pro الافتراضي">
-            <TextInput value={String(settings.ai.defaultGeminiPaidModel || '')} onChange={value => updateSetting('ai', 'defaultGeminiPaidModel', value)} dir="ltr" />
+            <SelectInput
+              value={normalizeGeminiPaidModelId(settings.ai.defaultGeminiPaidModel)}
+              onChange={value => updateSetting('ai', 'defaultGeminiPaidModel', value)}
+              options={GEMINI_PAID_MODEL_OPTIONS}
+            />
           </FieldLabel>
           <FieldLabel label="موديل OpenAI الافتراضي">
             <TextInput value={String(settings.ai.defaultOpenAiModel || '')} onChange={value => updateSetting('ai', 'defaultOpenAiModel', value)} dir="ltr" />

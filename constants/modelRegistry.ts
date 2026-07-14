@@ -38,12 +38,27 @@ export const MODEL_REGISTRY = Object.freeze({
   }),
 });
 
+const GEMINI_SELECTABLE_MODELS = [
+  ...MODEL_REGISTRY.gemini.free,
+  ...MODEL_REGISTRY.gemini.paid.filter(model => (
+    !MODEL_REGISTRY.gemini.free.some(existing => existing.id === model.id)
+  )),
+] as const;
+
 export const GEMINI_FREE_MODEL_OPTIONS = MODEL_REGISTRY.gemini.free.map(model => ({
   value: model.id,
   label: model.label,
 }));
 
 export const GEMINI_FREE_MODEL_VALUES = MODEL_REGISTRY.gemini.free.map(model => model.id);
+
+// Paid keys can use every Gemini model registered by the editor, including free-tier models.
+export const GEMINI_PAID_MODEL_OPTIONS = GEMINI_SELECTABLE_MODELS.map(model => ({
+  value: model.id,
+  label: model.label,
+}));
+
+export const GEMINI_PAID_MODEL_VALUES = GEMINI_SELECTABLE_MODELS.map(model => model.id);
 
 // Registry order is the shared fallback order used by the browser, API, and worker.
 export const GEMINI_ANALYSIS_MODEL = MODEL_REGISTRY.gemini.free[0].id;
@@ -75,4 +90,15 @@ export const normalizeGeminiFreeModelId = (
   const requested = typeof value === 'string' ? value.trim() : '';
   if (requested && allowed.includes(requested)) return requested;
   return allowed[0] || GEMINI_ANALYSIS_MODEL;
+};
+
+export const normalizeGeminiPaidModelId = (
+  value: unknown,
+  allowedModels: readonly unknown[] = GEMINI_PAID_MODEL_VALUES,
+): string => {
+  const allowed = uniqueModelIds(allowedModels);
+  const requested = typeof value === 'string' ? value.trim() : '';
+  if (requested && allowed.includes(requested)) return requested;
+  if (allowed.includes(GEMINI_PAID_ANALYSIS_MODEL)) return GEMINI_PAID_ANALYSIS_MODEL;
+  return allowed[0] || GEMINI_PAID_ANALYSIS_MODEL;
 };

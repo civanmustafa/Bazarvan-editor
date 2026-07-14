@@ -6,8 +6,11 @@ import { build } from 'esbuild';
 import {
   GEMINI_ANALYSIS_MODEL,
   GEMINI_FREE_MODEL_VALUES,
+  GEMINI_PAID_ANALYSIS_MODEL,
+  GEMINI_PAID_MODEL_VALUES,
   MODEL_REGISTRY,
   normalizeGeminiFreeModelId,
+  normalizeGeminiPaidModelId,
 } from '../constants/modelRegistry.ts';
 
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
@@ -60,6 +63,14 @@ test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
   );
   assert.equal(new Set(GEMINI_FREE_MODEL_VALUES).size, GEMINI_FREE_MODEL_VALUES.length);
   assert.equal(normalizeGeminiFreeModelId('not-a-model'), GEMINI_ANALYSIS_MODEL);
+  assert.deepEqual(
+    new Set(GEMINI_PAID_MODEL_VALUES),
+    new Set([
+      ...MODEL_REGISTRY.gemini.free.map(model => model.id),
+      ...MODEL_REGISTRY.gemini.paid.map(model => model.id),
+    ]),
+  );
+  assert.equal(normalizeGeminiPaidModelId('not-a-model'), GEMINI_PAID_ANALYSIS_MODEL);
 });
 
 test('SettingsRegistry validates system settings and discards unknown fields', async () => {
@@ -67,6 +78,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   const normalized = registry.normalizeSystemSettingsMap({
     ai: {
       defaultGeminiModel: 'unknown-model',
+      defaultGeminiPaidModel: 'unknown-paid-model',
       externalAnalysisRetryMinutes: 1,
       unknownSecret: 'must-not-survive',
     },
@@ -77,6 +89,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   });
 
   assert.equal(normalized.ai.defaultGeminiModel, GEMINI_ANALYSIS_MODEL);
+  assert.equal(normalized.ai.defaultGeminiPaidModel, GEMINI_PAID_ANALYSIS_MODEL);
   assert.equal(normalized.ai.externalAnalysisRetryMinutes, 5);
   assert.equal(normalized.ai.unknownSecret, undefined);
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
@@ -125,6 +138,11 @@ test('browser, API, and worker consume the shared registries', async () => {
   assert.match(assignedAutomation, /constants\/modelRegistry/);
   assert.match(externalSettings, /constants\/settingsRegistry/);
   assert.match(settingsPage, /constants\/settingsRegistry/);
+  assert.match(settingsPage, /options=\{GEMINI_PAID_MODEL_OPTIONS\}/);
+  assert.doesNotMatch(
+    settingsPage,
+    /label="موديل Gemini Pro الافتراضي">\s*<TextInput/,
+  );
   [geminiApi, aiEngine, settingsApi, assignedAutomation, externalSettings, settingsPage].forEach(source => {
     assert.doesNotMatch(source, /\['gemini-3\.5-flash'/);
   });

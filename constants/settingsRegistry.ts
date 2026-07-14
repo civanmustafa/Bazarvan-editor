@@ -7,6 +7,7 @@ import {
   GEMINI_PAID_ANALYSIS_MODEL,
   OPENAI_ANALYSIS_MODEL,
   normalizeGeminiFreeModelId,
+  normalizeGeminiPaidModelId,
 } from './modelRegistry';
 
 export const SYSTEM_SETTING_KEYS = ['ai', 'n8n', 'articles', 'roles', 'system'] as const;
@@ -136,7 +137,7 @@ const normalizeSystemSection = (
       ['independent_batch', 'sequential'],
       defaults.externalAnalysisCommandExecutionMode,
     ));
-    setWhenPresent('defaultGeminiPaidModel', field => normalizeString(field, defaults.defaultGeminiPaidModel, 120) || defaults.defaultGeminiPaidModel);
+    setWhenPresent('defaultGeminiPaidModel', field => normalizeGeminiPaidModelId(field));
     setWhenPresent('defaultOpenAiModel', field => normalizeString(field, defaults.defaultOpenAiModel, 120) || defaults.defaultOpenAiModel);
     return normalized;
   }
