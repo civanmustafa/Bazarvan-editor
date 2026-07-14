@@ -596,6 +596,15 @@ type ApiUsageRequest = {
   failedAttempts: ApiUsageFailedAttempt[];
 };
 
+const API_KEY_UNAVAILABLE_LABEL = 'غير متاح';
+const API_KEY_POOL_LABEL = 'مجموعة مفاتيح';
+const EXTERNAL_ANALYSIS_API_SOURCES = new Set([
+  'semantic_keywords_lsi',
+  'engineering_command',
+  'competitor_discovery',
+  'competitor_extraction',
+]);
+
 const getActivityMetadata = (event: RemoteAppActivityEvent): Record<string, any> => (
   isRecord(event.metadata) ? event.metadata : {}
 );
@@ -631,8 +640,31 @@ const getApiSourceLabel = (source?: string): string => {
 
 const formatApiKeySuffixLabel = (value: unknown): string => {
   const keySuffix = typeof value === 'string' && value.trim() ? value.trim() : '';
-  return keySuffix ? `••••${keySuffix.slice(-6)}` : 'غير متاح';
+  return keySuffix ? `••••${keySuffix.slice(-6)}` : API_KEY_UNAVAILABLE_LABEL;
 };
+
+const resolveApiUsageKeySuffixLabel = (
+  metadata: Record<string, any>,
+  outcome: ApiUsageRequest['outcome'],
+  failedAttempts: ApiUsageFailedAttempt[],
+): string => {
+  const directLabel = formatApiKeySuffixLabel(metadata.keySuffix);
+  if (directLabel !== API_KEY_UNAVAILABLE_LABEL || outcome !== 'failed') return directLabel;
+
+  const attemptedKeyCount = Number(metadata.attemptedKeyCount);
+  const distinctAttemptKeys = new Set(
+    failedAttempts
+      .map(attempt => attempt.keySuffixLabel)
+      .filter(label => label !== API_KEY_UNAVAILABLE_LABEL),
+  ).size;
+  return (Number.isFinite(attemptedKeyCount) && attemptedKeyCount > 1) || distinctAttemptKeys > 1
+    ? API_KEY_POOL_LABEL
+    : API_KEY_UNAVAILABLE_LABEL;
+};
+
+const isConcreteApiKeyLabel = (label: string): boolean => (
+  label !== API_KEY_UNAVAILABLE_LABEL && label !== API_KEY_POOL_LABEL
+);
 
 const getApiUsageEvents = (events: RemoteAppActivityEvent[]): RemoteAppActivityEvent[] => (
   events.filter(event => event.eventType === 'api_key_used')
@@ -694,7 +726,7 @@ const buildApiUsageRequests = (events: RemoteAppActivityEvent[]): ApiUsageReques
       service,
       provider,
       model,
-      keySuffixLabel: formatApiKeySuffixLabel(metadata.keySuffix),
+      keySuffixLabel: resolveApiUsageKeySuffixLabel(metadata, outcome, failedAttempts),
       outcome,
       userId: event.userId || null,
       source,
@@ -822,7 +854,7 @@ const ReportsPage: React.FC<{
   const apiKeyCount = new Set(apiUsageRequests.flatMap(request => [
     request.keySuffixLabel,
     ...request.failedAttempts.map(attempt => attempt.keySuffixLabel),
-  ]).filter(label => label !== 'غير متاح')).size;
+  ]).filter(isConcreteApiKeyLabel)).size;
   const freeGeminiApiCalls = apiUsageRequests.filter(request => request.provider === 'gemini').length;
   const paidGeminiApiCalls = apiUsageRequests.filter(request => request.provider === 'geminiPaid').length;
   const openAiApiCalls = apiUsageRequests.filter(request => request.provider === 'openai' || request.service === 'openai').length;
@@ -896,8 +928,9 @@ const ApiUsageRequestTable: React.FC<{
   profiles: RemoteProfile[];
   t: typeof translations.ar;
 }> = ({ requests, profiles, t }) => {
-  const getUserLabel = (userId?: string | null): string => {
-    const profile = userId ? profiles.find(item => item.id === userId) : null;
+  const getUserLabel = (request: ApiUsageRequest): string => {
+    const profile = request.userId ? profiles.find(item => item.id === request.userId) : null;
+    if (!request.userId && EXTERNAL_ANALYSIS_API_SOURCES.has(request.source)) return 'النظام التلقائي';
     return getProfileLabel(profile);
   };
 
@@ -953,7 +986,7 @@ const ApiUsageRequestTable: React.FC<{
                 </span>
               </td>
               <td className="px-3 py-3">{renderFailedAttempts(request.failedAttempts)}</td>
-              <td className="max-w-[220px] px-3 py-3 text-gray-600 dark:text-gray-300">{getUserLabel(request.userId)}</td>
+              <td className="max-w-[220px] px-3 py-3 text-gray-600 dark:text-gray-300">{getUserLabel(request)}</td>
               <td className="max-w-[220px] px-3 py-3 text-gray-600 dark:text-gray-300">{getApiSourceLabel(request.source)}</td>
               <td className="whitespace-nowrap px-3 py-3 text-gray-500">{formatIstanbulDateTime(request.createdAt, t.locale, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
             </tr>

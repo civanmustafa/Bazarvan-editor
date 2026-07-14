@@ -141,6 +141,17 @@ const getProfileLabel = (profile?: RemoteProfile | null): string => (
   profile?.fullName?.trim() || profile?.email?.trim() || '-'
 );
 
+const getExternalAnalysisActorLabel = (
+  job: ExternalAnalysisReportJob,
+  profile: RemoteProfile | null | undefined,
+  locale: 'ar' | 'en',
+): string => {
+  const profileLabel = getProfileLabel(profile);
+  if (profileLabel !== '-') return profileLabel;
+  if (job.origin === 'auto') return locale === 'ar' ? 'النظام التلقائي' : 'Automatic system';
+  return profileLabel;
+};
+
 const ExternalAnalysisReportsTable: React.FC<{
   jobs: ExternalAnalysisReportJob[];
   articles: RemoteArticleActivity[];
@@ -385,7 +396,7 @@ const ExternalAnalysisReportsTable: React.FC<{
                   </td>
                   <td className="px-3 py-3">{renderFailureDetails(job)}</td>
                   <td className="max-w-[220px] px-3 py-3 text-gray-600 dark:text-gray-300">
-                    <div className="font-bold">{getProfileLabel(requestedBy)}</div>
+                    <div className="font-bold">{getExternalAnalysisActorLabel(job, requestedBy, locale)}</div>
                     <div className="mt-1 text-xs text-gray-500">{job.origin === 'auto' ? 'تلقائي' : 'يدوي'}</div>
                     {job.batch_key && <div className="mt-1 truncate font-mono text-[10px] text-gray-400" title={job.batch_key}>{job.batch_key}</div>}
                   </td>

@@ -154,3 +154,17 @@ test('repository quality gate covers types, tests, build, and security checks', 
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40}/);
   assert.match(workflow, /actions\/setup-node@[0-9a-f]{40}/);
 });
+
+test('admin reports distinguish failed key pools and automatic external analysis actors', async () => {
+  const [adminApp, externalReports] = await Promise.all([
+    readWorkspaceFile('components/AdminApp.tsx'),
+    readWorkspaceFile('components/ExternalAnalysisReportsTable.tsx'),
+  ]);
+
+  assert.match(adminApp, /API_KEY_POOL_LABEL = 'مجموعة مفاتيح'/);
+  assert.match(adminApp, /attemptedKeyCount > 1/);
+  assert.match(adminApp, /EXTERNAL_ANALYSIS_API_SOURCES\.has\(request\.source\)/);
+  assert.match(adminApp, /النظام التلقائي/);
+  assert.match(externalReports, /getExternalAnalysisActorLabel/);
+  assert.match(externalReports, /النظام التلقائي/);
+});
