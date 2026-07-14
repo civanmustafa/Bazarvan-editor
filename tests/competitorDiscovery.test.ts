@@ -265,3 +265,14 @@ test('competitor extraction preserves partial success and bounds transient retri
   assert.match(panel, /hasNewCompletedSource/);
   assert.match(panel, /hydratedCompetitorsRef/);
 });
+
+test('competitor sidebar keeps one plain-text content surface', async () => {
+  const [sidebar, translations] = await Promise.all([
+    readWorkspaceFile('components/RightSidebar.tsx'),
+    readWorkspaceFile('components/translations.ts'),
+  ]);
+
+  assert.match(sidebar, /competitorPlainTextField/);
+  assert.doesNotMatch(sidebar, /fullExtractedText/);
+  assert.doesNotMatch(translations, /fullExtractedText/);
+});

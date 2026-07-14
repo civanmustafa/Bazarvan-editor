@@ -1959,14 +1959,6 @@ ${readyCommandCompetitorBlocks}`;
                                             )}
                                         </div>
                                     </div>
-                                    {content.text && (
-                                        <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
-                                            <div className="font-bold text-gray-700 dark:text-gray-200">{tRs.fullExtractedText}</div>
-                                            <div className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap custom-scrollbar leading-5 text-gray-600 dark:text-gray-300">
-                                                {content.text}
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
                             )}
                         </div>
