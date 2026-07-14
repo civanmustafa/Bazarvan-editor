@@ -2,10 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { MAX_ARTICLE_COMPETITORS, normalizeCompetitorSlots } from '../constants/competitors.ts';
+import {
+  COMPETITOR_EXTRACTION_MAX_ATTEMPTS,
+  MAX_ARTICLE_COMPETITORS,
+  normalizeCompetitorSlots,
+} from '../constants/competitors.ts';
 import {
   canonicalizeCompetitorUrl,
+  classifyFirecrawlProviderError,
   FirecrawlCompetitorError,
+  getUnsupportedCompetitorFileExtension,
+  isUnsupportedCompetitorFileUrl,
   markdownToCompetitorText,
   type CompetitorSearchResult,
 } from '../server/firecrawlCompetitorService.ts';
@@ -58,6 +65,48 @@ test('competitor URLs reject local and private destinations', () => {
       value,
     );
   }
+});
+
+test('competitor file URLs are excluded by one central URL policy', () => {
+  for (const [value, extension] of [
+    ['https://example.com/report.pdf', 'pdf'],
+    ['https://example.com/report.DOCX?download=1', 'docx'],
+    ['https://example.com/report%2Exlsx', 'xlsx'],
+    ['https://example.com/slides.pptx/', 'pptx'],
+    ['https://example.com/archive.zip', 'zip'],
+    ['https://example.com/image.webp', 'webp'],
+    ['https://example.com/video.mp4', 'mp4'],
+  ] as const) {
+    assert.equal(getUnsupportedCompetitorFileExtension(value), extension, value);
+    assert.equal(isUnsupportedCompetitorFileUrl(value), true, value);
+    assert.throws(
+      () => canonicalizeCompetitorUrl(value),
+      (error: unknown) => error instanceof FirecrawlCompetitorError
+        && error.code === 'unsupported_competitor_file'
+        && error.retryable === false,
+      value,
+    );
+  }
+
+  assert.equal(isUnsupportedCompetitorFileUrl('https://example.com/article.html'), false);
+  assert.equal(
+    canonicalizeCompetitorUrl('https://example.com/download?file=report.pdf'),
+    'https://example.com/download?file=report.pdf',
+  );
+});
+
+test('Firecrawl tunnel failures remain retryable independently of provider status', () => {
+  assert.deepEqual(
+    classifyFirecrawlProviderError(
+      400,
+      'ERR_TUNNEL_CONNECTION_FAILED: internal proxy error while establishing the tunnel.',
+    ),
+    { code: 'firecrawl_tunnel_error', retryable: true },
+  );
+  assert.deepEqual(
+    classifyFirecrawlProviderError(429, 'Quota exceeded.'),
+    { code: 'firecrawl_quota_exceeded', retryable: true },
+  );
 });
 
 test('competitor markdown is normalized into analysis text', () => {
@@ -197,4 +246,22 @@ test('automatic competitor discovery is durable, idempotent, and uses the centra
   assert.match(modal, /CompetitorDiscoveryPanel/);
   assert.match(reports, /job\.job_type === 'competitor_discovery'/);
   assert.match(reports, /اكتشاف وترتيب المنافسين/);
+});
+
+test('competitor extraction preserves partial success and bounds transient retries', async () => {
+  const [executor, panel] = await Promise.all([
+    readWorkspaceFile('server/competitorExtractionExecutor.ts'),
+    readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
+  ]);
+
+  assert.equal(COMPETITOR_EXTRACTION_MAX_ATTEMPTS, 3);
+  assert.match(executor, /retryExhausted/);
+  assert.match(executor, /status: shouldRetry \? 'retry_scheduled' : 'failed'/);
+  assert.match(executor, /\$\{normalized\.code\}_retry_exhausted/);
+  assert.ok(
+    executor.indexOf('await syncArticleCompetitors(context.job.article_id)')
+      < executor.indexOf('throw new ExternalAnalysisRetryError'),
+  );
+  assert.match(panel, /hasNewCompletedSource/);
+  assert.match(panel, /hydratedCompetitorsRef/);
 });

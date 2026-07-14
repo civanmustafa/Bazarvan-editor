@@ -1,6 +1,7 @@
 import {
   FirecrawlCompetitorError,
 } from './firecrawlCompetitorService';
+import { COMPETITOR_EXTRACTION_MAX_ATTEMPTS } from '../constants/competitors';
 import { getCompetitorPreview } from './competitorPreviewCache';
 import {
   ExternalAnalysisRetryError,
@@ -20,6 +21,16 @@ type CompetitorRow = {
   source_url: string;
   title: string;
   status: 'queued' | 'extracting' | 'retry_scheduled' | 'completed' | 'failed' | 'cancelled';
+  error_code: string | null;
+  error_message: string | null;
+};
+
+type CompetitorFailure = {
+  position: number;
+  code: string;
+  message: string;
+  retryable: boolean;
+  attempt: number;
 };
 
 const FIRECRAWL_MODEL = 'v2/scrape';
@@ -31,7 +42,7 @@ const getFirecrawlKeySuffix = (): string => (
 const readCompetitors = async (articleId: string): Promise<CompetitorRow[]> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('article_competitors')
-    .select('id,article_id,position,canonical_url,source_url,title,status')
+    .select('id,article_id,position,canonical_url,source_url,title,status,error_code,error_message')
     .eq('article_id', articleId)
     .order('position', { ascending: true });
   if (error) throw error;
@@ -77,7 +88,8 @@ const executeCompetitorExtraction = async (
   }
 
   const attempts: ExternalAnalysisJson[] = [];
-  const failures: Array<{ position: number; code: string; message: string; retryable: boolean }> = [];
+  const failures: CompetitorFailure[] = [];
+  const currentAttempt = Math.max(1, Number(context.job.attempt_count) || 1);
   let successfulCount = rows.filter(row => row.status === 'completed').length;
 
   for (const row of rows) {
@@ -147,11 +159,21 @@ const executeCompetitorExtraction = async (
             code: 'competitor_extraction_failed',
             retryable: true,
           });
+      const retryExhausted = normalized.retryable
+        && currentAttempt >= COMPETITOR_EXTRACTION_MAX_ATTEMPTS;
+      const shouldRetry = normalized.retryable && !retryExhausted;
+      const failureCode = retryExhausted
+        ? `${normalized.code}_retry_exhausted`
+        : normalized.code;
+      const failureMessage = retryExhausted
+        ? `Stopped after ${COMPETITOR_EXTRACTION_MAX_ATTEMPTS} attempts. ${normalized.message}`
+        : normalized.message;
       failures.push({
         position: row.position,
-        code: normalized.code,
-        message: normalized.message,
-        retryable: normalized.retryable,
+        code: failureCode,
+        message: failureMessage,
+        retryable: shouldRetry,
+        attempt: currentAttempt,
       });
       attempts.push({
         requestIndex: row.position,
@@ -159,14 +181,14 @@ const executeCompetitorExtraction = async (
         model: FIRECRAWL_MODEL,
         keySuffix: getFirecrawlKeySuffix(),
         status: normalized.status,
-        reason: normalized.code,
-        attempt: context.job.attempt_count,
+        reason: failureCode,
+        attempt: currentAttempt,
       });
       await updateCompetitor(row.id, {
-        status: normalized.retryable ? 'retry_scheduled' : 'failed',
+        status: shouldRetry ? 'retry_scheduled' : 'failed',
         extraction_provider: 'firecrawl',
-        error_code: normalized.code,
-        error_message: normalized.message.slice(0, 2_000),
+        error_code: failureCode,
+        error_message: failureMessage.slice(0, 2_000),
       }, ['queued', 'extracting', 'retry_scheduled']);
     }
 
@@ -184,6 +206,19 @@ const executeCompetitorExtraction = async (
     });
   }
 
+  // Make every completed source available to the article before a failed URL is retried.
+  await syncArticleCompetitors(context.job.article_id);
+  const finalRows = await readCompetitors(context.job.article_id);
+  successfulCount = finalRows.filter(row => row.status === 'completed').length;
+  const persistedFailures: CompetitorFailure[] = finalRows
+    .filter(row => row.status === 'failed')
+    .map(row => ({
+      position: row.position,
+      code: row.error_code || 'competitor_extraction_failed',
+      message: row.error_message || 'Competitor extraction failed.',
+      retryable: false,
+      attempt: currentAttempt,
+    }));
   const retryableFailures = failures.filter(failure => failure.retryable);
   if (retryableFailures.length > 0) {
     const first = retryableFailures[0];
@@ -195,20 +230,21 @@ const executeCompetitorExtraction = async (
         current: rows.length,
         total: rows.length,
         successfulCount,
-        failedCount: failures.length,
-        failures,
+        failedCount: persistedFailures.length,
+        retryingCount: retryableFailures.length,
+        attempt: currentAttempt,
+        maxAttempts: COMPETITOR_EXTRACTION_MAX_ATTEMPTS,
+        failures: [...persistedFailures, ...retryableFailures],
       },
     });
   }
 
-  await syncArticleCompetitors(context.job.article_id);
-  const finalRows = await readCompetitors(context.job.article_id);
   return {
     result: {
-      status: failures.length > 0 ? 'partial' : 'completed',
+      status: persistedFailures.length > 0 ? 'partial' : 'completed',
       successfulCount,
-      failedCount: failures.length,
-      failures,
+      failedCount: persistedFailures.length,
+      failures: persistedFailures,
       competitors: finalRows.map(row => ({
         id: row.id,
         position: row.position,
@@ -218,11 +254,12 @@ const executeCompetitorExtraction = async (
       })),
     },
     progress: {
-      stage: failures.length > 0 ? 'completed_with_failures' : 'completed',
+      stage: persistedFailures.length > 0 ? 'completed_with_failures' : 'completed',
       current: rows.length,
       total: rows.length,
       successfulCount,
-      failedCount: failures.length,
+      failedCount: persistedFailures.length,
+      maxAttempts: COMPETITOR_EXTRACTION_MAX_ATTEMPTS,
     },
   };
 };

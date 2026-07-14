@@ -252,7 +252,13 @@ const normalizeSelectedResults = (value: unknown): CompetitorSearchResult[] => {
     if (!isRecord(entry)) return;
     const sourceUrl = toText(entry.url) || toText(entry.canonicalUrl);
     if (!sourceUrl) return;
-    const canonicalUrl = canonicalizeCompetitorUrl(sourceUrl);
+    let canonicalUrl = '';
+    try {
+      canonicalUrl = canonicalizeCompetitorUrl(sourceUrl);
+    } catch (error) {
+      if (error instanceof FirecrawlCompetitorError && error.code === 'unsupported_competitor_file') return;
+      throw error;
+    }
     const domain = new URL(canonicalUrl).hostname.replace(/^www\./i, '');
     if (seenUrls.has(canonicalUrl) || seenDomains.has(domain)) return;
     seenUrls.add(canonicalUrl);

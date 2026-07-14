@@ -3,6 +3,7 @@ import {
   COMPETITOR_CONTENT_MAX_CHARS,
   COMPETITOR_SEARCH_CANDIDATE_LIMIT,
   COMPETITOR_SEARCH_RESULT_LIMIT,
+  UNSUPPORTED_COMPETITOR_FILE_EXTENSIONS,
 } from '../constants/competitors.ts';
 
 export type CompetitorSearchResult = {
@@ -66,6 +67,56 @@ const PRIVATE_HOST_NAMES = new Set([
   'metadata.google.internal',
   'metadata.aws.internal',
 ]);
+
+const UNSUPPORTED_COMPETITOR_FILE_EXTENSION_SET = new Set<string>(
+  UNSUPPORTED_COMPETITOR_FILE_EXTENSIONS,
+);
+
+const safeDecodePathname = (pathname: string): string => {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return pathname;
+  }
+};
+
+export const getUnsupportedCompetitorFileExtension = (value: string | URL): string => {
+  let url: URL;
+  try {
+    url = value instanceof URL ? value : new URL(value);
+  } catch {
+    return '';
+  }
+  const pathname = safeDecodePathname(url.pathname)
+    .toLowerCase()
+    .replace(/\/+$/, '');
+  const extension = pathname.match(/\.([a-z0-9]{1,8})$/)?.[1] || '';
+  return UNSUPPORTED_COMPETITOR_FILE_EXTENSION_SET.has(extension) ? extension : '';
+};
+
+export const isUnsupportedCompetitorFileUrl = (value: string | URL): boolean => (
+  Boolean(getUnsupportedCompetitorFileExtension(value))
+);
+
+export const classifyFirecrawlProviderError = (
+  status: number,
+  message: string,
+): { code: string; retryable: boolean } => {
+  const normalizedStatus = status || 502;
+  const tunnelFailure = /ERR_TUNNEL_CONNECTION_FAILED|internal proxy error|establish(?:ing)? the tunnel/i
+    .test(message);
+  return {
+    code: tunnelFailure
+      ? 'firecrawl_tunnel_error'
+      : normalizedStatus === 429
+        ? 'firecrawl_quota_exceeded'
+        : `firecrawl_http_${normalizedStatus}`,
+    retryable: tunnelFailure
+      || normalizedStatus === 408
+      || normalizedStatus === 429
+      || normalizedStatus >= 500,
+  };
+};
 
 const isPrivateIpv4 = (value: string): boolean => {
   const octets = value.split('.').map(part => Number.parseInt(part, 10));
@@ -152,6 +203,15 @@ export const canonicalizeCompetitorUrl = (value: string): string => {
     }
   });
   if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/+$/, '');
+  const unsupportedExtension = getUnsupportedCompetitorFileExtension(url);
+  if (unsupportedExtension) {
+    throw new FirecrawlCompetitorError({
+      message: `Competitor file URLs are not supported (.${unsupportedExtension}).`,
+      status: 400,
+      code: 'unsupported_competitor_file',
+      retryable: false,
+    });
+  }
   return url.toString();
 };
 
@@ -212,10 +272,12 @@ const firecrawlRequest = async (
         || toText(toRecord(normalized.error).message)
         || toText(normalized.message)
         || `Firecrawl request failed with HTTP ${response.status}.`;
+      const classification = classifyFirecrawlProviderError(response.status, providerMessage);
       throw new FirecrawlCompetitorError({
         message: providerMessage.slice(0, 1_000),
         status: response.status || 502,
-        code: response.status === 429 ? 'firecrawl_quota_exceeded' : `firecrawl_http_${response.status || 502}`,
+        code: classification.code,
+        retryable: classification.retryable,
       });
     }
     return normalized;
@@ -299,7 +361,6 @@ export const searchCompetitorWeb = async (options: {
     if (!rawUrl) return;
     try {
       const canonicalUrl = canonicalizeCompetitorUrl(rawUrl);
-      if (new URL(canonicalUrl).pathname.toLowerCase().endsWith('.pdf')) return;
       const domain = new URL(canonicalUrl).hostname.replace(/^www\./i, '');
       if (seenUrls.has(canonicalUrl) || seenDomains.has(domain)) return;
       seenUrls.add(canonicalUrl);

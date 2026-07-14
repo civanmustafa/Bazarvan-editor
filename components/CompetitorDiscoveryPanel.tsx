@@ -201,6 +201,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
   const hydratedDiscoveryJobRef = React.useRef('');
   const ensuredDiscoverySignatureRef = React.useRef('');
+  const hydratedCompetitorsRef = React.useRef<Map<string, CompetitorDiscoveryRow>>(new Map());
 
   const activeJob = state.activeJob && ACTIVE_JOB_STATUSES.has(state.activeJob.status)
     ? state.activeJob
@@ -245,11 +246,37 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     if (showLoading) setIsLoadingState(true);
     try {
       let nextState = await listArticleCompetitors(articleId, { includeContent: !compact });
-      if (compact && !nextState.activeJob) {
-        nextState = await listArticleCompetitors(articleId, { includeContent: true });
+      let loadedFullContent = !compact;
+      if (compact) {
+        const hasNewCompletedSource = nextState.competitors.some(row => (
+          row.status === 'completed'
+          && !hydratedCompetitorsRef.current.get(row.id)?.contentText
+        ));
+        const discoveryStillActive = Boolean(
+          nextState.discoveryJob && ACTIVE_JOB_STATUSES.has(nextState.discoveryJob.status),
+        );
+        if (hasNewCompletedSource || (!nextState.activeJob && !discoveryStillActive)) {
+          nextState = await listArticleCompetitors(articleId, { includeContent: true });
+          loadedFullContent = true;
+        } else {
+          nextState = {
+            ...nextState,
+            competitors: nextState.competitors.map(row => {
+              const hydrated = hydratedCompetitorsRef.current.get(row.id);
+              return hydrated?.contentText
+                ? { ...row, contentText: hydrated.contentText }
+                : row;
+            }),
+          };
+        }
+      }
+      if (loadedFullContent) {
+        hydratedCompetitorsRef.current = new Map(
+          nextState.competitors.map(row => [row.id, row]),
+        );
       }
       setState(nextState);
-      if ((!compact || !nextState.activeJob) && (nextState.competitors.length > 0 || nextState.latestJob)) {
+      if (loadedFullContent && (nextState.competitors.length > 0 || nextState.latestJob)) {
         onCompetitorsChange(nextState.competitors);
       }
       setError('');
@@ -263,6 +290,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   useEffect(() => {
     hydratedDiscoveryJobRef.current = '';
     ensuredDiscoverySignatureRef.current = '';
+    hydratedCompetitorsRef.current = new Map();
     setSearchResults([]);
     setSelectionSummary(null);
     setSelectedUrls(new Set<string>());
