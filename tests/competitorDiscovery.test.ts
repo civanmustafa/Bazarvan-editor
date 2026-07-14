@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { MAX_ARTICLE_COMPETITORS, normalizeCompetitorSlots } from '../constants/competitors.ts';
 import {
   canonicalizeCompetitorUrl,
@@ -13,6 +15,10 @@ import {
   normalizeCompetitorText,
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
+
+const readWorkspaceFile = async (relativePath: string): Promise<string> => (
+  readFile(fileURLToPath(new URL(`../${relativePath}`, import.meta.url)), 'utf8')
+);
 
 const searchResult = (
   domain: string,
@@ -158,4 +164,37 @@ test('expanded intent lexicon recognizes Arabic support and transactional search
     maxSelected: 5,
   });
   assert.equal(transactional.summary.targetIntent, 'transactional');
+});
+
+test('automatic competitor discovery is durable, idempotent, and uses the central engine', async () => {
+  const [migration, executor, worker, panel, card, modal, reports] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260714030000_automatic_competitor_discovery.sql'),
+    readWorkspaceFile('server/competitorDiscoveryExecutor.ts'),
+    readWorkspaceFile('server/externalAnalysisWorker.ts'),
+    readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
+    readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+    readWorkspaceFile('components/CompetitorDiscoveryModal.tsx'),
+    readWorkspaceFile('components/ExternalAnalysisReportsTable.tsx'),
+  ]);
+
+  assert.match(migration, /evaluate_competitor_discovery_readiness/);
+  assert.match(migration, /article_title_or_primary_keyword/);
+  assert.match(migration, /enqueue_competitor_discovery_job/);
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /ai_external_analysis_jobs_competitor_discovery_once_idx/);
+  assert.match(migration, /trigger enqueue_competitor_discovery_from_state/);
+  assert.match(migration, /trigger assign_competitor_discovery_signature/);
+  assert.match(migration, /job\.job_type in \('competitor_discovery', 'competitor_extraction'\)/);
+  assert.match(executor, /searchCompetitorWeb\(/);
+  assert.match(executor, /analyzeAndSelectCompetitors\(/);
+  assert.match(executor, /registerExternalAnalysisJobExecutor\('competitor_discovery'/);
+  assert.match(worker, /import '\.\/competitorDiscoveryExecutor'/);
+  assert.match(panel, /getPersistedCompetitorDiscovery/);
+  assert.match(panel, /ensureArticleCompetitorDiscovery/);
+  assert.match(card, /بحث المنافسين/);
+  assert.match(card, /COMPETITOR_REQUIREMENT_FIELDS/);
+  assert.match(modal, /createPortal\(/);
+  assert.match(modal, /CompetitorDiscoveryPanel/);
+  assert.match(reports, /job\.job_type === 'competitor_discovery'/);
+  assert.match(reports, /اكتشاف وترتيب المنافسين/);
 });

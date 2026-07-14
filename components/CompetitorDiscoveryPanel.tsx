@@ -22,6 +22,8 @@ import {
   cancelArticleCompetitorExtraction,
   CompetitorDiscoveryRequestError,
   enqueueArticleCompetitorExtraction,
+  ensureArticleCompetitorDiscovery,
+  getPersistedCompetitorDiscovery,
   listArticleCompetitors,
   loadArticleCompetitorPreview,
   removeArticleCompetitor,
@@ -51,6 +53,8 @@ const EMPTY_STATE: CompetitorDiscoveryState = {
   competitors: [],
   activeJob: null,
   latestJob: null,
+  discoveryJob: null,
+  discoveryReadiness: null,
 };
 
 const ACTIVE_JOB_STATUSES = new Set(['waiting_for_prerequisites', 'queued', 'running', 'retry_scheduled', 'paused']);
@@ -195,10 +199,18 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const [previewByUrl, setPreviewByUrl] = useState<Record<string, CompetitorPreview>>({});
   const [previewLoadingUrl, setPreviewLoadingUrl] = useState('');
   const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
+  const hydratedDiscoveryJobRef = React.useRef('');
+  const ensuredDiscoverySignatureRef = React.useRef('');
 
   const activeJob = state.activeJob && ACTIVE_JOB_STATUSES.has(state.activeJob.status)
     ? state.activeJob
     : null;
+  const activeDiscoveryJob = state.discoveryJob && ACTIVE_JOB_STATUSES.has(state.discoveryJob.status)
+    ? state.discoveryJob
+    : null;
+  const discoveryErrorMessage = typeof state.discoveryJob?.result?.errorMessage === 'string'
+    ? state.discoveryJob.result.errorMessage
+    : state.discoveryJob?.last_error || '';
   const selectedResults = useMemo(() => (
     searchResults.filter(result => selectedUrls.has(result.canonicalUrl))
   ), [searchResults, selectedUrls]);
@@ -249,6 +261,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   }, [articleId, isArabic, onCompetitorsChange]);
 
   useEffect(() => {
+    hydratedDiscoveryJobRef.current = '';
+    ensuredDiscoverySignatureRef.current = '';
     setSearchResults([]);
     setSelectionSummary(null);
     setSelectedUrls(new Set<string>());
@@ -260,16 +274,62 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   }, [articleId, refresh]);
 
   useEffect(() => {
+    const persisted = getPersistedCompetitorDiscovery(state);
+    const discoveryJobId = state.discoveryJob?.id || '';
+    const hydrationKey = [
+      discoveryJobId,
+      state.discoveryJob?.updated_at || '',
+      typeof state.discoveryJob?.result?.discoveredAt === 'string'
+        ? state.discoveryJob.result.discoveredAt
+        : '',
+    ].join(':');
+    if (!persisted || !discoveryJobId || hydratedDiscoveryJobRef.current === hydrationKey) return;
+    hydratedDiscoveryJobRef.current = hydrationKey;
+    const input = state.discoveryJob?.input_snapshot || {};
+    const persistedMode = input.queryType === 'primary_keyword' ? 'primary_keyword' : 'title';
+    const persistedQuery = typeof input.queryText === 'string' ? input.queryText.trim() : '';
+    setMode(persistedMode);
+    if (persistedQuery) setQuery(persistedQuery);
+    setSearchResults(persisted.results);
+    setSelectionSummary(persisted.selection);
+    const acceptedUrls = Array.isArray(state.discoveryJob?.result?.selectedUrls)
+      ? state.discoveryJob!.result!.selectedUrls.filter((value): value is string => typeof value === 'string')
+      : [];
+    setSelectedUrls(new Set(
+      acceptedUrls.length > 0
+        ? acceptedUrls
+        : persisted.results.filter(result => result.autoSelected).map(result => result.canonicalUrl),
+    ));
+  }, [state]);
+
+  useEffect(() => {
+    const signature = state.discoveryReadiness?.signature || '';
+    if (
+      !articleId
+      || !state.discoveryReadiness?.ready
+      || state.discoveryJob
+      || !signature
+      || ensuredDiscoverySignatureRef.current === signature
+    ) return;
+    ensuredDiscoverySignatureRef.current = signature;
+    void ensureArticleCompetitorDiscovery(articleId)
+      .then(() => refresh(false, true))
+      .catch(() => {
+        ensuredDiscoverySignatureRef.current = '';
+      });
+  }, [articleId, refresh, state.discoveryJob, state.discoveryReadiness]);
+
+  useEffect(() => {
     if (previewLocation && !previewSourceItem) setPreviewLocation(null);
   }, [previewLocation, previewSourceItem]);
 
   useEffect(() => {
-    if (!activeJob) return undefined;
+    if (!activeJob && !activeDiscoveryJob) return undefined;
     const timer = window.setInterval((): void => {
       void refresh(false, true);
-    }, activeJob.status === 'retry_scheduled' ? 30_000 : 2_500);
+    }, (activeJob?.status === 'retry_scheduled' || activeDiscoveryJob?.status === 'retry_scheduled') ? 30_000 : 2_500);
     return () => window.clearInterval(timer);
-  }, [activeJob, refresh]);
+  }, [activeDiscoveryJob, activeJob, refresh]);
 
   const handleSearch = async () => {
     if (!articleId || !query.trim()) {
@@ -491,13 +551,31 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         <button
           type="button"
           onClick={() => void handleSearch()}
-          disabled={!articleId || !query.trim() || isSearching || !state.providerConfigured}
+          disabled={!articleId || !query.trim() || isSearching || Boolean(activeDiscoveryJob) || !state.providerConfigured}
           title={isArabic ? 'بحث عن المنافسين' : 'Search competitors'}
           className="flex size-9 shrink-0 items-center justify-center rounded-md bg-[#d4af37] text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isSearching ? <LoaderCircle size={16} className="animate-spin" /> : <Search size={16} />}
         </button>
       </div>
+
+      {activeDiscoveryJob && (
+        <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2 text-[11px] font-bold text-blue-800 dark:border-blue-900/40 dark:bg-blue-500/10 dark:text-blue-300">
+          <LoaderCircle size={14} className="mt-0.5 shrink-0 animate-spin" />
+          <span>
+            {activeDiscoveryJob.status === 'retry_scheduled'
+              ? (isArabic ? 'تعذر البحث مؤقتًا، وستعاد محاولة المهمة نفسها تلقائيًا.' : 'Search is temporarily unavailable; the same task will retry automatically.')
+              : (isArabic ? 'جاري البحث عن المنافسين وترتيبهم في الخلفية.' : 'Searching and ranking competitors in the background.')}
+          </span>
+        </div>
+      )}
+
+      {!activeDiscoveryJob && searchResults.length === 0 && discoveryErrorMessage && (
+        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-[11px] font-bold text-red-700 dark:border-red-900/40 dark:bg-red-500/10 dark:text-red-300">
+          <XCircle size={14} className="mt-0.5 shrink-0" />
+          <span className="min-w-0 break-words">{discoveryErrorMessage}</span>
+        </div>
+      )}
 
       {searchResults.length > 0 && (
         <div className="space-y-2">

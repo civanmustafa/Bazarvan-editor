@@ -8,10 +8,12 @@ import {
   LoaderCircle,
   Play,
   RotateCcw,
+  Search,
   Square,
   Tags,
   XCircle,
 } from 'lucide-react';
+import type { GoalContext } from '../types';
 import { useUser } from '../contexts/UserContext';
 import {
   EXTERNAL_READY_COMMAND_DEFINITIONS,
@@ -27,6 +29,9 @@ import {
   type ExternalAnalysisDashboardSummary,
   useDefaultExternalEngineeringCommands,
 } from '../utils/externalAnalysis';
+import { ensureArticleCompetitorDiscovery } from '../utils/competitorDiscovery';
+
+const CompetitorDiscoveryModal = React.lazy(() => import('./CompetitorDiscoveryModal'));
 
 type NoticeState = {
   tone: 'success' | 'error' | 'info';
@@ -61,10 +66,21 @@ const ENGINEERING_REQUIREMENT_FIELDS = [
   'competitor_content_or_url',
 ] as const;
 
+const COMPETITOR_REQUIREMENT_FIELDS = [
+  'draft_status',
+  'article_title_or_primary_keyword',
+  'company_name',
+] as const;
+
 const AUTO_GENERATED_ENGINEERING_FIELDS = new Set(['alternative_keywords', 'lsi_keywords']);
 
 interface ExternalAnalysisCardControlsProps {
   articleId: string;
+  articleTitle: string;
+  primaryKeyword: string;
+  companyName: string;
+  articleLanguage: 'ar' | 'en';
+  goalContext?: GoalContext;
   hasAlternativeKeywords: boolean;
   hasLsiKeywords: boolean;
   summary?: ExternalAnalysisDashboardSummary;
@@ -73,6 +89,11 @@ interface ExternalAnalysisCardControlsProps {
 
 const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> = ({
   articleId,
+  articleTitle,
+  primaryKeyword,
+  companyName,
+  articleLanguage,
+  goalContext,
   hasAlternativeKeywords,
   hasLsiKeywords,
   summary,
@@ -82,10 +103,21 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const locale = t.locale === 'en' ? 'en' : 'ar';
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedCommandIds, setSelectedCommandIds] = useState<string[]>([]);
-  const [requirementsOpen, setRequirementsOpen] = useState<'semantic' | 'engineering' | null>(null);
-  const [busyAction, setBusyAction] = useState<'semantic' | 'engineering' | 'default' | 'cancel' | null>(null);
+  const [requirementsOpen, setRequirementsOpen] = useState<'semantic' | 'engineering' | 'competitor' | null>(null);
+  const [busyAction, setBusyAction] = useState<'semantic' | 'engineering' | 'competitor' | 'default' | 'cancel' | null>(null);
+  const [competitorModalOpen, setCompetitorModalOpen] = useState(false);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const ensuredCompetitorSignatureRef = useRef('');
+
+  const resolvedGoalContext: GoalContext = goalContext || {
+    pageType: '',
+    objective: '',
+    audienceScope: '',
+    targetCountry: '',
+    targetAudience: '',
+    searchIntent: '',
+  };
 
   const commands = useMemo(() => EXTERNAL_READY_COMMAND_DEFINITIONS.map(definition => ({
     id: definition.id,
@@ -95,11 +127,15 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
 
   const semanticJobActive = externalJobHasActiveStatus(summary?.latestSemanticJob);
   const engineeringActive = (summary?.activeEngineeringCount || 0) > 0;
+  const competitorDiscoveryActive = externalJobHasActiveStatus(summary?.latestCompetitorDiscoveryJob);
+  const competitorExtractionActive = externalJobHasActiveStatus(summary?.latestCompetitorExtractionJob);
+  const competitorJobActive = competitorDiscoveryActive || competitorExtractionActive;
   const customCommandMode = summary?.state?.engineering_command_mode === 'custom';
   const semanticTermsReady = hasAlternativeKeywords && hasLsiKeywords;
   const readinessState = summary?.state || null;
   const semanticMissingFields = new Set(readinessState?.semantic_missing_fields || []);
   const engineeringMissingFields = new Set(readinessState?.external_analysis_missing_fields || []);
+  const competitorMissingFields = new Set(readinessState?.competitor_discovery_missing_fields || []);
   if (semanticMissingFields.has('editor_text')) engineeringMissingFields.add('editor_text');
   if (!hasAlternativeKeywords) engineeringMissingFields.add('alternative_keywords');
   if (!hasLsiKeywords) engineeringMissingFields.add('lsi_keywords');
@@ -120,12 +156,32 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           ? (engineeringMissingFields.has(field) ? 'missing' : 'met')
           : 'checking',
   }));
+  const competitorRequirements: RequirementItem[] = COMPETITOR_REQUIREMENT_FIELDS.map(field => ({
+    field,
+    status: readinessState
+      ? (competitorMissingFields.has(field) ? 'missing' : 'met')
+      : 'checking',
+  }));
   const semanticCanStart = !readinessState
     || semanticRequirements.every(requirement => requirement.status === 'met');
   const engineeringCanQueue = !readinessState
     || engineeringRequirements.every(requirement => (
       requirement.status === 'met' || AUTO_GENERATED_ENGINEERING_FIELDS.has(requirement.field)
     ));
+  const competitorCanStart = !readinessState
+    || competitorRequirements.every(requirement => requirement.status === 'met');
+  const competitorDiscoveryResult = summary?.latestCompetitorDiscoveryJob?.result || {};
+  const competitorCandidateCount = Array.isArray(competitorDiscoveryResult.results)
+    ? competitorDiscoveryResult.results.length
+    : 0;
+  const competitorReviewStatus = typeof competitorDiscoveryResult.reviewStatus === 'string'
+    ? competitorDiscoveryResult.reviewStatus
+    : '';
+  const competitorNeedsReview = summary?.latestCompetitorDiscoveryJob?.status === 'completed'
+    && competitorCandidateCount > 0
+    && competitorReviewStatus !== 'accepted';
+  const competitorReadyCount = summary?.competitorReadyCount || 0;
+  const competitorTotalCount = summary?.competitorTotalCount || 0;
 
   const requirementCounter = (requirements: RequirementItem[]): string => (
     requirements.some(requirement => requirement.status === 'checking')
@@ -147,8 +203,27 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     setSelectedCommandIds([]);
     setMenuOpen(false);
     setRequirementsOpen(null);
+    setCompetitorModalOpen(false);
     setNotice(null);
+    ensuredCompetitorSignatureRef.current = '';
   }, [articleId]);
+
+  useEffect(() => {
+    const signature = readinessState?.competitor_discovery_signature || '';
+    if (
+      !readinessState?.competitor_discovery_ready
+      || !signature
+      || summary?.latestCompetitorDiscoveryJob
+      || ensuredCompetitorSignatureRef.current === signature
+    ) return;
+
+    ensuredCompetitorSignatureRef.current = signature;
+    void ensureArticleCompetitorDiscovery(articleId)
+      .then(() => onRefresh())
+      .catch(error => {
+        console.error(`Could not ensure competitor discovery for article "${articleId}":`, error);
+      });
+  }, [articleId, onRefresh, readinessState, summary?.latestCompetitorDiscoveryJob]);
 
   useEffect(() => {
     if (
@@ -199,6 +274,34 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const refreshAfterRequest = async () => {
     await onRefresh();
     window.setTimeout((): void => { void onRefresh(); }, 800);
+  };
+
+  const handleCompetitors = async () => {
+    if (!competitorCanStart) {
+      setRequirementsOpen('competitor');
+      return;
+    }
+
+    setCompetitorModalOpen(true);
+    setNotice(null);
+    if (summary?.latestCompetitorDiscoveryJob || busyAction) return;
+
+    setBusyAction('competitor');
+    try {
+      await ensureArticleCompetitorDiscovery(articleId);
+      await refreshAfterRequest();
+    } catch (error) {
+      setNotice({
+        tone: 'error',
+        message: error instanceof Error
+          ? error.message
+          : locale === 'ar'
+            ? 'تعذر تعيين مهمة اكتشاف المنافسين.'
+            : 'Could not enqueue competitor discovery.',
+      });
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   const handleSemantic = async () => {
@@ -279,7 +382,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   };
 
   const handleCancelAll = async () => {
-    if (busyAction || (!semanticJobActive && !engineeringActive)) return;
+    if (busyAction || (!semanticJobActive && !engineeringActive && !competitorJobActive)) return;
     setBusyAction('cancel');
     setNotice(null);
     try {
@@ -305,12 +408,14 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     ? semanticRequirements
     : requirementsOpen === 'engineering'
       ? engineeringRequirements
-      : [];
+      : requirementsOpen === 'competitor'
+        ? competitorRequirements
+        : [];
   const activeMetCount = activeRequirements.filter(requirement => requirement.status === 'met').length;
   const activeMissingCount = activeRequirements.filter(requirement => requirement.status === 'missing').length;
   const activeCheckingCount = activeRequirements.filter(requirement => requirement.status === 'checking').length;
 
-  const toggleRequirements = (type: 'semantic' | 'engineering') => {
+  const toggleRequirements = (type: 'semantic' | 'engineering' | 'competitor') => {
     setRequirementsOpen(current => current === type ? null : type);
   };
 
@@ -434,7 +539,50 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           </button>
         </div>
 
-        {(semanticJobActive || engineeringActive) && (
+        <div className="inline-flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => void handleCompetitors()}
+            disabled={busyAction === 'competitor'}
+            className="inline-flex min-h-7 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700 hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60 dark:border-blue-900/50 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+            title={locale === 'ar' ? 'اكتشاف أفضل المنافسين ومراجعتهم قبل سحب المحتوى' : 'Discover the strongest competitors and review them before importing content'}
+          >
+            {busyAction === 'competitor' || competitorJobActive
+              ? <LoaderCircle size={12} className="animate-spin" />
+              : competitorReadyCount > 0
+                ? <CheckCircle2 size={12} />
+                : <Search size={12} />}
+            <span>
+              {competitorExtractionActive
+                ? (locale === 'ar'
+                    ? `جاري سحب المنافسين ${competitorReadyCount}/${competitorTotalCount || '…'}`
+                    : `Importing competitors ${competitorReadyCount}/${competitorTotalCount || '…'}`)
+                : competitorDiscoveryActive
+                  ? (locale === 'ar' ? 'جاري بحث المنافسين' : 'Finding competitors')
+                  : competitorNeedsReview
+                    ? (locale === 'ar'
+                        ? `مراجعة ${competitorCandidateCount} منافسين`
+                        : `Review ${competitorCandidateCount} competitors`)
+                    : competitorReadyCount > 0
+                      ? (locale === 'ar'
+                          ? `المنافسون جاهزون ${competitorReadyCount}/${competitorTotalCount}`
+                          : `Competitors ready ${competitorReadyCount}/${competitorTotalCount}`)
+                      : (locale === 'ar' ? 'بحث المنافسين' : 'Find competitors')}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleRequirements('competitor')}
+            aria-expanded={requirementsOpen === 'competitor'}
+            className={`inline-flex min-h-7 items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] font-black ${competitorRequirements.some(requirement => requirement.status === 'missing') ? 'border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-500/10' : readinessState && competitorCanStart ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-500/10' : 'border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-400 dark:hover:bg-[#333]'}`}
+            title={locale === 'ar' ? 'عرض شروط اكتشاف المنافسين المحققة والناقصة' : 'Show met and missing competitor discovery requirements'}
+          >
+            <CircleHelp size={12} />
+            <span>{requirementCounter(competitorRequirements)}</span>
+          </button>
+        </div>
+
+        {(semanticJobActive || engineeringActive || competitorJobActive) && (
           <button
             type="button"
             onClick={() => void handleCancelAll()}
@@ -473,7 +621,9 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             <div className="text-[11px] font-black text-gray-700 dark:text-gray-200">
               {requirementsOpen === 'semantic'
                 ? (locale === 'ar' ? 'شروط توليد الصيغ وLSI' : 'Alternatives and LSI requirements')
-                : (locale === 'ar' ? 'شروط الأوامر اليدوية الجاهزة' : 'Ready command requirements')}
+                : requirementsOpen === 'engineering'
+                  ? (locale === 'ar' ? 'شروط الأوامر اليدوية الجاهزة' : 'Ready command requirements')
+                  : (locale === 'ar' ? 'شروط اكتشاف المنافسين' : 'Competitor discovery requirements')}
             </div>
             <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400">
               {activeCheckingCount > 0
@@ -518,6 +668,24 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           {notice.message}
         </div>
       )}
+
+      <React.Suspense fallback={null}>
+        {competitorModalOpen && (
+          <CompetitorDiscoveryModal
+            articleId={articleId}
+            articleTitle={articleTitle}
+            primaryKeyword={primaryKeyword}
+            companyName={companyName}
+            articleLanguage={articleLanguage}
+            goalContext={resolvedGoalContext}
+            locale={locale}
+            onClose={() => {
+              setCompetitorModalOpen(false);
+              void onRefresh();
+            }}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 };

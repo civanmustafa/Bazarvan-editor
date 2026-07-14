@@ -6,7 +6,11 @@ import type {
 import { deduplicateExternalAnalysisTasks } from './externalAnalysisTaskRegistry';
 import { getSupabaseClient } from './supabaseClient';
 
-export type ExternalAnalysisJobType = 'semantic_keywords_lsi' | 'engineering_command' | 'competitor_extraction';
+export type ExternalAnalysisJobType =
+  | 'semantic_keywords_lsi'
+  | 'engineering_command'
+  | 'competitor_discovery'
+  | 'competitor_extraction';
 
 export type ExternalAnalysisJobStatus =
   | 'waiting_for_prerequisites'
@@ -51,10 +55,13 @@ export type ExternalAnalysisArticleState = {
   article_id: string;
   semantic_ready: boolean;
   external_analysis_ready: boolean;
+  competitor_discovery_ready: boolean;
   semantic_readiness_signature: string;
   external_analysis_readiness_signature: string;
+  competitor_discovery_signature: string;
   semantic_missing_fields: string[];
   external_analysis_missing_fields: string[];
+  competitor_discovery_missing_fields: string[];
   engineering_command_mode: 'default' | 'custom';
   custom_engineering_command_ids: string[];
   external_analysis_effective_command_ids: string[];
@@ -66,6 +73,10 @@ export type ExternalAnalysisDashboardSummary = {
   articleId: string;
   state: ExternalAnalysisArticleState | null;
   latestSemanticJob: ExternalAnalysisJobRow | null;
+  latestCompetitorDiscoveryJob: ExternalAnalysisJobRow | null;
+  latestCompetitorExtractionJob: ExternalAnalysisJobRow | null;
+  competitorReadyCount: number;
+  competitorTotalCount: number;
   activeEngineeringCount: number;
   completedEngineeringCount: number;
   completedTaskCount: number;
@@ -128,6 +139,10 @@ const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
 const MISSING_FIELD_LABELS: Record<string, { ar: string; en: string }> = {
   draft_status: { ar: 'حالة المقالة: مسودة', en: 'Draft article status' },
   article_title: { ar: 'عنوان المقالة', en: 'Article title' },
+  article_title_or_primary_keyword: {
+    ar: 'عنوان المقالة أو الكلمة المفتاحية الأساسية',
+    en: 'Article title or primary keyword',
+  },
   editor_text: { ar: 'نص المقالة', en: 'Article text' },
   primary_keyword: { ar: 'الكلمة المفتاحية الأساسية', en: 'Primary keyword' },
   alternative_keywords: { ar: 'الصيغ البديلة', en: 'Alternative keyword forms' },
@@ -161,9 +176,11 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   requested_by: row.requested_by || null,
   job_type: row.job_type === 'semantic_keywords_lsi'
     ? 'semantic_keywords_lsi'
-    : row.job_type === 'competitor_extraction'
-      ? 'competitor_extraction'
-      : 'engineering_command',
+    : row.job_type === 'competitor_discovery'
+      ? 'competitor_discovery'
+      : row.job_type === 'competitor_extraction'
+        ? 'competitor_extraction'
+        : 'engineering_command',
   origin: row.origin === 'manual' ? 'manual' : 'auto',
   status: row.status as ExternalAnalysisJobStatus,
   batch_key: row.batch_key || null,
@@ -279,10 +296,10 @@ export const listExternalAnalysisDashboardSummaries = async (
   const ids = Array.from(new Set(articleIds.map(item => item.trim()).filter(Boolean)));
   if (ids.length === 0) return {};
   const supabase = getSupabaseClient();
-  const [stateResult, jobsResult] = await Promise.all([
+  const [stateResult, jobsResult, competitorsResult] = await Promise.all([
     supabase
       .from('ai_external_analysis_article_state')
-      .select('article_id,semantic_ready,external_analysis_ready,semantic_readiness_signature,external_analysis_readiness_signature,semantic_missing_fields,external_analysis_missing_fields,engineering_command_mode,custom_engineering_command_ids,external_analysis_effective_command_ids,engineering_command_selection_updated_at,updated_at')
+      .select('article_id,semantic_ready,external_analysis_ready,competitor_discovery_ready,semantic_readiness_signature,external_analysis_readiness_signature,competitor_discovery_signature,semantic_missing_fields,external_analysis_missing_fields,competitor_discovery_missing_fields,engineering_command_mode,custom_engineering_command_ids,external_analysis_effective_command_ids,engineering_command_selection_updated_at,updated_at')
       .in('article_id', ids),
     supabase
       .from('ai_external_analysis_jobs')
@@ -290,9 +307,14 @@ export const listExternalAnalysisDashboardSummaries = async (
       .in('article_id', ids)
       .order('created_at', { ascending: false })
       .limit(Math.max(100, ids.length * 50)),
+    supabase
+      .from('article_competitors')
+      .select('article_id,status,discovery_signature')
+      .in('article_id', ids),
   ]);
   if (stateResult.error) throw stateResult.error;
   if (jobsResult.error) throw jobsResult.error;
+  if (competitorsResult.error) throw competitorsResult.error;
 
   const stateByArticle = new Map<string, ExternalAnalysisArticleState>();
   (stateResult.data || []).forEach(row => {
@@ -300,16 +322,30 @@ export const listExternalAnalysisDashboardSummaries = async (
       article_id: String(row.article_id),
       semantic_ready: row.semantic_ready === true,
       external_analysis_ready: row.external_analysis_ready === true,
+      competitor_discovery_ready: row.competitor_discovery_ready === true,
       semantic_readiness_signature: String(row.semantic_readiness_signature || ''),
       external_analysis_readiness_signature: String(row.external_analysis_readiness_signature || ''),
+      competitor_discovery_signature: String(row.competitor_discovery_signature || ''),
       semantic_missing_fields: toStringList(row.semantic_missing_fields),
       external_analysis_missing_fields: toStringList(row.external_analysis_missing_fields),
+      competitor_discovery_missing_fields: toStringList(row.competitor_discovery_missing_fields),
       engineering_command_mode: row.engineering_command_mode === 'custom' ? 'custom' : 'default',
       custom_engineering_command_ids: toStringList(row.custom_engineering_command_ids),
       external_analysis_effective_command_ids: toStringList(row.external_analysis_effective_command_ids),
       engineering_command_selection_updated_at: row.engineering_command_selection_updated_at || null,
       updated_at: String(row.updated_at || ''),
     });
+  });
+
+  const competitorsByArticle = new Map<string, Array<{ status: string; discoverySignature: string }>>();
+  (competitorsResult.data || []).forEach(row => {
+    const articleId = String(row.article_id || '');
+    const values = competitorsByArticle.get(articleId) || [];
+    values.push({
+      status: String(row.status || ''),
+      discoverySignature: String(row.discovery_signature || ''),
+    });
+    competitorsByArticle.set(articleId, values);
   });
 
   const jobsByArticle = new Map<string, ExternalAnalysisJobRow[]>();
@@ -340,6 +376,24 @@ export const listExternalAnalysisDashboardSummaries = async (
       )
       && effectiveCommandIds.has(job.command_id || '')
     ));
+    const competitorDiscoveryJobs = jobs.filter(job => (
+      job.job_type === 'competitor_discovery'
+      && (
+        !state?.competitor_discovery_signature
+        || job.readiness_signature === state.competitor_discovery_signature
+      )
+    ));
+    const competitorExtractionJobs = jobs.filter(job => (
+      job.job_type === 'competitor_extraction'
+      && (
+        !state?.competitor_discovery_signature
+        || job.readiness_signature === state.competitor_discovery_signature
+      )
+    ));
+    const competitorRows = competitorsByArticle.get(articleId) || [];
+    const currentCompetitorRows = state?.competitor_discovery_signature
+      ? competitorRows.filter(row => row.discoverySignature === state.competitor_discovery_signature)
+      : competitorRows;
     const latestSemanticJob = semanticJobs[0] || null;
     const activeEngineeringJobs = engineeringJobs.filter(job => EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status));
     const completedEngineeringCount = engineeringJobs.filter(job => job.status === 'completed').length;
@@ -352,6 +406,10 @@ export const listExternalAnalysisDashboardSummaries = async (
       articleId,
       state,
       latestSemanticJob,
+      latestCompetitorDiscoveryJob: competitorDiscoveryJobs[0] || null,
+      latestCompetitorExtractionJob: competitorExtractionJobs[0] || null,
+      competitorReadyCount: currentCompetitorRows.filter(row => row.status === 'completed').length,
+      competitorTotalCount: currentCompetitorRows.length,
       activeEngineeringCount: activeEngineeringJobs.length,
       completedEngineeringCount,
       completedTaskCount,

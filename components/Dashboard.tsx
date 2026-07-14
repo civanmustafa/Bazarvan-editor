@@ -938,6 +938,11 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                 {showExternalAnalysisControls && articleId && onRefreshExternalAnalysis && (
                     <ExternalAnalysisCardControls
                         articleId={articleId}
+                        articleTitle={remoteActivity.title || title || ''}
+                        primaryKeyword={remoteActivity.keywords?.primary || ''}
+                        companyName={remoteActivity.keywords?.company || ''}
+                        articleLanguage={remoteActivity.articleLanguage === 'en' ? 'en' : 'ar'}
+                        goalContext={remoteActivity.goalContext}
                         hasAlternativeKeywords={hasAlternativeKeywords}
                         hasLsiKeywords={hasLsiKeywords}
                         summary={externalAnalysisSummary}
@@ -1362,6 +1367,7 @@ const Dashboard: React.FC = () => {
       .channel(`dashboard-external-analysis-${currentUserId || 'profile'}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ai_external_analysis_jobs' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ai_external_analysis_article_state' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'article_competitors' }, scheduleRefresh)
       .subscribe();
 
     return () => {

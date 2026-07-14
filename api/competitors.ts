@@ -107,10 +107,10 @@ const listCompetitors = async (
     includeContent ? 'content_text' : '',
     'word_count,status,extraction_provider,error_code,error_message,fetched_at,selected_by,created_at,updated_at',
   ].filter(Boolean).join(',');
-  const [competitorsResult, activeJobResult, latestJobResult] = await Promise.all([
+  const [competitorsResult, activeJobResult, latestJobResult, discoveryStateResult, discoveryJobsResult] = await Promise.all([
     supabase
       .from('article_competitors')
-      .select(competitorColumns)
+      .select(`${competitorColumns},discovery_signature`)
       .eq('article_id', articleId)
       .order('position', { ascending: true }),
     supabase
@@ -130,15 +130,111 @@ const listCompetitors = async (
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from('ai_external_analysis_article_state')
+      .select('competitor_discovery_ready,competitor_discovery_missing_fields,competitor_discovery_signature')
+      .eq('article_id', articleId)
+      .maybeSingle(),
+    supabase
+      .from('ai_external_analysis_jobs')
+      .select('id,article_id,job_type,origin,status,readiness_signature,input_snapshot,result,progress,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,completed_at,created_at,updated_at')
+      .eq('article_id', articleId)
+      .eq('job_type', 'competitor_discovery')
+      .order('created_at', { ascending: false })
+      .limit(10),
   ]);
   if (competitorsResult.error) throw competitorsResult.error;
   if (activeJobResult.error) throw activeJobResult.error;
   if (latestJobResult.error) throw latestJobResult.error;
+  if (discoveryStateResult.error) throw discoveryStateResult.error;
+  if (discoveryJobsResult.error) throw discoveryJobsResult.error;
+  const discoveryState = discoveryStateResult.data || null;
+  const discoverySignature = toText(discoveryState?.competitor_discovery_signature);
+  const discoveryJobs = discoveryJobsResult.data || [];
+  const discoveryJob = discoveryJobs.find(job => (
+    !discoverySignature || job.readiness_signature === discoverySignature
+  )) || discoveryJobs[0] || null;
   return {
     competitors: competitorsResult.data || [],
     activeJob: activeJobResult.data || null,
     latestJob: latestJobResult.data || null,
+    discoveryState,
+    discoveryJob,
   };
+};
+
+const readCompetitorDiscoveryState = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+) => {
+  const { data, error } = await supabase
+    .from('ai_external_analysis_article_state')
+    .select('competitor_discovery_ready,competitor_discovery_missing_fields,competitor_discovery_signature')
+    .eq('article_id', articleId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+};
+
+const persistCompetitorDiscoveryResult = async (
+  supabase: SupabaseAdmin,
+  options: {
+    articleId: string;
+    userId: string;
+    inputSnapshot: Record<string, unknown>;
+    result: Record<string, unknown>;
+  },
+) => {
+  const { data, error } = await supabase.rpc('save_competitor_discovery_result', {
+    p_article_id: options.articleId,
+    p_requested_by: options.userId,
+    p_input_snapshot: options.inputSnapshot,
+    p_result: options.result,
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] || null : data || null;
+};
+
+const markCompetitorSelectionAccepted = async (
+  supabase: SupabaseAdmin,
+  options: {
+    articleId: string;
+    userId: string;
+    discoverySignature: string;
+    selectedUrls: string[];
+  },
+): Promise<void> => {
+  if (!options.discoverySignature) return;
+  const { data: job, error: readError } = await supabase
+    .from('ai_external_analysis_jobs')
+    .select('id,result')
+    .eq('article_id', options.articleId)
+    .eq('job_type', 'competitor_discovery')
+    .eq('readiness_signature', options.discoverySignature)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!job) return;
+  const result = isRecord(job.result) ? job.result : {};
+  const { error: updateError } = await supabase
+    .from('ai_external_analysis_jobs')
+    .update({
+      result: {
+        ...result,
+        reviewStatus: 'accepted',
+        reviewedBy: options.userId,
+        reviewedAt: new Date().toISOString(),
+        selectedUrls: options.selectedUrls,
+      },
+      progress: {
+        stage: 'selection_accepted',
+        selectedCount: options.selectedUrls.length,
+        updatedAt: new Date().toISOString(),
+      },
+    })
+    .eq('id', job.id);
+  if (updateError) throw updateError;
 };
 
 const normalizeSelectedResults = (value: unknown): CompetitorSearchResult[] => {
@@ -306,6 +402,43 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
 
   await requireArticleWriteAccess(supabase, articleId, principal.userId);
+  if (action === 'ensure_discovery') {
+    consumeApiRateLimit('competitors-ensure-discovery', principal.userId, 30);
+    const { data: jobId, error: enqueueError } = await supabase.rpc(
+      'enqueue_competitor_discovery_job',
+      {
+        p_article_id: articleId,
+        p_requested_by: principal.userId,
+        p_origin: 'manual',
+      },
+    );
+    if (enqueueError) throw enqueueError;
+    const normalizedJobId = toText(Array.isArray(jobId) ? jobId[0] : jobId);
+    if (!normalizedJobId) {
+      const state = await readCompetitorDiscoveryState(supabase, articleId);
+      throw new CompetitorApiError({
+        message: 'Competitor discovery prerequisites are incomplete.',
+        status: 409,
+        code: 'competitor_discovery_prerequisites_missing',
+        details: {
+          missingFields: Array.isArray(state?.competitor_discovery_missing_fields)
+            ? state.competitor_discovery_missing_fields
+            : [],
+        },
+      });
+    }
+    const { data: job, error: jobError } = await supabase
+      .from('ai_external_analysis_jobs')
+      .select('id,article_id,job_type,origin,status,readiness_signature,input_snapshot,result,progress,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,completed_at,created_at,updated_at')
+      .eq('id', normalizedJobId)
+      .single();
+    if (jobError) throw jobError;
+    return {
+      status: ACTIVE_JOB_STATUSES.includes(String(job.status)) ? 202 : 200,
+      body: { ok: true, action, job },
+      headers: getCorsResponseHeaders(req),
+    };
+  }
   if (action === 'search') {
     consumeApiRateLimit('competitors-search', principal.userId, 20);
     const query = toText(body.query);
@@ -344,6 +477,31 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       maxResults: COMPETITOR_SEARCH_RESULT_LIMIT,
       maxSelected: MAX_ARTICLE_COMPETITORS,
     });
+    const inputSnapshot = {
+      queryType,
+      queryText: query,
+      articleTitle,
+      primaryKeyword,
+      companyName,
+      articleLanguage: language,
+      pageType,
+      searchIntent,
+      audienceScope,
+      targetCountry,
+    };
+    const discoveryJob = await persistCompetitorDiscoveryResult(supabase, {
+      articleId,
+      userId: principal.userId,
+      inputSnapshot,
+      result: {
+        status: selection.results.length > 0 ? 'awaiting_review' : 'no_results',
+        query,
+        queryType,
+        results: selection.results,
+        selection: selection.summary,
+        discoveredAt: new Date().toISOString(),
+      },
+    });
     return {
       status: 200,
       body: {
@@ -353,6 +511,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
         queryType,
         results: selection.results,
         selection: selection.summary,
+        discoveryJob,
       },
       headers: getCorsResponseHeaders(req),
     };
@@ -395,6 +554,8 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     }
     const queryText = toText(body.query);
     const results = normalizeSelectedResults(body.results);
+    const discoveryState = await readCompetitorDiscoveryState(supabase, articleId);
+    const discoverySignature = toText(discoveryState?.competitor_discovery_signature);
     const queued = await enqueueExtraction(supabase, {
       articleId,
       userId: principal.userId,
@@ -402,6 +563,34 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       queryText,
       results,
     });
+    if (discoverySignature) {
+      const queuedJob = isRecord(queued) && isRecord(queued.job) ? queued.job : {};
+      const extractionJobId = toText(queuedJob.id);
+      if (extractionJobId) {
+        const { error: jobSignatureError } = await supabase
+          .from('ai_external_analysis_jobs')
+          .update({
+            readiness_signature: discoverySignature,
+            input_snapshot: {
+              ...(isRecord(queuedJob.input_snapshot) ? queuedJob.input_snapshot : {}),
+              discoverySignature,
+            },
+          })
+          .eq('id', extractionJobId);
+        if (jobSignatureError) throw jobSignatureError;
+      }
+      const { error: signatureError } = await supabase
+        .from('article_competitors')
+        .update({ discovery_signature: discoverySignature })
+        .eq('article_id', articleId);
+      if (signatureError) throw signatureError;
+      await markCompetitorSelectionAccepted(supabase, {
+        articleId,
+        userId: principal.userId,
+        discoverySignature,
+        selectedUrls: results.map(result => result.canonicalUrl),
+      });
+    }
     return {
       status: 202,
       body: { ok: true, action, queued },
@@ -432,7 +621,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new CompetitorApiError({
-    message: 'action must be list, search, preview, extract, cancel, or remove.',
+    message: 'action must be list, ensure_discovery, search, preview, extract, cancel, or remove.',
     code: 'invalid_action',
   });
 };

@@ -181,6 +181,28 @@ const ExternalAnalysisReportsTable: React.FC<{
         </div>
       );
     }
+    if (job.job_type === 'competitor_discovery') {
+      const queryText = textValue(job.input_snapshot?.queryText);
+      const result = isRecord(job.result) ? job.result : {};
+      const candidateCount = Array.isArray(result.results) ? result.results.length : 0;
+      const selection = isRecord(result.selection) ? result.selection : {};
+      const selectedCount = Number(selection.autoSelectedCount) || 0;
+      return (
+        <div>
+          <div className="font-black text-gray-800 dark:text-gray-100">
+            {locale === 'ar' ? 'اكتشاف وترتيب المنافسين' : 'Competitor search and ranking'}
+          </div>
+          <div className="mt-1 max-w-[260px] break-words text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">
+            {queryText || '-'}
+          </div>
+          <div className="mt-1 text-[11px] text-gray-500">
+            {locale === 'ar'
+              ? `النتائج: ${candidateCount} · المحدد تلقائيًا: ${selectedCount}`
+              : `Results: ${candidateCount} · Auto-selected: ${selectedCount}`}
+          </div>
+        </div>
+      );
+    }
     if (job.job_type === 'competitor_extraction') {
       const sourceCount = Number(job.input_snapshot?.sourceCount) || 0;
       const queryText = textValue(job.input_snapshot?.queryText);
@@ -298,6 +320,8 @@ const ExternalAnalysisReportsTable: React.FC<{
               const result = isRecord(job.result) ? job.result : {};
               const generatedCount = job.job_type === 'semantic_keywords_lsi'
                 ? (Array.isArray(result.appliedFields) ? result.appliedFields.length : 0)
+                : job.job_type === 'competitor_discovery'
+                  ? (Array.isArray(result.results) ? result.results.length : 0)
                 : job.job_type === 'competitor_extraction'
                   ? Number(result.successfulCount) || 0
                   : (Array.isArray(result.patches) ? result.patches.length : 0);
@@ -340,6 +364,8 @@ const ExternalAnalysisReportsTable: React.FC<{
                       <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-300">
                         {job.job_type === 'semantic_keywords_lsi'
                           ? `حقول مطبقة: ${generatedCount}`
+                          : job.job_type === 'competitor_discovery'
+                            ? `منافسون مقترحون: ${generatedCount}`
                           : job.job_type === 'competitor_extraction'
                             ? `مواقع مسحوبة: ${generatedCount}`
                             : `اقتراحات: ${generatedCount}`}

@@ -1,6 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-export type ExternalAnalysisJobType = 'semantic_keywords_lsi' | 'engineering_command' | 'competitor_extraction';
+export type ExternalAnalysisJobType =
+  | 'semantic_keywords_lsi'
+  | 'engineering_command'
+  | 'competitor_discovery'
+  | 'competitor_extraction';
 
 export type ExternalAnalysisJobStatus =
   | 'waiting_for_prerequisites'

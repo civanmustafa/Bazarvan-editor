@@ -1,6 +1,7 @@
 import './loadEnv';
 import './externalSemanticAnalysisExecutor';
 import './externalEngineeringAnalysisExecutor';
+import './competitorDiscoveryExecutor';
 import './competitorExtractionExecutor';
 
 import os from 'node:os';

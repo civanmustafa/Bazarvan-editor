@@ -30,6 +30,7 @@ export type CompetitorDiscoveryRow = {
   fetchedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  discoverySignature: string;
 };
 
 export type CompetitorSearchResult = {
@@ -106,6 +107,16 @@ export type CompetitorExtractionJob = {
   completed_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  job_type?: 'competitor_discovery' | 'competitor_extraction';
+  readiness_signature?: string | null;
+  input_snapshot?: Record<string, unknown>;
+  result?: Record<string, unknown> | null;
+};
+
+export type CompetitorDiscoveryReadiness = {
+  ready: boolean;
+  missingFields: string[];
+  signature: string;
 };
 
 export type CompetitorDiscoveryState = {
@@ -113,6 +124,8 @@ export type CompetitorDiscoveryState = {
   competitors: CompetitorDiscoveryRow[];
   activeJob: CompetitorExtractionJob | null;
   latestJob: CompetitorExtractionJob | null;
+  discoveryJob: CompetitorExtractionJob | null;
+  discoveryReadiness: CompetitorDiscoveryReadiness | null;
 };
 
 export class CompetitorDiscoveryRequestError extends Error {
@@ -176,6 +189,7 @@ const toCompetitorRow = (value: unknown): CompetitorDiscoveryRow | null => {
     fetchedAt: value.fetched_at ? String(value.fetched_at) : null,
     createdAt: String(value.created_at || ''),
     updatedAt: String(value.updated_at || ''),
+    discoverySignature: toText(value.discovery_signature),
   };
 };
 
@@ -193,6 +207,10 @@ const toJob = (value: unknown): CompetitorExtractionJob | null => {
     completed_at: value.completed_at ? String(value.completed_at) : null,
     created_at: value.created_at ? String(value.created_at) : '',
     updated_at: value.updated_at ? String(value.updated_at) : '',
+    job_type: value.job_type === 'competitor_discovery' ? 'competitor_discovery' : 'competitor_extraction',
+    readiness_signature: value.readiness_signature ? String(value.readiness_signature) : null,
+    input_snapshot: isRecord(value.input_snapshot) ? value.input_snapshot : {},
+    result: isRecord(value.result) ? value.result : null,
   };
 };
 
@@ -229,6 +247,62 @@ const requestCompetitors = async (body: Record<string, unknown>): Promise<Record
   return normalized;
 };
 
+const parseCompetitorSearchResults = (value: unknown): CompetitorSearchResult[] => (
+  Array.isArray(value)
+    ? value.flatMap((entry: unknown) => {
+        if (!isRecord(entry)) return [];
+        const canonicalUrl = toText(entry.canonicalUrl);
+        if (!canonicalUrl) return [];
+        const signals = isRecord(entry.signals) ? entry.signals : {};
+        return [{
+          url: toText(entry.url) || canonicalUrl,
+          canonicalUrl,
+          domain: toText(entry.domain),
+          title: toText(entry.title),
+          description: toText(entry.description),
+          position: Math.max(1, Number(entry.position) || 1),
+          selectionRank: Math.max(1, Number(entry.selectionRank) || 1),
+          selectionScore: Math.max(0, Math.min(100, Number(entry.selectionScore) || 0)),
+          confidence: Math.max(0, Math.min(100, Number(entry.confidence) || 0)),
+          autoSelected: entry.autoSelected === true,
+          eligible: entry.eligible === true,
+          inferredIntent: (toText(entry.inferredIntent) || 'unknown') as CompetitorSearchResult['inferredIntent'],
+          inferredPageType: (toText(entry.inferredPageType) || 'unknown') as CompetitorSearchResult['inferredPageType'],
+          reasonCodes: toStringList(entry.reasonCodes),
+          warningCodes: toStringList(entry.warningCodes),
+          signals: {
+            intentMatch: Math.max(0, Math.min(100, Number(signals.intentMatch) || 0)),
+            relevance: Math.max(0, Math.min(100, Number(signals.relevance) || 0)),
+            searchStrength: Math.max(0, Math.min(100, Number(signals.searchStrength) || 0)),
+            pageTypeMatch: Math.max(0, Math.min(100, Number(signals.pageTypeMatch) || 0)),
+            languageMatch: Math.max(0, Math.min(100, Number(signals.languageMatch) || 0)),
+            metadataQuality: Math.max(0, Math.min(100, Number(signals.metadataQuality) || 0)),
+            locationMatch: Math.max(0, Math.min(100, Number(signals.locationMatch) || 0)),
+          },
+        }];
+      })
+    : []
+);
+
+const parseCompetitorSelectionSummary = (
+  value: unknown,
+  results: CompetitorSearchResult[],
+): CompetitorSelectionSummary => {
+  const selection = isRecord(value) ? value : {};
+  return {
+    strategy: 'automatic_review',
+    engineVersion: toText(selection.engineVersion),
+    targetIntent: (toText(selection.targetIntent) || 'unknown') as CompetitorSelectionSummary['targetIntent'],
+    targetPageType: (toText(selection.targetPageType) || 'unknown') as CompetitorSelectionSummary['targetPageType'],
+    confidence: Math.max(0, Math.min(100, Number(selection.confidence) || 0)),
+    candidateCount: Math.max(0, Number(selection.candidateCount) || 0),
+    reviewedCount: Math.max(0, Number(selection.reviewedCount) || results.length),
+    filteredCount: Math.max(0, Number(selection.filteredCount) || 0),
+    autoSelectedCount: Math.max(0, Number(selection.autoSelectedCount) || 0),
+    autoSelectedUrls: toStringList(selection.autoSelectedUrls),
+  };
+};
+
 export const listArticleCompetitors = async (
   articleId: string,
   options: { includeContent?: boolean } = {},
@@ -245,7 +319,24 @@ export const listArticleCompetitors = async (
       : [],
     activeJob: toJob(payload.activeJob),
     latestJob: toJob(payload.latestJob),
+    discoveryJob: toJob(payload.discoveryJob),
+    discoveryReadiness: isRecord(payload.discoveryState)
+      ? {
+          ready: payload.discoveryState.competitor_discovery_ready === true,
+          missingFields: toStringList(payload.discoveryState.competitor_discovery_missing_fields),
+          signature: toText(payload.discoveryState.competitor_discovery_signature),
+        }
+      : null,
   };
+};
+
+export const ensureArticleCompetitorDiscovery = async (
+  articleId: string,
+): Promise<CompetitorExtractionJob> => {
+  const payload = await requestCompetitors({ action: 'ensure_discovery', articleId });
+  const job = toJob(payload.job);
+  if (!job) throw new Error('Competitor discovery response did not include a job.');
+  return job;
 };
 
 export const searchArticleCompetitors = async (options: {
@@ -262,55 +353,23 @@ export const searchArticleCompetitors = async (options: {
   companyName: string;
 }): Promise<CompetitorSearchResponse> => {
   const payload = await requestCompetitors({ action: 'search', ...options });
-  const results = Array.isArray(payload.results)
-    ? payload.results.flatMap((value: unknown) => {
-        if (!isRecord(value)) return [];
-        const canonicalUrl = toText(value.canonicalUrl);
-        if (!canonicalUrl) return [];
-        const signals = isRecord(value.signals) ? value.signals : {};
-        return [{
-          url: toText(value.url) || canonicalUrl,
-          canonicalUrl,
-          domain: toText(value.domain),
-          title: toText(value.title),
-          description: toText(value.description),
-          position: Math.max(1, Number(value.position) || 1),
-          selectionRank: Math.max(1, Number(value.selectionRank) || 1),
-          selectionScore: Math.max(0, Math.min(100, Number(value.selectionScore) || 0)),
-          confidence: Math.max(0, Math.min(100, Number(value.confidence) || 0)),
-          autoSelected: value.autoSelected === true,
-          eligible: value.eligible === true,
-          inferredIntent: toText(value.inferredIntent) as CompetitorSearchResult['inferredIntent'] || 'unknown',
-          inferredPageType: toText(value.inferredPageType) as CompetitorSearchResult['inferredPageType'] || 'unknown',
-          reasonCodes: toStringList(value.reasonCodes),
-          warningCodes: toStringList(value.warningCodes),
-          signals: {
-            intentMatch: Math.max(0, Math.min(100, Number(signals.intentMatch) || 0)),
-            relevance: Math.max(0, Math.min(100, Number(signals.relevance) || 0)),
-            searchStrength: Math.max(0, Math.min(100, Number(signals.searchStrength) || 0)),
-            pageTypeMatch: Math.max(0, Math.min(100, Number(signals.pageTypeMatch) || 0)),
-            languageMatch: Math.max(0, Math.min(100, Number(signals.languageMatch) || 0)),
-            metadataQuality: Math.max(0, Math.min(100, Number(signals.metadataQuality) || 0)),
-            locationMatch: Math.max(0, Math.min(100, Number(signals.locationMatch) || 0)),
-          },
-        }];
-      })
-    : [];
-  const selection = isRecord(payload.selection) ? payload.selection : {};
+  const results = parseCompetitorSearchResults(payload.results);
   return {
     results,
-    selection: {
-      strategy: 'automatic_review',
-      engineVersion: toText(selection.engineVersion),
-      targetIntent: (toText(selection.targetIntent) || 'unknown') as CompetitorSelectionSummary['targetIntent'],
-      targetPageType: (toText(selection.targetPageType) || 'unknown') as CompetitorSelectionSummary['targetPageType'],
-      confidence: Math.max(0, Math.min(100, Number(selection.confidence) || 0)),
-      candidateCount: Math.max(0, Number(selection.candidateCount) || 0),
-      reviewedCount: Math.max(0, Number(selection.reviewedCount) || results.length),
-      filteredCount: Math.max(0, Number(selection.filteredCount) || 0),
-      autoSelectedCount: Math.max(0, Number(selection.autoSelectedCount) || 0),
-      autoSelectedUrls: toStringList(selection.autoSelectedUrls),
-    },
+    selection: parseCompetitorSelectionSummary(payload.selection, results),
+  };
+};
+
+export const getPersistedCompetitorDiscovery = (
+  state: CompetitorDiscoveryState,
+): CompetitorSearchResponse | null => {
+  const result = state.discoveryJob?.result;
+  if (!result) return null;
+  const results = parseCompetitorSearchResults(result.results);
+  if (results.length === 0 && !isRecord(result.selection)) return null;
+  return {
+    results,
+    selection: parseCompetitorSelectionSummary(result.selection, results),
   };
 };
 
