@@ -148,6 +148,19 @@ test('browser, API, and worker consume the shared registries', async () => {
   });
 });
 
+test('user settings do not duplicate centralized Gemini controls', async () => {
+  const settingsPage = await readWorkspaceFile('components/SettingsPage.tsx');
+  const personalPreferences = settingsPage.slice(
+    settingsPage.indexOf('const renderPersonalPreferences'),
+    settingsPage.indexOf('const renderAiSettings'),
+  );
+
+  assert.doesNotMatch(personalPreferences, /موديل Gemini الافتراضي/);
+  assert.doesNotMatch(personalPreferences, /التبديل بين نماذج جيميني المجانية/);
+  assert.match(settingsPage, /موديل Gemini الافتراضي للتحليل الخارجي/);
+  assert.match(settingsPage, /التبديل بين نماذج جيميني المجانية للعامل الخارجي/);
+});
+
 test('phase 4 migration creates protected durable user preferences', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260713020000_phase_4_settings_and_model_registry.sql',

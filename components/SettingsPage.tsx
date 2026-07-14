@@ -32,13 +32,7 @@ import {
 } from '../utils/systemSettings';
 import {
   buildGeminiFreeModelOptions,
-  GEMINI_FREE_MODEL_CHANGED_EVENT,
-  GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT,
-  getSelectedGeminiFreeModel,
-  isGeminiFreeModelFallbackEnabled,
   normalizeGeminiFreeModel,
-  setGeminiFreeModelFallbackEnabled,
-  setSelectedGeminiFreeModel,
 } from '../utils/geminiModelPreference';
 import {
   getDefaultSystemSettings,
@@ -220,8 +214,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
-  const [selectedGeminiFreeModel, setSelectedGeminiFreeModelState] = useState(() => getSelectedGeminiFreeModel());
-  const [isGeminiModelFallbackEnabled, setIsGeminiModelFallbackEnabled] = useState(() => isGeminiFreeModelFallbackEnabled());
 
   const tabs: SettingsTab[] = useMemo(() => [
     { key: 'system', label: 'النظام', path: '/settings/system', icon: <Shield size={16} /> },
@@ -270,31 +262,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     void loadSettings();
   }, [loadSettings]);
 
-  useEffect(() => {
-    const normalizedModel = normalizeGeminiFreeModel(selectedGeminiFreeModel, geminiFreeModelValues);
-    if (normalizedModel === selectedGeminiFreeModel) return;
-    setSelectedGeminiFreeModelState(normalizedModel);
-    setSelectedGeminiFreeModel(normalizedModel, geminiFreeModelValues);
-  }, [geminiFreeModelValues, selectedGeminiFreeModel]);
-
-  useEffect(() => {
-    const syncModelPreference = () => {
-      setSelectedGeminiFreeModelState(normalizeGeminiFreeModel(
-        getSelectedGeminiFreeModel(),
-        geminiFreeModelValues,
-      ));
-    };
-    const syncFallbackPreference = () => {
-      setIsGeminiModelFallbackEnabled(isGeminiFreeModelFallbackEnabled());
-    };
-    window.addEventListener(GEMINI_FREE_MODEL_CHANGED_EVENT, syncModelPreference);
-    window.addEventListener(GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT, syncFallbackPreference);
-    return () => {
-      window.removeEventListener(GEMINI_FREE_MODEL_CHANGED_EVENT, syncModelPreference);
-      window.removeEventListener(GEMINI_FREE_MODEL_FALLBACK_CHANGED_EVENT, syncFallbackPreference);
-    };
-  }, [geminiFreeModelValues]);
-
   const updateSetting = <K extends SystemSettingKey>(key: K, field: string, value: unknown) => {
     setSettings(prev => ({
       ...prev,
@@ -304,26 +271,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       },
     }));
     setSavedMessage('');
-  };
-
-  const handleGeminiFreeModelPreferenceChange = (value: string, shouldShowMessage = true) => {
-    const selectedModel = setSelectedGeminiFreeModel(value, geminiFreeModelValues);
-    setSelectedGeminiFreeModelState(selectedModel);
-    if (shouldShowMessage) {
-      setError('');
-      setSavedMessage('تم حفظ موديل Gemini الافتراضي لحسابك.');
-    }
-    return selectedModel;
-  };
-
-  const handleGeminiModelFallbackPreferenceChange = (enabled: boolean, shouldShowMessage = true) => {
-    setIsGeminiModelFallbackEnabled(setGeminiFreeModelFallbackEnabled(enabled));
-    if (shouldShowMessage) {
-      setError('');
-      setSavedMessage(enabled
-        ? 'تم تفعيل التبديل التلقائي بين نماذج Gemini المجانية لحسابك.'
-        : 'تم إيقاف التبديل التلقائي بين نماذج Gemini المجانية لحسابك.');
-    }
   };
 
   const handleSave = async () => {
@@ -434,18 +381,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </div>
         </div>
 
-        <FieldLabel label="موديل Gemini الافتراضي">
-          <SelectInput
-            value={selectedGeminiFreeModel}
-            onChange={value => handleGeminiFreeModelPreferenceChange(value)}
-            options={geminiFreeModelOptions}
-          />
-        </FieldLabel>
-        <ToggleField
-          label="التبديل بين نماذج جيميني المجانية"
-          checked={isGeminiModelFallbackEnabled}
-          onChange={value => handleGeminiModelFallbackPreferenceChange(value)}
-        />
       </div>
     </SettingsSection>
   );
@@ -471,7 +406,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </FieldLabel>
           <FieldLabel label="موديل Gemini الافتراضي للتحليل الخارجي">
             <SelectInput
-              value={normalizeGeminiFreeModel(String(settings.ai.defaultGeminiModel || selectedGeminiFreeModel), geminiFreeModelValues)}
+              value={normalizeGeminiFreeModel(String(settings.ai.defaultGeminiModel || ''), geminiFreeModelValues)}
               onChange={value => updateSetting('ai', 'defaultGeminiModel', value)}
               options={geminiFreeModelOptions}
             />
