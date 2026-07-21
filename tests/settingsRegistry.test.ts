@@ -62,6 +62,19 @@ const importSettingsRegistry = async (): Promise<any> => {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 };
 
+const importAiProviderCapabilities = async (): Promise<any> => {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL('../constants/aiProviderCapabilities.ts', import.meta.url))],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node20',
+    write: false,
+  });
+  const source = result.outputFiles[0].text;
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+};
+
 test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
   assert.equal(GEMINI_ANALYSIS_MODEL, MODEL_REGISTRY.gemini.free[0].id);
   assert.deepEqual(
@@ -129,6 +142,45 @@ test('ArticleStatusRegistry owns workflow states, dashboard priority, and analys
   assert.equal(isExternalAnalysisArticleStatus('content_preparation'), true);
   assert.equal(isExternalAnalysisArticleStatus('draft'), true);
   assert.equal(isExternalAnalysisArticleStatus('in_review'), false);
+});
+
+test('AiProviderCapabilities centrally gates OpenAI and resolves a safe default provider', async () => {
+  const {
+    getDefaultAiPatchProvider,
+    isAiPatchProviderAvailable,
+    isAiPatchProviderEnabled,
+    normalizeAiProviderCapabilities,
+  } = await importAiProviderCapabilities();
+  const disabled = normalizeAiProviderCapabilities({
+    providers: {
+      openai: { enabled: false, configured: true, model: 'gpt-enabled-but-blocked' },
+    },
+    defaultProvider: 'openai',
+  });
+  assert.equal(isAiPatchProviderEnabled(disabled, 'chatgpt'), false);
+  assert.equal(isAiPatchProviderAvailable(disabled, 'chatgpt'), false);
+  assert.equal(getDefaultAiPatchProvider(disabled), 'gemini');
+
+  const enabled = normalizeAiProviderCapabilities({
+    providers: {
+      openai: { enabled: true, configured: true, model: 'gpt-admin-default' },
+    },
+    defaultProvider: 'openai',
+  });
+  assert.equal(isAiPatchProviderEnabled(enabled, 'chatgpt'), true);
+  assert.equal(isAiPatchProviderAvailable(enabled, 'chatgpt'), true);
+  assert.equal(getDefaultAiPatchProvider(enabled), 'chatgpt');
+  assert.equal(enabled.providers.openai.model, 'gpt-admin-default');
+
+  const missingKey = normalizeAiProviderCapabilities({
+    providers: {
+      openai: { enabled: true, configured: false, model: 'gpt-no-key' },
+    },
+    defaultProvider: 'openai',
+  });
+  assert.equal(isAiPatchProviderEnabled(missingKey, 'chatgpt'), true);
+  assert.equal(isAiPatchProviderAvailable(missingKey, 'chatgpt'), false);
+  assert.equal(getDefaultAiPatchProvider(missingKey), 'gemini');
 });
 
 test('legacy browser preferences migrate without replacing existing online values', async () => {

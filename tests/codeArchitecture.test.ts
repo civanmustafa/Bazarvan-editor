@@ -25,6 +25,7 @@ test('development and production use one API route registry', async () => {
     '/api/gemini/progress/:progressId',
     '/api/gemini',
     '/api/chatgpt',
+    '/api/ai/capabilities',
     '/api/competitors',
     '/api/n8n/articles',
     '/api/articles/save',
@@ -44,6 +45,7 @@ test('development and production use one API route registry', async () => {
 test('API handlers share the same HTTP request and response adapters', async () => {
   const handlerFiles = [
     'api/adminUsers.ts',
+    'api/aiCapabilities.ts',
     'api/articlesSave.ts',
     'api/assignedArticleAutomation.ts',
     'api/chatgpt.ts',
@@ -167,4 +169,48 @@ test('admin reports distinguish failed key pools and automatic external analysis
   assert.match(adminApp, /النظام التلقائي/);
   assert.match(externalReports, /getExternalAnalysisActorLabel/);
   assert.match(externalReports, /النظام التلقائي/);
+});
+
+test('OpenAI availability is owned by one capability service across server and editor surfaces', async () => {
+  const [
+    capabilityRegistry,
+    capabilityService,
+    capabilityApi,
+    chatGptApi,
+    userContext,
+    aiContext,
+    toolbarActions,
+    selectionToolbar,
+    rightSidebar,
+    settingsPage,
+  ] = await Promise.all([
+    readWorkspaceFile('constants/aiProviderCapabilities.ts'),
+    readWorkspaceFile('server/aiProviderCapabilities.ts'),
+    readWorkspaceFile('api/aiCapabilities.ts'),
+    readWorkspaceFile('api/chatgpt.ts'),
+    readWorkspaceFile('contexts/UserContext.tsx'),
+    readWorkspaceFile('contexts/AIContext.tsx'),
+    readWorkspaceFile('components/toolbar/AIActions.tsx'),
+    readWorkspaceFile('components/SelectionToolbar.tsx'),
+    readWorkspaceFile('components/RightSidebar.tsx'),
+    readWorkspaceFile('components/SettingsPage.tsx'),
+  ]);
+
+  assert.match(capabilityRegistry, /getRuntimeProviderForPatchProvider/);
+  assert.match(capabilityRegistry, /available: enabled && configured/);
+  assert.match(capabilityService, /\.eq\('key', 'ai'\)/);
+  assert.match(capabilityService, /settings\.openAiEnabled === true/);
+  assert.match(capabilityApi, /authenticateApiRequest\(req\)/);
+  assert.match(capabilityApi, /'Cache-Control': 'no-store'/);
+  assert.match(chatGptApi, /readAiProviderCapabilities\(\)/);
+  assert.match(chatGptApi, /AI_PROVIDER_DISABLED/);
+  assert.match(chatGptApi, /AI_PROVIDER_NOT_CONFIGURED/);
+  assert.match(userContext, /AI_PROVIDER_CAPABILITIES_REFRESH_MS/);
+  assert.match(userContext, /AI_PROVIDER_CAPABILITIES_CHANGED_EVENT/);
+  assert.match(aiContext, /isAiProviderAvailable\('chatgpt'\)/);
+  [toolbarActions, selectionToolbar, rightSidebar].forEach(source => {
+    assert.match(source, /isAiProviderEnabled\('chatgpt'\)/);
+    assert.match(source, /isAiProviderAvailable\('chatgpt'\)/);
+  });
+  assert.match(settingsPage, /notifyAiProviderCapabilitiesChanged\(\)/);
 });

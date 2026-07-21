@@ -43,6 +43,7 @@ import {
   normalizeGeminiPaidModelId,
 } from '../constants/modelRegistry';
 import { ARTICLE_STATUS_OPTIONS } from '../constants/articleStatuses';
+import { notifyAiProviderCapabilitiesChanged } from '../utils/aiProviderCapabilities';
 
 type SettingsPageProps = {
   section: string | null;
@@ -286,6 +287,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
         response.secretStatus?.ai?.gemini?.allowedModels,
       ));
       setSecretStatus(response.secretStatus || EMPTY_SECRET_STATUS);
+      notifyAiProviderCapabilitiesChanged();
       setSavedMessage('تم حفظ الإعدادات.');
     } catch (saveError) {
       console.error('Failed to save system settings:', saveError);

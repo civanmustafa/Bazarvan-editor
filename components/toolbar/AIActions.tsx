@@ -30,7 +30,7 @@ const AiMenuItem: React.FC<{ onClick: () => void; disabled: boolean; children: R
 );
 
 const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading, uiLanguage, t, onAiRequest, onAnalyzeHeadings }) => {
-    const { engineeringPrompts } = useUser();
+    const { engineeringPrompts, isAiProviderEnabled, isAiProviderAvailable } = useUser();
     const quickAiProvider = useAISelector(context => context.quickAiProvider);
     const setQuickAiProvider = useAISelector(context => context.setQuickAiProvider);
     const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
@@ -43,8 +43,12 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
 
     const TONES = [t.tones.professional, t.tones.friendly, t.tones.persuasive, t.tones.simple];
     const isChatGptQuickProvider = quickAiProvider === 'chatgpt';
+    const isOpenAiEnabled = isAiProviderEnabled('chatgpt');
+    const isOpenAiAvailable = isAiProviderAvailable('chatgpt');
     const isGeminiPaidQuickProvider = quickAiProvider === 'geminiPaid';
-    const chatGptToggleTitle = uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands';
+    const chatGptToggleTitle = !isOpenAiAvailable
+        ? (uiLanguage === 'ar' ? 'OpenAI مفعّل دون مفتاح API مهيأ' : 'OpenAI is enabled without a configured API key')
+        : (uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands');
     const geminiPaidToggleTitle = uiLanguage === 'ar' ? 'Gemini Pro للأوامر السريعة' : 'Gemini Pro for quick commands';
     const toggleChatGptProvider = () => {
         setQuickAiProvider(provider => provider === 'chatgpt' ? 'gemini' : 'chatgpt');
@@ -106,14 +110,16 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
             >
                 {isAnyGeminiLoading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
             </ToolbarButton>
-            <ToolbarButton
-                onClick={toggleChatGptProvider}
-                title={chatGptToggleTitle}
-                isActive={isChatGptQuickProvider}
-                disabled={isAnyGeminiLoading}
-            >
-                <BrainCircuit size={16} />
-            </ToolbarButton>
+            {isOpenAiEnabled && (
+                <ToolbarButton
+                    onClick={toggleChatGptProvider}
+                    title={chatGptToggleTitle}
+                    isActive={isChatGptQuickProvider}
+                    disabled={isAnyGeminiLoading || !isOpenAiAvailable}
+                >
+                    <BrainCircuit size={16} />
+                </ToolbarButton>
+            )}
             <ToolbarButton
                 onClick={toggleGeminiPaidProvider}
                 title={geminiPaidToggleTitle}

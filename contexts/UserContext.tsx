@@ -4,7 +4,7 @@ import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { recordLogin, getActivityData, saveUserPreference, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
 import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
-import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
+import type { AiPatchProvider, ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import { updateCurrentProfileLastSeen } from '../utils/supabaseArticles';
@@ -22,6 +22,18 @@ import {
     resetUserPreferencesCache,
     saveCurrentUserPreferencesPatch,
 } from '../utils/userPreferences';
+import {
+    getDefaultAiProviderCapabilities,
+    isAiPatchProviderAvailable as readAiPatchProviderAvailable,
+    isAiPatchProviderEnabled as readAiPatchProviderEnabled,
+    type AiProviderCapabilities,
+} from '../constants/aiProviderCapabilities';
+import {
+    AI_PROVIDER_CAPABILITIES_CHANGED_EVENT,
+    loadAiProviderCapabilities,
+} from '../utils/aiProviderCapabilities';
+
+const AI_PROVIDER_CAPABILITIES_REFRESH_MS = 60_000;
 
 /*
  * UserContext is the owner of session-level app state:
@@ -56,6 +68,10 @@ interface UserContextType {
     uiLanguage: 'ar' | 'en';
     clientGoalContexts: ClientGoalContexts;
     engineeringPrompts: EngineeringPrompts;
+    aiProviderCapabilities: AiProviderCapabilities;
+    isAiProviderEnabled: (provider: AiPatchProvider) => boolean;
+    isAiProviderAvailable: (provider: AiPatchProvider) => boolean;
+    refreshAiProviderCapabilities: () => Promise<void>;
     t: typeof translations.ar;
     isIdle: boolean;
     handleLogin: (username: string, password: string) => Promise<boolean>;
@@ -210,6 +226,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [uiLanguage, setUiLanguage] = useState<'ar' | 'en'>('ar');
     const [clientGoalContexts, setClientGoalContexts] = useState<ClientGoalContexts>({});
     const [engineeringPrompts, setEngineeringPrompts] = useState<EngineeringPrompts>(() => normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
+    const [aiProviderCapabilities, setAiProviderCapabilities] = useState<AiProviderCapabilities>(getDefaultAiProviderCapabilities);
     const [preferencesReadyUserId, setPreferencesReadyUserId] = useState<string | null>(null);
     
     const [isIdle, setIsIdle] = useState(false);
@@ -218,6 +235,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isIdleRef = useRef(false);
     const currentViewRef = useRef<AppView>('login');
     const sessionUserIdRef = useRef<string | null>(null);
+    const aiCapabilitiesRequestRef = useRef(0);
 
     const t = translations[uiLanguage] || translations.ar;
 
@@ -226,6 +244,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         options: { recordLoginActivity?: boolean } = {},
     ): Promise<string | null> => {
         if (!user) {
+            aiCapabilitiesRequestRef.current += 1;
             setPreferencesReadyUserId(null);
             resetUserPreferencesCache();
             resetGeminiModelPreferences();
@@ -234,6 +253,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setCurrentUserRole('user');
             setClientGoalContexts({});
             setEngineeringPrompts(normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
+            setAiProviderCapabilities(getDefaultAiProviderCapabilities());
             try {
                 sessionStorage.removeItem('currentUser');
                 sessionStorage.removeItem('currentUserId');
@@ -263,6 +283,52 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentViewState(getRouteView(parseAppRoute()));
         return label;
     }, []);
+
+    const refreshAiProviderCapabilities = useCallback(async (): Promise<void> => {
+        if (!currentUserId || !isSupabaseConfigured) {
+            setAiProviderCapabilities(getDefaultAiProviderCapabilities());
+            return;
+        }
+        const requestId = aiCapabilitiesRequestRef.current + 1;
+        aiCapabilitiesRequestRef.current = requestId;
+        try {
+            const capabilities = await loadAiProviderCapabilities();
+            if (aiCapabilitiesRequestRef.current === requestId) {
+                setAiProviderCapabilities(capabilities);
+            }
+        } catch (error) {
+            console.error('Failed to load AI provider capabilities:', error);
+        }
+    }, [currentUserId]);
+
+    useEffect(() => {
+        if (!currentUserId || !isSupabaseConfigured) return;
+        void refreshAiProviderCapabilities();
+        const refresh = (): void => {
+            void refreshAiProviderCapabilities();
+        };
+        const handleVisibilityChange = () => {
+            if (!document.hidden) refresh();
+        };
+        const intervalId = window.setInterval(refresh, AI_PROVIDER_CAPABILITIES_REFRESH_MS);
+        window.addEventListener(AI_PROVIDER_CAPABILITIES_CHANGED_EVENT, refresh);
+        window.addEventListener('focus', refresh);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            window.clearInterval(intervalId);
+            window.removeEventListener(AI_PROVIDER_CAPABILITIES_CHANGED_EVENT, refresh);
+            window.removeEventListener('focus', refresh);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [currentUserId, refreshAiProviderCapabilities]);
+
+    const isAiProviderEnabled = useCallback((provider: AiPatchProvider): boolean => (
+        readAiPatchProviderEnabled(aiProviderCapabilities, provider)
+    ), [aiProviderCapabilities]);
+
+    const isAiProviderAvailable = useCallback((provider: AiPatchProvider): boolean => (
+        readAiPatchProviderAvailable(aiProviderCapabilities, provider)
+    ), [aiProviderCapabilities]);
 
     useEffect(() => {
         currentViewRef.current = currentView;
@@ -729,6 +795,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         uiLanguage,
         clientGoalContexts,
         engineeringPrompts,
+        aiProviderCapabilities,
+        isAiProviderEnabled,
+        isAiProviderAvailable,
+        refreshAiProviderCapabilities,
         t,
         isIdle,
         handleLogin,
@@ -759,6 +829,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         uiLanguage,
         clientGoalContexts,
         engineeringPrompts,
+        aiProviderCapabilities,
+        isAiProviderEnabled,
+        isAiProviderAvailable,
+        refreshAiProviderCapabilities,
         t,
         isIdle,
         handleLogin,

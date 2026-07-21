@@ -733,7 +733,13 @@ ${url}
 }`;
 
 const RightSidebar: React.FC = () => {
-    const { t, engineeringPrompts, chatGptOpenMode } = useUser();
+    const {
+        t,
+        engineeringPrompts,
+        chatGptOpenMode,
+        isAiProviderEnabled,
+        isAiProviderAvailable,
+    } = useUser();
     const setIsStructureTabActive = useEditorSelector(context => context.setIsStructureTabActive);
     const activeArticleId = useEditorSelector(context => context.activeArticleId);
     const articleTitle = useEditorSelector(context => context.title);
@@ -776,6 +782,8 @@ const RightSidebar: React.FC = () => {
     const [selectedSmartGeminiModel, setSelectedSmartGeminiModel] = useState(() => (
         normalizeGeminiFreeModel(getSelectedGeminiFreeModel(), geminiFreeModelValues)
     ));
+    const isOpenAiEnabled = isAiProviderEnabled('chatgpt');
+    const isOpenAiAvailable = isAiProviderAvailable('chatgpt');
     
     // Custom Dropdown State
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
@@ -1149,6 +1157,7 @@ ${readyCommandCompetitorBlocks}`;
     };
 
     const handleRunChatGptAnalysis = () => {
+        if (!isOpenAiAvailable) return;
         if (selectedReadyCommands.length > 0) {
             clearReadyCommandSelectionOnNextOpenRef.current = true;
         }
@@ -1704,7 +1713,7 @@ ${readyCommandCompetitorBlocks}`;
                         </div>
 
                         <div className="flex flex-col gap-2">
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className={`grid gap-2 ${isOpenAiEnabled ? 'grid-cols-3' : 'grid-cols-2'}`}>
                                 <div className="flex min-w-0 flex-col overflow-hidden rounded-lg bg-[#d4af37] text-white">
                                     <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex min-h-9 items-center justify-center gap-1.5 px-1.5 py-1.5 hover:bg-[#b8922e] disabled:opacity-50">
                                         {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
@@ -1728,10 +1737,17 @@ ${readyCommandCompetitorBlocks}`;
                                     {isAiLoading.geminiPaid ? <Wand2 size={16} className="animate-spin" /> : <BadgeDollarSign size={16} />}
                                     <span className="text-xs font-bold">Pro</span>
                                 </button>
-                                <button onClick={handleRunChatGptAnalysis} disabled={isAiLoading.chatgpt} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
-                                    {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
-                                    <span className="text-xs font-bold">ChatGPT</span>
-                                </button>
+                                {isOpenAiEnabled && (
+                                    <button
+                                        onClick={handleRunChatGptAnalysis}
+                                        disabled={isAiLoading.chatgpt || !isOpenAiAvailable}
+                                        title={!isOpenAiAvailable ? 'OpenAI مفعّل دون مفتاح API مهيأ على الخادم' : 'تشغيل التحليل باستخدام OpenAI'}
+                                        className="flex items-center justify-center gap-2 rounded-lg bg-[#d4af37] py-2 text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
+                                        <span className="text-xs font-bold">ChatGPT</span>
+                                    </button>
+                                )}
                             </div>
 
                             <ExternalAiBridgePanel
@@ -1779,7 +1795,7 @@ ${readyCommandCompetitorBlocks}`;
                                 )}
                             </div>
                             {/* Results ChatGPT */}
-                            <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
+                            {isOpenAiEnabled && <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
                                 <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsChatGptExpanded(!isChatGptExpanded)}>
                                     <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج ChatGPT</span>
                                     <ChevronDown size={14} className={isChatGptExpanded ? 'rotate-180' : ''} />
@@ -1790,7 +1806,7 @@ ${readyCommandCompetitorBlocks}`;
                                          aiResults.chatgpt ? renderAnalysisResult('chatgpt', aiResults.chatgpt) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
-                            </div>
+                            </div>}
                         </div>
                     </>
                 ) : (

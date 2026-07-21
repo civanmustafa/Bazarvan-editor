@@ -27,7 +27,8 @@ import type {
     StructureAnalysis,
 } from '../types';
 import { getArticleReplacementContent, parseMarkdownToArticleHtml, parseMarkdownToHtml, generateToc } from '../utils/editorUtils';
-import { GEMINI_ANALYSIS_MODEL, GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
+import { GEMINI_ANALYSIS_MODEL, GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_MODEL, OPENAI_ANALYSIS_MODEL } from '../constants/aiModels';
+import { getAiProviderModel, getDefaultAiPatchProvider } from '../constants/aiProviderCapabilities';
 import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
@@ -53,7 +54,7 @@ import {
  */
 const GEMINI_MODEL = GEMINI_ANALYSIS_MODEL;
 const GEMINI_PAID_MODEL = GEMINI_PAID_ANALYSIS_MODEL;
-const OPENAI_MODEL = 'gpt-5.4';
+const OPENAI_MODEL = OPENAI_ANALYSIS_MODEL;
 const CHATGPT_TIMEOUT_MS = 300000;
 const GEMINI_CHAT_STORAGE_PREFIX = 'bazarvan:gemini-chat';
 const GEMINI_CHAT_MAX_MESSAGES = 8;
@@ -2428,6 +2429,7 @@ const callChatGptAnalysis = async (
     prompt: string,
     conversationId?: string,
     usageContext: AiApiUsageContext = {},
+    model: string = OPENAI_MODEL,
 ): Promise<ChatGptAnalysisResult> => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
@@ -2440,7 +2442,7 @@ const callChatGptAnalysis = async (
             headers: getAuthenticatedApiHeaders(accessToken, { 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 prompt,
-                model: OPENAI_MODEL,
+                model,
                 conversationId,
                 requestId,
                 telemetry: usageContext,
@@ -2472,7 +2474,7 @@ const callChatGptAnalysis = async (
             keyFingerprint: typeof data.keyFingerprint === 'string' ? data.keyFingerprint : undefined,
             keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
             provider: 'openai',
-            model: typeof data.model === 'string' ? data.model : OPENAI_MODEL,
+            model: typeof data.model === 'string' ? data.model : model,
         };
     } catch (error) {
         window.clearTimeout(timeoutId);
@@ -4786,7 +4788,15 @@ export const useAI = () => {
 };
 
 export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { t, uiLanguage, engineeringPrompts, currentUser, currentView } = useUser();
+    const {
+        t,
+        uiLanguage,
+        engineeringPrompts,
+        currentUser,
+        currentView,
+        aiProviderCapabilities,
+        isAiProviderAvailable,
+    } = useUser();
     const editor = useEditorSelector(context => context.editor);
     const title = useEditorSelector(context => context.title);
     const setTitle = useEditorSelector(context => context.setTitle);
@@ -4803,7 +4813,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [aiResults, setAiResults] = useState<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
     const [aiInsertionPatches, setAiInsertionPatches] = useState<Record<AiPatchProvider, AiContentPatch[]>>(EMPTY_AI_INSERTION_PATCHES);
     const [isAiLoading, setIsAiLoading] = useState<Record<AiPatchProvider, boolean>>({ gemini: false, geminiPaid: false, chatgpt: false });
-    const [quickAiProvider, setQuickAiProvider] = useState<AiPatchProvider>('gemini');
+    const [quickAiProvider, setQuickAiProvider] = useState<AiPatchProvider>(() => (
+        getDefaultAiPatchProvider(aiProviderCapabilities)
+    ));
     const [isAiCommandLoading, setIsAiCommandLoading] = useState(false);
     const [suggestion, setSuggestion] = useState<SuggestionState | null>(null);
     const [headingsAnalysis, setHeadingsAnalysis] = useState<HeadingAnalysisResult[] | null>(null);
@@ -4822,6 +4834,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const isInitialMount = useRef(true);
     const previousArticleScopeRef = useRef<string>('');
     const previousArticleUserRef = useRef<string | null>(currentUser);
+    const openAiModel = getAiProviderModel(aiProviderCapabilities, 'chatgpt');
+
+    useEffect(() => {
+        setQuickAiProvider(provider => (
+            provider === 'chatgpt' && !isAiProviderAvailable('chatgpt')
+                ? getDefaultAiPatchProvider(aiProviderCapabilities)
+                : provider
+        ));
+    }, [aiProviderCapabilities, isAiProviderAvailable]);
 
     const getCurrentArticleAiScope = useCallback(() => (
         activeArticleId || getArticleChatStorageScope(articleKey, title)
@@ -5621,6 +5642,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
+        if (!isAiProviderAvailable('chatgpt')) {
+            setAiResults(prev => ({
+                ...prev,
+                chatgpt: 'OpenAI غير متاح. يجب أن يفعّله مسؤول النظام وأن يكون مفتاح API مهيأ على الخادم.',
+            }));
+            return;
+        }
         if (stopAiRequestIfArticleContextMissing('التحليل الذكي')) return;
         setIsAiLoading(prev => ({ ...prev, chatgpt: true }));
         setAiResults(prev => ({ ...prev, chatgpt: '' }));
@@ -5632,10 +5660,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             );
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
-            const result = await callChatGptAnalysis(finalPrompt, storedConversationId, buildApiUsageContext('smart_analysis', {
-                commandId: historyMeta?.commandId,
-                commandLabel: historyMeta?.commandLabel,
-            }));
+            const result = await callChatGptAnalysis(
+                finalPrompt,
+                storedConversationId,
+                buildApiUsageContext('smart_analysis', {
+                    commandId: historyMeta?.commandId,
+                    commandLabel: historyMeta?.commandLabel,
+                }),
+                openAiModel,
+            );
             saveStoredChatGptConversationId(currentUser, articleScope, result.conversationId);
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result.text, patches: [] }
@@ -5648,7 +5681,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
+    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext, stopAiRequestIfArticleContextMissing, isAiProviderAvailable, openAiModel]);
 
     const importManualAiResponse = useCallback((
         rawResponse: string,
@@ -5675,9 +5708,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         progressCallback?: GeminiProgressCallback,
     ): Promise<string> => {
         if (provider === 'chatgpt') {
+            if (!isAiProviderAvailable('chatgpt')) {
+                throw new Error('OpenAI غير متاح للمستخدمين حاليًا.');
+            }
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
-            const result = await callChatGptAnalysis(prompt, storedConversationId, usageContext);
+            const result = await callChatGptAnalysis(prompt, storedConversationId, usageContext, openAiModel);
             saveStoredChatGptConversationId(currentUser, articleScope, result.conversationId);
             return result.text;
         }
@@ -5694,7 +5730,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             mergedProgressCallback,
             geminiProvider,
         );
-    }, [articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext, trackGeminiProgress]);
+    }, [articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext, trackGeminiProgress, isAiProviderAvailable, openAiModel]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         const provider = quickAiProvider;

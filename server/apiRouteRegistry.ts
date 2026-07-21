@@ -1,4 +1,5 @@
 import adminUsersHandler from '../api/adminUsers';
+import aiCapabilitiesHandler from '../api/aiCapabilities';
 import articlesSaveHandler from '../api/articlesSave';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import chatgptHandler from '../api/chatgpt';
@@ -23,6 +24,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'gemini-progress', method: 'ALL', path: '/api/gemini/progress/:progressId', handler: geminiProgressHandler },
   { id: 'gemini', method: 'ALL', path: '/api/gemini', handler: geminiHandler },
   { id: 'chatgpt', method: 'ALL', path: '/api/chatgpt', handler: chatgptHandler },
+  { id: 'ai-capabilities', method: 'ALL', path: '/api/ai/capabilities', handler: aiCapabilitiesHandler },
   { id: 'competitors', method: 'ALL', path: '/api/competitors', handler: competitorsHandler },
   { id: 'n8n-articles', method: 'ALL', path: '/api/n8n/articles', handler: n8nArticlesHandler },
   { id: 'articles-save', method: 'ALL', path: '/api/articles/save', handler: articlesSaveHandler },

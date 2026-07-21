@@ -12,7 +12,7 @@ const MANUAL_COMMAND_ID = 'manual_command';
 const MANUAL_COMMAND_PREFIX = 'أنت خبير محتوى SEO/AEO/GEO/LLM SEO.';
 
 const SelectionToolbar: React.FC = () => {
-  const { uiLanguage } = useUser();
+  const { uiLanguage, isAiProviderEnabled, isAiProviderAvailable } = useUser();
   const editor = useEditorSelector(context => context.editor);
   const scrollContainerRef = useEditorSelector(context => context.scrollContainerRef);
   const onAiRequest = useAISelector(context => context.handleAiRequest);
@@ -33,8 +33,12 @@ const SelectionToolbar: React.FC = () => {
   const manualTextareaRef = useRef<HTMLTextAreaElement>(null);
   const t = translations[uiLanguage];
   const isChatGptQuickProvider = quickAiProvider === 'chatgpt';
+  const isOpenAiEnabled = isAiProviderEnabled('chatgpt');
+  const isOpenAiAvailable = isAiProviderAvailable('chatgpt');
   const isGeminiPaidQuickProvider = quickAiProvider === 'geminiPaid';
-  const chatGptToggleLabel = uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands';
+  const chatGptToggleLabel = !isOpenAiAvailable
+    ? (uiLanguage === 'ar' ? 'OpenAI مفعّل دون مفتاح API مهيأ' : 'OpenAI is enabled without a configured API key')
+    : (uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands');
   const geminiPaidToggleLabel = uiLanguage === 'ar' ? 'Gemini Pro للأوامر السريعة' : 'Gemini Pro for quick commands';
   const isAnyAiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt;
   const toggleChatGptProvider = () => {
@@ -216,19 +220,21 @@ const SelectionToolbar: React.FC = () => {
             <IconTooltip label={command.label} placement="top" />
           </button>
         ))}
-        <button
-          onClick={toggleChatGptProvider}
-          disabled={isAnyAiLoading || !!localLoadingAction}
-          aria-label={chatGptToggleLabel}
-          className={`group relative p-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37] disabled:text-gray-400 dark:disabled:text-gray-600 ${
-            isChatGptQuickProvider
-              ? 'bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
-              : 'text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20'
-          }`}
-        >
-          <BrainCircuit size={16} />
-          <IconTooltip label={chatGptToggleLabel} placement="top" />
-        </button>
+        {isOpenAiEnabled && (
+          <button
+            onClick={toggleChatGptProvider}
+            disabled={isAnyAiLoading || !!localLoadingAction || !isOpenAiAvailable}
+            aria-label={chatGptToggleLabel}
+            className={`group relative p-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37] disabled:text-gray-400 dark:disabled:text-gray-600 ${
+              isChatGptQuickProvider
+                ? 'bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20'
+            }`}
+          >
+            <BrainCircuit size={16} />
+            <IconTooltip label={chatGptToggleLabel} placement="top" />
+          </button>
+        )}
         <button
           onClick={toggleGeminiPaidProvider}
           disabled={isAnyAiLoading || !!localLoadingAction}

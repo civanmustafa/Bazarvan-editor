@@ -14,16 +14,10 @@ import {
   type AiExecutionTelemetryContext,
 } from '../server/aiExecutionEngine';
 import { recordAiExecutionTelemetry } from '../server/aiExecutionTelemetry';
+import { readAiProviderCapabilities } from '../server/aiProviderCapabilities';
 import { deliverApiResult, getHeaderValue, readRequestBody, type ApiResult } from './http.ts';
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-5.4";
-const ALLOWED_OPENAI_MODELS = new Set([
-  OPENAI_MODEL,
-  ...String(process.env.OPENAI_ALLOWED_MODELS || '')
-    .split(/[\n,;]+/)
-    .map(model => model.trim())
-    .filter(Boolean),
-]);
 const OPENAI_TIMEOUT_MS = 300000;
 
 type OpenAiAttemptDetail = {
@@ -298,6 +292,30 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
   try {
     const principal = await authenticateApiRequest(req);
     actorUserId = principal.userId;
+    const capabilities = await readAiProviderCapabilities();
+    const openAiCapability = capabilities.providers.openai;
+    if (!openAiCapability.enabled) {
+      return finalizeResult({
+        status: 403,
+        body: {
+          error: 'قام مسؤول النظام بتعطيل OpenAI.',
+          code: 'AI_PROVIDER_DISABLED',
+          provider: 'openai',
+          model: openAiCapability.model || OPENAI_MODEL,
+        },
+      });
+    }
+    if (!openAiCapability.configured) {
+      return finalizeResult({
+        status: 503,
+        body: {
+          error: 'تم تفعيل OpenAI، لكن لا يوجد مفتاح API صالح مهيأ على الخادم.',
+          code: 'AI_PROVIDER_NOT_CONFIGURED',
+          provider: 'openai',
+          model: openAiCapability.model || OPENAI_MODEL,
+        },
+      });
+    }
     consumeApiRateLimit(
       "openai:start",
       principal.userId,
@@ -326,9 +344,18 @@ const handleChatGptRequest = async (req: any): Promise<ApiResult> => {
       return finalizeResult({ status: 500, body: { error: "لم يتم تكوين مفتاح ChatGPT API.", provider: 'openai', model: selectedModel } });
     }
 
-    selectedModel = typeof model === "string" && ALLOWED_OPENAI_MODELS.has(model.trim())
+    const configuredModel = openAiCapability.model || OPENAI_MODEL;
+    const allowedOpenAiModels = new Set([
+      OPENAI_MODEL,
+      configuredModel,
+      ...String(process.env.OPENAI_ALLOWED_MODELS || '')
+        .split(/[\n,;]+/)
+        .map(allowedModel => allowedModel.trim())
+        .filter(Boolean),
+    ]);
+    selectedModel = typeof model === "string" && allowedOpenAiModels.has(model.trim())
       ? model.trim()
-      : OPENAI_MODEL;
+      : configuredModel;
     const requestedConversationId = normalizeConversationId(conversationId);
 
     let lastError: unknown = null;
