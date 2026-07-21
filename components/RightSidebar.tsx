@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2 } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine } from 'lucide-react';
 import StructureTab from './StructureTab';
 import { useUser } from '../contexts/UserContext';
 import { useAISelector } from '../contexts/AIContext';
@@ -27,6 +27,7 @@ import type { CompetitorDiscoveryRow } from '../utils/competitorDiscovery';
 
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
 const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
+const ContentWritingPanel = React.lazy(() => import('./ContentWritingPanel'));
 
 type ReadyCommand = {
     id: string;
@@ -762,7 +763,7 @@ const RightSidebar: React.FC = () => {
     const deleteAiInsertionPatchMergeDeleteTarget = useAISelector(context => context.deleteAiInsertionPatchMergeDeleteTarget);
     const selectAiInsertionPatchMergeDeleteTarget = useAISelector(context => context.selectAiInsertionPatchMergeDeleteTarget);
     
-    const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors'>('structure');
+    const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors' | 'writing'>('structure');
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history' | 'external'>('new');
     const [aiCommand, setAiCommand] = useState('');
     const [bulkCompetitorText, setBulkCompetitorText] = useState('');
@@ -2105,7 +2106,7 @@ ${readyCommandCompetitorBlocks}`;
     return (
         <aside className="basis-[18.7%] flex flex-col h-full min-w-0 bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg overflow-hidden border-s border-gray-300 dark:border-[#333]">
             <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
-                {(['structure', 'ai', 'competitors'] as const).map(tab => (
+                {(['structure', 'ai', 'competitors', 'writing'] as const).map(tab => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
@@ -2113,15 +2114,37 @@ ${readyCommandCompetitorBlocks}`;
                             ? (t.locale === 'ar' ? 'تحليل الهيكل' : 'Structure analysis')
                             : tab === 'ai'
                               ? (t.locale === 'ar' ? 'التحليل الذكي' : 'Smart analysis')
-                              : (t.locale === 'ar' ? 'المنافسون' : 'Competitors')}
+                              : tab === 'competitors'
+                                ? (t.locale === 'ar' ? 'المنافسون' : 'Competitors')
+                                : (t.locale === 'ar' ? 'كتابة المحتوى' : 'Content writing')}
                         className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15'}`}
                     >
-                        {tab === 'structure' ? <LayoutTemplate size={18} /> : tab === 'ai' ? <BrainCircuit size={18} /> : <Users size={18} />}
+                        {tab === 'structure'
+                            ? <LayoutTemplate size={18} />
+                            : tab === 'ai'
+                              ? <BrainCircuit size={18} />
+                              : tab === 'competitors'
+                                ? <Users size={18} />
+                                : <PenLine size={18} />}
                     </button>
                 ))}
             </div>
             <div className="flex-grow overflow-y-auto custom-scrollbar">
-                {activeTab === 'structure' ? <StructureTab /> : activeTab === 'ai' ? renderAiTab() : renderCompetitorsTab()}
+                {activeTab === 'structure'
+                    ? <StructureTab />
+                    : activeTab === 'ai'
+                      ? renderAiTab()
+                      : activeTab === 'competitors'
+                        ? renderCompetitorsTab()
+                        : (
+                            <React.Suspense fallback={(
+                                <div className="flex h-full items-center justify-center p-4 text-xs font-bold text-gray-400">
+                                    {t.locale === 'ar' ? 'جار تحميل كتابة المحتوى...' : 'Loading content writing...'}
+                                </div>
+                            )}>
+                                <ContentWritingPanel />
+                            </React.Suspense>
+                        )}
             </div>
         </aside>
     );

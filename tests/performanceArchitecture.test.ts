@@ -27,6 +27,13 @@ test('screen routes are lazy and editor providers are editor-only', async () => 
   assert.match(dashboard, /buildEditorArticlePath/);
 });
 
+test('content writing UI stays out of the initial editor sidebar chunk', async () => {
+  const rightSidebar = await readWorkspaceFile('components/RightSidebar.tsx');
+
+  assert.match(rightSidebar, /const ContentWritingPanel = React\.lazy\(\(\) => import\('\.\/ContentWritingPanel'\)\)/);
+  assert.doesNotMatch(rightSidebar, /import ContentWritingPanel from/);
+});
+
 test('high-frequency editor contexts expose selectors and memoized provider values', async () => {
   const [editorContext, aiContext, interactionContext, userContext] = await Promise.all([
     readWorkspaceFile('contexts/EditorContext.tsx'),

@@ -243,3 +243,38 @@ test('content writing has one template registry and one context builder', async 
   assert.match(settingsRegistry, /CONTENT_WRITING_TEMPLATE_FIELDS/);
   assert.match(settingsPage, /ContentWritingPromptSettings/);
 });
+
+test('content writing editor UI runs through durable authenticated sessions', async () => {
+  const [panel, client, rightSidebar] = await Promise.all([
+    readWorkspaceFile('components/ContentWritingPanel.tsx'),
+    readWorkspaceFile('utils/contentWritingSessions.ts'),
+    readWorkspaceFile('components/RightSidebar.tsx'),
+  ]);
+
+  assert.match(rightSidebar, /lazy\(\(\) => import\('\.\/ContentWritingPanel'\)\)/);
+  assert.match(rightSidebar, /'writing'/);
+  assert.match(panel, /isAiProviderEnabled\('gemini'\)/);
+  assert.match(panel, /isAiProviderAvailable\('gemini'\)/);
+  assert.match(panel, /isAiProviderEnabled\('geminiPaid'\)/);
+  assert.match(panel, /isAiProviderAvailable\('geminiPaid'\)/);
+  assert.match(panel, /isAiProviderEnabled\('chatgpt'\)/);
+  assert.match(panel, /isAiProviderAvailable\('chatgpt'\)/);
+  assert.match(panel, /await handleSaveDraft\(\)/);
+  assert.match(panel, /startInFlightRef\.current/);
+  assert.match(panel, /pendingStartRef\.current/);
+  assert.match(panel, /createContentWritingIdempotencyKey\(articleId\)/);
+  assert.match(panel, /setProvider\(aiProviderCapabilities\.defaultProvider\)/);
+  assert.match(panel, /startContentWritingSession\(/);
+  assert.match(panel, /listContentWritingSessions\(/);
+  assert.match(panel, /getContentWritingSessionDetail\(/);
+  assert.match(panel, /cancelContentWritingSession\(/);
+  assert.match(panel, /selectedDetail\.session\.resultText/);
+  assert.doesNotMatch(panel, /getSupabaseClient|localStorage|sessionStorage/);
+  assert.match(client, /getAuthenticatedApiToken\(\)/);
+  assert.match(client, /getAuthenticatedApiHeaders\(/);
+  assert.match(client, /includeMessages: options\.includeMessages === true/);
+  assert.match(client, /action: 'start'/);
+  assert.match(client, /action: 'get'/);
+  assert.match(client, /action: 'list'/);
+  assert.match(client, /action: 'cancel'/);
+});
