@@ -25,6 +25,7 @@ test('development and production use one API route registry', async () => {
     '/api/gemini/progress/:progressId',
     '/api/gemini',
     '/api/chatgpt',
+    '/api/content-writing',
     '/api/ai/capabilities',
     '/api/competitors',
     '/api/n8n/articles',
@@ -49,6 +50,7 @@ test('API handlers share the same HTTP request and response adapters', async () 
     'api/articlesSave.ts',
     'api/assignedArticleAutomation.ts',
     'api/chatgpt.ts',
+    'api/contentWriting.ts',
     'api/competitors.ts',
     'api/externalAnalysis.ts',
     'api/n8nArticles.ts',
@@ -176,7 +178,7 @@ test('AI provider availability is owned by one capability service across server 
     capabilityRegistry,
     capabilityService,
     capabilityApi,
-    chatGptApi,
+    openAiExecutionEngine,
     aiExecutionEngine,
     userContext,
     aiContext,
@@ -188,7 +190,7 @@ test('AI provider availability is owned by one capability service across server 
     readWorkspaceFile('constants/aiProviderCapabilities.ts'),
     readWorkspaceFile('server/aiProviderCapabilities.ts'),
     readWorkspaceFile('api/aiCapabilities.ts'),
-    readWorkspaceFile('api/chatgpt.ts'),
+    readWorkspaceFile('server/openAiExecutionEngine.ts'),
     readWorkspaceFile('server/aiExecutionEngine.ts'),
     readWorkspaceFile('contexts/UserContext.tsx'),
     readWorkspaceFile('contexts/AIContext.tsx'),
@@ -205,9 +207,9 @@ test('AI provider availability is owned by one capability service across server 
   assert.match(capabilityService, /settings\.geminiProEnabled !== false/);
   assert.match(capabilityApi, /authenticateApiRequest\(req\)/);
   assert.match(capabilityApi, /'Cache-Control': 'no-store'/);
-  assert.match(chatGptApi, /readAiProviderCapabilities\(\)/);
-  assert.match(chatGptApi, /AI_PROVIDER_DISABLED/);
-  assert.match(chatGptApi, /AI_PROVIDER_NOT_CONFIGURED/);
+  assert.match(openAiExecutionEngine, /readAiProviderCapabilities\(\)/);
+  assert.match(openAiExecutionEngine, /AI_PROVIDER_DISABLED/);
+  assert.match(openAiExecutionEngine, /AI_PROVIDER_NOT_CONFIGURED/);
   assert.match(aiExecutionEngine, /readAiProviderCapabilities\(\)/);
   assert.match(aiExecutionEngine, /AI_PROVIDER_DISABLED/);
   assert.match(aiExecutionEngine, /AI_PROVIDER_NOT_CONFIGURED/);

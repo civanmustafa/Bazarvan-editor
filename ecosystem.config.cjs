@@ -45,5 +45,21 @@ module.exports = {
         EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
       },
     },
+    {
+      name: 'bazarvan-content-writing-worker',
+      script: 'server-dist/content-writing-worker.mjs',
+      cwd: __dirname,
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: true,
+      restart_delay: 2000,
+      kill_timeout: 15000,
+      env: {
+        NODE_ENV: 'production',
+        CONTENT_WRITING_WORKER_POLL_MS: process.env.CONTENT_WRITING_WORKER_POLL_MS || '1500',
+        CONTENT_WRITING_SESSION_LEASE_SECONDS: process.env.CONTENT_WRITING_SESSION_LEASE_SECONDS || '1800',
+        CONTENT_WRITING_WORKER_CONCURRENCY: process.env.CONTENT_WRITING_WORKER_CONCURRENCY || '1',
+      },
+    },
   ],
 };

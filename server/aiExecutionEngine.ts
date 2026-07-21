@@ -657,7 +657,17 @@ const executeGeminiRequestInternal = async (
   options: GeminiExecutionOptions,
 ): Promise<ApiResult> => {
   try {
-    const { prompt, useUrlContext, history, model, provider, progressId: rawProgressId, allowModelFallback, fallbackModels } = requestBody || {};
+    const {
+      prompt,
+      systemInstruction,
+      useUrlContext,
+      history,
+      model,
+      provider,
+      progressId: rawProgressId,
+      allowModelFallback,
+      fallbackModels,
+    } = requestBody || {};
     const progressId = normalizeProgressId(rawProgressId);
     throwIfGeminiExecutionCancelled(progressId, options.signal);
     const requestedProvider = normalizeGeminiProvider(provider);
@@ -726,6 +736,9 @@ const executeGeminiRequestInternal = async (
     }
 
     const normalizedPrompt = typeof prompt === "string" ? prompt : String(prompt);
+    const normalizedSystemInstruction = typeof systemInstruction === 'string'
+      ? systemInstruction.trim()
+      : '';
     const normalizedHistory = normalizeGeminiHistory(history);
     const contents = normalizedHistory.length > 0
       ? [...normalizedHistory, { role: "user" as const, parts: [{ text: normalizedPrompt }] }]
@@ -852,6 +865,7 @@ const executeGeminiRequestInternal = async (
                   model: activeModel,
                   contents,
                   config: {
+                    ...(normalizedSystemInstruction ? { systemInstruction: normalizedSystemInstruction } : {}),
                     ...(useUrlContext
                       ? {
                           tools: [{ urlContext: {} }],

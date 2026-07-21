@@ -76,13 +76,13 @@ test('AI telemetry is server-authenticated and browser code cannot forge key rep
 });
 
 test('public AI responses remove key fingerprints while preserving safe attempt details', async () => {
-  const [engine, openAiApi] = await Promise.all([
+  const [engine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/aiExecutionEngine.ts'),
-    readWorkspaceFile('api/chatgpt.ts'),
+    readWorkspaceFile('server/openAiExecutionEngine.ts'),
   ]);
 
   assert.match(engine, /export const sanitizeAiExecutionResult/);
   assert.match(engine, /keyFingerprint: _fingerprint/);
-  assert.match(openAiApi, /const finalizeResult/);
-  assert.match(openAiApi, /keyFingerprint: _fingerprint/);
+  assert.match(openAiEngine, /const sanitizeResult/);
+  assert.match(openAiEngine, /keyFingerprint: _fingerprint/);
 });
