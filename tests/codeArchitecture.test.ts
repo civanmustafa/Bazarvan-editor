@@ -171,12 +171,13 @@ test('admin reports distinguish failed key pools and automatic external analysis
   assert.match(externalReports, /النظام التلقائي/);
 });
 
-test('OpenAI availability is owned by one capability service across server and editor surfaces', async () => {
+test('AI provider availability is owned by one capability service across server and editor surfaces', async () => {
   const [
     capabilityRegistry,
     capabilityService,
     capabilityApi,
     chatGptApi,
+    aiExecutionEngine,
     userContext,
     aiContext,
     toolbarActions,
@@ -188,6 +189,7 @@ test('OpenAI availability is owned by one capability service across server and e
     readWorkspaceFile('server/aiProviderCapabilities.ts'),
     readWorkspaceFile('api/aiCapabilities.ts'),
     readWorkspaceFile('api/chatgpt.ts'),
+    readWorkspaceFile('server/aiExecutionEngine.ts'),
     readWorkspaceFile('contexts/UserContext.tsx'),
     readWorkspaceFile('contexts/AIContext.tsx'),
     readWorkspaceFile('components/toolbar/AIActions.tsx'),
@@ -200,17 +202,42 @@ test('OpenAI availability is owned by one capability service across server and e
   assert.match(capabilityRegistry, /available: enabled && configured/);
   assert.match(capabilityService, /\.eq\('key', 'ai'\)/);
   assert.match(capabilityService, /settings\.openAiEnabled === true/);
+  assert.match(capabilityService, /settings\.geminiProEnabled !== false/);
   assert.match(capabilityApi, /authenticateApiRequest\(req\)/);
   assert.match(capabilityApi, /'Cache-Control': 'no-store'/);
   assert.match(chatGptApi, /readAiProviderCapabilities\(\)/);
   assert.match(chatGptApi, /AI_PROVIDER_DISABLED/);
   assert.match(chatGptApi, /AI_PROVIDER_NOT_CONFIGURED/);
+  assert.match(aiExecutionEngine, /readAiProviderCapabilities\(\)/);
+  assert.match(aiExecutionEngine, /AI_PROVIDER_DISABLED/);
+  assert.match(aiExecutionEngine, /AI_PROVIDER_NOT_CONFIGURED/);
   assert.match(userContext, /AI_PROVIDER_CAPABILITIES_REFRESH_MS/);
   assert.match(userContext, /AI_PROVIDER_CAPABILITIES_CHANGED_EVENT/);
   assert.match(aiContext, /isAiProviderAvailable\('chatgpt'\)/);
   [toolbarActions, selectionToolbar, rightSidebar].forEach(source => {
     assert.match(source, /isAiProviderEnabled\('chatgpt'\)/);
     assert.match(source, /isAiProviderAvailable\('chatgpt'\)/);
+    assert.match(source, /isAiProviderEnabled\('geminiPaid'\)/);
+    assert.match(source, /isAiProviderAvailable\('geminiPaid'\)/);
   });
+  assert.match(aiContext, /isAiProviderAvailable\(provider\)/);
+  assert.match(settingsPage, /السماح للمستخدمين باستخدام Gemini Pro/);
   assert.match(settingsPage, /notifyAiProviderCapabilitiesChanged\(\)/);
+});
+
+test('content writing has one template registry and one context builder', async () => {
+  const [registry, builder, settingsRegistry, settingsPage] = await Promise.all([
+    readWorkspaceFile('constants/contentWriting.ts'),
+    readWorkspaceFile('utils/contentWritingContext.ts'),
+    readWorkspaceFile('constants/settingsRegistry.ts'),
+    readWorkspaceFile('components/SettingsPage.tsx'),
+  ]);
+
+  assert.match(registry, /DEFAULT_CONTENT_WRITING_TEMPLATES/);
+  assert.match(registry, /CONTENT_WRITING_TEMPLATE_FIELDS/);
+  assert.match(builder, /buildContentWritingPromptBundle/);
+  assert.match(builder, /CONTENT_WRITING_REQUIRED_COMPETITOR_COUNT = 3/);
+  assert.doesNotMatch(builder, /content\.slice\(/);
+  assert.match(settingsRegistry, /CONTENT_WRITING_TEMPLATE_FIELDS/);
+  assert.match(settingsPage, /ContentWritingPromptSettings/);
 });

@@ -4838,7 +4838,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     useEffect(() => {
         setQuickAiProvider(provider => (
-            provider === 'chatgpt' && !isAiProviderAvailable('chatgpt')
+            !isAiProviderAvailable(provider)
                 ? getDefaultAiPatchProvider(aiProviderCapabilities)
                 : provider
         ));
@@ -5528,6 +5528,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         geminiModel?: string,
     ) => {
         if (!editor || items.length === 0) return false;
+        if (!isAiProviderAvailable(provider)) {
+            setAiResults(prev => ({
+                ...prev,
+                [provider]: `${provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini'} غير متاح. يجب أن يفعّله مسؤول النظام وأن تكون مفاتيح API مهيأة على الخادم.`,
+            }));
+            return false;
+        }
         if (stopAiRequestIfArticleContextMissing('الأوامر السريعة')) return false;
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         setAiResults(prev => ({ ...prev, [provider]: '' }));
@@ -5592,7 +5599,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress]);
+    }, [editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress, isAiProviderAvailable]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,
@@ -5602,6 +5609,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         geminiModel?: string,
     ) => {
         if (!editor) return;
+        if (!isAiProviderAvailable(provider)) {
+            setAiResults(prev => ({
+                ...prev,
+                [provider]: `${provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini'} غير متاح. يجب أن يفعّله مسؤول النظام وأن تكون مفاتيح API مهيأة على الخادم.`,
+            }));
+            return;
+        }
         if (stopAiRequestIfArticleContextMissing('التحليل الذكي')) return;
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         setAiResults(prev => ({ ...prev, [provider]: '' }));
@@ -5638,7 +5652,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress]);
+    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress, isAiProviderAvailable]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -5707,10 +5721,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         geminiModel?: string,
         progressCallback?: GeminiProgressCallback,
     ): Promise<string> => {
+        if (!isAiProviderAvailable(provider)) {
+            const providerLabel = provider === 'chatgpt'
+                ? 'OpenAI'
+                : provider === 'geminiPaid'
+                    ? 'Gemini Pro'
+                    : 'Gemini';
+            throw new Error(`${providerLabel} غير متاح للمستخدمين حاليا.`);
+        }
         if (provider === 'chatgpt') {
-            if (!isAiProviderAvailable('chatgpt')) {
-                throw new Error('OpenAI غير متاح للمستخدمين حاليًا.');
-            }
             const articleScope = getArticleChatStorageScope(articleKey, title);
             const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
             const result = await callChatGptAnalysis(prompt, storedConversationId, usageContext, openAiModel);

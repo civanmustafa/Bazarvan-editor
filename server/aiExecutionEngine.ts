@@ -10,6 +10,8 @@ import {
   getGeminiKeyFailureCooldownSeconds,
 } from "./geminiKeyCoordinator";
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
+import { readAiProviderCapabilities } from './aiProviderCapabilities';
+import type { AiProviderCapabilities } from '../constants/aiProviderCapabilities';
 import {
   assertAiRequestPayload,
   assertAllowedOrigin,
@@ -387,6 +389,34 @@ const getGeminiProviderLabel = (provider: GeminiProvider): string => (
   provider === "geminiPaid" ? "Gemini Pro" : "Gemini"
 );
 
+const getProviderCapabilityFailure = (
+  provider: GeminiProvider,
+  capabilities: AiProviderCapabilities,
+): ApiResult | null => {
+  const capability = capabilities.providers[provider];
+  if (!capability.enabled) {
+    return {
+      status: 403,
+      body: {
+        error: `${getGeminiProviderLabel(provider)} غير مسموح للمستخدمين حاليا.`,
+        code: 'AI_PROVIDER_DISABLED',
+        provider,
+      },
+    };
+  }
+  if (!capability.configured) {
+    return {
+      status: 503,
+      body: {
+        error: `${getGeminiProviderLabel(provider)} مفعّل، لكن لا توجد مفاتيح API مهيأة له على الخادم.`,
+        code: 'AI_PROVIDER_NOT_CONFIGURED',
+        provider,
+      },
+    };
+  }
+  return null;
+};
+
 const normalizeGeminiHistory = (history: unknown): GeminiHistoryContent[] => {
   if (!Array.isArray(history)) return [];
 
@@ -636,6 +666,23 @@ const executeGeminiRequestInternal = async (
       requestedProvider,
     );
     const selectedProvider = selectGeminiProvider(requestedProvider);
+    const capabilityFailure = getProviderCapabilityFailure(
+      selectedProvider,
+      await readAiProviderCapabilities(),
+    );
+    if (capabilityFailure) {
+      const failureBody = capabilityFailure.body as Record<string, unknown>;
+      setGeminiProgress(progressId, {
+        stage: 'failed',
+        provider: selectedProvider,
+        model: selectedModel,
+        keyCount: 0,
+        attemptedKeyCount: 0,
+        completed: true,
+        message: String(failureBody.error || 'مزود الذكاء الاصطناعي غير متاح.'),
+      });
+      return capabilityFailure;
+    }
     const modelOrder = getGeminiModelOrder(
       selectedProvider,
       selectedModel,
@@ -1254,6 +1301,12 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
     });
     const progressId = normalizeProgressId(requestBody?.progressId);
     if (requestBody?.async === true && progressId) {
+      const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
+      const capabilityFailure = getProviderCapabilityFailure(
+        requestedProvider,
+        await readAiProviderCapabilities(),
+      );
+      if (capabilityFailure) return capabilityFailure;
       const initial = getInitialJobProgress(requestBody);
       const job = await createAiJob({
         publicId: progressId,

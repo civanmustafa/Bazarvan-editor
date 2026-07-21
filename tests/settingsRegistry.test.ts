@@ -100,6 +100,8 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       defaultGeminiModel: 'unknown-model',
       defaultGeminiPaidModel: 'unknown-paid-model',
       externalAnalysisRetryMinutes: 1,
+      contentWritingInstructionsTemplate: 'تعليمات مخصصة',
+      contentWritingMaxInputTokens: 1,
       unknownSecret: 'must-not-survive',
     },
     articles: {
@@ -112,6 +114,8 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.ai.defaultGeminiModel, GEMINI_ANALYSIS_MODEL);
   assert.equal(normalized.ai.defaultGeminiPaidModel, GEMINI_PAID_ANALYSIS_MODEL);
   assert.equal(normalized.ai.externalAnalysisRetryMinutes, 5);
+  assert.equal(normalized.ai.contentWritingInstructionsTemplate, 'تعليمات مخصصة');
+  assert.equal(normalized.ai.contentWritingMaxInputTokens, 10_000);
   assert.equal(normalized.ai.unknownSecret, undefined);
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');

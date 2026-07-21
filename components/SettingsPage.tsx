@@ -22,6 +22,7 @@ import { useUser } from '../contexts/UserContext';
 import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
+import ContentWritingPromptSettings from './ContentWritingPromptSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
 import {
   loadSystemSettings,
@@ -392,10 +393,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     <div className="space-y-6">
       <SettingsSection title="إعدادات الذكاء الاصطناعي">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <ToggleField label="Gemini المجاني" checked={Boolean(settings.ai.geminiFreeEnabled)} onChange={value => updateSetting('ai', 'geminiFreeEnabled', value)} />
+          <ToggleField label="السماح للمستخدمين باستخدام Gemini المجاني" checked={Boolean(settings.ai.geminiFreeEnabled)} onChange={value => updateSetting('ai', 'geminiFreeEnabled', value)} />
           <ToggleField label="التبديل بين نماذج جيميني المجانية للعامل الخارجي" checked={Boolean(settings.ai.geminiFreeModelFallbackEnabled)} onChange={value => updateSetting('ai', 'geminiFreeModelFallbackEnabled', value)} />
-          <ToggleField label="Gemini Pro" checked={Boolean(settings.ai.geminiProEnabled)} onChange={value => updateSetting('ai', 'geminiProEnabled', value)} />
-          <ToggleField label="OpenAI" checked={Boolean(settings.ai.openAiEnabled)} onChange={value => updateSetting('ai', 'openAiEnabled', value)} />
+          <ToggleField label="السماح للمستخدمين باستخدام Gemini Pro" checked={Boolean(settings.ai.geminiProEnabled)} onChange={value => updateSetting('ai', 'geminiProEnabled', value)} />
+          <ToggleField label="السماح للمستخدمين باستخدام OpenAI" checked={Boolean(settings.ai.openAiEnabled)} onChange={value => updateSetting('ai', 'openAiEnabled', value)} />
           <FieldLabel label="المزود الافتراضي">
             <SelectInput
               value={String(settings.ai.defaultProvider || 'gemini')}
@@ -434,6 +435,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             <TextInput value={String(settings.ai.defaultOpenAiModel || '')} onChange={value => updateSetting('ai', 'defaultOpenAiModel', value)} dir="ltr" />
           </FieldLabel>
         </div>
+      </SettingsSection>
+
+      <SettingsSection title="إعدادات كتابة المحتوى">
+        <ContentWritingPromptSettings
+          values={settings.ai}
+          onChange={(field, value) => updateSetting('ai', field, value)}
+        />
       </SettingsSection>
 
       <SettingsSection title="قوالب التحرير والتحليل">

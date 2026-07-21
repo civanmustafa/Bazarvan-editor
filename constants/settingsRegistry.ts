@@ -10,12 +10,20 @@ import {
   normalizeGeminiPaidModelId,
 } from './modelRegistry';
 import { ARTICLE_STATUS_VALUES } from './articleStatuses';
+import {
+  CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET,
+  CONTENT_WRITING_MAX_INPUT_TOKEN_BUDGET,
+  CONTENT_WRITING_MIN_INPUT_TOKEN_BUDGET,
+  CONTENT_WRITING_TEMPLATE_FIELDS,
+  DEFAULT_CONTENT_WRITING_TEMPLATES,
+  normalizeContentWritingTemplate,
+} from './contentWriting';
 
 export const SYSTEM_SETTING_KEYS = ['ai', 'n8n', 'articles', 'roles', 'system'] as const;
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
 export type SystemSettingsMap = Record<SystemSettingKey, Record<string, any>>;
 
-export const SETTINGS_REGISTRY_VERSION = 1;
+export const SETTINGS_REGISTRY_VERSION = 2;
 export const USER_PREFERENCES_SCHEMA_VERSION = 1;
 
 const ALLOWED_EXTERNAL_COMMAND_IDS = new Set(
@@ -36,6 +44,10 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     externalAnalysisCommandExecutionMode: 'independent_batch',
     defaultGeminiPaidModel: GEMINI_PAID_ANALYSIS_MODEL,
     defaultOpenAiModel: OPENAI_ANALYSIS_MODEL,
+    [CONTENT_WRITING_TEMPLATE_FIELDS.instructions]: DEFAULT_CONTENT_WRITING_TEMPLATES.instructions,
+    [CONTENT_WRITING_TEMPLATE_FIELDS.articleContext]: DEFAULT_CONTENT_WRITING_TEMPLATES.articleContext,
+    [CONTENT_WRITING_TEMPLATE_FIELDS.generationRequest]: DEFAULT_CONTENT_WRITING_TEMPLATES.generationRequest,
+    contentWritingMaxInputTokens: CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET,
   },
   n8n: {
     enabled: true,
@@ -140,6 +152,24 @@ const normalizeSystemSection = (
     ));
     setWhenPresent('defaultGeminiPaidModel', field => normalizeGeminiPaidModelId(field));
     setWhenPresent('defaultOpenAiModel', field => normalizeString(field, defaults.defaultOpenAiModel, 120) || defaults.defaultOpenAiModel);
+    setWhenPresent(CONTENT_WRITING_TEMPLATE_FIELDS.instructions, field => normalizeContentWritingTemplate(
+      field,
+      defaults[CONTENT_WRITING_TEMPLATE_FIELDS.instructions],
+    ));
+    setWhenPresent(CONTENT_WRITING_TEMPLATE_FIELDS.articleContext, field => normalizeContentWritingTemplate(
+      field,
+      defaults[CONTENT_WRITING_TEMPLATE_FIELDS.articleContext],
+    ));
+    setWhenPresent(CONTENT_WRITING_TEMPLATE_FIELDS.generationRequest, field => normalizeContentWritingTemplate(
+      field,
+      defaults[CONTENT_WRITING_TEMPLATE_FIELDS.generationRequest],
+    ));
+    setWhenPresent('contentWritingMaxInputTokens', field => normalizeInteger(
+      field,
+      defaults.contentWritingMaxInputTokens,
+      CONTENT_WRITING_MIN_INPUT_TOKEN_BUDGET,
+      CONTENT_WRITING_MAX_INPUT_TOKEN_BUDGET,
+    ));
     return normalized;
   }
 

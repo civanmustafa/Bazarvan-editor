@@ -45,11 +45,15 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
     const isChatGptQuickProvider = quickAiProvider === 'chatgpt';
     const isOpenAiEnabled = isAiProviderEnabled('chatgpt');
     const isOpenAiAvailable = isAiProviderAvailable('chatgpt');
+    const isGeminiPaidEnabled = isAiProviderEnabled('geminiPaid');
+    const isGeminiPaidAvailable = isAiProviderAvailable('geminiPaid');
     const isGeminiPaidQuickProvider = quickAiProvider === 'geminiPaid';
     const chatGptToggleTitle = !isOpenAiAvailable
         ? (uiLanguage === 'ar' ? 'OpenAI مفعّل دون مفتاح API مهيأ' : 'OpenAI is enabled without a configured API key')
         : (uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands');
-    const geminiPaidToggleTitle = uiLanguage === 'ar' ? 'Gemini Pro للأوامر السريعة' : 'Gemini Pro for quick commands';
+    const geminiPaidToggleTitle = !isGeminiPaidAvailable
+        ? (uiLanguage === 'ar' ? 'Gemini Pro مفعّل دون مفتاح API مهيأ' : 'Gemini Pro is enabled without a configured API key')
+        : (uiLanguage === 'ar' ? 'Gemini Pro للأوامر السريعة' : 'Gemini Pro for quick commands');
     const toggleChatGptProvider = () => {
         setQuickAiProvider(provider => provider === 'chatgpt' ? 'gemini' : 'chatgpt');
     };
@@ -120,14 +124,16 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                     <BrainCircuit size={16} />
                 </ToolbarButton>
             )}
-            <ToolbarButton
-                onClick={toggleGeminiPaidProvider}
-                title={geminiPaidToggleTitle}
-                isActive={isGeminiPaidQuickProvider}
-                disabled={isAnyGeminiLoading}
-            >
-                <BadgeDollarSign size={16} />
-            </ToolbarButton>
+            {isGeminiPaidEnabled && (
+                <ToolbarButton
+                    onClick={toggleGeminiPaidProvider}
+                    title={geminiPaidToggleTitle}
+                    isActive={isGeminiPaidQuickProvider}
+                    disabled={isAnyGeminiLoading || !isGeminiPaidAvailable}
+                >
+                    <BadgeDollarSign size={16} />
+                </ToolbarButton>
+            )}
             {isAnyGeminiLoading && aiRequestProgress?.source === 'heading_analysis' && (
                 <div className="absolute top-full z-[1000] mt-1 w-72 max-w-[calc(100vw-2rem)]">
                     <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact onCancel={cancelAiRequest} />

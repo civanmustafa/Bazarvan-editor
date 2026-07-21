@@ -35,11 +35,15 @@ const SelectionToolbar: React.FC = () => {
   const isChatGptQuickProvider = quickAiProvider === 'chatgpt';
   const isOpenAiEnabled = isAiProviderEnabled('chatgpt');
   const isOpenAiAvailable = isAiProviderAvailable('chatgpt');
+  const isGeminiPaidEnabled = isAiProviderEnabled('geminiPaid');
+  const isGeminiPaidAvailable = isAiProviderAvailable('geminiPaid');
   const isGeminiPaidQuickProvider = quickAiProvider === 'geminiPaid';
   const chatGptToggleLabel = !isOpenAiAvailable
     ? (uiLanguage === 'ar' ? 'OpenAI مفعّل دون مفتاح API مهيأ' : 'OpenAI is enabled without a configured API key')
     : (uiLanguage === 'ar' ? 'ChatGPT للأوامر السريعة' : 'ChatGPT for quick commands');
-  const geminiPaidToggleLabel = uiLanguage === 'ar' ? 'Gemini Pro للأوامر السريعة' : 'Gemini Pro for quick commands';
+  const geminiPaidToggleLabel = !isGeminiPaidAvailable
+    ? (uiLanguage === 'ar' ? 'Gemini Pro مفعّل دون مفتاح API مهيأ' : 'Gemini Pro is enabled without a configured API key')
+    : (uiLanguage === 'ar' ? 'Gemini Pro للأوامر السريعة' : 'Gemini Pro for quick commands');
   const isAnyAiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt;
   const toggleChatGptProvider = () => {
     setQuickAiProvider(provider => provider === 'chatgpt' ? 'gemini' : 'chatgpt');
@@ -235,19 +239,21 @@ const SelectionToolbar: React.FC = () => {
             <IconTooltip label={chatGptToggleLabel} placement="top" />
           </button>
         )}
-        <button
-          onClick={toggleGeminiPaidProvider}
-          disabled={isAnyAiLoading || !!localLoadingAction}
-          aria-label={geminiPaidToggleLabel}
-          className={`group relative p-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37] disabled:text-gray-400 dark:disabled:text-gray-600 ${
-            isGeminiPaidQuickProvider
-              ? 'bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
-              : 'text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20'
-          }`}
-        >
-          <BadgeDollarSign size={16} />
-          <IconTooltip label={geminiPaidToggleLabel} placement="top" />
-        </button>
+        {isGeminiPaidEnabled && (
+          <button
+            onClick={toggleGeminiPaidProvider}
+            disabled={isAnyAiLoading || !!localLoadingAction || !isGeminiPaidAvailable}
+            aria-label={geminiPaidToggleLabel}
+            className={`group relative p-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#2A2A2A] focus:ring-[#d4af37] disabled:text-gray-400 dark:disabled:text-gray-600 ${
+              isGeminiPaidQuickProvider
+                ? 'bg-[#d4af37]/10 text-[#d4af37] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20'
+            }`}
+          >
+            <BadgeDollarSign size={16} />
+            <IconTooltip label={geminiPaidToggleLabel} placement="top" />
+          </button>
+        )}
         <button
           onClick={handleManualCommandToggle}
           disabled={isAnyAiLoading || !!localLoadingAction}

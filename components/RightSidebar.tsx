@@ -784,6 +784,16 @@ const RightSidebar: React.FC = () => {
     ));
     const isOpenAiEnabled = isAiProviderEnabled('chatgpt');
     const isOpenAiAvailable = isAiProviderAvailable('chatgpt');
+    const isGeminiFreeEnabled = isAiProviderEnabled('gemini');
+    const isGeminiFreeAvailable = isAiProviderAvailable('gemini');
+    const isGeminiPaidEnabled = isAiProviderEnabled('geminiPaid');
+    const isGeminiPaidAvailable = isAiProviderAvailable('geminiPaid');
+    const enabledSmartProviderCount = Number(isGeminiFreeEnabled) + Number(isGeminiPaidEnabled) + Number(isOpenAiEnabled);
+    const smartProviderGridClass = enabledSmartProviderCount >= 3
+        ? 'grid-cols-3'
+        : enabledSmartProviderCount === 2
+            ? 'grid-cols-2'
+            : 'grid-cols-1';
     
     // Custom Dropdown State
     const [isCommandsMenuOpen, setIsCommandsMenuOpen] = useState(false);
@@ -799,6 +809,15 @@ const RightSidebar: React.FC = () => {
         aiRequestProgress &&
         (aiRequestProgress.source === 'smart_analysis' || aiRequestProgress.source === 'ready_commands_batch')
     );
+
+    useEffect(() => {
+        const currentProviderAvailable = competitorGeminiProvider === 'geminiPaid'
+            ? isGeminiPaidAvailable
+            : isGeminiFreeAvailable;
+        if (!currentProviderAvailable) {
+            setCompetitorGeminiProvider(isGeminiPaidAvailable ? 'geminiPaid' : 'gemini');
+        }
+    }, [competitorGeminiProvider, isGeminiFreeAvailable, isGeminiPaidAvailable]);
 
     useEffect(() => {
         setIsStructureTabActive(activeTab === 'structure');
@@ -1713,9 +1732,14 @@ ${readyCommandCompetitorBlocks}`;
                         </div>
 
                         <div className="flex flex-col gap-2">
-                            <div className={`grid gap-2 ${isOpenAiEnabled ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                                <div className="flex min-w-0 flex-col overflow-hidden rounded-lg bg-[#d4af37] text-white">
-                                    <button onClick={handleRunGeminiAnalysis} disabled={isAiLoading.gemini} className="flex min-h-9 items-center justify-center gap-1.5 px-1.5 py-1.5 hover:bg-[#b8922e] disabled:opacity-50">
+                            <div className={`grid gap-2 ${smartProviderGridClass}`}>
+                                {isGeminiFreeEnabled && <div className="flex min-w-0 flex-col overflow-hidden rounded-lg bg-[#d4af37] text-white">
+                                    <button
+                                        onClick={handleRunGeminiAnalysis}
+                                        disabled={isAiLoading.gemini || !isGeminiFreeAvailable}
+                                        title={!isGeminiFreeAvailable ? 'Gemini مفعّل دون مفتاح API مهيأ على الخادم' : 'تشغيل التحليل باستخدام Gemini'}
+                                        className="flex min-h-9 items-center justify-center gap-1.5 px-1.5 py-1.5 hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
                                         {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                         <span className="text-xs font-bold">Gemini</span>
                                     </button>
@@ -1723,7 +1747,7 @@ ${readyCommandCompetitorBlocks}`;
                                         value={selectedSmartGeminiModel}
                                         onChange={event => setSelectedSmartGeminiModel(normalizeGeminiFreeModel(event.target.value, geminiFreeModelValues))}
                                         onClick={event => event.stopPropagation()}
-                                        disabled={isAiLoading.gemini}
+                                        disabled={isAiLoading.gemini || !isGeminiFreeAvailable}
                                         title={t.locale === 'ar' ? 'اختيار موديل Gemini المجاني' : 'Choose free Gemini model'}
                                         dir="ltr"
                                         className="mx-1 mb-1 min-w-0 rounded-md border border-white/40 bg-white/95 px-1 py-0.5 text-[10px] font-bold text-[#333] outline-none focus:ring-1 focus:ring-white disabled:opacity-70"
@@ -1732,11 +1756,18 @@ ${readyCommandCompetitorBlocks}`;
                                             <option key={option.value} value={option.value}>{option.label}</option>
                                         ))}
                                     </select>
-                                </div>
-                                <button onClick={handleRunGeminiPaidAnalysis} disabled={isAiLoading.geminiPaid} className="flex items-center justify-center gap-2 py-2 bg-[#d4af37] text-white rounded-lg hover:bg-[#b8922e] disabled:opacity-50">
-                                    {isAiLoading.geminiPaid ? <Wand2 size={16} className="animate-spin" /> : <BadgeDollarSign size={16} />}
-                                    <span className="text-xs font-bold">Pro</span>
-                                </button>
+                                </div>}
+                                {isGeminiPaidEnabled && (
+                                    <button
+                                        onClick={handleRunGeminiPaidAnalysis}
+                                        disabled={isAiLoading.geminiPaid || !isGeminiPaidAvailable}
+                                        title={!isGeminiPaidAvailable ? 'Gemini Pro مفعّل دون مفتاح API مهيأ على الخادم' : 'تشغيل التحليل باستخدام Gemini Pro'}
+                                        className="flex items-center justify-center gap-2 rounded-lg bg-[#d4af37] py-2 text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {isAiLoading.geminiPaid ? <Wand2 size={16} className="animate-spin" /> : <BadgeDollarSign size={16} />}
+                                        <span className="text-xs font-bold">Pro</span>
+                                    </button>
+                                )}
                                 {isOpenAiEnabled && (
                                     <button
                                         onClick={handleRunChatGptAnalysis}
@@ -1761,7 +1792,7 @@ ${readyCommandCompetitorBlocks}`;
 
                         <div className="-mx-3 space-y-2 pt-3 border-t border-gray-200 dark:border-[#3C3C3C]">
                             {/* Results Gemini */}
-                            <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
+                            {isGeminiFreeEnabled && <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
                                 <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsGeminiExpanded(!isGeminiExpanded)}>
                                     <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج Gemini</span>
                                     <ChevronDown size={14} className={isGeminiExpanded ? 'rotate-180' : ''} />
@@ -1776,9 +1807,9 @@ ${readyCommandCompetitorBlocks}`;
                                          aiResults.gemini ? renderAnalysisResult('gemini', aiResults.gemini) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
-                            </div>
+                            </div>}
                             {/* Results Gemini Pro */}
-                            <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
+                            {isGeminiPaidEnabled && <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
                                 <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsGeminiPaidExpanded(!isGeminiPaidExpanded)}>
                                     <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج Gemini Pro</span>
                                     <ChevronDown size={14} className={isGeminiPaidExpanded ? 'rotate-180' : ''} />
@@ -1793,7 +1824,7 @@ ${readyCommandCompetitorBlocks}`;
                                          aiResults.geminiPaid ? renderAnalysisResult('geminiPaid', aiResults.geminiPaid) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
-                            </div>
+                            </div>}
                             {/* Results ChatGPT */}
                             {isOpenAiEnabled && <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
                                 <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsChatGptExpanded(!isChatGptExpanded)}>
@@ -1841,10 +1872,12 @@ ${readyCommandCompetitorBlocks}`;
                     <div className="mb-2 text-xs font-bold text-gray-700 dark:text-gray-200">
                         {t.locale === 'ar' ? 'نموذج Gemini لاستخراج المنافسين' : 'Gemini model for competitor extraction'}
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                        <button
+                    <div className={`grid gap-2 ${isGeminiFreeEnabled && isGeminiPaidEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                        {isGeminiFreeEnabled && <button
                             type="button"
                             onClick={() => setCompetitorGeminiProvider('gemini')}
+                            disabled={!isGeminiFreeAvailable}
+                            title={!isGeminiFreeAvailable ? 'Gemini مفعّل دون مفتاح API مهيأ على الخادم' : 'Gemini'}
                             className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors ${
                                 competitorGeminiProvider === 'gemini'
                                     ? 'bg-[#d4af37] text-white'
@@ -1853,19 +1886,23 @@ ${readyCommandCompetitorBlocks}`;
                         >
                             <Sparkles size={14} />
                             Gemini
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setCompetitorGeminiProvider('geminiPaid')}
-                            className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors ${
-                                competitorGeminiProvider === 'geminiPaid'
-                                    ? 'bg-[#d4af37] text-white'
-                                    : 'border border-[#d4af37]/35 bg-[#d4af37]/10 text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]'
-                            }`}
-                        >
-                            <BadgeDollarSign size={14} />
-                            Gemini Pro
-                        </button>
+                        </button>}
+                        {isGeminiPaidEnabled && (
+                            <button
+                                type="button"
+                                onClick={() => setCompetitorGeminiProvider('geminiPaid')}
+                                disabled={!isGeminiPaidAvailable}
+                                title={!isGeminiPaidAvailable ? 'Gemini Pro مفعّل دون مفتاح API مهيأ على الخادم' : 'Gemini Pro'}
+                                className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    competitorGeminiProvider === 'geminiPaid'
+                                        ? 'bg-[#d4af37] text-white'
+                                        : 'border border-[#d4af37]/35 bg-[#d4af37]/10 text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]'
+                                }`}
+                            >
+                                <BadgeDollarSign size={14} />
+                                Gemini Pro
+                            </button>
+                        )}
                     </div>
                 </div>
 
