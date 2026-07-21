@@ -9,6 +9,7 @@ import {
   normalizeGeminiFreeModelId,
   normalizeGeminiPaidModelId,
 } from './modelRegistry';
+import { ARTICLE_STATUS_VALUES } from './articleStatuses';
 
 export const SYSTEM_SETTING_KEYS = ['ai', 'n8n', 'articles', 'roles', 'system'] as const;
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
@@ -151,7 +152,7 @@ const normalizeSystemSection = (
   }
 
   if (key === 'articles') {
-    setWhenPresent('defaultStatus', field => normalizeEnum(field, ['draft', 'in_review', 'published', 'archived'], defaults.defaultStatus));
+    setWhenPresent('defaultStatus', field => normalizeEnum(field, ARTICLE_STATUS_VALUES, defaults.defaultStatus));
     setWhenPresent('defaultVisibility', field => normalizeEnum(field, ['public', 'private'], defaults.defaultVisibility));
     setWhenPresent('defaultLanguage', field => normalizeEnum(field, ['ar', 'en'], defaults.defaultLanguage));
     setWhenPresent('trashRetentionDays', field => normalizeInteger(field, defaults.trashRetentionDays, 1, 3_650));

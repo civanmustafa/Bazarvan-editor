@@ -12,6 +12,7 @@ import AIActions from './toolbar/AIActions';
 import DocumentActions from './toolbar/DocumentActions';
 import FindAndReplace from './toolbar/FindAndReplace';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
+import { ARTICLE_STATUS_OPTIONS } from '../constants/articleStatuses';
 
 /*
  * Toolbar composition:
@@ -22,13 +23,6 @@ import NewArticleLanguageModal from './NewArticleLanguageModal';
  *
  * Add a new toolbar command in the matching toolbar/* component, then pass only the needed handler here.
  */
-const ARTICLE_STATUS_LABELS: Record<string, string> = {
-  draft: 'مسودة',
-  in_review: 'جاهز',
-  published: 'منشور',
-  archived: 'أرشيف',
-};
-
 const ARTICLE_ACCESS_ROLE_LABELS: Record<string, string> = {
   viewer: 'عرض',
   editor: 'تعديل',
@@ -222,9 +216,9 @@ const EditorToolbar: React.FC = () => {
                     value={activeArticleSettings.status}
                     disabled={isStatusSaving}
                     onChange={(event) => { void handleStatusChange(event.target.value); }}
-                    className="max-w-[92px] bg-transparent text-[11px] font-black outline-none disabled:opacity-60"
+                    className="max-w-[124px] bg-transparent text-[11px] font-black outline-none disabled:opacity-60"
                   >
-                    {Object.entries(ARTICLE_STATUS_LABELS).map(([value, label]) => (
+                    {ARTICLE_STATUS_OPTIONS.map(({ value, label }) => (
                       <option key={value} value={value}>{label}</option>
                     ))}
                   </select>

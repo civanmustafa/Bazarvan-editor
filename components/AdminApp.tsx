@@ -65,6 +65,7 @@ import {
   listExternalAnalysisReportJobs,
   type ExternalAnalysisReportJob,
 } from '../utils/externalAnalysis';
+import { getArticleStatusLabel } from '../constants/articleStatuses';
 
 type AdminAppProps = {
   section: AdminRouteSection;
@@ -319,7 +320,7 @@ const ArticleRow: React.FC<{
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
             <span>{ownerLabel}</span>
             <span>{article.source}</span>
-            <span>{article.status}</span>
+            <span>{getArticleStatusLabel(article.status, t.locale)}</span>
             <span>{article.visibility}</span>
             <span>{(article.articleLanguage || 'ar').toUpperCase()}</span>
             {trashInfo && <span className="text-red-500">محذوف</span>}
@@ -455,7 +456,7 @@ const ArticleDetailPage: React.FC<{
       )}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-        <DetailRow label="الحالة" value={article.status} />
+        <DetailRow label="الحالة" value={getArticleStatusLabel(article.status, t.locale)} />
         <DetailRow label="المصدر" value={article.source} />
         <DetailRow label="الظهور" value={article.visibility} />
         <DetailRow label="لغة المقال" value={(article.articleLanguage || 'ar').toUpperCase()} />
@@ -2133,7 +2134,9 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
                 <span className="inline-flex items-center gap-1 font-black text-gray-500 dark:text-gray-400"><Shield size={13} /> الحالة</span>
                 <select name="status" value={articleFilters.status} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
                   <option value="all">الكل</option>
-                  {articleFilterOptions.statuses.map(value => <option key={value} value={value}>{value}</option>)}
+                  {articleFilterOptions.statuses.map(value => (
+                    <option key={value} value={value}>{getArticleStatusLabel(value, t.locale)}</option>
+                  ))}
                 </select>
               </label>
               <label className="space-y-1">

@@ -1,10 +1,14 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
+import {
+  ARTICLE_STATUS_VALUES,
+  normalizeArticleStatus,
+  type ArticleStatus,
+} from '../constants/articleStatuses';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type ArticleVisibility = 'private' | 'public';
-type ArticleStatus = 'draft' | 'in_review' | 'published' | 'archived';
 type AccessRole = 'viewer' | 'editor';
 
 type ResolvedProfile = {
@@ -52,16 +56,8 @@ class IngestError extends Error {
 }
 
 const ALLOWED_VISIBILITIES = new Set<ArticleVisibility>(['private', 'public']);
-const ALLOWED_STATUSES = new Set<ArticleStatus>(['draft', 'in_review', 'published', 'archived']);
+const ALLOWED_STATUSES = new Set<ArticleStatus>(ARTICLE_STATUS_VALUES);
 const ALLOWED_ACCESS_ROLES = new Set<AccessRole>(['viewer', 'editor']);
-const STATUS_ALIASES: Record<string, ArticleStatus> = {
-  ready: 'in_review',
-  review: 'in_review',
-  reviewing: 'in_review',
-  'in review': 'in_review',
-  'جاهز': 'in_review',
-  'مراجعة': 'in_review',
-};
 
 const getPublicBaseUrl = (req: any): string => {
   const configuredUrl = String(
@@ -302,8 +298,9 @@ const normalizeLanguage = (value: unknown): 'ar' | 'en' => {
 
 const normalizeStatus = (value: unknown, fallback: ArticleStatus = 'draft'): ArticleStatus => {
   const token = normalizeToken(value);
-  if (STATUS_ALIASES[token]) return STATUS_ALIASES[token];
-  return ALLOWED_STATUSES.has(token as ArticleStatus) ? token as ArticleStatus : fallback;
+  return ALLOWED_STATUSES.has(token as ArticleStatus)
+    ? token as ArticleStatus
+    : normalizeArticleStatus(token, fallback);
 };
 
 const normalizeVisibility = (value: unknown): ArticleVisibility | null => {

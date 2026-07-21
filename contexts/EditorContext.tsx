@@ -44,6 +44,7 @@ import {
 import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
 import { recordAppActivity } from '../utils/appActivity';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
+import { shouldClearArticleAiResults } from '../constants/articleStatuses';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -1329,7 +1330,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const updatedArticle = await updateRemoteArticleSettings(activeArticleId, { status });
             setActiveArticleSettings(getActiveArticleSettings(updatedArticle));
             window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
-            if (status === 'in_review') {
+            if (shouldClearArticleAiResults(status)) {
                 window.dispatchEvent(new CustomEvent('bazarvan:article-ai-clear-request', {
                     detail: { articleId: activeArticleId },
                 }));

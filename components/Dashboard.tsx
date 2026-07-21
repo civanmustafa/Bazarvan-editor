@@ -37,8 +37,53 @@ import {
     listExternalAnalysisDashboardSummaries,
     type ExternalAnalysisDashboardSummary,
 } from '../utils/externalAnalysis';
+import {
+    ARTICLE_STATUS_OPTIONS,
+    DASHBOARD_ARTICLE_STATUS_TABS,
+    DASHBOARD_PREFETCH_ARTICLE_STATUSES,
+    getArticleStatusLabel,
+    normalizeArticleStatusFilter,
+    shouldClearArticleAiResults,
+    type ArticleStatusFilter,
+} from '../constants/articleStatuses';
 
 const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
+
+type DashboardStatusPages = Record<ArticleStatusFilter, number>;
+
+const readDashboardArticleLocation = (): { status: ArticleStatusFilter; page: number } => {
+  if (typeof window === 'undefined') return { status: 'all', page: 1 };
+  const params = new URLSearchParams(window.location.search);
+  const status = normalizeArticleStatusFilter(params.get('status'));
+  const parsedPage = Number.parseInt(params.get('page') || '1', 10);
+  return {
+    status,
+    page: Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1,
+  };
+};
+
+const createDashboardStatusPages = (
+  selectedStatus: ArticleStatusFilter = 'all',
+  selectedPage = 1,
+): DashboardStatusPages => Object.fromEntries(
+  DASHBOARD_ARTICLE_STATUS_TABS.map(status => [
+    status,
+    status === selectedStatus ? Math.max(1, selectedPage) : 1,
+  ]),
+) as DashboardStatusPages;
+
+const isDashboardPrefetchConnection = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  const connection = (navigator as Navigator & {
+    connection?: { saveData?: boolean; effectiveType?: string };
+  }).connection;
+  return !connection?.saveData && connection?.effectiveType !== 'slow-2g' && connection?.effectiveType !== '2g';
+};
+
+const getDashboardStatusTabLabel = (status: ArticleStatusFilter, locale: string): string => {
+  if (status === 'all') return locale === 'en' ? 'All articles' : 'كل المقالات';
+  return getArticleStatusLabel(status, locale);
+};
 
 /*
  * Dashboard is the user workspace:
@@ -203,12 +248,7 @@ const N8N_SETTING_OPTIONS: Record<N8nSettingFieldKey, { value: string; label: st
     { value: 'ar', label: 'عربي' },
     { value: 'en', label: 'English' },
   ],
-  status: [
-    { value: 'draft', label: 'مسودة' },
-    { value: 'in_review', label: 'جاهز' },
-    { value: 'published', label: 'منشور' },
-    { value: 'archived', label: 'أرشيف' },
-  ],
+  status: ARTICLE_STATUS_OPTIONS,
 };
 
 const getN8nOptionLabel = (field: N8nSettingFieldKey, value: string): string => (
@@ -969,6 +1009,7 @@ const Dashboard: React.FC = () => {
   const onLoadArticle = (article: RemoteArticleActivity) => {
     navigateToAppPath(buildEditorArticlePath(article.id));
   };
+  const initialDashboardLocation = useMemo(readDashboardArticleLocation, []);
   
   const [remoteArticles, setRemoteArticles] = useState<RemoteArticleActivity[]>([]);
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
@@ -976,7 +1017,10 @@ const Dashboard: React.FC = () => {
   const [detailSnapshot, setDetailSnapshot] = useState<ArticleStorageSnapshot | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [isArticlesLoading, setIsArticlesLoading] = useState(false);
-  const [articlesPage, setArticlesPage] = useState(1);
+  const [articleStatusTab, setArticleStatusTab] = useState<ArticleStatusFilter>(initialDashboardLocation.status);
+  const [articlePagesByStatus, setArticlePagesByStatus] = useState<DashboardStatusPages>(() => (
+    createDashboardStatusPages(initialDashboardLocation.status, initialDashboardLocation.page)
+  ));
   const [articlesTotalCount, setArticlesTotalCount] = useState(0);
   const [articlesHasNextPage, setArticlesHasNextPage] = useState(false);
   const [isArticlesPageFromCache, setIsArticlesPageFromCache] = useState(false);
@@ -1006,7 +1050,6 @@ const Dashboard: React.FC = () => {
     timeMin: '',
     timeMax: '',
     language: 'all',
-    status: 'all',
     profileId: 'all',
     visibility: 'all',
     source: 'all',
@@ -1023,6 +1066,19 @@ const Dashboard: React.FC = () => {
   const isAdmin = currentUserRole === 'admin';
   const dashboardRefreshRequestRef = useRef(0);
   const externalAnalysisRefreshRequestRef = useRef(0);
+  const prefetchedDashboardScopesRef = useRef(new Set<string>());
+  const dashboardFiltersInitializedRef = useRef(false);
+  const articlesPage = articlePagesByStatus[articleStatusTab] || 1;
+  const setArticlesPage = useCallback((nextPage: React.SetStateAction<number>) => {
+    setArticlePagesByStatus(previousPages => {
+      const currentPage = previousPages[articleStatusTab] || 1;
+      const resolvedPage = typeof nextPage === 'function' ? nextPage(currentPage) : nextPage;
+      return {
+        ...previousPages,
+        [articleStatusTab]: Math.max(1, Math.floor(resolvedPage || 1)),
+      };
+    });
+  }, [articleStatusTab]);
   const dashboardArticleIds = useMemo(
     () => remoteArticles.map(article => article.id).filter(Boolean),
     [remoteArticles],
@@ -1034,12 +1090,39 @@ const Dashboard: React.FC = () => {
     search: debouncedSearchQuery,
     mode: 'all',
     trash: isTrashVisible,
-    filters,
-  }), [articlesPage, debouncedSearchQuery, isTrashVisible, filters]);
+    filters: {
+      ...filters,
+      status: isTrashVisible ? 'all' : articleStatusTab,
+    },
+  }), [articleStatusTab, articlesPage, debouncedSearchQuery, isTrashVisible, filters]);
   const articlesPageQueryKey = useMemo(
     () => JSON.stringify(articlesPageOptions),
     [articlesPageOptions],
   );
+  const hasDashboardPrefetchFilters = useMemo(() => (
+    Object.values(filters).some(value => Boolean(value && value !== 'all'))
+  ), [filters]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || isTrashVisible) return;
+    const params = new URLSearchParams(window.location.search);
+    if (articleStatusTab === 'all') {
+      params.delete('status');
+    } else {
+      params.set('status', articleStatusTab);
+    }
+    if (articlesPage > 1) {
+      params.set('page', String(articlesPage));
+    } else {
+      params.delete('page');
+    }
+    const search = params.toString();
+    const nextLocation = `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`;
+    const currentLocation = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextLocation !== currentLocation) {
+      window.history.replaceState(window.history.state, '', nextLocation);
+    }
+  }, [articleStatusTab, articlesPage, isTrashVisible]);
 
   const refreshExternalAnalysisSummaries = useCallback(async () => {
     const requestId = externalAnalysisRefreshRequestRef.current + 1;
@@ -1229,7 +1312,7 @@ const Dashboard: React.FC = () => {
     const ids = [...selectedArticleIds];
     if (ids.length === 0 || !bulkStatus) return;
     await Promise.all(ids.map(id => updateRemoteArticleSettings(id, { status: bulkStatus })));
-    if (bulkStatus === 'in_review') {
+    if (shouldClearArticleAiResults(bulkStatus)) {
       ids.forEach(articleId => {
         window.dispatchEvent(new CustomEvent('bazarvan:article-ai-clear-request', {
           detail: { articleId },
@@ -1263,10 +1346,13 @@ const Dashboard: React.FC = () => {
         article.id === articleId ? updatedArticle : article
       ))));
       setDetailArticle(prev => (prev?.id === articleId ? updatedArticle : prev));
-      if (patch.status === 'in_review') {
+      if (shouldClearArticleAiResults(patch.status)) {
         window.dispatchEvent(new CustomEvent('bazarvan:article-ai-clear-request', {
           detail: { articleId },
         }));
+      }
+      if (patch.status) {
+        await refreshData();
       }
       if (patch.visibleToEmailsCsv !== undefined && patch.visibleToEmailsCsv.trim()) {
         void triggerAssignedArticleAutomation(articleId)
@@ -1328,6 +1414,67 @@ const Dashboard: React.FC = () => {
   }, [currentUser, isAdmin, articlesPageQueryKey]);
 
   useEffect(() => {
+    if (
+      !currentUser ||
+      !isSupabaseConfigured ||
+      isArticlesLoading ||
+      isTrashVisible ||
+      debouncedSearchQuery ||
+      hasDashboardPrefetchFilters ||
+      !isDashboardPrefetchConnection()
+    ) return;
+
+    let cancelled = false;
+    const timerId = window.setTimeout(() => {
+      void (async () => {
+        for (const status of DASHBOARD_PREFETCH_ARTICLE_STATUSES) {
+          if (cancelled) return;
+          const scopeKey = `${currentUserId || currentUser}:${status}:1`;
+          if (prefetchedDashboardScopesRef.current.has(scopeKey)) continue;
+          if (status === articleStatusTab && articlesPage === 1) {
+            prefetchedDashboardScopesRef.current.add(scopeKey);
+            continue;
+          }
+
+          const prefetchOptions: RemoteArticlesPageOptions = {
+            page: 1,
+            pageSize: DASHBOARD_ARTICLES_PAGE_SIZE,
+            search: '',
+            mode: 'all',
+            trash: false,
+            filters: { ...filters, status },
+          };
+
+          try {
+            const cachedPage = await readCachedRemoteArticlesPage(prefetchOptions);
+            if (!cachedPage && !cancelled) {
+              await listRemoteArticlesPage(prefetchOptions);
+            }
+            if (!cancelled) prefetchedDashboardScopesRef.current.add(scopeKey);
+          } catch (error) {
+            console.warn(`Could not prefetch dashboard status "${status}":`, error);
+          }
+        }
+      })();
+    }, 900);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [
+    articleStatusTab,
+    articlesPage,
+    currentUser,
+    currentUserId,
+    debouncedSearchQuery,
+    filters,
+    hasDashboardPrefetchFilters,
+    isArticlesLoading,
+    isTrashVisible,
+  ]);
+
+  useEffect(() => {
     if (!currentUser || !isSupabaseConfigured) return;
     const supabase = getSupabaseClient();
     const channel = supabase
@@ -1384,10 +1531,14 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     clearSelectedArticles();
-  }, [isTrashVisible, searchQuery, filters, articlesPage]);
+  }, [articleStatusTab, isTrashVisible, searchQuery, filters, articlesPage]);
 
   useEffect(() => {
-    setArticlesPage(1);
+    if (!dashboardFiltersInitializedRef.current) {
+      dashboardFiltersInitializedRef.current = true;
+      return;
+    }
+    setArticlePagesByStatus(createDashboardStatusPages());
   }, [isTrashVisible, searchQuery, filters]);
 
   const handleExportHtml = () => {
@@ -1514,6 +1665,16 @@ const Dashboard: React.FC = () => {
     setFilters(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleArticleStatusTabChange = (status: ArticleStatusFilter) => {
+    if (status === articleStatusTab) return;
+    setRemoteArticles([]);
+    setArticlesTotalCount(0);
+    setArticlesHasNextPage(false);
+    setIsArticlesPageFromCache(false);
+    setIsArticlesLoading(true);
+    setArticleStatusTab(status);
+  };
+
   const handleResetFilters = () => {
     setFilters({
       dateFrom: '',
@@ -1525,7 +1686,6 @@ const Dashboard: React.FC = () => {
       timeMin: '',
       timeMax: '',
       language: 'all',
-      status: 'all',
       profileId: 'all',
       visibility: 'all',
       source: 'all',
@@ -1695,6 +1855,34 @@ const Dashboard: React.FC = () => {
                     </div>
                 </div>
 
+                {!isTrashVisible && (
+                    <nav
+                        className="mb-3 overflow-x-auto border-b border-gray-200 dark:border-[#3C3C3C]"
+                        aria-label="تبويبات حالات المقالات"
+                    >
+                        <div className="flex min-w-max items-end gap-1">
+                            {DASHBOARD_ARTICLE_STATUS_TABS.map(status => {
+                              const isActive = articleStatusTab === status;
+                              return (
+                                <button
+                                    key={status}
+                                    type="button"
+                                    onClick={() => handleArticleStatusTabChange(status)}
+                                    aria-current={isActive ? 'page' : undefined}
+                                    className={`min-h-10 border-b-2 px-3 py-2 text-sm font-black transition-colors ${
+                                      isActive
+                                        ? 'border-[#d4af37] text-[#8a6f1d] dark:text-[#f2d675]'
+                                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800 dark:text-gray-400 dark:hover:border-gray-600 dark:hover:text-gray-200'
+                                    }`}
+                                >
+                                    {getDashboardStatusTabLabel(status, t.locale)}
+                                </button>
+                              );
+                            })}
+                        </div>
+                    </nav>
+                )}
+
                 <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <input
@@ -1831,18 +2019,6 @@ const Dashboard: React.FC = () => {
                                     <option value="all">{t.all}</option>
                                     <option value="ar">{t.arabic}</option>
                                     <option value="en">{t.english}</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
-                                    <Settings size={16} className="text-[#d4af37]" />
-                                    <span>الحالة</span>
-                                </label>
-                                <select name="status" value={filters.status} onChange={handleFilterChange} className={inputClass}>
-                                    <option value="all">{t.all}</option>
-                                    {N8N_SETTING_OPTIONS.status.map(option => (
-                                        <option key={option.value} value={option.value}>{option.label}</option>
-                                    ))}
                                 </select>
                             </div>
                             {isAdmin && (

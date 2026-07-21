@@ -42,6 +42,7 @@ import {
   GEMINI_PAID_MODEL_OPTIONS,
   normalizeGeminiPaidModelId,
 } from '../constants/modelRegistry';
+import { ARTICLE_STATUS_OPTIONS } from '../constants/articleStatuses';
 
 type SettingsPageProps = {
   section: string | null;
@@ -510,12 +511,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             <SelectInput
               value={String(settings.articles.defaultStatus || 'draft')}
               onChange={value => updateSetting('articles', 'defaultStatus', value)}
-              options={[
-                { value: 'draft', label: 'مسودة' },
-                { value: 'in_review', label: 'جاهز' },
-                { value: 'published', label: 'منشور' },
-                { value: 'archived', label: 'أرشيف' },
-              ]}
+              options={ARTICLE_STATUS_OPTIONS}
             />
           </FieldLabel>
           <FieldLabel label="الظهور الافتراضي">

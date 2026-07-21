@@ -137,7 +137,7 @@ const ALLOWED_PATCH_OPERATIONS = new Set<AiContentPatchOperation>([
 ]);
 
 const MISSING_FIELD_LABELS: Record<string, { ar: string; en: string }> = {
-  draft_status: { ar: 'حالة المقالة: مسودة', en: 'Draft article status' },
+  draft_status: { ar: 'حالة المقالة: تجهيز محتوى أو مسودة', en: 'Content preparation or draft status' },
   article_title: { ar: 'عنوان المقالة', en: 'Article title' },
   article_title_or_primary_keyword: {
     ar: 'عنوان المقالة أو الكلمة المفتاحية الأساسية',

@@ -62,3 +62,16 @@ test('dashboard RPC keeps AccessPolicy before pagination and has matching indexe
   assert.match(performanceMigration, /articles_dashboard_source_sort_idx/);
   assert.match(performanceMigration, /articles_dashboard_status_sort_idx/);
 });
+
+test('dashboard status tabs keep ten-row server pages and prefetch priority tabs sequentially', async () => {
+  const dashboard = await readWorkspaceFile('components/Dashboard.tsx');
+
+  assert.match(dashboard, /DASHBOARD_ARTICLES_PAGE_SIZE = 10/);
+  assert.match(dashboard, /DASHBOARD_ARTICLE_STATUS_TABS\.map/);
+  assert.match(dashboard, /status: isTrashVisible \? 'all' : articleStatusTab/);
+  assert.match(dashboard, /for \(const status of DASHBOARD_PREFETCH_ARTICLE_STATUSES\)/);
+  assert.match(dashboard, /await readCachedRemoteArticlesPage\(prefetchOptions\)/);
+  assert.match(dashboard, /await listRemoteArticlesPage\(prefetchOptions\)/);
+  assert.match(dashboard, /window\.history\.replaceState/);
+  assert.doesNotMatch(dashboard, /<select name="status"/);
+});

@@ -3,6 +3,7 @@ import {
   GEMINI_ANALYSIS_MODEL,
   GEMINI_PAID_ANALYSIS_MODEL,
 } from '../constants/modelRegistry';
+import { isExternalAnalysisArticleStatus } from '../constants/articleStatuses';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { aiExecutionEngine, type AiExecutionTelemetryContext } from '../server/aiExecutionEngine';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
@@ -480,8 +481,8 @@ const runSemanticGeneration = async (
   const keywords = normalizeKeywordsPayload(article.keywords);
   const goalContext = normalizeGoalContextPayload(article.goal_context);
 
-  if (article.status !== 'draft') {
-    reasons.push('Semantic generation skipped: article status is not draft.');
+  if (!isExternalAnalysisArticleStatus(article.status)) {
+    reasons.push('Semantic generation skipped: article status is not eligible for external analysis.');
     return { status: 'skipped', keywords, metadata, title: toTrimmedString(article.title) };
   }
   if (!keywords.primary) {
@@ -600,8 +601,8 @@ const runGeminiPaidCompetitorAnalysis = async (
   const competitors = getCompetitorData(metadata);
   const competitorBlocks = buildCompetitorBlocks(competitors.texts, competitors.urls);
 
-  if (article.status !== 'draft') {
-    reasons.push('Gemini Pro analysis skipped: article status is not draft.');
+  if (!isExternalAnalysisArticleStatus(article.status)) {
+    reasons.push('Gemini Pro analysis skipped: article status is not eligible for external analysis.');
     return { status: 'skipped', metadata };
   }
   if (!competitorBlocks.trim()) {

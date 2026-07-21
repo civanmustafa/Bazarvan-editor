@@ -7,6 +7,10 @@ import {
 } from './editorContentStore';
 import { getSupabaseClient } from './supabaseClient';
 import { normalizeGoalContext } from './goalContext';
+import {
+  shouldClearArticleAiResults,
+  type ArticleStatus,
+} from '../constants/articleStatuses';
 
 type ArticleStats = NonNullable<ArticleActivity['stats']>;
 
@@ -17,7 +21,7 @@ type ArticleRow = {
   assigned_to: string | null;
   source: 'manual' | 'n8n' | 'import' | 'system';
   visibility: 'private' | 'public';
-  status: 'draft' | 'in_review' | 'published' | 'archived';
+  status: ArticleStatus;
   title: string;
   content_json: any;
   content_html: string | null;
@@ -1161,7 +1165,7 @@ const updateRemoteArticleStatus = async (
 
     const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
     const currentSettings = isRecord(currentMetadata.n8nSettings) ? currentMetadata.n8nSettings : {};
-    const nextMetadataBase = status === 'in_review'
+    const nextMetadataBase = shouldClearArticleAiResults(status)
       ? withoutAiResultsMetadata(currentMetadata)
       : currentMetadata;
     const { error: updateError } = await supabase
@@ -1181,7 +1185,7 @@ const updateRemoteArticleStatus = async (
     if (updateError) throw updateError;
   }
 
-  if (status === 'in_review') {
+  if (shouldClearArticleAiResults(status)) {
     await clearRemoteArticleAiResults(articleId).catch(error => {
       console.error(`Failed to clear saved AI results for ready article "${articleId}":`, error);
     });
@@ -1244,7 +1248,7 @@ export const updateRemoteArticleSettings = async (
     n8nSettings.accessRole = nextAccessRole;
   }
 
-  const nextMetadataBase = patch.status === 'in_review'
+  const nextMetadataBase = shouldClearArticleAiResults(patch.status)
     ? withoutAiResultsMetadata(currentMetadata)
     : currentMetadata;
 

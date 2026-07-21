@@ -12,6 +12,13 @@ import {
   normalizeGeminiFreeModelId,
   normalizeGeminiPaidModelId,
 } from '../constants/modelRegistry.ts';
+import {
+  ARTICLE_STATUS_VALUES,
+  DASHBOARD_ARTICLE_STATUS_TABS,
+  DASHBOARD_PREFETCH_ARTICLE_STATUSES,
+  isExternalAnalysisArticleStatus,
+  normalizeArticleStatus,
+} from '../constants/articleStatuses.ts';
 
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
@@ -85,6 +92,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
     articles: {
       trashRetentionDays: 99_999,
       defaultLanguage: 'invalid',
+      defaultStatus: 'content_preparation',
     },
   });
 
@@ -94,6 +102,33 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.ai.unknownSecret, undefined);
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');
+  assert.equal(normalized.articles.defaultStatus, 'content_preparation');
+});
+
+test('ArticleStatusRegistry owns workflow states, dashboard priority, and analysis eligibility', () => {
+  assert.deepEqual(ARTICLE_STATUS_VALUES, [
+    'content_preparation',
+    'draft',
+    'in_review',
+    'published',
+    'archived',
+  ]);
+  assert.deepEqual(DASHBOARD_ARTICLE_STATUS_TABS.slice(0, 4), [
+    'all',
+    'in_review',
+    'content_preparation',
+    'draft',
+  ]);
+  assert.deepEqual(DASHBOARD_PREFETCH_ARTICLE_STATUSES, [
+    'in_review',
+    'content_preparation',
+    'draft',
+  ]);
+  assert.equal(normalizeArticleStatus('تجهيز محتوى'), 'content_preparation');
+  assert.equal(normalizeArticleStatus('ready'), 'in_review');
+  assert.equal(isExternalAnalysisArticleStatus('content_preparation'), true);
+  assert.equal(isExternalAnalysisArticleStatus('draft'), true);
+  assert.equal(isExternalAnalysisArticleStatus('in_review'), false);
 });
 
 test('legacy browser preferences migrate without replacing existing online values', async () => {
@@ -171,5 +206,20 @@ test('phase 4 migration creates protected durable user preferences', async () =>
   assert.match(migration, /function public\.merge_current_user_preferences\(p_patch jsonb\)/);
   assert.match(migration, /coalesce\(public\.user_preferences\.preferences, '\{\}'::jsonb\)\s*\|\| excluded\.preferences/);
   assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
+  assertBalancedSqlParentheses(migration);
+});
+
+test('content preparation migration expands status and external-analysis eligibility safely', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260721000000_content_preparation_status.sql',
+  );
+
+  assert.match(migration, /articles_status_check/);
+  assert.match(migration, /'content_preparation', 'draft', 'in_review', 'published', 'archived'/);
+  assert.match(migration, /article_status_supports_external_analysis/);
+  assert.match(migration, /in \('content_preparation', 'draft'\)/);
+  assert.match(migration, /create or replace function public\.evaluate_external_analysis_readiness/);
+  assert.match(migration, /create or replace function public\.evaluate_competitor_discovery_readiness/);
+  assert.match(migration, /public\.can_write_article\(target_article_id\)/);
   assertBalancedSqlParentheses(migration);
 });
