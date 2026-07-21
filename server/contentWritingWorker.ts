@@ -3,9 +3,9 @@ import './loadEnv';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
-  executeContentWritingConversation,
   type ContentWritingExecutionResult,
 } from './contentWritingEngine';
+import { executeStructuredContentWritingWorkflow } from './contentWritingWorkflow';
 import {
   claimNextContentWritingSession,
   completeContentWritingSession,
@@ -154,16 +154,17 @@ const executeClaimedSession = async (
 
   try {
     queueProgressWrite({
-      stage: 'preparing_conversation',
+      stage: 'preparing_workflow',
       provider: session.provider,
       model: session.model,
-      message: 'Loading the three persistent content writing messages.',
+      message: 'Loading the persistent conversation and completed writing steps.',
       completed: false,
     });
     const messages = await getContentWritingMessages(session.id);
-    const result = await executeContentWritingConversation({
+    const result = await executeStructuredContentWritingWorkflow({
       session,
       messages,
+      workerId: slotWorkerId,
       signal: controller.signal,
       onProgress: queueProgressWrite,
     });
@@ -196,7 +197,7 @@ const executeClaimedSession = async (
         provider: session.provider,
         model: result.model,
         status: result.status,
-        message: 'Content writing completed successfully.',
+        message: 'Structured content writing and final review completed successfully.',
         completed: true,
       };
       const completed = await completeContentWritingSession({

@@ -90,6 +90,11 @@ export type ContentWritingExecutionResult = {
   errorMessage?: string;
 };
 
+export type ContentWritingTurnHistory = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 const isRecord = (value: unknown): value is JsonObject => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -305,7 +310,7 @@ export const queueContentWritingSession = async (input: {
         article: {
           id: articleSource.article.id,
           title: articleSource.article.title,
-          language: articleSource.article.article_language,
+          language: articleSource.input.language,
           updatedAt: articleSource.article.updated_at,
         },
         competitors: bundle.competitors.map(competitor => ({
@@ -370,20 +375,47 @@ const toSafeMetadata = (body: JsonObject): JsonObject => {
   return metadata;
 };
 
-export const executeContentWritingConversation = async (options: {
+const createContentWritingRequestId = (
+  sessionId: string,
+  stepKey: string,
+  attempt: number,
+): string => `${sessionId}-${stepKey}-${Math.max(1, attempt)}`
+  .replace(/[^A-Za-z0-9_-]/g, '-')
+  .slice(0, 80);
+
+export const executeContentWritingTurn = async (options: {
   session: ContentWritingSession;
   messages: ContentWritingMessage[];
+  prompt: string;
+  stepKey: string;
+  stepLabel: string;
+  stepAttempt: number;
+  includeGenerationRequestInHistory?: boolean;
+  additionalHistory?: ContentWritingTurnHistory[];
+  maxOutputTokens?: number;
   signal?: AbortSignal;
   onProgress?: (progress: AiExecutionProgress) => void;
 }): Promise<ContentWritingExecutionResult> => {
   const [instructions, articleContext, generationRequest] = assertContentWritingConversation(options.messages);
+  const baseHistory: ContentWritingTurnHistory[] = [
+    { role: 'user', content: articleContext.content },
+    ...(options.includeGenerationRequestInHistory === false
+      ? []
+      : [{ role: 'user' as const, content: generationRequest.content }]),
+    ...(options.additionalHistory || []),
+  ];
+  const requestId = createContentWritingRequestId(
+    options.session.id,
+    options.stepKey,
+    options.stepAttempt,
+  );
   const telemetry = {
     actorUserId: options.session.created_by,
     source: 'content_writing',
     articleId: options.session.article_id,
-    action: 'generate_article',
-    commandId: 'content-writing-session',
-    commandLabel: 'Content writing session',
+    action: `structured_${options.stepKey}`,
+    commandId: options.stepKey,
+    commandLabel: options.stepLabel,
   };
   const allowModelFallback = options.session.provider === 'gemini'
     && options.session.context_snapshot?.allowModelFallback === true;
@@ -391,21 +423,24 @@ export const executeContentWritingConversation = async (options: {
     ? await executeOpenAiRequest({
       instructions: instructions.content,
       messages: [
-        { role: 'user', content: articleContext.content },
-        { role: 'user', content: generationRequest.content },
+        ...baseHistory,
+        { role: 'user', content: options.prompt },
       ],
       model: options.session.model,
-      requestId: options.session.id,
-      maxOutputTokens: 32_000,
+      requestId,
+      maxOutputTokens: options.maxOutputTokens || 8_000,
     }, { signal: options.signal, telemetry })
     : await aiExecutionEngine.executeGemini({
       systemInstruction: instructions.content,
-      history: [{ role: 'user', text: articleContext.content }],
-      prompt: generationRequest.content,
+      history: baseHistory.map(message => ({
+        role: message.role === 'assistant' ? 'model' : 'user',
+        text: message.content,
+      })),
+      prompt: options.prompt,
       provider: options.session.provider,
       model: options.session.model,
       allowModelFallback,
-      progressId: options.session.id,
+      progressId: requestId,
     }, {
       signal: options.signal,
       telemetry,
@@ -439,4 +474,22 @@ export const executeContentWritingConversation = async (options: {
     errorCode: toText(body.code) || `${options.session.provider}_http_${publicResult.status}`,
     errorMessage: toText(body.error) || `Content writing request failed with HTTP ${publicResult.status}.`,
   };
+};
+
+export const executeContentWritingConversation = async (options: {
+  session: ContentWritingSession;
+  messages: ContentWritingMessage[];
+  signal?: AbortSignal;
+  onProgress?: (progress: AiExecutionProgress) => void;
+}): Promise<ContentWritingExecutionResult> => {
+  const [, , generationRequest] = assertContentWritingConversation(options.messages);
+  return executeContentWritingTurn({
+    ...options,
+    prompt: generationRequest.content,
+    stepKey: 'complete-article',
+    stepLabel: 'Complete article generation',
+    stepAttempt: Math.max(1, options.session.attempt_count),
+    includeGenerationRequestInHistory: false,
+    maxOutputTokens: 32_000,
+  });
 };

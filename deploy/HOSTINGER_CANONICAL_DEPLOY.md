@@ -18,6 +18,13 @@ Before the first external-analysis worker deployment, apply these migrations in 
 
 Apply migrations 10 and 11 before deploying the matching web/server build. The new article-save endpoint depends on the `save_article_snapshot` RPC introduced by migration 11.
 
+Before deploying structured content writing, apply these migrations in order:
+
+1. `supabase/migrations/20260722000000_content_writing_sessions.sql` (skip only if it was already applied successfully)
+2. `supabase/migrations/20260722010000_structured_content_writing.sql`
+
+The second migration adds durable per-step output and resume support. Deploying the new worker before this migration is applied will make content-writing sessions fail when they try to create the outline step.
+
 ```bash
 cd /var/www/bazarvan-editor
 git pull --ff-only origin main
@@ -33,6 +40,6 @@ curl -fsS https://smarteditor.bazarvan.com/healthz
 
 Notes:
 
-- PM2 runs `bazarvan-editor` and `bazarvan-ai-worker` from `/var/www/bazarvan-editor`, so this is the canonical path.
+- PM2 runs the web server and all configured workers, including `bazarvan-content-writing-worker`, from `/var/www/bazarvan-editor`, so this is the canonical path.
 - Do not use `/var/www/bazarvan-smarteditor` for future deploy instructions unless PM2 is intentionally reconfigured.
-- If deployment behavior is unclear, verify both processes with `pm2 status`, then inspect them with `pm2 describe bazarvan-editor` and `pm2 describe bazarvan-ai-worker`.
+- If deployment behavior is unclear, verify all processes with `pm2 status`, then inspect the web process with `pm2 describe bazarvan-editor` and the writing worker with `pm2 describe bazarvan-content-writing-worker`.

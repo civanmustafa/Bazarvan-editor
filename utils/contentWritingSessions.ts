@@ -45,9 +45,40 @@ export type ContentWritingMessage = {
   createdAt: string;
 };
 
+export type ContentWritingStepType =
+  | 'outline'
+  | 'section'
+  | 'introduction'
+  | 'conclusion'
+  | 'faq'
+  | 'final_review';
+
+export type ContentWritingStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export type ContentWritingStep = {
+  id: string;
+  sessionId: string;
+  stepKey: string;
+  stepType: ContentWritingStepType;
+  ordinal: number;
+  title: string;
+  status: ContentWritingStepStatus;
+  promptText?: string;
+  outputText?: string | null;
+  metadata: Record<string, unknown>;
+  attemptCount: number;
+  lastErrorCode: string | null;
+  lastError: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ContentWritingSessionDetail = {
   session: ContentWritingSession;
   messages: ContentWritingMessage[];
+  steps: ContentWritingStep[];
 };
 
 export class ContentWritingRequestError extends Error {
@@ -131,6 +162,33 @@ const normalizeMessage = (value: unknown): ContentWritingMessage | null => {
   };
 };
 
+const normalizeStep = (value: unknown): ContentWritingStep | null => {
+  if (!isRecord(value) || !toText(value.id) || !toText(value.stepKey)) return null;
+  const stepType = toText(value.stepType) as ContentWritingStepType;
+  const status = toText(value.status) as ContentWritingStepStatus;
+  if (!['outline', 'section', 'introduction', 'conclusion', 'faq', 'final_review'].includes(stepType)) return null;
+  if (!['pending', 'running', 'completed', 'failed'].includes(status)) return null;
+  return {
+    id: toText(value.id),
+    sessionId: toText(value.sessionId),
+    stepKey: toText(value.stepKey),
+    stepType,
+    ordinal: Math.max(1, Number(value.ordinal) || 1),
+    title: toText(value.title),
+    status,
+    ...('promptText' in value ? { promptText: String(value.promptText || '') } : {}),
+    ...('outputText' in value ? { outputText: typeof value.outputText === 'string' ? value.outputText : null } : {}),
+    metadata: isRecord(value.metadata) ? value.metadata : {},
+    attemptCount: Math.max(0, Number(value.attemptCount) || 0),
+    lastErrorCode: toNullableText(value.lastErrorCode),
+    lastError: toNullableText(value.lastError),
+    startedAt: toNullableText(value.startedAt),
+    completedAt: toNullableText(value.completedAt),
+    createdAt: toText(value.createdAt),
+    updatedAt: toText(value.updatedAt),
+  };
+};
+
 const requestContentWriting = async (body: Record<string, unknown>): Promise<Record<string, any>> => {
   const token = await getAuthenticatedApiToken();
   const response = await fetch('/api/content-writing', {
@@ -175,12 +233,14 @@ export const startContentWritingSession = async (options: {
 
 export const getContentWritingSessionDetail = async (
   sessionId: string,
-  options: { includeMessages?: boolean } = {},
+  options: { includeMessages?: boolean; includeSteps?: boolean; includeStepContent?: boolean } = {},
 ): Promise<ContentWritingSessionDetail> => {
   const payload = await requestContentWriting({
     action: 'get',
     sessionId,
     includeMessages: options.includeMessages === true,
+    includeSteps: options.includeSteps !== false,
+    includeStepContent: options.includeStepContent === true,
   });
   const session = normalizeSession(payload.session);
   if (!session) throw new Error('Content writing API returned an invalid session.');
@@ -188,6 +248,9 @@ export const getContentWritingSessionDetail = async (
     session,
     messages: Array.isArray(payload.messages)
       ? payload.messages.map(normalizeMessage).filter((message): message is ContentWritingMessage => Boolean(message))
+      : [],
+    steps: Array.isArray(payload.steps)
+      ? payload.steps.map(normalizeStep).filter((step): step is ContentWritingStep => Boolean(step))
       : [],
   };
 };
@@ -208,5 +271,14 @@ export const cancelContentWritingSession = async (
   const payload = await requestContentWriting({ action: 'cancel', sessionId });
   const session = normalizeSession(payload.session);
   if (!session) throw new Error('Content writing API returned an invalid cancellation response.');
+  return session;
+};
+
+export const resumeContentWritingSession = async (
+  sessionId: string,
+): Promise<ContentWritingSession> => {
+  const payload = await requestContentWriting({ action: 'resume', sessionId });
+  const session = normalizeSession(payload.session);
+  if (!session) throw new Error('Content writing API returned an invalid resume response.');
   return session;
 };

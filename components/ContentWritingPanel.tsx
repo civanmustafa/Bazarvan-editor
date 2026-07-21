@@ -29,14 +29,17 @@ import {
   getContentWritingSessionDetail,
   isContentWritingSessionActive,
   listContentWritingSessions,
+  resumeContentWritingSession,
   startContentWritingSession,
   type ContentWritingProvider,
   type ContentWritingSession,
   type ContentWritingSessionDetail,
   type ContentWritingSessionStatus,
+  type ContentWritingStep,
+  type ContentWritingStepStatus,
 } from '../utils/contentWritingSessions';
 
-type ActionState = 'idle' | 'starting' | 'cancelling';
+type ActionState = 'idle' | 'starting' | 'cancelling' | 'resuming';
 
 type PendingStartRequest = {
   signature: string;
@@ -58,6 +61,13 @@ const STATUS_STYLES: Record<ContentWritingSessionStatus, string> = {
   completed: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300',
   failed: 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300',
   cancelled: 'bg-gray-100 text-gray-600 dark:bg-[#333] dark:text-gray-300',
+};
+
+const STEP_STATUS_STYLES: Record<ContentWritingStepStatus, string> = {
+  pending: 'text-gray-400',
+  running: 'text-blue-600 dark:text-blue-300',
+  completed: 'text-emerald-600 dark:text-emerald-300',
+  failed: 'text-red-600 dark:text-red-300',
 };
 
 const getStatusLabel = (status: ContentWritingSessionStatus, isArabic: boolean): string => {
@@ -123,6 +133,26 @@ const StatusIcon: React.FC<{ status: ContentWritingSessionStatus; size?: number 
   if (status === 'cancelled') return <CircleStop size={size} />;
   if (status === 'running') return <Loader2 size={size} className="animate-spin" />;
   return <Clock3 size={size} />;
+};
+
+const StepStatusIcon: React.FC<{ status: ContentWritingStepStatus }> = ({ status }) => {
+  if (status === 'completed') return <CheckCircle2 size={14} />;
+  if (status === 'failed') return <XCircle size={14} />;
+  if (status === 'running') return <Loader2 size={14} className="animate-spin" />;
+  return <Clock3 size={14} />;
+};
+
+const getStepLabel = (step: ContentWritingStep, isArabic: boolean): string => {
+  const labels = {
+    outline: isArabic ? 'مخطط المقالة' : 'Article outline',
+    introduction: isArabic ? 'المقدمة' : 'Introduction',
+    conclusion: isArabic ? 'الخاتمة' : 'Conclusion',
+    faq: isArabic ? 'الأسئلة الشائعة' : 'FAQ',
+    final_review: isArabic ? 'المراجعة النهائية' : 'Final review',
+  };
+  if (step.stepType !== 'section') return labels[step.stepType];
+  const sectionIndex = Math.max(1, Number(step.metadata.sectionIndex) || step.ordinal - 1);
+  return `${isArabic ? 'القسم' : 'Section'} ${sectionIndex}: ${step.title}`;
 };
 
 const ContentWritingPanel: React.FC = () => {
@@ -192,6 +222,9 @@ const ContentWritingPanel: React.FC = () => {
   const selectedProviderConfig = providerConfigs.find(item => item.id === provider);
   const hasActiveSession = sessions.some(isContentWritingSessionActive);
   const selectedSession = selectedDetail?.session || sessions.find(session => session.id === selectedSessionId) || null;
+  const selectedSessionProviderAvailable = selectedSession
+    ? providerConfigs.find(item => item.id === selectedSession.provider)?.available === true
+    : false;
   const selectedModel = modelByProvider[provider];
   const modelOptions = provider === 'gemini'
     ? GEMINI_FREE_MODEL_OPTIONS
@@ -354,6 +387,22 @@ const ContentWritingPanel: React.FC = () => {
     }
   };
 
+  const resumeSession = async () => {
+    if (!selectedSession || !['failed', 'cancelled'].includes(selectedSession.status) || hasActiveSession) return;
+    setActionState('resuming');
+    setErrorPresentation(null);
+    try {
+      const resumed = await resumeContentWritingSession(selectedSession.id);
+      mergeSession(resumed);
+      setSelectedDetail(current => current ? { ...current, session: { ...current.session, ...resumed } } : current);
+      await loadDetail(resumed.id, { silent: true });
+    } catch (error) {
+      setErrorPresentation(getErrorPresentation(error, isArabic));
+    } finally {
+      setActionState('idle');
+    }
+  };
+
   const copyResult = async () => {
     const result = selectedDetail?.session.resultText;
     if (!result) return;
@@ -372,6 +421,20 @@ const ContentWritingPanel: React.FC = () => {
   const keyCount = Number(progress.keyCount) || 0;
   const modelIndex = Number(progress.currentModelIndex) || 0;
   const modelCount = Number(progress.modelCount) || 0;
+  const workflowStepIndex = Number(progress.workflowStepIndex) || 0;
+  const workflowStepCount = Number(progress.workflowStepCount) || 0;
+  const workflowStepLabel = typeof progress.workflowStepLabel === 'string'
+    ? progress.workflowStepLabel.trim()
+    : '';
+  const workflowStepKey = typeof progress.workflowStepKey === 'string'
+    ? progress.workflowStepKey.trim()
+    : '';
+  const workflowSteps = selectedDetail?.steps || [];
+  const completedWorkflowSteps = workflowSteps.filter(step => step.status === 'completed').length;
+  const currentWorkflowStep = workflowSteps.find(step => step.stepKey === workflowStepKey);
+  const displayedWorkflowStepLabel = currentWorkflowStep
+    ? getStepLabel(currentWorkflowStep, isArabic)
+    : workflowStepLabel;
 
   if (!articleId) {
     return (
@@ -529,8 +592,13 @@ const ContentWritingPanel: React.FC = () => {
                   <Loader2 size={13} className="shrink-0 animate-spin text-[#d4af37]" />
                   <span className="min-w-0 truncate">{progressMessage || (isArabic ? 'جار تجهيز المحادثة...' : 'Preparing conversation...')}</span>
                 </div>
-                {(keyCount > 0 || modelCount > 0) && (
+                {(workflowStepCount > 0 || keyCount > 0 || modelCount > 0) && (
                   <div className="flex flex-wrap gap-1 text-[10px] font-bold text-gray-500 dark:text-gray-400">
+                    {workflowStepCount > 0 && (
+                      <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">
+                        {displayedWorkflowStepLabel || (isArabic ? 'مرحلة التوليد' : 'Writing step')} {workflowStepIndex || 1}/{workflowStepCount}
+                      </span>
+                    )}
                     {modelCount > 0 && <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">{isArabic ? 'الموديل' : 'Model'} {modelIndex || 1}/{modelCount}</span>}
                     {keyCount > 0 && <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">{isArabic ? 'المفتاح' : 'Key'} {keyIndex || 1}/{keyCount}</span>}
                   </div>
@@ -538,17 +606,43 @@ const ContentWritingPanel: React.FC = () => {
               </div>
             )}
 
-            {selectedSession.status === 'failed' && (
+            {workflowSteps.length > 0 && (
+              <div className="mt-3">
+                <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-bold text-gray-600 dark:text-gray-300">
+                  <span>{isArabic ? 'مراحل التوليد المنظم' : 'Structured writing steps'}</span>
+                  <span className="tabular-nums text-gray-400">{completedWorkflowSteps}/{workflowSteps.length}</span>
+                </div>
+                <div className="divide-y divide-gray-100 border-y border-gray-200 dark:divide-[#333] dark:border-[#3C3C3C]">
+                  {workflowSteps.map(step => (
+                    <div key={step.id} className="flex min-h-9 items-center justify-between gap-2 py-2 text-[11px]">
+                      <div className={`flex min-w-0 items-center gap-2 font-bold ${STEP_STATUS_STYLES[step.status]}`}>
+                        <span className="shrink-0"><StepStatusIcon status={step.status} /></span>
+                        <span className="truncate text-gray-700 dark:text-gray-200">{getStepLabel(step, isArabic)}</span>
+                      </div>
+                      {step.attemptCount > 1 && (
+                        <span className="shrink-0 rounded bg-gray-100 px-1.5 py-1 text-[10px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                          {isArabic ? 'محاولة' : 'Attempt'} {step.attemptCount}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {['failed', 'cancelled'].includes(selectedSession.status) && (
               <div className="mt-3 rounded-md bg-red-50 p-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300">
-                <div className="font-bold">{selectedSession.lastError || (isArabic ? 'فشلت جلسة الكتابة.' : 'The writing session failed.')}</div>
+                <div className="font-bold">{selectedSession.lastError || (selectedSession.status === 'cancelled'
+                  ? (isArabic ? 'تم إيقاف جلسة الكتابة.' : 'The writing session was stopped.')
+                  : (isArabic ? 'فشلت جلسة الكتابة.' : 'The writing session failed.'))}</div>
                 <button
                   type="button"
-                  onClick={() => void startSession()}
-                  disabled={hasActiveSession || actionState !== 'idle' || !selectedProviderConfig?.available}
+                  onClick={() => void resumeSession()}
+                  disabled={hasActiveSession || actionState !== 'idle' || !selectedSessionProviderAvailable}
                   className="mt-2 inline-flex h-8 items-center gap-1 rounded-md border border-red-200 bg-white px-2 text-[11px] font-bold hover:bg-red-50 disabled:opacity-50 dark:border-red-900/50 dark:bg-[#2A2A2A]"
                 >
-                  <RotateCcw size={13} />
-                  {isArabic ? 'إنشاء محاولة جديدة' : 'Start a new attempt'}
+                  {actionState === 'resuming' ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+                  {isArabic ? 'استئناف من آخر مرحلة ناجحة' : 'Resume from the last completed step'}
                 </button>
               </div>
             )}

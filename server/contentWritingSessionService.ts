@@ -53,6 +53,36 @@ export type ContentWritingMessage = {
   created_at: string;
 };
 
+export type ContentWritingStepType =
+  | 'outline'
+  | 'section'
+  | 'introduction'
+  | 'conclusion'
+  | 'faq'
+  | 'final_review';
+
+export type ContentWritingStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export type ContentWritingStep = {
+  id: string;
+  session_id: string;
+  step_key: string;
+  step_type: ContentWritingStepType;
+  ordinal: number;
+  title: string;
+  status: ContentWritingStepStatus;
+  prompt_text?: string;
+  output_text?: string | null;
+  metadata: JsonObject;
+  attempt_count: number;
+  last_error_code: string | null;
+  last_error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type JsonObject = Record<string, unknown>;
 
 const isRecord = (value: unknown): value is JsonObject => (
@@ -169,6 +199,131 @@ export const getContentWritingMessages = async (
     .order('sequence_number', { ascending: true });
   if (error) throwServiceError('message read', error);
   return (data || []) as ContentWritingMessage[];
+};
+
+export const getContentWritingSteps = async (
+  sessionId: string,
+  options: { includeContent?: boolean; includeMetadata?: boolean } = {},
+): Promise<ContentWritingStep[]> => {
+  const columns = [
+    'id',
+    'session_id',
+    'step_key',
+    'step_type',
+    'ordinal',
+    'title',
+    'status',
+    ...(options.includeContent ? ['prompt_text', 'output_text'] : []),
+    ...(options.includeMetadata ? ['metadata'] : []),
+    'attempt_count',
+    'last_error_code',
+    'last_error',
+    'started_at',
+    'completed_at',
+    'created_at',
+    'updated_at',
+  ];
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_steps')
+    .select(columns.join(','))
+    .eq('session_id', sessionId)
+    .order('ordinal', { ascending: true });
+  if (error) throwServiceError('step read', error);
+  const rows = Array.isArray(data) ? data as unknown as JsonObject[] : [];
+  return rows.map(row => ({
+    ...row,
+    metadata: isRecord(row.metadata) ? row.metadata : {},
+  })) as unknown as ContentWritingStep[];
+};
+
+export const ensureContentWritingStep = async (options: {
+  sessionId: string;
+  workerId: string;
+  stepKey: string;
+  stepType: ContentWritingStepType;
+  ordinal: number;
+  title: string;
+  metadata?: JsonObject;
+}): Promise<ContentWritingStep | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'ensure_content_writing_step',
+    {
+      p_session_id: options.sessionId,
+      p_worker_id: options.workerId,
+      p_step_key: options.stepKey,
+      p_step_type: options.stepType,
+      p_ordinal: options.ordinal,
+      p_title: options.title,
+      p_metadata: options.metadata || {},
+    },
+  );
+  if (error) throwServiceError('step preparation', error);
+  return firstRow<ContentWritingStep>(data);
+};
+
+export const startContentWritingStep = async (options: {
+  sessionId: string;
+  workerId: string;
+  stepKey: string;
+  promptText: string;
+}): Promise<ContentWritingStep | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'start_content_writing_step',
+    {
+      p_session_id: options.sessionId,
+      p_worker_id: options.workerId,
+      p_step_key: options.stepKey,
+      p_prompt_text: options.promptText,
+    },
+  );
+  if (error) throwServiceError('step start', error);
+  return firstRow<ContentWritingStep>(data);
+};
+
+export const completeContentWritingStep = async (options: {
+  sessionId: string;
+  workerId: string;
+  stepKey: string;
+  outputText: string;
+  metadata?: JsonObject;
+}): Promise<ContentWritingStep | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'complete_content_writing_step',
+    {
+      p_session_id: options.sessionId,
+      p_worker_id: options.workerId,
+      p_step_key: options.stepKey,
+      p_output_text: options.outputText,
+      p_metadata: options.metadata || {},
+    },
+  );
+  if (error) throwServiceError('step completion', error);
+  return firstRow<ContentWritingStep>(data);
+};
+
+export const failContentWritingStep = async (options: {
+  sessionId: string;
+  workerId: string;
+  stepKey: string;
+  errorCode: string;
+  errorMessage: string;
+  outputText?: string;
+  metadata?: JsonObject;
+}): Promise<ContentWritingStep | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'fail_content_writing_step',
+    {
+      p_session_id: options.sessionId,
+      p_worker_id: options.workerId,
+      p_step_key: options.stepKey,
+      p_error_code: options.errorCode,
+      p_error_message: options.errorMessage,
+      p_output_text: options.outputText || null,
+      p_metadata: options.metadata || {},
+    },
+  );
+  if (error) throwServiceError('step failure', error);
+  return firstRow<ContentWritingStep>(data);
 };
 
 export const completeContentWritingSession = async (options: {
@@ -290,5 +445,20 @@ export const cancelContentWritingSession = async (options: {
     },
   );
   if (error) throwServiceError('session cancellation', error);
+  return firstRow<ContentWritingSession>(data);
+};
+
+export const resumeContentWritingSession = async (options: {
+  sessionId: string;
+  requestedBy: string;
+}): Promise<ContentWritingSession | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'resume_content_writing_session',
+    {
+      p_session_id: options.sessionId,
+      p_requested_by: options.requestedBy,
+    },
+  );
+  if (error) throwServiceError('session resume', error);
   return firstRow<ContentWritingSession>(data);
 };

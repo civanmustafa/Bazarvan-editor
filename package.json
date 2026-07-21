@@ -19,7 +19,7 @@
     "start:content-writing": "node server-dist/content-writing-worker.mjs",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:security && npm run test:performance && npm run test:architecture",
-    "test:security": "node --experimental-strip-types --test tests/apiSecurity.test.ts tests/articleAccessAndSave.test.ts tests/settingsRegistry.test.ts tests/contentWriting.test.ts tests/contentWritingSessions.test.ts tests/aiExecutionEngine.test.ts tests/aiJobService.test.ts tests/competitorDiscovery.test.ts tests/externalAnalysisExactlyOnce.test.ts",
+    "test:security": "node --experimental-strip-types --test tests/apiSecurity.test.ts tests/articleAccessAndSave.test.ts tests/settingsRegistry.test.ts tests/contentWriting.test.ts tests/contentWritingWorkflow.test.ts tests/contentWritingSessions.test.ts tests/aiExecutionEngine.test.ts tests/aiJobService.test.ts tests/competitorDiscovery.test.ts tests/externalAnalysisExactlyOnce.test.ts",
     "test:performance": "node --experimental-strip-types --test tests/performanceArchitecture.test.ts",
     "test:architecture": "node --experimental-strip-types --test tests/codeArchitecture.test.ts tests/externalAiBridge.test.ts",
     "check:bundle": "node scripts/check-web-performance.mjs",

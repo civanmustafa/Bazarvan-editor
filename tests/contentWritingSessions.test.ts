@@ -51,9 +51,29 @@ test('content-writing migration persists idempotent sessions and exactly three i
   assertBalancedSqlParentheses(migration);
 });
 
-test('content-writing engine owns server-side context assembly and provider execution', async () => {
-  const [engine, service, geminiEngine, openAiEngine] = await Promise.all([
+test('structured content-writing migration persists resumable steps without API secrets', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260722010000_structured_content_writing.sql',
+  );
+
+  assert.match(migration, /create table if not exists public\.content_writing_steps/);
+  assert.match(migration, /unique \(session_id, step_key\)/);
+  assert.match(migration, /unique \(session_id, ordinal\)/);
+  assert.match(migration, /create policy "content_writing_steps_select_owner_or_admin"/);
+  assert.match(migration, /create or replace function public\.start_content_writing_step/);
+  assert.match(migration, /create or replace function public\.complete_content_writing_step/);
+  assert.match(migration, /create or replace function public\.resume_content_writing_session/);
+  assert.match(migration, /status in \('running', 'failed'\)/);
+  assert.doesNotMatch(migration, /key_fingerprint|api_key/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
+test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
+  const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('utils/contentWritingWorkflow.ts'),
     readWorkspaceFile('server/contentWritingSessionService.ts'),
     readWorkspaceFile('server/aiExecutionEngine.ts'),
     readWorkspaceFile('server/openAiExecutionEngine.ts'),
@@ -66,11 +86,21 @@ test('content-writing engine owns server-side context assembly and provider exec
   assert.match(engine, /messages: bundle\.messages\.map/);
   assert.match(engine, /assertContentWritingConversation/);
   assert.match(engine, /systemInstruction: instructions\.content/);
-  assert.match(engine, /history: \[\{ role: 'user', text: articleContext\.content \}\]/);
+  assert.match(engine, /executeContentWritingTurn/);
   assert.match(engine, /executeOpenAiRequest/);
   assert.doesNotMatch(engine, /competitor\.content\.slice|content_text\.slice/);
+  assert.match(workflow, /executeStructuredContentWritingWorkflow/);
+  assert.match(workflow, /getContentWritingSteps/);
+  assert.match(workflow, /startContentWritingStep/);
+  assert.match(workflow, /completeContentWritingStep/);
+  assert.match(workflow, /buildContentWritingFinalReviewPrompt/);
+  assert.match(workflow, /existing\.status === 'completed'/);
+  assert.match(workflowBuilder, /createContentWritingWorkflowSteps/);
+  assert.match(workflowBuilder, /assembleContentWritingDraft/);
+  assert.doesNotMatch(workflowBuilder, /competitor.*slice/i);
   assert.match(service, /create_content_writing_session/);
   assert.match(service, /complete_content_writing_session/);
+  assert.match(service, /resume_content_writing_session/);
   assert.match(service, /ContentWritingSessionSummary/);
   assert.doesNotMatch(service.match(/export const listContentWritingSessions[\s\S]*?export const cancelContentWritingSession/)?.[0] || '', /\.select\('\*'\)/);
   assert.match(geminiEngine, /systemInstruction: normalizedSystemInstruction/);
@@ -92,6 +122,8 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /action === 'get'/);
   assert.match(api, /action === 'list'/);
   assert.match(api, /action === 'cancel'/);
+  assert.match(api, /action === 'resume'/);
+  assert.match(api, /getContentWritingSteps/);
   assert.match(registry, /path: '\/api\/content-writing'/);
 });
 
@@ -104,7 +136,7 @@ test('content-writing worker keeps leases alive and is built and managed by PM2'
 
   assert.match(worker, /claimNextContentWritingSession/);
   assert.match(worker, /heartbeatContentWritingSession/);
-  assert.match(worker, /executeContentWritingConversation/);
+  assert.match(worker, /executeStructuredContentWritingWorkflow/);
   assert.match(worker, /completeContentWritingSession/);
   assert.match(worker, /controller\.abort\(new ContentWritingCancellationError/);
   assert.match(worker, /ContentWritingWorkerShutdownError/);

@@ -22,10 +22,13 @@ import {
   cancelContentWritingSession,
   getContentWritingMessages,
   getContentWritingSession,
+  getContentWritingSteps,
   listContentWritingSessions,
+  resumeContentWritingSession,
   type ContentWritingProvider,
   type ContentWritingSession,
   type ContentWritingSessionSummary,
+  type ContentWritingStep,
 } from '../server/contentWritingSessionService';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 
@@ -105,6 +108,31 @@ const toPublicSession = (
   updatedAt: session.updated_at,
 });
 
+const toPublicStep = (
+  step: ContentWritingStep,
+  options: { includeContent?: boolean } = {},
+): Record<string, unknown> => ({
+  id: step.id,
+  sessionId: step.session_id,
+  stepKey: step.step_key,
+  stepType: step.step_type,
+  ordinal: step.ordinal,
+  title: step.title,
+  status: step.status,
+  ...(options.includeContent ? {
+    promptText: step.prompt_text || '',
+    outputText: step.output_text || null,
+  } : {}),
+  metadata: step.metadata,
+  attemptCount: step.attempt_count,
+  lastErrorCode: step.last_error_code,
+  lastError: step.last_error,
+  startedAt: step.started_at,
+  completedAt: step.completed_at,
+  createdAt: step.created_at,
+  updatedAt: step.updated_at,
+});
+
 const getSessionOrThrow = async (sessionId: string): Promise<ContentWritingSession> => {
   const session = await getContentWritingSession(sessionId);
   if (!session) {
@@ -175,6 +203,13 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     const session = await getSessionOrThrow(requireUuid(body.sessionId, 'sessionId'));
     await requireArticleReadAccess(supabase, session.article_id, principal.userId);
     const messages = body.includeMessages === false ? undefined : await getContentWritingMessages(session.id);
+    const includeStepContent = body.includeStepContent === true;
+    const steps = body.includeSteps === false
+      ? undefined
+      : await getContentWritingSteps(session.id, {
+        includeContent: includeStepContent,
+        includeMetadata: includeStepContent,
+      });
     return {
       status: 200,
       body: {
@@ -189,6 +224,9 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
             content: message.content,
             createdAt: message.created_at,
           })),
+        } : {}),
+        ...(steps ? {
+          steps: steps.map(step => toPublicStep(step, { includeContent: includeStepContent })),
         } : {}),
       },
     };
@@ -232,8 +270,44 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     };
   }
 
+  if (action === 'resume') {
+    consumeApiRateLimit(
+      'content-writing:resume',
+      principal.userId,
+      getPositiveIntegerEnv('CONTENT_WRITING_RESUME_RATE_LIMIT_PER_MINUTE', 12),
+    );
+    const session = await getSessionOrThrow(requireUuid(body.sessionId, 'sessionId'));
+    await requireArticleWriteAccess(supabase, session.article_id, principal.userId);
+    if (session.created_by !== principal.userId && principal.role !== 'admin') {
+      throw new ContentWritingApiError({
+        message: 'Only the session creator or an administrator can resume this content writing session.',
+        status: 403,
+        code: 'content_writing_resume_forbidden',
+      });
+    }
+    if (!['failed', 'cancelled'].includes(session.status)) {
+      throw new ContentWritingApiError({
+        message: 'Only a failed or cancelled content writing session can be resumed.',
+        status: 409,
+        code: 'content_writing_resume_conflict',
+      });
+    }
+    const resumed = await resumeContentWritingSession({
+      sessionId: session.id,
+      requestedBy: principal.userId,
+    });
+    if (!resumed) {
+      throw new ContentWritingApiError({
+        message: 'The content writing session could not be resumed.',
+        status: 409,
+        code: 'content_writing_resume_conflict',
+      });
+    }
+    return { status: 202, body: { ok: true, accepted: true, session: toPublicSession(resumed) } };
+  }
+
   throw new ContentWritingApiError({
-    message: 'action must be start, get, list, or cancel.',
+    message: 'action must be start, get, list, cancel, or resume.',
     code: 'content_writing_action_invalid',
   });
 };
