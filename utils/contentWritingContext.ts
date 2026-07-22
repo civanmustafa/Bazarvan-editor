@@ -132,7 +132,6 @@ const getGoalContextIssues = (goalContext: Partial<GoalContext>): ContentWriting
     ['pageType', 'نوع الصفحة'],
     ['objective', 'هدف الصفحة'],
     ['audienceScope', 'نطاق الجمهور'],
-    ['targetAudience', 'الجمهور المستهدف'],
     ['searchIntent', 'نية البحث'],
   ];
   required.forEach(([key, label]) => {
@@ -177,14 +176,17 @@ export const estimateContentWritingInputTokens = (value: string): number => {
   return Math.max(1, Math.ceil(characterCount / 2));
 };
 
-const createGoalContextValue = (goalContext: Partial<GoalContext>): string => JSON.stringify({
-  pageType: toText(goalContext.pageType),
-  objective: toText(goalContext.objective),
-  audienceScope: toText(goalContext.audienceScope),
-  targetCountry: toText(goalContext.targetCountry),
-  targetAudience: toText(goalContext.targetAudience),
-  searchIntent: toText(goalContext.searchIntent),
-}, null, 2);
+const createGoalContextValue = (goalContext: Partial<GoalContext>): string => {
+  const targetAudience = toText(goalContext.targetAudience).trim();
+  return JSON.stringify({
+    pageType: toText(goalContext.pageType),
+    objective: toText(goalContext.objective),
+    audienceScope: toText(goalContext.audienceScope),
+    targetCountry: toText(goalContext.targetCountry),
+    ...(targetAudience ? { targetAudience } : {}),
+    searchIntent: toText(goalContext.searchIntent),
+  }, null, 2);
+};
 
 const createCompetitorsValue = (competitors: ContentWritingCompetitorInput[]): string => JSON.stringify(
   competitors.map((competitor, index) => ({

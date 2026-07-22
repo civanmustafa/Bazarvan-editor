@@ -92,6 +92,20 @@ test('content writing can start from an empty article body', async () => {
   assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'article_text'));
 });
 
+test('content-writing uses audience scope without requiring a hidden target audience field', async () => {
+  const { buildContentWritingPromptBundle } = await importContentWriting();
+  const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
+  delete (input.goalContext as Partial<typeof input.goalContext>).targetAudience;
+
+  const bundle = buildContentWritingPromptBundle(input);
+  const goalContext = JSON.parse(bundle.variables.goal_context);
+
+  assert.equal(bundle.ready, true);
+  assert.equal(goalContext.audienceScope, 'global');
+  assert.equal('targetAudience' in goalContext, false);
+  assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'goal_context.targetAudience'));
+});
+
 test('content-writing preflight blocks oversized requests instead of shortening them', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const marker = `START-${'نص '.repeat(4_000)}-FINISH`;

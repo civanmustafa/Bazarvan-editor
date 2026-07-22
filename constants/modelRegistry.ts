@@ -19,14 +19,14 @@ const GEMINI_FREE_MODELS = [
 ] as const satisfies readonly AiModelDefinition[];
 
 const GEMINI_PAID_MODELS = [
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'geminiPaid', tier: 'paid', priority: 10 },
+  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview - الأحدث والمدفوع', provider: 'geminiPaid', tier: 'paid', priority: 10 },
 ] as const satisfies readonly AiModelDefinition[];
 
 const OPENAI_MODELS = [
   { id: 'gpt-4.1-mini', label: 'GPT-4.1 mini', provider: 'openai', tier: 'paid', priority: 10 },
 ] as const satisfies readonly AiModelDefinition[];
 
-export const MODEL_REGISTRY_VERSION = 1;
+export const MODEL_REGISTRY_VERSION = 2;
 
 export const MODEL_REGISTRY = Object.freeze({
   gemini: Object.freeze({
@@ -38,13 +38,6 @@ export const MODEL_REGISTRY = Object.freeze({
   }),
 });
 
-const GEMINI_SELECTABLE_MODELS = [
-  ...MODEL_REGISTRY.gemini.free,
-  ...MODEL_REGISTRY.gemini.paid.filter(model => (
-    !MODEL_REGISTRY.gemini.free.some(existing => existing.id === model.id)
-  )),
-] as const;
-
 export const GEMINI_FREE_MODEL_OPTIONS = MODEL_REGISTRY.gemini.free.map(model => ({
   value: model.id,
   label: model.label,
@@ -52,13 +45,13 @@ export const GEMINI_FREE_MODEL_OPTIONS = MODEL_REGISTRY.gemini.free.map(model =>
 
 export const GEMINI_FREE_MODEL_VALUES = MODEL_REGISTRY.gemini.free.map(model => model.id);
 
-// Paid keys can use every Gemini model registered by the editor, including free-tier models.
-export const GEMINI_PAID_MODEL_OPTIONS = GEMINI_SELECTABLE_MODELS.map(model => ({
+// The Pro selector only exposes paid-only models; free-tier models belong to Gemini Free.
+export const GEMINI_PAID_MODEL_OPTIONS = MODEL_REGISTRY.gemini.paid.map(model => ({
   value: model.id,
   label: model.label,
 }));
 
-export const GEMINI_PAID_MODEL_VALUES = GEMINI_SELECTABLE_MODELS.map(model => model.id);
+export const GEMINI_PAID_MODEL_VALUES = MODEL_REGISTRY.gemini.paid.map(model => model.id);
 
 // Registry order is the shared fallback order used by the browser, API, and worker.
 export const GEMINI_ANALYSIS_MODEL = MODEL_REGISTRY.gemini.free[0].id;

@@ -397,7 +397,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           <ToggleField label="السماح للمستخدمين باستخدام Gemini المجاني" checked={Boolean(settings.ai.geminiFreeEnabled)} onChange={value => updateSetting('ai', 'geminiFreeEnabled', value)} />
           <ToggleField label="التبديل بين نماذج جيميني المجانية للعامل الخارجي" checked={Boolean(settings.ai.geminiFreeModelFallbackEnabled)} onChange={value => updateSetting('ai', 'geminiFreeModelFallbackEnabled', value)} />
           <ToggleField label="السماح للمستخدمين باستخدام Gemini Pro" checked={Boolean(settings.ai.geminiProEnabled)} onChange={value => updateSetting('ai', 'geminiProEnabled', value)} />
-          <ToggleField label="السماح للمستخدمين باستخدام OpenAI" checked={Boolean(settings.ai.openAiEnabled)} onChange={value => updateSetting('ai', 'openAiEnabled', value)} />
+          <ToggleField label="السماح للمستخدمين باستخدام OpenAI المدفوع" checked={Boolean(settings.ai.openAiEnabled)} onChange={value => updateSetting('ai', 'openAiEnabled', value)} />
           <FieldLabel label="المزود الافتراضي">
             <SelectInput
               value={String(settings.ai.defaultProvider || 'gemini')}

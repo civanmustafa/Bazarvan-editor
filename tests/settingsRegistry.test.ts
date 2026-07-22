@@ -85,10 +85,12 @@ test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
   assert.equal(normalizeGeminiFreeModelId('not-a-model'), GEMINI_ANALYSIS_MODEL);
   assert.deepEqual(
     new Set(GEMINI_PAID_MODEL_VALUES),
-    new Set([
-      ...MODEL_REGISTRY.gemini.free.map(model => model.id),
-      ...MODEL_REGISTRY.gemini.paid.map(model => model.id),
-    ]),
+    new Set(MODEL_REGISTRY.gemini.paid.map(model => model.id)),
+  );
+  assert.equal(GEMINI_PAID_ANALYSIS_MODEL, 'gemini-3.1-pro-preview');
+  assert.equal(
+    GEMINI_PAID_MODEL_VALUES.some(model => new Set<string>(GEMINI_FREE_MODEL_VALUES).has(model)),
+    false,
   );
   assert.equal(normalizeGeminiPaidModelId('not-a-model'), GEMINI_PAID_ANALYSIS_MODEL);
 });
