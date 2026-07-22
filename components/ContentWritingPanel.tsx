@@ -23,6 +23,8 @@ import {
   GEMINI_PAID_MODEL_OPTIONS,
 } from '../constants/aiModels';
 import { copyMarkdownToClipboard } from '../utils/editorUtils';
+import type { ExternalAiBridgeProvider } from '../types';
+import ContentWritingExternalBridgePanel from './ContentWritingExternalBridgePanel';
 import ContentWritingReviewModal from './ContentWritingReviewModal';
 import {
   ContentWritingRequestError,
@@ -31,6 +33,7 @@ import {
   getContentWritingSessionDetail,
   isContentWritingSessionActive,
   listContentWritingSessions,
+  prepareExternalContentWritingConversation,
   recordContentWritingSessionApplication,
   resumeContentWritingSession,
   startContentWritingSession,
@@ -55,7 +58,7 @@ type ErrorPresentation = {
 };
 
 type ReviewSnapshot = {
-  sessionId: string;
+  sessionId?: string;
   articleId: string;
   markdown: string;
   currentHtml: string;
@@ -175,6 +178,7 @@ const ContentWritingPanel: React.FC = () => {
   const {
     t,
     aiProviderCapabilities,
+    chatGptOpenMode,
     isAiProviderEnabled,
     isAiProviderAvailable,
   } = useUser();
@@ -403,6 +407,42 @@ const ContentWritingPanel: React.FC = () => {
     }
   };
 
+  const prepareExternalConversation = useCallback(async () => {
+    if (!articleId) throw new Error(isArabic ? 'احفظ المقالة أولًا.' : 'Save the article first.');
+    const targetArticleId = articleId;
+    const saved = await handleSaveDraft();
+    if (!saved && editor?.getText().trim()) {
+      throw new Error(isArabic
+        ? 'تعذر حفظ بيانات المقالة قبل تجهيز المحادثة الخارجية.'
+        : 'The article could not be saved before preparing the external conversation.');
+    }
+    if (activeArticleRef.current !== targetArticleId) {
+      throw new Error(isArabic ? 'تغيرت المقالة النشطة.' : 'The active article changed.');
+    }
+    return prepareExternalContentWritingConversation(targetArticleId);
+  }, [articleId, editor, handleSaveDraft, isArabic]);
+
+  const importExternalResult = useCallback((
+    _provider: ExternalAiBridgeProvider,
+    response: string,
+  ) => {
+    if (!articleId || !editor || editor.isDestroyed) {
+      setApplicationNotice({
+        tone: 'error',
+        message: isArabic ? 'المحرر غير متاح لاستيراد المقالة.' : 'The editor is unavailable for article import.',
+      });
+      return;
+    }
+    setErrorPresentation(null);
+    setApplicationNotice(null);
+    setReviewSnapshot({
+      articleId,
+      markdown: response,
+      currentHtml: editor.getHTML(),
+      currentText: editor.getText(),
+    });
+  }, [articleId, editor, isArabic]);
+
   const cancelSession = async () => {
     if (!selectedSession || !isContentWritingSessionActive(selectedSession)) return;
     setActionState('cancelling');
@@ -504,11 +544,13 @@ const ContentWritingPanel: React.FC = () => {
       }
 
       try {
-        const recorded = await recordContentWritingSessionApplication(snapshot.sessionId);
-        mergeSession(recorded);
-        setSelectedDetail(current => current && current.session.id === recorded.id
-          ? { ...current, session: { ...current.session, ...recorded } }
-          : current);
+        if (snapshot.sessionId) {
+          const recorded = await recordContentWritingSessionApplication(snapshot.sessionId);
+          mergeSession(recorded);
+          setSelectedDetail(current => current && current.session.id === recorded.id
+            ? { ...current, session: { ...current.session, ...recorded } }
+            : current);
+        }
         setApplicationNotice({
           tone: 'success',
           message: isArabic
@@ -656,6 +698,16 @@ const ContentWritingPanel: React.FC = () => {
                 ? (isArabic ? 'توجد جلسة قيد التنفيذ' : 'A session is already active')
                 : (isArabic ? 'كتابة المقالة' : 'Write article')}</span>
           </button>
+
+          <ContentWritingExternalBridgePanel
+            articleId={articleId}
+            isArabic={isArabic}
+            openMode={chatGptOpenMode}
+            disabled={hasActiveSession || actionState !== 'idle' || saveStatus === 'saving' || isApplying}
+            prepareConversation={prepareExternalConversation}
+            onImportResponse={importExternalResult}
+            onError={error => setErrorPresentation(getErrorPresentation(error, isArabic))}
+          />
 
           {errorPresentation && (
             <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">

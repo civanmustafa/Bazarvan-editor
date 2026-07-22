@@ -100,7 +100,8 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(engine, /from\('article_competitors'\)/);
   assert.match(engine, /getContentWritingCompetitorsFromMetadata/);
   assert.match(engine, /buildContentWritingPromptBundle/);
-  assert.match(engine, /messages: bundle\.messages\.map/);
+  assert.match(engine, /prepareContentWritingConversation/);
+  assert.match(engine, /messages: conversation\.messages\.map/);
   assert.match(engine, /assertContentWritingConversation/);
   assert.match(engine, /systemInstruction: instructions\.content/);
   assert.match(engine, /executeContentWritingTurn/);
@@ -136,6 +137,8 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /requireArticleReadAccess\(supabase, session\.article_id, principal\.userId\)/);
   assert.match(api, /IDEMPOTENCY_KEY_PATTERN/);
   assert.match(api, /queueContentWritingSession/);
+  assert.match(api, /action === 'prepareExternal'/);
+  assert.match(api, /prepareContentWritingConversation/);
   assert.match(api, /action === 'get'/);
   assert.match(api, /action === 'list'/);
   assert.match(api, /action === 'cancel'/);
@@ -163,6 +166,32 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(editorContext, /handleSaveDraft\(\{ reason: 'manual', force: true \}\)/);
   assert.match(editorContext, /parseMarkdownToArticleHtml/);
   assert.doesNotMatch(panel, /commands\.setContent/);
+});
+
+test('external content writing reuses server preparation, the shared bridge, and editor review', async () => {
+  const [api, engine, client, bridgePanel, writingPanel] = await Promise.all([
+    readWorkspaceFile('api/contentWriting.ts'),
+    readWorkspaceFile('server/contentWritingEngine.ts'),
+    readWorkspaceFile('utils/contentWritingSessions.ts'),
+    readWorkspaceFile('components/ContentWritingExternalBridgePanel.tsx'),
+    readWorkspaceFile('components/ContentWritingPanel.tsx'),
+  ]);
+
+  assert.match(api, /CONTENT_WRITING_EXTERNAL_RATE_LIMIT_PER_MINUTE/);
+  assert.match(api, /messages: conversation\.messages\.map/);
+  assert.match(api, /generation_request/);
+  assert.match(engine, /const assertContentWritingBundleReady/);
+  assert.match(engine, /prepareContentWritingConversation\(input\.articleId\)/);
+  assert.match(client, /prepareExternalContentWritingConversation/);
+  assert.match(client, /expectedStages/);
+  assert.match(bridgePanel, /EXTERNAL_AI_BRIDGE_PROVIDERS\.map/);
+  assert.match(bridgePanel, /openExternalAiBridge/);
+  assert.match(bridgePanel, /copyExternalAiBridgePrompt/);
+  assert.match(bridgePanel, /copiedSequence >= message\.sequenceNumber - 1/);
+  assert.doesNotMatch(bridgePanel, /https:\/\/(?:chatgpt|gemini\.)/);
+  assert.match(writingPanel, /<ContentWritingExternalBridgePanel/);
+  assert.match(writingPanel, /setReviewSnapshot/);
+  assert.doesNotMatch(bridgePanel, /applyGeneratedArticleContent/);
 });
 
 test('content-writing worker keeps leases alive and is built and managed by PM2', async () => {

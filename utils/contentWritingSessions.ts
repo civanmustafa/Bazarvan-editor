@@ -84,6 +84,28 @@ export type ContentWritingSessionDetail = {
   steps: ContentWritingStep[];
 };
 
+export type ExternalContentWritingMessage = {
+  sequenceNumber: 1 | 2 | 3;
+  stage: 'instructions' | 'article_context' | 'generation_request';
+  role: 'system' | 'user';
+  content: string;
+};
+
+export type ExternalContentWritingConversation = {
+  articleId: string;
+  articleTitle: string;
+  articleLanguage: string;
+  articleUpdatedAt: string;
+  templateRegistryVersion: number;
+  estimatedInputTokens: number;
+  maxInputTokens: number;
+  messages: [
+    ExternalContentWritingMessage,
+    ExternalContentWritingMessage,
+    ExternalContentWritingMessage,
+  ];
+};
+
 export class ContentWritingRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -195,6 +217,45 @@ const normalizeStep = (value: unknown): ContentWritingStep | null => {
   };
 };
 
+const normalizeExternalConversation = (value: unknown): ExternalContentWritingConversation | null => {
+  if (!isRecord(value) || !toText(value.articleId) || !Array.isArray(value.messages)) return null;
+  const expectedStages: ExternalContentWritingMessage['stage'][] = [
+    'instructions',
+    'article_context',
+    'generation_request',
+  ];
+  const messages = value.messages.map((message, index): ExternalContentWritingMessage | null => {
+    if (!isRecord(message)) return null;
+    const sequenceNumber = Number(message.sequenceNumber);
+    const stage = toText(message.stage) as ExternalContentWritingMessage['stage'];
+    const role = toText(message.role) as ExternalContentWritingMessage['role'];
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (
+      sequenceNumber !== index + 1
+      || stage !== expectedStages[index]
+      || !['system', 'user'].includes(role)
+      || !content
+    ) return null;
+    return {
+      sequenceNumber: sequenceNumber as 1 | 2 | 3,
+      stage,
+      role,
+      content,
+    };
+  });
+  if (messages.length !== 3 || messages.some(message => !message)) return null;
+  return {
+    articleId: toText(value.articleId),
+    articleTitle: toText(value.articleTitle),
+    articleLanguage: toText(value.articleLanguage) || 'ar',
+    articleUpdatedAt: toText(value.articleUpdatedAt),
+    templateRegistryVersion: Math.max(1, Number(value.templateRegistryVersion) || 1),
+    estimatedInputTokens: Math.max(0, Number(value.estimatedInputTokens) || 0),
+    maxInputTokens: Math.max(0, Number(value.maxInputTokens) || 0),
+    messages: messages as ExternalContentWritingConversation['messages'],
+  };
+};
+
 const requestContentWriting = async (body: Record<string, unknown>): Promise<Record<string, any>> => {
   const token = await getAuthenticatedApiToken();
   const response = await fetch('/api/content-writing', {
@@ -235,6 +296,17 @@ export const startContentWritingSession = async (options: {
   const session = normalizeSession(payload.session);
   if (!session) throw new Error('Content writing API returned an invalid session.');
   return { created: payload.created === true, session };
+};
+
+export const prepareExternalContentWritingConversation = async (
+  articleId: string,
+): Promise<ExternalContentWritingConversation> => {
+  const payload = await requestContentWriting({ action: 'prepareExternal', articleId });
+  const conversation = normalizeExternalConversation(payload.conversation);
+  if (!conversation || conversation.articleId !== articleId) {
+    throw new Error('Content writing API returned an invalid external conversation.');
+  }
+  return conversation;
 };
 
 export const getContentWritingSessionDetail = async (

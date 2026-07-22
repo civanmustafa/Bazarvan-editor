@@ -20,6 +20,8 @@ import {
   normalizeContentWritingCompetitors,
   type ContentWritingArticleInput,
   type ContentWritingCompetitorInput,
+  type ContentWritingPromptBundle,
+  type ContentWritingPromptMessage,
 } from '../utils/contentWritingContext';
 import {
   aiExecutionEngine,
@@ -93,6 +95,21 @@ export type ContentWritingExecutionResult = {
 export type ContentWritingTurnHistory = {
   role: 'user' | 'assistant';
   content: string;
+};
+
+export type PreparedContentWritingConversation = {
+  article: {
+    id: string;
+    title: string;
+    language: string;
+    updatedAt: string;
+  };
+  messages: ContentWritingPromptMessage[];
+  templateRegistryVersion: number;
+  estimatedInputTokens: number;
+  maxInputTokens: number;
+  contextSnapshot: JsonObject;
+  allowModelFallback: boolean;
 };
 
 const isRecord = (value: unknown): value is JsonObject => (
@@ -246,22 +263,7 @@ const createInputHash = (values: readonly string[]): string => (
   createHash('sha256').update(values.join('\n\u0000\n'), 'utf8').digest('hex')
 );
 
-export const queueContentWritingSession = async (input: {
-  articleId: string;
-  createdBy: string;
-  provider: ContentWritingProvider;
-  model?: string;
-  idempotencyKey: string;
-}): Promise<QueuedContentWritingSession> => {
-  const [articleSource, settings, model] = await Promise.all([
-    readArticleInput(input.articleId),
-    getContentWritingSettings(),
-    selectProviderModel(input.provider, input.model),
-  ]);
-  const bundle = buildContentWritingPromptBundle(articleSource.input, {
-    templates: settings.templates,
-    maxInputTokens: settings.maxInputTokens,
-  });
+const assertContentWritingBundleReady = (bundle: ContentWritingPromptBundle): void => {
   if (bundle.readinessIssues.length > 0) {
     throw new ContentWritingEngineError({
       message: 'Content writing prerequisites are incomplete.',
@@ -289,40 +291,84 @@ export const queueContentWritingSession = async (input: {
       },
     });
   }
+};
+
+export const prepareContentWritingConversation = async (
+  articleId: string,
+): Promise<PreparedContentWritingConversation> => {
+  const [articleSource, settings] = await Promise.all([
+    readArticleInput(articleId),
+    getContentWritingSettings(),
+  ]);
+  const bundle = buildContentWritingPromptBundle(articleSource.input, {
+    templates: settings.templates,
+    maxInputTokens: settings.maxInputTokens,
+  });
+  assertContentWritingBundleReady(bundle);
+
+  return {
+    article: {
+      id: articleSource.article.id,
+      title: toText(articleSource.article.title),
+      language: articleSource.input.language,
+      updatedAt: articleSource.article.updated_at,
+    },
+    messages: bundle.messages,
+    templateRegistryVersion: SETTINGS_REGISTRY_VERSION,
+    estimatedInputTokens: bundle.estimatedInputTokens,
+    maxInputTokens: bundle.maxInputTokens,
+    contextSnapshot: {
+      article: {
+        id: articleSource.article.id,
+        title: articleSource.article.title,
+        language: articleSource.input.language,
+        updatedAt: articleSource.article.updated_at,
+      },
+      competitors: bundle.competitors.map(competitor => ({
+        id: competitor.id || null,
+        position: competitor.position || null,
+        title: competitor.title || null,
+        url: competitor.url || null,
+        contentLength: competitor.content.length,
+      })),
+    },
+    allowModelFallback: settings.allowModelFallback,
+  };
+};
+
+export const queueContentWritingSession = async (input: {
+  articleId: string;
+  createdBy: string;
+  provider: ContentWritingProvider;
+  model?: string;
+  idempotencyKey: string;
+}): Promise<QueuedContentWritingSession> => {
+  const [conversation, model] = await Promise.all([
+    prepareContentWritingConversation(input.articleId),
+    selectProviderModel(input.provider, input.model),
+  ]);
 
   const inputHash = createInputHash([
     input.provider,
     model,
-    ...bundle.messages.map(message => message.content),
+    ...conversation.messages.map(message => message.content),
   ]);
   try {
     return await createContentWritingSession({
-      articleId: articleSource.article.id,
+      articleId: conversation.article.id,
       createdBy: input.createdBy,
       provider: input.provider,
       model,
       idempotencyKey: input.idempotencyKey,
-      templateRegistryVersion: SETTINGS_REGISTRY_VERSION,
-      estimatedInputTokens: bundle.estimatedInputTokens,
-      maxInputTokens: bundle.maxInputTokens,
+      templateRegistryVersion: conversation.templateRegistryVersion,
+      estimatedInputTokens: conversation.estimatedInputTokens,
+      maxInputTokens: conversation.maxInputTokens,
       inputHash,
       contextSnapshot: {
-        article: {
-          id: articleSource.article.id,
-          title: articleSource.article.title,
-          language: articleSource.input.language,
-          updatedAt: articleSource.article.updated_at,
-        },
-        competitors: bundle.competitors.map(competitor => ({
-          id: competitor.id || null,
-          position: competitor.position || null,
-          title: competitor.title || null,
-          url: competitor.url || null,
-          contentLength: competitor.content.length,
-        })),
-        allowModelFallback: input.provider === 'gemini' && settings.allowModelFallback,
+        ...conversation.contextSnapshot,
+        allowModelFallback: input.provider === 'gemini' && conversation.allowModelFallback,
       },
-      messages: bundle.messages.map(message => ({ content: message.content })),
+      messages: conversation.messages.map(message => ({ content: message.content })),
     });
   } catch (error) {
     if (error instanceof Error && /idempotency key belongs to a different/i.test(error.message)) {

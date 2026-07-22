@@ -16,6 +16,7 @@ import {
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 import {
   ContentWritingEngineError,
+  prepareContentWritingConversation,
   queueContentWritingSession,
 } from '../server/contentWritingEngine';
 import {
@@ -198,6 +199,42 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     };
   }
 
+  if (action === 'prepareExternal') {
+    consumeApiRateLimit(
+      'content-writing:prepare-external',
+      principal.userId,
+      getPositiveIntegerEnv('CONTENT_WRITING_EXTERNAL_RATE_LIMIT_PER_MINUTE', 20),
+    );
+    const articleId = requireUuid(body.articleId, 'articleId');
+    await requireArticleWriteAccess(supabase, articleId, principal.userId);
+    const conversation = await prepareContentWritingConversation(articleId);
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        conversation: {
+          articleId: conversation.article.id,
+          articleTitle: conversation.article.title,
+          articleLanguage: conversation.article.language,
+          articleUpdatedAt: conversation.article.updatedAt,
+          templateRegistryVersion: conversation.templateRegistryVersion,
+          estimatedInputTokens: conversation.estimatedInputTokens,
+          maxInputTokens: conversation.maxInputTokens,
+          messages: conversation.messages.map((message, index) => ({
+            sequenceNumber: index + 1,
+            stage: message.stage === 'articleContext'
+              ? 'article_context'
+              : message.stage === 'generationRequest'
+                ? 'generation_request'
+                : 'instructions',
+            role: message.role,
+            content: message.content,
+          })),
+        },
+      },
+    };
+  }
+
   if (action === 'get') {
     consumeApiRateLimit(
       'content-writing:read',
@@ -347,7 +384,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new ContentWritingApiError({
-    message: 'action must be start, get, list, cancel, resume, or recordApplication.',
+    message: 'action must be start, prepareExternal, get, list, cancel, resume, or recordApplication.',
     code: 'content_writing_action_invalid',
   });
 };
