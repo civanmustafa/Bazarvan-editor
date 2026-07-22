@@ -9,6 +9,10 @@ import {
   checkContentWritingReadiness,
   toPublicContentWritingReadiness,
 } from './contentWritingReadiness';
+import {
+  checkAdminAiProviderSecretsReadiness,
+  toPublicAdminAiProviderSecretsReadiness,
+} from './adminAiProviderSecretsReadiness';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,10 +54,16 @@ const healthzHandler: RequestHandler = (_req, res) => {
 
 const readyzHandler: RequestHandler = async (_req, res) => {
   const staticBuild = fs.existsSync(path.join(distDir, 'index.html'));
-  const contentWriting = await checkContentWritingReadiness();
-  const ok = staticBuild && contentWriting.ok;
+  const [contentWriting, adminAiProviderSecrets] = await Promise.all([
+    checkContentWritingReadiness(),
+    checkAdminAiProviderSecretsReadiness(),
+  ]);
+  const ok = staticBuild && contentWriting.ok && adminAiProviderSecrets.ok;
   if (!ok && contentWriting.detail) {
     console.error(`[readyz] ${contentWriting.detail}`);
+  }
+  if (!ok && adminAiProviderSecrets.detail) {
+    console.error(`[readyz] ${adminAiProviderSecrets.detail}`);
   }
   res.status(ok ? 200 : 503).json({
     ok,
@@ -61,6 +71,7 @@ const readyzHandler: RequestHandler = async (_req, res) => {
     checks: {
       staticBuild,
       contentWriting: toPublicContentWritingReadiness(contentWriting),
+      adminAiProviderSecrets: toPublicAdminAiProviderSecretsReadiness(adminAiProviderSecrets),
     },
   });
 };

@@ -23,6 +23,7 @@ import ClientGoalSettings from './ClientGoalSettings';
 import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import ContentWritingPromptSettings from './ContentWritingPromptSettings';
+import AdminAiProviderSecretsSettings from './AdminAiProviderSecretsSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
 import {
   loadSystemSettings,
@@ -436,6 +437,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </FieldLabel>
         </div>
       </SettingsSection>
+
+      {isAdmin && (
+        <SettingsSection title="مفاتيح المزودات الإدارية المشفّرة">
+          <AdminAiProviderSecretsSettings />
+        </SettingsSection>
+      )}
 
       <SettingsSection title="إعدادات كتابة المحتوى">
         <ContentWritingPromptSettings

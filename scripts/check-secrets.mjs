@@ -11,7 +11,7 @@ const directSecretPatterns = [
   /sk-(?:proj-)?[0-9A-Za-z_-]{20,}/g,
   /sb_secret_[0-9A-Za-z_-]{20,}/g,
 ];
-const assignedSecretPattern = /^(?:export[ \t]+)?(?:SUPABASE_SERVICE_ROLE_KEY|N8N_INGEST_TOKEN|GEMINI(?:_PAID|_PRO)?_API_KEYS?|OPENAI_API_KEYS?)[ \t]*=[ \t]*["']?([^\s"'#]{20,})/gm;
+const assignedSecretPattern = /^(?:export[ \t]+)?(?:SUPABASE_SERVICE_ROLE_KEY|N8N_INGEST_TOKEN|GEMINI(?:_PAID|_PRO)?_API_KEYS?|OPENAI_API_KEYS?|AI_SETTINGS_ENCRYPTION_KEY)[ \t]*=[ \t]*["']?([^\s"'#]{20,})/gm;
 const placeholderPattern = /^(?:your|example|placeholder|replace|change|make-a-|gemini-key-|openai-key-|supabase-|n8n-|free_key|paid_|ضع_|المفتاح_)/i;
 const findings = [];
 

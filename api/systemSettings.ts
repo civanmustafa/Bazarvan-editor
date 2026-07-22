@@ -14,6 +14,10 @@ import {
   type SystemSettingKey,
 } from '../constants/settingsRegistry';
 import { deliverApiResult, getHeaderValue, readRequestBody, type ApiResult } from './http.ts';
+import {
+  getEnvironmentGeminiApiKeys,
+  readAiProviderCredentialAvailability,
+} from '../server/adminAiProviderSecrets';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
@@ -90,10 +94,6 @@ const uniqueList = (items: string[]): string[] => (
   Array.from(new Set(items.map(item => item.trim()).filter(Boolean)))
 );
 
-const collectSecretList = (...values: Array<string | undefined>): string[] => (
-  uniqueList(values.flatMap(value => splitSecretList(value)))
-);
-
 const getAllowedGeminiFreeModels = (): string[] => (
   uniqueList([
     process.env.GEMINI_MODEL || GEMINI_ANALYSIS_MODEL,
@@ -118,19 +118,9 @@ const getPublicBaseUrl = (req: any): string => {
   return host ? `${protocol.split(',')[0].trim()}://${host.split(',')[0].trim()}` : '';
 };
 
-const getSecretStatus = (req: any) => {
-  const geminiKeys = collectSecretList(
-    process.env.GEMINI_API_KEYS,
-    process.env.GEMINI_API_KEY,
-    process.env.API_KEY,
-  );
-  const geminiPaidKeys = collectSecretList(
-    process.env.GEMINI_PAID_API_KEYS,
-    process.env.GEMINI_PAID_API_KEY,
-    process.env.GEMINI_PRO_API_KEYS,
-    process.env.GEMINI_PRO_API_KEY,
-  );
-  const openAiKeys = collectSecretList(process.env.OPENAI_API_KEYS, process.env.OPENAI_API_KEY);
+const getSecretStatus = async (req: any) => {
+  const geminiKeys = getEnvironmentGeminiApiKeys('gemini');
+  const credentialAvailability = await readAiProviderCredentialAvailability();
   const publicBaseUrl = getPublicBaseUrl(req);
 
   return {
@@ -142,13 +132,13 @@ const getSecretStatus = (req: any) => {
         allowedModels: getAllowedGeminiFreeModels(),
       },
       geminiPaid: {
-        configured: geminiPaidKeys.length > 0,
-        keyCount: geminiPaidKeys.length,
+        configured: credentialAvailability.geminiPaid.configured,
+        keyCount: credentialAvailability.geminiPaid.keyCount,
         model: process.env.GEMINI_PAID_MODEL || process.env.GEMINI_PRO_MODEL || GEMINI_PAID_ANALYSIS_MODEL,
       },
       openAi: {
-        configured: openAiKeys.length > 0,
-        keyCount: openAiKeys.length,
+        configured: credentialAvailability.openai.configured,
+        keyCount: credentialAvailability.openai.keyCount,
         model: process.env.OPENAI_MODEL || OPENAI_ANALYSIS_MODEL,
       },
     },
@@ -269,7 +259,7 @@ const handleSettingsRequest = async (req: any): Promise<ApiResult> => {
     body: {
       ok: true,
       settings,
-      secretStatus: getSecretStatus(req),
+      secretStatus: await getSecretStatus(req),
     },
   };
 };

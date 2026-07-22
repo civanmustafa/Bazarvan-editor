@@ -1,4 +1,5 @@
 import adminUsersHandler from '../api/adminUsers';
+import adminAiProviderSecretsHandler from '../api/adminAiProviderSecrets';
 import aiCapabilitiesHandler from '../api/aiCapabilities';
 import articlesSaveHandler from '../api/articlesSave';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
@@ -35,6 +36,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'external-analysis', method: 'ALL', path: '/api/external-analysis', handler: externalAnalysisHandler },
   { id: 'assigned-article-automation', method: 'ALL', path: '/api/articles/assigned-automation', handler: assignedArticleAutomationHandler },
   { id: 'system-settings', method: 'ALL', path: '/api/system/settings', handler: systemSettingsHandler },
+  { id: 'admin-ai-provider-secrets', method: 'ALL', path: '/api/admin/ai-provider-secrets', handler: adminAiProviderSecretsHandler },
   { id: 'admin-users', method: 'ALL', path: '/api/admin/users', handler: adminUsersHandler },
 ] as const;
 

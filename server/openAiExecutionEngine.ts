@@ -7,6 +7,7 @@ import {
 } from './aiExecutionEngine';
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
+import { resolveOpenAiApiKeys } from './adminAiProviderSecrets';
 
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || OPENAI_ANALYSIS_MODEL;
 const DEFAULT_OPENAI_INSTRUCTIONS = 'You are an expert SEO, AEO, GEO, and LLM SEO content assistant. Follow the user instructions precisely.';
@@ -49,15 +50,6 @@ class OpenAiRequestError extends Error {
     this.status = status;
   }
 }
-
-const normalizeKeys = (...values: Array<string | undefined>): string[] => (
-  Array.from(new Set(
-    values
-      .flatMap(value => String(value || '').split(/[\n,;]+/))
-      .map(key => key.trim())
-      .filter(Boolean),
-  ))
-);
 
 const randomizeKeyOrder = (keys: string[]): string[] => {
   const shuffled = [...keys];
@@ -290,7 +282,8 @@ export const executeOpenAiRequest = async (
       return finalize({ status: 400, body: { error: 'An OpenAI prompt or message list is required.', code: 'AI_PROMPT_REQUIRED' } });
     }
 
-    const keys = randomizeKeyOrder(normalizeKeys(process.env.OPENAI_API_KEY, process.env.OPENAI_API_KEYS));
+    const credentials = await resolveOpenAiApiKeys();
+    const keys = randomizeKeyOrder(credentials.keys);
     if (keys.length === 0) {
       return finalize({ status: 503, body: { error: 'No OpenAI API key is configured.', code: 'AI_PROVIDER_NOT_CONFIGURED', provider: 'openai', model: selectedModel } });
     }
@@ -333,6 +326,7 @@ export const executeOpenAiRequest = async (
               keySuffix: getApiKeySuffix(key),
               provider: 'openai',
               model: selectedModel,
+              credentialSource: credentials.source,
               attempts,
             },
           };
@@ -371,6 +365,7 @@ export const executeOpenAiRequest = async (
         code: 'OPENAI_REQUEST_FAILED',
         provider: 'openai',
         model: selectedModel,
+        credentialSource: credentials.source,
         keyFingerprint: lastAttempt?.keyFingerprint,
         keySuffix: lastAttempt?.keySuffix,
         attempts,

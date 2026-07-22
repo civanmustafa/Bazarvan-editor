@@ -28,6 +28,15 @@ Before deploying structured content writing, apply these migrations in order:
 
 These migrations add durable sessions, resumable steps, reviewed insertion, external-result reporting, and the active-session quality guard. Apply all five before deploying the matching server build. The `/readyz` deployment check returns HTTP 503 when the required content-writing schema is unavailable.
 
+Before enabling administrator-managed OpenAI or Gemini paid keys:
+
+1. Apply `supabase/migrations/20260722050000_admin_ai_provider_secrets.sql` in Supabase SQL Editor.
+2. Generate one encryption key on the server with `openssl rand -base64 32`.
+3. Add the generated value as `AI_SETTINGS_ENCRYPTION_KEY` in `/var/www/bazarvan-editor/.env.production`.
+4. Keep the existing `OPENAI_API_KEY` and `GEMINI_PAID_API_KEYS` values; they remain the Hostinger fallback whenever an administrator override is disabled.
+
+The raw administrator keys are encrypted with AES-256-GCM before storage, are never returned by the settings API, and are never readable by the `anon` or `authenticated` Supabase roles. Losing or changing `AI_SETTINGS_ENCRYPTION_KEY` makes already stored administrator overrides unreadable; keep it in the server environment and backup only.
+
 ```bash
 cd /var/www/bazarvan-editor
 git pull --ff-only origin main
@@ -46,5 +55,5 @@ Notes:
 
 - PM2 runs the web server and all configured workers, including `bazarvan-content-writing-worker`, from `/var/www/bazarvan-editor`, so this is the canonical path.
 - Do not use `/var/www/bazarvan-smarteditor` for future deploy instructions unless PM2 is intentionally reconfigured.
-- `/healthz` is the liveness check. `/readyz` additionally verifies the production build and required Supabase content-writing schema.
+- `/healthz` is the liveness check. `/readyz` additionally verifies the production build, required Supabase schemas, and `AI_SETTINGS_ENCRYPTION_KEY`.
 - If deployment behavior is unclear, verify all processes with `pm2 status`, then inspect the web process with `pm2 describe bazarvan-editor` and the writing worker with `pm2 describe bazarvan-content-writing-worker`.

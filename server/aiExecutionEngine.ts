@@ -11,6 +11,7 @@ import {
 } from "./geminiKeyCoordinator";
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
+import { resolveGeminiApiKeys } from './adminAiProviderSecrets';
 import type { AiProviderCapabilities } from '../constants/aiProviderCapabilities';
 import {
   assertAiRequestPayload,
@@ -294,33 +295,9 @@ const withCorsResponseHeaders = (req: any, result: ApiResult): ApiResult => {
   }
 };
 
-const parseGeminiKeyList = (...rawValues: Array<string | undefined>): string[] => (
-  Array.from(new Set(
-    rawValues
-      .flatMap(raw => String(raw || '').split(/[\n,;]+/))
-      .map(key => key.trim())
-      .filter(Boolean)
-  ))
-);
-
-const parseEnvGeminiKeys = (provider: GeminiProvider): string[] => {
-  return provider === "geminiPaid"
-    ? parseGeminiKeyList(
-        process.env.GEMINI_PAID_API_KEYS,
-        process.env.GEMINI_PAID_API_KEY,
-        process.env.GEMINI_PRO_API_KEYS,
-        process.env.GEMINI_PRO_API_KEY,
-      )
-    : parseGeminiKeyList(
-        process.env.GEMINI_API_KEYS,
-        process.env.GEMINI_API_KEY,
-        process.env.API_KEY,
-      );
-};
-
 const getProviderEnvHint = (provider: GeminiProvider): string => (
   provider === "geminiPaid"
-    ? "GEMINI_PAID_API_KEYS أو GEMINI_PAID_API_KEY"
+    ? "مفتاح الأدمن المشفّر أو GEMINI_PAID_API_KEYS"
     : "GEMINI_API_KEYS أو GEMINI_API_KEY"
 );
 
@@ -699,7 +676,8 @@ const executeGeminiRequestInternal = async (
       allowModelFallback === true,
       fallbackModels,
     );
-    const GEMINI_API_KEYS = parseEnvGeminiKeys(selectedProvider);
+    const credentials = await resolveGeminiApiKeys(selectedProvider);
+    const GEMINI_API_KEYS = credentials.keys;
 
     if (GEMINI_API_KEYS.length === 0) {
       setGeminiProgress(progressId, {
@@ -928,6 +906,7 @@ const executeGeminiRequestInternal = async (
                 keySuffix,
                 provider: selectedProvider,
                 model: activeModel,
+                credentialSource: credentials.source,
                 requestedModel: selectedModel,
                 modelFallbackUsed: activeModel !== selectedModel,
                 modelOrder,
@@ -1059,6 +1038,7 @@ const executeGeminiRequestInternal = async (
       ),
       provider: selectedProvider,
       model: lastAttemptedModel,
+      credentialSource: credentials.source,
       requestedModel: selectedModel,
       modelFallbackEnabled: modelOrder.length > 1,
       modelCount: modelOrder.length,
@@ -1192,7 +1172,7 @@ export const aiExecutionEngine = {
   executeGemini: executeGeminiRequest,
 };
 
-const getInitialJobProgress = (requestBody: any) => {
+const getInitialJobProgress = async (requestBody: any) => {
   const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
   const selectedModel = getSafeGeminiModel(
     selectGeminiModel(requestBody?.model, requestedProvider),
@@ -1211,7 +1191,7 @@ const getInitialJobProgress = (requestBody: any) => {
     model: selectedModel,
     modelCount: modelOrder.length,
     modelOrder,
-    keyCount: parseEnvGeminiKeys(selectedProvider).length,
+    keyCount: (await resolveGeminiApiKeys(selectedProvider)).keys.length,
   };
 };
 
@@ -1321,7 +1301,7 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
         await readAiProviderCapabilities(),
       );
       if (capabilityFailure) return capabilityFailure;
-      const initial = getInitialJobProgress(requestBody);
+      const initial = await getInitialJobProgress(requestBody);
       const job = await createAiJob({
         publicId: progressId,
         userId: principal.userId,

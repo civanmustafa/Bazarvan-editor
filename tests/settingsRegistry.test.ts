@@ -279,3 +279,17 @@ test('content preparation migration expands status and external-analysis eligibi
   assert.match(migration, /public\.can_write_article\(target_article_id\)/);
   assertBalancedSqlParentheses(migration);
 });
+
+test('administrator AI secret migration keeps encrypted values server-only', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260722050000_admin_ai_provider_secrets.sql',
+  );
+
+  assert.match(migration, /create table if not exists public\.ai_provider_secrets/);
+  assert.match(migration, /provider in \('openai_latest', 'gemini_latest'\)/);
+  assert.match(migration, /revoke all on table public\.ai_provider_secrets from anon/);
+  assert.match(migration, /revoke all on table public\.ai_provider_secrets from authenticated/);
+  assert.match(migration, /to service_role/);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
+  assertBalancedSqlParentheses(migration);
+});

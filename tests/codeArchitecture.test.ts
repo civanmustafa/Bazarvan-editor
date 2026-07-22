@@ -33,6 +33,7 @@ test('development and production use one API route registry', async () => {
     '/api/external-analysis',
     '/api/articles/assigned-automation',
     '/api/system/settings',
+    '/api/admin/ai-provider-secrets',
     '/api/admin/users',
   ];
 
@@ -46,6 +47,7 @@ test('development and production use one API route registry', async () => {
 test('API handlers share the same HTTP request and response adapters', async () => {
   const handlerFiles = [
     'api/adminUsers.ts',
+    'api/adminAiProviderSecrets.ts',
     'api/aiCapabilities.ts',
     'api/articlesSave.ts',
     'api/assignedArticleAutomation.ts',
@@ -149,6 +151,7 @@ test('repository quality gate covers types, tests, build, and security checks', 
     .forEach(scriptName => assert.match(scripts.verify || '', new RegExp(`npm run ${scriptName.replace(':', '\\:')}`)));
   assert.match(scripts['check:dependencies'] || '', /npm audit/);
   assert.match(scripts.postbuild || '', /check:content-writing-release/);
+  assert.match(scripts.postbuild || '', /check:admin-ai-secrets-release/);
   assert.match(scripts['check:content-writing-release'] || '', /checkContentWritingRelease\.ts/);
   assert.equal(compilerOptions.noImplicitAny, true);
   assert.equal(compilerOptions.strictBindCallApply, true);
@@ -227,6 +230,49 @@ test('AI provider availability is owned by one capability service across server 
   assert.match(aiContext, /isAiProviderAvailable\(provider\)/);
   assert.match(settingsPage, /السماح للمستخدمين باستخدام Gemini Pro/);
   assert.match(settingsPage, /notifyAiProviderCapabilitiesChanged\(\)/);
+});
+
+test('administrator AI overrides are encrypted, admin-only, and resolved by shared provider engines', async () => {
+  const [
+    migration,
+    secretService,
+    secretApi,
+    secretClient,
+    secretSettings,
+    settingsPage,
+    capabilityService,
+    openAiExecutionEngine,
+    aiExecutionEngine,
+  ] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260722050000_admin_ai_provider_secrets.sql'),
+    readWorkspaceFile('server/adminAiProviderSecrets.ts'),
+    readWorkspaceFile('api/adminAiProviderSecrets.ts'),
+    readWorkspaceFile('utils/adminAiProviderSecrets.ts'),
+    readWorkspaceFile('components/AdminAiProviderSecretsSettings.tsx'),
+    readWorkspaceFile('components/SettingsPage.tsx'),
+    readWorkspaceFile('server/aiProviderCapabilities.ts'),
+    readWorkspaceFile('server/openAiExecutionEngine.ts'),
+    readWorkspaceFile('server/aiExecutionEngine.ts'),
+  ]);
+
+  assert.match(migration, /alter table public\.ai_provider_secrets enable row level security/);
+  assert.match(migration, /revoke all on table public\.ai_provider_secrets from authenticated/);
+  assert.match(migration, /grant select, insert, update, delete on table public\.ai_provider_secrets to service_role/);
+  assert.match(secretService, /aes-256-gcm/);
+  assert.match(secretService, /setAAD\(getAdditionalAuthenticatedData\(provider\)\)/);
+  assert.match(secretService, /AI_SETTINGS_ENCRYPTION_KEY/);
+  assert.match(secretApi, /principal\.role !== 'admin'/);
+  assert.match(secretApi, /Cache-Control': 'no-store'/);
+  assert.doesNotMatch(secretApi, /ciphertext|authentication_tag|initialization_vector/);
+  assert.doesNotMatch(secretClient, /localStorage|sessionStorage/);
+  assert.match(secretSettings, /autoComplete="new-password"/);
+  assert.match(secretSettings, /saveAndEnableAdminAiProviderSecret/);
+  assert.match(settingsPage, /\{isAdmin && \(\s*<SettingsSection title="مفاتيح المزودات الإدارية المشفّرة">/);
+  assert.match(capabilityService, /readAiProviderCredentialAvailability\(\)/);
+  assert.match(openAiExecutionEngine, /resolveOpenAiApiKeys\(\)/);
+  assert.match(aiExecutionEngine, /resolveGeminiApiKeys\(selectedProvider\)/);
+  assert.doesNotMatch(openAiExecutionEngine, /process\.env\.OPENAI_API_KEYS?/);
+  assert.doesNotMatch(aiExecutionEngine, /process\.env\.GEMINI_(?:PAID|PRO)_API_KEYS?/);
 });
 
 test('content writing has one template registry and one context builder', async () => {
