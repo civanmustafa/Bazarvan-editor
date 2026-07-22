@@ -1,4 +1,5 @@
 import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from './authenticatedApi';
+import { notifyAiKeyUsageFeedback } from './aiKeyUsageFeedback';
 
 export type GeminiEngineProvider = 'gemini' | 'geminiPaid';
 
@@ -199,6 +200,12 @@ export const runGeminiAnalysisEngine = async ({
             rawBody,
             progressId,
         };
+    notifyAiKeyUsageFeedback({
+        provider: result.data.provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini',
+        status: result.status,
+        payload: result.data,
+        surface: request.telemetry?.source,
+    });
     window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
     return result;
 };

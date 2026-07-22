@@ -42,6 +42,7 @@ import {
     type GeminiProgressCallback,
     type GeminiProgressSnapshot,
 } from '../utils/geminiAnalysisEngine';
+import { notifyAiKeyUsageFeedback } from '../utils/aiKeyUsageFeedback';
 
 /*
  * AIContext owns all AI workflows:
@@ -2454,6 +2455,12 @@ const callChatGptAnalysis = async (
 
         const isJson = response.headers.get('content-type')?.includes('application/json');
         const data = isJson ? await response.json().catch(() => ({})) : {};
+        notifyAiKeyUsageFeedback({
+            provider: 'OpenAI',
+            status: response.status,
+            payload: data,
+            surface: usageContext.source,
+        });
         window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
 
         if (response.status === 404) {

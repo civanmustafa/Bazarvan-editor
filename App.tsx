@@ -22,6 +22,7 @@ import {
     COMPETITOR_TEXT_STORAGE_KEY,
     COMPETITOR_URLS_STORAGE_KEY,
 } from './utils/competitorStorage';
+import AiKeyUsageToast from './components/AiKeyUsageToast';
 import './styles/global.css';
 import './styles/components.css';
 
@@ -295,17 +296,20 @@ const AppContent: React.FC = () => {
     };
 
     return (
-      <Suspense
-        fallback={(
-          <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'dark' : ''} bg-[#FAFAFA] dark:bg-[#181818]`}>
-            <div className="rounded-lg border border-gray-200 bg-white px-5 py-4 text-sm font-bold text-[#333333] shadow-sm dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
-              جار تحميل الصفحة...
+      <>
+        <Suspense
+          fallback={(
+            <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'dark' : ''} bg-[#FAFAFA] dark:bg-[#181818]`}>
+              <div className="rounded-lg border border-gray-200 bg-white px-5 py-4 text-sm font-bold text-[#333333] shadow-sm dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+                جار تحميل الصفحة...
+              </div>
             </div>
-          </div>
-        )}
-      >
-        {renderView()}
-      </Suspense>
+          )}
+        >
+          {renderView()}
+        </Suspense>
+        <AiKeyUsageToast />
+      </>
     );
 }
 

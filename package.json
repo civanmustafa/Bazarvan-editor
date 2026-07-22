@@ -22,7 +22,7 @@
     "test": "npm run test:security && npm run test:performance && npm run test:architecture",
     "test:security": "node --experimental-strip-types --test tests/apiSecurity.test.ts tests/adminAiProviderSecrets.test.ts tests/articleAccessAndSave.test.ts tests/settingsRegistry.test.ts tests/contentWriting.test.ts tests/contentWritingWorkflow.test.ts tests/contentWritingSessions.test.ts tests/contentWritingReadiness.test.ts tests/aiExecutionEngine.test.ts tests/aiJobService.test.ts tests/competitorDiscovery.test.ts tests/externalAnalysisExactlyOnce.test.ts",
     "test:performance": "node --experimental-strip-types --test tests/performanceArchitecture.test.ts",
-    "test:architecture": "node --experimental-strip-types --test tests/codeArchitecture.test.ts tests/externalAiBridge.test.ts",
+    "test:architecture": "node --experimental-strip-types --test tests/codeArchitecture.test.ts tests/externalAiBridge.test.ts tests/aiKeyUsageFeedback.test.ts",
     "check:bundle": "node scripts/check-web-performance.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:dependencies": "npm audit --audit-level=moderate",

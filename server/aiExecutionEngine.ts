@@ -1028,6 +1028,7 @@ const executeGeminiRequestInternal = async (
     const responseStatus = lastError && lastError.status >= 400 && lastError.status < 500
       ? lastError.status
       : 502;
+    const lastAttempt = attempts[attempts.length - 1];
     const failureBody = {
       error: buildGeminiFailureMessage(
         selectedProvider,
@@ -1048,6 +1049,7 @@ const executeGeminiRequestInternal = async (
       attemptedKeyCount: getUniqueAttemptCount(attempts),
       keyModelAttemptCount: getUniqueKeyModelAttemptCount(attempts),
       totalAttemptCount: attempts.length,
+      keySuffix: lastAttempt?.keySuffix,
       attempts,
       attemptSummary: summarizeAttemptReasons(attempts),
       progressId,
@@ -1066,10 +1068,13 @@ const executeGeminiRequestInternal = async (
       attemptedModelKeyCount: getUniqueAttemptCountForModel(attempts, lastAttemptedModel),
       totalAttemptCount: getUniqueKeyModelAttemptCount(attempts),
       currentKeyIndex: lastOrderedKeys.length,
+      keySuffix: lastAttempt?.keySuffix,
+      status: lastAttempt?.status,
+      reason: lastAttempt?.reason,
       completed: true,
       message: modelOrder.length > 1
-        ? `فشل طلب Gemini بعد تجربة ${modelOrder.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل.`
-        : `فشل طلب Gemini بعد تجربة ${getUniqueAttemptCount(attempts)} من ${lastOrderedKeys.length} مفتاح.`,
+        ? `فشل طلب Gemini بعد تجربة ${modelOrder.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل.${lastAttempt?.keySuffix ? ` آخر مفتاح: ...${lastAttempt.keySuffix}.` : ''}`
+        : `فشل طلب Gemini بعد تجربة ${getUniqueAttemptCount(attempts)} من ${lastOrderedKeys.length} مفتاح.${lastAttempt?.keySuffix ? ` آخر مفتاح: ...${lastAttempt.keySuffix}.` : ''}`,
     });
     return {
       status: responseStatus,

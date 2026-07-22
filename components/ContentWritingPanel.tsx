@@ -23,6 +23,11 @@ import {
   GEMINI_PAID_MODEL_OPTIONS,
 } from '../constants/aiModels';
 import { copyMarkdownToClipboard } from '../utils/editorUtils';
+import {
+  collectAiKeyUsageEntries,
+  formatAiKeySuffix,
+  notifyAiKeyUsageFeedback,
+} from '../utils/aiKeyUsageFeedback';
 import type { ExternalAiBridgeProvider } from '../types';
 import ContentWritingExternalBridgePanel from './ContentWritingExternalBridgePanel';
 import ContentWritingReviewModal from './ContentWritingReviewModal';
@@ -223,6 +228,8 @@ const ContentWritingPanel: React.FC = () => {
   const pendingStartRef = useRef<PendingStartRequest | null>(null);
   const providerTouchedRef = useRef(false);
   const touchedModelsRef = useRef<Set<ContentWritingProvider>>(new Set());
+  const trackedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
+  const notifiedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     activeArticleRef.current = articleId;
@@ -349,6 +356,8 @@ const ContentWritingPanel: React.FC = () => {
     setCopied(false);
     setReviewSnapshot(null);
     setApplicationNotice(null);
+    trackedKeyFeedbackSessionsRef.current.clear();
+    notifiedKeyFeedbackSessionsRef.current.clear();
     if (articleId) void refreshSessions();
   }, [articleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -403,6 +412,7 @@ const ContentWritingPanel: React.FC = () => {
       if (activeArticleRef.current !== articleId) return;
       mergeSession(started.session);
       setSelectedSessionId(started.session.id);
+      trackedKeyFeedbackSessionsRef.current.add(started.session.id);
       if (started.reusedActive) {
         setApplicationNotice({
           tone: 'success',
@@ -493,6 +503,8 @@ const ContentWritingPanel: React.FC = () => {
     setErrorPresentation(null);
     try {
       const resumed = await resumeContentWritingSession(selectedSession.id);
+      trackedKeyFeedbackSessionsRef.current.add(resumed.id);
+      notifiedKeyFeedbackSessionsRef.current.delete(resumed.id);
       mergeSession(resumed);
       setSelectedDetail(current => current ? { ...current, session: { ...current.session, ...resumed } } : current);
       await loadDetail(resumed.id, { silent: true });
@@ -615,9 +627,49 @@ const ContentWritingPanel: React.FC = () => {
   const workflowStepKey = typeof progress.workflowStepKey === 'string'
     ? progress.workflowStepKey.trim()
     : '';
-  const workflowSteps = activeDetail?.steps || [];
+  const workflowSteps = useMemo(() => activeDetail?.steps || [], [activeDetail?.steps]);
   const completedWorkflowSteps = workflowSteps.filter(step => step.status === 'completed').length;
   const currentWorkflowStep = workflowSteps.find(step => step.stepKey === workflowStepKey);
+  const currentKeySuffix = typeof progress.keySuffix === 'string' ? progress.keySuffix.trim() : '';
+  const sessionKeyUsageEntries = useMemo(() => {
+    if (!selectedSession) return [];
+    const terminalStatus = selectedSession.status === 'completed'
+      ? 200
+      : selectedSession.status === 'failed'
+        ? 500
+        : undefined;
+    return collectAiKeyUsageEntries({
+      status: terminalStatus,
+      keySuffix: selectedSession.keySuffix,
+      responseMetadata: selectedSession.responseMetadata,
+      result: workflowSteps.map(step => step.metadata),
+    });
+  }, [selectedSession, workflowSteps]);
+
+  useEffect(() => {
+    if (!selectedSession || selectedSession.executionMode !== 'api') return;
+    if (isContentWritingSessionActive(selectedSession)) {
+      trackedKeyFeedbackSessionsRef.current.add(selectedSession.id);
+      return;
+    }
+    if (
+      !['completed', 'failed'].includes(selectedSession.status)
+      || !trackedKeyFeedbackSessionsRef.current.has(selectedSession.id)
+      || notifiedKeyFeedbackSessionsRef.current.has(selectedSession.id)
+      || sessionKeyUsageEntries.length === 0
+    ) return;
+    notifiedKeyFeedbackSessionsRef.current.add(selectedSession.id);
+    notifyAiKeyUsageFeedback({
+      provider: getProviderLabel(selectedSession.provider),
+      status: selectedSession.status === 'completed' ? 200 : 500,
+      payload: {
+        keySuffix: selectedSession.keySuffix,
+        responseMetadata: selectedSession.responseMetadata,
+        result: workflowSteps.map(step => step.metadata),
+      },
+      surface: 'content_writing',
+    });
+  }, [selectedSession, sessionKeyUsageEntries, workflowSteps]);
   const displayedWorkflowStepLabel = currentWorkflowStep
     ? getStepLabel(currentWorkflowStep, isArabic)
     : workflowStepLabel;
@@ -767,6 +819,24 @@ const ContentWritingPanel: React.FC = () => {
                   <span className="truncate text-[11px] font-bold text-gray-600 dark:text-gray-300">{getProviderLabel(selectedSession.provider, selectedSession.executionMode)}</span>
                 </div>
                 <div className="mt-1 truncate font-mono text-[10px] text-gray-400" dir="ltr">{selectedSession.model}</div>
+                {sessionKeyUsageEntries.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {sessionKeyUsageEntries.map((entry, index) => (
+                      <span
+                        key={`${entry.outcome}-${entry.keySuffix}-${entry.status || 0}-${index}`}
+                        className={`rounded px-1.5 py-0.5 font-mono text-[9px] font-black ${entry.outcome === 'success'
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
+                          : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}
+                        dir="ltr"
+                        title={entry.outcome === 'success'
+                          ? (isArabic ? 'نجح المفتاح' : 'Key succeeded')
+                          : (isArabic ? 'فشل المفتاح' : 'Key failed')}
+                      >
+                        {entry.outcome === 'success' ? '✓' : '×'} {formatAiKeySuffix(entry.keySuffix)}{entry.status ? ` · ${entry.status}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               {isContentWritingSessionActive(selectedSession) && (
                 <button
@@ -797,6 +867,11 @@ const ContentWritingPanel: React.FC = () => {
                     )}
                     {modelCount > 0 && <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">{isArabic ? 'الموديل' : 'Model'} {modelIndex || 1}/{modelCount}</span>}
                     {keyCount > 0 && <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">{isArabic ? 'المفتاح' : 'Key'} {keyIndex || 1}/{keyCount}</span>}
+                    {currentKeySuffix && (
+                      <span className="rounded bg-white px-1.5 py-1 font-mono font-black dark:bg-[#2A2A2A]" dir="ltr">
+                        {formatAiKeySuffix(currentKeySuffix)}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
