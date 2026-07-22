@@ -32,6 +32,7 @@ import { readAiProviderCapabilities } from './aiProviderCapabilities';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import { executeOpenAiRequest } from './openAiExecutionEngine';
 import {
+  createCompletedExternalContentWritingSession,
   createContentWritingSession,
   type ContentWritingMessage,
   type ContentWritingProvider,
@@ -105,6 +106,7 @@ export type PreparedContentWritingConversation = {
     updatedAt: string;
   };
   messages: ContentWritingPromptMessage[];
+  inputHash: string;
   templateRegistryVersion: number;
   estimatedInputTokens: number;
   maxInputTokens: number;
@@ -314,6 +316,7 @@ export const prepareContentWritingConversation = async (
       updatedAt: articleSource.article.updated_at,
     },
     messages: bundle.messages,
+    inputHash: createInputHash(bundle.messages.map(message => message.content)),
     templateRegistryVersion: SETTINGS_REGISTRY_VERSION,
     estimatedInputTokens: bundle.estimatedInputTokens,
     maxInputTokens: bundle.maxInputTokens,
@@ -334,6 +337,69 @@ export const prepareContentWritingConversation = async (
     },
     allowModelFallback: settings.allowModelFallback,
   };
+};
+
+export const recordExternalContentWritingResult = async (input: {
+  articleId: string;
+  createdBy: string;
+  externalProvider: 'chatgpt' | 'gemini';
+  idempotencyKey: string;
+  preparedInputHash: string;
+  resultText: string;
+}): Promise<QueuedContentWritingSession> => {
+  const conversation = await prepareContentWritingConversation(input.articleId);
+  if (conversation.inputHash !== input.preparedInputHash) {
+    throw new ContentWritingEngineError({
+      message: 'The article context changed after the external conversation was prepared.',
+      status: 409,
+      code: 'content_writing_external_context_changed',
+    });
+  }
+  const resultText = String(input.resultText || '').trim();
+  if (!resultText) {
+    throw new ContentWritingEngineError({
+      message: 'The external content writing result cannot be empty.',
+      status: 422,
+      code: 'content_writing_external_result_empty',
+    });
+  }
+  if (resultText.length > 1_000_000) {
+    throw new ContentWritingEngineError({
+      message: 'The external content writing result is too large.',
+      status: 413,
+      code: 'content_writing_external_result_too_large',
+    });
+  }
+
+  const inputHash = createInputHash([
+    'external',
+    input.externalProvider,
+    ...conversation.messages.map(message => message.content),
+  ]);
+  try {
+    return await createCompletedExternalContentWritingSession({
+      articleId: conversation.article.id,
+      createdBy: input.createdBy,
+      externalProvider: input.externalProvider,
+      idempotencyKey: input.idempotencyKey,
+      templateRegistryVersion: conversation.templateRegistryVersion,
+      estimatedInputTokens: conversation.estimatedInputTokens,
+      maxInputTokens: conversation.maxInputTokens,
+      inputHash,
+      contextSnapshot: conversation.contextSnapshot,
+      messages: conversation.messages.map(message => ({ content: message.content })),
+      resultText,
+    });
+  } catch (error) {
+    if (error instanceof Error && /idempotency key belongs to a different/i.test(error.message)) {
+      throw new ContentWritingEngineError({
+        message: 'The idempotency key was already used for a different external writing result.',
+        status: 409,
+        code: 'content_writing_idempotency_conflict',
+      });
+    }
+    throw error;
+  }
 };
 
 export const queueContentWritingSession = async (input: {

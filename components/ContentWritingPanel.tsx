@@ -34,6 +34,7 @@ import {
   isContentWritingSessionActive,
   listContentWritingSessions,
   prepareExternalContentWritingConversation,
+  recordExternalContentWritingResult,
   recordContentWritingSessionApplication,
   resumeContentWritingSession,
   startContentWritingSession,
@@ -43,6 +44,7 @@ import {
   type ContentWritingSessionStatus,
   type ContentWritingStep,
   type ContentWritingStepStatus,
+  type ExternalContentWritingConversation,
 } from '../utils/contentWritingSessions';
 
 type ActionState = 'idle' | 'starting' | 'cancelling' | 'resuming';
@@ -101,7 +103,11 @@ const getStatusLabel = (status: ContentWritingSessionStatus, isArabic: boolean):
   return labels[status][isArabic ? 0 : 1];
 };
 
-const getProviderLabel = (provider: ContentWritingProvider): string => {
+const getProviderLabel = (
+  provider: ContentWritingProvider,
+  executionMode: 'api' | 'external' = 'api',
+): string => {
+  if (executionMode === 'external') return provider === 'openai' ? 'ChatGPT خارجي' : 'Gemini خارجي';
   if (provider === 'geminiPaid') return 'Gemini Pro';
   if (provider === 'openai') return 'OpenAI';
   return 'Gemini';
@@ -119,6 +125,10 @@ const getErrorPresentation = (error: unknown, isArabic: boolean): ErrorPresentat
     AI_PROVIDER_DISABLED: ['قام الأدمن بتعطيل هذا المزود.', 'This provider is disabled by the administrator.'],
     AI_PROVIDER_NOT_CONFIGURED: ['المزود مفعّل ولكن مفتاحه غير مهيأ على الخادم.', 'The provider is enabled but not configured on the server.'],
     article_access_denied: ['لا تملك صلاحية كتابة هذه المقالة.', 'You cannot write this article.'],
+    content_writing_external_context_changed: ['تغيرت بيانات المقالة بعد تجهيز المحادثة. افتح المزود من جديد وأعد إرسال الرسائل الثلاث.', 'The article changed after the conversation was prepared. Reopen the provider and resend the three messages.'],
+    content_writing_external_result_empty: ['نتيجة الكتابة الخارجية فارغة.', 'The external writing result is empty.'],
+    content_writing_external_result_too_large: ['نتيجة الكتابة الخارجية تتجاوز الحد المسموح.', 'The external writing result exceeds the allowed size.'],
+    content_writing_idempotency_conflict: ['تعارض سجل الكتابة مع طلب سابق. أعد تجهيز المحادثة.', 'The writing record conflicts with an earlier request. Prepare the conversation again.'],
   };
   const readinessIssues = Array.isArray(error.payload.readinessIssues)
     ? error.payload.readinessIssues.flatMap(issue => {
@@ -422,26 +432,37 @@ const ContentWritingPanel: React.FC = () => {
     return prepareExternalContentWritingConversation(targetArticleId);
   }, [articleId, editor, handleSaveDraft, isArabic]);
 
-  const importExternalResult = useCallback((
-    _provider: ExternalAiBridgeProvider,
+  const importExternalResult = useCallback(async (
+    externalProvider: ExternalAiBridgeProvider,
     response: string,
+    conversation: ExternalContentWritingConversation,
+    idempotencyKey: string,
   ) => {
     if (!articleId || !editor || editor.isDestroyed) {
-      setApplicationNotice({
-        tone: 'error',
-        message: isArabic ? 'المحرر غير متاح لاستيراد المقالة.' : 'The editor is unavailable for article import.',
-      });
-      return;
+      throw new Error(isArabic ? 'المحرر غير متاح لاستيراد المقالة.' : 'The editor is unavailable for article import.');
     }
+    const recorded = await recordExternalContentWritingResult({
+      articleId,
+      externalProvider,
+      idempotencyKey,
+      preparedInputHash: conversation.inputHash,
+      resultText: response,
+    });
+    if (activeArticleRef.current !== articleId) {
+      throw new Error(isArabic ? 'تغيرت المقالة النشطة.' : 'The active article changed.');
+    }
+    mergeSession(recorded.session);
+    setSelectedSessionId(recorded.session.id);
     setErrorPresentation(null);
     setApplicationNotice(null);
     setReviewSnapshot({
+      sessionId: recorded.session.id,
       articleId,
       markdown: response,
       currentHtml: editor.getHTML(),
       currentText: editor.getText(),
     });
-  }, [articleId, editor, isArabic]);
+  }, [articleId, editor, isArabic, mergeSession]);
 
   const cancelSession = async () => {
     if (!selectedSession || !isContentWritingSessionActive(selectedSession)) return;
@@ -735,7 +756,7 @@ const ContentWritingPanel: React.FC = () => {
                     <StatusIcon status={selectedSession.status} size={13} />
                     {getStatusLabel(selectedSession.status, isArabic)}
                   </span>
-                  <span className="truncate text-[11px] font-bold text-gray-600 dark:text-gray-300">{getProviderLabel(selectedSession.provider)}</span>
+                  <span className="truncate text-[11px] font-bold text-gray-600 dark:text-gray-300">{getProviderLabel(selectedSession.provider, selectedSession.executionMode)}</span>
                 </div>
                 <div className="mt-1 truncate font-mono text-[10px] text-gray-400" dir="ltr">{selectedSession.model}</div>
               </div>
@@ -900,7 +921,7 @@ const ContentWritingPanel: React.FC = () => {
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-700 dark:text-gray-200">
                       <StatusIcon status={session.status} size={13} />
-                      <span>{getProviderLabel(session.provider)}</span>
+                      <span>{getProviderLabel(session.provider, session.executionMode)}</span>
                       <span className="truncate font-mono text-[10px] font-normal text-gray-400" dir="ltr">{session.model}</span>
                     </div>
                     <div className="mt-1 text-[10px] text-gray-400">{formatDateTime(session.createdAt, isArabic)}</div>

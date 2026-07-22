@@ -16,6 +16,7 @@ export type ContentWritingSession = {
   provider: ContentWritingProvider;
   model: string;
   status: ContentWritingSessionStatus;
+  executionMode: 'api' | 'external';
   idempotencyKey: string;
   templateRegistryVersion: number;
   estimatedInputTokens: number;
@@ -96,6 +97,7 @@ export type ExternalContentWritingConversation = {
   articleTitle: string;
   articleLanguage: string;
   articleUpdatedAt: string;
+  inputHash: string;
   templateRegistryVersion: number;
   estimatedInputTokens: number;
   maxInputTokens: number;
@@ -150,6 +152,7 @@ const normalizeSession = (value: unknown): ContentWritingSession | null => {
     provider: normalizeProvider(value.provider),
     model: toText(value.model),
     status: normalizeStatus(value.status),
+    executionMode: value.executionMode === 'external' ? 'external' : 'api',
     idempotencyKey: toText(value.idempotencyKey),
     templateRegistryVersion: Math.max(1, Number(value.templateRegistryVersion) || 1),
     estimatedInputTokens: Math.max(0, Number(value.estimatedInputTokens) || 0),
@@ -218,7 +221,12 @@ const normalizeStep = (value: unknown): ContentWritingStep | null => {
 };
 
 const normalizeExternalConversation = (value: unknown): ExternalContentWritingConversation | null => {
-  if (!isRecord(value) || !toText(value.articleId) || !Array.isArray(value.messages)) return null;
+  if (
+    !isRecord(value)
+    || !toText(value.articleId)
+    || !/^[a-f0-9]{64}$/.test(toText(value.inputHash))
+    || !Array.isArray(value.messages)
+  ) return null;
   const expectedStages: ExternalContentWritingMessage['stage'][] = [
     'instructions',
     'article_context',
@@ -249,6 +257,7 @@ const normalizeExternalConversation = (value: unknown): ExternalContentWritingCo
     articleTitle: toText(value.articleTitle),
     articleLanguage: toText(value.articleLanguage) || 'ar',
     articleUpdatedAt: toText(value.articleUpdatedAt),
+    inputHash: toText(value.inputHash),
     templateRegistryVersion: Math.max(1, Number(value.templateRegistryVersion) || 1),
     estimatedInputTokens: Math.max(0, Number(value.estimatedInputTokens) || 0),
     maxInputTokens: Math.max(0, Number(value.maxInputTokens) || 0),
@@ -256,9 +265,12 @@ const normalizeExternalConversation = (value: unknown): ExternalContentWritingCo
   };
 };
 
-const requestContentWriting = async (body: Record<string, unknown>): Promise<Record<string, any>> => {
+const requestContentWritingEndpoint = async (
+  endpoint: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, any>> => {
   const token = await getAuthenticatedApiToken();
-  const response = await fetch('/api/content-writing', {
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: getAuthenticatedApiHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
@@ -269,12 +281,20 @@ const requestContentWriting = async (body: Record<string, unknown>): Promise<Rec
   return normalized;
 };
 
+const requestContentWriting = (body: Record<string, unknown>): Promise<Record<string, any>> => (
+  requestContentWritingEndpoint('/api/content-writing', body)
+);
+
 export const createContentWritingIdempotencyKey = (articleId: string): string => {
   const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   return `content:${articleId}:${randomPart}`;
 };
+
+export const createExternalContentWritingIdempotencyKey = (articleId: string): string => (
+  createContentWritingIdempotencyKey(articleId).replace(/^content:/, 'content-external:')
+);
 
 export const isContentWritingSessionActive = (session: ContentWritingSession | null | undefined): boolean => (
   Boolean(session && ['queued', 'running', 'retry_scheduled'].includes(session.status))
@@ -307,6 +327,21 @@ export const prepareExternalContentWritingConversation = async (
     throw new Error('Content writing API returned an invalid external conversation.');
   }
   return conversation;
+};
+
+export const recordExternalContentWritingResult = async (options: {
+  articleId: string;
+  externalProvider: 'chatgpt' | 'gemini';
+  idempotencyKey: string;
+  preparedInputHash: string;
+  resultText: string;
+}): Promise<{ created: boolean; session: ContentWritingSession }> => {
+  const payload = await requestContentWritingEndpoint('/api/content-writing/external-result', options);
+  const session = normalizeSession(payload.session);
+  if (!session || session.executionMode !== 'external' || session.articleId !== options.articleId) {
+    throw new Error('External content writing API returned an invalid session.');
+  }
+  return { created: payload.created === true, session };
 };
 
 export const getContentWritingSessionDetail = async (

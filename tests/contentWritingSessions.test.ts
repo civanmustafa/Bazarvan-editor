@@ -86,6 +86,24 @@ test('content-writing application migration records explicit editor approvals', 
   assertBalancedSqlParentheses(migration);
 });
 
+test('content-writing external reporting migration records one completed external result safely', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260722030000_content_writing_external_reporting.sql',
+  );
+
+  assert.match(migration, /add column if not exists execution_mode text not null default 'api'/);
+  assert.match(migration, /check \(execution_mode in \('api', 'external'\)\)/);
+  assert.match(migration, /create or replace function public\.record_external_content_writing_result/);
+  assert.match(migration, /on conflict \(created_by, idempotency_key\) do nothing/);
+  assert.match(migration, /jsonb_array_length\(p_messages\) <> 3/);
+  assert.match(migration, /'assistant_result'/);
+  assert.match(migration, /v_session\.result_text is distinct from p_result_text/);
+  assert.match(migration, /to service_role/);
+  assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
   const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),
@@ -127,8 +145,9 @@ test('content-writing engine owns server-side context assembly and structured pr
 });
 
 test('content-writing API enforces authentication, article access, and idempotent starts', async () => {
-  const [api, registry] = await Promise.all([
+  const [api, externalApi, registry] = await Promise.all([
     readWorkspaceFile('api/contentWriting.ts'),
+    readWorkspaceFile('api/contentWritingExternalResult.ts'),
     readWorkspaceFile('server/apiRouteRegistry.ts'),
   ]);
 
@@ -147,6 +166,11 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /recordContentWritingApplication/);
   assert.match(api, /getContentWritingSteps/);
   assert.match(registry, /path: '\/api\/content-writing'/);
+  assert.match(registry, /path: '\/api\/content-writing\/external-result'/);
+  assert.match(externalApi, /authenticateApiRequest\(req\)/);
+  assert.match(externalApi, /requireArticleWriteAccess\(supabase, articleId, principal\.userId\)/);
+  assert.match(externalApi, /CONTENT_WRITING_EXTERNAL_RESULT_MAX_BYTES/);
+  assert.match(externalApi, /recordExternalContentWritingResult/);
 });
 
 test('content-writing review requires explicit approval and uses the central editor save path', async () => {
@@ -169,12 +193,13 @@ test('content-writing review requires explicit approval and uses the central edi
 });
 
 test('external content writing reuses server preparation, the shared bridge, and editor review', async () => {
-  const [api, engine, client, bridgePanel, writingPanel] = await Promise.all([
+  const [api, engine, client, bridgePanel, writingPanel, service] = await Promise.all([
     readWorkspaceFile('api/contentWriting.ts'),
     readWorkspaceFile('server/contentWritingEngine.ts'),
     readWorkspaceFile('utils/contentWritingSessions.ts'),
     readWorkspaceFile('components/ContentWritingExternalBridgePanel.tsx'),
     readWorkspaceFile('components/ContentWritingPanel.tsx'),
+    readWorkspaceFile('server/contentWritingSessionService.ts'),
   ]);
 
   assert.match(api, /CONTENT_WRITING_EXTERNAL_RATE_LIMIT_PER_MINUTE/);
@@ -183,6 +208,7 @@ test('external content writing reuses server preparation, the shared bridge, and
   assert.match(engine, /const assertContentWritingBundleReady/);
   assert.match(engine, /prepareContentWritingConversation\(input\.articleId\)/);
   assert.match(client, /prepareExternalContentWritingConversation/);
+  assert.match(client, /recordExternalContentWritingResult/);
   assert.match(client, /expectedStages/);
   assert.match(bridgePanel, /EXTERNAL_AI_BRIDGE_PROVIDERS\.map/);
   assert.match(bridgePanel, /openExternalAiBridge/);
@@ -191,7 +217,28 @@ test('external content writing reuses server preparation, the shared bridge, and
   assert.doesNotMatch(bridgePanel, /https:\/\/(?:chatgpt|gemini\.)/);
   assert.match(writingPanel, /<ContentWritingExternalBridgePanel/);
   assert.match(writingPanel, /setReviewSnapshot/);
+  assert.match(writingPanel, /sessionId: recorded\.session\.id/);
+  assert.match(engine, /conversation\.inputHash !== input\.preparedInputHash/);
+  assert.match(service, /record_external_content_writing_result/);
   assert.doesNotMatch(bridgePanel, /applyGeneratedArticleContent/);
+});
+
+test('admin content-writing reports load lightweight daily rows without generated article bodies', async () => {
+  const [loader, table, admin] = await Promise.all([
+    readWorkspaceFile('utils/contentWritingReports.ts'),
+    readWorkspaceFile('components/ContentWritingReportsTable.tsx'),
+    readWorkspaceFile('components/AdminApp.tsx'),
+  ]);
+
+  assert.match(loader, /from\('content_writing_sessions'\)/);
+  assert.match(loader, /\.gte\('created_at', options\.from\)/);
+  assert.match(loader, /\.lte\('created_at', options\.to\)/);
+  assert.match(loader, /execution_mode/);
+  assert.doesNotMatch(loader, /result_text|context_snapshot/);
+  assert.match(table, /buildAdminArticlePath\(session\.articleId\)/);
+  assert.match(table, /session\.applicationCount/);
+  assert.match(admin, /<ContentWritingReportsTable/);
+  assert.match(admin, /listContentWritingReportSessions/);
 });
 
 test('content-writing worker keeps leases alive and is built and managed by PM2', async () => {

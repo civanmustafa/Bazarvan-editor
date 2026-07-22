@@ -4,6 +4,7 @@ import articlesSaveHandler from '../api/articlesSave';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import chatgptHandler from '../api/chatgpt';
 import contentWritingHandler from '../api/contentWriting';
+import contentWritingExternalResultHandler from '../api/contentWritingExternalResult';
 import competitorsHandler from '../api/competitors';
 import externalAnalysisHandler from '../api/externalAnalysis';
 import geminiHandler, { geminiProgressHandler } from '../api/gemini';
@@ -26,6 +27,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'gemini', method: 'ALL', path: '/api/gemini', handler: geminiHandler },
   { id: 'chatgpt', method: 'ALL', path: '/api/chatgpt', handler: chatgptHandler },
   { id: 'content-writing', method: 'ALL', path: '/api/content-writing', handler: contentWritingHandler },
+  { id: 'content-writing-external-result', method: 'ALL', path: '/api/content-writing/external-result', handler: contentWritingExternalResultHandler },
   { id: 'ai-capabilities', method: 'ALL', path: '/api/ai/capabilities', handler: aiCapabilitiesHandler },
   { id: 'competitors', method: 'ALL', path: '/api/competitors', handler: competitorsHandler },
   { id: 'n8n-articles', method: 'ALL', path: '/api/n8n/articles', handler: n8nArticlesHandler },

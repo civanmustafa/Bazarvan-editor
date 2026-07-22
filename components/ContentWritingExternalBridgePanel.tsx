@@ -15,9 +15,10 @@ import {
   copyExternalAiBridgePrompt,
   openExternalAiBridge,
 } from '../utils/externalAiBridge';
-import type {
-  ExternalContentWritingConversation,
-  ExternalContentWritingMessage,
+import {
+  createExternalContentWritingIdempotencyKey,
+  type ExternalContentWritingConversation,
+  type ExternalContentWritingMessage,
 } from '../utils/contentWritingSessions';
 
 type ContentWritingExternalBridgePanelProps = {
@@ -26,7 +27,12 @@ type ContentWritingExternalBridgePanelProps = {
   openMode: ExternalAiOpenMode;
   disabled?: boolean;
   prepareConversation: () => Promise<ExternalContentWritingConversation>;
-  onImportResponse: (provider: ExternalAiBridgeProvider, response: string) => void;
+  onImportResponse: (
+    provider: ExternalAiBridgeProvider,
+    response: string,
+    conversation: ExternalContentWritingConversation,
+    idempotencyKey: string,
+  ) => Promise<void>;
   onError: (error: unknown) => void;
 };
 
@@ -69,16 +75,20 @@ const ContentWritingExternalBridgePanel: React.FC<ContentWritingExternalBridgePa
   const requestRef = useRef(0);
   const [activeProvider, setActiveProvider] = useState<ExternalAiBridgeProvider>('chatgpt');
   const [conversation, setConversation] = useState<ExternalContentWritingConversation | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState('');
   const [copiedSequence, setCopiedSequence] = useState(0);
   const [isPreparing, setIsPreparing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [responses, setResponses] = useState<Record<ExternalAiBridgeProvider, string>>(EMPTY_RESPONSES);
   const [status, setStatus] = useState<BridgeStatus>(null);
 
   useEffect(() => {
     requestRef.current += 1;
     setConversation(null);
+    setIdempotencyKey('');
     setCopiedSequence(0);
     setIsPreparing(false);
+    setIsImporting(false);
     setResponses(EMPTY_RESPONSES);
     setStatus(null);
   }, [articleId]);
@@ -107,11 +117,12 @@ const ContentWritingExternalBridgePanel: React.FC<ContentWritingExternalBridgePa
   };
 
   const startExternalConversation = async (provider: ExternalAiBridgeProvider) => {
-    if (disabled || isPreparing) return;
+    if (disabled || isPreparing || isImporting) return;
     const requestId = requestRef.current + 1;
     requestRef.current = requestId;
     setActiveProvider(provider);
     setConversation(null);
+    setIdempotencyKey('');
     setCopiedSequence(0);
     setStatus(null);
     setIsPreparing(true);
@@ -127,6 +138,7 @@ const ContentWritingExternalBridgePanel: React.FC<ContentWritingExternalBridgePa
       const prepared = await prepareConversation();
       if (requestRef.current !== requestId || prepared.articleId !== articleId) return;
       setConversation(prepared);
+      setIdempotencyKey(createExternalContentWritingIdempotencyKey(articleId));
       const firstMessage = prepared.messages[0];
       try {
         await copyExternalAiBridgePrompt(firstMessage.content);
@@ -162,9 +174,9 @@ const ContentWritingExternalBridgePanel: React.FC<ContentWritingExternalBridgePa
     }
   };
 
-  const importResponse = () => {
+  const importResponse = async () => {
     const response = responses[activeProvider].trim();
-    if (!response) {
+    if (!response || !conversation || !idempotencyKey || isImporting) {
       setStatus({
         tone: 'warning',
         message: isArabic
@@ -173,11 +185,22 @@ const ContentWritingExternalBridgePanel: React.FC<ContentWritingExternalBridgePa
       });
       return;
     }
-    onImportResponse(activeProvider, response);
-    setStatus({
-      tone: 'success',
-      message: isArabic ? 'تم فتح المقالة في نافذة المراجعة.' : 'The article was opened in review.',
-    });
+    setIsImporting(true);
+    try {
+      await onImportResponse(activeProvider, response, conversation, idempotencyKey);
+      setStatus({
+        tone: 'success',
+        message: isArabic ? 'تم حفظ النتيجة وفتحها في نافذة المراجعة.' : 'The result was saved and opened in review.',
+      });
+    } catch (error) {
+      setStatus({
+        tone: 'error',
+        message: isArabic ? 'تعذر حفظ نتيجة الكتابة الخارجية.' : 'The external writing result could not be saved.',
+      });
+      onError(error);
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const statusClass = status?.tone === 'error'
@@ -205,7 +228,7 @@ const ContentWritingExternalBridgePanel: React.FC<ContentWritingExternalBridgePa
             key={provider}
             type="button"
             onClick={() => void startExternalConversation(provider)}
-            disabled={disabled || isPreparing}
+            disabled={disabled || isPreparing || isImporting}
             title={isArabic
               ? `تجهيز المحادثة وفتح ${EXTERNAL_AI_BRIDGES[provider].label}`
               : `Prepare the conversation and open ${EXTERNAL_AI_BRIDGES[provider].label}`}
@@ -280,12 +303,14 @@ const ContentWritingExternalBridgePanel: React.FC<ContentWritingExternalBridgePa
           />
           <button
             type="button"
-            onClick={importResponse}
-            disabled={!responses[activeProvider].trim()}
+            onClick={() => void importResponse()}
+            disabled={!responses[activeProvider].trim() || isImporting}
             className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[#d4af37] px-3 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-55"
           >
-            <ClipboardPaste size={14} />
-            {isArabic ? 'مراجعة المقالة واستيرادها' : 'Review and import article'}
+            {isImporting ? <Loader2 size={14} className="animate-spin" /> : <ClipboardPaste size={14} />}
+            {isImporting
+              ? (isArabic ? 'جار حفظ النتيجة...' : 'Saving result...')
+              : (isArabic ? 'مراجعة المقالة واستيرادها' : 'Review and import article')}
           </button>
         </>
       )}

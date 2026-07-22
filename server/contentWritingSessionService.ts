@@ -16,6 +16,7 @@ export type ContentWritingSession = {
   provider: ContentWritingProvider;
   model: string;
   status: ContentWritingSessionStatus;
+  execution_mode: 'api' | 'external';
   idempotency_key: string;
   template_registry_version: number;
   estimated_input_tokens: number;
@@ -135,6 +136,42 @@ export const createContentWritingSession = async (input: {
   const source = isRecord(data) ? data : {};
   const session = isRecord(source.session) ? source.session as ContentWritingSession : null;
   if (!session?.id) throw new Error('Content writing session creation returned no session.');
+  return { created: source.created === true, session };
+};
+
+export const createCompletedExternalContentWritingSession = async (input: {
+  articleId: string;
+  createdBy: string;
+  externalProvider: 'chatgpt' | 'gemini';
+  idempotencyKey: string;
+  templateRegistryVersion: number;
+  estimatedInputTokens: number;
+  maxInputTokens: number;
+  inputHash: string;
+  contextSnapshot: JsonObject;
+  messages: Array<{ content: string }>;
+  resultText: string;
+}): Promise<{ created: boolean; session: ContentWritingSession }> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'record_external_content_writing_result',
+    {
+      p_article_id: input.articleId,
+      p_created_by: input.createdBy,
+      p_external_provider: input.externalProvider,
+      p_idempotency_key: input.idempotencyKey,
+      p_template_registry_version: input.templateRegistryVersion,
+      p_estimated_input_tokens: input.estimatedInputTokens,
+      p_max_input_tokens: input.maxInputTokens,
+      p_input_hash: input.inputHash,
+      p_context_snapshot: input.contextSnapshot,
+      p_messages: input.messages,
+      p_result_text: input.resultText,
+    },
+  );
+  if (error) throwServiceError('external result creation', error);
+  const source = isRecord(data) ? data : {};
+  const session = isRecord(source.session) ? source.session as ContentWritingSession : null;
+  if (!session?.id) throw new Error('External content writing result returned no session.');
   return { created: source.created === true, session };
 };
 
@@ -405,6 +442,7 @@ export const listContentWritingSessions = async (options: {
       'provider',
       'model',
       'status',
+      'execution_mode',
       'idempotency_key',
       'template_registry_version',
       'estimated_input_tokens',

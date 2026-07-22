@@ -29,10 +29,10 @@ import {
   resumeContentWritingSession,
   type ContentWritingProvider,
   type ContentWritingSession,
-  type ContentWritingSessionSummary,
   type ContentWritingStep,
 } from '../server/contentWritingSessionService';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
+import { toPublicContentWritingSession } from '../server/contentWritingPresenter';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9:_-]{16,160}$/;
@@ -79,39 +79,6 @@ const requireJsonRequest = async (req: any): Promise<Record<string, any>> => {
   }
   return body;
 };
-
-const toPublicSession = (
-  session: ContentWritingSession | ContentWritingSessionSummary,
-  options: { includeResult?: boolean } = {},
-): Record<string, unknown> => ({
-  id: session.id,
-  articleId: session.article_id,
-  createdBy: session.created_by,
-  provider: session.provider,
-  model: session.model,
-  status: session.status,
-  idempotencyKey: session.idempotency_key,
-  templateRegistryVersion: session.template_registry_version,
-  estimatedInputTokens: session.estimated_input_tokens,
-  maxInputTokens: session.max_input_tokens,
-  contextSnapshot: session.context_snapshot,
-  progress: session.progress,
-  ...(options.includeResult && 'result_text' in session ? { resultText: session.result_text } : {}),
-  conversationId: session.conversation_id,
-  keySuffix: session.key_suffix,
-  responseMetadata: session.response_metadata,
-  lastErrorCode: session.last_error_code,
-  lastError: session.last_error,
-  attemptCount: session.attempt_count,
-  cancelRequestedAt: session.cancel_requested_at,
-  startedAt: session.started_at,
-  completedAt: session.completed_at,
-  appliedAt: session.applied_at,
-  appliedBy: session.applied_by,
-  applicationCount: session.application_count,
-  createdAt: session.created_at,
-  updatedAt: session.updated_at,
-});
 
 const toPublicStep = (
   step: ContentWritingStep,
@@ -195,7 +162,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     });
     return {
       status: queued.created ? 202 : 200,
-      body: { ok: true, accepted: true, created: queued.created, session: toPublicSession(queued.session) },
+      body: { ok: true, accepted: true, created: queued.created, session: toPublicContentWritingSession(queued.session) },
     };
   }
 
@@ -217,6 +184,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
           articleTitle: conversation.article.title,
           articleLanguage: conversation.article.language,
           articleUpdatedAt: conversation.article.updatedAt,
+          inputHash: conversation.inputHash,
           templateRegistryVersion: conversation.templateRegistryVersion,
           estimatedInputTokens: conversation.estimatedInputTokens,
           maxInputTokens: conversation.maxInputTokens,
@@ -255,7 +223,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
       status: 200,
       body: {
         ok: true,
-        session: toPublicSession(session, { includeResult: true }),
+        session: toPublicContentWritingSession(session, { includeResult: true }),
         ...(messages ? {
           messages: messages.map(message => ({
             id: message.id,
@@ -283,7 +251,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     await requireArticleReadAccess(supabase, articleId, principal.userId);
     const limit = Math.max(1, Math.min(Number(body.limit) || 20, 50));
     const sessions = await listContentWritingSessions({ articleId, limit });
-    return { status: 200, body: { ok: true, sessions: sessions.map(session => toPublicSession(session)) } };
+    return { status: 200, body: { ok: true, sessions: sessions.map(session => toPublicContentWritingSession(session)) } };
   }
 
   if (action === 'cancel') {
@@ -307,7 +275,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     });
     return {
       status: 200,
-      body: { ok: true, session: toPublicSession(cancelled || session), alreadyTerminal: !cancelled },
+      body: { ok: true, session: toPublicContentWritingSession(cancelled || session), alreadyTerminal: !cancelled },
     };
   }
 
@@ -344,7 +312,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         code: 'content_writing_resume_conflict',
       });
     }
-    return { status: 202, body: { ok: true, accepted: true, session: toPublicSession(resumed) } };
+    return { status: 202, body: { ok: true, accepted: true, session: toPublicContentWritingSession(resumed) } };
   }
 
   if (action === 'recordApplication') {
@@ -380,7 +348,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         code: 'content_writing_apply_conflict',
       });
     }
-    return { status: 200, body: { ok: true, session: toPublicSession(applied, { includeResult: true }) } };
+    return { status: 200, body: { ok: true, session: toPublicContentWritingSession(applied, { includeResult: true }) } };
   }
 
   throw new ContentWritingApiError({

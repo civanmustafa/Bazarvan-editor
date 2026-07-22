@@ -30,6 +30,7 @@ import {
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import ExternalAnalysisReportsTable from './ExternalAnalysisReportsTable';
+import ContentWritingReportsTable from './ContentWritingReportsTable';
 import {
   getArticleTrashInfo,
   getRemoteAppSessionById,
@@ -66,6 +67,10 @@ import {
   type ExternalAnalysisReportJob,
 } from '../utils/externalAnalysis';
 import { getArticleStatusLabel } from '../constants/articleStatuses';
+import {
+  listContentWritingReportSessions,
+  type ContentWritingReportSession,
+} from '../utils/contentWritingReports';
 
 type AdminAppProps = {
   section: AdminRouteSection;
@@ -629,6 +634,7 @@ const getApiSourceLabel = (source?: string): string => {
     bulk_fix_review: 'الإصلاح المتعدد',
     bulk_fix_all: 'الإصلاح المجمع',
     competitor_extraction: 'استخراج المنافسين',
+    content_writing: 'كتابة المحتوى',
     engineering_command: 'أمر تحليل خارجي',
     assigned_automation_semantic: 'أتمتة الصيغ و LSI',
     assigned_automation_semantic_retry: 'إعادة أتمتة الصيغ و LSI',
@@ -818,6 +824,9 @@ const ReportsPage: React.FC<{
   externalAnalysisJobs: ExternalAnalysisReportJob[];
   isExternalAnalysisLoading: boolean;
   externalAnalysisError: string;
+  contentWritingSessions: ContentWritingReportSession[];
+  isContentWritingLoading: boolean;
+  contentWritingError: string;
   secretStatus: SecretStatus;
   isSecretStatusLoading: boolean;
   onRefreshSecretStatus: () => void;
@@ -831,6 +840,9 @@ const ReportsPage: React.FC<{
   externalAnalysisJobs,
   isExternalAnalysisLoading,
   externalAnalysisError,
+  contentWritingSessions,
+  isContentWritingLoading,
+  contentWritingError,
   secretStatus,
   isSecretStatusLoading,
   onRefreshSecretStatus,
@@ -859,6 +871,10 @@ const ReportsPage: React.FC<{
   const freeGeminiApiCalls = apiUsageRequests.filter(request => request.provider === 'gemini').length;
   const paidGeminiApiCalls = apiUsageRequests.filter(request => request.provider === 'geminiPaid').length;
   const openAiApiCalls = apiUsageRequests.filter(request => request.provider === 'openai' || request.service === 'openai').length;
+  const completedWritingSessions = contentWritingSessions.filter(session => session.status === 'completed').length;
+  const failedWritingSessions = contentWritingSessions.filter(session => session.status === 'failed').length;
+  const externalWritingSessions = contentWritingSessions.filter(session => session.executionMode === 'external').length;
+  const appliedWritingSessions = contentWritingSessions.filter(session => Boolean(session.appliedAt)).length;
   const aiErrors = articles.filter(article => JSON.stringify(article.metadata || {}).toLowerCase().includes('error'));
   const activeUserIds = new Set(dayActivityEvents.map(event => event.userId).filter(Boolean));
 
@@ -893,6 +909,13 @@ const ReportsPage: React.FC<{
         <AdminStat icon={<BrainCircuit size={18} />} label="OpenAI / Pro" value={paidGeminiApiCalls + openAiApiCalls} />
       </div>
 
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <AdminStat icon={<FileText size={18} />} label="جلسات كتابة المحتوى" value={contentWritingSessions.length} />
+        <AdminStat icon={<CheckCircle2 size={18} />} label="كتابة مكتملة" value={completedWritingSessions} />
+        <AdminStat icon={<ExternalLink size={18} />} label="كتابة خارجية" value={externalWritingSessions} />
+        <AdminStat icon={failedWritingSessions > 0 ? <XCircle size={18} /> : <Edit size={18} />} label="تم إدراجها / فشلت" value={`${appliedWritingSessions} / ${failedWritingSessions}`} />
+      </div>
+
       <ServerSecretsStatusPanel
         secretStatus={secretStatus}
         isLoading={isSecretStatusLoading}
@@ -907,6 +930,18 @@ const ReportsPage: React.FC<{
           profiles={profiles}
           isLoading={isExternalAnalysisLoading}
           error={externalAnalysisError}
+          locale={t.locale === 'en' ? 'en' : 'ar'}
+        />
+      </section>
+
+      <section className="space-y-4">
+        <SectionTitle>تقارير كتابة المحتوى</SectionTitle>
+        <ContentWritingReportsTable
+          sessions={contentWritingSessions}
+          articles={articles}
+          profiles={profiles}
+          isLoading={isContentWritingLoading}
+          error={contentWritingError}
           locale={t.locale === 'en' ? 'en' : 'ar'}
         />
       </section>
@@ -1400,6 +1435,9 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   const [externalAnalysisJobs, setExternalAnalysisJobs] = useState<ExternalAnalysisReportJob[]>([]);
   const [isExternalAnalysisLoading, setIsExternalAnalysisLoading] = useState(false);
   const [externalAnalysisError, setExternalAnalysisError] = useState('');
+  const [contentWritingSessions, setContentWritingSessions] = useState<ContentWritingReportSession[]>([]);
+  const [isContentWritingLoading, setIsContentWritingLoading] = useState(false);
+  const [contentWritingError, setContentWritingError] = useState('');
   const [sessionDetail, setSessionDetail] = useState<RemoteAppSession | null>(null);
   const [sessionDetailEvents, setSessionDetailEvents] = useState<RemoteAppActivityEvent[]>([]);
   const [snapshot, setSnapshot] = useState<ArticleStorageSnapshot | null>(null);
@@ -1439,13 +1477,18 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     setError('');
     const shouldLoadExternalAnalysis = section === 'reports' || section === 'dailyReport';
     setIsExternalAnalysisLoading(shouldLoadExternalAnalysis);
+    setIsContentWritingLoading(shouldLoadExternalAnalysis);
     if (shouldLoadExternalAnalysis) setExternalAnalysisError('');
+    if (shouldLoadExternalAnalysis) setContentWritingError('');
     try {
       let externalReportLoadError = '';
+      let contentWritingLoadError = '';
+      const reportFrom = getIstanbulDayStart(selectedReportDate).toISOString();
+      const reportTo = getIstanbulDayEnd(selectedReportDate).toISOString();
       const externalReportPromise = shouldLoadExternalAnalysis
         ? listExternalAnalysisReportJobs({
-            from: getIstanbulDayStart(selectedReportDate).toISOString(),
-            to: getIstanbulDayEnd(selectedReportDate).toISOString(),
+            from: reportFrom,
+            to: reportTo,
             limit: 500,
           }).catch(reportError => {
             console.error('Failed to load external analysis reports:', reportError);
@@ -1453,13 +1496,25 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
             return [] as ExternalAnalysisReportJob[];
           })
         : Promise.resolve(null);
-      const [articleRows, profileRows, logRows, sessionRows, activityRows, externalReportRows] = await Promise.all([
+      const contentWritingPromise = shouldLoadExternalAnalysis
+        ? listContentWritingReportSessions({
+            from: reportFrom,
+            to: reportTo,
+            limit: 500,
+          }).catch(reportError => {
+            console.error('Failed to load content writing reports:', reportError);
+            contentWritingLoadError = 'تعذر تحميل تقارير كتابة المحتوى من Supabase.';
+            return [] as ContentWritingReportSession[];
+          })
+        : Promise.resolve(null);
+      const [articleRows, profileRows, logRows, sessionRows, activityRows, externalReportRows, contentWritingRows] = await Promise.all([
         listRemoteArticles(),
         listRemoteProfiles(),
         listRemoteN8nIngestLogs(80),
         listRemoteAppSessions(120),
         listRemoteAppActivityEvents({ limit: 1000 }),
         externalReportPromise,
+        contentWritingPromise,
       ]);
       setArticles(sortArticles(articleRows));
       setProfiles(profileRows);
@@ -1467,13 +1522,16 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       setSessions(sessionRows);
       setActivityEvents(activityRows);
       if (externalReportRows) setExternalAnalysisJobs(externalReportRows);
+      if (contentWritingRows) setContentWritingSessions(contentWritingRows);
       if (shouldLoadExternalAnalysis) setExternalAnalysisError(externalReportLoadError);
+      if (shouldLoadExternalAnalysis) setContentWritingError(contentWritingLoadError);
     } catch (loadError) {
       console.error('Failed to load admin data:', loadError);
       setError('تعذر تحميل بيانات مركز المتابعة من Supabase.');
     } finally {
       setIsLoading(false);
       setIsExternalAnalysisLoading(false);
+      setIsContentWritingLoading(false);
     }
   }, [currentUser, isAdmin, section, selectedReportDate]);
 
@@ -2005,6 +2063,9 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
           externalAnalysisJobs={externalAnalysisJobs}
           isExternalAnalysisLoading={isExternalAnalysisLoading}
           externalAnalysisError={externalAnalysisError}
+          contentWritingSessions={contentWritingSessions}
+          isContentWritingLoading={isContentWritingLoading}
+          contentWritingError={contentWritingError}
           secretStatus={secretStatus}
           isSecretStatusLoading={isSecretStatusLoading}
           onRefreshSecretStatus={refreshSecretStatus}

@@ -1,0 +1,38 @@
+import type {
+  ContentWritingSession,
+  ContentWritingSessionSummary,
+} from './contentWritingSessionService';
+
+export const toPublicContentWritingSession = (
+  session: ContentWritingSession | ContentWritingSessionSummary,
+  options: { includeResult?: boolean } = {},
+): Record<string, unknown> => ({
+  id: session.id,
+  articleId: session.article_id,
+  createdBy: session.created_by,
+  provider: session.provider,
+  model: session.model,
+  status: session.status,
+  executionMode: session.execution_mode || 'api',
+  idempotencyKey: session.idempotency_key,
+  templateRegistryVersion: session.template_registry_version,
+  estimatedInputTokens: session.estimated_input_tokens,
+  maxInputTokens: session.max_input_tokens,
+  contextSnapshot: session.context_snapshot,
+  progress: session.progress,
+  ...(options.includeResult && 'result_text' in session ? { resultText: session.result_text } : {}),
+  conversationId: session.conversation_id,
+  keySuffix: session.key_suffix,
+  responseMetadata: session.response_metadata,
+  lastErrorCode: session.last_error_code,
+  lastError: session.last_error,
+  attemptCount: session.attempt_count,
+  cancelRequestedAt: session.cancel_requested_at,
+  startedAt: session.started_at,
+  completedAt: session.completed_at,
+  appliedAt: session.applied_at,
+  appliedBy: session.applied_by,
+  applicationCount: session.application_count,
+  createdAt: session.created_at,
+  updatedAt: session.updated_at,
+});
