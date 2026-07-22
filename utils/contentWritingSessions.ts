@@ -32,6 +32,9 @@ export type ContentWritingSession = {
   cancelRequestedAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
+  appliedAt: string | null;
+  appliedBy: string | null;
+  applicationCount: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -141,6 +144,9 @@ const normalizeSession = (value: unknown): ContentWritingSession | null => {
     cancelRequestedAt: toNullableText(value.cancelRequestedAt),
     startedAt: toNullableText(value.startedAt),
     completedAt: toNullableText(value.completedAt),
+    appliedAt: toNullableText(value.appliedAt),
+    appliedBy: toNullableText(value.appliedBy),
+    applicationCount: Math.max(0, Number(value.applicationCount) || 0),
     createdAt: toText(value.createdAt),
     updatedAt: toText(value.updatedAt),
   };
@@ -280,5 +286,14 @@ export const resumeContentWritingSession = async (
   const payload = await requestContentWriting({ action: 'resume', sessionId });
   const session = normalizeSession(payload.session);
   if (!session) throw new Error('Content writing API returned an invalid resume response.');
+  return session;
+};
+
+export const recordContentWritingSessionApplication = async (
+  sessionId: string,
+): Promise<ContentWritingSession> => {
+  const payload = await requestContentWriting({ action: 'recordApplication', sessionId });
+  const session = normalizeSession(payload.session);
+  if (!session) throw new Error('Content writing API returned an invalid application response.');
   return session;
 };

@@ -45,6 +45,8 @@ import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
 import { recordAppActivity } from '../utils/appActivity';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 import { shouldClearArticleAiResults } from '../constants/articleStatuses';
+import { parseMarkdownToArticleHtml } from '../utils/editorUtils';
+import { prepareContentWritingResultForEditor } from '../utils/contentWritingWorkflow';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -639,6 +641,14 @@ type SaveDraftOptions = {
     force?: boolean;
 };
 
+export type GeneratedContentApplicationResult = {
+    ok: boolean;
+    previousWordCount: number;
+    nextWordCount: number;
+    errorCode?: 'article_changed' | 'editor_unavailable' | 'empty_result' | 'backup_failed' | 'save_failed';
+    error?: string;
+};
+
 type PendingRemoteSaveRequest = {
     articleId: string | null;
     signature: string;
@@ -824,7 +834,11 @@ interface EditorContextType {
     handleLanguageChange: (lang: 'ar' | 'en') => void;
     handleActiveArticleStatusChange: (status: RemoteArticleStatus) => Promise<boolean>;
     handleClearKeywords: () => void;
-    handleSaveDraft: (options?: SaveDraftOptions) => Promise<void>;
+    handleSaveDraft: (options?: SaveDraftOptions) => Promise<boolean>;
+    applyGeneratedArticleContent: (options: {
+        expectedArticleId: string;
+        markdown: string;
+    }) => Promise<GeneratedContentApplicationResult>;
     handleRestoreDraft: () => void;
     handleNewArticle: (lang: 'ar' | 'en') => Promise<void>;
     handleLoadArticle: (title: string, article: ArticleActivity | RemoteArticleActivity) => Promise<void>;
@@ -883,7 +897,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const isArticleContentLoadingRef = useRef(false);
     const hasEditorChangedAfterArticleLoadRef = useRef(false);
     const loadedArticleSnapshotSavedAtRef = useRef(0);
-    const saveInFlightRef = useRef<Promise<void> | null>(null);
+    const saveInFlightRef = useRef<Promise<boolean> | null>(null);
     const queuedForcedSaveRef = useRef<SaveDraftOptions | null>(null);
     const lastSavedArticleSignatureRef = useRef('');
     const pendingRemoteSaveRequestRef = useRef<PendingRemoteSaveRequest | null>(null);
@@ -1422,20 +1436,20 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, []);
 
     // Writes the canonical article to Supabase. The public wrapper below handles overlap and unchanged autosaves.
-    const performSaveDraft = useCallback(async (options: SaveDraftOptions = {}) => {
+    const performSaveDraft = useCallback(async (options: SaveDraftOptions = {}): Promise<boolean> => {
         const reason = options.reason || 'manual';
         const forceSave = options.force ?? reason === 'manual';
         const showStatus = reason === 'manual';
-        if (!editor || !currentUser || !currentUserId) return;
-        if (isArticleContentLoadingRef.current) return;
+        if (!editor || !currentUser || !currentUserId) return false;
+        if (isArticleContentLoadingRef.current) return false;
         const contentJSON = editor.getJSON();
         const contentHTML = editor.getHTML();
         const currentText = editor.getText();
         const currentTextTrimmed = currentText.trim();
-        if (title.trim() === '' && currentTextTrimmed === '') return;
+        if (title.trim() === '' && currentTextTrimmed === '') return false;
         if (currentTextTrimmed === '' && (title.trim() || articleKey.trim())) {
             console.warn('Skipped saving empty editor content for a titled article to avoid overwriting saved content.');
-            return;
+            return false;
         }
         if (showStatus) {
             setSaveStatus('saving');
@@ -1479,7 +1493,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 attachments,
             });
             if (!forceSave && saveSignature === lastSavedArticleSignatureRef.current) {
-                return;
+                return true;
             }
 
             writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, finalTitleToSave);
@@ -1569,6 +1583,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 setSaveStatus('saved');
                 setTimeout(() => setSaveStatus('idle'), 2000);
             }
+            return true;
         } catch (error) {
             const message = error instanceof Error
                 ? error.message
@@ -1580,38 +1595,118 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 setSaveError(message);
                 setSaveStatus('error');
             }
+            return false;
         }
     }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, articleLanguage, goalContext, analysisResults, clearEditorSnapshotTimer, clearDraftPersistTimer]);
 
-    const handleSaveDraft = useCallback(async (options: SaveDraftOptions = {}) => {
+    const handleSaveDraft = useCallback(async (options: SaveDraftOptions = {}): Promise<boolean> => {
         const reason = options.reason || 'manual';
         const forceSave = options.force ?? reason === 'manual';
 
         if (saveInFlightRef.current) {
             if (forceSave) {
                 queuedForcedSaveRef.current = { reason: 'manual', force: true };
-                await saveInFlightRef.current.catch((): void => {});
+                await saveInFlightRef.current.catch(() => false);
                 const queuedSave = queuedForcedSaveRef.current;
                 if (queuedSave) {
                     queuedForcedSaveRef.current = null;
-                    await handleSaveDraft(queuedSave);
+                    return handleSaveDraft(queuedSave);
                 }
             }
-            return;
+            const followUpSave = saveInFlightRef.current;
+            return followUpSave || true;
         }
 
         const savePromise = performSaveDraft({ reason, force: forceSave }).finally(() => {
             saveInFlightRef.current = null;
         });
         saveInFlightRef.current = savePromise;
-        await savePromise;
+        const saved = await savePromise;
 
         const queuedSave = queuedForcedSaveRef.current;
         if (queuedSave) {
             queuedForcedSaveRef.current = null;
-            await handleSaveDraft(queuedSave);
+            return handleSaveDraft(queuedSave);
         }
+        return saved;
     }, [performSaveDraft]);
+
+    const applyGeneratedArticleContent = useCallback(async (options: {
+        expectedArticleId: string;
+        markdown: string;
+    }): Promise<GeneratedContentApplicationResult> => {
+        const previousWordCount = editor && !editor.isDestroyed
+            ? countWordsInText(editor.getText())
+            : 0;
+        const fail = (
+            errorCode: NonNullable<GeneratedContentApplicationResult['errorCode']>,
+            error: string,
+            nextWordCount = 0,
+        ): GeneratedContentApplicationResult => ({
+            ok: false,
+            previousWordCount,
+            nextWordCount,
+            errorCode,
+            error,
+        });
+
+        if (!editor || editor.isDestroyed) {
+            return fail('editor_unavailable', 'The article editor is not available.');
+        }
+        if (!options.expectedArticleId || activeArticleId !== options.expectedArticleId) {
+            return fail('article_changed', 'The active article changed before the generated result was applied.');
+        }
+
+        const prepared = prepareContentWritingResultForEditor(options.markdown, title);
+        if (!prepared.markdown) {
+            return fail('empty_result', 'The generated article body is empty.');
+        }
+
+        // Preserve any unsaved human edits before replacing the whole article body.
+        if (editor.getText().trim()) {
+            const backupSaved = await handleSaveDraft({ reason: 'manual', force: true });
+            if (!backupSaved) {
+                return fail('backup_failed', 'The current article could not be saved before replacement.');
+            }
+        }
+        if (activeArticleId !== options.expectedArticleId || editor.isDestroyed) {
+            return fail('article_changed', 'The active article changed before the generated result was applied.');
+        }
+
+        const html = parseMarkdownToArticleHtml(prepared.markdown, articleLanguage);
+        isArticleContentLoadingRef.current = true;
+        try {
+            setEditorContentSafely(editor, html, createEmptyEditorContent());
+            applyArticleLanguageFormatting(editor, articleLanguage, false);
+        } finally {
+            isArticleContentLoadingRef.current = false;
+        }
+        hasEditorChangedAfterArticleLoadRef.current = true;
+        clearEditorSnapshotTimer();
+        clearDraftPersistTimer();
+        captureEditorSnapshot(editor);
+
+        const nextWordCount = countWordsInText(editor.getText());
+        const saved = await handleSaveDraft({ reason: 'manual', force: true });
+        if (!saved) {
+            return fail(
+                'save_failed',
+                'The generated article was inserted locally but could not be saved to the server.',
+                nextWordCount,
+            );
+        }
+
+        return { ok: true, previousWordCount, nextWordCount };
+    }, [
+        activeArticleId,
+        articleLanguage,
+        captureEditorSnapshot,
+        clearDraftPersistTimer,
+        clearEditorSnapshotTimer,
+        editor,
+        handleSaveDraft,
+        title,
+    ]);
 
     const handleSaveDraftRef = useRef(handleSaveDraft);
     useEffect(() => {
@@ -1844,6 +1939,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleActiveArticleStatusChange,
         handleClearKeywords,
         handleSaveDraft,
+        applyGeneratedArticleContent,
         handleRestoreDraft,
         handleNewArticle,
         handleLoadArticle,
@@ -1867,6 +1963,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleActiveArticleStatusChange,
         handleClearKeywords,
         handleSaveDraft,
+        applyGeneratedArticleContent,
         handleRestoreDraft,
         handleNewArticle,
         handleLoadArticle,

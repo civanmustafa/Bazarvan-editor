@@ -7,6 +7,7 @@ import {
   CircleStop,
   Clock3,
   Copy,
+  Eye,
   FileText,
   Loader2,
   RefreshCw,
@@ -22,6 +23,7 @@ import {
   GEMINI_PAID_MODEL_OPTIONS,
 } from '../constants/aiModels';
 import { copyMarkdownToClipboard } from '../utils/editorUtils';
+import ContentWritingReviewModal from './ContentWritingReviewModal';
 import {
   ContentWritingRequestError,
   cancelContentWritingSession,
@@ -29,6 +31,7 @@ import {
   getContentWritingSessionDetail,
   isContentWritingSessionActive,
   listContentWritingSessions,
+  recordContentWritingSessionApplication,
   resumeContentWritingSession,
   startContentWritingSession,
   type ContentWritingProvider,
@@ -49,6 +52,19 @@ type PendingStartRequest = {
 type ErrorPresentation = {
   message: string;
   details: string[];
+};
+
+type ReviewSnapshot = {
+  sessionId: string;
+  articleId: string;
+  markdown: string;
+  currentHtml: string;
+  currentText: string;
+};
+
+type ApplicationNotice = {
+  tone: 'success' | 'warning' | 'error';
+  message: string;
 };
 
 const ACTIVE_POLL_MS = 2_500;
@@ -163,7 +179,11 @@ const ContentWritingPanel: React.FC = () => {
     isAiProviderAvailable,
   } = useUser();
   const articleId = useEditorSelector(context => context.activeArticleId);
+  const articleTitle = useEditorSelector(context => context.title);
+  const articleLanguage = useEditorSelector(context => context.articleLanguage);
+  const editor = useEditorSelector(context => context.editor);
   const handleSaveDraft = useEditorSelector(context => context.handleSaveDraft);
+  const applyGeneratedArticleContent = useEditorSelector(context => context.applyGeneratedArticleContent);
   const saveStatus = useEditorSelector(context => context.saveStatus);
   const isArabic = t.locale !== 'en';
   const [provider, setProvider] = useState<ContentWritingProvider>(aiProviderCapabilities.defaultProvider);
@@ -180,6 +200,9 @@ const ContentWritingPanel: React.FC = () => {
   const [actionState, setActionState] = useState<ActionState>('idle');
   const [errorPresentation, setErrorPresentation] = useState<ErrorPresentation | null>(null);
   const [copied, setCopied] = useState(false);
+  const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
+  const [isApplying, setIsApplying] = useState(false);
+  const [applicationNotice, setApplicationNotice] = useState<ApplicationNotice | null>(null);
   const activeArticleRef = useRef(articleId);
   const detailRequestRef = useRef(0);
   const startInFlightRef = useRef(false);
@@ -221,7 +244,8 @@ const ContentWritingPanel: React.FC = () => {
   );
   const selectedProviderConfig = providerConfigs.find(item => item.id === provider);
   const hasActiveSession = sessions.some(isContentWritingSessionActive);
-  const selectedSession = selectedDetail?.session || sessions.find(session => session.id === selectedSessionId) || null;
+  const activeDetail = selectedDetail?.session.id === selectedSessionId ? selectedDetail : null;
+  const selectedSession = activeDetail?.session || sessions.find(session => session.id === selectedSessionId) || null;
   const selectedSessionProviderAvailable = selectedSession
     ? providerConfigs.find(item => item.id === selectedSession.provider)?.available === true
     : false;
@@ -309,6 +333,8 @@ const ContentWritingPanel: React.FC = () => {
     setSelectedDetail(null);
     setErrorPresentation(null);
     setCopied(false);
+    setReviewSnapshot(null);
+    setApplicationNotice(null);
     if (articleId) void refreshSessions();
   }, [articleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -347,7 +373,12 @@ const ContentWritingPanel: React.FC = () => {
     setActionState('starting');
     setErrorPresentation(null);
     try {
-      await handleSaveDraft();
+      const saved = await handleSaveDraft();
+      if (!saved && editor?.getText().trim()) {
+        throw new Error(isArabic
+          ? 'تعذر حفظ بيانات المقالة قبل بدء جلسة الكتابة.'
+          : 'The article could not be saved before starting the writing session.');
+      }
       const started = await startContentWritingSession({
         articleId,
         provider,
@@ -404,7 +435,7 @@ const ContentWritingPanel: React.FC = () => {
   };
 
   const copyResult = async () => {
-    const result = selectedDetail?.session.resultText;
+    const result = activeDetail?.session.resultText;
     if (!result) return;
     try {
       await copyMarkdownToClipboard(result);
@@ -412,6 +443,90 @@ const ContentWritingPanel: React.FC = () => {
       window.setTimeout(() => setCopied(false), 2_000);
     } catch (error) {
       setErrorPresentation(getErrorPresentation(error, isArabic));
+    }
+  };
+
+  const openReview = () => {
+    const session = activeDetail?.session;
+    const markdown = session?.resultText;
+    if (!session || !markdown || !editor || editor.isDestroyed || session.articleId !== articleId) {
+      setApplicationNotice({
+        tone: 'error',
+        message: isArabic
+          ? 'تعذر فتح المراجعة لأن المقالة النشطة أو نتيجة الجلسة لم تعد متطابقة.'
+          : 'Review could not open because the active article or session result no longer matches.',
+      });
+      return;
+    }
+    setApplicationNotice(null);
+    setReviewSnapshot({
+      sessionId: session.id,
+      articleId: session.articleId,
+      markdown,
+      currentHtml: editor.getHTML(),
+      currentText: editor.getText(),
+    });
+  };
+
+  const closeReview = useCallback(() => {
+    if (!isApplying) setReviewSnapshot(null);
+  }, [isApplying]);
+
+  const confirmApplication = async () => {
+    const snapshot = reviewSnapshot;
+    if (!snapshot || isApplying) return;
+    setIsApplying(true);
+    setApplicationNotice(null);
+    try {
+      const applied = await applyGeneratedArticleContent({
+        expectedArticleId: snapshot.articleId,
+        markdown: snapshot.markdown,
+      });
+      if (!applied.ok) {
+        const messages = {
+          article_changed: isArabic
+            ? 'تغيّرت المقالة النشطة قبل الاعتماد. أغلِق المعاينة وافتح النتيجة من المقالة الصحيحة.'
+            : 'The active article changed before approval. Close the review and reopen it from the correct article.',
+          editor_unavailable: isArabic ? 'المحرر غير متاح حاليًا.' : 'The editor is currently unavailable.',
+          empty_result: isArabic ? 'نتيجة الكتابة لا تحتوي نصًا صالحًا للإدراج.' : 'The writing result has no valid body to insert.',
+          backup_failed: isArabic
+            ? 'تعذر حفظ النص الحالي، لذلك لم يتم استبداله.'
+            : 'The current article could not be saved, so it was not replaced.',
+          save_failed: isArabic
+            ? 'أُدرج النص محليًا، لكن تعذر حفظه في Supabase. أبقِ المقالة مفتوحة وأعد الضغط على الحفظ.'
+            : 'The text was inserted locally but could not be saved to Supabase. Keep the article open and retry saving.',
+        };
+        setApplicationNotice({
+          tone: 'error',
+          message: applied.errorCode ? messages[applied.errorCode] : (applied.error || (isArabic ? 'تعذر اعتماد النتيجة.' : 'The result could not be applied.')),
+        });
+        return;
+      }
+
+      try {
+        const recorded = await recordContentWritingSessionApplication(snapshot.sessionId);
+        mergeSession(recorded);
+        setSelectedDetail(current => current && current.session.id === recorded.id
+          ? { ...current, session: { ...current.session, ...recorded } }
+          : current);
+        setApplicationNotice({
+          tone: 'success',
+          message: isArabic
+            ? `تم اعتماد المقالة وحفظها بنجاح (${applied.nextWordCount.toLocaleString('ar')} كلمة).`
+            : `The article was approved and saved (${applied.nextWordCount.toLocaleString('en')} words).`,
+        });
+      } catch (recordError) {
+        console.error('The generated article was saved but its application audit could not be recorded:', recordError);
+        setApplicationNotice({
+          tone: 'warning',
+          message: isArabic
+            ? 'تم إدراج المقالة وحفظها، لكن تعذر تسجيل عملية الاعتماد في السجل.'
+            : 'The article was inserted and saved, but its approval audit could not be recorded.',
+        });
+      }
+      setReviewSnapshot(null);
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -429,7 +544,7 @@ const ContentWritingPanel: React.FC = () => {
   const workflowStepKey = typeof progress.workflowStepKey === 'string'
     ? progress.workflowStepKey.trim()
     : '';
-  const workflowSteps = selectedDetail?.steps || [];
+  const workflowSteps = activeDetail?.steps || [];
   const completedWorkflowSteps = workflowSteps.filter(step => step.status === 'completed').length;
   const currentWorkflowStep = workflowSteps.find(step => step.stepKey === workflowStepKey);
   const displayedWorkflowStepLabel = currentWorkflowStep
@@ -647,23 +762,55 @@ const ContentWritingPanel: React.FC = () => {
               </div>
             )}
 
-            {selectedSession.status === 'completed' && selectedDetail?.session.resultText && (
+            {selectedSession.status === 'completed' && activeDetail?.session.resultText && (
               <div className="mt-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-xs font-bold text-gray-700 dark:text-gray-200">{isArabic ? 'المقالة الناتجة' : 'Generated article'}</span>
-                  <button
-                    type="button"
-                    onClick={() => void copyResult()}
-                    title={isArabic ? 'نسخ المقالة' : 'Copy article'}
-                    aria-label={isArabic ? 'نسخ المقالة' : 'Copy article'}
-                    className="flex size-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:border-[#d4af37]/50 hover:text-[#8a6f1d] dark:border-[#3C3C3C] dark:text-gray-300"
-                  >
-                    {copied ? <Check size={15} className="text-emerald-600" /> : <Copy size={15} />}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={openReview}
+                      disabled={isApplying || selectedSession.articleId !== articleId}
+                      className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-2 text-[11px] font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:opacity-45 dark:text-[#f2d675]"
+                    >
+                      <Eye size={14} />
+                      {isArabic ? 'مراجعة وإدراج' : 'Review and insert'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void copyResult()}
+                      title={isArabic ? 'نسخ المقالة' : 'Copy article'}
+                      aria-label={isArabic ? 'نسخ المقالة' : 'Copy article'}
+                      className="flex size-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:border-[#d4af37]/50 hover:text-[#8a6f1d] dark:border-[#3C3C3C] dark:text-gray-300"
+                    >
+                      {copied ? <Check size={15} className="text-emerald-600" /> : <Copy size={15} />}
+                    </button>
+                  </div>
                 </div>
+                {selectedSession.appliedAt && (
+                  <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-300">
+                    <CheckCircle2 size={13} />
+                    <span>
+                      {isArabic ? 'تم الإدراج' : 'Inserted'} {formatDateTime(selectedSession.appliedAt, isArabic)}
+                      {selectedSession.applicationCount > 1 ? ` · ${selectedSession.applicationCount}` : ''}
+                    </span>
+                  </div>
+                )}
                 <pre className="max-h-[34rem] overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-white p-3 font-sans text-xs leading-6 text-gray-800 custom-scrollbar dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100" dir="auto">
-                  {selectedDetail.session.resultText}
+                  {activeDetail.session.resultText}
                 </pre>
+              </div>
+            )}
+
+            {applicationNotice && (
+              <div className={`mt-3 rounded-md border p-2 text-xs font-bold ${
+                applicationNotice.tone === 'success'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-900/20 dark:text-emerald-300'
+                  : applicationNotice.tone === 'warning'
+                    ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-300'
+                    : 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300'
+              }`}>
+                {applicationNotice.message}
               </div>
             )}
 
@@ -715,6 +862,20 @@ const ContentWritingPanel: React.FC = () => {
           )}
         </section>
       </div>
+
+      {reviewSnapshot && (
+        <ContentWritingReviewModal
+          articleTitle={articleTitle}
+          articleLanguage={articleLanguage}
+          locale={isArabic ? 'ar' : 'en'}
+          currentHtml={reviewSnapshot.currentHtml}
+          currentText={reviewSnapshot.currentText}
+          resultMarkdown={reviewSnapshot.markdown}
+          isApplying={isApplying}
+          onConfirm={() => void confirmApplication()}
+          onClose={closeReview}
+        />
+      )}
     </div>
   );
 };

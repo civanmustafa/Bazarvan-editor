@@ -270,7 +270,9 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(panel, /cancelContentWritingSession\(/);
   assert.match(panel, /resumeContentWritingSession\(/);
   assert.match(panel, /workflowSteps\.map/);
-  assert.match(panel, /selectedDetail\.session\.resultText/);
+  assert.match(panel, /selectedDetail\?\.session\.id === selectedSessionId/);
+  assert.match(panel, /activeDetail\.session\.resultText/);
+  assert.match(panel, /recordContentWritingSessionApplication/);
   assert.doesNotMatch(panel, /getSupabaseClient|localStorage|sessionStorage/);
   assert.match(client, /getAuthenticatedApiToken\(\)/);
   assert.match(client, /getAuthenticatedApiHeaders\(/);
@@ -281,4 +283,5 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(client, /action: 'list'/);
   assert.match(client, /action: 'cancel'/);
   assert.match(client, /action: 'resume'/);
+  assert.match(client, /action: 'recordApplication'/);
 });

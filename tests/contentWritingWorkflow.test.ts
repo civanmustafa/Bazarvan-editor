@@ -93,3 +93,29 @@ test('final review prompts receive the complete assembled draft', async () => {
   assert.match(prompt, /-END/);
   assert.equal(prompt.includes(marker), true);
 });
+
+test('editor preparation removes only the generated leading H1 from the article body', async () => {
+  const {
+    prepareContentWritingResultForEditor,
+    contentWritingMarkdownToPlainText,
+  } = await importWorkflow();
+  const prepared = prepareContentWritingResultForEditor(
+    '```markdown\n# A useful guide\n\nOpening **text**.\n\n## First topic\n\nBody.\n```',
+    'A useful guide',
+  );
+
+  assert.equal(prepared.leadingTitle, 'A useful guide');
+  assert.equal(prepared.titleMatchesArticle, true);
+  assert.doesNotMatch(prepared.markdown, /^#\s/m);
+  assert.match(prepared.markdown, /^## First topic/m);
+  assert.equal(contentWritingMarkdownToPlainText(prepared.markdown), 'Opening text. First topic Body.');
+});
+
+test('editor preparation flags a generated title that differs from the saved article title', async () => {
+  const { prepareContentWritingResultForEditor } = await importWorkflow();
+  const prepared = prepareContentWritingResultForEditor('# Different title\n\nBody.', 'Saved title');
+
+  assert.equal(prepared.leadingTitle, 'Different title');
+  assert.equal(prepared.titleMatchesArticle, false);
+  assert.equal(prepared.markdown, 'Body.');
+});

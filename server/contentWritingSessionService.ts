@@ -37,6 +37,9 @@ export type ContentWritingSession = {
   cancel_requested_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  applied_at: string | null;
+  applied_by: string | null;
+  application_count: number;
   created_at: string;
   updated_at: string;
 };
@@ -421,6 +424,9 @@ export const listContentWritingSessions = async (options: {
       'cancel_requested_at',
       'started_at',
       'completed_at',
+      'applied_at',
+      'applied_by',
+      'application_count',
       'created_at',
       'updated_at',
     ].join(','))
@@ -460,5 +466,20 @@ export const resumeContentWritingSession = async (options: {
     },
   );
   if (error) throwServiceError('session resume', error);
+  return firstRow<ContentWritingSession>(data);
+};
+
+export const recordContentWritingApplication = async (options: {
+  sessionId: string;
+  appliedBy: string;
+}): Promise<ContentWritingSession | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'record_content_writing_application',
+    {
+      p_session_id: options.sessionId,
+      p_applied_by: options.appliedBy,
+    },
+  );
+  if (error) throwServiceError('application recording', error);
   return firstRow<ContentWritingSession>(data);
 };

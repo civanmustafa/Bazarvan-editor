@@ -291,3 +291,60 @@ export const assembleContentWritingDraft = (options: {
 };
 
 export const normalizeFinalContentWritingResult = (value: string): string => stripCodeFence(value);
+
+const normalizeComparableHeading = (value: string): string => value
+  .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+  .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  .replace(/[*_`~]/g, '')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toLocaleLowerCase();
+
+export type PreparedContentWritingResult = {
+  markdown: string;
+  leadingTitle: string;
+  titleMatchesArticle: boolean;
+};
+
+/**
+ * The editor owns the article title separately, so a generated leading H1 must
+ * never be inserted into the body. Keeping this normalization in one place
+ * makes review and insertion use exactly the same document.
+ */
+export const prepareContentWritingResultForEditor = (
+  value: string,
+  articleTitle: string,
+): PreparedContentWritingResult => {
+  const normalized = normalizeFinalContentWritingResult(value);
+  const lines = normalized.split(/\r?\n/);
+  const firstContentIndex = lines.findIndex(line => Boolean(line.trim()));
+  const headingMatch = firstContentIndex >= 0
+    ? lines[firstContentIndex].trim().match(/^#\s+(.+?)\s*#*\s*$/)
+    : null;
+  const leadingTitle = headingMatch?.[1]?.trim() || '';
+
+  if (headingMatch) lines.splice(firstContentIndex, 1);
+
+  return {
+    markdown: lines.join('\n').trim(),
+    leadingTitle,
+    titleMatchesArticle: Boolean(leadingTitle)
+      && normalizeComparableHeading(leadingTitle) === normalizeComparableHeading(articleTitle),
+  };
+};
+
+export const contentWritingMarkdownToPlainText = (value: string): string => (
+  normalizeFinalContentWritingResult(value)
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}(?:[-+*]|\d+[.)])\s+/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/^\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)+\s*\|?\s*$/gm, '')
+    .replace(/\|/g, ' ')
+    .replace(/[*_`~]/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+);

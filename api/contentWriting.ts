@@ -24,6 +24,7 @@ import {
   getContentWritingSession,
   getContentWritingSteps,
   listContentWritingSessions,
+  recordContentWritingApplication,
   resumeContentWritingSession,
   type ContentWritingProvider,
   type ContentWritingSession,
@@ -104,6 +105,9 @@ const toPublicSession = (
   cancelRequestedAt: session.cancel_requested_at,
   startedAt: session.started_at,
   completedAt: session.completed_at,
+  appliedAt: session.applied_at,
+  appliedBy: session.applied_by,
+  applicationCount: session.application_count,
   createdAt: session.created_at,
   updatedAt: session.updated_at,
 });
@@ -306,8 +310,44 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     return { status: 202, body: { ok: true, accepted: true, session: toPublicSession(resumed) } };
   }
 
+  if (action === 'recordApplication') {
+    consumeApiRateLimit(
+      'content-writing:apply',
+      principal.userId,
+      getPositiveIntegerEnv('CONTENT_WRITING_APPLY_RATE_LIMIT_PER_MINUTE', 30),
+    );
+    const session = await getSessionOrThrow(requireUuid(body.sessionId, 'sessionId'));
+    await requireArticleWriteAccess(supabase, session.article_id, principal.userId);
+    if (session.created_by !== principal.userId && principal.role !== 'admin') {
+      throw new ContentWritingApiError({
+        message: 'Only the session creator or an administrator can apply this content writing result.',
+        status: 403,
+        code: 'content_writing_apply_forbidden',
+      });
+    }
+    if (session.status !== 'completed' || !toText(session.result_text)) {
+      throw new ContentWritingApiError({
+        message: 'Only a completed content writing result can be applied.',
+        status: 409,
+        code: 'content_writing_apply_conflict',
+      });
+    }
+    const applied = await recordContentWritingApplication({
+      sessionId: session.id,
+      appliedBy: principal.userId,
+    });
+    if (!applied) {
+      throw new ContentWritingApiError({
+        message: 'The content writing application could not be recorded.',
+        status: 409,
+        code: 'content_writing_apply_conflict',
+      });
+    }
+    return { status: 200, body: { ok: true, session: toPublicSession(applied, { includeResult: true }) } };
+  }
+
   throw new ContentWritingApiError({
-    message: 'action must be start, get, list, cancel, or resume.',
+    message: 'action must be start, get, list, cancel, resume, or recordApplication.',
     code: 'content_writing_action_invalid',
   });
 };

@@ -11,7 +11,7 @@ interface DocumentActionsProps {
     saveStatus: 'idle' | 'saving' | 'saved' | 'error';
     saveError?: string;
     onRestoreDraft: () => void | Promise<void>;
-    onSaveDraft: () => void | Promise<void>;
+    onSaveDraft: () => void | Promise<unknown>;
     onNewArticle: () => void | Promise<void>;
     onShowDashboard: () => void | Promise<void>;
     onLogout: () => void | Promise<void>;
@@ -38,7 +38,7 @@ const DocumentActions: React.FC<DocumentActionsProps> = ({
                 <History size={16} className={restoreStatus === 'restored' ? 'text-[#d4af37]' : ''} />
             </ToolbarButton>
             <ToolbarButton
-                onClick={onSaveDraft}
+                onClick={() => { void onSaveDraft(); }}
                 title={saveStatus === 'saved' ? t.saved : saveStatus === 'saving' ? 'جار الحفظ...' : saveStatus === 'error' ? (saveError || 'تعذر الحفظ. اضغط للمحاولة مرة أخرى.') : t.saveDraft}
                 disabled={saveStatus === 'saving'}
             >

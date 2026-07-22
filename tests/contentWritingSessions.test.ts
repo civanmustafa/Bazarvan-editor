@@ -69,6 +69,23 @@ test('structured content-writing migration persists resumable steps without API 
   assertBalancedSqlParentheses(migration);
 });
 
+test('content-writing application migration records explicit editor approvals', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260722020000_content_writing_application.sql',
+  );
+
+  assert.match(migration, /add column if not exists applied_at timestamptz/);
+  assert.match(migration, /add column if not exists applied_by uuid/);
+  assert.match(migration, /add column if not exists application_count integer/);
+  assert.match(migration, /create or replace function public\.record_content_writing_application/);
+  assert.match(migration, /v_session\.status <> 'completed'/);
+  assert.match(migration, /application_count = session\.application_count \+ 1/);
+  assert.match(migration, /grant execute on function public\.record_content_writing_application\(uuid, uuid\)/);
+  assert.doesNotMatch(migration, /key_fingerprint|api_key/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
   const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),
@@ -123,8 +140,29 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /action === 'list'/);
   assert.match(api, /action === 'cancel'/);
   assert.match(api, /action === 'resume'/);
+  assert.match(api, /action === 'recordApplication'/);
+  assert.match(api, /recordContentWritingApplication/);
   assert.match(api, /getContentWritingSteps/);
   assert.match(registry, /path: '\/api\/content-writing'/);
+});
+
+test('content-writing review requires explicit approval and uses the central editor save path', async () => {
+  const [panel, modal, editorContext] = await Promise.all([
+    readWorkspaceFile('components/ContentWritingPanel.tsx'),
+    readWorkspaceFile('components/ContentWritingReviewModal.tsx'),
+    readWorkspaceFile('contexts/EditorContext.tsx'),
+  ]);
+
+  assert.match(panel, /recordContentWritingSessionApplication/);
+  assert.match(panel, /applyGeneratedArticleContent/);
+  assert.match(panel, /selectedDetail\?\.session\.id === selectedSessionId/);
+  assert.match(modal, /aria-modal="true"/);
+  assert.match(modal, /onConfirm/);
+  assert.match(modal, /prepareContentWritingResultForEditor/);
+  assert.match(editorContext, /const applyGeneratedArticleContent = useCallback/);
+  assert.match(editorContext, /handleSaveDraft\(\{ reason: 'manual', force: true \}\)/);
+  assert.match(editorContext, /parseMarkdownToArticleHtml/);
+  assert.doesNotMatch(panel, /commands\.setContent/);
 });
 
 test('content-writing worker keeps leases alive and is built and managed by PM2', async () => {
