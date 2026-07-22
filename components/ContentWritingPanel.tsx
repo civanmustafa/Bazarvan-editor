@@ -403,6 +403,14 @@ const ContentWritingPanel: React.FC = () => {
       if (activeArticleRef.current !== articleId) return;
       mergeSession(started.session);
       setSelectedSessionId(started.session.id);
+      if (started.reusedActive) {
+        setApplicationNotice({
+          tone: 'success',
+          message: isArabic
+            ? 'توجد جلسة كتابة نشطة بالفعل؛ تم فتحها بدل إنشاء طلب مكرر.'
+            : 'An active writing session already exists; it was opened instead of creating a duplicate.',
+        });
+      }
       await loadDetail(started.session.id, { silent: true });
     } catch (error) {
       if (error instanceof ContentWritingRequestError && error.status < 500) {

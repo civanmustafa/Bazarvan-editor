@@ -305,7 +305,7 @@ export const startContentWritingSession = async (options: {
   provider: ContentWritingProvider;
   model?: string;
   idempotencyKey?: string;
-}): Promise<{ created: boolean; session: ContentWritingSession }> => {
+}): Promise<{ created: boolean; reusedActive: boolean; session: ContentWritingSession }> => {
   const payload = await requestContentWriting({
     action: 'start',
     articleId: options.articleId,
@@ -315,7 +315,11 @@ export const startContentWritingSession = async (options: {
   });
   const session = normalizeSession(payload.session);
   if (!session) throw new Error('Content writing API returned an invalid session.');
-  return { created: payload.created === true, session };
+  return {
+    created: payload.created === true,
+    reusedActive: payload.reusedActive === true,
+    session,
+  };
 };
 
 export const prepareExternalContentWritingConversation = async (

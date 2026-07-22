@@ -5,6 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { API_ROUTES, type ApiHandler } from './apiRouteRegistry';
+import {
+  checkContentWritingReadiness,
+  toPublicContentWritingReadiness,
+} from './contentWritingReadiness';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,8 +48,27 @@ const healthzHandler: RequestHandler = (_req, res) => {
   });
 };
 
+const readyzHandler: RequestHandler = async (_req, res) => {
+  const staticBuild = fs.existsSync(path.join(distDir, 'index.html'));
+  const contentWriting = await checkContentWritingReadiness();
+  const ok = staticBuild && contentWriting.ok;
+  if (!ok && contentWriting.detail) {
+    console.error(`[readyz] ${contentWriting.detail}`);
+  }
+  res.status(ok ? 200 : 503).json({
+    ok,
+    service: 'bazarvan-editor',
+    checks: {
+      staticBuild,
+      contentWriting: toPublicContentWritingReadiness(contentWriting),
+    },
+  });
+};
+
 app.get('/healthz', healthzHandler);
 app.get('/api/healthz', healthzHandler);
+app.get('/readyz', readyzHandler);
+app.get('/api/readyz', readyzHandler);
 
 API_ROUTES.forEach(route => {
   const handler = runApiHandler(route.handler);

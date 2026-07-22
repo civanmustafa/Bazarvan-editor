@@ -162,7 +162,13 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     });
     return {
       status: queued.created ? 202 : 200,
-      body: { ok: true, accepted: true, created: queued.created, session: toPublicContentWritingSession(queued.session) },
+      body: {
+        ok: true,
+        accepted: true,
+        created: queued.created,
+        reusedActive: queued.reusedActive === true,
+        session: toPublicContentWritingSession(queued.session),
+      },
     };
   }
 

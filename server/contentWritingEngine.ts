@@ -78,6 +78,7 @@ export class ContentWritingEngineError extends Error {
 
 export type QueuedContentWritingSession = {
   created: boolean;
+  reusedActive?: boolean;
   session: ContentWritingSession;
 };
 

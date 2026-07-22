@@ -148,6 +148,8 @@ test('repository quality gate covers types, tests, build, and security checks', 
   ['check:secrets', 'check:dependencies', 'typecheck', 'test', 'build', 'check:bundle']
     .forEach(scriptName => assert.match(scripts.verify || '', new RegExp(`npm run ${scriptName.replace(':', '\\:')}`)));
   assert.match(scripts['check:dependencies'] || '', /npm audit/);
+  assert.match(scripts.postbuild || '', /check:content-writing-release/);
+  assert.match(scripts['check:content-writing-release'] || '', /checkContentWritingRelease\.ts/);
   assert.equal(compilerOptions.noImplicitAny, true);
   assert.equal(compilerOptions.strictBindCallApply, true);
   assert.equal(compilerOptions.strictFunctionTypes, true);

@@ -104,6 +104,25 @@ test('content-writing external reporting migration records one completed externa
   assertBalancedSqlParentheses(migration);
 });
 
+test('content-writing quality guards serialize starts and enforce one active API session', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260722040000_content_writing_quality_guards.sql',
+  );
+
+  assert.match(migration, /content_writing_sessions_one_active_api_idx/);
+  assert.match(migration, /quality_guard_version smallint not null default 1/);
+  assert.match(migration, /where execution_mode = 'api'/);
+  assert.match(migration, /status in \('queued', 'running', 'retry_scheduled'\)/);
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /'reusedActive', true/);
+  assert.match(migration, /active_session\.id <> v_session\.id/);
+  assert.match(migration, /create or replace function public\.resume_content_writing_session/);
+  assert.match(migration, /duplicate_active_session_closed/);
+  assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
   const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),
@@ -156,6 +175,7 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /requireArticleReadAccess\(supabase, session\.article_id, principal\.userId\)/);
   assert.match(api, /IDEMPOTENCY_KEY_PATTERN/);
   assert.match(api, /queueContentWritingSession/);
+  assert.match(api, /reusedActive: queued\.reusedActive === true/);
   assert.match(api, /action === 'prepareExternal'/);
   assert.match(api, /prepareContentWritingConversation/);
   assert.match(api, /action === 'get'/);

@@ -34,6 +34,7 @@ npm run build
 pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 save
 curl -fsS https://smarteditor.bazarvan.com/healthz
+curl -fsS https://smarteditor.bazarvan.com/readyz
 ```
 
-PM2 runs the web server and the external-analysis worker from `/var/www/bazarvan-editor`; do not use `/var/www/bazarvan-smarteditor` unless PM2 is intentionally reconfigured.
+PM2 runs the web server and all configured workers from `/var/www/bazarvan-editor`; do not use `/var/www/bazarvan-smarteditor` unless PM2 is intentionally reconfigured. Apply the ordered Supabase migrations in `deploy/HOSTINGER_CANONICAL_DEPLOY.md` before deploying a build that depends on them.

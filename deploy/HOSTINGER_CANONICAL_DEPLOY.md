@@ -22,8 +22,11 @@ Before deploying structured content writing, apply these migrations in order:
 
 1. `supabase/migrations/20260722000000_content_writing_sessions.sql` (skip only if it was already applied successfully)
 2. `supabase/migrations/20260722010000_structured_content_writing.sql`
+3. `supabase/migrations/20260722020000_content_writing_application.sql`
+4. `supabase/migrations/20260722030000_content_writing_external_reporting.sql`
+5. `supabase/migrations/20260722040000_content_writing_quality_guards.sql`
 
-The second migration adds durable per-step output and resume support. Deploying the new worker before this migration is applied will make content-writing sessions fail when they try to create the outline step.
+These migrations add durable sessions, resumable steps, reviewed insertion, external-result reporting, and the active-session quality guard. Apply all five before deploying the matching server build. The `/readyz` deployment check returns HTTP 503 when the required content-writing schema is unavailable.
 
 ```bash
 cd /var/www/bazarvan-editor
@@ -36,10 +39,12 @@ npm run build
 pm2 startOrReload ecosystem.config.cjs --update-env
 pm2 save
 curl -fsS https://smarteditor.bazarvan.com/healthz
+curl -fsS https://smarteditor.bazarvan.com/readyz
 ```
 
 Notes:
 
 - PM2 runs the web server and all configured workers, including `bazarvan-content-writing-worker`, from `/var/www/bazarvan-editor`, so this is the canonical path.
 - Do not use `/var/www/bazarvan-smarteditor` for future deploy instructions unless PM2 is intentionally reconfigured.
+- `/healthz` is the liveness check. `/readyz` additionally verifies the production build and required Supabase content-writing schema.
 - If deployment behavior is unclear, verify all processes with `pm2 status`, then inspect the web process with `pm2 describe bazarvan-editor` and the writing worker with `pm2 describe bazarvan-content-writing-worker`.

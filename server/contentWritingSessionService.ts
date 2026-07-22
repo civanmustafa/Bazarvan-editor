@@ -115,7 +115,7 @@ export const createContentWritingSession = async (input: {
   inputHash: string;
   contextSnapshot: JsonObject;
   messages: Array<{ content: string }>;
-}): Promise<{ created: boolean; session: ContentWritingSession }> => {
+}): Promise<{ created: boolean; reusedActive: boolean; session: ContentWritingSession }> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
     'create_content_writing_session',
     {
@@ -136,7 +136,11 @@ export const createContentWritingSession = async (input: {
   const source = isRecord(data) ? data : {};
   const session = isRecord(source.session) ? source.session as ContentWritingSession : null;
   if (!session?.id) throw new Error('Content writing session creation returned no session.');
-  return { created: source.created === true, session };
+  return {
+    created: source.created === true,
+    reusedActive: source.reusedActive === true,
+    session,
+  };
 };
 
 export const createCompletedExternalContentWritingSession = async (input: {
