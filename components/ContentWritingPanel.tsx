@@ -28,6 +28,12 @@ import {
   formatAiKeySuffix,
   notifyAiKeyUsageFeedback,
 } from '../utils/aiKeyUsageFeedback';
+import {
+  evaluateContentWritingQuality,
+  normalizeContentWritingQualityReport,
+  type ContentWritingQualityReport,
+} from '../utils/contentWritingQuality';
+import { normalizeContentWritingQualityConfiguration } from '../constants/contentWritingQuality';
 import type { ExternalAiBridgeProvider } from '../types';
 import ContentWritingExternalBridgePanel from './ContentWritingExternalBridgePanel';
 import ContentWritingReviewModal from './ContentWritingReviewModal';
@@ -70,6 +76,7 @@ type ReviewSnapshot = {
   markdown: string;
   currentHtml: string;
   currentText: string;
+  qualityReport: ContentWritingQualityReport;
 };
 
 type ApplicationNotice = {
@@ -183,6 +190,7 @@ const getStepLabel = (step: ContentWritingStep, isArabic: boolean): string => {
     conclusion: isArabic ? 'الخاتمة' : 'Conclusion',
     faq: isArabic ? 'الأسئلة الشائعة' : 'FAQ',
     final_review: isArabic ? 'المراجعة النهائية' : 'Final review',
+    quality_repair: isArabic ? 'إصلاح معايير الجودة' : 'Quality repair',
   };
   if (step.stepType !== 'section') return labels[step.stepType];
   const sectionIndex = Math.max(1, Number(step.metadata.sectionIndex) || step.ordinal - 1);
@@ -196,10 +204,13 @@ const ContentWritingPanel: React.FC = () => {
     chatGptOpenMode,
     isAiProviderEnabled,
     isAiProviderAvailable,
+    currentUserRole,
   } = useUser();
   const articleId = useEditorSelector(context => context.activeArticleId);
   const articleTitle = useEditorSelector(context => context.title);
   const articleLanguage = useEditorSelector(context => context.articleLanguage);
+  const keywords = useEditorSelector(context => context.keywords);
+  const goalContext = useEditorSelector(context => context.goalContext);
   const editor = useEditorSelector(context => context.editor);
   const handleSaveDraft = useEditorSelector(context => context.handleSaveDraft);
   const applyGeneratedArticleContent = useEditorSelector(context => context.applyGeneratedArticleContent);
@@ -230,6 +241,30 @@ const ContentWritingPanel: React.FC = () => {
   const touchedModelsRef = useRef<Set<ContentWritingProvider>>(new Set());
   const trackedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
   const notifiedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
+
+  const getReviewQualityReport = useCallback((
+    session: ContentWritingSession,
+    markdown: string,
+    configurationOverride?: unknown,
+  ): ContentWritingQualityReport => {
+    const persisted = session.qualityReport
+      || normalizeContentWritingQualityReport(session.responseMetadata.qualityReport);
+    if (persisted) return persisted;
+    const configurationSource = configurationOverride
+      || session.contextSnapshot.qualityConfiguration;
+    return evaluateContentWritingQuality({
+      markdown,
+      articleTitle,
+      keywords,
+      goalContext,
+      articleLanguage,
+      configuration: normalizeContentWritingQualityConfiguration(
+        configurationSource && typeof configurationSource === 'object'
+          ? configurationSource as Record<string, unknown>
+          : {},
+      ),
+    }).report;
+  }, [articleLanguage, articleTitle, goalContext, keywords]);
 
   useEffect(() => {
     activeArticleRef.current = articleId;
@@ -479,8 +514,9 @@ const ContentWritingPanel: React.FC = () => {
       markdown: response,
       currentHtml: editor.getHTML(),
       currentText: editor.getText(),
+      qualityReport: getReviewQualityReport(recorded.session, response, conversation.qualityConfiguration),
     });
-  }, [articleId, editor, isArabic, mergeSession]);
+  }, [articleId, editor, getReviewQualityReport, isArabic, mergeSession]);
 
   const cancelSession = async () => {
     if (!selectedSession || !isContentWritingSessionActive(selectedSession)) return;
@@ -546,6 +582,7 @@ const ContentWritingPanel: React.FC = () => {
       markdown,
       currentHtml: editor.getHTML(),
       currentText: editor.getText(),
+      qualityReport: getReviewQualityReport(session, markdown),
     });
   };
 
@@ -553,9 +590,18 @@ const ContentWritingPanel: React.FC = () => {
     if (!isApplying) setReviewSnapshot(null);
   }, [isApplying]);
 
-  const confirmApplication = async () => {
+  const confirmApplication = async (qualityOverrideReason?: string) => {
     const snapshot = reviewSnapshot;
     if (!snapshot || isApplying) return;
+    if (!snapshot.qualityReport.passed && currentUserRole !== 'admin') {
+      setApplicationNotice({
+        tone: 'error',
+        message: isArabic
+          ? 'لا يمكن اعتماد المقالة قبل اجتياز بوابة الجودة.'
+          : 'The article cannot be approved before it passes the quality gate.',
+      });
+      return;
+    }
     setIsApplying(true);
     setApplicationNotice(null);
     try {
@@ -586,7 +632,10 @@ const ContentWritingPanel: React.FC = () => {
 
       try {
         if (snapshot.sessionId) {
-          const recorded = await recordContentWritingSessionApplication(snapshot.sessionId);
+          const recorded = await recordContentWritingSessionApplication(
+            snapshot.sessionId,
+            qualityOverrideReason,
+          );
           mergeSession(recorded);
           setSelectedDetail(current => current && current.session.id === recorded.id
             ? { ...current, session: { ...current.session, ...recorded } }
@@ -819,6 +868,13 @@ const ContentWritingPanel: React.FC = () => {
                   <span className="truncate text-[11px] font-bold text-gray-600 dark:text-gray-300">{getProviderLabel(selectedSession.provider, selectedSession.executionMode)}</span>
                 </div>
                 <div className="mt-1 truncate font-mono text-[10px] text-gray-400" dir="ltr">{selectedSession.model}</div>
+                {selectedSession.qualityScore !== null && (
+                  <div className={`mt-1.5 inline-flex rounded px-2 py-1 text-[10px] font-black ${selectedSession.qualityReport?.passed
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
+                    : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>
+                    {isArabic ? 'الجودة' : 'Quality'} {selectedSession.qualityScore}/100 · v{selectedSession.qualityPolicyVersion}
+                  </div>
+                )}
                 {sessionKeyUsageEntries.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {sessionKeyUsageEntries.map((entry, index) => (
@@ -1027,6 +1083,8 @@ const ContentWritingPanel: React.FC = () => {
           currentHtml={reviewSnapshot.currentHtml}
           currentText={reviewSnapshot.currentText}
           resultMarkdown={reviewSnapshot.markdown}
+          qualityReport={reviewSnapshot.qualityReport}
+          allowQualityOverride={currentUserRole === 'admin'}
           isApplying={isApplying}
           onConfirm={() => void confirmApplication()}
           onClose={closeReview}

@@ -175,8 +175,10 @@ const createAnalysisInput = (
   uiLanguage: 'ar' | 'en',
   refreshScope: ContentAnalysisRefreshScope,
   previousAnalysis?: FullAnalysis,
+  articleTitle = '',
 ): ContentAnalysisInput => ({
   analysisNodes: createAnalysisNodesFromEditorState(editorState),
+  articleTitle,
   textContent: typeof textContent === 'string' ? textContent : '',
   keywords,
   goalContext,
@@ -215,9 +217,10 @@ export const useContentAnalysis = (
   uiLanguage: 'ar' | 'en',
   refreshScope: ContentAnalysisRefreshScope = DEFAULT_REFRESH_SCOPE,
   enabled = true,
+  articleTitle = '',
 ): FullAnalysis => {
   const [analysisResults, setAnalysisResults] = useState<FullAnalysis>(() =>
-    runContentAnalysisSafely(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, DEFAULT_REFRESH_SCOPE))
+    runContentAnalysisSafely(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, DEFAULT_REFRESH_SCOPE, undefined, articleTitle))
   );
   const [workerDisabled, setWorkerDisabled] = useState(false);
   const activeWorkerRef = useRef<Worker | null>(null);
@@ -249,7 +252,7 @@ export const useContentAnalysis = (
       return;
     }
 
-    const input = createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, refreshScope, latestAnalysisRef.current);
+    const input = createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, refreshScope, latestAnalysisRef.current, articleTitle);
     const requestId = latestRequestIdRef.current + 1;
     latestRequestIdRef.current = requestId;
     const job: ContentAnalysisWorkerJob = {
@@ -340,6 +343,7 @@ export const useContentAnalysis = (
     refreshScope.duplicates,
     enabled,
     workerDisabled,
+    articleTitle,
   ]);
 
   return analysisResults;

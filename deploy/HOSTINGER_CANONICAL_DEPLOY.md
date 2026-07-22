@@ -25,8 +25,9 @@ Before deploying structured content writing, apply these migrations in order:
 3. `supabase/migrations/20260722020000_content_writing_application.sql`
 4. `supabase/migrations/20260722030000_content_writing_external_reporting.sql`
 5. `supabase/migrations/20260722040000_content_writing_quality_guards.sql`
+6. `supabase/migrations/20260723000000_content_writing_quality_policy.sql`
 
-These migrations add durable sessions, resumable steps, reviewed insertion, external-result reporting, and the active-session quality guard. Apply all five before deploying the matching server build. The `/readyz` deployment check returns HTTP 503 when the required content-writing schema is unavailable.
+These migrations add durable sessions, resumable steps, reviewed insertion, external-result reporting, the active-session guard, and versioned deterministic article-quality reports with repair tracking. Apply all six before deploying the matching server build. The `/readyz` deployment check returns HTTP 503 when the required content-writing schema is unavailable.
 
 Before enabling administrator-managed OpenAI or Gemini paid keys:
 

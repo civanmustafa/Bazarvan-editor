@@ -54,6 +54,7 @@ import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../../constants';
 export interface ContentAnalysisInput {
   editorState?: any;
   analysisNodes?: AnalysisDocumentNode[];
+  articleTitle?: string;
   textContent: string;
   keywords: Keywords;
   goalContext: GoalContext;
@@ -182,6 +183,7 @@ const enrichStructureViolationText = (
 export const runContentAnalysis = ({
   editorState,
   analysisNodes,
+  articleTitle,
   textContent,
   keywords,
   goalContext,
@@ -197,9 +199,29 @@ export const runContentAnalysis = ({
   const analysisGoal = getAnalysisGoal(goalContext);
 
   const totalWordCount = textContent.trim().split(/\s+/).filter(Boolean).length;
-  const nodes: AnalysisDocumentNode[] = analysisNodes?.length
+  let nodes: AnalysisDocumentNode[] = analysisNodes?.length
     ? analysisNodes
     : createAnalysisNodesFromEditorState(editorState);
+  const normalizedArticleTitle = typeof articleTitle === 'string'
+    ? articleTitle.replace(/\s+/g, ' ').trim()
+    : '';
+  if (
+    normalizedArticleTitle
+    && !nodes.some(node => node.type === 'heading' && node.level === 1)
+  ) {
+    nodes = [
+      {
+        type: 'heading',
+        level: 1,
+        text: normalizedArticleTitle,
+        contentText: normalizedArticleTitle,
+        nodeSize: 0,
+        synthetic: true,
+        pos: 0,
+      },
+      ...nodes,
+    ];
+  }
   const totalDocSize = nodes.reduce((size, node) => size + getAnalysisNodeSize(node), 0);
   const totalTableCount = tableCount ?? countNodesByType(editorState, 'table');
 

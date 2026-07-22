@@ -67,13 +67,14 @@ const ContentWritingReportsTable: React.FC<ContentWritingReportsTableProps> = ({
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <table className="w-full min-w-[1540px] text-start text-sm">
+      <table className="w-full min-w-[1660px] text-start text-sm">
         <thead className="text-xs uppercase text-gray-400">
           <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
             <th className="px-3 py-2 text-start">{locale === 'ar' ? 'المقالة' : 'Article'}</th>
             <th className="px-3 py-2 text-start">{locale === 'ar' ? 'طريقة التشغيل' : 'Execution'}</th>
             <th className="px-3 py-2 text-start">{locale === 'ar' ? 'الموديل' : 'Model'}</th>
             <th className="px-3 py-2 text-start">{locale === 'ar' ? 'الحالة' : 'Status'}</th>
+            <th className="px-3 py-2 text-start">{locale === 'ar' ? 'الجودة' : 'Quality'}</th>
             <th className="px-3 py-2 text-start">{locale === 'ar' ? 'المستخدم' : 'User'}</th>
             <th className="px-3 py-2 text-start">{locale === 'ar' ? 'المدخلات' : 'Input'}</th>
             <th className="px-3 py-2 text-start">{locale === 'ar' ? 'المحاولات' : 'Attempts'}</th>
@@ -109,6 +110,16 @@ const ContentWritingReportsTable: React.FC<ContentWritingReportsTableProps> = ({
                     {getStatusLabel(session.status, locale)}
                   </span>
                 </td>
+                <td className="whitespace-nowrap px-3 py-3">
+                  {session.qualityScore === null ? '-' : (
+                    <span className={`font-black tabular-nums ${session.qualityPassed === true ? 'text-emerald-600 dark:text-emerald-300' : session.qualityPassed === false ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}`}>
+                      {session.qualityScore}/{session.qualityMinimumScore || 100}
+                      <span className="ms-1 text-[10px] font-bold text-gray-400">
+                        v{session.qualityPolicyVersion || '-'} · {locale === 'ar' ? 'إصلاح' : 'repair'} {session.qualityRepairCount}
+                      </span>
+                    </span>
+                  )}
+                </td>
                 <td className="max-w-[220px] px-3 py-3 text-gray-600 dark:text-gray-300">{profile?.fullName || profile?.email || session.createdBy}</td>
                 <td className="whitespace-nowrap px-3 py-3 text-gray-500">{session.estimatedInputTokens.toLocaleString(locale)} / {session.maxInputTokens.toLocaleString(locale)}</td>
                 <td className="px-3 py-3 text-center font-bold tabular-nums text-gray-600 dark:text-gray-300">{session.attemptCount}</td>
@@ -125,7 +136,7 @@ const ContentWritingReportsTable: React.FC<ContentWritingReportsTableProps> = ({
               </tr>
             );
           }) : (
-            <tr><td colSpan={11} className="px-3 py-8 text-center text-gray-500">{locale === 'ar' ? 'لا توجد جلسات كتابة محتوى لهذا اليوم.' : 'No content writing sessions for this day.'}</td></tr>
+            <tr><td colSpan={12} className="px-3 py-8 text-center text-gray-500">{locale === 'ar' ? 'لا توجد جلسات كتابة محتوى لهذا اليوم.' : 'No content writing sessions for this day.'}</td></tr>
           )}
         </tbody>
       </table>

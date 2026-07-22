@@ -16,6 +16,18 @@ import {
   type ContentWritingWorkflowStepDefinition,
 } from '../utils/contentWritingWorkflow';
 import {
+  buildContentWritingQualityContract,
+  normalizeContentWritingQualityConfiguration,
+  type ContentWritingQualityConfiguration,
+} from '../constants/contentWritingQuality';
+import {
+  buildContentWritingRepairPrompt,
+  evaluateContentWritingQuality,
+  type ContentWritingQualityReport,
+} from '../utils/contentWritingQuality';
+import { normalizeGoalContext } from '../utils/goalContext';
+import type { GoalContext, Keywords } from '../types';
+import {
   executeContentWritingTurn,
   type ContentWritingExecutionResult,
 } from './contentWritingEngine';
@@ -49,6 +61,53 @@ const isRecord = (value: unknown): value is JsonObject => (
 );
 
 const toText = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const toTextList = (value: unknown): string[] => Array.isArray(value)
+  ? value.map(toText).filter(Boolean)
+  : [];
+
+type QualityRuntime = {
+  configuration: ContentWritingQualityConfiguration;
+  contract: string;
+  keywords: Keywords;
+  goalContext: GoalContext;
+};
+
+const getQualityRuntime = (
+  session: ContentWritingSession,
+  language: string,
+): QualityRuntime | null => {
+  const source = isRecord(session.context_snapshot?.qualityInput)
+    ? session.context_snapshot.qualityInput
+    : null;
+  if (!source) return null;
+  const keywordSource = isRecord(source.keywords) ? source.keywords : {};
+  const goalSource = isRecord(source.goalContext) ? source.goalContext : {};
+  const keywords: Keywords = {
+    primary: toText(keywordSource.primary),
+    secondaries: toTextList(keywordSource.secondaries),
+    company: toText(keywordSource.company),
+    lsi: toTextList(keywordSource.lsi),
+  };
+  if (!keywords.primary) return null;
+  const goalContext = normalizeGoalContext(goalSource);
+  const configuration = normalizeContentWritingQualityConfiguration(
+    isRecord(session.context_snapshot?.qualityConfiguration)
+      ? session.context_snapshot.qualityConfiguration
+      : {},
+  );
+  const persistedContract = toText(session.context_snapshot?.qualityContract);
+  return {
+    configuration,
+    contract: persistedContract || buildContentWritingQualityContract({
+      configuration,
+      language,
+      goalContext,
+    }),
+    keywords,
+    goalContext,
+  };
+};
 
 const getArticleSnapshot = (session: ContentWritingSession): { title: string; language: string } => {
   const article = isRecord(session.context_snapshot?.article) ? session.context_snapshot.article : {};
@@ -119,6 +178,7 @@ export const executeStructuredContentWritingWorkflow = async (
   options: StructuredWorkflowOptions,
 ): Promise<ContentWritingExecutionResult> => {
   const article = getArticleSnapshot(options.session);
+  const qualityRuntime = getQualityRuntime(options.session, article.language);
   const stepMap = new Map(
     (await getContentWritingSteps(options.session.id, { includeContent: true, includeMetadata: true }))
       .map(step => [step.step_key, step]),
@@ -276,12 +336,26 @@ export const executeStructuredContentWritingWorkflow = async (
   await ensureStep(outlineDefinition);
   const outlineResult = await runStep({
     definition: outlineDefinition,
-    prompt: buildContentWritingOutlinePrompt({ articleTitle: article.title, language: article.language }),
+    prompt: buildContentWritingOutlinePrompt({
+      articleTitle: article.title,
+      language: article.language,
+      qualityContract: qualityRuntime?.contract,
+      minimumSections: qualityRuntime?.configuration.policy.outlineSections.min,
+      maximumSections: qualityRuntime?.configuration.policy.outlineSections.max,
+    }),
     stepIndex: 1,
     stepCount: 1,
     maxOutputTokens: 4_000,
     processOutput: output => {
       const outline = parseContentWritingOutline(output);
+      if (qualityRuntime && (
+        outline.sections.length < qualityRuntime.configuration.policy.outlineSections.min
+        || outline.sections.length > qualityRuntime.configuration.policy.outlineSections.max
+      )) {
+        throw new Error(
+          `The outline must contain ${qualityRuntime.configuration.policy.outlineSections.min}-${qualityRuntime.configuration.policy.outlineSections.max} sections for quality policy ${qualityRuntime.configuration.policyVersion}.`,
+        );
+      }
       return { output, metadata: { outline } };
     },
   });
@@ -342,24 +416,6 @@ export const executeStructuredContentWritingWorkflow = async (
   if (!introductionResult.ok) return introductionResult.execution;
   outputs.introduction = introductionResult.output;
 
-  const conclusionDefinition = definitions.find(definition => definition.type === 'conclusion')!;
-  const introductionAndBodyDraft = assembleContentWritingDraft({
-    articleTitle: article.title,
-    language: article.language,
-    outline,
-    outputs,
-    includeFaq: false,
-  });
-  const conclusionResult = await runStep({
-    definition: conclusionDefinition,
-    prompt: buildContentWritingConclusionPrompt({ outline, draft: introductionAndBodyDraft }),
-    stepIndex: conclusionDefinition.ordinal,
-    stepCount: definitions.length,
-    maxOutputTokens: 4_000,
-  });
-  if (!conclusionResult.ok) return conclusionResult.execution;
-  outputs.conclusion = conclusionResult.output;
-
   const faqDefinition = definitions.find(definition => definition.type === 'faq')!;
   const articleWithoutFaq = assembleContentWritingDraft({
     articleTitle: article.title,
@@ -378,6 +434,23 @@ export const executeStructuredContentWritingWorkflow = async (
   if (!faqResult.ok) return faqResult.execution;
   outputs.faq = faqResult.output;
 
+  const conclusionDefinition = definitions.find(definition => definition.type === 'conclusion')!;
+  const introductionBodyAndFaqDraft = assembleContentWritingDraft({
+    articleTitle: article.title,
+    language: article.language,
+    outline,
+    outputs,
+  });
+  const conclusionResult = await runStep({
+    definition: conclusionDefinition,
+    prompt: buildContentWritingConclusionPrompt({ outline, draft: introductionBodyAndFaqDraft }),
+    stepIndex: conclusionDefinition.ordinal,
+    stepCount: definitions.length,
+    maxOutputTokens: 4_000,
+  });
+  if (!conclusionResult.ok) return conclusionResult.execution;
+  outputs.conclusion = conclusionResult.output;
+
   const assembledDraft = assembleContentWritingDraft({
     articleTitle: article.title,
     language: article.language,
@@ -387,7 +460,11 @@ export const executeStructuredContentWritingWorkflow = async (
   const finalDefinition = definitions.find(definition => definition.type === 'final_review')!;
   const finalResult = await runStep({
     definition: finalDefinition,
-    prompt: buildContentWritingFinalReviewPrompt({ articleTitle: article.title, draft: assembledDraft }),
+    prompt: buildContentWritingFinalReviewPrompt({
+      articleTitle: article.title,
+      draft: assembledDraft,
+      qualityContract: qualityRuntime?.contract,
+    }),
     stepIndex: finalDefinition.ordinal,
     stepCount: definitions.length,
     maxOutputTokens: 32_000,
@@ -395,12 +472,80 @@ export const executeStructuredContentWritingWorkflow = async (
   });
   if (!finalResult.ok) return finalResult.execution;
 
-  const persistedExecution = getPersistedExecution(finalResult.step);
-  const execution = finalResult.execution;
+  let finalOutput = finalResult.output;
+  let finalStep = finalResult.step;
+  let execution = finalResult.execution;
+  let qualityReport: ContentWritingQualityReport | null = null;
+  let repairPasses = 0;
+
+  if (qualityRuntime) {
+    let evaluation = evaluateContentWritingQuality({
+      markdown: finalOutput,
+      articleTitle: article.title,
+      keywords: qualityRuntime.keywords,
+      goalContext: qualityRuntime.goalContext,
+      articleLanguage: article.language === 'en' ? 'en' : 'ar',
+      configuration: qualityRuntime.configuration,
+      repairPasses,
+    });
+    qualityReport = evaluation.report;
+
+    for (
+      let pass = 1;
+      !qualityReport.passed && pass <= qualityRuntime.configuration.maxRepairPasses;
+      pass += 1
+    ) {
+      const repairDefinition: ContentWritingWorkflowStepDefinition = {
+        key: `quality-repair-${String(pass).padStart(2, '0')}`,
+        type: 'quality_repair',
+        ordinal: finalDefinition.ordinal + pass,
+        title: `Quality repair ${pass}`,
+        metadata: {
+          workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+          qualityPolicyVersion: qualityRuntime.configuration.policyVersion,
+          repairPass: pass,
+        },
+      };
+      await ensureStep(repairDefinition);
+      const repairResult = await runStep({
+        definition: repairDefinition,
+        prompt: buildContentWritingRepairPrompt({
+          report: qualityReport,
+          draft: finalOutput,
+          qualityContract: qualityRuntime.contract,
+          language: article.language === 'en' ? 'en' : 'ar',
+        }),
+        stepIndex: repairDefinition.ordinal,
+        stepCount: definitions.length + qualityRuntime.configuration.maxRepairPasses,
+        maxOutputTokens: 32_000,
+        processOutput: output => ({
+          output: normalizeFinalContentWritingResult(output),
+          metadata: { qualityReportBeforeRepair: qualityReport },
+        }),
+      });
+      if (!repairResult.ok) return repairResult.execution;
+      repairPasses = pass;
+      finalOutput = repairResult.output;
+      finalStep = repairResult.step;
+      execution = repairResult.execution || execution;
+      evaluation = evaluateContentWritingQuality({
+        markdown: finalOutput,
+        articleTitle: article.title,
+        keywords: qualityRuntime.keywords,
+        goalContext: qualityRuntime.goalContext,
+        articleLanguage: article.language === 'en' ? 'en' : 'ar',
+        configuration: qualityRuntime.configuration,
+        repairPasses,
+      });
+      qualityReport = evaluation.report;
+    }
+  }
+
+  const persistedExecution = getPersistedExecution(finalStep);
   return {
     ok: true,
     status: execution?.status || persistedExecution.status || 200,
-    text: finalResult.output,
+    text: finalOutput,
     model: execution?.model || persistedExecution.model || options.session.model,
     conversationId: execution?.conversationId || persistedExecution.conversationId,
     keySuffix: execution?.keySuffix || persistedExecution.keySuffix,
@@ -408,9 +553,13 @@ export const executeStructuredContentWritingWorkflow = async (
       provider: options.session.provider,
       structured: true,
       workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
-      stepCount: definitions.length,
+      stepCount: definitions.length + repairPasses,
       completedStepCount: getCompletedCount(stepMap.values()),
-      finalStepKey: finalDefinition.key,
+      finalStepKey: finalStep.step_key,
+      qualityPolicyVersion: qualityRuntime?.configuration.policyVersion || null,
+      qualityGatePassed: qualityReport?.passed ?? null,
+      qualityReport,
+      qualityRepairCount: repairPasses,
     },
   };
 };

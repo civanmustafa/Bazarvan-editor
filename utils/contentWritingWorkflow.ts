@@ -1,4 +1,4 @@
-export const CONTENT_WRITING_WORKFLOW_VERSION = 1;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 2;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 
@@ -8,11 +8,14 @@ export type ContentWritingWorkflowStepType =
   | 'introduction'
   | 'conclusion'
   | 'faq'
-  | 'final_review';
+  | 'final_review'
+  | 'quality_repair';
 
 export type ContentWritingOutlineSection = {
   title: string;
   brief: string;
+  targetWords?: number;
+  subheadings?: string[];
 };
 
 export type ContentWritingOutline = {
@@ -75,7 +78,18 @@ export const normalizeContentWritingOutline = (value: unknown): ContentWritingOu
     if (!title || seen.has(normalizedTitle)) return [];
     seen.add(normalizedTitle);
     const brief = isRecord(item) ? toText(item.brief, 1_200) : '';
-    return [{ title, brief: brief || title }];
+    const targetWords = isRecord(item) && Number.isFinite(Number(item.targetWords))
+      ? Math.max(80, Math.min(Math.round(Number(item.targetWords)), 300))
+      : undefined;
+    const subheadings = isRecord(item) && Array.isArray(item.subheadings)
+      ? item.subheadings.map(value => toText(value, 300)).filter(Boolean).slice(0, 4)
+      : [];
+    return [{
+      title,
+      brief: brief || title,
+      ...(targetWords ? { targetWords } : {}),
+      ...(subheadings.length > 0 ? { subheadings } : {}),
+    }];
   }).slice(0, CONTENT_WRITING_MAX_OUTLINE_SECTIONS);
   if (sections.length < CONTENT_WRITING_MIN_OUTLINE_SECTIONS) return null;
   return { sections };
@@ -126,17 +140,17 @@ export const createContentWritingWorkflowSteps = (
       metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION },
     },
     {
-      key: 'conclusion',
-      type: 'conclusion',
+      key: 'faq',
+      type: 'faq',
       ordinal: nextOrdinal + 1,
-      title: 'Conclusion',
+      title: 'Frequently asked questions',
       metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION },
     },
     {
-      key: 'faq',
-      type: 'faq',
+      key: 'conclusion',
+      type: 'conclusion',
       ordinal: nextOrdinal + 2,
-      title: 'Frequently asked questions',
+      title: 'Conclusion',
       metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION },
     },
     {
@@ -154,18 +168,25 @@ const outlineJson = (outline: ContentWritingOutline): string => JSON.stringify(o
 export const buildContentWritingOutlinePrompt = (options: {
   articleTitle: string;
   language: string;
+  qualityContract?: string;
+  minimumSections?: number;
+  maximumSections?: number;
 }): string => `Execute only the outline stage for the article "${options.articleTitle}".
 
 The permanent instructions, article data, keyword data, and the full text of all three competitors are already present in the conversation context. Do not write the article yet.
 
+${options.qualityContract ? `Mandatory quality contract:\n${options.qualityContract}\n` : ''}
+
 Return only valid JSON with this exact shape:
-{"sections":[{"title":"Section title","brief":"What this section must cover"}]}
+{"sections":[{"title":"Section title","brief":"What this section must cover","targetWords":140,"subheadings":["Optional H3 title"]}]}
 
 Requirements:
 - Use ${options.language === 'en' ? 'English' : 'Arabic'} for every title and brief.
-- Return between ${CONTENT_WRITING_MIN_OUTLINE_SECTIONS} and ${CONTENT_WRITING_MAX_OUTLINE_SECTIONS} unique body sections in a logical order.
+- Return between ${options.minimumSections || CONTENT_WRITING_MIN_OUTLINE_SECTIONS} and ${options.maximumSections || CONTENT_WRITING_MAX_OUTLINE_SECTIONS} unique body sections in a logical order.
 - Do not include the introduction, conclusion, or FAQ as body sections.
 - Cover the search intent and important competitor topics without copying competitor wording.
+- Make at least three H2 titles direct questions when the language and topic permit it.
+- Prefer either 120-150 target words without H3, or 180-220 words with 2-3 H3 subheadings.
 - Do not wrap the JSON in a code fence and do not add commentary.`;
 
 export const buildContentWritingSectionPrompt = (options: {
@@ -181,13 +202,15 @@ ${outlineJson(options.outline)}
 Current section:
 - Title: ${options.section.title}
 - Coverage brief: ${options.section.brief}
+- Target words: ${options.section.targetWords || 140}
+${options.section.subheadings?.length ? `- Required H3 subheadings: ${options.section.subheadings.join(' | ')}` : '- H3 subheadings: none unless needed by the quality contract'}
 
 ${options.previousSection ? `The complete preceding section is included for continuity only:
 <previous_section>
 ${options.previousSection}
 </previous_section>
 
-` : ''}Write the complete Markdown body for this section only. Do not repeat the section heading, article title, introduction, conclusion, or FAQ. Follow all permanent instructions and use the full competitor context as reference data, without copying it.`;
+` : ''}Write the complete Markdown body for this section only. Use the requested H3 headings when listed, but do not repeat the H2 section heading, article title, introduction, conclusion, or FAQ. Follow all permanent instructions and use the full competitor context as reference data, without copying it.`;
 
 export const buildContentWritingIntroductionPrompt = (options: {
   outline: ContentWritingOutline;
@@ -202,7 +225,7 @@ Completed body sections:
 ${options.bodyDraft}
 </completed_body>
 
-Write a concise, useful introduction that matches the search intent and naturally prepares the reader for the completed body. Return the introduction body only in Markdown. Do not add a heading or repeat the article title.`;
+Write exactly two useful introduction paragraphs that match the search intent and naturally prepare the reader for the completed body. The first paragraph must contain 30-60 words and 2-4 sentences. The second must contain 40-80 words and 2-4 sentences. Return the introduction body only in Markdown. Do not add a heading, list, or repeat the article title.`;
 
 export const buildContentWritingConclusionPrompt = (options: {
   outline: ContentWritingOutline;
@@ -217,7 +240,7 @@ Completed article draft so far:
 ${options.draft}
 </completed_draft>
 
-Write a focused conclusion that closes the article without introducing unsupported facts. Return the conclusion body only in Markdown. Do not add a heading or repeat the article title.`;
+Write a focused 70-120 word conclusion that closes the article without unsupported facts. Start the first paragraph with a natural concluding indicator. Include at least one useful number already supported by the article and one short list; introduce that list with a 15-40 word sentence ending in a colon or question mark. Return the conclusion body only in Markdown. Do not add a heading or repeat the article title.`;
 
 export const buildContentWritingFaqPrompt = (options: {
   outline: ContentWritingOutline;
@@ -232,14 +255,19 @@ Completed article draft:
 ${options.draft}
 </completed_draft>
 
-Write a useful FAQ based on the search intent, article, keywords, and full competitor context. Return only the questions and answers in Markdown, using level-three headings for questions. Do not add an FAQ section heading or repeat unsupported claims.`;
+Write a useful FAQ based on the search intent, article, keywords, and full competitor context. Return only the questions and answers in Markdown, using level-three headings for questions. Every answer must be one paragraph of 35-75 words and 2-3 sentences. Do not add an FAQ section heading or repeat unsupported claims.`;
 
 export const buildContentWritingFinalReviewPrompt = (options: {
   articleTitle: string;
   draft: string;
+  qualityContract?: string;
 }): string => `Execute the final editorial review for the article "${options.articleTitle}".
 
-Review the complete assembled draft against every permanent instruction, the article context, target keywords, search intent, and the full competitor sources. Correct coherence, repetition, unsupported claims, Markdown structure, language quality, and natural keyword use.
+Act as an independent semantic editor, not as the original section writer. Review the complete assembled draft against every permanent instruction, the article context, target keywords, search intent, and the full competitor sources. Correct coherence, repetition, unsupported claims, Markdown structure, language quality, and natural keyword use.
+
+Verify semantic usefulness explicitly: search-intent coverage, completeness of the answer, entity/topic coverage, factual grounding, originality versus competitors, quotable direct answers for AEO/GEO, logical progression, and an appropriate conversion or next-step cue. Remove any statement that is not supported by the supplied context rather than inventing evidence.
+
+${options.qualityContract ? `Deterministic quality contract:\n${options.qualityContract}\n` : ''}
 
 <assembled_draft>
 ${options.draft}
@@ -285,8 +313,8 @@ export const assembleContentWritingDraft = (options: {
     `# ${articleTitle}`,
     introduction,
     ...sectionParts,
-    conclusion ? `## ${conclusionTitle}\n\n${conclusion}` : '',
     options.includeFaq !== false && faq ? `## ${faqTitle}\n\n${faq}` : '',
+    conclusion ? `## ${conclusionTitle}\n\n${conclusion}` : '',
   ]);
 };
 

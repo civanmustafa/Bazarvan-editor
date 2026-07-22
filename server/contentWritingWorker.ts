@@ -191,6 +191,9 @@ const executeClaimedSession = async (
     }
 
     if (result.ok) {
+      const qualityReport = result.metadata.qualityReport && typeof result.metadata.qualityReport === 'object'
+        ? result.metadata.qualityReport as Record<string, unknown>
+        : null;
       const progress = {
         ...latestProgress,
         stage: 'completed',
@@ -199,6 +202,13 @@ const executeClaimedSession = async (
         status: result.status,
         message: 'Structured content writing and final review completed successfully.',
         completed: true,
+        ...(qualityReport ? {
+          qualityScore: Number(qualityReport.score) || 0,
+          qualityMinimumScore: Number(qualityReport.minimumScore) || 0,
+          qualityGatePassed: qualityReport.passed === true,
+          qualityPolicyVersion: Number(qualityReport.policyVersion) || 1,
+          qualityRepairPasses: Number(qualityReport.repairPasses) || 0,
+        } : {}),
       };
       const completed = await completeContentWritingSession({
         sessionId: session.id,

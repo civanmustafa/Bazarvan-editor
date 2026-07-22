@@ -50,7 +50,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 5);
+  assert.equal(result.requiredMigrationCount, 6);
   assert.deepEqual(result.checks, { sessions: true, messages: true, steps: true });
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'content_writing_messages',
@@ -61,6 +61,8 @@ test('content-writing readiness checks every required schema surface', async () 
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /execution_mode/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /application_count/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_guard_version/);
+  assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_policy_version/);
+  assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_report/);
 });
 
 test('public readiness reports a safe 503 reason without exposing Supabase details', async () => {
@@ -92,6 +94,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   const packageJson = JSON.parse(packageSource) as { scripts?: Record<string, string> };
 
   assert.match(releaseRegistry, /20260722040000_content_writing_quality_guards\.sql/);
+  assert.match(releaseRegistry, /20260723000000_content_writing_quality_policy\.sql/);
   assert.match(releaseRegistry, /server-dist\/content-writing-worker\.mjs/);
   assert.match(releaseScript, /CONTENT_WRITING_REQUIRED_MIGRATIONS/);
   assert.match(releaseScript, /claim_next_content_writing_session/);

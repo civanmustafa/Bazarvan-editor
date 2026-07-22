@@ -18,12 +18,19 @@ import {
   DEFAULT_CONTENT_WRITING_TEMPLATES,
   normalizeContentWritingTemplate,
 } from './contentWriting';
+import {
+  CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION,
+  CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES,
+  CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE,
+  CONTENT_WRITING_MAX_REPAIR_PASSES,
+  CONTENT_WRITING_QUALITY_POLICY_VERSIONS,
+} from './contentWritingQuality';
 
 export const SYSTEM_SETTING_KEYS = ['ai', 'n8n', 'articles', 'roles', 'system'] as const;
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
 export type SystemSettingsMap = Record<SystemSettingKey, Record<string, any>>;
 
-export const SETTINGS_REGISTRY_VERSION = 2;
+export const SETTINGS_REGISTRY_VERSION = 3;
 export const USER_PREFERENCES_SCHEMA_VERSION = 1;
 
 const ALLOWED_EXTERNAL_COMMAND_IDS = new Set(
@@ -48,6 +55,9 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     [CONTENT_WRITING_TEMPLATE_FIELDS.articleContext]: DEFAULT_CONTENT_WRITING_TEMPLATES.articleContext,
     [CONTENT_WRITING_TEMPLATE_FIELDS.generationRequest]: DEFAULT_CONTENT_WRITING_TEMPLATES.generationRequest,
     contentWritingMaxInputTokens: CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET,
+    contentWritingQualityPolicyVersion: CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION,
+    contentWritingMinimumQualityScore: CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE,
+    contentWritingMaxRepairPasses: CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES,
   },
   n8n: {
     enabled: true,
@@ -169,6 +179,29 @@ const normalizeSystemSection = (
       defaults.contentWritingMaxInputTokens,
       CONTENT_WRITING_MIN_INPUT_TOKEN_BUDGET,
       CONTENT_WRITING_MAX_INPUT_TOKEN_BUDGET,
+    ));
+    setWhenPresent('contentWritingQualityPolicyVersion', field => {
+      const version = normalizeInteger(
+        field,
+        defaults.contentWritingQualityPolicyVersion,
+        1,
+        CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION,
+      );
+      return CONTENT_WRITING_QUALITY_POLICY_VERSIONS.includes(version)
+        ? version
+        : defaults.contentWritingQualityPolicyVersion;
+    });
+    setWhenPresent('contentWritingMinimumQualityScore', field => normalizeInteger(
+      field,
+      defaults.contentWritingMinimumQualityScore,
+      50,
+      100,
+    ));
+    setWhenPresent('contentWritingMaxRepairPasses', field => normalizeInteger(
+      field,
+      defaults.contentWritingMaxRepairPasses,
+      0,
+      CONTENT_WRITING_MAX_REPAIR_PASSES,
     ));
     return normalized;
   }

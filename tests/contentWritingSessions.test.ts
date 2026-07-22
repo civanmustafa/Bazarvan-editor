@@ -123,6 +123,24 @@ test('content-writing quality guards serialize starts and enforce one active API
   assertBalancedSqlParentheses(migration);
 });
 
+test('content-writing quality policy migration persists versioned reports, repairs, and audited overrides', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260723000000_content_writing_quality_policy.sql',
+  );
+
+  assert.match(migration, /quality_policy_version integer not null default 1/);
+  assert.match(migration, /quality_score integer/);
+  assert.match(migration, /quality_report jsonb not null default '\{\}'::jsonb/);
+  assert.match(migration, /quality_repair_count integer not null default 0/);
+  assert.match(migration, /'quality_repair'/);
+  assert.match(migration, /sync_content_writing_quality_metadata/);
+  assert.match(migration, /p_quality_override_reason text default null/);
+  assert.match(migration, /char_length\(coalesce\(v_override_reason, ''\)\) < 8/);
+  assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
   const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),
@@ -149,6 +167,9 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(workflow, /startContentWritingStep/);
   assert.match(workflow, /completeContentWritingStep/);
   assert.match(workflow, /buildContentWritingFinalReviewPrompt/);
+  assert.match(workflow, /evaluateContentWritingQuality/);
+  assert.match(workflow, /buildContentWritingRepairPrompt/);
+  assert.match(workflow, /quality-repair-/);
   assert.match(workflow, /existing\.status === 'completed'/);
   assert.match(workflowBuilder, /createContentWritingWorkflowSteps/);
   assert.match(workflowBuilder, /assembleContentWritingDraft/);
@@ -184,6 +205,8 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /action === 'resume'/);
   assert.match(api, /action === 'recordApplication'/);
   assert.match(api, /recordContentWritingApplication/);
+  assert.match(api, /resolveSessionQualityReport/);
+  assert.match(api, /content_writing_quality_gate_failed/);
   assert.match(api, /getContentWritingSteps/);
   assert.match(registry, /path: '\/api\/content-writing'/);
   assert.match(registry, /path: '\/api\/content-writing\/external-result'/);
@@ -206,6 +229,8 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(modal, /aria-modal="true"/);
   assert.match(modal, /onConfirm/);
   assert.match(modal, /prepareContentWritingResultForEditor/);
+  assert.match(modal, /qualityReport\.score/);
+  assert.match(modal, /qualityOverrideReason/);
   assert.match(editorContext, /const applyGeneratedArticleContent = useCallback/);
   assert.match(editorContext, /handleSaveDraft\(\{ reason: 'manual', force: true \}\)/);
   assert.match(editorContext, /parseMarkdownToArticleHtml/);
@@ -255,8 +280,12 @@ test('admin content-writing reports load lightweight daily rows without generate
   assert.match(loader, /\.lte\('created_at', options\.to\)/);
   assert.match(loader, /execution_mode/);
   assert.doesNotMatch(loader, /result_text|context_snapshot/);
+  assert.match(loader, /quality_score/);
+  assert.match(loader, /quality_policy_version/);
+  assert.match(loader, /quality_repair_count/);
   assert.match(table, /buildAdminArticlePath\(session\.articleId\)/);
   assert.match(table, /session\.applicationCount/);
+  assert.match(table, /session\.qualityScore/);
   assert.match(admin, /<ContentWritingReportsTable/);
   assert.match(admin, /listContentWritingReportSessions/);
 });

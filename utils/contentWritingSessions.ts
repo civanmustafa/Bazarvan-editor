@@ -1,4 +1,12 @@
 import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from './authenticatedApi';
+import {
+  normalizeContentWritingQualityConfiguration,
+  type ContentWritingQualityConfiguration,
+} from '../constants/contentWritingQuality';
+import {
+  normalizeContentWritingQualityReport,
+  type ContentWritingQualityReport,
+} from './contentWritingQuality';
 
 export type ContentWritingProvider = 'gemini' | 'geminiPaid' | 'openai';
 export type ContentWritingSessionStatus =
@@ -36,6 +44,13 @@ export type ContentWritingSession = {
   appliedAt: string | null;
   appliedBy: string | null;
   applicationCount: number;
+  qualityPolicyVersion: number;
+  qualityScore: number | null;
+  qualityReport: ContentWritingQualityReport | null;
+  qualityRepairCount: number;
+  qualityOverrideReason: string | null;
+  qualityOverrideBy: string | null;
+  qualityOverrideAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -55,7 +70,8 @@ export type ContentWritingStepType =
   | 'introduction'
   | 'conclusion'
   | 'faq'
-  | 'final_review';
+  | 'final_review'
+  | 'quality_repair';
 
 export type ContentWritingStepStatus = 'pending' | 'running' | 'completed' | 'failed';
 
@@ -101,6 +117,8 @@ export type ExternalContentWritingConversation = {
   templateRegistryVersion: number;
   estimatedInputTokens: number;
   maxInputTokens: number;
+  qualityConfiguration: ContentWritingQualityConfiguration;
+  qualityContract: string;
   messages: [
     ExternalContentWritingMessage,
     ExternalContentWritingMessage,
@@ -172,6 +190,17 @@ const normalizeSession = (value: unknown): ContentWritingSession | null => {
     appliedAt: toNullableText(value.appliedAt),
     appliedBy: toNullableText(value.appliedBy),
     applicationCount: Math.max(0, Number(value.applicationCount) || 0),
+    qualityPolicyVersion: Math.max(1, Number(value.qualityPolicyVersion) || 1),
+    qualityScore: value.qualityScore !== null
+      && value.qualityScore !== undefined
+      && Number.isFinite(Number(value.qualityScore))
+      ? Number(value.qualityScore)
+      : null,
+    qualityReport: normalizeContentWritingQualityReport(value.qualityReport),
+    qualityRepairCount: Math.max(0, Number(value.qualityRepairCount) || 0),
+    qualityOverrideReason: toNullableText(value.qualityOverrideReason),
+    qualityOverrideBy: toNullableText(value.qualityOverrideBy),
+    qualityOverrideAt: toNullableText(value.qualityOverrideAt),
     createdAt: toText(value.createdAt),
     updatedAt: toText(value.updatedAt),
   };
@@ -197,7 +226,7 @@ const normalizeStep = (value: unknown): ContentWritingStep | null => {
   if (!isRecord(value) || !toText(value.id) || !toText(value.stepKey)) return null;
   const stepType = toText(value.stepType) as ContentWritingStepType;
   const status = toText(value.status) as ContentWritingStepStatus;
-  if (!['outline', 'section', 'introduction', 'conclusion', 'faq', 'final_review'].includes(stepType)) return null;
+  if (!['outline', 'section', 'introduction', 'conclusion', 'faq', 'final_review', 'quality_repair'].includes(stepType)) return null;
   if (!['pending', 'running', 'completed', 'failed'].includes(status)) return null;
   return {
     id: toText(value.id),
@@ -261,6 +290,10 @@ const normalizeExternalConversation = (value: unknown): ExternalContentWritingCo
     templateRegistryVersion: Math.max(1, Number(value.templateRegistryVersion) || 1),
     estimatedInputTokens: Math.max(0, Number(value.estimatedInputTokens) || 0),
     maxInputTokens: Math.max(0, Number(value.maxInputTokens) || 0),
+    qualityConfiguration: normalizeContentWritingQualityConfiguration(
+      isRecord(value.qualityConfiguration) ? value.qualityConfiguration : {},
+    ),
+    qualityContract: toText(value.qualityContract),
     messages: messages as ExternalContentWritingConversation['messages'],
   };
 };
@@ -402,8 +435,13 @@ export const resumeContentWritingSession = async (
 
 export const recordContentWritingSessionApplication = async (
   sessionId: string,
+  qualityOverrideReason?: string,
 ): Promise<ContentWritingSession> => {
-  const payload = await requestContentWriting({ action: 'recordApplication', sessionId });
+  const payload = await requestContentWriting({
+    action: 'recordApplication',
+    sessionId,
+    ...(qualityOverrideReason ? { qualityOverrideReason } : {}),
+  });
   const session = normalizeSession(payload.session);
   if (!session) throw new Error('Content writing API returned an invalid application response.');
   return session;

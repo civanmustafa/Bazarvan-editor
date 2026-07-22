@@ -41,6 +41,13 @@ export type ContentWritingSession = {
   applied_at: string | null;
   applied_by: string | null;
   application_count: number;
+  quality_policy_version: number;
+  quality_score: number | null;
+  quality_report: JsonObject;
+  quality_repair_count: number;
+  quality_override_reason: string | null;
+  quality_override_by: string | null;
+  quality_override_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -63,7 +70,8 @@ export type ContentWritingStepType =
   | 'introduction'
   | 'conclusion'
   | 'faq'
-  | 'final_review';
+  | 'final_review'
+  | 'quality_repair';
 
 export type ContentWritingStepStatus = 'pending' | 'running' | 'completed' | 'failed';
 
@@ -469,6 +477,13 @@ export const listContentWritingSessions = async (options: {
       'applied_at',
       'applied_by',
       'application_count',
+      'quality_policy_version',
+      'quality_score',
+      'quality_report',
+      'quality_repair_count',
+      'quality_override_reason',
+      'quality_override_by',
+      'quality_override_at',
       'created_at',
       'updated_at',
     ].join(','))
@@ -514,12 +529,14 @@ export const resumeContentWritingSession = async (options: {
 export const recordContentWritingApplication = async (options: {
   sessionId: string;
   appliedBy: string;
+  qualityOverrideReason?: string;
 }): Promise<ContentWritingSession | null> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
     'record_content_writing_application',
     {
       p_session_id: options.sessionId,
       p_applied_by: options.appliedBy,
+      p_quality_override_reason: options.qualityOverrideReason || null,
     },
   );
   if (error) throwServiceError('application recording', error);

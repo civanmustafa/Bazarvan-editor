@@ -33,6 +33,14 @@ import {
 } from '../server/contentWritingSessionService';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 import { toPublicContentWritingSession } from '../server/contentWritingPresenter';
+import {
+  evaluateContentWritingQuality,
+  normalizeContentWritingQualityReport,
+  type ContentWritingQualityReport,
+} from '../utils/contentWritingQuality';
+import { normalizeContentWritingQualityConfiguration } from '../constants/contentWritingQuality';
+import { normalizeGoalContext } from '../utils/goalContext';
+import type { Keywords } from '../types';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9:_-]{16,160}$/;
@@ -52,6 +60,65 @@ class ContentWritingApiError extends Error {
 }
 
 const toText = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+const toTextList = (value: unknown): string[] => Array.isArray(value)
+  ? value.map(toText).filter(Boolean)
+  : [];
+
+const resolveSessionQualityReport = async (
+  session: ContentWritingSession,
+): Promise<ContentWritingQualityReport | null> => {
+  const persisted = normalizeContentWritingQualityReport(session.quality_report)
+    || normalizeContentWritingQualityReport(session.response_metadata?.qualityReport);
+  if (persisted) return persisted;
+  const qualityInput = isRecord(session.context_snapshot?.qualityInput)
+    ? session.context_snapshot.qualityInput
+    : null;
+  const article = isRecord(session.context_snapshot?.article)
+    ? session.context_snapshot.article
+    : {};
+  if (!qualityInput || !toText(session.result_text)) return null;
+  const keywordSource = isRecord(qualityInput.keywords) ? qualityInput.keywords : {};
+  const keywords: Keywords = {
+    primary: toText(keywordSource.primary),
+    secondaries: toTextList(keywordSource.secondaries),
+    company: toText(keywordSource.company),
+    lsi: toTextList(keywordSource.lsi),
+  };
+  if (!keywords.primary) return null;
+  const report = evaluateContentWritingQuality({
+    markdown: session.result_text || '',
+    articleTitle: toText(article.title),
+    keywords,
+    goalContext: normalizeGoalContext(isRecord(qualityInput.goalContext) ? qualityInput.goalContext : {}),
+    articleLanguage: toText(article.language) === 'en' ? 'en' : 'ar',
+    configuration: normalizeContentWritingQualityConfiguration(
+      isRecord(session.context_snapshot?.qualityConfiguration)
+        ? session.context_snapshot.qualityConfiguration
+        : {},
+    ),
+  }).report;
+  const { error } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_sessions')
+    .update({
+      quality_policy_version: report.policyVersion,
+      quality_score: report.score,
+      quality_report: report,
+      quality_repair_count: report.repairPasses,
+      response_metadata: {
+        ...(isRecord(session.response_metadata) ? session.response_metadata : {}),
+        qualityReport: report,
+      },
+    })
+    .eq('id', session.id);
+  if (error) {
+    throw new ContentWritingApiError({
+      message: 'The content quality report could not be persisted.',
+      status: 500,
+      code: 'content_writing_quality_report_save_failed',
+    });
+  }
+  return report;
+};
 
 const requireUuid = (value: unknown, field: string): string => {
   const normalized = toText(value);
@@ -194,6 +261,8 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
           templateRegistryVersion: conversation.templateRegistryVersion,
           estimatedInputTokens: conversation.estimatedInputTokens,
           maxInputTokens: conversation.maxInputTokens,
+          qualityConfiguration: conversation.qualityConfiguration,
+          qualityContract: conversation.qualityContract,
           messages: conversation.messages.map((message, index) => ({
             sequenceNumber: index + 1,
             stage: message.stage === 'articleContext'
@@ -343,9 +412,32 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         code: 'content_writing_apply_conflict',
       });
     }
+    const qualityReport = await resolveSessionQualityReport(session);
+    const qualityOverrideReason = toText(body.qualityOverrideReason).slice(0, 500);
+    if (qualityReport && !qualityReport.passed) {
+      if (principal.role !== 'admin') {
+        throw new ContentWritingApiError({
+          message: 'The article has not passed the configured content quality gate.',
+          status: 409,
+          code: 'content_writing_quality_gate_failed',
+          details: { qualityReport },
+        });
+      }
+      if (qualityOverrideReason.length < 8) {
+        throw new ContentWritingApiError({
+          message: 'An administrator override reason of at least 8 characters is required.',
+          status: 422,
+          code: 'content_writing_quality_override_reason_required',
+          details: { qualityReport },
+        });
+      }
+    }
     const applied = await recordContentWritingApplication({
       sessionId: session.id,
       appliedBy: principal.userId,
+      qualityOverrideReason: qualityReport && !qualityReport.passed
+        ? qualityOverrideReason
+        : undefined,
     });
     if (!applied) {
       throw new ContentWritingApiError({

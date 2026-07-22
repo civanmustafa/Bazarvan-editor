@@ -33,6 +33,13 @@ export const toPublicContentWritingSession = (
   appliedAt: session.applied_at,
   appliedBy: session.applied_by,
   applicationCount: session.application_count,
+  qualityPolicyVersion: session.quality_policy_version || 1,
+  qualityScore: session.quality_score,
+  qualityReport: session.quality_report || null,
+  qualityRepairCount: session.quality_repair_count || 0,
+  qualityOverrideReason: session.quality_override_reason,
+  qualityOverrideBy: session.quality_override_by,
+  qualityOverrideAt: session.quality_override_at,
   createdAt: session.created_at,
   updatedAt: session.updated_at,
 });

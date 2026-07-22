@@ -40,8 +40,8 @@ test('structured writing parses a bounded outline and creates deterministic sequ
     'section-03',
     'section-04',
     'introduction',
-    'conclusion',
     'faq',
+    'conclusion',
     'final-review',
   ]);
   assert.deepEqual(steps.map((step: { ordinal: number }) => step.ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -79,6 +79,10 @@ test('structured writing assembles one markdown draft without duplicate section 
   assert.match(draft, /## Conclusion/);
   assert.match(draft, /## Frequently asked questions/);
   assert.match(draft, /### What matters\?/);
+  assert.ok(
+    draft.indexOf('## Frequently asked questions') < draft.indexOf('## Conclusion'),
+    'FAQ must appear before the conclusion so the conclusion remains the final H2.',
+  );
 });
 
 test('final review prompts receive the complete assembled draft', async () => {

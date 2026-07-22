@@ -45,6 +45,8 @@ const requiredServerMarkers = [
   'content_writing_sessions',
   'content_writing_steps',
   'quality_guard_version',
+  'quality_policy_version',
+  'quality_report',
 ];
 for (const marker of requiredServerMarkers) {
   if (!serverBundle.includes(marker)) {
@@ -56,6 +58,7 @@ const requiredWorkerMarkers = [
   'heartbeat_content_writing_session',
   'complete_content_writing_session',
   'fail_content_writing_session',
+  'Quality repair',
 ];
 for (const marker of requiredWorkerMarkers) {
   if (!workerBundle.includes(marker)) {

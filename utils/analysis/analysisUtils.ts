@@ -15,6 +15,7 @@ export interface AnalysisDocumentNode {
     text: string;
     contentText?: string;
     nodeSize?: number;
+    synthetic?: boolean;
     node?: any;
     pos: number;
 }

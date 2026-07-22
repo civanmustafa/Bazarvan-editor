@@ -12,10 +12,24 @@ import {
   type ContentWritingTemplateStage,
 } from '../constants/contentWriting';
 import { buildContentWritingPromptBundle } from '../utils/contentWritingContext';
+import {
+  CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION,
+  CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES,
+  CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE,
+  CONTENT_WRITING_MAX_REPAIR_PASSES,
+  CONTENT_WRITING_QUALITY_POLICY_VERSIONS,
+} from '../constants/contentWritingQuality';
 
 type ContentWritingPromptSettingsProps = {
   values: Record<string, unknown>;
-  onChange: (field: ContentWritingTemplateField | 'contentWritingMaxInputTokens', value: string | number) => void;
+  onChange: (
+    field: ContentWritingTemplateField
+      | 'contentWritingMaxInputTokens'
+      | 'contentWritingQualityPolicyVersion'
+      | 'contentWritingMinimumQualityScore'
+      | 'contentWritingMaxRepairPasses',
+    value: string | number,
+  ) => void;
 };
 
 const TEMPLATE_DEFINITIONS: Array<{
@@ -63,6 +77,9 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
     generationRequest: String(values[CONTENT_WRITING_TEMPLATE_FIELDS.generationRequest] ?? ''),
   }), [values]);
   const inputBudget = Number(values.contentWritingMaxInputTokens || CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET);
+  const qualityPolicyVersion = Number(values.contentWritingQualityPolicyVersion || CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION);
+  const minimumQualityScore = Number(values.contentWritingMinimumQualityScore || CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE);
+  const maxRepairPasses = Number(values.contentWritingMaxRepairPasses ?? CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES);
   const inspections = useMemo(() => Object.fromEntries(
     TEMPLATE_DEFINITIONS.map(definition => [
       definition.stage,
@@ -80,6 +97,9 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
       onChange(CONTENT_WRITING_TEMPLATE_FIELDS[stage], DEFAULT_CONTENT_WRITING_TEMPLATES[stage]);
     });
     onChange('contentWritingMaxInputTokens', CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET);
+    onChange('contentWritingQualityPolicyVersion', CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION);
+    onChange('contentWritingMinimumQualityScore', CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE);
+    onChange('contentWritingMaxRepairPasses', CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES);
   };
 
   return (
@@ -168,6 +188,46 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
           className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
         />
       </label>
+
+      <div className="grid gap-4 border-t border-gray-200 pt-5 dark:border-[#3C3C3C] md:grid-cols-3">
+        <label className="block">
+          <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">إصدار سياسة جودة المقالة</span>
+          <select
+            value={qualityPolicyVersion}
+            onChange={event => onChange('contentWritingQualityPolicyVersion', Number(event.target.value))}
+            className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+          >
+            {CONTENT_WRITING_QUALITY_POLICY_VERSIONS.map(version => (
+              <option key={version} value={version}>الإصدار {version}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">الحد الأدنى لدرجة الجودة</span>
+          <input
+            type="number"
+            min={50}
+            max={100}
+            value={minimumQualityScore}
+            onChange={event => onChange('contentWritingMinimumQualityScore', Number(event.target.value))}
+            className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">أقصى دورات إصلاح تلقائي</span>
+          <input
+            type="number"
+            min={0}
+            max={CONTENT_WRITING_MAX_REPAIR_PASSES}
+            value={maxRepairPasses}
+            onChange={event => onChange('contentWritingMaxRepairPasses', Number(event.target.value))}
+            className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+          />
+        </label>
+      </div>
+      <p className="text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+        تُثبَّت نسخة السياسة داخل كل جلسة. تغيير هذه القيم يؤثر في الجلسات الجديدة فقط، ويمكن إضافة إصدارات جديدة أو الرجوع إلى إصدار سابق دون تغيير الجلسات التاريخية.
+      </p>
 
       {showPreview && (
         <div className="border-t border-gray-200 pt-4 dark:border-[#3C3C3C]">

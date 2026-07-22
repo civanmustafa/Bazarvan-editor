@@ -1393,7 +1393,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         articleLanguage,
         uiLanguage,
         activeAnalysisPanels,
-        currentView === 'editor'
+        currentView === 'editor',
+        title,
     );
 
     useEffect(() => {

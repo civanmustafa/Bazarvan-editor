@@ -28,6 +28,11 @@ export type ContentWritingReportSession = {
   appliedAt: string | null;
   appliedBy: string | null;
   applicationCount: number;
+  qualityScore: number | null;
+  qualityPolicyVersion: number | null;
+  qualityRepairCount: number;
+  qualityPassed: boolean | null;
+  qualityMinimumScore: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -52,6 +57,9 @@ type ContentWritingReportRow = {
   applied_at: string | null;
   applied_by: string | null;
   application_count: number | null;
+  quality_score: number | null;
+  quality_policy_version: number | null;
+  quality_repair_count: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -80,6 +88,7 @@ const normalizeReportSession = (row: ContentWritingReportRow): ContentWritingRep
   const externalProvider = metadata.externalProvider === 'chatgpt' || metadata.externalProvider === 'gemini'
     ? metadata.externalProvider
     : null;
+  const qualityReport = isRecord(metadata.qualityReport) ? metadata.qualityReport : {};
   return {
     id: row.id,
     articleId: row.article_id,
@@ -100,6 +109,17 @@ const normalizeReportSession = (row: ContentWritingReportRow): ContentWritingRep
     appliedAt: toNullableText(row.applied_at),
     appliedBy: toNullableText(row.applied_by),
     applicationCount: Math.max(0, Number(row.application_count) || 0),
+    qualityScore: row.quality_score !== null && Number.isFinite(Number(row.quality_score))
+      ? Number(row.quality_score)
+      : null,
+    qualityPolicyVersion: row.quality_policy_version !== null && Number.isFinite(Number(row.quality_policy_version))
+      ? Math.max(1, Math.round(Number(row.quality_policy_version)))
+      : null,
+    qualityRepairCount: Math.max(0, Math.round(Number(row.quality_repair_count) || 0)),
+    qualityPassed: typeof qualityReport.passed === 'boolean' ? qualityReport.passed : null,
+    qualityMinimumScore: Number.isFinite(Number(qualityReport.minimumScore))
+      ? Math.max(0, Math.min(100, Math.round(Number(qualityReport.minimumScore))))
+      : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -132,6 +152,9 @@ export const listContentWritingReportSessions = async (options: {
       'applied_at',
       'applied_by',
       'application_count',
+      'quality_score',
+      'quality_policy_version',
+      'quality_repair_count',
       'created_at',
       'updated_at',
     ].join(','))

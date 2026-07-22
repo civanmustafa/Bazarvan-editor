@@ -5,7 +5,7 @@ export const CONTENT_WRITING_SCHEMA_PROBES = [
   {
     id: 'sessions',
     table: 'content_writing_sessions',
-    columns: 'id,execution_mode,applied_at,application_count,quality_guard_version',
+    columns: 'id,execution_mode,applied_at,application_count,quality_guard_version,quality_policy_version,quality_score,quality_report,quality_repair_count',
   },
   {
     id: 'messages',
@@ -15,7 +15,7 @@ export const CONTENT_WRITING_SCHEMA_PROBES = [
   {
     id: 'steps',
     table: 'content_writing_steps',
-    columns: 'id,session_id,step_key,status,ordinal',
+    columns: 'id,session_id,step_key,step_type,status,ordinal',
   },
 ] as const;
 

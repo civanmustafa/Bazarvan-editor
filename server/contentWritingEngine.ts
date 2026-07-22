@@ -11,11 +11,17 @@ import {
   type ContentWritingTemplateSet,
 } from '../constants/contentWriting';
 import {
+  buildContentWritingQualityContract,
+  normalizeContentWritingQualityConfiguration,
+  type ContentWritingQualityConfiguration,
+} from '../constants/contentWritingQuality';
+import {
   SETTINGS_REGISTRY_VERSION,
   normalizeSystemSettingsMap,
 } from '../constants/settingsRegistry';
 import {
   buildContentWritingPromptBundle,
+  estimateContentWritingInputTokens,
   getContentWritingCompetitorsFromMetadata,
   normalizeContentWritingCompetitors,
   type ContentWritingArticleInput,
@@ -23,6 +29,7 @@ import {
   type ContentWritingPromptBundle,
   type ContentWritingPromptMessage,
 } from '../utils/contentWritingContext';
+import { normalizeGoalContext } from '../utils/goalContext';
 import {
   aiExecutionEngine,
   sanitizeAiExecutionResult,
@@ -113,6 +120,8 @@ export type PreparedContentWritingConversation = {
   maxInputTokens: number;
   contextSnapshot: JsonObject;
   allowModelFallback: boolean;
+  qualityConfiguration: ContentWritingQualityConfiguration;
+  qualityContract: string;
 };
 
 const isRecord = (value: unknown): value is JsonObject => (
@@ -127,6 +136,7 @@ const getContentWritingSettings = async (): Promise<{
   templates: ContentWritingTemplateSet;
   maxInputTokens: number;
   allowModelFallback: boolean;
+  qualityConfiguration: ContentWritingQualityConfiguration;
 }> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('app_settings')
@@ -143,6 +153,11 @@ const getContentWritingSettings = async (): Promise<{
     },
     maxInputTokens: Number(ai.contentWritingMaxInputTokens),
     allowModelFallback: ai.geminiFreeModelFallbackEnabled !== false,
+    qualityConfiguration: normalizeContentWritingQualityConfiguration({
+      policyVersion: ai.contentWritingQualityPolicyVersion,
+      minimumScore: ai.contentWritingMinimumQualityScore,
+      maxRepairPasses: ai.contentWritingMaxRepairPasses,
+    }),
   };
 };
 
@@ -308,6 +323,46 @@ export const prepareContentWritingConversation = async (
     maxInputTokens: settings.maxInputTokens,
   });
   assertContentWritingBundleReady(bundle);
+  const normalizedGoalContext = normalizeGoalContext(articleSource.input.goalContext);
+  const qualityConfiguration = settings.qualityConfiguration;
+  const qualityContract = buildContentWritingQualityContract({
+    configuration: qualityConfiguration,
+    language: articleSource.input.language,
+    goalContext: normalizedGoalContext,
+  });
+  const qualityContractHeading = articleSource.input.language === 'en'
+    ? 'Mandatory quality criteria for this session:'
+    : 'معايير الجودة الملزمة لهذه الجلسة:';
+  const messages = bundle.messages.map(message => message.stage === 'generationRequest'
+    ? { ...message, content: `${message.content}\n\n${qualityContractHeading}\n${qualityContract}` }
+    : message);
+  const estimatedInputTokens = estimateContentWritingInputTokens(
+    messages.map(message => message.content).join('\n\n'),
+  );
+  if (estimatedInputTokens > bundle.maxInputTokens) {
+    throw new ContentWritingEngineError({
+      message: 'The complete article context exceeds the configured content writing input budget.',
+      status: 413,
+      code: 'content_writing_input_too_large',
+      details: {
+        estimatedInputTokens,
+        maxInputTokens: bundle.maxInputTokens,
+      },
+    });
+  }
+  const qualityInput = {
+    keywords: {
+      primary: toText(articleSource.input.keywords.primary),
+      secondaries: Array.isArray(articleSource.input.keywords.secondaries)
+        ? articleSource.input.keywords.secondaries.map(toText).filter(Boolean)
+        : [],
+      company: toText(articleSource.input.keywords.company),
+      lsi: Array.isArray(articleSource.input.keywords.lsi)
+        ? articleSource.input.keywords.lsi.map(toText).filter(Boolean)
+        : [],
+    },
+    goalContext: normalizedGoalContext,
+  };
 
   return {
     article: {
@@ -316,10 +371,10 @@ export const prepareContentWritingConversation = async (
       language: articleSource.input.language,
       updatedAt: articleSource.article.updated_at,
     },
-    messages: bundle.messages,
-    inputHash: createInputHash(bundle.messages.map(message => message.content)),
+    messages,
+    inputHash: createInputHash(messages.map(message => message.content)),
     templateRegistryVersion: SETTINGS_REGISTRY_VERSION,
-    estimatedInputTokens: bundle.estimatedInputTokens,
+    estimatedInputTokens,
     maxInputTokens: bundle.maxInputTokens,
     contextSnapshot: {
       article: {
@@ -335,8 +390,14 @@ export const prepareContentWritingConversation = async (
         url: competitor.url || null,
         contentLength: competitor.content.length,
       })),
+      qualityPolicyVersion: qualityConfiguration.policyVersion,
+      qualityConfiguration,
+      qualityContract,
+      qualityInput,
     },
     allowModelFallback: settings.allowModelFallback,
+    qualityConfiguration,
+    qualityContract,
   };
 };
 
