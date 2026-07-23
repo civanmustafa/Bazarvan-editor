@@ -86,3 +86,23 @@ test('public AI responses remove key fingerprints while preserving safe attempt 
   assert.match(openAiEngine, /const sanitizeResult/);
   assert.match(openAiEngine, /keyFingerprint: _fingerprint/);
 });
+
+test('all paid provider engines use the shared automatic fallback policy', async () => {
+  const [policy, secretService, geminiEngine, openAiEngine, settingsPage] = await Promise.all([
+    readWorkspaceFile('server/aiProviderFallbackPolicy.ts'),
+    readWorkspaceFile('server/adminAiProviderSecrets.ts'),
+    readWorkspaceFile('server/aiExecutionEngine.ts'),
+    readWorkspaceFile('server/openAiExecutionEngine.ts'),
+    readWorkspaceFile('components/SettingsPage.tsx'),
+  ]);
+
+  assert.match(policy, /openai: \['openai', 'geminiPaid', 'gemini'\]/);
+  assert.match(policy, /geminiPaid: \['geminiPaid', 'gemini'\]/);
+  assert.match(policy, /shouldAttemptAiFallback/);
+  assert.match(secretService, /tiers\.flatMap/);
+  assert.match(geminiEngine, /mergeCredentialFallbackResult/);
+  assert.match(geminiEngine, /stage: 'switching-provider'/);
+  assert.match(openAiEngine, /executeOpenAiProviderFallback/);
+  assert.match(openAiEngine, /getAvailableAiProviderFallbacks/);
+  assert.match(settingsPage, /الرجوع التلقائي للمفاتيح والمزودات مفعّل/);
+});

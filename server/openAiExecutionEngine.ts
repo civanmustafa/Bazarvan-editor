@@ -1,13 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import { OPENAI_ANALYSIS_MODEL } from '../constants/modelRegistry';
+import {
+  GEMINI_FREE_MODEL_VALUES,
+  OPENAI_ANALYSIS_MODEL,
+} from '../constants/modelRegistry';
+import type { AiProviderCapabilities } from '../constants/aiProviderCapabilities';
 import type { ApiResult } from '../api/http.ts';
 import {
+  aiExecutionEngine,
   normalizeAiExecutionTelemetryContext,
+  sanitizeAiExecutionResult,
   type AiExecutionTelemetryContext,
 } from './aiExecutionEngine';
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
 import { resolveOpenAiApiKeys } from './adminAiProviderSecrets';
+import { readExternalGeminiSettings } from './externalAnalysisSettings';
+import {
+  getAvailableAiProviderFallbacks,
+  mergeProviderFallbackResult,
+  shouldAttemptAiFallback,
+} from './aiProviderFallbackPolicy';
 import { normalizeOpenAiUsage, type NormalizedAiUsage } from './aiUsage';
 
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || OPENAI_ANALYSIS_MODEL;
@@ -20,6 +32,7 @@ type OpenAiAttemptDetail = {
   reason: string;
   attempt: number;
   model: string;
+  credentialSource: 'admin' | 'hostinger';
 };
 
 export type OpenAiConversationMessage = {
@@ -194,6 +207,7 @@ const getAttemptFailure = (
   key: string,
   model: string,
   attempt: number,
+  credentialSource: 'admin' | 'hostinger',
   error: unknown,
 ): OpenAiAttemptDetail => {
   const aborted = error instanceof Error && error.name === 'AbortError';
@@ -204,6 +218,7 @@ const getAttemptFailure = (
     reason: error instanceof Error && error.message.trim() ? error.message.trim() : 'OpenAI request failed.',
     attempt,
     model,
+    credentialSource,
   };
 };
 
@@ -229,6 +244,65 @@ const boundedInteger = (value: unknown, fallback: number, minimum: number, maxim
   return Number.isFinite(parsed) ? Math.max(minimum, Math.min(Math.round(parsed), maximum)) : fallback;
 };
 
+const toGeminiFallbackInput = (
+  input: string | OpenAiConversationMessage[],
+): {
+  prompt: string;
+  history?: Array<{ role: 'user' | 'model'; text: string }>;
+} => {
+  if (typeof input === 'string') return { prompt: input };
+  const lastMessage = input[input.length - 1];
+  return {
+    prompt: lastMessage?.content || '',
+    history: input.slice(0, -1).map(message => ({
+      role: message.role === 'assistant' ? 'model' : 'user',
+      text: message.content,
+    })),
+  };
+};
+
+const executeOpenAiProviderFallback = async (options: {
+  primaryResult: ApiResult;
+  input: string | OpenAiConversationMessage[];
+  instructions: string;
+  capabilities: AiProviderCapabilities;
+  signal?: AbortSignal;
+  telemetry: AiExecutionTelemetryContext;
+}): Promise<ApiResult> => {
+  if (!shouldAttemptAiFallback(options.primaryResult)) return options.primaryResult;
+  const fallbackProvider = getAvailableAiProviderFallbacks(options.capabilities, 'openai')[0];
+  if (fallbackProvider !== 'geminiPaid' && fallbackProvider !== 'gemini') {
+    return options.primaryResult;
+  }
+
+  const freeSettings = fallbackProvider === 'gemini'
+    ? await readExternalGeminiSettings()
+    : null;
+  const fallbackInput = toGeminiFallbackInput(options.input);
+  const fallbackResult = await aiExecutionEngine.executeGemini({
+    ...fallbackInput,
+    systemInstruction: options.instructions,
+    provider: fallbackProvider,
+    model: fallbackProvider === 'gemini'
+      ? freeSettings?.model
+      : options.capabilities.providers.geminiPaid.model,
+    allowModelFallback: fallbackProvider === 'gemini' && freeSettings?.allowModelFallback === true,
+    fallbackModels: fallbackProvider === 'gemini' && freeSettings?.allowModelFallback === true
+      ? [...GEMINI_FREE_MODEL_VALUES]
+      : undefined,
+    progressId: `gemini-${randomUUID()}`,
+  }, {
+    signal: options.signal,
+    telemetry: options.telemetry,
+    suppressTelemetry: true,
+  });
+  return mergeProviderFallbackResult({
+    previous: options.primaryResult,
+    next: sanitizeAiExecutionResult(fallbackResult),
+    requestedProvider: 'openai',
+  });
+};
+
 export const executeOpenAiRequest = async (
   request: OpenAiExecutionRequest,
   options: OpenAiExecutionOptions = {},
@@ -247,7 +321,7 @@ export const executeOpenAiRequest = async (
       await recordAiExecutionTelemetry({
         requestId,
         actorUserId: telemetry.actorUserId,
-        provider: 'openai',
+        provider: typeof body.provider === 'string' ? body.provider : 'openai',
         model: typeof body.model === 'string' ? body.model : selectedModel,
         source: telemetry.source,
         articleId: telemetry.articleId,
@@ -277,13 +351,6 @@ export const executeOpenAiRequest = async (
         body: { error: 'OpenAI is disabled by the system administrator.', code: 'AI_PROVIDER_DISABLED', provider: 'openai', model: selectedModel },
       });
     }
-    if (!capability.configured) {
-      return finalize({
-        status: 503,
-        body: { error: 'OpenAI is enabled but no server API key is configured.', code: 'AI_PROVIDER_NOT_CONFIGURED', provider: 'openai', model: selectedModel },
-      });
-    }
-
     const allowedModels = new Set([
       DEFAULT_OPENAI_MODEL,
       selectedModel,
@@ -295,16 +362,53 @@ export const executeOpenAiRequest = async (
     if ((typeof input === 'string' && !input) || (Array.isArray(input) && input.length === 0)) {
       return finalize({ status: 400, body: { error: 'An OpenAI prompt or message list is required.', code: 'AI_PROMPT_REQUIRED' } });
     }
+    const instructions = String(request.instructions || '').trim() || DEFAULT_OPENAI_INSTRUCTIONS;
+    if (!capability.configured) {
+      const primaryResult: ApiResult = {
+        status: 503,
+        body: {
+          error: 'OpenAI is enabled but no server API key is configured.',
+          code: 'AI_PROVIDER_NOT_CONFIGURED',
+          provider: 'openai',
+          model: selectedModel,
+        },
+      };
+      return finalize(await executeOpenAiProviderFallback({
+        primaryResult,
+        input,
+        instructions,
+        capabilities,
+        signal: options.signal,
+        telemetry,
+      }));
+    }
 
     const credentials = await resolveOpenAiApiKeys();
-    const keys = randomizeKeyOrder(credentials.keys);
-    if (keys.length === 0) {
-      return finalize({ status: 503, body: { error: 'No OpenAI API key is configured.', code: 'AI_PROVIDER_NOT_CONFIGURED', provider: 'openai', model: selectedModel } });
+    const keyCandidates = credentials.tiers.flatMap(tier => (
+      randomizeKeyOrder(tier.keys).map(key => ({ key, credentialSource: tier.source }))
+    ));
+    if (keyCandidates.length === 0) {
+      const primaryResult: ApiResult = {
+        status: 503,
+        body: {
+          error: 'No OpenAI API key is configured.',
+          code: 'AI_PROVIDER_NOT_CONFIGURED',
+          provider: 'openai',
+          model: selectedModel,
+        },
+      };
+      return finalize(await executeOpenAiProviderFallback({
+        primaryResult,
+        input,
+        instructions,
+        capabilities,
+        signal: options.signal,
+        telemetry,
+      }));
     }
 
     const timeoutMs = boundedInteger(process.env.OPENAI_TIMEOUT_MS, 300_000, 10_000, 900_000);
     const maxOutputTokens = boundedInteger(request.maxOutputTokens, 8_000, 256, 32_000);
-    const instructions = String(request.instructions || '').trim() || DEFAULT_OPENAI_INSTRUCTIONS;
     const requestedConversationId = normalizeConversationId(request.conversationId);
     const conversationMode = request.conversationMode === 'independent' ? 'independent' : 'managed';
     const promptCacheKey = String(request.promptCacheKey || '').trim().slice(0, 200) || undefined;
@@ -312,7 +416,8 @@ export const executeOpenAiRequest = async (
     let lastError: unknown = null;
 
     const tryKeys = async (resetConversation: boolean): Promise<ApiResult | null> => {
-      for (const key of keys) {
+      for (const candidate of keyCandidates) {
+        const { key, credentialSource } = candidate;
         if (options.signal?.aborted) {
           return { status: 499, body: { error: 'OpenAI request was cancelled.', code: 'AI_REQUEST_CANCELLED', provider: 'openai', model: selectedModel, attempts } };
         }
@@ -347,7 +452,9 @@ export const executeOpenAiRequest = async (
               keySuffix: getApiKeySuffix(key),
               provider: 'openai',
               model: selectedModel,
-              credentialSource: credentials.source,
+              credentialSource,
+              requestedCredentialSource: credentials.source,
+              credentialFallbackUsed: credentialSource !== credentials.source,
               attempts,
             },
           };
@@ -357,7 +464,13 @@ export const executeOpenAiRequest = async (
             lastError = error;
             continue;
           }
-          attempts.push(getAttemptFailure(key, selectedModel, attempts.length + 1, error));
+          attempts.push(getAttemptFailure(
+            key,
+            selectedModel,
+            attempts.length + 1,
+            credentialSource,
+            error,
+          ));
           lastError = error;
         } finally {
           clearTimeout(timeoutId);
@@ -379,19 +492,29 @@ export const executeOpenAiRequest = async (
       ? lastAttempt.status
       : 500;
     const message = lastError instanceof Error ? lastError.message : 'All OpenAI API keys failed.';
-    return finalize({
+    const primaryResult: ApiResult = {
       status,
       body: {
         error: `OpenAI API request failed: ${message}`,
         code: 'OPENAI_REQUEST_FAILED',
         provider: 'openai',
         model: selectedModel,
-        credentialSource: credentials.source,
+        credentialSource: lastAttempt?.credentialSource || credentials.source,
+        requestedCredentialSource: credentials.source,
+        credentialFallbackUsed: attempts.some(attempt => attempt.credentialSource !== credentials.source),
         keyFingerprint: lastAttempt?.keyFingerprint,
         keySuffix: lastAttempt?.keySuffix,
         attempts,
       },
-    });
+    };
+    return finalize(await executeOpenAiProviderFallback({
+      primaryResult,
+      input,
+      instructions,
+      capabilities,
+      signal: options.signal,
+      telemetry,
+    }));
   } catch (error) {
     return finalize({
       status: 500,

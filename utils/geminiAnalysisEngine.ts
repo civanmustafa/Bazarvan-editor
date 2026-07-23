@@ -201,7 +201,11 @@ export const runGeminiAnalysisEngine = async ({
             progressId,
         };
     notifyAiKeyUsageFeedback({
-        provider: result.data.provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini',
+        provider: result.data.provider === 'geminiPaid'
+            ? 'Gemini Pro'
+            : result.data.requestedProvider === 'geminiPaid'
+                ? 'Gemini المجاني (بديل تلقائي لـ Gemini Pro)'
+                : 'Gemini',
         status: result.status,
         payload: result.data,
         surface: request.telemetry?.source,

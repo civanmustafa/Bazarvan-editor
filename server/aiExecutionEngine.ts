@@ -11,8 +11,17 @@ import {
 } from "./geminiKeyCoordinator";
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
+import { readExternalGeminiSettings } from './externalAnalysisSettings';
 import { normalizeGeminiUsage } from './aiUsage';
-import { resolveGeminiApiKeys } from './adminAiProviderSecrets';
+import {
+  resolveGeminiApiKeys,
+  type ResolvedAiCredentialSet,
+} from './adminAiProviderSecrets';
+import {
+  mergeCredentialFallbackResult,
+  mergeProviderFallbackResult,
+  shouldAttemptAiFallback,
+} from './aiProviderFallbackPolicy';
 import type { AiProviderCapabilities } from '../constants/aiProviderCapabilities';
 import {
   assertAiRequestPayload,
@@ -47,7 +56,7 @@ const ALLOWED_GEMINI_MODELS = new Set([
 
 type ApiResult = {
   status: number;
-  body: unknown;
+  body?: unknown;
   headers?: Record<string, string>;
 };
 
@@ -73,7 +82,7 @@ type GeminiHistoryContent = {
 };
 
 type GeminiProvider = "gemini" | "geminiPaid";
-type GeminiProgressStage = "queued" | "attempting" | "failed-key" | "switching-key" | "switching-model" | "success" | "failed" | "cancelled";
+type GeminiProgressStage = "queued" | "attempting" | "failed-key" | "switching-key" | "switching-model" | "switching-provider" | "success" | "failed" | "cancelled";
 
 type GeminiProgressState = {
   id: string;
@@ -106,6 +115,7 @@ export type AiExecutionOptions = {
   signal?: AbortSignal;
   onProgress?: (progress: AiExecutionProgress) => void;
   telemetry?: AiExecutionTelemetryContext;
+  suppressTelemetry?: boolean;
 };
 
 export type GeminiExecutionOptions = AiExecutionOptions;
@@ -630,9 +640,15 @@ const buildGeminiFailureMessage = (
   return parts.join(' ');
 };
 
-const executeGeminiRequestInternal = async (
+type GeminiInternalExecutionContext = {
+  capabilities?: AiProviderCapabilities;
+  credentials?: ResolvedAiCredentialSet;
+};
+
+const executeGeminiCredentialTierInternal = async (
   requestBody: any,
   options: GeminiExecutionOptions,
+  internal: GeminiInternalExecutionContext = {},
 ): Promise<ApiResult> => {
   try {
     const {
@@ -656,7 +672,7 @@ const executeGeminiRequestInternal = async (
     const selectedProvider = selectGeminiProvider(requestedProvider);
     const capabilityFailure = getProviderCapabilityFailure(
       selectedProvider,
-      await readAiProviderCapabilities(),
+      internal.capabilities || await readAiProviderCapabilities(),
     );
     if (capabilityFailure) {
       const failureBody = capabilityFailure.body as Record<string, unknown>;
@@ -677,7 +693,7 @@ const executeGeminiRequestInternal = async (
       allowModelFallback === true,
       fallbackModels,
     );
-    const credentials = await resolveGeminiApiKeys(selectedProvider);
+    const credentials = internal.credentials || await resolveGeminiApiKeys(selectedProvider);
     const GEMINI_API_KEYS = credentials.keys;
 
     if (GEMINI_API_KEYS.length === 0) {
@@ -1128,6 +1144,111 @@ const executeGeminiRequestInternal = async (
   }
 };
 
+const isSuccessfulAiResult = (result: ApiResult): boolean => (
+  result.status >= 200 && result.status < 300
+);
+
+const executeGeminiProviderRequestInternal = async (
+  requestBody: any,
+  options: GeminiExecutionOptions,
+  capabilities: AiProviderCapabilities,
+): Promise<ApiResult> => {
+  const provider = normalizeGeminiProvider(requestBody?.provider);
+  const capabilityFailure = getProviderCapabilityFailure(provider, capabilities);
+  if (capabilityFailure) return capabilityFailure;
+
+  const credentials = await resolveGeminiApiKeys(provider);
+  const credentialTiers = credentials.tiers.filter(tier => tier.keys.length > 0);
+  if (credentialTiers.length === 0) {
+    return executeGeminiCredentialTierInternal(requestBody, options, {
+      capabilities,
+      credentials,
+    });
+  }
+
+  let result: ApiResult | null = null;
+  for (const tier of credentialTiers) {
+    const tierResult = await executeGeminiCredentialTierInternal(requestBody, options, {
+      capabilities,
+      credentials: {
+        keys: tier.keys,
+        source: tier.source,
+        tiers: [tier],
+      },
+    });
+    result = result
+      ? mergeCredentialFallbackResult({
+          previous: result,
+          next: tierResult,
+          provider,
+          requestedCredentialSource: credentialTiers[0].source,
+        })
+      : tierResult;
+    if (isSuccessfulAiResult(tierResult) || !shouldAttemptAiFallback(tierResult)) {
+      return result;
+    }
+  }
+
+  return result || {
+    status: 503,
+    body: {
+      error: `لم يتم تكوين مفاتيح ${getGeminiProviderLabel(provider)} على السيرفر.`,
+      code: 'AI_PROVIDER_NOT_CONFIGURED',
+      provider,
+    },
+  };
+};
+
+const executeGeminiRequestInternal = async (
+  requestBody: any,
+  options: GeminiExecutionOptions,
+): Promise<ApiResult> => {
+  const capabilities = await readAiProviderCapabilities();
+  const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
+  const primaryResult = await executeGeminiProviderRequestInternal(
+    requestBody,
+    options,
+    capabilities,
+  );
+  if (
+    requestedProvider !== 'geminiPaid'
+    || !shouldAttemptAiFallback(primaryResult)
+    || !capabilities.providers.gemini.available
+  ) {
+    return primaryResult;
+  }
+
+  const freeSettings = await readExternalGeminiSettings();
+  const progressId = normalizeProgressId(requestBody?.progressId);
+  setGeminiProgress(progressId, {
+    stage: 'switching-provider',
+    provider: 'gemini',
+    model: freeSettings.model,
+    requestedModel: selectGeminiModel(requestBody?.model, 'geminiPaid'),
+    keyCount: (await resolveGeminiApiKeys('gemini')).keys.length,
+    attemptedKeyCount: 0,
+    currentKeyIndex: 1,
+    completed: false,
+    status: undefined,
+    reason: undefined,
+    keySuffix: undefined,
+    message: 'فشلت مفاتيح Gemini Pro. يتم الآن الانتقال تلقائيًا إلى مفاتيح وموديلات Gemini المجانية.',
+  });
+  await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_SWITCH_DELAY_MS);
+  const fallbackResult = await executeGeminiProviderRequestInternal({
+    ...requestBody,
+    provider: 'gemini',
+    model: freeSettings.model,
+    allowModelFallback: freeSettings.allowModelFallback,
+    fallbackModels: freeSettings.allowModelFallback ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
+  }, options, capabilities);
+  return mergeProviderFallbackResult({
+    previous: primaryResult,
+    next: fallbackResult,
+    requestedProvider: 'geminiPaid',
+  });
+};
+
 const executeGeminiRequest = async (
   requestBody: any,
   options: GeminiExecutionOptions = {},
@@ -1144,25 +1265,27 @@ const executeGeminiRequest = async (
       ? result.body as Record<string, unknown>
       : {};
     const telemetry = normalizeAiExecutionTelemetryContext(options.telemetry);
-    await recordAiExecutionTelemetry({
-      requestId: progressId || undefined,
-      actorUserId: telemetry.actorUserId,
-      provider: typeof body.provider === 'string' ? body.provider : normalizeGeminiProvider(requestBody?.provider),
-      model: typeof body.model === 'string'
-        ? body.model
-        : selectGeminiModel(requestBody?.model, normalizeGeminiProvider(requestBody?.provider)),
-      source: telemetry.source,
-      articleId: telemetry.articleId,
-      status: result.status,
-      durationMs: Date.now() - startedAt,
-      body,
-      context: telemetry as Record<string, unknown>,
-    }).catch(error => {
-      console.warn('[ai-execution-engine] Could not persist request telemetry', {
-        progressId,
-        message: error instanceof Error ? error.message : String(error),
+    if (!options.suppressTelemetry) {
+      await recordAiExecutionTelemetry({
+        requestId: progressId || undefined,
+        actorUserId: telemetry.actorUserId,
+        provider: typeof body.provider === 'string' ? body.provider : normalizeGeminiProvider(requestBody?.provider),
+        model: typeof body.model === 'string'
+          ? body.model
+          : selectGeminiModel(requestBody?.model, normalizeGeminiProvider(requestBody?.provider)),
+        source: telemetry.source,
+        articleId: telemetry.articleId,
+        status: result.status,
+        durationMs: Date.now() - startedAt,
+        body,
+        context: telemetry as Record<string, unknown>,
+      }).catch(error => {
+        console.warn('[ai-execution-engine] Could not persist request telemetry', {
+          progressId,
+          message: error instanceof Error ? error.message : String(error),
+        });
       });
-    });
+    }
     return result;
   } finally {
     if (

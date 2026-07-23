@@ -81,9 +81,18 @@ const SettingsSection: React.FC<{ title: string; children: React.ReactNode }> = 
   </section>
 );
 
-const FieldLabel: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+const FieldLabel: React.FC<{
+  label: string;
+  description?: string;
+  children: React.ReactNode;
+}> = ({ label, description, children }) => (
   <label className="block">
     <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">{label}</span>
+    {description && (
+      <span className="mb-2 block text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">
+        {description}
+      </span>
+    )}
     {children}
   </label>
 );
@@ -162,11 +171,19 @@ const SelectInput: React.FC<{
 
 const ToggleField: React.FC<{
   label: string;
+  description?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
-}> = ({ label, checked, onChange }) => (
+}> = ({ label, description, checked, onChange }) => (
   <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-    <span className="text-sm font-bold text-gray-700 dark:text-gray-200">{label}</span>
+    <span className="min-w-0">
+      <span className="block text-sm font-bold text-gray-700 dark:text-gray-200">{label}</span>
+      {description && (
+        <span className="mt-1 block text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">
+          {description}
+        </span>
+      )}
+    </span>
     <input
       type="checkbox"
       checked={checked}
@@ -394,11 +411,40 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     <div className="space-y-6">
       <SettingsSection title="إعدادات الذكاء الاصطناعي">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <ToggleField label="السماح للمستخدمين باستخدام Gemini المجاني" checked={Boolean(settings.ai.geminiFreeEnabled)} onChange={value => updateSetting('ai', 'geminiFreeEnabled', value)} />
-          <ToggleField label="التبديل بين نماذج جيميني المجانية للعامل الخارجي" checked={Boolean(settings.ai.geminiFreeModelFallbackEnabled)} onChange={value => updateSetting('ai', 'geminiFreeModelFallbackEnabled', value)} />
-          <ToggleField label="السماح للمستخدمين باستخدام Gemini Pro" checked={Boolean(settings.ai.geminiProEnabled)} onChange={value => updateSetting('ai', 'geminiProEnabled', value)} />
-          <ToggleField label="السماح للمستخدمين باستخدام OpenAI المدفوع" checked={Boolean(settings.ai.openAiEnabled)} onChange={value => updateSetting('ai', 'openAiEnabled', value)} />
-          <FieldLabel label="المزود الافتراضي">
+          <div className="rounded-md border-r-4 border-[#d4af37] bg-[#d4af37]/10 px-3 py-3 text-xs font-semibold leading-6 text-gray-700 dark:text-gray-200 md:col-span-2">
+            <div className="font-black">الرجوع التلقائي للمفاتيح والمزودات مفعّل في جميع أوامر الذكاء الاصطناعي</div>
+            <div>OpenAI: المفتاح الإداري ← مفاتيح OpenAI في Hostinger ← Gemini Pro ← Gemini المجاني.</div>
+            <div>Gemini Pro: المفتاح الإداري ← مفاتيح Gemini المدفوعة في Hostinger ← Gemini المجاني.</div>
+            <div className="text-gray-500 dark:text-gray-400">يحدث الرجوع عند فشل المفتاح أو الحصة أو الفوترة أو 429 أو انتهاء المهلة أو خطأ المزود، ولا يحدث عند إلغاء المستخدم أو نقص المدخلات أو حظر السلامة.</div>
+          </div>
+          <ToggleField
+            label="السماح للمستخدمين باستخدام Gemini المجاني"
+            description="يُستخدم مباشرة عند اختياره، وهو المرحلة الأخيرة في الرجوع التلقائي بعد فشل OpenAI أو Gemini Pro. تعطيله يمنع استخدامه كبديل."
+            checked={Boolean(settings.ai.geminiFreeEnabled)}
+            onChange={value => updateSetting('ai', 'geminiFreeEnabled', value)}
+          />
+          <ToggleField
+            label="التبديل بين موديلات Gemini المجانية"
+            description="عند تفعيله يجرب الخادم موديلات Gemini المجانية بالترتيب إذا فشل الموديل الأول، سواء كان Gemini مختارًا مباشرة أو تم الوصول إليه بالرجوع التلقائي."
+            checked={Boolean(settings.ai.geminiFreeModelFallbackEnabled)}
+            onChange={value => updateSetting('ai', 'geminiFreeModelFallbackEnabled', value)}
+          />
+          <ToggleField
+            label="السماح للمستخدمين باستخدام Gemini Pro"
+            description="يسمح باستخدام Gemini Pro مباشرة، ويسمح لـ OpenAI بالانتقال إليه كأول مزود بديل. عند فشل مفاتيحه ينتقل إلى Gemini المجاني إذا كان مسموحًا."
+            checked={Boolean(settings.ai.geminiProEnabled)}
+            onChange={value => updateSetting('ai', 'geminiProEnabled', value)}
+          />
+          <ToggleField
+            label="السماح للمستخدمين باستخدام OpenAI المدفوع"
+            description="يسمح ببدء الطلب عبر OpenAI. عند فشل مفاتيحه ينتقل تلقائيًا إلى Gemini Pro ثم Gemini المجاني بحسب السماح والتوفر."
+            checked={Boolean(settings.ai.openAiEnabled)}
+            onChange={value => updateSetting('ai', 'openAiEnabled', value)}
+          />
+          <FieldLabel
+            label="المزود الافتراضي"
+            description="هذا هو مزود البداية فقط؛ قد يتغير المزود أثناء التنفيذ إذا حدث فشل قابل للرجوع."
+          >
             <SelectInput
               value={String(settings.ai.defaultProvider || 'gemini')}
               onChange={value => updateSetting('ai', 'defaultProvider', value)}
@@ -409,7 +455,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
               ]}
             />
           </FieldLabel>
-          <FieldLabel label="موديل Gemini الافتراضي للتحليل الخارجي">
+          <FieldLabel
+            label="موديل Gemini المجاني الافتراضي"
+            description="يبدأ به طلب Gemini المجاني، ويُستخدم أيضًا عند الوصول إلى Gemini المجاني بالرجوع التلقائي."
+          >
             <SelectInput
               value={normalizeGeminiFreeModel(String(settings.ai.defaultGeminiModel || ''), geminiFreeModelValues)}
               onChange={value => updateSetting('ai', 'defaultGeminiModel', value)}
@@ -425,14 +474,20 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
               onChange={value => updateSetting('ai', 'externalAnalysisRetryMinutes', value)}
             />
           </FieldLabel>
-          <FieldLabel label="موديل Gemini Pro الافتراضي">
+          <FieldLabel
+            label="موديل Gemini Pro الافتراضي"
+            description="يُستخدم عند اختيار Gemini Pro مباشرة، أو عند انتقال طلب OpenAI إليه تلقائيًا."
+          >
             <SelectInput
               value={normalizeGeminiPaidModelId(settings.ai.defaultGeminiPaidModel)}
               onChange={value => updateSetting('ai', 'defaultGeminiPaidModel', value)}
               options={GEMINI_PAID_MODEL_OPTIONS}
             />
           </FieldLabel>
-          <FieldLabel label="موديل OpenAI الافتراضي">
+          <FieldLabel
+            label="موديل OpenAI الافتراضي"
+            description="يُستخدم في مرحلة OpenAI الأولى، قبل الانتقال إلى المزودات البديلة عند الفشل."
+          >
             <TextInput value={String(settings.ai.defaultOpenAiModel || '')} onChange={value => updateSetting('ai', 'defaultOpenAiModel', value)} dir="ltr" />
           </FieldLabel>
         </div>

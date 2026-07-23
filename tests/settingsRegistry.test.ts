@@ -256,8 +256,8 @@ test('user settings do not duplicate centralized Gemini controls', async () => {
 
   assert.doesNotMatch(personalPreferences, /موديل Gemini الافتراضي/);
   assert.doesNotMatch(personalPreferences, /التبديل بين نماذج جيميني المجانية/);
-  assert.match(settingsPage, /موديل Gemini الافتراضي للتحليل الخارجي/);
-  assert.match(settingsPage, /التبديل بين نماذج جيميني المجانية للعامل الخارجي/);
+  assert.match(settingsPage, /موديل Gemini المجاني الافتراضي/);
+  assert.match(settingsPage, /التبديل بين موديلات Gemini المجانية/);
 });
 
 test('phase 4 migration creates protected durable user preferences', async () => {

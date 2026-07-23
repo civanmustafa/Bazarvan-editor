@@ -23,18 +23,21 @@ const PROVIDERS: Array<{
   title: string;
   description: string;
   fallbackLabel: string;
+  providerFallbackLabel: string;
 }> = [
   {
     id: 'openai_latest',
     title: 'مفتاح OpenAI (ChatGPT API) لأحدث الموديلات',
-    description: 'عند تفعيله تستخدم كل طلبات OpenAI هذا المفتاح مع الموديل الافتراضي المحدد أعلاه. عند تعطيله يعود المحرر إلى مفتاح Hostinger.',
+    description: 'عند تفعيله يبدأ كل طلب OpenAI بهذا المفتاح. إذا فشل بسبب المفتاح أو الحصة أو الفوترة أو المهلة، يجرب النظام مفاتيح OpenAI في Hostinger تلقائيًا.',
     fallbackLabel: 'مفاتيح OpenAI في Hostinger',
+    providerFallbackLabel: 'بعد نفاد مفاتيح OpenAI: Gemini Pro ثم Gemini المجاني، إذا كانا مسموحين ومهيأين.',
   },
   {
     id: 'gemini_latest',
     title: 'مفتاح Gemini لأحدث الموديلات',
-    description: 'عند تفعيله تستخدم طلبات Gemini المدفوعة هذا المفتاح مع الموديل الافتراضي المحدد أعلاه. عند تعطيله يعود المحرر إلى مجموعة Gemini Pro في Hostinger.',
+    description: 'عند تفعيله يبدأ كل طلب Gemini Pro بهذا المفتاح. إذا فشل بسبب المفتاح أو الحصة أو الفوترة أو المهلة، يجرب النظام مفاتيح Gemini المدفوعة في Hostinger تلقائيًا.',
     fallbackLabel: 'مفاتيح Gemini المدفوعة في Hostinger',
+    providerFallbackLabel: 'بعد نفاد مفاتيح Gemini Pro: ينتقل إلى Gemini المجاني، إذا كان مسموحًا ومهيأً.',
   },
 ];
 
@@ -174,11 +177,16 @@ const AdminAiProviderSecretsSettings: React.FC = () => {
                 <p className="mt-1 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
                   {definition.description}
                 </p>
+                <p className="mt-1 text-xs font-bold leading-6 text-[#8a6f1d] dark:text-[#f2d675]">
+                  {definition.providerFallbackLabel}
+                </p>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-gray-500 dark:text-gray-300">
                   <span>{status.configured ? `محفوظ: ••••${status.keySuffix}` : 'لا يوجد مفتاح إداري محفوظ'}</span>
                   <span>{definition.fallbackLabel}: {status.fallbackKeyCount || 0}</span>
                   <span className={status.effectiveConfigured ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>
-                    المصدر الحالي: {status.activeSource === 'admin' ? 'المفتاح الإداري' : 'Hostinger'}
+                    ترتيب المفاتيح: {status.enabled
+                      ? `المفتاح الإداري${status.fallbackKeyCount > 0 ? ' ← Hostinger عند الفشل' : ''}`
+                      : 'Hostinger'}
                   </span>
                 </div>
               </div>

@@ -2212,7 +2212,7 @@ type ChatGptAnalysisResult = {
     conversationId?: string;
     keyFingerprint?: string;
     keySuffix?: string;
-    provider?: 'openai';
+    provider?: 'openai' | 'geminiPaid' | 'gemini';
     model?: string;
 };
 
@@ -2455,8 +2455,13 @@ const callChatGptAnalysis = async (
 
         const isJson = response.headers.get('content-type')?.includes('application/json');
         const data = isJson ? await response.json().catch(() => ({})) : {};
+        const effectiveProvider = data.provider === 'geminiPaid'
+            ? 'Gemini Pro (بديل تلقائي لـ OpenAI)'
+            : data.provider === 'gemini'
+                ? 'Gemini المجاني (بديل تلقائي لـ OpenAI)'
+                : 'OpenAI';
         notifyAiKeyUsageFeedback({
-            provider: 'OpenAI',
+            provider: effectiveProvider,
             status: response.status,
             payload: data,
             surface: usageContext.source,
@@ -2480,7 +2485,9 @@ const callChatGptAnalysis = async (
             conversationId: typeof data.conversationId === 'string' ? data.conversationId : conversationId,
             keyFingerprint: typeof data.keyFingerprint === 'string' ? data.keyFingerprint : undefined,
             keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
-            provider: 'openai',
+            provider: data.provider === 'geminiPaid' || data.provider === 'gemini'
+                ? data.provider
+                : 'openai',
             model: typeof data.model === 'string' ? data.model : model,
         };
     } catch (error) {

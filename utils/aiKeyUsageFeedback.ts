@@ -63,7 +63,7 @@ export const collectAiKeyUsageEntries = (
     if (!keySuffix || !outcome) return;
     const reason = toText(source.reason || source.error || source.errorCode || source.error_code);
     const model = toText(source.model);
-    const dedupeKey = [keySuffix, outcome, status || '', reason, model].join(':');
+    const dedupeKey = [keySuffix, outcome, status || ''].join(':');
     if (seen.has(dedupeKey)) return;
     seen.add(dedupeKey);
     collected.push({
@@ -88,6 +88,10 @@ export const collectAiKeyUsageEntries = (
     if (Array.isArray(source.attempts)) visit(source.attempts, 'failed', depth + 1);
     if (Array.isArray(source.keyAttempts)) visit(source.keyAttempts, 'failed', depth + 1);
     if (Array.isArray(source.key_attempts)) visit(source.key_attempts, 'failed', depth + 1);
+    if (Array.isArray(source.credentialFallbackChain)) visit(source.credentialFallbackChain, undefined, depth + 1);
+    if (Array.isArray(source.credentialFallbackAttempts)) visit(source.credentialFallbackAttempts, 'failed', depth + 1);
+    if (Array.isArray(source.providerFallbackChain)) visit(source.providerFallbackChain, undefined, depth + 1);
+    if (Array.isArray(source.providerFallbackAttempts)) visit(source.providerFallbackAttempts, 'failed', depth + 1);
 
     const nestedKeys = ['execution', 'providerMetadata', 'responseMetadata', 'result'] as const;
     nestedKeys.forEach(key => {

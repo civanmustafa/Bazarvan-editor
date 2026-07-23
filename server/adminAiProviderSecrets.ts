@@ -13,6 +13,11 @@ export { ADMIN_AI_SECRET_PROVIDERS } from '../constants/adminAiProviderSecrets.t
 export type { AdminAiSecretProvider } from '../constants/adminAiProviderSecrets.ts';
 export type AiCredentialSource = 'admin' | 'hostinger';
 
+export type ResolvedAiCredentialTier = {
+  source: AiCredentialSource;
+  keys: string[];
+};
+
 type AiProviderSecretRow = {
   provider: AdminAiSecretProvider;
   ciphertext: string;
@@ -43,6 +48,7 @@ export type AdminAiProviderSecretsOverview = {
 export type ResolvedAiCredentialSet = {
   keys: string[];
   source: AiCredentialSource;
+  tiers: ResolvedAiCredentialTier[];
 };
 
 export type AiProviderCredentialAvailability = {
@@ -284,15 +290,36 @@ const readSecretRow = async (provider: AdminAiSecretProvider): Promise<AiProvide
   return data ? data as AiProviderSecretRow : null;
 };
 
+const buildResolvedCredentialSet = (
+  adminKey: string | null,
+  adminEnabled: boolean,
+  fallbackKeys: string[],
+): ResolvedAiCredentialSet => {
+  const normalizedFallbackKeys = Array.from(new Set(
+    fallbackKeys.map(key => key.trim()).filter(Boolean),
+  ));
+  const normalizedAdminKey = adminEnabled && adminKey ? adminKey.trim() : '';
+  const hostingerKeys = normalizedAdminKey
+    ? normalizedFallbackKeys.filter(key => key !== normalizedAdminKey)
+    : normalizedFallbackKeys;
+  const tiers: ResolvedAiCredentialTier[] = [
+    ...(normalizedAdminKey ? [{ source: 'admin' as const, keys: [normalizedAdminKey] }] : []),
+    ...(hostingerKeys.length > 0 ? [{ source: 'hostinger' as const, keys: hostingerKeys }] : []),
+  ];
+  return {
+    keys: tiers.flatMap(tier => tier.keys),
+    source: tiers[0]?.source || 'hostinger',
+    tiers,
+  };
+};
+
 const resolveCredentialSet = async (
   provider: AdminAiSecretProvider,
   fallbackKeys: string[],
 ): Promise<ResolvedAiCredentialSet> => {
   const row = await readSecretRow(provider);
-  if (!row?.enabled) return { keys: fallbackKeys, source: 'hostinger' };
-
-  const key = normalizeApiKey(decryptSecret(row));
-  return { keys: [key], source: 'admin' };
+  const adminKey = row?.enabled ? normalizeApiKey(decryptSecret(row)) : null;
+  return buildResolvedCredentialSet(adminKey, row?.enabled === true, fallbackKeys);
 };
 
 export const resolveOpenAiApiKeys = async (): Promise<ResolvedAiCredentialSet> => (
@@ -303,7 +330,7 @@ export const resolveGeminiApiKeys = async (
   provider: 'gemini' | 'geminiPaid',
 ): Promise<ResolvedAiCredentialSet> => {
   const fallbackKeys = getEnvironmentGeminiApiKeys(provider);
-  if (provider === 'gemini') return { keys: fallbackKeys, source: 'hostinger' };
+  if (provider === 'gemini') return buildResolvedCredentialSet(null, false, fallbackKeys);
   return resolveCredentialSet('gemini_latest', fallbackKeys);
 };
 
@@ -402,6 +429,7 @@ export const deleteAdminAiProviderSecret = async (
 };
 
 export const __adminAiProviderSecretsTestUtils = {
+  buildResolvedCredentialSet,
   encryptSecret,
   decryptSecret,
   normalizeApiKey,

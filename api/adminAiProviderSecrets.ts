@@ -54,7 +54,7 @@ const getPublicOverview = (overview: AdminAiProviderSecretsOverview) => {
       ...status,
       fallbackConfigured: fallbackKeyCount > 0,
       fallbackKeyCount,
-      effectiveConfigured: status.enabled ? customUsable : fallbackKeyCount > 0,
+      effectiveConfigured: customUsable || fallbackKeyCount > 0,
       activeSource: status.enabled ? 'admin' : 'hostinger',
     };
   };
