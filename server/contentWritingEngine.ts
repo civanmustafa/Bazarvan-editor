@@ -8,6 +8,7 @@ import {
 } from '../constants/modelRegistry';
 import {
   CONTENT_WRITING_TEMPLATE_FIELDS,
+  renderContentWritingTemplate,
   type ContentWritingTemplateSet,
 } from '../constants/contentWriting';
 import {
@@ -30,6 +31,7 @@ import {
   type ContentWritingPromptMessage,
 } from '../utils/contentWritingContext';
 import { normalizeGoalContext } from '../utils/goalContext';
+import { CONTENT_WRITING_WORKFLOW_VERSION } from '../utils/contentWritingWorkflow';
 import {
   aiExecutionEngine,
   sanitizeAiExecutionResult,
@@ -363,6 +365,16 @@ export const prepareContentWritingConversation = async (
     },
     goalContext: normalizedGoalContext,
   };
+  const compactArticleContextBase = renderContentWritingTemplate(
+    settings.templates.articleContext,
+    {
+      ...bundle.variables,
+      competitors_json: JSON.stringify({
+        status: 'indexed_separately',
+        note: 'Use the persisted competitor knowledge index and the source excerpts supplied for the current step.',
+      }, null, 2),
+    },
+  ).text;
 
   return {
     article: {
@@ -377,6 +389,7 @@ export const prepareContentWritingConversation = async (
     estimatedInputTokens,
     maxInputTokens: bundle.maxInputTokens,
     contextSnapshot: {
+      workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
       article: {
         id: articleSource.article.id,
         title: articleSource.article.title,
@@ -390,6 +403,8 @@ export const prepareContentWritingConversation = async (
         url: competitor.url || null,
         contentLength: competitor.content.length,
       })),
+      competitorChunks: bundle.competitorChunks,
+      compactArticleContextBase,
       qualityPolicyVersion: qualityConfiguration.policyVersion,
       qualityConfiguration,
       qualityContract,
@@ -565,6 +580,7 @@ export const executeContentWritingTurn = async (options: {
   stepLabel: string;
   stepAttempt: number;
   includeGenerationRequestInHistory?: boolean;
+  articleContextOverride?: string;
   additionalHistory?: ContentWritingTurnHistory[];
   maxOutputTokens?: number;
   signal?: AbortSignal;
@@ -572,7 +588,7 @@ export const executeContentWritingTurn = async (options: {
 }): Promise<ContentWritingExecutionResult> => {
   const [instructions, articleContext, generationRequest] = assertContentWritingConversation(options.messages);
   const baseHistory: ContentWritingTurnHistory[] = [
-    { role: 'user', content: articleContext.content },
+    { role: 'user', content: options.articleContextOverride?.trim() || articleContext.content },
     ...(options.includeGenerationRequestInHistory === false
       ? []
       : [{ role: 'user' as const, content: generationRequest.content }]),
@@ -603,6 +619,8 @@ export const executeContentWritingTurn = async (options: {
       model: options.session.model,
       requestId,
       maxOutputTokens: options.maxOutputTokens || 8_000,
+      conversationMode: 'independent',
+      promptCacheKey: `content-writing:${options.session.id}`.slice(0, 200),
     }, { signal: options.signal, telemetry })
     : await aiExecutionEngine.executeGemini({
       systemInstruction: instructions.content,

@@ -7,6 +7,10 @@ import {
   type ContentWritingTemplateStage,
 } from '../constants/contentWriting';
 import type { GoalContext, Keywords } from '../types';
+import {
+  chunkContentWritingCompetitor,
+  type ContentWritingSourceChunk,
+} from './contentWritingKnowledge';
 
 export const CONTENT_WRITING_REQUIRED_COMPETITOR_COUNT = 3;
 
@@ -44,6 +48,7 @@ export type ContentWritingPromptBundle = {
   messages: ContentWritingPromptMessage[];
   variables: Record<string, string>;
   competitors: ContentWritingCompetitorInput[];
+  competitorChunks: ContentWritingSourceChunk[];
   readinessIssues: ContentWritingReadinessIssue[];
   templateIssues: Array<{
     stage: ContentWritingTemplateStage;
@@ -188,12 +193,28 @@ const createGoalContextValue = (goalContext: Partial<GoalContext>): string => {
   }, null, 2);
 };
 
-const createCompetitorsValue = (competitors: ContentWritingCompetitorInput[]): string => JSON.stringify(
+const createCompetitorChunks = (
+  competitors: ContentWritingCompetitorInput[],
+): ContentWritingSourceChunk[] => competitors.flatMap((competitor, index) => (
+  chunkContentWritingCompetitor({
+    competitorNumber: index + 1,
+    title: competitor.title,
+    url: competitor.url,
+    content: competitor.content,
+  })
+));
+
+const createCompetitorsValue = (
+  competitors: ContentWritingCompetitorInput[],
+  chunks: ContentWritingSourceChunk[],
+): string => JSON.stringify(
   competitors.map((competitor, index) => ({
     competitorNumber: index + 1,
     title: competitor.title || '',
     url: competitor.url || '',
-    content: competitor.content,
+    chunks: chunks
+      .filter(chunk => chunk.competitorNumber === index + 1)
+      .map(chunk => ({ sourceId: chunk.id, text: chunk.text })),
   })),
   null,
   2,
@@ -214,6 +235,7 @@ export const buildContentWritingPromptBundle = (
     ...(options.templates || {}),
   };
   const { issues: readinessIssues, competitors } = validateContentWritingReadiness(input);
+  const competitorChunks = createCompetitorChunks(competitors);
   const variables: Record<string, string> = {
     article_id: toText(input.articleId).trim() || 'غير متوفر',
     article_title: toText(input.title),
@@ -224,7 +246,7 @@ export const buildContentWritingPromptBundle = (
     lsi_keywords: normalizeList(input.keywords.lsi).join('، '),
     company_name: toText(input.keywords.company),
     goal_context: createGoalContextValue(input.goalContext),
-    competitors_json: createCompetitorsValue(competitors),
+    competitors_json: createCompetitorsValue(competitors, competitorChunks),
   };
   const stageDefinitions: Array<{
     stage: ContentWritingTemplateStage;
@@ -261,6 +283,7 @@ export const buildContentWritingPromptBundle = (
     messages,
     variables,
     competitors,
+    competitorChunks,
     readinessIssues,
     templateIssues,
     estimatedInputTokens,

@@ -141,6 +141,20 @@ test('content-writing quality policy migration persists versioned reports, repai
   assertBalancedSqlParentheses(migration);
 });
 
+test('content-writing knowledge workflow migration enables indexing, audits, and targeted repairs', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260723010000_content_writing_knowledge_workflow.sql',
+  );
+
+  assert.match(migration, /'competitor_index'/);
+  assert.match(migration, /'coverage_audit'/);
+  assert.match(migration, /'section_repair'/);
+  assert.match(migration, /create or replace function public\.ensure_content_writing_step/);
+  assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
   const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),
@@ -167,6 +181,9 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(workflow, /startContentWritingStep/);
   assert.match(workflow, /completeContentWritingStep/);
   assert.match(workflow, /buildContentWritingFinalReviewPrompt/);
+  assert.match(workflow, /buildContentWritingCompetitorIndexPrompt/);
+  assert.match(workflow, /buildContentWritingCoverageAuditPrompt/);
+  assert.match(workflow, /section-repair-/);
   assert.match(workflow, /evaluateContentWritingQuality/);
   assert.match(workflow, /buildContentWritingRepairPrompt/);
   assert.match(workflow, /quality-repair-/);
@@ -182,6 +199,8 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(geminiEngine, /systemInstruction: normalizedSystemInstruction/);
   assert.match(openAiEngine, /readAiProviderCapabilities\(\)/);
   assert.match(openAiEngine, /recordAiExecutionTelemetry/);
+  assert.match(openAiEngine, /prompt_cache_key/);
+  assert.match(openAiEngine, /conversationMode === 'independent'/);
 });
 
 test('content-writing API enforces authentication, article access, and idempotent starts', async () => {
@@ -283,6 +302,8 @@ test('admin content-writing reports load lightweight daily rows without generate
   assert.match(loader, /quality_score/);
   assert.match(loader, /quality_policy_version/);
   assert.match(loader, /quality_repair_count/);
+  assert.match(loader, /cachedInputTokens/);
+  assert.match(loader, /knowledgeCoveragePercent/);
   assert.match(table, /buildAdminArticlePath\(session\.articleId\)/);
   assert.match(table, /session\.applicationCount/);
   assert.match(table, /session\.qualityScore/);

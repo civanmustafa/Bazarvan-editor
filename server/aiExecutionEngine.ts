@@ -11,6 +11,7 @@ import {
 } from "./geminiKeyCoordinator";
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
+import { normalizeGeminiUsage } from './aiUsage';
 import { resolveGeminiApiKeys } from './adminAiProviderSecrets';
 import type { AiProviderCapabilities } from '../constants/aiProviderCapabilities';
 import {
@@ -902,6 +903,7 @@ const executeGeminiRequestInternal = async (
               status: 200,
               body: {
                 text,
+                usage: normalizeGeminiUsage((response as { usageMetadata?: unknown }).usageMetadata),
                 keyFingerprint,
                 keySuffix,
                 provider: selectedProvider,

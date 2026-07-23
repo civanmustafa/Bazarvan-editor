@@ -34,6 +34,7 @@ test('structured writing parses a bounded outline and creates deterministic sequ
 
   assert.equal(outline.sections.length, 4);
   assert.deepEqual(steps.map((step: { key: string }) => step.key), [
+    'competitor-index',
     'outline',
     'section-01',
     'section-02',
@@ -42,9 +43,10 @@ test('structured writing parses a bounded outline and creates deterministic sequ
     'introduction',
     'faq',
     'conclusion',
+    'coverage-audit',
     'final-review',
   ]);
-  assert.deepEqual(steps.map((step: { ordinal: number }) => step.ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(steps.map((step: { ordinal: number }) => step.ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 });
 
 test('structured writing rejects incomplete or duplicate outlines', async () => {

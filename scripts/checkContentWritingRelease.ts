@@ -59,6 +59,10 @@ const requiredWorkerMarkers = [
   'complete_content_writing_session',
   'fail_content_writing_session',
   'Quality repair',
+  'Competitor knowledge index',
+  'Knowledge coverage audit',
+  'competitor_index',
+  'coverage_audit',
 ];
 for (const marker of requiredWorkerMarkers) {
   if (!workerBundle.includes(marker)) {

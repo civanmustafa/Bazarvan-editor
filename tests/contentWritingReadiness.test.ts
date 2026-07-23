@@ -50,7 +50,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 6);
+  assert.equal(result.requiredMigrationCount, 7);
   assert.deepEqual(result.checks, { sessions: true, messages: true, steps: true });
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'content_writing_messages',
@@ -95,6 +95,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
 
   assert.match(releaseRegistry, /20260722040000_content_writing_quality_guards\.sql/);
   assert.match(releaseRegistry, /20260723000000_content_writing_quality_policy\.sql/);
+  assert.match(releaseRegistry, /20260723010000_content_writing_knowledge_workflow\.sql/);
   assert.match(releaseRegistry, /server-dist\/content-writing-worker\.mjs/);
   assert.match(releaseScript, /CONTENT_WRITING_REQUIRED_MIGRATIONS/);
   assert.match(releaseScript, /claim_next_content_writing_session/);

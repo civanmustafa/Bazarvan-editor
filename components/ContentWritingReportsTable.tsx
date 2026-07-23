@@ -121,7 +121,25 @@ const ContentWritingReportsTable: React.FC<ContentWritingReportsTableProps> = ({
                   )}
                 </td>
                 <td className="max-w-[220px] px-3 py-3 text-gray-600 dark:text-gray-300">{profile?.fullName || profile?.email || session.createdBy}</td>
-                <td className="whitespace-nowrap px-3 py-3 text-gray-500">{session.estimatedInputTokens.toLocaleString(locale)} / {session.maxInputTokens.toLocaleString(locale)}</td>
+                <td className="whitespace-nowrap px-3 py-3 text-gray-500">
+                  <div>
+                    {(session.actualInputTokens || session.estimatedInputTokens).toLocaleString(locale)}
+                    {' / '}
+                    {session.maxInputTokens.toLocaleString(locale)}
+                  </div>
+                  {session.apiRequestCount > 0 ? (
+                    <div className="mt-1 text-[10px] font-bold text-gray-400">
+                      {locale === 'ar' ? 'كاش' : 'cache'} {session.cachedInputTokens.toLocaleString(locale)}
+                      {' · '}
+                      {locale === 'ar' ? 'مخرجات' : 'output'} {session.outputTokens.toLocaleString(locale)}
+                      {' · '}
+                      {locale === 'ar' ? 'طلبات' : 'requests'} {session.apiRequestCount.toLocaleString(locale)}
+                      {session.knowledgeCoveragePercent !== null
+                        ? ` · ${locale === 'ar' ? 'تغطية' : 'coverage'} ${session.knowledgeCoveragePercent}%`
+                        : ''}
+                    </div>
+                  ) : null}
+                </td>
                 <td className="px-3 py-3 text-center font-bold tabular-nums text-gray-600 dark:text-gray-300">{session.attemptCount}</td>
                 <td className="whitespace-nowrap px-3 py-3 text-gray-500">{formatDuration(session, locale)}</td>
                 <td className="whitespace-nowrap px-3 py-3 text-gray-500">

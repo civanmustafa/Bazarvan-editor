@@ -33,6 +33,12 @@ export type ContentWritingReportSession = {
   qualityRepairCount: number;
   qualityPassed: boolean | null;
   qualityMinimumScore: number | null;
+  actualInputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  apiRequestCount: number;
+  knowledgeCoveragePercent: number | null;
+  targetedRepairCount: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -89,6 +95,8 @@ const normalizeReportSession = (row: ContentWritingReportRow): ContentWritingRep
     ? metadata.externalProvider
     : null;
   const qualityReport = isRecord(metadata.qualityReport) ? metadata.qualityReport : {};
+  const usage = isRecord(metadata.usage) ? metadata.usage : {};
+  const knowledgeCoverage = isRecord(metadata.knowledgeCoverage) ? metadata.knowledgeCoverage : {};
   return {
     id: row.id,
     articleId: row.article_id,
@@ -120,6 +128,14 @@ const normalizeReportSession = (row: ContentWritingReportRow): ContentWritingRep
     qualityMinimumScore: Number.isFinite(Number(qualityReport.minimumScore))
       ? Math.max(0, Math.min(100, Math.round(Number(qualityReport.minimumScore))))
       : null,
+    actualInputTokens: Math.max(0, Math.round(Number(usage.inputTokens) || 0)),
+    cachedInputTokens: Math.max(0, Math.round(Number(usage.cachedInputTokens) || 0)),
+    outputTokens: Math.max(0, Math.round(Number(usage.outputTokens) || 0)),
+    apiRequestCount: Math.max(0, Math.round(Number(usage.apiRequestCount) || 0)),
+    knowledgeCoveragePercent: Number.isFinite(Number(knowledgeCoverage.afterRepairPercent))
+      ? Math.max(0, Math.min(100, Math.round(Number(knowledgeCoverage.afterRepairPercent))))
+      : null,
+    targetedRepairCount: Math.max(0, Math.round(Number(knowledgeCoverage.targetedRepairCount) || 0)),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

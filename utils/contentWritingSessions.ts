@@ -65,11 +65,14 @@ export type ContentWritingMessage = {
 };
 
 export type ContentWritingStepType =
+  | 'competitor_index'
   | 'outline'
   | 'section'
   | 'introduction'
   | 'conclusion'
   | 'faq'
+  | 'coverage_audit'
+  | 'section_repair'
   | 'final_review'
   | 'quality_repair';
 
@@ -226,7 +229,7 @@ const normalizeStep = (value: unknown): ContentWritingStep | null => {
   if (!isRecord(value) || !toText(value.id) || !toText(value.stepKey)) return null;
   const stepType = toText(value.stepType) as ContentWritingStepType;
   const status = toText(value.status) as ContentWritingStepStatus;
-  if (!['outline', 'section', 'introduction', 'conclusion', 'faq', 'final_review', 'quality_repair'].includes(stepType)) return null;
+  if (!['competitor_index', 'outline', 'section', 'introduction', 'conclusion', 'faq', 'coverage_audit', 'section_repair', 'final_review', 'quality_repair'].includes(stepType)) return null;
   if (!['pending', 'running', 'completed', 'failed'].includes(status)) return null;
   return {
     id: toText(value.id),

@@ -65,11 +65,14 @@ export type ContentWritingMessage = {
 };
 
 export type ContentWritingStepType =
+  | 'competitor_index'
   | 'outline'
   | 'section'
   | 'introduction'
   | 'conclusion'
   | 'faq'
+  | 'coverage_audit'
+  | 'section_repair'
   | 'final_review'
   | 'quality_repair';
 

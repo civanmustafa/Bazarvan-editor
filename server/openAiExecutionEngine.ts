@@ -8,6 +8,7 @@ import {
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
 import { resolveOpenAiApiKeys } from './adminAiProviderSecrets';
+import { normalizeOpenAiUsage, type NormalizedAiUsage } from './aiUsage';
 
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || OPENAI_ANALYSIS_MODEL;
 const DEFAULT_OPENAI_INSTRUCTIONS = 'You are an expert SEO, AEO, GEO, and LLM SEO content assistant. Follow the user instructions precisely.';
@@ -34,6 +35,8 @@ export type OpenAiExecutionRequest = {
   conversationId?: string;
   requestId?: string;
   maxOutputTokens?: number;
+  conversationMode?: 'managed' | 'independent';
+  promptCacheKey?: string;
 };
 
 export type OpenAiExecutionOptions = {
@@ -143,31 +146,42 @@ const createOpenAiResponse = async (options: {
   openAiKey: string;
   signal: AbortSignal;
   model: string;
-  conversationId: string;
+  conversationId?: string;
   instructions: string;
   input: string | OpenAiConversationMessage[];
   maxOutputTokens: number;
-}): Promise<string> => {
+  promptCacheKey?: string;
+}): Promise<{
+  text: string;
+  responseId?: string;
+  usage: NormalizedAiUsage;
+}> => {
+  const body = {
+    model: options.model,
+    ...(options.conversationId ? { conversation: options.conversationId } : {}),
+    instructions: options.instructions,
+    input: options.input,
+    max_output_tokens: options.maxOutputTokens,
+    ...(options.promptCacheKey ? { prompt_cache_key: options.promptCacheKey } : {}),
+  };
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${options.openAiKey}`,
     },
-    body: JSON.stringify({
-      model: options.model,
-      conversation: options.conversationId,
-      instructions: options.instructions,
-      input: options.input,
-      max_output_tokens: options.maxOutputTokens,
-    }),
+    body: JSON.stringify(body),
     signal: options.signal,
   });
   if (!response.ok) throw new OpenAiRequestError(await extractErrorMessage(response), response.status);
   const data = await response.json();
   const text = extractResponseText(data);
   if (!text) throw new Error('OpenAI did not return a valid text response.');
-  return text;
+  return {
+    text,
+    responseId: normalizeConversationId(data?.id),
+    usage: normalizeOpenAiUsage(data?.usage),
+  };
 };
 
 const isMissingConversationError = (error: unknown): boolean => (
@@ -292,6 +306,8 @@ export const executeOpenAiRequest = async (
     const maxOutputTokens = boundedInteger(request.maxOutputTokens, 8_000, 256, 32_000);
     const instructions = String(request.instructions || '').trim() || DEFAULT_OPENAI_INSTRUCTIONS;
     const requestedConversationId = normalizeConversationId(request.conversationId);
+    const conversationMode = request.conversationMode === 'independent' ? 'independent' : 'managed';
+    const promptCacheKey = String(request.promptCacheKey || '').trim().slice(0, 200) || undefined;
     let sawMissingConversation = false;
     let lastError: unknown = null;
 
@@ -304,10 +320,12 @@ export const executeOpenAiRequest = async (
         const disconnect = connectAbortSignal(options.signal, controller);
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         try {
-          const conversationId = resetConversation || !requestedConversationId
-            ? await createOpenAiConversation(key, controller.signal)
-            : requestedConversationId;
-          const text = await createOpenAiResponse({
+          const conversationId = conversationMode === 'independent'
+            ? undefined
+            : resetConversation || !requestedConversationId
+              ? await createOpenAiConversation(key, controller.signal)
+              : requestedConversationId;
+          const response = await createOpenAiResponse({
             openAiKey: key,
             signal: controller.signal,
             model: selectedModel,
@@ -315,12 +333,15 @@ export const executeOpenAiRequest = async (
             instructions,
             input,
             maxOutputTokens,
+            promptCacheKey,
           });
           return {
             status: 200,
             body: {
-              text,
-              conversationId,
+              text: response.text,
+              ...(conversationId ? { conversationId } : {}),
+              ...(response.responseId ? { responseId: response.responseId } : {}),
+              usage: response.usage,
               ...(resetConversation && requestedConversationId ? { conversationReset: true } : {}),
               keyFingerprint: createApiKeyFingerprint(key),
               keySuffix: getApiKeySuffix(key),
@@ -348,7 +369,7 @@ export const executeOpenAiRequest = async (
 
     const firstResult = await tryKeys(false);
     if (firstResult) return finalize(firstResult);
-    if (requestedConversationId && sawMissingConversation) {
+    if (conversationMode === 'managed' && requestedConversationId && sawMissingConversation) {
       const resetResult = await tryKeys(true);
       if (resetResult) return finalize(resetResult);
     }

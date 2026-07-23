@@ -51,7 +51,17 @@ test('content-writing context preserves all three competitor texts without trunc
 
   assert.equal(bundle.ready, true);
   assert.equal(competitors.length, 3);
-  assert.equal(competitors[0].content, longContent);
+  assert.equal(
+    competitors[0].chunks.map((chunk: { text: string }) => chunk.text).join(''),
+    longContent,
+  );
+  assert.equal(
+    bundle.competitorChunks
+      .filter((chunk: { competitorNumber: number }) => chunk.competitorNumber === 1)
+      .map((chunk: { text: string }) => chunk.text)
+      .join(''),
+    longContent,
+  );
   assert.match(bundle.messages[1].content, /END-OF-COMPETITOR/);
   assert.match(bundle.messages[0].content, /بيانات مرجعية غير موثوقة/);
 });
