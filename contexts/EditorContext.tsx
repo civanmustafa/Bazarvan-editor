@@ -47,6 +47,7 @@ import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 import { shouldClearArticleAiResults } from '../constants/articleStatuses';
 import { parseMarkdownToArticleHtml } from '../utils/editorUtils';
 import { prepareContentWritingResultForEditor } from '../utils/contentWritingWorkflow';
+import { canPersistArticleDraft } from '../utils/articleSavePolicy';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -1446,10 +1447,16 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const contentJSON = editor.getJSON();
         const contentHTML = editor.getHTML();
         const currentText = editor.getText();
-        const currentTextTrimmed = currentText.trim();
-        if (title.trim() === '' && currentTextTrimmed === '') return false;
-        if (currentTextTrimmed === '' && (title.trim() || articleKey.trim())) {
-            console.warn('Skipped saving empty editor content for a titled article to avoid overwriting saved content.');
+        if (!canPersistArticleDraft({
+            articleId: activeArticleId,
+            articleKey,
+            title,
+            plainText: currentText,
+        })) {
+            if (showStatus) {
+                setSaveError('أدخل عنوانًا أو محتوى قبل حفظ المقالة.');
+                setSaveStatus('error');
+            }
             return false;
         }
         if (showStatus) {
