@@ -519,12 +519,20 @@ export const cancelContentWritingSession = async (options: {
 export const resumeContentWritingSession = async (options: {
   sessionId: string;
   requestedBy: string;
+  provider: ContentWritingProvider;
+  model: string;
+  inputHash: string;
+  allowModelFallback: boolean;
 }): Promise<ContentWritingSession | null> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
     'resume_content_writing_session',
     {
       p_session_id: options.sessionId,
       p_requested_by: options.requestedBy,
+      p_provider: options.provider,
+      p_model: options.model,
+      p_input_hash: options.inputHash,
+      p_allow_model_fallback: options.allowModelFallback,
     },
   );
   if (error) throwServiceError('session resume', error);

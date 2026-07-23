@@ -427,10 +427,17 @@ export const cancelContentWritingSession = async (
   return session;
 };
 
-export const resumeContentWritingSession = async (
-  sessionId: string,
-): Promise<ContentWritingSession> => {
-  const payload = await requestContentWriting({ action: 'resume', sessionId });
+export const resumeContentWritingSession = async (options: {
+  sessionId: string;
+  provider: ContentWritingProvider;
+  model: string;
+}): Promise<ContentWritingSession> => {
+  const payload = await requestContentWriting({
+    action: 'resume',
+    sessionId: options.sessionId,
+    provider: options.provider,
+    model: options.model,
+  });
   const session = normalizeSession(payload.session);
   if (!session) throw new Error('Content writing API returned an invalid resume response.');
   return session;

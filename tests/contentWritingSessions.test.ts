@@ -156,6 +156,26 @@ test('content-writing knowledge workflow migration enables indexing, audits, and
   assertBalancedSqlParentheses(migration);
 });
 
+test('content-writing resume migration applies the user-selected provider and preferred model', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260723020000_content_writing_resume_preferences.sql',
+  );
+
+  assert.match(migration, /resume_preference_version smallint not null default 1/);
+  assert.match(migration, /p_provider text/);
+  assert.match(migration, /p_model text/);
+  assert.match(migration, /p_input_hash text/);
+  assert.match(migration, /set provider = v_provider,/);
+  assert.match(migration, /model = v_model,/);
+  assert.match(migration, /input_hash = p_input_hash,/);
+  assert.match(migration, /'\{allowModelFallback\}'/);
+  assert.match(migration, /'previousProvider', v_session\.provider/);
+  assert.match(migration, /status in \('running', 'failed'\)/);
+  assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
   const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),
@@ -171,6 +191,8 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(engine, /getContentWritingCompetitorsFromMetadata/);
   assert.match(engine, /buildContentWritingPromptBundle/);
   assert.match(engine, /prepareContentWritingConversation/);
+  assert.match(engine, /createContentWritingSessionInputHash/);
+  assert.match(engine, /resolveContentWritingResumePreference/);
   assert.match(engine, /messages: conversation\.messages\.map/);
   assert.match(engine, /assertContentWritingConversation/);
   assert.match(engine, /systemInstruction: instructions\.content/);
@@ -195,6 +217,9 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(service, /create_content_writing_session/);
   assert.match(service, /complete_content_writing_session/);
   assert.match(service, /resume_content_writing_session/);
+  assert.match(service, /p_provider: options\.provider/);
+  assert.match(service, /p_model: options\.model/);
+  assert.match(service, /p_input_hash: options\.inputHash/);
   assert.match(service, /ContentWritingSessionSummary/);
   assert.doesNotMatch(service.match(/export const listContentWritingSessions[\s\S]*?export const cancelContentWritingSession/)?.[0] || '', /\.select\('\*'\)/);
   assert.match(geminiEngine, /systemInstruction: normalizedSystemInstruction/);
@@ -223,6 +248,10 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /action === 'list'/);
   assert.match(api, /action === 'cancel'/);
   assert.match(api, /action === 'resume'/);
+  assert.match(api, /resolveContentWritingResumePreference/);
+  assert.match(api, /createContentWritingSessionInputHash/);
+  assert.match(api, /provider: preference\.provider/);
+  assert.match(api, /model: preference\.model/);
   assert.match(api, /action === 'recordApplication'/);
   assert.match(api, /recordContentWritingApplication/);
   assert.match(api, /resolveSessionQualityReport/);
@@ -246,6 +275,12 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(panel, /recordContentWritingSessionApplication/);
   assert.match(panel, /applyGeneratedArticleContent/);
   assert.match(panel, /selectedDetail\?\.session\.id === selectedSessionId/);
+  assert.match(panel, /getModelPreferenceHint/);
+  assert.match(panel, /isModelFallbackActive/);
+  assert.match(panel, /resumeContentWritingSession\(\{/);
+  assert.match(panel, /provider,/);
+  assert.match(panel, /model: selectedModel/);
+  assert.match(panel, /سيُستأنف تنفيذ المراحل المتبقية باستخدام/);
   assert.match(modal, /aria-modal="true"/);
   assert.match(modal, /onConfirm/);
   assert.match(modal, /prepareContentWritingResultForEditor/);

@@ -48,6 +48,7 @@ const requiredServerMarkers = [
   'quality_policy_version',
   'quality_report',
   'knowledge_workflow_version',
+  'resume_preference_version',
 ];
 for (const marker of requiredServerMarkers) {
   if (!serverBundle.includes(marker)) {

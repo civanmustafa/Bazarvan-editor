@@ -16,8 +16,10 @@ import {
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 import {
   ContentWritingEngineError,
+  createContentWritingSessionInputHash,
   prepareContentWritingConversation,
   queueContentWritingSession,
+  resolveContentWritingResumePreference,
 } from '../server/contentWritingEngine';
 import {
   cancelContentWritingSession,
@@ -63,6 +65,17 @@ const toText = (value: unknown): string => typeof value === 'string' ? value.tri
 const toTextList = (value: unknown): string[] => Array.isArray(value)
   ? value.map(toText).filter(Boolean)
   : [];
+
+const requireContentWritingProvider = (value: unknown): ContentWritingProvider => {
+  const provider = toText(value) as ContentWritingProvider;
+  if (!['gemini', 'geminiPaid', 'openai'].includes(provider)) {
+    throw new ContentWritingApiError({
+      message: 'provider must be gemini, geminiPaid, or openai.',
+      code: 'content_writing_provider_invalid',
+    });
+  }
+  return provider;
+};
 
 const resolveSessionQualityReport = async (
   session: ContentWritingSession,
@@ -206,13 +219,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     );
     const articleId = requireUuid(body.articleId, 'articleId');
     await requireArticleWriteAccess(supabase, articleId, principal.userId);
-    const provider = toText(body.provider) as ContentWritingProvider;
-    if (!['gemini', 'geminiPaid', 'openai'].includes(provider)) {
-      throw new ContentWritingApiError({
-        message: 'provider must be gemini, geminiPaid, or openai.',
-        code: 'content_writing_provider_invalid',
-      });
-    }
+    const provider = requireContentWritingProvider(body.provider);
     const idempotencyKey = toText(body.idempotencyKey);
     if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
       throw new ContentWritingApiError({
@@ -376,9 +383,27 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         code: 'content_writing_resume_conflict',
       });
     }
+    const requestedProvider = toText(body.provider);
+    const provider = requestedProvider
+      ? requireContentWritingProvider(requestedProvider)
+      : session.provider;
+    const preference = await resolveContentWritingResumePreference(
+      provider,
+      toText(body.model) || (provider === session.provider ? session.model : undefined),
+    );
+    const messages = await getContentWritingMessages(session.id);
+    const inputHash = createContentWritingSessionInputHash(
+      preference.provider,
+      preference.model,
+      messages.map(message => message.content),
+    );
     const resumed = await resumeContentWritingSession({
       sessionId: session.id,
       requestedBy: principal.userId,
+      provider: preference.provider,
+      model: preference.model,
+      inputHash,
+      allowModelFallback: preference.allowModelFallback,
     });
     if (!resumed) {
       throw new ContentWritingApiError({

@@ -125,6 +125,25 @@ const getProviderLabel = (
   return 'Gemini';
 };
 
+const getModelPreferenceHint = (
+  provider: ContentWritingProvider,
+  isArabic: boolean,
+): string => {
+  if (provider === 'gemini') {
+    return isArabic
+      ? 'هذا هو الموديل المفضّل ويُجرّب أولًا في كل مرحلة. عند فشل مفتاح تُجرّب بقية المفاتيح، وبعد نفادها قد ينتقل النظام إلى موديل Gemini مجاني آخر حسب إعداد التبديل.'
+      : 'This preferred model is tried first for every step. If a key fails, the remaining keys are tried; after they are exhausted, another free Gemini model may be used according to the fallback setting.';
+  }
+  if (provider === 'geminiPaid') {
+    return isArabic
+      ? 'يبدأ كل طلب بموديل Gemini Pro المحدد وتُجرّب مفاتيحه المدفوعة بالتتابع. إذا فشلت جميعها، قد ينتقل النظام إلى Gemini المجاني إذا كان مسموحًا ومهيأً.'
+      : 'Every request starts with the selected Gemini Pro model and rotates through its paid keys. If all fail, the system may fall back to free Gemini when allowed and configured.';
+  }
+  return isArabic
+    ? 'يبدأ كل طلب بموديل OpenAI المحدد في الإعدادات وتُجرّب مفاتيحه بالتتابع. إذا فشلت جميعها، قد ينتقل النظام إلى Gemini Pro ثم Gemini المجاني.'
+    : 'Every request starts with the OpenAI model selected in settings and rotates through its keys. If all fail, the system may fall back to Gemini Pro and then free Gemini.';
+};
+
 const getErrorPresentation = (error: unknown, isArabic: boolean): ErrorPresentation => {
   const fallback = isArabic ? 'تعذر تنفيذ طلب كتابة المحتوى.' : 'Could not run the content writing request.';
   if (!(error instanceof ContentWritingRequestError)) {
@@ -242,6 +261,7 @@ const ContentWritingPanel: React.FC = () => {
   const pendingStartRef = useRef<PendingStartRequest | null>(null);
   const providerTouchedRef = useRef(false);
   const touchedModelsRef = useRef<Set<ContentWritingProvider>>(new Set());
+  const resumeSelectionSessionRef = useRef('');
   const trackedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
   const notifiedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
 
@@ -305,10 +325,12 @@ const ContentWritingPanel: React.FC = () => {
   const hasActiveSession = sessions.some(isContentWritingSessionActive);
   const activeDetail = selectedDetail?.session.id === selectedSessionId ? selectedDetail : null;
   const selectedSession = activeDetail?.session || sessions.find(session => session.id === selectedSessionId) || null;
-  const selectedSessionProviderAvailable = selectedSession
-    ? providerConfigs.find(item => item.id === selectedSession.provider)?.available === true
-    : false;
   const selectedModel = modelByProvider[provider];
+  const modelPreferenceHint = getModelPreferenceHint(provider, isArabic);
+  const resumeSelectionChanged = Boolean(
+    selectedSession
+    && (selectedSession.provider !== provider || selectedSession.model !== selectedModel),
+  );
   const modelOptions = provider === 'gemini'
     ? GEMINI_FREE_MODEL_OPTIONS
     : provider === 'geminiPaid'
@@ -335,6 +357,25 @@ const ContentWritingPanel: React.FC = () => {
       || providerConfigs.find(item => item.enabled);
     if (next) setProvider(next.id);
   }, [providerConfigs, selectedProviderConfig]);
+
+  useEffect(() => {
+    if (
+      !selectedSession
+      || selectedSession.executionMode !== 'api'
+      || !['failed', 'cancelled'].includes(selectedSession.status)
+      || resumeSelectionSessionRef.current === selectedSession.id
+    ) {
+      return;
+    }
+    resumeSelectionSessionRef.current = selectedSession.id;
+    providerTouchedRef.current = true;
+    touchedModelsRef.current.add(selectedSession.provider);
+    setProvider(selectedSession.provider);
+    setModelByProvider(current => ({
+      ...current,
+      [selectedSession.provider]: selectedSession.model,
+    }));
+  }, [selectedSession]);
 
   const mergeSession = useCallback((incoming: ContentWritingSession) => {
     setSessions(current => {
@@ -537,11 +578,22 @@ const ContentWritingPanel: React.FC = () => {
   };
 
   const resumeSession = async () => {
-    if (!selectedSession || !['failed', 'cancelled'].includes(selectedSession.status) || hasActiveSession) return;
+    if (
+      !selectedSession
+      || !['failed', 'cancelled'].includes(selectedSession.status)
+      || hasActiveSession
+      || !selectedProviderConfig?.available
+    ) {
+      return;
+    }
     setActionState('resuming');
     setErrorPresentation(null);
     try {
-      const resumed = await resumeContentWritingSession(selectedSession.id);
+      const resumed = await resumeContentWritingSession({
+        sessionId: selectedSession.id,
+        provider,
+        model: selectedModel,
+      });
       trackedKeyFeedbackSessionsRef.current.add(resumed.id);
       notifiedKeyFeedbackSessionsRef.current.delete(resumed.id);
       mergeSession(resumed);
@@ -671,6 +723,15 @@ const ContentWritingPanel: React.FC = () => {
   const keyCount = Number(progress.keyCount) || 0;
   const modelIndex = Number(progress.currentModelIndex) || 0;
   const modelCount = Number(progress.modelCount) || 0;
+  const currentProgressModel = typeof progress.model === 'string' ? progress.model.trim() : '';
+  const requestedProgressModel = typeof progress.requestedModel === 'string'
+    ? progress.requestedModel.trim()
+    : '';
+  const isModelFallbackActive = Boolean(
+    currentProgressModel
+    && requestedProgressModel
+    && currentProgressModel !== requestedProgressModel,
+  );
   const workflowStepIndex = Number(progress.workflowStepIndex) || 0;
   const workflowStepCount = Number(progress.workflowStepCount) || 0;
   const workflowStepLabel = typeof progress.workflowStepLabel === 'string'
@@ -800,6 +861,7 @@ const ContentWritingPanel: React.FC = () => {
               </span>
               <select
                 value={selectedModel}
+                title={modelPreferenceHint}
                 onChange={event => {
                   touchedModelsRef.current.add(provider);
                   setModelByProvider(current => ({ ...current, [provider]: event.target.value }));
@@ -808,11 +870,22 @@ const ContentWritingPanel: React.FC = () => {
               >
                 {modelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
+              <span className="mt-1.5 block text-[10px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+                {modelPreferenceHint}
+              </span>
             </label>
           ) : selectedModel ? (
-            <div className="flex h-9 items-center justify-between gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-              <span className="text-gray-500 dark:text-gray-400">{isArabic ? 'الموديل' : 'Model'}</span>
-              <span className="truncate font-mono font-bold text-gray-700 dark:text-gray-200" dir="ltr">{selectedModel}</span>
+            <div>
+              <div
+                className="flex h-9 items-center justify-between gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs dark:border-[#3C3C3C] dark:bg-[#1F1F1F]"
+                title={modelPreferenceHint}
+              >
+                <span className="text-gray-500 dark:text-gray-400">{isArabic ? 'الموديل المفضّل' : 'Preferred model'}</span>
+                <span className="truncate font-mono font-bold text-gray-700 dark:text-gray-200" dir="ltr">{selectedModel}</span>
+              </div>
+              <p className="mt-1.5 text-[10px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+                {modelPreferenceHint}
+              </p>
             </div>
           ) : null}
 
@@ -925,6 +998,21 @@ const ContentWritingPanel: React.FC = () => {
                       </span>
                     )}
                     {modelCount > 0 && <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">{isArabic ? 'الموديل' : 'Model'} {modelIndex || 1}/{modelCount}</span>}
+                    {currentProgressModel && (
+                      <span
+                        className={`rounded px-1.5 py-1 font-mono ${
+                          isModelFallbackActive
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
+                            : 'bg-white dark:bg-[#2A2A2A]'
+                        }`}
+                        dir="ltr"
+                        title={isModelFallbackActive
+                          ? (isArabic ? `موديل بديل عن ${requestedProgressModel}` : `Fallback model for ${requestedProgressModel}`)
+                          : (isArabic ? 'الموديل المستخدم حاليًا' : 'Current model')}
+                      >
+                        {currentProgressModel}
+                      </span>
+                    )}
                     {keyCount > 0 && <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">{isArabic ? 'المفتاح' : 'Key'} {keyIndex || 1}/{keyCount}</span>}
                     {currentKeySuffix && (
                       <span className="rounded bg-white px-1.5 py-1 font-mono font-black dark:bg-[#2A2A2A]" dir="ltr">
@@ -965,10 +1053,25 @@ const ContentWritingPanel: React.FC = () => {
                 <div className="font-bold">{selectedSession.lastError || (selectedSession.status === 'cancelled'
                   ? (isArabic ? 'تم إيقاف جلسة الكتابة.' : 'The writing session was stopped.')
                   : (isArabic ? 'فشلت جلسة الكتابة.' : 'The writing session failed.'))}</div>
+                <div className="mt-2 rounded bg-white/80 p-2 text-[10px] font-semibold leading-5 text-gray-600 dark:bg-black/20 dark:text-gray-200">
+                  {isArabic
+                    ? `سيُستأنف تنفيذ المراحل المتبقية باستخدام ${getProviderLabel(provider)} والموديل ${selectedModel} كاختيار أول. تبقى المراحل المكتملة محفوظة، ويعمل تدوير المفاتيح والموديلات عند الفشل.`
+                    : `The remaining steps will resume with ${getProviderLabel(provider)} and ${selectedModel} as the first choice. Completed steps stay saved, and key/model fallback remains active on failure.`}
+                  {resumeSelectionChanged && (
+                    <span className="mt-1 block font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                      {isArabic
+                        ? 'تم تغيير اختيار الاستئناف عن مزود أو موديل الجلسة السابقة.'
+                        : 'The resume selection differs from the previous session provider or model.'}
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => void resumeSession()}
-                  disabled={hasActiveSession || actionState !== 'idle' || !selectedSessionProviderAvailable}
+                  disabled={hasActiveSession || actionState !== 'idle' || !selectedProviderConfig?.available}
+                  title={isArabic
+                    ? `استئناف بالموديل ${selectedModel} أولًا مع الاحتفاظ بالمراحل المكتملة`
+                    : `Resume with ${selectedModel} first while keeping completed steps`}
                   className="mt-2 inline-flex h-8 items-center gap-1 rounded-md border border-red-200 bg-white px-2 text-[11px] font-bold hover:bg-red-50 disabled:opacity-50 dark:border-red-900/50 dark:bg-[#2A2A2A]"
                 >
                   {actionState === 'resuming' ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}

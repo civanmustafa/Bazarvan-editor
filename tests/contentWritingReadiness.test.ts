@@ -50,7 +50,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 7);
+  assert.equal(result.requiredMigrationCount, 8);
   assert.deepEqual(result.checks, { sessions: true, messages: true, steps: true });
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'content_writing_messages',
@@ -59,6 +59,7 @@ test('content-writing readiness checks every required schema surface', async () 
   ]);
   assert.ok(calls.every(call => call.limit === 1));
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /execution_mode/);
+  assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /resume_preference_version/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /application_count/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_guard_version/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_policy_version/);
@@ -97,9 +98,15 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260722040000_content_writing_quality_guards\.sql/);
   assert.match(releaseRegistry, /20260723000000_content_writing_quality_policy\.sql/);
   assert.match(releaseRegistry, /20260723010000_content_writing_knowledge_workflow\.sql/);
+  assert.match(releaseRegistry, /20260723020000_content_writing_resume_preferences\.sql/);
+  assert.match(
+    await readWorkspaceFile('server/contentWritingReadiness.ts'),
+    /resume_preference_version/,
+  );
   assert.match(releaseRegistry, /server-dist\/content-writing-worker\.mjs/);
   assert.match(releaseScript, /CONTENT_WRITING_REQUIRED_MIGRATIONS/);
   assert.match(releaseScript, /claim_next_content_writing_session/);
+  assert.match(releaseScript, /resume_preference_version/);
   assert.match(server, /app\.get\('\/readyz', readyzHandler\)/);
   assert.match(server, /toPublicContentWritingReadiness/);
   assert.match(deploymentGuide, /curl -fsS https:\/\/smarteditor\.bazarvan\.com\/readyz/);

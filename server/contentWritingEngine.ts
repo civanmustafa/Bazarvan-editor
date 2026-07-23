@@ -283,6 +283,31 @@ const createInputHash = (values: readonly string[]): string => (
   createHash('sha256').update(values.join('\n\u0000\n'), 'utf8').digest('hex')
 );
 
+export const createContentWritingSessionInputHash = (
+  provider: ContentWritingProvider,
+  model: string,
+  messages: readonly string[],
+): string => createInputHash([provider, model, ...messages]);
+
+export const resolveContentWritingResumePreference = async (
+  provider: ContentWritingProvider,
+  requestedModel?: string,
+): Promise<{
+  provider: ContentWritingProvider;
+  model: string;
+  allowModelFallback: boolean;
+}> => {
+  const [model, settings] = await Promise.all([
+    selectProviderModel(provider, requestedModel),
+    getContentWritingSettings(),
+  ]);
+  return {
+    provider,
+    model,
+    allowModelFallback: provider === 'gemini' && settings.allowModelFallback,
+  };
+};
+
 const assertContentWritingBundleReady = (bundle: ContentWritingPromptBundle): void => {
   if (bundle.readinessIssues.length > 0) {
     throw new ContentWritingEngineError({
@@ -491,11 +516,11 @@ export const queueContentWritingSession = async (input: {
     selectProviderModel(input.provider, input.model),
   ]);
 
-  const inputHash = createInputHash([
+  const inputHash = createContentWritingSessionInputHash(
     input.provider,
     model,
-    ...conversation.messages.map(message => message.content),
-  ]);
+    conversation.messages.map(message => message.content),
+  );
   try {
     return await createContentWritingSession({
       articleId: conversation.article.id,
