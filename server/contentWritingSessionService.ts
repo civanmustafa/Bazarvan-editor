@@ -48,6 +48,7 @@ export type ContentWritingSession = {
   quality_override_reason: string | null;
   quality_override_by: string | null;
   quality_override_at: string | null;
+  knowledge_workflow_version: number;
   created_at: string;
   updated_at: string;
 };
@@ -487,6 +488,7 @@ export const listContentWritingSessions = async (options: {
       'quality_override_reason',
       'quality_override_by',
       'quality_override_at',
+      'knowledge_workflow_version',
       'created_at',
       'updated_at',
     ].join(','))

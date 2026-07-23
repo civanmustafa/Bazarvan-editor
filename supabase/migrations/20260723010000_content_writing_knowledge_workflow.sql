@@ -1,5 +1,12 @@
 begin;
 
+alter table public.content_writing_sessions
+  add column if not exists knowledge_workflow_version integer not null default 3
+    check (knowledge_workflow_version >= 3);
+
+comment on column public.content_writing_sessions.knowledge_workflow_version is
+  'Database capability marker for competitor indexing, coverage audits, and targeted section repairs.';
+
 alter table public.content_writing_steps
   drop constraint if exists content_writing_steps_step_type_check;
 alter table public.content_writing_steps

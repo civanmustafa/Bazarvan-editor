@@ -149,6 +149,7 @@ test('content-writing knowledge workflow migration enables indexing, audits, and
   assert.match(migration, /'competitor_index'/);
   assert.match(migration, /'coverage_audit'/);
   assert.match(migration, /'section_repair'/);
+  assert.match(migration, /knowledge_workflow_version integer not null default 3/);
   assert.match(migration, /create or replace function public\.ensure_content_writing_step/);
   assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
   assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');

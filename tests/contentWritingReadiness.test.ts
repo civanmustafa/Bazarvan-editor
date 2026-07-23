@@ -63,6 +63,7 @@ test('content-writing readiness checks every required schema surface', async () 
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_guard_version/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_policy_version/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_report/);
+  assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /knowledge_workflow_version/);
 });
 
 test('public readiness reports a safe 503 reason without exposing Supabase details', async () => {
