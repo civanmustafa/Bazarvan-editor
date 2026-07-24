@@ -15,6 +15,18 @@ const importContentWriting = async (): Promise<any> => {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 };
 
+const importGoalContext = async (): Promise<any> => {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL('../utils/goalContext.ts', import.meta.url))],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node20',
+    write: false,
+  });
+  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+};
+
 const createReadyArticle = (competitorContents: string[]) => ({
   articleId: 'article-1',
   title: 'عنوان المقالة',
@@ -125,6 +137,38 @@ test('content-writing requires the complete smart brief before a new session sta
   assert.equal(goalContext.audienceScope, 'global');
   assert.equal(goalContext.targetAudience, '');
   assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'goal_context.targetAudience'));
+});
+
+test('smart brief text fields preserve spaces while typing and trim only at normalization boundaries', async () => {
+  const {
+    normalizeGoalContext,
+    updateGoalContextField,
+  } = await importGoalContext();
+  const textKeys = [
+    'targetCountry',
+    'targetAudience',
+    'audienceNeeds',
+    'readerOutcome',
+    'desiredAction',
+    'uniqueAngle',
+    'evidenceRequirements',
+    'freshnessRequirements',
+    'brandVoice',
+  ];
+
+  for (const key of textKeys) {
+    const updated = updateGoalContextField(
+      normalizeGoalContext({ audienceScope: 'country' }),
+      key,
+      'كلمة أولى ',
+    );
+    assert.equal(updated[key], 'كلمة أولى ', `${key} must preserve the typed trailing space.`);
+    assert.equal(
+      normalizeGoalContext(updated)[key],
+      'كلمة أولى',
+      `${key} must still be trimmed at a normalization boundary.`,
+    );
+  }
 });
 
 test('content-writing preflight blocks oversized requests instead of shortening them', async () => {

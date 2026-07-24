@@ -36,6 +36,17 @@ export type GoalContextPresetOption = {
 };
 
 const TARGET_LOCATION_AUDIENCE_SCOPES = ['local', 'country', 'regional'];
+const GOAL_CONTEXT_FREE_TEXT_KEYS = new Set<keyof GoalContext>([
+  'targetCountry',
+  'targetAudience',
+  'audienceNeeds',
+  'readerOutcome',
+  'desiredAction',
+  'uniqueAngle',
+  'evidenceRequirements',
+  'freshnessRequirements',
+  'brandVoice',
+]);
 
 export const SMART_CONTENT_BRIEF_REQUIRED_KEYS: ReadonlyArray<keyof GoalContext> = [
   'pageType',
@@ -283,6 +294,15 @@ export const updateGoalContextField = (
   key: keyof GoalContext,
   value: string,
 ): GoalContext => {
+  // Preserve spaces and line breaks while the user is actively typing.
+  // normalizeGoalContext still trims these fields at persistence and prompt boundaries.
+  if (GOAL_CONTEXT_FREE_TEXT_KEYS.has(key)) {
+    return {
+      ...currentContext,
+      [key]: value,
+    };
+  }
+
   const nextContext = normalizeGoalContext({
     ...currentContext,
     [key]: value,
