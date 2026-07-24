@@ -4,6 +4,7 @@ import { createContext, useContext, useContextSelector } from 'use-context-selec
 import { useEditor as useTiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Highlight } from '@tiptap/extension-highlight';
+import Link from '@tiptap/extension-link';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableHeader } from '@tiptap/extension-table-header';
@@ -999,6 +1000,15 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const extensions = useMemo(() => [
         StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
         TextAlign.configure({ types: ['heading', 'paragraph', 'listItem', 'tableCell', 'tableHeader'], alignments: ['left', 'center', 'right', 'justify'] }),
+        Link.configure({
+            openOnClick: false,
+            autolink: false,
+            linkOnPaste: true,
+            HTMLAttributes: {
+                rel: 'noopener',
+                target: '_self',
+            },
+        }),
         ViolationHighlight.configure({ multicolor: true }),
         Table.configure({ resizable: true }),
         TableRow,

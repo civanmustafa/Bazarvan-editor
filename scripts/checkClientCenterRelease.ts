@@ -2,11 +2,16 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
   CLIENT_CENTER_FOUNDATION_MIGRATION,
+  CLIENT_CENTER_CRAWLING_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
 } from '../constants/clientCenter.ts';
 
 const root = process.cwd();
-for (const migration of [CLIENT_CENTER_FOUNDATION_MIGRATION, CLIENT_CENTER_REQUIRED_MIGRATION]) {
+for (const migration of [
+  CLIENT_CENTER_FOUNDATION_MIGRATION,
+  CLIENT_CENTER_CRAWLING_MIGRATION,
+  CLIENT_CENTER_REQUIRED_MIGRATION,
+]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
   if (!migrationInfo.isFile() || migrationInfo.size < 1_000) {
@@ -56,7 +61,11 @@ for (const marker of [
 
 console.log(JSON.stringify({
   ok: true,
-  migrations: [CLIENT_CENTER_FOUNDATION_MIGRATION, CLIENT_CENTER_REQUIRED_MIGRATION],
+  migrations: [
+    CLIENT_CENTER_FOUNDATION_MIGRATION,
+    CLIENT_CENTER_CRAWLING_MIGRATION,
+    CLIENT_CENTER_REQUIRED_MIGRATION,
+  ],
   crawler: 'server-dist/client-page-crawl-worker.mjs',
   readinessEndpoint: '/readyz',
 }, null, 2));

@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2 } from 'lucide-react';
 import StructureTab from './StructureTab';
 import { useUser } from '../contexts/UserContext';
 import { useAISelector } from '../contexts/AIContext';
@@ -28,6 +28,7 @@ import type { CompetitorDiscoveryRow } from '../utils/competitorDiscovery';
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
 const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
 const ContentWritingPanel = React.lazy(() => import('./ContentWritingPanel'));
+const InternalLinkingPanel = React.lazy(() => import('./InternalLinkingPanel'));
 
 type ReadyCommand = {
     id: string;
@@ -763,7 +764,7 @@ const RightSidebar: React.FC = () => {
     const deleteAiInsertionPatchMergeDeleteTarget = useAISelector(context => context.deleteAiInsertionPatchMergeDeleteTarget);
     const selectAiInsertionPatchMergeDeleteTarget = useAISelector(context => context.selectAiInsertionPatchMergeDeleteTarget);
     
-    const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors' | 'writing'>('structure');
+    const [activeTab, setActiveTab] = useState<'structure' | 'ai' | 'competitors' | 'writing' | 'links'>('structure');
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history' | 'external'>('new');
     const [aiCommand, setAiCommand] = useState('');
     const [bulkCompetitorText, setBulkCompetitorText] = useState('');
@@ -2106,7 +2107,7 @@ ${readyCommandCompetitorBlocks}`;
     return (
         <aside className="basis-[18.7%] flex flex-col h-full min-w-0 bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg overflow-hidden border-s border-gray-300 dark:border-[#333]">
             <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
-                {(['structure', 'ai', 'competitors', 'writing'] as const).map(tab => (
+                {(['structure', 'ai', 'competitors', 'writing', 'links'] as const).map(tab => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
@@ -2116,7 +2117,9 @@ ${readyCommandCompetitorBlocks}`;
                               ? (t.locale === 'ar' ? 'التحليل الذكي' : 'Smart analysis')
                               : tab === 'competitors'
                                 ? (t.locale === 'ar' ? 'المنافسون' : 'Competitors')
-                                : (t.locale === 'ar' ? 'كتابة المحتوى' : 'Content writing')}
+                                : tab === 'writing'
+                                  ? (t.locale === 'ar' ? 'كتابة المحتوى' : 'Content writing')
+                                  : (t.locale === 'ar' ? 'الربط الداخلي' : 'Internal linking')}
                         className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15'}`}
                     >
                         {tab === 'structure'
@@ -2125,7 +2128,9 @@ ${readyCommandCompetitorBlocks}`;
                               ? <BrainCircuit size={18} />
                               : tab === 'competitors'
                                 ? <Users size={18} />
-                                : <PenLine size={18} />}
+                                : tab === 'writing'
+                                  ? <PenLine size={18} />
+                                  : <Link2 size={18} />}
                     </button>
                 ))}
             </div>
@@ -2136,7 +2141,8 @@ ${readyCommandCompetitorBlocks}`;
                       ? renderAiTab()
                       : activeTab === 'competitors'
                         ? renderCompetitorsTab()
-                        : (
+                        : activeTab === 'writing'
+                          ? (
                             <React.Suspense fallback={(
                                 <div className="flex h-full items-center justify-center p-4 text-xs font-bold text-gray-400">
                                     {t.locale === 'ar' ? 'جار تحميل كتابة المحتوى...' : 'Loading content writing...'}
@@ -2144,7 +2150,16 @@ ${readyCommandCompetitorBlocks}`;
                             )}>
                                 <ContentWritingPanel />
                             </React.Suspense>
-                        )}
+                            )
+                          : (
+                            <React.Suspense fallback={(
+                                <div className="flex h-full items-center justify-center p-4 text-xs font-bold text-gray-400">
+                                    {t.locale === 'ar' ? 'جار تحميل الربط الداخلي...' : 'Loading internal linking...'}
+                                </div>
+                            )}>
+                                <InternalLinkingPanel />
+                            </React.Suspense>
+                            )}
             </div>
         </aside>
     );

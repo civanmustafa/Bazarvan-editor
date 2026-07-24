@@ -1,5 +1,6 @@
 export const CLIENT_CENTER_FOUNDATION_MIGRATION = '20260724010000_client_center_foundation.sql';
-export const CLIENT_CENTER_REQUIRED_MIGRATION = '20260724020000_client_center_management_and_crawling.sql';
+export const CLIENT_CENTER_CRAWLING_MIGRATION = '20260724020000_client_center_management_and_crawling.sql';
+export const CLIENT_CENTER_REQUIRED_MIGRATION = '20260724030000_internal_linking_engine.sql';
 
 export const CLIENT_CENTER_SCHEMA_PROBES = [
   {
@@ -26,5 +27,15 @@ export const CLIENT_CENTER_SCHEMA_PROBES = [
     id: 'crawlJobs',
     table: 'client_page_crawl_jobs',
     columns: 'id,client_id,page_id,requested_by,status,attempt_count,max_attempts,idempotency_key,next_attempt_at',
+  },
+  {
+    id: 'articleClientContexts',
+    table: 'article_client_contexts',
+    columns: 'article_id,client_id,selected_by,created_at,updated_at',
+  },
+  {
+    id: 'internalLinkActions',
+    table: 'internal_link_actions',
+    columns: 'id,article_id,client_id,page_id,actor_id,action,anchor_text,target_url,score,reason_details,article_signature,created_at',
   },
 ] as const;

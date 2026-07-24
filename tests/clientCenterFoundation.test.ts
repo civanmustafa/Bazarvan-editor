@@ -116,13 +116,17 @@ test('Client Center readiness probes every required table and hides provider det
     assignments: true,
     pages: true,
     crawlJobs: true,
+    articleClientContexts: true,
+    internalLinkActions: true,
   });
   assert.deepEqual(calls.map(call => call.table).sort(), [
+    'article_client_contexts',
     'client_assignments',
     'client_domains',
     'client_page_crawl_jobs',
     'client_pages',
     'clients',
+    'internal_link_actions',
   ]);
   assert.ok(calls.every(call => call.limit === 1));
 
@@ -152,10 +156,12 @@ test('Client Center release gate is wired to build and readiness', async () => {
 
   assert.match(registry, /20260724010000_client_center_foundation\.sql/);
   assert.match(registry, /20260724020000_client_center_management_and_crawling\.sql/);
+  assert.match(registry, /20260724030000_internal_linking_engine\.sql/);
   assert.match(script, /CLIENT_CENTER_REQUIRED_MIGRATION/);
   assert.match(server, /checkClientCenterReadiness/);
   assert.match(server, /toPublicClientCenterReadiness/);
   assert.match(guide, /20260724010000_client_center_foundation\.sql/);
   assert.match(guide, /20260724020000_client_center_management_and_crawling\.sql/);
+  assert.match(guide, /20260724030000_internal_linking_engine\.sql/);
   assert.match(packageJson.scripts?.postbuild || '', /check:client-center-release/);
 });
