@@ -14,16 +14,19 @@ import type { InternalLinkTargetPage, InternalLinkSuggestion } from './internalL
 export type ArticleClientContext = {
   articleId: string;
   clientId: string;
+  currentPageUrl: string;
   selectedBy: string | null;
   updatedAt: string;
 };
+
+export type InternalLinkActionType = 'applied' | 'dismissed' | 'blocked' | 'reported';
 
 export type InternalLinkAction = {
   id: string;
   articleId: string;
   clientId: string;
   pageId: string;
-  action: 'applied' | 'dismissed';
+  action: InternalLinkActionType;
   anchorText: string;
   targetUrl: string;
   score: number;
@@ -101,7 +104,11 @@ const mapAction = (row: any): InternalLinkAction => ({
   articleId: asText(row.article_id),
   clientId: asText(row.client_id),
   pageId: asText(row.page_id),
-  action: row.action === 'dismissed' ? 'dismissed' : 'applied',
+  action: (
+    row.action === 'dismissed'
+    || row.action === 'blocked'
+    || row.action === 'reported'
+  ) ? row.action : 'applied',
   anchorText: asText(row.anchor_text),
   targetUrl: asText(row.target_url),
   score: Number(row.score) || 0,
@@ -121,7 +128,7 @@ export const loadArticleClientContext = async (
 ): Promise<ArticleClientContext | null> => {
   const { data, error } = await getSupabaseClient()
     .from('article_client_contexts')
-    .select('article_id,client_id,selected_by,updated_at')
+    .select('article_id,client_id,current_page_url,selected_by,updated_at')
     .eq('article_id', articleId)
     .maybeSingle();
   throwIfError(error);
@@ -129,6 +136,7 @@ export const loadArticleClientContext = async (
   return {
     articleId: asText(data.article_id),
     clientId: asText(data.client_id),
+    currentPageUrl: asText(data.current_page_url),
     selectedBy: typeof data.selected_by === 'string' ? data.selected_by : null,
     updatedAt: asText(data.updated_at),
   };
@@ -137,12 +145,30 @@ export const loadArticleClientContext = async (
 export const saveArticleClientContext = async (
   articleId: string,
   clientId: string,
+  currentPageUrl = '',
 ): Promise<void> => {
   const { error } = await getSupabaseClient()
     .from('article_client_contexts')
     .upsert({
       article_id: articleId,
       client_id: clientId,
+      current_page_url: currentPageUrl.trim() || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'article_id' });
+  throwIfError(error);
+};
+
+export const saveArticleCurrentPageUrl = async (
+  articleId: string,
+  clientId: string,
+  currentPageUrl: string,
+): Promise<void> => {
+  const { error } = await getSupabaseClient()
+    .from('article_client_contexts')
+    .upsert({
+      article_id: articleId,
+      client_id: clientId,
+      current_page_url: currentPageUrl.trim() || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'article_id' });
   throwIfError(error);
@@ -234,8 +260,9 @@ export const recordInternalLinkAction = async (input: {
   articleId: string;
   clientId: string;
   suggestion: InternalLinkSuggestion;
-  action: 'applied' | 'dismissed';
+  action: InternalLinkActionType;
   articleSignature: string;
+  feedbackNote?: string;
 }): Promise<InternalLinkAction> => {
   const { data, error } = await getSupabaseClient()
     .from('internal_link_actions')
@@ -254,6 +281,8 @@ export const recordInternalLinkAction = async (input: {
         bm25Score: input.suggestion.bm25Score,
         completenessScore: input.suggestion.completenessScore,
         algorithmVersion: input.suggestion.algorithmVersion,
+        paragraphNumber: input.suggestion.paragraphNumber,
+        feedbackNote: input.feedbackNote?.trim().slice(0, 1000) || null,
       },
       article_signature: input.articleSignature,
     })
@@ -261,4 +290,36 @@ export const recordInternalLinkAction = async (input: {
     .single();
   throwIfError(error);
   return mapAction(data);
+};
+
+export const recordInternalLinkSuggestionRun = async (input: {
+  articleId: string;
+  clientId: string;
+  articleSignature: string;
+  inventorySignature: string;
+  currentPageUrl?: string;
+  pageCount: number;
+  suggestions: InternalLinkSuggestion[];
+}): Promise<void> => {
+  const paragraphNumbers = new Set(input.suggestions.map(item => item.paragraphNumber));
+  const { error } = await getSupabaseClient()
+    .from('client_link_suggestion_runs')
+    .insert({
+      article_id: input.articleId,
+      client_id: input.clientId,
+      article_signature: input.articleSignature,
+      inventory_signature: input.inventorySignature,
+      current_page_url: input.currentPageUrl?.trim() || null,
+      page_count: Math.max(0, Math.min(1_000_000, input.pageCount)),
+      suggestion_count: Math.max(0, Math.min(10_000, input.suggestions.length)),
+      top_score: input.suggestions[0]?.score ?? null,
+      algorithm_version: input.suggestions[0]?.algorithmVersion || 'bm25-paragraph-v2',
+      result_summary: {
+        paragraphCount: paragraphNumbers.size,
+        strongCount: input.suggestions.filter(item => item.confidence === 'strong').length,
+        goodCount: input.suggestions.filter(item => item.confidence === 'good').length,
+        reviewCount: input.suggestions.filter(item => item.confidence === 'review').length,
+      },
+    });
+  if (error && error.code !== '23505') throwIfError(error);
 };

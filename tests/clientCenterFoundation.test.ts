@@ -120,12 +120,14 @@ test('Client Center readiness probes every required table and hides provider det
     internalLinkActions: true,
     linkDictionaries: true,
     semanticProfiles: true,
+    suggestionRuns: true,
   });
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'article_client_contexts',
     'client_assignments',
     'client_domains',
     'client_link_dictionaries',
+    'client_link_suggestion_runs',
     'client_page_crawl_jobs',
     'client_page_semantic_profiles',
     'client_pages',
@@ -162,6 +164,7 @@ test('Client Center release gate is wired to build and readiness', async () => {
   assert.match(registry, /20260724020000_client_center_management_and_crawling\.sql/);
   assert.match(registry, /20260724030000_internal_linking_engine\.sql/);
   assert.match(registry, /20260724040000_client_semantic_index\.sql/);
+  assert.match(registry, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(script, /CLIENT_CENTER_REQUIRED_MIGRATION/);
   assert.match(server, /checkClientCenterReadiness/);
   assert.match(server, /toPublicClientCenterReadiness/);
@@ -169,5 +172,6 @@ test('Client Center release gate is wired to build and readiness', async () => {
   assert.match(guide, /20260724020000_client_center_management_and_crawling\.sql/);
   assert.match(guide, /20260724030000_internal_linking_engine\.sql/);
   assert.match(guide, /20260724040000_client_semantic_index\.sql/);
+  assert.match(guide, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(packageJson.scripts?.postbuild || '', /check:client-center-release/);
 });

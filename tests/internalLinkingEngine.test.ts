@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   createInternalLinkArticleSignature,
+  createInternalLinkInventorySignature,
   generateInternalLinkSuggestions,
   normalizeInternalLinkUrl,
   type InternalLinkTargetPage,
@@ -56,7 +57,10 @@ test('deterministic engine proposes a real body anchor with transparent evidence
   assert.ok(first[0].matchedTerms.length >= 2);
   assert.ok(first[0].reasons.some(reason => reason.includes('عنوان')));
   assert.ok(first[0].bm25Score > 0);
-  assert.equal(first[0].algorithmVersion, 'bm25-semantic-v1');
+  assert.equal(first[0].algorithmVersion, 'bm25-paragraph-v2');
+  assert.equal(first[0].paragraphNumber, 1);
+  assert.ok(first[0].alternativeAnchors.includes(first[0].anchorText));
+  assert.ok(first[0].alternativeAnchors.every(anchor => articleText.split('\n')[0].includes(anchor)));
   assert.notEqual(first[0].anchorText, input.articleTitle);
 });
 
@@ -131,6 +135,20 @@ test('engine excludes duplicate targets, unsafe page states, and dismissed sugge
     articleTitle: 'التحول الرقمي',
     articleText,
     pages: [eligible],
+    currentArticleUrl: eligible.canonicalUrl,
+  }), []);
+
+  assert.deepEqual(generateInternalLinkSuggestions({
+    articleTitle: 'التحول الرقمي',
+    articleText,
+    pages: [eligible],
+    blockedPageIds: [eligible.id],
+  }), []);
+
+  assert.deepEqual(generateInternalLinkSuggestions({
+    articleTitle: 'التحول الرقمي',
+    articleText,
+    pages: [eligible],
     dismissedPageIds: [eligible.id],
   }), []);
 
@@ -145,6 +163,36 @@ test('article signature is stable and changes when the article body changes', ()
   assert.equal(first, createInternalLinkArticleSignature('العنوان', articleText));
   assert.notEqual(first, createInternalLinkArticleSignature('العنوان', `${articleText} إضافة`));
   assert.match(first, /^article_[a-z0-9]+_[a-z0-9]+$/);
+});
+
+test('inventory signature is deterministic and changes with the indexed website inventory', () => {
+  const page = readyPage();
+  const first = createInternalLinkInventorySignature([page]);
+  assert.equal(first, createInternalLinkInventorySignature([page]));
+  assert.notEqual(first, createInternalLinkInventorySignature([{
+    ...page,
+    contentHash: 'changed-content',
+  }]));
+  assert.notEqual(
+    first,
+    createInternalLinkInventorySignature([page], 'https://example.com/current-article'),
+  );
+  assert.match(first, /^inventory_[a-z0-9]+_[a-z0-9]+$/);
+});
+
+test('phase 7 migration persists the current page, aggregate runs, block, and report actions securely', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260724050000_editor_internal_link_suggestions.sql',
+  );
+  assert.match(migration, /add column if not exists current_page_url/);
+  assert.match(migration, /action in \('applied', 'dismissed', 'blocked', 'reported'\)/);
+  assert.match(migration, /create table if not exists public\.client_link_suggestion_runs/);
+  assert.match(migration, /alter table public\.client_link_suggestion_runs enable row level security/);
+  assert.match(migration, /public\.can_write_article\(article_id\)/);
+  assert.match(migration, /public\.can_read_client\(client_id\)/);
+  assert.match(migration, /grant select, insert on public\.client_link_suggestion_runs to authenticated/);
+  assert.doesNotMatch(migration, /grant (?:update|delete)[^;]*client_link_suggestion_runs/i);
+  assert.doesNotMatch(migration, /openai|gemini|search_console|orphan_page/i);
 });
 
 test('phase 4/5 migration stores article-client scope and append-only link actions securely', async () => {
@@ -179,15 +227,22 @@ test('editor integration applies native links and does not call an AI provider',
   assert.match(panel, /\.setLink\(/);
   assert.match(panel, /recordInternalLinkAction/);
   assert.match(panel, /findUnlinkedAnchorRange/);
+  assert.match(panel, /رابط المقالة الحالية/);
+  assert.match(panel, /اختيار نص ربط بديل من الفقرة/);
+  assert.match(panel, /نسخ الرابط/);
+  assert.match(panel, /منع للمقالة/);
+  assert.match(panel, /إبلاغ/);
+  assert.match(panel, /recordInternalLinkSuggestionRun/);
   assert.doesNotMatch(panel, /handleAiAnalyze|runGemini|openai/i);
   assert.match(sidebar, /InternalLinkingPanel/);
   assert.match(sidebar, /'links'/);
   assert.match(editorContext, /@tiptap\/extension-link/);
   assert.match(editorContext, /Link\.configure/);
   assert.match(registry, /20260724030000_internal_linking_engine\.sql/);
+  assert.match(registry, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(registry, /article_client_contexts/);
   assert.match(registry, /internal_link_actions/);
   assert.match(releaseScript, /CLIENT_CENTER_CRAWLING_MIGRATION/);
   assert.match(guide, /20260724030000_internal_linking_engine\.sql/);
-  assert.match(guide, /لا يحتاج الترحيل الرابع إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
+  assert.match(guide, /لا يحتاج الترحيل الخامس إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
 });

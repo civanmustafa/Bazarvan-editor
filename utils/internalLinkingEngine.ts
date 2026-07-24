@@ -37,9 +37,11 @@ export type InternalLinkSuggestion = {
   matchedTerms: string[];
   reasons: string[];
   sourceExcerpt: string;
+  paragraphNumber: number;
+  alternativeAnchors: string[];
   bm25Score: number;
   completenessScore: number;
-  algorithmVersion: 'bm25-semantic-v1';
+  algorithmVersion: 'bm25-paragraph-v2';
 };
 
 export type InternalLinkingInput = {
@@ -51,6 +53,8 @@ export type InternalLinkingInput = {
   existingUrls?: string[];
   existingAnchors?: string[];
   dismissedPageIds?: string[];
+  blockedPageIds?: string[];
+  currentArticleUrl?: string;
   maximumSuggestions?: number;
 };
 
@@ -58,6 +62,8 @@ type TextSpan = {
   text: string;
   normalized: string;
   tokens: string[];
+  paragraphNumber: number;
+  paragraphText: string;
 };
 
 type TargetSignal = {
@@ -135,19 +141,48 @@ export const createInternalLinkArticleSignature = (
   return `article_${(hash >>> 0).toString(36)}_${value.length.toString(36)}`;
 };
 
+export const createInternalLinkInventorySignature = (
+  pages: InternalLinkTargetPage[],
+  currentArticleUrl = '',
+): string => {
+  const value = `${normalizeInternalLinkUrl(currentArticleUrl)}\n${pages
+    .map(page => [
+      page.id,
+      normalizeInternalLinkUrl(resolveTargetUrl(page)),
+      page.semanticProfile?.sourceSignature || page.contentHash || '',
+      page.semanticProfile?.dictionarySignature || '',
+      page.isEnabled === false ? '0' : '1',
+      page.crawlStatus,
+    ].join('|'))
+    .sort()
+    .join('\n')}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `inventory_${(hash >>> 0).toString(36)}_${value.length.toString(36)}`;
+};
+
 const buildTextSpans = (articleText: string): TextSpan[] => {
-  const rawSegments = [
-    ...articleText.split(/(?:\r?\n)+|(?<=[.!؟?؛;])\s+/u),
-  ];
-  return rawSegments
+  const paragraphs = articleText
+    .split(/(?:\r?\n)+/)
     .map(text => text.trim())
-    .filter(text => text.length >= 8)
-    .map(text => ({
-      text,
-      normalized: normalizeInternalLinkText(text),
-      tokens: meaningfulTokens(text),
-    }))
-    .filter(span => span.tokens.length >= MIN_ANCHOR_WORDS);
+    .filter(Boolean);
+  return paragraphs.flatMap((paragraphText, index) => (
+    paragraphText
+      .split(/(?<=[.!؟?؛;])\s+/u)
+      .map(text => text.trim())
+      .filter(text => text.length >= 8)
+      .map(text => ({
+        text,
+        normalized: normalizeInternalLinkText(text),
+        tokens: meaningfulTokens(text),
+        paragraphNumber: index + 1,
+        paragraphText,
+      }))
+      .filter(span => span.tokens.length >= MIN_ANCHOR_WORDS)
+  ));
 };
 
 const addSignals = (
@@ -275,7 +310,15 @@ const chooseAnchor = (
   signals: TargetSignal[],
   documentFrequency: Map<string, number>,
   totalPages: number,
-): { text: string; score: number; excerpt: string; exactPhrase: boolean } | null => {
+): {
+  text: string;
+  score: number;
+  excerpt: string;
+  exactPhrase: boolean;
+  paragraphNumber: number;
+  paragraphText: string;
+  alternativeAnchors: string[];
+} | null => {
   const tokenWeights = new Map<string, number>();
   const signalPhrases = new Set<string>();
   for (const signal of signals) {
@@ -290,7 +333,14 @@ const chooseAnchor = (
     || 0
   );
 
-  let best: { text: string; score: number; excerpt: string; exactPhrase: boolean } | null = null;
+  const candidates = new Map<string, {
+    text: string;
+    score: number;
+    excerpt: string;
+    exactPhrase: boolean;
+    paragraphNumber: number;
+    paragraphText: string;
+  }>();
   for (const span of spans) {
     const words = extractWordMatches(span.text);
     const upper = Math.min(MAX_ANCHOR_WORDS, words.length);
@@ -315,20 +365,54 @@ const chooseAnchor = (
         ), 0);
         const lengthPreference = size <= 4 ? 1 : 0.82;
         const score = (weight * coverage * lengthPreference) + (exactPhrase ? 14 : 0);
-        if (!best || score > best.score || (score === best.score && original.length < best.text.length)) {
-          best = {
-            text: original,
-            score,
-            excerpt: span.text.length <= 180
-              ? span.text
-              : `${span.text.slice(0, 177).trim()}...`,
-            exactPhrase,
-          };
+        const candidate = {
+          text: original,
+          score,
+          excerpt: span.paragraphText.length <= 220
+            ? span.paragraphText
+            : `${span.paragraphText.slice(0, 217).trim()}...`,
+          exactPhrase,
+          paragraphNumber: span.paragraphNumber,
+          paragraphText: span.paragraphText,
+        };
+        const current = candidates.get(normalized);
+        if (!current || candidate.score > current.score) {
+          candidates.set(normalized, candidate);
         }
       }
     }
   }
-  return best;
+  const ranked = [...candidates.values()].sort((left, right) => (
+    right.score - left.score
+    || left.text.length - right.text.length
+    || left.text.localeCompare(right.text, 'ar')
+  ));
+  const best = ranked[0];
+  if (!best) return null;
+  return {
+    ...best,
+    alternativeAnchors: ranked
+      .filter(candidate => candidate.paragraphNumber === best.paragraphNumber)
+      .slice(0, 5)
+      .map(candidate => candidate.text),
+  };
+};
+
+const buildTokenContext = (value: string): {
+  frequency: Map<string, number>;
+  stemTerms: Map<string, string>;
+} => {
+  const frequency = new Map<string, number>();
+  const stemTerms = new Map<string, string>();
+  for (const token of meaningfulTokens(value)) {
+    frequency.set(token, (frequency.get(token) || 0) + 1);
+    const stem = lightStemArabicToken(token);
+    if (!stem || stem === token) continue;
+    const stemToken = `~${stem}`;
+    frequency.set(stemToken, (frequency.get(stemToken) || 0) + 1);
+    if (!stemTerms.has(stem)) stemTerms.set(stem, token);
+  }
+  return { frequency, stemTerms };
 };
 
 const computeBm25Score = (input: {
@@ -374,22 +458,25 @@ const buildSuggestion = (
   page: InternalLinkTargetPage,
   signals: TargetSignal[],
   spans: TextSpan[],
-  articleTokenFrequency: Map<string, number>,
+  articleContextFrequency: Map<string, number>,
   documentFrequency: Map<string, number>,
   totalPages: number,
   averageDocumentLength: number,
-  articleStemTerms: Map<string, string>,
 ): InternalLinkSuggestion | null => {
+  const anchor = chooseAnchor(spans, signals, documentFrequency, totalPages);
+  if (!anchor) return null;
+
+  const paragraphContext = buildTokenContext(anchor.paragraphText);
   const matchedTokenWeights = new Map<string, number>();
   const matchedSources = new Set<TargetSignal['source']>();
   let totalSignalWeight = 0;
   for (const signal of signals) {
     totalSignalWeight += signal.weight * Math.max(1, signal.tokens.length);
     for (const token of signal.tokens) {
-      if (!articleTokenFrequency.has(token)) continue;
+      if (!paragraphContext.frequency.has(token)) continue;
       matchedSources.add(signal.source);
       const visibleToken = token.startsWith('~')
-        ? articleStemTerms.get(token.slice(1)) || token.slice(1)
+        ? paragraphContext.stemTerms.get(token.slice(1)) || token.slice(1)
         : token;
       matchedTokenWeights.set(
         visibleToken,
@@ -399,14 +486,11 @@ const buildSuggestion = (
   }
   if (matchedTokenWeights.size < 2) return null;
 
-  const anchor = chooseAnchor(spans, signals, documentFrequency, totalPages);
-  if (!anchor) return null;
-
   const documentLength = page.semanticProfile?.documentLength
     || signals.reduce((sum, signal) => sum + signal.frequency, 0);
   const bm25Score = computeBm25Score({
     signals,
-    articleTokenFrequency,
+    articleTokenFrequency: paragraphContext.frequency,
     documentFrequency,
     totalPages,
     documentLength,
@@ -425,10 +509,18 @@ const buildSuggestion = (
   );
   const anchorBonus = Math.min(22, anchor.score * 0.72) + (anchor.exactPhrase ? 8 : 0);
   const normalizedBm25 = 1 - Math.exp(-bm25Score / 8);
+  const articleContextMatches = new Set(
+    signals.flatMap(signal => signal.tokens).filter(token => articleContextFrequency.has(token)),
+  ).size;
+  const articleContextBonus = Math.min(4, articleContextMatches * 0.4);
   const completenessScore = page.semanticProfile?.completenessScore ?? 60;
   const completenessFactor = 0.85 + (Math.min(100, completenessScore) / 650);
   const score = Math.max(0, Math.min(100, Math.round((
-    (normalizedBm25 * 48) + (normalizedOverlap * 18) + sourceBonus + anchorBonus
+    (normalizedBm25 * 48)
+    + (normalizedOverlap * 18)
+    + sourceBonus
+    + anchorBonus
+    + articleContextBonus
   ) * completenessFactor)));
   if (score < 24) return null;
 
@@ -457,9 +549,11 @@ const buildSuggestion = (
     matchedTerms,
     reasons,
     sourceExcerpt: anchor.excerpt,
+    paragraphNumber: anchor.paragraphNumber,
+    alternativeAnchors: anchor.alternativeAnchors,
     bm25Score: Number(bm25Score.toFixed(2)),
     completenessScore,
-    algorithmVersion: 'bm25-semantic-v1',
+    algorithmVersion: 'bm25-paragraph-v2',
   };
 };
 
@@ -470,14 +564,19 @@ const baseLanguage = (value: string | undefined): string => (
 export const generateInternalLinkSuggestions = (
   input: InternalLinkingInput,
 ): InternalLinkSuggestion[] => {
-  const existingUrls = new Set((input.existingUrls || []).map(normalizeInternalLinkUrl).filter(Boolean));
+  const existingUrls = new Set([
+    ...(input.existingUrls || []),
+    input.currentArticleUrl || '',
+  ].map(normalizeInternalLinkUrl).filter(Boolean));
   const existingAnchors = new Set(
     (input.existingAnchors || []).map(normalizeInternalLinkText).filter(Boolean),
   );
   const dismissedPageIds = new Set(input.dismissedPageIds || []);
+  const blockedPageIds = new Set(input.blockedPageIds || []);
   const requestedLanguage = baseLanguage(input.articleLanguage);
   const eligible = input.pages
     .filter(isEligiblePage)
+    .filter(page => !blockedPageIds.has(page.id))
     .filter(page => {
       const pageLanguage = baseLanguage(page.semanticProfile?.pageLanguage || page.pageLanguage);
       return !requestedLanguage || !pageLanguage || requestedLanguage === pageLanguage;
@@ -490,26 +589,11 @@ export const generateInternalLinkSuggestions = (
   if (!input.articleText.trim() || eligible.length === 0) return [];
 
   const spans = buildTextSpans(input.articleText);
-  const articleTokens = meaningfulTokens([
+  const articleContext = buildTokenContext([
     input.articleTitle,
     input.articleText,
     ...(input.keywords || []),
   ].join(' '));
-  const articleTokenFrequency = new Map<string, number>();
-  for (const token of articleTokens) {
-    articleTokenFrequency.set(token, (articleTokenFrequency.get(token) || 0) + 1);
-  }
-  const articleStemTerms = new Map<string, string>();
-  for (const token of articleTokens) {
-    const stem = lightStemArabicToken(token);
-    if (!stem || stem === token) continue;
-    const stemToken = `~${stem}`;
-    articleTokenFrequency.set(
-      stemToken,
-      (articleTokenFrequency.get(stemToken) || 0) + 1,
-    );
-    if (!articleStemTerms.has(stem)) articleStemTerms.set(stem, token);
-  }
   const documentFrequency = computeDocumentFrequency(eligible);
   const averageDocumentLength = eligible.reduce((sum, item) => (
     sum
@@ -522,11 +606,10 @@ export const generateInternalLinkSuggestions = (
       page,
       signals,
       spans,
-      articleTokenFrequency,
+      articleContext.frequency,
       documentFrequency,
       eligible.length,
       averageDocumentLength,
-      articleStemTerms,
     ))
     .filter((suggestion): suggestion is InternalLinkSuggestion => Boolean(suggestion))
     .sort((a, b) => (

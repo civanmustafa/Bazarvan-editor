@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Ban,
   Check,
+  Clipboard,
   Database,
   ExternalLink,
+  Flag,
   Link2,
   Loader2,
   MousePointer2,
@@ -18,11 +21,14 @@ import {
   loadInternalLinkActions,
   loadInternalLinkTargetPages,
   recordInternalLinkAction,
+  recordInternalLinkSuggestionRun,
   saveArticleClientContext,
+  saveArticleCurrentPageUrl,
   type InternalLinkAction,
 } from '../utils/internalLinking';
 import {
   createInternalLinkArticleSignature,
+  createInternalLinkInventorySignature,
   generateInternalLinkSuggestions,
   type InternalLinkSuggestion,
   type InternalLinkTargetPage,
@@ -110,9 +116,12 @@ const InternalLinkingPanel: React.FC = () => {
   const [selectedClientId, setSelectedClientId] = useState('');
   const [pages, setPages] = useState<InternalLinkTargetPage[]>([]);
   const [actions, setActions] = useState<InternalLinkAction[]>([]);
+  const [currentPageUrl, setCurrentPageUrl] = useState('');
+  const [selectedAnchors, setSelectedAnchors] = useState<Record<string, string>>({});
   const [isLoadingContext, setIsLoadingContext] = useState(false);
   const [isLoadingPages, setIsLoadingPages] = useState(false);
   const [isSavingClient, setIsSavingClient] = useState(false);
+  const [isSavingCurrentPage, setIsSavingCurrentPage] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [busyPageId, setBusyPageId] = useState('');
   const [error, setError] = useState('');
@@ -143,9 +152,15 @@ const InternalLinkingPanel: React.FC = () => {
       latestByPage.set(action.pageId, action);
     }
     return [...latestByPage.values()]
-      .filter(action => action.action === 'dismissed')
+      .filter(action => action.action === 'dismissed' || action.action === 'reported')
       .map(action => action.pageId);
   }, [actions, articleSignature]);
+
+  const blockedPageIds = useMemo(() => (
+    [...new Set(actions
+      .filter(action => action.action === 'blocked')
+      .map(action => action.pageId))]
+  ), [actions]);
 
   const suggestions = useMemo(() => generateInternalLinkSuggestions({
     articleTitle,
@@ -156,11 +171,15 @@ const InternalLinkingPanel: React.FC = () => {
     existingUrls: existingLinks.urls,
     existingAnchors: existingLinks.anchors,
     dismissedPageIds,
+    blockedPageIds,
+    currentArticleUrl: currentPageUrl,
     maximumSuggestions: 20,
   }), [
     articleText,
     articleLanguage,
     articleTitle,
+    blockedPageIds,
+    currentPageUrl,
     dismissedPageIds,
     existingLinks.anchors,
     existingLinks.urls,
@@ -168,11 +187,27 @@ const InternalLinkingPanel: React.FC = () => {
     pages,
   ]);
 
+  const currentPageOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return pages.flatMap(page => {
+      const url = page.canonicalUrl?.trim() || page.finalUrl?.trim() || page.inputUrl.trim();
+      if (!url || seen.has(url)) return [];
+      seen.add(url);
+      return [{
+        url,
+        label: page.pageTitle?.trim() || page.h1?.trim() || url,
+      }];
+    });
+  }, [pages]);
+
   const refreshInventory = useCallback(async (
     articleId: string,
     clientId: string,
     showSpinner = true,
-  ) => {
+  ): Promise<{
+    pages: InternalLinkTargetPage[];
+    actions: InternalLinkAction[];
+  } | null> => {
     if (showSpinner) setIsLoadingPages(true);
     setError('');
     try {
@@ -182,10 +217,12 @@ const InternalLinkingPanel: React.FC = () => {
       ]);
       setPages(nextPages);
       setActions(nextActions);
+      return { pages: nextPages, actions: nextActions };
     } catch (loadError) {
       setPages([]);
       setActions([]);
       setError(loadError instanceof Error ? loadError.message : 'تعذر تحميل صفحات العميل.');
+      return null;
     } finally {
       if (showSpinner) setIsLoadingPages(false);
     }
@@ -197,6 +234,8 @@ const InternalLinkingPanel: React.FC = () => {
     setSelectedClientId('');
     setPages([]);
     setActions([]);
+    setCurrentPageUrl('');
+    setSelectedAnchors({});
     setError('');
     setNotice('');
     if (!activeArticleId) return () => { cancelled = true; };
@@ -210,6 +249,7 @@ const InternalLinkingPanel: React.FC = () => {
       setClients(nextClients);
       const contextClientExists = nextClients.some(client => client.id === context?.clientId);
       setSelectedClientId(contextClientExists ? context?.clientId || '' : '');
+      setCurrentPageUrl(contextClientExists ? context?.currentPageUrl || '' : '');
     }).catch(loadError => {
       if (!cancelled) {
         setError(loadError instanceof Error ? loadError.message : 'تعذر تحميل عملاء المقالة.');
@@ -224,6 +264,7 @@ const InternalLinkingPanel: React.FC = () => {
     if (!activeArticleId || !selectedClientId) {
       setPages([]);
       setActions([]);
+      setSelectedAnchors({});
       return;
     }
     void refreshInventory(activeArticleId, selectedClientId);
@@ -232,7 +273,10 @@ const InternalLinkingPanel: React.FC = () => {
   const handleClientChange = async (clientId: string) => {
     if (!activeArticleId || clientId === selectedClientId) return;
     const previousClientId = selectedClientId;
+    const previousCurrentPageUrl = currentPageUrl;
     setSelectedClientId(clientId);
+    setCurrentPageUrl('');
+    setSelectedAnchors({});
     setPages([]);
     setActions([]);
     setError('');
@@ -241,10 +285,11 @@ const InternalLinkingPanel: React.FC = () => {
 
     setIsSavingClient(true);
     try {
-      await saveArticleClientContext(activeArticleId, clientId);
+      await saveArticleClientContext(activeArticleId, clientId, '');
       setNotice('تم ربط المقالة بمخزون صفحات العميل.');
     } catch (saveError) {
       setSelectedClientId(previousClientId);
+      setCurrentPageUrl(previousCurrentPageUrl);
       setError(saveError instanceof Error ? saveError.message : 'تعذر حفظ العميل المحدد.');
     } finally {
       setIsSavingClient(false);
@@ -255,10 +300,67 @@ const InternalLinkingPanel: React.FC = () => {
     if (!activeArticleId || !selectedClientId) return;
     setIsRefreshing(true);
     setNotice('');
-    await refreshInventory(activeArticleId, selectedClientId, false);
-    setEditorRevision(value => value + 1);
-    setIsRefreshing(false);
+    try {
+      const refreshed = await refreshInventory(activeArticleId, selectedClientId, false);
+      if (refreshed) {
+        const nextSuggestions = generateInternalLinkSuggestions({
+          articleTitle,
+          articleText,
+          articleLanguage,
+          keywords: keywordValues,
+          pages: refreshed.pages,
+          existingUrls: existingLinks.urls,
+          existingAnchors: existingLinks.anchors,
+          dismissedPageIds,
+          blockedPageIds,
+          currentArticleUrl: currentPageUrl,
+          maximumSuggestions: 20,
+        });
+        await recordInternalLinkSuggestionRun({
+          articleId: activeArticleId,
+          clientId: selectedClientId,
+          articleSignature,
+          inventorySignature: createInternalLinkInventorySignature(refreshed.pages, currentPageUrl),
+          currentPageUrl,
+          pageCount: refreshed.pages.length,
+          suggestions: nextSuggestions,
+        });
+        setNotice('تم تحديث الاقتراحات وتسجيل ملخص الفحص.');
+      }
+      setEditorRevision(value => value + 1);
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : 'تعذر تسجيل فحص الاقتراحات.');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
+
+  const handleCurrentPageChange = async (value: string) => {
+    if (!activeArticleId || !selectedClientId || isSavingCurrentPage) return;
+    const previous = currentPageUrl;
+    setCurrentPageUrl(value);
+    setIsSavingCurrentPage(true);
+    setError('');
+    setNotice('');
+    try {
+      await saveArticleCurrentPageUrl(activeArticleId, selectedClientId, value);
+      setNotice(value
+        ? 'تم حفظ رابط المقالة الحالية، ولن يقترح النظام ربطها بنفسها.'
+        : 'تم اعتبار المقالة جديدة أو غير منشورة.');
+    } catch (saveError) {
+      setCurrentPageUrl(previous);
+      setError(saveError instanceof Error ? saveError.message : 'تعذر حفظ رابط المقالة الحالية.');
+    } finally {
+      setIsSavingCurrentPage(false);
+    }
+  };
+
+  const withSelectedAnchor = (suggestion: InternalLinkSuggestion): InternalLinkSuggestion => ({
+    ...suggestion,
+    anchorText: suggestion.alternativeAnchors.includes(selectedAnchors[suggestion.pageId])
+      ? selectedAnchors[suggestion.pageId]
+      : suggestion.anchorText,
+  });
 
   const selectAnchor = (suggestion: InternalLinkSuggestion): AnchorRange | null => {
     if (!editor) return null;
@@ -275,7 +377,8 @@ const InternalLinkingPanel: React.FC = () => {
 
   const handleApply = async (suggestion: InternalLinkSuggestion) => {
     if (!activeArticleId || !selectedClientId || !editor) return;
-    const range = selectAnchor(suggestion);
+    const resolvedSuggestion = withSelectedAnchor(suggestion);
+    const range = selectAnchor(resolvedSuggestion);
     if (!range) return;
     setBusyPageId(suggestion.pageId);
     setNotice('');
@@ -285,7 +388,7 @@ const InternalLinkingPanel: React.FC = () => {
         .focus()
         .setTextSelection(range)
         .setLink({
-          href: suggestion.targetUrl,
+          href: resolvedSuggestion.targetUrl,
           target: '_self',
           rel: 'noopener',
         })
@@ -295,7 +398,7 @@ const InternalLinkingPanel: React.FC = () => {
       const action = await recordInternalLinkAction({
         articleId: activeArticleId,
         clientId: selectedClientId,
-        suggestion,
+        suggestion: resolvedSuggestion,
         action: 'applied',
         articleSignature,
       });
@@ -319,7 +422,7 @@ const InternalLinkingPanel: React.FC = () => {
       const action = await recordInternalLinkAction({
         articleId: activeArticleId,
         clientId: selectedClientId,
-        suggestion,
+        suggestion: withSelectedAnchor(suggestion),
         action: 'dismissed',
         articleSignature,
       });
@@ -330,6 +433,64 @@ const InternalLinkingPanel: React.FC = () => {
       setError(dismissError instanceof Error ? dismissError.message : 'تعذر تجاهل الاقتراح.');
     } finally {
       setBusyPageId('');
+    }
+  };
+
+  const handleBlock = async (suggestion: InternalLinkSuggestion) => {
+    if (!activeArticleId || !selectedClientId) return;
+    if (!window.confirm('لن يظهر هذا الرابط مرة أخرى لهذه المقالة حتى لو تغيّر نصها. هل تريد المتابعة؟')) return;
+    setBusyPageId(suggestion.pageId);
+    setNotice('');
+    try {
+      const action = await recordInternalLinkAction({
+        articleId: activeArticleId,
+        clientId: selectedClientId,
+        suggestion: withSelectedAnchor(suggestion),
+        action: 'blocked',
+        articleSignature,
+      });
+      setActions(current => [action, ...current]);
+      setNotice('تم منع اقتراح هذا الرابط لهذه المقالة.');
+      setError('');
+    } catch (blockError) {
+      setError(blockError instanceof Error ? blockError.message : 'تعذر منع الرابط.');
+    } finally {
+      setBusyPageId('');
+    }
+  };
+
+  const handleReport = async (suggestion: InternalLinkSuggestion) => {
+    if (!activeArticleId || !selectedClientId) return;
+    const feedbackNote = window.prompt('اشرح باختصار لماذا الاقتراح غير مناسب:')?.trim();
+    if (!feedbackNote) return;
+    setBusyPageId(suggestion.pageId);
+    setNotice('');
+    try {
+      const action = await recordInternalLinkAction({
+        articleId: activeArticleId,
+        clientId: selectedClientId,
+        suggestion: withSelectedAnchor(suggestion),
+        action: 'reported',
+        articleSignature,
+        feedbackNote,
+      });
+      setActions(current => [action, ...current]);
+      setNotice('تم تسجيل البلاغ وإخفاء الاقتراح لهذه النسخة من المقالة.');
+      setError('');
+    } catch (reportError) {
+      setError(reportError instanceof Error ? reportError.message : 'تعذر تسجيل البلاغ.');
+    } finally {
+      setBusyPageId('');
+    }
+  };
+
+  const handleCopyUrl = async (suggestion: InternalLinkSuggestion) => {
+    try {
+      await navigator.clipboard.writeText(suggestion.targetUrl);
+      setNotice('تم نسخ الرابط.');
+      setError('');
+    } catch {
+      setError('تعذر نسخ الرابط تلقائيًا. يمكنك نسخه من الرابط الظاهر.');
     }
   };
 
@@ -383,6 +544,32 @@ const InternalLinkingPanel: React.FC = () => {
           </span>
         )}
       </label>
+
+      {selectedClientId && (
+        <label className="block space-y-1.5">
+          <span className="flex items-center gap-1.5 text-xs font-black text-gray-700 dark:text-gray-200">
+            <Link2 size={14} />
+            رابط المقالة الحالية
+          </span>
+          <select
+            value={currentPageUrl}
+            onChange={event => void handleCurrentPageChange(event.target.value)}
+            disabled={isLoadingPages || isSavingCurrentPage}
+            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 outline-none focus:border-[#d4af37] disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#272727] dark:text-gray-100"
+          >
+            <option value="">مقالة جديدة أو الرابط غير معروف</option>
+            {currentPageUrl && !currentPageOptions.some(option => option.url === currentPageUrl) && (
+              <option value={currentPageUrl}>{currentPageUrl}</option>
+            )}
+            {currentPageOptions.map(option => (
+              <option key={option.url} value={option.url}>{option.label}</option>
+            ))}
+          </select>
+          <span className="block text-[10px] font-semibold leading-5 text-gray-400">
+            اختياري. عند تحديد الصفحة المنشورة يستبعدها المحرك حتى لا يقترح ربط المقالة بنفسها.
+          </span>
+        </label>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold leading-5 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
@@ -439,6 +626,9 @@ const InternalLinkingPanel: React.FC = () => {
           <div className="space-y-3">
             {suggestions.map(suggestion => {
               const isBusy = busyPageId === suggestion.pageId;
+              const selectedAnchor = suggestion.alternativeAnchors.includes(selectedAnchors[suggestion.pageId])
+                ? selectedAnchors[suggestion.pageId]
+                : suggestion.anchorText;
               return (
                 <article
                   key={suggestion.pageId}
@@ -448,7 +638,7 @@ const InternalLinkingPanel: React.FC = () => {
                     <div className="min-w-0">
                       <div className="mb-1 text-[10px] font-black text-gray-400">نص الرابط المقترح</div>
                       <div className="rounded-md bg-[#d4af37]/10 px-2 py-1 text-xs font-black text-[#8a6f1d] dark:text-[#f2d675]">
-                        {suggestion.anchorText}
+                        {selectedAnchor}
                       </div>
                     </div>
                     <div className="shrink-0 text-center">
@@ -458,6 +648,29 @@ const InternalLinkingPanel: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-2 text-[10px] font-semibold leading-5 text-gray-600 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300">
+                    <div className="mb-1 font-black text-[#9b7d20]">الفقرة {suggestion.paragraphNumber}</div>
+                    {suggestion.sourceExcerpt}
+                  </div>
+
+                  {suggestion.alternativeAnchors.length > 1 && (
+                    <label className="mt-3 block space-y-1">
+                      <span className="text-[10px] font-black text-gray-500 dark:text-gray-300">اختيار نص ربط بديل من الفقرة</span>
+                      <select
+                        value={selectedAnchor}
+                        onChange={event => setSelectedAnchors(current => ({
+                          ...current,
+                          [suggestion.pageId]: event.target.value,
+                        }))}
+                        className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-[10px] font-bold text-gray-700 outline-none focus:border-[#d4af37] dark:border-[#454545] dark:bg-[#272727] dark:text-gray-100"
+                      >
+                        {suggestion.alternativeAnchors.map(anchor => (
+                          <option key={anchor} value={anchor}>{anchor}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
 
                   <div className="mt-3 text-xs font-black leading-5 text-gray-800 dark:text-gray-100">
                     {suggestion.targetTitle}
@@ -489,15 +702,33 @@ const InternalLinkingPanel: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="mt-3 grid grid-cols-3 gap-1.5">
+                  <div className="mt-3 grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
-                      onClick={() => selectAnchor(suggestion)}
+                      onClick={() => selectAnchor(withSelectedAnchor(suggestion))}
                       disabled={isBusy}
                       className="inline-flex items-center justify-center gap-1 rounded-md border border-gray-200 px-2 py-1.5 text-[10px] font-black text-gray-600 hover:border-[#d4af37] dark:border-[#454545] dark:text-gray-200"
                     >
                       <MousePointer2 size={12} />
                       تحديد النص
+                    </button>
+                    <a
+                      href={suggestion.targetUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1 rounded-md border border-gray-200 px-2 py-1.5 text-[10px] font-black text-gray-600 hover:border-[#d4af37] dark:border-[#454545] dark:text-gray-200"
+                    >
+                      <ExternalLink size={12} />
+                      فتح الصفحة
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyUrl(suggestion)}
+                      disabled={isBusy}
+                      className="inline-flex items-center justify-center gap-1 rounded-md border border-gray-200 px-2 py-1.5 text-[10px] font-black text-gray-600 hover:border-[#d4af37] dark:border-[#454545] dark:text-gray-200"
+                    >
+                      <Clipboard size={12} />
+                      نسخ الرابط
                     </button>
                     <button
                       type="button"
@@ -517,6 +748,24 @@ const InternalLinkingPanel: React.FC = () => {
                       <X size={12} />
                       تجاهل
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleBlock(suggestion)}
+                      disabled={isBusy}
+                      className="inline-flex items-center justify-center gap-1 rounded-md border border-amber-200 px-2 py-1.5 text-[10px] font-black text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:border-amber-900/60 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                    >
+                      <Ban size={12} />
+                      منع للمقالة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleReport(suggestion)}
+                      disabled={isBusy}
+                      className="inline-flex items-center justify-center gap-1 rounded-md border border-orange-200 px-2 py-1.5 text-[10px] font-black text-orange-600 hover:bg-orange-50 disabled:opacity-60 dark:border-orange-900/60 dark:text-orange-300 dark:hover:bg-orange-950/30"
+                    >
+                      <Flag size={12} />
+                      إبلاغ
+                    </button>
                   </div>
                 </article>
               );
@@ -525,7 +774,7 @@ const InternalLinkingPanel: React.FC = () => {
 
           <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white p-2.5 text-[10px] font-semibold leading-5 text-gray-500 dark:border-[#3C3C3C] dark:bg-[#272727] dark:text-gray-400">
             <ShieldCheck size={15} className="mt-0.5 shrink-0 text-emerald-500" />
-            يمنع المحرك تكرار الصفحة الهدف أو نص رابط مستخدم، ويستبعد الصفحات المعطلة وNoindex وغير الجاهزة. القرار النهائي يبقى للمحرر.
+            لا يضيف المحرك أي رابط تلقائيًا. يحدد الموظف نص الربط ثم يوافق على التطبيق، مع استبعاد الصفحة الحالية والروابط الموجودة والمعطلة وNoindex وغير الجاهزة.
           </div>
         </>
       )}
