@@ -153,9 +153,9 @@ const buildCompactArticleContext = (
   const base = toText(session.context_snapshot?.compactArticleContextBase);
   return `${base || 'Use the persisted article, keyword, goal, and audience context for this session.'}
 
-<persisted_competitor_knowledge_index>
+<persisted_competitor_coverage_matrix>
 ${contentWritingKnowledgeToPromptJson(knowledge)}
-</persisted_competitor_knowledge_index>`;
+</persisted_competitor_coverage_matrix>`;
 };
 
 const getStepUsage = (step: ContentWritingStep): unknown => {
@@ -428,6 +428,7 @@ export const executeStructuredContentWritingWorkflow = async (
           sourceChunkCount: competitorChunks.length,
           modelIndexedChunkCount: knowledge.modelProcessedChunkIds.length,
           fallbackChunkCount: knowledge.fallbackChunkIds.length,
+          competitorCoverageMatrix: knowledge.competitorCoverageMatrix,
         },
       };
     },
@@ -893,6 +894,16 @@ export const executeStructuredContentWritingWorkflow = async (
         knowledgeItemCount: knowledge.items.length,
         modelIndexedChunkCount: knowledge.modelProcessedChunkIds.length,
         fallbackChunkCount: knowledge.fallbackChunkIds.length,
+        allCompetitorIdeaCount: knowledge.competitorCoverageMatrix.allCompetitorIdeaIds.length,
+        multipleCompetitorIdeaCount: knowledge.competitorCoverageMatrix.multipleCompetitorIdeaIds.length,
+        singleCompetitorIdeaCount: knowledge.competitorCoverageMatrix.singleCompetitorIdeaIds.length,
+        originalityOpportunityIdeaCount:
+          knowledge.competitorCoverageMatrix.originalityOpportunityIdeaIds.length,
+        coverageByCompetitor: knowledge.competitorCoverageMatrix.coverageByCompetitor.map(item => ({
+          competitorNumber: item.competitorNumber,
+          ideaCount: item.knowledgeItemIds.length,
+          highPriorityIdeaCount: item.highPriorityItemIds.length,
+        })),
         beforeAuditPercent: coverageBeforeAudit.coveragePercent,
         afterRepairPercent: coverageAfterRepairs.coveragePercent,
         coveredIdeaCount: coverageAfterRepairs.coveredIdeaIds.length,

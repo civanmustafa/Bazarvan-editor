@@ -1,5 +1,5 @@
 export const CONTENT_WRITING_COMPETITOR_CHUNK_SIZE = 1_600;
-export const CONTENT_WRITING_KNOWLEDGE_VERSION = 1;
+export const CONTENT_WRITING_KNOWLEDGE_VERSION = 2;
 
 export type ContentWritingSourceChunk = {
   id: string;
@@ -16,11 +16,44 @@ export type ContentWritingKnowledgeItem = {
   kind: string;
   priority: 'high' | 'medium' | 'low';
   sourceChunkIds: string[];
+  competitorNumbers: number[];
+  coverageCount: number;
+  coverageLevel: ContentWritingCompetitorCoverageLevel;
+  originalityOpportunity: string;
+};
+
+export type ContentWritingCompetitorCoverageLevel =
+  | 'all_competitors'
+  | 'multiple_competitors'
+  | 'single_competitor';
+
+export type ContentWritingCompetitorCoverageMatrixRow = {
+  knowledgeItemId: string;
+  competitorNumbers: number[];
+  coverageCount: number;
+  coverageLevel: ContentWritingCompetitorCoverageLevel;
+  priority: ContentWritingKnowledgeItem['priority'];
+  originalityOpportunity: string;
+};
+
+export type ContentWritingCompetitorCoverageMatrix = {
+  competitorNumbers: number[];
+  rows: ContentWritingCompetitorCoverageMatrixRow[];
+  coverageByCompetitor: Array<{
+    competitorNumber: number;
+    knowledgeItemIds: string[];
+    highPriorityItemIds: string[];
+  }>;
+  allCompetitorIdeaIds: string[];
+  multipleCompetitorIdeaIds: string[];
+  singleCompetitorIdeaIds: string[];
+  originalityOpportunityIdeaIds: string[];
 };
 
 export type ContentWritingKnowledgeBase = {
   version: number;
   items: ContentWritingKnowledgeItem[];
+  competitorCoverageMatrix: ContentWritingCompetitorCoverageMatrix;
   processedChunkIds: string[];
   modelProcessedChunkIds: string[];
   fallbackChunkIds: string[];
@@ -160,12 +193,77 @@ const normalizePriority = (value: unknown): ContentWritingKnowledgeItem['priorit
   return 'medium';
 };
 
+const deriveCompetitorNumbers = (
+  sourceChunkIds: readonly string[],
+  chunksById: ReadonlyMap<string, ContentWritingSourceChunk>,
+): number[] => Array.from(new Set(
+  sourceChunkIds.flatMap(chunkId => {
+    const competitorNumber = chunksById.get(chunkId)?.competitorNumber;
+    return competitorNumber ? [competitorNumber] : [];
+  }),
+)).sort((left, right) => left - right);
+
+const deriveCoverageLevel = (
+  coverageCount: number,
+  competitorCount: number,
+): ContentWritingCompetitorCoverageLevel => {
+  if (coverageCount > 1 && coverageCount === competitorCount) return 'all_competitors';
+  if (coverageCount > 1) return 'multiple_competitors';
+  return 'single_competitor';
+};
+
+export const buildContentWritingCompetitorCoverageMatrix = (
+  items: readonly ContentWritingKnowledgeItem[],
+  chunks: readonly ContentWritingSourceChunk[],
+): ContentWritingCompetitorCoverageMatrix => {
+  const competitorNumbers = Array.from(new Set(chunks.map(chunk => chunk.competitorNumber)))
+    .sort((left, right) => left - right);
+  const rows = items.map((item): ContentWritingCompetitorCoverageMatrixRow => ({
+    knowledgeItemId: item.id,
+    competitorNumbers: item.competitorNumbers,
+    coverageCount: item.coverageCount,
+    coverageLevel: item.coverageLevel,
+    priority: item.priority,
+    originalityOpportunity: item.originalityOpportunity,
+  }));
+  return {
+    competitorNumbers,
+    rows,
+    coverageByCompetitor: competitorNumbers.map(competitorNumber => ({
+      competitorNumber,
+      knowledgeItemIds: items
+        .filter(item => item.competitorNumbers.includes(competitorNumber))
+        .map(item => item.id),
+      highPriorityItemIds: items
+        .filter(item => (
+          item.priority === 'high'
+          && item.competitorNumbers.includes(competitorNumber)
+        ))
+        .map(item => item.id),
+    })),
+    allCompetitorIdeaIds: rows
+      .filter(row => row.coverageLevel === 'all_competitors')
+      .map(row => row.knowledgeItemId),
+    multipleCompetitorIdeaIds: rows
+      .filter(row => row.coverageLevel === 'multiple_competitors')
+      .map(row => row.knowledgeItemId),
+    singleCompetitorIdeaIds: rows
+      .filter(row => row.coverageLevel === 'single_competitor')
+      .map(row => row.knowledgeItemId),
+    originalityOpportunityIdeaIds: rows
+      .filter(row => Boolean(row.originalityOpportunity))
+      .map(row => row.knowledgeItemId),
+  };
+};
+
 export const normalizeContentWritingKnowledgeBase = (
   value: unknown,
   chunks: readonly ContentWritingSourceChunk[],
 ): ContentWritingKnowledgeBase => {
   const source = typeof value === 'string' ? parseJsonObject(value) : isRecord(value) ? value : {};
   const validChunkIds = new Set(chunks.map(chunk => chunk.id));
+  const chunksById = new Map(chunks.map(chunk => [chunk.id, chunk]));
+  const competitorCount = new Set(chunks.map(chunk => chunk.competitorNumber)).size;
   const declaredModelProcessedChunkIds = toUniqueTextList(source.modelProcessedChunkIds, 5_000)
     .filter(id => validChunkIds.has(id));
   const modelProcessedChunkIds = Array.isArray(source.modelProcessedChunkIds)
@@ -184,6 +282,7 @@ export const normalizeContentWritingKnowledgeBase = (
     const sourceChunkIds = toUniqueTextList(item.sourceChunkIds)
       .filter(chunkId => validChunkIds.has(chunkId));
     if (!topic || !detail || sourceChunkIds.length === 0 || seenItemIds.has(id)) return [];
+    const competitorNumbers = deriveCompetitorNumbers(sourceChunkIds, chunksById);
     seenItemIds.add(id);
     return [{
       id,
@@ -192,6 +291,10 @@ export const normalizeContentWritingKnowledgeBase = (
       kind: toText(item.kind, 120) || 'topic',
       priority: normalizePriority(item.priority),
       sourceChunkIds,
+      competitorNumbers,
+      coverageCount: competitorNumbers.length,
+      coverageLevel: deriveCoverageLevel(competitorNumbers.length, competitorCount),
+      originalityOpportunity: toText(item.originalityOpportunity, 800),
     }];
   }).slice(0, 300);
 
@@ -215,12 +318,17 @@ export const normalizeContentWritingKnowledgeBase = (
       kind: 'source_fallback',
       priority: 'medium',
       sourceChunkIds: [chunk.id],
+      competitorNumbers: [chunk.competitorNumber],
+      coverageCount: 1,
+      coverageLevel: 'single_competitor',
+      originalityOpportunity: '',
     });
   });
 
   return {
     version: CONTENT_WRITING_KNOWLEDGE_VERSION,
     items,
+    competitorCoverageMatrix: buildContentWritingCompetitorCoverageMatrix(items, chunks),
     processedChunkIds: chunks.map(chunk => chunk.id),
     modelProcessedChunkIds,
     fallbackChunkIds,
@@ -381,6 +489,7 @@ export const contentWritingKnowledgeToPromptJson = (
 ): string => JSON.stringify({
   version: knowledge.version,
   items: knowledge.items,
+  competitorCoverageMatrix: knowledge.competitorCoverageMatrix,
   processedChunkIds: knowledge.processedChunkIds,
   fallbackChunkIds: knowledge.fallbackChunkIds,
 }, null, 2);

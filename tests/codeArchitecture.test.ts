@@ -376,6 +376,32 @@ test('smart content brief is visible, required before writing, and controlled by
   );
 });
 
+test('competitor coverage matrix is deterministic and controlled by the prompt registry', async () => {
+  const [knowledge, workflow, serverWorkflow, promptRegistry] = await Promise.all([
+    readWorkspaceFile('utils/contentWritingKnowledge.ts'),
+    readWorkspaceFile('utils/contentWritingWorkflow.ts'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+  ]);
+
+  assert.match(knowledge, /CONTENT_WRITING_KNOWLEDGE_VERSION = 2/);
+  assert.match(knowledge, /buildContentWritingCompetitorCoverageMatrix/);
+  assert.match(knowledge, /deriveCompetitorNumbers\(sourceChunkIds, chunksById\)/);
+  assert.match(knowledge, /coverageLevel: deriveCoverageLevel/);
+  assert.match(knowledge, /competitorCoverageMatrix: knowledge\.competitorCoverageMatrix/);
+  assert.match(workflow, /title: 'Competitor coverage matrix'/);
+  assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
+  assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 3/);
+  assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
+  assert.match(promptRegistry, /originalityOpportunity/);
+  assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);
+  assert.doesNotMatch(
+    `${knowledge}\n${workflow}\n${serverWorkflow}\n${promptRegistry}`,
+    /search\s*console|searchConsole/i,
+  );
+});
+
 test('content writing editor UI runs through durable authenticated sessions', async () => {
   const [panel, client, rightSidebar] = await Promise.all([
     readWorkspaceFile('components/ContentWritingPanel.tsx'),

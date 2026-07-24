@@ -136,7 +136,7 @@ export const getContentWritingCompetitorIndexStep = (): ContentWritingWorkflowSt
   key: 'competitor-index',
   type: 'competitor_index',
   ordinal: 1,
-  title: 'Competitor knowledge index',
+  title: 'Competitor coverage matrix',
   metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION },
 });
 
