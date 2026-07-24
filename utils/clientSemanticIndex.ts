@@ -125,6 +125,23 @@ export function normalizeSemanticText(value: string): string {
     .trim();
 }
 
+const GENERIC_CLIENT_PAGE_TITLES = new Set([
+  'الرئيسية',
+  'الصفحة الرئيسية',
+  'الرئيسية للموقع',
+  'أهلًا بكم',
+  'مرحبا بكم',
+  'home',
+  'home page',
+  'homepage',
+  'welcome',
+  'untitled',
+].map(value => normalizeSemanticText(value)));
+
+export const isGenericClientPageTitle = (value: string | undefined): boolean => (
+  GENERIC_CLIENT_PAGE_TITLES.has(normalizeSemanticText(value || ''))
+);
+
 const stableSignature = (prefix: string, value: string): string => {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
@@ -239,7 +256,11 @@ const pageUrlPath = (page: ClientSemanticPageInput): string => {
 };
 
 const buildSourceTexts = (page: ClientSemanticPageInput): SourceText[] => [
-  { source: 'title', value: page.pageTitle || '', weight: 10 },
+  {
+    source: 'title',
+    value: isGenericClientPageTitle(page.pageTitle) ? '' : page.pageTitle || '',
+    weight: 10,
+  },
   { source: 'h1', value: page.h1 || '', weight: 9 },
   ...(page.h2 || []).map(value => ({ source: 'h2', value, weight: 7 })),
   ...(page.h3 || []).map(value => ({ source: 'h3', value, weight: 5 })),
@@ -253,7 +274,7 @@ const calculateCompleteness = (
   page: ClientSemanticPageInput,
 ): { score: number; details: ClientSemanticCompletenessDetails } => {
   const details: ClientSemanticCompletenessDetails = {
-    title: Boolean(page.pageTitle?.trim()),
+    title: Boolean(page.pageTitle?.trim()) && !isGenericClientPageTitle(page.pageTitle),
     description: Boolean(page.metaDescription?.trim()),
     h1: Boolean(page.h1?.trim()),
     h2: Boolean(page.h2?.some(value => value.trim())),

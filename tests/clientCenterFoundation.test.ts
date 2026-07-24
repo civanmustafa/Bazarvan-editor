@@ -169,6 +169,9 @@ test('Client Center release gate is wired to build and readiness', async () => {
   assert.match(registry, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(registry, /20260724060000_internal_link_quality_policies\.sql/);
   assert.match(script, /CLIENT_CENTER_REQUIRED_MIGRATION/);
+  assert.match(script, /CLIENT_CENTER_ACCEPTANCE_VERSION/);
+  assert.match(script, /CLIENT_CENTER_ACCEPTANCE_CASES/);
+  assert.match(script, /clientCenterAcceptance\.test\.ts/);
   assert.match(server, /checkClientCenterReadiness/);
   assert.match(server, /toPublicClientCenterReadiness/);
   assert.match(guide, /20260724010000_client_center_foundation\.sql/);
@@ -177,5 +180,8 @@ test('Client Center release gate is wired to build and readiness', async () => {
   assert.match(guide, /20260724040000_client_semantic_index\.sql/);
   assert.match(guide, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(guide, /20260724060000_internal_link_quality_policies\.sql/);
+  assert.match(guide, /المرحلة العاشرة/);
+  assert.match(guide, /13 حالة قبول/);
   assert.match(packageJson.scripts?.postbuild || '', /check:client-center-release/);
+  assert.match(packageJson.scripts?.postbuild || '', /test:client-center-acceptance/);
 });

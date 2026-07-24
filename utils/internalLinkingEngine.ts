@@ -1,4 +1,5 @@
 import {
+  isGenericClientPageTitle,
   lightStemArabicToken,
   type ClientPageSemanticProfile,
 } from './clientSemanticIndex.ts';
@@ -31,6 +32,10 @@ export type InternalLinkTargetPage = {
   extractedPhrases?: string[];
   isEnabled?: boolean;
   semanticProfile?: ClientPageSemanticProfile;
+  allowedDomains?: Array<{
+    hostname: string;
+    includeSubdomains: boolean;
+  }>;
 };
 
 export type InternalLinkSuggestionConfidence = 'strong' | 'good' | 'review';
@@ -113,6 +118,10 @@ const STOP_WORDS = new Set([
   'its', 'you', 'your', 'we', 'our',
 ].map(value => normalizeInternalLinkText(value)));
 
+export const isGenericInternalLinkPageTitle = (value: string | undefined): boolean => (
+  isGenericClientPageTitle(value)
+);
+
 const meaningfulTokens = (value: string): string[] => normalizeInternalLinkText(value)
   .split(' ')
   .filter(token => token.length > 1 && !STOP_WORDS.has(token) && !/^\d+$/.test(token));
@@ -177,7 +186,7 @@ export const createInternalLinkInventorySignature = (
   const value = `${normalizeInternalLinkUrl(currentArticleUrl)}\n${policySignature}\n${pages
     .map(page => [
       page.id,
-      normalizeInternalLinkUrl(resolveTargetUrl(page)),
+      normalizeInternalLinkUrl(resolveInternalLinkTargetUrl(page)),
       page.semanticProfile?.sourceSignature || page.contentHash || '',
       page.semanticProfile?.dictionarySignature || '',
       page.isEnabled === false ? '0' : '1',
@@ -284,7 +293,7 @@ const pageSignals = (page: InternalLinkTargetPage): TargetSignal[] => {
   }
 
   const signals: TargetSignal[] = [];
-  addSignals(signals, [page.pageTitle], 5, 'title');
+  addSignals(signals, [isGenericInternalLinkPageTitle(page.pageTitle) ? undefined : page.pageTitle], 5, 'title');
   addSignals(signals, [page.h1], 4.5, 'heading');
   addSignals(signals, page.h2 || [], 3.5, 'heading');
   addSignals(signals, page.h3 || [], 2.5, 'heading');
@@ -295,10 +304,38 @@ const pageSignals = (page: InternalLinkTargetPage): TargetSignal[] => {
   return signals;
 };
 
-const resolveTargetUrl = (page: InternalLinkTargetPage): string => (
-  page.canonicalUrl?.trim()
-  || page.finalUrl?.trim()
-  || page.inputUrl.trim()
+const readUrlHostname = (value: string): string => {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+    return url.hostname.toLocaleLowerCase().replace(/\.$/, '');
+  } catch {
+    return '';
+  }
+};
+
+const isTargetUrlAllowedForPage = (
+  value: string,
+  page: InternalLinkTargetPage,
+): boolean => {
+  const hostname = readUrlHostname(value);
+  if (!hostname) return false;
+  if (page.allowedDomains && page.allowedDomains.length > 0) {
+    return page.allowedDomains.some(domain => {
+      const allowed = domain.hostname.toLocaleLowerCase().replace(/\.$/, '');
+      return hostname === allowed || (domain.includeSubdomains && hostname.endsWith(`.${allowed}`));
+    });
+  }
+  const inputHostname = readUrlHostname(page.inputUrl);
+  return Boolean(inputHostname && hostname === inputHostname);
+};
+
+export const resolveInternalLinkTargetUrl = (page: InternalLinkTargetPage): string => (
+  [
+    page.canonicalUrl?.trim(),
+    page.finalUrl?.trim(),
+    page.inputUrl.trim(),
+  ].find(value => Boolean(value && isTargetUrlAllowedForPage(value, page))) || ''
 );
 
 export const countExistingInventoryLinks = (
@@ -306,7 +343,7 @@ export const countExistingInventoryLinks = (
   pages: InternalLinkTargetPage[],
 ): number => {
   const targetUrls = new Set(
-    pages.map(page => normalizeInternalLinkUrl(resolveTargetUrl(page))).filter(Boolean),
+    pages.map(page => normalizeInternalLinkUrl(resolveInternalLinkTargetUrl(page))).filter(Boolean),
   );
   return existingUrls
     .map(normalizeInternalLinkUrl)
@@ -322,7 +359,7 @@ const isEligiblePage = (page: InternalLinkTargetPage): boolean => (
     typeof page.httpStatus !== 'number'
     || (page.httpStatus >= 200 && page.httpStatus < 400)
   )
-  && Boolean(resolveTargetUrl(page))
+  && Boolean(resolveInternalLinkTargetUrl(page))
 );
 
 const computeDocumentFrequency = (
@@ -610,8 +647,12 @@ const buildSuggestion = (
 
   return {
     pageId: page.id,
-    targetUrl: resolveTargetUrl(page),
-    targetTitle: page.pageTitle?.trim() || page.h1?.trim() || resolveTargetUrl(page),
+    targetUrl: resolveInternalLinkTargetUrl(page),
+    targetTitle: (
+      isGenericInternalLinkPageTitle(page.pageTitle)
+        ? page.h1?.trim() || page.pageTitle?.trim()
+        : page.pageTitle?.trim() || page.h1?.trim()
+    ) || resolveInternalLinkTargetUrl(page),
     anchorText: anchor.text,
     score,
     confidence: score >= 75 ? 'strong' : score >= 50 ? 'good' : 'review',
@@ -666,7 +707,7 @@ export const generateInternalLinkSuggestions = (
     })
     .filter(page => !dismissedPageIds.has(page.id))
     .filter(page => {
-      const targetUrl = normalizeInternalLinkUrl(resolveTargetUrl(page));
+      const targetUrl = normalizeInternalLinkUrl(resolveInternalLinkTargetUrl(page));
       if (!targetUrl || targetUrl === currentArticleUrl) return false;
       return (existingTargetCounts.get(targetUrl) || 0) < qualityPolicy.maximumLinksPerTarget;
     })

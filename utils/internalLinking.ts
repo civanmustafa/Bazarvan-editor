@@ -247,7 +247,7 @@ export const loadInternalLinkTargetPages = async (
   clientId: string,
 ): Promise<InternalLinkTargetPage[]> => {
   const supabase = getSupabaseClient();
-  const [pagesResult, dictionariesResult, profilesResult] = await Promise.all([
+  const [pagesResult, dictionariesResult, profilesResult, domainsResult] = await Promise.all([
     supabase
       .from('client_pages')
       .select(PAGE_COLUMNS)
@@ -284,10 +284,25 @@ export const loadInternalLinkTargetPages = async (
       ].join(','))
       .eq('client_id', clientId)
       .limit(2000),
+    supabase
+      .from('client_domains')
+      .select('hostname,include_subdomains')
+      .eq('client_id', clientId)
+      .eq('is_active', true),
   ]);
-  [pagesResult, dictionariesResult, profilesResult].forEach(result => throwIfError(result.error));
+  [pagesResult, dictionariesResult, profilesResult, domainsResult]
+    .forEach(result => throwIfError(result.error));
 
   const dictionaries = (dictionariesResult.data || []).map(mapClientLinkDictionary);
+  const allowedDomains = (domainsResult.data || []).flatMap(row => {
+    const hostname = asText(row.hostname).toLocaleLowerCase().replace(/\.$/, '');
+    return hostname
+      ? [{
+        hostname,
+        includeSubdomains: row.include_subdomains === true,
+      }]
+      : [];
+  });
   const storedProfiles = new Map(
     (profilesResult.data || [])
       .map(mapClientSemanticProfile)
@@ -297,6 +312,7 @@ export const loadInternalLinkTargetPages = async (
     const storedProfile = storedProfiles.get(page.id);
     return {
       ...page,
+      allowedDomains,
       semanticProfile: isClientSemanticProfileCurrent(storedProfile, {
         ...page,
         clientId: page.clientId || clientId,

@@ -121,6 +121,30 @@ const isHostnameAllowed = (hostname: string, domains: AllowedClientDomain[]): bo
   });
 };
 
+export const sanitizeDiscoveredClientUrl = (
+  value: string,
+  fallback: string,
+  domains: AllowedClientDomain[],
+): string => {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+    if (
+      !['http:', 'https:'].includes(url.protocol)
+      || url.username
+      || url.password
+      || !isHostnameAllowed(hostname, domains)
+    ) {
+      return fallback;
+    }
+    url.hash = '';
+    url.hostname = hostname;
+    return url.toString().slice(0, 2_048);
+  } catch {
+    return fallback;
+  }
+};
+
 const validatePublicClientUrl = async (
   value: string,
   domains: AllowedClientDomain[],
@@ -604,6 +628,11 @@ export const crawlClientPage = async (options: {
     const headerRobots = parseRobots(response.headers.get('x-robots-tag') || '');
     return {
       ...extracted,
+      canonicalUrl: sanitizeDiscoveredClientUrl(
+        extracted.canonicalUrl,
+        extracted.finalUrl,
+        options.domains,
+      ),
       robotsIndex: extracted.robotsIndex && headerRobots.index,
       robotsFollow: extracted.robotsFollow && headerRobots.follow,
     };

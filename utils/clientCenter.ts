@@ -704,6 +704,19 @@ export const normalizeClientPageUrl = (value: string): string => {
     const url = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
     url.hash = '';
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+    url.hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+    url.pathname = url.pathname.replace(/\/{2,}/g, '/');
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, '');
+    for (const key of Array.from(url.searchParams.keys())) {
+      const normalizedKey = key.toLowerCase();
+      if (
+        normalizedKey.startsWith('utm_')
+        || ['fbclid', 'gclid', 'dclid', 'msclkid', 'mc_cid', 'mc_eid'].includes(normalizedKey)
+      ) {
+        url.searchParams.delete(key);
+      }
+    }
+    url.searchParams.sort();
     return url.toString();
   } catch {
     return '';
@@ -726,6 +739,24 @@ export const isUrlAllowedForClientDomains = (
   } catch {
     return false;
   }
+};
+
+export const prepareClientPageUrlBatch = (input: {
+  urls: string[];
+  domains: ClientCenterDomain[];
+  maximumUrls?: number;
+}): {
+  accepted: string[];
+  rejected: string[];
+} => {
+  const maximumUrls = Math.max(1, Math.min(Math.floor(input.maximumUrls || 100), 1_000));
+  const normalized = Array.from(new Set(
+    input.urls.map(normalizeClientPageUrl).filter(Boolean),
+  )).slice(0, maximumUrls);
+  return {
+    accepted: normalized.filter(url => isUrlAllowedForClientDomains(url, input.domains)),
+    rejected: normalized.filter(url => !isUrlAllowedForClientDomains(url, input.domains)),
+  };
 };
 
 const createIdempotencyKey = (pageId: string, reason: string): string => {
@@ -769,9 +800,11 @@ export const addClientCenterPages = async (input: {
   urls: string[];
   domains: ClientCenterDomain[];
 }): Promise<{ accepted: number; queued: number; rejected: string[] }> => {
-  const normalized = Array.from(new Set(input.urls.map(normalizeClientPageUrl).filter(Boolean))).slice(0, 100);
-  const rejected = normalized.filter(url => !isUrlAllowedForClientDomains(url, input.domains));
-  const accepted = normalized.filter(url => isUrlAllowedForClientDomains(url, input.domains));
+  const { accepted, rejected } = prepareClientPageUrlBatch({
+    urls: input.urls,
+    domains: input.domains,
+    maximumUrls: 100,
+  });
   if (accepted.length === 0) return { accepted: 0, queued: 0, rejected };
 
   const supabase = getSupabaseClient();
