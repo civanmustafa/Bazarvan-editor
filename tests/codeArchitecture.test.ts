@@ -254,6 +254,7 @@ test('administrator prompt registry is the shared source for editor and writing 
     contentWritingWorkflow,
     externalExecutor,
     engineeringPrompts,
+    promptRegistrySettings,
   ] = await Promise.all([
     readWorkspaceFile('components/SettingsPage.tsx'),
     readWorkspaceFile('constants/promptRegistry.ts'),
@@ -264,6 +265,7 @@ test('administrator prompt registry is the shared source for editor and writing 
     readWorkspaceFile('server/contentWritingWorkflow.ts'),
     readWorkspaceFile('server/externalEngineeringAnalysisExecutor.ts'),
     readWorkspaceFile('constants/engineeringPrompts.ts'),
+    readWorkspaceFile('components/AdminPromptRegistrySettings.tsx'),
   ]);
 
   assert.match(settingsPage, /label: 'الأوامر الهندسية'/);
@@ -273,11 +275,17 @@ test('administrator prompt registry is the shared source for editor and writing 
   assert.match(promptApi, /authenticateApiRequest\(req\)/);
   assert.match(userContext, /loadPromptRegistry\(\)/);
   assert.match(userContext, /PROMPT_REGISTRY_CHANGED_EVENT/);
+  assert.match(userContext, /PROMPT_REGISTRY_REFRESH_MS/);
+  assert.match(userContext, /window\.addEventListener\('focus', refreshPrompts\)/);
   assert.match(aiContext, /PROMPT_TEMPLATE_IDS\.repairSingleViolation/);
   assert.match(aiContext, /PROMPT_TEMPLATE_IDS\.repairBulkGroup/);
   assert.match(contentWritingEngine, /promptTemplates: settings\.promptRegistry\.templates/);
   assert.match(contentWritingWorkflow, /context_snapshot\?\.promptTemplates/);
   assert.match(externalExecutor, /readPromptRegistrySettings\(\)/);
+  assert.match(promptRegistrySettings, /role="tablist"/);
+  assert.match(promptRegistrySettings, /role="tabpanel"/);
+  assert.match(promptRegistrySettings, /PROMPT_GROUP_IDS\.qualityGate/);
+  assert.match(promptRegistrySettings, /setActiveGroupId\(group\.id\)/);
   assert.doesNotMatch(engineeringPrompts, /ENGINEERING_PROMPT_PASSWORD|Rezan90/);
   await assertFileMissing('components/EngineeringPromptsSettings.tsx');
 });

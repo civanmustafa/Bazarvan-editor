@@ -39,6 +39,7 @@ import {
 } from '../utils/promptRegistry';
 
 const AI_PROVIDER_CAPABILITIES_REFRESH_MS = 60_000;
+const PROMPT_REGISTRY_REFRESH_MS = 5 * 60_000;
 
 /*
  * UserContext is the owner of session-level app state:
@@ -658,8 +659,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     useEffect(() => {
         if (!currentUserId || preferencesReadyUserId !== currentUserId) return;
         let cancelled = false;
+        let refreshPending = false;
 
         const refreshPrompts = () => {
+            if (refreshPending) return;
+            refreshPending = true;
             void loadPromptRegistry()
                 .then(registry => {
                     if (cancelled) return;
@@ -670,14 +674,21 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 })
                 .catch(error => {
                     console.error('Failed to load global engineering prompts:', error);
+                })
+                .finally(() => {
+                    refreshPending = false;
                 });
         };
 
         refreshPrompts();
+        const refreshInterval = window.setInterval(refreshPrompts, PROMPT_REGISTRY_REFRESH_MS);
         window.addEventListener(PROMPT_REGISTRY_CHANGED_EVENT, refreshPrompts);
+        window.addEventListener('focus', refreshPrompts);
         return () => {
             cancelled = true;
+            window.clearInterval(refreshInterval);
             window.removeEventListener(PROMPT_REGISTRY_CHANGED_EVENT, refreshPrompts);
+            window.removeEventListener('focus', refreshPrompts);
         };
     }, [currentUserId, preferencesReadyUserId]);
 
