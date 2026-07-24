@@ -2,7 +2,12 @@ import React from 'react';
 import { ChevronDown, Search } from 'lucide-react';
 import type { GoalContext } from '../types';
 import { useUser } from '../contexts/UserContext';
-import { getGoalContextFields, getGoalContextPresetOptions, isGoalContextFieldVisible } from '../utils/goalContext';
+import {
+  getGoalContextFields,
+  getGoalContextPresetOptions,
+  isGoalContextFieldVisible,
+  SMART_CONTENT_BRIEF_REQUIRED_KEYS,
+} from '../utils/goalContext';
 
 type GoalContextFieldsProps = {
   goalContext: GoalContext;
@@ -107,23 +112,41 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
 
       {fields.filter(field => isGoalContextFieldVisible(field, goalContext)).map(field => (
         <label key={field.key} className="block">
-          <span className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">{field.label}</span>
+          <span className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">
+            {field.label}
+            {(SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)
+              || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')) && (
+              <span className="ms-1 text-red-500" aria-hidden="true">*</span>
+            )}
+          </span>
           {field.kind === 'select' ? (
             <select
               value={goalContext[field.key]}
               onChange={(event) => onChange(field.key, event.target.value)}
               className={fieldClass}
+              required
             >
               {field.options.map(option => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
+          ) : field.kind === 'textarea' ? (
+            <textarea
+              value={goalContext[field.key]}
+              onChange={(event) => onChange(field.key, event.target.value)}
+              className={`${fieldClass} min-h-20 resize-y`}
+              placeholder={field.placeholder}
+              rows={3}
+              required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)}
+            />
           ) : (
             <input
               value={goalContext[field.key]}
               onChange={(event) => onChange(field.key, event.target.value)}
               className={fieldClass}
               placeholder={field.placeholder}
+              required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)
+                || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')}
             />
           )}
         </label>

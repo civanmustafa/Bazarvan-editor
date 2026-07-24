@@ -32,6 +32,16 @@ const createReadyArticle = (competitorContents: string[]) => ({
     audienceScope: 'global',
     targetCountry: '',
     targetAudience: 'الجمهور المستهدف',
+    audienceKnowledgeLevel: 'mixed',
+    audienceNeeds: 'شرح عملي وإطار واضح لاتخاذ القرار.',
+    readerOutcome: 'فهم الموضوع واختيار الخطوة التالية المناسبة.',
+    desiredAction: 'تطبيق التوصيات الواردة في المقالة.',
+    marketingStage: 'decision',
+    uniqueAngle: 'إرشاد عملي مبني على الأدلة.',
+    evidenceRequirements: 'إسناد الحقائق والأرقام المهمة إلى أدلة قابلة للتتبع.',
+    freshnessRequirements: 'تفضيل المعلومات الحديثة في الموضوعات المتغيرة.',
+    brandVoice: 'واضح وخبير ومباشر.',
+    topicSensitivity: 'standard',
     searchIntent: 'informational',
   },
   competitors: competitorContents.map((content, index) => ({
@@ -103,7 +113,7 @@ test('content writing can start from an empty article body', async () => {
   assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'article_text'));
 });
 
-test('content-writing uses audience scope without requiring a hidden target audience field', async () => {
+test('content-writing requires the complete smart brief before a new session starts', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
   delete (input.goalContext as Partial<typeof input.goalContext>).targetAudience;
@@ -111,10 +121,10 @@ test('content-writing uses audience scope without requiring a hidden target audi
   const bundle = buildContentWritingPromptBundle(input);
   const goalContext = JSON.parse(bundle.variables.goal_context);
 
-  assert.equal(bundle.ready, true);
+  assert.equal(bundle.ready, false);
   assert.equal(goalContext.audienceScope, 'global');
-  assert.equal('targetAudience' in goalContext, false);
-  assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'goal_context.targetAudience'));
+  assert.equal(goalContext.targetAudience, '');
+  assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'goal_context.targetAudience'));
 });
 
 test('content-writing preflight blocks oversized requests instead of shortening them', async () => {

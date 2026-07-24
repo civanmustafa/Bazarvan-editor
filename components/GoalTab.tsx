@@ -5,7 +5,11 @@ import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { useAISelector } from '../contexts/AIContext';
 import GoalContextFields from './GoalContextFields';
-import { formatGoalContextForCopy, updateGoalContextField } from '../utils/goalContext';
+import {
+  formatGoalContextForCopy,
+  getSmartContentBriefMissingKeys,
+  updateGoalContextField,
+} from '../utils/goalContext';
 
 const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     const {
@@ -32,6 +36,7 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     keywords.secondaries.some(term => term.trim())
   );
   const isClientSaved = Boolean(companyName && clientGoalContexts[companyName]);
+  const missingBriefFieldCount = getSmartContentBriefMissingKeys(goalContext).length;
   const savedMessage = companyName && lastSavedCompany === companyName
     ? t.clientContextSaved.replace('{company}', companyName)
     : '';
@@ -101,6 +106,18 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     <span className="text-[#d4af37]"><Target size={20} /></span>
                     <h4 className="text-sm font-bold text-[#333333] dark:text-gray-100">{t.contextTitle}</h4>
                 </div>
+                <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                  {t.contextDescription}
+                </p>
+                <p className={`mt-1 text-xs font-bold ${
+                  missingBriefFieldCount === 0
+                    ? 'text-green-600 dark:text-green-400'
+                    : 'text-amber-600 dark:text-amber-400'
+                }`}>
+                  {missingBriefFieldCount === 0
+                    ? t.smartBriefComplete
+                    : t.smartBriefMissing.replace('{count}', String(missingBriefFieldCount))}
+                </p>
             </div>
             <GoalContextFields goalContext={goalContext} onChange={updateGoalContext} />
             <div className="space-y-2 pt-2">

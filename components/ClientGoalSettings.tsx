@@ -71,7 +71,7 @@ const ClientGoalSettings: React.FC = () => {
   const formatFieldValue = (field: (typeof contextFields)[number], context: GoalContext) => {
     const value = context[field.key];
     if (!value) return '-';
-    if (field.kind === 'text') return value;
+    if (field.kind !== 'select') return value;
     return field.options.find(option => option.value === value)?.label || value;
   };
 

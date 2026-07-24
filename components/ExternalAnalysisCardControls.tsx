@@ -30,6 +30,7 @@ import {
   useDefaultExternalEngineeringCommands,
 } from '../utils/externalAnalysis';
 import { ensureArticleCompetitorDiscovery } from '../utils/competitorDiscovery';
+import { normalizeGoalContext } from '../utils/goalContext';
 
 const CompetitorDiscoveryModal = React.lazy(() => import('./CompetitorDiscoveryModal'));
 
@@ -110,14 +111,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const menuRef = useRef<HTMLDivElement>(null);
   const ensuredCompetitorSignatureRef = useRef('');
 
-  const resolvedGoalContext: GoalContext = goalContext || {
-    pageType: '',
-    objective: '',
-    audienceScope: '',
-    targetCountry: '',
-    targetAudience: '',
-    searchIntent: '',
-  };
+  const resolvedGoalContext: GoalContext = normalizeGoalContext(goalContext);
 
   const commands = useMemo(() => EXTERNAL_READY_COMMAND_DEFINITIONS.map(definition => ({
     id: definition.id,

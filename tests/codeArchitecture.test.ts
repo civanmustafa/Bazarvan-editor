@@ -279,6 +279,8 @@ test('administrator prompt registry is the shared source for editor and writing 
   assert.match(userContext, /window\.addEventListener\('focus', refreshPrompts\)/);
   assert.match(aiContext, /PROMPT_TEMPLATE_IDS\.repairSingleViolation/);
   assert.match(aiContext, /PROMPT_TEMPLATE_IDS\.repairBulkGroup/);
+  assert.match(aiContext, /PROMPT_TEMPLATE_IDS\.contentBriefGeneration/);
+  assert.match(registry, /contentWriting\.contentBriefGeneration/);
   assert.match(contentWritingEngine, /promptTemplates: settings\.promptRegistry\.templates/);
   assert.match(contentWritingWorkflow, /context_snapshot\?\.promptTemplates/);
   assert.match(externalExecutor, /readPromptRegistrySettings\(\)/);
@@ -348,6 +350,30 @@ test('content writing has one template registry and one context builder', async 
   assert.doesNotMatch(builder, /content\.slice\(/);
   assert.match(settingsRegistry, /CONTENT_WRITING_TEMPLATE_FIELDS/);
   assert.match(settingsPage, /ContentWritingPromptSettings/);
+});
+
+test('smart content brief is visible, required before writing, and controlled by the prompt registry', async () => {
+  const [goalTab, goalFields, contextBuilder, promptRegistry, aiContext] = await Promise.all([
+    readWorkspaceFile('components/GoalTab.tsx'),
+    readWorkspaceFile('components/GoalContextFields.tsx'),
+    readWorkspaceFile('utils/contentWritingContext.ts'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+    readWorkspaceFile('contexts/AIContext.tsx'),
+  ]);
+
+  assert.match(goalTab, /getSmartContentBriefMissingKeys/);
+  assert.match(goalTab, /smartBriefComplete/);
+  assert.match(goalFields, /SMART_CONTENT_BRIEF_REQUIRED_KEYS/);
+  assert.match(contextBuilder, /getSmartContentBriefMissingKeys/);
+  assert.match(contextBuilder, /targetAudience: 'وصف الجمهور المستهدف'/);
+  assert.match(promptRegistry, /contentWriting\.contentBriefGeneration/);
+  assert.match(promptRegistry, /current_brief_json/);
+  assert.match(promptRegistry, /موجز المقالة الذكي/);
+  assert.match(aiContext, /getPromptTemplate\([\s\S]*PROMPT_TEMPLATE_IDS\.contentBriefGeneration/);
+  assert.doesNotMatch(
+    `${goalTab}\n${contextBuilder}\n${promptRegistry}\n${aiContext}`,
+    /search\s*console|searchConsole/i,
+  );
 });
 
 test('content writing editor UI runs through durable authenticated sessions', async () => {

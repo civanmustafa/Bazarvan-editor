@@ -22,6 +22,16 @@ export interface GoalContext {
   audienceScope: string;
   targetCountry: string;
   targetAudience: string;
+  audienceKnowledgeLevel: string;
+  audienceNeeds: string;
+  readerOutcome: string;
+  desiredAction: string;
+  marketingStage: string;
+  uniqueAngle: string;
+  evidenceRequirements: string;
+  freshnessRequirements: string;
+  brandVoice: string;
+  topicSensitivity: string;
   searchIntent: string;
 }
 

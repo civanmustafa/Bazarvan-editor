@@ -78,6 +78,17 @@ const GOAL_CONTEXT_LABELS: Record<string, string> = {
     objective: 'هدف الصفحة',
     audienceScope: 'نطاق الجمهور',
     targetCountry: 'المدينة/الدولة/الإقليم المستهدف',
+    targetAudience: 'الجمهور المستهدف',
+    audienceKnowledgeLevel: 'مستوى معرفة الجمهور',
+    audienceNeeds: 'احتياجات الجمهور وأسئلته',
+    readerOutcome: 'النتيجة المطلوبة للقارئ',
+    desiredAction: 'الإجراء المطلوب بعد القراءة',
+    marketingStage: 'المرحلة التسويقية',
+    uniqueAngle: 'الزاوية والقيمة المميزة',
+    evidenceRequirements: 'متطلبات الأدلة والمصادر',
+    freshnessRequirements: 'متطلبات حداثة المعلومات',
+    brandVoice: 'نبرة العلامة التجارية',
+    topicSensitivity: 'حساسية الموضوع',
     searchIntent: 'نية البحث',
 };
 
@@ -111,6 +122,18 @@ const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
     navigational: 'الوصول إلى علامة أو صفحة محددة',
     'support-intent': 'حل مشكلة أو معرفة طريقة الاستخدام',
     'local-intent': 'شرح وتعلّم',
+    beginner: 'مبتدئ',
+    intermediate: 'متوسط',
+    expert: 'خبير',
+    mixed: 'مستويات مختلطة',
+    awareness: 'الوعي بالمشكلة',
+    consideration: 'المقارنة والتقييم',
+    decision: 'اتخاذ القرار',
+    standard: 'موضوع عام',
+    health: 'صحي أو طبي',
+    financial: 'مالي',
+    legal: 'قانوني',
+    safety: 'سلامة وأمان',
 };
 
 const GOAL_CONTEXT_LOCATION_SCOPES = new Set(['local', 'country', 'regional']);
@@ -154,6 +177,9 @@ const GOAL_CONTEXT_ALLOWED_VALUES = {
     pageType: ['article', 'news', 'service', 'category', 'comparison', 'product', 'landing', 'guide'],
     objective: ['educate', 'compare', 'convert', 'category-support', 'trust', 'support'],
     audienceScope: ['local', 'country', 'regional', 'global'],
+    audienceKnowledgeLevel: ['beginner', 'intermediate', 'expert', 'mixed'],
+    marketingStage: ['awareness', 'consideration', 'decision', 'retention'],
+    topicSensitivity: ['standard', 'health', 'financial', 'legal', 'safety'],
     searchIntent: ['informational', 'commercial', 'commercial-support', 'transactional', 'navigational', 'support-intent'],
 } as const;
 
@@ -250,7 +276,37 @@ const normalizeGeneratedGoalContext = (rawValue: unknown, currentContext: GoalCo
         targetCountry: audienceScope === 'global'
             ? ''
             : generatedTargetLocation || normalizedCurrent.targetCountry,
-        targetAudience: normalizedCurrent.targetAudience,
+        targetAudience: getFirstGeneratedTextValue(record, ['targetAudience', 'target_audience', 'audience'])
+            || normalizedCurrent.targetAudience,
+        audienceKnowledgeLevel: resolveGoalContextChoice(
+            getFirstGeneratedValue(record, ['audienceKnowledgeLevel', 'audience_knowledge_level', 'knowledgeLevel']),
+            GOAL_CONTEXT_ALLOWED_VALUES.audienceKnowledgeLevel,
+            normalizedCurrent.audienceKnowledgeLevel,
+        ),
+        audienceNeeds: getFirstGeneratedTextValue(record, ['audienceNeeds', 'audience_needs', 'needs'])
+            || normalizedCurrent.audienceNeeds,
+        readerOutcome: getFirstGeneratedTextValue(record, ['readerOutcome', 'reader_outcome', 'outcome'])
+            || normalizedCurrent.readerOutcome,
+        desiredAction: getFirstGeneratedTextValue(record, ['desiredAction', 'desired_action', 'callToAction'])
+            || normalizedCurrent.desiredAction,
+        marketingStage: resolveGoalContextChoice(
+            getFirstGeneratedValue(record, ['marketingStage', 'marketing_stage', 'journeyStage']),
+            GOAL_CONTEXT_ALLOWED_VALUES.marketingStage,
+            normalizedCurrent.marketingStage,
+        ),
+        uniqueAngle: getFirstGeneratedTextValue(record, ['uniqueAngle', 'unique_angle', 'valueProposition'])
+            || normalizedCurrent.uniqueAngle,
+        evidenceRequirements: getFirstGeneratedTextValue(record, ['evidenceRequirements', 'evidence_requirements'])
+            || normalizedCurrent.evidenceRequirements,
+        freshnessRequirements: getFirstGeneratedTextValue(record, ['freshnessRequirements', 'freshness_requirements'])
+            || normalizedCurrent.freshnessRequirements,
+        brandVoice: getFirstGeneratedTextValue(record, ['brandVoice', 'brand_voice', 'tone'])
+            || normalizedCurrent.brandVoice,
+        topicSensitivity: resolveGoalContextChoice(
+            getFirstGeneratedValue(record, ['topicSensitivity', 'topic_sensitivity', 'sensitivity']),
+            GOAL_CONTEXT_ALLOWED_VALUES.topicSensitivity,
+            normalizedCurrent.topicSensitivity,
+        ),
         searchIntent: resolveGoalContextChoice(
             getFirstGeneratedValue(record, ['searchIntent', 'search_intent', 'intent']),
             GOAL_CONTEXT_ALLOWED_VALUES.searchIntent,
@@ -5330,35 +5386,20 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return { error: 'أدخل الكلمة المفتاحية الأساسية أو عنوان المقالة أولًا.' };
         }
 
-        const prompt = [
-            'أنت خبير SEO واستراتيجية محتوى.',
-            '',
-            'استنتج سياق هدف الصفحة والجمهور من نمط الكلمة المفتاحية الأساسية والصيغ البديلة وعنوان المقالة فقط.',
-            'املأ حقول سياق الصفحة بحيث تكون مناسبة للتحليل وكتابة المحتوى، ولا تكتب مقالة أو شرحًا.',
-            '',
-            `عنوان المقالة: ${articleTitle || 'غير محدد'}`,
-            `الكلمة المفتاحية الأساسية: ${primary || 'غير محددة'}`,
-            `الصيغ البديلة: ${secondaries.length > 0 ? secondaries.join(', ') : 'غير محددة'}`,
-            `لغة المقال: ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`,
-            '',
-            'القيم المسموحة:',
-            `- pageType: ${GOAL_CONTEXT_ALLOWED_VALUES.pageType.join(', ')}`,
-            `- objective: ${GOAL_CONTEXT_ALLOWED_VALUES.objective.join(', ')}`,
-            `- audienceScope: ${GOAL_CONTEXT_ALLOWED_VALUES.audienceScope.join(', ')}`,
-            '- targetCountry: نص حر لاسم المدينة أو الدولة أو الإقليم إذا كان واضحًا من العنوان أو الكلمات، وإلا اتركه فارغًا',
-            `- searchIntent: ${GOAL_CONTEXT_ALLOWED_VALUES.searchIntent.join(', ')}`,
-            '',
-            'قواعد الاستنتاج:',
-            '- اختر pageType من نية العنوان والكلمات: category لصفحة تصنيف تضم منتجات أو خدمات ويكتب فيها محتوى داعم، service للخدمات، product للمنتجات، comparison للمقارنات، guide للأدلة، article للمقالات العامة.',
-            '- اختر objective بحسب نية المستخدم: category-support عندما يكون المحتوى داعماً لصفحة تصنيف منتجات/خدمات، educate للشرح والتعلّم، compare للمقارنة، convert للحجز/الشراء/التواصل، trust لبناء الثقة، support للدعم والاستخدام.',
-            '- اختر searchIntent بحسب ما يوحي به العنوان والكلمات.',
-            '- إذا كانت الصفحة تصنيف منتجات أو خدمات والمحتوى هدفه شرح الخيارات أو توجيه المستخدم داخل التصنيف، فغالباً اختر pageType بقيمة category وobjective بقيمة category-support وsearchIntent بقيمة commercial-support.',
-            '- اختر audienceScope بحسب وضوح نطاق الاستهداف من العنوان والكلمات، وإذا لم يظهر نطاق واضح فاختر global.',
-            '- إذا اخترت local أو country أو regional وكان اسم المدينة أو الدولة أو الإقليم واضحًا، ضعه في targetCountry.',
-            '',
-            'أرجع JSON فقط دون Markdown ودون شرح بهذا الشكل:',
-            '{ "pageType": "service", "objective": "convert", "audienceScope": "global", "targetCountry": "", "searchIntent": "transactional" }',
-        ].join('\n');
+        const prompt = renderPromptTemplate(
+            getPromptTemplate(
+                engineeringPrompts as unknown as Record<string, string>,
+                PROMPT_TEMPLATE_IDS.contentBriefGeneration,
+            ),
+            {
+                article_title: articleTitle || 'غير محدد',
+                primary_keyword: primary || 'غير محددة',
+                alternative_keywords: secondaries.length > 0 ? secondaries.join(', ') : 'غير محددة',
+                article_language: articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية',
+                allowed_values_json: JSON.stringify(GOAL_CONTEXT_ALLOWED_VALUES, null, 2),
+                current_brief_json: JSON.stringify(normalizeGoalContext(goalContext), null, 2),
+            },
+        );
 
         const usageContext = buildApiUsageContext('goal_context_generation');
         let result: string;
@@ -5389,7 +5430,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
 
         return { context };
-    }, [articleLanguage, buildApiUsageContext, goalContext, keywords.primary, keywords.secondaries, title, trackGeminiProgress]);
+    }, [articleLanguage, buildApiUsageContext, engineeringPrompts, goalContext, keywords.primary, keywords.secondaries, title, trackGeminiProgress]);
 
     const generateDraftTitle = useCallback(async (): Promise<string> => {
         const primary = keywords.primary.trim();

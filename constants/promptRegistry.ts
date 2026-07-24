@@ -4,7 +4,7 @@ import {
 } from './engineeringPrompts';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 
-export const PROMPT_REGISTRY_VERSION = 1;
+export const PROMPT_REGISTRY_VERSION = 2;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -22,6 +22,7 @@ export type PromptGroupId = typeof PROMPT_GROUP_IDS[keyof typeof PROMPT_GROUP_ID
 export const PROMPT_TEMPLATE_IDS = {
   repairSingleViolation: 'repair.singleViolation',
   repairBulkGroup: 'repair.bulkGroup',
+  contentBriefGeneration: 'contentWriting.contentBriefGeneration',
   contentWritingInstructions: 'contentWriting.instructions',
   contentWritingArticleContext: 'contentWriting.articleContext',
   contentWritingGenerationRequest: 'contentWriting.generationRequest',
@@ -162,6 +163,21 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     ],
   },
   {
+    id: PROMPT_TEMPLATE_IDS.contentBriefGeneration,
+    group: PROMPT_GROUP_IDS.writing,
+    label: 'توليد موجز المقالة الذكي',
+    description: 'يحوّل عنوان المقالة والكلمات المستهدفة والسياق الحالي إلى موجز تحريري كامل قبل بدء الكتابة.',
+    usage: 'يعمل عند الضغط على زر توليد السياق والجمهور، ويملأ حقول الموجز القابلة للمراجعة دون كتابة المقالة.',
+    variables: ['{{article_title}}', '{{primary_keyword}}', '{{alternative_keywords}}', '{{article_language}}', '{{allowed_values_json}}', '{{current_brief_json}}'],
+    requiredVariables: ['article_title', 'primary_keyword', 'alternative_keywords', 'article_language', 'allowed_values_json', 'current_brief_json'],
+    attachments: [
+      attachment('articleIdentity', 'هوية المقالة', 'العنوان ولغة المقالة الحالية.'),
+      attachment('keywords', 'الكلمات المستهدفة', 'الكلمة الأساسية والصيغ البديلة المتوفرة.'),
+      attachment('currentBrief', 'الموجز الحالي', 'القيم الحالية للاحتفاظ بما أدخله المستخدم وتحسين الناقص فقط.'),
+      attachment('allowedValues', 'قاموس القيم', 'القيم المسموحة للحقول الاختيارية حتى تبقى النتيجة قابلة للحفظ والفحص.'),
+    ],
+  },
+  {
     id: PROMPT_TEMPLATE_IDS.contentWritingInstructions,
     group: PROMPT_GROUP_IDS.writing,
     label: 'تعليمات نظام كتابة المقالة',
@@ -176,14 +192,14 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     id: PROMPT_TEMPLATE_IDS.contentWritingArticleContext,
     group: PROMPT_GROUP_IDS.writing,
     label: 'قالب سياق المقالة',
-    description: 'يرتب بيانات المقالة والكلمات والجمهور والمنافسين داخل رسالة سياق واحدة.',
+    description: 'يرتب بيانات المقالة والكلمات وموجز المقالة الذكي والمنافسين داخل رسالة سياق واحدة.',
     usage: 'تُستبدل المتغيرات بقيم المقالة عند إنشاء الجلسة، ثم يُحفظ السياق مع الجلسة.',
     variables: ['{{article_id}}', '{{article_title}}', '{{article_language}}', '{{article_text}}', '{{primary_keyword}}', '{{alternative_keywords}}', '{{lsi_keywords}}', '{{company_name}}', '{{goal_context}}', '{{competitors_json}}'],
     requiredVariables: ['article_title', 'article_language', 'article_text', 'primary_keyword', 'alternative_keywords', 'lsi_keywords', 'company_name', 'goal_context', 'competitors_json'],
     attachments: [
       attachment('articleIdentity', 'بيانات المقالة', 'المعرّف والعنوان واللغة والنص الحالي.'),
       attachment('keywords', 'الكلمات المستهدفة', 'الأساسية والبدائل وLSI واسم الشركة.'),
-      attachment('goalContext', 'الهدف والجمهور', 'نوع الصفحة والهدف والجمهور والموقع ونية البحث.'),
+      attachment('goalContext', 'موجز المقالة الذكي', 'نوع الصفحة والهدف والجمهور واحتياجاته والنتيجة والزاوية والأدلة والحداثة ونية البحث.'),
       attachment('competitors', 'مصادر المنافسين', 'المصادر الكاملة عند إنشاء الجلسة ثم الفهرس المختصر في الخطوات.'),
     ],
   },
@@ -222,7 +238,7 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     variables: ['{{article_title}}', '{{knowledge_json}}', '{{quality_contract_block}}', '{{output_language}}', '{{minimum_sections}}', '{{maximum_sections}}'],
     requiredVariables: ['article_title', 'knowledge_json', 'output_language', 'minimum_sections', 'maximum_sections'],
     attachments: [
-      attachment('articleContext', 'سياق المقالة', 'العنوان واللغة والكلمات والهدف والجمهور.'),
+      attachment('articleContext', 'موجز المقالة الذكي', 'العنوان واللغة والكلمات والهدف والجمهور واحتياجاته والنتيجة والزاوية والأدلة.'),
       attachment('knowledgeIndex', 'فهرس المنافسين', 'كل الأفكار والكيانات والأدلة المستخرجة.'),
       attachment('qualityContract', 'عقد الجودة', 'الشروط الكمية والبنيوية الملزمة للجلسة.'),
     ],
@@ -254,7 +270,7 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     attachments: [
       attachment('outline', 'المخطط', 'المخطط المعتمد للمقالة.'),
       attachment('completedBody', 'المتن المكتمل', 'كل أقسام المتن بعد كتابتها.'),
-      attachment('articleContext', 'سياق المقالة', 'الكلمات والهدف والجمهور ونية البحث.'),
+      attachment('articleContext', 'موجز المقالة الذكي', 'الكلمات والهدف والجمهور واحتياجاته والنتيجة والزاوية ونية البحث.'),
     ],
   },
   {
@@ -268,7 +284,7 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     attachments: [
       attachment('outline', 'المخطط', 'المخطط المعتمد للمقالة.'),
       attachment('completedDraft', 'المسودة المكتملة', 'المقدمة والمتن قبل الأسئلة والخاتمة.'),
-      attachment('articleContext', 'سياق المقالة', 'الكلمات والهدف والجمهور وفهرس المنافسين.'),
+      attachment('articleContext', 'موجز المقالة الذكي', 'الكلمات والهدف والجمهور والنتيجة المطلوبة وفهرس المنافسين.'),
     ],
   },
   {
@@ -326,7 +342,7 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     variables: ['{{article_title}}', '{{quality_contract_block}}', '{{knowledge_json}}', '{{coverage_audit_json}}', '{{assembled_draft}}'],
     requiredVariables: ['article_title', 'knowledge_json', 'coverage_audit_json', 'assembled_draft'],
     attachments: [
-      attachment('articleContext', 'سياق المقالة', 'العنوان والكلمات والهدف والجمهور ونية البحث.'),
+      attachment('articleContext', 'موجز المقالة الذكي', 'العنوان والكلمات والجمهور واحتياجاته والنتيجة والزاوية والأدلة ونية البحث.'),
       attachment('qualityContract', 'عقد الجودة', 'كل شروط سياسة الجودة الحالية.'),
       attachment('knowledgeIndex', 'فهرس المنافسين', 'المعرفة الموحدة المستخرجة من المنافسين.'),
       attachment('coverageAudit', 'تقرير التغطية', 'النواقص والإصلاحات التي اكتملت.'),
@@ -421,6 +437,32 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 
 أرجع JSON صالحًا فقط بهذا الشكل:
 { "suggestions": [ { "label": "اقتراح 1", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] }, { "label": "اقتراح 2", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] } ] }`,
+
+  [PROMPT_TEMPLATE_IDS.contentBriefGeneration]: `أنت خبير SEO واستراتيجية محتوى. أنشئ موجز مقالة ذكيًا قبل الكتابة، ولا تكتب المقالة أو مخططها.
+
+بيانات المقالة:
+- العنوان: {{article_title}}
+- الكلمة المفتاحية الأساسية: {{primary_keyword}}
+- الصيغ البديلة: {{alternative_keywords}}
+- لغة المقالة: {{article_language}}
+
+الموجز الحالي الذي يجب احترام قيمه الصريحة وتحسين الحقول الناقصة:
+{{current_brief_json}}
+
+القيم المسموحة للحقول الاختيارية:
+{{allowed_values_json}}
+
+استنتج بدقة نوع الصفحة وهدفها ونية البحث، ثم صف الجمهور الحقيقي ومستوى معرفته واحتياجاته والنتيجة التي يجب أن يصل إليها والإجراء المناسب بعد القراءة. حدد المرحلة التسويقية، والزاوية التي تمنح المقالة قيمة إضافية، ونوع الأدلة المطلوبة، وحساسية الموضوع، ومتطلبات حداثة المعلومات، ونبرة العلامة التجارية.
+
+قواعد:
+- لا تدّع معرفة بيانات لا تظهر من العنوان أو الكلمات؛ استخدم صياغة عملية محافظة عند عدم اليقين.
+- لا تضع اسم دولة أو مدينة إلا إذا كان واضحًا، واجعل audienceScope عالميًا عند غياب الاستهداف الجغرافي.
+- اجعل evidenceRequirements أكثر صرامة للموضوعات الصحية أو المالية أو القانونية أو المتعلقة بالسلامة.
+- اجعل uniqueAngle قيمة مفيدة أصلية، لا وعدًا تسويقيًا مبالغًا فيه.
+- أرجع JSON فقط دون Markdown أو شرح.
+
+الشكل الإلزامي:
+{"pageType":"article","objective":"educate","audienceScope":"global","targetCountry":"","targetAudience":"وصف محدد للجمهور","audienceKnowledgeLevel":"mixed","audienceNeeds":"المشكلات والأسئلة الأساسية","readerOutcome":"النتيجة المعرفية أو العملية","desiredAction":"الإجراء الطبيعي بعد القراءة","marketingStage":"awareness","uniqueAngle":"القيمة الجديدة للمقالة","evidenceRequirements":"الأدلة المطلوبة","freshnessRequirements":"ما يحتاج معلومات حديثة","brandVoice":"نبرة واضحة ومحددة","topicSensitivity":"standard","searchIntent":"informational"}`,
 
   [PROMPT_TEMPLATE_IDS.competitorIndex]: `نفّذ مرحلة فهرسة معرفة المنافسين فقط.
 
@@ -582,9 +624,9 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 
   [PROMPT_TEMPLATE_IDS.finalReview]: `نفّذ المراجعة التحريرية النهائية للمقالة "{{article_title}}".
 
-اعمل كمحرر دلالي مستقل، لا ككاتب الأقسام الأصلي. راجع المسودة المجمعة كاملة مقابل التعليمات الدائمة وسياق المقالة والكلمات المستهدفة ونية البحث وفهرس معرفة المنافسين وتدقيق التغطية المكتمل. صحح الترابط والتكرار والادعاءات غير المدعومة وبنية Markdown وجودة اللغة والاستخدام الطبيعي للكلمات.
+اعمل كمحرر دلالي مستقل، لا ككاتب الأقسام الأصلي. راجع المسودة المجمعة كاملة مقابل التعليمات الدائمة وموجز المقالة الذكي والكلمات المستهدفة ونية البحث وفهرس معرفة المنافسين وتدقيق التغطية المكتمل. صحح الترابط والتكرار والادعاءات غير المدعومة وبنية Markdown وجودة اللغة والاستخدام الطبيعي للكلمات.
 
-تحقق صراحة من: تغطية نية البحث، واكتمال الإجابة، وتغطية الكيانات والموضوعات، والأساس الواقعي، والأصالة مقارنة بالمنافسين، والإجابات المباشرة القابلة للاقتباس في AEO وGEO، والتدرج المنطقي، والدعوة المناسبة للخطوة التالية. احذف أي عبارة غير مدعومة بالسياق بدل اختراع دليل.
+تحقق صراحة من: الالتزام بالجمهور واحتياجاته والنتيجة والزاوية والأدلة المحددة في الموجز، وتغطية نية البحث، واكتمال الإجابة، وتغطية الكيانات والموضوعات، والأساس الواقعي، والأصالة مقارنة بالمنافسين، والإجابات المباشرة القابلة للاقتباس في AEO وGEO، والتدرج المنطقي، والدعوة المناسبة للخطوة التالية. احذف أي عبارة غير مدعومة بالسياق بدل اختراع دليل.
 
 {{quality_contract_block}}
 

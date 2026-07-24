@@ -18,7 +18,7 @@ export type GoalContextFieldConfig =
     }
   | {
       key: keyof GoalContext;
-      kind: 'text';
+      kind: 'text' | 'textarea';
       label: string;
       placeholder: string;
       visibleForAudienceScopes?: string[];
@@ -36,6 +36,33 @@ export type GoalContextPresetOption = {
 };
 
 const TARGET_LOCATION_AUDIENCE_SCOPES = ['local', 'country', 'regional'];
+
+export const SMART_CONTENT_BRIEF_REQUIRED_KEYS: ReadonlyArray<keyof GoalContext> = [
+  'pageType',
+  'objective',
+  'audienceScope',
+  'targetAudience',
+  'audienceKnowledgeLevel',
+  'audienceNeeds',
+  'readerOutcome',
+  'desiredAction',
+  'marketingStage',
+  'uniqueAngle',
+  'evidenceRequirements',
+  'topicSensitivity',
+  'searchIntent',
+];
+
+export const getSmartContentBriefMissingKeys = (
+  context: Partial<GoalContext> | null | undefined,
+): Array<keyof GoalContext> => {
+  const normalized = normalizeGoalContext(context);
+  const missing = SMART_CONTENT_BRIEF_REQUIRED_KEYS.filter(key => !normalized[key].trim());
+  if (usesTargetLocation(normalized.audienceScope) && !normalized.targetCountry.trim()) {
+    missing.push('targetCountry');
+  }
+  return missing;
+};
 
 const GOAL_CONTEXT_PRESETS: GoalContextPreset[] = [
   { id: 'service-convert-global-transactional', pageType: 'service', objective: 'convert', audienceScope: 'global', searchIntent: 'transactional' },
@@ -213,6 +240,28 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
     audienceScope,
     targetCountry: usesTargetLocation(audienceScope) ? getStoredTargetLocation(normalized) : '',
     targetAudience: asStoredString(normalized.targetAudience).trim(),
+    audienceKnowledgeLevel: normalizeMappedChoice(
+      normalized.audienceKnowledgeLevel,
+      {},
+      INITIAL_GOAL_CONTEXT.audienceKnowledgeLevel,
+    ),
+    audienceNeeds: asStoredString(normalized.audienceNeeds).trim(),
+    readerOutcome: asStoredString(normalized.readerOutcome).trim(),
+    desiredAction: asStoredString(normalized.desiredAction).trim(),
+    marketingStage: normalizeMappedChoice(
+      normalized.marketingStage,
+      {},
+      INITIAL_GOAL_CONTEXT.marketingStage,
+    ),
+    uniqueAngle: asStoredString(normalized.uniqueAngle).trim(),
+    evidenceRequirements: asStoredString(normalized.evidenceRequirements).trim(),
+    freshnessRequirements: asStoredString(normalized.freshnessRequirements).trim(),
+    brandVoice: asStoredString(normalized.brandVoice).trim(),
+    topicSensitivity: normalizeMappedChoice(
+      normalized.topicSensitivity,
+      {},
+      INITIAL_GOAL_CONTEXT.topicSensitivity,
+    ),
     searchIntent: normalizeMappedChoice(normalized.searchIntent, intentMap, INITIAL_GOAL_CONTEXT.searchIntent),
   };
 };
@@ -326,6 +375,88 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
         { value: 'support-intent', label: contextOptions.supportIntent },
       ],
     },
+    {
+      key: 'targetAudience',
+      label: t.targetAudience,
+      kind: 'textarea',
+      placeholder: t.targetAudiencePlaceholder,
+    },
+    {
+      key: 'audienceKnowledgeLevel',
+      label: t.audienceKnowledgeLevel,
+      kind: 'select',
+      options: [
+        { value: 'beginner', label: contextOptions.beginner },
+        { value: 'intermediate', label: contextOptions.intermediate },
+        { value: 'expert', label: contextOptions.expert },
+        { value: 'mixed', label: contextOptions.mixed },
+      ],
+    },
+    {
+      key: 'audienceNeeds',
+      label: t.audienceNeeds,
+      kind: 'textarea',
+      placeholder: t.audienceNeedsPlaceholder,
+    },
+    {
+      key: 'readerOutcome',
+      label: t.readerOutcome,
+      kind: 'textarea',
+      placeholder: t.readerOutcomePlaceholder,
+    },
+    {
+      key: 'desiredAction',
+      label: t.desiredAction,
+      kind: 'textarea',
+      placeholder: t.desiredActionPlaceholder,
+    },
+    {
+      key: 'marketingStage',
+      label: t.marketingStage,
+      kind: 'select',
+      options: [
+        { value: 'awareness', label: contextOptions.awareness },
+        { value: 'consideration', label: contextOptions.consideration },
+        { value: 'decision', label: contextOptions.decision },
+        { value: 'retention', label: contextOptions.retentionStage },
+      ],
+    },
+    {
+      key: 'uniqueAngle',
+      label: t.uniqueAngle,
+      kind: 'textarea',
+      placeholder: t.uniqueAnglePlaceholder,
+    },
+    {
+      key: 'evidenceRequirements',
+      label: t.evidenceRequirements,
+      kind: 'textarea',
+      placeholder: t.evidenceRequirementsPlaceholder,
+    },
+    {
+      key: 'freshnessRequirements',
+      label: t.freshnessRequirements,
+      kind: 'textarea',
+      placeholder: t.freshnessRequirementsPlaceholder,
+    },
+    {
+      key: 'brandVoice',
+      label: t.brandVoice,
+      kind: 'textarea',
+      placeholder: t.brandVoicePlaceholder,
+    },
+    {
+      key: 'topicSensitivity',
+      label: t.topicSensitivity,
+      kind: 'select',
+      options: [
+        { value: 'standard', label: contextOptions.standardSensitivity },
+        { value: 'health', label: contextOptions.healthSensitivity },
+        { value: 'financial', label: contextOptions.financialSensitivity },
+        { value: 'legal', label: contextOptions.legalSensitivity },
+        { value: 'safety', label: contextOptions.safetySensitivity },
+      ],
+    },
   ];
 };
 
@@ -347,8 +478,13 @@ const getTranslatedChoiceLabel = (
 ): string => {
   const optionKey = CONTEXT_OPTION_TRANSLATION_KEYS[key]?.[value];
   if (!optionKey) return value;
-  const source = compact ? t.contextCompactOptions : t.contextOptions;
-  return source[optionKey] || t.contextOptions[optionKey] || value;
+  if (compact) {
+    const compactLabel = t.contextCompactOptions[
+      optionKey as keyof GoalTabTranslations['contextCompactOptions']
+    ];
+    if (compactLabel) return compactLabel;
+  }
+  return t.contextOptions[optionKey] || value;
 };
 
 export const getGoalContextPresetOptions = (t: GoalTabTranslations): GoalContextPresetOption[] => {
@@ -394,7 +530,7 @@ export const formatGoalContextForCopy = (
     .filter(field => isGoalContextFieldVisible(field, normalizedContext))
     .forEach(field => {
       const rawValue = normalizedContext[field.key];
-      const value = field.kind === 'text'
+      const value = field.kind !== 'select'
         ? rawValue
         : field.options.find(option => option.value === rawValue)?.label || rawValue;
       lines.push(`${field.label}:`);

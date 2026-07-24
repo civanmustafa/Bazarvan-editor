@@ -438,6 +438,16 @@ export const INITIAL_GOAL_CONTEXT = {
   audienceScope: 'global',
   targetCountry: '',
   targetAudience: '',
+  audienceKnowledgeLevel: 'mixed',
+  audienceNeeds: '',
+  readerOutcome: '',
+  desiredAction: '',
+  marketingStage: 'decision',
+  uniqueAngle: '',
+  evidenceRequirements: '',
+  freshnessRequirements: '',
+  brandVoice: '',
+  topicSensitivity: 'standard',
   searchIntent: 'transactional',
 };
 
