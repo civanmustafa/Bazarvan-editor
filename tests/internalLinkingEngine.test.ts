@@ -8,6 +8,7 @@ import {
   normalizeInternalLinkUrl,
   type InternalLinkTargetPage,
 } from '../utils/internalLinkingEngine.ts';
+import { buildClientPageSemanticProfile } from '../utils/clientSemanticIndex.ts';
 
 const root = process.cwd();
 const readWorkspaceFile = (relativePath: string) => readFile(path.join(root, relativePath), 'utf8');
@@ -54,7 +55,48 @@ test('deterministic engine proposes a real body anchor with transparent evidence
   assert.ok(first[0].score >= 50);
   assert.ok(first[0].matchedTerms.length >= 2);
   assert.ok(first[0].reasons.some(reason => reason.includes('عنوان')));
+  assert.ok(first[0].bm25Score > 0);
+  assert.equal(first[0].algorithmVersion, 'bm25-semantic-v1');
   assert.notEqual(first[0].anchorText, input.articleTitle);
+});
+
+test('semantic index expands client synonyms and enforces article-page language compatibility', () => {
+  const target = readyPage({
+    clientId: '22222222-2222-4222-8222-222222222222',
+    contentHash: 'content-1',
+  });
+  target.semanticProfile = buildClientPageSemanticProfile({
+    ...target,
+    clientId: target.clientId || '',
+  }, [{
+    id: '33333333-3333-4333-8333-333333333333',
+    clientId: target.clientId || '',
+    dictionaryType: 'synonym',
+    label: 'التحول الرقمي',
+    terms: ['التحول الرقمي', 'الرقمنة المؤسسية'],
+    isActive: true,
+    createdAt: '',
+    updatedAt: '',
+  }]);
+
+  const synonymText = 'تساعد الرقمنة المؤسسية الشركات على تطوير إجراءاتها وتحسين تجربة العملاء.';
+  const suggestions = generateInternalLinkSuggestions({
+    articleTitle: 'دليل الرقمنة',
+    articleText: synonymText,
+    articleLanguage: 'ar',
+    pages: [target],
+  });
+  assert.equal(suggestions.length, 1);
+  assert.ok(synonymText.includes(suggestions[0].anchorText));
+  assert.ok(suggestions[0].reasons.includes('مطابقة عبر قاموس المرادفات'));
+  assert.ok(suggestions[0].completenessScore > 0);
+
+  assert.deepEqual(generateInternalLinkSuggestions({
+    articleTitle: 'Enterprise digitization',
+    articleText: 'Enterprise digitization improves customer operations and business services.',
+    articleLanguage: 'en',
+    pages: [target],
+  }), []);
 });
 
 test('engine excludes duplicate targets, unsafe page states, and dismissed suggestions', () => {
@@ -147,5 +189,5 @@ test('editor integration applies native links and does not call an AI provider',
   assert.match(registry, /internal_link_actions/);
   assert.match(releaseScript, /CLIENT_CENTER_CRAWLING_MIGRATION/);
   assert.match(guide, /20260724030000_internal_linking_engine\.sql/);
-  assert.match(guide, /لا يحتاج الترحيل الثالث إلى عامل PM2 أو مفتاح جديد/);
+  assert.match(guide, /لا يحتاج الترحيل الرابع إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
 });

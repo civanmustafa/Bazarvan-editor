@@ -1,4 +1,10 @@
 import { getSupabaseClient } from './supabaseClient';
+import {
+  buildClientPageSemanticProfile,
+  type ClientLinkDictionaryEntry,
+  type ClientLinkDictionaryType,
+  type ClientPageSemanticProfile,
+} from './clientSemanticIndex';
 
 export type ClientAssignmentAccess = 'viewer' | 'editor';
 export type ClientPageSource = 'manual' | 'csv' | 'sitemap';
@@ -73,6 +79,7 @@ export type ClientCenterPage = {
   pageLanguage: string;
   robotsIndex: boolean | null;
   robotsFollow: boolean | null;
+  contentHash: string;
   extractedTerms: string[];
   extractedPhrases: string[];
   wordCount: number;
@@ -114,6 +121,8 @@ export type ClientCenterDetails = {
   assignments: ClientCenterAssignment[];
   pages: ClientCenterPage[];
   jobs: ClientCenterCrawlJob[];
+  dictionaries: ClientLinkDictionaryEntry[];
+  semanticProfiles: ClientPageSemanticProfile[];
 };
 
 export type ClientCenterClientInput = {
@@ -179,6 +188,7 @@ const PAGE_COLUMNS = [
   'page_language',
   'robots_index',
   'robots_follow',
+  'content_hash',
   'extracted_terms',
   'extracted_phrases',
   'word_count',
@@ -213,6 +223,35 @@ const JOB_COLUMNS = [
   'error_message',
   'created_at',
   'updated_at',
+].join(',');
+
+const DICTIONARY_COLUMNS = [
+  'id',
+  'client_id',
+  'dictionary_type',
+  'label',
+  'terms',
+  'is_active',
+  'created_at',
+  'updated_at',
+].join(',');
+
+const SEMANTIC_PROFILE_COLUMNS = [
+  'page_id',
+  'client_id',
+  'profile_version',
+  'source_signature',
+  'dictionary_signature',
+  'page_language',
+  'path_segments',
+  'weighted_terms',
+  'phrases',
+  'light_stems',
+  'dictionary_matches',
+  'document_length',
+  'completeness_score',
+  'completeness_details',
+  'indexed_at',
 ].join(',');
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -273,6 +312,7 @@ const mapPage = (row: any): ClientCenterPage => ({
   pageLanguage: text(row.page_language),
   robotsIndex: typeof row.robots_index === 'boolean' ? row.robots_index : null,
   robotsFollow: typeof row.robots_follow === 'boolean' ? row.robots_follow : null,
+  contentHash: text(row.content_hash),
   extractedTerms: stringArray(row.extracted_terms),
   extractedPhrases: stringArray(row.extracted_phrases),
   wordCount: Number(row.word_count) || 0,
@@ -313,6 +353,104 @@ const mapJob = (row: any): ClientCenterCrawlJob => ({
   updatedAt: text(row.updated_at),
 });
 
+export const mapClientLinkDictionary = (row: any): ClientLinkDictionaryEntry => ({
+  id: text(row.id),
+  clientId: text(row.client_id),
+  dictionaryType: (
+    row.dictionary_type === 'topic' || row.dictionary_type === 'excluded_term'
+      ? row.dictionary_type
+      : 'synonym'
+  ),
+  label: text(row.label),
+  terms: stringArray(row.terms),
+  isActive: row.is_active !== false,
+  createdAt: text(row.created_at),
+  updatedAt: text(row.updated_at),
+});
+
+const mapWeightedTerms = (value: unknown): ClientPageSemanticProfile['weightedTerms'] => (
+  Array.isArray(value)
+    ? value.filter(item => item && typeof item === 'object').map((item: any) => ({
+      term: text(item.term),
+      weight: Number(item.weight) || 0,
+      frequency: Math.max(1, Number(item.frequency) || 1),
+      sources: stringArray(item.sources),
+    })).filter(item => item.term)
+    : []
+);
+
+const mapSemanticPhrases = (value: unknown): ClientPageSemanticProfile['phrases'] => (
+  Array.isArray(value)
+    ? value.filter(item => item && typeof item === 'object').map((item: any) => ({
+      phrase: text(item.phrase),
+      weight: Number(item.weight) || 0,
+      size: Number(item.size) || 0,
+      sources: stringArray(item.sources),
+    })).filter(item => item.phrase)
+    : []
+);
+
+const mapSemanticStems = (value: unknown): ClientPageSemanticProfile['lightStems'] => (
+  Array.isArray(value)
+    ? value.filter(item => item && typeof item === 'object').map((item: any) => ({
+      stem: text(item.stem),
+      terms: stringArray(item.terms),
+      weight: Number(item.weight) || 0,
+    })).filter(item => item.stem)
+    : []
+);
+
+const mapDictionaryMatches = (value: unknown): ClientPageSemanticProfile['dictionaryMatches'] => (
+  Array.isArray(value)
+    ? value.filter(item => item && typeof item === 'object').map((item: any) => ({
+      dictionaryId: text(item.dictionaryId),
+      type: (
+        item.type === 'topic' || item.type === 'excluded_term'
+          ? item.type
+          : 'synonym'
+      ),
+      label: text(item.label),
+      matchedTerms: stringArray(item.matchedTerms),
+    })).filter(item => item.label)
+    : []
+);
+
+const mapCompletenessDetails = (
+  value: unknown,
+): ClientPageSemanticProfile['completenessDetails'] => {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    title: source.title === true,
+    description: source.description === true,
+    h1: source.h1 === true,
+    h2: source.h2 === true,
+    h3: source.h3 === true,
+    slug: source.slug === true,
+    language: source.language === true,
+    canonical: source.canonical === true,
+    extractedTerms: source.extractedTerms === true,
+    extractedPhrases: source.extractedPhrases === true,
+  };
+};
+
+export const mapClientSemanticProfile = (row: any): ClientPageSemanticProfile => ({
+  pageId: text(row.page_id),
+  clientId: text(row.client_id),
+  profileVersion: Number(row.profile_version) || 1,
+  sourceSignature: text(row.source_signature),
+  dictionarySignature: text(row.dictionary_signature),
+  pageLanguage: text(row.page_language),
+  pathSegments: stringArray(row.path_segments),
+  weightedTerms: mapWeightedTerms(row.weighted_terms),
+  phrases: mapSemanticPhrases(row.phrases),
+  lightStems: mapSemanticStems(row.light_stems),
+  dictionaryMatches: mapDictionaryMatches(row.dictionary_matches),
+  documentLength: Number(row.document_length) || 0,
+  completenessScore: Number(row.completeness_score) || 0,
+  completenessDetails: mapCompletenessDetails(row.completeness_details),
+  indexedAt: text(row.indexed_at),
+});
+
 const throwIfError = (error: any): void => {
   if (error) throw new Error(error.message || 'تعذر تنفيذ طلب مركز العملاء.');
 };
@@ -336,7 +474,14 @@ export const listClientCenterClients = async (): Promise<ClientCenterClient[]> =
 
 export const loadClientCenterDetails = async (clientId: string): Promise<ClientCenterDetails> => {
   const supabase = getSupabaseClient();
-  const [domainsResult, assignmentsResult, pagesResult, jobsResult] = await Promise.all([
+  const [
+    domainsResult,
+    assignmentsResult,
+    pagesResult,
+    jobsResult,
+    dictionariesResult,
+    semanticProfilesResult,
+  ] = await Promise.all([
     supabase.from('client_domains').select(DOMAIN_COLUMNS).eq('client_id', clientId)
       .order('is_primary', { ascending: false }).order('hostname', { ascending: true }),
     supabase.from('client_assignments').select(ASSIGNMENT_COLUMNS).eq('client_id', clientId)
@@ -345,13 +490,26 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
       .order('updated_at', { ascending: false }).limit(500),
     supabase.from('client_page_crawl_jobs').select(JOB_COLUMNS).eq('client_id', clientId)
       .order('created_at', { ascending: false }).limit(500),
+    supabase.from('client_link_dictionaries').select(DICTIONARY_COLUMNS).eq('client_id', clientId)
+      .order('dictionary_type', { ascending: true }).order('label', { ascending: true }),
+    supabase.from('client_page_semantic_profiles').select(SEMANTIC_PROFILE_COLUMNS)
+      .eq('client_id', clientId).order('indexed_at', { ascending: false }).limit(500),
   ]);
-  [domainsResult, assignmentsResult, pagesResult, jobsResult].forEach(result => throwIfError(result.error));
+  [
+    domainsResult,
+    assignmentsResult,
+    pagesResult,
+    jobsResult,
+    dictionariesResult,
+    semanticProfilesResult,
+  ].forEach(result => throwIfError(result.error));
   return {
     domains: (domainsResult.data || []).map(mapDomain),
     assignments: (assignmentsResult.data || []).map(mapAssignment),
     pages: (pagesResult.data || []).map(mapPage),
     jobs: (jobsResult.data || []).map(mapJob),
+    dictionaries: (dictionariesResult.data || []).map(mapClientLinkDictionary),
+    semanticProfiles: (semanticProfilesResult.data || []).map(mapClientSemanticProfile),
   };
 };
 
@@ -605,4 +763,90 @@ export const setClientCenterPageEnabled = async (
 export const deleteClientCenterPage = async (pageId: string): Promise<void> => {
   const { error } = await getSupabaseClient().from('client_pages').delete().eq('id', pageId);
   throwIfError(error);
+};
+
+export const saveClientLinkDictionary = async (input: {
+  id?: string;
+  clientId: string;
+  dictionaryType: ClientLinkDictionaryType;
+  label: string;
+  terms: string[];
+  isActive?: boolean;
+}): Promise<ClientLinkDictionaryEntry> => {
+  const values = {
+    client_id: input.clientId,
+    dictionary_type: input.dictionaryType,
+    label: input.label.trim(),
+    terms: Array.from(new Set(input.terms.map(value => value.trim()).filter(Boolean))).slice(0, 100),
+    is_active: input.isActive !== false,
+  };
+  const query = input.id
+    ? getSupabaseClient().from('client_link_dictionaries').update(values).eq('id', input.id)
+    : getSupabaseClient().from('client_link_dictionaries').insert(values);
+  const { data, error } = await query.select(DICTIONARY_COLUMNS).single();
+  throwIfError(error);
+  return mapClientLinkDictionary(data);
+};
+
+export const setClientLinkDictionaryEnabled = async (
+  dictionaryId: string,
+  enabled: boolean,
+): Promise<void> => {
+  const { error } = await getSupabaseClient()
+    .from('client_link_dictionaries')
+    .update({ is_active: enabled })
+    .eq('id', dictionaryId);
+  throwIfError(error);
+};
+
+export const deleteClientLinkDictionary = async (dictionaryId: string): Promise<void> => {
+  const { error } = await getSupabaseClient()
+    .from('client_link_dictionaries')
+    .delete()
+    .eq('id', dictionaryId);
+  throwIfError(error);
+};
+
+const semanticProfilePayload = (profile: ClientPageSemanticProfile) => ({
+  page_id: profile.pageId,
+  client_id: profile.clientId,
+  profile_version: profile.profileVersion,
+  source_signature: profile.sourceSignature,
+  dictionary_signature: profile.dictionarySignature,
+  page_language: profile.pageLanguage || null,
+  path_segments: profile.pathSegments,
+  weighted_terms: profile.weightedTerms,
+  phrases: profile.phrases,
+  light_stems: profile.lightStems,
+  dictionary_matches: profile.dictionaryMatches,
+  document_length: profile.documentLength,
+  completeness_score: profile.completenessScore,
+  completeness_details: profile.completenessDetails,
+  indexed_at: profile.indexedAt,
+});
+
+export const saveClientSemanticProfiles = async (
+  profiles: ClientPageSemanticProfile[],
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  for (let start = 0; start < profiles.length; start += 100) {
+    const batch = profiles.slice(start, start + 100).map(semanticProfilePayload);
+    if (batch.length === 0) continue;
+    const { error } = await supabase
+      .from('client_page_semantic_profiles')
+      .upsert(batch, { onConflict: 'page_id' });
+    throwIfError(error);
+  }
+};
+
+export const rebuildClientSemanticProfiles = async (input: {
+  pages: ClientCenterPage[];
+  dictionaries: ClientLinkDictionaryEntry[];
+}): Promise<ClientPageSemanticProfile[]> => {
+  const indexedAt = new Date().toISOString();
+  const profiles = input.pages
+    .filter(page => page.crawlStatus === 'ready' && page.isEnabled && page.robotsIndex !== false)
+    .map(page => buildClientPageSemanticProfile(page, input.dictionaries, indexedAt));
+  await saveClientSemanticProfiles(profiles);
+  return profiles;
 };

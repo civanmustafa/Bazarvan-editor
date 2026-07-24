@@ -104,6 +104,7 @@ const InternalLinkingPanel: React.FC = () => {
   const activeArticleId = useEditorSelector(context => context.activeArticleId);
   const articleTitle = useEditorSelector(context => context.title);
   const articleText = useEditorSelector(context => context.text);
+  const articleLanguage = useEditorSelector(context => context.articleLanguage);
   const keywords = useEditorSelector(context => context.keywords);
   const [clients, setClients] = useState<ClientCenterClient[]>([]);
   const [selectedClientId, setSelectedClientId] = useState('');
@@ -149,6 +150,7 @@ const InternalLinkingPanel: React.FC = () => {
   const suggestions = useMemo(() => generateInternalLinkSuggestions({
     articleTitle,
     articleText,
+    articleLanguage,
     keywords: keywordValues,
     pages,
     existingUrls: existingLinks.urls,
@@ -157,6 +159,7 @@ const InternalLinkingPanel: React.FC = () => {
     maximumSuggestions: 20,
   }), [
     articleText,
+    articleLanguage,
     articleTitle,
     dismissedPageIds,
     existingLinks.anchors,
@@ -475,6 +478,10 @@ const InternalLinkingPanel: React.FC = () => {
                         {reason}
                       </span>
                     ))}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[9px] font-bold text-gray-400">
+                    <span>BM25: {suggestion.bm25Score}</span>
+                    <span>اكتمال بيانات الصفحة: {suggestion.completenessScore}%</span>
                   </div>
                   {suggestion.matchedTerms.length > 0 && (
                     <div className="mt-2 text-[10px] font-semibold leading-5 text-gray-400">

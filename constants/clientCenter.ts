@@ -1,6 +1,7 @@
 export const CLIENT_CENTER_FOUNDATION_MIGRATION = '20260724010000_client_center_foundation.sql';
 export const CLIENT_CENTER_CRAWLING_MIGRATION = '20260724020000_client_center_management_and_crawling.sql';
-export const CLIENT_CENTER_REQUIRED_MIGRATION = '20260724030000_internal_linking_engine.sql';
+export const CLIENT_CENTER_INTERNAL_LINKING_MIGRATION = '20260724030000_internal_linking_engine.sql';
+export const CLIENT_CENTER_REQUIRED_MIGRATION = '20260724040000_client_semantic_index.sql';
 
 export const CLIENT_CENTER_SCHEMA_PROBES = [
   {
@@ -37,5 +38,15 @@ export const CLIENT_CENTER_SCHEMA_PROBES = [
     id: 'internalLinkActions',
     table: 'internal_link_actions',
     columns: 'id,article_id,client_id,page_id,actor_id,action,anchor_text,target_url,score,reason_details,article_signature,created_at',
+  },
+  {
+    id: 'linkDictionaries',
+    table: 'client_link_dictionaries',
+    columns: 'id,client_id,dictionary_type,label,terms,is_active,created_by,updated_by,created_at,updated_at',
+  },
+  {
+    id: 'semanticProfiles',
+    table: 'client_page_semantic_profiles',
+    columns: 'page_id,client_id,profile_version,source_signature,dictionary_signature,page_language,path_segments,weighted_terms,phrases,light_stems,dictionary_matches,document_length,completeness_score,completeness_details,indexed_at,updated_at',
   },
 ] as const;

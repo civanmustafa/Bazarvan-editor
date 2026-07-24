@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Building2,
+  BookOpen,
   CheckCircle2,
   ChevronDown,
   CircleAlert,
@@ -8,6 +9,7 @@ import {
   Globe2,
   Link2,
   LoaderCircle,
+  Network,
   Plus,
   RefreshCw,
   Save,
@@ -27,11 +29,15 @@ import {
   deleteClientCenterAssignment,
   deleteClientCenterDomain,
   deleteClientCenterPage,
+  deleteClientLinkDictionary,
   getCurrentClientCenterUserId,
   listClientCenterClients,
   loadClientCenterDetails,
   refreshClientCenterPage,
+  rebuildClientSemanticProfiles,
   saveClientCenterAssignment,
+  saveClientLinkDictionary,
+  setClientLinkDictionaryEnabled,
   setClientCenterPageEnabled,
   updateClientCenterClient,
   updateClientCenterDomain,
@@ -41,14 +47,21 @@ import {
   type ClientCenterDetails,
   type ClientCenterPage,
 } from '../utils/clientCenter';
+import {
+  isClientSemanticProfileCurrent,
+  type ClientLinkDictionaryType,
+  type ClientPageSemanticProfile,
+} from '../utils/clientSemanticIndex';
 
-type ClientCenterTab = 'profile' | 'pages' | 'access';
+type ClientCenterTab = 'profile' | 'pages' | 'index' | 'access';
 
 const EMPTY_DETAILS: ClientCenterDetails = {
   domains: [],
   assignments: [],
   pages: [],
   jobs: [],
+  dictionaries: [],
+  semanticProfiles: [],
 };
 
 const EMPTY_CLIENT_INPUT: ClientCenterClientInput = {
@@ -134,7 +147,10 @@ const statusClass = (status: string): string => {
   return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300';
 };
 
-const PageDetails: React.FC<{ page: ClientCenterPage }> = ({ page }) => (
+const PageDetails: React.FC<{
+  page: ClientCenterPage;
+  semanticProfile?: ClientPageSemanticProfile;
+}> = ({ page, semanticProfile }) => (
   <div className="mt-3 grid grid-cols-1 gap-2 border-t border-gray-100 pt-3 text-xs dark:border-[#3C3C3C] md:grid-cols-2 lg:grid-cols-3">
     <div><span className="font-black text-gray-400">العنوان:</span> <span className="text-gray-700 dark:text-gray-200">{page.pageTitle || '-'}</span></div>
     <div><span className="font-black text-gray-400">H1:</span> <span className="text-gray-700 dark:text-gray-200">{page.h1 || '-'}</span></div>
@@ -142,6 +158,7 @@ const PageDetails: React.FC<{ page: ClientCenterPage }> = ({ page }) => (
     <div><span className="font-black text-gray-400">HTTP:</span> <span className="text-gray-700 dark:text-gray-200">{page.httpStatus || '-'}</span></div>
     <div><span className="font-black text-gray-400">الكلمات:</span> <span className="text-gray-700 dark:text-gray-200">{page.wordCount.toLocaleString('ar')}</span></div>
     <div><span className="font-black text-gray-400">الفهرسة:</span> <span className="text-gray-700 dark:text-gray-200">{page.robotsIndex === false ? 'noindex' : page.robotsIndex === true ? 'index' : '-'}</span></div>
+    <div><span className="font-black text-gray-400">اكتمال الملف الخوارزمي:</span> <span className="text-gray-700 dark:text-gray-200">{semanticProfile ? `${semanticProfile.completenessScore}%` : 'غير مبني'}</span></div>
     <div className="md:col-span-2 lg:col-span-3"><span className="font-black text-gray-400">الوصف:</span> <span className="text-gray-700 dark:text-gray-200">{page.metaDescription || '-'}</span></div>
     <div className="md:col-span-2 lg:col-span-3"><span className="font-black text-gray-400">الرابط النهائي:</span> <span className="break-all text-gray-700 dark:text-gray-200">{page.finalUrl || '-'}</span></div>
     {page.extractedTerms.length > 0 && (
@@ -181,10 +198,34 @@ const ClientCenterSettings: React.FC = () => {
   const [urlsInput, setUrlsInput] = useState('');
   const [pageQuery, setPageQuery] = useState('');
   const [expandedPageId, setExpandedPageId] = useState('');
+  const [dictionaryType, setDictionaryType] = useState<ClientLinkDictionaryType>('synonym');
+  const [dictionaryLabel, setDictionaryLabel] = useState('');
+  const [dictionaryTerms, setDictionaryTerms] = useState('');
+  const [isRebuildingIndex, setIsRebuildingIndex] = useState(false);
 
   const selectedClient = clients.find(client => client.id === selectedClientId) || null;
   const ownAssignment = details.assignments.find(assignment => assignment.userId === currentUserId && assignment.isActive);
   const canEditPages = isAdmin || ownAssignment?.accessLevel === 'editor';
+
+  const semanticProfileByPage = useMemo(() => new Map(
+    details.semanticProfiles.map(profile => [profile.pageId, profile] as const),
+  ), [details.semanticProfiles]);
+
+  const indexablePages = useMemo(() => details.pages.filter(page => (
+    page.crawlStatus === 'ready' && page.isEnabled && page.robotsIndex !== false
+  )), [details.pages]);
+
+  const currentSemanticPageIds = useMemo(() => new Set(indexablePages
+    .filter(page => isClientSemanticProfileCurrent(
+      semanticProfileByPage.get(page.id),
+      page,
+      details.dictionaries,
+    ))
+    .map(page => page.id)), [
+    details.dictionaries,
+    indexablePages,
+    semanticProfileByPage,
+  ]);
 
   const showMessage = (value: string): void => {
     setMessage(value);
@@ -392,6 +433,40 @@ const ClientCenterSettings: React.FC = () => {
     }
   };
 
+  const handleSaveDictionary = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedClientId || !dictionaryLabel.trim() || !dictionaryTerms.trim()) return;
+    await runMutation(async () => {
+      await saveClientLinkDictionary({
+        clientId: selectedClientId,
+        dictionaryType,
+        label: dictionaryLabel,
+        terms: dictionaryTerms.split(/[\n,،]+/),
+      });
+      setDictionaryLabel('');
+      setDictionaryTerms('');
+    }, 'تم حفظ القاموس. أعد بناء الفهرس لتطبيقه على جميع الصفحات.');
+  };
+
+  const handleRebuildSemanticIndex = async () => {
+    if (!selectedClientId || isRebuildingIndex) return;
+    setIsRebuildingIndex(true);
+    setError('');
+    setMessage('');
+    try {
+      const profiles = await rebuildClientSemanticProfiles({
+        pages: details.pages,
+        dictionaries: details.dictionaries,
+      });
+      setDetails(current => ({ ...current, semanticProfiles: profiles }));
+      showMessage(`تم بناء ${profiles.length.toLocaleString('ar')} ملف خوارزمي من صفحات موقع العميل.`);
+    } catch (rebuildError) {
+      showError(rebuildError);
+    } finally {
+      setIsRebuildingIndex(false);
+    }
+  };
+
   const renderClientForm = (creating: boolean) => (
     <form onSubmit={creating ? handleCreateClient : handleSaveClient} className="space-y-4">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -595,13 +670,165 @@ const ClientCenterSettings: React.FC = () => {
                   {page.lastErrorMessage || latestJob?.errorMessage}
                 </div>
               )}
-              {expanded && <PageDetails page={page} />}
+              {expanded && (
+                <PageDetails
+                  page={page}
+                  semanticProfile={semanticProfileByPage.get(page.id)}
+                />
+              )}
             </article>
           );
         })}
       </div>
     </div>
   );
+
+  const dictionaryTypeLabel: Record<ClientLinkDictionaryType, string> = {
+    synonym: 'مرادفات',
+    topic: 'موضوعات مرتبطة',
+    excluded_term: 'كلمات مستبعدة من المطابقة',
+  };
+
+  const renderIndexTab = () => {
+    const currentProfiles = indexablePages
+      .map(page => semanticProfileByPage.get(page.id))
+      .filter((profile): profile is ClientPageSemanticProfile => Boolean(
+        profile && currentSemanticPageIds.has(profile.pageId),
+      ));
+    const averageCompleteness = currentProfiles.length > 0
+      ? Math.round(
+        currentProfiles.reduce((sum, profile) => sum + profile.completenessScore, 0)
+        / currentProfiles.length,
+      )
+      : 0;
+    const staleCount = Math.max(0, indexablePages.length - currentProfiles.length);
+
+    return (
+      <div className="space-y-5">
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs font-semibold leading-6 text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+          يحوّل النظام بيانات صفحات موقع العميل إلى فهرس خوارزمي قابل لإعادة البناء: كلمات موزونة، عبارات من كلمتين إلى خمس، جذور عربية خفيفة، مسارات، مرادفات وموضوعات. لا تُرسل هذه العملية إلى أي نموذج ذكاء اصطناعي ولا تستخدم Search Console أو مقالات المحرر.
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {[
+            ['صفحات قابلة للفهرسة', indexablePages.length],
+            ['ملفات محدثة', currentProfiles.length],
+            ['تحتاج إعادة بناء', staleCount],
+            ['متوسط الاكتمال', `${averageCompleteness}%`],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-center dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+              <div className="text-lg font-black text-[#b8922e]">{typeof value === 'number' ? value.toLocaleString('ar') : value}</div>
+              <div className="mt-1 text-[10px] font-bold text-gray-400">{label}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-lg border border-gray-200 p-4 dark:border-[#3C3C3C] sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h4 className="text-sm font-black text-gray-800 dark:text-gray-100">الفهرس الخوارزمي للصفحات</h4>
+            <p className="mt-1 text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">
+              يُبنى تلقائيًا بعد كل زحف ناجح. استخدم إعادة البناء بعد إضافة قاموس أو تغييره، أو لترحيل الصفحات القديمة دفعة واحدة.
+            </p>
+          </div>
+          {canEditPages && (
+            <button
+              type="button"
+              className={primaryButtonClass}
+              disabled={isRebuildingIndex || indexablePages.length === 0}
+              onClick={() => void handleRebuildSemanticIndex()}
+            >
+              {isRebuildingIndex ? <LoaderCircle className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+              إعادة بناء الفهرس
+            </button>
+          )}
+        </div>
+
+        <section className="space-y-3">
+          <div>
+            <h4 className="flex items-center gap-2 text-sm font-black text-gray-800 dark:text-gray-100">
+              <BookOpen className="text-[#d4af37]" size={17} />
+              قواميس العميل
+            </h4>
+            <p className="mt-1 text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">
+              المرادفات توسّع المطابقة بين تعبيرات متكافئة، والموضوعات تجمع كلمات المجال، والاستبعاد يمنع كلمات عامة من التأثير في ترتيب الروابط.
+            </p>
+          </div>
+
+          {canEditPages && (
+            <form onSubmit={handleSaveDictionary} className="grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-4 dark:bg-[#1F1F1F] lg:grid-cols-[13rem_minmax(0,1fr)_minmax(0,1.4fr)_auto] lg:items-end">
+              <Field label="نوع القاموس">
+                <select className={inputClass} value={dictionaryType} onChange={event => setDictionaryType(event.target.value as ClientLinkDictionaryType)}>
+                  <option value="synonym">مرادفات</option>
+                  <option value="topic">موضوعات مرتبطة</option>
+                  <option value="excluded_term">كلمات مستبعدة من المطابقة</option>
+                </select>
+              </Field>
+              <Field label="اسم المجموعة">
+                <input className={inputClass} value={dictionaryLabel} onChange={event => setDictionaryLabel(event.target.value)} maxLength={160} placeholder="مثال: إدارة علاقات العملاء" />
+              </Field>
+              <Field label="الكلمات والعبارات" description="افصل بينها بفاصلة أو ضع كل قيمة في سطر.">
+                <textarea className={`${inputClass} min-h-20 resize-y`} value={dictionaryTerms} onChange={event => setDictionaryTerms(event.target.value)} placeholder={'CRM\nإدارة علاقات العملاء\nنظام العملاء'} />
+              </Field>
+              <button type="submit" disabled={isSaving || !dictionaryLabel.trim() || !dictionaryTerms.trim()} className={primaryButtonClass}>
+                <Plus size={16} /> إضافة
+              </button>
+            </form>
+          )}
+
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-[11px] font-semibold leading-5 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+            «كلمات مستبعدة من المطابقة» تخص حساب صلة الرابط فقط؛ لا تمنع الموظف من كتابتها ولا تضيف شروطًا إلى كتابة المقالة.
+          </div>
+
+          {details.dictionaries.length === 0 ? (
+            <div className="rounded-md border border-dashed border-gray-200 p-5 text-center text-sm font-semibold text-gray-400 dark:border-[#3C3C3C]">
+              لا توجد قواميس مخصصة. يعمل الفهرس بالأوزان والجذور والعبارات تلقائيًا، ويمكنك إضافة القواميس لتحسين مجال العميل.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {details.dictionaries.map(dictionary => (
+                <article key={dictionary.id} className="rounded-lg border border-gray-200 p-3 dark:border-[#3C3C3C]">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-black text-gray-800 dark:text-gray-100">{dictionary.label}</span>
+                        <span className="rounded-full bg-[#d4af37]/10 px-2 py-1 text-[10px] font-black text-[#8a6f1d]">{dictionaryTypeLabel[dictionary.dictionaryType]}</span>
+                        {!dictionary.isActive && <span className="text-[10px] font-black text-red-500">معطل</span>}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {dictionary.terms.map(term => (
+                          <span key={term} className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 dark:bg-[#1F1F1F] dark:text-gray-300">{term}</span>
+                        ))}
+                      </div>
+                    </div>
+                    {canEditPages && (
+                      <div className="flex shrink-0 gap-2">
+                        <button type="button" className={secondaryButtonClass} onClick={() => runMutation(
+                          () => setClientLinkDictionaryEnabled(dictionary.id, !dictionary.isActive),
+                          dictionary.isActive
+                            ? 'تم تعطيل القاموس. أعد بناء الفهرس لتطبيق التغيير.'
+                            : 'تم تفعيل القاموس. أعد بناء الفهرس لتطبيق التغيير.',
+                        )}>
+                          {dictionary.isActive ? 'تعطيل' : 'تفعيل'}
+                        </button>
+                        <button type="button" className={dangerButtonClass} title="حذف القاموس" onClick={() => {
+                          if (window.confirm('هل تريد حذف مجموعة القاموس؟ ستحتاج إلى إعادة بناء الفهرس.')) {
+                            void runMutation(
+                              () => deleteClientLinkDictionary(dictionary.id),
+                              'تم حذف القاموس. أعد بناء الفهرس لتطبيق التغيير.',
+                            );
+                          }
+                        }}><Trash2 size={15} /></button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  };
 
   const getProfileLabel = (profile: RemoteProfile | undefined): string => (
     profile?.fullName?.trim() || profile?.email?.trim() || profile?.id || 'مستخدم غير معروف'
@@ -747,10 +974,11 @@ const ClientCenterSettings: React.FC = () => {
                   <RefreshCw className={isDetailsLoading ? 'animate-spin' : ''} size={15} /> تحديث
                 </button>
               </div>
-              <div className="mb-5 grid grid-cols-3 gap-2">
+              <div className="mb-5 grid grid-cols-2 gap-2 lg:grid-cols-4">
                 {([
                   ['profile', 'البيانات والدومينات', <Globe2 size={16} />],
                   ['pages', 'روابط الموقع', <Link2 size={16} />],
+                  ['index', 'الفهرس والقواميس', <Network size={16} />],
                   ['access', 'الموظفون والصلاحيات', <ShieldCheck size={16} />],
                 ] as const).map(([key, label, icon]) => (
                   <button key={key} type="button" onClick={() => setSelectedTab(key)} className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-2 text-xs font-black transition-colors ${selectedTab === key ? 'bg-[#d4af37] text-white' : 'bg-gray-100 text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-300'}`}>
@@ -760,7 +988,13 @@ const ClientCenterSettings: React.FC = () => {
               </div>
               {isDetailsLoading ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-sm font-bold text-gray-400"><LoaderCircle className="animate-spin" size={20} /> جارٍ تحميل بيانات العميل</div>
-              ) : selectedTab === 'pages' ? renderPagesTab() : selectedTab === 'access' ? renderAccessTab() : renderProfileTab()}
+              ) : selectedTab === 'pages'
+                ? renderPagesTab()
+                : selectedTab === 'index'
+                  ? renderIndexTab()
+                  : selectedTab === 'access'
+                    ? renderAccessTab()
+                    : renderProfileTab()}
             </>
           )}
         </main>

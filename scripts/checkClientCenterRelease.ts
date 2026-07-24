@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   CLIENT_CENTER_FOUNDATION_MIGRATION,
   CLIENT_CENTER_CRAWLING_MIGRATION,
+  CLIENT_CENTER_INTERNAL_LINKING_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
 } from '../constants/clientCenter.ts';
 
@@ -10,6 +11,7 @@ const root = process.cwd();
 for (const migration of [
   CLIENT_CENTER_FOUNDATION_MIGRATION,
   CLIENT_CENTER_CRAWLING_MIGRATION,
+  CLIENT_CENTER_INTERNAL_LINKING_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
@@ -38,6 +40,7 @@ const serverBundle = await readFile(path.join(root, 'server-dist', 'server.mjs')
 for (const marker of [
   'client_center_schema_unavailable',
   'client_page_crawl_jobs',
+  'client_page_semantic_profiles',
   CLIENT_CENTER_REQUIRED_MIGRATION,
 ]) {
   if (!serverBundle.includes(marker)) {
@@ -52,6 +55,7 @@ const crawlerBundle = await readFile(
 for (const marker of [
   'claim_next_client_page_crawl_job',
   'deterministic_html',
+  'Semantic indexing failed',
   'client_page_domain_not_allowed',
 ]) {
   if (!crawlerBundle.includes(marker)) {
@@ -64,6 +68,7 @@ console.log(JSON.stringify({
   migrations: [
     CLIENT_CENTER_FOUNDATION_MIGRATION,
     CLIENT_CENTER_CRAWLING_MIGRATION,
+    CLIENT_CENTER_INTERNAL_LINKING_MIGRATION,
     CLIENT_CENTER_REQUIRED_MIGRATION,
   ],
   crawler: 'server-dist/client-page-crawl-worker.mjs',

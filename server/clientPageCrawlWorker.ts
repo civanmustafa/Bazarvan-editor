@@ -15,6 +15,7 @@ import {
   recoverStaleClientPageCrawlJobs,
   type ClientPageCrawlJob,
 } from './clientPageCrawlQueue';
+import { indexCompletedClientPage } from './clientSemanticIndexStore';
 
 const boundedInteger = (
   value: string | undefined,
@@ -158,6 +159,16 @@ const executeClaimedJob = async (
       },
     });
     if (completed) {
+      try {
+        await indexCompletedClientPage({
+          pageId: input.page.id,
+          clientId: input.page.client_id,
+          inputUrl: input.page.input_url,
+          result,
+        });
+      } catch (indexError) {
+        logThrottledError(`Semantic indexing failed for ${input.page.id}`, indexError);
+      }
       console.log(`[client-page-crawler] Completed ${job.id} for ${input.page.input_url}.`);
     }
   } catch (error) {

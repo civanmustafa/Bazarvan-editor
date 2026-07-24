@@ -1,4 +1,13 @@
-import { listClientCenterClients, type ClientCenterClient } from './clientCenter';
+import {
+  listClientCenterClients,
+  mapClientLinkDictionary,
+  mapClientSemanticProfile,
+  type ClientCenterClient,
+} from './clientCenter';
+import {
+  buildClientPageSemanticProfile,
+  isClientSemanticProfileCurrent,
+} from './clientSemanticIndex';
 import { getSupabaseClient } from './supabaseClient';
 import type { InternalLinkTargetPage, InternalLinkSuggestion } from './internalLinkingEngine';
 
@@ -25,6 +34,7 @@ export type InternalLinkAction = {
 
 const PAGE_COLUMNS = [
   'id',
+  'client_id',
   'input_url',
   'final_url',
   'canonical_url',
@@ -37,6 +47,7 @@ const PAGE_COLUMNS = [
   'slug',
   'page_language',
   'robots_index',
+  'content_hash',
   'extracted_terms',
   'extracted_phrases',
   'is_enabled',
@@ -66,6 +77,7 @@ const throwIfError = (error: any): void => {
 
 const mapTargetPage = (row: any): InternalLinkTargetPage => ({
   id: asText(row.id),
+  clientId: asText(row.client_id),
   inputUrl: asText(row.input_url),
   finalUrl: asText(row.final_url),
   canonicalUrl: asText(row.canonical_url),
@@ -78,6 +90,7 @@ const mapTargetPage = (row: any): InternalLinkTargetPage => ({
   slug: asText(row.slug),
   pageLanguage: asText(row.page_language),
   robotsIndex: typeof row.robots_index === 'boolean' ? row.robots_index : null,
+  contentHash: asText(row.content_hash),
   extractedTerms: asTextArray(row.extracted_terms),
   extractedPhrases: asTextArray(row.extracted_phrases),
   isEnabled: row.is_enabled !== false,
@@ -138,18 +151,68 @@ export const saveArticleClientContext = async (
 export const loadInternalLinkTargetPages = async (
   clientId: string,
 ): Promise<InternalLinkTargetPage[]> => {
-  const { data, error } = await getSupabaseClient()
-    .from('client_pages')
-    .select(PAGE_COLUMNS)
-    .eq('client_id', clientId)
-    .eq('is_enabled', true)
-    .eq('crawl_status', 'ready')
-    .neq('robots_index', false)
-    .order('priority', { ascending: false })
-    .order('page_title', { ascending: true })
-    .limit(2000);
-  throwIfError(error);
-  return (data || []).map(mapTargetPage);
+  const supabase = getSupabaseClient();
+  const [pagesResult, dictionariesResult, profilesResult] = await Promise.all([
+    supabase
+      .from('client_pages')
+      .select(PAGE_COLUMNS)
+      .eq('client_id', clientId)
+      .eq('is_enabled', true)
+      .eq('crawl_status', 'ready')
+      .neq('robots_index', false)
+      .order('priority', { ascending: false })
+      .order('page_title', { ascending: true })
+      .limit(2000),
+    supabase
+      .from('client_link_dictionaries')
+      .select('id,client_id,dictionary_type,label,terms,is_active,created_at,updated_at')
+      .eq('client_id', clientId)
+      .eq('is_active', true),
+    supabase
+      .from('client_page_semantic_profiles')
+      .select([
+        'page_id',
+        'client_id',
+        'profile_version',
+        'source_signature',
+        'dictionary_signature',
+        'page_language',
+        'path_segments',
+        'weighted_terms',
+        'phrases',
+        'light_stems',
+        'dictionary_matches',
+        'document_length',
+        'completeness_score',
+        'completeness_details',
+        'indexed_at',
+      ].join(','))
+      .eq('client_id', clientId)
+      .limit(2000),
+  ]);
+  [pagesResult, dictionariesResult, profilesResult].forEach(result => throwIfError(result.error));
+
+  const dictionaries = (dictionariesResult.data || []).map(mapClientLinkDictionary);
+  const storedProfiles = new Map(
+    (profilesResult.data || [])
+      .map(mapClientSemanticProfile)
+      .map(profile => [profile.pageId, profile] as const),
+  );
+  return (pagesResult.data || []).map(mapTargetPage).map(page => {
+    const storedProfile = storedProfiles.get(page.id);
+    return {
+      ...page,
+      semanticProfile: isClientSemanticProfileCurrent(storedProfile, {
+        ...page,
+        clientId: page.clientId || clientId,
+      }, dictionaries)
+        ? storedProfile
+        : buildClientPageSemanticProfile({
+          ...page,
+          clientId: page.clientId || clientId,
+        }, dictionaries),
+    };
+  });
 };
 
 export const loadInternalLinkActions = async (
@@ -188,6 +251,9 @@ export const recordInternalLinkAction = async (input: {
         confidence: input.suggestion.confidence,
         matchedTerms: input.suggestion.matchedTerms,
         reasons: input.suggestion.reasons,
+        bm25Score: input.suggestion.bm25Score,
+        completenessScore: input.suggestion.completenessScore,
+        algorithmVersion: input.suggestion.algorithmVersion,
       },
       article_signature: input.articleSignature,
     })
