@@ -11,10 +11,14 @@ import {
   MousePointer2,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   X,
 } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
 import { useEditorSelector } from '../contexts/EditorContext';
+import { useAISelector } from '../contexts/AIContext';
+import { useUser } from '../contexts/UserContext';
+import type { AiPatchProvider } from '../types';
 import {
   listInternalLinkingClients,
   loadArticleClientContext,
@@ -41,6 +45,14 @@ import {
   calculateInternalLinkSuggestionBudget,
   DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
 } from '../utils/internalLinkQualityPolicy';
+import {
+  buildInternalLinkAiReviewPrompt,
+  INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES,
+  parseInternalLinkAiReviewResponse,
+  type InternalLinkAiReview,
+} from '../utils/internalLinkAiReview';
+import { getPromptTemplate, PROMPT_TEMPLATE_IDS } from '../constants/promptRegistry';
+import GeminiProgressStatus from './GeminiProgressStatus';
 
 type ExistingLinkState = {
   urls: string[];
@@ -118,13 +130,37 @@ const confidenceClass: Record<InternalLinkSuggestion['confidence'], string> = {
   review: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
 };
 
+const aiReviewStatusLabel: Record<InternalLinkAiReview['status'], string> = {
+  approved: 'مناسب',
+  caution: 'يحتاج انتباه',
+  rejected: 'غير موصى به',
+};
+
+const aiReviewStatusClass: Record<InternalLinkAiReview['status'], string> = {
+  approved: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300',
+  caution: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300',
+  rejected: 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300',
+};
+
+const AI_REVIEW_PROVIDERS: Array<{ id: AiPatchProvider; label: string }> = [
+  { id: 'gemini', label: 'Gemini المجاني' },
+  { id: 'geminiPaid', label: 'Gemini المدفوع' },
+  { id: 'chatgpt', label: 'OpenAI' },
+];
+
 const InternalLinkingPanel: React.FC = () => {
+  const { engineeringPrompts, isAiProviderAvailable } = useUser();
   const editor = useEditorSelector(context => context.editor);
   const activeArticleId = useEditorSelector(context => context.activeArticleId);
   const articleTitle = useEditorSelector(context => context.title);
   const articleText = useEditorSelector(context => context.text);
   const articleLanguage = useEditorSelector(context => context.articleLanguage);
   const keywords = useEditorSelector(context => context.keywords);
+  const quickAiProvider = useAISelector(context => context.quickAiProvider);
+  const setQuickAiProvider = useAISelector(context => context.setQuickAiProvider);
+  const runPlainAiAnalysis = useAISelector(context => context.runPlainAiAnalysis);
+  const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
+  const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
   const [clients, setClients] = useState<ClientCenterClient[]>([]);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [pages, setPages] = useState<InternalLinkTargetPage[]>([]);
@@ -143,6 +179,10 @@ const InternalLinkingPanel: React.FC = () => {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [editorRevision, setEditorRevision] = useState(0);
+  const [isAiReviewEnabled, setIsAiReviewEnabled] = useState(false);
+  const [isAiReviewing, setIsAiReviewing] = useState(false);
+  const [aiReviews, setAiReviews] = useState<Record<string, InternalLinkAiReview>>({});
+  const [aiReviewSignature, setAiReviewSignature] = useState('');
 
   const articleSignature = useMemo(
     () => createInternalLinkArticleSignature(articleTitle, articleText),
@@ -211,6 +251,29 @@ const InternalLinkingPanel: React.FC = () => {
     qualityPolicy.values,
     20,
   ), [articleText, existingLinks.urls, pages, qualityPolicy.values]);
+
+  const aiReviewInputSignature = useMemo(() => JSON.stringify({
+    articleSignature,
+    clientId: selectedClientId,
+    policy: qualityPolicy.values,
+    candidates: suggestions
+      .slice(0, INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES)
+      .map(suggestion => ({
+        pageId: suggestion.pageId,
+        score: suggestion.score,
+        allowedAnchors: suggestion.alternativeAnchors,
+      })),
+  }), [
+    articleSignature,
+    qualityPolicy.values,
+    selectedClientId,
+    suggestions,
+  ]);
+
+  useEffect(() => {
+    setAiReviews({});
+    setAiReviewSignature('');
+  }, [aiReviewInputSignature]);
 
   const qualityPolicySourceLabel = qualityPolicy.source === 'client'
     ? 'سياسة العميل'
@@ -415,6 +478,56 @@ const InternalLinkingPanel: React.FC = () => {
       ? selectedAnchors[suggestion.pageId]
       : suggestion.anchorText,
   });
+
+  const handleAiReview = async () => {
+    if (
+      !isAiReviewEnabled
+      || isAiReviewing
+      || suggestions.length === 0
+      || !isAiProviderAvailable(quickAiProvider)
+    ) return;
+    const requestSignature = aiReviewInputSignature;
+    setIsAiReviewing(true);
+    setAiReviews({});
+    setAiReviewSignature('');
+    setError('');
+    setNotice('');
+    try {
+      const reviewRequest = buildInternalLinkAiReviewPrompt({
+        articleTitle,
+        articleLanguage,
+        articleText,
+        suggestions: suggestions.map(withSelectedAnchor),
+        pages,
+        qualityPolicy: qualityPolicy.values,
+        promptTemplate: getPromptTemplate(
+          engineeringPrompts as unknown as Record<string, string>,
+          PROMPT_TEMPLATE_IDS.internalLinkReview,
+        ),
+      });
+      const rawResponse = await runPlainAiAnalysis(reviewRequest.prompt, {
+        provider: quickAiProvider,
+        source: 'internal_link_review',
+        commandId: PROMPT_TEMPLATE_IDS.internalLinkReview,
+        commandLabel: 'مراجعة اقتراحات الربط الداخلي',
+        action: 'review_algorithmic_internal_link_suggestions',
+      });
+      const reviews = parseInternalLinkAiReviewResponse(rawResponse, reviewRequest.candidates);
+      setAiReviews(Object.fromEntries(reviews.map(review => [review.pageId, review])));
+      setAiReviewSignature(requestSignature);
+      setNotice(
+        `اكتملت مراجعة ${reviews.length.toLocaleString('ar')} اقتراحات بالذكاء الاصطناعي. النتائج استشارية ولم يُطبق أي رابط تلقائيًا.`,
+      );
+    } catch (reviewError) {
+      setError(
+        reviewError instanceof Error
+          ? reviewError.message
+          : 'تعذر إكمال مراجعة اقتراحات الربط الداخلي بالذكاء الاصطناعي.',
+      );
+    } finally {
+      setIsAiReviewing(false);
+    }
+  };
 
   const selectAnchor = (suggestion: InternalLinkSuggestion): AnchorRange | null => {
     if (!editor) return null;
@@ -667,6 +780,90 @@ const InternalLinkingPanel: React.FC = () => {
             </button>
           </div>
 
+          <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-900/60 dark:bg-violet-950/20">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-black text-violet-800 dark:text-violet-200">
+                  <Sparkles size={15} />
+                  مراجعة اختيارية بالذكاء الاصطناعي
+                </div>
+                <p className="mt-1 text-[10px] font-semibold leading-5 text-violet-700/80 dark:text-violet-300/80">
+                  معطلة افتراضيًا ولا تعمل تلقائيًا. تراجع أفضل {INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES.toLocaleString('ar')} نتائج خوارزمية فقط،
+                  ولا يمكنها إضافة صفحة أو رابط أو Anchor Text من خارج البيانات المعروضة.
+                </p>
+              </div>
+              <label className="inline-flex shrink-0 cursor-pointer items-center gap-2 text-[10px] font-black text-violet-700 dark:text-violet-200">
+                <input
+                  type="checkbox"
+                  checked={isAiReviewEnabled}
+                  onChange={event => {
+                    setIsAiReviewEnabled(event.target.checked);
+                    if (!event.target.checked) {
+                      setAiReviews({});
+                      setAiReviewSignature('');
+                    }
+                  }}
+                  className="h-4 w-4 accent-violet-600"
+                />
+                {isAiReviewEnabled ? 'مفعلة' : 'معطلة'}
+              </label>
+            </div>
+
+            {isAiReviewEnabled && (
+              <div className="mt-3 space-y-2">
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-black text-violet-700 dark:text-violet-200">
+                    المزود المختار أولًا
+                  </span>
+                  <select
+                    value={quickAiProvider}
+                    onChange={event => setQuickAiProvider(event.target.value as AiPatchProvider)}
+                    disabled={isAiReviewing}
+                    className="w-full rounded-md border border-violet-200 bg-white px-2 py-1.5 text-[10px] font-bold text-gray-700 outline-none focus:border-violet-500 disabled:opacity-60 dark:border-violet-900/70 dark:bg-[#272727] dark:text-gray-100"
+                  >
+                    {AI_REVIEW_PROVIDERS.map(provider => (
+                      <option
+                        key={provider.id}
+                        value={provider.id}
+                        disabled={!isAiProviderAvailable(provider.id)}
+                      >
+                        {provider.label}{isAiProviderAvailable(provider.id) ? '' : ' — غير متاح'}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-[9px] font-semibold leading-4 text-violet-600/80 dark:text-violet-300/80">
+                    يبدأ النظام بالمزود والموديل المختارين، وتبقى آلية تدوير المفاتيح والموديلات الحالية فعالة عند الفشل.
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => void handleAiReview()}
+                  disabled={
+                    isAiReviewing
+                    || suggestions.length === 0
+                    || !isAiProviderAvailable(quickAiProvider)
+                  }
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-[10px] font-black text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isAiReviewing
+                    ? <Loader2 size={13} className="animate-spin" />
+                    : <Sparkles size={13} />}
+                  مراجعة الاقتراحات بالذكاء الاصطناعي
+                </button>
+
+                {aiRequestProgress?.source === 'internal_link_review' && (
+                  <GeminiProgressStatus
+                    progress={aiRequestProgress}
+                    isArabic
+                    compact
+                    onCancel={cancelAiRequest}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
           {(isLoadingPages || isLoadingContext) && (
             <div className="flex items-center justify-center gap-2 py-8 text-xs font-bold text-gray-400">
               <Loader2 size={16} className="animate-spin" />
@@ -692,6 +889,9 @@ const InternalLinkingPanel: React.FC = () => {
               const selectedAnchor = suggestion.alternativeAnchors.includes(selectedAnchors[suggestion.pageId])
                 ? selectedAnchors[suggestion.pageId]
                 : suggestion.anchorText;
+              const aiReview = aiReviewSignature === aiReviewInputSignature
+                ? aiReviews[suggestion.pageId]
+                : undefined;
               return (
                 <article
                   key={suggestion.pageId}
@@ -762,6 +962,38 @@ const InternalLinkingPanel: React.FC = () => {
                   {suggestion.matchedTerms.length > 0 && (
                     <div className="mt-2 text-[10px] font-semibold leading-5 text-gray-400">
                       الكلمات المتطابقة: {suggestion.matchedTerms.join('، ')}
+                    </div>
+                  )}
+
+                  {aiReview && (
+                    <div className={`mt-3 rounded-lg border p-2.5 text-[10px] font-semibold leading-5 ${aiReviewStatusClass[aiReview.status]}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1 font-black">
+                          <Sparkles size={12} />
+                          رأي المراجعة: {aiReviewStatusLabel[aiReview.status]}
+                        </span>
+                        {aiReview.anchorWasAdjusted && (
+                          <span className="rounded-full border border-current/20 px-1.5 py-0.5 text-[8px] font-black">
+                            رُفض نص مخترع
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1">{aiReview.reason}</div>
+                      {aiReview.selectedAnchorText !== selectedAnchor && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAnchors(current => ({
+                            ...current,
+                            [suggestion.pageId]: aiReview.selectedAnchorText,
+                          }))}
+                          className="mt-2 rounded-md border border-current/30 px-2 py-1 text-[9px] font-black hover:bg-white/40 dark:hover:bg-black/10"
+                        >
+                          اختيار النص المراجع: {aiReview.selectedAnchorText}
+                        </button>
+                      )}
+                      <div className="mt-1.5 text-[9px] opacity-75">
+                        هذه مراجعة استشارية فقط؛ تطبيق الرابط يبقى بقرار الموظف.
+                      </div>
                     </div>
                   )}
 

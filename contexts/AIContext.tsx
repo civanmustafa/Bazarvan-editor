@@ -4766,6 +4766,17 @@ interface AIContextType {
     fixAllProgress: FixAllProgress;
     aiRequestProgress: AiRequestProgress | null;
     cancelAiRequest: (progressId: string) => Promise<void>;
+    runPlainAiAnalysis: (
+        prompt: string,
+        options?: {
+            provider?: AiPatchProvider;
+            source?: string;
+            commandId?: string;
+            commandLabel?: string;
+            action?: string;
+            geminiModel?: string;
+        },
+    ) => Promise<string>;
     handleAiRequest: (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => Promise<void>;
     handleAnalyzeHeadings: () => Promise<void>;
     handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta, provider?: GeminiPatchProvider, geminiModel?: string) => Promise<void>;
@@ -5761,6 +5772,32 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             geminiProvider,
         );
     }, [articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext, trackGeminiProgress, isAiProviderAvailable, openAiModel]);
+
+    const runPlainAiAnalysis = useCallback(async (
+        prompt: string,
+        options?: {
+            provider?: AiPatchProvider;
+            source?: string;
+            commandId?: string;
+            commandLabel?: string;
+            action?: string;
+            geminiModel?: string;
+        },
+    ): Promise<string> => {
+        const normalizedPrompt = prompt.trim();
+        if (!normalizedPrompt) throw new Error('لا يمكن إرسال أمر هندسي فارغ.');
+        const provider = options?.provider || quickAiProvider;
+        return callQuickProviderAnalysis(
+            normalizedPrompt,
+            provider,
+            buildApiUsageContext(options?.source || 'plain_ai_analysis', {
+                commandId: options?.commandId,
+                commandLabel: options?.commandLabel,
+                action: options?.action,
+            }),
+            options?.geminiModel,
+        );
+    }, [buildApiUsageContext, callQuickProviderAnalysis, quickAiProvider]);
     
     const handleAiRequest = useCallback(async (promptTemplate: string, action: 'replace-text' | 'replace-title' | 'copy-meta') => {
         const provider = quickAiProvider;
@@ -6718,7 +6755,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const value = useMemo<AIContextType>(() => ({
         aiResults, aiInsertionPatches, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
-        aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, cancelAiRequest, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
+        aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, cancelAiRequest, runPlainAiAnalysis, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         buildSmartAnalysisPrompt, validateAiArticleContext, importManualAiResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
         handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
@@ -6745,6 +6782,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         fixAllProgress,
         aiRequestProgress,
         cancelAiRequest,
+        runPlainAiAnalysis,
         handleAiRequest,
         handleAnalyzeHeadings,
         handleAiAnalyze,

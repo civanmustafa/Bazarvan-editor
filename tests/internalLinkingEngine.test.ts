@@ -14,6 +14,11 @@ import {
   calculateInternalLinkSuggestionBudget,
   normalizeInternalLinkQualityPolicy,
 } from '../utils/internalLinkQualityPolicy.ts';
+import {
+  buildInternalLinkAiReviewPrompt,
+  INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES,
+  parseInternalLinkAiReviewResponse,
+} from '../utils/internalLinkAiReview.ts';
 
 const root = process.cwd();
 const readWorkspaceFile = (relativePath: string) => readFile(path.join(root, relativePath), 'utf8');
@@ -21,6 +26,14 @@ const readWorkspaceFile = (relativePath: string) => readFile(path.join(root, rel
 const articleText = [
   'تساعد خدمات التحول الرقمي الشركات على تطوير الأعمال ورفع كفاءة العمليات.',
   'ويبدأ تحسين تجربة العملاء بفهم الرحلة الرقمية وتبسيط نقاط التواصل.',
+].join('\n');
+
+const internalLinkReviewPromptTemplate = [
+  'راجع الاقتراحات كمراجع ثانوي للربط الداخلي.',
+  'العنوان: {{article_title}}',
+  'اللغة: {{article_language}}',
+  'المرشحون: {{candidate_suggestions_json}}',
+  'قواعد الجودة: {{quality_rules_json}}',
 ].join('\n');
 
 const readyPage = (overrides: Partial<InternalLinkTargetPage> = {}): InternalLinkTargetPage => ({
@@ -262,6 +275,96 @@ test('inventory signature is deterministic and changes with the indexed website 
   assert.match(first, /^inventory_[a-z0-9]+_[a-z0-9]+$/);
 });
 
+test('phase 9 sends only the best five algorithmic candidates with closed website data', () => {
+  const baseSuggestion = generateInternalLinkSuggestions({
+    articleTitle: 'دليل التحول الرقمي',
+    articleText,
+    pages: [readyPage()],
+  })[0];
+  assert.ok(baseSuggestion);
+  const pages = Array.from({ length: 7 }, (_, index) => readyPage({
+    id: `11111111-1111-4111-8111-11111111111${index}`,
+    inputUrl: `https://example.com/page-${index}`,
+    finalUrl: `https://example.com/page-${index}`,
+    canonicalUrl: `https://example.com/page-${index}`,
+  }));
+  const suggestions = pages.map((page, index) => ({
+    ...baseSuggestion,
+    pageId: page.id,
+    targetUrl: page.canonicalUrl || page.inputUrl,
+    targetTitle: page.pageTitle || '',
+    score: 90 - index,
+  }));
+
+  const request = buildInternalLinkAiReviewPrompt({
+    articleTitle: 'دليل التحول الرقمي',
+    articleLanguage: 'ar',
+    articleText,
+    suggestions,
+    pages,
+    promptTemplate: internalLinkReviewPromptTemplate,
+  });
+
+  assert.equal(request.candidates.length, INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES);
+  assert.deepEqual(
+    request.candidates.map(candidate => candidate.pageId),
+    suggestions.slice(0, INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES).map(item => item.pageId),
+  );
+  assert.ok(request.candidates.every(candidate => (
+    candidate.allowedAnchorTexts.length > 0
+    && candidate.allowedAnchorTexts.every(anchor => candidate.paragraphText.includes(anchor))
+  )));
+  assert.match(request.prompt, /allowedAnchorTexts/);
+  assert.match(request.prompt, /درجات وأسباب|قواعد الجودة|مراجع ثانوي/);
+  assert.doesNotMatch(request.prompt, /page-6/);
+});
+
+test('phase 9 rejects invented pages and replaces invented anchor text with the algorithmic choice', () => {
+  const suggestion = generateInternalLinkSuggestions({
+    articleTitle: 'دليل التحول الرقمي',
+    articleText,
+    pages: [readyPage()],
+  })[0];
+  assert.ok(suggestion);
+  const request = buildInternalLinkAiReviewPrompt({
+    articleTitle: 'دليل التحول الرقمي',
+    articleText,
+    suggestions: [suggestion],
+    pages: [readyPage()],
+    promptTemplate: internalLinkReviewPromptTemplate,
+  });
+  const response = JSON.stringify({
+    reviews: [
+      {
+        pageId: 'invented-page',
+        status: 'approved',
+        selectedAnchorText: 'نص مخترع',
+        reason: 'يجب تجاهل هذه الصفحة.',
+      },
+      {
+        pageId: request.candidates[0].pageId,
+        status: 'caution',
+        selectedAnchorText: 'نص مخترع',
+        reason: 'الصلة جيدة ولكن النص غير مسموح.',
+      },
+    ],
+  });
+  const reviews = parseInternalLinkAiReviewResponse(response, request.candidates);
+
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].pageId, request.candidates[0].pageId);
+  assert.equal(reviews[0].selectedAnchorText, request.candidates[0].currentAnchorText);
+  assert.equal(reviews[0].anchorWasAdjusted, true);
+  assert.match(reviews[0].reason, /تم تجاهل نص ربط غير موجود/);
+  assert.throws(
+    () => parseInternalLinkAiReviewResponse(
+      '{"reviews":[{"pageId":"unknown","status":"approved","selectedAnchorText":"x"}]}',
+      request.candidates,
+    ),
+    /أي نتيجة مطابقة/,
+  );
+});
+
 test('phase 7 migration persists the current page, aggregate runs, block, and report actions securely', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260724050000_editor_internal_link_suggestions.sql',
@@ -320,8 +423,21 @@ test('phase 4/5 migration stores article-client scope and append-only link actio
   assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
 });
 
-test('editor integration applies native links and does not call an AI provider', async () => {
-  const [panel, clientCenter, sidebar, editorContext, registry, releaseScript, guide] = await Promise.all([
+test('editor integration keeps native links primary and phase 9 AI review optional and constrained', async () => {
+  const [
+    panel,
+    clientCenter,
+    sidebar,
+    editorContext,
+    registry,
+    releaseScript,
+    guide,
+    engine,
+    aiReview,
+    aiContext,
+    promptRegistry,
+    promptSettings,
+  ] = await Promise.all([
     readWorkspaceFile('components/InternalLinkingPanel.tsx'),
     readWorkspaceFile('components/ClientCenterSettings.tsx'),
     readWorkspaceFile('components/RightSidebar.tsx'),
@@ -329,6 +445,11 @@ test('editor integration applies native links and does not call an AI provider',
     readWorkspaceFile('constants/clientCenter.ts'),
     readWorkspaceFile('scripts/checkClientCenterRelease.ts'),
     readWorkspaceFile('deploy/HOSTINGER_CANONICAL_DEPLOY.md'),
+    readWorkspaceFile('utils/internalLinkingEngine.ts'),
+    readWorkspaceFile('utils/internalLinkAiReview.ts'),
+    readWorkspaceFile('contexts/AIContext.tsx'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+    readWorkspaceFile('components/AdminPromptRegistrySettings.tsx'),
   ]);
 
   assert.match(panel, /generateInternalLinkSuggestions/);
@@ -343,7 +464,21 @@ test('editor integration applies native links and does not call an AI provider',
   assert.match(panel, /recordInternalLinkSuggestionRun/);
   assert.match(panel, /قواعد الجودة المطبقة/);
   assert.match(panel, /loadInternalLinkQualityPolicy/);
-  assert.doesNotMatch(panel, /handleAiAnalyze|runGemini|openai/i);
+  assert.match(panel, /useState\(false\)/);
+  assert.match(panel, /مراجعة الاقتراحات بالذكاء الاصطناعي/);
+  assert.match(panel, /INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES/);
+  assert.match(panel, /source: 'internal_link_review'/);
+  assert.match(panel, /النتائج استشارية ولم يُطبق أي رابط تلقائيًا/);
+  assert.match(aiReview, /input\.suggestions[\s\S]*\.slice\(0, INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES\)/);
+  assert.match(aiReview, /candidatesById\.get\(pageId\)/);
+  assert.match(aiReview, /candidate\.allowedAnchorTexts\.includes\(requestedAnchor\)/);
+  assert.match(panel, /getPromptTemplate\([\s\S]*PROMPT_TEMPLATE_IDS\.internalLinkReview/);
+  assert.match(aiReview, /promptTemplate: string/);
+  assert.match(aiContext, /runPlainAiAnalysis/);
+  assert.doesNotMatch(engine, /openai|gemini|runPlainAiAnalysis|handleAiAnalyze/i);
+  assert.match(promptRegistry, /internalLinking\.reviewSuggestions/);
+  assert.match(promptRegistry, /PROMPT_GROUP_IDS\.internalLinking/);
+  assert.match(promptSettings, /tabLabel: 'الربط الداخلي'/);
   assert.match(clientCenter, /قواعد جودة الربط الداخلي/);
   assert.match(clientCenter, /حفظ السياسة العامة/);
   assert.match(clientCenter, /استخدام قواعد مخصصة لهذا العميل/);
@@ -360,4 +495,5 @@ test('editor integration applies native links and does not call an AI provider',
   assert.match(releaseScript, /CLIENT_CENTER_CRAWLING_MIGRATION/);
   assert.match(guide, /20260724030000_internal_linking_engine\.sql/);
   assert.match(guide, /لا يحتاج الترحيل السادس إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
+  assert.match(guide, /المرحلة التاسعة لا تضيف ترحيلًا سابعًا/);
 });

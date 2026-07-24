@@ -287,6 +287,8 @@ test('administrator prompt registry is the shared source for editor and writing 
   assert.match(promptRegistrySettings, /role="tablist"/);
   assert.match(promptRegistrySettings, /role="tabpanel"/);
   assert.match(promptRegistrySettings, /PROMPT_GROUP_IDS\.qualityGate/);
+  assert.match(promptRegistrySettings, /PROMPT_GROUP_IDS\.internalLinking/);
+  assert.match(promptRegistrySettings, /tabLabel: 'الربط الداخلي'/);
   assert.match(promptRegistrySettings, /setActiveGroupId\(group\.id\)/);
   assert.doesNotMatch(engineeringPrompts, /ENGINEERING_PROMPT_PASSWORD|Rezan90/);
   await assertFileMissing('components/EngineeringPromptsSettings.tsx');
@@ -392,7 +394,7 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
   assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 4/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 5/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);

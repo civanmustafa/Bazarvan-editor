@@ -71,6 +71,12 @@ const GROUPS: Array<{
     label: 'أوامر بوابة الجودة',
     description: 'إصلاح المقالة كاملة وفق الدرجة وتقرير المخالفات البرمجي وعقد الجودة الحالي.',
   },
+  {
+    id: PROMPT_GROUP_IDS.internalLinking,
+    tabLabel: 'الربط الداخلي',
+    label: 'أوامر مراجعة الربط الداخلي',
+    description: 'مراجعة اختيارية لأفضل نتائج محرك الربط الداخلي الخوارزمي. لا تنشئ صفحات أو روابط أو نصوص ربط جديدة، ولا تطبق أي اقتراح تلقائيًا.',
+  },
 ];
 
 const inputClass = 'w-full resize-y rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm leading-7 text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100';

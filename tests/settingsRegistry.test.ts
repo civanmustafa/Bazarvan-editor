@@ -169,6 +169,32 @@ test('PromptRegistry keeps Arabic defaults, required attachments, and valid admi
     registry.DEFAULT_PROMPT_TEMPLATES[registry.PROMPT_TEMPLATE_IDS.outline],
   );
   assert.equal(normalized.templates.unknownPrompt, undefined);
+
+  const internalLinkDefinition = registry.PROMPT_REGISTRY_DEFINITIONS.find(
+    (item: { id: string }) => item.id === registry.PROMPT_TEMPLATE_IDS.internalLinkReview,
+  );
+  assert.ok(internalLinkDefinition);
+  assert.equal(internalLinkDefinition.group, registry.PROMPT_GROUP_IDS.internalLinking);
+  assert.deepEqual(internalLinkDefinition.requiredVariables, [
+    'article_title',
+    'article_language',
+    'candidate_suggestions_json',
+    'quality_rules_json',
+  ]);
+  assert.deepEqual(
+    internalLinkDefinition.attachments.map((attachment: { id: string }) => attachment.id),
+    [
+      'candidateParagraphs',
+      'targetPages',
+      'algorithmEvidence',
+      'allowedAnchors',
+      'qualityPolicy',
+    ],
+  );
+  assert.match(
+    registry.DEFAULT_PROMPT_TEMPLATES[registry.PROMPT_TEMPLATE_IDS.internalLinkReview],
+    /لا تنشئ Anchor Text جديدًا/,
+  );
 });
 
 test('administrator prompt registry migration preserves saved templates when repeated', async () => {
