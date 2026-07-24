@@ -25,6 +25,7 @@ import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCo
 import ContentWritingPromptSettings from './ContentWritingPromptSettings';
 import AdminAiProviderSecretsSettings from './AdminAiProviderSecretsSettings';
 import AdminPromptRegistrySettings from './AdminPromptRegistrySettings';
+import ClientCenterSettings from './ClientCenterSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
 import {
   loadSystemSettings,
@@ -625,9 +626,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   );
 
   const renderClientSettings = () => (
-    <SettingsSection title="إعدادات العملاء">
-      <ClientGoalSettings />
-    </SettingsSection>
+    <div className="space-y-6">
+      <ClientCenterSettings />
+      <SettingsSection title="سياق هدف الصفحة الحالي">
+        <p className="mb-4 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+          هذه الإعدادات تخص سياق المقالة داخل المحرر، وهي مستقلة عن سجل العميل والدومينات والروابط في مركز العملاء.
+        </p>
+        <ClientGoalSettings />
+      </SettingsSection>
+    </div>
   );
 
   const renderPromptSettings = () => (

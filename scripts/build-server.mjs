@@ -21,6 +21,11 @@ const targets = [
     outfile: 'server-dist/content-writing-worker.mjs',
     label: 'content writing worker',
   },
+  {
+    entryPoint: 'server/clientPageCrawlWorker.ts',
+    outfile: 'server-dist/client-page-crawl-worker.mjs',
+    label: 'Client Center page crawl worker',
+  },
 ];
 
 await Promise.all(targets.map(({ entryPoint, outfile }) => build({

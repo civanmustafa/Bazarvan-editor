@@ -151,9 +151,11 @@ test('Client Center release gate is wired to build and readiness', async () => {
   const packageJson = JSON.parse(packageSource) as { scripts?: Record<string, string> };
 
   assert.match(registry, /20260724010000_client_center_foundation\.sql/);
+  assert.match(registry, /20260724020000_client_center_management_and_crawling\.sql/);
   assert.match(script, /CLIENT_CENTER_REQUIRED_MIGRATION/);
   assert.match(server, /checkClientCenterReadiness/);
   assert.match(server, /toPublicClientCenterReadiness/);
   assert.match(guide, /20260724010000_client_center_foundation\.sql/);
+  assert.match(guide, /20260724020000_client_center_management_and_crawling\.sql/);
   assert.match(packageJson.scripts?.postbuild || '', /check:client-center-release/);
 });
