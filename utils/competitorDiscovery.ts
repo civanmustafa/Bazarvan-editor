@@ -396,6 +396,10 @@ export const cancelArticleCompetitorExtraction = async (articleId: string): Prom
   await requestCompetitors({ action: 'cancel', articleId });
 };
 
+export const cancelArticleCompetitorDiscovery = async (articleId: string): Promise<void> => {
+  await requestCompetitors({ action: 'cancel_discovery', articleId });
+};
+
 export const removeArticleCompetitor = async (articleId: string, competitorId: string): Promise<void> => {
   await requestCompetitors({ action: 'remove', articleId, competitorId });
 };

@@ -248,6 +248,32 @@ test('automatic competitor discovery is durable, idempotent, and uses the centra
   assert.match(reports, /اكتشاف وترتيب المنافسين/);
 });
 
+test('competitor discovery stop control requests durable cancellation and keeps extraction cancellation separate', async () => {
+  const [apiHandler, browserClient, panel, controlsMigration, executor] = await Promise.all([
+    readWorkspaceFile('api/competitors.ts'),
+    readWorkspaceFile('utils/competitorDiscovery.ts'),
+    readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
+    readWorkspaceFile('supabase/migrations/20260711000000_external_analysis_job_controls.sql'),
+    readWorkspaceFile('server/competitorDiscoveryExecutor.ts'),
+  ]);
+
+  assert.match(apiHandler, /const cancelCompetitorJob = async/);
+  assert.match(apiHandler, /\.eq\('job_type', jobType\)/);
+  assert.match(apiHandler, /request_external_analysis_job_cancel/);
+  assert.match(apiHandler, /action === 'cancel_discovery'/);
+  assert.match(apiHandler, /'competitor_discovery'/);
+  assert.match(apiHandler, /jobType === 'competitor_extraction'/);
+  assert.match(browserClient, /cancelArticleCompetitorDiscovery/);
+  assert.match(browserClient, /action: 'cancel_discovery'/);
+  assert.match(panel, /handleCancelDiscovery/);
+  assert.match(panel, /discoveryCancelRequested/);
+  assert.match(panel, /إيقاف البحث عن المنافسين/);
+  assert.match(panel, /جاري إيقاف البحث عن المنافسين بأمان/);
+  assert.match(controlsMigration, /status = case when job\.status = 'running' then 'running' else 'cancelled' end/);
+  assert.match(controlsMigration, /cancel_requested_at = coalesce\(job\.cancel_requested_at, now\(\)\)/);
+  assert.match(executor, /signal: context\.signal/);
+});
+
 test('competitor extraction preserves partial success and bounds transient retries', async () => {
   const [executor, panel] = await Promise.all([
     readWorkspaceFile('server/competitorExtractionExecutor.ts'),

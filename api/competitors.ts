@@ -324,16 +324,17 @@ const enqueueExtraction = async (
   return data;
 };
 
-const cancelExtraction = async (
+const cancelCompetitorJob = async (
   supabase: SupabaseAdmin,
   articleId: string,
   userId: string,
+  jobType: 'competitor_discovery' | 'competitor_extraction',
 ) => {
   const { data: activeJob, error: readError } = await supabase
     .from('ai_external_analysis_jobs')
     .select('id,status')
     .eq('article_id', articleId)
-    .eq('job_type', 'competitor_extraction')
+    .eq('job_type', jobType)
     .in('status', ACTIVE_JOB_STATUSES)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -346,12 +347,14 @@ const cancelExtraction = async (
     p_requested_by: userId,
   });
   if (error) throw error;
-  const { error: competitorError } = await supabase
-    .from('article_competitors')
-    .update({ status: 'cancelled', error_code: 'cancelled_by_user', error_message: 'Extraction cancelled by the user.' })
-    .eq('article_id', articleId)
-    .in('status', ['queued', 'extracting', 'retry_scheduled']);
-  if (competitorError) throw competitorError;
+  if (jobType === 'competitor_extraction') {
+    const { error: competitorError } = await supabase
+      .from('article_competitors')
+      .update({ status: 'cancelled', error_code: 'cancelled_by_user', error_message: 'Extraction cancelled by the user.' })
+      .eq('article_id', articleId)
+      .in('status', ['queued', 'extracting', 'retry_scheduled']);
+    if (competitorError) throw competitorError;
+  }
   return { cancelled: true, job: Array.isArray(data) ? data[0] || activeJob : data || activeJob };
 };
 
@@ -605,7 +608,26 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
   if (action === 'cancel') {
     consumeApiRateLimit('competitors-cancel', principal.userId, 30);
-    const result = await cancelExtraction(supabase, articleId, principal.userId);
+    const result = await cancelCompetitorJob(
+      supabase,
+      articleId,
+      principal.userId,
+      'competitor_extraction',
+    );
+    return {
+      status: 200,
+      body: { ok: true, action, ...result },
+      headers: getCorsResponseHeaders(req),
+    };
+  }
+  if (action === 'cancel_discovery') {
+    consumeApiRateLimit('competitors-cancel-discovery', principal.userId, 30);
+    const result = await cancelCompetitorJob(
+      supabase,
+      articleId,
+      principal.userId,
+      'competitor_discovery',
+    );
     return {
       status: 200,
       body: { ok: true, action, ...result },
@@ -627,7 +649,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new CompetitorApiError({
-    message: 'action must be list, ensure_discovery, search, preview, extract, cancel, or remove.',
+    message: 'action must be list, ensure_discovery, search, preview, extract, cancel, cancel_discovery, or remove.',
     code: 'invalid_action',
   });
 };

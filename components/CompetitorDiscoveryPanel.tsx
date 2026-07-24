@@ -19,6 +19,7 @@ import {
   type CompetitorSearchMode,
 } from '../constants/competitors';
 import {
+  cancelArticleCompetitorDiscovery,
   cancelArticleCompetitorExtraction,
   CompetitorDiscoveryRequestError,
   enqueueArticleCompetitorExtraction,
@@ -209,6 +210,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const activeDiscoveryJob = state.discoveryJob && ACTIVE_JOB_STATUSES.has(state.discoveryJob.status)
     ? state.discoveryJob
     : null;
+  const discoveryCancelRequested = actionId === 'cancel-discovery'
+    || activeDiscoveryJob?.progress?.stage === 'cancel_requested';
   const discoveryErrorMessage = typeof state.discoveryJob?.result?.errorMessage === 'string'
     ? state.discoveryJob.result.errorMessage
     : state.discoveryJob?.last_error || '';
@@ -503,6 +506,33 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     }
   };
 
+  const handleCancelDiscovery = async () => {
+    if (!articleId || !activeDiscoveryJob || discoveryCancelRequested) return;
+    setActionId('cancel-discovery');
+    setError('');
+    try {
+      await cancelArticleCompetitorDiscovery(articleId);
+      setState(current => current.discoveryJob ? {
+        ...current,
+        discoveryJob: {
+          ...current.discoveryJob,
+          progress: {
+            ...current.discoveryJob.progress,
+            stage: 'cancel_requested',
+          },
+        },
+      } : current);
+      setNotice(isArabic
+        ? 'تم إرسال طلب إيقاف البحث. قد يستغرق الإيقاف عدة ثوانٍ إذا كان الاتصال الخارجي جاريًا.'
+        : 'Search cancellation was requested. It can take a few seconds while an external request is active.');
+      await refresh(false, true);
+    } catch (cancelError) {
+      setError(requestErrorMessage(cancelError, isArabic, 'Could not stop competitor discovery.'));
+    } finally {
+      setActionId('');
+    }
+  };
+
   const handleRemove = async (competitorId: string) => {
     if (!articleId) return;
     setActionId(competitorId);
@@ -590,11 +620,25 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
       {activeDiscoveryJob && (
         <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2 text-[11px] font-bold text-blue-800 dark:border-blue-900/40 dark:bg-blue-500/10 dark:text-blue-300">
           <LoaderCircle size={14} className="mt-0.5 shrink-0 animate-spin" />
-          <span>
-            {activeDiscoveryJob.status === 'retry_scheduled'
-              ? (isArabic ? 'تعذر البحث مؤقتًا، وستعاد محاولة المهمة نفسها تلقائيًا.' : 'Search is temporarily unavailable; the same task will retry automatically.')
-              : (isArabic ? 'جاري البحث عن المنافسين وترتيبهم في الخلفية.' : 'Searching and ranking competitors in the background.')}
+          <span className="min-w-0 flex-1">
+            {discoveryCancelRequested
+              ? (isArabic ? 'جاري إيقاف البحث عن المنافسين بأمان.' : 'Stopping competitor discovery safely.')
+              : activeDiscoveryJob.status === 'retry_scheduled'
+                ? (isArabic ? 'تعذر البحث مؤقتًا، وستعاد محاولة المهمة نفسها تلقائيًا.' : 'Search is temporarily unavailable; the same task will retry automatically.')
+                : (isArabic ? 'جاري البحث عن المنافسين وترتيبهم في الخلفية.' : 'Searching and ranking competitors in the background.')}
           </span>
+          <button
+            type="button"
+            onClick={() => void handleCancelDiscovery()}
+            disabled={discoveryCancelRequested}
+            title={isArabic ? 'إيقاف البحث عن المنافسين' : 'Stop competitor discovery'}
+            aria-label={isArabic ? 'إيقاف البحث عن المنافسين' : 'Stop competitor discovery'}
+            className="flex size-6 shrink-0 items-center justify-center rounded-md border border-blue-200 text-blue-700 hover:bg-blue-100 disabled:cursor-wait disabled:opacity-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-500/10"
+          >
+            {discoveryCancelRequested
+              ? <LoaderCircle size={12} className="animate-spin" />
+              : <Square size={10} fill="currentColor" />}
+          </button>
         </div>
       )}
 
