@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { access, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { readRequestBody, toWebResponse } from '../api/http.ts';
+import { parseAppRoute } from '../utils/appRoutes.ts';
 
 const workspaceUrl = (relativePath: string): URL => new URL(`../${relativePath}`, import.meta.url);
 const readWorkspaceFile = (relativePath: string): Promise<string> => readFile(workspaceUrl(relativePath), 'utf8');
@@ -13,6 +14,14 @@ const assertFileMissing = async (relativePath: string): Promise<void> => {
     `${relativePath} should remain deleted`,
   );
 };
+
+test('settings route registry accepts the engineering prompts tab', () => {
+  assert.deepEqual(parseAppRoute('/settings/prompts'), {
+    name: 'settings',
+    section: 'prompts',
+  });
+  assert.equal(parseAppRoute('/settings/not-registered').name, 'notFound');
+});
 
 test('development and production use one API route registry', async () => {
   const [registry, viteConfig, productionServer] = await Promise.all([
