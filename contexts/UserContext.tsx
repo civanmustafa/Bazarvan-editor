@@ -1,9 +1,10 @@
 
 import React, { useState, useCallback, useEffect, createContext, useContext, useMemo, useRef } from 'react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-import { recordLogin, getActivityData, saveUserPreference, saveUserClientGoalContexts, saveUserEngineeringPrompts } from '../hooks/useUserActivity';
+import { recordLogin, getActivityData, saveUserPreference, saveUserClientGoalContexts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
 import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
+import { DEFAULT_PROMPT_TEMPLATES } from '../constants/promptRegistry';
 import type { AiPatchProvider, ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext } from '../types';
 import { normalizeClientGoalContexts, normalizeGoalContext } from '../utils/goalContext';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
@@ -32,6 +33,10 @@ import {
     AI_PROVIDER_CAPABILITIES_CHANGED_EVENT,
     loadAiProviderCapabilities,
 } from '../utils/aiProviderCapabilities';
+import {
+    loadPromptRegistry,
+    PROMPT_REGISTRY_CHANGED_EVENT,
+} from '../utils/promptRegistry';
 
 const AI_PROVIDER_CAPABILITIES_REFRESH_MS = 60_000;
 
@@ -86,7 +91,6 @@ interface UserContextType {
     handleSaveClientGoalContext: (companyName: string, goalContext: GoalContext) => void;
     handleDeleteClientGoalContext: (companyName: string) => void;
     handleMergeClientGoalContexts: (contexts: ClientGoalContexts) => void;
-    handleSaveEngineeringPrompts: (prompts: EngineeringPrompts) => void;
 }
 
 const UserContext = createContext<UserContextType | null>(null);
@@ -225,7 +229,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [preferredLanguage, setPreferredLanguage] = useState<'ar' | 'en'>('ar');
     const [uiLanguage, setUiLanguage] = useState<'ar' | 'en'>('ar');
     const [clientGoalContexts, setClientGoalContexts] = useState<ClientGoalContexts>({});
-    const [engineeringPrompts, setEngineeringPrompts] = useState<EngineeringPrompts>(() => normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
+    const [engineeringPrompts, setEngineeringPrompts] = useState<EngineeringPrompts>(() => ({
+        ...normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS),
+        ...DEFAULT_PROMPT_TEMPLATES,
+    }));
     const [aiProviderCapabilities, setAiProviderCapabilities] = useState<AiProviderCapabilities>(getDefaultAiProviderCapabilities);
     const [preferencesReadyUserId, setPreferencesReadyUserId] = useState<string | null>(null);
     
@@ -613,11 +620,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             hydrateGeminiModelPreferences(preferences.ai);
 
             const normalizedContexts = normalizeClientGoalContexts(preferences.clientGoalContexts);
-            const normalizedPrompts = normalizeEngineeringPrompts(
-                preferences.engineeringPrompts as unknown as Partial<EngineeringPrompts>,
-            );
             setClientGoalContexts(normalizedContexts);
-            setEngineeringPrompts(normalizedPrompts);
+            setEngineeringPrompts({
+                ...normalizeEngineeringPrompts(DEFAULT_PROMPT_TEMPLATES),
+                ...DEFAULT_PROMPT_TEMPLATES,
+            });
 
             // Temporary local mirror keeps first paint and offline startup fast.
             saveUserPreference(currentUser, {
@@ -630,7 +637,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 preferredUILanguage: preferences.editor.uiLanguage,
             });
             saveUserClientGoalContexts(currentUser, normalizedContexts);
-            saveUserEngineeringPrompts(currentUser, normalizedPrompts);
             setPreferencesReadyUserId(currentUserId);
         };
 
@@ -648,6 +654,32 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             cancelled = true;
         };
     }, [currentUser, currentUserId]);
+
+    useEffect(() => {
+        if (!currentUserId || preferencesReadyUserId !== currentUserId) return;
+        let cancelled = false;
+
+        const refreshPrompts = () => {
+            void loadPromptRegistry()
+                .then(registry => {
+                    if (cancelled) return;
+                    setEngineeringPrompts({
+                        ...normalizeEngineeringPrompts(registry.templates),
+                        ...registry.templates,
+                    });
+                })
+                .catch(error => {
+                    console.error('Failed to load global engineering prompts:', error);
+                });
+        };
+
+        refreshPrompts();
+        window.addEventListener(PROMPT_REGISTRY_CHANGED_EVENT, refreshPrompts);
+        return () => {
+            cancelled = true;
+            window.removeEventListener(PROMPT_REGISTRY_CHANGED_EVENT, refreshPrompts);
+        };
+    }, [currentUserId, preferencesReadyUserId]);
 
     const handleLogin = useCallback(async (username: string, password: string): Promise<boolean> => {
         if (!isSupabaseConfigured) {
@@ -770,15 +802,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
     }, [clientGoalContexts, persistClientGoalContexts]);
 
-    const handleSaveEngineeringPrompts = useCallback((prompts: EngineeringPrompts) => {
-        const normalizedPrompts = normalizeEngineeringPrompts(prompts);
-        setEngineeringPrompts(normalizedPrompts);
-        if (currentUser) saveUserEngineeringPrompts(currentUser, normalizedPrompts);
-        persistUserPreferencePatch({
-            engineeringPrompts: normalizedPrompts as unknown as Record<string, unknown>,
-        });
-    }, [currentUser, persistUserPreferencePatch]);
-
     const value = useMemo<UserContextType>(() => ({
         currentUser,
         currentUserId,
@@ -813,7 +836,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleSaveClientGoalContext,
         handleDeleteClientGoalContext,
         handleMergeClientGoalContexts,
-        handleSaveEngineeringPrompts,
     }), [
         currentUser,
         currentUserId,
@@ -847,7 +869,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         handleSaveClientGoalContext,
         handleDeleteClientGoalContext,
         handleMergeClientGoalContexts,
-        handleSaveEngineeringPrompts,
     ]);
 
     return <UserContext.Provider value={value}>{children}</UserContext.Provider>;

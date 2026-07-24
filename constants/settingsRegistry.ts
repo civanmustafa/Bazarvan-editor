@@ -25,12 +25,16 @@ import {
   CONTENT_WRITING_MAX_REPAIR_PASSES,
   CONTENT_WRITING_QUALITY_POLICY_VERSIONS,
 } from './contentWritingQuality';
+import {
+  normalizePromptRegistrySettings,
+  PROMPT_REGISTRY_VERSION,
+} from './promptRegistry';
 
-export const SYSTEM_SETTING_KEYS = ['ai', 'n8n', 'articles', 'roles', 'system'] as const;
+export const SYSTEM_SETTING_KEYS = ['ai', 'prompts', 'n8n', 'articles', 'roles', 'system'] as const;
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
 export type SystemSettingsMap = Record<SystemSettingKey, Record<string, any>>;
 
-export const SETTINGS_REGISTRY_VERSION = 3;
+export const SETTINGS_REGISTRY_VERSION = 4;
 export const USER_PREFERENCES_SCHEMA_VERSION = 1;
 
 const ALLOWED_EXTERNAL_COMMAND_IDS = new Set(
@@ -59,6 +63,10 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     contentWritingMinimumQualityScore: CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE,
     contentWritingMaxRepairPasses: CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES,
   },
+  prompts: normalizePromptRegistrySettings({
+    registryVersion: PROMPT_REGISTRY_VERSION,
+    templates: {},
+  }),
   n8n: {
     enabled: true,
     defaultVisibility: 'public',
@@ -206,6 +214,10 @@ const normalizeSystemSection = (
     return normalized;
   }
 
+  if (key === 'prompts') {
+    return normalizePromptRegistrySettings(source);
+  }
+
   if (key === 'n8n') {
     setWhenPresent('enabled', field => normalizeBoolean(field, defaults.enabled));
     setWhenPresent('defaultVisibility', field => normalizeEnum(field, ['public', 'private'], defaults.defaultVisibility));
@@ -241,6 +253,8 @@ export const getDefaultSystemSettings = (): SystemSettingsMap => (
     ...SYSTEM_SETTINGS_DEFAULTS[key],
     ...(key === 'ai' ? {
       externalAnalysisDefaultCommandIds: [...SYSTEM_SETTINGS_DEFAULTS.ai.externalAnalysisDefaultCommandIds],
+    } : key === 'prompts' ? {
+      templates: { ...SYSTEM_SETTINGS_DEFAULTS.prompts.templates },
     } : {}),
   }])) as SystemSettingsMap
 );

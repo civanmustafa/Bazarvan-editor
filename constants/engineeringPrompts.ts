@@ -1,7 +1,6 @@
 import { AI_PROMPTS } from './aiPrompts';
 import type { AiAnalysisOptions, EngineeringPromptDefinition, EngineeringPromptId, EngineeringPrompts } from '../types';
 
-export const ENGINEERING_PROMPT_PASSWORD = 'Rezan90';
 export const CONTENT_SUMMARY_STORAGE_KEY = 'bazarvan-current-content-summary';
 
 export const ENGINEERING_PROMPT_IDS = {

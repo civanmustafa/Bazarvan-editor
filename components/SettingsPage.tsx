@@ -15,15 +15,16 @@ import {
   Save,
   Shield,
   SlidersHorizontal,
+  TerminalSquare,
   Users,
   Workflow,
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import ClientGoalSettings from './ClientGoalSettings';
-import EngineeringPromptsSettings from './EngineeringPromptsSettings';
 import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import ContentWritingPromptSettings from './ContentWritingPromptSettings';
 import AdminAiProviderSecretsSettings from './AdminAiProviderSecretsSettings';
+import AdminPromptRegistrySettings from './AdminPromptRegistrySettings';
 import { navigateToAppPath } from '../utils/appRoutes';
 import {
   loadSystemSettings,
@@ -46,6 +47,7 @@ import {
 } from '../constants/modelRegistry';
 import { ARTICLE_STATUS_OPTIONS } from '../constants/articleStatuses';
 import { notifyAiProviderCapabilitiesChanged } from '../utils/aiProviderCapabilities';
+import { notifyPromptRegistryChanged } from '../utils/promptRegistry';
 
 type SettingsPageProps = {
   section: string | null;
@@ -239,6 +241,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const tabs: SettingsTab[] = useMemo(() => [
     { key: 'system', label: 'النظام', path: '/settings/system', icon: <Shield size={16} /> },
     { key: 'ai', label: 'الذكاء الاصطناعي', path: '/settings/ai', icon: <Key size={16} /> },
+    { key: 'prompts', label: 'الأوامر الهندسية', path: '/settings/prompts', icon: <TerminalSquare size={16} /> },
     { key: 'n8n', label: 'n8n', path: '/settings/n8n', icon: <Workflow size={16} /> },
     { key: 'clients', label: 'العملاء', path: '/settings/clients', icon: <Users size={16} /> },
     { key: 'users', label: 'المستخدمون', path: '/settings/users', icon: <Users size={16} /> },
@@ -307,6 +310,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       ));
       setSecretStatus(response.secretStatus || EMPTY_SECRET_STATUS);
       notifyAiProviderCapabilitiesChanged();
+      notifyPromptRegistryChanged();
       setSavedMessage('تم حفظ الإعدادات.');
     } catch (saveError) {
       console.error('Failed to save system settings:', saveError);
@@ -506,10 +510,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
         />
       </SettingsSection>
 
-      <SettingsSection title="قوالب التحرير والتحليل">
-        <EngineeringPromptsSettings />
-      </SettingsSection>
-
       <SettingsSection title="الأوامر الافتراضية للتحليل الخارجي">
         <ExternalAnalysisDefaultCommandsSettings />
       </SettingsSection>
@@ -630,6 +630,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     </SettingsSection>
   );
 
+  const renderPromptSettings = () => (
+    <SettingsSection title="الأوامر الهندسية">
+      <AdminPromptRegistrySettings
+        values={settings.prompts}
+        onChange={(field, value) => updateSetting('prompts', field, value)}
+      />
+    </SettingsSection>
+  );
+
   const renderUsersSettings = () => (
     <div className="space-y-6">
       {renderPersonalPreferences()}
@@ -662,6 +671,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     }
 
     if (selectedSection === 'ai') return renderAiSettings();
+    if (selectedSection === 'prompts') return renderPromptSettings();
     if (selectedSection === 'n8n') return renderN8nSettings();
     if (selectedSection === 'clients') return renderClientSettings();
     if (selectedSection === 'roles') return renderRoleSettings();

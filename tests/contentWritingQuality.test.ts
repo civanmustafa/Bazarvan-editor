@@ -74,7 +74,7 @@ test('repair prompt prioritizes machine-detected failures and includes the full 
     language: 'ar',
   });
 
-  assert.match(prompt, /Machine-detected issues/);
+  assert.match(prompt, /المشكلات التي اكتشفها المحرك/);
   assert.match(prompt, /عقد جودة تجريبي/);
   assert.match(prompt, /نص قصير جدًا/);
   assert.match(prompt, /blocking/);

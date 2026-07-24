@@ -1,7 +1,7 @@
 import {
   DEFAULT_ENGINEERING_PROMPTS,
-  getEngineeringPrompt,
 } from '../constants/engineeringPrompts';
+import { getPromptTemplate } from '../constants/promptRegistry';
 import {
   EXTERNAL_AUTOMATIC_COMMAND_IDS,
   EXTERNAL_READY_COMMAND_DEFINITIONS,
@@ -19,8 +19,8 @@ export const EXTERNAL_ENGINEERING_COMMANDS: ExternalEngineeringCommand[] = EXTER
   .map((definition, index) => ({
     sequence: index + 1,
     id: definition.id,
-    label: getExternalReadyCommandLabel(definition.id, 'en'),
-    prompt: getEngineeringPrompt(DEFAULT_ENGINEERING_PROMPTS, definition.id),
+    label: getExternalReadyCommandLabel(definition.id, 'ar'),
+    prompt: getPromptTemplate(DEFAULT_ENGINEERING_PROMPTS, definition.id),
   }));
 
 export const EXTERNAL_AUTOMATIC_ENGINEERING_COMMANDS = EXTERNAL_AUTOMATIC_COMMAND_IDS
@@ -29,6 +29,10 @@ export const EXTERNAL_AUTOMATIC_ENGINEERING_COMMANDS = EXTERNAL_AUTOMATIC_COMMAN
 
 export const getExternalEngineeringCommand = (
   commandId: string | null,
-): ExternalEngineeringCommand | null => (
-  EXTERNAL_ENGINEERING_COMMANDS.find(command => command.id === commandId) ?? null
-);
+  templates: Record<string, string> = DEFAULT_ENGINEERING_PROMPTS,
+): ExternalEngineeringCommand | null => {
+  const command = EXTERNAL_ENGINEERING_COMMANDS.find(item => item.id === commandId);
+  return command
+    ? { ...command, prompt: getPromptTemplate(templates, command.id) }
+    : null;
+};

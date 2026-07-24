@@ -41,6 +41,10 @@ import {
   type ContentWritingQualityConfiguration,
 } from '../constants/contentWritingQuality';
 import {
+  getPromptTemplate,
+  PROMPT_TEMPLATE_IDS,
+} from '../constants/promptRegistry';
+import {
   buildContentWritingRepairPrompt,
   evaluateContentWritingQuality,
   type ContentWritingQualityReport,
@@ -233,6 +237,10 @@ export const executeStructuredContentWritingWorkflow = async (
 ): Promise<ContentWritingExecutionResult> => {
   const article = getArticleSnapshot(options.session);
   const qualityRuntime = getQualityRuntime(options.session, article.language);
+  const promptTemplates = isRecord(options.session.context_snapshot?.promptTemplates)
+    ? options.session.context_snapshot.promptTemplates as Record<string, string>
+    : {};
+  const promptTemplate = (id: string): string => getPromptTemplate(promptTemplates, id);
   const stepMap = new Map(
     (await getContentWritingSteps(options.session.id, { includeContent: true, includeMetadata: true }))
       .map(step => [step.step_key, step]),
@@ -406,6 +414,7 @@ export const executeStructuredContentWritingWorkflow = async (
     prompt: buildContentWritingCompetitorIndexPrompt({
       chunks: competitorChunks,
       language: article.language,
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.competitorIndex),
     }),
     stepIndex: competitorIndexDefinition.ordinal,
     stepCount: 2,
@@ -450,6 +459,7 @@ export const executeStructuredContentWritingWorkflow = async (
       qualityContract: qualityRuntime?.contract,
       minimumSections: qualityRuntime?.configuration.policy.outlineSections.min,
       maximumSections: qualityRuntime?.configuration.policy.outlineSections.max,
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.outline),
     }),
     stepIndex: outlineDefinition.ordinal,
     stepCount: 2,
@@ -531,6 +541,7 @@ export const executeStructuredContentWritingWorkflow = async (
             coveredIdeaIds: sectionCoverageByKey.get(previousDefinition.key)?.coveredIdeaIds || [],
           })),
         },
+        template: promptTemplate(PROMPT_TEMPLATE_IDS.bodySection),
       }),
       stepIndex: definition.ordinal,
       stepCount: definitions.length,
@@ -563,7 +574,11 @@ export const executeStructuredContentWritingWorkflow = async (
   });
   const introductionResult = await runStep({
     definition: introductionDefinition,
-    prompt: buildContentWritingIntroductionPrompt({ outline, bodyDraft }),
+    prompt: buildContentWritingIntroductionPrompt({
+      outline,
+      bodyDraft,
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.introduction),
+    }),
     stepIndex: introductionDefinition.ordinal,
     stepCount: definitions.length,
     maxOutputTokens: 4_000,
@@ -582,7 +597,11 @@ export const executeStructuredContentWritingWorkflow = async (
   });
   const faqResult = await runStep({
     definition: faqDefinition,
-    prompt: buildContentWritingFaqPrompt({ outline, draft: articleWithoutFaq }),
+    prompt: buildContentWritingFaqPrompt({
+      outline,
+      draft: articleWithoutFaq,
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.faq),
+    }),
     stepIndex: faqDefinition.ordinal,
     stepCount: definitions.length,
     maxOutputTokens: 6_000,
@@ -600,7 +619,11 @@ export const executeStructuredContentWritingWorkflow = async (
   });
   const conclusionResult = await runStep({
     definition: conclusionDefinition,
-    prompt: buildContentWritingConclusionPrompt({ outline, draft: introductionBodyAndFaqDraft }),
+    prompt: buildContentWritingConclusionPrompt({
+      outline,
+      draft: introductionBodyAndFaqDraft,
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.conclusion),
+    }),
     stepIndex: conclusionDefinition.ordinal,
     stepCount: definitions.length,
     maxOutputTokens: 4_000,
@@ -635,6 +658,7 @@ export const executeStructuredContentWritingWorkflow = async (
         },
       })),
       deterministicMissingIdeaIds: coverageBeforeAudit.missingIdeaIds,
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.coverageAudit),
     }),
     stepIndex: coverageAuditDefinition.ordinal,
     stepCount: definitions.length,
@@ -697,6 +721,7 @@ export const executeStructuredContentWritingWorkflow = async (
         repair,
         knowledgeItems: knowledge.items.filter(item => repair.ideaIds.includes(item.id)),
         sourceChunks: repairChunks,
+        template: promptTemplate(PROMPT_TEMPLATE_IDS.sectionRepair),
       }),
       stepIndex: repairDefinition.ordinal,
       stepCount: definitions.length + coverageAudit.repairs.length,
@@ -759,6 +784,7 @@ export const executeStructuredContentWritingWorkflow = async (
       knowledge,
       coverageAudit,
       qualityContract: qualityRuntime?.contract,
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.finalReview),
     }),
     stepIndex: finalDefinition.ordinal,
     stepCount: definitions.length + coverageAudit.repairs.length,
@@ -810,6 +836,7 @@ export const executeStructuredContentWritingWorkflow = async (
           draft: finalOutput,
           qualityContract: qualityRuntime.contract,
           language: article.language === 'en' ? 'en' : 'ar',
+          template: promptTemplate(PROMPT_TEMPLATE_IDS.qualityRepair),
         }),
         stepIndex: repairDefinition.ordinal,
         stepCount: definitions.length

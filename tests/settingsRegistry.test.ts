@@ -75,6 +75,19 @@ const importAiProviderCapabilities = async (): Promise<any> => {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 };
 
+const importPromptRegistry = async (): Promise<any> => {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL('../constants/promptRegistry.ts', import.meta.url))],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node20',
+    write: false,
+  });
+  const source = result.outputFiles[0].text;
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+};
+
 test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
   assert.equal(GEMINI_ANALYSIS_MODEL, MODEL_REGISTRY.gemini.free[0].id);
   assert.deepEqual(
@@ -128,6 +141,43 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');
   assert.equal(normalized.articles.defaultStatus, 'content_preparation');
+});
+
+test('PromptRegistry keeps Arabic defaults, required attachments, and valid administrator overrides', async () => {
+  const registry = await importPromptRegistry();
+  const definition = registry.PROMPT_REGISTRY_DEFINITIONS.find(
+    (item: { id: string }) => item.id === registry.PROMPT_TEMPLATE_IDS.bodySection,
+  );
+  assert.ok(definition);
+  assert.ok(definition.attachments.some(
+    (attachment: { id: string }) => attachment.id === 'coverageLedger',
+  ));
+  assert.match(registry.DEFAULT_PROMPT_TEMPLATES[definition.id], /سجل التغطية بين الأقسام/);
+
+  const customized = registry.DEFAULT_PROMPT_TEMPLATES[definition.id]
+    .replace('نفّذ كتابة قسم المتن', 'اكتب القسم المطلوب بعناية');
+  const normalized = registry.normalizePromptRegistrySettings({
+    templates: {
+      [definition.id]: customized,
+      [registry.PROMPT_TEMPLATE_IDS.outline]: 'نص ناقص بلا المتغيرات المطلوبة',
+      unknownPrompt: 'يجب تجاهله',
+    },
+  });
+  assert.equal(normalized.templates[definition.id], customized);
+  assert.equal(
+    normalized.templates[registry.PROMPT_TEMPLATE_IDS.outline],
+    registry.DEFAULT_PROMPT_TEMPLATES[registry.PROMPT_TEMPLATE_IDS.outline],
+  );
+  assert.equal(normalized.templates.unknownPrompt, undefined);
+});
+
+test('administrator prompt registry migration preserves saved templates when repeated', async () => {
+  const migration = await readWorkspaceFile('supabase/migrations/20260724000000_admin_prompt_registry.sql');
+  assert.match(migration, /insert into public\.app_settings/);
+  assert.match(migration, /'prompts'/);
+  assert.match(migration, /on conflict \(key\) do update/);
+  assert.match(migration, /public\.app_settings\.value -> 'templates'/);
+  assertBalancedSqlParentheses(migration);
 });
 
 test('ArticleStatusRegistry owns workflow states, dashboard priority, and analysis eligibility', () => {

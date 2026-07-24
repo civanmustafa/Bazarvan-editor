@@ -17,6 +17,11 @@ import {
   normalizeFinalContentWritingResult,
   prepareContentWritingResultForEditor,
 } from './contentWritingWorkflow';
+import {
+  getPromptTemplate,
+  PROMPT_TEMPLATE_IDS,
+  renderPromptTemplate,
+} from '../constants/promptRegistry';
 
 export type ContentWritingQualityCriterionResult = {
   id: string;
@@ -331,6 +336,7 @@ export const buildContentWritingRepairPrompt = (options: {
   draft: string;
   qualityContract: string;
   language: 'ar' | 'en';
+  template?: string;
 }): string => {
   const failures = options.report.criteria
     .filter(criterion => criterion.status === 'fail' || criterion.status === 'warn')
@@ -346,23 +352,19 @@ export const buildContentWritingRepairPrompt = (options: {
     ...criterion.messages.slice(0, 3).map(message => `   - ${message}`),
   ].join('\n')).join('\n');
   const languageInstruction = options.language === 'en'
-    ? 'Keep the complete article in English.'
+    ? 'حافظ على المقالة كاملة باللغة الإنجليزية.'
     : 'حافظ على المقالة كاملة باللغة العربية.';
-  return `Execute a focused quality repair of the complete article.
-
-${languageInstruction}
-The deterministic quality engine scored the draft ${options.report.score}/100; the required score is ${options.report.minimumScore}/100.
-Fix every blocking failure first, then important failures and warnings. Preserve accurate useful content, search intent, and natural keyword use. Do not invent facts, prices, statistics, or claims. Return the complete corrected article only as Markdown with exactly one H1.
-
-Quality contract:
-${options.qualityContract}
-
-Machine-detected issues:
-${audit || 'No individual issue details were produced; improve compliance with the full quality contract.'}
-
-<article_to_repair>
-${options.draft}
-</article_to_repair>`;
+  return renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.qualityRepair),
+    {
+      language_instruction: languageInstruction,
+      quality_score: options.report.score,
+      minimum_score: options.report.minimumScore,
+      quality_contract: options.qualityContract,
+      machine_issues: audit || 'لم ينتج المحرك تفاصيل فردية؛ حسّن الالتزام بعقد الجودة كاملًا.',
+      article_to_repair: options.draft,
+    },
+  );
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (

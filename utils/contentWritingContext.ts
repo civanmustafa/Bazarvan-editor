@@ -1,5 +1,6 @@
 import {
   CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET,
+  CONTENT_WRITING_PROTECTED_SYSTEM_GUARD,
   DEFAULT_CONTENT_WRITING_TEMPLATES,
   inspectContentWritingTemplate,
   renderContentWritingTemplate,
@@ -268,7 +269,13 @@ export const buildContentWritingPromptBundle = (
         missingValues: rendered.missingValues,
       });
     }
-    return { stage, role, content: rendered.text };
+    return {
+      stage,
+      role,
+      content: stage === 'instructions'
+        ? `${rendered.text}\n\n${CONTENT_WRITING_PROTECTED_SYSTEM_GUARD}`
+        : rendered.text,
+    };
   });
   const estimatedInputTokens = estimateContentWritingInputTokens(
     messages.map(message => message.content).join('\n\n'),

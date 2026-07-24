@@ -9,6 +9,7 @@ import {
 } from './externalAnalysisQueue';
 import { readExternalGeminiSettings } from './externalAnalysisSettings';
 import { getExternalEngineeringCommand } from './externalEngineeringCommands';
+import { readPromptRegistrySettings } from './promptRegistrySettings';
 import {
   buildExternalEngineeringPrompt,
   buildExternalEngineeringRepairPrompt,
@@ -184,7 +185,11 @@ const getJobCommandPosition = (
 const executeExternalEngineeringAnalysis = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
-  const command = getExternalEngineeringCommand(context.job.command_id);
+  const promptRegistry = await readPromptRegistrySettings();
+  const command = getExternalEngineeringCommand(
+    context.job.command_id,
+    promptRegistry.templates,
+  );
   if (!command) {
     throw createRetryError({
       code: 'engineering_command_not_registered',

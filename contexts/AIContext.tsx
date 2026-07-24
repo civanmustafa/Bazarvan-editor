@@ -30,6 +30,7 @@ import { getArticleReplacementContent, parseMarkdownToArticleHtml, parseMarkdown
 import { GEMINI_ANALYSIS_MODEL, GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_MODEL, OPENAI_ANALYSIS_MODEL } from '../constants/aiModels';
 import { getAiProviderModel, getDefaultAiPatchProvider } from '../constants/aiProviderCapabilities';
 import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
+import { PROMPT_TEMPLATE_IDS, getPromptTemplate, renderPromptTemplate } from '../constants/promptRegistry';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { normalizeGoalContext } from '../utils/goalContext';
@@ -371,36 +372,23 @@ const formatBulkFixViolationPrompt = (
     rule: CheckResult,
     item: NonNullable<CheckResult['violatingItems']>[number],
     targetText: string,
-    localContext?: Partial<BulkFixTargetContext>
+    localContext?: Partial<BulkFixTargetContext>,
+    template?: string,
 ): string => {
-    return [
-        'أصلح النص المحدد بناءً على بطاقة المعيار والمخالفة التالية.',
-        '',
-        formatAiReadOnlyLocalContext(localContext),
-        '',
-        '**بطاقة المعيار المخالف:**',
-        `- اسم المعيار: ${rule.title}`,
-        `- حالة المعيار: ${rule.status}`,
-        `- رسالة المخالفة: ${item.message || 'غير محددة'}`,
-        `- القيمة الحالية: ${rule.current}`,
-        `- القيمة المطلوبة: ${rule.required}`,
-        rule.description ? `- وصف المعيار: ${rule.description}` : '',
-        rule.details ? `- الشروط التفصيلية:\n${rule.details}` : '',
-        '',
-        '**النص المراد إصلاحه فقط:**',
-        `"""${targetText}"""`,
-        '',
-        '**تعليمات الإصلاح:**',
-        '- أصلح سبب المخالفة المذكور فقط مع الحفاظ على معنى النص وسياقه.',
-        '- اجعل النص الجديد مناسباً للقيمة المطلوبة والشروط التفصيلية إن وجدت.',
-        '- لا تبدأ النص كأنه فقرة مستقلة إذا كان السياق السابق يمهد له، ولا تختمه كأنه نهاية قسم إذا كان النص اللاحق يكمل الفكرة.',
-        '- تجنب تكرار المعلومات أو الكلمات المحورية الموجودة في النص السابق أو اللاحق، واجعل الربط طبيعياً ومختصراً.',
-        '- لا تضف شرحاً، ولا تسميات مثل "النص المقترح" أو "الإجابة".',
-        '- لا تعدّل خارج النص المحدد، ولا تضف معلومات غير موجودة في السياق.',
-        '',
-        'أرجع JSON حصراً بهذا الشكل:',
-        '{ "suggestions": ["النص البديل الجاهز فقط"] }',
-    ].filter(Boolean).join('\n');
+    return renderPromptTemplate(
+        template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.repairSingleViolation),
+        {
+            read_only_context: formatAiReadOnlyLocalContext(localContext),
+            criterion_title: rule.title,
+            criterion_status: rule.status,
+            violation_message: item.message || 'غير محددة',
+            current_value: rule.current,
+            required_value: rule.required,
+            criterion_description: rule.description ? `- وصف المعيار: ${rule.description}` : '',
+            criterion_details: rule.details ? `- الشروط التفصيلية:\n${rule.details}` : '',
+            target_text: targetText,
+        },
+    );
 };
 
 type BulkFixViolationContext = {
@@ -983,7 +971,8 @@ const formatBulkFixGroupPrompt = (
     selectedRuleTitles: Set<string>,
     protectionRules: CheckResult[],
     targetContext: BulkFixTargetContext,
-    articleLevelRules: CheckResult[] = []
+    articleLevelRules: CheckResult[] = [],
+    template?: string,
 ): string => {
     const uniqueRules = getUniqueBulkFixRules(group.violations);
     const targetRules = uniqueRules.filter(rule => selectedRuleTitles.has(rule.title));
@@ -1006,51 +995,18 @@ const formatBulkFixGroupPrompt = (
         ? 'سياق الموضع: هذه الفقرة تسبق قائمة تعداد آلية مباشرة، لذلك ينطبق عليها معيار تمهيد خطوات ولا ينطبق عليها معيار طول الفقرات العادية.'
         : 'سياق الموضع: هذه الوحدة لا تسبق قائمة تعداد آلية مباشرة، لذلك لا تعاملها كتمهيد خطوات ولا تطبق عليها شروط تمهيد الخطوات.';
 
-    return [
-        `هذه ${unitLabel} واحدة تحتاج إصلاحاً موجهاً دون كسر المعايير المرتبطة بها.`,
-        contextLine,
-        '',
-        formatAiReadOnlyLocalContext(targetContext),
-        '',
-        '**أهداف الإصلاح الأساسية:**',
-        targetRuleCards || '- لا توجد أهداف إصلاح محددة بوضوح.',
-        '',
-        '**قيود الحماية التي يجب عدم كسرها أثناء الإصلاح:**',
-        protectionRuleCards || '- لا توجد قيود حماية إضافية متاحة.',
-        '',
-        '**أهداف إضافية على مستوى المقال عند وجود سكور عام مخالف:**',
-        articleRuleCards || '- لا توجد أهداف عامة مخالفة على مستوى المقال.',
-        '',
-        '**النص المراد استبداله كوحدة واحدة:**',
-        `"""${targetText}"""`,
-        '',
-        '**تعليمات مهمة:**',
-        '- أصلح أهداف الإصلاح الأساسية فقط، واجعل قيود الحماية شروطاً ملزمة لا تكسرها أثناء التعديل.',
-        '- لا تحول قيود الحماية إلى هدف توسعة أو إعادة كتابة زائدة؛ دورها منع ظهور مخالفات جديدة.',
-        '- ارفق في تفكيرك قواعد وشروط أهداف الإصلاح وقيود الحماية عند صياغة البدائل.',
-        '- حافظ على وظيفة النص داخل القسم كما يوضح سياق الموضع، ولا تجعله يكرر ما قبله أو يقفز فوق ما بعده.',
-        '- لا تبدأ الاقتراح بمقدمة عامة إذا كان النص السابق بدأ الفكرة، ولا تعيد شرح معلومة ستأتي مباشرة في النص اللاحق.',
-        '- قدم اقتراحين فقط مختلفين قابلين للتطبيق، وكل اقتراح يجب أن يكون نصاً نهائياً جاهزاً للاستبدال.',
-        '- يجب أن يكون fixedText بلغة المقال فقط؛ إذا كانت لغة المقال الإنجليزية فاكتب fixedText بالإنجليزية، واجعل label وcriteriaChecks بالعربية.',
-        '- رتّب الاقتراحات بحيث يأتي أولاً الاقتراح الذي يجعل أكبر عدد من تدقيقات criteriaChecks بحالة pass، ثم الأقل كسراً للقيود.',
-        '- إذا كان هدف الإصلاح هو تقصير فقرة أو ضبط طولها، فلا تطل الجمل ولا تضف شرحاً غير ضروري.',
-        '- حافظ خصوصاً على قيود الحماية المعروضة فقط، ولا تضف كلمات بطيئة أو كلمات للحذف أو مخالفات ترقيم أو إحالات غامضة جديدة.',
-        '- لا تضف كلمات حث أو كلمات تحذيرية أو كلمات انتقالية فقط لإرضاء معيار عام ما لم يكن هذا المعيار هدف الإصلاح الأساسي.',
-        '- إذا ظهر معيار ضمن أهداف مستوى المقال، فاجعل status في criteriaChecks مبنياً على توافق النص المقترح نفسه مع شروط المعيار، ولا تجعله خارج الحد بسبب فقرات أخرى في المقال.',
-        '- الوضع العام للمقال موجود في before/current؛ أما after/status فيجب أن يصفا النص المقترح نفسه. إذا لم يمكن الجزم من النص المقترح وحده فاستخدم unknown بدلاً من fail.',
-        '- معيار تمهيد خطوات ينطبق فقط عندما تكون الفقرة الحالية قبل قائمة تعداد آلية مباشرة؛ غير ذلك لا تقيّمه ولا تذكره داخل criteriaChecks.',
-        '- إذا كانت الوحدة فقرة تمهيد خطوات، فلا تطبق عليها شروط طول الفقرات العادية؛ قيّمها بمعيار تمهيد خطوات فقط.',
-        '- حافظ على المعنى الأصلي وسياق الصفحة ولا تضف معلومات أو ادعاءات جديدة.',
-        '- إذا كان النص يحتوي عناوين، فاستخدم Markdown للحفاظ على مستويات العناوين قدر الإمكان.',
-        '- لا تكتب تسميات داخل fixedText مثل "النص المقترح" أو "الإجابة".',
-        '- يجب أن يكون الرد JSON صالحاً فقط، دون Markdown fences ودون شرح خارج JSON.',
-        '- المفتاح suggestions إلزامي، وكل عنصر داخله يجب أن يحتوي fixedText نصياً غير فارغ.',
-        '- داخل كل اقتراح أضف criteriaChecks لكل هدف إصلاح ولكل قيد حماية ولكل هدف مستوى مقال ظاهر، وفيه: criterionTitle، before، after، required، و status بقيمة pass أو warn أو fail أو unknown.',
-        '- إذا أصلح الاقتراح هدف الإصلاح لكنه كسر قيد حماية، فاعتبر status الخاص بهذا القيد fail ولا تعرضه كأنه ضمن الحد.',
-        '',
-        'أرجع JSON حصراً بهذا الشكل:',
-        '{ "suggestions": [ { "label": "اقتراح 1", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] }, { "label": "اقتراح 2", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] } ] }',
-    ].filter(Boolean).join('\n');
+    return renderPromptTemplate(
+        template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.repairBulkGroup),
+        {
+            target_unit_label: unitLabel,
+            context_line: contextLine,
+            read_only_context: formatAiReadOnlyLocalContext(targetContext),
+            target_rule_cards: targetRuleCards || '- لا توجد أهداف إصلاح محددة بوضوح.',
+            protection_rule_cards: protectionRuleCards || '- لا توجد قيود حماية إضافية متاحة.',
+            article_rule_cards: articleRuleCards || '- لا توجد أهداف عامة مخالفة على مستوى المقالة.',
+            target_text: targetText,
+        },
+    );
 };
 
 const normalizeCriteriaCheckStatus = (value: unknown): BulkFixCriterionCheck['status'] => {
@@ -5972,6 +5928,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         provider: AiPatchProvider = quickAiProvider,
         geminiModel?: string,
         progressCallback?: GeminiProgressCallback,
+        promptKind: 'single' | 'group' = 'group',
     ): Promise<BulkFixReviewItem> => {
         if (!editor || !analysisResults.structureAnalysis) {
             throw new Error('Editor or analysis data is not ready.');
@@ -5986,8 +5943,27 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const targetContext = getBulkFixTargetContext(editor, group, title);
         const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
         const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
+        const promptTemplates = engineeringPrompts as unknown as Record<string, string>;
+        const primaryViolation = group.violations[0];
+        const repairPrompt = promptKind === 'single' && primaryViolation
+            ? formatBulkFixViolationPrompt(
+                primaryViolation.rule,
+                primaryViolation.item,
+                targetText,
+                targetContext,
+                getPromptTemplate(promptTemplates, PROMPT_TEMPLATE_IDS.repairSingleViolation),
+            )
+            : formatBulkFixGroupPrompt(
+                group,
+                targetText,
+                selectedRuleTitles,
+                protectionRules,
+                targetContext,
+                articleLevelRules,
+                getPromptTemplate(promptTemplates, PROMPT_TEMPLATE_IDS.repairBulkGroup),
+            );
         const prompt = buildComprehensivePrompt(
-            formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules, targetContext, articleLevelRules),
+            repairPrompt,
             targetContext.sectionHeading,
             { includeArticleTitle: false, includeArticleToc: false }
         );
@@ -6057,7 +6033,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 .join(' | '),
             status: 'pending',
         };
-    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, buildComprehensivePrompt, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, getCurrentArticleAiIdentity]);
+    }, [editor, analysisResults.structureAnalysis, getSafeRangeText, title, engineeringPrompts, buildComprehensivePrompt, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, getCurrentArticleAiIdentity]);
 
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
         if (!editor || !analysisResults.structureAnalysis) return;
@@ -6096,6 +6072,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     detail: progress.message || p.detail,
                     geminiProgress: progress,
                 })),
+                'single',
             );
             replaceBulkFixReviewItems([proposedItem]);
             const suggestions = (proposedItem.variants && proposedItem.variants.length > 0
@@ -6221,7 +6198,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const protectionRules = getBulkFixProtectionRules(analysisResults.structureAnalysis, group, selectedRuleTitles, targetContext);
                 const articleLevelRules = getBulkFixArticleLevelRules(analysisResults.structureAnalysis, selectedRuleTitles);
                 const prompt = buildComprehensivePrompt(
-                    formatBulkFixGroupPrompt(group, targetText, selectedRuleTitles, protectionRules, targetContext, articleLevelRules),
+                    formatBulkFixGroupPrompt(
+                        group,
+                        targetText,
+                        selectedRuleTitles,
+                        protectionRules,
+                        targetContext,
+                        articleLevelRules,
+                        getPromptTemplate(
+                            engineeringPrompts as unknown as Record<string, string>,
+                            PROMPT_TEMPLATE_IDS.repairBulkGroup,
+                        ),
+                    ),
                     targetContext.sectionHeading,
                     { includeArticleTitle: false, includeArticleToc: false }
                 );
@@ -6344,7 +6332,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   : 'انتهى الإصلاح المتعدد وتم إنشاء الاقتراحات.',
         }));
         setIsAiLoading(prev => ({ ...prev, [provider]: false }));
-    }, [editor, analysisResults, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
+    }, [editor, analysisResults, engineeringPrompts, buildComprehensivePrompt, getSafeRangeText, logToAiHistory, replaceBulkFixReviewItems, resolveBulkFixReviewRange, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
 
     const updateBulkFixReviewItem = useCallback((itemId: string, updates: Partial<BulkFixReviewItem>) => {
         updateBulkFixReviewItems(items => items.map(item => (

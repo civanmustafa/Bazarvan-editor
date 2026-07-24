@@ -12,6 +12,11 @@ import {
   type ContentWritingTemplateSet,
 } from '../constants/contentWriting';
 import {
+  getPromptTemplate,
+  PROMPT_TEMPLATE_IDS,
+  type PromptRegistrySettings,
+} from '../constants/promptRegistry';
+import {
   buildContentWritingQualityContract,
   normalizeContentWritingQualityConfiguration,
   type ContentWritingQualityConfiguration,
@@ -40,6 +45,7 @@ import {
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import { executeOpenAiRequest } from './openAiExecutionEngine';
+import { readPromptRegistrySettings } from './promptRegistrySettings';
 import {
   createCompletedExternalContentWritingSession,
   createContentWritingSession,
@@ -136,23 +142,37 @@ const normalizeInputRecord = (value: unknown): JsonObject => isRecord(value) ? v
 
 const getContentWritingSettings = async (): Promise<{
   templates: ContentWritingTemplateSet;
+  promptRegistry: PromptRegistrySettings;
   maxInputTokens: number;
   allowModelFallback: boolean;
   qualityConfiguration: ContentWritingQualityConfiguration;
 }> => {
-  const { data, error } = await getExternalAnalysisSupabaseAdmin()
-    .from('app_settings')
-    .select('value')
-    .eq('key', 'ai')
-    .maybeSingle();
+  const [{ data, error }, promptRegistry] = await Promise.all([
+    getExternalAnalysisSupabaseAdmin()
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'ai')
+      .maybeSingle(),
+    readPromptRegistrySettings(),
+  ]);
   if (error && error.code !== '42P01') throw error;
   const ai = normalizeSystemSettingsMap({ ai: normalizeInputRecord(data?.value) }).ai;
   return {
     templates: {
-      instructions: String(ai[CONTENT_WRITING_TEMPLATE_FIELDS.instructions] || ''),
-      articleContext: String(ai[CONTENT_WRITING_TEMPLATE_FIELDS.articleContext] || ''),
-      generationRequest: String(ai[CONTENT_WRITING_TEMPLATE_FIELDS.generationRequest] || ''),
+      instructions: getPromptTemplate(
+        promptRegistry.templates,
+        PROMPT_TEMPLATE_IDS.contentWritingInstructions,
+      ) || String(ai[CONTENT_WRITING_TEMPLATE_FIELDS.instructions] || ''),
+      articleContext: getPromptTemplate(
+        promptRegistry.templates,
+        PROMPT_TEMPLATE_IDS.contentWritingArticleContext,
+      ) || String(ai[CONTENT_WRITING_TEMPLATE_FIELDS.articleContext] || ''),
+      generationRequest: getPromptTemplate(
+        promptRegistry.templates,
+        PROMPT_TEMPLATE_IDS.contentWritingGenerationRequest,
+      ) || String(ai[CONTENT_WRITING_TEMPLATE_FIELDS.generationRequest] || ''),
     },
+    promptRegistry,
     maxInputTokens: Number(ai.contentWritingMaxInputTokens),
     allowModelFallback: ai.geminiFreeModelFallbackEnabled !== false,
     qualityConfiguration: normalizeContentWritingQualityConfiguration({
@@ -433,6 +453,8 @@ export const prepareContentWritingConversation = async (
       qualityPolicyVersion: qualityConfiguration.policyVersion,
       qualityConfiguration,
       qualityContract,
+      promptRegistryVersion: settings.promptRegistry.registryVersion,
+      promptTemplates: settings.promptRegistry.templates,
       qualityInput,
     },
     allowModelFallback: settings.allowModelFallback,

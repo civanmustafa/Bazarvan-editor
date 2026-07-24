@@ -27,6 +27,7 @@ test('development and production use one API route registry', async () => {
     '/api/chatgpt',
     '/api/content-writing',
     '/api/ai/capabilities',
+    '/api/ai/prompt-registry',
     '/api/competitors',
     '/api/n8n/articles',
     '/api/articles/save',
@@ -49,6 +50,7 @@ test('API handlers share the same HTTP request and response adapters', async () 
     'api/adminUsers.ts',
     'api/adminAiProviderSecrets.ts',
     'api/aiCapabilities.ts',
+    'api/promptRegistry.ts',
     'api/articlesSave.ts',
     'api/assignedArticleAutomation.ts',
     'api/chatgpt.ts',
@@ -230,6 +232,45 @@ test('AI provider availability is owned by one capability service across server 
   assert.match(aiContext, /isAiProviderAvailable\(provider\)/);
   assert.match(settingsPage, /السماح للمستخدمين باستخدام Gemini Pro/);
   assert.match(settingsPage, /notifyAiProviderCapabilitiesChanged\(\)/);
+});
+
+test('administrator prompt registry is the shared source for editor and writing workflows', async () => {
+  const [
+    settingsPage,
+    registry,
+    promptApi,
+    userContext,
+    aiContext,
+    contentWritingEngine,
+    contentWritingWorkflow,
+    externalExecutor,
+    engineeringPrompts,
+  ] = await Promise.all([
+    readWorkspaceFile('components/SettingsPage.tsx'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+    readWorkspaceFile('api/promptRegistry.ts'),
+    readWorkspaceFile('contexts/UserContext.tsx'),
+    readWorkspaceFile('contexts/AIContext.tsx'),
+    readWorkspaceFile('server/contentWritingEngine.ts'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('server/externalEngineeringAnalysisExecutor.ts'),
+    readWorkspaceFile('constants/engineeringPrompts.ts'),
+  ]);
+
+  assert.match(settingsPage, /label: 'الأوامر الهندسية'/);
+  assert.match(settingsPage, /<AdminPromptRegistrySettings/);
+  assert.match(registry, /PROMPT_REGISTRY_DEFINITIONS/);
+  assert.match(registry, /attachments:/);
+  assert.match(promptApi, /authenticateApiRequest\(req\)/);
+  assert.match(userContext, /loadPromptRegistry\(\)/);
+  assert.match(userContext, /PROMPT_REGISTRY_CHANGED_EVENT/);
+  assert.match(aiContext, /PROMPT_TEMPLATE_IDS\.repairSingleViolation/);
+  assert.match(aiContext, /PROMPT_TEMPLATE_IDS\.repairBulkGroup/);
+  assert.match(contentWritingEngine, /promptTemplates: settings\.promptRegistry\.templates/);
+  assert.match(contentWritingWorkflow, /context_snapshot\?\.promptTemplates/);
+  assert.match(externalExecutor, /readPromptRegistrySettings\(\)/);
+  assert.doesNotMatch(engineeringPrompts, /ENGINEERING_PROMPT_PASSWORD|Rezan90/);
+  await assertFileMissing('components/EngineeringPromptsSettings.tsx');
 });
 
 test('administrator AI overrides are encrypted, admin-only, and resolved by shared provider engines', async () => {

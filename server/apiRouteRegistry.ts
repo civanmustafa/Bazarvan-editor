@@ -10,6 +10,7 @@ import competitorsHandler from '../api/competitors';
 import externalAnalysisHandler from '../api/externalAnalysis';
 import geminiHandler, { geminiProgressHandler } from '../api/gemini';
 import n8nArticlesHandler from '../api/n8nArticles';
+import promptRegistryHandler from '../api/promptRegistry';
 import systemSettingsHandler from '../api/systemSettings';
 
 export type ApiHandler = (req: any, res?: any) => Promise<Response | void>;
@@ -30,6 +31,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'content-writing', method: 'ALL', path: '/api/content-writing', handler: contentWritingHandler },
   { id: 'content-writing-external-result', method: 'ALL', path: '/api/content-writing/external-result', handler: contentWritingExternalResultHandler },
   { id: 'ai-capabilities', method: 'ALL', path: '/api/ai/capabilities', handler: aiCapabilitiesHandler },
+  { id: 'prompt-registry', method: 'ALL', path: '/api/ai/prompt-registry', handler: promptRegistryHandler },
   { id: 'competitors', method: 'ALL', path: '/api/competitors', handler: competitorsHandler },
   { id: 'n8n-articles', method: 'ALL', path: '/api/n8n/articles', handler: n8nArticlesHandler },
   { id: 'articles-save', method: 'ALL', path: '/api/articles/save', handler: articlesSaveHandler },

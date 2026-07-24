@@ -81,6 +81,7 @@ test('content-writing competitor instructions stay escaped inside one untrusted-
   assert.equal((contextMessage.match(new RegExp(maliciousMarker, 'g')) || []).length, 1);
   assert.doesNotMatch(bundle.variables.competitors_json, /<\/?(?:system|untrusted_competitor_sources_json)>/);
   assert.match(bundle.variables.competitors_json, /\\u003c\/untrusted_competitor_sources_json\\u003e/);
+  assert.match(bundle.messages[0].content, /قواعد نظام ثابتة مرفقة تلقائيًا/);
 });
 
 test('content-writing readiness requires three complete competitors and article prerequisites', async () => {
