@@ -69,6 +69,40 @@ test('every multi-choice field has a common default that exists in its option li
   }
 });
 
+test('page objective and search intent use distinct perspectives and labels', async () => {
+  const [{ getGoalContextFields, getGoalContextPresetOptions }, { translations }] = await Promise.all([
+    importWorkspaceModule('../utils/goalContext.ts'),
+    importWorkspaceModule('../components/translations.ts'),
+  ]);
+
+  for (const locale of ['ar', 'en'] as const) {
+    const fields = getGoalContextFields(translations[locale].goalTab);
+    const objective = fields.find((field: { key: string }) => field.key === 'objective');
+    const searchIntent = fields.find((field: { key: string }) => field.key === 'searchIntent');
+    assert.ok(objective && searchIntent);
+    assert.ok(objective.kind === 'select' && searchIntent.kind === 'select');
+    assert.ok(objective.helpText);
+    assert.ok(searchIntent.helpText);
+
+    const objectiveLabels = objective.options.map((option: { label: string }) => option.label);
+    const intentLabels = searchIntent.options.map((option: { label: string }) => option.label);
+    assert.equal(new Set(objectiveLabels).size, objectiveLabels.length);
+    assert.equal(new Set(intentLabels).size, intentLabels.length);
+    assert.deepEqual(
+      objectiveLabels.filter((label: string) => intentLabels.includes(label)),
+      [],
+    );
+
+    const presetLabels = getGoalContextPresetOptions(translations[locale].goalTab)
+      .map((option: { label: string }) => option.label);
+    assert.ok(presetLabels.every((label: string) => (
+      locale === 'ar'
+        ? label.includes('هدف:') && label.includes('نية:')
+        : label.includes('Goal:') && label.includes('Intent:')
+    )));
+  }
+});
+
 test('multi-choice storage supports multiple selections, custom text, and case-insensitive deduplication', async () => {
   const {
     parseGoalContextMultiValue,

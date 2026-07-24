@@ -310,6 +310,11 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
                   || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')}
               />
             )}
+            {field.helpText && (
+              <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+                {field.helpText}
+              </p>
+            )}
           </div>
         );
       })}

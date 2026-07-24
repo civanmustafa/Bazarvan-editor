@@ -15,6 +15,7 @@ export type GoalContextFieldConfig =
       kind: 'select';
       label: string;
       options: GoalContextOption[];
+      helpText?: string;
     }
   | {
       key: keyof GoalContext;
@@ -22,6 +23,7 @@ export type GoalContextFieldConfig =
       label: string;
       options: GoalContextOption[];
       customPlaceholder: string;
+      helpText?: string;
     }
   | {
       key: keyof GoalContext;
@@ -29,6 +31,7 @@ export type GoalContextFieldConfig =
       label: string;
       placeholder: string;
       visibleForAudienceScopes?: string[];
+      helpText?: string;
     };
 
 type GoalContextPreset = Pick<GoalContext, 'pageType' | 'objective' | 'audienceScope' | 'searchIntent'> & {
@@ -433,6 +436,7 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
       key: 'objective',
       label: t.objective,
       kind: 'select',
+      helpText: t.objectiveHelp,
       options: [
         { value: 'educate', label: contextOptions.educate },
         { value: 'compare', label: contextOptions.compare },
@@ -464,6 +468,7 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
       key: 'searchIntent',
       label: t.searchIntent,
       kind: 'select',
+      helpText: t.searchIntentHelp,
       options: [
         { value: 'informational', label: contextOptions.informational },
         { value: 'commercial', label: contextOptions.commercial },
