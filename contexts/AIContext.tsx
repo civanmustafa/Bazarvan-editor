@@ -33,7 +33,7 @@ import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringProm
 import { PROMPT_TEMPLATE_IDS, getPromptTemplate, renderPromptTemplate } from '../constants/promptRegistry';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
-import { normalizeGoalContext } from '../utils/goalContext';
+import { formatGoalContextValue, normalizeGoalContext } from '../utils/goalContext';
 import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
 import { getSelectedGeminiFreeModel, isGeminiFreeModelFallbackEnabled } from '../utils/geminiModelPreference';
 import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from '../utils/authenticatedApi';
@@ -84,12 +84,10 @@ const GOAL_CONTEXT_LABELS: Record<string, string> = {
     targetAudience: 'الجمهور المستهدف',
     audienceKnowledgeLevel: 'مستوى معرفة الجمهور',
     audienceNeeds: 'احتياجات الجمهور وأسئلته',
-    readerOutcome: 'النتيجة المطلوبة للقارئ',
-    desiredAction: 'الإجراء المطلوب بعد القراءة',
+    readerOutcome: 'النتيجة والإجراء المطلوب للقارئ',
     marketingStage: 'المرحلة التسويقية',
     uniqueAngle: 'الزاوية والقيمة المميزة',
-    evidenceRequirements: 'متطلبات الأدلة والمصادر',
-    freshnessRequirements: 'متطلبات حداثة المعلومات',
+    evidenceRequirements: 'متطلبات الأدلة وحداثة المعلومات',
     brandVoice: 'نبرة العلامة التجارية',
     topicSensitivity: 'حساسية الموضوع',
     searchIntent: 'نية البحث',
@@ -322,7 +320,13 @@ const formatGoalContext = (goalContext: GoalContext): string => {
     const normalizedContext = normalizeGoalContext(goalContext);
     return Object.entries(normalizedContext)
         .filter(([key, value]) => Boolean(GOAL_CONTEXT_LABELS[key]) && value.trim().length > 0)
-        .map(([key, value]) => `- ${GOAL_CONTEXT_LABELS[key] || key}: ${GOAL_CONTEXT_VALUE_LABELS[value] || value}`)
+        .map(([key, value]) => (
+            `- ${GOAL_CONTEXT_LABELS[key] || key}: ${
+                formatGoalContextValue(key as keyof GoalContext, value)
+                || GOAL_CONTEXT_VALUE_LABELS[value]
+                || value
+            }`
+        ))
         .join('\n');
 };
 

@@ -1,12 +1,15 @@
 import React from 'react';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown, Plus, Search, X } from 'lucide-react';
 import type { GoalContext } from '../types';
 import { useUser } from '../contexts/UserContext';
 import {
   getGoalContextFields,
   getGoalContextPresetOptions,
   isGoalContextFieldVisible,
+  parseGoalContextMultiValue,
+  serializeGoalContextMultiValue,
   SMART_CONTENT_BRIEF_REQUIRED_KEYS,
+  type GoalContextFieldConfig,
 } from '../utils/goalContext';
 
 type GoalContextFieldsProps = {
@@ -17,6 +20,143 @@ type GoalContextFieldsProps = {
 
 const fieldClass = 'w-full rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] px-2 py-2 text-sm text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]';
 const presetInputClass = 'w-full rounded-md border border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F] py-2 pe-8 ps-8 text-sm leading-5 text-[#333333] dark:text-[#e0e0e0] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-[#d4af37] focus:outline-none focus:ring-1 focus:ring-[#d4af37]';
+
+type MultiChoiceFieldConfig = Extract<GoalContextFieldConfig, { kind: 'multi-choice' }>;
+
+const GoalContextMultiChoice: React.FC<{
+  field: MultiChoiceFieldConfig;
+  value: string;
+  onChange: (value: string) => void;
+  labelledBy: string;
+  chooseLabel: string;
+  selectedLabel: string;
+  addLabel: string;
+  removeLabel: string;
+}> = ({
+  field,
+  value,
+  onChange,
+  labelledBy,
+  chooseLabel,
+  selectedLabel,
+  addLabel,
+  removeLabel,
+}) => {
+  const selectedValues = React.useMemo(() => parseGoalContextMultiValue(value), [value]);
+  const [customValue, setCustomValue] = React.useState('');
+  const selectedSet = React.useMemo(
+    () => new Set(selectedValues.map(item => item.toLocaleLowerCase())),
+    [selectedValues],
+  );
+
+  const updateValues = (values: string[]) => {
+    onChange(serializeGoalContextMultiValue(values));
+  };
+
+  const toggleOption = (optionValue: string) => {
+    const normalizedOption = optionValue.toLocaleLowerCase();
+    updateValues(selectedSet.has(normalizedOption)
+      ? selectedValues.filter(item => item.toLocaleLowerCase() !== normalizedOption)
+      : [...selectedValues, optionValue]);
+  };
+
+  const addCustomValue = () => {
+    const normalizedCustomValue = customValue.trim();
+    if (!normalizedCustomValue) return;
+    updateValues([...selectedValues, normalizedCustomValue]);
+    setCustomValue('');
+  };
+
+  return (
+    <div className="space-y-2">
+      {selectedValues.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedValues.map(selectedValue => {
+            const option = field.options.find(item => item.value === selectedValue);
+            return (
+              <span
+                key={selectedValue}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-[#d4af37]/30 bg-[#d4af37]/10 px-2 py-1 text-[11px] font-bold text-[#9b7b20] dark:bg-[#d4af37]/20 dark:text-[#f2d675]"
+              >
+                <span className="truncate">{option?.label || selectedValue}</span>
+                <button
+                  type="button"
+                  onClick={() => toggleOption(selectedValue)}
+                  className="flex-shrink-0 rounded-full p-0.5 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-950/40"
+                  aria-label={`${removeLabel} ${option?.label || selectedValue}`}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      <details
+        className="group rounded-md border border-gray-300 bg-white dark:border-[#3C3C3C] dark:bg-[#1F1F1F]"
+        aria-labelledby={labelledBy}
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-2 text-sm font-semibold text-[#333333] marker:content-none dark:text-[#e0e0e0]">
+          <span>
+            {selectedValues.length > 0
+              ? selectedLabel.replace('{count}', String(selectedValues.length))
+              : chooseLabel}
+          </span>
+          <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="space-y-2 border-t border-gray-200 p-2 dark:border-[#3C3C3C]">
+          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+            {field.options.map(option => {
+              const checked = selectedSet.has(option.value.toLocaleLowerCase());
+              return (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-start gap-2 rounded-md border px-2 py-2 text-xs font-semibold transition-colors ${
+                    checked
+                      ? 'border-[#d4af37]/50 bg-[#d4af37]/10 text-[#8b6e1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
+                      : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#2A2A2A]'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleOption(option.value)}
+                    className="mt-0.5 accent-[#d4af37]"
+                  />
+                  <span>{option.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 border-t border-gray-200 pt-2 dark:border-[#3C3C3C]">
+            <input
+              value={customValue}
+              onChange={event => setCustomValue(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addCustomValue();
+                }
+              }}
+              className={fieldClass}
+              placeholder={field.customPlaceholder}
+            />
+            <button
+              type="button"
+              onClick={addCustomValue}
+              disabled={!customValue.trim()}
+              className="inline-flex flex-shrink-0 items-center justify-center rounded-md bg-[#d4af37] px-3 text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={addLabel}
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+        </div>
+      </details>
+    </div>
+  );
+};
 
 const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
   goalContext,
@@ -110,47 +250,69 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
         )}
       </label>
 
-      {fields.filter(field => isGoalContextFieldVisible(field, goalContext)).map(field => (
-        <label key={field.key} className="block">
-          <span className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1">
-            {field.label}
-            {(SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)
-              || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')) && (
-              <span className="ms-1 text-red-500" aria-hidden="true">*</span>
-            )}
-          </span>
-          {field.kind === 'select' ? (
-            <select
-              value={goalContext[field.key]}
-              onChange={(event) => onChange(field.key, event.target.value)}
-              className={fieldClass}
-              required
+      {fields.filter(field => isGoalContextFieldVisible(field, goalContext)).map(field => {
+        const fieldId = `goal-context-${field.key}`;
+        const fieldLabelId = `${fieldId}-label`;
+        return (
+          <div key={field.key} className="block">
+            <label
+              id={fieldLabelId}
+              htmlFor={field.kind === 'multi-choice' ? undefined : fieldId}
+              className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1"
             >
-              {field.options.map(option => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          ) : field.kind === 'textarea' ? (
-            <textarea
-              value={goalContext[field.key]}
-              onChange={(event) => onChange(field.key, event.target.value)}
-              className={`${fieldClass} min-h-20 resize-y`}
-              placeholder={field.placeholder}
-              rows={3}
-              required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)}
-            />
-          ) : (
-            <input
-              value={goalContext[field.key]}
-              onChange={(event) => onChange(field.key, event.target.value)}
-              className={fieldClass}
-              placeholder={field.placeholder}
-              required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)
-                || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')}
-            />
-          )}
-        </label>
-      ))}
+              {field.label}
+              {(SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)
+                || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')) && (
+                <span className="ms-1 text-red-500" aria-hidden="true">*</span>
+              )}
+            </label>
+            {field.kind === 'select' ? (
+              <select
+                id={fieldId}
+                value={goalContext[field.key]}
+                onChange={(event) => onChange(field.key, event.target.value)}
+                className={fieldClass}
+                required
+              >
+                {field.options.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            ) : field.kind === 'multi-choice' ? (
+              <GoalContextMultiChoice
+                field={field}
+                value={goalContext[field.key]}
+                onChange={value => onChange(field.key, value)}
+                labelledBy={fieldLabelId}
+                chooseLabel={t.goalTab.multiChoiceSelect}
+                selectedLabel={t.goalTab.multiChoiceSelected}
+                addLabel={t.goalTab.multiChoiceAdd}
+                removeLabel={t.goalTab.multiChoiceRemove}
+              />
+            ) : field.kind === 'textarea' ? (
+              <textarea
+                id={fieldId}
+                value={goalContext[field.key]}
+                onChange={(event) => onChange(field.key, event.target.value)}
+                className={`${fieldClass} min-h-20 resize-y`}
+                placeholder={field.placeholder}
+                rows={3}
+                required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)}
+              />
+            ) : (
+              <input
+                id={fieldId}
+                value={goalContext[field.key]}
+                onChange={(event) => onChange(field.key, event.target.value)}
+                className={fieldClass}
+                placeholder={field.placeholder}
+                required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)
+                  || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')}
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 };

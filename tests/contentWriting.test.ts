@@ -73,6 +73,9 @@ test('content-writing context preserves all three competitor texts without trunc
 
   assert.equal(bundle.ready, true);
   assert.equal(competitors.length, 3);
+  const goalContext = JSON.parse(bundle.variables.goal_context);
+  assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'desiredAction'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'freshnessRequirements'));
   assert.equal(
     competitors[0].chunks.map((chunk: { text: string }) => chunk.text).join(''),
     longContent,
@@ -128,7 +131,7 @@ test('content writing can start from an empty article body', async () => {
 test('content-writing requires the complete smart brief before a new session starts', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
-  delete (input.goalContext as Partial<typeof input.goalContext>).targetAudience;
+  input.goalContext.targetAudience = '';
 
   const bundle = buildContentWritingPromptBundle(input);
   const goalContext = JSON.parse(bundle.variables.goal_context);

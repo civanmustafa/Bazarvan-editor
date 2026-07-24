@@ -18,6 +18,13 @@ export type GoalContextFieldConfig =
     }
   | {
       key: keyof GoalContext;
+      kind: 'multi-choice';
+      label: string;
+      options: GoalContextOption[];
+      customPlaceholder: string;
+    }
+  | {
+      key: keyof GoalContext;
       kind: 'text' | 'textarea';
       label: string;
       placeholder: string;
@@ -48,6 +55,28 @@ const GOAL_CONTEXT_FREE_TEXT_KEYS = new Set<keyof GoalContext>([
   'brandVoice',
 ]);
 
+export const parseGoalContextMultiValue = (value: string): string[] => {
+  const seen = new Set<string>();
+  return String(value || '')
+    .split(/\r?\n/)
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter(item => {
+      const normalized = item.toLocaleLowerCase();
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+};
+
+export const serializeGoalContextMultiValue = (values: string[]): string => (
+  parseGoalContextMultiValue(values.join('\n')).join('\n')
+);
+
+const mergeGoalContextValues = (...values: string[]): string => (
+  serializeGoalContextMultiValue(values.flatMap(parseGoalContextMultiValue))
+);
+
 export const SMART_CONTENT_BRIEF_REQUIRED_KEYS: ReadonlyArray<keyof GoalContext> = [
   'pageType',
   'objective',
@@ -56,10 +85,10 @@ export const SMART_CONTENT_BRIEF_REQUIRED_KEYS: ReadonlyArray<keyof GoalContext>
   'audienceKnowledgeLevel',
   'audienceNeeds',
   'readerOutcome',
-  'desiredAction',
   'marketingStage',
   'uniqueAngle',
   'evidenceRequirements',
+  'brandVoice',
   'topicSensitivity',
   'searchIntent',
 ];
@@ -245,6 +274,23 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
 
   const audienceScope = normalizeMappedChoice(normalized.audienceScope, {}, INITIAL_GOAL_CONTEXT.audienceScope);
 
+  const hasReaderOutcomeValue = Object.prototype.hasOwnProperty.call(source, 'readerOutcome');
+  const hasDesiredActionValue = Object.prototype.hasOwnProperty.call(source, 'desiredAction');
+  const readerOutcome = hasReaderOutcomeValue || hasDesiredActionValue
+    ? mergeGoalContextValues(
+        asStoredString(source.readerOutcome),
+        asStoredString(source.desiredAction),
+      )
+    : INITIAL_GOAL_CONTEXT.readerOutcome;
+  const hasEvidenceRequirementsValue = Object.prototype.hasOwnProperty.call(source, 'evidenceRequirements');
+  const hasFreshnessRequirementsValue = Object.prototype.hasOwnProperty.call(source, 'freshnessRequirements');
+  const evidenceRequirements = hasEvidenceRequirementsValue || hasFreshnessRequirementsValue
+    ? mergeGoalContextValues(
+        asStoredString(source.evidenceRequirements),
+        asStoredString(source.freshnessRequirements),
+      )
+    : INITIAL_GOAL_CONTEXT.evidenceRequirements;
+
   return {
     pageType: normalizeMappedChoice(normalized.pageType, pageTypeMap, INITIAL_GOAL_CONTEXT.pageType),
     objective: normalizeMappedChoice(normalized.objective, objectiveMap, INITIAL_GOAL_CONTEXT.objective),
@@ -257,16 +303,16 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
       INITIAL_GOAL_CONTEXT.audienceKnowledgeLevel,
     ),
     audienceNeeds: asStoredString(normalized.audienceNeeds).trim(),
-    readerOutcome: asStoredString(normalized.readerOutcome).trim(),
-    desiredAction: asStoredString(normalized.desiredAction).trim(),
+    readerOutcome,
+    desiredAction: readerOutcome,
     marketingStage: normalizeMappedChoice(
       normalized.marketingStage,
       {},
       INITIAL_GOAL_CONTEXT.marketingStage,
     ),
     uniqueAngle: asStoredString(normalized.uniqueAngle).trim(),
-    evidenceRequirements: asStoredString(normalized.evidenceRequirements).trim(),
-    freshnessRequirements: asStoredString(normalized.freshnessRequirements).trim(),
+    evidenceRequirements,
+    freshnessRequirements: evidenceRequirements,
     brandVoice: asStoredString(normalized.brandVoice).trim(),
     topicSensitivity: normalizeMappedChoice(
       normalized.topicSensitivity,
@@ -294,6 +340,22 @@ export const updateGoalContextField = (
   key: keyof GoalContext,
   value: string,
 ): GoalContext => {
+  if (key === 'readerOutcome' || key === 'desiredAction') {
+    return {
+      ...currentContext,
+      readerOutcome: value,
+      desiredAction: value,
+    };
+  }
+
+  if (key === 'evidenceRequirements' || key === 'freshnessRequirements') {
+    return {
+      ...currentContext,
+      evidenceRequirements: value,
+      freshnessRequirements: value,
+    };
+  }
+
   // Preserve spaces and line breaks while the user is actively typing.
   // normalizeGoalContext still trims these fields at persistence and prompt boundaries.
   if (GOAL_CONTEXT_FREE_TEXT_KEYS.has(key)) {
@@ -334,6 +396,22 @@ export const normalizeClientGoalContexts = (
 
 export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldConfig[] => {
   const contextOptions = t.contextOptions;
+  const isEnglish = t === translations.en.goalTab;
+  const localized = (arabic: string, english: string): string => (
+    isEnglish ? english : arabic
+  );
+  const multiOption = (
+    value: string,
+    arabic: string,
+    english: string,
+  ): GoalContextOption => ({
+    value,
+    label: localized(arabic, english),
+  });
+  const customPlaceholder = localized(
+    'اكتب خيارًا آخر ثم اضغط Enter',
+    'Type another option, then press Enter',
+  );
 
   return [
     {
@@ -398,83 +476,139 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
     {
       key: 'targetAudience',
       label: t.targetAudience,
-      kind: 'textarea',
-      placeholder: t.targetAudiencePlaceholder,
+      kind: 'multi-choice',
+      customPlaceholder,
+      options: [
+        multiOption('general-interested-audience', 'جمهور عام مهتم بالموضوع', 'General audience interested in the topic'),
+        multiOption('business-owners', 'أصحاب الأعمال والشركات', 'Business and company owners'),
+        multiOption('decision-makers', 'صناع القرار والمديرون', 'Decision-makers and managers'),
+        multiOption('professionals-specialists', 'المهنيون والمتخصصون', 'Professionals and specialists'),
+        multiOption('beginners-learners', 'المبتدئون والمتعلمون', 'Beginners and learners'),
+        multiOption('potential-customers', 'العملاء المحتملون', 'Potential customers'),
+        multiOption('existing-customers', 'العملاء الحاليون', 'Existing customers'),
+        multiOption('consumers-end-users', 'المستهلكون والمستخدمون النهائيون', 'Consumers and end users'),
+      ],
     },
     {
       key: 'audienceKnowledgeLevel',
       label: t.audienceKnowledgeLevel,
-      kind: 'select',
+      kind: 'multi-choice',
+      customPlaceholder,
       options: [
         { value: 'beginner', label: contextOptions.beginner },
         { value: 'intermediate', label: contextOptions.intermediate },
         { value: 'expert', label: contextOptions.expert },
         { value: 'mixed', label: contextOptions.mixed },
+        multiOption('non-technical', 'غير تقني', 'Non-technical'),
+        multiOption('specialized-technical', 'تقني متخصص', 'Specialized technical'),
       ],
     },
     {
       key: 'audienceNeeds',
       label: t.audienceNeeds,
-      kind: 'textarea',
-      placeholder: t.audienceNeedsPlaceholder,
+      kind: 'multi-choice',
+      customPlaceholder,
+      options: [
+        multiOption('clear-practical-answers', 'إجابات واضحة وعملية', 'Clear, practical answers'),
+        multiOption('step-by-step-guidance', 'خطوات تنفيذية مرتبة', 'Step-by-step guidance'),
+        multiOption('compare-alternatives', 'مقارنة البدائل والخيارات', 'Compare alternatives and options'),
+        multiOption('solve-specific-problem', 'حل مشكلة محددة', 'Solve a specific problem'),
+        multiOption('costs-pricing', 'فهم التكاليف والأسعار', 'Understand costs and pricing'),
+        multiOption('avoid-mistakes', 'تجنب الأخطاء والمخاطر', 'Avoid mistakes and risks'),
+        multiOption('examples-use-cases', 'أمثلة وحالات استخدام', 'Examples and use cases'),
+        multiOption('common-questions', 'إجابات عن الأسئلة الشائعة', 'Answers to common questions'),
+      ],
     },
     {
       key: 'readerOutcome',
-      label: t.readerOutcome,
-      kind: 'textarea',
-      placeholder: t.readerOutcomePlaceholder,
-    },
-    {
-      key: 'desiredAction',
-      label: t.desiredAction,
-      kind: 'textarea',
-      placeholder: t.desiredActionPlaceholder,
+      label: localized('النتيجة والإجراء المطلوب للقارئ', 'Reader outcome and desired action'),
+      kind: 'multi-choice',
+      customPlaceholder,
+      options: [
+        multiOption('understand-and-next-step', 'فهم الموضوع ومعرفة الخطوة التالية', 'Understand the topic and know the next step'),
+        multiOption('make-informed-decision', 'اتخاذ قرار مبني على معلومات', 'Make an informed decision'),
+        multiOption('apply-recommendations', 'تطبيق الخطوات أو التوصيات', 'Apply the steps or recommendations'),
+        multiOption('compare-and-choose', 'مقارنة الخيارات واختيار الأنسب', 'Compare options and choose the best fit'),
+        multiOption('request-service-contact', 'طلب خدمة أو استشارة أو تواصل', 'Request a service, consultation, or contact'),
+        multiOption('solve-problem-independently', 'حل المشكلة بصورة مستقلة', 'Solve the problem independently'),
+        multiOption('build-confidence', 'زيادة الفهم والثقة بالقرار', 'Increase understanding and confidence'),
+      ],
     },
     {
       key: 'marketingStage',
       label: t.marketingStage,
-      kind: 'select',
+      kind: 'multi-choice',
+      customPlaceholder,
       options: [
         { value: 'awareness', label: contextOptions.awareness },
         { value: 'consideration', label: contextOptions.consideration },
         { value: 'decision', label: contextOptions.decision },
         { value: 'retention', label: contextOptions.retentionStage },
+        multiOption('loyalty-advocacy', 'الولاء والتوصية', 'Loyalty and advocacy'),
       ],
     },
     {
       key: 'uniqueAngle',
       label: t.uniqueAngle,
-      kind: 'textarea',
-      placeholder: t.uniqueAnglePlaceholder,
+      kind: 'multi-choice',
+      customPlaceholder,
+      options: [
+        multiOption('practical-actionable', 'طرح عملي واضح قابل للتطبيق', 'Clear, practical, and actionable'),
+        multiOption('comprehensive-coverage', 'تغطية شاملة ومنظمة', 'Comprehensive, structured coverage'),
+        multiOption('evidence-data-led', 'طرح مبني على الأدلة والبيانات', 'Evidence- and data-led'),
+        multiOption('simple-for-beginners', 'تبسيط الموضوع للمبتدئين', 'Simplified for beginners'),
+        multiOption('expert-depth', 'عمق متخصص للخبراء', 'Specialist depth for experts'),
+        multiOption('local-market-context', 'ملاءمة للسوق أو المنطقة المستهدفة', 'Adapted to the target market or region'),
+        multiOption('neutral-comparison', 'مقارنة محايدة تساعد على الاختيار', 'Neutral comparison that supports choice'),
+        multiOption('mistakes-and-solutions', 'كشف الأخطاء الشائعة وحلولها', 'Common mistakes and their solutions'),
+      ],
     },
     {
       key: 'evidenceRequirements',
-      label: t.evidenceRequirements,
-      kind: 'textarea',
-      placeholder: t.evidenceRequirementsPlaceholder,
-    },
-    {
-      key: 'freshnessRequirements',
-      label: t.freshnessRequirements,
-      kind: 'textarea',
-      placeholder: t.freshnessRequirementsPlaceholder,
+      label: localized('متطلبات الأدلة وحداثة المعلومات', 'Evidence and information freshness'),
+      kind: 'multi-choice',
+      customPlaceholder,
+      options: [
+        multiOption('reliable-current-sources', 'مصادر موثوقة وحديثة', 'Reliable, current sources'),
+        multiOption('official-primary-sources', 'مصادر رسمية وأولية', 'Official and primary sources'),
+        multiOption('studies-statistics', 'دراسات وإحصائيات موثقة', 'Documented studies and statistics'),
+        multiOption('expert-quotes', 'آراء أو اقتباسات خبراء', 'Expert opinions or quotations'),
+        multiOption('cases-real-examples', 'دراسات حالة وأمثلة واقعية', 'Case studies and real examples'),
+        multiOption('current-laws-regulations', 'قوانين ولوائح محدثة', 'Current laws and regulations'),
+        multiOption('recent-prices-dates', 'أسعار وتواريخ ومعلومات زمنية حديثة', 'Recent prices, dates, and time-sensitive information'),
+        multiOption('source-every-claim', 'توثيق كل ادعاء مهم بمصدر', 'Source every material claim'),
+      ],
     },
     {
       key: 'brandVoice',
       label: t.brandVoice,
-      kind: 'textarea',
-      placeholder: t.brandVoicePlaceholder,
+      kind: 'multi-choice',
+      customPlaceholder,
+      options: [
+        multiOption('formal-professional', 'رسمي احترافي', 'Formal and professional'),
+        multiOption('clear-simple', 'واضح وبسيط', 'Clear and simple'),
+        multiOption('friendly-conversational', 'ودود وحواري', 'Friendly and conversational'),
+        multiOption('authoritative-expert', 'خبير وموثوق', 'Authoritative and expert'),
+        multiOption('neutral-objective', 'محايد وموضوعي', 'Neutral and objective'),
+        multiOption('persuasive-balanced', 'إقناعي متوازن دون مبالغة', 'Persuasive and balanced without hype'),
+        multiOption('educational-guiding', 'تعليمي وإرشادي', 'Educational and guiding'),
+        multiOption('reassuring-supportive', 'مطمئن وداعم', 'Reassuring and supportive'),
+      ],
     },
     {
       key: 'topicSensitivity',
       label: t.topicSensitivity,
-      kind: 'select',
+      kind: 'multi-choice',
+      customPlaceholder,
       options: [
         { value: 'standard', label: contextOptions.standardSensitivity },
         { value: 'health', label: contextOptions.healthSensitivity },
         { value: 'financial', label: contextOptions.financialSensitivity },
         { value: 'legal', label: contextOptions.legalSensitivity },
         { value: 'safety', label: contextOptions.safetySensitivity },
+        multiOption('privacy-security', 'خصوصية وأمن معلومات', 'Privacy and information security'),
+        multiOption('cultural-religious', 'ثقافي أو ديني', 'Cultural or religious'),
+        multiOption('political-public', 'سياسي أو شأن عام', 'Political or public affairs'),
       ],
     },
   ];
@@ -486,9 +620,20 @@ const getFieldOptionLabel = (
   value: string,
 ): string => {
   const field = fields.find(item => item.key === key);
-  if (!field || field.kind !== 'select') return value;
+  if (!field || (field.kind !== 'select' && field.kind !== 'multi-choice')) return value;
+  if (field.kind === 'multi-choice') {
+    return parseGoalContextMultiValue(value)
+      .map(item => field.options.find(option => option.value === item)?.label || item)
+      .join('، ');
+  }
   return field.options.find(option => option.value === value)?.label || value;
 };
+
+export const formatGoalContextValue = (
+  key: keyof GoalContext,
+  value: string,
+  t: GoalTabTranslations = translations.ar.goalTab,
+): string => getFieldOptionLabel(getGoalContextFields(t), key, value);
 
 const getTranslatedChoiceLabel = (
   t: GoalTabTranslations,
@@ -550,9 +695,7 @@ export const formatGoalContextForCopy = (
     .filter(field => isGoalContextFieldVisible(field, normalizedContext))
     .forEach(field => {
       const rawValue = normalizedContext[field.key];
-      const value = field.kind !== 'select'
-        ? rawValue
-        : field.options.find(option => option.value === rawValue)?.label || rawValue;
+      const value = getFieldOptionLabel(fields, field.key, rawValue);
       lines.push(`${field.label}:`);
       lines.push(value || '-');
       lines.push('');

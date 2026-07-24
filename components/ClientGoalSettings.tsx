@@ -15,6 +15,7 @@ import {
   isGoalContextFieldVisible,
   normalizeGoalContext,
   parseClientGoalContextBulk,
+  parseGoalContextMultiValue,
   updateGoalContextField,
 } from '../utils/goalContext';
 
@@ -106,6 +107,11 @@ const ClientGoalSettings: React.FC = () => {
   const formatFieldValue = (field: (typeof contextFields)[number], context: GoalContext) => {
     const value = context[field.key];
     if (!value) return '-';
+    if (field.kind === 'multi-choice') {
+      return parseGoalContextMultiValue(value)
+        .map(item => field.options.find(option => option.value === item)?.label || item)
+        .join('، ');
+    }
     if (field.kind !== 'select') return value;
     return field.options.find(option => option.value === value)?.label || value;
   };
