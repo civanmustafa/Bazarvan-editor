@@ -1,4 +1,5 @@
 import {
+  cancelContentWritingSession,
   getContentWritingSessionDetail,
   isContentWritingSessionActive,
   type ContentWritingSession,
@@ -12,6 +13,8 @@ import {
 type ContentWritingActivityOptions = {
   activityId: string;
   action?: string;
+  articleId?: string;
+  articleTitle?: string;
 };
 
 type ActiveMonitor = {
@@ -62,6 +65,8 @@ export const syncContentWritingSessionActivity = (
       : session.keySuffix || undefined,
     progress: session.progress,
     payload,
+    articleId: options.articleId || session.articleId,
+    articleTitle: options.articleTitle,
     surface: 'content_writing',
     action: options.action,
     message: typeof session.progress.message === 'string'
@@ -73,6 +78,9 @@ export const syncContentWritingSessionActivity = (
       ...common,
       stage: session.status,
       completed: false,
+      cancel: async () => {
+        await cancelContentWritingSession(session.id);
+      },
     });
     return;
   }
@@ -108,6 +116,8 @@ export const monitorContentWritingSessionActivity = (
       finishAiExecutionActivity(options.activityId, {
         surface: 'content_writing',
         action: options.action,
+        articleId: options.articleId,
+        articleTitle: options.articleTitle,
         outcome: 'failed',
         stage: 'failed',
         message: 'تجاوزت متابعة جلسة الكتابة مدة 24 ساعة دون حالة نهائية.',
@@ -126,6 +136,8 @@ export const monitorContentWritingSessionActivity = (
       updateAiExecutionActivity(options.activityId, {
         surface: 'content_writing',
         action: options.action,
+        articleId: options.articleId,
+        articleTitle: options.articleTitle,
         completed: false,
         stage: 'reconnecting',
         message: error instanceof Error

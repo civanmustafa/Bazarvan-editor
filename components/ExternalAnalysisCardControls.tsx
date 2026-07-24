@@ -21,6 +21,7 @@ import {
 } from '../constants/externalAnalysisCommands';
 import {
   cancelAllExternalAnalysisJobs,
+  cancelExternalAnalysisJob,
   ExternalAnalysisRequestError,
   enqueueExternalEngineeringAnalysis,
   enqueueExternalSemanticAnalysis,
@@ -140,25 +141,36 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
       job: ExternalAnalysisDashboardSummary['latestSemanticJob'],
     ) => {
       const activityId = `external-analysis:${articleId}:${kind}`;
+      const action = kind === 'engineering' && (summary?.activeEngineeringCount || 0) > 1
+        ? `حزمة الأوامر الهندسية (${summary?.activeEngineeringCount})`
+        : job?.command_label || (kind === 'semantic' ? 'توليد الصيغ وLSI' : 'الأوامر اليدوية الجاهزة');
+      const activityContext = {
+        articleId,
+        articleTitle,
+        commandId: job?.command_id || undefined,
+        surface: job?.job_type || (kind === 'semantic' ? 'semantic_keywords_lsi' : 'engineering_command'),
+        action,
+      };
       if (active && job) {
         if (!trackedExternalAiActivitiesRef.current.has(activityId)) {
           trackedExternalAiActivitiesRef.current.add(activityId);
           beginAiExecutionActivity({
             id: activityId,
+            ...activityContext,
             provider: 'gemini',
             requestedProvider: 'gemini',
-            surface: job.job_type,
-            action: job.command_label || (kind === 'semantic' ? 'توليد الصيغ وLSI' : 'الأوامر اليدوية الجاهزة'),
             stage: job.status,
             message: kind === 'semantic'
               ? 'مهمة توليد الصيغ وLSI تعمل في الخلفية.'
               : 'مهمة الأوامر الهندسية تعمل في الخلفية.',
+            cancel: async () => {
+              await cancelExternalAnalysisJob(articleId, job.id);
+            },
           });
         }
         updateAiExecutionActivity(activityId, {
+          ...activityContext,
           requestedProvider: 'gemini',
-          surface: job.job_type,
-          action: job.command_label || (kind === 'semantic' ? 'توليد الصيغ وLSI' : 'الأوامر اليدوية الجاهزة'),
           stage: job.status,
           progress: job.progress,
           completed: false,
@@ -167,6 +179,9 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             : kind === 'semantic'
               ? 'جار توليد الصيغ البديلة وكلمات LSI...'
               : 'جار تنفيذ الأمر الهندسي...',
+          cancel: async () => {
+            await cancelExternalAnalysisJob(articleId, job.id);
+          },
         });
         return;
       }
@@ -177,9 +192,8 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           ? 'cancelled'
           : 'failed';
       finishAiExecutionActivity(activityId, {
+        ...activityContext,
         requestedProvider: 'gemini',
-        surface: job.job_type,
-        action: job.command_label || (kind === 'semantic' ? 'توليد الصيغ وLSI' : 'الأوامر اليدوية الجاهزة'),
         stage: job.status,
         progress: job.progress,
         payload: job.result,
@@ -190,11 +204,20 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     };
 
     syncJob('semantic', semanticJobActive, summary?.latestSemanticJob || null);
-    syncJob('engineering', engineeringActive, summary?.latestEngineeringJob || null);
+    syncJob(
+      'engineering',
+      engineeringActive,
+      engineeringActive
+        ? summary?.activeEngineeringRootJob || summary?.latestEngineeringJob || null
+        : summary?.latestEngineeringJob || null,
+    );
   }, [
     articleId,
+    articleTitle,
     engineeringActive,
     semanticJobActive,
+    summary?.activeEngineeringCount,
+    summary?.activeEngineeringRootJob,
     summary?.latestEngineeringJob,
     summary?.latestSemanticJob,
   ]);

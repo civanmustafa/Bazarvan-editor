@@ -2456,16 +2456,28 @@ const callChatGptAnalysis = async (
     const requestId = `openai-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
     const activityId = `openai:${requestId}`;
     let activityFinished = false;
+    let manualCancellationRequested = false;
+    const activityContext = {
+        articleId: usageContext.articleId,
+        articleTitle: usageContext.articleTitle,
+        articleKey: usageContext.articleKey,
+        commandId: usageContext.commandId,
+        surface: usageContext.source,
+        action: usageContext.action || usageContext.commandLabel,
+    };
     beginAiExecutionActivity({
         id: activityId,
+        ...activityContext,
         provider: 'openai',
         requestedProvider: 'openai',
         model,
         requestedModel: model,
-        surface: usageContext.source,
-        action: usageContext.action || usageContext.commandLabel,
         stage: 'connecting',
         message: 'جار الاتصال بـ OpenAI وتجربة المفتاح المحدد...',
+        cancel: () => {
+            manualCancellationRequested = true;
+            controller.abort();
+        },
     });
 
     try {
@@ -2496,6 +2508,7 @@ const callChatGptAnalysis = async (
             message?: string,
         ) => {
             finishAiExecutionActivity(activityId, {
+                ...activityContext,
                 provider: effectiveProvider,
                 requestedProvider: 'openai',
                 model: typeof data.model === 'string' ? data.model : model,
@@ -2504,8 +2517,6 @@ const callChatGptAnalysis = async (
                 outcome,
                 payload: data,
                 message,
-                surface: usageContext.source,
-                action: usageContext.action || usageContext.commandLabel,
             });
             activityFinished = true;
         };
@@ -2541,10 +2552,26 @@ const callChatGptAnalysis = async (
         };
     } catch (error) {
         window.clearTimeout(timeoutId);
+        if (manualCancellationRequested) {
+            if (!activityFinished) {
+                finishAiExecutionActivity(activityId, {
+                    ...activityContext,
+                    provider: 'openai',
+                    requestedProvider: 'openai',
+                    model,
+                    requestedModel: model,
+                    httpStatus: 499,
+                    outcome: 'cancelled',
+                    message: 'تم إيقاف طلب OpenAI يدويًا.',
+                });
+            }
+            throw new GeminiAnalysisCancelledError();
+        }
         console.error("Error calling ChatGPT API:", error);
         if (!activityFinished) {
             const timedOut = error instanceof Error && error.name === 'AbortError';
             finishAiExecutionActivity(activityId, {
+                ...activityContext,
                 provider: 'openai',
                 requestedProvider: 'openai',
                 model,
@@ -2556,8 +2583,6 @@ const callChatGptAnalysis = async (
                     : error instanceof Error
                         ? error.message
                         : 'خطأ غير معروف',
-                surface: usageContext.source,
-                action: usageContext.action || usageContext.commandLabel,
             });
         }
         if (error instanceof Error && error.name === 'AbortError') {
@@ -5768,6 +5793,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setAiInsertionPatches(prev => ({ ...prev, chatgpt: parsedResult.patches }));
             logReadyCommandAnalysis('chatgpt', parsedResult, historyMeta);
         } catch (e) {
+            if (isGeminiAnalysisCancelledError(e)) return;
             setAiResults(prev => ({ ...prev, chatgpt: "فشل تحليل ChatGPT." }));
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));

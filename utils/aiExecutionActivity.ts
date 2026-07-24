@@ -9,9 +9,14 @@ export const AI_EXECUTION_ACTIVITY_EVENT = 'bazarvan:ai-execution-activity';
 
 export type AiExecutionState = 'running' | 'success' | 'failed' | 'cancelled';
 export type AiCredentialTier = 'free' | 'paid' | 'unknown';
+export type AiExecutionCancelHandler = () => void | Promise<void>;
 
 export type AiExecutionActivity = {
   id: string;
+  articleId: string;
+  articleTitle: string;
+  articleKey: string;
+  commandId: string;
   provider: string;
   requestedProvider: string;
   model: string;
@@ -30,6 +35,7 @@ export type AiExecutionActivity = {
   modelCount?: number;
   totalAttemptCount?: number;
   httpStatus?: number;
+  cancellable: boolean;
   entries: AiKeyUsageEntry[];
   startedAt: string;
   updatedAt: string;
@@ -38,6 +44,10 @@ export type AiExecutionActivity = {
 
 type AiExecutionActivityInput = {
   id?: string;
+  articleId?: string;
+  articleTitle?: string;
+  articleKey?: string;
+  commandId?: string;
   provider?: string;
   requestedProvider?: string;
   model?: string;
@@ -62,9 +72,13 @@ type AiExecutionActivityInput = {
   completed?: boolean;
   outcome?: AiKeyUsageOutcome | 'cancelled';
   startedAt?: string;
+  cancel?: AiExecutionCancelHandler | null;
 };
 
 const activityStore = new Map<string, AiExecutionActivity>();
+const activityCancelHandlers = new Map<string, AiExecutionCancelHandler>();
+const cancellationRequests = new Set<string>();
+const manuallyCancelledActivities = new Set<string>();
 const MAX_STORED_ACTIVITIES = 24;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -233,19 +247,46 @@ const pruneActivityStore = (): void => {
     .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
   while (activityStore.size > MAX_STORED_ACTIVITIES && oldestTerminal.length > 0) {
     const activity = oldestTerminal.shift();
-    if (activity) activityStore.delete(activity.id);
+    if (activity) {
+      activityStore.delete(activity.id);
+      activityCancelHandlers.delete(activity.id);
+      cancellationRequests.delete(activity.id);
+      manuallyCancelledActivities.delete(activity.id);
+    }
   }
 };
 
 const publishActivity = (activity: AiExecutionActivity): AiExecutionActivity => {
-  activityStore.set(activity.id, activity);
+  const publishedActivity: AiExecutionActivity = {
+    ...activity,
+    cancellable: activity.state === 'running' && activityCancelHandlers.has(activity.id),
+  };
+  activityStore.set(publishedActivity.id, publishedActivity);
   pruneActivityStore();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<AiExecutionActivity>(AI_EXECUTION_ACTIVITY_EVENT, {
-      detail: activity,
+      detail: publishedActivity,
     }));
   }
-  return activity;
+  return publishedActivity;
+};
+
+const syncCancelHandler = (
+  id: string,
+  input: AiExecutionActivityInput,
+  state: AiExecutionState,
+): void => {
+  if (state !== 'running') {
+    activityCancelHandlers.delete(id);
+    cancellationRequests.delete(id);
+    return;
+  }
+  if (!Object.prototype.hasOwnProperty.call(input, 'cancel')) return;
+  if (typeof input.cancel === 'function') {
+    activityCancelHandlers.set(id, input.cancel);
+    return;
+  }
+  activityCancelHandlers.delete(id);
 };
 
 const createInitialActivity = (
@@ -256,6 +297,10 @@ const createInitialActivity = (
   const provider = toText(input.provider) || 'AI';
   return {
     id,
+    articleId: toText(input.articleId),
+    articleTitle: toText(input.articleTitle),
+    articleKey: toText(input.articleKey),
+    commandId: toText(input.commandId),
     provider,
     requestedProvider: toText(input.requestedProvider) || provider,
     model: toText(input.model),
@@ -274,6 +319,7 @@ const createInitialActivity = (
     ...(toPositiveNumber(input.modelCount) ? { modelCount: toPositiveNumber(input.modelCount) } : {}),
     ...(toPositiveNumber(input.totalAttemptCount) ? { totalAttemptCount: toPositiveNumber(input.totalAttemptCount) } : {}),
     ...(toPositiveNumber(input.httpStatus) ? { httpStatus: toPositiveNumber(input.httpStatus) } : {}),
+    cancellable: false,
     entries: input.entries || [],
     startedAt: toText(input.startedAt) || now,
     updatedAt: now,
@@ -312,6 +358,8 @@ export const beginAiExecutionActivity = (
   input: AiExecutionActivityInput,
 ): AiExecutionActivity => {
   const id = toText(input.id) || createActivityId();
+  manuallyCancelledActivities.delete(id);
+  cancellationRequests.delete(id);
   const current = activityStore.get(id);
   if (current) {
     return updateAiExecutionActivity(id, {
@@ -320,10 +368,12 @@ export const beginAiExecutionActivity = (
       completed: false,
     });
   }
-  return publishActivity(createInitialActivity(id, {
+  const initial = createInitialActivity(id, {
     ...input,
     state: input.state || 'running',
-  }));
+  });
+  syncCancelHandler(id, input, initial.state);
+  return publishActivity(initial);
 };
 
 export const updateAiExecutionActivity = (
@@ -341,7 +391,7 @@ export const updateAiExecutionActivity = (
   const current = activityStore.get(normalizedId)
     || createInitialActivity(normalizedId, mergedInput);
   const provider = toText(mergedInput.provider) || current.provider;
-  const stage = toText(mergedInput.stage) || current.stage;
+  let stage = toText(mergedInput.stage) || current.stage;
   const payload = mergedInput.payload ?? mergedInput.progress;
   const defaultOutcome = getDefaultOutcome(mergedInput, stage);
   const payloadEntries = collectAiKeyUsageEntries(payload, defaultOutcome);
@@ -350,12 +400,26 @@ export const updateAiExecutionActivity = (
     mergeEntries(mergedInput.entries || [], payloadEntries),
   );
   const now = new Date().toISOString();
-  const state = getActivityState(current.state, mergedInput, stage);
+  let state = getActivityState(current.state, mergedInput, stage);
+  let message = toText(mergedInput.message) || current.message;
+  if (
+    manuallyCancelledActivities.has(normalizedId)
+    && current.state === 'cancelled'
+    && mergedInput.completed === false
+  ) {
+    state = 'cancelled';
+    stage = current.stage;
+    message = current.message;
+  }
   const keySuffix = normalizeAiKeySuffix(mergedInput.keySuffix)
     || findLatestSuccessfulKeySuffix(entries)
     || normalizeAiKeySuffix(current.keySuffix);
   const activity: AiExecutionActivity = {
     ...current,
+    articleId: toText(mergedInput.articleId) || current.articleId,
+    articleTitle: toText(mergedInput.articleTitle) || current.articleTitle,
+    articleKey: toText(mergedInput.articleKey) || current.articleKey,
+    commandId: toText(mergedInput.commandId) || current.commandId,
     provider,
     requestedProvider: toText(mergedInput.requestedProvider) || current.requestedProvider || provider,
     model: toText(mergedInput.model) || current.model,
@@ -365,7 +429,7 @@ export const updateAiExecutionActivity = (
     stage,
     surface: toText(mergedInput.surface) || current.surface,
     action: toText(mergedInput.action) || current.action,
-    message: toText(mergedInput.message) || current.message,
+    message,
     keySuffix,
     ...(toPositiveNumber(mergedInput.currentKeyIndex) ? { currentKeyIndex: toPositiveNumber(mergedInput.currentKeyIndex) } : {}),
     ...(toPositiveNumber(mergedInput.keyCount) ? { keyCount: toPositiveNumber(mergedInput.keyCount) } : {}),
@@ -378,6 +442,7 @@ export const updateAiExecutionActivity = (
     updatedAt: now,
     ...(state !== 'running' ? { completedAt: current.completedAt || now } : { completedAt: undefined }),
   };
+  syncCancelHandler(normalizedId, mergedInput, state);
   return publishActivity(activity);
 };
 
@@ -404,6 +469,51 @@ export const getAiExecutionActivities = (): AiExecutionActivity[] => (
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 );
 
+export const requestAiExecutionActivityCancel = async (
+  id: string,
+): Promise<AiExecutionActivity> => {
+  const normalizedId = toText(id);
+  const current = activityStore.get(normalizedId);
+  const cancel = activityCancelHandlers.get(normalizedId);
+  if (!current || current.state !== 'running') {
+    throw new Error('هذه العملية ليست نشطة الآن.');
+  }
+  if (!cancel) {
+    throw new Error('لا تدعم هذه العملية الإيقاف من نافذة الحالة.');
+  }
+  if (cancellationRequests.has(normalizedId)) return current;
+
+  cancellationRequests.add(normalizedId);
+  updateAiExecutionActivity(normalizedId, {
+    stage: 'cancelling',
+    completed: false,
+    message: 'جار إرسال طلب الإيقاف إلى المهمة الأصلية...',
+  });
+  try {
+    await cancel();
+    manuallyCancelledActivities.add(normalizedId);
+    return finishAiExecutionActivity(normalizedId, {
+      stage: 'cancelled',
+      outcome: 'cancelled',
+      httpStatus: 499,
+      message: 'تم إيقاف العملية يدويًا من نافذة حالة الذكاء الاصطناعي.',
+    });
+  } catch (error) {
+    cancellationRequests.delete(normalizedId);
+    updateAiExecutionActivity(normalizedId, {
+      stage: 'cancellation_failed',
+      completed: false,
+      message: error instanceof Error
+        ? `تعذر إيقاف العملية: ${error.message}`
+        : 'تعذر إيقاف العملية بسبب خطأ غير معروف.',
+    });
+    throw error;
+  }
+};
+
 export const resetAiExecutionActivitiesForTests = (): void => {
   activityStore.clear();
+  activityCancelHandlers.clear();
+  cancellationRequests.clear();
+  manuallyCancelledActivities.clear();
 };

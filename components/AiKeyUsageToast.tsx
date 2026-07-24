@@ -6,8 +6,12 @@ import {
   ChevronUp,
   CircleDollarSign,
   Clock3,
+  FileText,
   KeyRound,
   Loader2,
+  MapPin,
+  MousePointerClick,
+  Square,
   X,
   XCircle,
 } from 'lucide-react';
@@ -16,6 +20,7 @@ import {
   AI_EXECUTION_ACTIVITY_EVENT,
   formatAiProviderName,
   getAiExecutionActivities,
+  requestAiExecutionActivityCancel,
   type AiExecutionActivity,
   type AiExecutionState,
 } from '../utils/aiExecutionActivity';
@@ -32,6 +37,12 @@ const SURFACE_LABELS: Record<string, [string, string]> = {
   content_writing: ['كتابة المقالة', 'Article writing'],
   engineering_command: ['أمر هندسي جاهز', 'Engineering command'],
   internal_linking_ai_review: ['مراجعة الربط الداخلي', 'Internal-link review'],
+  goal_context_generation: ['توليد سياق هدف الصفحة', 'Page goal context'],
+  draft_title_generation: ['اقتراح عنوان المقالة', 'Draft title'],
+  ready_commands_batch: ['حزمة الأوامر الجاهزة', 'Ready commands bundle'],
+  floating_toolbar: ['شريط المحرر العائم', 'Floating editor toolbar'],
+  heading_analysis: ['تحليل العناوين', 'Heading analysis'],
+  plain_ai_analysis: ['أمر ذكاء اصطناعي مباشر', 'Direct AI command'],
 };
 
 const STAGE_LABELS: Record<string, [string, string]> = {
@@ -43,6 +54,10 @@ const STAGE_LABELS: Record<string, [string, string]> = {
   retrying: ['إعادة المحاولة', 'Retrying'],
   retry_scheduled: ['إعادة المحاولة مجدولة', 'Retry scheduled'],
   resuming: ['جار الاستئناف', 'Resuming'],
+  reconnecting: ['إعادة الاتصال بالحالة', 'Reconnecting'],
+  cancelling: ['جار طلب الإيقاف', 'Stopping'],
+  cancel_requested: ['تم إرسال طلب الإيقاف', 'Stop requested'],
+  cancellation_failed: ['تعذر الإيقاف', 'Stop failed'],
   'failed-key': ['فشل المفتاح', 'Key failed'],
   'switching-key': ['الانتقال إلى مفتاح آخر', 'Switching key'],
   'switching-model': ['الانتقال إلى موديل آخر', 'Switching model'],
@@ -99,6 +114,23 @@ const formatDuration = (startedAt: string, completedAt: string | undefined, now:
   return `${minutes}m ${seconds % 60}s`;
 };
 
+const formatLastUpdateAge = (updatedAt: string, now: number, isArabic: boolean): string => {
+  const updated = new Date(updatedAt).getTime();
+  const seconds = Number.isFinite(updated) ? Math.max(0, Math.floor((now - updated) / 1_000)) : 0;
+  if (seconds < 5) return isArabic ? 'الآن' : 'now';
+  if (seconds < 60) return isArabic ? `منذ ${seconds} ث` : `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return isArabic ? `منذ ${minutes} د` : `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return isArabic ? `منذ ${hours} س` : `${hours}h ago`;
+};
+
+const getCompactActivityId = (id: string): string => {
+  const normalized = id.trim();
+  if (normalized.length <= 16) return normalized;
+  return `…${normalized.slice(-12)}`;
+};
+
 const StatusIcon: React.FC<{ state: AiExecutionState }> = ({ state }) => {
   if (state === 'running') return <Loader2 size={15} className="animate-spin" />;
   if (state === 'success') return <CheckCircle2 size={15} />;
@@ -113,6 +145,8 @@ const AiExecutionMonitor: React.FC = () => {
   const [selectedId, setSelectedId] = useState(() => activities[0]?.id || '');
   const [collapsed, setCollapsed] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [cancellingId, setCancellingId] = useState('');
+  const [cancelError, setCancelError] = useState('');
 
   useEffect(() => {
     const handleActivity = (event: Event) => {
@@ -158,6 +192,10 @@ const AiExecutionMonitor: React.FC = () => {
     setSelectedId(activities[0]?.id || '');
   }, [activities, selectedId]);
 
+  useEffect(() => {
+    setCancelError('');
+  }, [selectedId]);
+
   const selected = activities.find(activity => activity.id === selectedId) || activities[0];
   const activeCount = activities.filter(activity => activity.state === 'running').length;
   const orderedEntries = useMemo(() => {
@@ -181,8 +219,23 @@ const AiExecutionMonitor: React.FC = () => {
   const requestedModelChanged = selected.requestedModel
     && selected.model
     && selected.requestedModel !== selected.model;
-  const surfaceLabel = selected.action
-    || getLabel(SURFACE_LABELS, selected.surface, isArabic);
+  const sourceLabel = selected.surface
+    ? getLabel(SURFACE_LABELS, selected.surface, isArabic)
+    : (isArabic ? 'داخل المحرر' : 'Inside the editor');
+  const surfaceLabel = selected.action || sourceLabel;
+  const articleLabel = selected.articleTitle
+    || selected.articleKey
+    || (selected.articleId
+      ? `${isArabic ? 'مقالة' : 'Article'} #${selected.articleId.slice(0, 8)}`
+      : (isArabic ? 'المسودة الحالية غير المحفوظة' : 'Current unsaved draft'));
+  const lastUpdateAge = formatLastUpdateAge(selected.updatedAt, now, isArabic);
+  const lastUpdateTime = new Date(selected.updatedAt).getTime();
+  const isStale = selected.state === 'running'
+    && Number.isFinite(lastUpdateTime)
+    && now - lastUpdateTime >= 60_000;
+  const isCancelling = cancellingId === selected.id
+    || selected.stage === 'cancelling'
+    || selected.stage === 'cancel_requested';
   const keyStatus = selected.state === 'running'
     ? selected.currentKeyIndex && selected.keyCount
       ? `${isArabic ? 'تجربة المفتاح' : 'Trying key'} ${selected.currentKeyIndex}/${selected.keyCount}`
@@ -192,6 +245,20 @@ const AiExecutionMonitor: React.FC = () => {
       : selected.state === 'cancelled'
         ? (isArabic ? 'تم إيقاف الطلب' : 'Request stopped')
         : (isArabic ? 'لم ينجح الطلب' : 'Request failed');
+  const handleCancel = async () => {
+    if (!selected.cancellable || isCancelling) return;
+    setCancellingId(selected.id);
+    setCancelError('');
+    try {
+      await requestAiExecutionActivityCancel(selected.id);
+    } catch (error) {
+      setCancelError(error instanceof Error
+        ? error.message
+        : (isArabic ? 'تعذر إيقاف العملية.' : 'Could not stop the operation.'));
+    } finally {
+      setCancellingId('');
+    }
+  };
 
   return (
     <div
@@ -227,7 +294,8 @@ const AiExecutionMonitor: React.FC = () => {
           type="button"
           onClick={() => setActivities(current => current.filter(activity => activity.id !== selected.id))}
           className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-[#333] dark:hover:text-gray-100"
-          aria-label={isArabic ? 'إغلاق' : 'Close'}
+          aria-label={isArabic ? 'إخفاء النافذة فقط' : 'Hide window only'}
+          title={isArabic ? 'إخفاء النافذة فقط؛ لا يوقف العملية' : 'Hide this window only; the operation keeps running'}
         >
           <X size={14} />
         </button>
@@ -258,6 +326,75 @@ const AiExecutionMonitor: React.FC = () => {
           )}
 
           <div className="space-y-2.5 p-3">
+            <div className="rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/5 p-2.5 text-[10px] dark:bg-[#d4af37]/[0.07]">
+              <div className="flex min-w-0 items-start gap-2">
+                <FileText size={13} className="mt-0.5 shrink-0 text-[#b8922e]" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-gray-400">{isArabic ? 'المقالة التي تعمل عليها العملية' : 'Article being processed'}</div>
+                  <div className="mt-0.5 truncate font-black text-gray-800 dark:text-gray-100" title={articleLabel}>
+                    {articleLabel}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="flex min-w-0 items-start gap-1.5 rounded-md bg-white/70 p-2 dark:bg-black/15">
+                  <MapPin size={12} className="mt-0.5 shrink-0 text-gray-400" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-gray-400">{isArabic ? 'الموضع / المصدر' : 'Location / source'}</div>
+                    <div className="mt-0.5 truncate font-black text-gray-700 dark:text-gray-100" title={sourceLabel}>{sourceLabel}</div>
+                  </div>
+                </div>
+                <div className="flex min-w-0 items-start gap-1.5 rounded-md bg-white/70 p-2 dark:bg-black/15">
+                  <MousePointerClick size={12} className="mt-0.5 shrink-0 text-gray-400" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-gray-400">{isArabic ? 'الزر / العملية' : 'Button / operation'}</div>
+                    <div className="mt-0.5 truncate font-black text-gray-700 dark:text-gray-100" title={surfaceLabel}>{surfaceLabel}</div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 font-bold text-gray-400">
+                <span title={selected.id}>{isArabic ? 'معرّف المهمة' : 'Task ID'}: <bdi className="font-mono">{getCompactActivityId(selected.id)}</bdi></span>
+                <span className={isStale ? 'text-amber-600 dark:text-amber-300' : ''}>
+                  {isArabic ? 'آخر تحديث' : 'Last update'}: {lastUpdateAge}
+                </span>
+              </div>
+            </div>
+
+            {selected.state === 'running' && (
+              <div className="flex items-center gap-2">
+                {selected.cancellable ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleCancel()}
+                    disabled={isCancelling}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black text-red-700 hover:bg-red-100 disabled:cursor-wait disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/15"
+                  >
+                    {isCancelling ? <Loader2 size={12} className="animate-spin" /> : <Square size={11} fill="currentColor" />}
+                    {isCancelling
+                      ? (isArabic ? 'جار الإيقاف...' : 'Stopping...')
+                      : (isArabic ? 'إيقاف هذه العملية' : 'Stop this operation')}
+                  </button>
+                ) : (
+                  <div className="rounded-lg bg-gray-100 px-2.5 py-2 text-[10px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                    {isArabic
+                      ? 'سيظهر الإيقاف بعد إنشاء المهمة وربطها بالخادم.'
+                      : 'Stop becomes available after the server task is created.'}
+                  </div>
+                )}
+                {isStale && (
+                  <div className="min-w-0 text-[10px] font-bold leading-4 text-amber-600 dark:text-amber-300">
+                    {isArabic ? 'لم تصل حالة جديدة منذ مدة؛ يمكنك إيقافها بأمان.' : 'No recent status update; you can stop it safely.'}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {cancelError && (
+              <div className="rounded-lg bg-red-50 px-2.5 py-2 text-[10px] font-bold text-red-700 dark:bg-red-500/10 dark:text-red-200">
+                {cancelError}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg bg-gray-50 p-2 dark:bg-[#1d1d1d]">
                 <div className="mb-1 font-bold text-gray-400">{isArabic ? 'المزوّد والنوع' : 'Provider and tier'}</div>

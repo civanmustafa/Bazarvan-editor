@@ -170,25 +170,32 @@ export const runGeminiAnalysisEngine = async ({
 }: RunGeminiEngineOptions): Promise<GeminiEngineResult> => {
     const progressId = createGeminiProgressId();
     const activityId = `gemini:${progressId}`;
+    const activityContext = {
+        articleId: request.telemetry?.articleId,
+        articleTitle: request.telemetry?.articleTitle,
+        articleKey: request.telemetry?.articleKey,
+        commandId: request.telemetry?.commandId,
+        surface: request.telemetry?.source,
+        action: request.telemetry?.action || request.telemetry?.commandLabel,
+    };
     beginAiExecutionActivity({
         id: activityId,
+        ...activityContext,
         provider: request.provider,
         requestedProvider: request.provider,
         model: request.model,
         requestedModel: request.model,
-        surface: request.telemetry?.source,
-        action: request.telemetry?.action || request.telemetry?.commandLabel,
         stage: 'queued',
         message: 'جار بدء الاتصال بمزود الذكاء الاصطناعي...',
+        cancel: () => cancelGeminiAnalysisEngine(progressId),
     });
     const reportProgress: GeminiProgressCallback = progress => {
         updateAiExecutionActivity(activityId, {
+            ...activityContext,
             provider: progress.provider,
             requestedProvider: request.provider,
             model: progress.model,
             requestedModel: progress.requestedModel || request.model,
-            surface: request.telemetry?.source,
-            action: request.telemetry?.action || request.telemetry?.commandLabel,
             progress,
             completed: progress.completed === true,
         });
@@ -241,14 +248,13 @@ export const runGeminiAnalysisEngine = async ({
                 ? 'success'
                 : 'failed';
         finishAiExecutionActivity(activityId, {
+            ...activityContext,
             provider: effectiveProvider,
             requestedProvider: request.provider,
             model: typeof result.data.model === 'string' ? result.data.model : result.progress?.model || request.model,
             requestedModel: typeof result.data.requestedModel === 'string'
                 ? result.data.requestedModel
                 : result.progress?.requestedModel || request.model,
-            surface: request.telemetry?.source,
-            action: request.telemetry?.action || request.telemetry?.commandLabel,
             progress: result.progress,
             payload: result.data,
             httpStatus: result.status,
@@ -261,12 +267,11 @@ export const runGeminiAnalysisEngine = async ({
         return result;
     } catch (error) {
         finishAiExecutionActivity(activityId, {
+            ...activityContext,
             provider: request.provider,
             requestedProvider: request.provider,
             model: request.model,
             requestedModel: request.model,
-            surface: request.telemetry?.source,
-            action: request.telemetry?.action || request.telemetry?.commandLabel,
             stage: 'failed',
             outcome: 'failed',
             message: error instanceof Error ? error.message : 'تعذر الاتصال بمزود الذكاء الاصطناعي.',

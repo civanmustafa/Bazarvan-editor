@@ -484,6 +484,8 @@ const ContentWritingPanel: React.FC = () => {
     const activityId = `content-writing:${pendingStart.idempotencyKey}`;
     beginAiExecutionActivity({
       id: activityId,
+      articleId,
+      articleTitle,
       provider,
       requestedProvider: provider,
       model: selectedModel,
@@ -518,6 +520,8 @@ const ContentWritingPanel: React.FC = () => {
       const activityOptions = {
         activityId,
         action: isArabic ? 'كتابة المقالة' : 'Article writing',
+        articleId,
+        articleTitle,
       };
       syncContentWritingSessionActivity(started.session, [], activityOptions);
       monitorContentWritingSessionActivity(started.session.id, activityOptions);
@@ -538,6 +542,8 @@ const ContentWritingPanel: React.FC = () => {
         setErrorPresentation(getErrorPresentation(error, isArabic));
       }
       finishAiExecutionActivity(activityId, {
+        articleId,
+        articleTitle,
         provider,
         requestedProvider: provider,
         model: selectedModel,
@@ -632,6 +638,8 @@ const ContentWritingPanel: React.FC = () => {
     contentWritingActivityIdsRef.current.set(selectedSession.id, activityId);
     beginAiExecutionActivity({
       id: activityId,
+      articleId,
+      articleTitle,
       provider,
       requestedProvider: provider,
       model: selectedModel,
@@ -653,6 +661,8 @@ const ContentWritingPanel: React.FC = () => {
       const activityOptions = {
         activityId,
         action: isArabic ? 'استئناف كتابة المقالة' : 'Resume article writing',
+        articleId,
+        articleTitle,
       };
       syncContentWritingSessionActivity(resumed, [], activityOptions);
       monitorContentWritingSessionActivity(resumed.id, activityOptions);
@@ -660,6 +670,8 @@ const ContentWritingPanel: React.FC = () => {
     } catch (error) {
       setErrorPresentation(getErrorPresentation(error, isArabic));
       finishAiExecutionActivity(activityId, {
+        articleId,
+        articleTitle,
         provider,
         requestedProvider: provider,
         model: selectedModel,
@@ -846,12 +858,14 @@ const ContentWritingPanel: React.FC = () => {
     const activityOptions = {
       activityId,
       action: isArabic ? 'كتابة المقالة' : 'Article writing',
+      articleId,
+      articleTitle,
     };
     syncContentWritingSessionActivity(selectedSession, workflowSteps, activityOptions);
     if (isContentWritingSessionActive(selectedSession)) {
       monitorContentWritingSessionActivity(selectedSession.id, activityOptions);
     }
-  }, [isArabic, selectedSession, sessionKeyUsageEntries, workflowSteps]);
+  }, [articleId, articleTitle, isArabic, selectedSession, sessionKeyUsageEntries, workflowSteps]);
   const displayedWorkflowStepLabel = currentWorkflowStep
     ? getStepLabel(currentWorkflowStep, isArabic)
     : workflowStepLabel;

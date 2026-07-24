@@ -9,6 +9,7 @@ import {
   beginAiExecutionActivity,
   finishAiExecutionActivity,
   getAiExecutionActivities,
+  requestAiExecutionActivityCancel,
   resetAiExecutionActivitiesForTests,
   updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity.ts';
@@ -139,4 +140,46 @@ test('unified AI activity follows live key, model, and paid-to-free fallback sta
   assert.ok(completed.entries.some(entry => entry.keySuffix === 'PAID01' && entry.outcome === 'failed'));
   assert.ok(completed.entries.some(entry => entry.keySuffix === 'FREE02' && entry.outcome === 'success'));
   assert.equal(getAiExecutionActivities()[0].id, 'activity-test');
+});
+
+test('unified AI activity identifies its article and stops the original operation', async () => {
+  resetAiExecutionActivitiesForTests();
+  let cancellationCount = 0;
+  const started = beginAiExecutionActivity({
+    id: 'identified-activity',
+    articleId: 'article-123',
+    articleTitle: 'دليل التحول الرقمي',
+    articleKey: 'digital-transformation',
+    commandId: 'commands-bundle',
+    surface: 'engineering_command',
+    action: 'حزمة الأوامر الهندسية',
+    cancel: async () => {
+      cancellationCount += 1;
+    },
+  });
+
+  assert.equal(started.articleTitle, 'دليل التحول الرقمي');
+  assert.equal(started.articleId, 'article-123');
+  assert.equal(started.cancellable, true);
+
+  const updated = updateAiExecutionActivity(started.id, {
+    stage: 'running',
+    completed: false,
+  });
+  assert.equal(updated.articleTitle, 'دليل التحول الرقمي');
+  assert.equal(updated.cancellable, true);
+
+  const cancelled = await requestAiExecutionActivityCancel(started.id);
+  assert.equal(cancellationCount, 1);
+  assert.equal(cancelled.state, 'cancelled');
+  assert.equal(cancelled.httpStatus, 499);
+  assert.equal(cancelled.cancellable, false);
+
+  const lateProgress = updateAiExecutionActivity(started.id, {
+    stage: 'running',
+    completed: false,
+    message: 'late update',
+  });
+  assert.equal(lateProgress.state, 'cancelled');
+  assert.equal(lateProgress.stage, 'cancelled');
 });

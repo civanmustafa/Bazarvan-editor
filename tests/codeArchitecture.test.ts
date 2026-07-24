@@ -70,20 +70,31 @@ test('all editor AI execution paths publish to one fixed live activity monitor',
   assert.match(app, /const AiExecutionMonitor = lazy/);
   assert.match(monitor, /fixed bottom-4 left-4/);
   assert.match(monitor, /AI_EXECUTION_ACTIVITY_EVENT/);
+  assert.match(monitor, /المقالة التي تعمل عليها العملية/);
+  assert.match(monitor, /الموضع \/ المصدر/);
+  assert.match(monitor, /إيقاف هذه العملية/);
+  assert.match(monitor, /requestAiExecutionActivityCancel/);
+  assert.match(monitor, /آخر تحديث/);
   assert.match(activityEngine, /export const beginAiExecutionActivity/);
   assert.match(activityEngine, /export const updateAiExecutionActivity/);
   assert.match(activityEngine, /export const finishAiExecutionActivity/);
+  assert.match(activityEngine, /export const requestAiExecutionActivityCancel/);
   assert.match(geminiEngine, /beginAiExecutionActivity/);
   assert.match(geminiEngine, /updateAiExecutionActivity/);
   assert.match(geminiEngine, /finishAiExecutionActivity/);
+  assert.match(geminiEngine, /cancel:\s*\(\) => cancelGeminiAnalysisEngine\(progressId\)/);
   assert.match(aiContext, /openai:\$\{requestId\}/);
   assert.match(aiContext, /beginAiExecutionActivity/);
+  assert.match(aiContext, /manualCancellationRequested = true/);
   assert.match(writingPanel, /content-writing:/);
   assert.match(writingPanel, /monitorContentWritingSessionActivity/);
   assert.match(writingMonitor, /syncContentWritingSessionActivity/);
   assert.match(writingMonitor, /getContentWritingSessionDetail/);
+  assert.match(writingMonitor, /cancelContentWritingSession\(session\.id\)/);
   assert.match(externalControls, /external-analysis:/);
   assert.match(externalControls, /updateAiExecutionActivity/);
+  assert.match(externalControls, /activeEngineeringRootJob/);
+  assert.match(externalControls, /cancelExternalAnalysisJob\(articleId, job\.id\)/);
 });
 
 test('API handlers share the same HTTP request and response adapters', async () => {

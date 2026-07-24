@@ -82,6 +82,7 @@ export type ExternalAnalysisDashboardSummary = {
   completedTaskCount: number;
   retryingEngineeringCount: number;
   latestEngineeringJob: ExternalAnalysisJobRow | null;
+  activeEngineeringRootJob?: ExternalAnalysisJobRow | null;
   latestUpdatedAt: string | null;
 };
 
@@ -214,6 +215,7 @@ const SUMMARY_JOB_SELECT = [
   'sequence_number',
   'command_id',
   'command_label',
+  'depends_on_job_id',
   'readiness_signature',
   'progress',
   'last_error',
@@ -231,7 +233,6 @@ const SUMMARY_JOB_SELECT = [
 const FULL_JOB_SELECT = [
   SUMMARY_JOB_SELECT,
   'requested_by',
-  'depends_on_job_id',
   'input_snapshot',
   'result',
 ].join(',');
@@ -396,6 +397,10 @@ export const listExternalAnalysisDashboardSummaries = async (
       : competitorRows;
     const latestSemanticJob = semanticJobs[0] || null;
     const activeEngineeringJobs = engineeringJobs.filter(job => EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status));
+    const activeEngineeringIds = new Set(activeEngineeringJobs.map(job => job.id));
+    const activeEngineeringRootJob = activeEngineeringJobs.find(job => (
+      !job.depends_on_job_id || !activeEngineeringIds.has(job.depends_on_job_id)
+    )) || activeEngineeringJobs[activeEngineeringJobs.length - 1] || null;
     const completedEngineeringCount = engineeringJobs.filter(job => job.status === 'completed').length;
     const completedTaskCount = completedEngineeringCount
       + (latestSemanticJob?.status === 'completed' ? 1 : 0);
@@ -415,6 +420,7 @@ export const listExternalAnalysisDashboardSummaries = async (
       completedTaskCount,
       retryingEngineeringCount: activeEngineeringJobs.filter(job => job.status === 'retry_scheduled').length,
       latestEngineeringJob: engineeringJobs[0] || null,
+      activeEngineeringRootJob,
       latestUpdatedAt,
     } satisfies ExternalAnalysisDashboardSummary];
   }));
