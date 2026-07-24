@@ -43,7 +43,10 @@ import {
     type GeminiProgressCallback,
     type GeminiProgressSnapshot,
 } from '../utils/geminiAnalysisEngine';
-import { notifyAiKeyUsageFeedback } from '../utils/aiKeyUsageFeedback';
+import {
+    beginAiExecutionActivity,
+    finishAiExecutionActivity,
+} from '../utils/aiExecutionActivity';
 
 /*
  * AIContext owns all AI workflows:
@@ -2447,6 +2450,19 @@ const callChatGptAnalysis = async (
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), CHATGPT_TIMEOUT_MS);
     const requestId = `openai-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    const activityId = `openai:${requestId}`;
+    let activityFinished = false;
+    beginAiExecutionActivity({
+        id: activityId,
+        provider: 'openai',
+        requestedProvider: 'openai',
+        model,
+        requestedModel: model,
+        surface: usageContext.source,
+        action: usageContext.action || usageContext.commandLabel,
+        stage: 'connecting',
+        message: 'جار الاتصال بـ OpenAI وتجربة المفتاح المحدد...',
+    });
 
     try {
         const accessToken = await getAuthenticatedApiToken();
@@ -2467,30 +2483,47 @@ const callChatGptAnalysis = async (
 
         const isJson = response.headers.get('content-type')?.includes('application/json');
         const data = isJson ? await response.json().catch(() => ({})) : {};
-        const effectiveProvider = data.provider === 'geminiPaid'
-            ? 'Gemini Pro (بديل تلقائي لـ OpenAI)'
-            : data.provider === 'gemini'
-                ? 'Gemini المجاني (بديل تلقائي لـ OpenAI)'
-                : 'OpenAI';
-        notifyAiKeyUsageFeedback({
-            provider: effectiveProvider,
-            status: response.status,
-            payload: data,
-            surface: usageContext.source,
-        });
+        const effectiveProvider = data.provider === 'geminiPaid' || data.provider === 'gemini'
+            ? data.provider
+            : 'openai';
+        const finishActivity = (
+            outcome: 'success' | 'failed',
+            status: number,
+            message?: string,
+        ) => {
+            finishAiExecutionActivity(activityId, {
+                provider: effectiveProvider,
+                requestedProvider: 'openai',
+                model: typeof data.model === 'string' ? data.model : model,
+                requestedModel: model,
+                httpStatus: status,
+                outcome,
+                payload: data,
+                message,
+                surface: usageContext.source,
+                action: usageContext.action || usageContext.commandLabel,
+            });
+            activityFinished = true;
+        };
         window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
 
         if (response.status === 404) {
+            finishActivity('failed', response.status, 'مسار ChatGPT API غير مفعّل محليًا.');
             throw new Error('مسار ChatGPT API غير مفعّل محليًا. أعد تشغيل خادم التطوير حتى يقرأ إعدادات Vite الجديدة.');
         }
 
         if (!response.ok) {
-            throw new Error(data.error?.message || data.error || `ChatGPT request failed with status ${response.status}`);
+            const errorMessage = data.error?.message || data.error || `ChatGPT request failed with status ${response.status}`;
+            finishActivity('failed', response.status, typeof errorMessage === 'string' ? errorMessage : undefined);
+            throw new Error(errorMessage);
         }
 
         if (typeof data.text !== 'string') {
+            finishActivity('failed', 502, 'لم يُرجع الخادم نصًا صالحًا.');
             throw new Error('ChatGPT server route did not return a valid text response.');
         }
+
+        finishActivity('success', response.status, 'تم تلقي رد مزود الذكاء الاصطناعي بنجاح.');
 
         return {
             text: data.text,
@@ -2505,6 +2538,24 @@ const callChatGptAnalysis = async (
     } catch (error) {
         window.clearTimeout(timeoutId);
         console.error("Error calling ChatGPT API:", error);
+        if (!activityFinished) {
+            const timedOut = error instanceof Error && error.name === 'AbortError';
+            finishAiExecutionActivity(activityId, {
+                provider: 'openai',
+                requestedProvider: 'openai',
+                model,
+                requestedModel: model,
+                httpStatus: timedOut ? 504 : 500,
+                outcome: 'failed',
+                message: timedOut
+                    ? 'انتهت مهلة الاتصال بـ OpenAI.'
+                    : error instanceof Error
+                        ? error.message
+                        : 'خطأ غير معروف',
+                surface: usageContext.source,
+                action: usageContext.action || usageContext.commandLabel,
+            });
+        }
         if (error instanceof Error && error.name === 'AbortError') {
             return {
                 text: "انتهت مهلة الاتصال بـ ChatGPT (300 ثانية). إذا لم يظهر طلب في لوحة OpenAI فهذا يعني أن الخادم المحلي لم يصل إلى OpenAI.",

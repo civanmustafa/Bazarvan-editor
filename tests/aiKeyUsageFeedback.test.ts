@@ -5,6 +5,13 @@ import {
   formatAiKeySuffix,
   notifyAiKeyUsageFeedback,
 } from '../utils/aiKeyUsageFeedback.ts';
+import {
+  beginAiExecutionActivity,
+  finishAiExecutionActivity,
+  getAiExecutionActivities,
+  resetAiExecutionActivitiesForTests,
+  updateAiExecutionActivity,
+} from '../utils/aiExecutionActivity.ts';
 
 test('AI key feedback keeps failed rotations and the successful key suffix', () => {
   const entries = collectAiKeyUsageEntries({
@@ -70,4 +77,66 @@ test('AI key feedback includes credential and provider fallback suffixes', () =>
       ['PRO003', 'failed', 503],
     ],
   );
+});
+
+test('unified AI activity follows live key, model, and paid-to-free fallback state', () => {
+  resetAiExecutionActivitiesForTests();
+  const started = beginAiExecutionActivity({
+    id: 'activity-test',
+    provider: 'geminiPaid',
+    requestedProvider: 'geminiPaid',
+    model: 'gemini-paid-test',
+    requestedModel: 'gemini-paid-test',
+    surface: 'quick_provider',
+  });
+  assert.equal(started.state, 'running');
+  assert.equal(started.credentialTier, 'paid');
+
+  const rotating = updateAiExecutionActivity('activity-test', {
+    progress: {
+      stage: 'failed-key',
+      provider: 'geminiPaid',
+      model: 'gemini-paid-test',
+      currentKeyIndex: 1,
+      keyCount: 2,
+      keySuffix: 'PAID01',
+      status: 429,
+      completed: false,
+    },
+    completed: false,
+  });
+  assert.equal(rotating.state, 'running');
+  assert.equal(rotating.keySuffix, 'PAID01');
+  assert.deepEqual(rotating.entries.map(entry => [entry.keySuffix, entry.outcome]), [
+    ['PAID01', 'failed'],
+  ]);
+
+  const completed = finishAiExecutionActivity('activity-test', {
+    provider: 'gemini',
+    requestedProvider: 'geminiPaid',
+    model: 'gemini-free-test',
+    requestedModel: 'gemini-paid-test',
+    httpStatus: 200,
+    outcome: 'success',
+    payload: {
+      provider: 'gemini',
+      model: 'gemini-free-test',
+      keySuffix: 'FREE02',
+      status: 200,
+      providerFallbackChain: [
+        { provider: 'geminiPaid', model: 'gemini-paid-test', keySuffix: 'PAID01', status: 429 },
+        { provider: 'gemini', model: 'gemini-free-test', keySuffix: 'FREE02', status: 200 },
+      ],
+    },
+  });
+
+  assert.equal(completed.state, 'success');
+  assert.equal(completed.credentialTier, 'free');
+  assert.equal(completed.requestedProvider, 'geminiPaid');
+  assert.equal(completed.provider, 'gemini');
+  assert.equal(completed.model, 'gemini-free-test');
+  assert.equal(completed.keySuffix, 'FREE02');
+  assert.ok(completed.entries.some(entry => entry.keySuffix === 'PAID01' && entry.outcome === 'failed'));
+  assert.ok(completed.entries.some(entry => entry.keySuffix === 'FREE02' && entry.outcome === 'success'));
+  assert.equal(getAiExecutionActivities()[0].id, 'activity-test');
 });

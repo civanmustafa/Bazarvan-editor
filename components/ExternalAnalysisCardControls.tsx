@@ -31,6 +31,11 @@ import {
 } from '../utils/externalAnalysis';
 import { ensureArticleCompetitorDiscovery } from '../utils/competitorDiscovery';
 import { normalizeGoalContext } from '../utils/goalContext';
+import {
+  beginAiExecutionActivity,
+  finishAiExecutionActivity,
+  updateAiExecutionActivity,
+} from '../utils/aiExecutionActivity';
 
 const CompetitorDiscoveryModal = React.lazy(() => import('./CompetitorDiscoveryModal'));
 
@@ -110,6 +115,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const ensuredCompetitorSignatureRef = useRef('');
+  const trackedExternalAiActivitiesRef = useRef<Set<string>>(new Set());
 
   const resolvedGoalContext: GoalContext = normalizeGoalContext(goalContext);
 
@@ -126,6 +132,72 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const competitorJobActive = competitorDiscoveryActive || competitorExtractionActive;
   const customCommandMode = summary?.state?.engineering_command_mode === 'custom';
   const semanticTermsReady = hasAlternativeKeywords && hasLsiKeywords;
+
+  useEffect(() => {
+    const syncJob = (
+      kind: 'semantic' | 'engineering',
+      active: boolean,
+      job: ExternalAnalysisDashboardSummary['latestSemanticJob'],
+    ) => {
+      const activityId = `external-analysis:${articleId}:${kind}`;
+      if (active && job) {
+        if (!trackedExternalAiActivitiesRef.current.has(activityId)) {
+          trackedExternalAiActivitiesRef.current.add(activityId);
+          beginAiExecutionActivity({
+            id: activityId,
+            provider: 'gemini',
+            requestedProvider: 'gemini',
+            surface: job.job_type,
+            action: job.command_label || (kind === 'semantic' ? 'توليد الصيغ وLSI' : 'الأوامر اليدوية الجاهزة'),
+            stage: job.status,
+            message: kind === 'semantic'
+              ? 'مهمة توليد الصيغ وLSI تعمل في الخلفية.'
+              : 'مهمة الأوامر الهندسية تعمل في الخلفية.',
+          });
+        }
+        updateAiExecutionActivity(activityId, {
+          requestedProvider: 'gemini',
+          surface: job.job_type,
+          action: job.command_label || (kind === 'semantic' ? 'توليد الصيغ وLSI' : 'الأوامر اليدوية الجاهزة'),
+          stage: job.status,
+          progress: job.progress,
+          completed: false,
+          message: typeof job.progress.message === 'string'
+            ? job.progress.message
+            : kind === 'semantic'
+              ? 'جار توليد الصيغ البديلة وكلمات LSI...'
+              : 'جار تنفيذ الأمر الهندسي...',
+        });
+        return;
+      }
+      if (!job || !trackedExternalAiActivitiesRef.current.has(activityId)) return;
+      const outcome = job.status === 'completed'
+        ? 'success'
+        : job.status === 'cancelled'
+          ? 'cancelled'
+          : 'failed';
+      finishAiExecutionActivity(activityId, {
+        requestedProvider: 'gemini',
+        surface: job.job_type,
+        action: job.command_label || (kind === 'semantic' ? 'توليد الصيغ وLSI' : 'الأوامر اليدوية الجاهزة'),
+        stage: job.status,
+        progress: job.progress,
+        payload: job.result,
+        outcome,
+        message: job.last_error || undefined,
+      });
+      trackedExternalAiActivitiesRef.current.delete(activityId);
+    };
+
+    syncJob('semantic', semanticJobActive, summary?.latestSemanticJob || null);
+    syncJob('engineering', engineeringActive, summary?.latestEngineeringJob || null);
+  }, [
+    articleId,
+    engineeringActive,
+    semanticJobActive,
+    summary?.latestEngineeringJob,
+    summary?.latestSemanticJob,
+  ]);
   const readinessState = summary?.state || null;
   const semanticMissingFields = new Set(readinessState?.semantic_missing_fields || []);
   const engineeringMissingFields = new Set(readinessState?.external_analysis_missing_fields || []);

@@ -26,8 +26,16 @@ import { copyMarkdownToClipboard } from '../utils/editorUtils';
 import {
   collectAiKeyUsageEntries,
   formatAiKeySuffix,
-  notifyAiKeyUsageFeedback,
 } from '../utils/aiKeyUsageFeedback';
+import {
+  beginAiExecutionActivity,
+  finishAiExecutionActivity,
+} from '../utils/aiExecutionActivity';
+import {
+  getContentWritingActivityId,
+  monitorContentWritingSessionActivity,
+  syncContentWritingSessionActivity,
+} from '../utils/contentWritingActivityMonitor';
 import {
   evaluateContentWritingQuality,
   normalizeContentWritingQualityReport,
@@ -265,7 +273,7 @@ const ContentWritingPanel: React.FC = () => {
   const touchedModelsRef = useRef<Set<ContentWritingProvider>>(new Set());
   const resumeSelectionSessionRef = useRef('');
   const trackedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
-  const notifiedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
+  const contentWritingActivityIdsRef = useRef<Map<string, string>>(new Map());
 
   const getReviewQualityReport = useCallback((
     session: ContentWritingSession,
@@ -438,7 +446,7 @@ const ContentWritingPanel: React.FC = () => {
     setReviewSnapshot(null);
     setApplicationNotice(null);
     trackedKeyFeedbackSessionsRef.current.clear();
-    notifiedKeyFeedbackSessionsRef.current.clear();
+    contentWritingActivityIdsRef.current.clear();
     if (articleId) void refreshSessions();
   }, [articleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -473,6 +481,18 @@ const ContentWritingPanel: React.FC = () => {
           idempotencyKey: createContentWritingIdempotencyKey(articleId),
         };
     pendingStartRef.current = pendingStart;
+    const activityId = `content-writing:${pendingStart.idempotencyKey}`;
+    beginAiExecutionActivity({
+      id: activityId,
+      provider,
+      requestedProvider: provider,
+      model: selectedModel,
+      requestedModel: selectedModel,
+      surface: 'content_writing',
+      action: 'كتابة المقالة',
+      stage: 'preparing',
+      message: isArabic ? 'جار حفظ المقالة وبدء جلسة الكتابة...' : 'Saving the article and starting the writing session...',
+    });
     startInFlightRef.current = true;
     setActionState('starting');
     setErrorPresentation(null);
@@ -494,6 +514,13 @@ const ContentWritingPanel: React.FC = () => {
       mergeSession(started.session);
       setSelectedSessionId(started.session.id);
       trackedKeyFeedbackSessionsRef.current.add(started.session.id);
+      contentWritingActivityIdsRef.current.set(started.session.id, activityId);
+      const activityOptions = {
+        activityId,
+        action: isArabic ? 'كتابة المقالة' : 'Article writing',
+      };
+      syncContentWritingSessionActivity(started.session, [], activityOptions);
+      monitorContentWritingSessionActivity(started.session.id, activityOptions);
       if (started.reusedActive) {
         setApplicationNotice({
           tone: 'success',
@@ -510,6 +537,17 @@ const ContentWritingPanel: React.FC = () => {
       if (activeArticleRef.current === articleId) {
         setErrorPresentation(getErrorPresentation(error, isArabic));
       }
+      finishAiExecutionActivity(activityId, {
+        provider,
+        requestedProvider: provider,
+        model: selectedModel,
+        requestedModel: selectedModel,
+        surface: 'content_writing',
+        action: 'كتابة المقالة',
+        outcome: 'failed',
+        stage: 'failed',
+        message: error instanceof Error ? error.message : (isArabic ? 'تعذر بدء جلسة الكتابة.' : 'Could not start the writing session.'),
+      });
     } finally {
       startInFlightRef.current = false;
       setActionState('idle');
@@ -590,6 +628,19 @@ const ContentWritingPanel: React.FC = () => {
     }
     setActionState('resuming');
     setErrorPresentation(null);
+    const activityId = `content-writing:${selectedSession.id}:resume:${Date.now()}`;
+    contentWritingActivityIdsRef.current.set(selectedSession.id, activityId);
+    beginAiExecutionActivity({
+      id: activityId,
+      provider,
+      requestedProvider: provider,
+      model: selectedModel,
+      requestedModel: selectedModel,
+      surface: 'content_writing',
+      action: 'استئناف كتابة المقالة',
+      stage: 'resuming',
+      message: isArabic ? 'جار استئناف الجلسة من آخر مرحلة ناجحة...' : 'Resuming from the last successful step...',
+    });
     try {
       const resumed = await resumeContentWritingSession({
         sessionId: selectedSession.id,
@@ -597,12 +648,28 @@ const ContentWritingPanel: React.FC = () => {
         model: selectedModel,
       });
       trackedKeyFeedbackSessionsRef.current.add(resumed.id);
-      notifiedKeyFeedbackSessionsRef.current.delete(resumed.id);
       mergeSession(resumed);
       setSelectedDetail(current => current ? { ...current, session: { ...current.session, ...resumed } } : current);
+      const activityOptions = {
+        activityId,
+        action: isArabic ? 'استئناف كتابة المقالة' : 'Resume article writing',
+      };
+      syncContentWritingSessionActivity(resumed, [], activityOptions);
+      monitorContentWritingSessionActivity(resumed.id, activityOptions);
       await loadDetail(resumed.id, { silent: true });
     } catch (error) {
       setErrorPresentation(getErrorPresentation(error, isArabic));
+      finishAiExecutionActivity(activityId, {
+        provider,
+        requestedProvider: provider,
+        model: selectedModel,
+        requestedModel: selectedModel,
+        surface: 'content_writing',
+        action: 'استئناف كتابة المقالة',
+        outcome: 'failed',
+        stage: 'failed',
+        message: error instanceof Error ? error.message : (isArabic ? 'تعذر استئناف جلسة الكتابة.' : 'Could not resume the writing session.'),
+      });
     } finally {
       setActionState('idle');
     }
@@ -765,26 +832,26 @@ const ContentWritingPanel: React.FC = () => {
     if (!selectedSession || selectedSession.executionMode !== 'api') return;
     if (isContentWritingSessionActive(selectedSession)) {
       trackedKeyFeedbackSessionsRef.current.add(selectedSession.id);
-      return;
     }
     if (
-      !['completed', 'failed'].includes(selectedSession.status)
-      || !trackedKeyFeedbackSessionsRef.current.has(selectedSession.id)
-      || notifiedKeyFeedbackSessionsRef.current.has(selectedSession.id)
-      || sessionKeyUsageEntries.length === 0
+      !isContentWritingSessionActive(selectedSession)
+      && !trackedKeyFeedbackSessionsRef.current.has(selectedSession.id)
     ) return;
-    notifiedKeyFeedbackSessionsRef.current.add(selectedSession.id);
-    notifyAiKeyUsageFeedback({
-      provider: getProviderLabel(selectedSession.provider),
-      status: selectedSession.status === 'completed' ? 200 : 500,
-      payload: {
-        keySuffix: selectedSession.keySuffix,
-        responseMetadata: selectedSession.responseMetadata,
-        result: workflowSteps.map(step => step.metadata),
-      },
-      surface: 'content_writing',
-    });
-  }, [selectedSession, sessionKeyUsageEntries, workflowSteps]);
+    const activityId = getContentWritingActivityId(
+      selectedSession.id,
+      contentWritingActivityIdsRef.current.get(selectedSession.id)
+        || `content-writing:${selectedSession.id}`,
+    );
+    contentWritingActivityIdsRef.current.set(selectedSession.id, activityId);
+    const activityOptions = {
+      activityId,
+      action: isArabic ? 'كتابة المقالة' : 'Article writing',
+    };
+    syncContentWritingSessionActivity(selectedSession, workflowSteps, activityOptions);
+    if (isContentWritingSessionActive(selectedSession)) {
+      monitorContentWritingSessionActivity(selectedSession.id, activityOptions);
+    }
+  }, [isArabic, selectedSession, sessionKeyUsageEntries, workflowSteps]);
   const displayedWorkflowStepLabel = currentWorkflowStep
     ? getStepLabel(currentWorkflowStep, isArabic)
     : workflowStepLabel;

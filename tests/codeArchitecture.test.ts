@@ -54,6 +54,38 @@ test('development and production use one API route registry', async () => {
   assert.doesNotMatch(productionServer, /app\.all\('\/api\//);
 });
 
+test('all editor AI execution paths publish to one fixed live activity monitor', async () => {
+  const [app, monitor, activityEngine, geminiEngine, aiContext, writingPanel, writingMonitor, externalControls] = await Promise.all([
+    readWorkspaceFile('App.tsx'),
+    readWorkspaceFile('components/AiKeyUsageToast.tsx'),
+    readWorkspaceFile('utils/aiExecutionActivity.ts'),
+    readWorkspaceFile('utils/geminiAnalysisEngine.ts'),
+    readWorkspaceFile('contexts/AIContext.tsx'),
+    readWorkspaceFile('components/ContentWritingPanel.tsx'),
+    readWorkspaceFile('utils/contentWritingActivityMonitor.ts'),
+    readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+  ]);
+
+  assert.match(app, /<AiExecutionMonitor\s*\/>/);
+  assert.match(app, /const AiExecutionMonitor = lazy/);
+  assert.match(monitor, /fixed bottom-4 left-4/);
+  assert.match(monitor, /AI_EXECUTION_ACTIVITY_EVENT/);
+  assert.match(activityEngine, /export const beginAiExecutionActivity/);
+  assert.match(activityEngine, /export const updateAiExecutionActivity/);
+  assert.match(activityEngine, /export const finishAiExecutionActivity/);
+  assert.match(geminiEngine, /beginAiExecutionActivity/);
+  assert.match(geminiEngine, /updateAiExecutionActivity/);
+  assert.match(geminiEngine, /finishAiExecutionActivity/);
+  assert.match(aiContext, /openai:\$\{requestId\}/);
+  assert.match(aiContext, /beginAiExecutionActivity/);
+  assert.match(writingPanel, /content-writing:/);
+  assert.match(writingPanel, /monitorContentWritingSessionActivity/);
+  assert.match(writingMonitor, /syncContentWritingSessionActivity/);
+  assert.match(writingMonitor, /getContentWritingSessionDetail/);
+  assert.match(externalControls, /external-analysis:/);
+  assert.match(externalControls, /updateAiExecutionActivity/);
+});
+
 test('API handlers share the same HTTP request and response adapters', async () => {
   const handlerFiles = [
     'api/adminUsers.ts',

@@ -54,7 +54,6 @@ export const collectAiKeyUsageEntries = (
   defaultOutcome?: AiKeyUsageOutcome,
 ): AiKeyUsageEntry[] => {
   const collected: AiKeyUsageEntry[] = [];
-  const seen = new Set<string>();
 
   const add = (source: Record<string, unknown>, fallbackOutcome?: AiKeyUsageOutcome): void => {
     const keySuffix = normalizeAiKeySuffix(source.keySuffix ?? source.key_suffix);
@@ -63,9 +62,13 @@ export const collectAiKeyUsageEntries = (
     if (!keySuffix || !outcome) return;
     const reason = toText(source.reason || source.error || source.errorCode || source.error_code);
     const model = toText(source.model);
-    const dedupeKey = [keySuffix, outcome, status || ''].join(':');
-    if (seen.has(dedupeKey)) return;
-    seen.add(dedupeKey);
+    const duplicate = collected.some(entry => (
+      entry.keySuffix === keySuffix
+      && entry.outcome === outcome
+      && entry.status === status
+      && (!entry.model || !model || entry.model === model)
+    ));
+    if (duplicate) return;
     collected.push({
       keySuffix,
       outcome,
@@ -93,7 +96,7 @@ export const collectAiKeyUsageEntries = (
     if (Array.isArray(source.providerFallbackChain)) visit(source.providerFallbackChain, undefined, depth + 1);
     if (Array.isArray(source.providerFallbackAttempts)) visit(source.providerFallbackAttempts, 'failed', depth + 1);
 
-    const nestedKeys = ['execution', 'providerMetadata', 'responseMetadata', 'result'] as const;
+    const nestedKeys = ['execution', 'providerMetadata', 'responseMetadata', 'result', 'progress', 'gemini'] as const;
     nestedKeys.forEach(key => {
       if (source[key] !== undefined) visit(source[key], sourceOutcome, depth + 1);
     });

@@ -1,5 +1,9 @@
 import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from './authenticatedApi';
-import { notifyAiKeyUsageFeedback } from './aiKeyUsageFeedback';
+import {
+    beginAiExecutionActivity,
+    finishAiExecutionActivity,
+    updateAiExecutionActivity,
+} from './aiExecutionActivity';
 
 export type GeminiEngineProvider = 'gemini' | 'geminiPaid';
 
@@ -165,53 +169,110 @@ export const runGeminiAnalysisEngine = async ({
     timeoutMs = GEMINI_JOB_TIMEOUT_MS,
 }: RunGeminiEngineOptions): Promise<GeminiEngineResult> => {
     const progressId = createGeminiProgressId();
-    const accessToken = await getAuthenticatedApiToken();
-    const controller = new AbortController();
-    const startTimeoutId = window.setTimeout(() => controller.abort(), GEMINI_JOB_START_TIMEOUT_MS);
-
-    let response: Response;
-    try {
-        response = await fetch('/api/gemini', {
-            method: 'POST',
-            headers: getAuthenticatedApiHeaders(accessToken, { 'Content-Type': 'application/json' }),
-            body: JSON.stringify({
-                ...request,
-                progressId,
-                async: true,
-            }),
-            signal: controller.signal,
-        });
-    } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-            throw new Error('تعذر بدء مهمة Gemini خلال 30 ثانية. تحقق من اتصال السيرفر ثم أعد المحاولة.');
-        }
-        throw error;
-    } finally {
-        window.clearTimeout(startTimeoutId);
-    }
-
-    const rawBody = await response.text().catch(() => '');
-    const data = parseJsonRecord(rawBody);
-    const result = response.status === 202 && data.accepted === true
-        ? await waitForGeminiJob(progressId, accessToken, onProgress, timeoutMs)
-        : {
-            status: response.status,
-            data,
-            rawBody,
-            progressId,
-        };
-    notifyAiKeyUsageFeedback({
-        provider: result.data.provider === 'geminiPaid'
-            ? 'Gemini Pro'
-            : result.data.requestedProvider === 'geminiPaid'
-                ? 'Gemini المجاني (بديل تلقائي لـ Gemini Pro)'
-                : 'Gemini',
-        status: result.status,
-        payload: result.data,
+    const activityId = `gemini:${progressId}`;
+    beginAiExecutionActivity({
+        id: activityId,
+        provider: request.provider,
+        requestedProvider: request.provider,
+        model: request.model,
+        requestedModel: request.model,
         surface: request.telemetry?.source,
+        action: request.telemetry?.action || request.telemetry?.commandLabel,
+        stage: 'queued',
+        message: 'جار بدء الاتصال بمزود الذكاء الاصطناعي...',
     });
-    window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
-    return result;
+    const reportProgress: GeminiProgressCallback = progress => {
+        updateAiExecutionActivity(activityId, {
+            provider: progress.provider,
+            requestedProvider: request.provider,
+            model: progress.model,
+            requestedModel: progress.requestedModel || request.model,
+            surface: request.telemetry?.source,
+            action: request.telemetry?.action || request.telemetry?.commandLabel,
+            progress,
+            completed: progress.completed === true,
+        });
+        onProgress?.(progress);
+    };
+
+    try {
+        const accessToken = await getAuthenticatedApiToken();
+        const controller = new AbortController();
+        const startTimeoutId = window.setTimeout(() => controller.abort(), GEMINI_JOB_START_TIMEOUT_MS);
+        let response: Response;
+        try {
+            response = await fetch('/api/gemini', {
+                method: 'POST',
+                headers: getAuthenticatedApiHeaders(accessToken, { 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                    ...request,
+                    progressId,
+                    async: true,
+                }),
+                signal: controller.signal,
+            });
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw new Error('تعذر بدء مهمة Gemini خلال 30 ثانية. تحقق من اتصال السيرفر ثم أعد المحاولة.');
+            }
+            throw error;
+        } finally {
+            window.clearTimeout(startTimeoutId);
+        }
+
+        const rawBody = await response.text().catch(() => '');
+        const data = parseJsonRecord(rawBody);
+        const result = response.status === 202 && data.accepted === true
+            ? await waitForGeminiJob(progressId, accessToken, reportProgress, timeoutMs)
+            : {
+                status: response.status,
+                data,
+                rawBody,
+                progressId,
+            };
+        const effectiveProvider = result.data.provider === 'geminiPaid'
+            ? 'geminiPaid'
+            : result.data.provider === 'gemini'
+                ? 'gemini'
+                : request.provider;
+        const outcome = result.status === 499 || result.data.cancelled === true
+            ? 'cancelled'
+            : result.status >= 200 && result.status < 300
+                ? 'success'
+                : 'failed';
+        finishAiExecutionActivity(activityId, {
+            provider: effectiveProvider,
+            requestedProvider: request.provider,
+            model: typeof result.data.model === 'string' ? result.data.model : result.progress?.model || request.model,
+            requestedModel: typeof result.data.requestedModel === 'string'
+                ? result.data.requestedModel
+                : result.progress?.requestedModel || request.model,
+            surface: request.telemetry?.source,
+            action: request.telemetry?.action || request.telemetry?.commandLabel,
+            progress: result.progress,
+            payload: result.data,
+            httpStatus: result.status,
+            outcome,
+            message: typeof result.data.error === 'string'
+                ? result.data.error
+                : result.progress?.message,
+        });
+        window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
+        return result;
+    } catch (error) {
+        finishAiExecutionActivity(activityId, {
+            provider: request.provider,
+            requestedProvider: request.provider,
+            model: request.model,
+            requestedModel: request.model,
+            surface: request.telemetry?.source,
+            action: request.telemetry?.action || request.telemetry?.commandLabel,
+            stage: 'failed',
+            outcome: 'failed',
+            message: error instanceof Error ? error.message : 'تعذر الاتصال بمزود الذكاء الاصطناعي.',
+        });
+        throw error;
+    }
 };
 
 export const cancelGeminiAnalysisEngine = async (progressId: string): Promise<void> => {
