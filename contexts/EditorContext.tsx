@@ -49,6 +49,7 @@ import { shouldClearArticleAiResults } from '../constants/articleStatuses';
 import { parseMarkdownToArticleHtml } from '../utils/editorUtils';
 import { prepareContentWritingResultForEditor } from '../utils/contentWritingWorkflow';
 import { canPersistArticleDraft } from '../utils/articleSavePolicy';
+import { handleEditorLinkClick } from '../utils/editorLinkInteraction';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -1027,6 +1028,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         editorProps: {
             transformPastedHTML: removePastedSectionSeparatorsFromHtml,
             transformPastedText: removePastedSectionSeparatorsFromText,
+            handleDOMEvents: {
+                click: (_view, event) => handleEditorLinkClick(event),
+            },
         },
         onUpdate: ({ editor, transaction }) => {
             if (transaction.getMeta('preventUpdate')) return;

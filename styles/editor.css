@@ -16,6 +16,27 @@
   color: inherit;
 }
 
+.ProseMirror a[href] {
+  color: #1d4ed8;
+  cursor: text;
+  text-decoration-line: underline !important;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: currentColor;
+  text-underline-offset: 0.18em;
+}
+
+.ProseMirror a[href]:hover {
+  color: #1e40af;
+}
+
+.dark .ProseMirror a[href] {
+  color: #93c5fd;
+}
+
+.dark .ProseMirror a[href]:hover {
+  color: #bfdbfe;
+}
+
 .ProseMirror p {
   margin: 0 0 1rem;
 }
