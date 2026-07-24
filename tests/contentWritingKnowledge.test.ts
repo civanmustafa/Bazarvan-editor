@@ -130,29 +130,37 @@ test('section results and coverage audits accept only known persisted IDs', asyn
     markdown: 'Useful section.',
     coveredIdeaIds: ['K001', 'UNKNOWN'],
     usedSourceChunkIds: ['C1-S001', 'UNKNOWN'],
-  }), ['K001'], ['C1-S001']);
+    usedClaimIds: ['CL001', 'UNKNOWN'],
+  }), ['K001'], ['C1-S001'], ['CL001']);
   assert.deepEqual(section.coverage, {
     coveredIdeaIds: ['K001'],
     usedSourceChunkIds: ['C1-S001'],
+    usedClaimIds: ['CL001'],
   });
 
   const audit = parseContentWritingCoverageAudit(JSON.stringify({
     missingIdeaIds: ['K001', 'UNKNOWN'],
     weakIdeaIds: [],
+    unsupportedClaimIds: ['CL001', 'UNKNOWN'],
+    blockedClaimIds: [],
     duplicateTopics: ['Repeated idea'],
     repairs: [{
       sectionKey: 'section-01',
       instructions: 'Add the missing supported explanation.',
       ideaIds: ['K001', 'UNKNOWN'],
       sourceChunkIds: ['C1-S001', 'UNKNOWN'],
+      claimIds: ['CL001', 'UNKNOWN'],
     }],
   }), {
     validIdeaIds: ['K001'],
     validChunkIds: ['C1-S001'],
+    validClaimIds: ['CL001'],
     validSectionKeys: ['section-01'],
   });
 
   assert.deepEqual(audit.missingIdeaIds, ['K001']);
   assert.deepEqual(audit.repairs[0].ideaIds, ['K001']);
   assert.deepEqual(audit.repairs[0].sourceChunkIds, ['C1-S001']);
+  assert.deepEqual(audit.repairs[0].claimIds, ['CL001']);
+  assert.deepEqual(audit.unsupportedClaimIds, ['CL001']);
 });

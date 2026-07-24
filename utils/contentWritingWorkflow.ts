@@ -5,13 +5,14 @@ import {
   type ContentWritingSectionCoverage,
   type ContentWritingSourceChunk,
 } from './contentWritingKnowledge';
+import type { ContentWritingClaimLedgerItem } from './contentWritingClaims';
 import {
   getPromptTemplate,
   PROMPT_TEMPLATE_IDS,
   renderPromptTemplate,
 } from '../constants/promptRegistry';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 3;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 4;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
@@ -34,6 +35,7 @@ export type ContentWritingOutlineSection = {
   targetWords?: number;
   subheadings?: string[];
   requiredIdeaIds?: string[];
+  requiredClaimIds?: string[];
   sourceChunkIds?: string[];
 };
 
@@ -106,6 +108,9 @@ export const normalizeContentWritingOutline = (value: unknown): ContentWritingOu
     const requiredIdeaIds = isRecord(item) && Array.isArray(item.requiredIdeaIds)
       ? Array.from(new Set(item.requiredIdeaIds.map(value => toText(value, 120)).filter(Boolean))).slice(0, 100)
       : [];
+    const requiredClaimIds = isRecord(item) && Array.isArray(item.requiredClaimIds)
+      ? Array.from(new Set(item.requiredClaimIds.map(value => toText(value, 120)).filter(Boolean))).slice(0, 100)
+      : [];
     const sourceChunkIds = isRecord(item) && Array.isArray(item.sourceChunkIds)
       ? Array.from(new Set(item.sourceChunkIds.map(value => toText(value, 120)).filter(Boolean))).slice(0, 100)
       : [];
@@ -115,6 +120,7 @@ export const normalizeContentWritingOutline = (value: unknown): ContentWritingOu
       ...(targetWords ? { targetWords } : {}),
       ...(subheadings.length > 0 ? { subheadings } : {}),
       ...(requiredIdeaIds.length > 0 ? { requiredIdeaIds } : {}),
+      ...(requiredClaimIds.length > 0 ? { requiredClaimIds } : {}),
       ...(sourceChunkIds.length > 0 ? { sourceChunkIds } : {}),
     }];
   }).slice(0, CONTENT_WRITING_MAX_OUTLINE_SECTIONS);
@@ -136,7 +142,7 @@ export const getContentWritingCompetitorIndexStep = (): ContentWritingWorkflowSt
   key: 'competitor-index',
   type: 'competitor_index',
   ordinal: 1,
-  title: 'Competitor coverage matrix',
+  title: 'Competitor coverage and claim ledger',
   metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION },
 });
 
@@ -171,18 +177,27 @@ export const ensureContentWritingOutlineKnowledgeCoverage = (
   knowledge: ContentWritingKnowledgeBase,
 ): ContentWritingOutline => {
   const validIdeaIds = new Set(knowledge.items.map(item => item.id));
+  const usableClaims = knowledge.claimLedger.claims.filter(claim => claim.usagePolicy !== 'blocked');
+  const validClaimIds = new Set(usableClaims.map(claim => claim.id));
   const assigned = new Set<string>();
+  const assignedClaims = new Set<string>();
   const sections = outline.sections.map(section => {
     const requiredIdeaIds = (section.requiredIdeaIds || [])
       .filter(id => validIdeaIds.has(id) && !assigned.has(id));
     requiredIdeaIds.forEach(id => assigned.add(id));
+    const requiredClaimIds = (section.requiredClaimIds || [])
+      .filter(id => validClaimIds.has(id) && !assignedClaims.has(id));
+    requiredClaimIds.forEach(id => assignedClaims.add(id));
     const sourceChunkIds = Array.from(new Set([
       ...(section.sourceChunkIds || []),
       ...knowledge.items
         .filter(item => requiredIdeaIds.includes(item.id))
         .flatMap(item => item.sourceChunkIds),
+      ...usableClaims
+        .filter(claim => requiredClaimIds.includes(claim.id))
+        .flatMap(claim => claim.supportingSourceChunkIds),
     ]));
-    return { ...section, requiredIdeaIds, sourceChunkIds };
+    return { ...section, requiredIdeaIds, requiredClaimIds, sourceChunkIds };
   });
 
   knowledge.items.forEach(item => {
@@ -204,6 +219,33 @@ export const ensureContentWritingOutlineKnowledgeCoverage = (
       ...item.sourceChunkIds,
     ]));
     assigned.add(item.id);
+  });
+  usableClaims.forEach(claim => {
+    if (assignedClaims.has(claim.id)) return;
+    const bestIndex = sections
+      .map((section, index) => ({
+        index,
+        linkedIdeaCount: claim.knowledgeItemIds
+          .filter(id => (section.requiredIdeaIds || []).includes(id)).length,
+        score: similarityScore(
+          claim.statement,
+          `${section.title}\n${section.brief}\n${(section.subheadings || []).join('\n')}`,
+        ),
+        load: section.requiredClaimIds?.length || 0,
+      }))
+      .sort((left, right) => (
+        right.linkedIdeaCount - left.linkedIdeaCount
+        || right.score - left.score
+        || left.load - right.load
+        || left.index - right.index
+      ))[0]?.index || 0;
+    const section = sections[bestIndex];
+    section.requiredClaimIds = [...(section.requiredClaimIds || []), claim.id];
+    section.sourceChunkIds = Array.from(new Set([
+      ...(section.sourceChunkIds || []),
+      ...claim.supportingSourceChunkIds,
+    ]));
+    assignedClaims.add(claim.id);
   });
   return { sections };
 };
@@ -272,13 +314,24 @@ export const buildContentWritingCompetitorIndexPrompt = (options: {
   chunks: readonly ContentWritingSourceChunk[];
   language: string;
   template?: string;
-}): string => renderPromptTemplate(
-  options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.competitorIndex),
-  {
+  sourceClaimsTemplate?: string;
+}): string => {
+  const variables = {
     source_ids_json: JSON.stringify(options.chunks.map(chunk => chunk.id)),
     output_language: options.language === 'en' ? 'اللغة الإنجليزية' : 'اللغة العربية',
-  },
-);
+  };
+  return [
+    renderPromptTemplate(
+      options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.competitorIndex),
+      variables,
+    ),
+    renderPromptTemplate(
+      options.sourceClaimsTemplate
+        || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.sourceClaimsLedger),
+      variables,
+    ),
+  ].filter(Boolean).join('\n\n');
+};
 
 export const buildContentWritingOutlinePrompt = (options: {
   articleTitle: string;
@@ -308,10 +361,17 @@ export const buildContentWritingSectionPrompt = (options: {
   sectionIndex: number;
   previousSection?: string;
   knowledgeItems: ContentWritingKnowledgeBase['items'];
+  claims: ContentWritingClaimLedgerItem[];
   sourceChunks: readonly ContentWritingSourceChunk[];
   coverageLedger: {
     coveredIdeaIds: string[];
-    previousSectionSummaries: Array<{ sectionKey: string; title: string; coveredIdeaIds: string[] }>;
+    usedClaimIds: string[];
+    previousSectionSummaries: Array<{
+      sectionKey: string;
+      title: string;
+      coveredIdeaIds: string[];
+      usedClaimIds: string[];
+    }>;
   };
   template?: string;
 }): string => renderPromptTemplate(
@@ -327,7 +387,9 @@ export const buildContentWritingSectionPrompt = (options: {
       ? `- عناوين H3 المطلوبة: ${options.section.subheadings.join(' | ')}`
       : '- لا تستخدم H3 إلا إذا احتاجه عقد الجودة.',
     required_idea_ids: (options.section.requiredIdeaIds || []).join(', ') || 'لا يوجد',
+    required_claim_ids: (options.section.requiredClaimIds || []).join(', ') || 'لا يوجد',
     knowledge_items_json: JSON.stringify(options.knowledgeItems, null, 2),
+    claims_ledger_json: JSON.stringify(options.claims, null, 2),
     source_chunks_json: JSON.stringify(options.sourceChunks.map(chunk => ({
       sourceId: chunk.id,
       competitorNumber: chunk.competitorNumber,
@@ -352,6 +414,7 @@ export const buildContentWritingCoverageAuditPrompt = (options: {
     coverage: ContentWritingSectionCoverage;
   }>;
   deterministicMissingIdeaIds: string[];
+  deterministicBlockedClaimIds: string[];
   template?: string;
 }): string => renderPromptTemplate(
   options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.coverageAudit),
@@ -360,6 +423,7 @@ export const buildContentWritingCoverageAuditPrompt = (options: {
     knowledge_json: contentWritingKnowledgeToPromptJson(options.knowledge),
     section_coverages_json: JSON.stringify(options.sectionCoverages, null, 2),
     missing_idea_ids_json: JSON.stringify(options.deterministicMissingIdeaIds),
+    blocked_claim_ids_json: JSON.stringify(options.deterministicBlockedClaimIds),
     completed_draft: options.draft,
     max_repairs: CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS,
   },
@@ -372,6 +436,7 @@ export const buildContentWritingSectionRepairPrompt = (options: {
   originalMarkdown: string;
   repair: ContentWritingCoverageAudit['repairs'][number];
   knowledgeItems: ContentWritingKnowledgeBase['items'];
+  claims: ContentWritingClaimLedgerItem[];
   sourceChunks: readonly ContentWritingSourceChunk[];
   template?: string;
 }): string => renderPromptTemplate(
@@ -381,6 +446,7 @@ export const buildContentWritingSectionRepairPrompt = (options: {
     section_json: JSON.stringify(options.section, null, 2),
     repair_instructions: options.repair.instructions,
     knowledge_items_json: JSON.stringify(options.knowledgeItems, null, 2),
+    claims_ledger_json: JSON.stringify(options.claims, null, 2),
     source_chunks_json: JSON.stringify(
       options.sourceChunks.map(chunk => ({ sourceId: chunk.id, text: chunk.text })),
       null,

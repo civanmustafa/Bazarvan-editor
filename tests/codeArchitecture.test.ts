@@ -384,20 +384,50 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
     readWorkspaceFile('constants/promptRegistry.ts'),
   ]);
 
-  assert.match(knowledge, /CONTENT_WRITING_KNOWLEDGE_VERSION = 2/);
+  assert.match(knowledge, /CONTENT_WRITING_KNOWLEDGE_VERSION = 3/);
   assert.match(knowledge, /buildContentWritingCompetitorCoverageMatrix/);
   assert.match(knowledge, /deriveCompetitorNumbers\(sourceChunkIds, chunksById\)/);
   assert.match(knowledge, /coverageLevel: deriveCoverageLevel/);
   assert.match(knowledge, /competitorCoverageMatrix: knowledge\.competitorCoverageMatrix/);
-  assert.match(workflow, /title: 'Competitor coverage matrix'/);
+  assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 3/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 4/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);
   assert.doesNotMatch(
     `${knowledge}\n${workflow}\n${serverWorkflow}\n${promptRegistry}`,
+    /search\s*console|searchConsole/i,
+  );
+});
+
+test('source registry and claim ledger constrain every content-writing repair surface', async () => {
+  const [claims, knowledge, workflow, serverWorkflow, promptRegistry, quality] = await Promise.all([
+    readWorkspaceFile('utils/contentWritingClaims.ts'),
+    readWorkspaceFile('utils/contentWritingKnowledge.ts'),
+    readWorkspaceFile('utils/contentWritingWorkflow.ts'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+    readWorkspaceFile('utils/contentWritingQuality.ts'),
+  ]);
+
+  assert.match(claims, /normalizeContentWritingSourceClaims/);
+  assert.match(claims, /requires_external_verification/);
+  assert.match(claims, /usagePolicy: 'blocked'/);
+  assert.match(claims, /summarizeContentWritingClaimUsage/);
+  assert.match(knowledge, /sourceRegistry: sourceClaims\.sourceRegistry/);
+  assert.match(knowledge, /claimLedger: sourceClaims\.claimLedger/);
+  assert.match(workflow, /PROMPT_TEMPLATE_IDS\.sourceClaimsLedger/);
+  assert.match(workflow, /claims_ledger_json/);
+  assert.match(serverWorkflow, /deterministicBlockedClaimIds/);
+  assert.match(serverWorkflow, /usedClaimIds: repairedCoverage\.usedClaimIds/);
+  assert.match(promptRegistry, /contentWriting\.sourceClaimsLedger/);
+  assert.match(promptRegistry, /محرك المصادر وسجل الادعاءات/);
+  assert.match(promptRegistry, /لا تعِد إدخال ادعاء usagePolicy له blocked/);
+  assert.match(quality, /PROMPT_TEMPLATE_IDS\.qualityRepair/);
+  assert.doesNotMatch(
+    `${claims}\n${knowledge}\n${workflow}\n${serverWorkflow}\n${promptRegistry}\n${quality}`,
     /search\s*console|searchConsole/i,
   );
 });

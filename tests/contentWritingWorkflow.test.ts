@@ -55,6 +55,70 @@ test('structured writing rejects incomplete or duplicate outlines', async () => 
   assert.equal(normalizeContentWritingOutline({ sections: ['One', 'One', 'Two', 'Three'] }), null);
 });
 
+test('outline coverage assigns usable claims and excludes blocked claims', async () => {
+  const {
+    ensureContentWritingOutlineKnowledgeCoverage,
+    parseContentWritingOutline,
+  } = await importWorkflow();
+  const outline = parseContentWritingOutline(outlineJson);
+  const covered = ensureContentWritingOutlineKnowledgeCoverage(outline, {
+    items: [{
+      id: 'K001',
+      topic: 'First topic',
+      detail: 'A useful fact.',
+      sourceChunkIds: ['C1-S001'],
+    }],
+    claimLedger: {
+      claims: [
+        {
+          id: 'CL001',
+          statement: 'A usable fact.',
+          knowledgeItemIds: ['K001'],
+          supportingSourceChunkIds: ['C1-S001'],
+          usagePolicy: 'allowed',
+        },
+        {
+          id: 'CL002',
+          statement: 'A blocked statistic.',
+          knowledgeItemIds: ['K001'],
+          supportingSourceChunkIds: ['C1-S001'],
+          usagePolicy: 'blocked',
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(
+    covered.sections.flatMap((section: { requiredClaimIds?: string[] }) => section.requiredClaimIds || []),
+    ['CL001'],
+  );
+  assert.equal(
+    covered.sections.some(
+      (section: { requiredClaimIds?: string[] }) => section.requiredClaimIds?.includes('CL002'),
+    ),
+    false,
+  );
+});
+
+test('competitor analysis prompt appends the editable source and claim ledger command', async () => {
+  const { buildContentWritingCompetitorIndexPrompt } = await importWorkflow();
+  const prompt = buildContentWritingCompetitorIndexPrompt({
+    language: 'ar',
+    chunks: [{
+      id: 'C1-S001',
+      competitorNumber: 1,
+      title: 'Source',
+      url: 'https://example.com',
+      text: 'Source text.',
+    }],
+  });
+
+  assert.match(prompt, /sourceAssessments/);
+  assert.match(prompt, /claims/);
+  assert.match(prompt, /محرك المصادر وسجل الادعاءات/);
+  assert.match(prompt, /لا تعتبر تكرار الادعاء تحققًا نهائيًا/);
+});
+
 test('structured writing assembles one markdown draft without duplicate section headings', async () => {
   const {
     parseContentWritingOutline,

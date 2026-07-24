@@ -36,6 +36,10 @@ import {
   type ContentWritingSourceChunk,
 } from '../utils/contentWritingKnowledge';
 import {
+  selectContentWritingClaims,
+  summarizeContentWritingClaimUsage,
+} from '../utils/contentWritingClaims';
+import {
   buildContentWritingQualityContract,
   normalizeContentWritingQualityConfiguration,
   type ContentWritingQualityConfiguration,
@@ -415,10 +419,11 @@ export const executeStructuredContentWritingWorkflow = async (
       chunks: competitorChunks,
       language: article.language,
       template: promptTemplate(PROMPT_TEMPLATE_IDS.competitorIndex),
+      sourceClaimsTemplate: promptTemplate(PROMPT_TEMPLATE_IDS.sourceClaimsLedger),
     }),
     stepIndex: competitorIndexDefinition.ordinal,
     stepCount: 2,
-    maxOutputTokens: 12_000,
+    maxOutputTokens: 16_000,
     processOutput: output => {
       const knowledge = parseContentWritingKnowledgeBase(output, competitorChunks);
       return {
@@ -429,6 +434,8 @@ export const executeStructuredContentWritingWorkflow = async (
           modelIndexedChunkCount: knowledge.modelProcessedChunkIds.length,
           fallbackChunkCount: knowledge.fallbackChunkIds.length,
           competitorCoverageMatrix: knowledge.competitorCoverageMatrix,
+          sourceRegistry: knowledge.sourceRegistry,
+          claimLedger: knowledge.claimLedger,
         },
       };
     },
@@ -524,6 +531,11 @@ export const executeStructuredContentWritingWorkflow = async (
       knowledge,
       chunks: competitorChunks,
     });
+    const relevantClaims = selectContentWritingClaims({
+      claimLedger: knowledge.claimLedger,
+      knowledgeItemIds: requiredIdeaIds,
+      sourceChunkIds: relevantChunks.map(chunk => chunk.id),
+    });
     const result = await runStep({
       definition,
       prompt: buildContentWritingSectionPrompt({
@@ -532,14 +544,18 @@ export const executeStructuredContentWritingWorkflow = async (
         sectionIndex: index,
         previousSection: index > 0 ? outputs[sectionDefinitions[index - 1].key] : undefined,
         knowledgeItems: knowledge.items.filter(item => requiredIdeaIds.includes(item.id)),
+        claims: relevantClaims,
         sourceChunks: relevantChunks,
         coverageLedger: {
           coveredIdeaIds: Array.from(sectionCoverageByKey.values())
             .flatMap(coverage => coverage.coveredIdeaIds),
+          usedClaimIds: Array.from(sectionCoverageByKey.values())
+            .flatMap(coverage => coverage.usedClaimIds),
           previousSectionSummaries: sectionDefinitions.slice(0, index).map(previousDefinition => ({
             sectionKey: previousDefinition.key,
             title: previousDefinition.title,
             coveredIdeaIds: sectionCoverageByKey.get(previousDefinition.key)?.coveredIdeaIds || [],
+            usedClaimIds: sectionCoverageByKey.get(previousDefinition.key)?.usedClaimIds || [],
           })),
         },
         template: promptTemplate(PROMPT_TEMPLATE_IDS.bodySection),
@@ -553,6 +569,7 @@ export const executeStructuredContentWritingWorkflow = async (
           output,
           knowledge.items.map(item => item.id),
           competitorChunks.map(chunk => chunk.id),
+          knowledge.claimLedger.claims.map(claim => claim.id),
         );
         return { output: parsed.markdown, metadata: { sectionCoverage: parsed.coverage } };
       },
@@ -637,6 +654,11 @@ export const executeStructuredContentWritingWorkflow = async (
     knowledge,
     sectionCoverages: Array.from(sectionCoverageByKey.values()),
   });
+  const claimUsageBeforeAudit = summarizeContentWritingClaimUsage({
+    claimLedger: knowledge.claimLedger,
+    usedClaimIds: Array.from(sectionCoverageByKey.values())
+      .flatMap(coverage => coverage.usedClaimIds),
+  });
   const draftBeforeAudit = assembleContentWritingDraft({
     articleTitle: article.title,
     language: article.language,
@@ -656,9 +678,11 @@ export const executeStructuredContentWritingWorkflow = async (
         coverage: sectionCoverageByKey.get(definition.key) || {
           coveredIdeaIds: [],
           usedSourceChunkIds: [],
+          usedClaimIds: [],
         },
       })),
       deterministicMissingIdeaIds: coverageBeforeAudit.missingIdeaIds,
+      deterministicBlockedClaimIds: claimUsageBeforeAudit.blockedClaimIds,
       template: promptTemplate(PROMPT_TEMPLATE_IDS.coverageAudit),
     }),
     stepIndex: coverageAuditDefinition.ordinal,
@@ -669,6 +693,7 @@ export const executeStructuredContentWritingWorkflow = async (
       const audit = parseContentWritingCoverageAudit(output, {
         validIdeaIds: knowledge.items.map(item => item.id),
         validChunkIds: competitorChunks.map(chunk => chunk.id),
+        validClaimIds: knowledge.claimLedger.claims.map(claim => claim.id),
         validSectionKeys: sectionDefinitions.map(definition => definition.key),
       });
       return { output, metadata: { coverageAudit: audit, deterministicCoverage: coverageBeforeAudit } };
@@ -680,6 +705,7 @@ export const executeStructuredContentWritingWorkflow = async (
     {
       validIdeaIds: knowledge.items.map(item => item.id),
       validChunkIds: competitorChunks.map(chunk => chunk.id),
+      validClaimIds: knowledge.claimLedger.claims.map(claim => claim.id),
       validSectionKeys: sectionDefinitions.map(definition => definition.key),
     },
   );
@@ -689,6 +715,11 @@ export const executeStructuredContentWritingWorkflow = async (
     const sectionIndex = sectionDefinitions.findIndex(definition => definition.key === repair.sectionKey);
     if (sectionIndex < 0) continue;
     const sourceChunkIdSet = new Set(repair.sourceChunkIds);
+    const repairClaimIds = new Set(repair.claimIds);
+    knowledge.claimLedger.claims
+      .filter(claim => repairClaimIds.has(claim.id))
+      .flatMap(claim => claim.supportingSourceChunkIds)
+      .forEach(chunkId => sourceChunkIdSet.add(chunkId));
     const selectedChunks = selectRelevantContentWritingChunks({
       title: outline.sections[sectionIndex].title,
       brief: `${outline.sections[sectionIndex].brief}\n${repair.instructions}`,
@@ -700,6 +731,14 @@ export const executeStructuredContentWritingWorkflow = async (
       ...competitorChunks.filter(chunk => sourceChunkIdSet.has(chunk.id)),
       ...selectedChunks,
     ].filter((chunk, index, list) => list.findIndex(candidate => candidate.id === chunk.id) === index);
+    const selectedRepairClaims = selectContentWritingClaims({
+      claimLedger: knowledge.claimLedger,
+      knowledgeItemIds: repair.ideaIds,
+      sourceChunkIds: repairChunks.map(chunk => chunk.id),
+    });
+    const repairClaims = repairClaimIds.size > 0
+      ? knowledge.claimLedger.claims.filter(claim => repairClaimIds.has(claim.id))
+      : selectedRepairClaims;
     const repairDefinition: ContentWritingWorkflowStepDefinition = {
       key: `section-repair-${String(repairIndex + 1).padStart(2, '0')}`,
       type: 'section_repair',
@@ -721,6 +760,7 @@ export const executeStructuredContentWritingWorkflow = async (
         originalMarkdown: outputs[repair.sectionKey],
         repair,
         knowledgeItems: knowledge.items.filter(item => repair.ideaIds.includes(item.id)),
+        claims: repairClaims,
         sourceChunks: repairChunks,
         template: promptTemplate(PROMPT_TEMPLATE_IDS.sectionRepair),
       }),
@@ -733,6 +773,7 @@ export const executeStructuredContentWritingWorkflow = async (
           output,
           knowledge.items.map(item => item.id),
           competitorChunks.map(chunk => chunk.id),
+          knowledge.claimLedger.claims.map(claim => claim.id),
         );
         return {
           output: parsed.markdown,
@@ -745,6 +786,7 @@ export const executeStructuredContentWritingWorkflow = async (
     const previousCoverage = sectionCoverageByKey.get(repair.sectionKey) || {
       coveredIdeaIds: [],
       usedSourceChunkIds: [],
+      usedClaimIds: [],
     };
     const repairedCoverage = normalizeContentWritingSectionCoverage(
       repairResult.step.metadata?.sectionCoverage,
@@ -758,12 +800,20 @@ export const executeStructuredContentWritingWorkflow = async (
         ...previousCoverage.usedSourceChunkIds,
         ...repairedCoverage.usedSourceChunkIds,
       ])),
+      // A targeted repair replaces the complete section, so removed blocked claims
+      // must not survive in the declared claim usage ledger.
+      usedClaimIds: repairedCoverage.usedClaimIds,
     });
   }
 
   const coverageAfterRepairs = summarizeContentWritingCoverage({
     knowledge,
     sectionCoverages: Array.from(sectionCoverageByKey.values()),
+  });
+  const claimUsageAfterRepairs = summarizeContentWritingClaimUsage({
+    claimLedger: knowledge.claimLedger,
+    usedClaimIds: Array.from(sectionCoverageByKey.values())
+      .flatMap(coverage => coverage.usedClaimIds),
   });
   const assembledDraft = assembleContentWritingDraft({
     articleTitle: article.title,
@@ -899,6 +949,16 @@ export const executeStructuredContentWritingWorkflow = async (
         singleCompetitorIdeaCount: knowledge.competitorCoverageMatrix.singleCompetitorIdeaIds.length,
         originalityOpportunityIdeaCount:
           knowledge.competitorCoverageMatrix.originalityOpportunityIdeaIds.length,
+        sourceCount: knowledge.sourceRegistry.sources.length,
+        primarySourceCount: knowledge.sourceRegistry.primarySourceIds.length,
+        contextualSourceCount: knowledge.sourceRegistry.contextualSourceIds.length,
+        referenceOnlySourceCount: knowledge.sourceRegistry.referenceOnlySourceIds.length,
+        claimCount: knowledge.claimLedger.claims.length,
+        allowedClaimCount: knowledge.claimLedger.allowedClaimIds.length,
+        qualifiedClaimCount: knowledge.claimLedger.qualifiedClaimIds.length,
+        blockedClaimCount: knowledge.claimLedger.blockedClaimIds.length,
+        usedClaimCount: claimUsageAfterRepairs.usedClaimIds.length,
+        declaredBlockedClaimIdsBeforeFinalReview: claimUsageAfterRepairs.blockedClaimIds,
         coverageByCompetitor: knowledge.competitorCoverageMatrix.coverageByCompetitor.map(item => ({
           competitorNumber: item.competitorNumber,
           ideaCount: item.knowledgeItemIds.length,

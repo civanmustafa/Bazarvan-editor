@@ -204,7 +204,9 @@ const StepStatusIcon: React.FC<{ status: ContentWritingStepStatus }> = ({ status
 
 const getStepLabel = (step: ContentWritingStep, isArabic: boolean): string => {
   const labels = {
-    competitor_index: isArabic ? 'بناء مصفوفة تغطية المنافسين' : 'Competitor coverage matrix',
+    competitor_index: isArabic
+      ? 'بناء مصفوفة المنافسين وسجل المصادر والادعاءات'
+      : 'Competitor coverage and claim ledger',
     coverage_audit: isArabic ? 'تدقيق اكتمال التغطية' : 'Coverage audit',
     section_repair: isArabic ? 'إصلاح قسم مستهدف' : 'Targeted section repair',
     outline: isArabic ? 'مخطط المقالة' : 'Article outline',

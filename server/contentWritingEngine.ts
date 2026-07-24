@@ -416,7 +416,7 @@ export const prepareContentWritingConversation = async (
       ...bundle.variables,
       competitors_json: JSON.stringify({
         status: 'indexed_separately',
-        note: 'Use the persisted competitor knowledge index and the source excerpts supplied for the current step.',
+        note: 'Use the persisted competitor coverage matrix, source registry, claim ledger, and the source excerpts supplied for the current step.',
       }, null, 2),
     },
   ).text;

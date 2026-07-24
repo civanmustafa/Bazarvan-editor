@@ -1,5 +1,11 @@
+import {
+  normalizeContentWritingSourceClaims,
+  type ContentWritingClaimLedger,
+  type ContentWritingSourceRegistry,
+} from './contentWritingClaims';
+
 export const CONTENT_WRITING_COMPETITOR_CHUNK_SIZE = 1_600;
-export const CONTENT_WRITING_KNOWLEDGE_VERSION = 2;
+export const CONTENT_WRITING_KNOWLEDGE_VERSION = 3;
 
 export type ContentWritingSourceChunk = {
   id: string;
@@ -54,6 +60,8 @@ export type ContentWritingKnowledgeBase = {
   version: number;
   items: ContentWritingKnowledgeItem[];
   competitorCoverageMatrix: ContentWritingCompetitorCoverageMatrix;
+  sourceRegistry: ContentWritingSourceRegistry;
+  claimLedger: ContentWritingClaimLedger;
   processedChunkIds: string[];
   modelProcessedChunkIds: string[];
   fallbackChunkIds: string[];
@@ -62,6 +70,7 @@ export type ContentWritingKnowledgeBase = {
 export type ContentWritingSectionCoverage = {
   coveredIdeaIds: string[];
   usedSourceChunkIds: string[];
+  usedClaimIds: string[];
 };
 
 export type ContentWritingCoverageRepair = {
@@ -69,11 +78,14 @@ export type ContentWritingCoverageRepair = {
   instructions: string;
   ideaIds: string[];
   sourceChunkIds: string[];
+  claimIds: string[];
 };
 
 export type ContentWritingCoverageAudit = {
   missingIdeaIds: string[];
   weakIdeaIds: string[];
+  unsupportedClaimIds: string[];
+  blockedClaimIds: string[];
   duplicateTopics: string[];
   repairs: ContentWritingCoverageRepair[];
 };
@@ -325,10 +337,17 @@ export const normalizeContentWritingKnowledgeBase = (
     });
   });
 
+  const sourceClaims = normalizeContentWritingSourceClaims({
+    value: source,
+    items,
+    chunks,
+  });
   return {
     version: CONTENT_WRITING_KNOWLEDGE_VERSION,
     items,
     competitorCoverageMatrix: buildContentWritingCompetitorCoverageMatrix(items, chunks),
+    sourceRegistry: sourceClaims.sourceRegistry,
+    claimLedger: sourceClaims.claimLedger,
     processedChunkIds: chunks.map(chunk => chunk.id),
     modelProcessedChunkIds,
     fallbackChunkIds,
@@ -402,6 +421,7 @@ export const parseContentWritingSectionResult = (
   value: string,
   validIdeaIds: readonly string[],
   validChunkIds: readonly string[],
+  validClaimIds: readonly string[] = [],
 ): { markdown: string; coverage: ContentWritingSectionCoverage } => {
   const source = parseJsonObject(value);
   if (!source) throw new Error('The section must be valid JSON.');
@@ -409,11 +429,13 @@ export const parseContentWritingSectionResult = (
   if (!markdown) throw new Error('The section JSON must contain non-empty Markdown.');
   const ideaSet = new Set(validIdeaIds);
   const chunkSet = new Set(validChunkIds);
+  const claimSet = new Set(validClaimIds);
   return {
     markdown,
     coverage: {
       coveredIdeaIds: toUniqueTextList(source.coveredIdeaIds).filter(id => ideaSet.has(id)),
       usedSourceChunkIds: toUniqueTextList(source.usedSourceChunkIds).filter(id => chunkSet.has(id)),
+      usedClaimIds: toUniqueTextList(source.usedClaimIds).filter(id => claimSet.has(id)),
     },
   };
 };
@@ -425,6 +447,7 @@ export const normalizeContentWritingSectionCoverage = (
   return {
     coveredIdeaIds: toUniqueTextList(source.coveredIdeaIds),
     usedSourceChunkIds: toUniqueTextList(source.usedSourceChunkIds),
+    usedClaimIds: toUniqueTextList(source.usedClaimIds),
   };
 };
 
@@ -433,6 +456,7 @@ export const parseContentWritingCoverageAudit = (
   options: {
     validIdeaIds: readonly string[];
     validChunkIds: readonly string[];
+    validClaimIds?: readonly string[];
     validSectionKeys: readonly string[];
   },
 ): ContentWritingCoverageAudit => {
@@ -440,6 +464,7 @@ export const parseContentWritingCoverageAudit = (
   if (!source) throw new Error('The coverage audit must be valid JSON.');
   const ideaIds = new Set(options.validIdeaIds);
   const chunkIds = new Set(options.validChunkIds);
+  const claimIds = new Set(options.validClaimIds || []);
   const sectionKeys = new Set(options.validSectionKeys);
   const repairs = Array.isArray(source.repairs)
     ? source.repairs.flatMap((item): ContentWritingCoverageRepair[] => {
@@ -452,12 +477,17 @@ export const parseContentWritingCoverageAudit = (
         instructions,
         ideaIds: toUniqueTextList(item.ideaIds).filter(id => ideaIds.has(id)),
         sourceChunkIds: toUniqueTextList(item.sourceChunkIds).filter(id => chunkIds.has(id)),
+        claimIds: toUniqueTextList(item.claimIds).filter(id => claimIds.has(id)),
       }];
     }).slice(0, 3)
     : [];
   return {
     missingIdeaIds: toUniqueTextList(source.missingIdeaIds).filter(id => ideaIds.has(id)),
     weakIdeaIds: toUniqueTextList(source.weakIdeaIds).filter(id => ideaIds.has(id)),
+    unsupportedClaimIds: toUniqueTextList(source.unsupportedClaimIds)
+      .filter(id => claimIds.has(id)),
+    blockedClaimIds: toUniqueTextList(source.blockedClaimIds)
+      .filter(id => claimIds.has(id)),
     duplicateTopics: toUniqueTextList(source.duplicateTopics, 50, 500),
     repairs,
   };
@@ -490,6 +520,8 @@ export const contentWritingKnowledgeToPromptJson = (
   version: knowledge.version,
   items: knowledge.items,
   competitorCoverageMatrix: knowledge.competitorCoverageMatrix,
+  sourceRegistry: knowledge.sourceRegistry,
+  claimLedger: knowledge.claimLedger,
   processedChunkIds: knowledge.processedChunkIds,
   fallbackChunkIds: knowledge.fallbackChunkIds,
 }, null, 2);

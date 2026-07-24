@@ -61,8 +61,11 @@ const requiredWorkerMarkers = [
   'complete_content_writing_session',
   'fail_content_writing_session',
   'Quality repair',
-  'Competitor coverage matrix',
+  'Competitor coverage and claim ledger',
   'Knowledge coverage audit',
+  'sourceRegistry',
+  'claimLedger',
+  'requires_external_verification',
   'competitor_index',
   'coverage_audit',
 ];
