@@ -10,7 +10,6 @@ import { useAISelector } from '../contexts/AIContext';
 import type { Keywords, KeywordAnalysis, AnalysisStatus, KeywordStats, DuplicateAnalysis, GoalContext } from '../types';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 import { parseGoalContextText } from '../utils/goalContext';
-import GeminiProgressStatus from './GeminiProgressStatus';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import { useClientDirectory } from '../hooks/useClientDirectory';
 import {
@@ -345,8 +344,6 @@ const LeftSidebar: React.FC = () => {
   const highlightedItem = useInteractionSelector(context => context.highlightedItem);
   const setHighlightedItem = useInteractionSelector(context => context.setHighlightedItem);
   const generateSemanticKeywords = useAISelector(context => context.generateSemanticKeywords);
-  const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
-  const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
   const {
     activeClients,
     isLoadingClients,
@@ -748,9 +745,6 @@ const LeftSidebar: React.FC = () => {
         {isGeneratingSemanticKeywords ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
         <span>{isGeneratingSemanticKeywords ? tLk.generatingSemanticKeywords : tLk.generateSemanticKeywords}</span>
       </button>
-      {isGeneratingSemanticKeywords && aiRequestProgress?.source === 'semantic_keywords_lsi' && (
-        <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact onCancel={cancelAiRequest} />
-      )}
       {semanticGenerationStatus && (
         <p className={`text-xs font-bold ${semanticGenerationStatus === tLk.semanticKeywordsGenerated ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} aria-live="polite">
           {semanticGenerationStatus}

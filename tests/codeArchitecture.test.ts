@@ -55,7 +55,7 @@ test('development and production use one API route registry', async () => {
 });
 
 test('all editor AI execution paths publish to one fixed live activity monitor', async () => {
-  const [app, monitor, activityEngine, geminiEngine, aiContext, writingPanel, writingMonitor, externalControls] = await Promise.all([
+  const [app, monitor, activityEngine, geminiEngine, aiContext, writingPanel, writingMonitor, externalControls, leftSidebar] = await Promise.all([
     readWorkspaceFile('App.tsx'),
     readWorkspaceFile('components/AiKeyUsageToast.tsx'),
     readWorkspaceFile('utils/aiExecutionActivity.ts'),
@@ -64,6 +64,7 @@ test('all editor AI execution paths publish to one fixed live activity monitor',
     readWorkspaceFile('components/ContentWritingPanel.tsx'),
     readWorkspaceFile('utils/contentWritingActivityMonitor.ts'),
     readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+    readWorkspaceFile('components/LeftSidebar.tsx'),
   ]);
 
   assert.match(app, /<AiExecutionMonitor\s*\/>/);
@@ -95,6 +96,8 @@ test('all editor AI execution paths publish to one fixed live activity monitor',
   assert.match(externalControls, /updateAiExecutionActivity/);
   assert.match(externalControls, /activeEngineeringRootJob/);
   assert.match(externalControls, /cancelExternalAnalysisJob\(articleId, job\.id\)/);
+  assert.doesNotMatch(leftSidebar, /GeminiProgressStatus/);
+  assert.doesNotMatch(leftSidebar, /aiRequestProgress\?\.source === 'semantic_keywords_lsi'/);
 });
 
 test('API handlers share the same HTTP request and response adapters', async () => {
