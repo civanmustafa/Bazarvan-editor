@@ -2,6 +2,7 @@ import {
   listClientCenterClients,
   mapClientLinkDictionary,
   mapClientSemanticProfile,
+  mapInternalLinkQualityPolicy,
   type ClientCenterClient,
 } from './clientCenter';
 import {
@@ -10,6 +11,10 @@ import {
 } from './clientSemanticIndex';
 import { getSupabaseClient } from './supabaseClient';
 import type { InternalLinkTargetPage, InternalLinkSuggestion } from './internalLinkingEngine';
+import {
+  DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
+  type InternalLinkQualityPolicyValues,
+} from './internalLinkQualityPolicy';
 
 export type ArticleClientContext = {
   articleId: string;
@@ -35,6 +40,12 @@ export type InternalLinkAction = {
   createdAt: string;
 };
 
+export type EffectiveInternalLinkQualityPolicy = {
+  values: InternalLinkQualityPolicyValues;
+  source: 'client' | 'global' | 'default';
+  policyVersion: number;
+};
+
 const PAGE_COLUMNS = [
   'id',
   'client_id',
@@ -42,6 +53,7 @@ const PAGE_COLUMNS = [
   'final_url',
   'canonical_url',
   'crawl_status',
+  'http_status',
   'page_title',
   'meta_description',
   'h1',
@@ -70,6 +82,21 @@ const ACTION_COLUMNS = [
   'created_at',
 ].join(',');
 
+const QUALITY_POLICY_COLUMNS = [
+  'id',
+  'scope',
+  'client_id',
+  'minimum_score',
+  'max_links_per_1000_words',
+  'absolute_maximum_links',
+  'maximum_links_per_target',
+  'minimum_matched_terms',
+  'forbidden_anchors',
+  'policy_version',
+  'created_at',
+  'updated_at',
+].join(',');
+
 const asText = (value: unknown): string => typeof value === 'string' ? value : '';
 const asTextArray = (value: unknown): string[] => (
   Array.isArray(value) ? value.filter(item => typeof item === 'string') as string[] : []
@@ -85,6 +112,10 @@ const mapTargetPage = (row: any): InternalLinkTargetPage => ({
   finalUrl: asText(row.final_url),
   canonicalUrl: asText(row.canonical_url),
   crawlStatus: asText(row.crawl_status),
+  httpStatus: row.http_status !== null && row.http_status !== undefined
+    && Number.isFinite(Number(row.http_status))
+    ? Number(row.http_status)
+    : null,
   pageTitle: asText(row.page_title),
   metaDescription: asText(row.meta_description),
   h1: asText(row.h1),
@@ -122,6 +153,44 @@ const mapAction = (row: any): InternalLinkAction => ({
 export const listInternalLinkingClients = async (): Promise<ClientCenterClient[]> => (
   (await listClientCenterClients()).filter(client => client.isActive)
 );
+
+export const loadInternalLinkQualityPolicy = async (
+  clientId: string,
+): Promise<EffectiveInternalLinkQualityPolicy> => {
+  const { data, error } = await getSupabaseClient()
+    .from('internal_link_quality_policies')
+    .select(QUALITY_POLICY_COLUMNS)
+    .or(`scope.eq.global,client_id.eq.${clientId}`);
+  throwIfError(error);
+  const policies = (data || []).map(mapInternalLinkQualityPolicy);
+  const clientPolicy = policies.find(policy => (
+    policy.scope === 'client' && policy.clientId === clientId
+  ));
+  const globalPolicy = policies.find(policy => policy.scope === 'global');
+  const selected = clientPolicy || globalPolicy;
+  if (!selected) {
+    return {
+      values: {
+        ...DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
+        forbiddenAnchors: [...DEFAULT_INTERNAL_LINK_QUALITY_POLICY.forbiddenAnchors],
+      },
+      source: 'default',
+      policyVersion: 1,
+    };
+  }
+  return {
+    values: {
+      minimumScore: selected.minimumScore,
+      maxLinksPer1000Words: selected.maxLinksPer1000Words,
+      absoluteMaximumLinks: selected.absoluteMaximumLinks,
+      maximumLinksPerTarget: selected.maximumLinksPerTarget,
+      minimumMatchedTerms: selected.minimumMatchedTerms,
+      forbiddenAnchors: selected.forbiddenAnchors,
+    },
+    source: selected.scope,
+    policyVersion: selected.policyVersion,
+  };
+};
 
 export const loadArticleClientContext = async (
   articleId: string,
@@ -300,6 +369,8 @@ export const recordInternalLinkSuggestionRun = async (input: {
   currentPageUrl?: string;
   pageCount: number;
   suggestions: InternalLinkSuggestion[];
+  qualityPolicy?: EffectiveInternalLinkQualityPolicy;
+  suggestionBudget?: number;
 }): Promise<void> => {
   const paragraphNumbers = new Set(input.suggestions.map(item => item.paragraphNumber));
   const { error } = await getSupabaseClient()
@@ -313,12 +384,17 @@ export const recordInternalLinkSuggestionRun = async (input: {
       page_count: Math.max(0, Math.min(1_000_000, input.pageCount)),
       suggestion_count: Math.max(0, Math.min(10_000, input.suggestions.length)),
       top_score: input.suggestions[0]?.score ?? null,
-      algorithm_version: input.suggestions[0]?.algorithmVersion || 'bm25-paragraph-v2',
+      algorithm_version: input.suggestions[0]?.algorithmVersion || 'bm25-quality-v3',
       result_summary: {
         paragraphCount: paragraphNumbers.size,
         strongCount: input.suggestions.filter(item => item.confidence === 'strong').length,
         goodCount: input.suggestions.filter(item => item.confidence === 'good').length,
         reviewCount: input.suggestions.filter(item => item.confidence === 'review').length,
+        suggestionBudget: Math.max(0, input.suggestionBudget || 0),
+        policySource: input.qualityPolicy?.source || 'default',
+        policyVersion: input.qualityPolicy?.policyVersion || 1,
+        minimumScore: input.qualityPolicy?.values.minimumScore
+          ?? DEFAULT_INTERNAL_LINK_QUALITY_POLICY.minimumScore,
       },
     });
   if (error && error.code !== '23505') throwIfError(error);

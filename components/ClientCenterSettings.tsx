@@ -30,6 +30,7 @@ import {
   deleteClientCenterDomain,
   deleteClientCenterPage,
   deleteClientLinkDictionary,
+  deleteInternalLinkQualityPolicy,
   getCurrentClientCenterUserId,
   listClientCenterClients,
   loadClientCenterDetails,
@@ -37,6 +38,7 @@ import {
   rebuildClientSemanticProfiles,
   saveClientCenterAssignment,
   saveClientLinkDictionary,
+  saveInternalLinkQualityPolicy,
   setClientLinkDictionaryEnabled,
   setClientCenterPageEnabled,
   updateClientCenterClient,
@@ -52,6 +54,11 @@ import {
   type ClientLinkDictionaryType,
   type ClientPageSemanticProfile,
 } from '../utils/clientSemanticIndex';
+import {
+  DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
+  normalizeInternalLinkQualityPolicy,
+  type InternalLinkQualityPolicyValues,
+} from '../utils/internalLinkQualityPolicy';
 
 type ClientCenterTab = 'profile' | 'pages' | 'index' | 'access';
 
@@ -62,6 +69,7 @@ const EMPTY_DETAILS: ClientCenterDetails = {
   jobs: [],
   dictionaries: [],
   semanticProfiles: [],
+  qualityPolicies: [],
 };
 
 const EMPTY_CLIENT_INPUT: ClientCenterClientInput = {
@@ -99,6 +107,43 @@ const Field: React.FC<{
     {description && <span className="block text-[11px] font-semibold leading-5 text-gray-400">{description}</span>}
     {children}
   </label>
+);
+
+const QualityPolicyFields: React.FC<{
+  value: InternalLinkQualityPolicyValues;
+  disabled?: boolean;
+  onChange: (patch: Partial<InternalLinkQualityPolicyValues>) => void;
+}> = ({ value, disabled = false, onChange }) => (
+  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+    <Field label="الحد الأدنى لدرجة الصلة" description="لا يظهر أي اقتراح تقل درجته عن هذه القيمة من 100.">
+      <input type="number" min={0} max={100} className={inputClass} disabled={disabled} value={value.minimumScore} onChange={event => onChange({ minimumScore: Number(event.target.value) })} />
+    </Field>
+    <Field label="الروابط لكل 1000 كلمة" description="يحسب المحرك سقفًا تلقائيًا بحسب طول المقالة.">
+      <input type="number" min={0.5} max={20} step={0.5} className={inputClass} disabled={disabled} value={value.maxLinksPer1000Words} onChange={event => onChange({ maxLinksPer1000Words: Number(event.target.value) })} />
+    </Field>
+    <Field label="الحد الأقصى المطلق للروابط">
+      <input type="number" min={1} max={50} className={inputClass} disabled={disabled} value={value.absoluteMaximumLinks} onChange={event => onChange({ absoluteMaximumLinks: Number(event.target.value) })} />
+    </Field>
+    <Field label="أقصى تكرار للرابط الهدف" description="يشمل الروابط الموجودة في المقالة قبل إضافة اقتراح جديد.">
+      <input type="number" min={1} max={5} className={inputClass} disabled={disabled} value={value.maximumLinksPerTarget} onChange={event => onChange({ maximumLinksPerTarget: Number(event.target.value) })} />
+    </Field>
+    <Field label="أقل عدد كلمات دلالية متطابقة">
+      <input type="number" min={2} max={5} className={inputClass} disabled={disabled} value={value.minimumMatchedTerms} onChange={event => onChange({ minimumMatchedTerms: Number(event.target.value) })} />
+    </Field>
+    <div className="md:col-span-2 lg:col-span-3">
+      <Field label="نصوص Anchor Text غير المسموحة" description="ضع كل عبارة في سطر. هذه قائمة خاصة بالروابط، وليست قائمة مصطلحات للكتابة.">
+        <textarea
+          className={`${inputClass} min-h-28 resize-y`}
+          disabled={disabled}
+          value={value.forbiddenAnchors.join('\n')}
+          onChange={event => onChange({
+            forbiddenAnchors: event.target.value.split(/\r?\n/),
+          })}
+          placeholder={'اضغط هنا\nاعرف المزيد\nاقرأ المزيد'}
+        />
+      </Field>
+    </div>
+  </div>
 );
 
 const formatDate = (value: string | null): string => {
@@ -202,6 +247,13 @@ const ClientCenterSettings: React.FC = () => {
   const [dictionaryLabel, setDictionaryLabel] = useState('');
   const [dictionaryTerms, setDictionaryTerms] = useState('');
   const [isRebuildingIndex, setIsRebuildingIndex] = useState(false);
+  const [globalQualityPolicyDraft, setGlobalQualityPolicyDraft] = useState(
+    normalizeInternalLinkQualityPolicy(DEFAULT_INTERNAL_LINK_QUALITY_POLICY),
+  );
+  const [clientQualityPolicyDraft, setClientQualityPolicyDraft] = useState(
+    normalizeInternalLinkQualityPolicy(DEFAULT_INTERNAL_LINK_QUALITY_POLICY),
+  );
+  const [clientQualityPolicyEnabled, setClientQualityPolicyEnabled] = useState(false);
 
   const selectedClient = clients.find(client => client.id === selectedClientId) || null;
   const ownAssignment = details.assignments.find(assignment => assignment.userId === currentUserId && assignment.isActive);
@@ -292,6 +344,17 @@ const ClientCenterSettings: React.FC = () => {
   useEffect(() => {
     if (selectedClient) setClientInput(clientToInput(selectedClient));
   }, [selectedClient]);
+
+  useEffect(() => {
+    const globalPolicy = details.qualityPolicies.find(policy => policy.scope === 'global');
+    const clientPolicy = details.qualityPolicies.find(policy => (
+      policy.scope === 'client' && policy.clientId === selectedClientId
+    ));
+    const globalValues = normalizeInternalLinkQualityPolicy(globalPolicy || null);
+    setGlobalQualityPolicyDraft(globalValues);
+    setClientQualityPolicyDraft(normalizeInternalLinkQualityPolicy(clientPolicy || globalValues));
+    setClientQualityPolicyEnabled(Boolean(clientPolicy));
+  }, [details.qualityPolicies, selectedClientId]);
 
   const hasActiveJobs = details.jobs.some(job => (
     job.status === 'queued' || job.status === 'running' || job.status === 'retry_scheduled'
@@ -465,6 +528,41 @@ const ClientCenterSettings: React.FC = () => {
     } finally {
       setIsRebuildingIndex(false);
     }
+  };
+
+  const handleSaveGlobalQualityPolicy = async () => {
+    if (!isAdmin) return;
+    await runMutation(async () => {
+      await saveInternalLinkQualityPolicy({
+        scope: 'global',
+        values: globalQualityPolicyDraft,
+      });
+    }, 'تم حفظ قواعد الجودة العامة وتحديث إصدارها.');
+  };
+
+  const handleSaveClientQualityPolicy = async () => {
+    if (!selectedClientId || !canEditPages) return;
+    const existing = details.qualityPolicies.find(policy => (
+      policy.scope === 'client' && policy.clientId === selectedClientId
+    ));
+    if (!clientQualityPolicyEnabled) {
+      if (!existing) {
+        showMessage('العميل يستخدم قواعد الجودة العامة بالفعل.');
+        return;
+      }
+      await runMutation(
+        () => deleteInternalLinkQualityPolicy(existing.id),
+        'تم حذف التخصيص، وسيستخدم العميل قواعد الجودة العامة.',
+      );
+      return;
+    }
+    await runMutation(async () => {
+      await saveInternalLinkQualityPolicy({
+        scope: 'client',
+        clientId: selectedClientId,
+        values: clientQualityPolicyDraft,
+      });
+    }, 'تم حفظ قواعد جودة الربط الخاصة بهذا العميل.');
   };
 
   const renderClientForm = (creating: boolean) => (
@@ -723,7 +821,7 @@ const ClientCenterSettings: React.FC = () => {
           ))}
         </div>
 
-        <div className="flex flex-col gap-3 rounded-lg border border-gray-200 p-4 dark:border-[#3C3C3C] sm:flex-row sm:items-center sm:justify-between">
+	        <div className="flex flex-col gap-3 rounded-lg border border-gray-200 p-4 dark:border-[#3C3C3C] sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h4 className="text-sm font-black text-gray-800 dark:text-gray-100">الفهرس الخوارزمي للصفحات</h4>
             <p className="mt-1 text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">
@@ -740,10 +838,93 @@ const ClientCenterSettings: React.FC = () => {
               {isRebuildingIndex ? <LoaderCircle className="animate-spin" size={16} /> : <RefreshCw size={16} />}
               إعادة بناء الفهرس
             </button>
-          )}
-        </div>
+	          )}
+	        </div>
 
-        <section className="space-y-3">
+	        <section className="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-[#3C3C3C]">
+	          <div>
+	            <h4 className="flex items-center gap-2 text-sm font-black text-gray-800 dark:text-gray-100">
+	              <ShieldCheck className="text-[#d4af37]" size={17} />
+	              قواعد جودة الربط الداخلي
+	            </h4>
+	            <p className="mt-1 text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">
+	              تُقرأ هذه القواعد من قاعدة البيانات عند فحص المقالة. تخصيص العميل يتقدم على السياسة العامة، وحذف التخصيص يعيده تلقائيًا إلى السياسة العامة.
+	            </p>
+	          </div>
+
+	          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-[11px] font-semibold leading-5 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+	            قواعد ثابتة لا يمكن تجاوزها: Anchor Text من كلمتين إلى خمس، منع الربط بالمقالة نفسها، ومنع الصفحة المعطلة أو غير الجاهزة أو Noindex، وعدم وضع رابطين على النص نفسه. لا تُضاف الروابط تلقائيًا.
+	          </div>
+
+	          <div className="space-y-3 rounded-lg bg-gray-50 p-4 dark:bg-[#1F1F1F]">
+	            <div className="flex flex-wrap items-center justify-between gap-2">
+	              <div>
+	                <div className="text-sm font-black text-gray-800 dark:text-gray-100">السياسة العامة</div>
+	                <div className="text-[10px] font-bold text-gray-400">
+	                  تطبق على جميع العملاء الذين لا يملكون تخصيصًا
+	                  {details.qualityPolicies.find(policy => policy.scope === 'global')
+	                    ? ` • الإصدار ${details.qualityPolicies.find(policy => policy.scope === 'global')?.policyVersion}`
+	                    : ' • القيم الافتراضية'}
+	                </div>
+	              </div>
+	              {isAdmin && (
+	                <button type="button" disabled={isSaving} className={primaryButtonClass} onClick={() => void handleSaveGlobalQualityPolicy()}>
+	                  <Save size={15} /> حفظ السياسة العامة
+	                </button>
+	              )}
+	            </div>
+	            <QualityPolicyFields
+	              value={globalQualityPolicyDraft}
+	              disabled={!isAdmin}
+	              onChange={patch => setGlobalQualityPolicyDraft(current => normalizeInternalLinkQualityPolicy({
+	                ...current,
+	                ...patch,
+	              }))}
+	            />
+	          </div>
+
+	          <div className="space-y-3 rounded-lg border border-[#d4af37]/30 p-4">
+	            <label className="flex cursor-pointer items-start gap-2">
+	              <input
+	                type="checkbox"
+	                checked={clientQualityPolicyEnabled}
+	                disabled={!canEditPages}
+	                onChange={event => {
+	                  const enabled = event.target.checked;
+	                  setClientQualityPolicyEnabled(enabled);
+	                  if (enabled) {
+	                    setClientQualityPolicyDraft(normalizeInternalLinkQualityPolicy(globalQualityPolicyDraft));
+	                  }
+	                }}
+	                className="mt-1 accent-[#d4af37]"
+	              />
+	              <span>
+	                <span className="block text-sm font-black text-gray-800 dark:text-gray-100">استخدام قواعد مخصصة لهذا العميل</span>
+	                <span className="block text-[10px] font-bold leading-5 text-gray-400">
+	                  عند إيقافها وحفظها يُحذف التخصيص ويعود العميل إلى السياسة العامة.
+	                </span>
+	              </span>
+	            </label>
+	            {clientQualityPolicyEnabled && (
+	              <QualityPolicyFields
+	                value={clientQualityPolicyDraft}
+	                disabled={!canEditPages}
+	                onChange={patch => setClientQualityPolicyDraft(current => normalizeInternalLinkQualityPolicy({
+	                  ...current,
+	                  ...patch,
+	                }))}
+	              />
+	            )}
+	            {canEditPages && (
+	              <button type="button" disabled={isSaving} className={secondaryButtonClass} onClick={() => void handleSaveClientQualityPolicy()}>
+	                <Save size={15} />
+	                {clientQualityPolicyEnabled ? 'حفظ تخصيص العميل' : 'اعتماد السياسة العامة'}
+	              </button>
+	            )}
+	          </div>
+	        </section>
+
+	        <section className="space-y-3">
           <div>
             <h4 className="flex items-center gap-2 text-sm font-black text-gray-800 dark:text-gray-100">
               <BookOpen className="text-[#d4af37]" size={17} />

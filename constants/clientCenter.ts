@@ -2,7 +2,8 @@ export const CLIENT_CENTER_FOUNDATION_MIGRATION = '20260724010000_client_center_
 export const CLIENT_CENTER_CRAWLING_MIGRATION = '20260724020000_client_center_management_and_crawling.sql';
 export const CLIENT_CENTER_INTERNAL_LINKING_MIGRATION = '20260724030000_internal_linking_engine.sql';
 export const CLIENT_CENTER_SEMANTIC_INDEX_MIGRATION = '20260724040000_client_semantic_index.sql';
-export const CLIENT_CENTER_REQUIRED_MIGRATION = '20260724050000_editor_internal_link_suggestions.sql';
+export const CLIENT_CENTER_EDITOR_SUGGESTIONS_MIGRATION = '20260724050000_editor_internal_link_suggestions.sql';
+export const CLIENT_CENTER_REQUIRED_MIGRATION = '20260724060000_internal_link_quality_policies.sql';
 
 export const CLIENT_CENTER_SCHEMA_PROBES = [
   {
@@ -54,5 +55,10 @@ export const CLIENT_CENTER_SCHEMA_PROBES = [
     id: 'suggestionRuns',
     table: 'client_link_suggestion_runs',
     columns: 'id,article_id,client_id,article_signature,inventory_signature,current_page_url,page_count,suggestion_count,top_score,algorithm_version,result_summary,created_by,created_at',
+  },
+  {
+    id: 'qualityPolicies',
+    table: 'internal_link_quality_policies',
+    columns: 'id,scope,client_id,minimum_score,max_links_per_1000_words,absolute_maximum_links,maximum_links_per_target,minimum_matched_terms,forbidden_anchors,policy_version,created_by,updated_by,created_at,updated_at',
   },
 ] as const;

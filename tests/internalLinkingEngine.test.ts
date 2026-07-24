@@ -10,6 +10,10 @@ import {
   type InternalLinkTargetPage,
 } from '../utils/internalLinkingEngine.ts';
 import { buildClientPageSemanticProfile } from '../utils/clientSemanticIndex.ts';
+import {
+  calculateInternalLinkSuggestionBudget,
+  normalizeInternalLinkQualityPolicy,
+} from '../utils/internalLinkQualityPolicy.ts';
 
 const root = process.cwd();
 const readWorkspaceFile = (relativePath: string) => readFile(path.join(root, relativePath), 'utf8');
@@ -57,7 +61,9 @@ test('deterministic engine proposes a real body anchor with transparent evidence
   assert.ok(first[0].matchedTerms.length >= 2);
   assert.ok(first[0].reasons.some(reason => reason.includes('عنوان')));
   assert.ok(first[0].bm25Score > 0);
-  assert.equal(first[0].algorithmVersion, 'bm25-paragraph-v2');
+  assert.equal(first[0].algorithmVersion, 'bm25-quality-v3');
+  const anchorWordCount = first[0].anchorText.match(/[A-Za-z0-9\u0600-\u06FF]+/g)?.length || 0;
+  assert.ok(anchorWordCount >= 2 && anchorWordCount <= 5);
   assert.equal(first[0].paragraphNumber, 1);
   assert.ok(first[0].alternativeAnchors.includes(first[0].anchorText));
   assert.ok(first[0].alternativeAnchors.every(anchor => articleText.split('\n')[0].includes(anchor)));
@@ -123,11 +129,17 @@ test('engine excludes duplicate targets, unsafe page states, and dismissed sugge
     canonicalUrl: 'https://example.com/failed',
     crawlStatus: 'failed',
   });
+  const broken = readyPage({
+    id: '55555555-5555-4555-8555-555555555555',
+    inputUrl: 'https://example.com/broken',
+    canonicalUrl: 'https://example.com/broken',
+    httpStatus: 404,
+  });
 
   assert.deepEqual(generateInternalLinkSuggestions({
     articleTitle: 'التحول الرقمي',
     articleText,
-    pages: [eligible, noIndex, disabled, failed],
+    pages: [eligible, noIndex, disabled, failed, broken],
     existingUrls: ['https://EXAMPLE.com/digital-transformation/#section'],
   }), []);
 
@@ -156,6 +168,76 @@ test('engine excludes duplicate targets, unsafe page states, and dismissed sugge
     normalizeInternalLinkUrl('https://EXAMPLE.com/digital-transformation/#section'),
     normalizeInternalLinkUrl('https://example.com/digital-transformation'),
   );
+});
+
+test('quality policy rejects generic anchors, shallow relevance, and scores below its threshold', () => {
+  const genericPage = readyPage({
+    pageTitle: 'اضغط هنا',
+    h1: 'اضغط هنا',
+    h2: [],
+    h3: [],
+    metaDescription: '',
+    extractedTerms: ['اضغط', 'هنا'],
+    extractedPhrases: ['اضغط هنا'],
+  });
+  assert.deepEqual(generateInternalLinkSuggestions({
+    articleTitle: 'مقالة تجريبية',
+    articleText: 'للوصول إلى التفاصيل يمكنك اضغط هنا ومتابعة المعلومات المنشورة.',
+    pages: [genericPage],
+  }), []);
+
+  const shallowPage = readyPage({
+    pageTitle: 'موضوع بعيد تمامًا',
+    h1: 'عنوان آخر',
+    h2: [],
+    h3: [],
+    metaDescription: 'تطوير الأعمال',
+    extractedTerms: [],
+    extractedPhrases: [],
+  });
+  assert.deepEqual(generateInternalLinkSuggestions({
+    articleTitle: 'التحول المؤسسي',
+    articleText: 'يساعد تطوير الأعمال الفرق على التخطيط.',
+    pages: [shallowPage],
+  }), []);
+
+  assert.deepEqual(generateInternalLinkSuggestions({
+    articleTitle: 'التحول الرقمي',
+    articleText,
+    pages: [readyPage()],
+    qualityPolicy: { minimumScore: 100 },
+  }), []);
+});
+
+test('quality policy derives the remaining link budget and permits a bounded repeated target', () => {
+  const longArticle = Array.from({ length: 8 }, () => articleText).join('\n');
+  assert.equal(calculateInternalLinkSuggestionBudget(longArticle, 0, {
+    maxLinksPer1000Words: 5,
+    absoluteMaximumLinks: 20,
+  }), 1);
+  assert.equal(calculateInternalLinkSuggestionBudget(longArticle, 1, {
+    maxLinksPer1000Words: 20,
+    absoluteMaximumLinks: 20,
+  }), 3);
+
+  const target = readyPage();
+  assert.equal(generateInternalLinkSuggestions({
+    articleTitle: 'التحول الرقمي',
+    articleText,
+    pages: [target],
+    existingUrls: ['https://external.example/reference'],
+  }).length, 1, 'External references must not consume the internal-link budget.');
+
+  assert.equal(generateInternalLinkSuggestions({
+    articleTitle: 'التحول الرقمي',
+    articleText: longArticle,
+    pages: [target],
+    existingUrls: [target.canonicalUrl || ''],
+    qualityPolicy: {
+      maximumLinksPerTarget: 2,
+      maxLinksPer1000Words: 20,
+    },
+  }).length, 1);
 });
 
 test('article signature is stable and changes when the article body changes', () => {
@@ -195,6 +277,31 @@ test('phase 7 migration persists the current page, aggregate runs, block, and re
   assert.doesNotMatch(migration, /openai|gemini|search_console|orphan_page/i);
 });
 
+test('phase 8 stores one global policy and a client override with scoped RLS', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260724060000_internal_link_quality_policies.sql',
+  );
+  assert.match(migration, /create table if not exists public\.internal_link_quality_policies/);
+  assert.match(migration, /scope in \('global', 'client'\)/);
+  assert.match(migration, /internal_link_quality_policies_one_global_idx/);
+  assert.match(migration, /unique \(client_id\)/);
+  assert.match(migration, /alter table public\.internal_link_quality_policies enable row level security/);
+  assert.match(migration, /public\.can_read_client\(client_id\)/);
+  assert.match(migration, /public\.can_edit_client\(client_id\)/);
+  assert.match(migration, /scope = 'global' and client_id is null and public\.is_admin\(\)/);
+  assert.doesNotMatch(migration, /openai|gemini|search_console|orphan_page/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
+
+  const normalized = normalizeInternalLinkQualityPolicy({
+    minimumScore: 500,
+    maxLinksPer1000Words: 0,
+    forbiddenAnchors: [],
+  });
+  assert.equal(normalized.minimumScore, 100);
+  assert.equal(normalized.maxLinksPer1000Words, 0.5);
+  assert.ok(normalized.forbiddenAnchors.includes('اضغط هنا'));
+});
+
 test('phase 4/5 migration stores article-client scope and append-only link actions securely', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260724030000_internal_linking_engine.sql',
@@ -214,8 +321,9 @@ test('phase 4/5 migration stores article-client scope and append-only link actio
 });
 
 test('editor integration applies native links and does not call an AI provider', async () => {
-  const [panel, sidebar, editorContext, registry, releaseScript, guide] = await Promise.all([
+  const [panel, clientCenter, sidebar, editorContext, registry, releaseScript, guide] = await Promise.all([
     readWorkspaceFile('components/InternalLinkingPanel.tsx'),
+    readWorkspaceFile('components/ClientCenterSettings.tsx'),
     readWorkspaceFile('components/RightSidebar.tsx'),
     readWorkspaceFile('contexts/EditorContext.tsx'),
     readWorkspaceFile('constants/clientCenter.ts'),
@@ -233,16 +341,23 @@ test('editor integration applies native links and does not call an AI provider',
   assert.match(panel, /منع للمقالة/);
   assert.match(panel, /إبلاغ/);
   assert.match(panel, /recordInternalLinkSuggestionRun/);
+  assert.match(panel, /قواعد الجودة المطبقة/);
+  assert.match(panel, /loadInternalLinkQualityPolicy/);
   assert.doesNotMatch(panel, /handleAiAnalyze|runGemini|openai/i);
+  assert.match(clientCenter, /قواعد جودة الربط الداخلي/);
+  assert.match(clientCenter, /حفظ السياسة العامة/);
+  assert.match(clientCenter, /استخدام قواعد مخصصة لهذا العميل/);
+  assert.match(clientCenter, /saveInternalLinkQualityPolicy/);
   assert.match(sidebar, /InternalLinkingPanel/);
   assert.match(sidebar, /'links'/);
   assert.match(editorContext, /@tiptap\/extension-link/);
   assert.match(editorContext, /Link\.configure/);
   assert.match(registry, /20260724030000_internal_linking_engine\.sql/);
   assert.match(registry, /20260724050000_editor_internal_link_suggestions\.sql/);
+  assert.match(registry, /20260724060000_internal_link_quality_policies\.sql/);
   assert.match(registry, /article_client_contexts/);
   assert.match(registry, /internal_link_actions/);
   assert.match(releaseScript, /CLIENT_CENTER_CRAWLING_MIGRATION/);
   assert.match(guide, /20260724030000_internal_linking_engine\.sql/);
-  assert.match(guide, /لا يحتاج الترحيل الخامس إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
+  assert.match(guide, /لا يحتاج الترحيل السادس إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
 });

@@ -2,6 +2,13 @@ import {
   lightStemArabicToken,
   type ClientPageSemanticProfile,
 } from './clientSemanticIndex.ts';
+import {
+  calculateInternalLinkSuggestionBudget,
+  INTERNAL_LINK_ANCHOR_MAX_WORDS,
+  INTERNAL_LINK_ANCHOR_MIN_WORDS,
+  normalizeInternalLinkQualityPolicy,
+  type InternalLinkQualityPolicyValues,
+} from './internalLinkQualityPolicy.ts';
 
 export type InternalLinkTargetPage = {
   id: string;
@@ -10,6 +17,7 @@ export type InternalLinkTargetPage = {
   finalUrl?: string;
   canonicalUrl?: string;
   crawlStatus: string;
+  httpStatus?: number | null;
   pageTitle?: string;
   metaDescription?: string;
   h1?: string;
@@ -41,7 +49,7 @@ export type InternalLinkSuggestion = {
   alternativeAnchors: string[];
   bm25Score: number;
   completenessScore: number;
-  algorithmVersion: 'bm25-paragraph-v2';
+  algorithmVersion: 'bm25-quality-v3';
 };
 
 export type InternalLinkingInput = {
@@ -56,6 +64,7 @@ export type InternalLinkingInput = {
   blockedPageIds?: string[];
   currentArticleUrl?: string;
   maximumSuggestions?: number;
+  qualityPolicy?: Partial<InternalLinkQualityPolicyValues> | null;
 };
 
 type TextSpan = {
@@ -77,8 +86,8 @@ type TargetSignal = {
 
 const ARABIC_DIACRITICS = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g;
 const WORD_PATTERN = /[A-Za-z0-9\u0600-\u06FF]+/g;
-const MAX_ANCHOR_WORDS = 6;
-const MIN_ANCHOR_WORDS = 2;
+const MAX_ANCHOR_WORDS = INTERNAL_LINK_ANCHOR_MAX_WORDS;
+const MIN_ANCHOR_WORDS = INTERNAL_LINK_ANCHOR_MIN_WORDS;
 
 export const normalizeInternalLinkText = (value: string): string => value
   .normalize('NFKC')
@@ -107,6 +116,16 @@ const STOP_WORDS = new Set([
 const meaningfulTokens = (value: string): string[] => normalizeInternalLinkText(value)
   .split(' ')
   .filter(token => token.length > 1 && !STOP_WORDS.has(token) && !/^\d+$/.test(token));
+
+const isForbiddenAnchor = (value: string, forbiddenAnchors: Set<string>): boolean => {
+  const normalized = normalizeInternalLinkText(value);
+  if (!normalized) return true;
+  const padded = ` ${normalized} `;
+  for (const forbidden of forbiddenAnchors) {
+    if (padded.includes(` ${forbidden} `)) return true;
+  }
+  return false;
+};
 
 export const normalizeInternalLinkUrl = (value: string): string => {
   const trimmed = value.trim();
@@ -144,8 +163,18 @@ export const createInternalLinkArticleSignature = (
 export const createInternalLinkInventorySignature = (
   pages: InternalLinkTargetPage[],
   currentArticleUrl = '',
+  qualityPolicy?: Partial<InternalLinkQualityPolicyValues> | null,
 ): string => {
-  const value = `${normalizeInternalLinkUrl(currentArticleUrl)}\n${pages
+  const normalizedPolicy = normalizeInternalLinkQualityPolicy(qualityPolicy);
+  const policySignature = [
+    normalizedPolicy.minimumScore,
+    normalizedPolicy.maxLinksPer1000Words,
+    normalizedPolicy.absoluteMaximumLinks,
+    normalizedPolicy.maximumLinksPerTarget,
+    normalizedPolicy.minimumMatchedTerms,
+    [...normalizedPolicy.forbiddenAnchors].sort().join(','),
+  ].join('|');
+  const value = `${normalizeInternalLinkUrl(currentArticleUrl)}\n${policySignature}\n${pages
     .map(page => [
       page.id,
       normalizeInternalLinkUrl(resolveTargetUrl(page)),
@@ -153,6 +182,7 @@ export const createInternalLinkInventorySignature = (
       page.semanticProfile?.dictionarySignature || '',
       page.isEnabled === false ? '0' : '1',
       page.crawlStatus,
+      page.httpStatus ?? '',
     ].join('|'))
     .sort()
     .join('\n')}`;
@@ -271,10 +301,27 @@ const resolveTargetUrl = (page: InternalLinkTargetPage): string => (
   || page.inputUrl.trim()
 );
 
+export const countExistingInventoryLinks = (
+  existingUrls: string[],
+  pages: InternalLinkTargetPage[],
+): number => {
+  const targetUrls = new Set(
+    pages.map(page => normalizeInternalLinkUrl(resolveTargetUrl(page))).filter(Boolean),
+  );
+  return existingUrls
+    .map(normalizeInternalLinkUrl)
+    .filter(url => url && targetUrls.has(url))
+    .length;
+};
+
 const isEligiblePage = (page: InternalLinkTargetPage): boolean => (
   page.isEnabled !== false
   && page.robotsIndex !== false
   && page.crawlStatus === 'ready'
+  && (
+    typeof page.httpStatus !== 'number'
+    || (page.httpStatus >= 200 && page.httpStatus < 400)
+  )
   && Boolean(resolveTargetUrl(page))
 );
 
@@ -310,6 +357,7 @@ const chooseAnchor = (
   signals: TargetSignal[],
   documentFrequency: Map<string, number>,
   totalPages: number,
+  forbiddenAnchors: Set<string>,
 ): {
   text: string;
   score: number;
@@ -349,6 +397,7 @@ const chooseAnchor = (
         const group = words.slice(start, start + size);
         const original = span.text.slice(group[0].start, group[group.length - 1].end).trim();
         const normalized = normalizeInternalLinkText(original);
+        if (isForbiddenAnchor(original, forbiddenAnchors)) continue;
         const tokens = meaningfulTokens(original);
         if (tokens.length < MIN_ANCHOR_WORDS) continue;
         const weightedTokens = tokens.filter(token => anchorTokenWeight(token) > 0);
@@ -363,7 +412,7 @@ const chooseAnchor = (
             totalPages,
           )
         ), 0);
-        const lengthPreference = size <= 4 ? 1 : 0.82;
+        const lengthPreference = size === 2 ? 0.9 : 1 + ((size - 2) * 0.04);
         const score = (weight * coverage * lengthPreference) + (exactPhrase ? 14 : 0);
         const candidate = {
           text: original,
@@ -384,7 +433,8 @@ const chooseAnchor = (
   }
   const ranked = [...candidates.values()].sort((left, right) => (
     right.score - left.score
-    || left.text.length - right.text.length
+    || meaningfulTokens(right.text).length - meaningfulTokens(left.text).length
+    || right.text.length - left.text.length
     || left.text.localeCompare(right.text, 'ar')
   ));
   const best = ranked[0];
@@ -462,8 +512,16 @@ const buildSuggestion = (
   documentFrequency: Map<string, number>,
   totalPages: number,
   averageDocumentLength: number,
+  qualityPolicy: InternalLinkQualityPolicyValues,
+  forbiddenAnchors: Set<string>,
 ): InternalLinkSuggestion | null => {
-  const anchor = chooseAnchor(spans, signals, documentFrequency, totalPages);
+  const anchor = chooseAnchor(
+    spans,
+    signals,
+    documentFrequency,
+    totalPages,
+    forbiddenAnchors,
+  );
   if (!anchor) return null;
 
   const paragraphContext = buildTokenContext(anchor.paragraphText);
@@ -484,7 +542,7 @@ const buildSuggestion = (
       );
     }
   }
-  if (matchedTokenWeights.size < 2) return null;
+  if (matchedTokenWeights.size < qualityPolicy.minimumMatchedTerms) return null;
 
   const documentLength = page.semanticProfile?.documentLength
     || signals.reduce((sum, signal) => sum + signal.frequency, 0);
@@ -522,7 +580,18 @@ const buildSuggestion = (
     + anchorBonus
     + articleContextBonus
   ) * completenessFactor)));
-  if (score < 24) return null;
+  const hasStrongRelation = (
+    matchedSources.has('title')
+    || matchedSources.has('heading')
+    || matchedSources.has('phrase')
+    || matchedSources.has('synonym')
+    || matchedSources.has('topic')
+    || (
+      matchedTokenWeights.size > qualityPolicy.minimumMatchedTerms
+      && bm25Score >= 1.5
+    )
+  );
+  if (!hasStrongRelation || score < qualityPolicy.minimumScore) return null;
 
   const reasons: string[] = [];
   if (matchedSources.has('title')) reasons.push('تطابق مع عنوان الصفحة');
@@ -553,7 +622,7 @@ const buildSuggestion = (
     alternativeAnchors: anchor.alternativeAnchors,
     bm25Score: Number(bm25Score.toFixed(2)),
     completenessScore,
-    algorithmVersion: 'bm25-paragraph-v2',
+    algorithmVersion: 'bm25-quality-v3',
   };
 };
 
@@ -564,10 +633,24 @@ const baseLanguage = (value: string | undefined): string => (
 export const generateInternalLinkSuggestions = (
   input: InternalLinkingInput,
 ): InternalLinkSuggestion[] => {
-  const existingUrls = new Set([
-    ...(input.existingUrls || []),
-    input.currentArticleUrl || '',
-  ].map(normalizeInternalLinkUrl).filter(Boolean));
+  const qualityPolicy = normalizeInternalLinkQualityPolicy(input.qualityPolicy);
+  const forbiddenAnchors = new Set(
+    qualityPolicy.forbiddenAnchors.map(normalizeInternalLinkText).filter(Boolean),
+  );
+  const normalizedExistingUrls = (input.existingUrls || [])
+    .map(normalizeInternalLinkUrl)
+    .filter(Boolean);
+  const existingTargetCounts = new Map<string, number>();
+  for (const url of normalizedExistingUrls) {
+    existingTargetCounts.set(url, (existingTargetCounts.get(url) || 0) + 1);
+  }
+  const currentArticleUrl = normalizeInternalLinkUrl(input.currentArticleUrl || '');
+  const suggestionBudget = calculateInternalLinkSuggestionBudget(
+    input.articleText,
+    countExistingInventoryLinks(input.existingUrls || [], input.pages),
+    qualityPolicy,
+    input.maximumSuggestions,
+  );
   const existingAnchors = new Set(
     (input.existingAnchors || []).map(normalizeInternalLinkText).filter(Boolean),
   );
@@ -582,11 +665,15 @@ export const generateInternalLinkSuggestions = (
       return !requestedLanguage || !pageLanguage || requestedLanguage === pageLanguage;
     })
     .filter(page => !dismissedPageIds.has(page.id))
-    .filter(page => !existingUrls.has(normalizeInternalLinkUrl(resolveTargetUrl(page))))
+    .filter(page => {
+      const targetUrl = normalizeInternalLinkUrl(resolveTargetUrl(page));
+      if (!targetUrl || targetUrl === currentArticleUrl) return false;
+      return (existingTargetCounts.get(targetUrl) || 0) < qualityPolicy.maximumLinksPerTarget;
+    })
     .map(page => ({ page, signals: pageSignals(page) }))
     .filter(item => item.signals.length > 0);
 
-  if (!input.articleText.trim() || eligible.length === 0) return [];
+  if (!input.articleText.trim() || eligible.length === 0 || suggestionBudget === 0) return [];
 
   const spans = buildTextSpans(input.articleText);
   const articleContext = buildTokenContext([
@@ -610,10 +697,13 @@ export const generateInternalLinkSuggestions = (
       documentFrequency,
       eligible.length,
       averageDocumentLength,
+      qualityPolicy,
+      forbiddenAnchors,
     ))
     .filter((suggestion): suggestion is InternalLinkSuggestion => Boolean(suggestion))
     .sort((a, b) => (
       b.score - a.score
+      || meaningfulTokens(b.anchorText).length - meaningfulTokens(a.anchorText).length
       || a.targetTitle.localeCompare(b.targetTitle, 'ar')
       || a.pageId.localeCompare(b.pageId)
     ));
@@ -632,7 +722,7 @@ export const generateInternalLinkSuggestions = (
     })) continue;
     usedAnchors.add(normalizedAnchor);
     accepted.push(suggestion);
-    if (accepted.length >= Math.max(1, Math.min(input.maximumSuggestions || 20, 50))) break;
+    if (accepted.length >= suggestionBudget) break;
   }
   return accepted;
 };

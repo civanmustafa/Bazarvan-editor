@@ -19,21 +19,28 @@ import {
   listInternalLinkingClients,
   loadArticleClientContext,
   loadInternalLinkActions,
+  loadInternalLinkQualityPolicy,
   loadInternalLinkTargetPages,
   recordInternalLinkAction,
   recordInternalLinkSuggestionRun,
   saveArticleClientContext,
   saveArticleCurrentPageUrl,
+  type EffectiveInternalLinkQualityPolicy,
   type InternalLinkAction,
 } from '../utils/internalLinking';
 import {
   createInternalLinkArticleSignature,
   createInternalLinkInventorySignature,
+  countExistingInventoryLinks,
   generateInternalLinkSuggestions,
   type InternalLinkSuggestion,
   type InternalLinkTargetPage,
 } from '../utils/internalLinkingEngine';
 import type { ClientCenterClient } from '../utils/clientCenter';
+import {
+  calculateInternalLinkSuggestionBudget,
+  DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
+} from '../utils/internalLinkQualityPolicy';
 
 type ExistingLinkState = {
   urls: string[];
@@ -43,6 +50,12 @@ type ExistingLinkState = {
 type AnchorRange = {
   from: number;
   to: number;
+};
+
+const DEFAULT_EFFECTIVE_QUALITY_POLICY: EffectiveInternalLinkQualityPolicy = {
+  values: DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
+  source: 'default',
+  policyVersion: 1,
 };
 
 const readExistingLinks = (html: string): ExistingLinkState => {
@@ -116,6 +129,9 @@ const InternalLinkingPanel: React.FC = () => {
   const [selectedClientId, setSelectedClientId] = useState('');
   const [pages, setPages] = useState<InternalLinkTargetPage[]>([]);
   const [actions, setActions] = useState<InternalLinkAction[]>([]);
+  const [qualityPolicy, setQualityPolicy] = useState<EffectiveInternalLinkQualityPolicy>(
+    DEFAULT_EFFECTIVE_QUALITY_POLICY,
+  );
   const [currentPageUrl, setCurrentPageUrl] = useState('');
   const [selectedAnchors, setSelectedAnchors] = useState<Record<string, string>>({});
   const [isLoadingContext, setIsLoadingContext] = useState(false);
@@ -174,6 +190,7 @@ const InternalLinkingPanel: React.FC = () => {
     blockedPageIds,
     currentArticleUrl: currentPageUrl,
     maximumSuggestions: 20,
+    qualityPolicy: qualityPolicy.values,
   }), [
     articleText,
     articleLanguage,
@@ -185,7 +202,21 @@ const InternalLinkingPanel: React.FC = () => {
     existingLinks.urls,
     keywordValues,
     pages,
+    qualityPolicy.values,
   ]);
+
+  const suggestionBudget = useMemo(() => calculateInternalLinkSuggestionBudget(
+    articleText,
+    countExistingInventoryLinks(existingLinks.urls, pages),
+    qualityPolicy.values,
+    20,
+  ), [articleText, existingLinks.urls, pages, qualityPolicy.values]);
+
+  const qualityPolicySourceLabel = qualityPolicy.source === 'client'
+    ? 'سياسة العميل'
+    : qualityPolicy.source === 'global'
+      ? 'السياسة العامة'
+      : 'القيم الافتراضية';
 
   const currentPageOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -207,20 +238,28 @@ const InternalLinkingPanel: React.FC = () => {
   ): Promise<{
     pages: InternalLinkTargetPage[];
     actions: InternalLinkAction[];
+    qualityPolicy: EffectiveInternalLinkQualityPolicy;
   } | null> => {
     if (showSpinner) setIsLoadingPages(true);
     setError('');
     try {
-      const [nextPages, nextActions] = await Promise.all([
+      const [nextPages, nextActions, nextQualityPolicy] = await Promise.all([
         loadInternalLinkTargetPages(clientId),
         loadInternalLinkActions(articleId, clientId),
+        loadInternalLinkQualityPolicy(clientId),
       ]);
       setPages(nextPages);
       setActions(nextActions);
-      return { pages: nextPages, actions: nextActions };
+      setQualityPolicy(nextQualityPolicy);
+      return {
+        pages: nextPages,
+        actions: nextActions,
+        qualityPolicy: nextQualityPolicy,
+      };
     } catch (loadError) {
       setPages([]);
       setActions([]);
+      setQualityPolicy(DEFAULT_EFFECTIVE_QUALITY_POLICY);
       setError(loadError instanceof Error ? loadError.message : 'تعذر تحميل صفحات العميل.');
       return null;
     } finally {
@@ -234,6 +273,7 @@ const InternalLinkingPanel: React.FC = () => {
     setSelectedClientId('');
     setPages([]);
     setActions([]);
+    setQualityPolicy(DEFAULT_EFFECTIVE_QUALITY_POLICY);
     setCurrentPageUrl('');
     setSelectedAnchors({});
     setError('');
@@ -264,6 +304,7 @@ const InternalLinkingPanel: React.FC = () => {
     if (!activeArticleId || !selectedClientId) {
       setPages([]);
       setActions([]);
+      setQualityPolicy(DEFAULT_EFFECTIVE_QUALITY_POLICY);
       setSelectedAnchors({});
       return;
     }
@@ -279,6 +320,7 @@ const InternalLinkingPanel: React.FC = () => {
     setSelectedAnchors({});
     setPages([]);
     setActions([]);
+    setQualityPolicy(DEFAULT_EFFECTIVE_QUALITY_POLICY);
     setError('');
     setNotice('');
     if (!clientId) return;
@@ -315,15 +357,27 @@ const InternalLinkingPanel: React.FC = () => {
           blockedPageIds,
           currentArticleUrl: currentPageUrl,
           maximumSuggestions: 20,
+          qualityPolicy: refreshed.qualityPolicy.values,
         });
         await recordInternalLinkSuggestionRun({
           articleId: activeArticleId,
           clientId: selectedClientId,
           articleSignature,
-          inventorySignature: createInternalLinkInventorySignature(refreshed.pages, currentPageUrl),
+          inventorySignature: createInternalLinkInventorySignature(
+            refreshed.pages,
+            currentPageUrl,
+            refreshed.qualityPolicy.values,
+          ),
           currentPageUrl,
           pageCount: refreshed.pages.length,
           suggestions: nextSuggestions,
+          qualityPolicy: refreshed.qualityPolicy,
+          suggestionBudget: calculateInternalLinkSuggestionBudget(
+            articleText,
+            countExistingInventoryLinks(existingLinks.urls, refreshed.pages),
+            refreshed.qualityPolicy.values,
+            20,
+          ),
         });
         setNotice('تم تحديث الاقتراحات وتسجيل ملخص الفحص.');
       }
@@ -584,11 +638,20 @@ const InternalLinkingPanel: React.FC = () => {
 
       {selectedClientId && (
         <>
-          <div className="grid grid-cols-3 gap-2">
+	          <div className="grid grid-cols-3 gap-2">
             <div className="rounded-lg border border-gray-200 bg-white p-2 text-center dark:border-[#3C3C3C] dark:bg-[#272727]">
               <div className="text-base font-black text-[#d4af37]">{pages.length}</div>
               <div className="text-[9px] font-bold text-gray-400">صفحة جاهزة</div>
-            </div>
+	          </div>
+
+	          <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-[10px] font-semibold leading-5 text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+	            <div className="font-black">قواعد الجودة المطبقة: {qualityPolicySourceLabel} — الإصدار {qualityPolicy.policyVersion}</div>
+	            <div>
+	              الحد الأدنى للدرجة {qualityPolicy.values.minimumScore}/100، والميزانية الحالية حتى {suggestionBudget.toLocaleString('ar')} رابط جديد
+	              بحسب طول المقالة والروابط الموجودة، وبحد أقصى {qualityPolicy.values.maxLinksPer1000Words} لكل 1000 كلمة.
+	            </div>
+	            <div>نص Anchor Text من كلمتين إلى خمس كلمات، ولا يعرض المحرك الروابط السطحية أو المكررة أو غير الآمنة.</div>
+	          </div>
             <div className="rounded-lg border border-gray-200 bg-white p-2 text-center dark:border-[#3C3C3C] dark:bg-[#272727]">
               <div className="text-base font-black text-[#d4af37]">{suggestions.length}</div>
               <div className="text-[9px] font-bold text-gray-400">اقتراح صالح</div>

@@ -5,6 +5,10 @@ import {
   type ClientLinkDictionaryType,
   type ClientPageSemanticProfile,
 } from './clientSemanticIndex';
+import {
+  normalizeInternalLinkQualityPolicy,
+  type InternalLinkQualityPolicyValues,
+} from './internalLinkQualityPolicy';
 
 export type ClientAssignmentAccess = 'viewer' | 'editor';
 export type ClientPageSource = 'manual' | 'csv' | 'sitemap';
@@ -116,6 +120,17 @@ export type ClientCenterCrawlJob = {
   updatedAt: string;
 };
 
+export type InternalLinkQualityPolicyScope = 'global' | 'client';
+
+export type InternalLinkQualityPolicyRecord = InternalLinkQualityPolicyValues & {
+  id: string;
+  scope: InternalLinkQualityPolicyScope;
+  clientId: string | null;
+  policyVersion: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ClientCenterDetails = {
   domains: ClientCenterDomain[];
   assignments: ClientCenterAssignment[];
@@ -123,6 +138,7 @@ export type ClientCenterDetails = {
   jobs: ClientCenterCrawlJob[];
   dictionaries: ClientLinkDictionaryEntry[];
   semanticProfiles: ClientPageSemanticProfile[];
+  qualityPolicies: InternalLinkQualityPolicyRecord[];
 };
 
 export type ClientCenterClientInput = {
@@ -252,6 +268,21 @@ const SEMANTIC_PROFILE_COLUMNS = [
   'completeness_score',
   'completeness_details',
   'indexed_at',
+].join(',');
+
+const QUALITY_POLICY_COLUMNS = [
+  'id',
+  'scope',
+  'client_id',
+  'minimum_score',
+  'max_links_per_1000_words',
+  'absolute_maximum_links',
+  'maximum_links_per_target',
+  'minimum_matched_terms',
+  'forbidden_anchors',
+  'policy_version',
+  'created_at',
+  'updated_at',
 ].join(',');
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -451,6 +482,26 @@ export const mapClientSemanticProfile = (row: any): ClientPageSemanticProfile =>
   indexedAt: text(row.indexed_at),
 });
 
+export const mapInternalLinkQualityPolicy = (row: any): InternalLinkQualityPolicyRecord => {
+  const values = normalizeInternalLinkQualityPolicy({
+    minimumScore: row.minimum_score,
+    maxLinksPer1000Words: row.max_links_per_1000_words,
+    absoluteMaximumLinks: row.absolute_maximum_links,
+    maximumLinksPerTarget: row.maximum_links_per_target,
+    minimumMatchedTerms: row.minimum_matched_terms,
+    forbiddenAnchors: row.forbidden_anchors,
+  });
+  return {
+    id: text(row.id),
+    scope: row.scope === 'client' ? 'client' : 'global',
+    clientId: typeof row.client_id === 'string' ? row.client_id : null,
+    ...values,
+    policyVersion: Math.max(1, Number(row.policy_version) || 1),
+    createdAt: text(row.created_at),
+    updatedAt: text(row.updated_at),
+  };
+};
+
 const throwIfError = (error: any): void => {
   if (error) throw new Error(error.message || 'تعذر تنفيذ طلب مركز العملاء.');
 };
@@ -481,6 +532,7 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
     jobsResult,
     dictionariesResult,
     semanticProfilesResult,
+    qualityPoliciesResult,
   ] = await Promise.all([
     supabase.from('client_domains').select(DOMAIN_COLUMNS).eq('client_id', clientId)
       .order('is_primary', { ascending: false }).order('hostname', { ascending: true }),
@@ -494,6 +546,9 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
       .order('dictionary_type', { ascending: true }).order('label', { ascending: true }),
     supabase.from('client_page_semantic_profiles').select(SEMANTIC_PROFILE_COLUMNS)
       .eq('client_id', clientId).order('indexed_at', { ascending: false }).limit(500),
+    supabase.from('internal_link_quality_policies').select(QUALITY_POLICY_COLUMNS)
+      .or(`scope.eq.global,client_id.eq.${clientId}`)
+      .order('scope', { ascending: true }),
   ]);
   [
     domainsResult,
@@ -502,6 +557,7 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
     jobsResult,
     dictionariesResult,
     semanticProfilesResult,
+    qualityPoliciesResult,
   ].forEach(result => throwIfError(result.error));
   return {
     domains: (domainsResult.data || []).map(mapDomain),
@@ -510,6 +566,7 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
     jobs: (jobsResult.data || []).map(mapJob),
     dictionaries: (dictionariesResult.data || []).map(mapClientLinkDictionary),
     semanticProfiles: (semanticProfilesResult.data || []).map(mapClientSemanticProfile),
+    qualityPolicies: (qualityPoliciesResult.data || []).map(mapInternalLinkQualityPolicy),
   };
 };
 
@@ -849,4 +906,52 @@ export const rebuildClientSemanticProfiles = async (input: {
     .map(page => buildClientPageSemanticProfile(page, input.dictionaries, indexedAt));
   await saveClientSemanticProfiles(profiles);
   return profiles;
+};
+
+export const saveInternalLinkQualityPolicy = async (input: {
+  scope: InternalLinkQualityPolicyScope;
+  clientId?: string | null;
+  values: Partial<InternalLinkQualityPolicyValues>;
+}): Promise<InternalLinkQualityPolicyRecord> => {
+  const supabase = getSupabaseClient();
+  const clientId = input.scope === 'client' ? input.clientId?.trim() || '' : '';
+  if (input.scope === 'client' && !clientId) {
+    throw new Error('معرّف العميل مطلوب لحفظ قواعد الجودة المخصصة.');
+  }
+  const values = normalizeInternalLinkQualityPolicy(input.values);
+  const payload = {
+    scope: input.scope,
+    client_id: clientId || null,
+    minimum_score: values.minimumScore,
+    max_links_per_1000_words: values.maxLinksPer1000Words,
+    absolute_maximum_links: values.absoluteMaximumLinks,
+    maximum_links_per_target: values.maximumLinksPerTarget,
+    minimum_matched_terms: values.minimumMatchedTerms,
+    forbidden_anchors: values.forbiddenAnchors,
+    updated_at: new Date().toISOString(),
+  };
+  let existingQuery = supabase
+    .from('internal_link_quality_policies')
+    .select('id')
+    .eq('scope', input.scope);
+  existingQuery = input.scope === 'global'
+    ? existingQuery.is('client_id', null)
+    : existingQuery.eq('client_id', clientId);
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+  throwIfError(existingError);
+  const query = existing?.id
+    ? supabase.from('internal_link_quality_policies').update(payload).eq('id', existing.id)
+    : supabase.from('internal_link_quality_policies').insert(payload);
+  const { data, error } = await query.select(QUALITY_POLICY_COLUMNS).single();
+  throwIfError(error);
+  return mapInternalLinkQualityPolicy(data);
+};
+
+export const deleteInternalLinkQualityPolicy = async (policyId: string): Promise<void> => {
+  const { error } = await getSupabaseClient()
+    .from('internal_link_quality_policies')
+    .delete()
+    .eq('id', policyId)
+    .eq('scope', 'client');
+  throwIfError(error);
 };
