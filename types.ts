@@ -13,6 +13,7 @@ export interface Keywords {
   primary: string;
   secondaries: string[];
   company: string;
+  clientId?: string;
   lsi: string[];
 }
 

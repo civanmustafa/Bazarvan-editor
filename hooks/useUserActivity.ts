@@ -80,10 +80,12 @@ const toStringArray = (value: unknown, fallback: string[] = []): string[] => (
 
 export const normalizeKeywords = (value: unknown): Keywords => {
   const source = isRecord(value) ? value : {};
+  const clientId = typeof source.clientId === 'string' ? source.clientId.trim() : '';
   return {
     primary: typeof source.primary === 'string' ? source.primary : '',
     secondaries: toStringArray(source.secondaries, ['', '', '', '']),
     company: typeof source.company === 'string' ? source.company : '',
+    ...(clientId ? { clientId } : {}),
     lsi: toStringArray(source.lsi),
   };
 };

@@ -59,6 +59,7 @@ import {
   normalizeInternalLinkQualityPolicy,
   type InternalLinkQualityPolicyValues,
 } from '../utils/internalLinkQualityPolicy';
+import { notifyClientDirectoryChanged } from '../hooks/useClientDirectory';
 
 type ClientCenterTab = 'profile' | 'pages' | 'index' | 'access';
 
@@ -423,6 +424,7 @@ const ClientCenterSettings: React.FC = () => {
       const created = await createClientCenterClient(clientInput);
       setIsCreatingClient(false);
       await refreshClients(created.id);
+      notifyClientDirectoryChanged();
       showMessage('تم إنشاء العميل. أضف الدومين قبل إدخال الروابط.');
     } catch (createError) {
       showError(createError);
@@ -436,6 +438,7 @@ const ClientCenterSettings: React.FC = () => {
     if (!selectedClient || !clientInput.name?.trim()) return;
     await runMutation(async () => {
       await updateClientCenterClient(selectedClient.id, clientInput);
+      notifyClientDirectoryChanged();
     }, 'تم حفظ بيانات العميل.', { refreshClients: true, refreshDetails: false });
   };
 
@@ -568,7 +571,10 @@ const ClientCenterSettings: React.FC = () => {
   const renderClientForm = (creating: boolean) => (
     <form onSubmit={creating ? handleCreateClient : handleSaveClient} className="space-y-4">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <Field label="اسم العميل">
+        <Field
+          label="اسم العميل / الشركة"
+          description="هذا هو الاسم الموحد الذي يظهر في تبويب الكلمات والأهداف داخل المحرر."
+        >
           <input className={inputClass} value={clientInput.name || ''} onChange={event => setClientInput(prev => ({ ...prev, name: event.target.value }))} required maxLength={160} />
         </Field>
         <Field label="الاسم القانوني">

@@ -28,6 +28,7 @@ import {
   recordInternalLinkAction,
   recordInternalLinkSuggestionRun,
   saveArticleClientContext,
+  saveArticleClientSelection,
   saveArticleCurrentPageUrl,
   type EffectiveInternalLinkQualityPolicy,
   type InternalLinkAction,
@@ -51,6 +52,7 @@ import {
   parseInternalLinkAiReviewResponse,
   type InternalLinkAiReview,
 } from '../utils/internalLinkAiReview';
+import { buildUnifiedCompanyKeywords } from '../utils/clientCompanyIdentity';
 import { getPromptTemplate, PROMPT_TEMPLATE_IDS } from '../constants/promptRegistry';
 import GeminiProgressStatus from './GeminiProgressStatus';
 
@@ -156,6 +158,7 @@ const InternalLinkingPanel: React.FC = () => {
   const articleText = useEditorSelector(context => context.text);
   const articleLanguage = useEditorSelector(context => context.articleLanguage);
   const keywords = useEditorSelector(context => context.keywords);
+  const setKeywords = useEditorSelector(context => context.setKeywords);
   const quickAiProvider = useAISelector(context => context.quickAiProvider);
   const setQuickAiProvider = useAISelector(context => context.setQuickAiProvider);
   const runPlainAiAnalysis = useAISelector(context => context.runPlainAiAnalysis);
@@ -353,6 +356,12 @@ const InternalLinkingPanel: React.FC = () => {
       const contextClientExists = nextClients.some(client => client.id === context?.clientId);
       setSelectedClientId(contextClientExists ? context?.clientId || '' : '');
       setCurrentPageUrl(contextClientExists ? context?.currentPageUrl || '' : '');
+      const contextClient = contextClientExists
+        ? nextClients.find(client => client.id === context?.clientId) || null
+        : null;
+      if (contextClient) {
+        setKeywords(current => buildUnifiedCompanyKeywords(current, contextClient));
+      }
     }).catch(loadError => {
       if (!cancelled) {
         setError(loadError instanceof Error ? loadError.message : 'تعذر تحميل عملاء المقالة.');
@@ -361,7 +370,7 @@ const InternalLinkingPanel: React.FC = () => {
       if (!cancelled) setIsLoadingContext(false);
     });
     return () => { cancelled = true; };
-  }, [activeArticleId]);
+  }, [activeArticleId, setKeywords]);
 
   useEffect(() => {
     if (!activeArticleId || !selectedClientId) {
@@ -373,6 +382,34 @@ const InternalLinkingPanel: React.FC = () => {
     }
     void refreshInventory(activeArticleId, selectedClientId);
   }, [activeArticleId, refreshInventory, selectedClientId]);
+
+  useEffect(() => {
+    const keywordClientId = keywords.clientId?.trim() || '';
+    if (
+      isLoadingContext
+      || !activeArticleId
+      || !keywordClientId
+      || keywordClientId === selectedClientId
+      || !clients.some(client => client.id === keywordClientId)
+    ) return;
+
+    setSelectedClientId(keywordClientId);
+    setCurrentPageUrl('');
+    setSelectedAnchors({});
+    void saveArticleClientSelection(activeArticleId, keywordClientId).catch(saveError => {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : 'تعذر توحيد العميل المحدد مع الربط الداخلي.',
+      );
+    });
+  }, [
+    activeArticleId,
+    clients,
+    isLoadingContext,
+    keywords.clientId,
+    selectedClientId,
+  ]);
 
   const handleClientChange = async (clientId: string) => {
     if (!activeArticleId || clientId === selectedClientId) return;
@@ -391,6 +428,10 @@ const InternalLinkingPanel: React.FC = () => {
     setIsSavingClient(true);
     try {
       await saveArticleClientContext(activeArticleId, clientId, '');
+      const selectedClient = clients.find(client => client.id === clientId);
+      if (selectedClient) {
+        setKeywords(current => buildUnifiedCompanyKeywords(current, selectedClient));
+      }
       setNotice('تم ربط المقالة بمخزون صفحات العميل.');
     } catch (saveError) {
       setSelectedClientId(previousClientId);

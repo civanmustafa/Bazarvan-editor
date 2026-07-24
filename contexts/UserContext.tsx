@@ -89,8 +89,8 @@ interface UserContextType {
     handleStructureViewModeChange: (mode: 'grid' | 'list') => void;
     handlePreferredLanguageChange: (lang: 'ar' | 'en') => void;
     handleUiLanguageChange: (lang: 'ar' | 'en') => void;
-    handleSaveClientGoalContext: (companyName: string, goalContext: GoalContext) => void;
-    handleDeleteClientGoalContext: (companyName: string) => void;
+    handleSaveClientGoalContext: (clientKey: string, goalContext: GoalContext, legacyCompanyName?: string) => void;
+    handleDeleteClientGoalContext: (clientKey: string, legacyCompanyName?: string) => void;
     handleMergeClientGoalContexts: (contexts: ClientGoalContexts) => void;
 }
 
@@ -789,20 +789,32 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
     }, [currentUser, persistUserPreferencePatch]);
 
-    const handleSaveClientGoalContext = useCallback((companyName: string, context: GoalContext) => {
-        const normalizedCompanyName = companyName.trim();
-        if (!normalizedCompanyName) return;
-        persistClientGoalContexts({
-            ...clientGoalContexts,
-            [normalizedCompanyName]: normalizeGoalContext(context),
-        });
+    const handleSaveClientGoalContext = useCallback((
+        clientKey: string,
+        context: GoalContext,
+        legacyCompanyName = '',
+    ) => {
+        const normalizedClientKey = clientKey.trim();
+        if (!normalizedClientKey) return;
+        const nextContexts = { ...clientGoalContexts };
+        const normalizedLegacyName = legacyCompanyName.trim();
+        if (normalizedLegacyName && normalizedLegacyName !== normalizedClientKey) {
+            delete nextContexts[normalizedLegacyName];
+        }
+        nextContexts[normalizedClientKey] = normalizeGoalContext(context);
+        persistClientGoalContexts(nextContexts);
     }, [clientGoalContexts, persistClientGoalContexts]);
 
-    const handleDeleteClientGoalContext = useCallback((companyName: string) => {
-        const normalizedCompanyName = companyName.trim();
-        if (!normalizedCompanyName || !clientGoalContexts[normalizedCompanyName]) return;
+    const handleDeleteClientGoalContext = useCallback((
+        clientKey: string,
+        legacyCompanyName = '',
+    ) => {
+        const normalizedClientKey = clientKey.trim();
+        const normalizedLegacyName = legacyCompanyName.trim();
+        if (!normalizedClientKey && !normalizedLegacyName) return;
         const nextContexts = { ...clientGoalContexts };
-        delete nextContexts[normalizedCompanyName];
+        if (normalizedClientKey) delete nextContexts[normalizedClientKey];
+        if (normalizedLegacyName) delete nextContexts[normalizedLegacyName];
         persistClientGoalContexts(nextContexts);
     }, [clientGoalContexts, persistClientGoalContexts]);
 

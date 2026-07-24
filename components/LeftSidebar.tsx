@@ -12,6 +12,16 @@ import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 import { parseGoalContextText } from '../utils/goalContext';
 import GeminiProgressStatus from './GeminiProgressStatus';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
+import { useClientDirectory } from '../hooks/useClientDirectory';
+import {
+  buildUnifiedCompanyKeywords,
+  getClientGoalContext,
+  resolveCompanyClient,
+} from '../utils/clientCompanyIdentity';
+import {
+  loadArticleClientContext,
+  saveArticleClientSelection,
+} from '../utils/articleClientContext';
 
 const DuplicatesTab = React.lazy(() => import('./DuplicatesTab'));
 
@@ -326,6 +336,7 @@ const LeftSidebar: React.FC = () => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
   const keywords = useEditorSelector(context => context.keywords);
   const setKeywords = useEditorSelector(context => context.setKeywords);
+  const activeArticleId = useEditorSelector(context => context.activeArticleId);
   const setGoalContext = useEditorSelector(context => context.setGoalContext);
   const analysisResults = useEditorSelector(context => context.analysisResults);
   const setIsDuplicatesTabActive = useEditorSelector(context => context.setIsDuplicatesTabActive);
@@ -336,6 +347,11 @@ const LeftSidebar: React.FC = () => {
   const generateSemanticKeywords = useAISelector(context => context.generateSemanticKeywords);
   const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
   const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
+  const {
+    activeClients,
+    isLoadingClients,
+    clientDirectoryError,
+  } = useClientDirectory();
   
   const { keywordAnalysis, duplicateAnalysis, duplicateStats } = analysisResults;
 
@@ -344,11 +360,12 @@ const LeftSidebar: React.FC = () => {
   const [autoDistributeText, setAutoDistributeText] = React.useState('');
   const [isGeneratingSemanticKeywords, setIsGeneratingSemanticKeywords] = React.useState(false);
   const [semanticGenerationStatus, setSemanticGenerationStatus] = React.useState('');
+  const [companySelectionError, setCompanySelectionError] = React.useState('');
+  const [linkedArticleClientId, setLinkedArticleClientId] = React.useState('');
   const tLk = t.leftSidebar;
-  const companySuggestionsId = React.useId();
-  const savedCompanyNames = React.useMemo(
-    () => Object.keys(clientGoalContexts).sort((a, b) => a.localeCompare(b)),
-    [clientGoalContexts],
+  const selectedCompanyClient = React.useMemo(
+    () => resolveCompanyClient(activeClients, keywords, linkedArticleClientId),
+    [activeClients, keywords.clientId, keywords.company, linkedArticleClientId],
   );
 
   const getTabClass = (tabName: 'keywords' | 'duplicates') => {
@@ -393,25 +410,103 @@ const LeftSidebar: React.FC = () => {
     }
   };
 
-  const applyCompanyGoalContext = React.useCallback((companyName: string) => {
-    const preset = clientGoalContexts[companyName.trim()];
+  React.useEffect(() => {
+    let cancelled = false;
+    setLinkedArticleClientId('');
+    if (!activeArticleId) return () => {
+      cancelled = true;
+    };
+
+    void loadArticleClientContext(activeArticleId).then(context => {
+      if (!cancelled) setLinkedArticleClientId(context?.clientId || '');
+    }).catch(error => {
+      if (!cancelled) {
+        setCompanySelectionError(
+          error instanceof Error ? error.message : 'تعذر تحميل عميل المقالة.',
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeArticleId]);
+
+  React.useEffect(() => {
+    if (!selectedCompanyClient) return;
+    if (
+      keywords.clientId === selectedCompanyClient.id
+      && keywords.company === selectedCompanyClient.name
+    ) return;
+    setKeywords(current => buildUnifiedCompanyKeywords(current, selectedCompanyClient));
+  }, [
+    keywords.clientId,
+    keywords.company,
+    selectedCompanyClient,
+    setKeywords,
+  ]);
+
+  const applyCompanyGoalContext = React.useCallback((client: typeof selectedCompanyClient) => {
+    if (!client) return;
+    const preset = getClientGoalContext(clientGoalContexts, client);
     if (preset) {
       setGoalContext(preset);
     }
   }, [clientGoalContexts, setGoalContext]);
 
-  const handleCompanyChange = React.useCallback((companyName: string) => {
-    setKeywords(k => ({ ...k, company: companyName }));
-    applyCompanyGoalContext(companyName);
-  }, [applyCompanyGoalContext, setKeywords]);
+  const handleCompanyChange = React.useCallback((clientId: string) => {
+    const client = activeClients.find(candidate => candidate.id === clientId);
+    if (!client) return;
+    setCompanySelectionError('');
+    setLinkedArticleClientId(client.id);
+    setKeywords(current => buildUnifiedCompanyKeywords(current, client));
+    applyCompanyGoalContext(client);
+    if (activeArticleId) {
+      void saveArticleClientSelection(activeArticleId, client.id).catch(error => {
+        setCompanySelectionError(
+          error instanceof Error ? error.message : 'تعذر ربط المقالة بالعميل المحدد.',
+        );
+      });
+    }
+  }, [activeArticleId, activeClients, applyCompanyGoalContext, setKeywords]);
 
-  const renderCompanySuggestions = () => savedCompanyNames.length > 0 ? (
-    <datalist id={companySuggestionsId}>
-      {savedCompanyNames.map(companyName => (
-        <option key={companyName} value={companyName} />
-      ))}
-    </datalist>
-  ) : null;
+  const renderCompanySelector = () => {
+    const legacyValue = keywords.company && !selectedCompanyClient ? '__legacy_company__' : '';
+    const value = selectedCompanyClient?.id || legacyValue;
+    return (
+      <div className="space-y-2">
+        <select
+          value={value}
+          onChange={event => handleCompanyChange(event.target.value)}
+          disabled={isLoadingClients || activeClients.length === 0}
+          className="w-full rounded-md border border-gray-300 bg-gray-50 p-2 text-sm font-semibold text-[#333333] outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-[#e0e0e0]"
+        >
+          <option value="">
+            {isLoadingClients
+              ? 'جاري تحميل العملاء...'
+              : activeClients.length > 0
+                ? 'اختر العميل / الشركة'
+                : 'لا يوجد عميل نشط في مركز العملاء'}
+          </option>
+          {legacyValue && (
+            <option value={legacyValue} disabled>
+              {keywords.company} — اسم قديم غير مرتبط
+            </option>
+          )}
+          {activeClients.map(client => (
+            <option key={client.id} value={client.id}>{client.name}</option>
+          ))}
+        </select>
+        <p className="text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+          الاسم مأخوذ من مركز العملاء، ويُستخدم نفسه في الكلمات والأهداف والربط الداخلي.
+        </p>
+        {(clientDirectoryError || companySelectionError) && (
+          <p className="text-[11px] font-bold text-red-600 dark:text-red-400">
+            {companySelectionError || clientDirectoryError}
+          </p>
+        )}
+      </div>
+    );
+  };
 
   const handleSecondaryHighlightToggle = (term: string, index: number) => {
     if (!term.trim()) {
@@ -696,17 +791,24 @@ const LeftSidebar: React.FC = () => {
             .map(stripKeywordDots)
             .filter(Boolean);
         const newCompany = companyLines[0] || keywords.company;
+        const distributedClient = resolveCompanyClient(activeClients, {
+            clientId: keywords.clientId,
+            company: newCompany,
+        });
     
         setKeywords({
             primary: newPrimary,
             secondaries: newSecondaries,
             lsi: newLsi,
-            company: newCompany,
+            company: distributedClient?.name || keywords.company,
+            ...(distributedClient?.id || keywords.clientId
+                ? { clientId: distributedClient?.id || keywords.clientId }
+                : {}),
         });
         if (distributedGoalContext) {
             setGoalContext(distributedGoalContext);
         } else {
-            applyCompanyGoalContext(newCompany);
+            applyCompanyGoalContext(distributedClient || selectedCompanyClient);
         }
 
         const competitorsPart = competitorParts.join('\n');
@@ -828,17 +930,7 @@ const LeftSidebar: React.FC = () => {
                 onClick={() => handleHighlightToggle(keywords.company, 'company')}
             >
                 <div onClick={e => e.stopPropagation()}>
-                    <KeywordInput 
-                        value={keywords.company}
-                        onChange={handleCompanyChange}
-                        placeholder={tLk.enterCompany}
-                        list={savedCompanyNames.length > 0 ? companySuggestionsId : undefined}
-                        onHighlight={() => handleHighlightToggle(keywords.company, 'company')}
-                        isHighlighted={highlightedItem === keywords.company}
-                        onCopy={() => navigator.clipboard.writeText(keywords.company)}
-                        t={tLk}
-                    />
-                    {renderCompanySuggestions()}
+                    {renderCompanySelector()}
                     <ModernProgressBar analysis={keywordAnalysis.company} t={tLk} />
                 </div>
             </ModernSection>
@@ -1080,18 +1172,7 @@ const LeftSidebar: React.FC = () => {
                     <h4 className="text-sm font-bold text-[#333333] dark:text-[#C7C7C7]">{tLk.companyName}</h4>
                 </div>
                 <div onClick={(e) => e.stopPropagation()}>
-                    <KeywordInput 
-                        value={keywords.company}
-                        onChange={handleCompanyChange}
-                        placeholder={tLk.enterCompany}
-                        list={savedCompanyNames.length > 0 ? companySuggestionsId : undefined}
-                        onHighlight={() => handleHighlightToggle(keywords.company, 'company')}
-                        isHighlighted={highlightedItem === keywords.company}
-                        className="bg-white dark:bg-[#2A2A2A]"
-                        onCopy={() => navigator.clipboard.writeText(keywords.company)}
-                        t={tLk}
-                    />
-                    {renderCompanySuggestions()}
+                    {renderCompanySelector()}
                     <ModernProgressBar analysis={keywordAnalysis.company} t={tLk} />
                 </div>
               </div>

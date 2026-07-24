@@ -10,6 +10,7 @@ import {
   getSmartContentBriefMissingKeys,
   updateGoalContextField,
 } from '../utils/goalContext';
+import { getClientGoalContext } from '../utils/clientCompanyIdentity';
 
 const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     const {
@@ -30,12 +31,17 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
   const t = translations[uiLanguage].goalTab;
   const companyName = keywords.company.trim();
+  const companyClient = companyName
+    ? { id: keywords.clientId?.trim() || companyName, name: companyName }
+    : null;
   const hasGoalContextSource = Boolean(
     title.trim() ||
     keywords.primary.trim() ||
     keywords.secondaries.some(term => term.trim())
   );
-  const isClientSaved = Boolean(companyName && clientGoalContexts[companyName]);
+  const isClientSaved = Boolean(
+    companyClient && getClientGoalContext(clientGoalContexts, companyClient),
+  );
   const missingBriefFieldCount = getSmartContentBriefMissingKeys(goalContext).length;
   const savedMessage = companyName && lastSavedCompany === companyName
     ? t.clientContextSaved.replace('{company}', companyName)
@@ -52,8 +58,8 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   };
 
   const handleSaveClientContext = () => {
-    if (!companyName || isClientSaved) return;
-    handleSaveClientGoalContext(companyName, goalContext);
+    if (!companyClient || isClientSaved) return;
+    handleSaveClientGoalContext(companyClient.id, goalContext, companyClient.name);
     setLastSavedCompany(companyName);
     setGoalContextGenerationStatus('');
     setCopyStatus('');

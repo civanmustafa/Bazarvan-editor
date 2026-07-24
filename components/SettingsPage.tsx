@@ -630,7 +630,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       <ClientCenterSettings />
       <SettingsSection title="سياق هدف الصفحة الحالي">
         <p className="mb-4 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-          هذه الإعدادات تخص سياق المقالة داخل المحرر، وهي مستقلة عن سجل العميل والدومينات والروابط في مركز العملاء.
+          اسم العميل في مركز العملاء هو نفسه اسم الشركة داخل الكلمات والأهداف. اختر
+          العميل المسجل ثم احفظ سياق أهدافه؛ وسيبقى الربط صحيحًا حتى عند تغيير اسم العميل.
         </p>
         <ClientGoalSettings />
       </SettingsSection>

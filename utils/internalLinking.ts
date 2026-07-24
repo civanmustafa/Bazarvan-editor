@@ -16,13 +16,13 @@ import {
   type InternalLinkQualityPolicyValues,
 } from './internalLinkQualityPolicy';
 
-export type ArticleClientContext = {
-  articleId: string;
-  clientId: string;
-  currentPageUrl: string;
-  selectedBy: string | null;
-  updatedAt: string;
-};
+export {
+  loadArticleClientContext,
+  saveArticleClientContext,
+  saveArticleClientSelection,
+  saveArticleCurrentPageUrl,
+  type ArticleClientContext,
+} from './articleClientContext';
 
 export type InternalLinkActionType = 'applied' | 'dismissed' | 'blocked' | 'reported';
 
@@ -190,57 +190,6 @@ export const loadInternalLinkQualityPolicy = async (
     source: selected.scope,
     policyVersion: selected.policyVersion,
   };
-};
-
-export const loadArticleClientContext = async (
-  articleId: string,
-): Promise<ArticleClientContext | null> => {
-  const { data, error } = await getSupabaseClient()
-    .from('article_client_contexts')
-    .select('article_id,client_id,current_page_url,selected_by,updated_at')
-    .eq('article_id', articleId)
-    .maybeSingle();
-  throwIfError(error);
-  if (!data) return null;
-  return {
-    articleId: asText(data.article_id),
-    clientId: asText(data.client_id),
-    currentPageUrl: asText(data.current_page_url),
-    selectedBy: typeof data.selected_by === 'string' ? data.selected_by : null,
-    updatedAt: asText(data.updated_at),
-  };
-};
-
-export const saveArticleClientContext = async (
-  articleId: string,
-  clientId: string,
-  currentPageUrl = '',
-): Promise<void> => {
-  const { error } = await getSupabaseClient()
-    .from('article_client_contexts')
-    .upsert({
-      article_id: articleId,
-      client_id: clientId,
-      current_page_url: currentPageUrl.trim() || null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'article_id' });
-  throwIfError(error);
-};
-
-export const saveArticleCurrentPageUrl = async (
-  articleId: string,
-  clientId: string,
-  currentPageUrl: string,
-): Promise<void> => {
-  const { error } = await getSupabaseClient()
-    .from('article_client_contexts')
-    .upsert({
-      article_id: articleId,
-      client_id: clientId,
-      current_page_url: currentPageUrl.trim() || null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'article_id' });
-  throwIfError(error);
 };
 
 export const loadInternalLinkTargetPages = async (

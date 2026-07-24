@@ -50,6 +50,7 @@ import { parseMarkdownToArticleHtml } from '../utils/editorUtils';
 import { prepareContentWritingResultForEditor } from '../utils/contentWritingWorkflow';
 import { canPersistArticleDraft } from '../utils/articleSavePolicy';
 import { handleEditorLinkClick } from '../utils/editorLinkInteraction';
+import { saveArticleClientSelection } from '../utils/articleClientContext';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -1567,6 +1568,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 idempotencyKey: pendingRequest.idempotencyKey,
                 saveReason: reason,
             });
+            if (keywords.clientId?.trim()) {
+                await saveArticleClientSelection(savedArticle.id, keywords.clientId).catch(error => {
+                    console.error(`Failed to synchronize article client "${savedArticle.id}":`, error);
+                });
+            }
             pendingRemoteSaveRequestRef.current = null;
             setActiveArticleId(savedArticle.id);
             setActiveArticleSettings(getActiveArticleSettings(savedArticle));
