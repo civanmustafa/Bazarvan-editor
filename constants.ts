@@ -433,22 +433,22 @@ export const INITIAL_KEYWORDS: Keywords = {
 };
 
 export const INITIAL_GOAL_CONTEXT = {
-  pageType: 'service',
-  objective: 'convert',
-  audienceScope: 'global',
+  pageType: '',
+  objective: '',
+  audienceScope: '',
   targetCountry: '',
-  targetAudience: 'general-interested-audience',
-  audienceKnowledgeLevel: 'beginner',
-  audienceNeeds: 'clear-practical-answers',
-  readerOutcome: 'understand-and-next-step',
-  desiredAction: 'understand-and-next-step',
-  marketingStage: 'decision',
-  uniqueAngle: 'practical-actionable',
-  evidenceRequirements: 'reliable-current-sources',
-  freshnessRequirements: 'reliable-current-sources',
-  brandVoice: 'formal-professional',
-  topicSensitivity: 'standard',
-  searchIntent: 'transactional',
+  targetAudience: '',
+  audienceKnowledgeLevel: '',
+  audienceNeeds: '',
+  readerOutcome: '',
+  desiredAction: '',
+  marketingStage: '',
+  uniqueAngle: '',
+  evidenceRequirements: '',
+  freshnessRequirements: '',
+  brandVoice: '',
+  topicSensitivity: '',
+  searchIntent: '',
 };
 
 export const MANUAL_DRAFT_KEY = 'editor-manual-draft-content';

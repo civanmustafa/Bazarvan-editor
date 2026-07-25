@@ -48,7 +48,7 @@ test('smart brief keeps four core selectors and exposes nine reduced multi-choic
   assert.ok(!fields.some((field: { key: string }) => field.key === 'freshnessRequirements'));
 });
 
-test('every multi-choice field has a common default that exists in its option list', async () => {
+test('the smart brief starts empty while every multi-choice field keeps its options', async () => {
   const [{ getGoalContextFields }, { translations }, { INITIAL_GOAL_CONTEXT }] = await Promise.all([
     importWorkspaceModule('../utils/goalContext.ts'),
     importWorkspaceModule('../components/translations.ts'),
@@ -57,16 +57,8 @@ test('every multi-choice field has a common default that exists in its option li
   const multiChoiceFields = getGoalContextFields(translations.ar.goalTab)
     .filter((field: { kind: string }) => field.kind === 'multi-choice');
 
-  for (const field of multiChoiceFields) {
-    const defaultValues = String(INITIAL_GOAL_CONTEXT[field.key] || '').split(/\r?\n/).filter(Boolean);
-    assert.ok(defaultValues.length > 0, `${field.key} must have a default value.`);
-    assert.ok(
-      defaultValues.every((value: string) => (
-        field.options.some((option: { value: string }) => option.value === value)
-      )),
-      `${field.key} defaults must match visible options.`,
-    );
-  }
+  assert.ok(Object.values(INITIAL_GOAL_CONTEXT).every(value => value === ''));
+  assert.ok(multiChoiceFields.every((field: { options: unknown[] }) => field.options.length >= 5));
 });
 
 test('only the four core brief fields are required and optional defaults can be cleared', async () => {
@@ -82,7 +74,14 @@ test('only the four core brief fields are required and optional defaults can be 
     ['pageType', 'objective', 'audienceScope', 'searchIntent'],
   );
   const initial = normalizeGoalContext();
-  const withoutMarketingStage = updateGoalContextField(initial, 'marketingStage', '');
+  assert.deepEqual(getSmartContentBriefMissingKeys(initial), SMART_CONTENT_BRIEF_REQUIRED_KEYS);
+  const completeCore = normalizeGoalContext({
+    pageType: 'article',
+    objective: 'educate',
+    audienceScope: 'global',
+    searchIntent: 'informational',
+  });
+  const withoutMarketingStage = updateGoalContextField(completeCore, 'marketingStage', '');
   const withoutKnowledgeLevel = updateGoalContextField(
     withoutMarketingStage,
     'audienceKnowledgeLevel',
@@ -179,6 +178,8 @@ test('smart brief UI contains checkbox multi-select and a manual Enter-to-add in
   );
 
   assert.match(source, /type="checkbox"/);
+  assert.match(source, /<option value="" disabled>/);
+  assert.match(source, /selectPlaceholder/);
   assert.match(source, /customValue/);
   assert.match(source, /event\.key === 'Enter'/);
   assert.match(source, /serializeGoalContextMultiValue/);

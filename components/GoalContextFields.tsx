@@ -273,6 +273,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
                 className={fieldClass}
                 required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)}
               >
+                <option value="" disabled>{t.goalTab.selectPlaceholder}</option>
                 {field.options.map(option => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
