@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -150,4 +151,18 @@ test('Firecrawl configuration is part of worker readiness', async () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.checks.firecrawlConfigured, false);
+});
+
+test('queue fairness migration skips future retries and unmet dependencies when choosing an article', async () => {
+  const migration = await readFile(new URL(
+    '../supabase/migrations/20260725000000_external_analysis_queue_fairness.sql',
+    import.meta.url,
+  ), 'utf8');
+
+  assert.match(migration, /create or replace function public\.claim_next_external_analysis_job/);
+  assert.match(migration, /job\.status = 'retry_scheduled'\s+and coalesce\(job\.next_attempt_at, now\(\)\) <= now\(\)/);
+  assert.match(migration, /dependency\.status = 'completed'/);
+  assert.match(migration, /job\.lease_expires_at > now\(\)/);
+  assert.match(migration, /for update skip locked/);
+  assert.match(migration, /grant execute on function public\.claim_next_external_analysis_job\(text, text\[\], integer\) to service_role/);
 });
