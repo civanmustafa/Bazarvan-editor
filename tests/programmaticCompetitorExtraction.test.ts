@@ -117,8 +117,10 @@ test('JSON-LD articleBody provides a deterministic fallback for script-rendered 
 });
 
 test('competitor UI exposes separate AI and programmatic extraction with automatic AI fallback', async () => {
-  const [sidebar, browserClient, apiHandler, extractor] = await Promise.all([
+  const [sidebar, translations, promptRegistry, browserClient, apiHandler, extractor] = await Promise.all([
     readWorkspaceFile('components/RightSidebar.tsx'),
+    readWorkspaceFile('components/translations.ts'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
     readWorkspaceFile('utils/competitorDiscovery.ts'),
     readWorkspaceFile('api/competitors.ts'),
     readWorkspaceFile('server/programmaticCompetitorExtractor.ts'),
@@ -130,6 +132,11 @@ test('competitor UI exposes separate AI and programmatic extraction with automat
   assert.match(sidebar, /await runCompetitorExtraction\([\s\S]*fallbackNotice/);
   assert.match(sidebar, /controller\.signal\.aborted/);
   assert.match(sidebar, /programmaticExtractionCancelled/);
+  assert.match(sidebar, /setCompetitorPlainTextFromExtraction\(index, content\)/);
+  assert.match(sidebar, /textIndex === index \? extractedText : text/);
+  assert.match(sidebar, /const text = plainText \|\| extractedText/);
+  assert.match(translations, /وضع النص الكامل في خانة «محتوى نصي عادي»/);
+  assert.match(promptRegistry, /نسخة واحدة من خانة المحتوى النصي العادي لكل منافس/);
   assert.doesNotMatch(sidebar, /competitorGeminiProgress/);
   assert.match(browserClient, /action:\s*'programmatic_extract'/);
   assert.match(browserClient, /signal:\s*options\.signal/);

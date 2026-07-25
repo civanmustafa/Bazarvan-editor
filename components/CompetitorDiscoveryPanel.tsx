@@ -561,8 +561,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           </h3>
           <p className="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
             {isArabic
-              ? 'ابحث، اختر حتى 5 مواقع، ثم سيُحفظ المحتوى في المقالة تلقائيًا.'
-              : 'Search, select up to 5 sites, and their content will be saved to the article.'}
+              ? 'ابحث واختر حتى 5 مواقع. السحب الجماعي يتم في الخادم عبر Firecrawl دون استخدام Gemini، ثم يُحفظ النص الكامل في المقالة.'
+              : 'Search and select up to 5 sites. Bulk import runs on the server through Firecrawl without Gemini, then saves the full text to the article.'}
           </p>
         </div>
         {isLoadingState && <LoaderCircle size={16} className="shrink-0 animate-spin text-[#d4af37]" />}
@@ -762,7 +762,9 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
             className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-black text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isStarting ? <LoaderCircle size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
-            <span>{isArabic ? `سحب ${selectedResults.length} موقع` : `Import ${selectedResults.length} site(s)`}</span>
+            <span>{isArabic
+              ? `سحب ${selectedResults.length} موقع عبر Firecrawl`
+              : `Import ${selectedResults.length} site(s) via Firecrawl`}</span>
           </button>
         </div>
       )}
@@ -773,7 +775,9 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
             <span className="inline-flex min-w-0 items-center gap-2 font-black text-blue-800 dark:text-blue-300">
               <LoaderCircle size={14} className="shrink-0 animate-spin" />
               <span className="truncate">
-                {isArabic ? `سحب المنافس ${Math.min(current || 1, total || 1)}/${total || 1}` : `Importing competitor ${Math.min(current || 1, total || 1)}/${total || 1}`}
+                {isArabic
+                  ? `سحب المنافس عبر Firecrawl ${Math.min(current || 1, total || 1)}/${total || 1}`
+                  : `Importing via Firecrawl ${Math.min(current || 1, total || 1)}/${total || 1}`}
               </span>
             </span>
             <button
@@ -808,7 +812,16 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               <div className="min-w-0 flex-1">
                 <div className="line-clamp-1 text-[11px] font-black text-gray-800 dark:text-gray-100">{row.position}. {row.title || row.domain}</div>
                 <div className="mt-0.5 truncate text-[10px] text-gray-500" dir="ltr">{row.domain}</div>
-                {row.status === 'completed' && <div className="mt-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">{row.wordCount} {isArabic ? 'كلمة' : 'words'}</div>}
+                {row.status === 'completed' && (
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
+                    <span>{row.wordCount} {isArabic ? 'كلمة' : 'words'}</span>
+                    <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] dark:bg-emerald-500/10">
+                      {row.extractionProvider.startsWith('firecrawl')
+                        ? 'Firecrawl'
+                        : row.extractionProvider || (isArabic ? 'غير محدد' : 'Unknown')}
+                    </span>
+                  </div>
+                )}
                 {row.errorMessage && <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-red-600 dark:text-red-300">{row.errorMessage}</div>}
               </div>
               <button

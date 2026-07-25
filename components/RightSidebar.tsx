@@ -64,7 +64,7 @@ type CompetitorExtractedContent = {
     wordCount: number;
 };
 
-type CompetitorExtractionSource = 'url' | 'programmatic' | 'html' | 'text';
+type CompetitorExtractionSource = 'url' | 'programmatic' | 'firecrawl' | 'html' | 'text';
 
 type CompetitorExtractionState = {
     status: 'idle' | 'loading' | 'success' | 'error';
@@ -299,6 +299,16 @@ const normalizeCompetitorContent = (parsed: any, fallbackUrl: string): Competito
         text: typeof parsed.text === 'string' ? stripExtractionLabels(parsed.text) : '',
         wordCount: Number.isFinite(Number(parsed.wordCount)) ? Number(parsed.wordCount) : 0,
     };
+
+    if (!content.text) {
+        content.text = normalizePlainCompetitorText([
+            ...content.headings.h1,
+            ...content.headings.h2,
+            ...content.headings.h3,
+            ...content.paragraphs,
+            ...content.listItems,
+        ].join('\n\n'));
+    }
 
     if (!content.wordCount) {
         content.wordCount = [
@@ -567,16 +577,15 @@ const collectCompetitorStatTexts = (
     extractions: CompetitorExtractionState[],
 ): string[] => {
     const texts: string[] = [];
-
-    plainTexts.forEach(value => {
-        const text = stripExtractionLabels(normalizePlainCompetitorText(value));
+    const slotCount = Math.max(plainTexts.length, extractions.length);
+    for (let index = 0; index < slotCount; index += 1) {
+        const plainText = stripExtractionLabels(normalizePlainCompetitorText(plainTexts[index] || ''));
+        const extractedText = stripExtractionLabels(normalizePlainCompetitorText(
+            extractions[index]?.content?.text || '',
+        ));
+        const text = plainText || extractedText;
         if (text) texts.push(text);
-    });
-
-    extractions.forEach(extraction => {
-        const text = extraction.content?.text?.trim();
-        if (text) texts.push(stripExtractionLabels(text));
-    });
+    }
 
     return texts.filter(Boolean);
 };
@@ -635,13 +644,27 @@ const buildReadyCommandCompetitorBlocks = (
     urls: string[],
 ): string => {
     const blocks: string[] = [];
+    const slotCount = Math.max(extractions.length, plainTexts.length, urls.length);
+    for (let index = 0; index < slotCount; index += 1) {
+        const extraction = extractions[index];
+        const content = extraction?.content;
+        const plainText = stripExtractionLabels(normalizePlainCompetitorText(plainTexts[index] || ''));
+        const extractedText = stripExtractionLabels(normalizePlainCompetitorText(content?.text || ''));
+        const text = plainText || extractedText;
+        if (!text) continue;
 
-    plainTexts.forEach((value, index) => {
-        const text = stripExtractionLabels(normalizePlainCompetitorText(value));
-        if (!text) return;
-
-        blocks.push(`### المنافس ${index + 1} - محتوى نص عادي
-الرابط: ${urls[index]?.trim() || 'غير محدد'}
+        const sourceLabel = extraction?.source === 'programmatic'
+            ? 'محتوى نصي مستخرج برمجيًا'
+            : extraction?.source === 'firecrawl'
+                ? 'محتوى نصي مسحوب عبر Firecrawl'
+                : extraction?.source === 'url'
+                    ? 'محتوى نصي مستخرج عبر الذكاء الاصطناعي'
+                    : extraction?.source === 'html'
+                        ? 'محتوى نصي مستخرج من HTML'
+                        : 'محتوى نصي عادي';
+        blocks.push(`### المنافس ${index + 1} - ${sourceLabel}
+الرابط: ${content?.url || content?.fetchedUrl || urls[index]?.trim() || 'غير محدد'}
+العنوان: ${content?.title || 'غير محدد'}
 عدد الكلمات: ${countPromptWords(text)}
 طريقة الاستشهاد عند استخدام فكرة من هذا النص: المصدر: المنافس ${index + 1}؛ فقرة الدليل: [فقرة رقمها] مقتطف قصير من الفقرة.
 
@@ -649,30 +672,7 @@ const buildReadyCommandCompetitorBlocks = (
 ---
 ${formatCompetitorEvidenceParagraphs(text)}
 ---`);
-    });
-
-    extractions.forEach((extraction, index) => {
-        if (!['html', 'programmatic', 'url'].includes(extraction.source || '')) return;
-        const content = extraction.content;
-        const extractedText = content?.text?.trim();
-        if (!content || !extractedText) return;
-
-        const extractionLabel = extraction.source === 'programmatic'
-            ? 'المحتوى المستخرج برمجيًا'
-            : extraction.source === 'url'
-                ? 'المحتوى المستخرج عبر الذكاء الاصطناعي'
-                : 'المحتوى المستخرج من كود HTML';
-        blocks.push(`### المنافس ${index + 1} - ${extractionLabel}
-الرابط: ${content.url || content.fetchedUrl || urls[index]?.trim() || 'غير محدد'}
-العنوان: ${content.title || 'غير محدد'}
-عدد الكلمات المستخرجة: ${content.wordCount || countPromptWords(extractedText)}
-طريقة الاستشهاد عند استخدام فكرة من هذا النص: المصدر: المنافس ${index + 1}؛ فقرة الدليل: [فقرة رقمها] مقتطف قصير من الفقرة.
-
-النص المستخرج مرقم الفقرات:
----
-${formatCompetitorEvidenceParagraphs(extractedText)}
----`);
-    });
+    }
 
     return blocks.join('\n\n');
 };
@@ -915,9 +915,11 @@ const RightSidebar: React.FC = () => {
             if (row.status === 'completed') {
                 return {
                     status: 'success',
-                    source: row.extractionProvider === 'firecrawl' || row.extractionProvider === 'programmatic'
-                        ? 'programmatic'
-                        : 'url',
+                    source: row.extractionProvider.startsWith('firecrawl')
+                        ? 'firecrawl'
+                        : row.extractionProvider === 'programmatic'
+                            ? 'programmatic'
+                            : 'url',
                     error: '',
                     content: {
                         url: row.canonicalUrl || row.sourceUrl,
@@ -1239,6 +1241,17 @@ ${readyCommandCompetitorBlocks}`;
         setCompetitorTexts(prev => prev.map((text, textIndex) => textIndex === index ? value : text));
     };
 
+    const setCompetitorPlainTextFromExtraction = (
+        index: number,
+        content: CompetitorExtractedContent,
+    ) => {
+        const extractedText = normalizePlainCompetitorText(content.text);
+        if (!extractedText) return;
+        setCompetitorTexts(prev => prev.map((text, textIndex) => (
+            textIndex === index ? extractedText : text
+        )));
+    };
+
     const handleBulkCompetitorTextDistribute = (value: string) => {
         const sections = splitBulkCompetitorTexts(value);
         if (sections.length === 0) return;
@@ -1322,6 +1335,7 @@ ${readyCommandCompetitorBlocks}`;
                 ...parsed,
                 provider: data.provider || provider,
             }, fallbackUrl);
+            setCompetitorPlainTextFromExtraction(index, content);
 
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
                 status: 'success',
@@ -1385,10 +1399,12 @@ ${readyCommandCompetitorBlocks}`;
                 signal: controller.signal,
             });
             if (programmaticExtractionControllersRef.current[index] !== controller) return;
+            const content = normalizeCompetitorContent(extracted, url);
+            setCompetitorPlainTextFromExtraction(index, content);
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
                 status: 'success',
                 source: 'programmatic',
-                content: normalizeCompetitorContent(extracted, url),
+                content,
                 error: '',
                 notice: extracted.cacheHit
                     ? tRs.programmaticExtractionCacheHit
@@ -1471,6 +1487,7 @@ ${readyCommandCompetitorBlocks}`;
         window.setTimeout(() => {
             try {
                 const content = extractCompetitorContentFromHtml(html, fallbackUrl);
+                setCompetitorPlainTextFromExtraction(index, content);
                 setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
                     status: 'success',
                     source: 'html',
@@ -1945,7 +1962,9 @@ ${readyCommandCompetitorBlocks}`;
 
                 <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                     <div className="mb-2 text-xs font-bold text-gray-700 dark:text-gray-200">
-                        {t.locale === 'ar' ? 'نموذج Gemini لاستخراج المنافسين' : 'Gemini model for competitor extraction'}
+                        {t.locale === 'ar'
+                            ? 'نموذج Gemini لزر «استخراج بالذكاء» لكل رابط فقط'
+                            : 'Gemini model for each link’s “AI extraction” button only'}
                     </div>
                     <div className={`grid gap-2 ${isGeminiFreeEnabled && isGeminiPaidEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
                         {isGeminiFreeEnabled && <button
@@ -2101,9 +2120,11 @@ ${readyCommandCompetitorBlocks}`;
                                             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 dark:bg-[#333333] dark:text-gray-300">
                                                 {extraction.source === 'programmatic'
                                                     ? tRs.programmaticExtractionSource
-                                                    : extraction.source === 'url'
-                                                        ? tRs.aiExtractionSource
-                                                        : tRs.htmlExtractionSource}
+                                                    : extraction.source === 'firecrawl'
+                                                        ? 'Firecrawl'
+                                                        : extraction.source === 'url'
+                                                            ? tRs.aiExtractionSource
+                                                            : tRs.htmlExtractionSource}
                                             </span>
                                             {content.cacheHit && (
                                                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">

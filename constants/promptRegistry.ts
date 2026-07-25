@@ -79,7 +79,11 @@ const READY_ATTACHMENT_LABELS: Record<string, PromptAttachmentDefinition> = {
   articleToc: attachment('articleToc', 'هيكل المقالة', 'عناوين المقالة مرتبة حسب مستوياتها.'),
   currentConclusion: attachment('currentConclusion', 'الخاتمة الحالية', 'نص الخاتمة الحالية عند توفرها.'),
   editorText: attachment('editorText', 'نص المقالة', 'النص الكامل الحالي من المحرر.'),
-  competitorContent: attachment('competitorContent', 'محتوى المنافسين', 'نصوص المنافسين وعناوينهم وروابطهم المتاحة.'),
+  competitorContent: attachment(
+    'competitorContent',
+    'محتوى المنافسين',
+    'النص الكامل والعنوان والرابط لكل منافس متاح. يعتمد النظام نسخة واحدة من خانة المحتوى النصي العادي لكل منافس لمنع تكرار النص المستخرج في الطلب نفسه.',
+  ),
   targetKeywords: attachment('targetKeywords', 'الكلمات المستهدفة', 'الكلمة الأساسية والصيغ البديلة وكلمات LSI.'),
   companyName: attachment('companyName', 'اسم الشركة', 'اسم الشركة أو العلامة التجارية.'),
   goalContext: attachment('goalContext', 'الهدف والجمهور', 'نوع الصفحة وهدفها والجمهور والموقع ونية البحث.'),

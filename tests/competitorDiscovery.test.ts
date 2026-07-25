@@ -292,6 +292,23 @@ test('competitor extraction preserves partial success and bounds transient retri
   assert.match(panel, /hydratedCompetitorsRef/);
 });
 
+test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini', async () => {
+  const [executor, panel, sidebar] = await Promise.all([
+    readWorkspaceFile('server/competitorExtractionExecutor.ts'),
+    readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
+    readWorkspaceFile('components/RightSidebar.tsx'),
+  ]);
+
+  assert.match(executor, /provider: 'firecrawl'/);
+  assert.match(executor, /model: FIRECRAWL_MODEL/);
+  assert.match(executor, /getCompetitorPreview/);
+  assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
+  assert.match(panel, /سحب \$\{selectedResults\.length\} موقع عبر Firecrawl/);
+  assert.match(panel, /سحب المنافس عبر Firecrawl/);
+  assert.match(sidebar, /row\.extractionProvider\.startsWith\('firecrawl'\)/);
+  assert.match(sidebar, /extraction\.source === 'firecrawl'/);
+});
+
 test('competitor sidebar keeps one plain-text content surface', async () => {
   const [sidebar, translations] = await Promise.all([
     readWorkspaceFile('components/RightSidebar.tsx'),
