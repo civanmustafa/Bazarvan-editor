@@ -237,10 +237,11 @@ test('expanded intent lexicon recognizes Arabic support and transactional search
 });
 
 test('automatic competitor discovery is durable, idempotent, and uses the central engine', async () => {
-  const [migration, executor, worker, panel, card, modal, reports] = await Promise.all([
+  const [migration, executor, worker, ecosystem, panel, card, modal, reports] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260714030000_automatic_competitor_discovery.sql'),
     readWorkspaceFile('server/competitorDiscoveryExecutor.ts'),
     readWorkspaceFile('server/externalAnalysisWorker.ts'),
+    readWorkspaceFile('ecosystem.config.cjs'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
     readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
     readWorkspaceFile('components/CompetitorDiscoveryModal.tsx'),
@@ -259,8 +260,13 @@ test('automatic competitor discovery is durable, idempotent, and uses the centra
   assert.match(executor, /analyzeAndSelectCompetitors\(/);
   assert.match(executor, /registerExternalAnalysisJobExecutor\('competitor_discovery'/);
   assert.match(worker, /import '\.\/competitorDiscoveryExecutor'/);
+  assert.match(worker, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES/);
+  assert.match(worker, /supportedJobTypes: workerJobTypes/);
   assert.match(worker, /reason=\$\{retry\.code\}/);
   assert.match(worker, /retry\.message\.replace\(\/\\s\+\/g/);
+  assert.match(ecosystem, /name: 'bazarvan-competitor-worker'/);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'competitor_discovery,competitor_extraction'/);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,engineering_command'/);
   assert.match(panel, /getPersistedCompetitorDiscovery/);
   assert.match(panel, /ensureArticleCompetitorDiscovery/);
   assert.match(card, /بحث المنافسين/);
@@ -293,7 +299,7 @@ test('competitor discovery stop control requests durable cancellation and keeps 
   assert.match(panel, /discoveryQueueStalled/);
   assert.match(panel, /COMPETITOR_DISCOVERY_QUEUE_STALL_MS/);
   assert.match(panel, /بانتظار عامل بحث المنافسين/);
-  assert.match(panel, /عامل bazarvan-ai-worker لم يستلمها خلال 90 ثانية/);
+  assert.match(panel, /عامل bazarvan-competitor-worker لم يستلمها خلال 90 ثانية/);
   assert.match(panel, /إيقاف البحث عن المنافسين/);
   assert.match(panel, /جاري إيقاف البحث عن المنافسين بأمان/);
   assert.match(controlsMigration, /status = case when job\.status = 'running' then 'running' else 'cancelled' end/);

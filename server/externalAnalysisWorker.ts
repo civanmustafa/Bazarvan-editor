@@ -16,6 +16,7 @@ import {
   scheduleExternalAnalysisJobRetry,
   updateExternalAnalysisJobProgress,
   type ExternalAnalysisJob,
+  type ExternalAnalysisJobType,
 } from './externalAnalysisQueue';
 import {
   ExternalAnalysisRetryError,
@@ -58,6 +59,14 @@ const workerConcurrency = parseBoundedInteger(
   1,
   5,
 );
+const configuredJobTypes = new Set(
+  String(process.env.EXTERNAL_ANALYSIS_WORKER_JOB_TYPES || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean),
+);
+const workerJobTypes: ExternalAnalysisJobType[] = getSupportedExternalAnalysisJobTypes()
+  .filter(jobType => configuredJobTypes.size === 0 || configuredJobTypes.has(jobType));
 const recoveryIntervalMs = 60_000;
 const workerId = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
@@ -304,10 +313,9 @@ const runWorkerSlot = async (slotIndex: number): Promise<void> => {
     try {
       if (slotIndex === 0) await recoverStaleJobsIfDue();
 
-      const supportedJobTypes = getSupportedExternalAnalysisJobTypes();
-      if (supportedJobTypes.length === 0) {
+      if (workerJobTypes.length === 0) {
         if (!idleNoticeShown) {
-          console.log('[external-analysis-worker] No executors registered; queue claiming is idle.');
+          console.log('[external-analysis-worker] No allowed executors are configured; queue claiming is idle.');
           idleNoticeShown = true;
         }
         await sleep(pollIntervalMs);
@@ -317,7 +325,7 @@ const runWorkerSlot = async (slotIndex: number): Promise<void> => {
       idleNoticeShown = false;
       const job = await claimNextExternalAnalysisJob({
         workerId: slotWorkerId,
-        supportedJobTypes,
+        supportedJobTypes: workerJobTypes,
         leaseSeconds,
       });
 
@@ -336,7 +344,7 @@ const runWorkerSlot = async (slotIndex: number): Promise<void> => {
 
 const runWorker = async (): Promise<void> => {
   console.log(
-    `[external-analysis-worker] Started ${workerId}; concurrency=${workerConcurrency}, poll=${pollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m (global setting takes precedence).`,
+    `[external-analysis-worker] Started ${workerId}; jobTypes=${workerJobTypes.join(',') || 'none'}; concurrency=${workerConcurrency}, poll=${pollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m (global setting takes precedence).`,
   );
 
   await Promise.all(

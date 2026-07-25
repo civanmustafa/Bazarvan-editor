@@ -128,8 +128,9 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - لا تستخدم `/var/www/bazarvan-smarteditor` في تعليمات النشر المستقبلية إلا إذا أُعيد ضبط PM2 عمدًا للعمل منه.
 - إذا لم تكن حالة النشر واضحة، اعرض جميع العمليات بالأمر `pm2 status`.
 - لفحص خادم الويب استخدم `pm2 describe bazarvan-editor`.
-- لفحص عامل البحث وسحب المنافسين استخدم `pm2 describe bazarvan-ai-worker`، ولسجله استخدم `pm2 logs bazarvan-ai-worker --lines 100`.
-- إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات البحث والسحب متدهورة ويجب فحص `bazarvan-ai-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
+- لفحص عامل البحث وسحب المنافسين المستقل عبر Firecrawl استخدم `pm2 describe bazarvan-competitor-worker`، ولسجله استخدم `pm2 logs bazarvan-competitor-worker --lines 100`.
+- يستخدم `bazarvan-ai-worker` فقط للتحليل الدلالي والأوامر الهندسية، لذلك لا تمنع أخطاء Gemini عامل Firecrawl من استلام مهام المنافسين.
+- إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات البحث والسحب متدهورة ويجب فحص `bazarvan-competitor-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
 - لفحص عامل كتابة المقالة استخدم `pm2 describe bazarvan-content-writing-worker`.
 - لفحص عامل زحف صفحات العملاء استخدم `pm2 describe bazarvan-client-page-crawler`.
 - عند فشل `/readyz` لا تعتبر النشر مكتملًا؛ راجع الترحيلات ومتغيرات البيئة وسجل العملية في PM2.

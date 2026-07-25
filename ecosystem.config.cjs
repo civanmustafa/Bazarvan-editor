@@ -12,6 +12,24 @@ module.exports = {
       },
     },
     {
+      name: 'bazarvan-competitor-worker',
+      script: 'server-dist/external-analysis-worker.mjs',
+      cwd: __dirname,
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: true,
+      restart_delay: 2000,
+      kill_timeout: 10000,
+      env: {
+        NODE_ENV: 'production',
+        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'competitor_discovery,competitor_extraction',
+        EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.COMPETITOR_WORKER_POLL_MS || '3000',
+        EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS || '300',
+        EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
+        EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: process.env.COMPETITOR_WORKER_CONCURRENCY || '3',
+      },
+    },
+    {
       name: 'bazarvan-ai-worker',
       script: 'server-dist/external-analysis-worker.mjs',
       cwd: __dirname,
@@ -22,6 +40,7 @@ module.exports = {
       kill_timeout: 10000,
       env: {
         NODE_ENV: 'production',
+        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,engineering_command',
         EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.EXTERNAL_ANALYSIS_WORKER_POLL_MS || '5000',
         EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS || '300',
         EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',

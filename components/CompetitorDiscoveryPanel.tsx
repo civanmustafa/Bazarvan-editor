@@ -599,8 +599,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const activeJobError = activeJob?.last_error?.trim() || '';
   const activeJobWarning = extractionQueueStalled
     ? isArabic
-      ? 'تم حفظ المهمة، لكن عامل bazarvan-ai-worker لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل العامل في هوستينجر، ثم أعد المحاولة.'
-      : 'The job was saved, but bazarvan-ai-worker did not claim it within 90 seconds. Stop it, start the worker on Hostinger, then retry.'
+      ? 'تم حفظ المهمة، لكن عامل bazarvan-competitor-worker لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل عامل المنافسين في هوستينجر، ثم أعد المحاولة.'
+      : 'The job was saved, but bazarvan-competitor-worker did not claim it within 90 seconds. Stop it, start the competitor worker on Hostinger, then retry.'
     : extractionWaitingForWorker
       ? isArabic
         ? 'تم حفظ المهمة في الطابور، ولم يبدأ اتصال Firecrawl بعد.'
@@ -690,8 +690,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               ? (isArabic ? 'جاري إيقاف البحث عن المنافسين بأمان.' : 'Stopping competitor discovery safely.')
               : discoveryQueueStalled
                 ? (isArabic
-                  ? 'تم حفظ مهمة بحث المنافسين، لكن عامل bazarvan-ai-worker لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل العامل في هوستينجر، ثم أعد المحاولة.'
-                  : 'The competitor search job was saved, but bazarvan-ai-worker did not claim it within 90 seconds. Stop it, start the worker on Hostinger, then retry.')
+                  ? 'تم حفظ مهمة بحث المنافسين، لكن عامل bazarvan-competitor-worker لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل عامل المنافسين في هوستينجر، ثم أعد المحاولة.'
+                  : 'The competitor search job was saved, but bazarvan-competitor-worker did not claim it within 90 seconds. Stop it, start the competitor worker on Hostinger, then retry.')
               : discoveryWaitingForWorker
                 ? (isArabic
                   ? 'بانتظار عامل بحث المنافسين؛ لم يبدأ البحث الخارجي بعد.'
