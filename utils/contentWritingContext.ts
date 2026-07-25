@@ -122,6 +122,8 @@ export const getContentWritingCompetitorsFromMetadata = (
       ? root.competitors
       : {};
   const texts = toTextList(source.texts);
+  // attachments.competitors.texts is the single canonical competitor input saved
+  // by Firecrawl or the editor. Preview cards are UI-only and never duplicated here.
   const urls = toTextList(source.urls);
   const titles = toTextList(source.titles);
   return normalizeContentWritingCompetitors(texts.map((content, index) => ({

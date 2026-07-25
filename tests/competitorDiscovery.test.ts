@@ -352,12 +352,26 @@ test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini'
 });
 
 test('competitor sidebar keeps one plain-text content surface', async () => {
-  const [sidebar, translations] = await Promise.all([
+  const [sidebar, translations, writingContext, engineeringExecutor] = await Promise.all([
     readWorkspaceFile('components/RightSidebar.tsx'),
     readWorkspaceFile('components/translations.ts'),
+    readWorkspaceFile('utils/contentWritingContext.ts'),
+    readWorkspaceFile('server/externalEngineeringAnalysisExecutor.ts'),
   ]);
 
   assert.match(sidebar, /competitorPlainTextField/);
+  assert.match(sidebar, /canonicalAnalysisSource/);
+  assert.match(sidebar, /competitorPlainTextUsageHint/);
+  assert.match(sidebar, /firecrawlExtractionPreview/);
+  assert.match(sidebar, /programmaticExtractionPreview/);
+  assert.match(sidebar, /aiExtractionPreview/);
+  assert.match(sidebar, /extractionPreviewUsageHint/);
+  assert.doesNotMatch(sidebar, /tRs\.extractedContent/);
+  assert.match(translations, /النص المعتمد للتحليل والكتابة/);
+  assert.match(translations, /هذه بطاقة معاينة للمصدر والبنية فقط وليست مدخلًا ثانيًا/);
+  assert.doesNotMatch(translations, /extractedContent:\s*'المحتوى المستخرج'/);
+  assert.match(writingContext, /attachments\.competitors\.texts is the single canonical competitor input/);
+  assert.match(engineeringExecutor, /same persisted canonical competitor texts as content writing/);
   assert.doesNotMatch(sidebar, /fullExtractedText/);
   assert.doesNotMatch(translations, /fullExtractedText/);
 });

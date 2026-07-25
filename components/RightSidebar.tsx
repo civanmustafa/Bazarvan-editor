@@ -576,6 +576,9 @@ const collectCompetitorStatTexts = (
     plainTexts: string[],
     extractions: CompetitorExtractionState[],
 ): string[] => {
+    // competitorTexts is the canonical editor surface used by stats, ready commands,
+    // saved article attachments, external analysis, and content writing. Extraction
+    // content is retained only as a loss-prevention fallback and preview payload.
     const texts: string[] = [];
     const slotCount = Math.max(plainTexts.length, extractions.length);
     for (let index = 0; index < slotCount; index += 1) {
@@ -643,6 +646,8 @@ const buildReadyCommandCompetitorBlocks = (
     plainTexts: string[],
     urls: string[],
 ): string => {
+    // Ready/manual commands receive exactly one text block per competitor. Prefer the
+    // user-editable canonical field and never attach the preview card as a second copy.
     const blocks: string[] = [];
     const slotCount = Math.max(extractions.length, plainTexts.length, urls.length);
     for (let index = 0; index < slotCount; index += 1) {
@@ -661,7 +666,7 @@ const buildReadyCommandCompetitorBlocks = (
                     ? 'محتوى نصي مستخرج عبر الذكاء الاصطناعي'
                     : extraction?.source === 'html'
                         ? 'محتوى نصي مستخرج من HTML'
-                        : 'محتوى نصي عادي';
+                        : 'نص معتمد مدخل يدويًا';
         blocks.push(`### المنافس ${index + 1} - ${sourceLabel}
 الرابط: ${content?.url || content?.fetchedUrl || urls[index]?.trim() || 'غير محدد'}
 العنوان: ${content?.title || 'غير محدد'}
@@ -1245,6 +1250,8 @@ ${readyCommandCompetitorBlocks}`;
         index: number,
         content: CompetitorExtractedContent,
     ) => {
+        // Every extraction method converges here. The preview card keeps metadata and
+        // headings; this canonical text field is what downstream analysis actually uses.
         const extractedText = normalizePlainCompetitorText(content.text);
         if (!extractedText) return;
         setCompetitorTexts(prev => prev.map((text, textIndex) => (
@@ -2022,7 +2029,7 @@ ${readyCommandCompetitorBlocks}`;
                         className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#f2d675]"
                     >
                         <FileText size={14} />
-                        <span>{t.locale === 'ar' ? 'تعبئة النصوص العادية' : 'Fill plain text fields'}</span>
+                        <span>{t.locale === 'ar' ? 'تعبئة النصوص المعتمدة' : 'Fill canonical analysis texts'}</span>
                     </button>
                 </div>
 
@@ -2037,6 +2044,13 @@ ${readyCommandCompetitorBlocks}`;
                     const firecrawlPendingHint = isArabicLocale
                         ? 'هذا الرابط ينتظر عامل سحب المنافسين؛ لم يبدأ اتصال Firecrawl بعد.'
                         : 'This URL is waiting for the competitor extraction worker; the Firecrawl request has not started yet.';
+                    const extractionPreviewTitle = extraction.source === 'firecrawl'
+                        ? tRs.firecrawlExtractionPreview
+                        : extraction.source === 'programmatic'
+                            ? tRs.programmaticExtractionPreview
+                            : extraction.source === 'url'
+                                ? tRs.aiExtractionPreview
+                                : tRs.htmlExtractionPreview;
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
@@ -2098,7 +2112,12 @@ ${readyCommandCompetitorBlocks}`;
                                     </div>
                                 </div>
                                 <div>
-                                    <div className="mb-1 text-[11px] font-bold text-gray-500 dark:text-gray-400">{tRs.competitorPlainTextField}</div>
+                                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                                        <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">{tRs.competitorPlainTextField}</span>
+                                        <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                            {tRs.canonicalAnalysisSource}
+                                        </span>
+                                    </div>
                                     <textarea
                                         value={plainText}
                                         onChange={(event) => handleCompetitorTextChange(index, event.target.value)}
@@ -2107,6 +2126,9 @@ ${readyCommandCompetitorBlocks}`;
                                         className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
                                         dir="auto"
                                     />
+                                    <div className="mt-1 text-[10px] font-semibold leading-4 text-gray-500 dark:text-gray-400">
+                                        {tRs.competitorPlainTextUsageHint}
+                                    </div>
                                 </div>
                             </div>
 
@@ -2127,7 +2149,7 @@ ${readyCommandCompetitorBlocks}`;
                                 <div className="mt-3 space-y-3 border-t border-gray-100 pt-3 text-xs dark:border-[#3C3C3C]">
                                     <div className="flex items-center justify-between gap-2">
                                         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                            <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{tRs.extractedContent}</span>
+                                            <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{extractionPreviewTitle}</span>
                                             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 dark:bg-[#333333] dark:text-gray-300">
                                                 {extraction.source === 'programmatic'
                                                     ? tRs.programmaticExtractionSource
@@ -2149,6 +2171,9 @@ ${readyCommandCompetitorBlocks}`;
                                             )}
                                         </div>
                                         <span className="shrink-0 text-[11px] text-gray-400">{content.wordCount} {t.common.words}</span>
+                                    </div>
+                                    <div className="rounded-md border border-blue-100 bg-blue-50/70 px-2 py-1.5 text-[10px] font-semibold leading-4 text-blue-700 dark:border-blue-900/30 dark:bg-blue-500/10 dark:text-blue-300">
+                                        {tRs.extractionPreviewUsageHint}
                                     </div>
                                     <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
                                         <div className="mb-2 font-bold text-gray-700 dark:text-gray-200">{tRs.pageTableOfContents}</div>

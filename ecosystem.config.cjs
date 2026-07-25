@@ -11,6 +11,8 @@ module.exports = {
         PORT: process.env.PORT || '8080',
       },
     },
+    // Firecrawl owns competitor discovery/extraction. Keep Gemini-backed job types out
+    // of this process so provider failures cannot delay competitor retrieval.
     {
       name: 'bazarvan-competitor-worker',
       script: 'server-dist/external-analysis-worker.mjs',
@@ -29,6 +31,7 @@ module.exports = {
         EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: process.env.COMPETITOR_WORKER_CONCURRENCY || '3',
       },
     },
+    // Semantic and engineering AI work stays separate from the Firecrawl process above.
     {
       name: 'bazarvan-ai-worker',
       script: 'server-dist/external-analysis-worker.mjs',

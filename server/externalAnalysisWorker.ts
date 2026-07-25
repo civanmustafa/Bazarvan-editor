@@ -65,6 +65,8 @@ const configuredJobTypes = new Set(
     .map(value => value.trim())
     .filter(Boolean),
 );
+// PM2 uses this hard boundary to keep Firecrawl competitor jobs isolated from
+// semantic/engineering AI jobs even though both processes share the worker binary.
 const workerJobTypes: ExternalAnalysisJobType[] = getSupportedExternalAnalysisJobTypes()
   .filter(jobType => configuredJobTypes.size === 0 || configuredJobTypes.has(jobType));
 const recoveryIntervalMs = 60_000;

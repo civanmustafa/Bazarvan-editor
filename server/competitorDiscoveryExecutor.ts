@@ -22,6 +22,11 @@ import {
 } from './externalAnalysisQueue.ts';
 import { loadArticleClientOwnDomains } from './clientCompetitorExclusions.ts';
 
+/**
+ * Architecture boundary:
+ * Firecrawl Search discovers candidate URLs, then the deterministic selection engine
+ * filters and ranks them. This discovery path does not call Gemini or OpenAI.
+ */
 const FIRECRAWL_SEARCH_MODEL = 'v2/search';
 
 const textValue = (value: unknown): string => (

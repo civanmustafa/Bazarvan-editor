@@ -135,7 +135,7 @@ test('competitor UI exposes separate AI and programmatic extraction with automat
   assert.match(sidebar, /setCompetitorPlainTextFromExtraction\(index, content\)/);
   assert.match(sidebar, /textIndex === index \? extractedText : text/);
   assert.match(sidebar, /const text = plainText \|\| extractedText/);
-  assert.match(translations, /وضع النص الكامل في خانة «محتوى نصي عادي»/);
+  assert.match(translations, /وضع النص الكامل في خانة «النص المعتمد للتحليل والكتابة»/);
   assert.match(promptRegistry, /نسخة واحدة من خانة المحتوى النصي العادي لكل منافس/);
   assert.doesNotMatch(sidebar, /competitorGeminiProgress/);
   assert.match(browserClient, /action:\s*'programmatic_extract'/);

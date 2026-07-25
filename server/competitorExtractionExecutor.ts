@@ -13,6 +13,14 @@ import {
   type ExternalAnalysisJson,
 } from './externalAnalysisQueue';
 
+/**
+ * Architecture boundary:
+ * - This queued executor is Firecrawl-only for both retrieval and main-content extraction.
+ * - It must persist the full text in article_competitors.content_text, then synchronize that
+ *   text into the article competitor attachment consumed by analysis and content writing.
+ * - Do not add Gemini/OpenAI fallback here. AI extraction is a separate explicit editor path,
+ *   while the programmatic button owns its own optional AI fallback.
+ */
 type CompetitorRow = {
   id: string;
   article_id: string;

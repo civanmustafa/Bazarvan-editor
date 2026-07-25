@@ -123,6 +123,8 @@ const toEngineeringPromptInput = (
       ? metadata.competitors
       : {};
 
+  // Use the same persisted canonical competitor texts as content writing. Extraction
+  // preview metadata must never be attached as an additional competitor copy.
   return {
     title: toTrimmedString(article.title),
     plainText: toTrimmedString(article.plain_text),
