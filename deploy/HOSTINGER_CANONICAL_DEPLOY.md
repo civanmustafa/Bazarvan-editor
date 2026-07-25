@@ -112,7 +112,7 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - `pm2 startOrReload ... --update-env`: يشغّل العمليات الجديدة أو يعيد تحميل القائمة الحالية مع متغيرات البيئة المحدثة.
 - `pm2 save`: يحفظ قائمة العمليات لكي تعود بعد إعادة تشغيل الخادم.
 - `/healthz`: يتحقق من أن خادم الويب يعمل.
-- `/readyz`: يتحقق أيضًا من بناء الإنتاج، ومخططات Supabase المطلوبة، ومفتاح التشفير.
+- `/readyz`: يتحقق أيضًا من بناء الإنتاج، ومخططات Supabase المطلوبة، ومفتاح التشفير. يعرض حالة عامل المنافسين داخل `checks.externalAnalysisWorker` ويضع `degraded: true` عند تعطل طابوره، لكنه لا يعيد HTTP 503 بسبب تأخر مهمة وحده حتى لا تدخل مراقبة هوستينجر وPM2 في حلقة إعادة تشغيل تقطع المهام.
 
 ## ملاحظات وتشخيص المشكلات
 
@@ -121,6 +121,7 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - إذا لم تكن حالة النشر واضحة، اعرض جميع العمليات بالأمر `pm2 status`.
 - لفحص خادم الويب استخدم `pm2 describe bazarvan-editor`.
 - لفحص عامل البحث وسحب المنافسين استخدم `pm2 describe bazarvan-ai-worker`، ولسجله استخدم `pm2 logs bazarvan-ai-worker --lines 100`.
+- إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات البحث والسحب متدهورة ويجب فحص `bazarvan-ai-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
 - لفحص عامل كتابة المقالة استخدم `pm2 describe bazarvan-content-writing-worker`.
 - لفحص عامل زحف صفحات العملاء استخدم `pm2 describe bazarvan-client-page-crawler`.
 - عند فشل `/readyz` لا تعتبر النشر مكتملًا؛ راجع الترحيلات ومتغيرات البيئة وسجل العملية في PM2.

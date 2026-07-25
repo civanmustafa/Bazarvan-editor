@@ -259,6 +259,8 @@ test('automatic competitor discovery is durable, idempotent, and uses the centra
   assert.match(executor, /analyzeAndSelectCompetitors\(/);
   assert.match(executor, /registerExternalAnalysisJobExecutor\('competitor_discovery'/);
   assert.match(worker, /import '\.\/competitorDiscoveryExecutor'/);
+  assert.match(worker, /reason=\$\{retry\.code\}/);
+  assert.match(worker, /retry\.message\.replace\(\/\\s\+\/g/);
   assert.match(panel, /getPersistedCompetitorDiscovery/);
   assert.match(panel, /ensureArticleCompetitorDiscovery/);
   assert.match(card, /بحث المنافسين/);

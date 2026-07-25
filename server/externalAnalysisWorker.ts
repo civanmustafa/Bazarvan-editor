@@ -282,8 +282,9 @@ const executeClaimedJob = async (
       if (scheduled.status === 'cancelled') {
         console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
       } else {
+        const retryLogMessage = retry.message.replace(/\s+/g, ' ').slice(0, 500);
         console.warn(
-          `[external-analysis-worker] Job ${job.id} will retry at ${scheduled.next_attempt_at}.`,
+          `[external-analysis-worker] Job ${job.id} (${job.job_type}) will retry at ${scheduled.next_attempt_at}; reason=${retry.code}: ${retryLogMessage}`,
         );
       }
     } catch (scheduleError) {

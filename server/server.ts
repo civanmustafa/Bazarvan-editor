@@ -71,8 +71,8 @@ const readyzHandler: RequestHandler = async (_req, res) => {
   const ok = staticBuild
     && contentWriting.ok
     && adminAiProviderSecrets.ok
-    && clientCenter.ok
-    && externalAnalysisWorker.ok;
+    && clientCenter.ok;
+  const degraded = ok && !externalAnalysisWorker.ok;
   if (!ok && contentWriting.detail) {
     console.error(`[readyz] ${contentWriting.detail}`);
   }
@@ -82,11 +82,12 @@ const readyzHandler: RequestHandler = async (_req, res) => {
   if (!ok && clientCenter.detail) {
     console.error(`[readyz] ${clientCenter.detail}`);
   }
-  if (!ok && externalAnalysisWorker.detail) {
-    console.error(`[readyz] ${externalAnalysisWorker.detail}`);
+  if (!externalAnalysisWorker.ok && externalAnalysisWorker.detail) {
+    console.warn(`[readyz:degraded] ${externalAnalysisWorker.detail}`);
   }
   res.status(ok ? 200 : 503).json({
     ok,
+    degraded,
     service: 'bazarvan-editor',
     checks: {
       staticBuild,
