@@ -2034,7 +2034,7 @@ ${readyCommandCompetitorBlocks}`;
                     const isUrlLoading = isLoading && extraction.source === 'url';
                     const isProgrammaticLoading = isLoading && extraction.source === 'programmatic';
                     const isFirecrawlLoading = isLoading && extraction.source === 'firecrawl';
-                    const firecrawlPendingHint = t.locale === 'ar'
+                    const firecrawlPendingHint = isArabicLocale
                         ? 'هذا الرابط ينتظر عامل Firecrawl؛ لم يبدأ استخراج Gemini.'
                         : 'This URL is waiting for the Firecrawl worker; Gemini extraction has not started.';
                     return (

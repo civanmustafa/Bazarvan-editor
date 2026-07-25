@@ -334,6 +334,7 @@ test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini'
   assert.match(sidebar, /extraction\.source === 'firecrawl'/);
   assert.match(sidebar, /source: 'firecrawl'/);
   assert.match(sidebar, /isFirecrawlLoading/);
+  assert.match(sidebar, /const firecrawlPendingHint = isArabicLocale/);
   assert.match(sidebar, /لم يبدأ استخراج Gemini/);
 });
 
