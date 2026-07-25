@@ -288,6 +288,10 @@ test('competitor discovery stop control requests durable cancellation and keeps 
   assert.match(browserClient, /action: 'cancel_discovery'/);
   assert.match(panel, /handleCancelDiscovery/);
   assert.match(panel, /discoveryCancelRequested/);
+  assert.match(panel, /discoveryQueueStalled/);
+  assert.match(panel, /COMPETITOR_DISCOVERY_QUEUE_STALL_MS/);
+  assert.match(panel, /بانتظار عامل بحث المنافسين/);
+  assert.match(panel, /عامل bazarvan-ai-worker لم يستلمها خلال 90 ثانية/);
   assert.match(panel, /إيقاف البحث عن المنافسين/);
   assert.match(panel, /جاري إيقاف البحث عن المنافسين بأمان/);
   assert.match(controlsMigration, /status = case when job\.status = 'running' then 'running' else 'cancelled' end/);

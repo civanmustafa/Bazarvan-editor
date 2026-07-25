@@ -15,6 +15,7 @@ import {
 import type { GoalContext } from '../types';
 import type { CompetitorPreviewTarget } from './CompetitorPreviewModal';
 import {
+  COMPETITOR_DISCOVERY_QUEUE_STALL_MS,
   COMPETITOR_EXTRACTION_MAX_ATTEMPTS,
   COMPETITOR_EXTRACTION_QUEUE_STALL_MS,
   MAX_ARTICLE_COMPETITORS,
@@ -217,6 +218,12 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const discoveryErrorMessage = typeof state.discoveryJob?.result?.errorMessage === 'string'
     ? state.discoveryJob.result.errorMessage
     : state.discoveryJob?.last_error || '';
+  const activeDiscoveryJobAgeMs = activeDiscoveryJob?.created_at
+    ? Math.max(0, Date.now() - Date.parse(activeDiscoveryJob.created_at))
+    : 0;
+  const discoveryQueueStalled = activeDiscoveryJob?.status === 'queued'
+    && activeDiscoveryJobAgeMs >= COMPETITOR_DISCOVERY_QUEUE_STALL_MS;
+  const discoveryWaitingForWorker = activeDiscoveryJob?.status === 'queued';
   const selectedResults = useMemo(() => (
     searchResults.filter(result => selectedUrls.has(result.canonicalUrl))
   ), [searchResults, selectedUrls]);
@@ -670,14 +677,33 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
       </div>
 
       {activeDiscoveryJob && (
-        <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2 text-[11px] font-bold text-blue-800 dark:border-blue-900/40 dark:bg-blue-500/10 dark:text-blue-300">
-          <LoaderCircle size={14} className="mt-0.5 shrink-0 animate-spin" />
+        <div className={`flex items-start gap-2 rounded-md border px-2.5 py-2 text-[11px] font-bold ${
+          discoveryQueueStalled
+            ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-500/10 dark:text-amber-300'
+            : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-500/10 dark:text-blue-300'
+        }`}>
+          {discoveryQueueStalled
+            ? <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            : <LoaderCircle size={14} className="mt-0.5 shrink-0 animate-spin" />}
           <span className="min-w-0 flex-1">
             {discoveryCancelRequested
               ? (isArabic ? 'جاري إيقاف البحث عن المنافسين بأمان.' : 'Stopping competitor discovery safely.')
+              : discoveryQueueStalled
+                ? (isArabic
+                  ? 'تم حفظ مهمة بحث المنافسين، لكن عامل bazarvan-ai-worker لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل العامل في هوستينجر، ثم أعد المحاولة.'
+                  : 'The competitor search job was saved, but bazarvan-ai-worker did not claim it within 90 seconds. Stop it, start the worker on Hostinger, then retry.')
+              : discoveryWaitingForWorker
+                ? (isArabic
+                  ? 'بانتظار عامل بحث المنافسين؛ لم يبدأ البحث الخارجي بعد.'
+                  : 'Waiting for the competitor discovery worker; external search has not started yet.')
               : activeDiscoveryJob.status === 'retry_scheduled'
                 ? (isArabic ? 'تعذر البحث مؤقتًا، وستعاد محاولة المهمة نفسها تلقائيًا.' : 'Search is temporarily unavailable; the same task will retry automatically.')
                 : (isArabic ? 'جاري البحث عن المنافسين وترتيبهم في الخلفية.' : 'Searching and ranking competitors in the background.')}
+            {discoveryErrorMessage && (
+              <span className="mt-1 block break-words text-red-700 dark:text-red-300">
+                {discoveryErrorMessage}
+              </span>
+            )}
           </span>
           <button
             type="button"
@@ -685,7 +711,11 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
             disabled={discoveryCancelRequested}
             title={isArabic ? 'إيقاف البحث عن المنافسين' : 'Stop competitor discovery'}
             aria-label={isArabic ? 'إيقاف البحث عن المنافسين' : 'Stop competitor discovery'}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md border border-blue-200 text-blue-700 hover:bg-blue-100 disabled:cursor-wait disabled:opacity-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-500/10"
+            className={`flex size-6 shrink-0 items-center justify-center rounded-md border disabled:cursor-wait disabled:opacity-50 ${
+              discoveryQueueStalled
+                ? 'border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-500/10'
+                : 'border-blue-200 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-500/10'
+            }`}
           >
             {discoveryCancelRequested
               ? <LoaderCircle size={12} className="animate-spin" />

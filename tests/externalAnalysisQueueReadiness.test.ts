@@ -23,10 +23,12 @@ const createProbeClient = (
     assert.equal(table, 'ai_external_analysis_jobs');
     return {
       select: (columns: string) => {
+        assert.match(columns, /job_type/);
         assert.match(columns, /lease_expires_at/);
         return {
-          eq: (column: string, value: string) => {
-            assert.deepEqual([column, value], ['job_type', 'competitor_extraction']);
+          in: (jobTypeColumn: string, jobTypes: string[]) => {
+            assert.equal(jobTypeColumn, 'job_type');
+            assert.deepEqual(jobTypes, ['competitor_discovery', 'competitor_extraction']);
             return {
               in: (statusColumn: string, statuses: string[]) => {
                 assert.equal(statusColumn, 'status');
@@ -51,6 +53,7 @@ test('readiness reports a competitor extraction job that no worker claimed', asy
   const now = Date.parse('2026-07-25T12:00:00.000Z');
   const result = await readiness.checkExternalAnalysisQueueReadiness({
     client: createProbeClient([{
+      job_type: 'competitor_extraction',
       status: 'queued',
       created_at: '2026-07-25T11:58:00.000Z',
       lease_expires_at: null,
@@ -65,6 +68,27 @@ test('readiness reports a competitor extraction job that no worker claimed', asy
   assert.equal(result.code, 'external_analysis_worker_unavailable');
   assert.equal(result.checks.queueTable, true);
   assert.equal(result.checks.noStalledCompetitorJobs, false);
+});
+
+test('readiness also reports a competitor discovery job that no worker claimed', async () => {
+  const readiness = await importReadiness();
+  readiness.__resetExternalAnalysisQueueReadinessForTests();
+  const now = Date.parse('2026-07-25T12:00:00.000Z');
+  const result = await readiness.checkExternalAnalysisQueueReadiness({
+    client: createProbeClient([{
+      job_type: 'competitor_discovery',
+      status: 'queued',
+      created_at: '2026-07-25T11:58:00.000Z',
+      lease_expires_at: null,
+    }]),
+    now,
+    force: true,
+    firecrawlConfigured: true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.stalledQueuedCount, 1);
+  assert.equal(result.code, 'external_analysis_worker_unavailable');
 });
 
 test('a healthy running lease prevents a queued backlog from being labeled as a dead worker', async () => {

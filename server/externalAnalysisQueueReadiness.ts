@@ -1,7 +1,10 @@
-import { COMPETITOR_EXTRACTION_QUEUE_STALL_MS } from '../constants/competitors.ts';
+import { COMPETITOR_QUEUE_STALL_MS } from '../constants/competitors.ts';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 
+const WORKER_COMPETITOR_JOB_TYPES = ['competitor_discovery', 'competitor_extraction'];
+
 type QueueJobRow = {
+  job_type?: string | null;
   status?: string | null;
   created_at?: string | null;
   lease_expires_at?: string | null;
@@ -18,7 +21,7 @@ type ProbeResult = {
 export type ExternalAnalysisQueueReadinessClient = {
   from: (table: string) => {
     select: (columns: string) => {
-      eq: (column: string, value: string) => {
+      in: (column: string, values: string[]) => {
         in: (column: string, values: string[]) => {
           order: (column: string, options: { ascending: boolean }) => {
             limit: (count: number) => PromiseLike<ProbeResult>;
@@ -106,8 +109,8 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
     const result = await withTimeout(
       client
         .from('ai_external_analysis_jobs')
-        .select('status,created_at,lease_expires_at')
-        .eq('job_type', 'competitor_extraction')
+        .select('job_type,status,created_at,lease_expires_at')
+        .in('job_type', WORKER_COMPETITOR_JOB_TYPES)
         .in('status', ['queued', 'running'])
         .order('created_at', { ascending: true })
         .limit(50),
@@ -132,12 +135,12 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
     stalledQueuedCount = hasHealthyRunningJob
       ? 0
       : queuedRows.filter(row => {
-          const createdAt = timestamp(row.created_at);
-          return createdAt > 0 && now - createdAt >= COMPETITOR_EXTRACTION_QUEUE_STALL_MS;
-        }).length;
+        const createdAt = timestamp(row.created_at);
+        return createdAt > 0 && now - createdAt >= COMPETITOR_QUEUE_STALL_MS;
+      }).length;
     checks.noStalledCompetitorJobs = stalledQueuedCount === 0 && expiredRunningCount === 0;
     if (!checks.noStalledCompetitorJobs) {
-      detail = `competitor extraction queue stalled: queued=${stalledQueuedCount}, expired=${expiredRunningCount}`;
+      detail = `competitor worker queue stalled: queued=${stalledQueuedCount}, expired=${expiredRunningCount}`;
     }
   } catch (error) {
     checks.queueTable = false;
@@ -152,7 +155,7 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
   const result: ExternalAnalysisQueueReadinessResult = {
     ok,
     checkedAt: new Date(now).toISOString(),
-    stallAfterSeconds: Math.round(COMPETITOR_EXTRACTION_QUEUE_STALL_MS / 1_000),
+    stallAfterSeconds: Math.round(COMPETITOR_QUEUE_STALL_MS / 1_000),
     checks,
     queuedCount,
     runningCount,
