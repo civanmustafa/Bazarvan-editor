@@ -13,7 +13,10 @@ import {
 } from './aiExecutionEngine';
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
-import { resolveOpenAiApiKeys } from './adminAiProviderSecrets';
+import {
+  resolveOpenAiApiKeys,
+  type AiCredentialSource,
+} from './adminAiProviderSecrets';
 import { readExternalGeminiSettings } from './externalAnalysisSettings';
 import {
   getAvailableAiProviderFallbacks,
@@ -32,7 +35,7 @@ type OpenAiAttemptDetail = {
   reason: string;
   attempt: number;
   model: string;
-  credentialSource: 'admin' | 'hostinger';
+  credentialSource: AiCredentialSource;
 };
 
 export type OpenAiConversationMessage = {
@@ -207,7 +210,7 @@ const getAttemptFailure = (
   key: string,
   model: string,
   attempt: number,
-  credentialSource: 'admin' | 'hostinger',
+  credentialSource: AiCredentialSource,
   error: unknown,
 ): OpenAiAttemptDetail => {
   const aborted = error instanceof Error && error.name === 'AbortError';
@@ -342,7 +345,7 @@ export const executeOpenAiRequest = async (
     if (options.signal?.aborted) {
       return finalize({ status: 499, body: { error: 'OpenAI request was cancelled.', code: 'AI_REQUEST_CANCELLED' } });
     }
-    const capabilities = await readAiProviderCapabilities();
+    const capabilities = await readAiProviderCapabilities(telemetry.actorUserId);
     const capability = capabilities.providers.openai;
     selectedModel = capability.model || DEFAULT_OPENAI_MODEL;
     if (!capability.enabled) {
@@ -383,7 +386,7 @@ export const executeOpenAiRequest = async (
       }));
     }
 
-    const credentials = await resolveOpenAiApiKeys();
+    const credentials = await resolveOpenAiApiKeys(telemetry.actorUserId);
     const keyCandidates = credentials.tiers.flatMap(tier => (
       randomizeKeyOrder(tier.keys).map(key => ({ key, credentialSource: tier.source }))
     ));

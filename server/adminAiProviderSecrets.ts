@@ -8,10 +8,15 @@ import {
   ADMIN_AI_SECRET_PROVIDERS,
   type AdminAiSecretProvider,
 } from '../constants/adminAiProviderSecrets.ts';
+import {
+  readUserAiProviderSecretsOverview,
+  resolveUserAiProviderKeys,
+  type UserAiSecretProvider,
+} from './userAiProviderSecrets.ts';
 
 export { ADMIN_AI_SECRET_PROVIDERS } from '../constants/adminAiProviderSecrets.ts';
 export type { AdminAiSecretProvider } from '../constants/adminAiProviderSecrets.ts';
-export type AiCredentialSource = 'admin' | 'hostinger';
+export type AiCredentialSource = 'user' | 'admin' | 'hostinger';
 
 export type ResolvedAiCredentialTier = {
   source: AiCredentialSource;
@@ -294,17 +299,24 @@ const buildResolvedCredentialSet = (
   adminKey: string | null,
   adminEnabled: boolean,
   fallbackKeys: string[],
+  userKeys: string[] = [],
 ): ResolvedAiCredentialSet => {
-  const normalizedFallbackKeys = Array.from(new Set(
-    fallbackKeys.map(key => key.trim()).filter(Boolean),
-  ));
+  const normalizedUserKeys = Array.from(new Set(userKeys.map(key => key.trim()).filter(Boolean)));
   const normalizedAdminKey = adminEnabled && adminKey ? adminKey.trim() : '';
-  const hostingerKeys = normalizedAdminKey
-    ? normalizedFallbackKeys.filter(key => key !== normalizedAdminKey)
-    : normalizedFallbackKeys;
+  const keysBeforeHostinger = new Set([
+    ...normalizedUserKeys,
+    ...(normalizedAdminKey ? [normalizedAdminKey] : []),
+  ]);
+  const normalizedFallbackKeys = Array.from(new Set(
+    fallbackKeys.map(key => key.trim()).filter(key => key && !keysBeforeHostinger.has(key)),
+  ));
+  const adminKeys = normalizedAdminKey && !normalizedUserKeys.includes(normalizedAdminKey)
+    ? [normalizedAdminKey]
+    : [];
   const tiers: ResolvedAiCredentialTier[] = [
-    ...(normalizedAdminKey ? [{ source: 'admin' as const, keys: [normalizedAdminKey] }] : []),
-    ...(hostingerKeys.length > 0 ? [{ source: 'hostinger' as const, keys: hostingerKeys }] : []),
+    ...(normalizedUserKeys.length > 0 ? [{ source: 'user' as const, keys: normalizedUserKeys }] : []),
+    ...(adminKeys.length > 0 ? [{ source: 'admin' as const, keys: adminKeys }] : []),
+    ...(normalizedFallbackKeys.length > 0 ? [{ source: 'hostinger' as const, keys: normalizedFallbackKeys }] : []),
   ];
   return {
     keys: tiers.flatMap(tier => tier.keys),
@@ -316,53 +328,84 @@ const buildResolvedCredentialSet = (
 const resolveCredentialSet = async (
   provider: AdminAiSecretProvider,
   fallbackKeys: string[],
+  userId?: string,
+  userProvider?: UserAiSecretProvider,
 ): Promise<ResolvedAiCredentialSet> => {
-  const row = await readSecretRow(provider);
+  const [row, userKeys] = await Promise.all([
+    readSecretRow(provider),
+    userProvider ? resolveUserAiProviderKeys(userId, userProvider) : Promise.resolve([]),
+  ]);
   const adminKey = row?.enabled ? normalizeApiKey(decryptSecret(row)) : null;
-  return buildResolvedCredentialSet(adminKey, row?.enabled === true, fallbackKeys);
+  return buildResolvedCredentialSet(adminKey, row?.enabled === true, fallbackKeys, userKeys);
 };
 
-export const resolveOpenAiApiKeys = async (): Promise<ResolvedAiCredentialSet> => (
-  resolveCredentialSet('openai_latest', getEnvironmentOpenAiApiKeys())
+export const resolveOpenAiApiKeys = async (userId?: string): Promise<ResolvedAiCredentialSet> => (
+  resolveCredentialSet('openai_latest', getEnvironmentOpenAiApiKeys(), userId, 'openai_paid')
 );
 
 export const resolveGeminiApiKeys = async (
   provider: 'gemini' | 'geminiPaid',
+  userId?: string,
 ): Promise<ResolvedAiCredentialSet> => {
   const fallbackKeys = getEnvironmentGeminiApiKeys(provider);
-  if (provider === 'gemini') return buildResolvedCredentialSet(null, false, fallbackKeys);
-  return resolveCredentialSet('gemini_latest', fallbackKeys);
+  if (provider === 'gemini') {
+    const userKeys = await resolveUserAiProviderKeys(userId, 'gemini_free');
+    return buildResolvedCredentialSet(null, false, fallbackKeys, userKeys);
+  }
+  return resolveCredentialSet('gemini_latest', fallbackKeys, userId, 'gemini_paid');
 };
 
-export const readAiProviderCredentialAvailability = async (): Promise<{
+export const readAiProviderCredentialAvailability = async (userId?: string): Promise<{
+  gemini: AiProviderCredentialAvailability;
   openai: AiProviderCredentialAvailability;
   geminiPaid: AiProviderCredentialAvailability;
 }> => {
-  const overview = await readAdminAiProviderSecretsOverview();
-  const openAiFallbackKeys = getEnvironmentOpenAiApiKeys();
-  const geminiFallbackKeys = getEnvironmentGeminiApiKeys('geminiPaid');
-  const toAvailability = (
-    status: AdminAiProviderSecretStatus,
-    fallbackKeys: string[],
-  ): AiProviderCredentialAvailability => {
-    if (!status.enabled) {
-      return {
-        configured: fallbackKeys.length > 0,
-        keyCount: fallbackKeys.length,
-        source: 'hostinger',
-      };
-    }
-    const configured = status.configured && overview.encryptionConfigured;
+  const [adminOverview, userOverview] = await Promise.all([
+    readAdminAiProviderSecretsOverview(),
+    userId ? readUserAiProviderSecretsOverview(userId) : Promise.resolve(null),
+  ]);
+  const toAvailability = (options: {
+    userProvider: UserAiSecretProvider;
+    adminProvider?: AdminAiSecretProvider;
+    fallbackKeys: string[];
+  }): AiProviderCredentialAvailability => {
+    const userStatus = userOverview?.providers[options.userProvider];
+    const userKeyCount = userOverview?.encryptionConfigured
+      && userStatus?.enabled
+      && userStatus.configured
+      ? userStatus.keyCount
+      : 0;
+    const adminStatus = options.adminProvider
+      ? adminOverview.providers[options.adminProvider]
+      : null;
+    const adminKeyCount = adminOverview.encryptionConfigured
+      && adminStatus?.enabled
+      && adminStatus.configured
+      ? 1
+      : 0;
+    const fallbackKeyCount = options.fallbackKeys.length;
     return {
-      configured,
-      keyCount: configured ? 1 : 0,
-      source: 'admin',
+      configured: userKeyCount + adminKeyCount + fallbackKeyCount > 0,
+      keyCount: userKeyCount + adminKeyCount + fallbackKeyCount,
+      source: userKeyCount > 0 ? 'user' : adminKeyCount > 0 ? 'admin' : 'hostinger',
     };
   };
 
   return {
-    openai: toAvailability(overview.providers.openai_latest, openAiFallbackKeys),
-    geminiPaid: toAvailability(overview.providers.gemini_latest, geminiFallbackKeys),
+    gemini: toAvailability({
+      userProvider: 'gemini_free',
+      fallbackKeys: getEnvironmentGeminiApiKeys('gemini'),
+    }),
+    openai: toAvailability({
+      userProvider: 'openai_paid',
+      adminProvider: 'openai_latest',
+      fallbackKeys: getEnvironmentOpenAiApiKeys(),
+    }),
+    geminiPaid: toAvailability({
+      userProvider: 'gemini_paid',
+      adminProvider: 'gemini_latest',
+      fallbackKeys: getEnvironmentGeminiApiKeys('geminiPaid'),
+    }),
   };
 };
 

@@ -397,6 +397,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     const preference = await resolveContentWritingResumePreference(
       provider,
       toText(body.model) || (provider === session.provider ? session.model : undefined),
+      session.created_by,
     );
     const messages = await getContentWritingMessages(session.id);
     const inputHash = createContentWritingSessionInputHash(

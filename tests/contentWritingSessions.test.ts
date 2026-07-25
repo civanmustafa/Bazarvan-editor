@@ -241,7 +241,7 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(service, /ContentWritingSessionSummary/);
   assert.doesNotMatch(service.match(/export const listContentWritingSessions[\s\S]*?export const cancelContentWritingSession/)?.[0] || '', /\.select\('\*'\)/);
   assert.match(geminiEngine, /systemInstruction: normalizedSystemInstruction/);
-  assert.match(openAiEngine, /readAiProviderCapabilities\(\)/);
+  assert.match(openAiEngine, /readAiProviderCapabilities\(telemetry\.actorUserId\)/);
   assert.match(openAiEngine, /recordAiExecutionTelemetry/);
   assert.match(openAiEngine, /prompt_cache_key/);
   assert.match(openAiEngine, /conversationMode === 'independent'/);

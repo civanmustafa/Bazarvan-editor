@@ -127,3 +127,18 @@ test('administrator credentials stay ahead of Hostinger keys and duplicate keys 
   assert.deepEqual(disabled.tiers, [{ source: 'hostinger', keys: ['hostinger-1'] }]);
   assert.equal(disabled.source, 'hostinger');
 });
+
+test('personal credentials stay ahead of administrator and Hostinger keys', () => {
+  const resolved = __adminAiProviderSecretsTestUtils.buildResolvedCredentialSet(
+    'admin-key',
+    true,
+    ['hostinger-key', 'personal-key', 'admin-key'],
+    ['personal-key', 'personal-key-2'],
+  );
+  assert.deepEqual(resolved.tiers, [
+    { source: 'user', keys: ['personal-key', 'personal-key-2'] },
+    { source: 'admin', keys: ['admin-key'] },
+    { source: 'hostinger', keys: ['hostinger-key'] },
+  ]);
+  assert.equal(resolved.source, 'user');
+});

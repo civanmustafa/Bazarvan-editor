@@ -68,7 +68,7 @@ test('administrator AI secret readiness checks schema and encryption independent
     });
     assert.equal(isAiSettingsEncryptionConfigured(), true);
     assert.equal(ready.ok, true);
-    assert.deepEqual(ready.checks, { schema: true, encryptionKey: true });
+    assert.deepEqual(ready.checks, { schema: true, userSchema: true, encryptionKey: true });
   });
 
   const previous = process.env.AI_SETTINGS_ENCRYPTION_KEY;

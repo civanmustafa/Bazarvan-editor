@@ -12,6 +12,7 @@ import geminiHandler, { geminiProgressHandler } from '../api/gemini';
 import n8nArticlesHandler from '../api/n8nArticles';
 import promptRegistryHandler from '../api/promptRegistry';
 import systemSettingsHandler from '../api/systemSettings';
+import userAiProviderSecretsHandler from '../api/userAiProviderSecrets';
 
 export type ApiHandler = (req: any, res?: any) => Promise<Response | void>;
 export type ApiRouteMethod = 'ALL' | 'POST';
@@ -38,6 +39,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'external-analysis', method: 'ALL', path: '/api/external-analysis', handler: externalAnalysisHandler },
   { id: 'assigned-article-automation', method: 'ALL', path: '/api/articles/assigned-automation', handler: assignedArticleAutomationHandler },
   { id: 'system-settings', method: 'ALL', path: '/api/system/settings', handler: systemSettingsHandler },
+  { id: 'user-ai-provider-secrets', method: 'ALL', path: '/api/user/ai-provider-secrets', handler: userAiProviderSecretsHandler },
   { id: 'admin-ai-provider-secrets', method: 'ALL', path: '/api/admin/ai-provider-secrets', handler: adminAiProviderSecretsHandler },
   { id: 'admin-users', method: 'ALL', path: '/api/admin/users', handler: adminUsersHandler },
 ] as const;

@@ -24,6 +24,7 @@ import ClientGoalSettings from './ClientGoalSettings';
 import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import ContentWritingPromptSettings from './ContentWritingPromptSettings';
 import AdminAiProviderSecretsSettings from './AdminAiProviderSecretsSettings';
+import UserAiProviderSecretsSettings from './UserAiProviderSecretsSettings';
 import AdminPromptRegistrySettings from './AdminPromptRegistrySettings';
 import ClientCenterSettings from './ClientCenterSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
@@ -322,8 +323,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   };
 
   const renderPersonalPreferences = () => (
-    <SettingsSection title="تفضيلات المستخدم">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+    <div className="space-y-6">
+      <SettingsSection title="تفضيلات المستخدم">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div>
           <div className="mb-2 text-sm font-bold text-gray-600 dark:text-gray-300">{t.highlightStyle}</div>
           <div className="grid grid-cols-2 gap-2">
@@ -408,8 +410,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </div>
         </div>
 
-      </div>
-    </SettingsSection>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="مفاتيح الذكاء الاصطناعي الخاصة بحسابي">
+        <UserAiProviderSecretsSettings />
+      </SettingsSection>
+    </div>
   );
 
   const renderAiSettings = () => (
@@ -418,8 +424,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="rounded-md border-r-4 border-[#d4af37] bg-[#d4af37]/10 px-3 py-3 text-xs font-semibold leading-6 text-gray-700 dark:text-gray-200 md:col-span-2">
             <div className="font-black">الرجوع التلقائي للمفاتيح والمزودات مفعّل في جميع أوامر الذكاء الاصطناعي</div>
-            <div>OpenAI: المفتاح الإداري ← مفاتيح OpenAI في Hostinger ← Gemini Pro ← Gemini المجاني.</div>
-            <div>Gemini Pro: المفتاح الإداري ← مفاتيح Gemini المدفوعة في Hostinger ← Gemini المجاني.</div>
+            <div>OpenAI: مفاتيح المستخدم ← المفتاح الإداري ← مفاتيح OpenAI في Hostinger ← Gemini Pro ← Gemini المجاني.</div>
+            <div>Gemini Pro: مفاتيح المستخدم ← المفتاح الإداري ← مفاتيح Gemini المدفوعة في Hostinger ← Gemini المجاني.</div>
+            <div>Gemini المجاني: مفاتيح المستخدم ← مفاتيح Gemini المجانية في Hostinger.</div>
             <div className="text-gray-500 dark:text-gray-400">يحدث الرجوع عند فشل المفتاح أو الحصة أو الفوترة أو 429 أو انتهاء المهلة أو خطأ المزود، ولا يحدث عند إلغاء المستخدم أو نقص المدخلات أو حظر السلامة.</div>
           </div>
           <ToggleField

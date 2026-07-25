@@ -266,8 +266,9 @@ const getAllowedGeminiModels = (provider: ContentWritingProvider): string[] => u
 const selectProviderModel = async (
   provider: ContentWritingProvider,
   requestedModel?: string,
+  userId?: string,
 ): Promise<string> => {
-  const capabilities = await readAiProviderCapabilities();
+  const capabilities = await readAiProviderCapabilities(userId);
   const capability = capabilities.providers[provider];
   if (!capability.enabled) {
     throw new ContentWritingEngineError({
@@ -314,13 +315,14 @@ export const createContentWritingSessionInputHash = (
 export const resolveContentWritingResumePreference = async (
   provider: ContentWritingProvider,
   requestedModel?: string,
+  userId?: string,
 ): Promise<{
   provider: ContentWritingProvider;
   model: string;
   allowModelFallback: boolean;
 }> => {
   const [model, settings] = await Promise.all([
-    selectProviderModel(provider, requestedModel),
+    selectProviderModel(provider, requestedModel, userId),
     getContentWritingSettings(),
   ]);
   return {
@@ -537,7 +539,7 @@ export const queueContentWritingSession = async (input: {
 }): Promise<QueuedContentWritingSession> => {
   const [conversation, model] = await Promise.all([
     prepareContentWritingConversation(input.articleId),
-    selectProviderModel(input.provider, input.model),
+    selectProviderModel(input.provider, input.model, input.createdBy),
   ]);
 
   const inputHash = createContentWritingSessionInputHash(

@@ -36,8 +36,8 @@ const handleAiCapabilitiesRequest = async (req: any): Promise<ApiResult> => {
     return { status: 405, body: { error: 'Method not allowed. Use GET.' } };
   }
 
-  await authenticateApiRequest(req);
-  const capabilities = await readAiProviderCapabilities();
+  const principal = await authenticateApiRequest(req);
+  const capabilities = await readAiProviderCapabilities(principal.userId);
   return {
     status: 200,
     body: { ok: true, capabilities },

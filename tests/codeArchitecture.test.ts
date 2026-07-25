@@ -43,6 +43,7 @@ test('development and production use one API route registry', async () => {
     '/api/external-analysis',
     '/api/articles/assigned-automation',
     '/api/system/settings',
+    '/api/user/ai-provider-secrets',
     '/api/admin/ai-provider-secrets',
     '/api/admin/users',
   ];
@@ -109,6 +110,7 @@ test('API handlers share the same HTTP request and response adapters', async () 
   const handlerFiles = [
     'api/adminUsers.ts',
     'api/adminAiProviderSecrets.ts',
+    'api/userAiProviderSecrets.ts',
     'api/aiCapabilities.ts',
     'api/promptRegistry.ts',
     'api/articlesSave.ts',
@@ -274,10 +276,10 @@ test('AI provider availability is owned by one capability service across server 
   assert.match(capabilityService, /settings\.geminiProEnabled !== false/);
   assert.match(capabilityApi, /authenticateApiRequest\(req\)/);
   assert.match(capabilityApi, /'Cache-Control': 'no-store'/);
-  assert.match(openAiExecutionEngine, /readAiProviderCapabilities\(\)/);
+  assert.match(openAiExecutionEngine, /readAiProviderCapabilities\(telemetry\.actorUserId\)/);
   assert.match(openAiExecutionEngine, /AI_PROVIDER_DISABLED/);
   assert.match(openAiExecutionEngine, /AI_PROVIDER_NOT_CONFIGURED/);
-  assert.match(aiExecutionEngine, /readAiProviderCapabilities\(\)/);
+  assert.match(aiExecutionEngine, /readAiProviderCapabilities\(userId\)/);
   assert.match(aiExecutionEngine, /AI_PROVIDER_DISABLED/);
   assert.match(aiExecutionEngine, /AI_PROVIDER_NOT_CONFIGURED/);
   assert.match(userContext, /AI_PROVIDER_CAPABILITIES_REFRESH_MS/);
@@ -381,11 +383,47 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
   assert.match(secretSettings, /autoComplete="new-password"/);
   assert.match(secretSettings, /saveAndEnableAdminAiProviderSecret/);
   assert.match(settingsPage, /\{isAdmin && \(\s*<SettingsSection title="مفاتيح المزودات الإدارية المشفّرة">/);
-  assert.match(capabilityService, /readAiProviderCredentialAvailability\(\)/);
-  assert.match(openAiExecutionEngine, /resolveOpenAiApiKeys\(\)/);
-  assert.match(aiExecutionEngine, /resolveGeminiApiKeys\(selectedProvider\)/);
+  assert.match(capabilityService, /readAiProviderCredentialAvailability\(userId\)/);
+  assert.match(openAiExecutionEngine, /resolveOpenAiApiKeys\(telemetry\.actorUserId\)/);
+  assert.match(aiExecutionEngine, /resolveGeminiApiKeys\(selectedProvider,\s*userId\)/);
   assert.doesNotMatch(openAiExecutionEngine, /process\.env\.OPENAI_API_KEYS?/);
   assert.doesNotMatch(aiExecutionEngine, /process\.env\.GEMINI_(?:PAID|PRO)_API_KEYS?/);
+});
+
+test('each user can manage encrypted personal AI key groups without exposing raw keys', async () => {
+  const [
+    migration,
+    secretService,
+    secretApi,
+    secretClient,
+    secretSettings,
+    settingsPage,
+    adminSecretService,
+  ] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260726000000_user_ai_provider_secrets.sql'),
+    readWorkspaceFile('server/userAiProviderSecrets.ts'),
+    readWorkspaceFile('api/userAiProviderSecrets.ts'),
+    readWorkspaceFile('utils/userAiProviderSecrets.ts'),
+    readWorkspaceFile('components/UserAiProviderSecretsSettings.tsx'),
+    readWorkspaceFile('components/SettingsPage.tsx'),
+    readWorkspaceFile('server/adminAiProviderSecrets.ts'),
+  ]);
+
+  assert.match(migration, /alter table public\.user_ai_provider_secrets enable row level security/);
+  assert.match(migration, /revoke all on table public\.user_ai_provider_secrets from authenticated/);
+  assert.match(migration, /primary key \(user_id, provider\)/);
+  assert.match(secretService, /aes-256-gcm/);
+  assert.match(secretService, /getAdditionalAuthenticatedData\(userId, provider\)/);
+  assert.match(secretApi, /principal\.userId/);
+  assert.doesNotMatch(secretApi, /body\.userId|body\.user_id/);
+  assert.doesNotMatch(secretApi, /ciphertext|authentication_tag|initialization_vector/);
+  assert.doesNotMatch(secretClient, /localStorage|sessionStorage/);
+  assert.match(secretSettings, /gemini_free/);
+  assert.match(secretSettings, /gemini_paid/);
+  assert.match(secretSettings, /openai_paid/);
+  assert.match(settingsPage, /<UserAiProviderSecretsSettings\s*\/>/);
+  assert.match(adminSecretService, /source: 'user'/);
+  assert.match(adminSecretService, /resolveUserAiProviderKeys/);
 });
 
 test('content writing has one template registry and one context builder', async () => {

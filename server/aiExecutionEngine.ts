@@ -643,6 +643,7 @@ const buildGeminiFailureMessage = (
 type GeminiInternalExecutionContext = {
   capabilities?: AiProviderCapabilities;
   credentials?: ResolvedAiCredentialSet;
+  userId?: string;
 };
 
 const executeGeminiCredentialTierInternal = async (
@@ -672,7 +673,9 @@ const executeGeminiCredentialTierInternal = async (
     const selectedProvider = selectGeminiProvider(requestedProvider);
     const capabilityFailure = getProviderCapabilityFailure(
       selectedProvider,
-      internal.capabilities || await readAiProviderCapabilities(),
+      internal.capabilities || await readAiProviderCapabilities(
+        internal.userId || normalizeAiExecutionTelemetryContext(options.telemetry).actorUserId,
+      ),
     );
     if (capabilityFailure) {
       const failureBody = capabilityFailure.body as Record<string, unknown>;
@@ -693,7 +696,10 @@ const executeGeminiCredentialTierInternal = async (
       allowModelFallback === true,
       fallbackModels,
     );
-    const credentials = internal.credentials || await resolveGeminiApiKeys(selectedProvider);
+    const credentials = internal.credentials || await resolveGeminiApiKeys(
+      selectedProvider,
+      internal.userId || normalizeAiExecutionTelemetryContext(options.telemetry).actorUserId,
+    );
     const GEMINI_API_KEYS = credentials.keys;
 
     if (GEMINI_API_KEYS.length === 0) {
@@ -1152,17 +1158,19 @@ const executeGeminiProviderRequestInternal = async (
   requestBody: any,
   options: GeminiExecutionOptions,
   capabilities: AiProviderCapabilities,
+  userId?: string,
 ): Promise<ApiResult> => {
   const provider = normalizeGeminiProvider(requestBody?.provider);
   const capabilityFailure = getProviderCapabilityFailure(provider, capabilities);
   if (capabilityFailure) return capabilityFailure;
 
-  const credentials = await resolveGeminiApiKeys(provider);
+  const credentials = await resolveGeminiApiKeys(provider, userId);
   const credentialTiers = credentials.tiers.filter(tier => tier.keys.length > 0);
   if (credentialTiers.length === 0) {
     return executeGeminiCredentialTierInternal(requestBody, options, {
       capabilities,
       credentials,
+      userId,
     });
   }
 
@@ -1170,6 +1178,7 @@ const executeGeminiProviderRequestInternal = async (
   for (const tier of credentialTiers) {
     const tierResult = await executeGeminiCredentialTierInternal(requestBody, options, {
       capabilities,
+      userId,
       credentials: {
         keys: tier.keys,
         source: tier.source,
@@ -1203,12 +1212,14 @@ const executeGeminiRequestInternal = async (
   requestBody: any,
   options: GeminiExecutionOptions,
 ): Promise<ApiResult> => {
-  const capabilities = await readAiProviderCapabilities();
+  const userId = normalizeAiExecutionTelemetryContext(options.telemetry).actorUserId;
+  const capabilities = await readAiProviderCapabilities(userId);
   const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
   const primaryResult = await executeGeminiProviderRequestInternal(
     requestBody,
     options,
     capabilities,
+    userId,
   );
   if (
     requestedProvider !== 'geminiPaid'
@@ -1225,7 +1236,7 @@ const executeGeminiRequestInternal = async (
     provider: 'gemini',
     model: freeSettings.model,
     requestedModel: selectGeminiModel(requestBody?.model, 'geminiPaid'),
-    keyCount: (await resolveGeminiApiKeys('gemini')).keys.length,
+    keyCount: (await resolveGeminiApiKeys('gemini', userId)).keys.length,
     attemptedKeyCount: 0,
     currentKeyIndex: 1,
     completed: false,
@@ -1241,7 +1252,7 @@ const executeGeminiRequestInternal = async (
     model: freeSettings.model,
     allowModelFallback: freeSettings.allowModelFallback,
     fallbackModels: freeSettings.allowModelFallback ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
-  }, options, capabilities);
+  }, options, capabilities, userId);
   return mergeProviderFallbackResult({
     previous: primaryResult,
     next: fallbackResult,
@@ -1302,7 +1313,7 @@ export const aiExecutionEngine = {
   executeGemini: executeGeminiRequest,
 };
 
-const getInitialJobProgress = async (requestBody: any) => {
+const getInitialJobProgress = async (requestBody: any, userId?: string) => {
   const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
   const selectedModel = getSafeGeminiModel(
     selectGeminiModel(requestBody?.model, requestedProvider),
@@ -1321,7 +1332,7 @@ const getInitialJobProgress = async (requestBody: any) => {
     model: selectedModel,
     modelCount: modelOrder.length,
     modelOrder,
-    keyCount: (await resolveGeminiApiKeys(selectedProvider)).keys.length,
+    keyCount: (await resolveGeminiApiKeys(selectedProvider, userId)).keys.length,
   };
 };
 
@@ -1428,10 +1439,10 @@ const handleGeminiRequest = async (req: any): Promise<ApiResult> => {
       const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
       const capabilityFailure = getProviderCapabilityFailure(
         requestedProvider,
-        await readAiProviderCapabilities(),
+        await readAiProviderCapabilities(principal.userId),
       );
       if (capabilityFailure) return capabilityFailure;
-      const initial = await getInitialJobProgress(requestBody);
+      const initial = await getInitialJobProgress(requestBody, principal.userId);
       const job = await createAiJob({
         publicId: progressId,
         userId: principal.userId,

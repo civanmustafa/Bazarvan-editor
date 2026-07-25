@@ -1,6 +1,7 @@
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 import { isAiSettingsEncryptionConfigured } from './adminAiProviderSecrets.ts';
 import { ADMIN_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/adminAiProviderSecrets.ts';
+import { USER_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/userAiProviderSecrets.ts';
 
 type ReadinessProbeResult = {
   error?: {
@@ -21,8 +22,10 @@ export type AdminAiProviderSecretsReadinessResult = {
   ok: boolean;
   checkedAt: string;
   requiredMigration: string;
+  requiredMigrations: string[];
   checks: {
     schema: boolean;
+    userSchema: boolean;
     encryptionKey: boolean;
   };
   code?: 'admin_ai_provider_secrets_unavailable';
@@ -47,6 +50,7 @@ export const checkAdminAiProviderSecretsReadiness = async (options: {
 
   const checks = {
     schema: false,
+    userSchema: false,
     encryptionKey: isAiSettingsEncryptionConfigured(),
   };
   const failures: string[] = [];
@@ -62,6 +66,15 @@ export const checkAdminAiProviderSecretsReadiness = async (options: {
     } else {
       checks.schema = true;
     }
+    const { error: userSchemaError } = await client
+      .from('user_ai_provider_secrets')
+      .select('user_id,provider,enabled,key_count,key_suffixes,encryption_version')
+      .limit(1);
+    if (userSchemaError) {
+      failures.push(`userSchema: ${userSchemaError.code || 'unknown'}: ${userSchemaError.message || 'Unknown Supabase error.'}`);
+    } else {
+      checks.userSchema = true;
+    }
   } catch (error) {
     failures.push(`schema: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -69,11 +82,15 @@ export const checkAdminAiProviderSecretsReadiness = async (options: {
     failures.push('encryptionKey: AI_SETTINGS_ENCRYPTION_KEY is missing or invalid.');
   }
 
-  const ok = checks.schema && checks.encryptionKey;
+  const ok = checks.schema && checks.userSchema && checks.encryptionKey;
   const result: AdminAiProviderSecretsReadinessResult = {
     ok,
     checkedAt: new Date().toISOString(),
-    requiredMigration: ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
+    requiredMigration: USER_AI_PROVIDER_SECRETS_MIGRATION,
+    requiredMigrations: [
+      ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
+      USER_AI_PROVIDER_SECRETS_MIGRATION,
+    ],
     checks,
     ...(!ok ? {
       code: 'admin_ai_provider_secrets_unavailable' as const,
@@ -93,6 +110,7 @@ export const toPublicAdminAiProviderSecretsReadiness = (
   ok: result.ok,
   checkedAt: result.checkedAt,
   requiredMigration: result.requiredMigration,
+  requiredMigrations: result.requiredMigrations,
   checks: result.checks,
   ...(result.code ? { code: result.code } : {}),
 });

@@ -11,7 +11,6 @@ import {
 import { normalizeSystemSettingsMap } from '../constants/settingsRegistry';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import {
-  getEnvironmentGeminiApiKeys,
   readAiProviderCredentialAvailability,
 } from './adminAiProviderSecrets';
 
@@ -19,7 +18,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
 
-export const readAiProviderCapabilities = async (): Promise<AiProviderCapabilities> => {
+export const readAiProviderCapabilities = async (userId?: string): Promise<AiProviderCapabilities> => {
   const defaults = getDefaultAiProviderCapabilities();
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('app_settings')
@@ -30,14 +29,13 @@ export const readAiProviderCapabilities = async (): Promise<AiProviderCapabiliti
   if (error && error.code !== '42P01') throw error;
   const storedAi = isRecord(data?.value) ? data.value : {};
   const settings = normalizeSystemSettingsMap({ ai: storedAi }).ai;
-  const geminiConfigured = getEnvironmentGeminiApiKeys('gemini').length > 0;
-  const credentialAvailability = await readAiProviderCredentialAvailability();
+  const credentialAvailability = await readAiProviderCredentialAvailability(userId);
 
   return normalizeAiProviderCapabilities({
     providers: {
       gemini: {
         enabled: settings.geminiFreeEnabled !== false,
-        configured: geminiConfigured,
+        configured: credentialAvailability.gemini.configured,
         model: String(settings.defaultGeminiModel || process.env.GEMINI_MODEL || GEMINI_ANALYSIS_MODEL),
       },
       geminiPaid: {
