@@ -332,6 +332,9 @@ test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini'
   assert.doesNotMatch(panel, /current \|\| 1/);
   assert.match(sidebar, /row\.extractionProvider\.startsWith\('firecrawl'\)/);
   assert.match(sidebar, /extraction\.source === 'firecrawl'/);
+  assert.match(sidebar, /source: 'firecrawl'/);
+  assert.match(sidebar, /isFirecrawlLoading/);
+  assert.match(sidebar, /لم يبدأ استخراج Gemini/);
 });
 
 test('competitor sidebar keeps one plain-text content surface', async () => {

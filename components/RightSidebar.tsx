@@ -946,7 +946,7 @@ const RightSidebar: React.FC = () => {
             }
             return {
                 status: 'loading',
-                source: 'url',
+                source: 'firecrawl',
                 content: null,
                 error: '',
             } satisfies CompetitorExtractionState;
@@ -2033,6 +2033,10 @@ ${readyCommandCompetitorBlocks}`;
                     const isLoading = extraction.status === 'loading';
                     const isUrlLoading = isLoading && extraction.source === 'url';
                     const isProgrammaticLoading = isLoading && extraction.source === 'programmatic';
+                    const isFirecrawlLoading = isLoading && extraction.source === 'firecrawl';
+                    const firecrawlPendingHint = t.locale === 'ar'
+                        ? 'هذا الرابط ينتظر عامل Firecrawl؛ لم يبدأ استخراج Gemini.'
+                        : 'This URL is waiting for the Firecrawl worker; Gemini extraction has not started.';
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
@@ -2055,7 +2059,7 @@ ${readyCommandCompetitorBlocks}`;
                                                 type="button"
                                                 onClick={() => handleExtractCompetitorUrl(index)}
                                                 disabled={isLoading}
-                                                title={tRs.extractCompetitorWithAiHint}
+                                                title={isFirecrawlLoading ? firecrawlPendingHint : tRs.extractCompetitorWithAiHint}
                                                 className="flex min-w-0 items-center justify-center gap-1 rounded-md bg-[#d4af37] px-2 py-2 text-[11px] font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
                                             >
                                                 {isUrlLoading ? <Wand2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
@@ -2067,7 +2071,9 @@ ${readyCommandCompetitorBlocks}`;
                                                     ? handleCancelProgrammaticExtraction(index)
                                                     : handleExtractCompetitorProgrammatically(index)}
                                                 disabled={isLoading && !isProgrammaticLoading}
-                                                title={isProgrammaticLoading
+                                                title={isFirecrawlLoading
+                                                    ? firecrawlPendingHint
+                                                    : isProgrammaticLoading
                                                     ? tRs.stopProgrammaticExtraction
                                                     : tRs.extractCompetitorProgrammaticallyHint}
                                                 className={`flex min-w-0 items-center justify-center gap-1 rounded-md border px-2 py-2 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -2084,6 +2090,11 @@ ${readyCommandCompetitorBlocks}`;
                                                 </span>
                                             </button>
                                         </div>
+                                        {isFirecrawlLoading && (
+                                            <div className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5 text-[10px] font-bold leading-4 text-blue-700 dark:border-blue-900/40 dark:bg-blue-500/10 dark:text-blue-300">
+                                                {firecrawlPendingHint}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div>
