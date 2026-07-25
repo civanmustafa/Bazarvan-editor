@@ -299,9 +299,14 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(panel, /provider,/);
   assert.match(panel, /model: selectedModel/);
   assert.match(panel, /سيُستأنف تنفيذ المراحل المتبقية باستخدام/);
+  assert.match(panel, /recoverContentWritingDraft/);
+  assert.match(panel, /المسودة الجزئية المستردة/);
+  assert.match(panel, /snapshot\.sessionId && !snapshot\.isPartial/);
   assert.match(modal, /aria-modal="true"/);
   assert.match(modal, /onConfirm/);
   assert.match(modal, /prepareContentWritingResultForEditor/);
+  assert.match(modal, /استيراد المسودة الجزئية/);
+  assert.match(modal, /!isPartial && !qualityReport\.passed/);
   assert.match(modal, /qualityReport\.score/);
   assert.match(modal, /qualityOverrideReason/);
   assert.match(editorContext, /const applyGeneratedArticleContent = useCallback/);

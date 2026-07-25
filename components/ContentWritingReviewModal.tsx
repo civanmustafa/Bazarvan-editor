@@ -22,6 +22,7 @@ type ContentWritingReviewModalProps = {
   currentHtml: string;
   currentText: string;
   resultMarkdown: string;
+  isPartial?: boolean;
   qualityReport: ContentWritingQualityReport;
   allowQualityOverride: boolean;
   isApplying: boolean;
@@ -47,6 +48,7 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
   currentHtml,
   currentText,
   resultMarkdown,
+  isPartial = false,
   qualityReport,
   allowQualityOverride,
   isApplying,
@@ -71,7 +73,7 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
   );
   const currentWordCount = countWords(currentText);
   const generatedWordCount = countWords(generatedText);
-  const qualityNeedsOverride = !qualityReport.passed;
+  const qualityNeedsOverride = !isPartial && !qualityReport.passed;
   const canOverrideQuality = allowQualityOverride && qualityOverrideReason.trim().length >= 8;
 
   useEffect(() => {
@@ -140,7 +142,9 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
           <FileText size={19} className="mt-0.5 shrink-0 text-[#b8922e]" />
           <div className="min-w-0 flex-1">
             <h2 id="content-writing-review-title" className="truncate text-base font-black text-gray-900 dark:text-gray-100">
-              {isArabic ? 'مراجعة المقالة قبل الإدراج' : 'Review article before insertion'}
+              {isPartial
+                ? (isArabic ? 'مراجعة المسودة الجزئية قبل الاستيراد' : 'Review partial draft before import')
+                : (isArabic ? 'مراجعة المقالة قبل الإدراج' : 'Review article before insertion')}
             </h2>
             <div className="mt-1 truncate text-xs font-bold text-gray-500 dark:text-gray-400">{articleTitle}</div>
           </div>
@@ -176,13 +180,26 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
           </div>
         )}
 
+        {isPartial && (
+          <div className="flex shrink-0 items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs font-bold leading-5 text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <span>
+              {isArabic
+                ? 'هذه مسودة مستردة من مراحل الكتابة المكتملة قبل التوقف، وقد تكون ناقصة. يعرض فحص الجودة أدناه معلومات إرشادية فقط، ويمكن استيراد المسودة دون اعتبار الجلسة مكتملة.'
+                : 'This draft was recovered from prose steps completed before the stop and may be incomplete. The quality check below is informational, and importing it will not mark the session complete.'}
+            </span>
+          </div>
+        )}
+
         <section className={`shrink-0 border-b px-4 py-3 ${qualityReport.passed
           ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-900/15'
           : 'border-red-200 bg-red-50 dark:border-red-900/60 dark:bg-red-900/15'}`}>
           <div className="flex flex-wrap items-center gap-3">
             <ShieldCheck size={18} className={qualityReport.passed ? 'text-emerald-600' : 'text-red-600'} />
             <div className="font-black text-gray-900 dark:text-gray-100">
-              {isArabic ? 'بوابة الجودة' : 'Quality gate'}: {qualityReport.score}/100
+              {isPartial
+                ? (isArabic ? 'فحص جودة إرشادي' : 'Informational quality check')
+                : (isArabic ? 'بوابة الجودة' : 'Quality gate')}: {qualityReport.score}/100
             </div>
             <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
               {isArabic ? 'المطلوب' : 'Required'}: {qualityReport.minimumScore}/100
@@ -262,9 +279,13 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
 
         <footer className="flex shrink-0 flex-col gap-2 border-t border-gray-200 bg-white px-4 py-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] sm:flex-row sm:items-center sm:justify-between">
           <div className="text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
-            {isArabic
-              ? 'سيُحفظ النص الحالي أولًا، ثم يُستبدل جسم المقالة ويُحفظ في Supabase.'
-              : 'The current text is saved first, then the article body is replaced and saved to Supabase.'}
+            {isPartial
+              ? (isArabic
+                ? 'سيُحفظ النص الحالي أولًا، ثم تستبدله المسودة الجزئية وتُحفظ. ستبقى جلسة الكتابة قابلة للاستئناف.'
+                : 'The current text is saved first, then replaced by the partial draft and saved. The writing session remains resumable.')
+              : (isArabic
+                ? 'سيُحفظ النص الحالي أولًا، ثم يُستبدل جسم المقالة ويُحفظ في Supabase.'
+                : 'The current text is saved first, then the article body is replaced and saved to Supabase.')}
           </div>
           <div className="flex shrink-0 items-center justify-end gap-2">
             <button
@@ -284,6 +305,8 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
               {isApplying ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
               {isApplying
                 ? (isArabic ? 'جار الإدراج والحفظ...' : 'Inserting and saving...')
+                : isPartial
+                  ? (isArabic ? 'استيراد المسودة الجزئية' : 'Import partial draft')
                 : qualityNeedsOverride
                   ? (isArabic ? 'تجاوز الجودة واعتماد المقالة' : 'Override quality and approve')
                   : (isArabic ? 'اعتماد واستبدال نص المقالة' : 'Approve and replace article')}

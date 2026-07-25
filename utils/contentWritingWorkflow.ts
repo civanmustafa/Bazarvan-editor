@@ -555,6 +555,103 @@ export const assembleContentWritingDraft = (options: {
   ]);
 };
 
+export type RecoverableContentWritingStep = {
+  stepKey: string;
+  stepType: ContentWritingWorkflowStepType;
+  ordinal: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  outputText?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type RecoveredContentWritingDraft = {
+  markdown: string;
+  source: 'session_result' | 'review_step' | 'assembled_steps';
+  includedStepCount: number;
+};
+
+/**
+ * Rebuilds the safest article draft available from persisted workflow steps.
+ *
+ * Analysis-only outputs (competitor index, outline, and coverage audit) are
+ * intentionally excluded. A completed final/quality review is already a full
+ * article and takes precedence; otherwise the same deterministic assembler used
+ * by the worker combines only completed prose stages. Targeted section repairs
+ * replace their original section instead of being appended as duplicate text.
+ */
+export const recoverContentWritingDraft = (options: {
+  articleTitle: string;
+  language: string;
+  sessionResultText?: string | null;
+  steps: readonly RecoverableContentWritingStep[];
+}): RecoveredContentWritingDraft | null => {
+  const sessionResult = String(options.sessionResultText || '').trim();
+  if (sessionResult) {
+    return {
+      markdown: normalizeFinalContentWritingResult(sessionResult),
+      source: 'session_result',
+      includedStepCount: options.steps.filter(step => step.status === 'completed').length,
+    };
+  }
+
+  const completedWithOutput = options.steps
+    .filter(step => step.status === 'completed' && Boolean(String(step.outputText || '').trim()))
+    .sort((left, right) => left.ordinal - right.ordinal);
+  const reviewedDraft = [...completedWithOutput]
+    .reverse()
+    .find(step => step.stepType === 'quality_repair' || step.stepType === 'final_review');
+  if (reviewedDraft?.outputText) {
+    return {
+      markdown: normalizeFinalContentWritingResult(reviewedDraft.outputText),
+      source: 'review_step',
+      includedStepCount: 1,
+    };
+  }
+
+  const outlineStep = completedWithOutput.find(step => step.stepType === 'outline');
+  const outline = normalizeContentWritingOutline(outlineStep?.metadata?.outline)
+    || normalizeContentWritingOutline(outlineStep?.outputText);
+  if (!outline) return null;
+
+  const outputs: Record<string, string> = {};
+  let includedStepCount = 0;
+  completedWithOutput.forEach(step => {
+    const output = String(step.outputText || '').trim();
+    if (!output) return;
+    if (
+      step.stepType === 'section'
+      || step.stepType === 'introduction'
+      || step.stepType === 'faq'
+      || step.stepType === 'conclusion'
+    ) {
+      outputs[step.stepKey] = output;
+      includedStepCount += 1;
+      return;
+    }
+    if (step.stepType === 'section_repair') {
+      const repairedSectionKey = toText(
+        step.metadata?.repairedSectionKey || step.metadata?.sectionKey,
+        120,
+      );
+      if (repairedSectionKey && /^section-\d{2}$/.test(repairedSectionKey)) {
+        outputs[repairedSectionKey] = output;
+        includedStepCount += 1;
+      }
+    }
+  });
+
+  if (includedStepCount === 0) return null;
+  const markdown = assembleContentWritingDraft({
+    articleTitle: options.articleTitle,
+    language: options.language,
+    outline,
+    outputs,
+  }).trim();
+  return markdown
+    ? { markdown, source: 'assembled_steps', includedStepCount }
+    : null;
+};
+
 export const normalizeFinalContentWritingResult = (value: string): string => stripCodeFence(value);
 
 const normalizeComparableHeading = (value: string): string => value

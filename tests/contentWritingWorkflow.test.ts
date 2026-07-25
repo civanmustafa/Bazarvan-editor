@@ -151,6 +151,104 @@ test('structured writing assembles one markdown draft without duplicate section 
   );
 });
 
+test('stopped writing recovers only completed prose stages as an importable partial draft', async () => {
+  const { recoverContentWritingDraft } = await importWorkflow();
+  const recovered = recoverContentWritingDraft({
+    articleTitle: 'A useful guide',
+    language: 'en',
+    steps: [
+      {
+        stepKey: 'competitor-index',
+        stepType: 'competitor_index',
+        ordinal: 1,
+        status: 'completed',
+        outputText: 'RAW COMPETITOR ANALYSIS',
+      },
+      {
+        stepKey: 'outline',
+        stepType: 'outline',
+        ordinal: 2,
+        status: 'completed',
+        outputText: outlineJson,
+        metadata: { outline: JSON.parse(outlineJson) },
+      },
+      {
+        stepKey: 'section-01',
+        stepType: 'section',
+        ordinal: 3,
+        status: 'completed',
+        outputText: 'Original first section.',
+      },
+      {
+        stepKey: 'section-02',
+        stepType: 'section',
+        ordinal: 4,
+        status: 'completed',
+        outputText: 'Completed second section.',
+      },
+      {
+        stepKey: 'section-03',
+        stepType: 'section',
+        ordinal: 5,
+        status: 'failed',
+        outputText: 'INVALID FAILED OUTPUT',
+      },
+      {
+        stepKey: 'section-repair-01',
+        stepType: 'section_repair',
+        ordinal: 12,
+        status: 'completed',
+        outputText: 'Repaired first section.',
+        metadata: { repairedSectionKey: 'section-01' },
+      },
+    ],
+  });
+
+  assert.ok(recovered);
+  assert.equal(recovered.source, 'assembled_steps');
+  assert.equal(recovered.includedStepCount, 3);
+  assert.match(recovered.markdown, /^# A useful guide/);
+  assert.match(recovered.markdown, /## First topic[\s\S]*Repaired first section\./);
+  assert.match(recovered.markdown, /## Second topic[\s\S]*Completed second section\./);
+  assert.doesNotMatch(recovered.markdown, /Original first section|RAW COMPETITOR|INVALID FAILED/);
+  assert.doesNotMatch(recovered.markdown, /## Third topic|## Fourth topic/);
+});
+
+test('stopped writing prefers the latest completed full-draft review over assembled stages', async () => {
+  const { recoverContentWritingDraft } = await importWorkflow();
+  const recovered = recoverContentWritingDraft({
+    articleTitle: 'Saved title',
+    language: 'en',
+    steps: [
+      {
+        stepKey: 'outline',
+        stepType: 'outline',
+        ordinal: 2,
+        status: 'completed',
+        outputText: outlineJson,
+      },
+      {
+        stepKey: 'final-review',
+        stepType: 'final_review',
+        ordinal: 11,
+        status: 'completed',
+        outputText: '# Saved title\n\nFinal reviewed body.',
+      },
+      {
+        stepKey: 'quality-repair-01',
+        stepType: 'quality_repair',
+        ordinal: 12,
+        status: 'failed',
+        outputText: '# Saved title\n\nInvalid failed repair.',
+      },
+    ],
+  });
+
+  assert.ok(recovered);
+  assert.equal(recovered.source, 'review_step');
+  assert.equal(recovered.markdown, '# Saved title\n\nFinal reviewed body.');
+});
+
 test('final review prompts receive the complete assembled draft', async () => {
   const { buildContentWritingFinalReviewPrompt } = await importWorkflow();
   const marker = `START-${'complete body '.repeat(1_000)}-END`;

@@ -42,6 +42,7 @@ import {
   normalizeContentWritingQualityReport,
   type ContentWritingQualityReport,
 } from '../utils/contentWritingQuality';
+import { recoverContentWritingDraft } from '../utils/contentWritingWorkflow';
 import { normalizeContentWritingQualityConfiguration } from '../constants/contentWritingQuality';
 import type { ExternalAiBridgeProvider } from '../types';
 import ContentWritingExternalBridgePanel from './ContentWritingExternalBridgePanel';
@@ -83,6 +84,7 @@ type ReviewSnapshot = {
   sessionId?: string;
   articleId: string;
   markdown: string;
+  isPartial: boolean;
   currentHtml: string;
   currentText: string;
   qualityReport: ContentWritingQualityReport;
@@ -347,6 +349,20 @@ const ContentWritingPanel: React.FC = () => {
   const hasActiveSession = sessions.some(isContentWritingSessionActive);
   const activeDetail = selectedDetail?.session.id === selectedSessionId ? selectedDetail : null;
   const selectedSession = activeDetail?.session || sessions.find(session => session.id === selectedSessionId) || null;
+  const workflowSteps = useMemo(() => activeDetail?.steps || [], [activeDetail?.steps]);
+  const recoverableDraft = useMemo(() => {
+    if (!selectedSession || !activeDetail) return null;
+    return recoverContentWritingDraft({
+      articleTitle,
+      language: articleLanguage,
+      sessionResultText: activeDetail.session.resultText,
+      steps: workflowSteps,
+    });
+  }, [activeDetail, articleLanguage, articleTitle, selectedSession, workflowSteps]);
+  const isRecoverableDraftPartial = Boolean(
+    recoverableDraft
+    && (selectedSession?.status !== 'completed' || !activeDetail?.session.resultText),
+  );
   const selectedModel = modelByProvider[provider];
   const modelPreferenceHint = getModelPreferenceHint(provider, isArabic);
   const resumeSelectionChanged = Boolean(
@@ -617,6 +633,7 @@ const ContentWritingPanel: React.FC = () => {
       sessionId: recorded.session.id,
       articleId,
       markdown: response,
+      isPartial: false,
       currentHtml: editor.getHTML(),
       currentText: editor.getText(),
       qualityReport: getReviewQualityReport(recorded.session, response, conversation.qualityConfiguration),
@@ -631,6 +648,9 @@ const ContentWritingPanel: React.FC = () => {
       const cancelled = await cancelContentWritingSession(selectedSession.id);
       mergeSession(cancelled);
       setSelectedDetail(current => current ? { ...current, session: { ...current.session, ...cancelled } } : current);
+      // Reload the persisted steps once cancellation is acknowledged so every
+      // completed prose stage is immediately available to the recovery draft.
+      await loadDetail(cancelled.id, { silent: true });
     } catch (error) {
       setErrorPresentation(getErrorPresentation(error, isArabic));
     } finally {
@@ -703,7 +723,7 @@ const ContentWritingPanel: React.FC = () => {
   };
 
   const copyResult = async () => {
-    const result = activeDetail?.session.resultText;
+    const result = recoverableDraft?.markdown;
     if (!result) return;
     try {
       await copyMarkdownToClipboard(result);
@@ -716,7 +736,7 @@ const ContentWritingPanel: React.FC = () => {
 
   const openReview = () => {
     const session = activeDetail?.session;
-    const markdown = session?.resultText;
+    const markdown = recoverableDraft?.markdown;
     if (!session || !markdown || !editor || editor.isDestroyed || session.articleId !== articleId) {
       setApplicationNotice({
         tone: 'error',
@@ -731,6 +751,7 @@ const ContentWritingPanel: React.FC = () => {
       sessionId: session.id,
       articleId: session.articleId,
       markdown,
+      isPartial: isRecoverableDraftPartial,
       currentHtml: editor.getHTML(),
       currentText: editor.getText(),
       qualityReport: getReviewQualityReport(session, markdown),
@@ -744,7 +765,7 @@ const ContentWritingPanel: React.FC = () => {
   const confirmApplication = async (qualityOverrideReason?: string) => {
     const snapshot = reviewSnapshot;
     if (!snapshot || isApplying) return;
-    if (!snapshot.qualityReport.passed && currentUserRole !== 'admin') {
+    if (!snapshot.isPartial && !snapshot.qualityReport.passed && currentUserRole !== 'admin') {
       setApplicationNotice({
         tone: 'error',
         message: isArabic
@@ -782,7 +803,7 @@ const ContentWritingPanel: React.FC = () => {
       }
 
       try {
-        if (snapshot.sessionId) {
+        if (snapshot.sessionId && !snapshot.isPartial) {
           const recorded = await recordContentWritingSessionApplication(
             snapshot.sessionId,
             qualityOverrideReason,
@@ -794,9 +815,13 @@ const ContentWritingPanel: React.FC = () => {
         }
         setApplicationNotice({
           tone: 'success',
-          message: isArabic
-            ? `تم اعتماد المقالة وحفظها بنجاح (${applied.nextWordCount.toLocaleString('ar')} كلمة).`
-            : `The article was approved and saved (${applied.nextWordCount.toLocaleString('en')} words).`,
+          message: snapshot.isPartial
+            ? (isArabic
+              ? `تم استيراد المسودة الجزئية وحفظها (${applied.nextWordCount.toLocaleString('ar')} كلمة). بقيت جلسة الكتابة غير مكتملة ويمكن استئنافها لاحقًا.`
+              : `The partial draft was imported and saved (${applied.nextWordCount.toLocaleString('en')} words). The writing session remains incomplete and can be resumed later.`)
+            : (isArabic
+              ? `تم اعتماد المقالة وحفظها بنجاح (${applied.nextWordCount.toLocaleString('ar')} كلمة).`
+              : `The article was approved and saved (${applied.nextWordCount.toLocaleString('en')} words).`),
         });
       } catch (recordError) {
         console.error('The generated article was saved but its application audit could not be recorded:', recordError);
@@ -836,7 +861,6 @@ const ContentWritingPanel: React.FC = () => {
   const workflowStepKey = typeof progress.workflowStepKey === 'string'
     ? progress.workflowStepKey.trim()
     : '';
-  const workflowSteps = useMemo(() => activeDetail?.steps || [], [activeDetail?.steps]);
   const completedWorkflowSteps = workflowSteps.filter(step => step.status === 'completed').length;
   const currentWorkflowStep = workflowSteps.find(step => step.stepKey === workflowStepKey);
   const automaticWorkflowStepKey = (
@@ -1250,6 +1274,13 @@ const ContentWritingPanel: React.FC = () => {
                     </span>
                   )}
                 </div>
+                {!recoverableDraft && (
+                  <div className="mt-2 rounded bg-white/80 p-2 text-[10px] font-semibold leading-5 text-gray-600 dark:bg-black/20 dark:text-gray-200">
+                    {isArabic
+                      ? 'لم تكتمل بعد أي مرحلة تكتب نص المقالة، لذلك لا توجد مسودة قابلة للاستيراد. تبقى نتائج التحليل أو المخطط متاحة داخل المراحل أعلاه.'
+                      : 'No article-writing prose step completed yet, so there is no draft to import. Analysis or outline results remain available in the steps above.'}
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => void resumeSession()}
@@ -1265,10 +1296,14 @@ const ContentWritingPanel: React.FC = () => {
               </div>
             )}
 
-            {selectedSession.status === 'completed' && activeDetail?.session.resultText && (
+            {recoverableDraft && !isContentWritingSessionActive(selectedSession) && (
               <div className="mt-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-gray-700 dark:text-gray-200">{isArabic ? 'المقالة الناتجة' : 'Generated article'}</span>
+                  <span className="text-xs font-bold text-gray-700 dark:text-gray-200">
+                    {isRecoverableDraftPartial
+                      ? (isArabic ? 'المسودة الجزئية المستردة' : 'Recovered partial draft')
+                      : (isArabic ? 'المقالة الناتجة' : 'Generated article')}
+                  </span>
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
@@ -1277,20 +1312,29 @@ const ContentWritingPanel: React.FC = () => {
                       className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-2 text-[11px] font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:opacity-45 dark:text-[#f2d675]"
                     >
                       <Eye size={14} />
-                      {isArabic ? 'مراجعة وإدراج' : 'Review and insert'}
+                      {isRecoverableDraftPartial
+                        ? (isArabic ? 'مراجعة واستيراد المسودة' : 'Review and import draft')
+                        : (isArabic ? 'مراجعة وإدراج' : 'Review and insert')}
                     </button>
                     <button
                       type="button"
                       onClick={() => void copyResult()}
-                      title={isArabic ? 'نسخ المقالة' : 'Copy article'}
-                      aria-label={isArabic ? 'نسخ المقالة' : 'Copy article'}
+                      title={isArabic ? 'نسخ النص المعروض' : 'Copy displayed text'}
+                      aria-label={isArabic ? 'نسخ النص المعروض' : 'Copy displayed text'}
                       className="flex size-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:border-[#d4af37]/50 hover:text-[#8a6f1d] dark:border-[#3C3C3C] dark:text-gray-300"
                     >
                       {copied ? <Check size={15} className="text-emerald-600" /> : <Copy size={15} />}
                     </button>
                   </div>
                 </div>
-                {selectedSession.appliedAt && (
+                {isRecoverableDraftPartial && (
+                  <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[10px] font-bold leading-5 text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200">
+                    {isArabic
+                      ? `جُمعت هذه المسودة من ${recoverableDraft.includedStepCount.toLocaleString('ar')} من مراحل كتابة النص المكتملة فقط. لا تتضمن نتائج التحليل الخام، ولا تُعد الجلسة مكتملة، ويمكن مراجعتها واستيرادها أو استئناف الجلسة لاحقًا.`
+                      : `This draft was assembled from ${recoverableDraft.includedStepCount.toLocaleString('en')} completed prose steps only. It excludes raw analysis, does not mark the session complete, and can be reviewed/imported or resumed later.`}
+                  </div>
+                )}
+                {!isRecoverableDraftPartial && selectedSession.appliedAt && (
                   <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-300">
                     <CheckCircle2 size={13} />
                     <span>
@@ -1300,7 +1344,7 @@ const ContentWritingPanel: React.FC = () => {
                   </div>
                 )}
                 <pre className="max-h-[34rem] overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-white p-3 font-sans text-xs leading-6 text-gray-800 custom-scrollbar dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100" dir="auto">
-                  {activeDetail.session.resultText}
+                  {recoverableDraft.markdown}
                 </pre>
               </div>
             )}
@@ -1374,6 +1418,7 @@ const ContentWritingPanel: React.FC = () => {
           currentHtml={reviewSnapshot.currentHtml}
           currentText={reviewSnapshot.currentText}
           resultMarkdown={reviewSnapshot.markdown}
+          isPartial={reviewSnapshot.isPartial}
           qualityReport={reviewSnapshot.qualityReport}
           allowQualityOverride={currentUserRole === 'admin'}
           isApplying={isApplying}
