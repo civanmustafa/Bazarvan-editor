@@ -341,7 +341,8 @@ test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini'
   assert.match(sidebar, /source: 'firecrawl'/);
   assert.match(sidebar, /isFirecrawlLoading/);
   assert.match(sidebar, /const firecrawlPendingHint = isArabicLocale/);
-  assert.match(sidebar, /لم يبدأ استخراج Gemini/);
+  assert.match(sidebar, /لم يبدأ اتصال Firecrawl بعد/);
+  assert.doesNotMatch(sidebar, /لم يبدأ استخراج Gemini|Gemini extraction has not started/);
 });
 
 test('competitor sidebar keeps one plain-text content surface', async () => {

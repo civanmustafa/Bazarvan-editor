@@ -2035,8 +2035,8 @@ ${readyCommandCompetitorBlocks}`;
                     const isProgrammaticLoading = isLoading && extraction.source === 'programmatic';
                     const isFirecrawlLoading = isLoading && extraction.source === 'firecrawl';
                     const firecrawlPendingHint = isArabicLocale
-                        ? 'هذا الرابط ينتظر عامل Firecrawl؛ لم يبدأ استخراج Gemini.'
-                        : 'This URL is waiting for the Firecrawl worker; Gemini extraction has not started.';
+                        ? 'هذا الرابط ينتظر عامل سحب المنافسين؛ لم يبدأ اتصال Firecrawl بعد.'
+                        : 'This URL is waiting for the competitor extraction worker; the Firecrawl request has not started yet.';
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
