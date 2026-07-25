@@ -462,7 +462,7 @@ test('editor integration keeps native links primary and phase 9 AI review option
   assert.match(panel, /منع للمقالة/);
   assert.match(panel, /إبلاغ/);
   assert.match(panel, /recordInternalLinkSuggestionRun/);
-  assert.match(panel, /قواعد الجودة المطبقة/);
+  assert.doesNotMatch(panel, /قواعد الجودة المطبقة/);
   assert.match(panel, /loadInternalLinkQualityPolicy/);
   assert.match(panel, /useState\(false\)/);
   assert.match(panel, /مراجعة الاقتراحات بالذكاء الاصطناعي/);

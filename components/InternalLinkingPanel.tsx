@@ -278,12 +278,6 @@ const InternalLinkingPanel: React.FC = () => {
     setAiReviewSignature('');
   }, [aiReviewInputSignature]);
 
-  const qualityPolicySourceLabel = qualityPolicy.source === 'client'
-    ? 'سياسة العميل'
-    : qualityPolicy.source === 'global'
-      ? 'السياسة العامة'
-      : 'القيم الافتراضية';
-
   const currentPageOptions = useMemo(() => {
     const seen = new Set<string>();
     return pages.flatMap(page => {
@@ -798,14 +792,6 @@ const InternalLinkingPanel: React.FC = () => {
               <div className="text-[9px] font-bold text-gray-400">صفحة جاهزة</div>
 	          </div>
 
-	          <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-[10px] font-semibold leading-5 text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
-	            <div className="font-black">قواعد الجودة المطبقة: {qualityPolicySourceLabel} — الإصدار {qualityPolicy.policyVersion}</div>
-	            <div>
-	              الحد الأدنى للدرجة {qualityPolicy.values.minimumScore}/100، والميزانية الحالية حتى {suggestionBudget.toLocaleString('ar')} رابط جديد
-	              بحسب طول المقالة والروابط الموجودة، وبحد أقصى {qualityPolicy.values.maxLinksPer1000Words} لكل 1000 كلمة.
-	            </div>
-	            <div>نص Anchor Text من كلمتين إلى خمس كلمات، ولا يعرض المحرك الروابط السطحية أو المكررة أو غير الآمنة.</div>
-	          </div>
             <div className="rounded-lg border border-gray-200 bg-white p-2 text-center dark:border-[#3C3C3C] dark:bg-[#272727]">
               <div className="text-base font-black text-[#d4af37]">{suggestions.length}</div>
               <div className="text-[9px] font-bold text-gray-400">اقتراح صالح</div>
