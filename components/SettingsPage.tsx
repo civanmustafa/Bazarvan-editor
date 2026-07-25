@@ -462,7 +462,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </FieldLabel>
           <FieldLabel
             label="موديل Gemini المجاني الافتراضي"
-            description="يبدأ به طلب Gemini المجاني، ويُستخدم أيضًا عند الوصول إلى Gemini المجاني بالرجوع التلقائي."
+            description="القائمة مقتصرة على أقوى أربعة موديلات مجانية. يبدأ الافتراضي بالأقوى، وتُجرّب جميع المفاتيح عليه قبل الانتقال إلى الموديل التالي عند تفعيل التبديل."
           >
             <SelectInput
               value={normalizeGeminiFreeModel(String(settings.ai.defaultGeminiModel || ''), geminiFreeModelValues)}

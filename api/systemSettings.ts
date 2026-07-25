@@ -83,23 +83,12 @@ const assertAdmin = async (supabase: SupabaseAdmin, req: any): Promise<string> =
   return userData.user.id;
 };
 
-const splitSecretList = (value: string | undefined): string[] => (
-  String(value || '')
-    .split(/[\n,;]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
-);
-
 const uniqueList = (items: string[]): string[] => (
   Array.from(new Set(items.map(item => item.trim()).filter(Boolean)))
 );
 
 const getAllowedGeminiFreeModels = (): string[] => (
-  uniqueList([
-    process.env.GEMINI_MODEL || GEMINI_ANALYSIS_MODEL,
-    ...GEMINI_FREE_MODEL_VALUES,
-    ...splitSecretList(process.env.GEMINI_ALLOWED_MODELS),
-  ])
+  uniqueList([...GEMINI_FREE_MODEL_VALUES])
 );
 
 const hasEnvValue = (...keys: string[]): boolean => keys.some(key => Boolean(process.env[key]?.trim()));

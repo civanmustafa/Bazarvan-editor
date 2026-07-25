@@ -258,7 +258,9 @@ const readArticleInput = async (articleId: string): Promise<{
 
 const getAllowedGeminiModels = (provider: ContentWritingProvider): string[] => uniqueModelIds([
   ...(provider === 'geminiPaid' ? GEMINI_PAID_MODEL_VALUES : GEMINI_FREE_MODEL_VALUES),
-  ...String(process.env.GEMINI_ALLOWED_MODELS || '').split(/[\n,;]+/),
+  ...(provider === 'geminiPaid'
+    ? String(process.env.GEMINI_ALLOWED_MODELS || '').split(/[\n,;]+/)
+    : []),
 ]);
 
 const selectProviderModel = async (

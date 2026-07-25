@@ -89,6 +89,13 @@ const importPromptRegistry = async (): Promise<any> => {
 };
 
 test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
+  assert.deepEqual(GEMINI_FREE_MODEL_VALUES, [
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-2.5-pro',
+    'gemini-3-flash-preview',
+  ]);
+  assert.equal(GEMINI_FREE_MODEL_VALUES.length, 4);
   assert.equal(GEMINI_ANALYSIS_MODEL, MODEL_REGISTRY.gemini.free[0].id);
   assert.deepEqual(
     GEMINI_FREE_MODEL_VALUES,
@@ -96,6 +103,7 @@ test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
   );
   assert.equal(new Set(GEMINI_FREE_MODEL_VALUES).size, GEMINI_FREE_MODEL_VALUES.length);
   assert.equal(normalizeGeminiFreeModelId('not-a-model'), GEMINI_ANALYSIS_MODEL);
+  assert.equal(normalizeGeminiFreeModelId('gemini-2.5-flash'), GEMINI_ANALYSIS_MODEL);
   assert.deepEqual(
     new Set(GEMINI_PAID_MODEL_VALUES),
     new Set(MODEL_REGISTRY.gemini.paid.map(model => model.id)),
@@ -106,6 +114,37 @@ test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
     false,
   );
   assert.equal(normalizeGeminiPaidModelId('not-a-model'), GEMINI_PAID_ANALYSIS_MODEL);
+});
+
+test('Gemini free model upgrade starts existing users on the new strongest model once', async () => {
+  const registry = await importSettingsRegistry();
+  const upgradedSystem = registry.normalizeSystemSettingsMap({
+    ai: {
+      settingsRegistryVersion: registry.SETTINGS_REGISTRY_VERSION - 1,
+      defaultGeminiModel: 'gemini-3.5-flash',
+    },
+  });
+  assert.equal(upgradedSystem.ai.defaultGeminiModel, 'gemini-3.6-flash');
+
+  const currentSystem = registry.normalizeSystemSettingsMap({
+    ai: {
+      settingsRegistryVersion: registry.SETTINGS_REGISTRY_VERSION,
+      defaultGeminiModel: 'gemini-2.5-pro',
+    },
+  });
+  assert.equal(currentSystem.ai.defaultGeminiModel, 'gemini-2.5-pro');
+
+  const upgradedUser = registry.normalizeUserPreferences({
+    schemaVersion: registry.USER_PREFERENCES_SCHEMA_VERSION - 1,
+    ai: { defaultGeminiModel: 'gemini-3.5-flash' },
+  });
+  assert.equal(upgradedUser.ai.defaultGeminiModel, 'gemini-3.6-flash');
+
+  const currentUser = registry.normalizeUserPreferences({
+    schemaVersion: registry.USER_PREFERENCES_SCHEMA_VERSION,
+    ai: { defaultGeminiModel: 'gemini-2.5-pro' },
+  });
+  assert.equal(currentUser.ai.defaultGeminiModel, 'gemini-2.5-pro');
 });
 
 test('SettingsRegistry validates system settings and discards unknown fields', async () => {
@@ -284,6 +323,7 @@ test('legacy browser preferences migrate without replacing existing online value
     allowModelFallback: false,
   });
   const migrated = registry.migrateLegacyUserPreferences({
+    schemaVersion: 1,
     appearance: { theme: 'dark' },
     ai: { defaultGeminiModel: 'gemini-2.5-pro' },
   }, legacy);
@@ -291,7 +331,7 @@ test('legacy browser preferences migrate without replacing existing online value
   assert.equal(migrated.appearance.theme, 'dark');
   assert.equal(migrated.appearance.highlightStyle, 'underline');
   assert.equal(migrated.editor.preferredLanguage, 'en');
-  assert.equal(migrated.ai.defaultGeminiModel, 'gemini-2.5-pro');
+  assert.equal(migrated.ai.defaultGeminiModel, GEMINI_ANALYSIS_MODEL);
   assert.equal(migrated.ai.allowGeminiModelFallback, false);
   assert.equal(migrated.clientGoalContexts.Acme.objective, 'legacy objective');
   assert.equal(migrated.engineeringPrompts.analyzeFull, 'legacy prompt');

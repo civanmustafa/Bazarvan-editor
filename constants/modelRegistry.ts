@@ -9,13 +9,12 @@ export type AiModelDefinition = {
 };
 
 const GEMINI_FREE_MODELS = [
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash - الأقوى مجانًا', provider: 'gemini', tier: 'free', priority: 10 },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro - استدلال متقدم', provider: 'gemini', tier: 'free', priority: 20 },
-  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview - أداء متقدم', provider: 'gemini', tier: 'free', priority: 30 },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash - متوازن', provider: 'gemini', tier: 'free', priority: 40 },
-  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite - سريع', provider: 'gemini', tier: 'free', priority: 50 },
-  { id: 'gemini-2.5-flash-lite-preview-09-2025', label: 'Gemini 2.5 Flash-Lite Preview - سريع', provider: 'gemini', tier: 'free', priority: 60 },
-  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite - الأخف', provider: 'gemini', tier: 'free', priority: 70 },
+  // Canonical free text-generation shortlist, verified against Google's Standard
+  // pricing table on 2026-07-26. Registry order is strongest-first everywhere.
+  { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash - الأقوى والأحدث مجانًا', provider: 'gemini', tier: 'free', priority: 10 },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash - قوي وسريع', provider: 'gemini', tier: 'free', priority: 20 },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro - استدلال متقدم', provider: 'gemini', tier: 'free', priority: 30 },
+  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview - أداء متقدم', provider: 'gemini', tier: 'free', priority: 40 },
 ] as const satisfies readonly AiModelDefinition[];
 
 const GEMINI_PAID_MODELS = [
@@ -26,7 +25,7 @@ const OPENAI_MODELS = [
   { id: 'gpt-4.1-mini', label: 'GPT-4.1 mini', provider: 'openai', tier: 'paid', priority: 10 },
 ] as const satisfies readonly AiModelDefinition[];
 
-export const MODEL_REGISTRY_VERSION = 2;
+export const MODEL_REGISTRY_VERSION = 3;
 
 export const MODEL_REGISTRY = Object.freeze({
   gemini: Object.freeze({

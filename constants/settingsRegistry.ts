@@ -34,8 +34,8 @@ export const SYSTEM_SETTING_KEYS = ['ai', 'prompts', 'n8n', 'articles', 'roles',
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
 export type SystemSettingsMap = Record<SystemSettingKey, Record<string, any>>;
 
-export const SETTINGS_REGISTRY_VERSION = 4;
-export const USER_PREFERENCES_SCHEMA_VERSION = 1;
+export const SETTINGS_REGISTRY_VERSION = 5;
+export const USER_PREFERENCES_SCHEMA_VERSION = 2;
 
 const ALLOWED_EXTERNAL_COMMAND_IDS = new Set(
   EXTERNAL_READY_COMMAND_DEFINITIONS.map(definition => definition.id),
@@ -151,14 +151,18 @@ const normalizeSystemSection = (
   };
 
   if (key === 'ai') {
+    const sourceRegistryVersion = typeof source.settingsRegistryVersion === 'number'
+      ? source.settingsRegistryVersion
+      : 0;
     setWhenPresent('settingsRegistryVersion', () => SETTINGS_REGISTRY_VERSION);
     setWhenPresent('geminiFreeEnabled', field => normalizeBoolean(field, defaults.geminiFreeEnabled));
     setWhenPresent('geminiProEnabled', field => normalizeBoolean(field, defaults.geminiProEnabled));
     setWhenPresent('openAiEnabled', field => normalizeBoolean(field, defaults.openAiEnabled));
     setWhenPresent('defaultProvider', field => normalizeEnum(field, ['gemini', 'geminiPaid', 'openai'], defaults.defaultProvider));
-    setWhenPresent('defaultGeminiModel', field => normalizeGeminiFreeModelId(
-      field,
-      options.allowedGeminiModels,
+    setWhenPresent('defaultGeminiModel', field => (
+      sourceRegistryVersion < SETTINGS_REGISTRY_VERSION
+        ? GEMINI_ANALYSIS_MODEL
+        : normalizeGeminiFreeModelId(field, options.allowedGeminiModels)
     ));
     setWhenPresent('geminiFreeModelFallbackEnabled', field => normalizeBoolean(field, defaults.geminiFreeModelFallbackEnabled));
     setWhenPresent('externalAnalysisRetryMinutes', field => normalizeInteger(field, defaults.externalAnalysisRetryMinutes, 5, 1_440));
@@ -342,6 +346,9 @@ export const normalizeUserPreferences = (
   allowedGeminiModels?: readonly unknown[],
 ): UserPreferences => {
   const source = isSettingsRecord(value) ? value : {};
+  const sourceSchemaVersion = typeof source.schemaVersion === 'number'
+    ? source.schemaVersion
+    : 0;
   const appearance = isSettingsRecord(source.appearance) ? source.appearance : {};
   const editor = isSettingsRecord(source.editor) ? source.editor : {};
   const ai = isSettingsRecord(source.ai) ? source.ai : {};
@@ -359,7 +366,9 @@ export const normalizeUserPreferences = (
       uiLanguage: normalizeEnum(editor.uiLanguage, ['ar', 'en'], USER_PREFERENCES_DEFAULTS.editor.uiLanguage),
     },
     ai: {
-      defaultGeminiModel: normalizeGeminiFreeModelId(ai.defaultGeminiModel, allowedGeminiModels),
+      defaultGeminiModel: sourceSchemaVersion < USER_PREFERENCES_SCHEMA_VERSION
+        ? GEMINI_ANALYSIS_MODEL
+        : normalizeGeminiFreeModelId(ai.defaultGeminiModel, allowedGeminiModels),
       allowGeminiModelFallback: normalizeBoolean(ai.allowGeminiModelFallback, USER_PREFERENCES_DEFAULTS.ai.allowGeminiModelFallback),
     },
     clientGoalContexts: isSettingsRecord(source.clientGoalContexts) ? source.clientGoalContexts : {},
@@ -432,7 +441,9 @@ export const migrateLegacyUserPreferences = (
       ...(isSettingsRecord(legacy.ai) ? legacy.ai : {}),
       ...(isSettingsRecord(online.ai) ? online.ai : {}),
     },
-    schemaVersion: USER_PREFERENCES_SCHEMA_VERSION,
+    schemaVersion: typeof online.schemaVersion === 'number'
+      ? online.schemaVersion
+      : legacy.schemaVersion,
   };
   return normalizeUserPreferences(merged, allowedGeminiModels);
 };

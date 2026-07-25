@@ -29,16 +29,11 @@ export const readExternalGeminiSettings = async (): Promise<ExternalGeminiSettin
 
   if (error && error.code !== '42P01') throw error;
   const settings = isRecord(data?.value) ? data.value : {};
-  const environmentModel = process.env.GEMINI_MODEL?.trim() || GEMINI_ANALYSIS_MODEL;
-  const allowedModels = uniqueModelIds([
-    environmentModel,
-    ...GEMINI_FREE_MODEL_VALUES,
-    ...String(process.env.GEMINI_ALLOWED_MODELS || '').split(/[\n,;]+/),
-  ]);
+  const allowedModels = uniqueModelIds(GEMINI_FREE_MODEL_VALUES);
   const normalizedAi = normalizeSystemSettingsMap({
     ai: {
       ...settings,
-      defaultGeminiModel: toTrimmedString(settings.defaultGeminiModel) || environmentModel,
+      defaultGeminiModel: toTrimmedString(settings.defaultGeminiModel) || GEMINI_ANALYSIS_MODEL,
     },
   }, { allowedGeminiModels: allowedModels }).ai;
   return {

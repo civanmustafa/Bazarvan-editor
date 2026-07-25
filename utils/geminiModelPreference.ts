@@ -53,9 +53,11 @@ const persistAiPreferences = () => {
 };
 
 export const buildGeminiFreeModelOptions = (
-  extraModels: string[] = [],
+  _extraModels: string[] = [],
 ): { value: string; label: string }[] => (
-  uniqueModelIds([...GEMINI_FREE_MODEL_VALUES, ...extraModels])
+  // Keep the editor and settings selectors limited to the four reviewed free
+  // models even if an older server still advertises legacy environment models.
+  uniqueModelIds(GEMINI_FREE_MODEL_VALUES)
     .map(model => ({
       value: model,
       label: getGeminiFreeModelLabel(model),

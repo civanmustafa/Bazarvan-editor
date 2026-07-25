@@ -4,6 +4,8 @@ import {
   GEMINI_ANALYSIS_MODEL as REGISTRY_GEMINI_ANALYSIS_MODEL,
   GEMINI_FREE_MODEL_VALUES,
   GEMINI_PAID_ANALYSIS_MODEL as REGISTRY_GEMINI_PAID_ANALYSIS_MODEL,
+  GEMINI_PAID_MODEL_VALUES,
+  normalizeGeminiFreeModelId,
 } from "../constants/modelRegistry";
 import {
   claimGeminiApiKey,
@@ -42,10 +44,11 @@ import {
   type AiJob,
 } from './aiJobService';
 
-const GEMINI_ANALYSIS_MODEL = process.env.GEMINI_MODEL?.trim() || REGISTRY_GEMINI_ANALYSIS_MODEL;
+const GEMINI_ANALYSIS_MODEL = REGISTRY_GEMINI_ANALYSIS_MODEL;
 const GEMINI_PAID_ANALYSIS_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || REGISTRY_GEMINI_PAID_ANALYSIS_MODEL;
 const ALLOWED_GEMINI_MODELS = new Set([
   ...GEMINI_FREE_MODEL_VALUES,
+  ...GEMINI_PAID_MODEL_VALUES,
   GEMINI_ANALYSIS_MODEL,
   GEMINI_PAID_ANALYSIS_MODEL,
   ...((process.env.GEMINI_ALLOWED_MODELS || "")
@@ -321,32 +324,29 @@ const normalizeGeminiProvider = (value: unknown): GeminiProvider => (
 const selectGeminiProvider = (requestedProvider: GeminiProvider): GeminiProvider => requestedProvider;
 
 const selectGeminiModel = (model: unknown, provider: GeminiProvider): string => {
+  if (provider === "gemini") {
+    return normalizeGeminiFreeModelId(model, GEMINI_FREE_MODEL_VALUES);
+  }
   if (typeof model === "string" && ALLOWED_GEMINI_MODELS.has(model)) {
     return model;
   }
 
-  return provider === "geminiPaid" ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL;
+  return GEMINI_PAID_ANALYSIS_MODEL;
 };
 
 const getAllowedGeminiFreeModels = (): string[] => (
-  Array.from(new Set([
-    GEMINI_ANALYSIS_MODEL,
-    ...GEMINI_FREE_MODEL_VALUES,
-    ...((process.env.GEMINI_ALLOWED_MODELS || "")
-      .split(/[\n,;]+/)
-      .map(model => model.trim())
-      .filter(Boolean)),
-  ].filter(Boolean)))
+  [...GEMINI_FREE_MODEL_VALUES]
 );
 
 const normalizeRequestedGeminiFreeModels = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
+  const allowedFreeModels = new Set<string>(GEMINI_FREE_MODEL_VALUES);
   return Array.from(new Set(
     value
       .map(model => typeof model === "string" ? model.trim() : "")
       .filter(model => (
         Boolean(model) &&
-        ALLOWED_GEMINI_MODELS.has(model)
+        allowedFreeModels.has(model)
       )),
   ));
 };
