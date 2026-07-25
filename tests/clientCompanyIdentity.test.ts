@@ -110,6 +110,8 @@ test('editor and settings use Client Center as the shared company source', async
   assert.match(clientGoals, /handleSaveClientGoalContext\(selectedClient\.id/);
   assert.doesNotMatch(clientGoals, /setCompanyName/);
   assert.match(clientCenter, /اسم العميل \/ الشركة/);
+  assert.match(clientCenter, /label="الدومين"/);
+  assert.doesNotMatch(clientCenter, /دومينات العميل/);
   assert.match(goalTab, /keywords\.clientId/);
   assert.match(internalLinkingPanel, /buildUnifiedCompanyKeywords/);
   assert.match(editorContext, /saveArticleClientSelection\(savedArticle\.id, keywords\.clientId\)/);

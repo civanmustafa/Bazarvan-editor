@@ -42,7 +42,7 @@ test('Client Center phase 2 UI manages scoped clients without excluded fields', 
 
   for (const marker of [
     'مركز العملاء',
-    'بيانات والدومينات',
+    'بيانات والدومين',
     'روابط الموقع',
     'الموظفون والصلاحيات',
     'إدخال الروابط يدويًا',
@@ -52,18 +52,23 @@ test('Client Center phase 2 UI manages scoped clients without excluded fields', 
   }
   for (const operation of [
     'createClientCenterClient',
-    'createClientCenterDomain',
+    'saveClientCenterPrimaryDomain',
     'saveClientCenterAssignment',
     'addClientCenterPages',
     'refreshClientCenterPage',
   ]) {
     assert.match(component, new RegExp(operation));
   }
+  assert.match(component, /label="الدومين"/);
+  assert.doesNotMatch(component, /دومينات العميل/);
+  assert.doesNotMatch(component, /domainPrimary|domainSubdomains|handleAddDomain/);
   assert.match(settings, /<ClientCenterSettings \/>/);
   assert.match(settings, /<ClientGoalSettings \/>/);
   assert.match(utility, /\.from\('clients'\)/);
   assert.match(utility, /\.from\('client_pages'\)/);
   assert.match(utility, /\.from\('client_page_crawl_jobs'\)/);
+  assert.match(utility, /include_subdomains:\s*true/);
+  assert.match(utility, /\.delete\(\)[\s\S]*\.neq\('id', target\.id\)/);
 
   for (const excludedLabel of [
     'أسلوب ونبرة الكتابة',
@@ -83,9 +88,12 @@ test('manual client URLs are normalized and restricted to registered domains', a
   const {
     isUrlAllowedForClientDomains,
     normalizeClientHostname,
+    normalizeClientPrimaryDomain,
     normalizeClientPageUrl,
   } = await importClientUtility();
   assert.equal(normalizeClientHostname('https://WWW.Example.com/path'), 'www.example.com');
+  assert.equal(normalizeClientPrimaryDomain('https://WWW.Example.com/path'), 'example.com');
+  assert.throws(() => normalizeClientPrimaryDomain('example'));
   assert.equal(
     normalizeClientPageUrl('example.com/page#section'),
     'https://example.com/page',

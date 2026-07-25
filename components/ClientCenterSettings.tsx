@@ -25,24 +25,23 @@ import { listRemoteProfiles, type RemoteProfile } from '../utils/supabaseArticle
 import {
   addClientCenterPages,
   createClientCenterClient,
-  createClientCenterDomain,
   deleteClientCenterAssignment,
-  deleteClientCenterDomain,
   deleteClientCenterPage,
   deleteClientLinkDictionary,
   deleteInternalLinkQualityPolicy,
   getCurrentClientCenterUserId,
   listClientCenterClients,
   loadClientCenterDetails,
+  normalizeClientPrimaryDomain,
   refreshClientCenterPage,
   rebuildClientSemanticProfiles,
   saveClientCenterAssignment,
+  saveClientCenterPrimaryDomain,
   saveClientLinkDictionary,
   saveInternalLinkQualityPolicy,
   setClientLinkDictionaryEnabled,
   setClientCenterPageEnabled,
   updateClientCenterClient,
-  updateClientCenterDomain,
   type ClientAssignmentAccess,
   type ClientCenterClient,
   type ClientCenterClientInput,
@@ -237,8 +236,6 @@ const ClientCenterSettings: React.FC = () => {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [domainInput, setDomainInput] = useState('');
-  const [domainPrimary, setDomainPrimary] = useState(false);
-  const [domainSubdomains, setDomainSubdomains] = useState(false);
   const [assignmentUserId, setAssignmentUserId] = useState('');
   const [assignmentAccess, setAssignmentAccess] = useState<ClientAssignmentAccess>('viewer');
   const [urlsInput, setUrlsInput] = useState('');
@@ -259,6 +256,12 @@ const ClientCenterSettings: React.FC = () => {
   const selectedClient = clients.find(client => client.id === selectedClientId) || null;
   const ownAssignment = details.assignments.find(assignment => assignment.userId === currentUserId && assignment.isActive);
   const canEditPages = isAdmin || ownAssignment?.accessLevel === 'editor';
+  const primaryClientDomain = useMemo(() => (
+    details.domains.find(domain => domain.isPrimary && domain.isActive)
+    || details.domains.find(domain => domain.isActive)
+    || details.domains[0]
+    || null
+  ), [details.domains]);
 
   const semanticProfileByPage = useMemo(() => new Map(
     details.semanticProfiles.map(profile => [profile.pageId, profile] as const),
@@ -347,6 +350,11 @@ const ClientCenterSettings: React.FC = () => {
   }, [selectedClient]);
 
   useEffect(() => {
+    if (isCreatingClient) return;
+    setDomainInput(primaryClientDomain?.hostname || '');
+  }, [isCreatingClient, primaryClientDomain, selectedClientId]);
+
+  useEffect(() => {
     const globalPolicy = details.qualityPolicies.find(policy => policy.scope === 'global');
     const clientPolicy = details.qualityPolicies.find(policy => (
       policy.scope === 'client' && policy.clientId === selectedClientId
@@ -419,15 +427,39 @@ const ClientCenterSettings: React.FC = () => {
       showError(new Error('اسم العميل مطلوب.'));
       return;
     }
-    setIsSaving(true);
+    if (!domainInput.trim()) {
+      showError(new Error('الدومين مطلوب.'));
+      return;
+    }
+    let normalizedDomain: string;
     try {
-      const created = await createClientCenterClient(clientInput);
+      normalizedDomain = normalizeClientPrimaryDomain(domainInput);
+    } catch (domainError) {
+      showError(domainError);
+      return;
+    }
+    setIsSaving(true);
+    let createdClient: ClientCenterClient | null = null;
+    try {
+      createdClient = await createClientCenterClient(clientInput);
+      await saveClientCenterPrimaryDomain({
+        clientId: createdClient.id,
+        hostname: normalizedDomain,
+      });
       setIsCreatingClient(false);
-      await refreshClients(created.id);
+      await refreshClients(createdClient.id);
       notifyClientDirectoryChanged();
-      showMessage('تم إنشاء العميل. أضف الدومين قبل إدخال الروابط.');
+      showMessage('تم إنشاء العميل وحفظ الدومين الرئيسي.');
     } catch (createError) {
-      showError(createError);
+      if (createdClient) {
+        setIsCreatingClient(false);
+        await refreshClients(createdClient.id);
+        showError(new Error(
+          `تم إنشاء العميل، لكن تعذر حفظ الدومين: ${createError instanceof Error ? createError.message : 'خطأ غير معروف'}`,
+        ));
+      } else {
+        showError(createError);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -435,27 +467,22 @@ const ClientCenterSettings: React.FC = () => {
 
   const handleSaveClient = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!selectedClient || !clientInput.name?.trim()) return;
+    if (!selectedClient || !clientInput.name?.trim() || !domainInput.trim()) return;
+    let normalizedDomain: string;
+    try {
+      normalizedDomain = normalizeClientPrimaryDomain(domainInput);
+    } catch (domainError) {
+      showError(domainError);
+      return;
+    }
     await runMutation(async () => {
       await updateClientCenterClient(selectedClient.id, clientInput);
-      notifyClientDirectoryChanged();
-    }, 'تم حفظ بيانات العميل.', { refreshClients: true, refreshDetails: false });
-  };
-
-  const handleAddDomain = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!selectedClientId || !domainInput.trim()) return;
-    await runMutation(async () => {
-      await createClientCenterDomain({
-        clientId: selectedClientId,
-        hostname: domainInput,
-        isPrimary: details.domains.length === 0 || domainPrimary,
-        includeSubdomains: domainSubdomains,
+      await saveClientCenterPrimaryDomain({
+        clientId: selectedClient.id,
+        hostname: normalizedDomain,
       });
-      setDomainInput('');
-      setDomainPrimary(false);
-      setDomainSubdomains(false);
-    }, 'تمت إضافة الدومين.');
+      notifyClientDirectoryChanged();
+    }, 'تم حفظ بيانات العميل والدومين الرئيسي.', { refreshClients: true, refreshDetails: true });
   };
 
   const handleSaveAssignment = async (event: React.FormEvent) => {
@@ -490,7 +517,7 @@ const ClientCenterSettings: React.FC = () => {
       await refreshDetails(selectedClientId);
       showMessage(
         `تم قبول ${result.accepted} رابط ووضع ${result.queued} مهمة زحف في قائمة الانتظار`
-        + (result.rejected.length > 0 ? `، ورُفض ${result.rejected.length} رابط خارج الدومينات المسجلة.` : '.'),
+        + (result.rejected.length > 0 ? `، ورُفض ${result.rejected.length} رابط خارج الدومين الرئيسي.` : '.'),
       );
     } catch (addError) {
       showError(addError);
@@ -570,13 +597,29 @@ const ClientCenterSettings: React.FC = () => {
 
   const renderClientForm = (creating: boolean) => (
     <form onSubmit={creating ? handleCreateClient : handleSaveClient} className="space-y-4">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="max-w-xl space-y-3">
         <Field
           label="اسم العميل / الشركة"
           description="هذا هو الاسم الموحد الذي يظهر في تبويب الكلمات والأهداف داخل المحرر."
         >
           <input className={inputClass} value={clientInput.name || ''} onChange={event => setClientInput(prev => ({ ...prev, name: event.target.value }))} required maxLength={160} />
         </Field>
+        <Field label="الدومين">
+          <input
+            className={inputClass}
+            dir="ltr"
+            placeholder="example.com"
+            value={domainInput}
+            onChange={event => setDomainInput(event.target.value)}
+            required
+            maxLength={253}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Field label="الاسم القانوني">
           <input className={inputClass} value={clientInput.legalName || ''} onChange={event => setClientInput(prev => ({ ...prev, legalName: event.target.value }))} maxLength={240} />
         </Field>
@@ -617,6 +660,7 @@ const ClientCenterSettings: React.FC = () => {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {[
             ['اسم العميل', selectedClient?.name],
+            ['الدومين', primaryClientDomain?.hostname],
             ['الاسم القانوني', selectedClient?.legalName],
             ['الدولة', selectedClient?.country],
             ['اللغة الافتراضية', selectedClient?.defaultLanguage],
@@ -630,64 +674,6 @@ const ClientCenterSettings: React.FC = () => {
           ))}
         </div>
       )}
-
-      <div className="border-t border-gray-100 pt-5 dark:border-[#3C3C3C]">
-        <div className="mb-3 flex items-center gap-2">
-          <Globe2 className="text-[#d4af37]" size={18} />
-          <h3 className="font-black text-gray-800 dark:text-gray-100">دومينات العميل</h3>
-        </div>
-        <p className="mb-3 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-          لا يسمح عامل الزحف بمعالجة رابط إلا إذا كان تابعًا لأحد هذه الدومينات. تفعيل النطاقات الفرعية يسمح مثلًا بـ blog.example.com.
-        </p>
-        {isAdmin && (
-          <form onSubmit={handleAddDomain} className="mb-4 grid grid-cols-1 gap-3 rounded-md bg-gray-50 p-3 dark:bg-[#1F1F1F] md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:items-end">
-            <Field label="الدومين أو رابط الموقع">
-              <input className={inputClass} dir="ltr" placeholder="example.com" value={domainInput} onChange={event => setDomainInput(event.target.value)} />
-            </Field>
-            <label className="flex items-center gap-2 pb-2 text-xs font-bold text-gray-600 dark:text-gray-300">
-              <input type="checkbox" checked={domainPrimary} onChange={event => setDomainPrimary(event.target.checked)} />
-              رئيسي
-            </label>
-            <label className="flex items-center gap-2 pb-2 text-xs font-bold text-gray-600 dark:text-gray-300">
-              <input type="checkbox" checked={domainSubdomains} onChange={event => setDomainSubdomains(event.target.checked)} />
-              النطاقات الفرعية
-            </label>
-            <button type="submit" disabled={isSaving || !domainInput.trim()} className={primaryButtonClass}><Plus size={16} /> إضافة</button>
-          </form>
-        )}
-        <div className="space-y-2">
-          {details.domains.length === 0 && <div className="rounded-md border border-dashed border-gray-200 p-4 text-center text-sm font-semibold text-gray-400 dark:border-[#3C3C3C]">لم تتم إضافة دومين بعد.</div>}
-          {details.domains.map(domain => (
-            <div key={domain.id} className="flex flex-col gap-3 rounded-md border border-gray-200 p-3 dark:border-[#3C3C3C] md:flex-row md:items-center md:justify-between">
-              <div className="min-w-0">
-                <div dir="ltr" className="truncate text-sm font-black text-gray-800 dark:text-gray-100">{domain.hostname}</div>
-                <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-bold text-gray-400">
-                  {domain.isPrimary && <span>الدومين الرئيسي</span>}
-                  {domain.includeSubdomains && <span>يشمل النطاقات الفرعية</span>}
-                  {!domain.isActive && <span className="text-red-500">معطل</span>}
-                </div>
-              </div>
-              {isAdmin && (
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" className={secondaryButtonClass} onClick={() => runMutation(
-                    () => updateClientCenterDomain(domain.id, domain.clientId, { isPrimary: true }),
-                    'تم تعيين الدومين رئيسيًا.',
-                  )}>تعيين رئيسي</button>
-                  <button type="button" className={secondaryButtonClass} onClick={() => runMutation(
-                    () => updateClientCenterDomain(domain.id, domain.clientId, { includeSubdomains: !domain.includeSubdomains }),
-                    'تم تحديث إعداد النطاقات الفرعية.',
-                  )}>{domain.includeSubdomains ? 'منع الفرعية' : 'السماح بالفرعية'}</button>
-                  <button type="button" className={dangerButtonClass} title="حذف الدومين" onClick={() => {
-                    if (window.confirm('هل تريد حذف هذا الدومين؟')) {
-                      void runMutation(() => deleteClientCenterDomain(domain.id), 'تم حذف الدومين.');
-                    }
-                  }}><Trash2 size={15} /></button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 
@@ -698,7 +684,7 @@ const ClientCenterSettings: React.FC = () => {
       </div>
       {canEditPages && (
         <form onSubmit={handleAddPages} className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-          <Field label="إدخال الروابط يدويًا" description="ضع كل رابط في سطر مستقل. الحد الأقصى 100 رابط في العملية، ويجب أن تتبع الروابط الدومينات المسجلة.">
+          <Field label="إدخال الروابط يدويًا" description="ضع كل رابط في سطر مستقل. الحد الأقصى 100 رابط في العملية، ويجب أن تتبع الروابط الدومين الرئيسي.">
             <textarea dir="ltr" className={`${inputClass} min-h-28 resize-y text-left`} placeholder={'https://example.com/page-1\nhttps://example.com/page-2'} value={urlsInput} onChange={event => setUrlsInput(event.target.value)} />
           </Field>
           <button type="submit" disabled={isSaving || !urlsInput.trim()} className={`${primaryButtonClass} mt-3`}>
@@ -1024,7 +1010,7 @@ const ClientCenterSettings: React.FC = () => {
   const renderAccessTab = () => (
     <div className="space-y-4">
       <div className="rounded-md border border-gray-200 p-3 text-xs font-semibold leading-6 text-gray-600 dark:border-[#3C3C3C] dark:text-gray-300">
-        صلاحية «عرض» تسمح بمشاهدة بيانات العميل والروابط. صلاحية «تعديل» تسمح أيضًا بإضافة الروابط وإعادة زحفها. إنشاء العميل والدومينات وتعيين الموظفين يبقى للمسؤول فقط.
+        صلاحية «عرض» تسمح بمشاهدة بيانات العميل والروابط. صلاحية «تعديل» تسمح أيضًا بإضافة الروابط وإعادة زحفها. إنشاء العميل والدومين وتعيين الموظفين يبقى للمسؤول فقط.
       </div>
       {isAdmin && (
         <form onSubmit={handleSaveAssignment} className="grid grid-cols-1 gap-3 rounded-md bg-gray-50 p-3 dark:bg-[#1F1F1F] md:grid-cols-[minmax(0,1fr)_12rem_auto] md:items-end">
@@ -1117,6 +1103,7 @@ const ClientCenterSettings: React.FC = () => {
             {isAdmin && (
               <button type="button" className={primaryButtonClass} onClick={() => {
                 setClientInput(EMPTY_CLIENT_INPUT);
+                setDomainInput('');
                 setIsCreatingClient(true);
               }}><Plus size={15} /> جديد</button>
             )}
@@ -1127,6 +1114,7 @@ const ClientCenterSettings: React.FC = () => {
             {clients.map(client => (
               <button key={client.id} type="button" onClick={() => {
                 setIsCreatingClient(false);
+                setDomainInput('');
                 setSelectedClientId(client.id);
                 setSelectedTab('profile');
                 setMessage('');
@@ -1155,7 +1143,7 @@ const ClientCenterSettings: React.FC = () => {
               <div className="mb-4 flex flex-col gap-3 border-b border-gray-100 pb-4 dark:border-[#3C3C3C] sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h3 className="text-xl font-black text-gray-900 dark:text-gray-100">{selectedClient.name}</h3>
-                  <div className="mt-1 text-xs font-semibold text-gray-400">{details.domains.find(domain => domain.isPrimary)?.hostname || 'لم يحدد دومين رئيسي'}</div>
+                  <div className="mt-1 text-xs font-semibold text-gray-400">{primaryClientDomain?.hostname || 'لم يحدد دومين رئيسي'}</div>
                 </div>
                 <button type="button" className={secondaryButtonClass} onClick={() => void refreshDetails(selectedClient.id)}>
                   <RefreshCw className={isDetailsLoading ? 'animate-spin' : ''} size={15} /> تحديث
@@ -1163,7 +1151,7 @@ const ClientCenterSettings: React.FC = () => {
               </div>
               <div className="mb-5 grid grid-cols-2 gap-2 lg:grid-cols-4">
                 {([
-                  ['profile', 'البيانات والدومينات', <Globe2 size={16} />],
+                  ['profile', 'البيانات والدومين', <Globe2 size={16} />],
                   ['pages', 'روابط الموقع', <Link2 size={16} />],
                   ['index', 'الفهرس والقواميس', <Network size={16} />],
                   ['access', 'الموظفون والصلاحيات', <ShieldCheck size={16} />],

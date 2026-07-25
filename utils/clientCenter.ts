@@ -618,6 +618,86 @@ export const normalizeClientHostname = (value: string): string => {
   }
 };
 
+export const normalizeClientPrimaryDomain = (value: string): string => {
+  const hostname = normalizeClientHostname(value).replace(/^www\./, '');
+  const validDomain = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$/i;
+  if (!validDomain.test(hostname)) {
+    throw new Error('أدخل دومينًا صالحًا مثل example.com دون مسار صفحة.');
+  }
+  return hostname;
+};
+
+export const saveClientCenterPrimaryDomain = async (input: {
+  clientId: string;
+  hostname: string;
+}): Promise<ClientCenterDomain> => {
+  const supabase = getSupabaseClient();
+  const hostname = normalizeClientPrimaryDomain(input.hostname);
+  const { data: rows, error: readError } = await supabase
+    .from('client_domains')
+    .select(DOMAIN_COLUMNS)
+    .eq('client_id', input.clientId);
+  throwIfError(readError);
+  const domains = (rows || []).map(mapDomain);
+
+  if (domains.length === 0) {
+    const { data, error } = await supabase
+      .from('client_domains')
+      .insert({
+        client_id: input.clientId,
+        hostname,
+        is_primary: true,
+        include_subdomains: true,
+        is_active: true,
+      })
+      .select(DOMAIN_COLUMNS)
+      .single();
+    throwIfError(error);
+    return mapDomain(data);
+  }
+
+  const currentPrimary = domains.find(domain => domain.isPrimary);
+  const matchingDomain = domains.find(domain => domain.hostname === hostname);
+  const target = matchingDomain || currentPrimary || domains[0];
+
+  if (currentPrimary && currentPrimary.id !== target.id) {
+    const { error } = await supabase
+      .from('client_domains')
+      .update({ is_primary: false })
+      .eq('id', currentPrimary.id);
+    throwIfError(error);
+  }
+
+  const { data, error: updateError } = await supabase
+    .from('client_domains')
+    .update({
+      hostname,
+      is_primary: true,
+      include_subdomains: true,
+      is_active: true,
+    })
+    .eq('id', target.id)
+    .select(DOMAIN_COLUMNS)
+    .single();
+  throwIfError(updateError);
+
+  const { error: deactivateError } = await supabase
+    .from('client_domains')
+    .update({ is_primary: false, is_active: false })
+    .eq('client_id', input.clientId)
+    .neq('id', target.id);
+  throwIfError(deactivateError);
+
+  const { error: deleteError } = await supabase
+    .from('client_domains')
+    .delete()
+    .eq('client_id', input.clientId)
+    .neq('id', target.id);
+  throwIfError(deleteError);
+
+  return mapDomain(data);
+};
+
 export const createClientCenterDomain = async (input: {
   clientId: string;
   hostname: string;
