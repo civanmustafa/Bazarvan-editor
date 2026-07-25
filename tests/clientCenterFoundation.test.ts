@@ -32,7 +32,9 @@ const importReadiness = async (): Promise<any> => {
 
 const createProbeClient = (options: {
   failedTable?: string;
+  failedFunction?: string;
   calls?: Array<{ table: string; columns: string; limit: number }>;
+  rpcCalls?: string[];
 } = {}) => ({
   from: (table: string) => ({
     select: (columns: string) => ({
@@ -46,6 +48,14 @@ const createProbeClient = (options: {
       },
     }),
   }),
+  rpc: async (functionName: string) => {
+    options.rpcCalls?.push(functionName);
+    return {
+      error: functionName === options.failedFunction
+        ? { code: 'PGRST202', message: 'Private function detail.' }
+        : null,
+    };
+  },
 });
 
 test('Client Center migration creates the scoped multi-client foundation', async () => {
@@ -99,12 +109,34 @@ test('Client Center migration creates the scoped multi-client foundation', async
   assertBalancedSqlParentheses(migration);
 });
 
+test('Client Center draft creation is minimal, duplicate-safe, and scoped to its creator', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260725010000_client_draft_creation.sql',
+  );
+
+  assert.match(migration, /create or replace function public\.create_client_draft/);
+  assert.match(migration, /returns public\.clients/);
+  assert.match(migration, /security definer/);
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /lower\(btrim\(client\.name\)\) = lower\(v_name\)/);
+  assert.match(migration, /insert into public\.client_assignments/);
+  assert.match(migration, /'editor'::public\.client_assignment_access/);
+  assert.match(migration, /if not public\.is_admin\(\)/);
+  assert.match(migration, /grant execute on function public\.create_client_draft\(text, text\)\s+to authenticated/);
+  assert.match(migration, /create or replace function public\.client_draft_creation_schema_version/);
+  assert.match(migration, /grant execute on function public\.client_draft_creation_schema_version\(\)\s+to authenticated, service_role/);
+  assert.doesNotMatch(migration, /insert into public\.client_domains/);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('Client Center readiness probes every required table and hides provider details', async () => {
   const readiness = await importReadiness();
   readiness.__resetClientCenterReadinessForTests();
   const calls: Array<{ table: string; columns: string; limit: number }> = [];
+  const rpcCalls: string[] = [];
   const ready = await readiness.checkClientCenterReadiness({
-    client: createProbeClient({ calls }),
+    client: createProbeClient({ calls, rpcCalls }),
     force: true,
     timeoutMs: 1_000,
   });
@@ -122,7 +154,9 @@ test('Client Center readiness probes every required table and hides provider det
     semanticProfiles: true,
     suggestionRuns: true,
     qualityPolicies: true,
+    clientDraftCreation: true,
   });
+  assert.deepEqual(rpcCalls, ['client_draft_creation_schema_version']);
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'article_client_contexts',
     'client_assignments',
@@ -150,6 +184,16 @@ test('Client Center readiness probes every required table and hides provider det
   assert.equal(publicResult.code, 'client_center_schema_unavailable');
   assert.equal('detail' in publicResult, false);
   assert.doesNotMatch(JSON.stringify(publicResult), /Private schema detail|PGRST204/);
+
+  readiness.__resetClientCenterReadinessForTests();
+  const missingDraftFunction = await readiness.checkClientCenterReadiness({
+    client: createProbeClient({ failedFunction: 'client_draft_creation_schema_version' }),
+    force: true,
+    timeoutMs: 1_000,
+  });
+  assert.equal(missingDraftFunction.ok, false);
+  assert.equal(missingDraftFunction.checks.clientDraftCreation, false);
+  assert.match(missingDraftFunction.detail, /Private function detail/);
 });
 
 test('Client Center release gate is wired to build and readiness', async () => {
@@ -168,6 +212,7 @@ test('Client Center release gate is wired to build and readiness', async () => {
   assert.match(registry, /20260724040000_client_semantic_index\.sql/);
   assert.match(registry, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(registry, /20260724060000_internal_link_quality_policies\.sql/);
+  assert.match(registry, /20260725010000_client_draft_creation\.sql/);
   assert.match(script, /CLIENT_CENTER_REQUIRED_MIGRATION/);
   assert.match(script, /CLIENT_CENTER_ACCEPTANCE_VERSION/);
   assert.match(script, /CLIENT_CENTER_ACCEPTANCE_CASES/);
@@ -180,6 +225,7 @@ test('Client Center release gate is wired to build and readiness', async () => {
   assert.match(guide, /20260724040000_client_semantic_index\.sql/);
   assert.match(guide, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(guide, /20260724060000_internal_link_quality_policies\.sql/);
+  assert.match(guide, /20260725010000_client_draft_creation\.sql/);
   assert.match(guide, /المرحلة العاشرة/);
   assert.match(guide, /13 حالة قبول/);
   assert.match(packageJson.scripts?.postbuild || '', /check:client-center-release/);

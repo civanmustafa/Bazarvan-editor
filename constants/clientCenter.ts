@@ -3,7 +3,8 @@ export const CLIENT_CENTER_CRAWLING_MIGRATION = '20260724020000_client_center_ma
 export const CLIENT_CENTER_INTERNAL_LINKING_MIGRATION = '20260724030000_internal_linking_engine.sql';
 export const CLIENT_CENTER_SEMANTIC_INDEX_MIGRATION = '20260724040000_client_semantic_index.sql';
 export const CLIENT_CENTER_EDITOR_SUGGESTIONS_MIGRATION = '20260724050000_editor_internal_link_suggestions.sql';
-export const CLIENT_CENTER_REQUIRED_MIGRATION = '20260724060000_internal_link_quality_policies.sql';
+export const CLIENT_CENTER_QUALITY_POLICY_MIGRATION = '20260724060000_internal_link_quality_policies.sql';
+export const CLIENT_CENTER_REQUIRED_MIGRATION = '20260725010000_client_draft_creation.sql';
 
 export const CLIENT_CENTER_SCHEMA_PROBES = [
   {

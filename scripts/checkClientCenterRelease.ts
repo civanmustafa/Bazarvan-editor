@@ -5,6 +5,7 @@ import {
   CLIENT_CENTER_CRAWLING_MIGRATION,
   CLIENT_CENTER_EDITOR_SUGGESTIONS_MIGRATION,
   CLIENT_CENTER_INTERNAL_LINKING_MIGRATION,
+  CLIENT_CENTER_QUALITY_POLICY_MIGRATION,
   CLIENT_CENTER_SEMANTIC_INDEX_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
 } from '../constants/clientCenter.ts';
@@ -32,6 +33,7 @@ for (const migration of [
   CLIENT_CENTER_INTERNAL_LINKING_MIGRATION,
   CLIENT_CENTER_SEMANTIC_INDEX_MIGRATION,
   CLIENT_CENTER_EDITOR_SUGGESTIONS_MIGRATION,
+  CLIENT_CENTER_QUALITY_POLICY_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
@@ -87,6 +89,7 @@ for (const marker of [
   'client_page_semantic_profiles',
   'client_link_suggestion_runs',
   'internal_link_quality_policies',
+  'client_draft_creation_schema_version',
   CLIENT_CENTER_REQUIRED_MIGRATION,
 ]) {
   if (!serverBundle.includes(marker)) {
@@ -117,6 +120,7 @@ console.log(JSON.stringify({
     CLIENT_CENTER_INTERNAL_LINKING_MIGRATION,
     CLIENT_CENTER_SEMANTIC_INDEX_MIGRATION,
     CLIENT_CENTER_EDITOR_SUGGESTIONS_MIGRATION,
+    CLIENT_CENTER_QUALITY_POLICY_MIGRATION,
     CLIENT_CENTER_REQUIRED_MIGRATION,
   ],
   crawler: 'server-dist/client-page-crawl-worker.mjs',

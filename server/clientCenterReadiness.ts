@@ -17,13 +17,18 @@ export type ClientCenterReadinessClient = {
       limit: (count: number) => PromiseLike<ProbeResult>;
     };
   };
+  rpc: (functionName: string) => PromiseLike<ProbeResult>;
 };
+
+type ClientCenterReadinessCheckId =
+  | (typeof CLIENT_CENTER_SCHEMA_PROBES)[number]['id']
+  | 'clientDraftCreation';
 
 export type ClientCenterReadinessResult = {
   ok: boolean;
   checkedAt: string;
   requiredMigration: string;
-  checks: Record<(typeof CLIENT_CENTER_SCHEMA_PROBES)[number]['id'], boolean>;
+  checks: Record<ClientCenterReadinessCheckId, boolean>;
   code?: 'client_center_schema_unavailable';
   detail?: string;
 };
@@ -60,7 +65,10 @@ export const checkClientCenterReadiness = async (options: {
   }
 
   const checks = Object.fromEntries(
-    CLIENT_CENTER_SCHEMA_PROBES.map(probe => [probe.id, false]),
+    [
+      ...CLIENT_CENTER_SCHEMA_PROBES.map(probe => [probe.id, false] as const),
+      ['clientDraftCreation', false] as const,
+    ],
   ) as ClientCenterReadinessResult['checks'];
   const failures: string[] = [];
   const timeoutMs = Math.max(500, Math.min(options.timeoutMs || 5_000, 15_000));
@@ -100,6 +108,24 @@ export const checkClientCenterReadiness = async (options: {
       failures.push(`${probe.id}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
     }
   }));
+
+  try {
+    const result = await withTimeout(
+      client.rpc('client_draft_creation_schema_version'),
+      timeoutMs,
+    );
+    if (result.error) {
+      const code = result.error.code || 'unknown';
+      const message = result.error.message || 'Unknown Supabase error.';
+      failures.push(`clientDraftCreation: ${code}: ${message}`.slice(0, 1_000));
+    } else {
+      checks.clientDraftCreation = true;
+    }
+  } catch (error) {
+    failures.push(
+      `clientDraftCreation: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000),
+    );
+  }
 
   const ok = failures.length === 0;
   const result: ClientCenterReadinessResult = {

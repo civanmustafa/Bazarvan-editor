@@ -3,6 +3,21 @@ import type { ClientCenterClient } from './clientCenter';
 
 const normalizeName = (value: string): string => value.trim().toLocaleLowerCase();
 
+const ARABIC_SCRIPT_PATTERN = /[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]/u;
+const LATIN_SCRIPT_PATTERN = /[a-z]/iu;
+const LANGUAGE_CODE_PATTERN = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/;
+
+export const inferClientDefaultLanguage = (
+  primaryKeyword: string,
+  fallbackLanguage = 'ar',
+): string => {
+  if (ARABIC_SCRIPT_PATTERN.test(primaryKeyword)) return 'ar';
+  if (LATIN_SCRIPT_PATTERN.test(primaryKeyword)) return 'en';
+
+  const normalizedFallback = fallbackLanguage.trim().toLowerCase();
+  return LANGUAGE_CODE_PATTERN.test(normalizedFallback) ? normalizedFallback : 'ar';
+};
+
 export const resolveCompanyClient = (
   clients: ClientCenterClient[],
   keywords: Pick<Keywords, 'clientId' | 'company'>,

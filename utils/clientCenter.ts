@@ -592,6 +592,20 @@ export const createClientCenterClient = async (
   return mapClient(data);
 };
 
+export const createDraftClientCenterClient = async (input: {
+  name: string;
+  defaultLanguage: string;
+}): Promise<ClientCenterClient> => {
+  const { data, error } = await getSupabaseClient().rpc('create_client_draft', {
+    p_name: input.name.trim(),
+    p_default_language: input.defaultLanguage.trim().toLowerCase() || 'ar',
+  });
+  throwIfError(error);
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error('لم تُرجع قاعدة البيانات سجل العميل بعد إنشائه.');
+  return mapClient(row);
+};
+
 export const updateClientCenterClient = async (
   clientId: string,
   input: ClientCenterClientInput,

@@ -599,7 +599,7 @@ const ClientCenterSettings: React.FC = () => {
     <form onSubmit={creating ? handleCreateClient : handleSaveClient} className="space-y-4">
       <div className="max-w-xl space-y-3">
         <Field
-          label="اسم العميل / الشركة"
+          label="اسم الشركة/العميل"
           description="هذا هو الاسم الموحد الذي يظهر في تبويب الكلمات والأهداف داخل المحرر."
         >
           <input className={inputClass} value={clientInput.name || ''} onChange={event => setClientInput(prev => ({ ...prev, name: event.target.value }))} required maxLength={160} />

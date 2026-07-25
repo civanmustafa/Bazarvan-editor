@@ -494,6 +494,6 @@ test('editor integration keeps native links primary and phase 9 AI review option
   assert.match(registry, /internal_link_actions/);
   assert.match(releaseScript, /CLIENT_CENTER_CRAWLING_MIGRATION/);
   assert.match(guide, /20260724030000_internal_linking_engine\.sql/);
-  assert.match(guide, /لا يحتاج الترحيل السادس إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
-  assert.match(guide, /المرحلة التاسعة لا تضيف ترحيلًا سابعًا/);
+  assert.match(guide, /20260725010000_client_draft_creation\.sql/);
+  assert.match(guide, /لا يحتاج هذا الترحيل إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
 });

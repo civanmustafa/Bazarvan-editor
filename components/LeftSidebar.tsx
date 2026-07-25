@@ -21,6 +21,7 @@ import {
   loadArticleClientContext,
   saveArticleClientSelection,
 } from '../utils/articleClientContext';
+import QuickClientCreateModal from './QuickClientCreateModal';
 
 const DuplicatesTab = React.lazy(() => import('./DuplicatesTab'));
 
@@ -345,6 +346,7 @@ const LeftSidebar: React.FC = () => {
   const setHighlightedItem = useInteractionSelector(context => context.setHighlightedItem);
   const generateSemanticKeywords = useAISelector(context => context.generateSemanticKeywords);
   const {
+    clients,
     activeClients,
     isLoadingClients,
     clientDirectoryError,
@@ -359,6 +361,10 @@ const LeftSidebar: React.FC = () => {
   const [semanticGenerationStatus, setSemanticGenerationStatus] = React.useState('');
   const [companySelectionError, setCompanySelectionError] = React.useState('');
   const [linkedArticleClientId, setLinkedArticleClientId] = React.useState('');
+  const [companyInputValue, setCompanyInputValue] = React.useState(keywords.company);
+  const [isCompanyMenuOpen, setIsCompanyMenuOpen] = React.useState(false);
+  const [quickClientName, setQuickClientName] = React.useState('');
+  const [isQuickClientModalOpen, setIsQuickClientModalOpen] = React.useState(false);
   const tLk = t.leftSidebar;
   const selectedCompanyClient = React.useMemo(
     () => resolveCompanyClient(activeClients, keywords, linkedArticleClientId),
@@ -450,10 +456,15 @@ const LeftSidebar: React.FC = () => {
     }
   }, [clientGoalContexts, setGoalContext]);
 
-  const handleCompanyChange = React.useCallback((clientId: string) => {
-    const client = activeClients.find(candidate => candidate.id === clientId);
+  React.useEffect(() => {
+    setCompanyInputValue(keywords.company);
+  }, [keywords.company]);
+
+  const applyCompanySelection = React.useCallback((client: typeof selectedCompanyClient) => {
     if (!client) return;
     setCompanySelectionError('');
+    setCompanyInputValue(client.name);
+    setIsCompanyMenuOpen(false);
     setLinkedArticleClientId(client.id);
     setKeywords(current => buildUnifiedCompanyKeywords(current, client));
     applyCompanyGoalContext(client);
@@ -464,37 +475,130 @@ const LeftSidebar: React.FC = () => {
         );
       });
     }
-  }, [activeArticleId, activeClients, applyCompanyGoalContext, setKeywords]);
+  }, [activeArticleId, applyCompanyGoalContext, setKeywords]);
+
+  const handleCompanyChange = React.useCallback((clientId: string) => {
+    applyCompanySelection(activeClients.find(candidate => candidate.id === clientId) || null);
+  }, [activeClients, applyCompanySelection]);
+
+  const normalizedCompanyInput = companyInputValue.trim().replace(/\s+/g, ' ');
+  const exactCompanyClient = React.useMemo(() => {
+    const normalized = normalizedCompanyInput.toLocaleLowerCase();
+    if (!normalized) return null;
+    return clients.find(client => client.name.trim().toLocaleLowerCase() === normalized) || null;
+  }, [clients, normalizedCompanyInput]);
+  const filteredCompanyClients = React.useMemo(() => {
+    const normalized = normalizedCompanyInput.toLocaleLowerCase();
+    const candidates = normalized
+      ? activeClients.filter(client => client.name.toLocaleLowerCase().includes(normalized))
+      : activeClients;
+    return candidates.slice(0, 8);
+  }, [activeClients, normalizedCompanyInput]);
+
+  const openQuickClientModal = React.useCallback(() => {
+    if (normalizedCompanyInput.length < 2 || exactCompanyClient) return;
+    setQuickClientName(normalizedCompanyInput);
+    setCompanySelectionError('');
+    setIsCompanyMenuOpen(false);
+    setIsQuickClientModalOpen(true);
+  }, [exactCompanyClient, normalizedCompanyInput]);
+
+  const handleCompanyInputKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      setIsCompanyMenuOpen(false);
+      return;
+    }
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (exactCompanyClient?.isActive) {
+      applyCompanySelection(exactCompanyClient);
+      return;
+    }
+    openQuickClientModal();
+  }, [applyCompanySelection, exactCompanyClient, openQuickClientModal]);
+
+  const handleQuickClientCreated = React.useCallback((client: typeof selectedCompanyClient) => {
+    if (!client) return;
+    if (!client.isActive) {
+      throw new Error('هذا العميل موجود لكنه غير نشط. فعّله من الإعدادات ← العملاء.');
+    }
+    applyCompanySelection(client);
+  }, [applyCompanySelection]);
 
   const renderCompanySelector = () => {
-    const legacyValue = keywords.company && !selectedCompanyClient ? '__legacy_company__' : '';
-    const value = selectedCompanyClient?.id || legacyValue;
     return (
       <div className="space-y-2">
-        <select
-          value={value}
-          onChange={event => handleCompanyChange(event.target.value)}
-          disabled={isLoadingClients || activeClients.length === 0}
-          className="w-full rounded-md border border-gray-300 bg-gray-50 p-2 text-sm font-semibold text-[#333333] outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-[#e0e0e0]"
+        <div
+          className="relative"
+          onBlur={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setIsCompanyMenuOpen(false);
+            }
+          }}
         >
-          <option value="">
-            {isLoadingClients
-              ? 'جاري تحميل العملاء...'
-              : activeClients.length > 0
-                ? 'اختر العميل / الشركة'
-                : 'لا يوجد عميل نشط في مركز العملاء'}
-          </option>
-          {legacyValue && (
-            <option value={legacyValue} disabled>
-              {keywords.company} — اسم قديم غير مرتبط
-            </option>
+          <input
+            type="text"
+            role="combobox"
+            aria-expanded={isCompanyMenuOpen}
+            aria-controls="company-client-options"
+            aria-autocomplete="list"
+            value={companyInputValue}
+            onChange={event => {
+              setCompanyInputValue(event.target.value);
+              setCompanySelectionError('');
+              setIsCompanyMenuOpen(true);
+            }}
+            onFocus={() => setIsCompanyMenuOpen(true)}
+            onKeyDown={handleCompanyInputKeyDown}
+            disabled={isLoadingClients}
+            placeholder={isLoadingClients ? 'جاري تحميل العملاء...' : 'ابحث أو اكتب اسمًا جديدًا'}
+            className="w-full rounded-md border border-gray-300 bg-gray-50 p-2 text-sm font-semibold text-[#333333] outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-[#e0e0e0]"
+            data-testid="company-client-combobox"
+          />
+          {isCompanyMenuOpen && !isLoadingClients && (
+            <div
+              id="company-client-options"
+              role="listbox"
+              className="absolute inset-x-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-xl dark:border-[#3C3C3C] dark:bg-[#2A2A2A]"
+            >
+              {filteredCompanyClients.map(client => (
+                <button
+                  key={client.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedCompanyClient?.id === client.id}
+                  onClick={() => handleCompanyChange(client.id)}
+                  className="w-full rounded px-3 py-2 text-start text-sm font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                >
+                  {client.name}
+                </button>
+              ))}
+              {exactCompanyClient && !exactCompanyClient.isActive && (
+                <div className="rounded px-3 py-2 text-xs font-bold leading-5 text-amber-700 dark:text-amber-300">
+                  هذا العميل موجود لكنه غير نشط. فعّله من الإعدادات ← العملاء.
+                </div>
+              )}
+              {!exactCompanyClient && normalizedCompanyInput.length >= 2 && (
+                <button
+                  type="button"
+                  onClick={openQuickClientModal}
+                  className="flex w-full items-start gap-2 rounded px-3 py-2 text-start text-sm font-black text-[#9a7720] hover:bg-[#d4af37]/15 dark:text-[#f2d675] dark:hover:bg-[#d4af37]/20"
+                  data-testid="create-new-client-option"
+                >
+                  <Plus className="mt-0.5 shrink-0" size={15} />
+                  <span>إضافة «{normalizedCompanyInput}» كشركة/عميل جديد</span>
+                </button>
+              )}
+              {filteredCompanyClients.length === 0 && normalizedCompanyInput.length < 2 && (
+                <div className="px-3 py-2 text-xs font-semibold leading-5 text-gray-400">
+                  اكتب حرفين على الأقل للبحث أو إضافة عميل جديد.
+                </div>
+              )}
+            </div>
           )}
-          {activeClients.map(client => (
-            <option key={client.id} value={client.id}>{client.name}</option>
-          ))}
-        </select>
+        </div>
         <p className="text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
-          الاسم مأخوذ من مركز العملاء، ويُستخدم نفسه في الكلمات والأهداف والربط الداخلي.
+          اختر اسمًا مسجلًا، أو اكتب اسمًا جديدًا ثم اضغط Enter لإضافته إلى مركز العملاء.
         </p>
         {(clientDirectoryError || companySelectionError) && (
           <p className="text-[11px] font-bold text-red-600 dark:text-red-400">
@@ -1176,7 +1280,16 @@ const LeftSidebar: React.FC = () => {
   };
   
   return (
-    <aside className="relative z-30 basis-[20.57%] bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg flex flex-col h-full min-w-0">
+    <>
+      <QuickClientCreateModal
+        isOpen={isQuickClientModalOpen}
+        initialName={quickClientName}
+        primaryKeyword={keywords.primary}
+        fallbackLanguage={uiLanguage}
+        onClose={() => setIsQuickClientModalOpen(false)}
+        onCreated={handleQuickClientCreated}
+      />
+      <aside className="relative z-30 basis-[20.57%] bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg flex flex-col h-full min-w-0">
         <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
             <button onClick={() => handleTabChange('keywords')} className={getTabClass('keywords')}>
                 <KeyRound size={16} />
@@ -1212,7 +1325,8 @@ const LeftSidebar: React.FC = () => {
                 </React.Suspense>
             )}
         </div>
-    </aside>
+      </aside>
+    </>
   );
 };
 

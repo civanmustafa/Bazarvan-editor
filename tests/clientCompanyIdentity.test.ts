@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildUnifiedCompanyKeywords,
   getClientGoalContext,
+  inferClientDefaultLanguage,
   mapNamedGoalContextsToClients,
   resolveCompanyClient,
 } from '../utils/clientCompanyIdentity.ts';
@@ -84,9 +85,17 @@ test('goal presets prefer client ids and retain legacy name compatibility', () =
   );
 });
 
+test('new client drafts infer Arabic from an Arabic primary keyword', () => {
+  assert.equal(inferClientDefaultLanguage('خدمات التحول الرقمي', 'en'), 'ar');
+  assert.equal(inferClientDefaultLanguage('Digital transformation services', 'ar'), 'en');
+  assert.equal(inferClientDefaultLanguage('12345', 'tr'), 'tr');
+  assert.equal(inferClientDefaultLanguage('12345', 'invalid language'), 'ar');
+});
+
 test('editor and settings use Client Center as the shared company source', async () => {
   const [
     leftSidebar,
+    quickClientModal,
     clientGoals,
     clientCenter,
     goalTab,
@@ -96,6 +105,7 @@ test('editor and settings use Client Center as the shared company source', async
     userActivity,
   ] = await Promise.all([
     readFile(new URL('../components/LeftSidebar.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/QuickClientCreateModal.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/ClientGoalSettings.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/ClientCenterSettings.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/GoalTab.tsx', import.meta.url), 'utf8'),
@@ -107,9 +117,15 @@ test('editor and settings use Client Center as the shared company source', async
 
   assert.match(leftSidebar, /useClientDirectory\(\)/);
   assert.match(leftSidebar, /buildUnifiedCompanyKeywords/);
+  assert.match(leftSidebar, /company-client-combobox/);
+  assert.match(leftSidebar, /create-new-client-option/);
+  assert.match(leftSidebar, /QuickClientCreateModal/);
+  assert.match(quickClientModal, /createDraftClientCenterClient/);
+  assert.match(quickClientModal, /inferClientDefaultLanguage\(primaryKeyword, fallbackLanguage\)/);
+  assert.match(quickClientModal, /quick-client-language/);
   assert.match(clientGoals, /handleSaveClientGoalContext\(selectedClient\.id/);
   assert.doesNotMatch(clientGoals, /setCompanyName/);
-  assert.match(clientCenter, /اسم العميل \/ الشركة/);
+  assert.match(clientCenter, /اسم الشركة\/العميل/);
   assert.match(clientCenter, /label="الدومين"/);
   assert.doesNotMatch(clientCenter, /دومينات العميل/);
   assert.match(goalTab, /keywords\.clientId/);
