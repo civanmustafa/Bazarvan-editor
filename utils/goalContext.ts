@@ -84,15 +84,6 @@ export const SMART_CONTENT_BRIEF_REQUIRED_KEYS: ReadonlyArray<keyof GoalContext>
   'pageType',
   'objective',
   'audienceScope',
-  'targetAudience',
-  'audienceKnowledgeLevel',
-  'audienceNeeds',
-  'readerOutcome',
-  'marketingStage',
-  'uniqueAngle',
-  'evidenceRequirements',
-  'brandVoice',
-  'topicSensitivity',
   'searchIntent',
 ];
 
@@ -100,11 +91,7 @@ export const getSmartContentBriefMissingKeys = (
   context: Partial<GoalContext> | null | undefined,
 ): Array<keyof GoalContext> => {
   const normalized = normalizeGoalContext(context);
-  const missing = SMART_CONTENT_BRIEF_REQUIRED_KEYS.filter(key => !normalized[key].trim());
-  if (usesTargetLocation(normalized.audienceScope) && !normalized.targetCountry.trim()) {
-    missing.push('targetCountry');
-  }
-  return missing;
+  return SMART_CONTENT_BRIEF_REQUIRED_KEYS.filter(key => !normalized[key].trim());
 };
 
 const GOAL_CONTEXT_PRESETS: GoalContextPreset[] = [
@@ -300,28 +287,16 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
     audienceScope,
     targetCountry: usesTargetLocation(audienceScope) ? getStoredTargetLocation(normalized) : '',
     targetAudience: asStoredString(normalized.targetAudience).trim(),
-    audienceKnowledgeLevel: normalizeMappedChoice(
-      normalized.audienceKnowledgeLevel,
-      {},
-      INITIAL_GOAL_CONTEXT.audienceKnowledgeLevel,
-    ),
+    audienceKnowledgeLevel: asStoredString(normalized.audienceKnowledgeLevel).trim(),
     audienceNeeds: asStoredString(normalized.audienceNeeds).trim(),
     readerOutcome,
     desiredAction: readerOutcome,
-    marketingStage: normalizeMappedChoice(
-      normalized.marketingStage,
-      {},
-      INITIAL_GOAL_CONTEXT.marketingStage,
-    ),
+    marketingStage: asStoredString(normalized.marketingStage).trim(),
     uniqueAngle: asStoredString(normalized.uniqueAngle).trim(),
     evidenceRequirements,
     freshnessRequirements: evidenceRequirements,
     brandVoice: asStoredString(normalized.brandVoice).trim(),
-    topicSensitivity: normalizeMappedChoice(
-      normalized.topicSensitivity,
-      {},
-      INITIAL_GOAL_CONTEXT.topicSensitivity,
-    ),
+    topicSensitivity: asStoredString(normalized.topicSensitivity).trim(),
     searchIntent: normalizeMappedChoice(normalized.searchIntent, intentMap, INITIAL_GOAL_CONTEXT.searchIntent),
   };
 };

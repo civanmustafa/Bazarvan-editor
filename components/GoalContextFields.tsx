@@ -261,8 +261,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
               className="block text-xs font-bold text-gray-600 dark:text-gray-300 mb-1"
             >
               {field.label}
-              {(SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)
-                || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')) && (
+              {SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key) && (
                 <span className="ms-1 text-red-500" aria-hidden="true">*</span>
               )}
             </label>
@@ -272,7 +271,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
                 value={goalContext[field.key]}
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={fieldClass}
-                required
+                required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)}
               >
                 {field.options.map(option => (
                   <option key={option.value} value={option.value}>{option.label}</option>
@@ -306,8 +305,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={fieldClass}
                 placeholder={field.placeholder}
-                required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)
-                  || (field.key === 'targetCountry' && goalContext.audienceScope !== 'global')}
+                required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)}
               />
             )}
             {field.helpText && (

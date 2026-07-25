@@ -17,6 +17,10 @@ import {
   registerExternalAnalysisJobExecutor,
   type ExternalAnalysisExecutionContext,
 } from './externalAnalysisExecutor.ts';
+import {
+  getExternalAnalysisSupabaseAdmin,
+} from './externalAnalysisQueue.ts';
+import { loadArticleClientOwnDomains } from './clientCompetitorExclusions.ts';
 
 const FIRECRAWL_SEARCH_MODEL = 'v2/search';
 
@@ -47,6 +51,14 @@ const executeCompetitorDiscovery = async (
       progress: { stage: 'needs_input', current: 0, total: 0 },
     };
   }
+  const ownDomains = extractCompetitorOwnDomains(
+    companyName,
+    ...(await loadArticleClientOwnDomains(
+      getExternalAnalysisSupabaseAdmin(),
+      context.job.article_id,
+      companyName,
+    )),
+  );
 
   await context.reportProgress({
     progress: {
@@ -66,7 +78,7 @@ const executeCompetitorDiscovery = async (
       limit: COMPETITOR_SEARCH_CANDIDATE_LIMIT,
       country: resolveCompetitorCountryCode(targetCountry),
       location: targetCountry,
-      excludeDomains: extractCompetitorOwnDomains(companyName),
+      excludeDomains: ownDomains,
       signal: context.signal,
     });
     const selection = analyzeAndSelectCompetitors({
@@ -81,7 +93,7 @@ const executeCompetitorDiscovery = async (
         audienceScope: textValue(input.audienceScope),
         targetCountry,
         companyName,
-        ownDomains: extractCompetitorOwnDomains(companyName),
+        ownDomains,
       },
       candidates,
       maxResults: COMPETITOR_SEARCH_RESULT_LIMIT,

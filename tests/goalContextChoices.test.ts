@@ -69,6 +69,33 @@ test('every multi-choice field has a common default that exists in its option li
   }
 });
 
+test('only the four core brief fields are required and optional defaults can be cleared', async () => {
+  const {
+    getSmartContentBriefMissingKeys,
+    normalizeGoalContext,
+    SMART_CONTENT_BRIEF_REQUIRED_KEYS,
+    updateGoalContextField,
+  } = await importWorkspaceModule('../utils/goalContext.ts');
+
+  assert.deepEqual(
+    SMART_CONTENT_BRIEF_REQUIRED_KEYS,
+    ['pageType', 'objective', 'audienceScope', 'searchIntent'],
+  );
+  const initial = normalizeGoalContext();
+  const withoutMarketingStage = updateGoalContextField(initial, 'marketingStage', '');
+  const withoutKnowledgeLevel = updateGoalContextField(
+    withoutMarketingStage,
+    'audienceKnowledgeLevel',
+    '',
+  );
+
+  assert.equal(withoutKnowledgeLevel.marketingStage, '');
+  assert.equal(withoutKnowledgeLevel.audienceKnowledgeLevel, '');
+  assert.equal(normalizeGoalContext(withoutKnowledgeLevel).marketingStage, '');
+  assert.equal(normalizeGoalContext(withoutKnowledgeLevel).audienceKnowledgeLevel, '');
+  assert.deepEqual(getSmartContentBriefMissingKeys(withoutKnowledgeLevel), []);
+});
+
 test('page objective and search intent use distinct perspectives and labels', async () => {
   const [{ getGoalContextFields, getGoalContextPresetOptions }, { translations }] = await Promise.all([
     importWorkspaceModule('../utils/goalContext.ts'),

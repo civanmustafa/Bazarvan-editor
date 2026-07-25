@@ -404,7 +404,7 @@ test('content writing has one template registry and one context builder', async 
   assert.match(settingsPage, /ContentWritingPromptSettings/);
 });
 
-test('smart content brief is visible, required before writing, and controlled by the prompt registry', async () => {
+test('smart content brief keeps only its core fields required and is controlled by the prompt registry', async () => {
   const [goalTab, goalFields, contextBuilder, promptRegistry, aiContext] = await Promise.all([
     readWorkspaceFile('components/GoalTab.tsx'),
     readWorkspaceFile('components/GoalContextFields.tsx'),
@@ -416,11 +416,13 @@ test('smart content brief is visible, required before writing, and controlled by
   assert.match(goalTab, /getSmartContentBriefMissingKeys/);
   assert.match(goalTab, /smartBriefComplete/);
   assert.match(goalFields, /SMART_CONTENT_BRIEF_REQUIRED_KEYS/);
-  assert.match(contextBuilder, /getSmartContentBriefMissingKeys/);
-  assert.match(contextBuilder, /targetAudience: 'وصف الجمهور المستهدف'/);
+  assert.match(contextBuilder, /optionalFields/);
+  assert.match(contextBuilder, /if \(value\) serialized\[key\] = value/);
+  assert.doesNotMatch(contextBuilder, /goal_context\.targetAudience/);
   assert.match(promptRegistry, /contentWriting\.contentBriefGeneration/);
   assert.match(promptRegistry, /current_brief_json/);
   assert.match(promptRegistry, /موجز المقالة الذكي/);
+  assert.match(promptRegistry, /لا تُرفق بقية حقول الجمهور/);
   assert.match(aiContext, /getPromptTemplate\([\s\S]*PROMPT_TEMPLATE_IDS\.contentBriefGeneration/);
   assert.doesNotMatch(
     `${goalTab}\n${contextBuilder}\n${promptRegistry}\n${aiContext}`,

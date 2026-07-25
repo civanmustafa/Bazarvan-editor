@@ -15,8 +15,10 @@ import {
 import {
   analyzeAndSelectCompetitors,
   extractCompetitorOwnDomains,
+  isCompetitorOwnDomain,
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
+import { loadArticleClientOwnDomains } from '../server/clientCompetitorExclusions.ts';
 import { getCompetitorPreview } from '../server/competitorPreviewCache';
 import {
   getProgrammaticCompetitorContent,
@@ -491,7 +493,10 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     const audienceScope = toText(body.audienceScope).slice(0, 100);
     const targetCountry = toText(body.targetCountry).slice(0, 160);
     const companyName = toText(body.companyName).slice(0, 500);
-    const ownDomains = extractCompetitorOwnDomains(companyName);
+    const ownDomains = extractCompetitorOwnDomains(
+      companyName,
+      ...(await loadArticleClientOwnDomains(supabase, articleId, companyName)),
+    );
     const candidates = await searchCompetitorWeb({
       query,
       limit: COMPETITOR_SEARCH_CANDIDATE_LIMIT,
@@ -593,7 +598,19 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       });
     }
     const queryText = toText(body.query);
-    const results = normalizeSelectedResults(body.results);
+    const ownDomains = await loadArticleClientOwnDomains(
+      supabase,
+      articleId,
+      toText(body.companyName),
+    );
+    const results = normalizeSelectedResults(body.results)
+      .filter(result => !isCompetitorOwnDomain(result.domain, ownDomains));
+    if (results.length === 0) {
+      throw new CompetitorApiError({
+        message: 'The selected URL belongs to the client domain and cannot be added as a competitor.',
+        code: 'client_domain_not_a_competitor',
+      });
+    }
     const discoveryState = await readCompetitorDiscoveryState(supabase, articleId);
     const discoverySignature = toText(discoveryState?.competitor_discovery_signature);
     const queued = await enqueueExtraction(supabase, {

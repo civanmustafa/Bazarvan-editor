@@ -128,18 +128,44 @@ test('content writing can start from an empty article body', async () => {
   assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'article_text'));
 });
 
-test('content-writing requires the complete smart brief before a new session starts', async () => {
+test('content-writing uses only filled optional brief fields and does not require them', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
   input.goalContext.targetAudience = '';
+  input.goalContext.audienceKnowledgeLevel = '';
+  input.goalContext.marketingStage = '';
+  input.goalContext.targetCountry = '';
 
   const bundle = buildContentWritingPromptBundle(input);
   const goalContext = JSON.parse(bundle.variables.goal_context);
 
-  assert.equal(bundle.ready, false);
+  assert.equal(bundle.ready, true);
   assert.equal(goalContext.audienceScope, 'global');
-  assert.equal(goalContext.targetAudience, '');
-  assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'goal_context.targetAudience'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'targetAudience'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'audienceKnowledgeLevel'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'marketingStage'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'targetCountry'));
+  assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => (
+    issue.code.startsWith('goal_context.') && ![
+      'goal_context.pageType',
+      'goal_context.objective',
+      'goal_context.audienceScope',
+      'goal_context.searchIntent',
+    ].includes(issue.code)
+  )));
+});
+
+test('content-writing still requires the four core brief fields and company name', async () => {
+  const { buildContentWritingPromptBundle } = await importContentWriting();
+  const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
+  input.goalContext.objective = '';
+  input.keywords.company = '';
+
+  const bundle = buildContentWritingPromptBundle(input);
+
+  assert.equal(bundle.ready, false);
+  assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'goal_context.objective'));
+  assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'company_name'));
 });
 
 test('smart brief text fields preserve spaces while typing and trim only at normalization boundaries', async () => {

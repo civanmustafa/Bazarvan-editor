@@ -526,6 +526,24 @@ const domainMatches = (domain: string, candidates: Set<string>): boolean => {
   return Array.from(candidates).some(candidate => normalized === candidate || normalized.endsWith(`.${candidate}`));
 };
 
+export const isCompetitorOwnDomain = (
+  urlOrDomain: unknown,
+  ownDomains: string[],
+): boolean => {
+  const raw = String(urlOrDomain || '').trim();
+  if (!raw || ownDomains.length === 0) return false;
+  let domain = raw;
+  try {
+    domain = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname;
+  } catch {
+    // A raw hostname can still be checked by the same suffix policy.
+  }
+  return domainMatches(
+    domain,
+    new Set(extractCompetitorOwnDomains(...ownDomains)),
+  );
+};
+
 const jaccardSimilarity = (left: string, right: string): number => {
   const leftTokens = new Set(tokenize(left));
   const rightTokens = new Set(tokenize(right));

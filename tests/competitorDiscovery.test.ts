@@ -19,6 +19,7 @@ import {
 import {
   analyzeAndSelectCompetitors,
   extractCompetitorOwnDomains,
+  isCompetitorOwnDomain,
   normalizeCompetitorText,
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
@@ -141,6 +142,8 @@ test('competitor selection normalizes Arabic context, countries, and owned domai
     extractCompetitorOwnDomains('https://www.Example.com/path', 'شركة بلا دومين'),
     ['example.com'],
   );
+  assert.equal(isCompetitorOwnDomain('https://shop.example.com/page', ['example.com']), true);
+  assert.equal(isCompetitorOwnDomain('example.com.evil.test', ['example.com']), false);
 });
 
 test('central competitor engine auto-selects strong commercial matches for user review', () => {
@@ -166,7 +169,8 @@ test('central competitor engine auto-selects strong commercial matches for user 
       searchIntent: 'commercial',
       audienceScope: 'country',
       targetCountry: 'السعودية',
-      companyName: 'https://mybrand.com',
+      companyName: 'اسم الشركة',
+      ownDomains: ['mybrand.com'],
     },
     candidates,
     maxResults: 15,
@@ -183,6 +187,23 @@ test('central competitor engine auto-selects strong commercial matches for user 
   assert.ok(selection.results.every(result => result.domain !== 'mybrand.com'));
   assert.ok(selection.results.every(result => !result.canonicalUrl.endsWith('/login')));
   assert.ok(selection.results.filter(result => result.autoSelected).every(result => result.inferredPageType !== 'video'));
+});
+
+test('manual and queued competitor discovery load the linked client domain exclusion', async () => {
+  const [apiSource, executorSource, exclusionSource] = await Promise.all([
+    readWorkspaceFile('api/competitors.ts'),
+    readWorkspaceFile('server/competitorDiscoveryExecutor.ts'),
+    readWorkspaceFile('server/clientCompetitorExclusions.ts'),
+  ]);
+
+  assert.match(apiSource, /loadArticleClientOwnDomains\(supabase, articleId, companyName\)/);
+  assert.match(apiSource, /client_domain_not_a_competitor/);
+  assert.match(executorSource, /loadArticleClientOwnDomains/);
+  assert.match(exclusionSource, /\.from\('article_client_contexts'\)/);
+  assert.match(exclusionSource, /\.from\('clients'\)/);
+  assert.match(exclusionSource, /\.from\('client_domains'\)/);
+  assert.match(exclusionSource, /\.eq\('name', textValue\(companyName\)\)/);
+  assert.match(exclusionSource, /\.eq\('is_active', true\)/);
 });
 
 test('expanded intent lexicon recognizes Arabic support and transactional searches', () => {

@@ -12,7 +12,6 @@ import {
   chunkContentWritingCompetitor,
   type ContentWritingSourceChunk,
 } from './contentWritingKnowledge';
-import { getSmartContentBriefMissingKeys } from './goalContext';
 
 export const CONTENT_WRITING_REQUIRED_COMPETITOR_COUNT = 3;
 
@@ -144,29 +143,6 @@ const getGoalContextIssues = (goalContext: Partial<GoalContext>): ContentWriting
   required.forEach(([key, label]) => {
     if (!hasText(goalContext[key])) issues.push({ code: `goal_context.${key}`, label });
   });
-  if (
-    ['local', 'country', 'regional'].includes(toText(goalContext.audienceScope).trim())
-    && !hasText(goalContext.targetCountry)
-  ) {
-    issues.push({ code: 'goal_context.targetCountry', label: 'الدولة أو الموقع المستهدف' });
-  }
-  const smartBriefLabels: Partial<Record<keyof GoalContext, string>> = {
-    targetAudience: 'وصف الجمهور المستهدف',
-    audienceKnowledgeLevel: 'مستوى معرفة الجمهور',
-    audienceNeeds: 'احتياجات الجمهور وأسئلته',
-    readerOutcome: 'النتيجة والإجراء المطلوب للقارئ',
-    marketingStage: 'المرحلة التسويقية',
-    uniqueAngle: 'الزاوية والقيمة المميزة',
-    evidenceRequirements: 'متطلبات الأدلة وحداثة المعلومات',
-    brandVoice: 'نبرة العلامة التجارية',
-    topicSensitivity: 'حساسية الموضوع',
-  };
-  getSmartContentBriefMissingKeys(goalContext).forEach(key => {
-    const label = smartBriefLabels[key];
-    if (label && !issues.some(issue => issue.code === `goal_context.${key}`)) {
-      issues.push({ code: `goal_context.${key}`, label });
-    }
-  });
   return issues;
 };
 
@@ -201,22 +177,29 @@ export const estimateContentWritingInputTokens = (value: string): number => {
 };
 
 const createGoalContextValue = (goalContext: Partial<GoalContext>): string => {
-  return JSON.stringify({
+  const serialized: Record<string, string> = {
     pageType: toText(goalContext.pageType),
     objective: toText(goalContext.objective),
     audienceScope: toText(goalContext.audienceScope),
-    targetCountry: toText(goalContext.targetCountry),
-    targetAudience: toText(goalContext.targetAudience),
-    audienceKnowledgeLevel: toText(goalContext.audienceKnowledgeLevel),
-    audienceNeeds: toText(goalContext.audienceNeeds),
-    readerOutcome: toText(goalContext.readerOutcome),
-    marketingStage: toText(goalContext.marketingStage),
-    uniqueAngle: toText(goalContext.uniqueAngle),
-    evidenceRequirements: toText(goalContext.evidenceRequirements),
-    brandVoice: toText(goalContext.brandVoice),
-    topicSensitivity: toText(goalContext.topicSensitivity),
     searchIntent: toText(goalContext.searchIntent),
-  }, null, 2);
+  };
+  const optionalFields: Array<keyof GoalContext> = [
+    'targetCountry',
+    'targetAudience',
+    'audienceKnowledgeLevel',
+    'audienceNeeds',
+    'readerOutcome',
+    'marketingStage',
+    'uniqueAngle',
+    'evidenceRequirements',
+    'brandVoice',
+    'topicSensitivity',
+  ];
+  optionalFields.forEach(key => {
+    const value = toText(goalContext[key]);
+    if (value) serialized[key] = value;
+  });
+  return JSON.stringify(serialized, null, 2);
 };
 
 const createCompetitorChunks = (
