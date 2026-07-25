@@ -17,6 +17,10 @@ import {
   checkClientCenterReadiness,
   toPublicClientCenterReadiness,
 } from './clientCenterReadiness';
+import {
+  checkExternalAnalysisQueueReadiness,
+  toPublicExternalAnalysisQueueReadiness,
+} from './externalAnalysisQueueReadiness';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,12 +62,17 @@ const healthzHandler: RequestHandler = (_req, res) => {
 
 const readyzHandler: RequestHandler = async (_req, res) => {
   const staticBuild = fs.existsSync(path.join(distDir, 'index.html'));
-  const [contentWriting, adminAiProviderSecrets, clientCenter] = await Promise.all([
+  const [contentWriting, adminAiProviderSecrets, clientCenter, externalAnalysisWorker] = await Promise.all([
     checkContentWritingReadiness(),
     checkAdminAiProviderSecretsReadiness(),
     checkClientCenterReadiness(),
+    checkExternalAnalysisQueueReadiness(),
   ]);
-  const ok = staticBuild && contentWriting.ok && adminAiProviderSecrets.ok && clientCenter.ok;
+  const ok = staticBuild
+    && contentWriting.ok
+    && adminAiProviderSecrets.ok
+    && clientCenter.ok
+    && externalAnalysisWorker.ok;
   if (!ok && contentWriting.detail) {
     console.error(`[readyz] ${contentWriting.detail}`);
   }
@@ -73,6 +82,9 @@ const readyzHandler: RequestHandler = async (_req, res) => {
   if (!ok && clientCenter.detail) {
     console.error(`[readyz] ${clientCenter.detail}`);
   }
+  if (!ok && externalAnalysisWorker.detail) {
+    console.error(`[readyz] ${externalAnalysisWorker.detail}`);
+  }
   res.status(ok ? 200 : 503).json({
     ok,
     service: 'bazarvan-editor',
@@ -81,6 +93,7 @@ const readyzHandler: RequestHandler = async (_req, res) => {
       contentWriting: toPublicContentWritingReadiness(contentWriting),
       adminAiProviderSecrets: toPublicAdminAiProviderSecretsReadiness(adminAiProviderSecrets),
       clientCenter: toPublicClientCenterReadiness(clientCenter),
+      externalAnalysisWorker: toPublicExternalAnalysisQueueReadiness(externalAnalysisWorker),
     },
   });
 };

@@ -326,6 +326,10 @@ test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini'
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
   assert.match(panel, /سحب \$\{selectedResults\.length\} موقع عبر Firecrawl/);
   assert.match(panel, /سحب المنافس عبر Firecrawl/);
+  assert.match(panel, /بانتظار عامل السحب 0\//);
+  assert.match(panel, /لم يبدأ عامل السحب 0\//);
+  assert.match(panel, /COMPETITOR_EXTRACTION_QUEUE_STALL_MS/);
+  assert.doesNotMatch(panel, /current \|\| 1/);
   assert.match(sidebar, /row\.extractionProvider\.startsWith\('firecrawl'\)/);
   assert.match(sidebar, /extraction\.source === 'firecrawl'/);
 });

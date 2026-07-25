@@ -120,6 +120,7 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - لا تستخدم `/var/www/bazarvan-smarteditor` في تعليمات النشر المستقبلية إلا إذا أُعيد ضبط PM2 عمدًا للعمل منه.
 - إذا لم تكن حالة النشر واضحة، اعرض جميع العمليات بالأمر `pm2 status`.
 - لفحص خادم الويب استخدم `pm2 describe bazarvan-editor`.
+- لفحص عامل البحث وسحب المنافسين استخدم `pm2 describe bazarvan-ai-worker`، ولسجله استخدم `pm2 logs bazarvan-ai-worker --lines 100`.
 - لفحص عامل كتابة المقالة استخدم `pm2 describe bazarvan-content-writing-worker`.
 - لفحص عامل زحف صفحات العملاء استخدم `pm2 describe bazarvan-client-page-crawler`.
 - عند فشل `/readyz` لا تعتبر النشر مكتملًا؛ راجع الترحيلات ومتغيرات البيئة وسجل العملية في PM2.

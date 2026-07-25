@@ -109,6 +109,8 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseScript, /resume_preference_version/);
   assert.match(server, /app\.get\('\/readyz', readyzHandler\)/);
   assert.match(server, /toPublicContentWritingReadiness/);
+  assert.match(server, /toPublicExternalAnalysisQueueReadiness/);
   assert.match(deploymentGuide, /curl -fsS https:\/\/smarteditor\.bazarvan\.com\/readyz/);
+  assert.match(deploymentGuide, /pm2 describe bazarvan-ai-worker/);
   assert.match(packageJson.scripts?.postbuild || '', /check:content-writing-release/);
 });

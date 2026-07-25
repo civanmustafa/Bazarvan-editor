@@ -15,6 +15,8 @@ import {
 import type { GoalContext } from '../types';
 import type { CompetitorPreviewTarget } from './CompetitorPreviewModal';
 import {
+  COMPETITOR_EXTRACTION_MAX_ATTEMPTS,
+  COMPETITOR_EXTRACTION_QUEUE_STALL_MS,
   MAX_ARTICLE_COMPETITORS,
   type CompetitorSearchMode,
 } from '../constants/competitors';
@@ -551,6 +553,56 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const current = progressNumber(progress.current);
   const total = progressNumber(progress.total) || state.competitors.length;
   const progressTitle = typeof progress.title === 'string' ? progress.title : '';
+  const progressStage = typeof progress.stage === 'string' ? progress.stage : '';
+  const activeJobAgeMs = activeJob?.created_at
+    ? Math.max(0, Date.now() - Date.parse(activeJob.created_at))
+    : 0;
+  const extractionQueueStalled = activeJob?.status === 'queued'
+    && activeJobAgeMs >= COMPETITOR_EXTRACTION_QUEUE_STALL_MS;
+  const extractionWaitingForWorker = activeJob?.status === 'queued';
+  const extractionRetryScheduled = activeJob?.status === 'retry_scheduled';
+  const extractionPreparing = activeJob?.status === 'running'
+    && progressStage !== 'extracting_competitor'
+    && progressStage !== 'competitor_processed';
+  const displayedCurrent = Math.min(
+    Math.max(0, current),
+    Math.max(1, total),
+  );
+  const extractionStatusLabel = activeJob
+    ? extractionQueueStalled
+      ? isArabic
+        ? `لم يبدأ عامل السحب 0/${total || 1}`
+        : `Extraction worker did not start 0/${total || 1}`
+      : extractionWaitingForWorker
+        ? isArabic
+          ? `بانتظار عامل السحب 0/${total || 1}`
+          : `Waiting for extraction worker 0/${total || 1}`
+        : extractionRetryScheduled
+          ? isArabic
+            ? `بانتظار إعادة المحاولة ${displayedCurrent}/${total || 1}`
+            : `Waiting to retry ${displayedCurrent}/${total || 1}`
+          : extractionPreparing
+            ? isArabic
+              ? `عامل السحب يجهّز المهمة 0/${total || 1}`
+              : `Extraction worker is preparing 0/${total || 1}`
+            : isArabic
+              ? `سحب المنافس عبر Firecrawl ${Math.max(1, displayedCurrent)}/${total || 1}`
+              : `Importing via Firecrawl ${Math.max(1, displayedCurrent)}/${total || 1}`
+    : '';
+  const activeJobError = activeJob?.last_error?.trim() || '';
+  const activeJobWarning = extractionQueueStalled
+    ? isArabic
+      ? 'تم حفظ المهمة، لكن عامل bazarvan-ai-worker لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل العامل في هوستينجر، ثم أعد المحاولة.'
+      : 'The job was saved, but bazarvan-ai-worker did not claim it within 90 seconds. Stop it, start the worker on Hostinger, then retry.'
+    : extractionWaitingForWorker
+      ? isArabic
+        ? 'تم حفظ المهمة في الطابور، ولم يبدأ اتصال Firecrawl بعد.'
+        : 'The job is queued; no Firecrawl request has started yet.'
+      : activeJob?.status === 'running'
+        ? isArabic
+          ? 'اتصال Firecrawl جارٍ. قد يستغرق الرابط الواحد حتى 75 ثانية قبل نجاحه أو ظهور خطئه.'
+          : 'Firecrawl is running. One URL can take up to 75 seconds before it succeeds or reports an error.'
+        : '';
 
   return (
     <section className="space-y-3 border-b border-gray-200 pb-4 dark:border-[#3C3C3C]">
@@ -770,15 +822,24 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
       )}
 
       {activeJob && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2.5 text-xs dark:border-blue-900/40 dark:bg-blue-500/10">
+        <div
+          data-testid="competitor-extraction-status"
+          className={`rounded-md border px-2.5 py-2.5 text-xs ${
+            extractionQueueStalled || extractionRetryScheduled
+              ? 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-500/10'
+              : 'border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-500/10'
+          }`}
+        >
           <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex min-w-0 items-center gap-2 font-black text-blue-800 dark:text-blue-300">
-              <LoaderCircle size={14} className="shrink-0 animate-spin" />
-              <span className="truncate">
-                {isArabic
-                  ? `سحب المنافس عبر Firecrawl ${Math.min(current || 1, total || 1)}/${total || 1}`
-                  : `Importing via Firecrawl ${Math.min(current || 1, total || 1)}/${total || 1}`}
-              </span>
+            <span className={`inline-flex min-w-0 items-center gap-2 font-black ${
+              extractionQueueStalled || extractionRetryScheduled
+                ? 'text-amber-800 dark:text-amber-300'
+                : 'text-blue-800 dark:text-blue-300'
+            }`}>
+              {extractionQueueStalled
+                ? <AlertTriangle size={14} className="shrink-0" />
+                : <LoaderCircle size={14} className="shrink-0 animate-spin" />}
+              <span className="truncate">{extractionStatusLabel}</span>
             </span>
             <button
               type="button"
@@ -790,7 +851,31 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               {actionId === 'cancel' ? <LoaderCircle size={13} className="animate-spin" /> : <Square size={12} fill="currentColor" />}
             </button>
           </div>
-          {progressTitle && <div className="mt-1 truncate text-[11px] text-blue-700 dark:text-blue-300">{progressTitle}</div>}
+          {progressTitle && !extractionWaitingForWorker && (
+            <div className="mt-1 truncate text-[11px] text-blue-700 dark:text-blue-300">{progressTitle}</div>
+          )}
+          {activeJobWarning && (
+            <div className={`mt-1 text-[10px] font-bold leading-4 ${
+              extractionQueueStalled
+                ? 'text-amber-800 dark:text-amber-300'
+                : 'text-blue-700 dark:text-blue-300'
+            }`}>
+              {activeJobWarning}
+            </div>
+          )}
+          {activeJobError && (
+            <div className="mt-1 text-[10px] font-bold leading-4 text-red-700 dark:text-red-300">
+              {activeJobError}
+            </div>
+          )}
+          {(activeJob.attempt_count || 0) > 0 && (
+            <div className="mt-1 text-[10px] font-bold text-gray-600 dark:text-gray-300">
+              {isArabic ? 'المحاولة' : 'Attempt'} {Math.min(
+                activeJob.attempt_count || 1,
+                COMPETITOR_EXTRACTION_MAX_ATTEMPTS,
+              )}/{COMPETITOR_EXTRACTION_MAX_ATTEMPTS}
+            </div>
+          )}
           {activeJob.status === 'retry_scheduled' && activeJob.next_attempt_at && (
             <div className="mt-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">
               {isArabic ? 'إعادة المحاولة' : 'Retry'}: {new Date(activeJob.next_attempt_at).toLocaleString(isArabic ? 'ar' : 'en')}
