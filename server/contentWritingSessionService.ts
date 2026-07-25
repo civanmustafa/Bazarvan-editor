@@ -259,7 +259,7 @@ export const getContentWritingMessages = async (
 
 export const getContentWritingSteps = async (
   sessionId: string,
-  options: { includeContent?: boolean; includeMetadata?: boolean } = {},
+  options: { includeContent?: boolean; includeOutput?: boolean; includeMetadata?: boolean } = {},
 ): Promise<ContentWritingStep[]> => {
   const columns = [
     'id',
@@ -269,7 +269,8 @@ export const getContentWritingSteps = async (
     'ordinal',
     'title',
     'status',
-    ...(options.includeContent ? ['prompt_text', 'output_text'] : []),
+    ...(options.includeContent ? ['prompt_text'] : []),
+    ...(options.includeContent || options.includeOutput ? ['output_text'] : []),
     ...(options.includeMetadata ? ['metadata'] : []),
     'attempt_count',
     'last_error_code',

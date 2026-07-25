@@ -69,6 +69,24 @@ test('structured content-writing migration persists resumable steps without API 
   assertBalancedSqlParentheses(migration);
 });
 
+test('structured writing results are fetched without reloading full step prompts', async () => {
+  const [api, service, client, panel] = await Promise.all([
+    readWorkspaceFile('api/contentWriting.ts'),
+    readWorkspaceFile('server/contentWritingSessionService.ts'),
+    readWorkspaceFile('utils/contentWritingSessions.ts'),
+    readWorkspaceFile('components/ContentWritingPanel.tsx'),
+  ]);
+
+  assert.match(api, /const includeStepOutput = includeStepContent \|\| body\.includeStepOutput === true/);
+  assert.match(api, /includeOutput: includeStepOutput/);
+  assert.match(service, /options\.includeContent \|\| options\.includeOutput \? \['output_text'\] : \[\]/);
+  assert.match(service, /options\.includeContent \? \['prompt_text'\] : \[\]/);
+  assert.match(client, /includeStepOutput\?: boolean/);
+  assert.match(panel, /getContentWritingSessionDetail\(sessionId, \{ includeStepOutput: true \}\)/);
+  assert.match(panel, /automaticWorkflowStepKey/);
+  assert.match(panel, /content-writing-step-result-/);
+});
+
 test('content-writing application migration records explicit editor approvals', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260722020000_content_writing_application.sql',

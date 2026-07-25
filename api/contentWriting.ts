@@ -162,7 +162,7 @@ const requireJsonRequest = async (req: any): Promise<Record<string, any>> => {
 
 const toPublicStep = (
   step: ContentWritingStep,
-  options: { includeContent?: boolean } = {},
+  options: { includeContent?: boolean; includeOutput?: boolean } = {},
 ): Record<string, unknown> => ({
   id: step.id,
   sessionId: step.session_id,
@@ -173,6 +173,8 @@ const toPublicStep = (
   status: step.status,
   ...(options.includeContent ? {
     promptText: step.prompt_text || '',
+  } : {}),
+  ...(options.includeContent || options.includeOutput ? {
     outputText: step.output_text || null,
   } : {}),
   metadata: step.metadata,
@@ -295,10 +297,12 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     await requireArticleReadAccess(supabase, session.article_id, principal.userId);
     const messages = body.includeMessages === false ? undefined : await getContentWritingMessages(session.id);
     const includeStepContent = body.includeStepContent === true;
+    const includeStepOutput = includeStepContent || body.includeStepOutput === true;
     const steps = body.includeSteps === false
       ? undefined
       : await getContentWritingSteps(session.id, {
         includeContent: includeStepContent,
+        includeOutput: includeStepOutput,
         includeMetadata: includeStepContent,
       });
     return {
@@ -317,7 +321,10 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
           })),
         } : {}),
         ...(steps ? {
-          steps: steps.map(step => toPublicStep(step, { includeContent: includeStepContent })),
+          steps: steps.map(step => toPublicStep(step, {
+            includeContent: includeStepContent,
+            includeOutput: includeStepOutput,
+          })),
         } : {}),
       },
     };

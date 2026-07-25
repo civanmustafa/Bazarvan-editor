@@ -386,7 +386,12 @@ export const recordExternalContentWritingResult = async (options: {
 
 export const getContentWritingSessionDetail = async (
   sessionId: string,
-  options: { includeMessages?: boolean; includeSteps?: boolean; includeStepContent?: boolean } = {},
+  options: {
+    includeMessages?: boolean;
+    includeSteps?: boolean;
+    includeStepContent?: boolean;
+    includeStepOutput?: boolean;
+  } = {},
 ): Promise<ContentWritingSessionDetail> => {
   const payload = await requestContentWriting({
     action: 'get',
@@ -394,6 +399,7 @@ export const getContentWritingSessionDetail = async (
     includeMessages: options.includeMessages === true,
     includeSteps: options.includeSteps !== false,
     includeStepContent: options.includeStepContent === true,
+    includeStepOutput: options.includeStepOutput === true,
   });
   const session = normalizeSession(payload.session);
   if (!session) throw new Error('Content writing API returned an invalid session.');

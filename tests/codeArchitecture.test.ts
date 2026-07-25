@@ -512,6 +512,11 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(panel, /cancelContentWritingSession\(/);
   assert.match(panel, /resumeContentWritingSession\(/);
   assert.match(panel, /workflowSteps\.map/);
+  assert.match(panel, /includeStepOutput: true/);
+  assert.match(panel, /expandedWorkflowStepKey/);
+  assert.match(panel, /aria-expanded=\{isExpanded\}/);
+  assert.match(panel, /outputText/);
+  assert.match(panel, /ستظهر هنا مباشرة فور اكتمالها/);
   assert.match(panel, /selectedDetail\?\.session\.id === selectedSessionId/);
   assert.match(panel, /activeDetail\.session\.resultText/);
   assert.match(panel, /recordContentWritingSessionApplication/);
@@ -520,6 +525,7 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(client, /getAuthenticatedApiHeaders\(/);
   assert.match(client, /includeMessages: options\.includeMessages === true/);
   assert.match(client, /includeSteps: options\.includeSteps !== false/);
+  assert.match(client, /includeStepOutput: options\.includeStepOutput === true/);
   assert.match(client, /action: 'start'/);
   assert.match(client, /action: 'get'/);
   assert.match(client, /action: 'list'/);

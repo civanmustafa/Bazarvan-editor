@@ -4,6 +4,7 @@ import {
   BadgeDollarSign,
   Check,
   CheckCircle2,
+  ChevronDown,
   CircleStop,
   Clock3,
   Copy,
@@ -229,6 +230,16 @@ const getStepLabel = (step: ContentWritingStep, isArabic: boolean): string => {
   return `${isArabic ? 'القسم' : 'Section'} ${sectionIndex}: ${step.title}`;
 };
 
+const getStepStatusLabel = (status: ContentWritingStepStatus, isArabic: boolean): string => {
+  const labels: Record<ContentWritingStepStatus, [string, string]> = {
+    pending: ['لم تبدأ', 'Pending'],
+    running: ['جارية الآن', 'Running now'],
+    completed: ['مكتملة', 'Completed'],
+    failed: ['فشلت', 'Failed'],
+  };
+  return labels[status][isArabic ? 0 : 1];
+};
+
 const ContentWritingPanel: React.FC = () => {
   const {
     t,
@@ -265,6 +276,7 @@ const ContentWritingPanel: React.FC = () => {
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
   const [isApplying, setIsApplying] = useState(false);
   const [applicationNotice, setApplicationNotice] = useState<ApplicationNotice | null>(null);
+  const [expandedWorkflowStepKey, setExpandedWorkflowStepKey] = useState('');
   const activeArticleRef = useRef(articleId);
   const detailRequestRef = useRef(0);
   const startInFlightRef = useRef(false);
@@ -398,7 +410,9 @@ const ContentWritingPanel: React.FC = () => {
     const requestId = ++detailRequestRef.current;
     if (!options.silent) setIsDetailLoading(true);
     try {
-      const detail = await getContentWritingSessionDetail(sessionId);
+      // Live step review needs only the persisted output. Keep the much larger prompt text
+      // server-side so active-session polling stays bounded.
+      const detail = await getContentWritingSessionDetail(sessionId, { includeStepOutput: true });
       if (requestId !== detailRequestRef.current) return;
       setSelectedDetail(detail);
       mergeSession(detail.session);
@@ -445,6 +459,7 @@ const ContentWritingPanel: React.FC = () => {
     setCopied(false);
     setReviewSnapshot(null);
     setApplicationNotice(null);
+    setExpandedWorkflowStepKey('');
     trackedKeyFeedbackSessionsRef.current.clear();
     contentWritingActivityIdsRef.current.clear();
     if (articleId) void refreshSessions();
@@ -824,6 +839,15 @@ const ContentWritingPanel: React.FC = () => {
   const workflowSteps = useMemo(() => activeDetail?.steps || [], [activeDetail?.steps]);
   const completedWorkflowSteps = workflowSteps.filter(step => step.status === 'completed').length;
   const currentWorkflowStep = workflowSteps.find(step => step.stepKey === workflowStepKey);
+  const automaticWorkflowStepKey = (
+    (workflowStepKey && workflowSteps.some(step => step.stepKey === workflowStepKey)
+      ? workflowStepKey
+      : '')
+    || workflowSteps.find(step => step.status === 'running')?.stepKey
+    || [...workflowSteps].reverse().find(step => step.status === 'completed')?.stepKey
+    || workflowSteps[0]?.stepKey
+    || ''
+  );
   const currentKeySuffix = typeof progress.keySuffix === 'string' ? progress.keySuffix.trim() : '';
   const sessionKeyUsageEntries = useMemo(() => {
     if (!selectedSession) return [];
@@ -839,6 +863,10 @@ const ContentWritingPanel: React.FC = () => {
       result: workflowSteps.map(step => step.metadata),
     });
   }, [selectedSession, workflowSteps]);
+
+  useEffect(() => {
+    setExpandedWorkflowStepKey(automaticWorkflowStepKey);
+  }, [automaticWorkflowStepKey, selectedSessionId]);
 
   useEffect(() => {
     if (!selectedSession || selectedSession.executionMode !== 'api') return;
@@ -1113,20 +1141,94 @@ const ContentWritingPanel: React.FC = () => {
                   <span>{isArabic ? 'مراحل التوليد المنظم' : 'Structured writing steps'}</span>
                   <span className="tabular-nums text-gray-400">{completedWorkflowSteps}/{workflowSteps.length}</span>
                 </div>
-                <div className="divide-y divide-gray-100 border-y border-gray-200 dark:divide-[#333] dark:border-[#3C3C3C]">
-                  {workflowSteps.map(step => (
-                    <div key={step.id} className="flex min-h-9 items-center justify-between gap-2 py-2 text-[11px]">
-                      <div className={`flex min-w-0 items-center gap-2 font-bold ${STEP_STATUS_STYLES[step.status]}`}>
-                        <span className="shrink-0"><StepStatusIcon status={step.status} /></span>
-                        <span className="truncate text-gray-700 dark:text-gray-200">{getStepLabel(step, isArabic)}</span>
+                <div className="space-y-1.5">
+                  {workflowSteps.map(step => {
+                    const isExpanded = expandedWorkflowStepKey === step.stepKey;
+                    const outputText = typeof step.outputText === 'string' ? step.outputText.trim() : '';
+                    const resultPanelId = `content-writing-step-result-${step.id}`;
+                    return (
+                      <div
+                        key={step.id}
+                        className={`overflow-hidden rounded-md border ${
+                          step.status === 'running'
+                            ? 'border-blue-300 bg-blue-50/40 dark:border-blue-800 dark:bg-blue-500/5'
+                            : 'border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#252525]'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setExpandedWorkflowStepKey(current => (
+                            current === step.stepKey ? '' : step.stepKey
+                          ))}
+                          aria-expanded={isExpanded}
+                          aria-controls={resultPanelId}
+                          className="flex min-h-11 w-full items-center justify-between gap-2 px-2.5 py-2 text-start text-[11px] hover:bg-gray-50 dark:hover:bg-white/5"
+                        >
+                          <span className={`flex min-w-0 items-start gap-2 font-bold ${STEP_STATUS_STYLES[step.status]}`}>
+                            <span className="mt-0.5 shrink-0"><StepStatusIcon status={step.status} /></span>
+                            <span className="min-w-0 break-words leading-5 text-gray-700 dark:text-gray-200">
+                              {getStepLabel(step, isArabic)}
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            {step.attemptCount > 1 && (
+                              <span className="rounded bg-gray-100 px-1.5 py-1 text-[9px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                                {isArabic ? 'محاولة' : 'Attempt'} {step.attemptCount}
+                              </span>
+                            )}
+                            <span className={`rounded px-1.5 py-1 text-[9px] font-black ${STEP_STATUS_STYLES[step.status]}`}>
+                              {getStepStatusLabel(step.status, isArabic)}
+                            </span>
+                            <ChevronDown
+                              size={14}
+                              className={`text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                            />
+                          </span>
+                        </button>
+
+                        {isExpanded && (
+                          <div
+                            id={resultPanelId}
+                            className="border-t border-gray-100 px-2.5 py-2.5 text-[11px] dark:border-[#333]"
+                            aria-live={step.status === 'running' ? 'polite' : undefined}
+                          >
+                            <div className="mb-2 font-black text-gray-600 dark:text-gray-300">
+                              {isArabic ? 'نتيجة المرحلة' : 'Step result'}
+                            </div>
+                            {outputText ? (
+                              <div
+                                className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-gray-50 p-2.5 leading-6 text-gray-700 custom-scrollbar dark:bg-[#1F1F1F] dark:text-gray-200"
+                                dir="auto"
+                              >
+                                {outputText}
+                              </div>
+                            ) : step.status === 'running' ? (
+                              <div className="flex items-center gap-2 rounded-md bg-blue-50 p-2.5 font-bold leading-5 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                                <Loader2 size={13} className="shrink-0 animate-spin" />
+                                <span>
+                                  {isArabic
+                                    ? 'جار توليد نتيجة هذه المرحلة، وستظهر هنا مباشرة فور اكتمالها.'
+                                    : 'This step is generating now. Its result will appear here immediately when complete.'}
+                                </span>
+                              </div>
+                            ) : step.status === 'failed' ? (
+                              <div className="rounded-md bg-red-50 p-2.5 font-bold leading-5 text-red-700 dark:bg-red-900/20 dark:text-red-300">
+                                {step.lastError || (isArabic ? 'فشلت هذه المرحلة ولم تُحفظ نتيجة صالحة.' : 'This step failed without a valid saved result.')}
+                              </div>
+                            ) : step.status === 'pending' ? (
+                              <div className="rounded-md bg-gray-50 p-2.5 font-semibold leading-5 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-400">
+                                {isArabic ? 'لم تبدأ هذه المرحلة بعد.' : 'This step has not started yet.'}
+                              </div>
+                            ) : (
+                              <div className="rounded-md bg-gray-50 p-2.5 font-semibold leading-5 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-400">
+                                {isArabic ? 'اكتملت المرحلة دون نتيجة نصية قابلة للعرض.' : 'This step completed without a displayable text result.'}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      {step.attemptCount > 1 && (
-                        <span className="shrink-0 rounded bg-gray-100 px-1.5 py-1 text-[10px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
-                          {isArabic ? 'محاولة' : 'Attempt'} {step.attemptCount}
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
