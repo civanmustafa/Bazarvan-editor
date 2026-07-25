@@ -30,7 +30,6 @@ const Dashboard = lazy(() => import('./components/Dashboard'));
 const AdminApp = lazy(() => import('./components/AdminApp'));
 const SettingsPage = lazy(() => import('./components/SettingsPage'));
 const EditorApp = lazy(() => import('./components/EditorApp'));
-const AiExecutionMonitor = lazy(() => import('./components/AiKeyUsageToast'));
 
 /*
  * App shell map:
@@ -307,9 +306,6 @@ const AppContent: React.FC = () => {
           )}
         >
           {renderView()}
-        </Suspense>
-        <Suspense fallback={null}>
-          <AiExecutionMonitor />
         </Suspense>
       </>
     );

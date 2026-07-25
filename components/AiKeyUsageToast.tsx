@@ -1,15 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Activity,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   CircleDollarSign,
   Clock3,
-  FileText,
-  KeyRound,
   Loader2,
-  MapPin,
   Square,
   X,
   XCircle,
@@ -93,18 +88,6 @@ const getLabel = (
   return normalized.replace(/[_-]+/g, ' ') || (isArabic ? 'جار التنفيذ' : 'Running');
 };
 
-const getFailureReason = (reason: string | undefined, isArabic: boolean): string => {
-  const normalized = String(reason || '').trim();
-  if (!normalized) return '';
-  if (!isArabic) return normalized;
-  const token = normalized.toLowerCase();
-  if (token.includes('quota') || token.includes('429')) return 'تجاوز الحصة أو كثرة الطلبات';
-  if (token.includes('auth') || token.includes('401') || token.includes('403')) return 'المفتاح غير صالح أو غير مصرح';
-  if (token.includes('timeout') || token.includes('timed out')) return 'انتهت مهلة الاتصال';
-  if (token.includes('blocked')) return 'المفتاح محظور لدى المزود';
-  return normalized;
-};
-
 const formatDuration = (startedAt: string, completedAt: string | undefined, now: number): string => {
   const started = new Date(startedAt).getTime();
   const ended = completedAt ? new Date(completedAt).getTime() : now;
@@ -120,30 +103,19 @@ const formatLastUpdateAge = (updatedAt: string, now: number, isArabic: boolean):
   if (seconds < 5) return isArabic ? 'الآن' : 'now';
   if (seconds < 60) return isArabic ? `منذ ${seconds} ث` : `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return isArabic ? `منذ ${minutes} د` : `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return isArabic ? `منذ ${hours} س` : `${hours}h ago`;
-};
-
-const getCompactActivityId = (id: string): string => {
-  const normalized = id.trim();
-  if (normalized.length <= 16) return normalized;
-  return `…${normalized.slice(-12)}`;
+  return isArabic ? `منذ ${minutes} د` : `${minutes}m ago`;
 };
 
 const StatusIcon: React.FC<{ state: AiExecutionState }> = ({ state }) => {
-  if (state === 'running') return <Loader2 size={15} className="animate-spin" />;
-  if (state === 'success') return <CheckCircle2 size={15} />;
-  if (state === 'failed') return <XCircle size={15} />;
-  return <XCircle size={15} />;
+  if (state === 'running') return <Loader2 size={13} className="animate-spin" />;
+  if (state === 'success') return <CheckCircle2 size={13} />;
+  return <XCircle size={13} />;
 };
 
 const AiExecutionMonitor: React.FC = () => {
   const { uiLanguage } = useUser();
   const isArabic = uiLanguage !== 'en';
   const [activities, setActivities] = useState<AiExecutionActivity[]>(() => getAiExecutionActivities());
-  const [selectedId, setSelectedId] = useState(() => activities[0]?.id || '');
-  const [collapsed, setCollapsed] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [cancellingId, setCancellingId] = useState('');
   const [cancelError, setCancelError] = useState('');
@@ -152,19 +124,12 @@ const AiExecutionMonitor: React.FC = () => {
     const handleActivity = (event: Event) => {
       const incoming = (event as CustomEvent<AiExecutionActivity>).detail;
       if (!incoming?.id) return;
-      setActivities(current => {
-        const next = [
-          incoming,
-          ...current.filter(activity => activity.id !== incoming.id),
-        ].slice(0, 8);
-        return next;
-      });
-      setSelectedId(current => {
-        if (!current || ['queued', 'preparing', 'connecting', 'resuming'].includes(incoming.stage)) {
-          return incoming.id;
-        }
-        return current;
-      });
+      setActivities(current => [
+        incoming,
+        ...current.filter(activity => activity.id !== incoming.id),
+      ].slice(0, 8));
+      setCancelError('');
+
       if (incoming.state !== 'running') {
         const terminalUpdatedAt = incoming.updatedAt;
         window.setTimeout(() => {
@@ -173,7 +138,6 @@ const AiExecutionMonitor: React.FC = () => {
             || activity.state === 'running'
             || activity.updatedAt !== terminalUpdatedAt
           )));
-          setSelectedId(current => current === incoming.id ? '' : current);
         }, TERMINAL_NOTICE_TTL_MS);
       }
     };
@@ -187,27 +151,12 @@ const AiExecutionMonitor: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [activities]);
 
-  useEffect(() => {
-    if (selectedId && activities.some(activity => activity.id === selectedId)) return;
-    setSelectedId(activities[0]?.id || '');
-  }, [activities, selectedId]);
-
-  useEffect(() => {
-    setCancelError('');
-  }, [selectedId]);
-
-  const selected = activities.find(activity => activity.id === selectedId) || activities[0];
-  const activeCount = activities.filter(activity => activity.state === 'running').length;
-  const orderedEntries = useMemo(() => {
-    if (!selected) return [];
-    return [...selected.entries].sort((left, right) => {
-      if (left.outcome === right.outcome) return 0;
-      return left.outcome === 'failed' ? -1 : 1;
-    });
-  }, [selected]);
-
+  // The first activity is always the one with the latest live update. Keeping the
+  // monitor in one row prevents a detached popup from covering editor controls.
+  const selected = activities[0];
   if (!selected) return null;
 
+  const activeCount = activities.filter(activity => activity.state === 'running').length;
   const succeededKeys = selected.entries.filter(entry => entry.outcome === 'success').length;
   const failedKeys = selected.entries.filter(entry => entry.outcome === 'failed').length;
   const tierLabel = selected.credentialTier === 'free'
@@ -216,19 +165,19 @@ const AiExecutionMonitor: React.FC = () => {
       ? (isArabic ? 'مدفوع' : 'Paid')
       : (isArabic ? 'غير محدد' : 'Unknown');
   const requestedProviderChanged = formatAiProviderName(selected.requestedProvider) !== formatAiProviderName(selected.provider);
-  const requestedModelChanged = selected.requestedModel
+  const requestedModelChanged = Boolean(
+    selected.requestedModel
     && selected.model
-    && selected.requestedModel !== selected.model;
+    && selected.requestedModel !== selected.model,
+  );
   const sourceLabel = selected.surface
     ? getLabel(SURFACE_LABELS, selected.surface, isArabic)
     : (isArabic ? 'داخل المحرر' : 'Inside the editor');
-  const surfaceLabel = selected.action || sourceLabel;
-  const articleLabel = selected.articleTitle
-    || selected.articleKey
-    || (selected.articleId
-      ? `${isArabic ? 'مقالة' : 'Article'} #${selected.articleId.slice(0, 8)}`
-      : (isArabic ? 'المسودة الحالية غير المحفوظة' : 'Current unsaved draft'));
-  const lastUpdateAge = formatLastUpdateAge(selected.updatedAt, now, isArabic);
+  const actionLabel = selected.action || sourceLabel;
+  const stageLabel = selected.state === 'running'
+    ? getLabel(STAGE_LABELS, selected.stage, isArabic)
+    : STATE_LABELS[selected.state][isArabic ? 0 : 1];
+  const visibleMessage = getVisibleAiExecutionMessage(selected, actionLabel, sourceLabel);
   const lastUpdateTime = new Date(selected.updatedAt).getTime();
   const isStale = selected.state === 'running'
     && Number.isFinite(lastUpdateTime)
@@ -236,14 +185,7 @@ const AiExecutionMonitor: React.FC = () => {
   const isCancelling = cancellingId === selected.id
     || selected.stage === 'cancelling'
     || selected.stage === 'cancel_requested';
-  const keyStatus = selected.state === 'running'
-    ? getLabel(STAGE_LABELS, selected.stage, isArabic)
-    : selected.state === 'success'
-      ? (isArabic ? 'اكتمل الطلب بنجاح' : 'Request completed successfully')
-      : selected.state === 'cancelled'
-        ? (isArabic ? 'تم إيقاف الطلب' : 'Request stopped')
-        : (isArabic ? 'لم ينجح الطلب' : 'Request failed');
-  const visibleMessage = getVisibleAiExecutionMessage(selected, surfaceLabel, sourceLabel);
+
   const handleCancel = async () => {
     if (!selected.cancellable || isCancelling) return;
     setCancellingId(selected.id);
@@ -261,264 +203,129 @@ const AiExecutionMonitor: React.FC = () => {
 
   return (
     <div
-      className="fixed bottom-4 left-4 z-[10000] w-[min(25rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-[#3C3C3C] dark:bg-[#242424]"
+      data-ai-execution-monitor="inline"
+      className="flex min-h-10 shrink-0 items-center border-x border-b border-gray-300 bg-white px-2 text-[10px] font-bold text-gray-600 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-300"
       dir={isArabic ? 'rtl' : 'ltr'}
       role="status"
       aria-live="polite"
     >
-      <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2.5 dark:border-[#333]">
-        <Activity size={16} className="shrink-0 text-[#b8922e]" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-black text-gray-800 dark:text-gray-100">
-            {isArabic ? 'حالة اتصال الذكاء الاصطناعي' : 'AI connection status'}
-          </div>
-          <div className="truncate text-[10px] font-bold text-gray-400">
-            {surfaceLabel || (isArabic ? 'عملية داخل المحرر' : 'Editor operation')}
-            {activeCount > 1 ? ` · ${activeCount} ${isArabic ? 'عمليات مباشرة' : 'live operations'}` : ''}
-          </div>
-        </div>
-        <span className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-black ${stateStyles[selected.state]}`}>
-          <StatusIcon state={selected.state} />
-          {STATE_LABELS[selected.state][isArabic ? 0 : 1]}
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto whitespace-nowrap py-1.5 custom-scrollbar">
+        <span className="inline-flex shrink-0 items-center gap-1 font-black text-gray-800 dark:text-gray-100">
+          <Activity size={14} className="text-[#b8922e]" />
+          {isArabic ? 'الذكاء الاصطناعي' : 'AI'}
         </span>
-        <button
-          type="button"
-          onClick={() => setCollapsed(current => !current)}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-[#333] dark:hover:text-gray-100"
-          aria-label={collapsed ? (isArabic ? 'توسيع' : 'Expand') : (isArabic ? 'تصغير' : 'Collapse')}
-        >
-          {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
-        <button
-          type="button"
-          onClick={() => setActivities(current => current.filter(activity => activity.id !== selected.id))}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-[#333] dark:hover:text-gray-100"
-          aria-label={isArabic ? 'إخفاء النافذة فقط' : 'Hide window only'}
-          title={isArabic ? 'إخفاء النافذة فقط؛ لا يوقف العملية' : 'Hide this window only; the operation keeps running'}
-        >
-          <X size={14} />
-        </button>
+
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 font-black ${stateStyles[selected.state]}`}>
+          <StatusIcon state={selected.state} />
+          {stageLabel}
+        </span>
+
+        <span className="max-w-44 shrink-0 truncate font-black text-gray-700 dark:text-gray-100" title={`${actionLabel} · ${sourceLabel}`}>
+          {actionLabel}
+          {actionLabel !== sourceLabel ? ` · ${sourceLabel}` : ''}
+          {activeCount > 1 ? ` · +${activeCount - 1}` : ''}
+        </span>
+
+        <span className="shrink-0 text-gray-300 dark:text-gray-600">|</span>
+        <span className="shrink-0">
+          {isArabic ? 'المزوّد' : 'Provider'}: <strong>{formatAiProviderName(selected.provider)}</strong>
+        </span>
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-black ${
+          selected.credentialTier === 'free'
+            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200'
+            : selected.credentialTier === 'paid'
+              ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200'
+              : 'bg-gray-200 text-gray-600 dark:bg-gray-500/15 dark:text-gray-300'
+        }`}>
+          <CircleDollarSign size={10} />
+          {tierLabel}
+        </span>
+        {requestedProviderChanged && (
+          <span className="shrink-0 text-amber-600 dark:text-amber-300">
+            {isArabic ? 'الأولوية' : 'Preferred'}: <strong>{formatAiProviderName(selected.requestedProvider)}</strong>
+          </span>
+        )}
+
+        <span className="shrink-0 text-gray-300 dark:text-gray-600">|</span>
+        <span className="shrink-0" dir="ltr">
+          <strong>{selected.model || selected.requestedModel || (isArabic ? 'بانتظار الموديل' : 'Model pending')}</strong>
+          {requestedModelChanged ? ` ← ${selected.requestedModel}` : ''}
+          {selected.currentModelIndex && selected.modelCount
+            ? ` (${selected.currentModelIndex}/${selected.modelCount})`
+            : ''}
+        </span>
+
+        <span className="shrink-0 text-gray-300 dark:text-gray-600">|</span>
+        <span className="shrink-0" dir="ltr">
+          {selected.keySuffix ? formatAiKeySuffix(selected.keySuffix) : (isArabic ? 'بانتظار المفتاح' : 'Key pending')}
+          {selected.currentKeyIndex && selected.keyCount
+            ? ` (${selected.currentKeyIndex}/${selected.keyCount})`
+            : ''}
+        </span>
+        {failedKeys > 0 && (
+          <span className="shrink-0 text-red-600 dark:text-red-300">
+            {isArabic ? 'فشل' : 'Failed'} {failedKeys}
+          </span>
+        )}
+        {succeededKeys > 0 && (
+          <span className="shrink-0 text-emerald-600 dark:text-emerald-300">
+            {isArabic ? 'نجح' : 'Succeeded'} {succeededKeys}
+          </span>
+        )}
+        {selected.httpStatus && (
+          <span className="shrink-0 font-mono" dir="ltr">HTTP {selected.httpStatus}</span>
+        )}
+
+        <span className="inline-flex shrink-0 items-center gap-1 font-mono" dir="ltr">
+          <Clock3 size={10} />
+          {formatDuration(selected.startedAt, selected.completedAt, now)}
+        </span>
+        <span className={`shrink-0 ${isStale ? 'text-amber-600 dark:text-amber-300' : ''}`}>
+          {isArabic ? 'آخر تحديث' : 'Updated'}: {formatLastUpdateAge(selected.updatedAt, now, isArabic)}
+        </span>
+
+        {visibleMessage && (
+          <span className={`min-w-32 max-w-72 truncate ${
+            selected.state === 'failed'
+              ? 'text-red-600 dark:text-red-300'
+              : 'text-blue-700 dark:text-blue-200'
+          }`} title={visibleMessage}>
+            {visibleMessage}
+          </span>
+        )}
+        {cancelError && (
+          <span className="min-w-32 max-w-72 truncate text-red-600 dark:text-red-300" title={cancelError}>
+            {cancelError}
+          </span>
+        )}
       </div>
 
-      {!collapsed && (
-        <>
-          {activities.length > 1 && (
-            <div className="flex gap-1 overflow-x-auto border-b border-gray-100 px-2 py-1.5 custom-scrollbar dark:border-[#333]">
-              {activities.slice(0, 5).map(activity => (
-                <button
-                  key={activity.id}
-                  type="button"
-                  onClick={() => setSelectedId(activity.id)}
-                  className={`inline-flex min-w-0 shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[9px] font-black ${
-                    activity.id === selected.id
-                      ? 'bg-[#d4af37]/15 text-[#8a6f1d] dark:text-[#f2d675]'
-                      : 'bg-gray-50 text-gray-500 hover:bg-gray-100 dark:bg-[#2d2d2d] dark:text-gray-300 dark:hover:bg-[#333]'
-                  }`}
-                >
-                  <StatusIcon state={activity.state} />
-                  <span className="max-w-28 truncate">
-                    {activity.action || getLabel(SURFACE_LABELS, activity.surface, isArabic)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="space-y-2.5 p-3">
-            <div className="rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/5 p-2.5 text-[10px] dark:bg-[#d4af37]/[0.07]">
-              <div className="flex min-w-0 items-start gap-2">
-                <FileText size={13} className="mt-0.5 shrink-0 text-[#b8922e]" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-bold text-gray-400">{isArabic ? 'المقالة التي تعمل عليها العملية' : 'Article being processed'}</div>
-                  <div className="mt-0.5 truncate font-black text-gray-800 dark:text-gray-100" title={articleLabel}>
-                    {articleLabel}
-                  </div>
-                </div>
-              </div>
-              {sourceLabel !== surfaceLabel && (
-                <div className="mt-2 flex min-w-0 items-start gap-1.5 rounded-md bg-white/70 p-2 dark:bg-black/15">
-                  <MapPin size={12} className="mt-0.5 shrink-0 text-gray-400" />
-                  <div className="min-w-0">
-                    <div className="font-bold text-gray-400">{isArabic ? 'الموضع / المصدر' : 'Location / source'}</div>
-                    <div className="mt-0.5 truncate font-black text-gray-700 dark:text-gray-100" title={sourceLabel}>{sourceLabel}</div>
-                  </div>
-                </div>
-              )}
-              <div className="mt-2 flex items-center justify-between gap-2 font-bold text-gray-400">
-                <span title={selected.id}>{isArabic ? 'معرّف المهمة' : 'Task ID'}: <bdi className="font-mono">{getCompactActivityId(selected.id)}</bdi></span>
-                <span className={isStale ? 'text-amber-600 dark:text-amber-300' : ''}>
-                  {isArabic ? 'آخر تحديث' : 'Last update'}: {lastUpdateAge}
-                </span>
-              </div>
-            </div>
-
-            {selected.state === 'running' && (
-              <div className="flex items-center gap-2">
-                {selected.cancellable ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleCancel()}
-                    disabled={isCancelling}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black text-red-700 hover:bg-red-100 disabled:cursor-wait disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/15"
-                  >
-                    {isCancelling ? <Loader2 size={12} className="animate-spin" /> : <Square size={11} fill="currentColor" />}
-                    {isCancelling
-                      ? (isArabic ? 'جار الإيقاف...' : 'Stopping...')
-                      : (isArabic ? 'إيقاف هذه العملية' : 'Stop this operation')}
-                  </button>
-                ) : (
-                  <div className="rounded-lg bg-gray-100 px-2.5 py-2 text-[10px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
-                    {isArabic
-                      ? 'سيظهر الإيقاف بعد إنشاء المهمة وربطها بالخادم.'
-                      : 'Stop becomes available after the server task is created.'}
-                  </div>
-                )}
-                {isStale && (
-                  <div className="min-w-0 text-[10px] font-bold leading-4 text-amber-600 dark:text-amber-300">
-                    {isArabic ? 'لم تصل حالة جديدة منذ مدة؛ يمكنك إيقافها بأمان.' : 'No recent status update; you can stop it safely.'}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {cancelError && (
-              <div className="rounded-lg bg-red-50 px-2.5 py-2 text-[10px] font-bold text-red-700 dark:bg-red-500/10 dark:text-red-200">
-                {cancelError}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              <div className="rounded-lg bg-gray-50 p-2 dark:bg-[#1d1d1d]">
-                <div className="mb-1 font-bold text-gray-400">{isArabic ? 'المزوّد والنوع' : 'Provider and tier'}</div>
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate font-black text-gray-700 dark:text-gray-100">{formatAiProviderName(selected.provider)}</span>
-                  <span className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-black ${
-                    selected.credentialTier === 'free'
-                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200'
-                      : selected.credentialTier === 'paid'
-                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200'
-                        : 'bg-gray-200 text-gray-600 dark:bg-gray-500/15 dark:text-gray-300'
-                  }`}>
-                    <CircleDollarSign size={11} />
-                    {tierLabel}
-                  </span>
-                </div>
-                {requestedProviderChanged && (
-                  <div className="mt-1 truncate font-bold text-amber-600 dark:text-amber-300">
-                    {isArabic ? 'الأولوية' : 'Preferred'}: {formatAiProviderName(selected.requestedProvider)}
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-lg bg-gray-50 p-2 dark:bg-[#1d1d1d]">
-                <div className="mb-1 font-bold text-gray-400">{isArabic ? 'الموديل' : 'Model'}</div>
-                <div className="truncate font-mono font-black text-gray-700 dark:text-gray-100" dir="ltr">
-                  {selected.model || selected.requestedModel || (isArabic ? 'بانتظار التحديد' : 'Pending')}
-                </div>
-                {requestedModelChanged && (
-                  <div className="mt-1 truncate font-mono font-bold text-amber-600 dark:text-amber-300" dir="ltr">
-                    {selected.requestedModel}
-                  </div>
-                )}
-              </div>
-
-              <div className="col-span-2 rounded-lg bg-gray-50 p-2 dark:bg-[#1d1d1d]">
-                <div className="mb-1 flex items-center gap-1 font-bold text-gray-400">
-                  <KeyRound size={11} />
-                  {isArabic ? 'المفتاح الحالي' : 'Current key'}
-                </div>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate font-mono font-black text-gray-700 dark:text-gray-100" dir="ltr">
-                      {selected.keySuffix ? formatAiKeySuffix(selected.keySuffix) : (isArabic ? 'لم يظهر بعد' : 'Not available yet')}
-                    </div>
-                    <div className="mt-1 truncate font-black text-gray-500 dark:text-gray-300">{keyStatus}</div>
-                    {(failedKeys > 0 || succeededKeys > 0) && (
-                      <div className="mt-1 flex gap-2 font-black">
-                        {failedKeys > 0 && <span className="text-red-600 dark:text-red-300">{isArabic ? 'فشل' : 'Failed'} {failedKeys}</span>}
-                        {succeededKeys > 0 && <span className="text-emerald-600 dark:text-emerald-300">{isArabic ? 'نجح' : 'Succeeded'} {succeededKeys}</span>}
-                      </div>
-                    )}
-                  </div>
-                  {selected.currentKeyIndex && selected.keyCount && (
-                    <span className="shrink-0 rounded bg-white px-2 py-1 font-black text-gray-500 dark:bg-[#2d2d2d] dark:text-gray-300">
-                      {isArabic ? 'المفتاح' : 'Key'} {selected.currentKeyIndex}/{selected.keyCount}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-gray-500 dark:text-gray-300">
-              {selected.currentModelIndex && selected.modelCount && (
-                <span className="rounded-md bg-gray-100 px-2 py-1 dark:bg-[#333]">
-                  {isArabic ? 'الموديل' : 'Model'} {selected.currentModelIndex}/{selected.modelCount}
-                </span>
-              )}
-              {selected.httpStatus && (
-                <span className="rounded-md bg-gray-100 px-2 py-1 font-mono dark:bg-[#333]" dir="ltr">
-                  HTTP {selected.httpStatus}
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 font-mono dark:bg-[#333]" dir="ltr">
-                <Clock3 size={10} />
-                {formatDuration(selected.startedAt, selected.completedAt, now)}
-              </span>
-            </div>
-
-            {visibleMessage && (
-              <div className={`rounded-lg px-2.5 py-2 text-[10px] font-bold leading-5 ${
-                selected.state === 'failed'
-                  ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200'
-                  : 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200'
-              }`}>
-                {visibleMessage}
-              </div>
-            )}
-
-            {orderedEntries.length > 0 && (
-              <div>
-                <div className="mb-1.5 text-[10px] font-black text-gray-500 dark:text-gray-300">
-                  {isArabic ? 'سجل محاولات المفاتيح' : 'Key attempt history'}
-                </div>
-                <div className="max-h-32 space-y-1 overflow-y-auto custom-scrollbar">
-                  {orderedEntries.map((entry, index) => (
-                    <div
-                      key={`${entry.outcome}-${entry.keySuffix}-${entry.status || 0}-${entry.model || ''}-${index}`}
-                      className={`flex items-start gap-2 rounded-md px-2 py-1.5 text-[10px] font-bold ${
-                        entry.outcome === 'success'
-                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200'
-                          : 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200'
-                      }`}
-                    >
-                      {entry.outcome === 'success'
-                        ? <CheckCircle2 size={12} className="mt-0.5 shrink-0" />
-                        : <XCircle size={12} className="mt-0.5 shrink-0" />}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span>
-                            {entry.outcome === 'success'
-                              ? (isArabic ? 'نجح المفتاح' : 'Key succeeded')
-                              : (isArabic ? 'فشل المفتاح' : 'Key failed')}
-                          </span>
-                          <span className="font-mono font-black" dir="ltr">{formatAiKeySuffix(entry.keySuffix)}</span>
-                        </div>
-                        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 opacity-80">
-                          {entry.model && <span className="truncate font-mono" dir="ltr">{entry.model}</span>}
-                          {entry.status && <span className="shrink-0 font-mono" dir="ltr">HTTP {entry.status}</span>}
-                        </div>
-                        {entry.outcome === 'failed' && getFailureReason(entry.reason, isArabic) && (
-                          <div className="mt-0.5 truncate opacity-80">{getFailureReason(entry.reason, isArabic)}</div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </>
+      {selected.state === 'running' && (
+        <button
+          type="button"
+          onClick={() => void handleCancel()}
+          disabled={!selected.cancellable || isCancelling}
+          className="ms-2 inline-flex shrink-0 items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-black text-red-700 hover:bg-red-100 disabled:cursor-wait disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/15"
+          title={!selected.cancellable
+            ? (isArabic ? 'سيصبح الإيقاف متاحًا بعد إنشاء المهمة على الخادم' : 'Stop becomes available after the server task is created')
+            : undefined}
+        >
+          {isCancelling ? <Loader2 size={11} className="animate-spin" /> : <Square size={10} fill="currentColor" />}
+          {isCancelling
+            ? (isArabic ? 'جار الإيقاف' : 'Stopping')
+            : (isArabic ? 'إيقاف' : 'Stop')}
+        </button>
       )}
+
+      <button
+        type="button"
+        onClick={() => setActivities(current => current.filter(activity => activity.id !== selected.id))}
+        className="ms-1 flex size-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-[#333] dark:hover:text-gray-100"
+        aria-label={isArabic ? 'إخفاء الإشعار فقط' : 'Hide notification only'}
+        title={isArabic ? 'إخفاء الإشعار فقط؛ لا يوقف العملية' : 'Hide notification only; the operation keeps running'}
+      >
+        <X size={12} />
+      </button>
     </div>
   );
 };

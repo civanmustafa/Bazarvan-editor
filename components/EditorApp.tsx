@@ -14,6 +14,7 @@ import {
 } from '../utils/appRoutes';
 import { getCachedRemoteArticleById, getRemoteArticleById } from '../utils/supabaseArticles';
 import EditorToolbar from './EditorToolbar';
+import AiExecutionMonitor from './AiKeyUsageToast';
 import LeftSidebar from './LeftSidebar';
 import ModalManager from './ModalManager';
 import RightSidebar from './RightSidebar';
@@ -43,6 +44,7 @@ const EditorView: React.FC = () => {
         <LeftSidebar />
         <div className="relative basis-[60.73%] flex flex-col h-full min-w-0">
           <TipsCarousel />
+          <AiExecutionMonitor />
           <EditorToolbar />
           <div
             ref={scrollContainerRef}

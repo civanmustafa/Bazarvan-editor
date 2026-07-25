@@ -54,9 +54,9 @@ test('development and production use one API route registry', async () => {
   assert.doesNotMatch(productionServer, /app\.all\('\/api\//);
 });
 
-test('all editor AI execution paths publish to one fixed live activity monitor', async () => {
-  const [app, monitor, activityEngine, geminiEngine, aiContext, writingPanel, writingMonitor, externalControls, leftSidebar] = await Promise.all([
-    readWorkspaceFile('App.tsx'),
+test('all editor AI execution paths publish to one inline live activity monitor', async () => {
+  const [editorApp, monitor, activityEngine, geminiEngine, aiContext, writingPanel, writingMonitor, externalControls, leftSidebar] = await Promise.all([
+    readWorkspaceFile('components/EditorApp.tsx'),
     readWorkspaceFile('components/AiKeyUsageToast.tsx'),
     readWorkspaceFile('utils/aiExecutionActivity.ts'),
     readWorkspaceFile('utils/geminiAnalysisEngine.ts'),
@@ -67,17 +67,18 @@ test('all editor AI execution paths publish to one fixed live activity monitor',
     readWorkspaceFile('components/LeftSidebar.tsx'),
   ]);
 
-  assert.match(app, /<AiExecutionMonitor\s*\/>/);
-  assert.match(app, /const AiExecutionMonitor = lazy/);
-  assert.match(monitor, /fixed bottom-4 left-4/);
+  assert.match(editorApp, /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s*\/>\s*<EditorToolbar\s*\/>/);
+  assert.match(editorApp, /import AiExecutionMonitor from '\.\/AiKeyUsageToast'/);
+  assert.match(monitor, /data-ai-execution-monitor="inline"/);
+  assert.doesNotMatch(monitor, /fixed bottom-4 left-4/);
   assert.match(monitor, /AI_EXECUTION_ACTIVITY_EVENT/);
-  assert.match(monitor, /المقالة التي تعمل عليها العملية/);
-  assert.match(monitor, /الموضع \/ المصدر/);
+  assert.doesNotMatch(monitor, /المقالة التي تعمل عليها العملية/);
+  assert.doesNotMatch(monitor, /articleLabel/);
   assert.doesNotMatch(monitor, /الزر \/ العملية/);
   assert.doesNotMatch(monitor, /حالة المفاتيح/);
   assert.doesNotMatch(monitor, /selected\.totalAttemptCount/);
   assert.match(monitor, /getVisibleAiExecutionMessage/);
-  assert.match(monitor, /إيقاف هذه العملية/);
+  assert.match(monitor, /'إيقاف'/);
   assert.match(monitor, /requestAiExecutionActivityCancel/);
   assert.match(monitor, /آخر تحديث/);
   assert.match(activityEngine, /export const beginAiExecutionActivity/);
