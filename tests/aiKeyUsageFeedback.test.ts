@@ -9,10 +9,47 @@ import {
   beginAiExecutionActivity,
   finishAiExecutionActivity,
   getAiExecutionActivities,
+  getVisibleAiExecutionMessage,
   requestAiExecutionActivityCancel,
   resetAiExecutionActivitiesForTests,
   updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity.ts';
+
+test('AI activity display hides duplicated live key details but keeps useful messages', () => {
+  resetAiExecutionActivitiesForTests();
+  const activity = beginAiExecutionActivity({
+    id: 'display-deduplication',
+    provider: 'gemini',
+    model: 'gemini-3.5-flash',
+    keySuffix: 'KEYipE',
+    currentKeyIndex: 1,
+    keyCount: 13,
+    surface: 'goal_context_generation',
+    action: 'توليد سياق هدف الصفحة',
+    message: 'تجربة المفتاح 1 من 13 (...ipE) للنموذج gemini-3.5-flash.',
+  });
+
+  assert.equal(
+    getVisibleAiExecutionMessage(activity, 'توليد سياق هدف الصفحة', 'توليد سياق هدف الصفحة'),
+    '',
+  );
+  assert.equal(
+    getVisibleAiExecutionMessage(
+      { ...activity, message: 'توليد سياق هدف الصفحة' },
+      'توليد سياق هدف الصفحة',
+      'توليد سياق هدف الصفحة',
+    ),
+    '',
+  );
+  assert.equal(
+    getVisibleAiExecutionMessage(
+      { ...activity, message: 'انتهت مهلة الاتصال وسيعاد المحاولة تلقائيًا.' },
+      'توليد سياق هدف الصفحة',
+      'توليد سياق هدف الصفحة',
+    ),
+    'انتهت مهلة الاتصال وسيعاد المحاولة تلقائيًا.',
+  );
+});
 
 test('AI key feedback keeps failed rotations and the successful key suffix', () => {
   const entries = collectAiKeyUsageEntries({

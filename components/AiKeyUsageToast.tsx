@@ -10,7 +10,6 @@ import {
   KeyRound,
   Loader2,
   MapPin,
-  MousePointerClick,
   Square,
   X,
   XCircle,
@@ -20,6 +19,7 @@ import {
   AI_EXECUTION_ACTIVITY_EVENT,
   formatAiProviderName,
   getAiExecutionActivities,
+  getVisibleAiExecutionMessage,
   requestAiExecutionActivityCancel,
   type AiExecutionActivity,
   type AiExecutionState,
@@ -237,14 +237,13 @@ const AiExecutionMonitor: React.FC = () => {
     || selected.stage === 'cancelling'
     || selected.stage === 'cancel_requested';
   const keyStatus = selected.state === 'running'
-    ? selected.currentKeyIndex && selected.keyCount
-      ? `${isArabic ? 'تجربة المفتاح' : 'Trying key'} ${selected.currentKeyIndex}/${selected.keyCount}`
-      : (isArabic ? 'بانتظار بيانات المفتاح' : 'Waiting for key details')
+    ? getLabel(STAGE_LABELS, selected.stage, isArabic)
     : selected.state === 'success'
       ? (isArabic ? 'اكتمل الطلب بنجاح' : 'Request completed successfully')
       : selected.state === 'cancelled'
         ? (isArabic ? 'تم إيقاف الطلب' : 'Request stopped')
         : (isArabic ? 'لم ينجح الطلب' : 'Request failed');
+  const visibleMessage = getVisibleAiExecutionMessage(selected, surfaceLabel, sourceLabel);
   const handleCancel = async () => {
     if (!selected.cancellable || isCancelling) return;
     setCancellingId(selected.id);
@@ -336,22 +335,15 @@ const AiExecutionMonitor: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <div className="flex min-w-0 items-start gap-1.5 rounded-md bg-white/70 p-2 dark:bg-black/15">
+              {sourceLabel !== surfaceLabel && (
+                <div className="mt-2 flex min-w-0 items-start gap-1.5 rounded-md bg-white/70 p-2 dark:bg-black/15">
                   <MapPin size={12} className="mt-0.5 shrink-0 text-gray-400" />
                   <div className="min-w-0">
                     <div className="font-bold text-gray-400">{isArabic ? 'الموضع / المصدر' : 'Location / source'}</div>
                     <div className="mt-0.5 truncate font-black text-gray-700 dark:text-gray-100" title={sourceLabel}>{sourceLabel}</div>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-start gap-1.5 rounded-md bg-white/70 p-2 dark:bg-black/15">
-                  <MousePointerClick size={12} className="mt-0.5 shrink-0 text-gray-400" />
-                  <div className="min-w-0">
-                    <div className="font-bold text-gray-400">{isArabic ? 'الزر / العملية' : 'Button / operation'}</div>
-                    <div className="mt-0.5 truncate font-black text-gray-700 dark:text-gray-100" title={surfaceLabel}>{surfaceLabel}</div>
-                  </div>
-                </div>
-              </div>
+              )}
               <div className="mt-2 flex items-center justify-between gap-2 font-bold text-gray-400">
                 <span title={selected.id}>{isArabic ? 'معرّف المهمة' : 'Task ID'}: <bdi className="font-mono">{getCompactActivityId(selected.id)}</bdi></span>
                 <span className={isStale ? 'text-amber-600 dark:text-amber-300' : ''}>
@@ -430,47 +422,37 @@ const AiExecutionMonitor: React.FC = () => {
                 )}
               </div>
 
-              <div className="rounded-lg bg-gray-50 p-2 dark:bg-[#1d1d1d]">
+              <div className="col-span-2 rounded-lg bg-gray-50 p-2 dark:bg-[#1d1d1d]">
                 <div className="mb-1 flex items-center gap-1 font-bold text-gray-400">
                   <KeyRound size={11} />
                   {isArabic ? 'المفتاح الحالي' : 'Current key'}
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono font-black text-gray-700 dark:text-gray-100" dir="ltr">
-                    {selected.keySuffix ? formatAiKeySuffix(selected.keySuffix) : (isArabic ? 'لم يظهر بعد' : 'Not available yet')}
-                  </span>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono font-black text-gray-700 dark:text-gray-100" dir="ltr">
+                      {selected.keySuffix ? formatAiKeySuffix(selected.keySuffix) : (isArabic ? 'لم يظهر بعد' : 'Not available yet')}
+                    </div>
+                    <div className="mt-1 truncate font-black text-gray-500 dark:text-gray-300">{keyStatus}</div>
+                    {(failedKeys > 0 || succeededKeys > 0) && (
+                      <div className="mt-1 flex gap-2 font-black">
+                        {failedKeys > 0 && <span className="text-red-600 dark:text-red-300">{isArabic ? 'فشل' : 'Failed'} {failedKeys}</span>}
+                        {succeededKeys > 0 && <span className="text-emerald-600 dark:text-emerald-300">{isArabic ? 'نجح' : 'Succeeded'} {succeededKeys}</span>}
+                      </div>
+                    )}
+                  </div>
                   {selected.currentKeyIndex && selected.keyCount && (
-                    <span className="shrink-0 rounded bg-white px-1.5 py-0.5 font-black text-gray-500 dark:bg-[#2d2d2d] dark:text-gray-300">
-                      {selected.currentKeyIndex}/{selected.keyCount}
+                    <span className="shrink-0 rounded bg-white px-2 py-1 font-black text-gray-500 dark:bg-[#2d2d2d] dark:text-gray-300">
+                      {isArabic ? 'المفتاح' : 'Key'} {selected.currentKeyIndex}/{selected.keyCount}
                     </span>
                   )}
                 </div>
               </div>
-
-              <div className="rounded-lg bg-gray-50 p-2 dark:bg-[#1d1d1d]">
-                <div className="mb-1 font-bold text-gray-400">{isArabic ? 'حالة المفاتيح' : 'Key status'}</div>
-                <div className="truncate font-black text-gray-700 dark:text-gray-100">{keyStatus}</div>
-                {(failedKeys > 0 || succeededKeys > 0) && (
-                  <div className="mt-1 flex gap-2 font-black">
-                    {failedKeys > 0 && <span className="text-red-600 dark:text-red-300">{isArabic ? 'فشل' : 'Failed'} {failedKeys}</span>}
-                    {succeededKeys > 0 && <span className="text-emerald-600 dark:text-emerald-300">{isArabic ? 'نجح' : 'Succeeded'} {succeededKeys}</span>}
-                  </div>
-                )}
-              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-gray-500 dark:text-gray-300">
-              <span className={`rounded-md border px-2 py-1 ${stateStyles[selected.state]}`}>
-                {getLabel(STAGE_LABELS, selected.stage, isArabic)}
-              </span>
               {selected.currentModelIndex && selected.modelCount && (
                 <span className="rounded-md bg-gray-100 px-2 py-1 dark:bg-[#333]">
                   {isArabic ? 'الموديل' : 'Model'} {selected.currentModelIndex}/{selected.modelCount}
-                </span>
-              )}
-              {selected.totalAttemptCount && (
-                <span className="rounded-md bg-gray-100 px-2 py-1 dark:bg-[#333]">
-                  {isArabic ? 'المحاولات' : 'Attempts'} {selected.totalAttemptCount}
                 </span>
               )}
               {selected.httpStatus && (
@@ -484,13 +466,13 @@ const AiExecutionMonitor: React.FC = () => {
               </span>
             </div>
 
-            {selected.message && (
+            {visibleMessage && (
               <div className={`rounded-lg px-2.5 py-2 text-[10px] font-bold leading-5 ${
                 selected.state === 'failed'
                   ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200'
                   : 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200'
               }`}>
-                {selected.message}
+                {visibleMessage}
               </div>
             )}
 

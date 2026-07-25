@@ -73,6 +73,10 @@ test('all editor AI execution paths publish to one fixed live activity monitor',
   assert.match(monitor, /AI_EXECUTION_ACTIVITY_EVENT/);
   assert.match(monitor, /المقالة التي تعمل عليها العملية/);
   assert.match(monitor, /الموضع \/ المصدر/);
+  assert.doesNotMatch(monitor, /الزر \/ العملية/);
+  assert.doesNotMatch(monitor, /حالة المفاتيح/);
+  assert.doesNotMatch(monitor, /selected\.totalAttemptCount/);
+  assert.match(monitor, /getVisibleAiExecutionMessage/);
   assert.match(monitor, /إيقاف هذه العملية/);
   assert.match(monitor, /requestAiExecutionActivityCancel/);
   assert.match(monitor, /آخر تحديث/);

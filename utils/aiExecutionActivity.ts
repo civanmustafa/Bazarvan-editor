@@ -177,6 +177,34 @@ export const formatAiProviderName = (provider: unknown): string => {
   return value || 'AI';
 };
 
+export const getVisibleAiExecutionMessage = (
+  activity: AiExecutionActivity,
+  surfaceLabel: string,
+  sourceLabel: string,
+): string => {
+  const message = activity.message.trim();
+  if (!message) return '';
+  const normalized = message
+    .toLocaleLowerCase()
+    .replace(/[،,:؛;.!؟?()[\]{}…]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normalizedSurface = surfaceLabel.toLocaleLowerCase().trim();
+  const normalizedSource = sourceLabel.toLocaleLowerCase().trim();
+  if (normalized === normalizedSurface || normalized === normalizedSource) return '';
+  if (activity.state !== 'running') return message;
+
+  const isKeyAttemptMessage = (
+    /(تجربة|تجريب|trying|attempting)/i.test(normalized)
+    && /(المفتاح|key)/i.test(normalized)
+    && (
+      /(نموذج|موديل|model)/i.test(normalized)
+      || Boolean(activity.keySuffix && normalized.includes(activity.keySuffix.toLocaleLowerCase()))
+    )
+  );
+  return isKeyAttemptMessage ? '' : message;
+};
+
 const mergeEntries = (
   current: AiKeyUsageEntry[],
   incoming: AiKeyUsageEntry[],
