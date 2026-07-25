@@ -1250,8 +1250,9 @@ ${readyCommandCompetitorBlocks}`;
         index: number,
         content: CompetitorExtractedContent,
     ) => {
-        // Every extraction method converges here. The preview card keeps metadata and
-        // headings; this canonical text field is what downstream analysis actually uses.
+        // Every direct extraction method converges here. Firecrawl queue completion reaches
+        // the same canonical field through handleDiscoveredCompetitors; downstream analysis
+        // and content writing never consume a separate preview card.
         const extractedText = normalizePlainCompetitorText(content.text);
         if (!extractedText) return;
         setCompetitorTexts(prev => prev.map((text, textIndex) => (
@@ -2035,7 +2036,11 @@ ${readyCommandCompetitorBlocks}`;
 
                 {competitorUrls.map((url, index) => {
                     const extraction = competitorExtractions[index] || createEmptyCompetitorState();
-                    const content = extraction.source === 'text' ? null : extraction.content;
+                    // Firecrawl already fills the editable canonical text field above. Do not
+                    // render a second result card for the same content.
+                    const content = extraction.source === 'text' || extraction.source === 'firecrawl'
+                        ? null
+                        : extraction.content;
                     const plainText = competitorTexts[index] || '';
                     const isLoading = extraction.status === 'loading';
                     const isUrlLoading = isLoading && extraction.source === 'url';
@@ -2044,13 +2049,11 @@ ${readyCommandCompetitorBlocks}`;
                     const firecrawlPendingHint = isArabicLocale
                         ? 'هذا الرابط ينتظر عامل سحب المنافسين؛ لم يبدأ اتصال Firecrawl بعد.'
                         : 'This URL is waiting for the competitor extraction worker; the Firecrawl request has not started yet.';
-                    const extractionPreviewTitle = extraction.source === 'firecrawl'
-                        ? tRs.firecrawlExtractionPreview
-                        : extraction.source === 'programmatic'
-                            ? tRs.programmaticExtractionPreview
-                            : extraction.source === 'url'
-                                ? tRs.aiExtractionPreview
-                                : tRs.htmlExtractionPreview;
+                    const extractionPreviewTitle = extraction.source === 'programmatic'
+                        ? tRs.programmaticExtractionPreview
+                        : extraction.source === 'url'
+                            ? tRs.aiExtractionPreview
+                            : tRs.htmlExtractionPreview;
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
@@ -2153,11 +2156,9 @@ ${readyCommandCompetitorBlocks}`;
                                             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 dark:bg-[#333333] dark:text-gray-300">
                                                 {extraction.source === 'programmatic'
                                                     ? tRs.programmaticExtractionSource
-                                                    : extraction.source === 'firecrawl'
-                                                        ? 'Firecrawl'
-                                                        : extraction.source === 'url'
-                                                            ? tRs.aiExtractionSource
-                                                            : tRs.htmlExtractionSource}
+                                                    : extraction.source === 'url'
+                                                        ? tRs.aiExtractionSource
+                                                        : tRs.htmlExtractionSource}
                                             </span>
                                             {content.cacheHit && (
                                                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
