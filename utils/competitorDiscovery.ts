@@ -95,6 +95,15 @@ export type CompetitorPreview = {
   expiresAt: string;
 };
 
+export type ProgrammaticCompetitorContent = CompetitorPreview & {
+  paragraphs: string[];
+  listItems: string[];
+  contentHash: string;
+  qualityScore: number;
+  redirectCount: number;
+  responseContentType: string;
+};
+
 export type CompetitorExtractionJob = {
   id: string;
   status: string;
@@ -234,17 +243,35 @@ const toPreview = (value: unknown): CompetitorPreview | null => {
   };
 };
 
-const requestCompetitors = async (body: Record<string, unknown>): Promise<Record<string, any>> => {
+const requestCompetitors = async (
+  body: Record<string, unknown>,
+  options: { signal?: AbortSignal } = {},
+): Promise<Record<string, any>> => {
   const token = await getAuthenticatedApiToken();
   const response = await fetch('/api/competitors', {
     method: 'POST',
     headers: getAuthenticatedApiHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
+    signal: options.signal,
   });
   const payload = await response.json().catch(() => ({}));
   const normalized = isRecord(payload) ? payload : {};
   if (!response.ok) throw new CompetitorDiscoveryRequestError(response, normalized);
   return normalized;
+};
+
+const toProgrammaticContent = (value: unknown): ProgrammaticCompetitorContent | null => {
+  const preview = toPreview(value);
+  if (!preview || !isRecord(value)) return null;
+  return {
+    ...preview,
+    paragraphs: toStringList(value.paragraphs),
+    listItems: toStringList(value.listItems),
+    contentHash: toText(value.contentHash),
+    qualityScore: Math.max(0, Math.min(100, Number(value.qualityScore) || 0)),
+    redirectCount: Math.max(0, Number(value.redirectCount) || 0),
+    responseContentType: toText(value.responseContentType),
+  };
 };
 
 const parseCompetitorSearchResults = (value: unknown): CompetitorSearchResult[] => (
@@ -381,6 +408,20 @@ export const loadArticleCompetitorPreview = async (
   const preview = toPreview(payload.preview);
   if (!preview) throw new Error('Competitor preview response was invalid.');
   return preview;
+};
+
+export const extractCompetitorProgrammatically = async (
+  url: string,
+  options: { signal?: AbortSignal; forceRefresh?: boolean } = {},
+): Promise<ProgrammaticCompetitorContent> => {
+  const payload = await requestCompetitors({
+    action: 'programmatic_extract',
+    url,
+    forceRefresh: options.forceRefresh === true,
+  }, { signal: options.signal });
+  const content = toProgrammaticContent(payload.content);
+  if (!content) throw new Error('Programmatic competitor extraction response was invalid.');
+  return content;
 };
 
 export const enqueueArticleCompetitorExtraction = async (options: {

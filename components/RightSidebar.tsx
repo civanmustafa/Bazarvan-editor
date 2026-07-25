@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2 } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2, Code2, X } from 'lucide-react';
 import StructureTab from './StructureTab';
 import { useUser } from '../contexts/UserContext';
 import { useAISelector } from '../contexts/AIContext';
@@ -21,9 +21,13 @@ import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEE
 import GeminiProgressStatus from './GeminiProgressStatus';
 import ExternalAiBridgePanel from './ExternalAiBridgePanel';
 import CompetitorDiscoveryPanel from './CompetitorDiscoveryPanel';
-import { runGeminiAnalysisEngine, type GeminiProgressSnapshot } from '../utils/geminiAnalysisEngine';
+import { runGeminiAnalysisEngine } from '../utils/geminiAnalysisEngine';
 import { createEmptyCompetitorSlots, MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
-import type { CompetitorDiscoveryRow } from '../utils/competitorDiscovery';
+import {
+    CompetitorDiscoveryRequestError,
+    extractCompetitorProgrammatically,
+    type CompetitorDiscoveryRow,
+} from '../utils/competitorDiscovery';
 
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
 const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
@@ -41,7 +45,12 @@ type ReadyCommand = {
 
 type CompetitorExtractedContent = {
     url: string;
+    canonicalUrl?: string;
     fetchedUrl: string;
+    provider?: string;
+    cacheHit?: boolean;
+    fetchedAt?: string;
+    qualityScore?: number;
     title: string;
     description: string;
     headings: {
@@ -55,17 +64,14 @@ type CompetitorExtractedContent = {
     wordCount: number;
 };
 
-type CompetitorExtractionSource = 'url' | 'html' | 'text';
+type CompetitorExtractionSource = 'url' | 'programmatic' | 'html' | 'text';
 
 type CompetitorExtractionState = {
     status: 'idle' | 'loading' | 'success' | 'error';
     source?: CompetitorExtractionSource;
     content: CompetitorExtractedContent | null;
     error: string;
-};
-
-type LocalGeminiProgressSnapshot = GeminiProgressSnapshot & {
-    active?: boolean;
+    notice?: string;
 };
 
 type CompetitorRepeatedPhrase = {
@@ -102,6 +108,7 @@ const createEmptyCompetitorState = (): CompetitorExtractionState => ({
     source: undefined,
     content: null,
     error: '',
+    notice: '',
 });
 
 const createDefaultCompetitorUrls = createEmptyCompetitorSlots;
@@ -270,9 +277,16 @@ const stripExtractionLabels = (value: string): string => (
 const normalizeCompetitorContent = (parsed: any, fallbackUrl: string): CompetitorExtractedContent => {
     const content: CompetitorExtractedContent = {
         url: typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : fallbackUrl,
+        canonicalUrl: typeof parsed.canonicalUrl === 'string' ? parsed.canonicalUrl.trim() : undefined,
         fetchedUrl: typeof parsed.fetchedUrl === 'string' && parsed.fetchedUrl.trim()
             ? parsed.fetchedUrl.trim()
             : typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : fallbackUrl,
+        provider: typeof parsed.provider === 'string' ? parsed.provider.trim() : undefined,
+        cacheHit: parsed.cacheHit === true,
+        fetchedAt: typeof parsed.fetchedAt === 'string' ? parsed.fetchedAt.trim() : undefined,
+        qualityScore: Number.isFinite(Number(parsed.qualityScore))
+            ? Math.max(0, Math.min(100, Number(parsed.qualityScore)))
+            : undefined,
         title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
         description: typeof parsed.description === 'string' ? parsed.description.trim() : '',
         headings: {
@@ -638,12 +652,17 @@ ${formatCompetitorEvidenceParagraphs(text)}
     });
 
     extractions.forEach((extraction, index) => {
-        if (extraction.source !== 'html') return;
+        if (!['html', 'programmatic', 'url'].includes(extraction.source || '')) return;
         const content = extraction.content;
         const extractedText = content?.text?.trim();
         if (!content || !extractedText) return;
 
-        blocks.push(`### المنافس ${index + 1} - المحتوى المستخرج من كود HTML
+        const extractionLabel = extraction.source === 'programmatic'
+            ? 'المحتوى المستخرج برمجيًا'
+            : extraction.source === 'url'
+                ? 'المحتوى المستخرج عبر الذكاء الاصطناعي'
+                : 'المحتوى المستخرج من كود HTML';
+        blocks.push(`### المنافس ${index + 1} - ${extractionLabel}
 الرابط: ${content.url || content.fetchedUrl || urls[index]?.trim() || 'غير محدد'}
 العنوان: ${content.title || 'غير محدد'}
 عدد الكلمات المستخرجة: ${content.wordCount || countPromptWords(extractedText)}
@@ -772,7 +791,7 @@ const RightSidebar: React.FC = () => {
     const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
     const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => loadStoredCompetitorTexts());
     const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => loadStoredCompetitorExtractions());
-    const [competitorGeminiProgress, setCompetitorGeminiProgress] = useState<Record<number, LocalGeminiProgressSnapshot>>({});
+    const programmaticExtractionControllersRef = useRef<Record<number, AbortController>>({});
     const [selectedReadyCommandIds, setSelectedReadyCommandIds] = useState<string[]>([]);
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isGeminiPaidExpanded, setIsGeminiPaidExpanded] = useState(false);
@@ -825,6 +844,11 @@ const RightSidebar: React.FC = () => {
         setIsStructureTabActive(activeTab === 'structure');
         return () => setIsStructureTabActive(false);
     }, [activeTab, setIsStructureTabActive]);
+
+    useEffect(() => () => {
+        Object.values(programmaticExtractionControllersRef.current).forEach(controller => controller.abort());
+        programmaticExtractionControllersRef.current = {};
+    }, []);
 
     useEffect(() => {
         const syncSelectedGeminiModel = () => {
@@ -891,11 +915,15 @@ const RightSidebar: React.FC = () => {
             if (row.status === 'completed') {
                 return {
                     status: 'success',
-                    source: 'url',
+                    source: row.extractionProvider === 'firecrawl' || row.extractionProvider === 'programmatic'
+                        ? 'programmatic'
+                        : 'url',
                     error: '',
                     content: {
                         url: row.canonicalUrl || row.sourceUrl,
+                        canonicalUrl: row.canonicalUrl || row.sourceUrl,
                         fetchedUrl: row.canonicalUrl || row.sourceUrl,
+                        provider: row.extractionProvider,
                         title: row.title,
                         description: row.description,
                         headings: row.headings,
@@ -921,7 +949,6 @@ const RightSidebar: React.FC = () => {
                 error: '',
             } satisfies CompetitorExtractionState;
         }));
-        setCompetitorGeminiProgress({});
     }, []);
 
     useEffect(() => {
@@ -1233,23 +1260,15 @@ ${readyCommandCompetitorBlocks}`;
         source: CompetitorExtractionSource,
         fallbackUrl: string,
         provider: 'gemini' | 'geminiPaid' = competitorGeminiProvider,
+        notice = '',
     ) => {
         setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
             ...item,
             status: 'loading',
             source,
             error: '',
+            notice,
         } : item));
-        setCompetitorGeminiProgress(prev => ({
-            ...prev,
-            [index]: {
-                provider,
-                model: provider === 'geminiPaid' ? GEMINI_PAID_ANALYSIS_MODEL : getSelectedGeminiFreeModel(),
-                active: true,
-                completed: false,
-                message: isArabicLocale ? 'بدء الاتصال بـ Gemini...' : 'Starting Gemini request...',
-            },
-        }));
 
         try {
             const engineResult = await runGeminiAnalysisEngine({
@@ -1262,19 +1281,15 @@ ${readyCommandCompetitorBlocks}`;
                     fallbackModels: provider === 'gemini' ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
                     telemetry: {
                         source: 'competitor_extraction',
-                        action: source,
+                        articleId: activeArticleId || undefined,
+                        articleTitle,
+                        articleKey: activeArticleId || articleTitle || `competitor-${index + 1}`,
+                        action: isArabicLocale
+                            ? `استخراج المنافس ${index + 1} عبر الذكاء الاصطناعي`
+                            : `AI extraction for competitor ${index + 1}`,
                         batchIndex: index + 1,
                         batchTotal: competitorExtractions.length,
                     },
-                },
-                onProgress: progress => {
-                    setCompetitorGeminiProgress(prev => ({
-                        ...prev,
-                        [index]: {
-                            ...progress,
-                            active: !progress.completed,
-                        },
-                    }));
                 },
             });
             const { status, data } = engineResult;
@@ -1287,39 +1302,13 @@ ${readyCommandCompetitorBlocks}`;
                     source,
                     content: null,
                     error: '',
+                    notice,
                 } : item));
-                setCompetitorGeminiProgress(prev => ({
-                    ...prev,
-                    [index]: {
-                        ...(prev[index] || {}),
-                        stage: 'cancelled',
-                        status: 499,
-                        active: false,
-                        completed: true,
-                        message: isArabicLocale ? 'تم إيقاف التحليل يدويًا.' : 'Analysis stopped manually.',
-                    },
-                }));
                 return;
             }
             if (status < 200 || status >= 300) {
                 throw new Error(data.error || `${tRs.competitorExtractionFailed} (${status})`);
             }
-            setCompetitorGeminiProgress(prev => ({
-                ...prev,
-                [index]: {
-                    ...(prev[index] || {}),
-                    provider: data.provider || provider,
-                    model: data.model,
-                    requestedModel: data.requestedModel,
-                    keyCount: typeof data.keyCount === 'number' ? data.keyCount : undefined,
-                    attemptedKeyCount: typeof data.attemptedKeyCount === 'number' ? data.attemptedKeyCount : undefined,
-                    keySuffix: typeof data.keySuffix === 'string' ? data.keySuffix : undefined,
-                    status,
-                    completed: true,
-                    active: false,
-                    message: isArabicLocale ? 'تم تلقي رد Gemini بنجاح.' : 'Gemini responded successfully.',
-                },
-            }));
 
             const parsed = extractJsonFromGeminiText(typeof data.text === 'string' ? data.text : '');
             if (!parsed || typeof parsed !== 'object') {
@@ -1329,13 +1318,17 @@ ${readyCommandCompetitorBlocks}`;
                 throw new Error(parsed.error.trim());
             }
 
-            const content = normalizeCompetitorContent(parsed, fallbackUrl);
+            const content = normalizeCompetitorContent({
+                ...parsed,
+                provider: data.provider || provider,
+            }, fallbackUrl);
 
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
                 status: 'success',
                 source,
                 content,
                 error: '',
+                notice,
             } : item));
         } catch (error) {
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
@@ -1343,20 +1336,8 @@ ${readyCommandCompetitorBlocks}`;
                 source,
                 content: null,
                 error: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
+                notice,
             } : item));
-            setCompetitorGeminiProgress(prev => {
-                const current = prev[index];
-                return {
-                    ...prev,
-                    [index]: current
-                        ? { ...current, active: false, completed: true }
-                        : {
-                            active: false,
-                            completed: true,
-                            message: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
-                        },
-                    };
-            });
         }
     };
 
@@ -1373,6 +1354,98 @@ ${readyCommandCompetitorBlocks}`;
         }
 
         await runCompetitorExtraction(index, buildCompetitorPrompt(url), true, 'url', url);
+    };
+
+    const handleExtractCompetitorProgrammatically = async (index: number) => {
+        const url = competitorUrls[index]?.trim();
+        if (!url) {
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'error',
+                source: 'programmatic',
+                content: null,
+                error: tRs.competitorUrlRequired,
+                notice: '',
+            } : item));
+            return;
+        }
+
+        const controller = new AbortController();
+        programmaticExtractionControllersRef.current[index]?.abort();
+        programmaticExtractionControllersRef.current[index] = controller;
+        setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+            ...item,
+            status: 'loading',
+            source: 'programmatic',
+            error: '',
+            notice: tRs.programmaticExtractionRunning,
+        } : item));
+
+        try {
+            const extracted = await extractCompetitorProgrammatically(url, {
+                signal: controller.signal,
+            });
+            if (programmaticExtractionControllersRef.current[index] !== controller) return;
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'success',
+                source: 'programmatic',
+                content: normalizeCompetitorContent(extracted, url),
+                error: '',
+                notice: extracted.cacheHit
+                    ? tRs.programmaticExtractionCacheHit
+                    : tRs.programmaticExtractionSucceeded,
+            } : item));
+        } catch (error) {
+            if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+                setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                    ...item,
+                    status: 'idle',
+                    source: 'programmatic',
+                    error: '',
+                    notice: tRs.programmaticExtractionCancelled,
+                } : item));
+                return;
+            }
+
+            if (
+                error instanceof CompetitorDiscoveryRequestError
+                && ['invalid_competitor_url', 'unsafe_competitor_url', 'unsafe_competitor_address'].includes(error.code)
+            ) {
+                setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                    status: 'error',
+                    source: 'programmatic',
+                    content: null,
+                    error: tRs.programmaticExtractionUnsafeUrl,
+                    notice: '',
+                } : item));
+                return;
+            }
+
+            const fallbackNotice = tRs.programmaticExtractionFallback;
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
+                status: 'loading',
+                source: 'url',
+                content: null,
+                error: '',
+                notice: fallbackNotice,
+            } : item));
+            await runCompetitorExtraction(
+                index,
+                buildCompetitorPrompt(url),
+                true,
+                'url',
+                url,
+                competitorGeminiProvider,
+                fallbackNotice,
+            );
+        } finally {
+            if (programmaticExtractionControllersRef.current[index] === controller) {
+                delete programmaticExtractionControllersRef.current[index];
+            }
+        }
+    };
+
+    const handleCancelProgrammaticExtraction = (index: number) => {
+        programmaticExtractionControllersRef.current[index]?.abort();
     };
 
     const handleExtractCompetitorHtml = (index: number) => {
@@ -1940,6 +2013,7 @@ ${readyCommandCompetitorBlocks}`;
                     const plainText = competitorTexts[index] || '';
                     const isLoading = extraction.status === 'loading';
                     const isUrlLoading = isLoading && extraction.source === 'url';
+                    const isProgrammaticLoading = isLoading && extraction.source === 'programmatic';
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
@@ -1948,7 +2022,7 @@ ${readyCommandCompetitorBlocks}`;
                             <div className="space-y-3">
                                 <div>
                                     <div className="mb-1 text-[11px] font-bold text-gray-500 dark:text-gray-400">{tRs.competitorUrlField}</div>
-                                    <div className="flex items-stretch gap-2">
+                                    <div className="space-y-2">
                                         <input
                                             type="url"
                                             value={url}
@@ -1957,15 +2031,40 @@ ${readyCommandCompetitorBlocks}`;
                                             className="min-w-0 flex-1 rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
                                             dir="ltr"
                                         />
-                                        <button
-                                            type="button"
-                                            onClick={() => handleExtractCompetitorUrl(index)}
-                                            disabled={isLoading}
-                                            className="flex shrink-0 items-center justify-center gap-1 rounded-md bg-[#d4af37] px-3 py-2 text-xs font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            {isUrlLoading ? <Wand2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
-                                            <span>{isUrlLoading ? tRs.extractingCompetitor : tRs.extractCompetitorFromUrl}</span>
-                                        </button>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleExtractCompetitorUrl(index)}
+                                                disabled={isLoading}
+                                                title={tRs.extractCompetitorWithAiHint}
+                                                className="flex min-w-0 items-center justify-center gap-1 rounded-md bg-[#d4af37] px-2 py-2 text-[11px] font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                {isUrlLoading ? <Wand2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                                                <span className="truncate">{isUrlLoading ? tRs.extractingCompetitor : tRs.extractCompetitorWithAi}</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => isProgrammaticLoading
+                                                    ? handleCancelProgrammaticExtraction(index)
+                                                    : handleExtractCompetitorProgrammatically(index)}
+                                                disabled={isLoading && !isProgrammaticLoading}
+                                                title={isProgrammaticLoading
+                                                    ? tRs.stopProgrammaticExtraction
+                                                    : tRs.extractCompetitorProgrammaticallyHint}
+                                                className={`flex min-w-0 items-center justify-center gap-1 rounded-md border px-2 py-2 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                    isProgrammaticLoading
+                                                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
+                                                        : 'border-[#d4af37]/50 bg-[#d4af37]/10 text-[#8a6f1d] hover:bg-[#d4af37]/20 dark:text-[#f2d675]'
+                                                }`}
+                                            >
+                                                {isProgrammaticLoading ? <X size={14} /> : <Code2 size={14} />}
+                                                <span className="truncate">
+                                                    {isProgrammaticLoading
+                                                        ? tRs.stopProgrammaticExtraction
+                                                        : tRs.extractCompetitorProgrammatically}
+                                                </span>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                                 <div>
@@ -1981,9 +2080,9 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                             </div>
 
-                            {isLoading && competitorGeminiProgress[index] && (
-                                <div className="mt-2">
-                                    <GeminiProgressStatus progress={competitorGeminiProgress[index]} isArabic={isArabicLocale} compact onCancel={cancelAiRequest} />
+                            {extraction.notice && (
+                                <div className="mt-2 rounded-md bg-blue-50 px-2 py-2 text-[11px] font-semibold leading-5 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                                    {extraction.notice}
                                 </div>
                             )}
 
@@ -1997,7 +2096,26 @@ ${readyCommandCompetitorBlocks}`;
                             {content && (
                                 <div className="mt-3 space-y-3 border-t border-gray-100 pt-3 text-xs dark:border-[#3C3C3C]">
                                     <div className="flex items-center justify-between gap-2">
-                                        <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{tRs.extractedContent}</span>
+                                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                            <span className="font-bold text-[#8a6f1d] dark:text-[#f2d675]">{tRs.extractedContent}</span>
+                                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 dark:bg-[#333333] dark:text-gray-300">
+                                                {extraction.source === 'programmatic'
+                                                    ? tRs.programmaticExtractionSource
+                                                    : extraction.source === 'url'
+                                                        ? tRs.aiExtractionSource
+                                                        : tRs.htmlExtractionSource}
+                                            </span>
+                                            {content.cacheHit && (
+                                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
+                                                    {tRs.cachedExtraction}
+                                                </span>
+                                            )}
+                                            {typeof content.qualityScore === 'number' && (
+                                                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                                                    {tRs.extractionQuality}: {Math.round(content.qualityScore)}%
+                                                </span>
+                                            )}
+                                        </div>
                                         <span className="shrink-0 text-[11px] text-gray-400">{content.wordCount} {t.common.words}</span>
                                     </div>
                                     <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">

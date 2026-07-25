@@ -18,6 +18,10 @@ import {
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
 import { getCompetitorPreview } from '../server/competitorPreviewCache';
+import {
+  getProgrammaticCompetitorContent,
+  ProgrammaticCompetitorExtractionError,
+} from '../server/programmaticCompetitorExtractor';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 import {
   ArticleAccessPolicyError,
@@ -395,10 +399,37 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   assertRequestContentLength(req, 96 * 1024);
   const body = await readJsonBody(req);
   const action = toText(body.action);
-  const articleId = requireArticleId(body);
   const principal = await authenticateApiRequest(req);
   const supabase = getExternalAnalysisSupabaseAdmin() as SupabaseAdmin;
 
+  if (action === 'programmatic_extract') {
+    consumeApiRateLimit('competitors-programmatic-extract', principal.userId, 20);
+    const controller = new AbortController();
+    const requestSignal = req?.signal && typeof req.signal.addEventListener === 'function'
+      ? req.signal as AbortSignal
+      : null;
+    const abortFromRequest = () => controller.abort(requestSignal?.reason);
+    const abortFromNodeRequest = () => controller.abort(new Error('The request was aborted by the user.'));
+    requestSignal?.addEventListener('abort', abortFromRequest, { once: true });
+    if (typeof req?.once === 'function') req.once('aborted', abortFromNodeRequest);
+    try {
+      const content = await getProgrammaticCompetitorContent({
+        url: toText(body.url),
+        signal: controller.signal,
+        forceRefresh: body.forceRefresh === true,
+      });
+      return {
+        status: 200,
+        body: { ok: true, action, content },
+        headers: getCorsResponseHeaders(req),
+      };
+    } finally {
+      requestSignal?.removeEventListener('abort', abortFromRequest);
+      if (typeof req?.off === 'function') req.off('aborted', abortFromNodeRequest);
+    }
+  }
+
+  const articleId = requireArticleId(body);
   if (action === 'list') {
     consumeApiRateLimit('competitors-list', principal.userId, 120);
     await requireArticleReadAccess(supabase, articleId, principal.userId);
@@ -649,7 +680,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new CompetitorApiError({
-    message: 'action must be list, ensure_discovery, search, preview, extract, cancel, cancel_discovery, or remove.',
+    message: 'action must be list, ensure_discovery, search, preview, programmatic_extract, extract, cancel, cancel_discovery, or remove.',
     code: 'invalid_action',
   });
 };
@@ -664,11 +695,14 @@ export default async function handler(req: any, res?: any): Promise<Response | v
     const status = error instanceof CompetitorApiError
       || error instanceof ArticleAccessPolicyError
       || error instanceof FirecrawlCompetitorError
+      || error instanceof ProgrammaticCompetitorExtractionError
       ? error.status
       : error instanceof ApiSecurityError
         ? error.status
         : 500;
-    const code = error instanceof CompetitorApiError || error instanceof FirecrawlCompetitorError
+    const code = error instanceof CompetitorApiError
+      || error instanceof FirecrawlCompetitorError
+      || error instanceof ProgrammaticCompetitorExtractionError
       ? error.code
       : error instanceof ArticleAccessPolicyError
         ? 'article_access_denied'
