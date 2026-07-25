@@ -4,6 +4,7 @@ import {
   Check,
   CheckCircle2,
   Eye,
+  ExternalLink,
   LoaderCircle,
   RotateCcw,
   Search,
@@ -174,6 +175,20 @@ const requestErrorMessage = (error: unknown, isArabic: boolean, fallback: string
     if (labels[error.code]) return labels[error.code];
   }
   return error instanceof Error ? error.message : fallback;
+};
+
+const resolveExternalSourceUrl = (...candidates: Array<string | null | undefined>): string => {
+  for (const candidate of candidates) {
+    const value = candidate?.trim();
+    if (!value) continue;
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+    } catch {
+      // Ignore invalid source URLs instead of allowing them to navigate the editor.
+    }
+  }
+  return '';
 };
 
 const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
@@ -764,6 +779,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           <div className="max-h-80 space-y-1.5 overflow-y-auto pe-1 custom-scrollbar">
             {searchResults.map((result, index) => {
               const selected = selectedUrls.has(result.canonicalUrl);
+              const searchSourceUrl = resolveExternalSourceUrl(result.canonicalUrl, result.url);
               const visibleReasons = result.reasonCodes
                 .filter(code => code !== 'auto-selected' && code !== 'diverse-source')
                 .slice(0, 2);
@@ -825,14 +841,28 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                       )}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewLocation({ source: 'search', index })}
-                    title={isArabic ? 'معاينة الموقع داخل المحرر' : 'Preview website inside the editor'}
-                    className="m-1 flex size-7 shrink-0 items-center justify-center self-start rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#8a6f1d] dark:hover:bg-[#333] dark:hover:text-[#f2d675]"
-                  >
-                    <Eye size={14} />
-                  </button>
+                  <div className="m-1 flex shrink-0 items-start gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewLocation({ source: 'search', index })}
+                      title={isArabic ? 'معاينة الموقع داخل المحرر' : 'Preview website inside the editor'}
+                      className="flex size-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#8a6f1d] dark:hover:bg-[#333] dark:hover:text-[#f2d675]"
+                    >
+                      <Eye size={14} />
+                    </button>
+                    {searchSourceUrl && (
+                      <a
+                        href={searchSourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={isArabic ? 'فتح المصدر في تبويب جديد' : 'Open source in a new tab'}
+                        aria-label={isArabic ? 'فتح المصدر في تبويب جديد' : 'Open source in a new tab'}
+                        className="flex size-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#8a6f1d] dark:hover:bg-[#333] dark:hover:text-[#f2d675]"
+                      >
+                        <ExternalLink size={14} />
+                      </a>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -919,45 +949,60 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           <div className="text-[11px] font-black text-gray-600 dark:text-gray-300">
             {isArabic ? 'المصادر المحفوظة في المقالة' : 'Saved article sources'}
           </div>
-          {state.competitors.map((row, index) => (
-            <div key={row.id} className="flex items-start gap-2 rounded-md border border-gray-200 bg-white px-2 py-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-              <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${statusTone(row.status)}`}>
-                {row.status === 'completed' ? <Check size={11} /> : row.status === 'failed' || row.status === 'cancelled' ? <XCircle size={11} /> : <LoaderCircle size={11} className={row.status === 'extracting' ? 'animate-spin' : ''} />}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="line-clamp-1 text-[11px] font-black text-gray-800 dark:text-gray-100">{row.position}. {row.title || row.domain}</div>
-                <div className="mt-0.5 truncate text-[10px] text-gray-500" dir="ltr">{row.domain}</div>
-                {row.status === 'completed' && (
-                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
-                    <span>{row.wordCount} {isArabic ? 'كلمة' : 'words'}</span>
-                    <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] dark:bg-emerald-500/10">
-                      {row.extractionProvider.startsWith('firecrawl')
-                        ? 'Firecrawl'
-                        : row.extractionProvider || (isArabic ? 'غير محدد' : 'Unknown')}
-                    </span>
-                  </div>
+          {state.competitors.map((row, index) => {
+            const savedSourceUrl = resolveExternalSourceUrl(row.canonicalUrl, row.sourceUrl);
+            return (
+              <div key={row.id} className="flex items-start gap-2 rounded-md border border-gray-200 bg-white px-2 py-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${statusTone(row.status)}`}>
+                  {row.status === 'completed' ? <Check size={11} /> : row.status === 'failed' || row.status === 'cancelled' ? <XCircle size={11} /> : <LoaderCircle size={11} className={row.status === 'extracting' ? 'animate-spin' : ''} />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="line-clamp-1 text-[11px] font-black text-gray-800 dark:text-gray-100">{row.position}. {row.title || row.domain}</div>
+                  <div className="mt-0.5 truncate text-[10px] text-gray-500" dir="ltr">{row.domain}</div>
+                  {row.status === 'completed' && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
+                      <span>{row.wordCount} {isArabic ? 'كلمة' : 'words'}</span>
+                      <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] dark:bg-emerald-500/10">
+                        {row.extractionProvider.startsWith('firecrawl')
+                          ? 'Firecrawl'
+                          : row.extractionProvider || (isArabic ? 'غير محدد' : 'Unknown')}
+                      </span>
+                    </div>
+                  )}
+                  {row.errorMessage && <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-red-600 dark:text-red-300">{row.errorMessage}</div>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPreviewLocation({ source: 'saved', index })}
+                  title={isArabic ? 'معاينة المصدر داخل المحرر' : 'Preview source inside the editor'}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#8a6f1d] dark:hover:bg-[#333] dark:hover:text-[#f2d675]"
+                >
+                  <Eye size={14} />
+                </button>
+                {savedSourceUrl && (
+                  <a
+                    href={savedSourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={isArabic ? 'فتح المصدر في تبويب جديد' : 'Open source in a new tab'}
+                    aria-label={isArabic ? 'فتح المصدر في تبويب جديد' : 'Open source in a new tab'}
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#8a6f1d] dark:hover:bg-[#333] dark:hover:text-[#f2d675]"
+                  >
+                    <ExternalLink size={14} />
+                  </a>
                 )}
-                {row.errorMessage && <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-red-600 dark:text-red-300">{row.errorMessage}</div>}
+                <button
+                  type="button"
+                  onClick={() => void handleRemove(row.id)}
+                  disabled={Boolean(activeJob) || actionId === row.id}
+                  title={isArabic ? 'حذف المصدر' : 'Remove source'}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-500/10"
+                >
+                  {actionId === row.id ? <LoaderCircle size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setPreviewLocation({ source: 'saved', index })}
-                title={isArabic ? 'معاينة المصدر داخل المحرر' : 'Preview source inside the editor'}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#8a6f1d] dark:hover:bg-[#333] dark:hover:text-[#f2d675]"
-              >
-                <Eye size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleRemove(row.id)}
-                disabled={Boolean(activeJob) || actionId === row.id}
-                title={isArabic ? 'حذف المصدر' : 'Remove source'}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-500/10"
-              >
-                {actionId === row.id ? <LoaderCircle size={13} className="animate-spin" /> : <Trash2 size={13} />}
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

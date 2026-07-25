@@ -377,3 +377,15 @@ test('competitor sidebar keeps one canonical text surface and no Firecrawl resul
   assert.doesNotMatch(sidebar, /fullExtractedText/);
   assert.doesNotMatch(translations, /fullExtractedText/);
 });
+
+test('search results and saved article sources open their safe original URL in a new tab', async () => {
+  const panel = await readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx');
+
+  assert.match(panel, /const resolveExternalSourceUrl/);
+  assert.match(panel, /parsed\.protocol === 'http:' \|\| parsed\.protocol === 'https:'/);
+  assert.match(panel, /const searchSourceUrl = resolveExternalSourceUrl\(result\.canonicalUrl, result\.url\)/);
+  assert.match(panel, /const savedSourceUrl = resolveExternalSourceUrl\(row\.canonicalUrl, row\.sourceUrl\)/);
+  assert.ok((panel.match(/target="_blank"/g) || []).length >= 2);
+  assert.ok((panel.match(/rel="noopener noreferrer"/g) || []).length >= 2);
+  assert.ok((panel.match(/<ExternalLink size=\{14\} \/>/g) || []).length >= 2);
+});
