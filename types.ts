@@ -72,6 +72,12 @@ export interface ReadyCommandAnalysisHistoryMeta {
 export interface ReadyCommandAnalysisBatchItem extends ReadyCommandAnalysisHistoryMeta {
   userPrompt: string;
   options: AiAnalysisOptions;
+  competitorSources?: Array<{
+    competitorNumber: number;
+    url: string;
+    title: string;
+    text: string;
+  }>;
 }
 
 export type EngineeringPromptSource = 'smartAnalysis' | 'toolbar';

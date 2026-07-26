@@ -9,6 +9,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: process.env.PORT || '8080',
+        GEMINI_PER_KEY_TIMEOUT_MS: process.env.GEMINI_PER_KEY_TIMEOUT_MS || '75000',
       },
     },
     // Firecrawl owns competitor discovery/extraction. Keep Gemini-backed job types out
@@ -47,7 +48,8 @@ module.exports = {
         EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.EXTERNAL_ANALYSIS_WORKER_POLL_MS || '5000',
         EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS || '300',
         EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
-        EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: process.env.EXTERNAL_ANALYSIS_WORKER_CONCURRENCY || '5',
+        EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: process.env.EXTERNAL_ANALYSIS_WORKER_CONCURRENCY || '2',
+        GEMINI_PER_KEY_TIMEOUT_MS: process.env.GEMINI_PER_KEY_TIMEOUT_MS || '75000',
       },
     },
     {
@@ -65,6 +67,7 @@ module.exports = {
         AI_JOB_LEASE_SECONDS: process.env.AI_JOB_LEASE_SECONDS || '300',
         AI_JOB_WORKER_CONCURRENCY: process.env.AI_JOB_WORKER_CONCURRENCY || '2',
         EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
+        GEMINI_PER_KEY_TIMEOUT_MS: process.env.GEMINI_PER_KEY_TIMEOUT_MS || '75000',
       },
     },
     {
@@ -81,6 +84,7 @@ module.exports = {
         CONTENT_WRITING_WORKER_POLL_MS: process.env.CONTENT_WRITING_WORKER_POLL_MS || '1500',
         CONTENT_WRITING_SESSION_LEASE_SECONDS: process.env.CONTENT_WRITING_SESSION_LEASE_SECONDS || '1800',
         CONTENT_WRITING_WORKER_CONCURRENCY: process.env.CONTENT_WRITING_WORKER_CONCURRENCY || '1',
+        GEMINI_PER_KEY_TIMEOUT_MS: process.env.GEMINI_PER_KEY_TIMEOUT_MS || '75000',
       },
     },
     {

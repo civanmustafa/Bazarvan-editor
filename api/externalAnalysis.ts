@@ -267,12 +267,17 @@ const enqueueEngineeringJobs = async (
       details: { commandIds: invalidCommandIds },
     });
   }
+  const activeCommands = commands.filter(
+    (command): command is NonNullable<ReturnType<typeof getExternalEngineeringCommand>> => Boolean(command),
+  );
 
   const keywords = isRecord(article.keywords) ? article.keywords : {};
+  const needsEditorText = activeCommands.some(command => command.options.editorText);
+  const needsCompetitorInput = activeCommands.some(command => command.options.competitorContent);
   const missingFields = [
     ...toStringList(state.external_analysis_missing_fields),
-    !toTrimmedString(article.plain_text) ? 'editor_text' : '',
-    !hasCompetitorInput(article.metadata) ? 'competitor_content_or_url' : '',
+    needsEditorText && !toTrimmedString(article.plain_text) ? 'editor_text' : '',
+    needsCompetitorInput && !hasCompetitorInput(article.metadata) ? 'competitor_content_or_url' : '',
   ].filter(Boolean);
   if (!state.external_analysis_ready || !state.external_analysis_readiness_signature || missingFields.length > 0) {
     throw new ExternalAnalysisApiError({
@@ -290,8 +295,11 @@ const enqueueEngineeringJobs = async (
   });
   if (preferenceError) throw preferenceError;
 
-  const needsSemanticPrerequisite = toStringList(keywords.secondaries).length === 0
-    || toStringList(keywords.lsi).length === 0;
+  const needsSemanticPrerequisite = activeCommands.some(command => command.options.targetKeywords)
+    && (
+      toStringList(keywords.secondaries).length === 0
+      || toStringList(keywords.lsi).length === 0
+    );
   const { data: enqueuedIds, error: enqueueError } = await supabase.rpc(
     'enqueue_external_engineering_jobs',
     { p_article_id: article.id },

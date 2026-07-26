@@ -327,12 +327,16 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
       || selectedCommandIds.length > 0
       || summary?.state?.engineering_command_mode !== 'custom'
     ) return;
-    setSelectedCommandIds(summary.state.custom_engineering_command_ids || []);
+    const activeCommandIds = new Set(commands.map(command => command.id));
+    setSelectedCommandIds(
+      (summary.state.custom_engineering_command_ids || []).filter(commandId => activeCommandIds.has(commandId)),
+    );
   }, [
     menuOpen,
     selectedCommandIds.length,
     summary?.state?.custom_engineering_command_ids,
     summary?.state?.engineering_command_mode,
+    commands,
   ]);
 
   const formatRequestError = (error: unknown): string => {

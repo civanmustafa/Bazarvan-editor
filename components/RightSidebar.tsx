@@ -18,7 +18,9 @@ import {
     normalizeGeminiFreeModel,
 } from '../utils/geminiModelPreference';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
+import { isRetiredEngineeringCommandId } from '../constants/externalAnalysisCommands';
 import GeminiProgressStatus from './GeminiProgressStatus';
+import { truncatePromptTextDistributed } from '../utils/promptText';
 import ExternalAiBridgePanel from './ExternalAiBridgePanel';
 import CompetitorDiscoveryPanel from './CompetitorDiscoveryPanel';
 import { runGeminiAnalysisEngine } from '../utils/geminiAnalysisEngine';
@@ -28,6 +30,10 @@ import {
     extractCompetitorProgrammatically,
     type CompetitorDiscoveryRow,
 } from '../utils/competitorDiscovery';
+import {
+    COMPETITOR_COMPARISON_COMMAND_ID,
+    type CompetitorComparisonSource,
+} from '../utils/competitorComparisonWorkflow';
 
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
 const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
@@ -147,15 +153,18 @@ const splitBulkCompetitorTexts = (value: string): string[] => {
 };
 
 const countPromptWords = (value: string): number => value.split(/\s+/).filter(Boolean).length;
+const READY_COMMAND_COMPETITOR_TOTAL_MAX_CHARS = 30_000;
+const READY_COMMAND_COMPETITOR_SINGLE_MAX_CHARS = 15_000;
 
 const truncatePromptText = (value: string, maxLength = 9000): string => {
-    const trimmed = value.trim();
-    if (trimmed.length <= maxLength) return trimmed;
-    return `${trimmed.slice(0, maxLength).trim()}\n\n[تم اختصار بقية النص لتخفيف حجم الطلب على API.]`;
+    return truncatePromptTextDistributed(value, maxLength, {
+        middle: '[تم اختصار جزء من نص المنافس؛ المقطع التالي عينة من الوسط.]',
+        tail: '[تم اختصار جزء آخر؛ المقطع التالي من نهاية نص المنافس.]',
+    });
 };
 
-const formatCompetitorEvidenceParagraphs = (value: string): string => {
-    const paragraphs = truncatePromptText(value)
+const formatCompetitorEvidenceParagraphs = (value: string, maxLength = 9000): string => {
+    const paragraphs = truncatePromptText(value, maxLength)
         .split(/\n{2,}/)
         .map(paragraph => paragraph.trim())
         .filter(Boolean);
@@ -183,8 +192,6 @@ const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string =
 
 const READY_COMMAND_DISPLAY_ORDER = [
     ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison,
-    ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis,
-    ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands,
     ENGINEERING_PROMPT_IDS.smartAnalysis.repetitionAndFillerAudit,
     ENGINEERING_PROMPT_IDS.smartAnalysis.fullArticleAudit,
 ];
@@ -648,16 +655,23 @@ const buildReadyCommandCompetitorBlocks = (
 ): string => {
     // Ready/manual commands receive exactly one text block per competitor. Prefer the
     // user-editable canonical field and never attach the preview card as a second copy.
-    const blocks: string[] = [];
     const slotCount = Math.max(extractions.length, plainTexts.length, urls.length);
-    for (let index = 0; index < slotCount; index += 1) {
+    const slots = Array.from({ length: slotCount }, (_, index) => {
         const extraction = extractions[index];
         const content = extraction?.content;
         const plainText = stripExtractionLabels(normalizePlainCompetitorText(plainTexts[index] || ''));
         const extractedText = stripExtractionLabels(normalizePlainCompetitorText(content?.text || ''));
         const text = plainText || extractedText;
-        if (!text) continue;
+        return { index, extraction, content, text };
+    }).filter(slot => Boolean(slot.text));
+    const perCompetitorLimit = slots.length > 0
+        ? Math.min(
+            READY_COMMAND_COMPETITOR_SINGLE_MAX_CHARS,
+            Math.floor(READY_COMMAND_COMPETITOR_TOTAL_MAX_CHARS / slots.length),
+        )
+        : 0;
 
+    return slots.map(({ index, extraction, content, text }) => {
         const sourceLabel = extraction?.source === 'programmatic'
             ? 'محتوى نصي مستخرج برمجيًا'
             : extraction?.source === 'firecrawl'
@@ -667,7 +681,7 @@ const buildReadyCommandCompetitorBlocks = (
                     : extraction?.source === 'html'
                         ? 'محتوى نصي مستخرج من HTML'
                         : 'نص معتمد مدخل يدويًا';
-        blocks.push(`### المنافس ${index + 1} - ${sourceLabel}
+        return `### المنافس ${index + 1} - ${sourceLabel}
 الرابط: ${content?.url || content?.fetchedUrl || urls[index]?.trim() || 'غير محدد'}
 العنوان: ${content?.title || 'غير محدد'}
 عدد الكلمات: ${countPromptWords(text)}
@@ -675,11 +689,9 @@ const buildReadyCommandCompetitorBlocks = (
 
 النص مرقم الفقرات:
 ---
-${formatCompetitorEvidenceParagraphs(text)}
----`);
-    }
-
-    return blocks.join('\n\n');
+${formatCompetitorEvidenceParagraphs(text, perCompetitorLimit)}
+---`;
+    }).join('\n\n');
 };
 
 const buildCompetitorPrompt = (url: string): string => `أنت محلل محتوى SEO تقني صارم داخل أداة تحرير محتوى.
@@ -775,6 +787,7 @@ const RightSidebar: React.FC = () => {
     const handleAiAnalyze = useAISelector(context => context.handleAiAnalyze);
     const handleChatGptAnalyze = useAISelector(context => context.handleChatGptAnalyze);
     const handleGeminiReadyCommandsAnalyze = useAISelector(context => context.handleGeminiReadyCommandsAnalyze);
+    const handleCompetitorComparisonAnalyze = useAISelector(context => context.handleCompetitorComparisonAnalyze);
     const buildSmartAnalysisPrompt = useAISelector(context => context.buildSmartAnalysisPrompt);
     const validateAiArticleContext = useAISelector(context => context.validateAiArticleContext);
     const importManualAiResponse = useAISelector(context => context.importManualAiResponse);
@@ -833,7 +846,11 @@ const RightSidebar: React.FC = () => {
     const tRs = t.rightSidebar;
     const isGeminiSmartProgress = Boolean(
         aiRequestProgress &&
-        (aiRequestProgress.source === 'smart_analysis' || aiRequestProgress.source === 'ready_commands_batch')
+        (
+            aiRequestProgress.source === 'smart_analysis'
+            || aiRequestProgress.source === 'ready_commands_batch'
+            || aiRequestProgress.source?.startsWith('competitor_comparison_')
+        )
     );
 
     useEffect(() => {
@@ -997,7 +1014,10 @@ const RightSidebar: React.FC = () => {
     const readyCommands: ReadyCommand[] = useMemo(() => {
         const isArabic = t.locale === 'ar';
         return ENGINEERING_PROMPT_DEFINITIONS
-            .filter(definition => definition.source === 'smartAnalysis')
+            .filter(definition => (
+                definition.source === 'smartAnalysis'
+                && !isRetiredEngineeringCommandId(definition.id)
+            ))
             .sort((first, second) => (
                 getReadyCommandDisplayOrder(first.id) - getReadyCommandDisplayOrder(second.id)
             ))
@@ -1025,6 +1045,22 @@ const RightSidebar: React.FC = () => {
 
     const readyCommandCompetitorBlocks = useMemo(() => {
         return buildReadyCommandCompetitorBlocks(competitorExtractions, competitorTexts, competitorUrls);
+    }, [competitorExtractions, competitorTexts, competitorUrls]);
+
+    const readyCommandCompetitorSources = useMemo<CompetitorComparisonSource[]>(() => {
+        const slotCount = Math.max(competitorExtractions.length, competitorTexts.length, competitorUrls.length);
+        return Array.from({ length: slotCount }, (_, index) => {
+            const extraction = competitorExtractions[index];
+            const content = extraction?.content;
+            const plainText = stripExtractionLabels(normalizePlainCompetitorText(competitorTexts[index] || ''));
+            const extractedText = stripExtractionLabels(normalizePlainCompetitorText(content?.text || ''));
+            return {
+                competitorNumber: index + 1,
+                url: content?.url || content?.fetchedUrl || competitorUrls[index]?.trim() || '',
+                title: content?.title || '',
+                text: plainText || extractedText,
+            };
+        }).filter(source => Boolean(source.text.trim() || source.url.trim()));
     }, [competitorExtractions, competitorTexts, competitorUrls]);
 
     const competitorTextStats = useMemo(() => {
@@ -1081,13 +1117,19 @@ ${readyCommandCompetitorBlocks}`;
 
     const readyCommandBatchItems: ReadyCommandAnalysisBatchItem[] = selectedReadyCommands.map(command => {
         const options = getReadyCommandOptions(command);
+        const isIndependentCompetitorCommand = command.id === COMPETITOR_COMPARISON_COMMAND_ID;
         return {
             commandId: command.id,
             commandLabel: command.label,
-            userPrompt: appendSelectedAttachments(command.value, options),
+            userPrompt: isIndependentCompetitorCommand
+                ? command.value
+                : appendSelectedAttachments(command.value, options),
             options,
             skipPatchInstructions: command.skipPatchInstructions,
             savesContentSummary: command.savesContentSummary,
+            competitorSources: isIndependentCompetitorCommand
+                ? readyCommandCompetitorSources
+                : undefined,
         };
     });
 
@@ -1110,6 +1152,18 @@ ${readyCommandCompetitorBlocks}`;
 
     const buildManualBridgePrompt = (provider: ExternalAiBridgeProvider): string | null => {
         if (!validateAiArticleContext(isArabicLocale ? 'التحليل الذكي الخارجي' : 'External smart analysis')) return null;
+        if (selectedReadyCommands.length > 1) {
+            window.alert(isArabicLocale
+                ? 'الأوامر المحددة تُنفذ كطلبات مستقلة. استخدم أزرار Gemini أو ChatGPT داخل المحرر بدل جمعها في مطالبة خارجية واحدة.'
+                : 'Selected commands run as separate requests. Use the in-editor Gemini or ChatGPT buttons instead of combining them in one external prompt.');
+            return null;
+        }
+        if (selectedReadyCommand?.id === COMPETITOR_COMPARISON_COMMAND_ID) {
+            window.alert(isArabicLocale
+                ? 'هذا الأمر يحتاج عدة طلبات مستقلة ثم دمجًا نهائيًا، لذلك شغّله من أزرار Gemini أو ChatGPT داخل المحرر.'
+                : 'This command requires independent competitor requests and a final synthesis. Run it with the in-editor Gemini or ChatGPT buttons.');
+            return null;
+        }
         if (selectedReadyCommands.length > 0) {
             clearReadyCommandSelectionOnNextOpenRef.current = true;
         }
@@ -1192,6 +1246,10 @@ ${readyCommandCompetitorBlocks}`;
             handleGeminiReadyCommandsAnalyze(readyCommandBatchItems, 'gemini', selectedSmartGeminiModel);
             return;
         }
+        if (readyCommandBatchItems[0]?.commandId === COMPETITOR_COMPARISON_COMMAND_ID) {
+            handleCompetitorComparisonAnalyze(readyCommandBatchItems[0], 'gemini', selectedSmartGeminiModel);
+            return;
+        }
 
         const request = buildCurrentSmartAnalysisRequest();
         handleAiAnalyze(request.userPrompt, request.options, request.historyMeta, 'gemini', selectedSmartGeminiModel);
@@ -1206,6 +1264,10 @@ ${readyCommandCompetitorBlocks}`;
             handleGeminiReadyCommandsAnalyze(readyCommandBatchItems, 'geminiPaid');
             return;
         }
+        if (readyCommandBatchItems[0]?.commandId === COMPETITOR_COMPARISON_COMMAND_ID) {
+            handleCompetitorComparisonAnalyze(readyCommandBatchItems[0], 'geminiPaid');
+            return;
+        }
 
         const request = buildCurrentSmartAnalysisRequest();
         handleAiAnalyze(request.userPrompt, request.options, request.historyMeta, 'geminiPaid');
@@ -1217,6 +1279,14 @@ ${readyCommandCompetitorBlocks}`;
             clearReadyCommandSelectionOnNextOpenRef.current = true;
         }
         setIsChatGptExpanded(true);
+        if (selectedReadyCommands.length > 1) {
+            handleGeminiReadyCommandsAnalyze(readyCommandBatchItems, 'chatgpt');
+            return;
+        }
+        if (readyCommandBatchItems[0]?.commandId === COMPETITOR_COMPARISON_COMMAND_ID) {
+            handleCompetitorComparisonAnalyze(readyCommandBatchItems[0], 'chatgpt');
+            return;
+        }
         const request = buildCurrentSmartAnalysisRequest();
         handleChatGptAnalyze(request.userPrompt, request.options, request.historyMeta);
     };
@@ -1816,8 +1886,8 @@ ${readyCommandCompetitorBlocks}`;
                             {selectedReadyCommands.length > 1 && (
                                 <p className="mt-1.5 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
                                     {t.locale === 'ar'
-                                        ? `سيتم إرسال ${selectedReadyCommands.length} أوامر دفعة واحدة إلى مزود Gemini الذي تختاره، مع توزيعها على مفاتيح API المتاحة له.`
-                                        : `${selectedReadyCommands.length} commands will be sent together to the Gemini provider you choose, distributed across its available API keys.`}
+                                        ? `سيتم تنفيذ ${selectedReadyCommands.length} أوامر بصورة مستقلة ومتتابعة لدى مزود Gemini المختار.`
+                                        : `${selectedReadyCommands.length} commands will run as separate sequential requests with the selected Gemini provider.`}
                                 </p>
                             )}
                         </div>

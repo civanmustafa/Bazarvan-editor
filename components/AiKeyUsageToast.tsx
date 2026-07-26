@@ -30,6 +30,9 @@ const TERMINAL_NOTICE_TTL_MS = 18_000;
 const SURFACE_LABELS: Record<string, [string, string]> = {
   semantic_keywords_lsi: ['توليد الصيغ وLSI', 'Alternatives and LSI'],
   smart_analysis: ['التحليل الذكي', 'Smart analysis'],
+  competitor_comparison_map: ['تحليل منافس مستقل', 'Independent competitor analysis'],
+  competitor_comparison_synthesis: ['دمج نتائج المنافسين', 'Competitor result synthesis'],
+  competitor_comparison_synthesis_repair: ['إصلاح دمج المنافسين', 'Competitor synthesis repair'],
   quick_provider: ['أمر سريع', 'Quick command'],
   bulk_fix_review: ['مراجعة إصلاح المخالفات', 'Violation repair review'],
   bulk_fix_all: ['إصلاح المخالفات', 'Fix violations'],

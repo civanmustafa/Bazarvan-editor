@@ -129,7 +129,7 @@ test('engineering command bundles cannot start or retry without saved article te
   assert.match(engineeringExecutor, /throw new ExternalAnalysisTerminalError/);
   const articleTextGuard = engineeringExecutor.slice(
     engineeringExecutor.indexOf("if (!input.plainText)"),
-    engineeringExecutor.indexOf('if (input.keywords.secondaries.length'),
+    engineeringExecutor.indexOf('command.options.targetKeywords'),
   );
   assert.match(articleTextGuard, /ExternalAnalysisTerminalError/);
   assert.doesNotMatch(articleTextGuard, /createRetryError|retry_scheduled/);

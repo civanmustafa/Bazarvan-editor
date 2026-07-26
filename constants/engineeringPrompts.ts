@@ -296,7 +296,7 @@ const PEOPLE_QUESTIONS_PROMPT = `استخرج أهم أسئلة الباحثين
 الإجابة المختصرة المفيدة في فقرة واحدة.
 - لا تعرض السؤال والإجابة كنص جاهز داخل التقرير خارج البطاقة.`;
 
-const COMPETITOR_CONTENT_COMPARISON_PROMPT = `# مقارنة المحتوى الحالي مع محتوى المنافسين + اقتراح محتوى جاهز
+const PREVIOUS_COMPETITOR_CONTENT_COMPARISON_PROMPT = `# مقارنة المحتوى الحالي مع محتوى المنافسين + اقتراح محتوى جاهز
 
 قاعدة إخراج إلزامية لهذا الأمر:
 
@@ -418,6 +418,24 @@ const COMPETITOR_CONTENT_COMPARISON_PROMPT = `# مقارنة المحتوى ال
 * لا تعرض عناوين "الفكرة" أو "سبب أهميتها" أو "سبب أهمية إضافتها" داخل analysisMarkdown عند وجود بطاقة تنفيذ؛ اجعل السبب داخل حقل reason فقط.
 * لا تكرر title أو reason أو placementLabel أو contentMarkdown خارج البطاقة.
 * لا تطلب الخاتمة الحالية أو معايير الخاتمة أو اسم الشركة أو جدول المحتويات، ولا تعتمد عليها إذا لم تكن مرفقة.`;
+
+const COMPETITOR_CONTENT_COMPARISON_PROMPT = `حلّل أفكار المنافسين مقارنة بالمقالة الحالية لاكتشاف:
+- الأفكار المهمة الناقصة كليًا.
+- الأفكار الموجودة جزئيًا التي تحتاج تعميقًا.
+- الادعاءات أو الأرقام المتعارضة التي تحتاج تحققًا.
+- نقاط التفوق المفيدة في المقالة الحالية.
+
+يجب تحليل كل منافس بصورة مستقلة أولًا، ثم دمج النتائج دلاليًا في مرحلة نهائية واحدة. لا تعتبر اختلاف الصياغة اختلافًا في الفكرة، ولا تدمج ادعاءات متعارضة في حقيقة واحدة، ولا تستبعد فكرة مهمة لأنها وردت لدى منافس واحد فقط.
+
+في التقرير النهائي:
+- اجمع النتائج المتطابقة دون فقد إحالات المنافسين وفقرات الأدلة.
+- رتّب الفجوات حسب أثرها وملاءمتها لهدف المقالة.
+- اذكر التعارضات بوضوح ولا تتبنَّ ادعاء المنافس كحقيقة.
+- أنشئ patch مستقلًا لكل تعديل مفيد وغير مكرر.
+- استخدم replace_block عند تعديل نص موجود، وعمليات الإضافة للمحتوى الجديد فقط.
+- اجعل النص المقترح أصليًا ومتوافقًا مع لغة المقالة ونبرتها.
+- لا تنسخ نصوص المنافسين ولا تخترع معلومات أو أرقامًا.
+- احتفظ بنقاط تفوق المقالة ولا تحذفها لمجرد اختلافها عن المنافسين.`;
 
 const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO/LLM SEO. افحص المحتوى التالي بعمق ولكن باختصار، وقيّمه من حيث مطابقته لنية البحث، كفاية الإجابة، قابلية الاقتباس في AI Overviews، الفجوات المعرفية، الأسئلة الناقصة، الادعاءات غير المدعومة، الكيانات الناقصة، البنية، وقوة التحويل.
 
@@ -1436,6 +1454,9 @@ const REPLACED_ENGINEERING_PROMPTS: Partial<Record<EngineeringPromptId, string[]
     PREVIOUS_COMPETITOR_GAP_ANALYSIS_PROMPT,
     PREVIOUS_COMPETITOR_GAP_ANALYSIS_PATCH_PROMPT,
   ],
+  [ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison]: [
+    PREVIOUS_COMPETITOR_CONTENT_COMPARISON_PROMPT,
+  ],
   [ENGINEERING_PROMPT_IDS.toolbar.generateMeta]: [PREVIOUS_GENERATE_META_PROMPT],
   [ENGINEERING_PROMPT_IDS.toolbar.rephrase]: [PREVIOUS_REPHRASE_PROMPT],
   [ENGINEERING_PROMPT_IDS.toolbar.improveWording]: [LEGACY_IMPROVE_WORDING_PROMPT, PREVIOUS_IMPROVE_WORDING_PROMPT],
@@ -1453,7 +1474,7 @@ const REPLACED_ENGINEERING_PROMPTS: Partial<Record<EngineeringPromptId, string[]
   [ENGINEERING_PROMPT_IDS.toolbar.changeTone]: [PREVIOUS_CHANGE_TONE_PROMPT],
 };
 
-const sanitizeEngineeringPrompt = (id: EngineeringPromptId, value: string): string => {
+export const sanitizeEngineeringPrompt = (id: EngineeringPromptId, value: string): string => {
   const replacedPrompts = REPLACED_ENGINEERING_PROMPTS[id] || [];
   if (replacedPrompts.some(prompt => value.trim() === prompt.trim())) {
     return DEFAULT_ENGINEERING_PROMPTS[id];

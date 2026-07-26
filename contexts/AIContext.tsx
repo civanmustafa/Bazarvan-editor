@@ -54,6 +54,18 @@ import {
     renderSemanticKeywordPrompt,
     type SemanticKeywordInput,
 } from '../utils/semanticKeywordPolicy';
+import {
+    buildCompetitorComparisonMapPrompt,
+    buildCompetitorComparisonSynthesisPrompt,
+    buildCompetitorComparisonSynthesisRepairPrompt,
+    combineCompetitorComparisonMapResults,
+    createCompetitorComparisonBatches,
+    getCompetitorComparisonExpectedItemIds,
+    isCompetitorComparisonCommand,
+    parseCompetitorComparisonMapResponse,
+    validateCompetitorComparisonSynthesisResponse,
+    type CompetitorComparisonMapResult,
+} from '../utils/competitorComparisonWorkflow';
 
 /*
  * AIContext owns all AI workflows:
@@ -72,8 +84,21 @@ const GEMINI_CHAT_STORAGE_PREFIX = 'bazarvan:gemini-chat';
 const GEMINI_CHAT_MAX_MESSAGES = 8;
 const GEMINI_CHAT_MAX_TOTAL_CHARS = 48000;
 const GEMINI_CHAT_MESSAGE_CHAR_LIMIT = 12000;
+const SMART_ANALYSIS_ARTICLE_MAX_CHARS = 20_000;
+const SMART_ANALYSIS_ARTICLE_TAIL_CHARS = 5_000;
+const TOOLBAR_INPUT_MAX_CHARS = 20_000;
+const HEADING_ANALYSIS_CONTEXT_MAX_CHARS = 12_000;
 const CHATGPT_CONVERSATION_STORAGE_PREFIX = 'bazarvan:chatgpt-conversation';
 const ARTICLE_AI_RUNTIME_STORAGE_PREFIX = 'bazarvan:article-ai-runtime:';
+
+const createPromptFingerprint = (value: string): string => {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+};
 const ARTICLE_AI_CLEAR_REQUEST_EVENT = 'bazarvan:article-ai-clear-request';
 const ARTICLE_AI_RESULTS_RESTORE_EVENT = 'bazarvan:article-ai-results-restored';
 const AI_CONTEXT_NOTICE_TIMEOUT_MS = 8000;
@@ -2219,13 +2244,18 @@ const callGeminiArticleChatAnalysis = async (
     usageContext?: AiApiUsageContext,
     model?: string,
     progressCallback?: GeminiProgressCallback,
+    includeHistory = false,
 ): Promise<string> => {
-    const history = readStoredGeminiChatHistory(currentUser, articleScope, provider);
+    // Ready engineering commands are independent operations. Replaying earlier
+    // prompt/response pairs can add tens of thousands of unrelated characters.
+    const history = includeHistory
+        ? readStoredGeminiChatHistory(currentUser, articleScope, provider)
+        : [];
     const selectedModel = provider === 'geminiPaid'
         ? GEMINI_PAID_MODEL
         : model?.trim() || getGeminiModelForProvider(provider);
     const result = await requestGeminiAnalysis(prompt, history, selectedModel, usageContext, progressCallback, provider);
-    if (result.ok) {
+    if (result.ok && includeHistory) {
         saveStoredGeminiChatHistory(currentUser, articleScope, appendGeminiChatExchange(history, prompt, result.text), provider);
     }
     onResult?.(result);
@@ -2390,6 +2420,22 @@ const truncatePromptText = (value: string, maxLength = 9000): string => {
     const trimmed = value.trim();
     if (trimmed.length <= maxLength) return trimmed;
     return `${trimmed.slice(0, maxLength).trim()}\n\n[The rest of the competitor text was shortened to keep the API request light.]`;
+};
+
+const truncateArticlePromptText = (
+    value: string,
+    maxLength = SMART_ANALYSIS_ARTICLE_MAX_CHARS,
+): string => {
+    const trimmed = value.trim();
+    if (trimmed.length <= maxLength) return trimmed;
+
+    const tailLength = Math.min(SMART_ANALYSIS_ARTICLE_TAIL_CHARS, Math.floor(maxLength / 4));
+    const headLength = maxLength - tailLength;
+    return [
+        trimmed.slice(0, headLength).trim(),
+        '[تم اختصار منتصف المقال لتخفيف طلب API مع الاحتفاظ بالبداية والنهاية.]',
+        trimmed.slice(-tailLength).trim(),
+    ].join('\n\n');
 };
 
 const formatCompetitorEvidenceParagraphs = (value: string): string => {
@@ -2900,6 +2946,24 @@ const SITE_OWNER_PUBLISHING_VOICE_GUARD = `**قاعدة صوت صاحب المو
 - عند شرح حدود تقنية أو شروط استخدام مهمة، صغها كمعلومة موثوقة تفيد الزائر ولا تجعل الكاتب يبدو غير ملم بالمنتج. مثال: تساعد مؤشرات نوع المعدن في توجيه قرار الحفر، مع بقاء الدقة مرتبطة بعمق الهدف وطبيعة التربة.
 - إذا لم تستطع كتابة نص آمن وجاهز للنشر من منظور صاحب الموقع، فلا تنشئ patch أو suggestion جاهزا؛ اكتب ملاحظة تحليلية فقط.`;
 
+const SMART_ANALYSIS_UNIFIED_OUTPUT_CONTRACT = `عقد الإخراج الموحد (أولوية على أي تنسيق آخر):
+أرجع كائن JSON صالحا فقط دون نص أو سياج Markdown خارجه:
+{"analysisMarkdown":"...","patches":[{"marker":"patch_1","operation":"replace_block","title":"...","anchorText":"...","targetText":"...","placementLabel":"...","contentMarkdown":"...","reason":"...","mergeDeleteTargetText":"","mergeDeleteAnchorText":"","mergeDeletePlacementLabel":"","confidence":0.85}]}
+
+القواعد:
+1. اكتب analysisMarkdown والحقول الوصفية بالعربية، واكتب contentMarkdown بلغة المقال. أبق targetText وanchorText حرفيين من المقال بلا ترجمة.
+2. اجعل analysisMarkdown تشخيصا مختصرا فقط. لكل تعديل قابل للتطبيق ضع فيه [[PATCH:patch_1]] في موضعه، واجعل marker مطابقا. لا تكرر title أوreason أوplacementLabel أوcontentMarkdown أو النص الجاهز خارج patch.
+3. العمليات المسموحة فقط: replace_block, replace_text, delete_block, insert_after_heading, insert_before_heading, append_to_section, insert_before_faq, insert_before_conclusion, append_to_article.
+4. تعديل/تحسين/توسيع/تحويل نص موجود = replace_block، مع نسخه حرفيا في targetText ووضع البديل النهائي فقط في contentMarkdown. حذف بلا بديل = delete_block مع targetText حرفي وcontentMarkdown فارغ. استخدم الإضافة للمحتوى الجديد فقط.
+5. ضع أقرب عنوان أو فقرة مرجعية في anchorText، ووصف الموضع باختصار في placementLabel. إذا تعذر تحديد نص موجود حرفيا فلا تخترعه ولا تستخدم تسمية عامة بدلا منه.
+6. H2 جديد قسم مستقل بعملية insert_before_conclusion أوinsert_before_heading أوappend_to_article، ولا يوضع داخل H2 آخر. كل patch يحتوي H2 واحدا فقط؛ يمكن إبقاء H3/H4 التابعة داخله. H3 جديد داخل H2 قائم يستخدم append_to_section.
+7. السؤال والجواب يكتبان داخل contentMarkdown معا: عنوان H3 للسؤال ثم فقرة الإجابة، دون تسميات "السؤال/الإجابة". تحويل نص إلى قائمة أو خطوات أو جدول يستخدم replace_block، ويجب أن يكون الجدول كاملا لا صف عنوان فقط.
+8. عند الدمج ضع النص النهائي في patch واحد، واستخدم حقول mergeDelete* لحذف المقطع الثاني من موضعه القديم عند الحاجة.
+9. إذا استند الاقتراح إلى منافس فاكتب في reason: "المصدر: المنافس N؛ فقرة الدليل: [فقرة N] مقتطف قصير". وإذا كان استنتاجا جديدا فاكتب: "مصدر الفكرة: الذكاء الاصطناعي". لا تخترع مصدرا أو معلومة.
+10. لا تستخدم الخط العريض أو عبارات مثل "النص المقترح" داخل analysisMarkdown أوcontentMarkdown.
+11. النص الجاهز للنشر يكون بصوت صاحب الموقع الواثق. إن كانت معلومة تجارية/تقنية غير مؤكدة فلا تحولها إلى نص جاهز؛ ضع ملاحظة تحليلية فقط. لا تستخدم عبارات تنقل التحقق إلى الزائر مثل "تحقق من التوفر" أو "ربما".
+12. لا تنشئ patch إن لم يوجد نص آمن قابل للتطبيق، ولا تضع أكثر من patch لنفس التعديل.`;
+
 const appendSiteOwnerPublishingVoiceGuard = (prompt: string): string => (
     prompt.includes('قاعدة صوت صاحب الموقع للنصوص الجاهزة للنشر')
         ? prompt
@@ -2907,10 +2971,9 @@ const appendSiteOwnerPublishingVoiceGuard = (prompt: string): string => (
 );
 
 const buildSmartAnalysisFinalPrompt = (contextPrompt: string, options?: { skipPatchInstructions?: boolean }) => {
-    const guardedContextPrompt = appendSiteOwnerPublishingVoiceGuard(contextPrompt);
     return options?.skipPatchInstructions
-        ? guardedContextPrompt
-        : `${guardedContextPrompt}\n\n${SMART_ANALYSIS_PATCH_OUTPUT_INSTRUCTION}\n\n${READY_COMMAND_PATCH_CARD_REQUIREMENT}\n\n${READY_COMMAND_H2_SECTION_REQUIREMENT}\n\n${READY_COMMAND_SINGLE_SECTION_CARD_REQUIREMENT}\n\n${SMART_ANALYSIS_INLINE_PATCH_OUTPUT_INSTRUCTION}`;
+        ? contextPrompt
+        : `${contextPrompt}\n\n${SMART_ANALYSIS_UNIFIED_OUTPUT_CONTRACT}`;
 };
 
 const saveContentSummaryForCompetitors = (
@@ -4868,7 +4931,8 @@ interface AIContextType {
     handleAnalyzeHeadings: () => Promise<void>;
     handleAiAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta, provider?: GeminiPatchProvider, geminiModel?: string) => Promise<void>;
     handleChatGptAnalyze: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => Promise<void>;
-    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[], provider?: GeminiPatchProvider, geminiModel?: string) => Promise<boolean>;
+    handleGeminiReadyCommandsAnalyze: (items: ReadyCommandAnalysisBatchItem[], provider?: AiPatchProvider, geminiModel?: string) => Promise<boolean>;
+    handleCompetitorComparisonAnalyze: (item: ReadyCommandAnalysisBatchItem, provider?: AiPatchProvider, geminiModel?: string) => Promise<boolean>;
     buildSmartAnalysisPrompt: (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => string;
     validateAiArticleContext: (flowLabel: string) => boolean;
     importManualAiResponse: (rawResponse: string, provider: ExternalAiBridgeProvider, historyMeta?: ReadyCommandAnalysisHistoryMeta) => void;
@@ -4951,6 +5015,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const aiResultsRef = useRef<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
     const aiInsertionPatchesRef = useRef<Record<AiPatchProvider, AiContentPatch[]>>(EMPTY_AI_INSERTION_PATCHES);
     const aiHistoryRef = useRef<AIHistoryItem[]>([]);
+    const competitorComparisonMapCacheRef = useRef<Map<string, CompetitorComparisonMapResult>>(new Map());
     const [bulkFixReviewItems, setBulkFixReviewItems] = useState<BulkFixReviewItem[]>([]);
     const bulkFixReviewItemsRef = useRef<BulkFixReviewItem[]>([]);
     const [fixAllProgress, setFixAllProgress] = useState<FixAllProgress>({ current: 0, total: 0, running: false, failed: 0, errors: [] });
@@ -5325,7 +5390,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             parts.push(`**معايير الكلمات الحالية:**\n${keywordSummary.join('\n') || '- لا توجد كلمات مستهدفة مدخلة.'}`);
         }
         if (editorText) {
-            parts.push(`**نص المقال الحالي من المحرر:**\n---\n${text}\n---`);
+            parts.push(`**نص المقال الحالي من المحرر:**\n---\n${truncateArticlePromptText(text)}\n---`);
         }
         if (currentConclusion) {
             const conclusionText = getCurrentConclusionAttachmentText(editor);
@@ -5586,9 +5651,227 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         )
     ), [generateContextAwarePrompt]);
 
+    const runCompetitorComparisonReadyCommand = useCallback(async (
+        item: ReadyCommandAnalysisBatchItem,
+        provider: AiPatchProvider,
+        geminiModel?: string,
+    ): Promise<SmartAnalysisParsedResult> => {
+        const sources = (item.competitorSources || [])
+            .filter(source => Boolean(source.text.trim() || source.url.trim()))
+            .sort((left, right) => left.competitorNumber - right.competitorNumber);
+        if (sources.length === 0) {
+            throw new Error('لا يوجد نص منافس معتمد. استخرج نص منافس واحد على الأقل قبل تشغيل المقارنة.');
+        }
+        const missingTextCompetitorNumbers = sources
+            .filter(source => !source.text.trim())
+            .map(source => source.competitorNumber);
+        if (missingTextCompetitorNumbers.length > 0) {
+            throw new Error(
+                `استخرج النص المعتمد للمنافسين التالية أرقامهم قبل المقارنة المباشرة: ${missingTextCompetitorNumbers.join('، ')}.`,
+            );
+        }
+
+        const articleContext = generateContextAwarePrompt('', {
+            ...item.options,
+            manualCommand: false,
+            competitorContent: false,
+        });
+        const articleScope = getArticleChatStorageScope(articleKey, title);
+        const totalMapRequests = sources.reduce(
+            (total, source) => total + createCompetitorComparisonBatches(source).length,
+            0,
+        );
+        let requestIndex = 0;
+
+        const callWorkflowProvider = async (
+            prompt: string,
+            source: 'competitor_comparison_map' | 'competitor_comparison_synthesis' | 'competitor_comparison_synthesis_repair',
+            extra: AiApiUsageContext,
+        ): Promise<string> => {
+            const usageContext = buildApiUsageContext(source, {
+                commandId: item.commandId,
+                commandLabel: item.commandLabel,
+                ...extra,
+            });
+            if (provider === 'chatgpt') {
+                const response = await callChatGptAnalysis(
+                    prompt,
+                    undefined,
+                    usageContext,
+                    openAiModel,
+                );
+                return response.text;
+            }
+            return callGeminiArticleChatAnalysis(
+                prompt,
+                currentUser,
+                articleScope,
+                provider,
+                provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
+                usageContext,
+                provider === 'gemini' ? geminiModel : undefined,
+                trackGeminiProgress(usageContext),
+            );
+        };
+
+        const mapResults: CompetitorComparisonMapResult[] = [];
+        for (const source of sources) {
+            const batches = createCompetitorComparisonBatches(source);
+            const cacheKey = createPromptFingerprint(JSON.stringify({
+                provider,
+                geminiModel: provider === 'gemini' ? geminiModel || '' : '',
+                articleContext,
+                source,
+            }));
+            const cached = competitorComparisonMapCacheRef.current.get(cacheKey);
+            if (cached) {
+                mapResults.push(cached);
+                continue;
+            }
+
+            const batchResults: CompetitorComparisonMapResult[] = [];
+            for (const batch of batches) {
+                requestIndex += 1;
+                setAiResults(previous => ({
+                    ...previous,
+                    [provider]: `جار تحليل المنافس ${source.competitorNumber} بصورة مستقلة (${requestIndex}/${totalMapRequests})...`,
+                }));
+                const prompt = buildCompetitorComparisonMapPrompt({ articleContext, batch });
+                const responseText = await callWorkflowProvider(
+                    prompt,
+                    'competitor_comparison_map',
+                    {
+                        batchIndex: requestIndex,
+                        batchTotal: totalMapRequests,
+                        action: `competitor_${source.competitorNumber}`,
+                    },
+                );
+                const parsed = parseCompetitorComparisonMapResponse({
+                    responseText,
+                    batch,
+                    itemOffset: batchResults.reduce((total, result) => total + result.items.length, 0),
+                });
+                if (!parsed.result) {
+                    throw new Error(
+                        `تعذر التحقق من تغطية المنافس ${source.competitorNumber}: ${parsed.errors.join('، ')}`,
+                    );
+                }
+                batchResults.push(parsed.result);
+            }
+            const combined = combineCompetitorComparisonMapResults(
+                source.competitorNumber,
+                batchResults,
+            );
+            competitorComparisonMapCacheRef.current.set(cacheKey, combined);
+            mapResults.push(combined);
+        }
+
+        setAiResults(previous => ({
+            ...previous,
+            [provider]: 'اكتمل التحليل المستقل. جار دمج النتائج دلاليًا وإنشاء التعديلات النهائية...',
+        }));
+        const synthesisPrompt = buildCompetitorComparisonSynthesisPrompt({
+            commandPrompt: item.userPrompt,
+            articleContext,
+            mapResults,
+            outputContract: SMART_ANALYSIS_UNIFIED_OUTPUT_CONTRACT,
+        });
+        let finalResponse = await callWorkflowProvider(
+            synthesisPrompt,
+            'competitor_comparison_synthesis',
+            {
+                batchIndex: totalMapRequests + 1,
+                batchTotal: totalMapRequests + 1,
+                action: 'ai_semantic_synthesis',
+            },
+        );
+        const expectedItemIds = getCompetitorComparisonExpectedItemIds(mapResults);
+        let validation = validateCompetitorComparisonSynthesisResponse({
+            responseText: finalResponse,
+            expectedItemIds,
+        });
+        if (!validation.ok) {
+            finalResponse = await callWorkflowProvider(
+                buildCompetitorComparisonSynthesisRepairPrompt({
+                    originalPrompt: synthesisPrompt,
+                    previousResponse: finalResponse,
+                    validation,
+                }),
+                'competitor_comparison_synthesis_repair',
+                {
+                    batchIndex: totalMapRequests + 2,
+                    batchTotal: totalMapRequests + 2,
+                    action: 'repair_synthesis_coverage',
+                },
+            );
+            validation = validateCompetitorComparisonSynthesisResponse({
+                responseText: finalResponse,
+                expectedItemIds,
+            });
+        }
+        if (!validation.ok) {
+            throw new Error(`لم يعالج دمج المنافسين جميع النتائج: ${validation.errors.join('، ')}`);
+        }
+
+        return applyReadyCommandPatchRules(
+            parseSmartAnalysisResponse(finalResponse, provider),
+            item.commandId,
+        );
+    }, [
+        articleKey,
+        buildApiUsageContext,
+        currentUser,
+        generateContextAwarePrompt,
+        openAiModel,
+        persistGeminiPaidArticleResult,
+        title,
+        trackGeminiProgress,
+    ]);
+
+    const handleCompetitorComparisonAnalyze = useCallback(async (
+        item: ReadyCommandAnalysisBatchItem,
+        provider: AiPatchProvider = 'gemini',
+        geminiModel?: string,
+    ): Promise<boolean> => {
+        if (!editor || !isCompetitorComparisonCommand(item.commandId)) return false;
+        if (!isAiProviderAvailable(provider)) {
+            setAiResults(previous => ({
+                ...previous,
+                [provider]: `${provider === 'chatgpt' ? 'OpenAI' : provider === 'geminiPaid' ? 'Gemini Pro' : 'Gemini'} غير متاح.`,
+            }));
+            return false;
+        }
+        if (stopAiRequestIfArticleContextMissing('مقارنة المنافسين')) return false;
+        setIsAiLoading(previous => ({ ...previous, [provider]: true }));
+        setAiResults(previous => ({ ...previous, [provider]: '' }));
+        setAiInsertionPatches(previous => ({ ...previous, [provider]: [] }));
+        try {
+            const parsedResult = await runCompetitorComparisonReadyCommand(item, provider, geminiModel);
+            setAiResults(previous => ({ ...previous, [provider]: parsedResult.displayText }));
+            setAiInsertionPatches(previous => ({ ...previous, [provider]: parsedResult.patches }));
+            logReadyCommandAnalysis(provider, parsedResult, item);
+            return true;
+        } catch (error) {
+            if (isGeminiAnalysisCancelledError(error)) return false;
+            setAiResults(previous => ({
+                ...previous,
+                [provider]: error instanceof Error ? error.message : 'فشل تحليل المنافسين.',
+            }));
+            return false;
+        } finally {
+            setIsAiLoading(previous => ({ ...previous, [provider]: false }));
+        }
+    }, [
+        editor,
+        isAiProviderAvailable,
+        logReadyCommandAnalysis,
+        runCompetitorComparisonReadyCommand,
+        stopAiRequestIfArticleContextMissing,
+    ]);
+
     const handleGeminiReadyCommandsAnalyze = useCallback(async (
         items: ReadyCommandAnalysisBatchItem[],
-        provider: GeminiPatchProvider = 'gemini',
+        provider: AiPatchProvider = 'gemini',
         geminiModel?: string,
     ) => {
         if (!editor || items.length === 0) return false;
@@ -5612,6 +5895,16 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }[] = [];
             for (let index = 0; index < items.length; index += 1) {
                 const item = items[index];
+                if (isCompetitorComparisonCommand(item.commandId)) {
+                    const parsedResult = namespaceSmartAnalysisPatches(
+                        await runCompetitorComparisonReadyCommand(item, provider, geminiModel),
+                        `cmd_${index + 1}`,
+                        item.commandLabel,
+                    );
+                    logReadyCommandAnalysis(provider, parsedResult, item);
+                    results.push({ item, parsedResult });
+                    continue;
+                }
                 const finalPrompt = buildSmartAnalysisFinalPrompt(
                     generateContextAwarePrompt(item.userPrompt, item.options),
                     { skipPatchInstructions: item.skipPatchInstructions },
@@ -5622,16 +5915,23 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     batchIndex: index + 1,
                     batchTotal: items.length,
                 });
-                const result = await callGeminiArticleChatAnalysis(
-                    finalPrompt,
-                    currentUser,
-                    articleScope,
-                    provider,
-                    provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
-                    usageContext,
-                    provider === 'gemini' ? geminiModel : undefined,
-                    trackGeminiProgress(usageContext),
-                );
+                const result = provider === 'chatgpt'
+                    ? (await callChatGptAnalysis(
+                        finalPrompt,
+                        undefined,
+                        usageContext,
+                        openAiModel,
+                    )).text
+                    : await callGeminiArticleChatAnalysis(
+                        finalPrompt,
+                        currentUser,
+                        articleScope,
+                        provider,
+                        provider === 'geminiPaid' ? persistGeminiPaidArticleResult : undefined,
+                        usageContext,
+                        provider === 'gemini' ? geminiModel : undefined,
+                        trackGeminiProgress(usageContext),
+                    );
                 const parsedResult = item.skipPatchInstructions
                     ? { displayText: result, patches: [] }
                     : namespaceSmartAnalysisPatches(
@@ -5663,7 +5963,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress, isAiProviderAvailable]);
+    }, [editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress, isAiProviderAvailable, runCompetitorComparisonReadyCommand, openAiModel]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,
@@ -5736,18 +6036,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 generateContextAwarePrompt(userPrompt, options),
                 { skipPatchInstructions: historyMeta?.skipPatchInstructions },
             );
-            const articleScope = getArticleChatStorageScope(articleKey, title);
-            const storedConversationId = readStoredChatGptConversationId(currentUser, articleScope);
             const result = await callChatGptAnalysis(
                 finalPrompt,
-                storedConversationId,
+                undefined,
                 buildApiUsageContext('smart_analysis', {
                     commandId: historyMeta?.commandId,
                     commandLabel: historyMeta?.commandLabel,
                 }),
                 openAiModel,
             );
-            saveStoredChatGptConversationId(currentUser, articleScope, result.conversationId);
             const parsedResult = historyMeta?.skipPatchInstructions
                 ? { displayText: result.text, patches: [] }
                 : applyReadyCommandPatchRules(parseSmartAnalysisResponse(result.text, 'chatgpt'), historyMeta?.commandId);
@@ -5863,9 +6160,11 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 textToProcess = text;
                 originalText = action === 'replace-title' ? title : 'Meta Description';
             }
+            const boundedInputText = truncateArticlePromptText(textToProcess, TOOLBAR_INPUT_MAX_CHARS);
+            const templateContainsSelectedText = promptTemplate.includes('${selectedText}');
             const prompt = renderEngineeringPrompt(promptTemplate, {
-                selectedText: textToProcess,
-                fullArticleText: text,
+                selectedText: boundedInputText,
+                fullArticleText: truncateArticlePromptText(text, TOOLBAR_INPUT_MAX_CHARS),
             });
             const toolbarGuardRuleKeys: (keyof StructureAnalysis)[] = [
                 'paragraphLength',
@@ -5897,7 +6196,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 '- راعِ نوع الصفحة وهدفها والجمهور ونية البحث في النبرة، مستوى التفصيل، والعبارات المقترحة.',
                 formatStructureCriteriaRules('معايير يجب احترامها عند توليد اقتراح شريط الأدوات', toolbarGuardRules),
             ].join('\n\n');
-            const usesSelectedTextContext = Boolean(localContext && textToProcess.trim());
+            const usesSelectedTextContext = Boolean(localContext && boundedInputText);
             const boundedPrompt = usesSelectedTextContext
                 ? [
                     formatAiReadOnlyLocalContext(localContext),
@@ -5906,11 +6205,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         ? '**الأمر المطلوب على النص المستهدف فقط:**'
                         : '**الأمر المطلوب اعتمادًا على النص المحدد والسياق:**',
                     prompt,
-                    '',
-                    action === 'replace-text'
-                        ? '**النص المستهدف المسموح باستبداله فقط:**'
-                        : '**النص المحدد المرجعي:**',
-                    `"""${textToProcess}"""`,
+                    templateContainsSelectedText
+                        ? '**ملاحظة:** النص المستهدف مرفق مرة واحدة داخل الأمر أعلاه.'
+                        : [
+                            action === 'replace-text'
+                                ? '**النص المستهدف المسموح باستبداله فقط:**'
+                                : '**النص المحدد المرجعي:**',
+                            `"""${boundedInputText}"""`,
+                        ].join('\n\n'),
                     '',
                     action === 'replace-text'
                         ? [
@@ -5968,17 +6270,25 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             editor.state.doc.descendants((node, pos) => {
                 if (node.type.name === 'heading') headings.push({ level: node.attrs.level, text: node.textContent, from: pos, to: pos + node.nodeSize });
             });
+            let remainingHeadingContextChars = HEADING_ANALYSIS_CONTEXT_MAX_CHARS;
+            const takeHeadingContext = (label: string, value?: string): string => {
+                const normalized = value?.trim() || '';
+                if (!normalized || remainingHeadingContextChars <= 0) return '';
+                const candidate = `${label}: """${normalized}"""`;
+                if (candidate.length > remainingHeadingContextChars) return '';
+                remainingHeadingContextChars -= candidate.length;
+                return candidate;
+            };
             const headingsText = headings.map(h => {
                 const localContext = getAiLocalTextContext(editor, h.from, h.to, title);
                 return [
                     `[H${h.level}] ${h.text}`,
-                    localContext.sectionHeading ? `عنوان القسم للاطلاع فقط: ${localContext.sectionHeading}` : '',
-                    localContext.previousTexts?.[0] ? `الفقرة السابقة للاطلاع فقط: """${localContext.previousTexts[0]}"""` : '',
-                    localContext.nextTexts?.[0] ? `الفقرة التالية للاطلاع فقط: """${localContext.nextTexts[0]}"""` : '',
+                    takeHeadingContext('الفقرة السابقة للاطلاع فقط', localContext.previousTexts?.[0]),
+                    takeHeadingContext('الفقرة التالية للاطلاع فقط', localContext.nextTexts?.[0]),
                 ].filter(Boolean).join('\n');
             }).join('\n\n---\n\n');
             const promptTemplate = getEngineeringPrompt(engineeringPrompts, ENGINEERING_PROMPT_IDS.toolbar.suggestHeadings);
-            const prompt = `${buildComprehensivePrompt(promptTemplate)}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً. اجعل flaws ملاحظات عربية، واجعل suggestions عناوين مقترحة بلغة المقال فقط: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
+            const prompt = `${buildComprehensivePrompt(promptTemplate, undefined, { includeArticleToc: false })}\n\n${headingsText}\n\nأرجع مصفوفة JSON حصراً. اجعل flaws ملاحظات عربية، واجعل suggestions عناوين مقترحة بلغة المقال فقط: [ { "original": "...", "level": 2, "flaws": [], "suggestions": [] } ]`;
             const resultJson = await callQuickProviderAnalysis(prompt, provider, buildApiUsageContext('heading_analysis'));
             if (isAiErrorResponseText(resultJson)) return;
             const parsed = extractJson(resultJson);
@@ -6800,7 +7110,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, cancelAiRequest, runPlainAiAnalysis, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         buildSmartAnalysisPrompt, validateAiArticleContext, importManualAiResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
-        handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
+        handleChatGptAnalyze, handleGeminiReadyCommandsAnalyze, handleCompetitorComparisonAnalyze, handleAiFix, handleFixAllViolations, getRelatedBulkFixRules, applyBulkFixReviewItem,
         applySelectedBulkFixReviewItems, selectBulkFixReviewItemTarget, skipBulkFixReviewItem,
         clearBulkFixReviewItems, applySuggestionFromHistory,
         applyAiInsertionPatch, applyAllAiInsertionPatches, selectAiInsertionPatchTarget,
@@ -6837,6 +7147,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         generateGoalContext,
         handleChatGptAnalyze,
         handleGeminiReadyCommandsAnalyze,
+        handleCompetitorComparisonAnalyze,
         handleAiFix,
         handleFixAllViolations,
         getRelatedBulkFixRules,

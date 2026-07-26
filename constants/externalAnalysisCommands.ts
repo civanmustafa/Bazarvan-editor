@@ -5,11 +5,18 @@ import {
 
 export const EXTERNAL_AUTOMATIC_COMMAND_IDS = [
   ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison,
-  ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis,
-  ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands,
   ENGINEERING_PROMPT_IDS.smartAnalysis.repetitionAndFillerAudit,
   ENGINEERING_PROMPT_IDS.smartAnalysis.fullArticleAudit,
 ] as const;
+
+export const RETIRED_ENGINEERING_COMMAND_IDS = new Set<string>([
+  ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis,
+  ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands,
+]);
+
+export const isRetiredEngineeringCommandId = (commandId: string): boolean => (
+  RETIRED_ENGINEERING_COMMAND_IDS.has(commandId)
+);
 
 const EXTERNAL_COMMAND_LABELS: Record<string, { ar: string; en: string }> = {
   entityMap: { ar: 'خريطة الكيانات', en: 'Entity map' },
@@ -32,7 +39,7 @@ const automaticOrder = new Map<string, number>(
   EXTERNAL_AUTOMATIC_COMMAND_IDS.map((id, index) => [id, index]),
 );
 
-export const EXTERNAL_READY_COMMAND_DEFINITIONS = ENGINEERING_PROMPT_DEFINITIONS
+const ALL_EXTERNAL_READY_COMMAND_DEFINITIONS = ENGINEERING_PROMPT_DEFINITIONS
   .filter(definition => definition.source === 'smartAnalysis')
   .map((definition, definitionIndex) => ({ definition, definitionIndex }))
   .sort((left, right) => {
@@ -46,8 +53,11 @@ export const EXTERNAL_READY_COMMAND_DEFINITIONS = ENGINEERING_PROMPT_DEFINITIONS
   })
   .map(item => item.definition);
 
+export const EXTERNAL_READY_COMMAND_DEFINITIONS = ALL_EXTERNAL_READY_COMMAND_DEFINITIONS
+  .filter(definition => !isRetiredEngineeringCommandId(definition.id));
+
 export const getExternalReadyCommandDefinition = (commandId: string) => (
-  EXTERNAL_READY_COMMAND_DEFINITIONS.find(definition => definition.id === commandId) ?? null
+  ALL_EXTERNAL_READY_COMMAND_DEFINITIONS.find(definition => definition.id === commandId) ?? null
 );
 
 export const getExternalReadyCommandLabel = (

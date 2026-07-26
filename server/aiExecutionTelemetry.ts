@@ -116,6 +116,10 @@ export const recordAiExecutionTelemetry = async (
       rules: Array.isArray(context.rules)
         ? context.rules.filter(item => typeof item === 'string').map(item => item.trim()).filter(Boolean).slice(0, 20)
         : [],
+      promptChars: toOptionalNumber(context.promptChars),
+      historyChars: toOptionalNumber(context.historyChars),
+      totalInputChars: toOptionalNumber(context.totalInputChars),
+      useUrlContext: context.useUrlContext === true,
       attemptedKeyCount: toOptionalNumber(body.attemptedKeyCount),
       keyCount: toOptionalNumber(body.keyCount),
       requestedModel: toString(body.requestedModel, 160) || null,

@@ -182,6 +182,15 @@ class GeminiJobCancelledError extends Error {
   }
 }
 
+class GeminiRequestTimeoutError extends Error {
+  readonly status = 504;
+
+  constructor(timeoutMs: number, model: string) {
+    super(`Gemini request timed out locally after ${timeoutMs}ms for model ${model}.`);
+    this.name = 'GeminiRequestTimeoutError';
+  }
+}
+
 const RETRIABLE_GEMINI_STATUSES = new Set([500, 502, 503, 504]);
 const GEMINI_PROGRESS_TTL_MS = 10 * 60 * 1000;
 const geminiProgressStore = new Map<string, GeminiProgressState>();
@@ -423,6 +432,25 @@ const normalizeGeminiHistory = (history: unknown): GeminiHistoryContent[] => {
     .filter((item): item is GeminiHistoryContent => Boolean(item));
 };
 
+const getGeminiPayloadMetrics = (requestBody: any) => {
+  const promptChars = typeof requestBody?.prompt === 'string'
+    ? requestBody.prompt.length
+    : String(requestBody?.prompt || '').length;
+  const historyChars = Array.isArray(requestBody?.history)
+    ? requestBody.history.reduce((total: number, item: unknown) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return total;
+        const text = (item as Record<string, unknown>).text;
+        return total + (typeof text === 'string' ? text.length : 0);
+      }, 0)
+    : 0;
+  return {
+    promptChars,
+    historyChars,
+    totalInputChars: promptChars + historyChars,
+    useUrlContext: requestBody?.useUrlContext === true,
+  };
+};
+
 const getGeminiErrorDetails = (error: unknown): GeminiErrorDetails => {
   const value = error && typeof error === "object" ? error as Record<string, any> : {};
   const nestedError = value.error && typeof value.error === "object" ? value.error : {};
@@ -463,8 +491,8 @@ const GEMINI_PROGRESS_SWITCH_DELAY_MS = getGeminiProgressDelay("GEMINI_PROGRESS_
 
 const getGeminiRequestTimeout = (): number => {
   const rawValue = process.env.GEMINI_PER_KEY_TIMEOUT_MS;
-  const parsedValue = rawValue ? Number(rawValue) : 30000;
-  if (!Number.isFinite(parsedValue)) return 30000;
+  const parsedValue = rawValue ? Number(rawValue) : 75000;
+  if (!Number.isFinite(parsedValue)) return 75000;
   return Math.max(5000, Math.min(120000, Math.floor(parsedValue)));
 };
 
@@ -510,7 +538,7 @@ const withGeminiKeyTimeout = async <T,>(
       new Promise<T>((_, reject) => {
         timeoutId = setTimeout(() => {
           abortController.abort();
-          reject(new Error(`Gemini request timed out after ${GEMINI_PER_KEY_TIMEOUT_MS}ms for model ${model} and key ...${keySuffix} (504)`));
+          reject(new GeminiRequestTimeoutError(GEMINI_PER_KEY_TIMEOUT_MS, model));
         }, GEMINI_PER_KEY_TIMEOUT_MS);
       }),
     ]);
@@ -749,6 +777,7 @@ const executeGeminiCredentialTierInternal = async (
     const attempts: GeminiAttemptDetail[] = [];
     let lastAttemptedModel = selectedModel;
     let lastOrderedKeys = GEMINI_API_KEYS;
+    let requestLevelTimeout = false;
     setGeminiProgress(progressId, {
       stage: "queued",
       provider: selectedProvider,
@@ -966,14 +995,23 @@ const executeGeminiCredentialTierInternal = async (
               });
               throw new GeminiJobCancelledError();
             }
+            const timedOutLocally = error instanceof GeminiRequestTimeoutError;
             lastError = getGeminiErrorDetails(error);
             const reason = getGeminiFailureReason(lastError);
-            await keyLease.complete({
-              outcome: 'failed',
-              status: lastError.status,
-              reason,
-              cooldownSeconds: getGeminiKeyFailureCooldownSeconds(reason, lastError.status),
-            });
+            requestLevelTimeout = requestLevelTimeout || timedOutLocally;
+            await keyLease.complete(timedOutLocally
+              ? {
+                  outcome: 'cancelled',
+                  status: lastError.status,
+                  reason: 'cancelled',
+                  cooldownSeconds: 0,
+                }
+              : {
+                  outcome: 'failed',
+                  status: lastError.status,
+                  reason,
+                  cooldownSeconds: getGeminiKeyFailureCooldownSeconds(reason, lastError.status),
+                });
             await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_MIN_ATTEMPT_MS, attemptStartedAt);
             attempts.push({
               keyFingerprint,
@@ -984,8 +1022,8 @@ const executeGeminiCredentialTierInternal = async (
               model: activeModel,
             });
             const failedModelAttemptedKeyCount = getUniqueAttemptCountForModel(attempts, activeModel);
-            const hasNextKey = keyIndex < orderedKeys.length - 1;
-            const hasNextModel = modelIndex < modelOrder.length - 1;
+            const hasNextKey = !timedOutLocally && keyIndex < orderedKeys.length - 1;
+            const hasNextModel = !timedOutLocally && modelIndex < modelOrder.length - 1;
             setGeminiProgress(progressId, {
               stage: "failed-key",
               provider: selectedProvider,
@@ -1005,7 +1043,9 @@ const executeGeminiCredentialTierInternal = async (
               status: lastError.status,
               reason,
               completed: false,
-              message: `فشل المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel} بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : hasNextModel ? " سيتم الانتقال لموديل مجاني آخر." : ""}`,
+              message: timedOutLocally
+                ? `انتهت مهلة الطلب على النموذج ${activeModel}. لن يتم تبديل المفتاح لأن المهلة تخص حجم/مدة الطلب ولا تعني أن المفتاح معطّل.`
+                : `فشل المفتاح ${keyIndex + 1} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel} بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : hasNextModel ? " سيتم الانتقال لموديل مجاني آخر." : ""}`,
             });
             console.warn('Gemini key attempt failed', {
               provider: selectedProvider,
@@ -1014,6 +1054,7 @@ const executeGeminiCredentialTierInternal = async (
               status: lastError.status,
               reason,
               attempt: attempt + 1,
+              requestLevelTimeout: timedOutLocally,
             });
             if (hasNextKey) {
               await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_STEP_DELAY_MS);
@@ -1045,22 +1086,28 @@ const executeGeminiCredentialTierInternal = async (
             break;
           }
         }
+        if (requestLevelTimeout) break;
       }
+      if (requestLevelTimeout) break;
     }
 
     throwIfGeminiExecutionCancelled(progressId, options.signal);
-    const responseStatus = lastError && lastError.status >= 400 && lastError.status < 500
-      ? lastError.status
-      : 502;
+    const responseStatus = requestLevelTimeout
+      ? 504
+      : lastError && lastError.status >= 400 && lastError.status < 500
+        ? lastError.status
+        : 502;
     const lastAttempt = attempts[attempts.length - 1];
     const failureBody = {
-      error: buildGeminiFailureMessage(
-        selectedProvider,
-        lastAttemptedModel,
-        GEMINI_API_KEYS.length,
-        attempts,
-        lastError,
-      ),
+      error: requestLevelTimeout
+        ? `انتهت مهلة طلب Gemini بعد ${GEMINI_PER_KEY_TIMEOUT_MS} مللي ثانية. لم يتم تبديل المفتاح أو وضعه في فترة تهدئة لأن 504 المحلي يخص مدة الطلب، لا صلاحية المفتاح. خفّض حجم المدخل أو أعد المحاولة.`
+        : buildGeminiFailureMessage(
+            selectedProvider,
+            lastAttemptedModel,
+            GEMINI_API_KEYS.length,
+            attempts,
+            lastError,
+          ),
       provider: selectedProvider,
       model: lastAttemptedModel,
       credentialSource: credentials.source,
@@ -1076,28 +1123,34 @@ const executeGeminiCredentialTierInternal = async (
       keySuffix: lastAttempt?.keySuffix,
       attempts,
       attemptSummary: summarizeAttemptReasons(attempts),
+      requestLevelTimeout,
       progressId,
     };
+    const attemptedModels = Array.from(new Set(
+      attempts.map(item => item.model).filter((model): model is string => Boolean(model)),
+    ));
     setGeminiProgress(progressId, {
       stage: "failed",
       provider: selectedProvider,
       model: lastAttemptedModel,
       requestedModel: selectedModel,
-      currentModelIndex: modelOrder.length,
+      currentModelIndex: Math.max(1, attemptedModels.length),
       modelCount: modelOrder.length,
       modelOrder,
-      attemptedModels: Array.from(new Set(attempts.map(item => item.model).filter((model): model is string => Boolean(model)))),
+      attemptedModels,
       keyCount: lastOrderedKeys.length,
       attemptedKeyCount: getUniqueAttemptCountForModel(attempts, lastAttemptedModel),
       attemptedModelKeyCount: getUniqueAttemptCountForModel(attempts, lastAttemptedModel),
       totalAttemptCount: getUniqueKeyModelAttemptCount(attempts),
-      currentKeyIndex: lastOrderedKeys.length,
+      currentKeyIndex: requestLevelTimeout ? 1 : lastOrderedKeys.length,
       keySuffix: lastAttempt?.keySuffix,
       status: lastAttempt?.status,
       reason: lastAttempt?.reason,
       completed: true,
-      message: modelOrder.length > 1
-        ? `فشل طلب Gemini بعد تجربة ${modelOrder.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل.${lastAttempt?.keySuffix ? ` آخر مفتاح: ...${lastAttempt.keySuffix}.` : ''}`
+      message: requestLevelTimeout
+        ? `انتهت مهلة طلب Gemini بعد محاولة واحدة دون تدوير بقية المفاتيح؛ المفتاح غير مصنف كمعطّل.`
+        : modelOrder.length > 1
+        ? `فشل طلب Gemini بعد تجربة ${attemptedModels.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل.${lastAttempt?.keySuffix ? ` آخر مفتاح: ...${lastAttempt.keySuffix}.` : ''}`
         : `فشل طلب Gemini بعد تجربة ${getUniqueAttemptCount(attempts)} من ${lastOrderedKeys.length} مفتاح.${lastAttempt?.keySuffix ? ` آخر مفتاح: ...${lastAttempt.keySuffix}.` : ''}`,
     });
     return {
@@ -1266,6 +1319,13 @@ const executeGeminiRequest = async (
 ): Promise<ApiResult> => {
   const startedAt = Date.now();
   const progressId = normalizeProgressId(requestBody?.progressId);
+  const payloadMetrics = getGeminiPayloadMetrics(requestBody);
+  console.info('[ai-execution-engine] Gemini request payload', {
+    progressId: progressId || undefined,
+    provider: normalizeGeminiProvider(requestBody?.provider),
+    model: requestBody?.model,
+    ...payloadMetrics,
+  });
   if (progressId && options.onProgress) {
     geminiProgressListeners.set(progressId, options.onProgress);
   }
@@ -1289,7 +1349,10 @@ const executeGeminiRequest = async (
         status: result.status,
         durationMs: Date.now() - startedAt,
         body,
-        context: telemetry as Record<string, unknown>,
+        context: {
+          ...telemetry,
+          ...payloadMetrics,
+        },
       }).catch(error => {
         console.warn('[ai-execution-engine] Could not persist request telemetry', {
           progressId,

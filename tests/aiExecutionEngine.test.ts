@@ -111,3 +111,13 @@ test('all paid provider engines use the shared automatic fallback policy', async
   assert.match(openAiEngine, /getAvailableAiProviderFallbacks/);
   assert.match(settingsPage, /الرجوع التلقائي للمفاتيح والمزودات مفعّل/);
 });
+
+test('a local Gemini timeout is treated as a request failure without cooling or rotating keys', async () => {
+  const engine = await readWorkspaceFile('server/aiExecutionEngine.ts');
+
+  assert.match(engine, /class GeminiRequestTimeoutError extends Error/);
+  assert.match(engine, /error instanceof GeminiRequestTimeoutError/);
+  assert.match(engine, /outcome: 'cancelled',\s+status: lastError\.status,\s+reason: 'cancelled',\s+cooldownSeconds: 0/);
+  assert.match(engine, /if \(requestLevelTimeout\) break/);
+  assert.match(engine, /لن يتم تبديل المفتاح/);
+});

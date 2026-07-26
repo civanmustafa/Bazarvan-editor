@@ -449,10 +449,21 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     }
     const gemini = isRecord(job.progress.gemini) ? job.progress.gemini : {};
     const model = toTrimmedString(gemini.model) || toTrimmedString(job.result?.model);
+    const workflowMessage = toTrimmedString(job.progress.message);
+    const competitorCurrent = Number(job.progress.competitorCurrent || 0);
+    const competitorTotal = Number(job.progress.competitorTotal || 0);
+    const cacheHitCount = Number(job.progress.cacheHitCount || 0);
     const keyIndex = Number(gemini.currentKeyIndex || 0);
     const keyCount = Number(gemini.keyCount || 0);
     const keySuffix = toTrimmedString(gemini.keySuffix) || toTrimmedString(job.result?.keySuffix);
     return [
+      workflowMessage,
+      competitorCurrent > 0 && competitorTotal > 0
+        ? `${locale === 'ar' ? 'المنافس' : 'competitor'} ${competitorCurrent}/${competitorTotal}`
+        : '',
+      cacheHitCount > 0
+        ? `${locale === 'ar' ? 'معاد استخدامه' : 'cached'} ${cacheHitCount}`
+        : '',
       model,
       keyIndex > 0 && keyCount > 0 ? `${locale === 'ar' ? 'المفتاح' : 'key'} ${keyIndex}/${keyCount}` : '',
       keySuffix ? `...${keySuffix.replace(/^\.+/, '')}` : '',
@@ -578,6 +589,9 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
               const expanded = expandedJobIds.has(job.id);
               const patches = getPatches(job);
               const analysis = getExternalJobAnalysisMarkdown(job);
+              const competitorWorkflow = isRecord(job.result?.competitorWorkflow)
+                ? job.result.competitorWorkflow
+                : null;
               const commandLabel = job.command_id
                 ? getExternalReadyCommandLabel(job.command_id, locale)
                 : job.command_label || '-';
@@ -617,6 +631,21 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                       )}
                       {job.last_error && <div className="mb-2 border-s-2 border-red-500 bg-red-50 px-2 py-1.5 text-[10px] leading-5 text-red-700 dark:bg-red-900/10 dark:text-red-300">{job.last_error}</div>}
                       <div className="mb-2 flex justify-end">{renderJobControls(job)}</div>
+                      {competitorWorkflow && (
+                        <div className="mb-2 flex flex-wrap gap-1.5 text-[9px] font-bold text-gray-500 dark:text-gray-400">
+                          <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                            {locale === 'ar' ? 'تحليل مستقل' : 'Independent maps'}: {Number(competitorWorkflow.competitorCount || 0)}
+                          </span>
+                          <span className="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-[#333]">
+                            {locale === 'ar' ? 'النتائج المعالجة' : 'Processed items'}: {Number(competitorWorkflow.processedItemCount || 0)}
+                          </span>
+                          {Number(competitorWorkflow.cacheHitCount || 0) > 0 && (
+                            <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                              {locale === 'ar' ? 'نتائج معاد استخدامها' : 'Cache hits'}: {Number(competitorWorkflow.cacheHitCount || 0)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {hasResult ? (
                         <>
                           <div className="mb-1 flex justify-end">

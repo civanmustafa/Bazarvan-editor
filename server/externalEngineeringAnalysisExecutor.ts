@@ -9,11 +9,15 @@ import {
   type ExternalAnalysisJson,
 } from './externalAnalysisQueue';
 import { readExternalGeminiSettings } from './externalAnalysisSettings';
-import { getExternalEngineeringCommand } from './externalEngineeringCommands';
+import {
+  EXTERNAL_AUTOMATIC_ENGINEERING_COMMANDS,
+  getExternalEngineeringCommand,
+} from './externalEngineeringCommands';
 import { readPromptRegistrySettings } from './promptRegistrySettings';
 import {
   buildExternalEngineeringPrompt,
   buildExternalEngineeringRepairPrompt,
+  getExternalEngineeringPromptMetrics,
   type ExternalEngineeringPromptInput,
 } from './externalEngineeringPrompt';
 import {
@@ -25,6 +29,8 @@ import {
   runExternalGeminiCall,
 } from './externalGeminiRunner';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
+import { isCompetitorComparisonCommand } from '../utils/competitorComparisonWorkflow';
+import { executeExternalCompetitorComparisonWorkflow } from './externalCompetitorComparisonExecutor';
 
 type ExternalEngineeringArticleRow = {
   id: string;
@@ -144,6 +150,7 @@ const toEngineeringPromptInput = (
 
 const assertEngineeringInputs = (
   input: ExternalEngineeringPromptInput,
+  command: NonNullable<ReturnType<typeof getExternalEngineeringCommand>>,
 ): void => {
   if (!input.plainText) {
     throw new ExternalAnalysisTerminalError({
@@ -152,7 +159,10 @@ const assertEngineeringInputs = (
       cancelEngineeringBundle: true,
     });
   }
-  if (input.keywords.secondaries.length === 0 || input.keywords.lsi.length === 0) {
+  if (
+    command.options.targetKeywords
+    && (input.keywords.secondaries.length === 0 || input.keywords.lsi.length === 0)
+  ) {
     throw createRetryError({
       code: 'engineering_semantic_terms_missing',
       message: 'Alternative forms and LSI terms must be ready before engineering analysis.',
@@ -160,6 +170,8 @@ const assertEngineeringInputs = (
     });
   }
   if (
+    command.options.competitorContent
+    &&
     !input.competitorUrls.some(Boolean)
     && !input.competitorTexts.some(Boolean)
   ) {
@@ -180,7 +192,7 @@ const getJobCommandPosition = (
   const total = Number.isFinite(snapshotTotal) && snapshotTotal > 0
     ? Math.max(sequence, Math.floor(snapshotTotal))
     : context.job.origin === 'auto'
-      ? 5
+      ? EXTERNAL_AUTOMATIC_ENGINEERING_COMMANDS.length
       : sequence;
   return { sequence, total };
 };
@@ -229,7 +241,7 @@ const executeExternalEngineeringAnalysis = async (
 
   const input = toEngineeringPromptInput(initial.article);
   const inputFingerprint = JSON.stringify(input);
-  assertEngineeringInputs(input);
+  assertEngineeringInputs(input, command);
   const aiSettings = await readExternalGeminiSettings();
   if (!aiSettings.enabled) {
     throw createRetryError({
@@ -239,13 +251,92 @@ const executeExternalEngineeringAnalysis = async (
     });
   }
 
+  if (isCompetitorComparisonCommand(command.id)) {
+    const workflowResult = await executeExternalCompetitorComparisonWorkflow({
+      context,
+      command,
+      input,
+      commandPosition,
+      aiSettings,
+    });
+    const latest = await readArticleAndState(context.job.article_id);
+    if (!isCurrentEngineeringJob(context, latest.state)) {
+      return {
+        result: {
+          status: 'superseded',
+          reason: 'external_readiness_changed_during_analysis',
+          commandId: command.id,
+          commandLabel: command.label,
+          commandSequence: commandPosition.sequence,
+          generated: workflowResult.parsed,
+          competitorWorkflow: workflowResult.workflow,
+        },
+        progress: {
+          stage: 'superseded',
+          commandSequence: commandPosition.sequence,
+          commandTotal: commandPosition.total,
+        },
+      };
+    }
+    if (JSON.stringify(toEngineeringPromptInput(latest.article)) !== inputFingerprint) {
+      throw createRetryError({
+        code: 'engineering_input_changed_during_analysis',
+        message: 'The article or competitor input changed while the independent competitor analysis was running.',
+        progress: {
+          stage: 'retry_scheduled',
+          commandSequence: commandPosition.sequence,
+          reason: 'engineering_input_changed',
+        },
+      });
+    }
+
+    return {
+      result: {
+        status: 'completed',
+        commandId: command.id,
+        commandLabel: command.label,
+        commandSequence: commandPosition.sequence,
+        commandTotal: commandPosition.total,
+        analysisMarkdown: workflowResult.parsed.analysisMarkdown,
+        patches: workflowResult.parsed.patches,
+        rawResponse: workflowResult.finalCall.text.slice(0, 60_000),
+        provider: workflowResult.finalCall.provider,
+        model: workflowResult.finalCall.model,
+        keySuffix: workflowResult.finalCall.keySuffix,
+        keyAttempts: workflowResult.attempts,
+        competitorWorkflow: workflowResult.workflow,
+        independentCompetitorResults: workflowResult.mapResults,
+        sourceArticleUpdatedAt: initial.article.updated_at,
+        completedAt: new Date().toISOString(),
+      },
+      progress: {
+        stage: 'engineering_completed',
+        message: 'اكتمل تحليل كل منافس بصورة مستقلة ودمج النتائج بالذكاء الاصطناعي.',
+        commandSequence: commandPosition.sequence,
+        commandTotal: commandPosition.total,
+        provider: workflowResult.finalCall.provider,
+        model: workflowResult.finalCall.model,
+        keySuffix: workflowResult.finalCall.keySuffix,
+        keyAttemptCount: workflowResult.attempts.length,
+        competitorWorkflow: workflowResult.workflow,
+      },
+    };
+  }
+
   const attempts: ExternalAnalysisJson[] = [];
+  const engineeringPrompt = buildExternalEngineeringPrompt(command, input, commandPosition);
+  const promptMetrics = getExternalEngineeringPromptMetrics(command, input, engineeringPrompt);
+  console.info('[external-engineering] Gemini prompt payload', {
+    jobId: context.job.id,
+    commandId: command.id,
+    ...promptMetrics,
+  });
   let finalCall = await runExternalGeminiCall({
     context,
-    prompt: buildExternalEngineeringPrompt(command, input, commandPosition),
+    prompt: engineeringPrompt,
     model: aiSettings.model,
     allowModelFallback: aiSettings.allowModelFallback,
-    useUrlContext: input.competitorUrls.some(Boolean),
+    useUrlContext: promptMetrics.usesUrlContextFallback,
     requestIndex: 1,
   });
   attempts.push(...finalCall.attempts);

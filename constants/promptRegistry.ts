@@ -2,9 +2,10 @@ import {
   DEFAULT_ENGINEERING_PROMPTS,
   ENGINEERING_PROMPT_DEFINITIONS,
 } from './engineeringPrompts';
+import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 
-export const PROMPT_REGISTRY_VERSION = 6;
+export const PROMPT_REGISTRY_VERSION = 7;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -121,7 +122,9 @@ const getReadyCommandAttachments = (
       ];
 };
 
-const ENGINEERING_DEFINITIONS: PromptRegistryDefinition[] = ENGINEERING_PROMPT_DEFINITIONS.map(definition => ({
+const ENGINEERING_DEFINITIONS: PromptRegistryDefinition[] = ENGINEERING_PROMPT_DEFINITIONS
+  .filter(definition => !isRetiredEngineeringCommandId(definition.id))
+  .map(definition => ({
   id: definition.id,
   group: definition.source === 'toolbar' ? PROMPT_GROUP_IDS.toolbar : PROMPT_GROUP_IDS.readyCommands,
   label: definition.labelKey,
@@ -137,7 +140,7 @@ const ENGINEERING_DEFINITIONS: PromptRegistryDefinition[] = ENGINEERING_PROMPT_D
     : getReadyCommandAttachments(definition.options as Record<string, unknown> | undefined),
   legacyLabelKey: definition.labelKey,
   legacySource: definition.source,
-}));
+  }));
 
 const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
   {
