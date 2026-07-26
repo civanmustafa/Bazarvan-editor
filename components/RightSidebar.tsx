@@ -181,9 +181,7 @@ const getSmartAnalysisLabelFallback = (key: string, isArabic: boolean): string =
         articleToc: { ar: 'جدول المحتويات', en: 'Table of Contents' },
         currentConclusion: { ar: 'الخاتمة الحالية', en: 'Current Conclusion' },
         contentSummaryForCompetitors: { ar: 'تلخيص المحتوى للمنافسين', en: 'Content summary for competitors' },
-        competitorGapAnalysis: { ar: 'مقارنة محتوى المنافسين', en: 'Compare content with competitors' },
-        competitorContentComparison: { ar: 'أفكار جديدة/متضاربة مع منافسين', en: 'New/conflicting competitor ideas' },
-        combinedCommands: { ar: 'تجميعة أوامر', en: 'Commands bundle' },
+        competitorContentComparison: { ar: 'تحليل المنافسين الشامل', en: 'Comprehensive competitor analysis' },
         repetitionAndFillerAudit: { ar: 'اكتشاف التكرار والحشو', en: 'Repetition and filler audit' },
         articleSectionOrder: { ar: 'ترتيب الأقسام', en: 'Section order analysis' },
     };
@@ -1190,12 +1188,8 @@ ${readyCommandCompetitorBlocks}`;
                 return <FileSearch size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.contentSummaryForCompetitors:
                 return <FileText size={16} className={iconClass} />;
-            case ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis:
-                return <Users size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison:
                 return <FilePlus2 size={16} className={iconClass} />;
-            case ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands:
-                return <Sparkles size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.improveConclusion:
                 return <FilePlus2 size={16} className={iconClass} />;
             case ENGINEERING_PROMPT_IDS.smartAnalysis.improveWeakest:

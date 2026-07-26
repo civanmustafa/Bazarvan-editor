@@ -23,7 +23,7 @@ const EXTERNAL_COMMAND_LABELS: Record<string, { ar: string; en: string }> = {
   analyzeFull: { ar: 'تحليل المقالة كاملة', en: 'Full article audit' },
   contentSummaryForCompetitors: { ar: 'تلخيص المحتوى للمنافسين', en: 'Content summary for competitors' },
   competitorGapAnalysis: { ar: 'مقارنة محتوى المنافسين', en: 'Compare content with competitors' },
-  competitorContentComparison: { ar: 'أفكار جديدة أو متضاربة مع المنافسين', en: 'New or conflicting competitor ideas' },
+  competitorContentComparison: { ar: 'تحليل المنافسين الشامل', en: 'Comprehensive competitor analysis' },
   combinedCommands: { ar: 'تجميعة الأوامر', en: 'Commands bundle' },
   improveConclusion: { ar: 'تحسين الخاتمة', en: 'Improve conclusion' },
   improveWeakest: { ar: 'تحسين أضعف قسم', en: 'Improve weakest section' },
@@ -33,6 +33,11 @@ const EXTERNAL_COMMAND_LABELS: Record<string, { ar: string; en: string }> = {
   unsuitableSections: { ar: 'الأقسام غير المناسبة', en: 'Unsuitable sections' },
   repetitionAndFillerAudit: { ar: 'اكتشاف التكرار والحشو', en: 'Repetition and filler audit' },
   articleSectionOrder: { ar: 'ترتيب الأقسام', en: 'Section order analysis' },
+};
+
+const RETIRED_COMMAND_LABEL_KEYS: Record<string, keyof typeof EXTERNAL_COMMAND_LABELS> = {
+  [ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis]: 'competitorGapAnalysis',
+  [ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands]: 'combinedCommands',
 };
 
 const automaticOrder = new Map<string, number>(
@@ -65,6 +70,7 @@ export const getExternalReadyCommandLabel = (
   locale: 'ar' | 'en' = 'ar',
 ): string => {
   const definition = getExternalReadyCommandDefinition(commandId);
-  if (!definition) return commandId;
-  return EXTERNAL_COMMAND_LABELS[definition.labelKey]?.[locale] || definition.labelKey;
+  const labelKey = definition?.labelKey || RETIRED_COMMAND_LABEL_KEYS[commandId];
+  if (!labelKey) return commandId;
+  return EXTERNAL_COMMAND_LABELS[labelKey]?.[locale] || labelKey;
 };

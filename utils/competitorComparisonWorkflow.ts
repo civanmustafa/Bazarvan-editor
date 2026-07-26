@@ -11,6 +11,9 @@ const MAP_CATEGORIES = new Set([
   'partial_idea',
   'conflicting_claim',
   'article_advantage',
+  'structure_opportunity',
+  'trust_gap',
+  'conversion_opportunity',
   'duplicate',
   'irrelevant',
 ]);
@@ -32,6 +35,9 @@ export type CompetitorComparisonCategory =
   | 'partial_idea'
   | 'conflicting_claim'
   | 'article_advantage'
+  | 'structure_opportunity'
+  | 'trust_gap'
+  | 'conversion_opportunity'
   | 'duplicate'
   | 'irrelevant';
 
@@ -283,6 +289,9 @@ export const buildCompetitorComparisonMapPrompt = (options: {
     '- partial_idea: فكرة موجودة جزئيًا وتغطية المنافس أعمق بوضوح.',
     '- conflicting_claim: ادعاء أو رقم أو معلومة تتعارض مع المقالة.',
     '- article_advantage: نقطة مفيدة تتفوق فيها المقالة الحالية.',
+    '- structure_opportunity: بنية أو عنوان أو ترتيب أو جدول أو قائمة أو خطوات لدى المنافس تحسن الفهم أو رحلة القارئ.',
+    '- trust_gap: كيان أو دليل أو مواصفة أو عنصر ثقة مهم يغطيه المنافس وتفتقده المقالة أو تعرضه بلا دعم كافٍ.',
+    '- conversion_opportunity: اعتراض أو نقطة قرار أو CTA أو معلومة تجارية مفيدة يغطيها المنافس ويمكن أن تحسن التحويل.',
     '- duplicate: فكرة مكررة لا تضيف قيمة جديدة.',
     '- irrelevant: فكرة لدى المنافس لا تلائم هدف المقالة.',
     '',

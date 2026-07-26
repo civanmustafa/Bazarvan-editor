@@ -419,7 +419,7 @@ const PREVIOUS_COMPETITOR_CONTENT_COMPARISON_PROMPT = `# مقارنة المحت
 * لا تكرر title أو reason أو placementLabel أو contentMarkdown خارج البطاقة.
 * لا تطلب الخاتمة الحالية أو معايير الخاتمة أو اسم الشركة أو جدول المحتويات، ولا تعتمد عليها إذا لم تكن مرفقة.`;
 
-const COMPETITOR_CONTENT_COMPARISON_PROMPT = `حلّل أفكار المنافسين مقارنة بالمقالة الحالية لاكتشاف:
+const PREVIOUS_COMPACT_COMPETITOR_CONTENT_COMPARISON_PROMPT = `حلّل أفكار المنافسين مقارنة بالمقالة الحالية لاكتشاف:
 - الأفكار المهمة الناقصة كليًا.
 - الأفكار الموجودة جزئيًا التي تحتاج تعميقًا.
 - الادعاءات أو الأرقام المتعارضة التي تحتاج تحققًا.
@@ -436,6 +436,62 @@ const COMPETITOR_CONTENT_COMPARISON_PROMPT = `حلّل أفكار المنافس
 - اجعل النص المقترح أصليًا ومتوافقًا مع لغة المقالة ونبرتها.
 - لا تنسخ نصوص المنافسين ولا تخترع معلومات أو أرقامًا.
 - احتفظ بنقاط تفوق المقالة ولا تحذفها لمجرد اختلافها عن المنافسين.`;
+
+const COMPETITOR_CONTENT_COMPARISON_PROMPT = `نفّذ تحليلًا شاملًا للمقالة الحالية مقارنة بالمنافسين. يُحلَّل كل منافس في طلب مستقل أولًا، ثم تُدمج النتائج المنظمة دلاليًا في مرحلة نهائية واحدة. لا تعتبر اختلاف الصياغة اختلافًا في الفكرة، ولا تدمج ادعاءات متعارضة في حقيقة واحدة، ولا تستبعد فكرة مهمة لأنها وردت لدى منافس واحد فقط.
+
+محاور التغطية الإلزامية:
+
+1. نية البحث وعمق الإجابة:
+- قيّم تغطية نية البحث الأساسية والنوايا الفرعية.
+- اكتشف التعريفات والمفاهيم والخطوات والأمثلة والمقارنات والاختيارات والاعتراضات والأسئلة الناقصة.
+- ميّز بين الفكرة الناقصة كليًا والفكرة الموجودة جزئيًا التي يغطيها المنافس بعمق أو وضوح أكبر.
+
+2. نقاط التفوق والفجوات:
+- احتفظ بنقاط تفوق المقالة الحالية ولا تحذفها لمجرد اختلافها عن المنافسين.
+- اجمع الأفكار المتطابقة دلاليًا مع الاحتفاظ بكل أرقام المنافسين ومعرفات الأدلة.
+- رتّب الفجوات حسب أثرها، أهميتها للقارئ، وملاءمتها لهدف الصفحة.
+
+3. الدقة والتعارض والثقة:
+- ارصد الادعاءات والأرقام والمواصفات التقنية والخصائص المتعارضة أو غير المدعومة.
+- لا تتبنَّ ادعاء المنافس كحقيقة؛ وضّح ما يحتاج تحققًا أو تخفيفًا في الصياغة.
+- قيّم الكيانات والمصطلحات المهمة، قابلية الإسناد، وعناصر الثقة وE-E-A-T.
+
+4. SEO وAEO/GEO/LLM:
+- قيّم استخدام الكلمات المستهدفة دون حشو، قابلية القراءة، وقابلية استخراج إجابات واضحة والاقتباس في AI Overviews ومحركات الإجابة.
+- اكتشف الأسئلة التي يجيب عنها المنافسون ولا تجيب عنها المقالة، وأسئلة القرار والمقارنة والتكلفة والاعتراضات أو المخاطر ذات الصلة.
+
+5. البنية والتحويل:
+- قارن العناوين وتسلسل الأفكار وسهولة القراءة ورحلة القارئ.
+- حدد فرص تحويل المقاطع إلى جدول أو قائمة أو خطوات عندما يحسن ذلك الفهم.
+- قيّم قوة التحويل وCTA، وحدد قسمين على الأكثر من الأقسام الأقل ملاءمة إن وجدا.
+- اقترح نقل الأقسام أو ترتيب H2 أفضل عندما توجد مشكلة حقيقية، دون إنشاء patches لمجرد إعادة الترتيب.
+
+6. التحسينات الجاهزة:
+- حدد أضعف قسم قابل للتحسين وأنشئ له patch استبدال عند توفر نص نهائي أفضل.
+- اقترح فكرة أصلية واحدة من الذكاء الاصطناعي فقط إذا أضافت قيمة غير موجودة في المقالة أو نتائج المنافسين، وصرّح بمصدرها.
+- أنشئ patches مستقلة للأسئلة أو الفجوات أو التصحيحات أو التحويلات البنيوية القابلة للتطبيق، وتجنب اقتراح تعديلين يعالجان المشكلة نفسها.
+
+صيغة التقرير النهائي:
+
+1. ملخص تنفيذي من 5–8 نقاط يوضح أقوى نقطة، أخطر ضعف، أهم فجوة، وأولوية التنفيذ.
+2. مصفوفة مقارنة مختصرة: المحور | وضع المقالة | تفوق المنافسين | الفجوة | الأولوية | مصادر الأدلة.
+3. نقاط تفوق المقالة الحالية.
+4. فجوات المحتوى مصنفة إلى: أسئلة، مقارنة أو اختيار، اعتراضات، تعريفات، خطوات أو أمثلة، كيانات وثقة، وتحويل.
+5. الادعاءات أو المعلومات المتعارضة وما يحتاج تحققًا.
+6. فرص الأسئلة والجداول والقوائم والخطوات، مع patches فقط لما يستحق الإضافة فعلًا.
+7. تقييم ترتيب الأقسام: مواضع النقل الضرورية والترتيب المقترح لعناوين H2، من دون patch لهذا الجزء.
+8. خطة تحسين مرتبة وبطاقات تنفيذ مستقلة، ثم حكم نهائي يوضح هل المقالة أقوى أم أضعف وما أول تعديل يحقق أكبر أثر.
+
+قواعد إلزامية:
+
+- لا تنسخ من المنافسين حرفيًا، ولا تخترع معلومات أو أرقامًا أو ادعاءات.
+- كل نتيجة مستندة إلى منافس يجب أن تحتفظ برقم المنافس ومعرف أو مقتطف الدليل داخل reason.
+- إذا كانت الفكرة من استنتاج الذكاء الاصطناعي فاكتب داخل reason: "مصدر الفكرة: الذكاء الاصطناعي".
+- لا تقدم نصائح عامة، ولا تقترح صورًا أو فيديوهات أو Schema أو شهادات عملاء.
+- استخدم replace_block عند تحسين أو تصحيح نص موجود، وعمليات الإضافة للمحتوى الجديد فعلًا فقط.
+- ضع النص الجاهز داخل patches فقط، ولا تكرر title أو reason أو placementLabel أو contentMarkdown داخل analysisMarkdown.
+- لا تنشئ patch لملاحظة تحتاج مراجعة يدوية أو تحققًا خارجيًا ولا يتوفر لها نص نهائي آمن.
+- اجعل النصوص المقترحة أصلية ومتوافقة مع لغة المقالة ونبرتها وكلماتها المهمة.`;
 
 const FULL_ARTICLE_SEO_AI_AUDIT_PROMPT = `أنت خبير محتوى SEO/AEO/GEO/LLM SEO. افحص المحتوى التالي بعمق ولكن باختصار، وقيّمه من حيث مطابقته لنية البحث، كفاية الإجابة، قابلية الاقتباس في AI Overviews، الفجوات المعرفية، الأسئلة الناقصة، الادعاءات غير المدعومة، الكيانات الناقصة، البنية، وقوة التحويل.
 
@@ -1093,25 +1149,6 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
     savesContentSummary: true,
   },
   {
-    id: ENGINEERING_PROMPT_IDS.smartAnalysis.competitorGapAnalysis,
-    source: 'smartAnalysis',
-    labelKey: 'competitorGapAnalysis',
-    defaultValue: COMPETITOR_GAP_ANALYSIS_PROMPT,
-    options: {
-      ...DEFAULT_SMART_ANALYSIS_OPTIONS,
-      competitorContent: true,
-      articleToc: true,
-      currentConclusion: true,
-      companyName: true,
-      keywordCriteria: true,
-      basicStructureCriteria: true,
-      headingsSequenceCriteria: true,
-      productPageCriteria: true,
-      interactionCtaCriteria: true,
-      conclusionCriteria: true,
-    },
-  },
-  {
     id: ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison,
     source: 'smartAnalysis',
     labelKey: 'competitorContentComparison',
@@ -1121,26 +1158,7 @@ export const ENGINEERING_PROMPT_DEFINITIONS: EngineeringPromptDefinition[] = [
       articleToc: false,
       currentConclusion: false,
       competitorContent: true,
-      companyName: false,
-      keywordCriteria: true,
-      basicStructureCriteria: true,
-      headingsSequenceCriteria: true,
-      productPageCriteria: true,
-      interactionCtaCriteria: true,
-      conclusionCriteria: false,
-    },
-  },
-  {
-    id: ENGINEERING_PROMPT_IDS.smartAnalysis.combinedCommands,
-    source: 'smartAnalysis',
-    labelKey: 'combinedCommands',
-    defaultValue: `${COMBINED_COMMANDS_PROMPT}\n\n${COMBINED_COMMANDS_PATCH_CONTRACT}`,
-    options: {
-      ...DEFAULT_SMART_ANALYSIS_OPTIONS,
-      articleToc: false,
-      currentConclusion: false,
-      competitorContent: true,
-      companyName: false,
+      companyName: true,
       keywordCriteria: true,
       basicStructureCriteria: true,
       headingsSequenceCriteria: true,
@@ -1456,6 +1474,7 @@ const REPLACED_ENGINEERING_PROMPTS: Partial<Record<EngineeringPromptId, string[]
   ],
   [ENGINEERING_PROMPT_IDS.smartAnalysis.competitorContentComparison]: [
     PREVIOUS_COMPETITOR_CONTENT_COMPARISON_PROMPT,
+    PREVIOUS_COMPACT_COMPETITOR_CONTENT_COMPARISON_PROMPT,
   ],
   [ENGINEERING_PROMPT_IDS.toolbar.generateMeta]: [PREVIOUS_GENERATE_META_PROMPT],
   [ENGINEERING_PROMPT_IDS.toolbar.rephrase]: [PREVIOUS_REPHRASE_PROMPT],

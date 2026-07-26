@@ -165,12 +165,51 @@ test('overlapping commands are retired from new execution but keep historical la
   )?.[1] || '';
   assert.match(automaticBlock, /competitorContentComparison/);
   assert.doesNotMatch(automaticBlock, /competitorGapAnalysis|combinedCommands/);
+  assert.match(sourceText, /RETIRED_COMMAND_LABEL_KEYS/);
+  assert.match(sourceText, /مقارنة محتوى المنافسين/);
+  assert.match(sourceText, /تجميعة الأوامر/);
+});
+
+test('only the comprehensive competitor command remains active and covers retired command scopes', async () => {
+  const [engineeringSource, promptRegistrySource] = await Promise.all([
+    readFile(new URL('../constants/engineeringPrompts.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../constants/promptRegistry.ts', import.meta.url), 'utf8'),
+  ]);
+  const activeDefinitionBlock = engineeringSource.match(
+    /export const ENGINEERING_PROMPT_DEFINITIONS:[\s\S]*?= \[([\s\S]*?)\n\];\n\nexport const DEFAULT_ENGINEERING_PROMPTS/,
+  )?.[1] || '';
+  assert.match(activeDefinitionBlock, /competitorContentComparison/);
+  assert.doesNotMatch(activeDefinitionBlock, /competitorGapAnalysis|combinedCommands/);
+  assert.match(promptRegistrySource, /ENGINEERING_PROMPT_DEFINITIONS/);
+  assert.match(promptRegistrySource, /sanitizeEngineeringPrompt/);
+
+  const prompt = engineeringSource.match(
+    /const COMPETITOR_CONTENT_COMPARISON_PROMPT = `([\s\S]*?)`;\n\nconst FULL_ARTICLE_SEO_AI_AUDIT_PROMPT/,
+  )?.[1] || '';
+  assert.ok(prompt.length > 0);
+  [
+    'نية البحث وعمق الإجابة',
+    'نقاط التفوق والفجوات',
+    'المواصفات التقنية',
+    'E-E-A-T',
+    'SEO وAEO/GEO/LLM',
+    'أسئلة القرار والمقارنة والتكلفة',
+    'جدول أو قائمة أو خطوات',
+    'قوة التحويل وCTA',
+    'أضعف قسم',
+    'فكرة أصلية واحدة من الذكاء الاصطناعي',
+    'قسمين على الأكثر من الأقسام الأقل ملاءمة',
+    'الترتيب المقترح لعناوين H2',
+    'مصفوفة مقارنة مختصرة',
+    'حكم نهائي',
+  ].forEach(requiredScope => assert.match(prompt, new RegExp(requiredScope)));
 });
 
 test('server workflow persists per-competitor maps without modifying content-writing modules', async () => {
-  const [executor, migration, aiContext, sidebar] = await Promise.all([
+  const [executor, migration, cleanupMigration, aiContext, sidebar] = await Promise.all([
     readFile(new URL('../server/externalCompetitorComparisonExecutor.ts', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/migrations/20260726020000_independent_competitor_engineering_analysis.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260726030000_comprehensive_competitor_command.sql', import.meta.url), 'utf8'),
     readFile(new URL('../contexts/AIContext.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/RightSidebar.tsx', import.meta.url), 'utf8'),
   ]);
@@ -181,6 +220,9 @@ test('server workflow persists per-competitor maps without modifying content-wri
   assert.match(migration, /smartAnalysis\.competitorGapAnalysis/);
   assert.match(migration, /smartAnalysis\.combinedCommands/);
   assert.match(migration, /Historical completed results remain available/);
+  assert.match(cleanupMigration, /Comprehensive competitor analysis/);
+  assert.match(cleanupMigration, /- 'smartAnalysis\.competitorGapAnalysis'/);
+  assert.match(cleanupMigration, /- 'smartAnalysis\.combinedCommands'/);
   assert.match(aiContext, /runCompetitorComparisonReadyCommand/);
   assert.match(aiContext, /provider === 'chatgpt'/);
   assert.match(aiContext, /competitor_comparison_synthesis/);

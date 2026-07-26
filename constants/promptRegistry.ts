@@ -1,11 +1,13 @@
 import {
   DEFAULT_ENGINEERING_PROMPTS,
   ENGINEERING_PROMPT_DEFINITIONS,
+  sanitizeEngineeringPrompt,
 } from './engineeringPrompts';
 import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
+import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 7;
+export const PROMPT_REGISTRY_VERSION = 8;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -886,13 +888,19 @@ export const normalizePromptRegistrySettings = (
 
   PROMPT_REGISTRY_DEFINITIONS.forEach(definition => {
     const candidate = sourceTemplates[definition.id];
-    if (
+    const normalizedCandidate = (
       typeof candidate === 'string'
-      && candidate.trim()
-      && candidate.length <= PROMPT_TEMPLATE_MAX_CHARS
-      && hasRequiredVariables(candidate, definition.requiredVariables)
+      && definition.legacySource
+    )
+      ? sanitizeEngineeringPrompt(definition.id as EngineeringPromptId, candidate)
+      : candidate;
+    if (
+      typeof normalizedCandidate === 'string'
+      && normalizedCandidate.trim()
+      && normalizedCandidate.length <= PROMPT_TEMPLATE_MAX_CHARS
+      && hasRequiredVariables(normalizedCandidate, definition.requiredVariables)
     ) {
-      templates[definition.id] = candidate;
+      templates[definition.id] = normalizedCandidate;
     }
   });
 

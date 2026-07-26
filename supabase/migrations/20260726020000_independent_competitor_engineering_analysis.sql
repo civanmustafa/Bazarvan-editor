@@ -50,7 +50,7 @@ as $$
     (1, 'smartAnalysis.entityMap', 'Entity map'),
     (2, 'smartAnalysis.fullArticleAudit', 'Full article audit'),
     (3, 'smartAnalysis.contentSummaryForCompetitors', 'Content summary for competitors'),
-    (4, 'smartAnalysis.competitorContentComparison', 'New or conflicting competitor ideas'),
+    (4, 'smartAnalysis.competitorContentComparison', 'Comprehensive competitor analysis'),
     (5, 'smartAnalysis.improveConclusion', 'Improve conclusion'),
     (6, 'smartAnalysis.improveWeakest', 'Improve weakest section'),
     (7, 'smartAnalysis.suggestNewIdea', 'Suggest a new idea'),
