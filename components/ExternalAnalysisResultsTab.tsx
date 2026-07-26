@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Clock3,
   Copy,
+  ExternalLink,
   FilePlus2,
   LocateFixed,
   LoaderCircle,
@@ -17,6 +18,7 @@ import {
 import { useAISelector } from '../contexts/AIContext';
 import { useUser } from '../contexts/UserContext';
 import { getExternalReadyCommandLabel } from '../constants/externalAnalysisCommands';
+import { COMPETITOR_COMPARISON_COMMAND_ID } from '../utils/competitorComparisonWorkflow';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import {
@@ -57,6 +59,17 @@ const toTrimmedString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
 
+const toSafeExternalUrl = (value: unknown): string => {
+  const candidate = toTrimmedString(value);
+  if (!candidate) return '';
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : '';
+  } catch {
+    return '';
+  }
+};
+
 const statusClassName = (status: ExternalAnalysisJobStatus): string => {
   if (status === 'completed') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300';
   if (status === 'running') return 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300';
@@ -73,6 +86,80 @@ const normalizeMarker = (value?: string): string => (
     .replace(/\]\]\s*$/i, '')
     .trim()
 );
+
+type VisibleCompetitorComparisonItem = {
+  id: string;
+  category: string;
+  topic: string;
+  summary: string;
+  importance: string;
+  articleEvidence: string;
+  competitorEvidence: Array<{ chunkId: string; excerpt: string }>;
+};
+
+type VisibleCompetitorComparisonResult = {
+  competitorNumber: number;
+  sourceUrl: string;
+  sourceTitle: string;
+  items: VisibleCompetitorComparisonItem[];
+};
+
+const COMPARISON_CATEGORY_LABELS: Record<string, { ar: string; en: string }> = {
+  missing_idea: { ar: 'فكرة ناقصة', en: 'Missing idea' },
+  partial_idea: { ar: 'تغطية جزئية', en: 'Partial coverage' },
+  conflicting_claim: { ar: 'ادعاء متعارض', en: 'Conflicting claim' },
+  article_advantage: { ar: 'تفوق المقالة', en: 'Article advantage' },
+  structure_opportunity: { ar: 'فرصة بنيوية', en: 'Structure opportunity' },
+  trust_gap: { ar: 'فجوة ثقة', en: 'Trust gap' },
+  conversion_opportunity: { ar: 'فرصة تحويل', en: 'Conversion opportunity' },
+  duplicate: { ar: 'مكرر', en: 'Duplicate' },
+  irrelevant: { ar: 'غير ملائم', en: 'Irrelevant' },
+};
+
+const toVisibleCompetitorComparisonResults = (
+  job: ExternalAnalysisJobRow,
+): VisibleCompetitorComparisonResult[] => {
+  const source = Array.isArray(job.result?.independentCompetitorResults)
+    ? job.result.independentCompetitorResults
+    : Array.isArray(job.progress.independentCompetitorResults)
+      ? job.progress.independentCompetitorResults
+      : [];
+  return source.flatMap(value => {
+    if (!isRecord(value)) return [];
+    const competitorNumber = Number(value.competitorNumber);
+    if (!Number.isFinite(competitorNumber) || competitorNumber < 1) return [];
+    const items = Array.isArray(value.items)
+      ? value.items.flatMap(item => {
+          if (!isRecord(item)) return [];
+          const competitorEvidence = Array.isArray(item.competitorEvidence)
+            ? item.competitorEvidence.flatMap(evidence => (
+                isRecord(evidence) && toTrimmedString(evidence.excerpt)
+                  ? [{
+                      chunkId: toTrimmedString(evidence.chunkId),
+                      excerpt: toTrimmedString(evidence.excerpt),
+                    }]
+                  : []
+              ))
+            : [];
+          return [{
+            id: toTrimmedString(item.id) || `competitor_${competitorNumber}_item`,
+            category: toTrimmedString(item.category),
+            topic: toTrimmedString(item.topic),
+            summary: toTrimmedString(item.summary),
+            importance: toTrimmedString(item.importance),
+            articleEvidence: toTrimmedString(item.articleEvidence),
+            competitorEvidence,
+          }];
+        })
+      : [];
+    return [{
+      competitorNumber,
+      sourceUrl: toSafeExternalUrl(value.sourceUrl),
+      sourceTitle: toTrimmedString(value.sourceTitle),
+      items,
+    }];
+  }).sort((left, right) => left.competitorNumber - right.competitorNumber);
+};
 
 const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({ articleId }) => {
   const { t } = useUser();
@@ -111,8 +198,11 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
       setError('');
       setExpandedJobIds(current => {
         if (current.size > 0) return current;
-        const latestCompleted = rows.find(job => job.job_type === 'engineering_command' && job.status === 'completed');
-        return latestCompleted ? new Set([latestCompleted.id]) : current;
+        const latestVisible = rows.find(job => (
+          job.command_id === COMPETITOR_COMPARISON_COMMAND_ID
+          && EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status)
+        )) || rows.find(job => job.job_type === 'engineering_command' && job.status === 'completed');
+        return latestVisible ? new Set([latestVisible.id]) : current;
       });
     } catch (loadError) {
       if (refreshRequestRef.current !== requestId) return;
@@ -259,7 +349,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   };
 
   const handleRetryJob = async (job: ExternalAnalysisJobRow) => {
-    if (!articleId || jobActionId || !['failed', 'blocked', 'cancelled'].includes(job.status)) return;
+    if (!articleId || jobActionId || !['retry_scheduled', 'failed', 'blocked', 'cancelled'].includes(job.status)) return;
     setJobActionId(job.id);
     setControlNotice(null);
     try {
@@ -267,8 +357,8 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
       setControlNotice({
         tone: 'success',
         message: locale === 'ar'
-          ? 'أُعيدت المهمة الفاشلة نفسها إلى الطابور، ولن تتكرر المهام الناجحة.'
-          : 'The same failed task was requeued; successful tasks will not be repeated.',
+          ? 'تم طلب الاستئناف الآن. ستُستخدم نتائج المنافسين المكتملة ويبدأ العمل من أول منافس غير مكتمل.'
+          : 'Resume requested now. Completed competitor results will be reused and work continues from the first incomplete competitor.',
       });
       await refreshJobs(false);
     } catch (retryError) {
@@ -415,6 +505,9 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   };
 
   const renderAnalysis = (job: ExternalAnalysisJobRow, patches: AiContentPatch[]) => {
+    if (job.command_id === COMPETITOR_COMPARISON_COMMAND_ID) {
+      return <>{patches.map(patch => renderPatch(patch))}</>;
+    }
     const analysis = getExternalJobAnalysisMarkdown(job);
     if (patches.length === 0) {
       return analysis
@@ -441,6 +534,76 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     if (tail.trim()) parts.push(<div key="tail" className="ai-output text-xs leading-6" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(tail) }} />);
     patches.filter(patch => !used.has(patch.id)).forEach(patch => parts.push(renderPatch(patch)));
     return <>{parts}</>;
+  };
+
+  const renderIndependentCompetitorResults = (
+    results: VisibleCompetitorComparisonResult[],
+  ) => {
+    if (results.length === 0) return null;
+    return (
+      <div className="mb-3 space-y-2">
+        <div className="text-[11px] font-black text-gray-700 dark:text-gray-200">
+          {locale === 'ar' ? 'نتيجة كل مقارنة مستقلة' : 'Each independent comparison result'}
+        </div>
+        {results.map(result => (
+          <section key={`competitor-result-${result.competitorNumber}`} className="rounded-md border border-blue-200 bg-blue-50/40 p-2 dark:border-blue-500/20 dark:bg-blue-500/5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[11px] font-black text-blue-800 dark:text-blue-200">
+                {locale === 'ar' ? `المنافس ${result.competitorNumber}` : `Competitor ${result.competitorNumber}`}
+                {result.sourceTitle ? ` — ${result.sourceTitle}` : ''}
+              </div>
+              {result.sourceUrl && (
+                <a
+                  href={result.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[9px] font-bold text-blue-700 hover:underline dark:text-blue-300"
+                >
+                  <ExternalLink size={11} />
+                  {locale === 'ar' ? 'فتح المصدر' : 'Open source'}
+                </a>
+              )}
+            </div>
+            {result.items.length > 0 ? (
+              <div className="mt-2 space-y-1.5">
+                {result.items.map((item, index) => (
+                  <article key={`${result.competitorNumber}-${item.id}-${index}`} className="rounded border border-gray-200 bg-white p-2 dark:border-[#3C3C3C] dark:bg-[#242424]">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-black text-gray-800 dark:text-gray-100">{item.topic}</span>
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[8px] font-black text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                        {(COMPARISON_CATEGORY_LABELS[item.category] || { ar: item.category, en: item.category })[locale]}
+                      </span>
+                      {item.importance && (
+                        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[8px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                          {locale === 'ar' ? 'الأهمية' : 'Importance'}: {item.importance}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-[10px] leading-5 text-gray-700 dark:text-gray-200">{item.summary}</div>
+                    {item.articleEvidence && (
+                      <div className="mt-1 border-s-2 border-emerald-400 ps-2 text-[9px] leading-5 text-gray-500 dark:text-gray-400">
+                        <span className="font-black">{locale === 'ar' ? 'من المقالة' : 'From article'}: </span>
+                        {item.articleEvidence}
+                      </div>
+                    )}
+                    {item.competitorEvidence.map((evidence, evidenceIndex) => (
+                      <div key={`${item.id}-evidence-${evidenceIndex}`} className="mt-1 border-s-2 border-blue-300 ps-2 text-[9px] leading-5 text-gray-500 dark:text-gray-400">
+                        <span className="font-black">{locale === 'ar' ? 'دليل المنافس' : 'Competitor evidence'}{evidence.chunkId ? ` (${evidence.chunkId})` : ''}: </span>
+                        {evidence.excerpt}
+                      </div>
+                    ))}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2 text-[9px] text-gray-500 dark:text-gray-400">
+                {locale === 'ar' ? 'اكتملت المقارنة ولم تُرصد نتيجة مستقلة تستحق المعالجة.' : 'Comparison completed with no independent item requiring action.'}
+              </div>
+            )}
+          </section>
+        ))}
+      </div>
+    );
   };
 
   const progressText = (job: ExternalAnalysisJobRow): string => {
@@ -472,7 +635,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
 
   const renderJobControls = (job: ExternalAnalysisJobRow) => {
     const active = EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status);
-    const canRetry = ['failed', 'blocked', 'cancelled'].includes(job.status);
+    const canRetry = ['retry_scheduled', 'failed', 'blocked', 'cancelled'].includes(job.status);
     if (!active && !canRetry) return null;
     const busy = jobActionId === job.id;
     const cancellationPending = job.status === 'running' && Boolean(job.cancel_requested_at);
@@ -497,10 +660,14 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
             onClick={() => void handleRetryJob(job)}
             disabled={Boolean(jobActionId)}
             className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[9px] font-black text-[#8a6f1d] hover:bg-[#d4af37]/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-[#f2d675]"
-            title={locale === 'ar' ? 'إعادة المهمة الفاشلة نفسها' : 'Retry the same failed task'}
+            title={job.status === 'retry_scheduled'
+              ? (locale === 'ar' ? 'استئناف المهمة الآن دون انتظار الموعد المجدول' : 'Resume now without waiting for the scheduled time')
+              : (locale === 'ar' ? 'إعادة المهمة الفاشلة نفسها' : 'Retry the same failed task')}
           >
             {busy ? <LoaderCircle size={11} className="animate-spin" /> : <RotateCcw size={11} />}
-            <span>{locale === 'ar' ? 'إعادة التشغيل' : 'Retry'}</span>
+            <span>{job.status === 'retry_scheduled'
+              ? (locale === 'ar' ? 'استئناف الآن' : 'Resume now')
+              : (locale === 'ar' ? 'إعادة التشغيل' : 'Retry')}</span>
           </button>
         )}
       </div>
@@ -592,6 +759,9 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
               const competitorWorkflow = isRecord(job.result?.competitorWorkflow)
                 ? job.result.competitorWorkflow
                 : null;
+              const independentCompetitorResults = job.command_id === COMPETITOR_COMPARISON_COMMAND_ID
+                ? toVisibleCompetitorComparisonResults(job)
+                : [];
               const commandLabel = job.command_id
                 ? getExternalReadyCommandLabel(job.command_id, locale)
                 : job.command_label || '-';
@@ -627,10 +797,15 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                         </div>
                       )}
                       {job.next_attempt_at && job.status === 'retry_scheduled' && (
-                        <div className="mb-2 text-[10px] text-amber-700 dark:text-amber-300">{locale === 'ar' ? 'المحاولة التالية' : 'Next attempt'}: {formatDate(job.next_attempt_at)}</div>
+                        <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] leading-5 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/5 dark:text-amber-300">
+                          {locale === 'ar'
+                            ? `سيستأنف النظام تلقائيًا في ${formatDate(job.next_attempt_at)} حسب مدة إعادة المحاولة في إعدادات المسؤول. يمكنك اختيار «استئناف الآن» دون فقد نتائج المنافسين المكتملة.`
+                            : `The system will resume automatically at ${formatDate(job.next_attempt_at)} using the administrator retry interval. You can choose “Resume now” without losing completed competitor results.`}
+                        </div>
                       )}
                       {job.last_error && <div className="mb-2 border-s-2 border-red-500 bg-red-50 px-2 py-1.5 text-[10px] leading-5 text-red-700 dark:bg-red-900/10 dark:text-red-300">{job.last_error}</div>}
                       <div className="mb-2 flex justify-end">{renderJobControls(job)}</div>
+                      {renderIndependentCompetitorResults(independentCompetitorResults)}
                       {competitorWorkflow && (
                         <div className="mb-2 flex flex-wrap gap-1.5 text-[9px] font-bold text-gray-500 dark:text-gray-400">
                           <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
@@ -648,13 +823,26 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                       )}
                       {hasResult ? (
                         <>
-                          <div className="mb-1 flex justify-end">
-                            <button type="button" onClick={() => handleCopy(`report-${job.id}`, analysis)} disabled={!analysis} className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:opacity-40 dark:text-gray-300">
-                              <Copy size={12} /> {copiedId === `report-${job.id}` ? (locale === 'ar' ? 'تم النسخ' : 'Copied') : (locale === 'ar' ? 'نسخ التقرير' : 'Copy report')}
-                            </button>
-                          </div>
+                          {job.command_id !== COMPETITOR_COMPARISON_COMMAND_ID && (
+                            <div className="mb-1 flex justify-end">
+                              <button type="button" onClick={() => handleCopy(`report-${job.id}`, analysis)} disabled={!analysis} className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:opacity-40 dark:text-gray-300">
+                                <Copy size={12} /> {copiedId === `report-${job.id}` ? (locale === 'ar' ? 'تم النسخ' : 'Copied') : (locale === 'ar' ? 'نسخ التقرير' : 'Copy report')}
+                              </button>
+                            </div>
+                          )}
                           {renderAnalysis(job, patches)}
                         </>
+                      ) : job.command_id === COMPETITOR_COMPARISON_COMMAND_ID
+                        && independentCompetitorResults.length > 0
+                        && job.status !== 'completed' ? (
+                          <div className="py-2 text-[10px] font-bold text-blue-600 dark:text-blue-300">
+                            {locale === 'ar' ? 'تظهر نتائج كل منافس أعلاه فور اكتمالها. بطاقات التطبيق النهائية ستظهر بعد اكتمال دمج جميع المنافسين.' : 'Each competitor result appears above when completed. Final application cards will appear after all competitors are synthesized.'}
+                          </div>
+                        ) : job.command_id === COMPETITOR_COMPARISON_COMMAND_ID
+                          && job.status === 'completed' ? (
+                            <div className="py-2 text-[10px] text-gray-500 dark:text-gray-400">
+                              {locale === 'ar' ? 'اكتمل التحليل ولم ينتج تعديل آمن يحتاج تطبيقًا في المحرر.' : 'Analysis completed with no safe editor change requiring application.'}
+                            </div>
                       ) : (
                         <div className="py-3 text-[10px] text-gray-400">{locale === 'ar' ? 'لا توجد نتيجة محفوظة لهذه المهمة بعد.' : 'No saved result for this task yet.'}</div>
                       )}

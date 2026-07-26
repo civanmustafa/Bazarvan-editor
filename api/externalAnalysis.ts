@@ -487,7 +487,10 @@ const retryExternalAnalysisJob = async (
     });
   }
 
-  const { data, error } = await supabase.rpc('retry_external_analysis_job', {
+  const retryRpc = existingJob.status === 'retry_scheduled'
+    ? 'resume_external_analysis_job_now'
+    : 'retry_external_analysis_job';
+  const { data, error } = await supabase.rpc(retryRpc, {
     p_job_id: jobId,
     p_requested_by: requestedBy,
   });

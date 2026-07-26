@@ -528,7 +528,7 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
   assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 8/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 9/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);

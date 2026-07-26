@@ -119,8 +119,13 @@ test('AI synthesis is accepted only when every independent item is dispositioned
   const valid = validateCompetitorComparisonSynthesisResponse({
     expectedItemIds,
     responseText: JSON.stringify({
-      analysisMarkdown: 'A complete report.',
-      patches: [],
+      analysisMarkdown: '',
+      patches: [{
+        marker: 'patch_1',
+        operation: 'append_to_article',
+        title: 'Ready editor change',
+        contentMarkdown: 'Directly applicable content.',
+      }],
       itemDispositions: expectedItemIds.map(itemId => ({
         itemId,
         disposition: 'retained',
@@ -131,6 +136,23 @@ test('AI synthesis is accepted only when every independent item is dispositioned
     }),
   });
   assert.equal(valid.ok, true);
+
+  const narrativeOnly = validateCompetitorComparisonSynthesisResponse({
+    expectedItemIds,
+    responseText: JSON.stringify({
+      analysisMarkdown: 'Generic narrative report.',
+      patches: [],
+      itemDispositions: expectedItemIds.map(itemId => ({
+        itemId,
+        disposition: 'retained',
+        clusterId: 'cluster_1',
+        reason: 'Important unique result.',
+      })),
+    }),
+  });
+  assert.equal(narrativeOnly.ok, false);
+  assert.match(narrativeOnly.errors.join(','), /analysis_markdown_must_be_empty/);
+  assert.match(narrativeOnly.errors.join(','), /missing_patch_cards/);
 
   const missing = validateCompetitorComparisonSynthesisResponse({
     expectedItemIds,
@@ -201,21 +223,27 @@ test('only the comprehensive competitor command remains active and covers retire
     'قسمين على الأكثر من الأقسام الأقل ملاءمة',
     'الترتيب المقترح لعناوين H2',
     'مصفوفة مقارنة مختصرة',
-    'حكم نهائي',
+    'صيغة النتيجة النهائية المباشرة',
+    'analysisMarkdown سلسلة فارغة',
+    'بطاقة patch مستقلة',
   ].forEach(requiredScope => assert.match(prompt, new RegExp(requiredScope)));
 });
 
 test('server workflow persists per-competitor maps without modifying content-writing modules', async () => {
-  const [executor, migration, cleanupMigration, aiContext, sidebar] = await Promise.all([
+  const [executor, migration, cleanupMigration, resumeMigration, resultsTab, aiContext, sidebar] = await Promise.all([
     readFile(new URL('../server/externalCompetitorComparisonExecutor.ts', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/migrations/20260726020000_independent_competitor_engineering_analysis.sql', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/migrations/20260726030000_comprehensive_competitor_command.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260726040000_competitor_analysis_resume_controls.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../components/ExternalAnalysisResultsTab.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../contexts/AIContext.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/RightSidebar.tsx', import.meta.url), 'utf8'),
   ]);
   assert.match(executor, /independent_per_competitor_ai_synthesis/);
   assert.match(executor, /ai_engineering_competitor_map_cache/);
   assert.match(executor, /buildCompetitorComparisonSynthesisPrompt/);
+  assert.match(executor, /independentCompetitorResults: mapResults/);
+  assert.match(executor, /analysisMarkdown: ''/);
   assert.doesNotMatch(executor, /contentWriting/i);
   assert.match(migration, /smartAnalysis\.competitorGapAnalysis/);
   assert.match(migration, /smartAnalysis\.combinedCommands/);
@@ -225,6 +253,12 @@ test('server workflow persists per-competitor maps without modifying content-wri
   assert.doesNotMatch(cleanupMigration, /returns table \(\s*sequence integer,/);
   assert.match(cleanupMigration, /- 'smartAnalysis\.competitorGapAnalysis'/);
   assert.match(cleanupMigration, /- 'smartAnalysis\.combinedCommands'/);
+  assert.match(resumeMigration, /resume_external_analysis_job_now/);
+  assert.match(resumeMigration, /status = 'queued'/);
+  assert.match(resumeMigration, /source', 'manual_resume'/);
+  assert.match(resultsTab, /نتيجة كل مقارنة مستقلة/);
+  assert.match(resultsTab, /استئناف الآن/);
+  assert.match(resultsTab, /COMPETITOR_COMPARISON_COMMAND_ID/);
   assert.match(aiContext, /runCompetitorComparisonReadyCommand/);
   assert.match(aiContext, /provider === 'chatgpt'/);
   assert.match(aiContext, /competitor_comparison_synthesis/);

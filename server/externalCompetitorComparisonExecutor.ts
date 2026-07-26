@@ -15,7 +15,6 @@ import {
   type ExternalEngineeringPromptInput,
 } from './externalEngineeringPrompt';
 import {
-  hasUsableExternalEngineeringResult,
   parseExternalEngineeringResult,
   type ExternalEngineeringResult,
 } from './externalEngineeringResult';
@@ -52,6 +51,13 @@ type CompetitorComparisonWorkflowResult = {
   workflow: ExternalAnalysisJson;
 };
 
+const hasUsableCompetitorCardResult = (
+  result: ExternalEngineeringResult,
+): boolean => (
+  result.parsedFromJson
+  && result.invalidPatchCount === 0
+);
+
 const toTrimmedString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
@@ -79,6 +85,15 @@ const createSources = (input: ExternalEngineeringPromptInput): CompetitorCompari
     }),
   ).filter(source => source.text || source.url)
 );
+
+const attachSourceMetadata = (
+  result: CompetitorComparisonMapResult,
+  source: CompetitorComparisonSource,
+): CompetitorComparisonMapResult => ({
+  ...result,
+  sourceUrl: source.url,
+  sourceTitle: source.title,
+});
 
 const hasExactChunkCoverage = (
   result: CompetitorComparisonMapResult,
@@ -223,15 +238,16 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
     });
     if (cached) {
       cacheHitCount += 1;
-      mapResults.push(cached);
+      mapResults.push(attachSourceMetadata(cached, source));
       await context.reportProgress({
         progress: {
           stage: 'competitor_map_cache_hit',
-          message: `إعادة استخدام تحليل المنافس ${source.competitorNumber} المحفوظ.`,
+          message: `اكتملت المقارنة المستقلة مع المنافس ${source.competitorNumber} من النتيجة المحفوظة.`,
           competitorCurrent: mapResults.length,
           competitorTotal: sources.length,
           competitorNumber: source.competitorNumber,
           cacheHitCount,
+          independentCompetitorResults: mapResults,
         },
       });
       continue;
@@ -253,6 +269,7 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
           sourceBatch: batchResults.length + 1,
           sourceBatchTotal: batches.length,
           cacheHitCount,
+          independentCompetitorResults: mapResults,
         },
       });
       const mapPrompt = buildCompetitorComparisonMapPrompt({ articleContext, batch });
@@ -311,9 +328,12 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
       batchResults.push(parsed.result);
     }
 
-    const combined = combineCompetitorComparisonMapResults(
-      source.competitorNumber,
-      batchResults,
+    const combined = attachSourceMetadata(
+      combineCompetitorComparisonMapResults(
+        source.competitorNumber,
+        batchResults,
+      ),
+      source,
     );
     const lastAttempt = attempts[attempts.length - 1] || {};
     await saveCachedMapResult({
@@ -329,6 +349,19 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
       model: toTrimmedString(lastAttempt.model) || aiSettings.model,
     });
     mapResults.push(combined);
+    await context.reportProgress({
+      progress: {
+        stage: 'competitor_map_completed',
+        message: `اكتملت المقارنة المستقلة مع المنافس ${source.competitorNumber}.`,
+        commandSequence: commandPosition.sequence,
+        commandTotal: commandPosition.total,
+        competitorCurrent: mapResults.length,
+        competitorTotal: sources.length,
+        competitorNumber: source.competitorNumber,
+        cacheHitCount,
+        independentCompetitorResults: mapResults,
+      },
+    });
   }
 
   await context.reportProgress({
@@ -341,6 +374,7 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
       competitorTotal: sources.length,
       cacheHitCount,
       mapRequestCount,
+      independentCompetitorResults: mapResults,
     },
   });
   const synthesisPrompt = buildCompetitorComparisonSynthesisPrompt({
@@ -393,7 +427,7 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
     command.id,
     commandPosition.sequence,
   );
-  if (!validation.ok || !hasUsableExternalEngineeringResult(parsed)) {
+  if (!validation.ok || !hasUsableCompetitorCardResult(parsed)) {
     requestIndex += 1;
     await context.reportProgress({
       progress: {
@@ -437,7 +471,7 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
     );
   }
 
-  if (!validation.ok || !hasUsableExternalEngineeringResult(parsed)) {
+  if (!validation.ok || !hasUsableCompetitorCardResult(parsed)) {
     throw createRetryError({
       code: 'competitor_synthesis_response_invalid',
       message: `Gemini did not cover every independent competitor result: ${validation.errors.join(', ')}`,
@@ -452,7 +486,12 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
   }
 
   return {
-    parsed,
+    parsed: {
+      ...parsed,
+      // The comprehensive comparison is application-first: the user-facing
+      // result is composed only of editor-ready cards, never a prose report.
+      analysisMarkdown: '',
+    },
     finalCall,
     attempts,
     mapResults,

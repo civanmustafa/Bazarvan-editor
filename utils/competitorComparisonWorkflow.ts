@@ -96,6 +96,8 @@ export type CompetitorComparisonMapItem = {
 export type CompetitorComparisonMapResult = {
   competitorId: string;
   competitorNumber: number;
+  sourceUrl?: string;
+  sourceTitle?: string;
   processedChunkIds: string[];
   items: CompetitorComparisonMapItem[];
 };
@@ -471,23 +473,30 @@ export const buildCompetitorComparisonSynthesisPrompt = (options: {
     '',
     'قواعد الدمج:',
     '- ادمج العناصر المتطابقة دلاليًا أو التي تكمل الفكرة نفسها، مع الاحتفاظ بكل itemId وكل إحالة مصدر.',
-    '- لا تدمج ادعاءات متعارضة في حقيقة واحدة؛ اعرض البدائل واطلب التحقق عند الحاجة.',
+    '- لا تدمج ادعاءات متعارضة في حقيقة واحدة. إذا أمكن إنتاج صياغة نهائية دقيقة وآمنة فأنشئ لها بطاقة تعديل، وإلا استبعدها من التعديل مع سبب محدد بدل كتابة شرح عام.',
     '- لا تستبعد فكرة لأنها وردت لدى منافس واحد فقط.',
     '- لا تكرر التعديل نفسه لأكثر من منافس.',
-    '- أنشئ النصوص الجاهزة وبطاقات patches الآن فقط، بصياغة أصلية متوافقة مع المقالة.',
+    '- أنشئ النصوص الجاهزة وبطاقات patches الآن فقط، بصياغة أصلية متوافقة مع المقالة. لا تنشئ تقريرًا نصيًا.',
     '- لا تنسخ من المنافسين ولا تتبنى أرقامهم أو ادعاءاتهم كحقائق دون سند مناسب.',
     '- يجب أن يظهر كل itemId مدخل مرة واحدة فقط داخل itemDispositions.',
     '- القيم المسموحة لـ disposition هي merged أو retained أو excluded.',
-    '- عند excluded اكتب سببًا محددًا. لا تستبعد عنصرًا لمجرد تقليل حجم التقرير.',
-    '- عند merged أو retained ضع clusterId غير فارغ يربطه بالمجموعة النهائية.',
+    '- عند excluded اكتب سببًا محددًا، ومن أسبابه الصحيحة أن النتيجة لا تحتاج تعديلًا أو لا يتوفر لها نص نهائي آمن. لا تستبعد عنصرًا لمجرد تقليل عدد البطاقات.',
+    '- عند merged أو retained ضع clusterId غير فارغ يربطه ببطاقة التعديل النهائية.',
+    '- أنشئ بطاقة patch مستقلة واحدة على الأقل لكل clusterId غير مستبعد، واجعل reason يذكر أرقام المنافسين ومعرفات الأدلة وسبب التعديل المباشر.',
+    '- اجعل analysisMarkdown سلسلة فارغة حرفيًا. كل ما يراه المستخدم ويطبقه يجب أن يكون داخل patches فقط.',
     '',
-    'أضف إلى كائن JSON النهائي الحقلين التاليين دون تغيير عقد analysisMarkdown وpatches:',
+    'أضف إلى كائن JSON النهائي الحقلين التاليين مع إبقاء analysisMarkdown فارغًا ووضع النتيجة القابلة للتطبيق في patches:',
     '"itemDispositions":[{"itemId":"competitor_1_item_1","disposition":"merged","clusterId":"cluster_1","reason":"..."}]',
     '"clusters":[{"clusterId":"cluster_1","title":"...","category":"missing_idea","itemIds":["competitor_1_item_1"],"competitors":[1],"decision":"..."}]',
     '',
     `معرفات العناصر المطلوب تغطيتها حرفيًا (${itemIds.length}): ${JSON.stringify(itemIds)}`,
     '',
     options.outputContract.trim(),
+    '',
+    'استثناء إخراج ملزم لهذا الأمر الشامل:',
+    '- تجاهل تعليمات كتابة تقرير داخل analysisMarkdown الواردة في العقد العام، واجعل analysisMarkdown سلسلة فارغة حرفيًا.',
+    '- أرجع النتيجة المفيدة للمستخدم كبطاقات patches قابلة للتطبيق فقط.',
+    '- لا تكتب أي شرح عام أو ملخص أو مصفوفة خارج حقول بطاقات patches.',
   ].join('\n');
 };
 
@@ -543,9 +552,19 @@ export const validateCompetitorComparisonSynthesisResponse = (options: {
   if (unknownItemIds.length > 0) errors.push(`unknown_items:${unknownItemIds.join(',')}`);
   if (duplicateItemIds.length > 0) errors.push(`duplicate_items:${duplicateItemIds.join(',')}`);
 
-  const hasOutput = toTrimmedString(parsed.analysisMarkdown || parsed.analysis || parsed.report)
-    || (Array.isArray(parsed.patches) && parsed.patches.length > 0);
-  if (!hasOutput) errors.push('missing_analysis_and_patches');
+  if (toTrimmedString(parsed.analysisMarkdown || parsed.analysis || parsed.report)) {
+    errors.push('analysis_markdown_must_be_empty');
+  }
+  const patches = Array.isArray(parsed.patches) ? parsed.patches : [];
+  if (!Array.isArray(parsed.patches)) errors.push('patches_is_not_array');
+  const actionableClusterIds = new Set(
+    dispositions
+      .filter(item => item.disposition !== 'excluded' && item.clusterId)
+      .map(item => item.clusterId),
+  );
+  if (patches.length < actionableClusterIds.size) {
+    errors.push(`missing_patch_cards:${actionableClusterIds.size - patches.length}`);
+  }
 
   return {
     ok: errors.length === 0,
@@ -569,7 +588,7 @@ export const buildCompetitorComparisonSynthesisRepairPrompt = (options: {
   `العناصر المفقودة: ${JSON.stringify(options.validation.missingItemIds)}`,
   `العناصر غير المعروفة: ${JSON.stringify(options.validation.unknownItemIds)}`,
   `العناصر المكررة: ${JSON.stringify(options.validation.duplicateItemIds)}`,
-  'أعد إنشاء كائن JSON كامل وصالح، وعالج كل itemId مرة واحدة فقط. لا تضف ادعاءات جديدة.',
+  'أعد إنشاء كائن JSON كامل وصالح، وعالج كل itemId مرة واحدة فقط. اجعل analysisMarkdown فارغًا، وأنشئ بطاقة patch مستقلة لكل clusterId غير مستبعد. لا تضف ادعاءات جديدة.',
   '',
   '<previous_invalid_response>',
   options.previousResponse.slice(0, 20_000),
