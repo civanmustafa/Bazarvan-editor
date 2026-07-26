@@ -6,7 +6,6 @@ import { useEditorSelector } from '../contexts/EditorContext';
 import { useAISelector } from '../contexts/AIContext';
 import { AI_PROMPTS } from '../constants/aiPrompts';
 import { IconTooltip } from './toolbar/ToolbarItems';
-import GeminiProgressStatus from './GeminiProgressStatus';
 
 const MANUAL_COMMAND_ID = 'manual_command';
 const MANUAL_COMMAND_PREFIX = 'أنت خبير محتوى SEO/AEO/GEO/LLM SEO.';
@@ -20,8 +19,6 @@ const SelectionToolbar: React.FC = () => {
   const isAiLoading = useAISelector(context => context.isAiLoading);
   const quickAiProvider = useAISelector(context => context.quickAiProvider);
   const setQuickAiProvider = useAISelector(context => context.setQuickAiProvider);
-  const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
-  const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
   
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -268,11 +265,6 @@ const SelectionToolbar: React.FC = () => {
           <IconTooltip label={t.aiMenu.manualCommand} placement="top" />
         </button>
       </div>
-      {isAiCommandLoading && aiRequestProgress?.source === 'floating_toolbar' && (
-        <div className="mt-1 w-72 max-w-[calc(100vw-2rem)]">
-          <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact onCancel={cancelAiRequest} />
-        </div>
-      )}
       {isManualCommandOpen && (
         <form onSubmit={handleManualCommandSubmit} className="mt-1 w-72 max-h-[calc(100vh-7rem)] overflow-y-auto border-t border-gray-200 pt-2 dark:border-[#3C3C3C]">
           <textarea

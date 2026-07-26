@@ -56,7 +56,22 @@ test('development and production use one API route registry', async () => {
 });
 
 test('all editor AI execution paths publish to one inline live activity monitor', async () => {
-  const [editorApp, monitor, activityEngine, geminiEngine, aiContext, writingPanel, writingMonitor, externalControls, leftSidebar] = await Promise.all([
+  const [
+    editorApp,
+    monitor,
+    activityEngine,
+    geminiEngine,
+    aiContext,
+    writingPanel,
+    writingMonitor,
+    externalControls,
+    leftSidebar,
+    rightSidebar,
+    selectionToolbar,
+    toolbarAiActions,
+    structureTab,
+    internalLinkingPanel,
+  ] = await Promise.all([
     readWorkspaceFile('components/EditorApp.tsx'),
     readWorkspaceFile('components/AiKeyUsageToast.tsx'),
     readWorkspaceFile('utils/aiExecutionActivity.ts'),
@@ -66,6 +81,11 @@ test('all editor AI execution paths publish to one inline live activity monitor'
     readWorkspaceFile('utils/contentWritingActivityMonitor.ts'),
     readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
     readWorkspaceFile('components/LeftSidebar.tsx'),
+    readWorkspaceFile('components/RightSidebar.tsx'),
+    readWorkspaceFile('components/SelectionToolbar.tsx'),
+    readWorkspaceFile('components/toolbar/AIActions.tsx'),
+    readWorkspaceFile('components/StructureTab.tsx'),
+    readWorkspaceFile('components/InternalLinkingPanel.tsx'),
   ]);
 
   assert.match(editorApp, /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s*\/>\s*<EditorToolbar\s*\/>/);
@@ -108,6 +128,18 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   assert.match(externalControls, /cancelExternalAnalysisJob\(articleId, job\.id\)/);
   assert.doesNotMatch(leftSidebar, /GeminiProgressStatus/);
   assert.doesNotMatch(leftSidebar, /aiRequestProgress\?\.source === 'semantic_keywords_lsi'/);
+  await assertFileMissing('components/GeminiProgressStatus.tsx');
+  for (const editorSurface of [
+    rightSidebar,
+    selectionToolbar,
+    toolbarAiActions,
+    structureTab,
+    internalLinkingPanel,
+  ]) {
+    assert.doesNotMatch(editorSurface, /GeminiProgressStatus/);
+  }
+  assert.doesNotMatch(rightSidebar, /جاري التفكير|جاري الاتصال بـ ChatGPT/);
+  assert.match(monitor, /internal_link_review/);
 });
 
 test('API handlers share the same HTTP request and response adapters', async () => {

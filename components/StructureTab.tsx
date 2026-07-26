@@ -8,7 +8,6 @@ import { useInteractionSelector } from '../contexts/InteractionContext';
 import { useAISelector } from '../contexts/AIContext';
 import { isProductPageContext } from '../utils/goalContext';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
-import GeminiProgressStatus from './GeminiProgressStatus';
 import {
     buildGeminiFreeModelOptions,
     GEMINI_FREE_MODEL_CHANGED_EVENT,
@@ -782,7 +781,6 @@ const StructureTab: React.FC = () => {
     const clearBulkFixReviewItems = useAISelector(context => context.clearBulkFixReviewItems);
     const handleAiFix = useAISelector(context => context.handleAiFix);
     const aiFixingInfo = useAISelector(context => context.aiFixingInfo);
-    const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
     
     const { structureAnalysis: analysis, structureStats: stats } = analysisResults;
     const [modalContent, setModalContent] = useState<CheckResult | null>(null);
@@ -1065,22 +1063,6 @@ const StructureTab: React.FC = () => {
                   ))}
                </select>
            </div>
-           {fixAllProgress.running && (
-               <div className="mt-2">
-                   {geminiProgress ? (
-                       <GeminiProgressStatus
-                           progress={{ ...geminiProgress, active: true }}
-                           isArabic={uiLanguage === 'ar'}
-                           compact
-                           onCancel={cancelAiRequest}
-                       />
-                   ) : (
-                       <div className="rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/10 p-2 text-[11px] font-bold text-gray-700 dark:border-[#d4af37]/30 dark:bg-[#d4af37]/15 dark:text-gray-200">
-                           {fixAllProgress.detail || (uiLanguage === 'ar' ? 'جاري تنفيذ الإصلاح المتعدد...' : 'Bulk fix is running...')}
-                       </div>
-                   )}
-               </div>
-           )}
            {fixAllProgress.failed > 0 && !fixAllProgress.running && (
                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">
                   <p className="font-bold">

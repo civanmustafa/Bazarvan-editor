@@ -19,7 +19,6 @@ import {
 } from '../utils/geminiModelPreference';
 import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt } from '../constants/engineeringPrompts';
 import { isRetiredEngineeringCommandId } from '../constants/externalAnalysisCommands';
-import GeminiProgressStatus from './GeminiProgressStatus';
 import { truncatePromptTextDistributed } from '../utils/promptText';
 import ExternalAiBridgePanel from './ExternalAiBridgePanel';
 import CompetitorDiscoveryPanel from './CompetitorDiscoveryPanel';
@@ -792,8 +791,6 @@ const RightSidebar: React.FC = () => {
     const aiResults = useAISelector(context => context.aiResults);
     const aiInsertionPatches = useAISelector(context => context.aiInsertionPatches);
     const isAiLoading = useAISelector(context => context.isAiLoading);
-    const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
-    const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
     const applyAiInsertionPatch = useAISelector(context => context.applyAiInsertionPatch);
     const selectAiInsertionPatchTarget = useAISelector(context => context.selectAiInsertionPatchTarget);
     const deleteAiInsertionPatchMergeDeleteTarget = useAISelector(context => context.deleteAiInsertionPatchMergeDeleteTarget);
@@ -842,15 +839,6 @@ const RightSidebar: React.FC = () => {
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
     const tRs = t.rightSidebar;
-    const isGeminiSmartProgress = Boolean(
-        aiRequestProgress &&
-        (
-            aiRequestProgress.source === 'smart_analysis'
-            || aiRequestProgress.source === 'ready_commands_batch'
-            || aiRequestProgress.source?.startsWith('competitor_comparison_')
-        )
-    );
-
     useEffect(() => {
         const currentProviderAvailable = competitorGeminiProvider === 'geminiPaid'
             ? isGeminiPaidAvailable
@@ -1963,12 +1951,9 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                                 {isGeminiExpanded && (
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {isAiLoading.gemini ? (
-                                            isGeminiSmartProgress && aiRequestProgress?.provider !== 'geminiPaid'
-                                                ? <GeminiProgressStatus progress={aiRequestProgress} isArabic={isArabicLocale} compact onCancel={cancelAiRequest} />
-                                                : <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div>
-                                        ) :
-                                         aiResults.gemini ? renderAnalysisResult('gemini', aiResults.gemini) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
+                                        {aiResults.gemini
+                                            ? renderAnalysisResult('gemini', aiResults.gemini)
+                                            : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
                             </div>}
@@ -1980,12 +1965,9 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                                 {isGeminiPaidExpanded && (
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {isAiLoading.geminiPaid ? (
-                                            isGeminiSmartProgress && aiRequestProgress?.provider === 'geminiPaid'
-                                                ? <GeminiProgressStatus progress={aiRequestProgress} isArabic={isArabicLocale} compact onCancel={cancelAiRequest} />
-                                                : <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري التفكير...</div>
-                                        ) :
-                                         aiResults.geminiPaid ? renderAnalysisResult('geminiPaid', aiResults.geminiPaid) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
+                                        {aiResults.geminiPaid
+                                            ? renderAnalysisResult('geminiPaid', aiResults.geminiPaid)
+                                            : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
                             </div>}
@@ -1997,8 +1979,9 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                                 {isChatGptExpanded && (
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {isAiLoading.chatgpt ? <div className="flex gap-2 animate-pulse text-[#d4af37]"><Wand2 size={14} /> جاري الاتصال بـ ChatGPT...</div> :
-                                         aiResults.chatgpt ? renderAnalysisResult('chatgpt', aiResults.chatgpt) : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
+                                        {aiResults.chatgpt
+                                            ? renderAnalysisResult('chatgpt', aiResults.chatgpt)
+                                            : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
                                     </div>
                                 )}
                             </div>}

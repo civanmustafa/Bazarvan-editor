@@ -54,7 +54,6 @@ import {
 } from '../utils/internalLinkAiReview';
 import { buildUnifiedCompanyKeywords } from '../utils/clientCompanyIdentity';
 import { getPromptTemplate, PROMPT_TEMPLATE_IDS } from '../constants/promptRegistry';
-import GeminiProgressStatus from './GeminiProgressStatus';
 
 type ExistingLinkState = {
   urls: string[];
@@ -162,8 +161,6 @@ const InternalLinkingPanel: React.FC = () => {
   const quickAiProvider = useAISelector(context => context.quickAiProvider);
   const setQuickAiProvider = useAISelector(context => context.setQuickAiProvider);
   const runPlainAiAnalysis = useAISelector(context => context.runPlainAiAnalysis);
-  const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
-  const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
   const [clients, setClients] = useState<ClientCenterClient[]>([]);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [pages, setPages] = useState<InternalLinkTargetPage[]>([]);
@@ -879,14 +876,6 @@ const InternalLinkingPanel: React.FC = () => {
                   مراجعة الاقتراحات بالذكاء الاصطناعي
                 </button>
 
-                {aiRequestProgress?.source === 'internal_link_review' && (
-                  <GeminiProgressStatus
-                    progress={aiRequestProgress}
-                    isArabic
-                    compact
-                    onCancel={cancelAiRequest}
-                  />
-                )}
               </div>
             )}
           </div>

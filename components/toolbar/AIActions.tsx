@@ -6,7 +6,6 @@ import { useUser } from '../../contexts/UserContext';
 import { useAISelector } from '../../contexts/AIContext';
 import { AI_PROMPTS } from '../../constants/aiPrompts';
 import { DEFAULT_ENGINEERING_PROMPTS, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../../constants/engineeringPrompts';
-import GeminiProgressStatus from '../GeminiProgressStatus';
 
 interface AIActionsProps {
     hasSelection: boolean;
@@ -33,8 +32,6 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
     const { engineeringPrompts, isAiProviderEnabled, isAiProviderAvailable } = useUser();
     const quickAiProvider = useAISelector(context => context.quickAiProvider);
     const setQuickAiProvider = useAISelector(context => context.setQuickAiProvider);
-    const aiRequestProgress = useAISelector(context => context.aiRequestProgress);
-    const cancelAiRequest = useAISelector(context => context.cancelAiRequest);
     const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
     const [isToneMenuOpen, setIsToneMenuOpen] = useState(false);
     const [isExpandMenuOpen, setIsExpandMenuOpen] = useState(false);
@@ -133,11 +130,6 @@ const AIActions: React.FC<AIActionsProps> = ({ hasSelection, isAnyGeminiLoading,
                 >
                     <BadgeDollarSign size={16} />
                 </ToolbarButton>
-            )}
-            {isAnyGeminiLoading && aiRequestProgress?.source === 'heading_analysis' && (
-                <div className="absolute top-full z-[1000] mt-1 w-72 max-w-[calc(100vw-2rem)]">
-                    <GeminiProgressStatus progress={aiRequestProgress} isArabic={uiLanguage === 'ar'} compact onCancel={cancelAiRequest} />
-                </div>
             )}
             {isAiMenuOpen && (
                 <div className={`absolute mt-2 max-h-[calc(100vh-5rem)] w-60 origin-top-left overflow-y-auto rounded-md bg-white dark:bg-[#2A2A2A] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none py-1 z-[10000] ${uiLanguage === 'ar' ? 'left-0' : 'right-0'}`}>

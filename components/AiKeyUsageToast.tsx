@@ -39,6 +39,7 @@ const SURFACE_LABELS: Record<string, [string, string]> = {
   content_writing: ['كتابة المقالة', 'Article writing'],
   engineering_command: ['أمر هندسي جاهز', 'Engineering command'],
   internal_linking_ai_review: ['مراجعة الربط الداخلي', 'Internal-link review'],
+  internal_link_review: ['مراجعة الربط الداخلي', 'Internal-link review'],
   goal_context_generation: ['توليد سياق هدف الصفحة', 'Page goal context'],
   draft_title_generation: ['اقتراح عنوان المقالة', 'Draft title'],
   ready_commands_batch: ['حزمة الأوامر الجاهزة', 'Ready commands bundle'],
