@@ -378,6 +378,21 @@ const getGeminiModelOrder = (
   ]));
 };
 
+const applyGeminiFreeModelFallbackPolicy = async (requestBody: any): Promise<any> => {
+  if (normalizeGeminiProvider(requestBody?.provider) !== 'gemini') return requestBody;
+
+  const settings = await readExternalGeminiSettings();
+  const allowModelFallback = requestBody?.allowModelFallback === true
+    && settings.allowModelFallback;
+  return {
+    ...(requestBody || {}),
+    allowModelFallback,
+    fallbackModels: allowModelFallback
+      ? [...GEMINI_FREE_MODEL_VALUES]
+      : undefined,
+  };
+};
+
 const getSafeGeminiModel = (selectedModel: string, provider: GeminiProvider): string => {
   if (ALLOWED_GEMINI_MODELS.has(selectedModel)) return selectedModel;
   return provider === "geminiPaid" ? GEMINI_PAID_ANALYSIS_MODEL : GEMINI_ANALYSIS_MODEL;
@@ -784,10 +799,9 @@ const executeGeminiCredentialTierInternal = async (
     let lastAttemptedModel = selectedModel;
     let lastOrderedKeys = GEMINI_API_KEYS;
     let lastAttemptTimedOutLocally = false;
-    // A local timeout describes this model/request combination, not a broken key.
-    // Skip the timed-out key on the next fallback model so recovery changes both
-    // variables without multiplying one slow request by every configured key.
-    const timedOutKeyFingerprints = new Set<string>();
+    // A local timeout is recorded for this key/model pair without disabling the
+    // key. The engine must still exhaust every remaining key on the current
+    // model, then retry the keys on each configured fallback model.
     setGeminiProgress(progressId, {
       stage: "queued",
       provider: selectedProvider,
@@ -810,7 +824,6 @@ const executeGeminiCredentialTierInternal = async (
     for (let modelIndex = 0; modelIndex < modelOrder.length; modelIndex += 1) {
       throwIfGeminiExecutionCancelled(progressId, options.signal);
       const activeModel = modelOrder[modelIndex];
-      let modelTimedOutLocally = false;
       lastAttemptedModel = activeModel;
       const orderedKeys = GEMINI_API_KEYS;
       lastOrderedKeys = orderedKeys;
@@ -828,13 +841,13 @@ const executeGeminiCredentialTierInternal = async (
           attemptedKeyCount: 0,
           attemptedModelKeyCount: 0,
           totalAttemptCount: attempts.length,
-          currentKeyIndex: Math.min(orderedKeys.length, timedOutKeyFingerprints.size + 1),
+          currentKeyIndex: 1,
           currentAttempt: 1,
           status: undefined,
           reason: undefined,
           completed: false,
           message: lastAttemptTimedOutLocally
-            ? `انتهت مهلة الموديل السابق. تم التبديل إلى النموذج ${activeModel} وسيُستخدم مفتاح مختلف دون تعطيل المفتاح السابق.`
+            ? `انتهت محاولات الموديل السابق. تم التبديل إلى النموذج ${activeModel} وتجربة المفاتيح من جديد دون تعطيل المفاتيح التي انتهت مهلتها.`
             : `فشلت مفاتيح الموديل السابق. تم التبديل إلى النموذج ${activeModel} وتجربة المفاتيح من جديد.`,
         });
         await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_SWITCH_DELAY_MS);
@@ -842,12 +855,11 @@ const executeGeminiCredentialTierInternal = async (
 
       for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
         throwIfGeminiExecutionCancelled(progressId, options.signal);
-        const attemptedForModel = new Set([
-          ...timedOutKeyFingerprints,
-          ...attempts
+        const attemptedForModel = new Set(
+          attempts
             .filter(item => item.model === activeModel)
             .map(item => item.keyFingerprint),
-        ]);
+        );
         const leaseOptions = {
           provider: selectedProvider,
           model: activeModel,
@@ -858,17 +870,7 @@ const executeGeminiCredentialTierInternal = async (
             : undefined,
           leaseSeconds: Math.ceil(GEMINI_PER_KEY_TIMEOUT_MS / 1_000) + 30,
         };
-        let keyLease = await claimGeminiApiKey(leaseOptions);
-        if (!keyLease && timedOutKeyFingerprints.size > 0) {
-          // Prefer a different key after a timeout, but do not prevent model
-          // fallback when the provider has only one currently eligible key.
-          keyLease = await claimGeminiApiKey({
-            ...leaseOptions,
-            excludedFingerprints: attempts
-              .filter(item => item.model === activeModel)
-              .map(item => item.keyFingerprint),
-          });
-        }
+        const keyLease = await claimGeminiApiKey(leaseOptions);
         if (!keyLease) {
           lastError = {
             status: 429,
@@ -879,10 +881,7 @@ const executeGeminiCredentialTierInternal = async (
         const GEMINI_API_KEY = keyLease.apiKey;
         const keyFingerprint = keyLease.fingerprint;
         const keySuffix = keyLease.suffix;
-        const currentKeyDisplayIndex = Math.min(
-          orderedKeys.length,
-          timedOutKeyFingerprints.size + keyIndex + 1,
-        );
+        const currentKeyDisplayIndex = Math.min(orderedKeys.length, keyIndex + 1);
         for (let attempt = 0; attempt < 1; attempt += 1) {
           throwIfGeminiExecutionCancelled(progressId, options.signal);
           const attemptStartedAt = Date.now();
@@ -1031,10 +1030,6 @@ const executeGeminiCredentialTierInternal = async (
               ? "timeout"
               : keyFailureReason;
             lastAttemptTimedOutLocally = timedOutLocally;
-            if (timedOutLocally) {
-              modelTimedOutLocally = true;
-              timedOutKeyFingerprints.add(keyFingerprint);
-            }
             await keyLease.complete(timedOutLocally
               ? {
                   outcome: 'cancelled',
@@ -1058,7 +1053,7 @@ const executeGeminiCredentialTierInternal = async (
               model: activeModel,
             });
             const failedModelAttemptedKeyCount = getUniqueAttemptCountForModel(attempts, activeModel);
-            const hasNextKey = !timedOutLocally && keyIndex < orderedKeys.length - 1;
+            const hasNextKey = keyIndex < orderedKeys.length - 1;
             const hasNextModel = modelIndex < modelOrder.length - 1;
             setGeminiProgress(progressId, {
               stage: "failed-key",
@@ -1080,7 +1075,7 @@ const executeGeminiCredentialTierInternal = async (
               reason,
               completed: false,
               message: timedOutLocally
-                ? `انتهت مهلة الطلب على النموذج ${activeModel}.${hasNextModel ? " سيتم الانتقال فورًا إلى الموديل التالي بمفتاح مختلف دون تعطيل المفتاح الحالي." : " انتهت الموديلات البديلة المتاحة، وسيُترك المفتاح مفعّلًا."}`
+                ? `انتهت مهلة المفتاح ${currentKeyDisplayIndex} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي دون تعطيل المفتاح الحالي." : hasNextModel ? " اكتملت مفاتيح هذا الموديل وسيتم الانتقال لموديل مجاني آخر." : " انتهت جميع محاولات المفاتيح والموديلات، وستبقى المفاتيح التي انتهت مهلتها مفعّلة."}`
                 : `فشل المفتاح ${currentKeyDisplayIndex} من ${orderedKeys.length} (...${keySuffix}) على النموذج ${activeModel} بسبب ${getGeminiFailureReasonLabel(reason)}.${hasNextKey ? " سيتم الانتقال للمفتاح التالي." : hasNextModel ? " سيتم الانتقال لموديل مجاني آخر." : ""}`,
             });
             console.warn('Gemini key attempt failed', {
@@ -1122,7 +1117,6 @@ const executeGeminiCredentialTierInternal = async (
             break;
           }
         }
-        if (modelTimedOutLocally) break;
       }
     }
 
@@ -1135,7 +1129,7 @@ const executeGeminiCredentialTierInternal = async (
     const lastAttempt = attempts[attempts.length - 1];
     const failureBody = {
       error: lastAttemptTimedOutLocally
-        ? `انتهت مهلة نماذج Gemini المتاحة بعد ${GEMINI_PER_KEY_TIMEOUT_MS} مللي ثانية لكل محاولة. جُرّبت الموديلات البديلة بمفاتيح مختلفة دون تعطيل أي مفتاح؛ خفّض حجم المدخل أو أعد المحاولة.`
+        ? `انتهت مهلة نماذج Gemini المتاحة بعد ${GEMINI_PER_KEY_TIMEOUT_MS} مللي ثانية لكل محاولة. جُرّبت جميع المفاتيح المتاحة على جميع الموديلات البديلة دون تعطيل أي مفتاح؛ خفّض حجم المدخل أو أعد المحاولة.`
         : buildGeminiFailureMessage(
             selectedProvider,
             lastAttemptedModel,
@@ -1179,14 +1173,14 @@ const executeGeminiCredentialTierInternal = async (
       totalAttemptCount: getUniqueKeyModelAttemptCount(attempts),
       currentKeyIndex: Math.min(
         lastOrderedKeys.length,
-        Math.max(1, timedOutKeyFingerprints.size + getUniqueAttemptCountForModel(attempts, lastAttemptedModel)),
+        Math.max(1, getUniqueAttemptCountForModel(attempts, lastAttemptedModel)),
       ),
       keySuffix: lastAttempt?.keySuffix,
       status: lastAttempt?.status,
       reason: lastAttempt?.reason,
       completed: true,
       message: lastAttemptTimedOutLocally
-        ? `انتهت مهلة طلب Gemini بعد تجربة ${attemptedModels.length} موديل باستخدام ${timedOutKeyFingerprints.size} مفتاح مختلف؛ لم يُصنّف أي مفتاح كمعطّل.`
+        ? `انتهت مهلة طلب Gemini بعد تجربة ${attemptedModels.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل؛ لم يُصنّف أي مفتاح كمعطّل.`
         : modelOrder.length > 1
         ? `فشل طلب Gemini بعد تجربة ${attemptedModels.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل.${lastAttempt?.keySuffix ? ` آخر مفتاح: ...${lastAttempt.keySuffix}.` : ''}`
         : `فشل طلب Gemini بعد تجربة ${getUniqueAttemptCount(attempts)} من ${lastOrderedKeys.length} مفتاح.${lastAttempt?.keySuffix ? ` آخر مفتاح: ...${lastAttempt.keySuffix}.` : ''}`,
@@ -1306,8 +1300,9 @@ const executeGeminiRequestInternal = async (
   const userId = normalizeAiExecutionTelemetryContext(options.telemetry).actorUserId;
   const capabilities = await readAiProviderCapabilities(userId);
   const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
+  const effectiveRequestBody = await applyGeminiFreeModelFallbackPolicy(requestBody);
   const primaryResult = await executeGeminiProviderRequestInternal(
-    requestBody,
+    effectiveRequestBody,
     options,
     capabilities,
     userId,
@@ -1415,17 +1410,18 @@ export const aiExecutionEngine = {
 };
 
 const getInitialJobProgress = async (requestBody: any, userId?: string) => {
-  const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
+  const effectiveRequestBody = await applyGeminiFreeModelFallbackPolicy(requestBody);
+  const requestedProvider = normalizeGeminiProvider(effectiveRequestBody?.provider);
   const selectedModel = getSafeGeminiModel(
-    selectGeminiModel(requestBody?.model, requestedProvider),
+    selectGeminiModel(effectiveRequestBody?.model, requestedProvider),
     requestedProvider,
   );
   const selectedProvider = selectGeminiProvider(requestedProvider);
   const modelOrder = getGeminiModelOrder(
     selectedProvider,
     selectedModel,
-    requestBody?.allowModelFallback === true,
-    requestBody?.fallbackModels,
+    effectiveRequestBody?.allowModelFallback === true,
+    effectiveRequestBody?.fallbackModels,
   );
 
   return {

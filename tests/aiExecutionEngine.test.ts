@@ -112,15 +112,19 @@ test('all paid provider engines use the shared automatic fallback policy', async
   assert.match(settingsPage, /الرجوع التلقائي للمفاتيح والمزودات مفعّل/);
 });
 
-test('a local Gemini timeout moves to the next model with a different key without disabling it', async () => {
-  const engine = await readWorkspaceFile('server/aiExecutionEngine.ts');
+test('quick free Gemini commands exhaust all keys and models after a local timeout', async () => {
+  const [engine, aiContext] = await Promise.all([
+    readWorkspaceFile('server/aiExecutionEngine.ts'),
+    readWorkspaceFile('contexts/AIContext.tsx'),
+  ]);
 
   assert.match(engine, /class GeminiRequestTimeoutError extends Error/);
   assert.match(engine, /error instanceof GeminiRequestTimeoutError/);
   assert.match(engine, /outcome: 'cancelled',\s+status: lastError\.status,\s+reason: 'cancelled',\s+cooldownSeconds: 0/);
-  assert.match(engine, /timedOutKeyFingerprints\.add\(keyFingerprint\)/);
-  assert.match(engine, /\.\.\.timedOutKeyFingerprints/);
-  assert.match(engine, /if \(modelTimedOutLocally\) break/);
-  assert.doesNotMatch(engine, /if \(requestLevelTimeout\) break/);
-  assert.match(engine, /سيتم الانتقال فورًا إلى الموديل التالي بمفتاح مختلف دون تعطيل المفتاح الحالي/);
+  assert.match(engine, /const hasNextKey = keyIndex < orderedKeys\.length - 1/);
+  assert.doesNotMatch(engine, /timedOutKeyFingerprints|modelTimedOutLocally/);
+  assert.match(engine, /جميع المفاتيح المتاحة على جميع الموديلات البديلة/);
+  assert.match(engine, /allowModelFallback = requestBody\?\.allowModelFallback === true\s+&& settings\.allowModelFallback/);
+  assert.match(aiContext, /requireFreeModelFallback \|\| isGeminiFreeModelFallbackEnabled\(\)/);
+  assert.match(aiContext, /geminiProvider === 'gemini',\s+\);/);
 });

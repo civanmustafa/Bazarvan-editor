@@ -2031,6 +2031,7 @@ const requestGeminiAnalysis = async (
     usageContext: AiApiUsageContext = {},
     progressCallback?: GeminiProgressCallback,
     provider: GeminiPatchProvider = 'gemini',
+    requireFreeModelFallback = false,
 ): Promise<GeminiAnalysisResult> => {
     // Every UI workflow uses the server-side engine so proxy timeouts cannot
     // interrupt key/model rotation and browser code never handles secret keys.
@@ -2041,7 +2042,8 @@ const requestGeminiAnalysis = async (
               history: history && history.length > 0 ? trimGeminiChatHistory(history) : undefined,
               model,
               provider,
-              allowModelFallback: provider === 'gemini' && isGeminiFreeModelFallbackEnabled(),
+              allowModelFallback: provider === 'gemini'
+                  && (requireFreeModelFallback || isGeminiFreeModelFallbackEnabled()),
               fallbackModels: provider === 'gemini' ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
               telemetry: usageContext,
           },
@@ -2158,8 +2160,17 @@ const callGeminiAnalysis = async (
     usageContext?: AiApiUsageContext,
     progressCallback?: GeminiProgressCallback,
     provider: GeminiPatchProvider = 'gemini',
+    requireFreeModelFallback = false,
 ): Promise<string> => {
-    const result = await requestGeminiAnalysis(prompt, undefined, model, usageContext, progressCallback, provider);
+    const result = await requestGeminiAnalysis(
+        prompt,
+        undefined,
+        model,
+        usageContext,
+        progressCallback,
+        provider,
+        requireFreeModelFallback,
+    );
     onResult?.(result);
     if (result.cancelled) throw new GeminiAnalysisCancelledError();
     return result.text;
@@ -6127,6 +6138,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             usageContext,
             mergedProgressCallback,
             geminiProvider,
+            geminiProvider === 'gemini',
         );
     }, [articleKey, currentUser, quickAiProvider, title, persistGeminiPaidArticleResult, buildApiUsageContext, trackGeminiProgress, isAiProviderAvailable, openAiModel]);
 
