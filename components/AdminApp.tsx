@@ -594,6 +594,8 @@ type ApiUsageRequest = {
   service: string;
   provider: string;
   model: string;
+  articleId: string;
+  articleTitle: string;
   keySuffixLabel: string;
   outcome: 'success' | 'failed' | 'cancelled';
   userId: string | null;
@@ -727,12 +729,22 @@ const buildApiUsageRequests = (events: RemoteAppActivityEvent[]): ApiUsageReques
       : rawOutcome === 'cancelled'
         ? 'cancelled'
         : 'success';
+    const articleId = typeof (metadata.articleId ?? metadata.article_id) === 'string'
+      ? String(metadata.articleId ?? metadata.article_id).trim()
+      : event.entityType === 'article' && event.entityId
+        ? event.entityId.trim()
+        : '';
+    const articleTitle = typeof (metadata.articleTitle ?? metadata.article_title) === 'string'
+      ? String(metadata.articleTitle ?? metadata.article_title).trim()
+      : '';
 
     return {
       id: event.id,
       service,
       provider,
       model,
+      articleId,
+      articleTitle,
       keySuffixLabel: resolveApiUsageKeySuffixLabel(metadata, outcome, failedAttempts),
       outcome,
       userId: event.userId || null,
@@ -948,7 +960,7 @@ const ReportsPage: React.FC<{
 
       <section className="space-y-4">
         <SectionTitle>استخدام مفاتيح API</SectionTitle>
-        <ApiUsageRequestTable requests={apiUsageRequests} profiles={profiles} t={t} />
+        <ApiUsageRequestTable requests={apiUsageRequests} articles={articles} profiles={profiles} t={t} />
       </section>
 
       <section>
@@ -961,13 +973,44 @@ const ReportsPage: React.FC<{
 
 const ApiUsageRequestTable: React.FC<{
   requests: ApiUsageRequest[];
+  articles: RemoteArticleActivity[];
   profiles: RemoteProfile[];
   t: typeof translations.ar;
-}> = ({ requests, profiles, t }) => {
+}> = ({ requests, articles, profiles, t }) => {
+  const articlesById = useMemo(
+    () => new Map(articles.map(article => [article.id, article])),
+    [articles],
+  );
   const getUserLabel = (request: ApiUsageRequest): string => {
     const profile = request.userId ? profiles.find(item => item.id === request.userId) : null;
     if (!request.userId && EXTERNAL_ANALYSIS_API_SOURCES.has(request.source)) return 'النظام التلقائي';
     return getProfileLabel(profile);
+  };
+
+  const renderArticleTitle = (request: ApiUsageRequest) => {
+    const article = request.articleId
+      ? articlesById.get(request.articleId)
+      : null;
+    const title = request.articleTitle || article?.title?.trim() || '';
+    if (!request.articleId) {
+      return (
+        <span className="text-gray-400">
+          {title || 'غير مرتبط بمقالة'}
+        </span>
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={() => navigateToAppPath(buildAdminArticlePath(request.articleId))}
+        className="inline-flex max-w-[280px] items-start gap-1.5 text-start font-bold text-[#8a6f1d] hover:underline dark:text-[#f2d675]"
+        title={title || 'فتح المقالة'}
+      >
+        <FileText size={13} className="mt-0.5 shrink-0" />
+        <span className="line-clamp-2 break-words">{title || t.untitled}</span>
+      </button>
+    );
   };
 
   const renderFailedAttempts = (attempts: ApiUsageFailedAttempt[]) => {
@@ -993,11 +1036,12 @@ const ApiUsageRequestTable: React.FC<{
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-      <table className="w-full min-w-[1320px] text-start text-sm">
+      <table className="w-full min-w-[1540px] text-start text-sm">
         <thead className="text-xs uppercase text-gray-400">
           <tr className="border-b border-gray-100 dark:border-[#3C3C3C]">
             <th className="px-3 py-2 text-start">نوع النموذج</th>
             <th className="px-3 py-2 text-start">الموديل</th>
+            <th className="px-3 py-2 text-start">اسم المقالة</th>
             <th className="px-3 py-2 text-start">آخر أحرف المفتاح</th>
             <th className="px-3 py-2 text-start">النتيجة</th>
             <th className="px-3 py-2 text-start">المفاتيح الفاشلة</th>
@@ -1011,6 +1055,7 @@ const ApiUsageRequestTable: React.FC<{
             <tr key={request.id} className="border-b border-gray-100 align-top dark:border-[#3C3C3C]">
               <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{getApiProviderLabel(request.service, request.provider)}</td>
               <td className="px-3 py-3 font-mono text-xs text-gray-500">{request.model}</td>
+              <td className="max-w-[300px] px-3 py-3 text-gray-600 dark:text-gray-300">{renderArticleTitle(request)}</td>
               <td className="px-3 py-3 font-mono text-xs font-black text-gray-600 dark:text-gray-300">{request.keySuffixLabel}</td>
               <td className="px-3 py-3">
                 <span className={request.outcome === 'success'
@@ -1027,7 +1072,7 @@ const ApiUsageRequestTable: React.FC<{
               <td className="whitespace-nowrap px-3 py-3 text-gray-500">{formatIstanbulDateTime(request.createdAt, t.locale, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
             </tr>
           )) : (
-            <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
+            <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-500">لا توجد استدعاءات API مسجلة لهذا اليوم.</td></tr>
           )}
         </tbody>
       </table>

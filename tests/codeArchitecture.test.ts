@@ -242,6 +242,12 @@ test('admin reports distinguish failed key pools and automatic external analysis
   assert.match(adminApp, /attemptedKeyCount > 1/);
   assert.match(adminApp, /EXTERNAL_ANALYSIS_API_SOURCES\.has\(request\.source\)/);
   assert.match(adminApp, /النظام التلقائي/);
+  assert.match(adminApp, /articleTitle: string/);
+  assert.match(adminApp, /metadata\.articleTitle \?\? metadata\.article_title/);
+  assert.match(adminApp, />اسم المقالة</);
+  assert.match(adminApp, /articlesById\.get\(request\.articleId\)/);
+  assert.match(adminApp, /غير مرتبط بمقالة/);
+  assert.match(adminApp, /buildAdminArticlePath\(request\.articleId\)/);
   assert.match(externalReports, /getExternalAnalysisActorLabel/);
   assert.match(externalReports, /النظام التلقائي/);
 });
