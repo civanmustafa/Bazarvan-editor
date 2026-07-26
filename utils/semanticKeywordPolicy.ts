@@ -19,6 +19,8 @@ export type SemanticKeywordTerms = {
 
 export type SemanticKeywordConstraints = {
   numbers: string[];
+  locations: string[];
+  nationalities: string[];
   qualifiers: string[];
 };
 
@@ -180,6 +182,14 @@ const canonicalizeArabicNationality = (value: string): string => {
   )) || '';
 };
 
+const isNationalityQualifier = (value: string): boolean => {
+  if (canonicalizeArabicNationality(value)) return true;
+  const normalized = normalizeSemanticKeywordText(value);
+  return KNOWN_NATIONALITY_QUALIFIERS.some(
+    qualifier => normalizeSemanticKeywordText(qualifier) === normalized,
+  );
+};
+
 const detectNationalityQualifiers = (primaryKeyword: string): string[] => (
   normalizeSemanticKeywordText(primaryKeyword)
     .split(' ')
@@ -220,10 +230,9 @@ export const getSemanticKeywordConstraints = (
 ): SemanticKeywordConstraints => {
   const primaryKeyword = input.primaryKeyword.trim();
   const primaryNationalities = detectNationalityQualifiers(primaryKeyword);
-  const dictionaryQualifiers = [
-    ...KNOWN_GEOGRAPHIC_QUALIFIERS,
-    ...KNOWN_NATIONALITY_QUALIFIERS,
-  ]
+  const dictionaryLocations = KNOWN_GEOGRAPHIC_QUALIFIERS
+    .filter(qualifier => containsPhrase(primaryKeyword, qualifier));
+  const dictionaryNationalities = KNOWN_NATIONALITY_QUALIFIERS
     .filter(qualifier => containsPhrase(primaryKeyword, qualifier))
     .map(qualifier => canonicalizeArabicNationality(qualifier) || qualifier);
   const goalQualifier = getGoalContextQualifier(input.goalContext);
@@ -235,26 +244,42 @@ export const getSemanticKeywordConstraints = (
       || primaryNationalities.includes(canonicalizeArabicNationality(value))
     ))
     .map(value => canonicalizeArabicNationality(value) || value);
+  const verifiedModelLocations = verifiedModelQualifiers.filter(
+    qualifier => !isNationalityQualifier(qualifier),
+  );
+  const verifiedModelNationalities = verifiedModelQualifiers.filter(isNationalityQualifier);
+  const locations = uniquePhrases([
+    ...dictionaryLocations,
+    ...detectMarkerQualifiers(primaryKeyword),
+    ...(goalQualifier && containsPhrase(primaryKeyword, goalQualifier) ? [goalQualifier] : []),
+    ...verifiedModelLocations,
+  ]);
+  const nationalities = uniquePhrases([
+    ...dictionaryNationalities,
+    ...primaryNationalities,
+    ...verifiedModelNationalities,
+  ]);
 
   return {
     numbers: extractNumbers(primaryKeyword),
-    qualifiers: uniquePhrases([
-      ...dictionaryQualifiers,
-      ...primaryNationalities,
-      ...detectMarkerQualifiers(primaryKeyword),
-      ...(goalQualifier && containsPhrase(primaryKeyword, goalQualifier) ? [goalQualifier] : []),
-      ...verifiedModelQualifiers,
-    ]),
+    locations,
+    nationalities,
+    qualifiers: uniquePhrases([...locations, ...nationalities]),
   };
 };
 
 const formatProtectedConstraints = (constraints: SemanticKeywordConstraints): string => [
   constraints.numbers.length
-    ? `- الأرقام الإلزامية في كل صيغة: ${constraints.numbers.join('، ')}. يُمنع حذفها أو تغييرها أو إضافة رقم آخر.`
-    : '- لا تحتوي الكلمة الأساسية رقمًا إلزاميًا، ويُمنع اختراع أرقام أو سنوات جديدة.',
-  constraints.qualifiers.length
-    ? `- المواقع أو القوميات الإلزامية في كل صيغة: ${constraints.qualifiers.join('، ')}.`
-    : '- لم يكتشف النظام موقعًا أو قومية مؤكدة برمجيًا؛ استخرج الموجود فعلًا في الكلمة الأساسية وأعده في protectedQualifiers.',
+    ? `- قيد الرقم نشط لأن الكلمة الأساسية تحتوي: ${constraints.numbers.join('، ')}. حافظ عليه في كل صيغة بديلة دون تغيير أو إضافة رقم آخر.`
+    : '- قيد الرقم غير نشط لأن الكلمة الأساسية لا تحتوي رقمًا؛ لا يلزم إدخال رقم في الصيغ، ويُمنع اختراع رقم أو سنة.',
+  constraints.locations.length
+    ? `- قيد الموقع نشط لأن الكلمة الأساسية تحتوي: ${constraints.locations.join('، ')}. حافظ عليه في كل صيغة بديلة.`
+    : '- قيد الموقع غير نشط؛ لا يلزم إدخال دولة أو مدينة أو منطقة في الصيغ.',
+  constraints.nationalities.length
+    ? `- قيد القومية نشط لأن الكلمة الأساسية تحتوي: ${constraints.nationalities.join('، ')}. حافظ عليها في كل صيغة بديلة بصيغتها أو تصريفها الصحيح.`
+    : '- قيد القومية غير نشط؛ لا يلزم إدخال قومية أو نسبة جغرافية في الصيغ.',
+  '- طبّق فقط القيود النشطة أعلاه؛ قد يكون النشط قيدًا واحدًا أو قيدين أو القيود الثلاثة وفق الكلمة الأساسية.',
+  '- هذه القيود تخص الصيغ البديلة فقط، ولا يُشترط تكرار الرقم أو الموقع أو القومية داخل كلمات LSI.',
 ].join('\n');
 
 const truncateText = (value: string, maxLength: number): string => {
@@ -289,8 +314,8 @@ export const buildSemanticKeywordRepairPrompt = (
 ): string => [
   renderSemanticKeywordPrompt(input, template),
   '',
-  'الرد السابق لم يحقق عقد النتيجة أو أسقط رقمًا أو موقعًا أو قومية محمية.',
-  'صححه مرة واحدة، وتأكد برمجيًا من كل صيغة قبل إرجاعها.',
+  'الرد السابق لم يحقق عدد النتائج أو خالف قيدًا نشطًا من القيود المذكورة أعلاه.',
+  'صححه مرة واحدة، وطبّق فقط ما اكتشفه النظام فعلًا من رقم أو موقع أو قومية داخل الكلمة الأساسية.',
   '<previous_response>',
   truncateText(previousResponse, 4_000),
   '</previous_response>',
@@ -454,3 +479,30 @@ export const hasUsableSemanticKeywordTerms = (
   (!needsSecondaries || terms.secondaries.length >= 4)
   && (!needsLsi || terms.lsi.length >= 10)
 );
+
+export const describeSemanticKeywordValidationFailure = (
+  terms: Pick<SemanticKeywordTerms, 'secondaries' | 'lsi'>,
+  input: SemanticKeywordInput,
+  needsSecondaries = true,
+  needsLsi = true,
+): string => {
+  const constraints = getSemanticKeywordConstraints(input);
+  const shortages = [
+    needsSecondaries && terms.secondaries.length < 4
+      ? `الصيغ البديلة الصالحة ${terms.secondaries.length}/4`
+      : '',
+    needsLsi && terms.lsi.length < 10
+      ? `كلمات LSI الصالحة ${terms.lsi.length}/10`
+      : '',
+  ].filter(Boolean);
+  const activeConstraints = [
+    constraints.numbers.length ? `الرقم (${constraints.numbers.join('، ')})` : '',
+    constraints.locations.length ? `الموقع (${constraints.locations.join('، ')})` : '',
+    constraints.nationalities.length ? `القومية (${constraints.nationalities.join('، ')})` : '',
+  ].filter(Boolean);
+  const constraintSummary = activeConstraints.length
+    ? `القيود النشطة المستخرجة من الكلمة الأساسية فقط: ${activeConstraints.join('، ')}.`
+    : 'لم يُكتشف في الكلمة الأساسية رقم أو موقع أو قومية إلزامية.';
+
+  return `لم تُعتمد نتيجة التوليد: ${shortages.join('، ') || 'النتيجة غير مكتملة'}. ${constraintSummary} لا تُفرض هذه القيود على كلمات LSI. حاول مرة أخرى.`;
+};

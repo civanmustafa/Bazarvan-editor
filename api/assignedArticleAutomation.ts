@@ -13,6 +13,7 @@ import { aiExecutionEngine, type AiExecutionTelemetryContext } from '../server/a
 import { readPromptRegistrySettings } from '../server/promptRegistrySettings';
 import {
   buildSemanticKeywordRepairPrompt,
+  describeSemanticKeywordValidationFailure,
   hasUsableSemanticKeywordTerms,
   parseSemanticKeywordTerms,
   renderSemanticKeywordPrompt,
@@ -452,7 +453,10 @@ const runSemanticGeneration = async (
     }
 
     if (!hasMergedTerms) {
-      throw new AssignedAutomationError('Gemini did not return usable alternative forms and LSI terms.', 502);
+      throw new AssignedAutomationError(
+        describeSemanticKeywordValidationFailure(semanticTerms, semanticInput),
+        502,
+      );
     }
 
     const nextKeywords: KeywordsPayload = {

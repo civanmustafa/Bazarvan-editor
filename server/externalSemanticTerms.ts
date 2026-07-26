@@ -1,5 +1,6 @@
 import {
   buildSemanticKeywordRepairPrompt,
+  describeSemanticKeywordValidationFailure,
   hasUsableSemanticKeywordTerms,
   parseSemanticKeywordTerms,
   renderSemanticKeywordPrompt,
@@ -56,6 +57,18 @@ export const hasUsableExternalSemanticTerms = (
   needsSecondaries: boolean,
   needsLsi: boolean,
 ): boolean => hasUsableSemanticKeywordTerms(terms, needsSecondaries, needsLsi);
+
+export const describeExternalSemanticValidationFailure = (
+  terms: ExternalSemanticTerms,
+  article: ExternalSemanticArticleInput,
+  needsSecondaries: boolean,
+  needsLsi: boolean,
+): string => describeSemanticKeywordValidationFailure(
+  terms,
+  toSemanticInput(article),
+  needsSecondaries,
+  needsLsi,
+);
 
 export const buildExternalSemanticPrompt = (
   article: ExternalSemanticArticleInput,

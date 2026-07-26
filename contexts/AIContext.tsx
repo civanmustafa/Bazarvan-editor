@@ -49,6 +49,7 @@ import {
 } from '../utils/aiExecutionActivity';
 import {
     buildSemanticKeywordRepairPrompt,
+    describeSemanticKeywordValidationFailure,
     hasUsableSemanticKeywordTerms,
     parseSemanticKeywordTerms,
     renderSemanticKeywordPrompt,
@@ -5528,7 +5529,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return {
                 secondaries: terms.secondaries,
                 lsi: terms.lsi,
-                error: 'لم يُرجع الذكاء الاصطناعي 4 صيغ بديلة و10 كلمات LSI صالحة بعد التحقق من الأرقام والمواقع والقوميات. حاول مرة أخرى.',
+                error: describeSemanticKeywordValidationFailure(terms, semanticInput),
             };
         }
 

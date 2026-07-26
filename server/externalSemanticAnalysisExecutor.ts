@@ -21,6 +21,7 @@ import { readPromptRegistrySettings } from './promptRegistrySettings';
 import {
   buildExternalSemanticPrompt,
   buildExternalSemanticRepairPrompt,
+  describeExternalSemanticValidationFailure,
   hasUsableExternalSemanticTerms,
   parseExternalSemanticTerms,
   type ExternalSemanticArticleInput,
@@ -335,7 +336,12 @@ const executeExternalSemanticAnalysis = async (
   )) {
     throw createRetryError({
       code: 'semantic_response_invalid',
-      message: 'Gemini returned no usable alternative forms or LSI terms after one repair request.',
+      message: describeExternalSemanticValidationFailure(
+        terms,
+        articleInput,
+        initialTargets.needsSecondaries,
+        initialTargets.needsLsi,
+      ),
       progress: {
         stage: 'retry_scheduled',
         reason: 'semantic_response_invalid',

@@ -323,8 +323,10 @@ test('semantic keyword policy preserves numbers, places, and nationalities deter
     input,
     registry.DEFAULT_PROMPT_TEMPLATES[registry.PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration],
   );
-  assert.match(prompt, /الأرقام الإلزامية في كل صيغة: 10/);
-  assert.match(prompt, /المواقع أو القوميات الإلزامية في كل صيغة: دبي/);
+  assert.match(prompt, /قيد الرقم نشط لأن الكلمة الأساسية تحتوي: 10/);
+  assert.match(prompt, /قيد الموقع نشط لأن الكلمة الأساسية تحتوي: دبي/);
+  assert.match(prompt, /قيد القومية غير نشط/);
+  assert.match(prompt, /لا يُشترط تكرار الرقم أو الموقع أو القومية داخل كلمات LSI/);
 
   const nationalityInput = {
     ...input,
@@ -348,13 +350,107 @@ test('semantic keyword policy preserves numbers, places, and nationalities deter
   ));
 });
 
+test('semantic keyword constraints activate independently from the primary keyword only', async () => {
+  const policy = await importSemanticKeywordPolicy();
+  const baseInput = {
+    title: '',
+    plainText: '',
+    articleLanguage: 'ar',
+    companyName: 'بازارفان',
+    existingSecondaries: [] as string[],
+    existingLsi: [] as string[],
+    goalContext: {},
+  };
+
+  const noConstraintInput = {
+    ...baseInput,
+    primaryKeyword: 'أفضل أدوات التسويق الرقمي',
+  };
+  assert.deepEqual(policy.getSemanticKeywordConstraints(noConstraintInput), {
+    numbers: [],
+    locations: [],
+    nationalities: [],
+    qualifiers: [],
+  });
+  const unconstrainedTerms = policy.parseSemanticKeywordTerms(JSON.stringify({
+    secondaries: [
+      'أحسن أدوات التسويق الإلكتروني',
+      'أدوات فعالة للتسويق الرقمي',
+      'ما أفضل أدوات التسويق عبر الإنترنت',
+      'حلول تسويق رقمي احترافية',
+    ],
+    lsi: [
+      'تحليل الجمهور',
+      'رحلة العميل',
+      'قياس التحويل',
+      'إدارة الحملات',
+      'تحسين الإعلانات',
+      'استراتيجية المحتوى',
+      'تقسيم السوق',
+      'مؤشرات الأداء',
+      'أتمتة العمليات',
+      'اتجاهات 2026',
+    ],
+  }), noConstraintInput);
+  assert.equal(policy.hasUsableSemanticKeywordTerms(unconstrainedTerms, true, true), true);
+
+  const numberOnly = policy.getSemanticKeywordConstraints({
+    ...baseInput,
+    primaryKeyword: 'أفضل 7 أدوات إدارة مشاريع',
+  });
+  assert.deepEqual(numberOnly.numbers, ['7']);
+  assert.deepEqual(numberOnly.locations, []);
+  assert.deepEqual(numberOnly.nationalities, []);
+
+  const locationOnly = policy.getSemanticKeywordConstraints({
+    ...baseInput,
+    primaryKeyword: 'خدمات المحاسبة في دبي',
+  });
+  assert.deepEqual(locationOnly.numbers, []);
+  assert.deepEqual(locationOnly.locations, ['دبي']);
+  assert.deepEqual(locationOnly.nationalities, []);
+
+  const nationalityOnly = policy.getSemanticKeywordConstraints({
+    ...baseInput,
+    primaryKeyword: 'أكلات مناسبة للعراقيين',
+  });
+  assert.deepEqual(nationalityOnly.numbers, []);
+  assert.deepEqual(nationalityOnly.locations, []);
+  assert.deepEqual(nationalityOnly.nationalities, ['عراقي']);
+
+  const allConstraints = policy.getSemanticKeywordConstraints({
+    ...baseInput,
+    primaryKeyword: 'أفضل 5 مطاعم عراقية في دبي',
+  });
+  assert.deepEqual(allConstraints.numbers, ['5']);
+  assert.deepEqual(allConstraints.locations, ['دبي']);
+  assert.deepEqual(allConstraints.nationalities, ['عراقي']);
+
+  const failureMessage = policy.describeSemanticKeywordValidationFailure(
+    { secondaries: [], lsi: [] },
+    { ...baseInput, primaryKeyword: 'أفضل 7 أدوات إدارة مشاريع' },
+  );
+  assert.match(failureMessage, /الصيغ البديلة الصالحة 0\/4/);
+  assert.match(failureMessage, /كلمات LSI الصالحة 0\/10/);
+  assert.match(failureMessage, /الرقم \(7\)/);
+  assert.doesNotMatch(failureMessage, /الموقع \(/);
+  assert.doesNotMatch(failureMessage, /القومية \(/);
+});
+
 test('administrator prompt registry migration preserves saved templates when repeated', async () => {
-  const migration = await readWorkspaceFile('supabase/migrations/20260724000000_admin_prompt_registry.sql');
+  const [migration, conditionalConstraintsMigration] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260724000000_admin_prompt_registry.sql'),
+    readWorkspaceFile('supabase/migrations/20260726050000_conditional_semantic_keyword_constraints.sql'),
+  ]);
   assert.match(migration, /insert into public\.app_settings/);
   assert.match(migration, /'prompts'/);
   assert.match(migration, /on conflict \(key\) do update/);
   assert.match(migration, /public\.app_settings\.value -> 'templates'/);
   assertBalancedSqlParentheses(migration);
+  assert.match(conditionalConstraintsMigration, /semanticKeywords\.generation/);
+  assert.match(conditionalConstraintsMigration, /replace\(/);
+  assert.match(conditionalConstraintsMigration, /'10'::jsonb/);
+  assertBalancedSqlParentheses(conditionalConstraintsMigration);
 });
 
 test('ArticleStatusRegistry owns workflow states, dashboard priority, and analysis eligibility', () => {
