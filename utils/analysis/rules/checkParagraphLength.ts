@@ -1,6 +1,7 @@
 import type { CheckResult, AnalysisStatus } from '../../../types';
 import { createCheckResult, getWordCount, getSentenceCount, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
+import { getTolerantViolationStatus } from '../criteriaEvaluation';
 
 export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
     const { nodes, nonEmptyParagraphs, conclusionSection, isPosInFaqSection, t, uiLanguage } = context;
@@ -73,7 +74,7 @@ export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
     
     let worstStatus: AnalysisStatus = 'pass';
     if (violations.length > 0) {
-        worstStatus = 'fail';
+        worstStatus = getTolerantViolationStatus(violations.length);
     } else if (warnings.length > 0) {
         worstStatus = 'warn';
     }

@@ -1,6 +1,7 @@
 import type { CheckResult } from '../../../types';
 import { createCheckResult, getAnalysisNodeContentText, normalizeArabicText, DUPLICATE_WORDS_EXCLUSION_LIST } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
+import { getTolerantViolationStatus } from '../criteriaEvaluation';
 
 const findDuplicateWords = (
     context: AnalysisContext,
@@ -77,7 +78,7 @@ const findDuplicateWords = (
     }
 
     const currentText = `${violations.length} ${t.common.repetitions}`;
-    const result = createCheckResult(title, 'fail', currentText, tRule.required, progress, description, details);
+    const result = createCheckResult(title, getTolerantViolationStatus(violations.length), currentText, tRule.required, progress, description, details);
     result.violatingItems = violations;
     return result;
 };

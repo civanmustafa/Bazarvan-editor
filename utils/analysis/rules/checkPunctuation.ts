@@ -1,6 +1,7 @@
 import type { CheckResult } from '../../../types';
 import { createCheckResult, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
+import { hasValidParagraphEndPunctuation } from '../criteriaEvaluation';
 
 export const checkPunctuation = (context: AnalysisContext): CheckResult => {
     const { nonEmptyParagraphs, t, uiLanguage } = context;
@@ -15,7 +16,7 @@ export const checkPunctuation = (context: AnalysisContext): CheckResult => {
     }
 
     const missingEndPunctuationViolations = nonEmptyParagraphs
-        .filter(p => !/[.!?؟:]\s*$/.test(p.text.trim()))
+        .filter(p => !hasValidParagraphEndPunctuation(p.text))
         .map(v => ({
             from: v.pos,
             to: v.pos + getAnalysisNodeSize(v),

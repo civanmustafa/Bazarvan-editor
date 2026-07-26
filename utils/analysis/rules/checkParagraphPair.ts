@@ -6,6 +6,7 @@ import {
     normalizeArabicText,
 } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
+import { getTolerantViolationStatus } from '../criteriaEvaluation';
 
 type ParagraphEntry = AnalysisContext['nonEmptyParagraphs'][number];
 
@@ -216,7 +217,7 @@ export const checkParagraphPair = (context: AnalysisContext): CheckResult => {
         ? `${violatingPairs.length} أزواج أعلى من 30% (الأعلى ${strongestPercentage}%)`
         : `${violatingPairs.length} pairs above 30% (highest ${strongestPercentage}%)`;
 
-    const result = createCheckResult(title, 'fail', currentText, requiredText, 0, description, details);
+    const result = createCheckResult(title, getTolerantViolationStatus(violatingPairs.length), currentText, requiredText, 0, description, details);
     result.violationCount = violatingPairs.length;
     result.violatingItems = violatingPairs.flatMap((pair) => {
         const sharedCount = pair.sharedWords.length;

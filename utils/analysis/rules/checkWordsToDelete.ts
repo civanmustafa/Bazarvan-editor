@@ -1,6 +1,7 @@
 import type { CheckResult } from '../../../types';
 import { createCheckResult, isProtectedKeywordTerm } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
+import { getTolerantViolationStatus } from '../criteriaEvaluation';
 import { WORDS_TO_DELETE } from '../../../constants';
 
 export const checkWordsToDelete = (context: AnalysisContext): CheckResult => {
@@ -37,7 +38,7 @@ export const checkWordsToDelete = (context: AnalysisContext): CheckResult => {
     if (violations.length === 0) {
         return createCheckResult(title, 'pass', t.common.good, requiredText, 1, description, details);
     }
-    const result = createCheckResult(title, 'fail', `${violations.length} ${t.common.violations}`, requiredText, 0, description, details);
+    const result = createCheckResult(title, getTolerantViolationStatus(violations.length), `${violations.length} ${t.common.violations}`, requiredText, 0, description, details);
     result.violatingItems = violations;
     return result;
 };

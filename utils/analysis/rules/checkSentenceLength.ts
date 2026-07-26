@@ -1,6 +1,7 @@
 import type { CheckResult, AnalysisStatus } from '../../../types';
 import { createCheckResult, getWordCount, getAnalysisNodeContentText } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
+import { getTolerantViolationStatus } from '../criteriaEvaluation';
 
 export const checkSentenceLength = (context: AnalysisContext): CheckResult => {
     const { nonEmptyParagraphs, t, uiLanguage } = context;
@@ -55,12 +56,8 @@ export const checkSentenceLength = (context: AnalysisContext): CheckResult => {
         ? `${(invalidSentencesPercentage * 100).toFixed(0)}% من الجمل خارج النطاق`
         : `${(invalidSentencesPercentage * 100).toFixed(0)}% of sentences are outside range`;
     
-    let status: AnalysisStatus;
     const progress = (totalSentences - invalidSentencesCount) / totalSentences;
-
-    if (invalidSentencesPercentage > 0.19) status = 'fail';
-    else if (invalidSentencesPercentage > 0) status = 'warn';
-    else status = 'pass';
+    const status: AnalysisStatus = getTolerantViolationStatus(invalidSentencesCount);
     
     const result = createCheckResult(title, status, currentText, requiredText, progress, description, details);
     if (violations.length > 0) result.violatingItems = violations;
