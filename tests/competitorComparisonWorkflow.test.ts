@@ -262,6 +262,12 @@ test('server workflow persists per-competitor maps without modifying content-wri
   assert.match(aiContext, /runCompetitorComparisonReadyCommand/);
   assert.match(aiContext, /provider === 'chatgpt'/);
   assert.match(aiContext, /competitor_comparison_synthesis/);
+  assert.match(aiContext, /aiCompetitorComparisonResults/);
+  assert.match(aiContext, /publishCompetitorComparisonResult\(provider, combined\)/);
+  assert.match(aiContext, /isStructuredSmartAnalysisEnvelope/);
+  assert.doesNotMatch(aiContext, /stripOrphanPatchMarkers\(displayText \|\| rawResponse/);
   assert.match(sidebar, /isRetiredEngineeringCommandId/);
   assert.match(sidebar, /handleCompetitorComparisonAnalyze/);
+  assert.match(sidebar, /independent-competitor-results-/);
+  assert.match(sidebar, /aiResults\.gemini \|\| aiInsertionPatches\.gemini\.length > 0/);
 });

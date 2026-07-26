@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2, Code2, X } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2, Code2, X, ExternalLink } from 'lucide-react';
 import StructureTab from './StructureTab';
 import { useUser } from '../contexts/UserContext';
 import { useAISelector } from '../contexts/AIContext';
@@ -31,6 +31,7 @@ import {
 } from '../utils/competitorDiscovery';
 import {
     COMPETITOR_COMPARISON_COMMAND_ID,
+    type CompetitorComparisonMapResult,
     type CompetitorComparisonSource,
 } from '../utils/competitorComparisonWorkflow';
 
@@ -77,6 +78,35 @@ type CompetitorExtractionState = {
     content: CompetitorExtractedContent | null;
     error: string;
     notice?: string;
+};
+
+const COMPETITOR_COMPARISON_CATEGORY_LABELS: Record<string, { ar: string; en: string }> = {
+    missing_idea: { ar: 'فكرة ناقصة', en: 'Missing idea' },
+    partial_idea: { ar: 'تغطية جزئية', en: 'Partial coverage' },
+    conflicting_claim: { ar: 'ادعاء متعارض', en: 'Conflicting claim' },
+    article_advantage: { ar: 'تفوق المقالة', en: 'Article advantage' },
+    structure_opportunity: { ar: 'فرصة بنيوية', en: 'Structure opportunity' },
+    trust_gap: { ar: 'فجوة ثقة', en: 'Trust gap' },
+    conversion_opportunity: { ar: 'فرصة تحويل', en: 'Conversion opportunity' },
+    duplicate: { ar: 'مكرر', en: 'Duplicate' },
+    irrelevant: { ar: 'غير ملائم', en: 'Irrelevant' },
+};
+
+const COMPETITOR_COMPARISON_IMPORTANCE_LABELS: Record<string, { ar: string; en: string }> = {
+    high: { ar: 'مرتفعة', en: 'High' },
+    medium: { ar: 'متوسطة', en: 'Medium' },
+    low: { ar: 'منخفضة', en: 'Low' },
+};
+
+const toSafeCompetitorSourceUrl = (value?: string): string => {
+    const trimmed = value?.trim() || '';
+    if (!trimmed) return '';
+    try {
+        const url = new URL(trimmed);
+        return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+    } catch {
+        return '';
+    }
 };
 
 type CompetitorRepeatedPhrase = {
@@ -790,6 +820,7 @@ const RightSidebar: React.FC = () => {
     const importManualAiResponse = useAISelector(context => context.importManualAiResponse);
     const aiResults = useAISelector(context => context.aiResults);
     const aiInsertionPatches = useAISelector(context => context.aiInsertionPatches);
+    const aiCompetitorComparisonResults = useAISelector(context => context.aiCompetitorComparisonResults);
     const isAiLoading = useAISelector(context => context.isAiLoading);
     const applyAiInsertionPatch = useAISelector(context => context.applyAiInsertionPatch);
     const selectAiInsertionPatchTarget = useAISelector(context => context.selectAiInsertionPatchTarget);
@@ -1792,6 +1823,98 @@ ${readyCommandCompetitorBlocks}`;
         return <>{parts}</>;
     };
 
+    const renderIndependentCompetitorResults = (
+        provider: AiPatchProvider,
+        results: CompetitorComparisonMapResult[] = aiCompetitorComparisonResults[provider],
+    ) => {
+        if (results.length === 0) return null;
+        const locale = t.locale === 'en' ? 'en' : 'ar';
+
+        return (
+            <div className="mb-3 space-y-2" data-testid={`independent-competitor-results-${provider}`}>
+                <div className="flex items-center justify-between gap-2 text-[11px] font-black text-gray-700 dark:text-gray-200">
+                    <span>{locale === 'ar' ? 'نتيجة كل منافس بصورة مستقلة' : 'Each competitor result independently'}</span>
+                    <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                        {results.length}
+                    </span>
+                </div>
+                {results.map(result => {
+                    const sourceUrl = toSafeCompetitorSourceUrl(result.sourceUrl);
+                    return (
+                        <section
+                            key={`${provider}-competitor-result-${result.competitorNumber}`}
+                            className="rounded-md border border-blue-200 bg-blue-50/40 p-2 dark:border-blue-500/20 dark:bg-blue-500/5"
+                        >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="text-[11px] font-black text-blue-800 dark:text-blue-200">
+                                    {locale === 'ar' ? `المنافس ${result.competitorNumber}` : `Competitor ${result.competitorNumber}`}
+                                    {result.sourceTitle ? ` — ${result.sourceTitle}` : ''}
+                                </div>
+                                {sourceUrl && (
+                                    <a
+                                        href={sourceUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1 text-[9px] font-bold text-blue-700 hover:underline dark:text-blue-300"
+                                    >
+                                        <ExternalLink size={11} />
+                                        {locale === 'ar' ? 'فتح المصدر' : 'Open source'}
+                                    </a>
+                                )}
+                            </div>
+                            {result.items.length > 0 ? (
+                                <div className="mt-2 space-y-1.5">
+                                    {result.items.map((item, index) => (
+                                        <article
+                                            key={`${provider}-${result.competitorNumber}-${item.id}-${index}`}
+                                            className="rounded border border-gray-200 bg-white p-2 dark:border-[#3C3C3C] dark:bg-[#242424]"
+                                        >
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                <span className="text-[10px] font-black text-gray-800 dark:text-gray-100">{item.topic}</span>
+                                                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[8px] font-black text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">
+                                                    {(COMPETITOR_COMPARISON_CATEGORY_LABELS[item.category] || { ar: item.category, en: item.category })[locale]}
+                                                </span>
+                                                <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[8px] font-bold text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                                                    {locale === 'ar' ? 'الأهمية' : 'Importance'}:{' '}
+                                                    {(COMPETITOR_COMPARISON_IMPORTANCE_LABELS[item.importance] || { ar: item.importance, en: item.importance })[locale]}
+                                                </span>
+                                            </div>
+                                            <div className="mt-1 text-[10px] leading-5 text-gray-700 dark:text-gray-200">{item.summary}</div>
+                                            {item.articleEvidence && (
+                                                <div className="mt-1 border-s-2 border-emerald-400 ps-2 text-[9px] leading-5 text-gray-500 dark:text-gray-400">
+                                                    <span className="font-black">{locale === 'ar' ? 'الموجود في المقالة' : 'In the article'}: </span>
+                                                    {item.articleEvidence}
+                                                </div>
+                                            )}
+                                            {item.competitorEvidence.map((evidence, evidenceIndex) => (
+                                                <div
+                                                    key={`${item.id}-evidence-${evidenceIndex}`}
+                                                    className="mt-1 border-s-2 border-blue-300 ps-2 text-[9px] leading-5 text-gray-500 dark:text-gray-400"
+                                                >
+                                                    <span className="font-black">
+                                                        {locale === 'ar' ? 'دليل المنافس' : 'Competitor evidence'}
+                                                        {evidence.chunkId ? ` (${evidence.chunkId})` : ''}:{' '}
+                                                    </span>
+                                                    {evidence.excerpt}
+                                                </div>
+                                            ))}
+                                        </article>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="mt-2 text-[9px] text-gray-500 dark:text-gray-400">
+                                    {locale === 'ar'
+                                        ? 'اكتملت مقارنة هذا المنافس ولم تظهر نقطة مستقلة تستحق المعالجة.'
+                                        : 'This competitor comparison completed with no independent item requiring action.'}
+                                </div>
+                            )}
+                        </section>
+                    );
+                })}
+            </div>
+        );
+    };
+
     const renderAiTab = () => (
         <div ref={smartAnalysisTabRef} className="flex flex-col h-full">
             <div className="flex p-2 mx-2 mt-2 mb-1 bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
@@ -1951,9 +2074,27 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                                 {isGeminiExpanded && (
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {aiResults.gemini
+                                        {renderIndependentCompetitorResults('gemini')}
+                                        {aiCompetitorComparisonResults.gemini.length > 0
+                                            && !isAiLoading.gemini
+                                            && (aiResults.gemini || aiInsertionPatches.gemini.length > 0) && (
+                                                <div className="mb-2 text-[11px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                                                    نتيجة الدمج النهائي لجميع المنافسين
+                                                </div>
+                                            )}
+                                        {aiResults.gemini || aiInsertionPatches.gemini.length > 0
                                             ? renderAnalysisResult('gemini', aiResults.gemini)
-                                            : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
+                                            : aiCompetitorComparisonResults.gemini.length === 0
+                                                ? <span className="text-gray-400 italic">لا توجد نتائج.</span>
+                                                : null}
+                                        {aiCompetitorComparisonResults.gemini.length > 0
+                                            && !isAiLoading.gemini
+                                            && !aiResults.gemini
+                                            && aiInsertionPatches.gemini.length === 0 && (
+                                                <div className="rounded border border-gray-200 bg-white/60 p-2 text-[10px] text-gray-500 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-400">
+                                                    اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.
+                                                </div>
+                                            )}
                                     </div>
                                 )}
                             </div>}
@@ -1965,9 +2106,27 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                                 {isGeminiPaidExpanded && (
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {aiResults.geminiPaid
+                                        {renderIndependentCompetitorResults('geminiPaid')}
+                                        {aiCompetitorComparisonResults.geminiPaid.length > 0
+                                            && !isAiLoading.geminiPaid
+                                            && (aiResults.geminiPaid || aiInsertionPatches.geminiPaid.length > 0) && (
+                                                <div className="mb-2 text-[11px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                                                    نتيجة الدمج النهائي لجميع المنافسين
+                                                </div>
+                                            )}
+                                        {aiResults.geminiPaid || aiInsertionPatches.geminiPaid.length > 0
                                             ? renderAnalysisResult('geminiPaid', aiResults.geminiPaid)
-                                            : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
+                                            : aiCompetitorComparisonResults.geminiPaid.length === 0
+                                                ? <span className="text-gray-400 italic">لا توجد نتائج.</span>
+                                                : null}
+                                        {aiCompetitorComparisonResults.geminiPaid.length > 0
+                                            && !isAiLoading.geminiPaid
+                                            && !aiResults.geminiPaid
+                                            && aiInsertionPatches.geminiPaid.length === 0 && (
+                                                <div className="rounded border border-gray-200 bg-white/60 p-2 text-[10px] text-gray-500 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-400">
+                                                    اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.
+                                                </div>
+                                            )}
                                     </div>
                                 )}
                             </div>}
@@ -1979,9 +2138,27 @@ ${readyCommandCompetitorBlocks}`;
                                 </div>
                                 {isChatGptExpanded && (
                                     <div className="p-2 text-sm text-gray-700 dark:text-gray-300 ai-output min-h-[50px]">
-                                        {aiResults.chatgpt
+                                        {renderIndependentCompetitorResults('chatgpt')}
+                                        {aiCompetitorComparisonResults.chatgpt.length > 0
+                                            && !isAiLoading.chatgpt
+                                            && (aiResults.chatgpt || aiInsertionPatches.chatgpt.length > 0) && (
+                                                <div className="mb-2 text-[11px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                                                    نتيجة الدمج النهائي لجميع المنافسين
+                                                </div>
+                                            )}
+                                        {aiResults.chatgpt || aiInsertionPatches.chatgpt.length > 0
                                             ? renderAnalysisResult('chatgpt', aiResults.chatgpt)
-                                            : <span className="text-gray-400 italic">لا توجد نتائج.</span>}
+                                            : aiCompetitorComparisonResults.chatgpt.length === 0
+                                                ? <span className="text-gray-400 italic">لا توجد نتائج.</span>
+                                                : null}
+                                        {aiCompetitorComparisonResults.chatgpt.length > 0
+                                            && !isAiLoading.chatgpt
+                                            && !aiResults.chatgpt
+                                            && aiInsertionPatches.chatgpt.length === 0 && (
+                                                <div className="rounded border border-gray-200 bg-white/60 p-2 text-[10px] text-gray-500 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-400">
+                                                    اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.
+                                                </div>
+                                            )}
                                     </div>
                                 )}
                             </div>}

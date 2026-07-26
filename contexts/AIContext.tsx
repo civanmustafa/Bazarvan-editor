@@ -2324,10 +2324,16 @@ type StoredArticleAiRuntime = {
     aiHistory: AIHistoryItem[];
     bulkFixReviewItems: BulkFixReviewItem[];
     aiInsertionPatches: Record<AiPatchProvider, AiContentPatch[]>;
+    aiCompetitorComparisonResults: Record<AiPatchProvider, CompetitorComparisonMapResult[]>;
 };
 
 const EMPTY_AI_RESULTS: Record<AiPatchProvider, string> = { gemini: '', geminiPaid: '', chatgpt: '' };
 const EMPTY_AI_INSERTION_PATCHES: Record<AiPatchProvider, AiContentPatch[]> = { gemini: [], geminiPaid: [], chatgpt: [] };
+const EMPTY_AI_COMPETITOR_COMPARISON_RESULTS: Record<AiPatchProvider, CompetitorComparisonMapResult[]> = {
+    gemini: [],
+    geminiPaid: [],
+    chatgpt: [],
+};
 
 const getArticleAiRuntimeStorageKey = (currentUser: string | null, articleScope: string): string => {
     const userPart = currentUser?.trim() || 'anonymous';
@@ -2352,6 +2358,11 @@ const readStoredArticleAiRuntime = (currentUser: string | null, articleScope: st
                 gemini: Array.isArray(parsed.aiInsertionPatches?.gemini) ? parsed.aiInsertionPatches.gemini : [],
                 geminiPaid: Array.isArray(parsed.aiInsertionPatches?.geminiPaid) ? parsed.aiInsertionPatches.geminiPaid : [],
                 chatgpt: Array.isArray(parsed.aiInsertionPatches?.chatgpt) ? parsed.aiInsertionPatches.chatgpt : [],
+            },
+            aiCompetitorComparisonResults: {
+                gemini: Array.isArray(parsed.aiCompetitorComparisonResults?.gemini) ? parsed.aiCompetitorComparisonResults.gemini : [],
+                geminiPaid: Array.isArray(parsed.aiCompetitorComparisonResults?.geminiPaid) ? parsed.aiCompetitorComparisonResults.geminiPaid : [],
+                chatgpt: Array.isArray(parsed.aiCompetitorComparisonResults?.chatgpt) ? parsed.aiCompetitorComparisonResults.chatgpt : [],
             },
         };
     } catch (error) {
@@ -3492,6 +3503,17 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
     }
 
     const record = parsed as Record<string, unknown>;
+    const isStructuredSmartAnalysisEnvelope = [
+        'analysisMarkdown',
+        'analysis',
+        'reportMarkdown',
+        'report',
+        'markdown',
+        'patches',
+        'insertions',
+        'contentPatches',
+        'itemDispositions',
+    ].some(key => Object.prototype.hasOwnProperty.call(record, key));
     const displayText = asTrimmedString(
         record.analysisMarkdown ||
         record.analysis ||
@@ -3503,10 +3525,20 @@ const parseSmartAnalysisResponse = (rawResponse: string, provider: AiPatchProvid
     const patches = normalizeAiPatches(record.patches || record.insertions || record.contentPatches, provider);
     const resolvedPatches = patches.length ? patches : extractLooseAiPatchesFromText(rawResponse, provider);
     if (!displayText && patches.length === 0) {
-        if (resolvedPatches.length === 0) return { displayText: rawResponse, patches: [] };
+        if (resolvedPatches.length === 0) {
+            return {
+                displayText: isStructuredSmartAnalysisEnvelope ? '' : rawResponse.trim(),
+                patches: [],
+            };
+        }
     }
 
-    const cleanDisplayText = removeMarkdownBold(stripOrphanPatchMarkers(displayText || rawResponse, resolvedPatches));
+    // A valid structured response may intentionally leave analysisMarkdown empty and return only
+    // actionable cards. Never expose its JSON transport envelope in the editor results panel.
+    const cleanDisplayText = removeMarkdownBold(stripOrphanPatchMarkers(
+        displayText || (isStructuredSmartAnalysisEnvelope ? '' : rawResponse),
+        resolvedPatches,
+    ));
 
     return {
         displayText: resolvedPatches.length ? stripDuplicatePatchTextFromAnalysis(cleanDisplayText, resolvedPatches) : cleanDisplayText,
@@ -4900,6 +4932,7 @@ type FixAllProgress = {
 interface AIContextType {
     aiResults: Record<AiPatchProvider, string>;
     aiInsertionPatches: Record<AiPatchProvider, AiContentPatch[]>;
+    aiCompetitorComparisonResults: Record<AiPatchProvider, CompetitorComparisonMapResult[]>;
     isAiLoading: Record<AiPatchProvider, boolean>;
     quickAiProvider: AiPatchProvider;
     setQuickAiProvider: React.Dispatch<React.SetStateAction<AiPatchProvider>>;
@@ -5000,6 +5033,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     
     const [aiResults, setAiResults] = useState<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
     const [aiInsertionPatches, setAiInsertionPatches] = useState<Record<AiPatchProvider, AiContentPatch[]>>(EMPTY_AI_INSERTION_PATCHES);
+    const [aiCompetitorComparisonResults, setAiCompetitorComparisonResults] = useState<Record<AiPatchProvider, CompetitorComparisonMapResult[]>>(EMPTY_AI_COMPETITOR_COMPARISON_RESULTS);
     const [isAiLoading, setIsAiLoading] = useState<Record<AiPatchProvider, boolean>>({ gemini: false, geminiPaid: false, chatgpt: false });
     const [quickAiProvider, setQuickAiProvider] = useState<AiPatchProvider>(() => (
         getDefaultAiPatchProvider(aiProviderCapabilities)
@@ -5014,6 +5048,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [aiRequestProgress, setAiRequestProgress] = useState<AiRequestProgress | null>(null);
     const aiResultsRef = useRef<Record<AiPatchProvider, string>>(EMPTY_AI_RESULTS);
     const aiInsertionPatchesRef = useRef<Record<AiPatchProvider, AiContentPatch[]>>(EMPTY_AI_INSERTION_PATCHES);
+    const aiCompetitorComparisonResultsRef = useRef<Record<AiPatchProvider, CompetitorComparisonMapResult[]>>(EMPTY_AI_COMPETITOR_COMPARISON_RESULTS);
     const aiHistoryRef = useRef<AIHistoryItem[]>([]);
     const competitorComparisonMapCacheRef = useRef<Map<string, CompetitorComparisonMapResult>>(new Map());
     const [bulkFixReviewItems, setBulkFixReviewItems] = useState<BulkFixReviewItem[]>([]);
@@ -5142,6 +5177,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, [aiInsertionPatches]);
 
     useEffect(() => {
+        aiCompetitorComparisonResultsRef.current = aiCompetitorComparisonResults;
+    }, [aiCompetitorComparisonResults]);
+
+    useEffect(() => {
         aiHistoryRef.current = aiHistory;
     }, [aiHistory]);
 
@@ -5150,6 +5189,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setAiHistory([]);
         replaceBulkFixReviewItems([]);
         setAiInsertionPatches({ ...EMPTY_AI_INSERTION_PATCHES });
+        setAiCompetitorComparisonResults({ ...EMPTY_AI_COMPETITOR_COMPARISON_RESULTS });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
         setSuggestion(null);
         setHeadingsAnalysis(null);
@@ -5161,6 +5201,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setAiHistory(runtime?.aiHistory || []);
         replaceBulkFixReviewItems(runtime?.bulkFixReviewItems || []);
         setAiInsertionPatches(runtime?.aiInsertionPatches || { ...EMPTY_AI_INSERTION_PATCHES });
+        setAiCompetitorComparisonResults(runtime?.aiCompetitorComparisonResults || { ...EMPTY_AI_COMPETITOR_COMPARISON_RESULTS });
         setFixAllProgress({ current: 0, total: 0, running: false, failed: 0, errors: [] });
         setSuggestion(null);
         setHeadingsAnalysis(null);
@@ -5182,6 +5223,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 aiHistory: aiHistoryRef.current,
                 bulkFixReviewItems: bulkFixReviewItemsRef.current,
                 aiInsertionPatches: aiInsertionPatchesRef.current,
+                aiCompetitorComparisonResults: aiCompetitorComparisonResultsRef.current,
             });
         }
 
@@ -5208,11 +5250,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 aiHistory: aiHistoryRef.current,
                 bulkFixReviewItems: bulkFixReviewItemsRef.current,
                 aiInsertionPatches: aiInsertionPatchesRef.current,
+                aiCompetitorComparisonResults: aiCompetitorComparisonResultsRef.current,
             });
         }, 400);
 
         return () => window.clearTimeout(timeoutId);
-    }, [aiHistory, aiInsertionPatches, aiResults, bulkFixReviewItems, currentUser, currentView, getCurrentArticleAiScope]);
+    }, [aiCompetitorComparisonResults, aiHistory, aiInsertionPatches, aiResults, bulkFixReviewItems, currentUser, currentView, getCurrentArticleAiScope]);
 
     useEffect(() => {
         const clearCurrentArticleAi = (event: Event) => {
@@ -5651,6 +5694,26 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         )
     ), [generateContextAwarePrompt]);
 
+    const clearProviderCompetitorComparisonResults = useCallback((provider: AiPatchProvider) => {
+        setAiCompetitorComparisonResults(previous => ({
+            ...previous,
+            [provider]: [],
+        }));
+    }, []);
+
+    const publishCompetitorComparisonResult = useCallback((
+        provider: AiPatchProvider,
+        result: CompetitorComparisonMapResult,
+    ) => {
+        setAiCompetitorComparisonResults(previous => ({
+            ...previous,
+            [provider]: [
+                ...previous[provider].filter(item => item.competitorNumber !== result.competitorNumber),
+                result,
+            ].sort((left, right) => left.competitorNumber - right.competitorNumber),
+        }));
+    }, []);
+
     const runCompetitorComparisonReadyCommand = useCallback(async (
         item: ReadyCommandAnalysisBatchItem,
         provider: AiPatchProvider,
@@ -5725,7 +5788,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }));
             const cached = competitorComparisonMapCacheRef.current.get(cacheKey);
             if (cached) {
-                mapResults.push(cached);
+                const visibleCachedResult = {
+                    ...cached,
+                    sourceUrl: source.url,
+                    sourceTitle: source.title,
+                };
+                mapResults.push(visibleCachedResult);
+                publishCompetitorComparisonResult(provider, visibleCachedResult);
                 continue;
             }
 
@@ -5758,12 +5827,19 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
                 batchResults.push(parsed.result);
             }
-            const combined = combineCompetitorComparisonMapResults(
-                source.competitorNumber,
-                batchResults,
-            );
+            const combined = {
+                ...combineCompetitorComparisonMapResults(
+                    source.competitorNumber,
+                    batchResults,
+                ),
+                sourceUrl: source.url,
+                sourceTitle: source.title,
+            };
             competitorComparisonMapCacheRef.current.set(cacheKey, combined);
             mapResults.push(combined);
+            // Publish only after every batch belonging to this competitor is complete, so the user
+            // sees one stable independent result while the following competitors continue running.
+            publishCompetitorComparisonResult(provider, combined);
         }
 
         setAiResults(previous => ({
@@ -5824,6 +5900,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         generateContextAwarePrompt,
         openAiModel,
         persistGeminiPaidArticleResult,
+        publishCompetitorComparisonResult,
         title,
         trackGeminiProgress,
     ]);
@@ -5845,6 +5922,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setIsAiLoading(previous => ({ ...previous, [provider]: true }));
         setAiResults(previous => ({ ...previous, [provider]: '' }));
         setAiInsertionPatches(previous => ({ ...previous, [provider]: [] }));
+        clearProviderCompetitorComparisonResults(provider);
         try {
             const parsedResult = await runCompetitorComparisonReadyCommand(item, provider, geminiModel);
             setAiResults(previous => ({ ...previous, [provider]: parsedResult.displayText }));
@@ -5863,6 +5941,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
     }, [
         editor,
+        clearProviderCompetitorComparisonResults,
         isAiProviderAvailable,
         logReadyCommandAnalysis,
         runCompetitorComparisonReadyCommand,
@@ -5886,6 +5965,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         setAiResults(prev => ({ ...prev, [provider]: '' }));
         setAiInsertionPatches(prev => ({ ...prev, [provider]: [] }));
+        clearProviderCompetitorComparisonResults(provider);
 
         try {
             const articleScope = getArticleChatStorageScope(articleKey, title);
@@ -5963,7 +6043,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress, isAiProviderAvailable, runCompetitorComparisonReadyCommand, openAiModel]);
+    }, [editor, generateContextAwarePrompt, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, clearProviderCompetitorComparisonResults, stopAiRequestIfArticleContextMissing, trackGeminiProgress, isAiProviderAvailable, runCompetitorComparisonReadyCommand, openAiModel]);
 
     const handleAiAnalyze = useCallback(async (
         userPrompt: string,
@@ -5984,6 +6064,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         setAiResults(prev => ({ ...prev, [provider]: '' }));
         setAiInsertionPatches(prev => ({ ...prev, [provider]: [] }));
+        clearProviderCompetitorComparisonResults(provider);
         try {
             const finalPrompt = buildSmartAnalysisFinalPrompt(
                 generateContextAwarePrompt(userPrompt, options),
@@ -6016,7 +6097,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
         }
-    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, stopAiRequestIfArticleContextMissing, trackGeminiProgress, isAiProviderAvailable]);
+    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, persistGeminiPaidArticleResult, buildApiUsageContext, clearProviderCompetitorComparisonResults, stopAiRequestIfArticleContextMissing, trackGeminiProgress, isAiProviderAvailable]);
 
     const handleChatGptAnalyze = useCallback(async (userPrompt: string, options: any, historyMeta?: ReadyCommandAnalysisHistoryMeta) => {
         if (!editor) return;
@@ -6031,6 +6112,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setIsAiLoading(prev => ({ ...prev, chatgpt: true }));
         setAiResults(prev => ({ ...prev, chatgpt: '' }));
         setAiInsertionPatches(prev => ({ ...prev, chatgpt: [] }));
+        clearProviderCompetitorComparisonResults('chatgpt');
         try {
             const finalPrompt = buildSmartAnalysisFinalPrompt(
                 generateContextAwarePrompt(userPrompt, options),
@@ -6057,7 +6139,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } finally {
             setIsAiLoading(prev => ({ ...prev, chatgpt: false }));
         }
-    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext, stopAiRequestIfArticleContextMissing, isAiProviderAvailable, openAiModel]);
+    }, [generateContextAwarePrompt, editor, logReadyCommandAnalysis, currentUser, articleKey, title, buildApiUsageContext, clearProviderCompetitorComparisonResults, stopAiRequestIfArticleContextMissing, isAiProviderAvailable, openAiModel]);
 
     const importManualAiResponse = useCallback((
         rawResponse: string,
@@ -6066,6 +6148,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     ) => {
         const responseText = rawResponse.trim();
         if (!responseText) return;
+        clearProviderCompetitorComparisonResults(provider);
 
         const parsedResult = historyMeta?.skipPatchInstructions
             ? { displayText: responseText, patches: [] }
@@ -6074,7 +6157,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setAiResults(prev => ({ ...prev, [provider]: parsedResult.displayText }));
         setAiInsertionPatches(prev => ({ ...prev, [provider]: parsedResult.patches }));
         logReadyCommandAnalysis(provider, parsedResult, historyMeta);
-    }, [logReadyCommandAnalysis]);
+    }, [clearProviderCompetitorComparisonResults, logReadyCommandAnalysis]);
 
     const callQuickProviderAnalysis = useCallback(async (
         prompt: string,
@@ -7106,7 +7189,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, []);
 
     const value = useMemo<AIContextType>(() => ({
-        aiResults, aiInsertionPatches, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
+        aiResults, aiInsertionPatches, aiCompetitorComparisonResults, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, cancelAiRequest, runPlainAiAnalysis, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         buildSmartAnalysisPrompt, validateAiArticleContext, importManualAiResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
@@ -7123,6 +7206,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }), [
         aiResults,
         aiInsertionPatches,
+        aiCompetitorComparisonResults,
         isAiLoading,
         quickAiProvider,
         isAiCommandLoading,
