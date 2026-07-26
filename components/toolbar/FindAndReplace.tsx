@@ -3,6 +3,10 @@ import { Editor } from '@tiptap/core';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
 import { ChevronUp, ChevronDown } from 'lucide-react';
+import {
+    findReplaceMatches,
+    type FindReplaceTextBlock,
+} from '../../utils/findAndReplace';
 
 interface FindAndReplaceProps {
     editor: Editor;
@@ -46,15 +50,22 @@ const FindAndReplace: React.FC<FindAndReplaceProps> = ({ editor, t, clearAllHigh
             return;
         }
 
-        const newMatches: { from: number; to: number }[] = [];
+        const blocks: FindReplaceTextBlock[] = [];
         editor.state.doc.descendants((node, pos) => {
-            if (node.isText && node.text) {
-                let index = -1;
-                while ((index = node.text.indexOf(value, index + 1)) !== -1) {
-                    newMatches.push({ from: pos + index, to: pos + index + value.length });
+            if (!node.isTextblock) return true;
+            const segments: FindReplaceTextBlock['segments'] = [];
+            node.descendants((child, childPos) => {
+                const absoluteFrom = pos + 1 + childPos;
+                if (child.isText && child.text) {
+                    segments.push({ text: child.text, from: absoluteFrom });
+                } else if (child.type.name === 'hardBreak') {
+                    segments.push({ text: ' ', from: absoluteFrom });
                 }
-            }
+            });
+            if (segments.length > 0) blocks.push({ segments });
+            return false;
         });
+        const newMatches = findReplaceMatches(blocks, value);
 
         setMatches(newMatches);
         setCurrentMatchIndex(newMatches.length > 0 ? 0 : -1);
@@ -90,7 +101,11 @@ const FindAndReplace: React.FC<FindAndReplaceProps> = ({ editor, t, clearAllHigh
         if (matches.length === 0 || !findValue) return;
         const transaction = editor.state.tr;
         [...matches].reverse().forEach(match => {
-            transaction.replaceWith(match.from, match.to, editor.schema.text(replaceValue));
+            if (replaceValue) {
+                transaction.replaceWith(match.from, match.to, editor.schema.text(replaceValue));
+            } else {
+                transaction.delete(match.from, match.to);
+            }
         });
         editor.view.dispatch(transaction);
         onClose();
@@ -110,6 +125,21 @@ const FindAndReplace: React.FC<FindAndReplaceProps> = ({ editor, t, clearAllHigh
         window.addEventListener('keydown', handleKeyDown, true);
         return () => window.removeEventListener('keydown', handleKeyDown, true);
     }, [onClose, clearAllHighlights]);
+
+    useEffect(() => {
+        const handleTransaction = ({ transaction }: { transaction: any }) => {
+            if (
+                !transaction.docChanged
+                || transaction.getMeta('preventUpdate')
+                || !findValue
+            ) return;
+            window.setTimeout(() => findAndHighlight(findValue), 0);
+        };
+        editor.on('transaction', handleTransaction);
+        return () => {
+            editor.off('transaction', handleTransaction);
+        };
+    }, [editor, findValue, findAndHighlight]);
 
     return (
         <div className="flex items-center gap-2 p-1.5 bg-gray-200 dark:bg-[#2A2A2A] rounded-md">
