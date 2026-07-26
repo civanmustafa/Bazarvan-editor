@@ -511,7 +511,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     const analysis = getExternalJobAnalysisMarkdown(job);
     if (patches.length === 0) {
       return analysis
-        ? <div className="ai-output text-xs leading-6" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(analysis) }} />
+        ? <div className="ai-output text-xs leading-6 text-gray-800 dark:text-gray-100" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(analysis) }} />
         : null;
     }
 
@@ -522,7 +522,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     let match: RegExpExecArray | null;
     while ((match = markerPattern.exec(analysis)) !== null) {
       const text = analysis.slice(lastIndex, match.index);
-      if (text.trim()) parts.push(<div key={`text-${lastIndex}`} className="ai-output text-xs leading-6" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(text) }} />);
+      if (text.trim()) parts.push(<div key={`text-${lastIndex}`} className="ai-output text-xs leading-6 text-gray-800 dark:text-gray-100" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(text) }} />);
       const marker = normalizeMarker(match[1]);
       patches.filter(patch => !used.has(patch.id) && normalizeMarker(patch.marker) === marker).forEach(patch => {
         used.add(patch.id);
@@ -531,7 +531,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
       lastIndex = markerPattern.lastIndex;
     }
     const tail = analysis.slice(lastIndex);
-    if (tail.trim()) parts.push(<div key="tail" className="ai-output text-xs leading-6" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(tail) }} />);
+    if (tail.trim()) parts.push(<div key="tail" className="ai-output text-xs leading-6 text-gray-800 dark:text-gray-100" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(tail) }} />);
     patches.filter(patch => !used.has(patch.id)).forEach(patch => parts.push(renderPatch(patch)));
     return <>{parts}</>;
   };
@@ -679,7 +679,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   }
 
   return (
-    <div className="space-y-4" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="space-y-4 text-gray-700 dark:text-gray-200" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
       <div className="flex items-center justify-between gap-2 border-b border-gray-200 pb-3 dark:border-[#3C3C3C]">
         <div className="text-sm font-black text-gray-800 dark:text-gray-100">{locale === 'ar' ? 'نتائج التحليل الخارجي' : 'External analysis results'}</div>
         <button type="button" onClick={() => void refreshJobs(true)} disabled={loading} className="rounded p-1.5 text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] disabled:opacity-50" title={locale === 'ar' ? 'تحديث' : 'Refresh'}>
