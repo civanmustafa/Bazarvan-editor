@@ -2343,9 +2343,11 @@ ${readyCommandCompetitorBlocks}`;
 
                 {competitorUrls.map((url, index) => {
                     const extraction = competitorExtractions[index] || createEmptyCompetitorState();
-                    // Firecrawl already fills the editable canonical text field above. Do not
-                    // render a second result card for the same content.
-                    const content = extraction.source === 'text' || extraction.source === 'firecrawl'
+                    // Firecrawl, manual text, and AI extraction already fill the editable
+                    // canonical text box. Do not duplicate any of them in a result card.
+                    const content = extraction.source === 'text'
+                        || extraction.source === 'firecrawl'
+                        || extraction.source === 'url'
                         ? null
                         : extraction.content;
                     const plainText = competitorTexts[index] || '';
@@ -2358,9 +2360,7 @@ ${readyCommandCompetitorBlocks}`;
                         : 'This URL is waiting for the competitor extraction worker; the Firecrawl request has not started yet.';
                     const extractionPreviewTitle = extraction.source === 'programmatic'
                         ? tRs.programmaticExtractionPreview
-                        : extraction.source === 'url'
-                            ? tRs.aiExtractionPreview
-                            : tRs.htmlExtractionPreview;
+                        : tRs.htmlExtractionPreview;
                     return (
                         <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <label className="mb-2 block text-xs font-bold text-gray-600 dark:text-gray-300">
@@ -2422,12 +2422,6 @@ ${readyCommandCompetitorBlocks}`;
                                     </div>
                                 </div>
                                 <div>
-                                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                                        <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">{tRs.competitorPlainTextField}</span>
-                                        <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-                                            {tRs.canonicalAnalysisSource}
-                                        </span>
-                                    </div>
                                     <textarea
                                         value={plainText}
                                         onChange={(event) => handleCompetitorTextChange(index, event.target.value)}
@@ -2446,9 +2440,6 @@ ${readyCommandCompetitorBlocks}`;
                                         }`}
                                         dir="auto"
                                     />
-                                    <div className="mt-1 text-[10px] font-semibold leading-4 text-gray-500 dark:text-gray-400">
-                                        {tRs.competitorPlainTextUsageHint}
-                                    </div>
                                 </div>
                             </div>
 
@@ -2473,9 +2464,7 @@ ${readyCommandCompetitorBlocks}`;
                                             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold text-gray-600 dark:bg-[#333333] dark:text-gray-300">
                                                 {extraction.source === 'programmatic'
                                                     ? tRs.programmaticExtractionSource
-                                                    : extraction.source === 'url'
-                                                        ? tRs.aiExtractionSource
-                                                        : tRs.htmlExtractionSource}
+                                                    : tRs.htmlExtractionSource}
                                             </span>
                                             {content.cacheHit && (
                                                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">

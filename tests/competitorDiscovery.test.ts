@@ -392,7 +392,7 @@ test('dual extraction failure is excluded until the canonical marker is manually
   assert.match(writingContext, /getUsableCompetitorText/);
 });
 
-test('competitor sidebar keeps one canonical text surface and no Firecrawl result card', async () => {
+test('competitor sidebar keeps one unlabeled canonical text box and no Firecrawl or AI result card', async () => {
   const [sidebar, translations, writingContext, engineeringExecutor] = await Promise.all([
     readWorkspaceFile('components/RightSidebar.tsx'),
     readWorkspaceFile('components/translations.ts'),
@@ -400,16 +400,21 @@ test('competitor sidebar keeps one canonical text surface and no Firecrawl resul
     readWorkspaceFile('server/externalEngineeringAnalysisExecutor.ts'),
   ]);
 
-  assert.match(sidebar, /competitorPlainTextField/);
-  assert.match(sidebar, /canonicalAnalysisSource/);
-  assert.match(sidebar, /competitorPlainTextUsageHint/);
-  assert.match(sidebar, /extraction\.source === 'text' \|\| extraction\.source === 'firecrawl'/);
+  assert.doesNotMatch(sidebar, /competitorPlainTextField/);
+  assert.doesNotMatch(sidebar, /canonicalAnalysisSource/);
+  assert.doesNotMatch(sidebar, /competitorPlainTextUsageHint/);
+  assert.match(sidebar, /extraction\.source === 'text'/);
+  assert.match(sidebar, /extraction\.source === 'firecrawl'/);
+  assert.match(sidebar, /extraction\.source === 'url'/);
   assert.doesNotMatch(sidebar, /firecrawlExtractionPreview/);
   assert.match(sidebar, /programmaticExtractionPreview/);
-  assert.match(sidebar, /aiExtractionPreview/);
+  assert.doesNotMatch(sidebar, /aiExtractionPreview/);
   assert.match(sidebar, /extractionPreviewUsageHint/);
   assert.doesNotMatch(sidebar, /tRs\.extractedContent/);
-  assert.match(translations, /النص المعتمد للتحليل والكتابة/);
+  assert.doesNotMatch(translations, /competitorPlainTextField:/);
+  assert.doesNotMatch(translations, /canonicalAnalysisSource:/);
+  assert.doesNotMatch(translations, /competitorPlainTextUsageHint:/);
+  assert.doesNotMatch(translations, /aiExtractionPreview:/);
   assert.match(translations, /هذه بطاقة معاينة للمصدر والبنية فقط وليست مدخلًا ثانيًا/);
   assert.doesNotMatch(translations, /extractedContent:\s*'المحتوى المستخرج'/);
   assert.doesNotMatch(translations, /firecrawlExtractionPreview/);
