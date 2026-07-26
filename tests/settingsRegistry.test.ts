@@ -88,6 +88,19 @@ const importPromptRegistry = async (): Promise<any> => {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 };
 
+const importSemanticKeywordPolicy = async (): Promise<any> => {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL('../utils/semanticKeywordPolicy.ts', import.meta.url))],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node20',
+    write: false,
+  });
+  const source = result.outputFiles[0].text;
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+};
+
 test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
   assert.deepEqual(GEMINI_FREE_MODEL_VALUES, [
     'gemini-3.6-flash',
@@ -234,6 +247,105 @@ test('PromptRegistry keeps Arabic defaults, required attachments, and valid admi
     registry.DEFAULT_PROMPT_TEMPLATES[registry.PROMPT_TEMPLATE_IDS.internalLinkReview],
     /لا تنشئ Anchor Text جديدًا/,
   );
+
+  const semanticDefinition = registry.PROMPT_REGISTRY_DEFINITIONS.find(
+    (item: { id: string }) => item.id === registry.PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration,
+  );
+  assert.ok(semanticDefinition);
+  assert.equal(semanticDefinition.group, registry.PROMPT_GROUP_IDS.semanticKeywords);
+  assert.deepEqual(semanticDefinition.requiredVariables, [
+    'primary_keyword',
+    'article_language',
+    'goal_context',
+    'protected_constraints',
+  ]);
+  assert.match(
+    registry.DEFAULT_PROMPT_TEMPLATES[semanticDefinition.id],
+    /المفرد في بعض الصيغ والجمع في صيغ أخرى/,
+  );
+  assert.match(registry.DEFAULT_PROMPT_TEMPLATES[semanticDefinition.id], /«أفضل» و«أحسن»/);
+});
+
+test('semantic keyword policy preserves numbers, places, and nationalities deterministically', async () => {
+  const [policy, registry] = await Promise.all([
+    importSemanticKeywordPolicy(),
+    importPromptRegistry(),
+  ]);
+  const input = {
+    title: 'أفضل المطاعم',
+    plainText: '',
+    articleLanguage: 'ar',
+    primaryKeyword: 'أفضل ١٠ مطاعم في دبي',
+    companyName: 'بازارفان',
+    existingSecondaries: [] as string[],
+    existingLsi: [] as string[],
+    goalContext: {
+      objective: 'compare',
+      searchIntent: 'commercial',
+      targetCountry: 'دبي',
+    },
+  };
+  const response = JSON.stringify({
+    protectedQualifiers: ['دبي'],
+    secondaries: [
+      'أحسن 10 مطعم في دبي',
+      'دليل ١٠ مطاعم داخل دبي',
+      'ما أحسن 10 مطعم في دبي',
+      'قائمة 10 مطاعم مميزة في دبي',
+      'أفضل مطاعم دبي',
+      'أفضل 10 مطاعم في أبوظبي',
+      'أفضل 10 مطاعم في دبي 2026',
+    ],
+    lsi: [
+      'تقييمات الزوار',
+      'جودة الطعام',
+      'تنوع المأكولات',
+      'أجواء المكان',
+      'مواعيد العمل',
+      'الحجز المسبق',
+      'مواقف السيارات',
+      'خيارات العائلات',
+      'قوائم الطعام',
+      'تجربة الضيوف',
+    ],
+  });
+
+  const terms = policy.parseSemanticKeywordTerms(response, input);
+  assert.deepEqual(terms.secondaries, [
+    'أحسن 10 مطعم في دبي',
+    'دليل ١٠ مطاعم داخل دبي',
+    'ما أحسن 10 مطعم في دبي',
+    'قائمة 10 مطاعم مميزة في دبي',
+  ]);
+  assert.equal(policy.hasUsableSemanticKeywordTerms(terms, true, true), true);
+
+  const prompt = policy.renderSemanticKeywordPrompt(
+    input,
+    registry.DEFAULT_PROMPT_TEMPLATES[registry.PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration],
+  );
+  assert.match(prompt, /الأرقام الإلزامية في كل صيغة: 10/);
+  assert.match(prompt, /المواقع أو القوميات الإلزامية في كل صيغة: دبي/);
+
+  const nationalityInput = {
+    ...input,
+    primaryKeyword: 'أفضل 5 أطباق للسعوديين',
+    goalContext: {},
+  };
+  const nationalityTerms = policy.parseSemanticKeywordTerms(JSON.stringify({
+    protectedQualifiers: ['السعوديين'],
+    secondaries: [
+      'أحسن 5 أطباق سعودية',
+      'قائمة 5 أكلات للسعوديين',
+      'ما أفضل 5 وجبات سعودية',
+      'أشهر 5 أطباق سعودي',
+      'أفضل 5 أطباق خليجية',
+    ],
+    lsi: Array.from({ length: 10 }, (_, index) => `مصطلح دلالي ${index + 1}`),
+  }), nationalityInput);
+  assert.equal(nationalityTerms.secondaries.length, 4);
+  assert.ok(nationalityTerms.secondaries.every(
+    (term: string) => /سعود/u.test(policy.normalizeSemanticKeywordText(term)),
+  ));
 });
 
 test('administrator prompt registry migration preserves saved templates when repeated', async () => {

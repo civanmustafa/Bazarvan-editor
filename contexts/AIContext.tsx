@@ -47,6 +47,13 @@ import {
     beginAiExecutionActivity,
     finishAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
+import {
+    buildSemanticKeywordRepairPrompt,
+    hasUsableSemanticKeywordTerms,
+    parseSemanticKeywordTerms,
+    renderSemanticKeywordPrompt,
+    type SemanticKeywordInput,
+} from '../utils/semanticKeywordPolicy';
 
 /*
  * AIContext owns all AI workflows:
@@ -5349,43 +5356,25 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return { secondaries: [], lsi: [], error: 'أدخل الكلمة المفتاحية الأساسية أولًا.' };
         }
 
-        const prompt = [
-            'أنت خبير SEO دلالي وLLM SEO.',
-            '',
-            'مهمتك توليد صيغ بديلة طبيعية للكلمة المفتاحية الأساسية وكلمات LSI مرتبطة بنية البحث وسياق هدف الصفحة والجمهور، ثم إرجاعها بصيغة JSON فقط لتوزيعها تلقائيًا داخل لوحة الكلمات.',
-            '',
-            `الكلمة المفتاحية الأساسية: ${primary}`,
-            keywords.company.trim() ? `اسم الشركة: ${keywords.company.trim()}` : '',
-            title.trim() ? `عنوان المقال: ${title.trim()}` : '',
-            `لغة المقال: ${articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'}`,
-            '',
-            'سياق هدف الصفحة والجمهور:',
-            formatGoalContext(goalContext) || '- لم يحدد',
-            '',
-            'الشروط:',
-            '- لا تكتب المقالة.',
-            '- لا تستخدم حشوًا مفتاحيًا.',
-            '- لا تقترح كلمات بعيدة عن نية البحث.',
-            '- اجعل كل الاقتراحات طبيعية وقابلة للاستخدام داخل محتوى حقيقي.',
-            '- راعِ هدف المقالة والجمهور المستهدف في كل اقتراح.',
-            '- اجعل كل عناصر secondaries وlsi بلغة المقال فقط؛ إذا كانت لغة المقال الإنجليزية فاكتب القوائم بالإنجليزية.',
-            '- لا تعتبر اسم الشركة صيغة بديلة أو كلمة LSI، ولا تضع اسم الشركة أو جزءًا منه في أي قائمة.',
-            '- لا تكرر الكلمة المفتاحية الأساسية نفسها ضمن الصيغ البديلة.',
-            '- لا تعتبر الكلمة المفتاحية الأساسية أو أي صيغة بديلة أو جزءًا منهما كلمة LSI.',
-            '- ممنوع أن تتضمن كلمات LSI اسم الشركة أو جزءًا من الكلمة المفتاحية الأساسية أو جزءًا من الصيغ البديلة.',
-            '- يجب أن تكون كلمات LSI مفاهيم وكيانات وسياقات دلالية مفيدة، وليست كلمات عامة أو جملًا عامة بلا معنى.',
-            '- أخرج 4 إلى 6 صيغ بديلة قصيرة.',
-            '- أخرج 10 إلى 16 كلمة أو عبارة LSI.',
-            '',
-            'أرجع JSON فقط بهذا الشكل دون Markdown ودون شرح:',
-            '{ "secondaries": ["صيغة بديلة 1", "صيغة بديلة 2"], "lsi": ["كلمة LSI 1", "كلمة LSI 2"] }',
-        ].filter(Boolean).join('\n');
-
+        const semanticInput: SemanticKeywordInput = {
+            title,
+            plainText: text,
+            articleLanguage,
+            primaryKeyword: primary,
+            companyName: keywords.company,
+            existingSecondaries: keywords.secondaries,
+            existingLsi: keywords.lsi,
+            goalContext: normalizeGoalContext(goalContext) as unknown as Record<string, unknown>,
+        };
+        const promptTemplate = getPromptTemplate(
+            engineeringPrompts as unknown as Record<string, string>,
+            PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration,
+        );
         const usageContext = buildApiUsageContext('semantic_keywords_lsi');
         let result: string;
         try {
             result = await callGeminiAnalysis(
-                prompt,
+                renderSemanticKeywordPrompt(semanticInput, promptTemplate),
                 undefined,
                 undefined,
                 usageContext,
@@ -5401,72 +5390,45 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return { secondaries: [], lsi: [], error: result };
         }
 
-        const parsed = extractJson(result);
-        const normalizeSemanticTerm = (value: string): string => value
-            .normalize('NFKC')
-            .toLowerCase()
-            .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-        const semanticStopWords = new Set([
-            'في', 'من', 'عن', 'على', 'الى', 'إلى', 'مع', 'و', 'أو', 'او', 'ال', 'ل', 'ب', 'the', 'a', 'an', 'and', 'or', 'of', 'for', 'to', 'in', 'on', 'with',
-        ].map(normalizeSemanticTerm));
-        const getSemanticTokens = (value: string): string[] => normalizeSemanticTerm(value)
-            .split(' ')
-            .filter(token => token.length > 2 && !semanticStopWords.has(token));
-        const hasProtectedSemanticOverlap = (term: string, protectedTerms: string[]): boolean => {
-            const normalizedTerm = normalizeSemanticTerm(term);
-            if (!normalizedTerm) return true;
-
-            return protectedTerms.some(protectedTerm => {
-                const normalizedProtected = normalizeSemanticTerm(protectedTerm);
-                if (!normalizedProtected) return false;
-                if (normalizedTerm === normalizedProtected) return true;
-                if (normalizedTerm.includes(normalizedProtected) || normalizedProtected.includes(normalizedTerm)) return true;
-
-                const protectedTokens = getSemanticTokens(protectedTerm);
-                if (protectedTokens.length === 0) return false;
-                return protectedTokens.some(token => normalizedTerm.split(' ').includes(token));
-            });
-        };
-        const isGenericSemanticTerm = (term: string): boolean => {
-            const normalizedTerm = normalizeSemanticTerm(term);
-            const words = normalizedTerm.split(' ').filter(Boolean);
-            const genericTerms = new Set([
-                'معلومات', 'نصائح', 'فوائد', 'مميزات', 'خدمات', 'حلول', 'خيارات', 'دليل شامل', 'أفضل خيار', 'تجربة مميزة',
-                'information', 'tips', 'benefits', 'features', 'services', 'solutions', 'options', 'complete guide', 'best option',
-            ].map(normalizeSemanticTerm));
-
-            return genericTerms.has(normalizedTerm) || (words.length > 4 && !words.some(word => word.length > 5));
-        };
-        const normalizeTerms = (value: unknown): string[] => {
-            if (!Array.isArray(value)) return [];
-            const seen = new Set<string>();
-            return value
-                .map(item => typeof item === 'string' ? item.replace(/[.،,;؛]+$/g, '').trim() : '')
-                .filter(Boolean)
-                .filter(item => normalizeSemanticTerm(item) !== normalizeSemanticTerm(primary))
-                .filter(item => !hasProtectedSemanticOverlap(item, [keywords.company]))
-                .filter(item => {
-                    const key = normalizeSemanticTerm(item);
-                    if (seen.has(key)) return false;
-                    seen.add(key);
-                    return true;
-                });
-        };
-
-        const secondaries = normalizeTerms(parsed?.secondaries).slice(0, 6);
-        const lsiProtectedTerms = [primary, keywords.company, ...secondaries].filter(Boolean);
-        const lsi = normalizeTerms(parsed?.lsi)
-            .filter(item => !hasProtectedSemanticOverlap(item, lsiProtectedTerms))
-            .filter(item => !isGenericSemanticTerm(item))
-            .slice(0, 16);
-        if (secondaries.length === 0 && lsi.length === 0) {
-            return { secondaries, lsi, error: 'لم يرجع الذكاء الاصطناعي صيغا قابلة للتوزيع. حاول مرة أخرى.' };
+        let terms = parseSemanticKeywordTerms(result, semanticInput);
+        if (!hasUsableSemanticKeywordTerms(terms, true, true)) {
+            try {
+                result = await callGeminiAnalysis(
+                    buildSemanticKeywordRepairPrompt(
+                        semanticInput,
+                        promptTemplate,
+                        result,
+                    ),
+                    undefined,
+                    undefined,
+                    usageContext,
+                    trackGeminiProgress(usageContext),
+                );
+            } catch (error) {
+                if (isGeminiAnalysisCancelledError(error)) {
+                    return { secondaries: [], lsi: [], cancelled: true };
+                }
+                throw error;
+            }
+            if (/^حدث خطأ أثناء الاتصال بـ Gemini/.test(result)) {
+                return { secondaries: [], lsi: [], error: result };
+            }
+            terms = parseSemanticKeywordTerms(result, semanticInput);
         }
 
-        return { secondaries, lsi };
-    }, [articleLanguage, buildApiUsageContext, goalContext, keywords.company, keywords.primary, title, trackGeminiProgress]);
+        if (!hasUsableSemanticKeywordTerms(terms, true, true)) {
+            return {
+                secondaries: terms.secondaries,
+                lsi: terms.lsi,
+                error: 'لم يُرجع الذكاء الاصطناعي 4 صيغ بديلة و10 كلمات LSI صالحة بعد التحقق من الأرقام والمواقع والقوميات. حاول مرة أخرى.',
+            };
+        }
+
+        return {
+            secondaries: terms.secondaries,
+            lsi: terms.lsi,
+        };
+    }, [articleLanguage, buildApiUsageContext, engineeringPrompts, goalContext, keywords.company, keywords.lsi, keywords.primary, keywords.secondaries, text, title, trackGeminiProgress]);
 
     const generateGoalContext = useCallback(async (): Promise<{ context?: GoalContext; error?: string; cancelled?: boolean }> => {
         const primary = keywords.primary.trim();

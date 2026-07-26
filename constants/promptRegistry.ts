@@ -4,10 +4,11 @@ import {
 } from './engineeringPrompts';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 
-export const PROMPT_REGISTRY_VERSION = 5;
+export const PROMPT_REGISTRY_VERSION = 6;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
+  semanticKeywords: 'semanticKeywords',
   toolbar: 'toolbar',
   readyCommands: 'readyCommands',
   repair: 'repair',
@@ -21,6 +22,7 @@ export const PROMPT_GROUP_IDS = {
 export type PromptGroupId = typeof PROMPT_GROUP_IDS[keyof typeof PROMPT_GROUP_IDS];
 
 export const PROMPT_TEMPLATE_IDS = {
+  semanticKeywordsGeneration: 'semanticKeywords.generation',
   repairSingleViolation: 'repair.singleViolation',
   repairBulkGroup: 'repair.bulkGroup',
   contentBriefGeneration: 'contentWriting.contentBriefGeneration',
@@ -138,6 +140,23 @@ const ENGINEERING_DEFINITIONS: PromptRegistryDefinition[] = ENGINEERING_PROMPT_D
 }));
 
 const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
+  {
+    id: PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration,
+    group: PROMPT_GROUP_IDS.semanticKeywords,
+    label: 'توليد الصيغ البديلة وكلمات LSI',
+    description: 'ينشئ صيغ بحث طبيعية تحافظ على الأرقام والمواقع والقوميات ونية البحث، مع كلمات LSI دلالية.',
+    usage: 'يستخدمه زر توليد الصيغ داخل المحرر ومهمة التوليد الخلفية نفسها. يرفق النظام القيود المحمية التي اكتشفها برمجيًا ثم يرفض أي صيغة تخالفها.',
+    variables: ['{{primary_keyword}}', '{{company_name}}', '{{article_title}}', '{{article_language}}', '{{goal_context}}', '{{existing_alternative_keywords}}', '{{existing_lsi_keywords}}', '{{protected_constraints}}', '{{article_excerpt}}'],
+    requiredVariables: ['primary_keyword', 'article_language', 'goal_context', 'protected_constraints'],
+    attachments: [
+      attachment('primaryKeyword', 'الكلمة المفتاحية الأساسية', 'المصدر الإلزامي لنفس نية البحث ولكل الأرقام والمؤهلات المحمية.'),
+      attachment('protectedConstraints', 'الأرقام والمواقع والقوميات المحمية', 'يستخرجها النظام برمجيًا من الكلمة الأساسية والسوق المحدد، ويعيد فحص كل صيغة بها.'),
+      attachment('goalAndIntent', 'هدف الصفحة ونية البحث', 'نوع الصفحة والهدف والجمهور والسوق ونية البحث لمنع تغيير المقصود.'),
+      attachment('existingTerms', 'الكلمات الحالية', 'الصيغ البديلة وLSI الموجودة لتجنب التكرار.'),
+      attachment('articleIdentity', 'هوية المقالة', 'العنوان واللغة ومقتطف من النص عند توفره.'),
+      attachment('outputValidation', 'عقد النتيجة', 'عدد الصيغ وشكل JSON وقواعد الرفض البرمجية بعد استلام الرد.'),
+    ],
+  },
   {
     id: PROMPT_TEMPLATE_IDS.repairSingleViolation,
     group: PROMPT_GROUP_IDS.repair,
@@ -424,6 +443,45 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
   [PROMPT_TEMPLATE_IDS.contentWritingInstructions]: DEFAULT_CONTENT_WRITING_TEMPLATES.instructions,
   [PROMPT_TEMPLATE_IDS.contentWritingArticleContext]: DEFAULT_CONTENT_WRITING_TEMPLATES.articleContext,
   [PROMPT_TEMPLATE_IDS.contentWritingGenerationRequest]: DEFAULT_CONTENT_WRITING_TEMPLATES.generationRequest,
+  [PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration]: `أنت خبير SEO دلالي ومتخصص في فهم طريقة بحث المستخدمين. ولّد صيغًا بديلة للكلمة المفتاحية الأساسية تعبّر عن نية البحث نفسها بصياغات حقيقية مختلفة، ثم ولّد كلمات LSI مفيدة للسياق.
+
+بيانات المهمة:
+- الكلمة المفتاحية الأساسية: {{primary_keyword}}
+- لغة النتائج: {{article_language}}
+- عنوان المقالة: {{article_title}}
+- اسم الشركة أو العلامة: {{company_name}}
+- سياق هدف الصفحة والجمهور ونية البحث: {{goal_context}}
+- الصيغ البديلة الموجودة: {{existing_alternative_keywords}}
+- كلمات LSI الموجودة: {{existing_lsi_keywords}}
+
+القيود التي اكتشفها النظام برمجيًا ويجب تطبيقها حرفيًا:
+{{protected_constraints}}
+
+مقتطف المقالة للاستدلال على السياق فقط، وليس مصدرًا لتغيير نية البحث:
+<article_excerpt>
+{{article_excerpt}}
+</article_excerpt>
+
+قواعد الصيغ البديلة:
+- أنشئ من 4 إلى 6 صيغ قصيرة وطبيعية يستخدمها الناس للبحث عن المقصود نفسه، ولا تكرر الكلمة الأساسية حرفيًا.
+- يجب أن تحتوي كل صيغة بديلة على جميع الأرقام الموجودة في الكلمة الأساسية بالقيم نفسها؛ لا تحذف رقمًا ولا تبدله ولا تضف رقمًا جديدًا.
+- استخرج أي دولة أو مدينة أو محافظة أو مقاطعة أو ولاية أو إقليم أو منطقة مذكورة في الكلمة الأساسية، وضعها في protectedQualifiers، ثم أبقها في كل صيغة بديلة. لا تستبدل الموقع بموقع أوسع أو أضيق أو مختلف.
+- استخرج أي قومية أو نسبة جغرافية أو عرقية مذكورة في الكلمة الأساسية، وضعها في protectedQualifiers، ثم أبقها في كل صيغة بديلة من دون تحويلها إلى قومية أخرى.
+- عند وجود مفرد وجمع طبيعيين للكلمة المحورية، استخدم المفرد في بعض الصيغ والجمع في صيغ أخرى، ما دام المقصود ونية البحث لم يتغيرا.
+- استخدم مرادفات مباشرة شائعة للأفعال والصفات والكلمات الوصفية في بعض الصيغ، مثل «أفضل» و«أحسن»، أو «شراء» و«اقتناء»، بشرط بقاء المعنى والمرحلة الشرائية نفسيهما.
+- نوّع ترتيب الكلمات، وحروف الجر، والصياغة الاسمية أو الاستفهامية، والتهجئة الشائعة المقبولة عندما تكون طريقة بحث حقيقية، ولا تنتج تبديلات آلية ركيكة.
+- حافظ على نوع الشيء أو الخدمة، والجمهور، والموقع، والزمن، والعدد، ونية البحث التجارية أو المعلوماتية أو المحلية نفسها.
+- لا تجعل الصيغة أوسع أو أضيق من الكلمة الأساسية، ولا تضف سعرًا أو حجزًا أو شراءً أو مقارنةً أو سنةً أو موقعًا أو جمهورًا غير موجود في المقصود الأصلي.
+- لا تستخدم اسم الشركة أو جزءًا منه في الصيغ البديلة أو LSI، ولا تكرر صيغة موجودة.
+
+قواعد كلمات LSI:
+- أنشئ من 10 إلى 16 كيانًا أو مفهومًا أو مصطلحًا سياقيًا يساعد على تغطية الموضوع، وليس إعادة صياغة للكلمة الأساسية.
+- لا تضع الكلمة الأساسية أو صيغة بديلة كاملة أو اسم الشركة داخل LSI.
+- تجنب الكلمات العامة مثل «معلومات» و«نصائح» و«خدمات» إذا لم تضف دلالة خاصة بالموضوع.
+- إذا كان عنوان المقالة فارغًا أو عامًا جدًا، ضع في title عنوان SEO واحدًا طبيعيًا؛ وإلا أرجع title فارغًا.
+
+أرجع JSON صالحًا فقط دون Markdown أو شرح. protectedQualifiers يجب أن يحتوي فقط على المواقع والقوميات الموجودة فعلًا داخل الكلمة الأساسية:
+{"title":"","protectedQualifiers":["الموقع أو القومية المحمية"],"secondaries":["صيغة بديلة 1","صيغة بديلة 2","صيغة بديلة 3","صيغة بديلة 4"],"lsi":["مصطلح دلالي 1","مصطلح دلالي 2"]}`,
   [PROMPT_TEMPLATE_IDS.repairSingleViolation]: `أصلح النص المحدد بناءً على بطاقة المعيار والمخالفة التالية.
 
 {{read_only_context}}

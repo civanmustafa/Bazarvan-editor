@@ -30,6 +30,12 @@ const GROUPS: Array<{
   description: string;
 }> = [
   {
+    id: PROMPT_GROUP_IDS.semanticKeywords,
+    tabLabel: 'الكلمات وLSI',
+    label: 'أوامر توليد الصيغ البديلة وكلمات LSI',
+    description: 'يتحكم هذا الأمر في زر توليد الصيغ داخل المحرر ومهام التوليد الخلفية. يرفق النظام الكلمة الأساسية وسياق الهدف والأرقام والمواقع والقوميات المحمية، ثم يفحص النتيجة برمجيًا قبل اعتمادها.',
+  },
+  {
     id: PROMPT_GROUP_IDS.toolbar,
     tabLabel: 'السريعة',
     label: 'الأوامر الهندسية السريعة في شريط المحرر',

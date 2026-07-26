@@ -489,13 +489,38 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
   assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 5/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 6/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);
   assert.doesNotMatch(
     `${knowledge}\n${workflow}\n${serverWorkflow}\n${promptRegistry}`,
     /search\s*console|searchConsole/i,
+  );
+});
+
+test('semantic keyword generation shares one editable prompt and one deterministic policy', async () => {
+  const [aiContext, externalTerms, externalExecutor, assignedAutomation, promptRegistry, adminRegistry] = await Promise.all([
+    readWorkspaceFile('contexts/AIContext.tsx'),
+    readWorkspaceFile('server/externalSemanticTerms.ts'),
+    readWorkspaceFile('server/externalSemanticAnalysisExecutor.ts'),
+    readWorkspaceFile('api/assignedArticleAutomation.ts'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+    readWorkspaceFile('components/AdminPromptRegistrySettings.tsx'),
+  ]);
+
+  assert.match(promptRegistry, /semanticKeywords\.generation/);
+  assert.match(promptRegistry, /المفرد في بعض الصيغ والجمع في صيغ أخرى/);
+  assert.match(promptRegistry, /«أفضل» و«أحسن»/);
+  assert.match(adminRegistry, /PROMPT_GROUP_IDS\.semanticKeywords/);
+  assert.match(aiContext, /renderSemanticKeywordPrompt/);
+  assert.match(aiContext, /parseSemanticKeywordTerms/);
+  assert.match(externalTerms, /semanticKeywordPolicy/);
+  assert.match(externalExecutor, /readPromptRegistrySettings/);
+  assert.match(assignedAutomation, /PROMPT_TEMPLATE_IDS\.semanticKeywordsGeneration/);
+  assert.doesNotMatch(
+    `${aiContext}\n${externalTerms}\n${assignedAutomation}`,
+    /You are an expert semantic SEO editor/,
   );
 });
 

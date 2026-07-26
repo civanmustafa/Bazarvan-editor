@@ -4,8 +4,20 @@ import {
   GEMINI_PAID_ANALYSIS_MODEL,
 } from '../constants/modelRegistry';
 import { isExternalAnalysisArticleStatus } from '../constants/articleStatuses';
+import {
+  PROMPT_TEMPLATE_IDS,
+  getPromptTemplate,
+} from '../constants/promptRegistry';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { aiExecutionEngine, type AiExecutionTelemetryContext } from '../server/aiExecutionEngine';
+import { readPromptRegistrySettings } from '../server/promptRegistrySettings';
+import {
+  buildSemanticKeywordRepairPrompt,
+  hasUsableSemanticKeywordTerms,
+  parseSemanticKeywordTerms,
+  renderSemanticKeywordPrompt,
+  type SemanticKeywordInput,
+} from '../utils/semanticKeywordPolicy';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type AutomationStatus = 'generated' | 'analyzed' | 'skipped' | 'failed';
@@ -100,28 +112,6 @@ const callGemini = async (
   };
 };
 
-const extractJson = (text: string): any => {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
-  const source = fenced || trimmed;
-  try {
-    return JSON.parse(source);
-  } catch {
-    const start = source.indexOf('{');
-    const end = source.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(source.slice(start, end + 1));
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-};
-
 const toStringList = (value: unknown): string[] => {
   if (Array.isArray(value)) return value.flatMap(toStringList);
   if (isRecord(value)) {
@@ -139,40 +129,6 @@ const toStringList = (value: unknown): string[] => {
     .split(/[\n\r,;\u060C\u061B|*\/#•·]+|(?<!\d)\.(?!\d)|\s+-\s+/g)
     .map(item => item.replace(/^[-–—•·\d.)\s]+/, '').trim())
     .filter(Boolean);
-};
-
-const getFirstListFromRecord = (source: unknown, keys: string[]): string[] => {
-  if (!isRecord(source)) return [];
-
-  for (const key of keys) {
-    const values = toStringList(source[key]);
-    if (values.length > 0) return values;
-  }
-
-  return [];
-};
-
-const extractSemanticTerms = (parsed: unknown): { title: string; secondaries: string[]; lsi: string[] } => {
-  const source = isRecord(parsed) ? parsed : {};
-  const nestedKeywords = isRecord(source.keywords) ? source.keywords : {};
-  const semantic = isRecord(source.semantic) ? source.semantic : {};
-  const seo = isRecord(source.seo) ? source.seo : {};
-
-  return {
-    title: toTrimmedString(source.title || source.articleTitle || source.seoTitle),
-    secondaries: mergeUniqueTerms([], [
-      ...getFirstListFromRecord(source, ['secondaries', 'alternativeForms', 'alternative_forms', 'alternatives', 'synonyms']),
-      ...getFirstListFromRecord(nestedKeywords, ['secondaries', 'alternativeForms', 'alternative_forms', 'alternatives', 'synonyms']),
-      ...getFirstListFromRecord(semantic, ['secondaries', 'alternativeForms', 'alternative_forms', 'alternatives', 'synonyms']),
-      ...getFirstListFromRecord(seo, ['secondaries', 'alternativeForms', 'alternative_forms', 'alternatives', 'synonyms']),
-    ], 16),
-    lsi: mergeUniqueTerms([], [
-      ...getFirstListFromRecord(source, ['lsi', 'lsiKeywords', 'lsi_keywords', 'semanticTerms', 'semantic_terms', 'relatedTerms']),
-      ...getFirstListFromRecord(nestedKeywords, ['lsi', 'lsiKeywords', 'lsi_keywords', 'semanticTerms', 'semantic_terms', 'relatedTerms']),
-      ...getFirstListFromRecord(semantic, ['lsi', 'lsiKeywords', 'lsi_keywords', 'semanticTerms', 'semantic_terms', 'relatedTerms']),
-      ...getFirstListFromRecord(seo, ['lsi', 'lsiKeywords', 'lsi_keywords', 'semanticTerms', 'semantic_terms', 'relatedTerms']),
-    ], 36),
-  };
 };
 
 const normalizeKeywordsPayload = (value: unknown): KeywordsPayload => {
@@ -272,55 +228,6 @@ const buildCompetitorBlocks = (texts: string[], urls: string[]): string => texts
   })
   .filter(Boolean)
   .join('\n\n');
-
-const buildSemanticPrompt = (
-  article: Record<string, any>,
-  keywords: KeywordsPayload,
-  goalContext: GoalContextPayload,
-): string => [
-  'You are an expert semantic SEO editor.',
-  'Generate useful alternative keyword forms and LSI terms for the assigned draft.',
-  'Do not rewrite the article.',
-  'Use the page context, audience, search intent, and primary keyword.',
-  'Return strict JSON only, without Markdown, without code fences, and without explanation.',
-  'Use exactly these keys: title, secondaries, lsi.',
-  'Return at least 6 items in secondaries and at least 12 items in lsi when possible.',
-  'Do not include empty strings. Avoid repeating existing terms unless there is no better variant.',
-  '',
-  `Article language: ${article.article_language === 'en' ? 'English' : 'Arabic'}`,
-  `Article title: ${article.title || '-'}`,
-  `Primary keyword: ${keywords.primary}`,
-  `Current alternative forms: ${keywords.secondaries.join(', ') || '-'}`,
-  `Current LSI terms: ${keywords.lsi.join(', ') || '-'}`,
-  `Company/brand: ${keywords.company || '-'}`,
-  `Page context: pageType=${goalContext.pageType}; objective=${goalContext.objective}; audienceScope=${goalContext.audienceScope}; targetCountry=${goalContext.targetCountry || '-'}; searchIntent=${goalContext.searchIntent}`,
-  '',
-  'Required JSON shape:',
-  '{ "title": "one SEO title only if the current title is missing or generic", "secondaries": ["..."], "lsi": ["..."] }',
-].join('\n');
-
-const buildSemanticRetryPrompt = (
-  article: Record<string, any>,
-  keywords: KeywordsPayload,
-  goalContext: GoalContextPayload,
-  previousAnswer: string,
-): string => [
-  'Your previous answer could not be parsed into usable keyword lists.',
-  'Return JSON only with exactly these keys: title, secondaries, lsi.',
-  'secondaries must be an array of alternative keyword forms.',
-  'lsi must be an array of semantic LSI terms.',
-  '',
-  `Article language: ${article.article_language === 'en' ? 'English' : 'Arabic'}`,
-  `Primary keyword: ${keywords.primary}`,
-  `Article title: ${article.title || '-'}`,
-  `Page context: pageType=${goalContext.pageType}; objective=${goalContext.objective}; audienceScope=${goalContext.audienceScope}; targetCountry=${goalContext.targetCountry || '-'}; searchIntent=${goalContext.searchIntent}`,
-  '',
-  'Previous answer:',
-  truncateText(previousAnswer, 4000) || '-',
-  '',
-  'Required JSON only:',
-  '{ "title": "", "secondaries": ["..."], "lsi": ["..."] }',
-].join('\n');
 
 const buildProCompetitorPrompt = (
   article: Record<string, any>,
@@ -495,32 +402,45 @@ const runSemanticGeneration = async (
   }
 
   try {
+    const semanticInput: SemanticKeywordInput = {
+      title: toTrimmedString(article.title),
+      plainText: toTrimmedString(article.plain_text),
+      articleLanguage: article.article_language === 'en' ? 'en' : 'ar',
+      primaryKeyword: keywords.primary,
+      companyName: keywords.company,
+      existingSecondaries: keywords.secondaries,
+      existingLsi: keywords.lsi,
+      goalContext: goalContext as unknown as Record<string, unknown>,
+    };
+    const promptRegistry = await readPromptRegistrySettings();
+    const semanticPromptTemplate = getPromptTemplate(
+      promptRegistry.templates,
+      PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration,
+    );
     let gemini = await callGemini(
-      buildSemanticPrompt(article, keywords, goalContext),
+      renderSemanticKeywordPrompt(semanticInput, semanticPromptTemplate),
       'gemini',
       { ...telemetry, source: 'assigned_automation_semantic' },
     );
-    let semanticTerms = extractSemanticTerms(extractJson(gemini.text));
+    let semanticTerms = parseSemanticKeywordTerms(gemini.text, semanticInput);
     let incomingSecondaries = mergeUniqueTerms([], semanticTerms.secondaries, 12);
     let incomingLsi = mergeUniqueTerms([], semanticTerms.lsi, 30);
-    let hasMergedTerms = Boolean(
-      mergeUniqueTerms(keywords.secondaries, incomingSecondaries, 12).length &&
-      mergeUniqueTerms(keywords.lsi, incomingLsi, 30).length
-    );
+    let hasMergedTerms = hasUsableSemanticKeywordTerms(semanticTerms, true, true);
 
     if (!hasMergedTerms) {
       const retry = await callGemini(
-        buildSemanticRetryPrompt(article, keywords, goalContext, gemini.text),
+        buildSemanticKeywordRepairPrompt(
+          semanticInput,
+          semanticPromptTemplate,
+          gemini.text,
+        ),
         'gemini',
         { ...telemetry, source: 'assigned_automation_semantic_retry' },
       );
-      const retryTerms = extractSemanticTerms(extractJson(retry.text));
+      const retryTerms = parseSemanticKeywordTerms(retry.text, semanticInput);
       const retrySecondaries = mergeUniqueTerms([], retryTerms.secondaries, 12);
       const retryLsi = mergeUniqueTerms([], retryTerms.lsi, 30);
-      const retryHasMergedTerms = Boolean(
-        mergeUniqueTerms(keywords.secondaries, retrySecondaries, 12).length &&
-        mergeUniqueTerms(keywords.lsi, retryLsi, 30).length
-      );
+      const retryHasMergedTerms = hasUsableSemanticKeywordTerms(retryTerms, true, true);
 
       if (retryHasMergedTerms) {
         gemini = retry;

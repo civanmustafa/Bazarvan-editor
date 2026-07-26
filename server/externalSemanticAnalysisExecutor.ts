@@ -14,6 +14,11 @@ import {
   runExternalGeminiCall,
 } from './externalGeminiRunner';
 import {
+  PROMPT_TEMPLATE_IDS,
+  getPromptTemplate,
+} from '../constants/promptRegistry';
+import { readPromptRegistrySettings } from './promptRegistrySettings';
+import {
   buildExternalSemanticPrompt,
   buildExternalSemanticRepairPrompt,
   hasUsableExternalSemanticTerms,
@@ -251,10 +256,15 @@ const executeExternalSemanticAnalysis = async (
     });
   }
 
+  const promptRegistry = await readPromptRegistrySettings();
+  const semanticPromptTemplate = getPromptTemplate(
+    promptRegistry.templates,
+    PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration,
+  );
   const attempts: ExternalAnalysisJson[] = [];
   let finalCall = await runExternalGeminiCall({
     context,
-    prompt: buildExternalSemanticPrompt(articleInput),
+    prompt: buildExternalSemanticPrompt(articleInput, semanticPromptTemplate),
     model: aiSettings.model,
     allowModelFallback: aiSettings.allowModelFallback,
     requestIndex: 1,
@@ -275,11 +285,7 @@ const executeExternalSemanticAnalysis = async (
     });
   }
 
-  let terms = parseExternalSemanticTerms(
-    finalCall.text,
-    articleInput.keywords.primary,
-    articleInput.keywords.company,
-  );
+  let terms = parseExternalSemanticTerms(finalCall.text, articleInput);
 
   if (!hasUsableExternalSemanticTerms(
     terms,
@@ -294,7 +300,11 @@ const executeExternalSemanticAnalysis = async (
     });
     finalCall = await runExternalGeminiCall({
       context,
-      prompt: buildExternalSemanticRepairPrompt(articleInput, finalCall.text),
+      prompt: buildExternalSemanticRepairPrompt(
+        articleInput,
+        finalCall.text,
+        semanticPromptTemplate,
+      ),
       model: aiSettings.model,
       allowModelFallback: aiSettings.allowModelFallback,
       requestIndex: 2,
@@ -315,11 +325,7 @@ const executeExternalSemanticAnalysis = async (
       });
     }
 
-    terms = parseExternalSemanticTerms(
-      finalCall.text,
-      articleInput.keywords.primary,
-      articleInput.keywords.company,
-    );
+    terms = parseExternalSemanticTerms(finalCall.text, articleInput);
   }
 
   if (!hasUsableExternalSemanticTerms(
