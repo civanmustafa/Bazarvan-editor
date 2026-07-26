@@ -221,6 +221,8 @@ test('server workflow persists per-competitor maps without modifying content-wri
   assert.match(migration, /smartAnalysis\.combinedCommands/);
   assert.match(migration, /Historical completed results remain available/);
   assert.match(cleanupMigration, /Comprehensive competitor analysis/);
+  assert.match(cleanupMigration, /returns table \(\s*catalog_order integer,/);
+  assert.doesNotMatch(cleanupMigration, /returns table \(\s*sequence integer,/);
   assert.match(cleanupMigration, /- 'smartAnalysis\.competitorGapAnalysis'/);
   assert.match(cleanupMigration, /- 'smartAnalysis\.combinedCommands'/);
   assert.match(aiContext, /runCompetitorComparisonReadyCommand/);

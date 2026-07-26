@@ -4,7 +4,7 @@
 
 create or replace function public.external_analysis_command_catalog()
 returns table (
-  sequence integer,
+  catalog_order integer,
   command_id text,
   command_label text
 )
