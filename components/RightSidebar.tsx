@@ -2003,7 +2003,7 @@ ${readyCommandCompetitorBlocks}`;
             <div className="flex p-2 mx-2 mt-2 mb-1 bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
                 <button onClick={() => setAiSubTab('new')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'new' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{tRs.newAnalysis}</button>
                 <button onClick={() => setAiSubTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'history' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.aiHistory.title}</button>
-                <button onClick={() => setAiSubTab('external')} className={`flex-1 px-1 py-1.5 text-[10px] font-bold leading-4 rounded-md transition-all ${aiSubTab === 'external' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.locale === 'ar' ? 'نتائج التحليل الخارجي' : 'External results'}</button>
+                <button onClick={() => setAiSubTab('external')} className={`flex-1 px-1 py-1.5 text-[10px] font-bold leading-4 rounded-md transition-all ${aiSubTab === 'external' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.locale === 'ar' ? 'التحليل الخارجي' : 'External analysis'}</button>
             </div>
 
             <div className="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-4">
@@ -2249,7 +2249,7 @@ ${readyCommandCompetitorBlocks}`;
                     </>
                 ) : (
                     <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">جار تحميل النتائج...</div>}>
-                        {aiSubTab === 'history' ? <AIHistoryTab /> : <ExternalAnalysisResultsTab articleId={activeArticleId} />}
+                        {aiSubTab === 'history' ? <AIHistoryTab /> : <ExternalAnalysisResultsTab articleId={activeArticleId} articleTitle={articleTitle} />}
                     </React.Suspense>
                 )}
             </div>

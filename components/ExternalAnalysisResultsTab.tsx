@@ -31,10 +31,16 @@ import {
   type ExternalAnalysisJobRow,
   type ExternalAnalysisJobStatus,
 } from '../utils/externalAnalysis';
+import {
+  finishAiExecutionActivity,
+  updateAiExecutionActivity,
+} from '../utils/aiExecutionActivity';
+import { projectExternalAnalysisActivity } from '../utils/externalAnalysisActivityBridge';
 import type { AiContentPatch } from '../types';
 
 interface ExternalAnalysisResultsTabProps {
   articleId: string | null;
+  articleTitle?: string;
 }
 
 type ResultFilter = 'all' | 'active' | 'completed';
@@ -161,7 +167,10 @@ const toVisibleCompetitorComparisonResults = (
   }).sort((left, right) => left.competitorNumber - right.competitorNumber);
 };
 
-const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({ articleId }) => {
+const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
+  articleId,
+  articleTitle = '',
+}) => {
   const { t } = useUser();
   const locale = t.locale === 'en' ? 'en' : 'ar';
   const applyAiContentPatch = useAISelector(context => context.applyAiContentPatch);
@@ -178,6 +187,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   const [jobActionId, setJobActionId] = useState('');
   const [controlNotice, setControlNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const refreshRequestRef = useRef(0);
+  const syncedActivityFingerprintsRef = useRef<Map<string, string>>(new Map());
 
   const refreshJobs = useCallback(async (showLoading = false) => {
     const requestId = refreshRequestRef.current + 1;
@@ -260,6 +270,51 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
       void supabase.removeChannel(channel);
     };
   }, [articleId, refreshJobs]);
+
+  useEffect(() => {
+    const orderedJobs = [...jobs].sort((left, right) => {
+      const leftRunning = left.status === 'running' ? 1 : 0;
+      const rightRunning = right.status === 'running' ? 1 : 0;
+      if (leftRunning !== rightRunning) return leftRunning - rightRunning;
+      return new Date(left.updated_at).getTime() - new Date(right.updated_at).getTime();
+    });
+
+    orderedJobs.forEach(job => {
+      const projection = projectExternalAnalysisActivity(job, articleTitle);
+      const previousFingerprint = syncedActivityFingerprintsRef.current.get(projection.activityId);
+      const shouldStartTracking = job.status === 'running';
+      if (!previousFingerprint && !shouldStartTracking) return;
+      if (previousFingerprint === projection.fingerprint) return;
+      syncedActivityFingerprintsRef.current.set(projection.activityId, projection.fingerprint);
+
+      const {
+        activityId,
+        fingerprint: _fingerprint,
+        outcome,
+        ...activity
+      } = projection;
+
+      if (outcome) {
+        finishAiExecutionActivity(activityId, {
+          ...activity,
+          outcome,
+          completed: true,
+          cancel: null,
+        });
+        return;
+      }
+
+      updateAiExecutionActivity(activityId, {
+        ...activity,
+        state: 'running',
+        completed: false,
+        cancel: async () => {
+          await cancelExternalAnalysisJob(job.article_id, job.id);
+          await refreshJobs(false);
+        },
+      });
+    });
+  }, [articleTitle, jobs, refreshJobs]);
 
   const semanticJobs = jobs.filter(job => job.job_type === 'semantic_keywords_lsi');
   const latestSemanticJob = semanticJobs[0] || null;
@@ -681,7 +736,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   return (
     <div className="space-y-4 text-gray-700 dark:text-gray-200" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
       <div className="flex items-center justify-between gap-2 border-b border-gray-200 pb-3 dark:border-[#3C3C3C]">
-        <div className="text-sm font-black text-gray-800 dark:text-gray-100">{locale === 'ar' ? 'نتائج التحليل الخارجي' : 'External analysis results'}</div>
+        <div className="text-sm font-black text-gray-800 dark:text-gray-100">{locale === 'ar' ? 'التحليل الخارجي' : 'External analysis'}</div>
         <button type="button" onClick={() => void refreshJobs(true)} disabled={loading} className="rounded p-1.5 text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] disabled:opacity-50" title={locale === 'ar' ? 'تحديث' : 'Refresh'}>
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
         </button>
