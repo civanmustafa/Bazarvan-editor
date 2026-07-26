@@ -475,10 +475,20 @@ export const hasUsableSemanticKeywordTerms = (
   terms: Pick<SemanticKeywordTerms, 'secondaries' | 'lsi'>,
   needsSecondaries: boolean,
   needsLsi: boolean,
-): boolean => (
-  (!needsSecondaries || terms.secondaries.length >= 4)
-  && (!needsLsi || terms.lsi.length >= 10)
-);
+): boolean => {
+  if (!needsSecondaries && !needsLsi) return true;
+
+  /*
+   * The requested 4 alternatives and 10 LSI terms are generation targets, not
+   * an all-or-nothing acceptance threshold. Keep every deterministically valid
+   * item returned by the model; only retry when none of the requested lists
+   * contains a usable item.
+   */
+  return (
+    (needsSecondaries && terms.secondaries.length > 0)
+    || (needsLsi && terms.lsi.length > 0)
+  );
+};
 
 export const describeSemanticKeywordValidationFailure = (
   terms: Pick<SemanticKeywordTerms, 'secondaries' | 'lsi'>,
@@ -487,12 +497,12 @@ export const describeSemanticKeywordValidationFailure = (
   needsLsi = true,
 ): string => {
   const constraints = getSemanticKeywordConstraints(input);
-  const shortages = [
-    needsSecondaries && terms.secondaries.length < 4
-      ? `الصيغ البديلة الصالحة ${terms.secondaries.length}/4`
+  const missingLists = [
+    needsSecondaries && terms.secondaries.length === 0
+      ? 'لم تُرجع أي صيغة بديلة صالحة'
       : '',
-    needsLsi && terms.lsi.length < 10
-      ? `كلمات LSI الصالحة ${terms.lsi.length}/10`
+    needsLsi && terms.lsi.length === 0
+      ? 'لم تُرجع أي كلمة LSI صالحة'
       : '',
   ].filter(Boolean);
   const activeConstraints = [
@@ -504,5 +514,5 @@ export const describeSemanticKeywordValidationFailure = (
     ? `القيود النشطة المستخرجة من الكلمة الأساسية فقط: ${activeConstraints.join('، ')}.`
     : 'لم يُكتشف في الكلمة الأساسية رقم أو موقع أو قومية إلزامية.';
 
-  return `لم تُعتمد نتيجة التوليد: ${shortages.join('، ') || 'النتيجة غير مكتملة'}. ${constraintSummary} لا تُفرض هذه القيود على كلمات LSI. حاول مرة أخرى.`;
+  return `تعذر اعتماد نتيجة التوليد: ${missingLists.join('، ') || 'لم تُرجع أي نتيجة صالحة'}. ${constraintSummary} لا تُفرض هذه القيود على كلمات LSI. حاول مرة أخرى.`;
 };

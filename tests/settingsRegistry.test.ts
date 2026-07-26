@@ -394,6 +394,41 @@ test('semantic keyword constraints activate independently from the primary keywo
   }), noConstraintInput);
   assert.equal(policy.hasUsableSemanticKeywordTerms(unconstrainedTerms, true, true), true);
 
+  const partialTerms = {
+    secondaries: [
+      'أحسن أدوات التسويق الإلكتروني',
+      'حلول تسويق رقمي احترافية',
+    ],
+    lsi: [
+      'تحليل الجمهور',
+      'رحلة العميل',
+      'قياس التحويل',
+      'إدارة الحملات',
+      'تحسين الإعلانات',
+      'استراتيجية المحتوى',
+    ],
+  };
+  assert.equal(
+    policy.hasUsableSemanticKeywordTerms(partialTerms, true, true),
+    true,
+    'valid partial results must be accepted below the 4/10 generation targets',
+  );
+  assert.equal(
+    policy.hasUsableSemanticKeywordTerms({ secondaries: partialTerms.secondaries, lsi: [] }, true, true),
+    true,
+    'alternative forms must be accepted even when LSI is empty',
+  );
+  assert.equal(
+    policy.hasUsableSemanticKeywordTerms({ secondaries: [], lsi: partialTerms.lsi }, true, true),
+    true,
+    'LSI terms must be accepted even when alternative forms are empty',
+  );
+  assert.equal(
+    policy.hasUsableSemanticKeywordTerms({ secondaries: [], lsi: [] }, true, true),
+    false,
+    'a retry is still required when no requested list contains a valid item',
+  );
+
   const numberOnly = policy.getSemanticKeywordConstraints({
     ...baseInput,
     primaryKeyword: 'أفضل 7 أدوات إدارة مشاريع',
@@ -430,8 +465,8 @@ test('semantic keyword constraints activate independently from the primary keywo
     { secondaries: [], lsi: [] },
     { ...baseInput, primaryKeyword: 'أفضل 7 أدوات إدارة مشاريع' },
   );
-  assert.match(failureMessage, /الصيغ البديلة الصالحة 0\/4/);
-  assert.match(failureMessage, /كلمات LSI الصالحة 0\/10/);
+  assert.match(failureMessage, /لم تُرجع أي صيغة بديلة صالحة/);
+  assert.match(failureMessage, /لم تُرجع أي كلمة LSI صالحة/);
   assert.match(failureMessage, /الرقم \(7\)/);
   assert.doesNotMatch(failureMessage, /الموقع \(/);
   assert.doesNotMatch(failureMessage, /القومية \(/);

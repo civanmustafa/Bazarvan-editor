@@ -176,9 +176,16 @@ const applySemanticTerms = async (options: {
   }
 
   const rawKeywords = isRecord(latest.article.keywords) ? latest.article.keywords : {};
+  /*
+   * A partial valid response is still useful. Update each empty list only when
+   * Gemini returned valid items for that specific list, so a successful
+   * alternatives result is never discarded because LSI is empty (or vice versa).
+   */
+  const shouldApplySecondaries = targets.needsSecondaries && options.terms.secondaries.length > 0;
+  const shouldApplyLsi = targets.needsLsi && options.terms.lsi.length > 0;
   const appliedFields = [
-    targets.needsSecondaries ? 'secondaries' : '',
-    targets.needsLsi ? 'lsi' : '',
+    shouldApplySecondaries ? 'secondaries' : '',
+    shouldApplyLsi ? 'lsi' : '',
   ].filter(Boolean);
   const now = new Date().toISOString();
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
@@ -186,10 +193,10 @@ const applySemanticTerms = async (options: {
     .update({
       keywords: {
         ...rawKeywords,
-        secondaries: targets.needsSecondaries
+        secondaries: shouldApplySecondaries
           ? options.terms.secondaries
           : latestKeywords.secondaries,
-        lsi: targets.needsLsi
+        lsi: shouldApplyLsi
           ? options.terms.lsi
           : latestKeywords.lsi,
       },
