@@ -34,6 +34,7 @@ export interface GoalContext {
   brandVoice: string;
   topicSensitivity: string;
   searchIntent: string;
+  generatedBrief: string;
 }
 
 export type ClientGoalContexts = Record<string, GoalContext>;

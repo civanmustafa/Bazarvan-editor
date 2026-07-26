@@ -185,3 +185,44 @@ test('smart brief UI contains checkbox multi-select and a manual Enter-to-add in
   assert.match(source, /serializeGoalContextMultiValue/);
   assert.match(source, /multiChoiceSelect/);
 });
+
+test('generated smart brief is stored in an independent editable card without replacing manual choices', async () => {
+  const [goalTab, aiContext] = await Promise.all([
+    readFile(fileURLToPath(new URL('../components/GoalTab.tsx', import.meta.url)), 'utf8'),
+    readFile(fileURLToPath(new URL('../contexts/AIContext.tsx', import.meta.url)), 'utf8'),
+  ]);
+
+  assert.match(goalTab, /id="generated-content-brief"/);
+  assert.match(goalTab, /value=\{goalContext\.generatedBrief\}/);
+  assert.match(goalTab, /generatedBrief: result\.briefText/);
+  assert.doesNotMatch(goalTab, /setGoalContext\(result\.context\)/);
+  assert.match(aiContext, /Promise<\{ briefText\?: string/);
+  assert.match(aiContext, /manual_choices_json/);
+  assert.match(aiContext, /existing_generated_brief/);
+  assert.match(aiContext, /return \{ briefText \}/);
+  assert.doesNotMatch(aiContext, /normalizeGeneratedGoalContext/);
+});
+
+test('generated brief persists with the article but is excluded from reusable client defaults', async () => {
+  const {
+    normalizeClientGoalContexts,
+    normalizeGoalContext,
+  } = await importWorkspaceModule('../utils/goalContext.ts');
+  const articleContext = normalizeGoalContext({
+    pageType: 'article',
+    objective: 'educate',
+    audienceScope: 'global',
+    searchIntent: 'informational',
+    generatedBrief: '  موجز المقالة القابل للتحرير  ',
+  });
+
+  assert.equal(articleContext.generatedBrief, 'موجز المقالة القابل للتحرير');
+  assert.equal(
+    normalizeGoalContext({ contentBrief: 'موجز قديم' } as any).generatedBrief,
+    'موجز قديم',
+  );
+  assert.equal(
+    normalizeClientGoalContexts({ 'اسم العميل': articleContext })['اسم العميل'].generatedBrief,
+    '',
+  );
+});

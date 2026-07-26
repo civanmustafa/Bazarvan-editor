@@ -56,6 +56,7 @@ const GOAL_CONTEXT_FREE_TEXT_KEYS = new Set<keyof GoalContext>([
   'evidenceRequirements',
   'freshnessRequirements',
   'brandVoice',
+  'generatedBrief',
 ]);
 
 export const parseGoalContextMultiValue = (value: string): string[] => {
@@ -298,6 +299,11 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
     brandVoice: asStoredString(normalized.brandVoice).trim(),
     topicSensitivity: asStoredString(normalized.topicSensitivity).trim(),
     searchIntent: normalizeMappedChoice(normalized.searchIntent, intentMap, INITIAL_GOAL_CONTEXT.searchIntent),
+    generatedBrief: asStoredString(
+      normalized.generatedBrief ||
+      (source as Record<string, unknown>).smartBrief ||
+      (source as Record<string, unknown>).contentBrief,
+    ).trim(),
   };
 };
 
@@ -366,7 +372,10 @@ export const normalizeClientGoalContexts = (
   return Object.entries(value).reduce<ClientGoalContexts>((acc, [companyName, context]) => {
     const normalizedCompany = companyName.trim();
     if (normalizedCompany) {
-      acc[normalizedCompany] = normalizeGoalContext(context);
+      acc[normalizedCompany] = normalizeGoalContext({
+        ...context,
+        generatedBrief: '',
+      });
     }
     return acc;
   }, {});
@@ -680,6 +689,12 @@ export const formatGoalContextForCopy = (
       lines.push(value || '-');
       lines.push('');
     });
+
+  if (normalizedContext.generatedBrief) {
+    lines.push(`${t.generatedBriefLabel}:`);
+    lines.push(normalizedContext.generatedBrief);
+    lines.push('');
+  }
 
   return lines.join('\n').trim();
 };

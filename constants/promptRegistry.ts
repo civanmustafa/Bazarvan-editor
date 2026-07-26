@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 10;
+export const PROMPT_REGISTRY_VERSION = 11;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -197,15 +197,15 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     id: PROMPT_TEMPLATE_IDS.contentBriefGeneration,
     group: PROMPT_GROUP_IDS.writing,
     label: 'توليد موجز المقالة الذكي',
-    description: 'يحوّل عنوان المقالة والكلمات المستهدفة والسياق الحالي إلى موجز تحريري كامل قبل بدء الكتابة.',
-    usage: 'يعمل عند الضغط على زر توليد السياق والجمهور، ويملأ حقول الموجز القابلة للمراجعة دون كتابة المقالة.',
-    variables: ['{{article_title}}', '{{primary_keyword}}', '{{alternative_keywords}}', '{{article_language}}', '{{allowed_values_json}}', '{{current_brief_json}}'],
-    requiredVariables: ['article_title', 'primary_keyword', 'alternative_keywords', 'article_language', 'allowed_values_json', 'current_brief_json'],
+    description: 'ينشئ موجزًا تحريريًا نصيًا مستقلاً وقابلاً للتعديل، مع إبقاء اختيارات المستخدم اليدوية دون تغيير.',
+    usage: 'يعمل عند الضغط على زر التوليد، ويضع النتيجة في بطاقة نصية أسفل الزر. تستخدمه الكتابة والتحليلات مع الخيارات اليدوية، ولا يعبئها أو يستبدلها.',
+    variables: ['{{article_title}}', '{{primary_keyword}}', '{{alternative_keywords}}', '{{article_language}}', '{{manual_choices_json}}', '{{existing_generated_brief}}'],
+    requiredVariables: ['article_title', 'primary_keyword', 'alternative_keywords', 'article_language', 'manual_choices_json', 'existing_generated_brief'],
     attachments: [
       attachment('articleIdentity', 'هوية المقالة', 'العنوان ولغة المقالة الحالية.'),
       attachment('keywords', 'الكلمات المستهدفة', 'الكلمة الأساسية والصيغ البديلة المتوفرة.'),
-      attachment('currentBrief', 'الموجز الحالي', 'القيم الحالية للاحتفاظ بما أدخله المستخدم وتحسين الناقص فقط.'),
-      attachment('allowedValues', 'قاموس القيم', 'القيم المسموحة للحقول الاختيارية حتى تبقى النتيجة قابلة للحفظ والفحص.'),
+      attachment('manualChoices', 'اختيارات المستخدم اليدوية', 'القيم المعبأة فقط هي قيود وسياق للقراءة، ولا يجوز للأمر تعديلها أو اقتراح بدائل لها.'),
+      attachment('existingGeneratedBrief', 'الموجز النصي السابق', 'النص الموجود في البطاقة لإعادة صياغته أو تحسينه عند طلب التوليد مجددًا.'),
     ],
   },
   {
@@ -552,7 +552,7 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 أرجع JSON صالحًا فقط بهذا الشكل:
 { "suggestions": [ { "label": "اقتراح 1", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] }, { "label": "اقتراح 2", "fixedText": "...", "criteriaChecks": [ { "criterionTitle": "اسم المعيار", "before": "الحالة قبل الإصلاح", "after": "الحالة بعد التعديل", "required": "المطلوب", "status": "pass" } ] } ] }`,
 
-  [PROMPT_TEMPLATE_IDS.contentBriefGeneration]: `أنت خبير SEO واستراتيجية محتوى. أنشئ موجز مقالة ذكيًا قبل الكتابة، ولا تكتب المقالة أو مخططها.
+  [PROMPT_TEMPLATE_IDS.contentBriefGeneration]: `أنت خبير SEO واستراتيجية محتوى. أنشئ موجزًا تحريريًا نصيًا مستقلاً قبل الكتابة، ولا تكتب المقالة أو مخططها.
 
 بيانات المقالة:
 - العنوان: {{article_title}}
@@ -560,23 +560,32 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 - الصيغ البديلة: {{alternative_keywords}}
 - لغة المقالة: {{article_language}}
 
-الموجز الحالي الذي يجب احترام قيمه الصريحة وتحسين الحقول الناقصة:
-{{current_brief_json}}
+اختيارات المستخدم اليدوية (للقراءة فقط):
+{{manual_choices_json}}
 
-القيم المسموحة للحقول الاختيارية:
-{{allowed_values_json}}
+الموجز النصي الموجود حاليًا في البطاقة:
+{{existing_generated_brief}}
 
-استنتج بدقة نوع الصفحة وهدفها ونية البحث، ثم صف الجمهور الحقيقي ومستوى معرفته واحتياجاته والنتيجة التي يجب أن يصل إليها والإجراء المناسب بعد القراءة. حدد المرحلة التسويقية، والزاوية التي تمنح المقالة قيمة إضافية، ونوع الأدلة المطلوبة، وحساسية الموضوع، ومتطلبات حداثة المعلومات، ونبرة العلامة التجارية.
+أنشئ موجزًا عمليًا واضحًا يوجه التحليل والكتابة، ويغطي بحسب المعلومات المتاحة فقط:
+- خلاصة الهدف ونية البحث ونوع الصفحة.
+- الجمهور واحتياجاته ومستوى معرفته والنتيجة المطلوبة منه.
+- نطاق التغطية والزاوية المميزة وما يجب أن تتفوق به المقالة.
+- متطلبات الأدلة والتحقق وحداثة المعلومات وحساسية الموضوع.
+- توجيهات تنفيذية للنبرة والعمق والأمثلة والدعوة المناسبة لاتخاذ إجراء.
 
 قواعد:
+- لا تعدل خيارات المستخدم اليدوية، ولا تُرجع قيمًا بديلة لها، ولا تحاول تعبئة أي حقل من حقولها.
+- تعامل مع القيم اليدوية المعبأة كقيود ملزمة، وتجاهل الحقول الفارغة بدل اختراع اختيار للمستخدم.
+- عند وجود موجز نصي سابق، حسّنه أو أعد صياغته داخل النتيجة الجديدة دون تغيير الخيارات اليدوية.
 - لا تدّع معرفة بيانات لا تظهر من العنوان أو الكلمات؛ استخدم صياغة عملية محافظة عند عدم اليقين.
-- لا تضع اسم دولة أو مدينة إلا إذا كان واضحًا، واجعل audienceScope عالميًا عند غياب الاستهداف الجغرافي.
-- اجعل evidenceRequirements أكثر صرامة للموضوعات الصحية أو المالية أو القانونية أو المتعلقة بالسلامة.
-- اجعل uniqueAngle قيمة مفيدة أصلية، لا وعدًا تسويقيًا مبالغًا فيه.
+- لا تضف استهدافًا جغرافيًا أو جمهورًا أو مرحلة تسويقية على أنها اختيار مؤكد ما لم تكن ظاهرة في المدخلات.
+- شدد متطلبات الأدلة للموضوعات الصحية أو المالية أو القانونية أو المتعلقة بالسلامة.
+- اجعل الزاوية قيمة مفيدة أصلية، لا وعدًا تسويقيًا مبالغًا فيه.
+- اكتب الموجز بلغة المقالة، وبحجم عملي مركز يصلح كتعليمات للأنظمة اللاحقة.
 - أرجع JSON فقط دون Markdown أو شرح.
 
 الشكل الإلزامي:
-{"pageType":"article","objective":"educate","audienceScope":"global","targetCountry":"","targetAudience":"وصف محدد للجمهور","audienceKnowledgeLevel":"mixed","audienceNeeds":"المشكلات والأسئلة الأساسية","readerOutcome":"النتيجة المعرفية أو العملية","desiredAction":"الإجراء الطبيعي بعد القراءة","marketingStage":"awareness","uniqueAngle":"القيمة الجديدة للمقالة","evidenceRequirements":"الأدلة المطلوبة","freshnessRequirements":"ما يحتاج معلومات حديثة","brandVoice":"نبرة واضحة ومحددة","topicSensitivity":"standard","searchIntent":"informational"}`,
+{"briefText":"نص الموجز التحريري الكامل القابل للتعديل"}`,
 
   [PROMPT_TEMPLATE_IDS.competitorIndex]: `نفّذ مرحلة بناء مصفوفة تغطية المنافسين فقط.
 

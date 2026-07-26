@@ -85,13 +85,18 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     try {
       const result = await generateGoalContext();
       if (result.cancelled) return;
-      if (result.error || !result.context) {
+      if (result.error || !result.briefText) {
         setIsGoalContextGenerationSuccess(false);
         setGoalContextGenerationStatus(result.error || t.goalContextGenerationFailed);
         return;
       }
 
-      setGoalContext(result.context);
+      // The AI-generated brief is article-specific. Keep every user-selected
+      // option untouched and update only the independent editable text block.
+      setGoalContext(previousContext => ({
+        ...previousContext,
+        generatedBrief: result.briefText || '',
+      }));
       setLastSavedCompany('');
       setIsGoalContextGenerationSuccess(true);
       setGoalContextGenerationStatus(t.goalContextGenerated);
@@ -137,6 +142,35 @@ const GoalTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 {isGeneratingGoalContext ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                 <span>{isGeneratingGoalContext ? t.generatingGoalContext : t.generateGoalContext}</span>
               </button>
+              <div className="rounded-xl border border-[#d4af37]/35 bg-[#d4af37]/5 p-3 dark:bg-[#d4af37]/10">
+                <div className="mb-2 flex items-center gap-2">
+                  <Sparkles size={15} className="text-[#b8922e] dark:text-[#f2d675]" />
+                  <label
+                    htmlFor="generated-content-brief"
+                    className="text-xs font-bold text-gray-800 dark:text-gray-100"
+                  >
+                    {t.generatedBriefLabel}
+                  </label>
+                </div>
+                <textarea
+                  id="generated-content-brief"
+                  dir="auto"
+                  value={goalContext.generatedBrief}
+                  onChange={event => {
+                    setGoalContextGenerationStatus('');
+                    setGoalContext(previousContext => ({
+                      ...previousContext,
+                      generatedBrief: event.target.value,
+                    }));
+                  }}
+                  rows={10}
+                  placeholder={t.generatedBriefPlaceholder}
+                  className="w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm leading-7 text-gray-800 outline-none transition focus:border-[#d4af37] focus:ring-2 focus:ring-[#d4af37]/20 dark:border-[#4A4A4A] dark:bg-[#202020] dark:text-gray-100"
+                />
+                <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                  {t.generatedBriefHelp}
+                </p>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                     type="button"

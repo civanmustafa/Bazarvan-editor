@@ -449,6 +449,7 @@ export const INITIAL_GOAL_CONTEXT = {
   brandVoice: '',
   topicSensitivity: '',
   searchIntent: '',
+  generatedBrief: '',
 };
 
 export const MANUAL_DRAFT_KEY = 'editor-manual-draft-content';

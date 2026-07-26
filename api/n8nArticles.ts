@@ -392,6 +392,21 @@ const getGoalContextPayload = (body: Record<string, any>) => {
   const objective = getFirstString(body, ['objective', 'pageObjective', 'page_objective']) || getFirstString(source, ['objective', 'pageObjective', 'page_objective']);
   const audienceScope = getFirstString(body, ['audienceScope', 'audience_scope']) || getFirstString(source, ['audienceScope', 'audience_scope', 'scope']);
   const searchIntent = getFirstString(body, ['searchIntent', 'search_intent', 'intent']) || getFirstString(source, ['searchIntent', 'search_intent', 'intent']);
+  const generatedBrief = getFirstString(body, [
+    'generatedBrief',
+    'generated_brief',
+    'smartBrief',
+    'smart_brief',
+    'contentBrief',
+    'content_brief',
+  ]) || getFirstString(source, [
+    'generatedBrief',
+    'generated_brief',
+    'smartBrief',
+    'smart_brief',
+    'contentBrief',
+    'content_brief',
+  ]);
 
   return compactObject({
     pageType: resolveMappedChoice(pageType, PAGE_TYPE_ALIASES, 'article'),
@@ -399,6 +414,7 @@ const getGoalContextPayload = (body: Record<string, any>) => {
     audienceScope: resolveMappedChoice(audienceScope, AUDIENCE_SCOPE_ALIASES, 'global'),
     targetCountry: getFirstString(body, ['targetCountry', 'target_country', 'targetLocation', 'target_location']) || getFirstString(source, ['targetCountry', 'target_country', 'targetLocation', 'target_location', 'country']),
     searchIntent: resolveMappedChoice(searchIntent, SEARCH_INTENT_ALIASES, 'informational'),
+    generatedBrief,
   });
 };
 

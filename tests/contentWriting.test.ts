@@ -55,6 +55,7 @@ const createReadyArticle = (competitorContents: string[]) => ({
     brandVoice: 'واضح وخبير ومباشر.',
     topicSensitivity: 'standard',
     searchIntent: 'informational',
+    generatedBrief: 'موجز تحريري مستقل يوجه التحليل والكتابة دون تغيير اختيارات المستخدم.',
   },
   competitors: competitorContents.map((content, index) => ({
     position: index + 1,
@@ -76,6 +77,10 @@ test('content-writing context preserves all three competitor texts without trunc
   const goalContext = JSON.parse(bundle.variables.goal_context);
   assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'desiredAction'));
   assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'freshnessRequirements'));
+  assert.equal(
+    goalContext.generatedBrief,
+    'موجز تحريري مستقل يوجه التحليل والكتابة دون تغيير اختيارات المستخدم.',
+  );
   assert.equal(
     competitors[0].chunks.map((chunk: { text: string }) => chunk.text).join(''),
     longContent,
@@ -183,6 +188,7 @@ test('smart brief text fields preserve spaces while typing and trim only at norm
     'evidenceRequirements',
     'freshnessRequirements',
     'brandVoice',
+    'generatedBrief',
   ];
 
   for (const key of textKeys) {

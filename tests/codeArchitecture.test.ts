@@ -502,9 +502,14 @@ test('smart content brief keeps only its core fields required and is controlled 
   assert.match(contextBuilder, /if \(value\) serialized\[key\] = value/);
   assert.doesNotMatch(contextBuilder, /goal_context\.targetAudience/);
   assert.match(promptRegistry, /contentWriting\.contentBriefGeneration/);
-  assert.match(promptRegistry, /current_brief_json/);
+  assert.match(promptRegistry, /manual_choices_json/);
+  assert.match(promptRegistry, /existing_generated_brief/);
+  assert.match(promptRegistry, /\{"briefText":/);
   assert.match(promptRegistry, /موجز المقالة الذكي/);
   assert.match(promptRegistry, /لا تُرفق بقية حقول الجمهور/);
+  assert.match(goalTab, /generatedBrief: result\.briefText/);
+  assert.doesNotMatch(goalTab, /setGoalContext\(result\.context\)/);
+  assert.match(contextBuilder, /'generatedBrief'/);
   assert.match(aiContext, /getPromptTemplate\([\s\S]*PROMPT_TEMPLATE_IDS\.contentBriefGeneration/);
   assert.doesNotMatch(
     `${goalTab}\n${contextBuilder}\n${promptRegistry}\n${aiContext}`,
@@ -528,7 +533,7 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
   assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 10/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 11/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);

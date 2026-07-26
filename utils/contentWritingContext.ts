@@ -196,6 +196,7 @@ const createGoalContextValue = (goalContext: Partial<GoalContext>): string => {
     'evidenceRequirements',
     'brandVoice',
     'topicSensitivity',
+    'generatedBrief',
   ];
   optionalFields.forEach(key => {
     const value = toText(goalContext[key]);

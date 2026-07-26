@@ -124,6 +124,7 @@ const GOAL_CONTEXT_LABELS: Record<string, string> = {
     brandVoice: 'نبرة العلامة التجارية',
     topicSensitivity: 'حساسية الموضوع',
     searchIntent: 'نية البحث',
+    generatedBrief: 'الموجز النصي المولد',
 };
 
 const GOAL_CONTEXT_VALUE_LABELS: Record<string, string> = {
@@ -207,16 +208,6 @@ const getMissingRequiredArticleAiFields = (
     return missingFields;
 };
 
-const GOAL_CONTEXT_ALLOWED_VALUES = {
-    pageType: ['article', 'news', 'service', 'category', 'comparison', 'product', 'landing', 'guide'],
-    objective: ['educate', 'compare', 'convert', 'category-support', 'trust', 'support'],
-    audienceScope: ['local', 'country', 'regional', 'global'],
-    audienceKnowledgeLevel: ['beginner', 'intermediate', 'expert', 'mixed'],
-    marketingStage: ['awareness', 'consideration', 'decision', 'retention'],
-    topicSensitivity: ['standard', 'health', 'financial', 'legal', 'safety'],
-    searchIntent: ['informational', 'commercial', 'commercial-support', 'transactional', 'navigational', 'support-intent'],
-} as const;
-
 const getArticleLanguageLabel = (articleLanguage: string): string => (
     articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية'
 );
@@ -242,122 +233,59 @@ const buildAiOutputLanguageInstruction = (articleLanguage: string): string => (
         ].join('\n')
 );
 
-const normalizeTokenForMatching = (value: string) => value.trim().toLowerCase();
-
-const resolveGoalContextChoice = (
-    rawValue: unknown,
-    allowedValues: readonly string[],
-    fallbackValue: string,
-): string => {
-    if (typeof rawValue !== 'string') return fallbackValue;
-    const normalizedValue = normalizeTokenForMatching(rawValue);
-    const matchedValue = allowedValues.find(value => normalizeTokenForMatching(value) === normalizedValue);
-    if (matchedValue) return matchedValue;
-
-    const matchedLabel = allowedValues.find(value => (
-        normalizeTokenForMatching(GOAL_CONTEXT_VALUE_LABELS[value] || '') === normalizedValue
-    ));
-    return matchedLabel || fallbackValue;
-};
-
-const getFirstGeneratedValue = (record: Record<string, unknown>, keys: string[]): unknown => {
-    return keys.map(key => record[key]).find(value => value != null);
-};
-
-const getFirstGeneratedTextValue = (record: Record<string, unknown>, keys: string[]): string => {
-    const value = getFirstGeneratedValue(record, keys);
-    return typeof value === 'string' ? value.trim() : '';
-};
-
-const normalizeGeneratedGoalContext = (rawValue: unknown, currentContext: GoalContext): GoalContext | null => {
-    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) return null;
-    const root = rawValue as Record<string, unknown>;
-    const nestedContext = root.context || root.goalContext || root.goal_context;
-    const record = nestedContext && typeof nestedContext === 'object' && !Array.isArray(nestedContext)
-        ? nestedContext as Record<string, unknown>
-        : root;
-    const normalizedCurrent = normalizeGoalContext(currentContext);
-
-    const audienceScope = resolveGoalContextChoice(
-        getFirstGeneratedValue(record, ['audienceScope', 'audience_scope', 'scope']),
-        GOAL_CONTEXT_ALLOWED_VALUES.audienceScope,
-        normalizedCurrent.audienceScope,
+const normalizeGeneratedBriefText = (rawValue: unknown, rawResponse: string): string => {
+    const readCandidate = (value: unknown): string => (
+        typeof value === 'string' ? value.trim() : ''
     );
-    const generatedTargetLocation = getFirstGeneratedTextValue(record, [
-        'targetCountry',
-        'target_country',
-        'targetLocation',
-        'target_location',
-        'location',
-        'market',
-        'country',
-        'region',
-        'city',
-    ]);
+    let candidate = '';
 
-    return normalizeGoalContext({
-        pageType: resolveGoalContextChoice(
-            getFirstGeneratedValue(record, ['pageType', 'page_type', 'type']),
-            GOAL_CONTEXT_ALLOWED_VALUES.pageType,
-            normalizedCurrent.pageType,
-        ),
-        objective: resolveGoalContextChoice(
-            getFirstGeneratedValue(record, ['objective', 'pageObjective', 'page_objective']),
-            GOAL_CONTEXT_ALLOWED_VALUES.objective,
-            normalizedCurrent.objective,
-        ),
-        audienceScope,
-        targetCountry: audienceScope === 'global'
-            ? ''
-            : generatedTargetLocation || normalizedCurrent.targetCountry,
-        targetAudience: getFirstGeneratedTextValue(record, ['targetAudience', 'target_audience', 'audience'])
-            || normalizedCurrent.targetAudience,
-        audienceKnowledgeLevel: resolveGoalContextChoice(
-            getFirstGeneratedValue(record, ['audienceKnowledgeLevel', 'audience_knowledge_level', 'knowledgeLevel']),
-            GOAL_CONTEXT_ALLOWED_VALUES.audienceKnowledgeLevel,
-            normalizedCurrent.audienceKnowledgeLevel,
-        ),
-        audienceNeeds: getFirstGeneratedTextValue(record, ['audienceNeeds', 'audience_needs', 'needs'])
-            || normalizedCurrent.audienceNeeds,
-        readerOutcome: getFirstGeneratedTextValue(record, ['readerOutcome', 'reader_outcome', 'outcome'])
-            || normalizedCurrent.readerOutcome,
-        desiredAction: getFirstGeneratedTextValue(record, ['desiredAction', 'desired_action', 'callToAction'])
-            || normalizedCurrent.desiredAction,
-        marketingStage: resolveGoalContextChoice(
-            getFirstGeneratedValue(record, ['marketingStage', 'marketing_stage', 'journeyStage']),
-            GOAL_CONTEXT_ALLOWED_VALUES.marketingStage,
-            normalizedCurrent.marketingStage,
-        ),
-        uniqueAngle: getFirstGeneratedTextValue(record, ['uniqueAngle', 'unique_angle', 'valueProposition'])
-            || normalizedCurrent.uniqueAngle,
-        evidenceRequirements: getFirstGeneratedTextValue(record, ['evidenceRequirements', 'evidence_requirements'])
-            || normalizedCurrent.evidenceRequirements,
-        freshnessRequirements: getFirstGeneratedTextValue(record, ['freshnessRequirements', 'freshness_requirements'])
-            || normalizedCurrent.freshnessRequirements,
-        brandVoice: getFirstGeneratedTextValue(record, ['brandVoice', 'brand_voice', 'tone'])
-            || normalizedCurrent.brandVoice,
-        topicSensitivity: resolveGoalContextChoice(
-            getFirstGeneratedValue(record, ['topicSensitivity', 'topic_sensitivity', 'sensitivity']),
-            GOAL_CONTEXT_ALLOWED_VALUES.topicSensitivity,
-            normalizedCurrent.topicSensitivity,
-        ),
-        searchIntent: resolveGoalContextChoice(
-            getFirstGeneratedValue(record, ['searchIntent', 'search_intent', 'intent']),
-            GOAL_CONTEXT_ALLOWED_VALUES.searchIntent,
-            normalizedCurrent.searchIntent,
-        ),
-    });
+    if (typeof rawValue === 'string') {
+        candidate = readCandidate(rawValue);
+    } else if (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)) {
+        const root = rawValue as Record<string, unknown>;
+        const nested = root.result && typeof root.result === 'object' && !Array.isArray(root.result)
+            ? root.result as Record<string, unknown>
+            : {};
+        candidate = [
+            root.briefText,
+            root.generatedBrief,
+            root.contentBrief,
+            root.brief,
+            root.summary,
+            nested.briefText,
+            nested.generatedBrief,
+            nested.contentBrief,
+            nested.brief,
+            nested.summary,
+        ].map(readCandidate).find(Boolean) || '';
+    }
+
+    if (!candidate) {
+        const plainResponse = rawResponse
+            .replace(/^```(?:json|markdown|text)?\s*/i, '')
+            .replace(/\s*```$/i, '')
+            .trim();
+        if (
+            plainResponse &&
+            !plainResponse.startsWith('{') &&
+            !plainResponse.startsWith('[')
+        ) {
+            candidate = plainResponse;
+        }
+    }
+
+    return candidate.slice(0, 12_000);
 };
 
 const formatGoalContext = (goalContext: GoalContext): string => {
     const normalizedContext = normalizeGoalContext(goalContext);
     return Object.entries(normalizedContext)
-        .filter(([key, value]) => Boolean(GOAL_CONTEXT_LABELS[key]) && value.trim().length > 0)
+        .filter(([key, value]) => Boolean(GOAL_CONTEXT_LABELS[key]) && String(value || '').trim().length > 0)
         .map(([key, value]) => (
             `- ${GOAL_CONTEXT_LABELS[key] || key}: ${
-                formatGoalContextValue(key as keyof GoalContext, value)
-                || GOAL_CONTEXT_VALUE_LABELS[value]
-                || value
+                formatGoalContextValue(key as keyof GoalContext, String(value || ''))
+                || GOAL_CONTEXT_VALUE_LABELS[String(value || '')]
+                || String(value || '')
             }`
         ))
         .join('\n');
@@ -4976,7 +4904,7 @@ interface AIContextType {
         options?: { namespace?: string; titlePrefix?: string; commandId?: string }
     ) => SmartAnalysisParsedResult;
     generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string; cancelled?: boolean }>;
-    generateGoalContext: () => Promise<{ context?: GoalContext; error?: string; cancelled?: boolean }>;
+    generateGoalContext: () => Promise<{ briefText?: string; error?: string; cancelled?: boolean }>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[], options?: { includeRelatedRules?: boolean; geminiModel?: string; maxViolationsPerRule?: number }) => Promise<void>;
     getRelatedBulkFixRules: (rulesToFix: string[]) => BulkFixRelatedRule[];
@@ -5539,7 +5467,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         };
     }, [articleLanguage, buildApiUsageContext, engineeringPrompts, goalContext, keywords.company, keywords.lsi, keywords.primary, keywords.secondaries, text, title, trackGeminiProgress]);
 
-    const generateGoalContext = useCallback(async (): Promise<{ context?: GoalContext; error?: string; cancelled?: boolean }> => {
+    const generateGoalContext = useCallback(async (): Promise<{ briefText?: string; error?: string; cancelled?: boolean }> => {
         const primary = keywords.primary.trim();
         const secondaries = keywords.secondaries.map(term => term.trim()).filter(Boolean);
         const articleTitle = title.trim();
@@ -5548,6 +5476,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return { error: 'أدخل الكلمة المفتاحية الأساسية أو عنوان المقالة أولًا.' };
         }
 
+        const {
+            generatedBrief: existingGeneratedBrief,
+            ...manualChoices
+        } = normalizeGoalContext(goalContext);
         const prompt = renderPromptTemplate(
             getPromptTemplate(
                 engineeringPrompts as unknown as Record<string, string>,
@@ -5558,8 +5490,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 primary_keyword: primary || 'غير محددة',
                 alternative_keywords: secondaries.length > 0 ? secondaries.join(', ') : 'غير محددة',
                 article_language: articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية',
-                allowed_values_json: JSON.stringify(GOAL_CONTEXT_ALLOWED_VALUES, null, 2),
-                current_brief_json: JSON.stringify(normalizeGoalContext(goalContext), null, 2),
+                manual_choices_json: JSON.stringify(manualChoices, null, 2),
+                existing_generated_brief: existingGeneratedBrief || 'لا يوجد موجز مولد سابق.',
             },
         );
 
@@ -5580,18 +5512,18 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             throw error;
         }
         const parsed = extractJson(result);
-        const context = normalizeGeneratedGoalContext(parsed, goalContext);
+        const briefText = normalizeGeneratedBriefText(parsed, result);
 
-        if (!context) {
+        if (!briefText) {
             const looksLikeApiError = /Gemini|API|خطأ|مهلة|فشل/i.test(result);
             return {
                 error: looksLikeApiError
                     ? result
-                    : 'لم يرجع الذكاء الاصطناعي سياقًا قابلًا للتعبئة. حاول مرة أخرى.',
+                    : 'لم يرجع الذكاء الاصطناعي موجزًا نصيًا صالحًا. حاول مرة أخرى.',
             };
         }
 
-        return { context };
+        return { briefText };
     }, [articleLanguage, buildApiUsageContext, engineeringPrompts, goalContext, keywords.primary, keywords.secondaries, title, trackGeminiProgress]);
 
     const generateDraftTitle = useCallback(async (): Promise<string> => {

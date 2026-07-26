@@ -31,6 +31,7 @@ type GoalContextPayload = {
   audienceScope: string;
   targetCountry: string;
   searchIntent: string;
+  generatedBrief: string;
 };
 
 type KeywordsPayload = {
@@ -150,6 +151,14 @@ const normalizeGoalContextPayload = (value: unknown): GoalContextPayload => {
     audienceScope: toTrimmedString(source.audienceScope),
     targetCountry: toTrimmedString(source.targetCountry),
     searchIntent: toTrimmedString(source.searchIntent),
+    generatedBrief: toTrimmedString(
+      source.generatedBrief ||
+      source.generated_brief ||
+      source.smartBrief ||
+      source.smart_brief ||
+      source.contentBrief ||
+      source.content_brief,
+    ),
   };
 };
 
@@ -250,6 +259,7 @@ const buildProCompetitorPrompt = (
   `LSI terms: ${keywords.lsi.join(', ')}`,
   `Company/brand: ${keywords.company || '-'}`,
   `Page context: pageType=${goalContext.pageType}; objective=${goalContext.objective}; audienceScope=${goalContext.audienceScope}; targetCountry=${goalContext.targetCountry || '-'}; searchIntent=${goalContext.searchIntent}`,
+  `Generated editable article brief: ${goalContext.generatedBrief || '-'}`,
   '',
   'Current article text:',
   '---',

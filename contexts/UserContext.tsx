@@ -801,7 +801,13 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (normalizedLegacyName && normalizedLegacyName !== normalizedClientKey) {
             delete nextContexts[normalizedLegacyName];
         }
-        nextContexts[normalizedClientKey] = normalizeGoalContext(context);
+        // The generated brief belongs to the current article. Client defaults keep
+        // only the user's reusable choices so an old article brief is never copied
+        // into a different article for the same client.
+        nextContexts[normalizedClientKey] = normalizeGoalContext({
+            ...context,
+            generatedBrief: '',
+        });
         persistClientGoalContexts(nextContexts);
     }, [clientGoalContexts, persistClientGoalContexts]);
 

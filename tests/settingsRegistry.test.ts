@@ -438,9 +438,10 @@ test('semantic keyword constraints activate independently from the primary keywo
 });
 
 test('administrator prompt registry migration preserves saved templates when repeated', async () => {
-  const [migration, conditionalConstraintsMigration] = await Promise.all([
+  const [migration, conditionalConstraintsMigration, generatedBriefMigration] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260724000000_admin_prompt_registry.sql'),
     readWorkspaceFile('supabase/migrations/20260726050000_conditional_semantic_keyword_constraints.sql'),
+    readWorkspaceFile('supabase/migrations/20260726060000_generated_content_brief_text_block.sql'),
   ]);
   assert.match(migration, /insert into public\.app_settings/);
   assert.match(migration, /'prompts'/);
@@ -451,6 +452,10 @@ test('administrator prompt registry migration preserves saved templates when rep
   assert.match(conditionalConstraintsMigration, /replace\(/);
   assert.match(conditionalConstraintsMigration, /'10'::jsonb/);
   assertBalancedSqlParentheses(conditionalConstraintsMigration);
+  assert.match(generatedBriefMigration, /contentWriting\.contentBriefGeneration/);
+  assert.match(generatedBriefMigration, /'11'::jsonb/);
+  assert.match(generatedBriefMigration, /value -> 'templates'/);
+  assertBalancedSqlParentheses(generatedBriefMigration);
 });
 
 test('ArticleStatusRegistry owns workflow states, dashboard priority, and analysis eligibility', () => {
