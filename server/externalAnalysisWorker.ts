@@ -7,6 +7,7 @@ import './competitorExtractionExecutor';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
+  cancelExternalEngineeringBundle,
   claimNextExternalAnalysisJob,
   completeExternalAnalysisJob,
   finalizeExternalAnalysisJobCancel,
@@ -20,6 +21,7 @@ import {
 } from './externalAnalysisQueue';
 import {
   ExternalAnalysisRetryError,
+  ExternalAnalysisTerminalError,
   getExternalAnalysisJobExecutor,
   getSupportedExternalAnalysisJobTypes,
 } from './externalAnalysisExecutor';
@@ -276,6 +278,29 @@ const executeClaimedJob = async (
         console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
       } catch (cancelError) {
         logThrottledError(`Could not finalize cancellation for job ${job.id}`, cancelError);
+      }
+      return;
+    }
+
+    if (error instanceof ExternalAnalysisTerminalError) {
+      try {
+        const cancelledCount = error.cancelEngineeringBundle
+          && job.job_type === 'engineering_command'
+          ? await cancelExternalEngineeringBundle(job.article_id)
+          : 0;
+        if (cancelledCount === 0) {
+          await finalizeExternalAnalysisJobCancel({
+            jobId: job.id,
+            workerId: slotWorkerId,
+            errorCode: error.code,
+            errorMessage: error.message,
+          });
+        }
+        console.log(
+          `[external-analysis-worker] Cancelled terminal job ${job.id} (${job.job_type}); reason=${error.code}; related=${cancelledCount}.`,
+        );
+      } catch (terminalError) {
+        logThrottledError(`Could not finalize terminal job ${job.id}`, terminalError);
       }
       return;
     }

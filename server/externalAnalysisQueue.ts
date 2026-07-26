@@ -186,6 +186,18 @@ export const finalizeExternalAnalysisJobCancel = async (options: {
   return job;
 };
 
+export const cancelExternalEngineeringBundle = async (
+  articleId: string,
+): Promise<number> => {
+  const data = await callQueueRpc<unknown>('cancel_stale_external_engineering_jobs', {
+    p_article_id: articleId,
+    p_current_signature: null,
+    p_cancel_all: true,
+  });
+  const count = Number(Array.isArray(data) ? data[0] : data);
+  return Number.isFinite(count) ? Math.max(0, count) : 0;
+};
+
 export const scheduleExternalAnalysisJobRetry = async (options: {
   jobId: string;
   workerId: string;

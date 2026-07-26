@@ -47,6 +47,22 @@ export class ExternalAnalysisRetryError extends Error {
   }
 }
 
+export class ExternalAnalysisTerminalError extends Error {
+  readonly code: string;
+  readonly cancelEngineeringBundle: boolean;
+
+  constructor(options: {
+    message: string;
+    code: string;
+    cancelEngineeringBundle?: boolean;
+  }) {
+    super(options.message);
+    this.name = 'ExternalAnalysisTerminalError';
+    this.code = options.code;
+    this.cancelEngineeringBundle = options.cancelEngineeringBundle === true;
+  }
+}
+
 const executors = new Map<ExternalAnalysisJobType, ExternalAnalysisJobExecutor>();
 
 export const registerExternalAnalysisJobExecutor = (

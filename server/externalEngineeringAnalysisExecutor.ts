@@ -1,5 +1,6 @@
 import {
   ExternalAnalysisRetryError,
+  ExternalAnalysisTerminalError,
   registerExternalAnalysisJobExecutor,
   type ExternalAnalysisExecutionContext,
 } from './externalAnalysisExecutor';
@@ -145,10 +146,10 @@ const assertEngineeringInputs = (
   input: ExternalEngineeringPromptInput,
 ): void => {
   if (!input.plainText) {
-    throw createRetryError({
+    throw new ExternalAnalysisTerminalError({
       code: 'engineering_article_text_missing',
-      message: 'The article text is still empty; engineering analysis will retry later.',
-      progress: { stage: 'retry_scheduled', reason: 'article_text_missing' },
+      message: 'The engineering command bundle was cancelled because the article text is empty.',
+      cancelEngineeringBundle: true,
     });
   }
   if (input.keywords.secondaries.length === 0 || input.keywords.lsi.length === 0) {

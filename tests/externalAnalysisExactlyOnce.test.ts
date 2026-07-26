@@ -86,3 +86,55 @@ test('external analysis queue enforces one canonical job and retries by job id',
   assert.match(resultsTab, /retryExternalAnalysisJob\(articleId, job\.id\)/);
   assert.doesNotMatch(resultsTab, /enqueueExternalEngineeringAnalysis\(articleId, \[job\.command_id\]\)/);
 });
+
+test('engineering command bundles cannot start or retry without saved article text', async () => {
+  const [
+    migration,
+    api,
+    controls,
+    engineeringExecutor,
+    worker,
+    queue,
+    deploymentGuide,
+  ] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260726010000_external_engineering_article_text_guard.sql'),
+    readWorkspaceFile('api/externalAnalysis.ts'),
+    readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+    readWorkspaceFile('server/externalEngineeringAnalysisExecutor.ts'),
+    readWorkspaceFile('server/externalAnalysisWorker.ts'),
+    readWorkspaceFile('server/externalAnalysisQueue.ts'),
+    readWorkspaceFile('deploy/HOSTINGER_CANONICAL_DEPLOY.md'),
+  ]);
+
+  assert.match(
+    migration,
+    /v_external_missing := v_external_missing \|\| jsonb_build_array\('editor_text'\)/,
+  );
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
+  assert.match(migration, /create or replace function public\.enqueue_external_engineering_jobs/);
+  assert.ok(
+    migration.indexOf("if not coalesce(v_has_article_text, false) then")
+      < migration.indexOf('enqueue_external_engineering_jobs_sequential_base'),
+  );
+  assert.match(migration, /perform public\.cancel_stale_external_engineering_jobs\(p_article_id, null, true\)/);
+  assert.match(migration, /external_analysis_ready = false/);
+  assert.match(migration, /engineering_article_text_missing/);
+
+  assert.ok(
+    api.indexOf("!toTrimmedString(article.plain_text) ? 'editor_text' : ''")
+      < api.indexOf("'enqueue_external_engineering_jobs'"),
+  );
+  assert.match(controls, /const engineeringCanQueue = Boolean\(/);
+  assert.match(controls, /لا يمكن تشغيل الحزمة لأن نص المقالة فارغ/);
+  assert.match(engineeringExecutor, /throw new ExternalAnalysisTerminalError/);
+  const articleTextGuard = engineeringExecutor.slice(
+    engineeringExecutor.indexOf("if (!input.plainText)"),
+    engineeringExecutor.indexOf('if (input.keywords.secondaries.length'),
+  );
+  assert.match(articleTextGuard, /ExternalAnalysisTerminalError/);
+  assert.doesNotMatch(articleTextGuard, /createRetryError|retry_scheduled/);
+  assert.match(worker, /error instanceof ExternalAnalysisTerminalError/);
+  assert.match(worker, /cancelExternalEngineeringBundle\(job\.article_id\)/);
+  assert.match(queue, /cancel_stale_external_engineering_jobs/);
+  assert.match(deploymentGuide, /20260726010000_external_engineering_article_text_guard\.sql/);
+});

@@ -251,14 +251,21 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
       ? (competitorMissingFields.has(field) ? 'missing' : 'met')
       : 'checking',
   }));
-  const semanticCanStart = !readinessState
-    || semanticRequirements.every(requirement => requirement.status === 'met');
-  const engineeringCanQueue = !readinessState
-    || engineeringRequirements.every(requirement => (
+  const semanticCanStart = Boolean(
+    readinessState
+    && semanticRequirements.every(requirement => requirement.status === 'met'),
+  );
+  const engineeringCanQueue = Boolean(
+    readinessState
+    && engineeringRequirements.every(requirement => (
       requirement.status === 'met' || AUTO_GENERATED_ENGINEERING_FIELDS.has(requirement.field)
-    ));
-  const competitorCanStart = !readinessState
-    || competitorRequirements.every(requirement => requirement.status === 'met');
+    )),
+  );
+  const competitorCanStart = Boolean(
+    readinessState
+    && competitorRequirements.every(requirement => requirement.status === 'met'),
+  );
+  const engineeringArticleTextMissing = engineeringMissingFields.has('editor_text');
   const competitorDiscoveryResult = summary?.latestCompetitorDiscoveryJob?.result || {};
   const competitorCandidateCount = Array.isArray(competitorDiscoveryResult.results)
     ? competitorDiscoveryResult.results.length
@@ -588,7 +595,13 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
                 </div>
                 {!engineeringCanQueue && (
                   <div className="mt-1.5 border-t border-red-100 pt-1.5 text-[10px] font-bold text-red-600 dark:border-red-900/40 dark:text-red-300">
-                    {locale === 'ar' ? 'توجد شروط أساسية ناقصة. افتح مؤشر الشروط لمعرفة التفاصيل.' : 'Core requirements are missing. Open the requirements indicator for details.'}
+                    {engineeringArticleTextMissing
+                      ? (locale === 'ar'
+                          ? 'لا يمكن تشغيل الحزمة لأن نص المقالة فارغ. اكتب نص المقالة واحفظها أولًا.'
+                          : 'The bundle cannot run while the article text is empty. Write and save the article first.')
+                      : (locale === 'ar'
+                          ? 'توجد شروط أساسية ناقصة. افتح مؤشر الشروط لمعرفة التفاصيل.'
+                          : 'Core requirements are missing. Open the requirements indicator for details.')}
                   </div>
                 )}
                 <button
