@@ -13,8 +13,13 @@ export const checkSecondParagraph = (context: AnalysisContext): CheckResult => {
         ? "• تقع هذه الفقرة في المقدمة مباشرة بعد الفقرة التلخيصية.\n• يجب أن تتكون من 40 إلى 80 كلمة.\n• يجب أن تحتوي على 2 إلى 4 جمل.\n• الهدف: التمهيد للمحتوى الأساسي بشكل مباشر."
         : "• This paragraph sits in the intro right after the summary.\n• Must be between 40 and 80 words.\n• Must contain 2 to 4 sentences.\n• Goal: Transition directly to the main content.";
 
-    const firstHeadingIndex = nodes.findIndex(n => n.type === 'heading');
-    const introductionNodes = firstHeadingIndex === -1 ? nodes : nodes.slice(0, firstHeadingIndex);
+    // The quality document owns a synthetic H1 for the saved article title.
+    // The introduction therefore lives after that H1 and before the first H2,
+    // rather than before the first heading of any level.
+    const firstBodyHeadingIndex = nodes.findIndex(n => n.type === 'heading' && n.level === 2);
+    const introductionNodes = firstBodyHeadingIndex === -1
+        ? nodes
+        : nodes.slice(0, firstBodyHeadingIndex);
     const introductionParagraphs = introductionNodes.filter(n => n.type === 'paragraph' && n.text.trim().length > 0);
     
     if (introductionParagraphs.length < 2) {

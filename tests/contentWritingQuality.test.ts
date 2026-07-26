@@ -63,6 +63,50 @@ test('deterministic quality evaluation returns a versioned blocking report', asy
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'keyword.primary'));
 });
 
+test('quality analysis detects the second introduction paragraph and Arabic numbered conclusion list', async () => {
+  const { createContentWritingAnalysisDocument, evaluateContentWritingQuality } = await importQuality();
+  const sentence = (prefix: string, count: number): string => (
+    Array.from({ length: count }, (_, index) => `${prefix}${index + 1}`).join(' ')
+  );
+  const firstParagraph = `${sentence('مقدمة', 15)}. ${sentence('تمهيد', 15)}.`;
+  const secondParagraph = `${sentence('تفصيل', 20)}. ${sentence('توضيح', 20)}.`;
+  const conclusionParagraph = `في الختام ${sentence('خلاصة', 25)}.`;
+  const listIntroduction = `${sentence('خطوة', 15)}:`;
+  const listItems = [
+    `١. ${sentence('أول', 10)}`,
+    `٢. ${sentence('ثان', 10)}`,
+    `٣. ${sentence('ثالث', 10)}`,
+  ].join('\n');
+  const markdown = [
+    firstParagraph,
+    '',
+    secondParagraph,
+    '',
+    '## الخاتمة',
+    '',
+    conclusionParagraph,
+    '',
+    listIntroduction,
+    '',
+    listItems,
+  ].join('\n');
+
+  const document = createContentWritingAnalysisDocument(markdown, articleInput.articleTitle);
+  assert.equal(
+    document.nodes
+      .slice(0, document.nodes.findIndex((node: any) => node.type === 'heading' && node.level === 2))
+      .filter((node: any) => node.type === 'paragraph').length,
+    2,
+  );
+  assert.equal(document.nodes.filter((node: any) => node.type === 'orderedList').length, 1);
+
+  const evaluation = evaluateContentWritingQuality({ ...articleInput, markdown });
+  const criterion = (id: string) => evaluation.report.criteria.find((item: any) => item.id === id);
+  assert.equal(criterion('secondParagraph')?.status, 'pass');
+  assert.equal(criterion('conclusionHasNumber')?.status, 'pass');
+  assert.equal(criterion('conclusionHasList')?.status, 'pass');
+});
+
 test('repair prompt prioritizes machine-detected failures and includes the full draft', async () => {
   const { buildContentWritingRepairPrompt, evaluateContentWritingQuality } = await importQuality();
   const markdown = '# عنوان\n\nنص قصير جدًا.';

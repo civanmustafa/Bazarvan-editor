@@ -512,8 +512,60 @@ export const buildContentWritingFinalReviewPrompt = (options: {
   },
 );
 
+const GENERATED_LIST_DIGIT_MAP: Record<string, string> = {
+  '٠': '0',
+  '١': '1',
+  '٢': '2',
+  '٣': '3',
+  '٤': '4',
+  '٥': '5',
+  '٦': '6',
+  '٧': '7',
+  '٨': '8',
+  '٩': '9',
+  '۰': '0',
+  '۱': '1',
+  '۲': '2',
+  '۳': '3',
+  '۴': '4',
+  '۵': '5',
+  '۶': '6',
+  '۷': '7',
+  '۸': '8',
+  '۹': '9',
+};
+
+const toAsciiListNumber = (value: string): string => Array.from(value)
+  .map(character => GENERATED_LIST_DIGIT_MAP[character] || character)
+  .join('');
+
+const normalizeGeneratedListMarker = (line: string): string => {
+  const bulletMatch = line.match(/^(\s*)[•‣◦⁃–—]\s+(.+)$/u);
+  if (bulletMatch) return `${bulletMatch[1]}- ${bulletMatch[2]}`;
+
+  const orderedMatch = line.match(
+    /^(\s*)(?:([\d٠-٩۰-۹]{1,2})[.)\-–—:]|\(([\d٠-٩۰-۹]{1,2})\))\s+(.+)$/u,
+  );
+  if (!orderedMatch) return line;
+  return `${orderedMatch[1]}${toAsciiListNumber(orderedMatch[2] || orderedMatch[3])}. ${orderedMatch[4]}`;
+};
+
+const removeGeneratedBoldFormatting = (value: string): string => value
+  .replace(/<\/?(?:strong|b)\b[^>]*>/gi, '')
+  .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+  .replace(/__([^_\n]+)__/g, '$1');
+
+const normalizeGeneratedContentWritingMarkdown = (value: string): string => (
+  removeGeneratedBoldFormatting(
+    stripCodeFence(value)
+      .split(/\r?\n/)
+      .map(normalizeGeneratedListMarker)
+      .join('\n'),
+  )
+);
+
 const removeLeadingHeading = (value: string, maximumLevel = 6): string => {
-  const normalized = stripCodeFence(value);
+  const normalized = normalizeGeneratedContentWritingMarkdown(value);
   const lines = normalized.split(/\r?\n/);
   const firstContentIndex = lines.findIndex(line => Boolean(line.trim()));
   const heading = firstContentIndex >= 0
@@ -652,7 +704,9 @@ export const recoverContentWritingDraft = (options: {
     : null;
 };
 
-export const normalizeFinalContentWritingResult = (value: string): string => stripCodeFence(value);
+export const normalizeFinalContentWritingResult = (
+  value: string,
+): string => normalizeGeneratedContentWritingMarkdown(value);
 
 const normalizeComparableHeading = (value: string): string => value
   .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -701,7 +755,7 @@ export const contentWritingMarkdownToPlainText = (value: string): string => (
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/^\s{0,3}(?:[-+*]|\d+[.)])\s+/gm, '')
+    .replace(/^\s{0,3}(?:[-+*•‣◦⁃–—]|[\p{N}]{1,2}[.)\-–—:]|\([\p{N}]{1,2}\))\s+/gmu, '')
     .replace(/^\s*>\s?/gm, '')
     .replace(/^\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)+\s*\|?\s*$/gm, '')
     .replace(/\|/g, ' ')

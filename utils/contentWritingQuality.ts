@@ -78,7 +78,18 @@ const isTableSeparator = (value: string): boolean => (
 
 const isTableRow = (value: string): boolean => value.includes('|') && value.split('|').length >= 3;
 
-const isListLine = (value: string): boolean => /^\s*(?:[-+*]|\d+[.)])\s+\S/.test(value);
+const isOrderedListLine = (value: string): boolean => (
+  /^\s*(?:[\p{N}]{1,2}[.)\-–—:]|\([\p{N}]{1,2}\))\s+\S/u.test(value)
+);
+
+const isListLine = (value: string): boolean => (
+  /^\s*(?:[-+*•‣◦⁃–—]|[\p{N}]{1,2}[.)\-–—:]|\([\p{N}]{1,2}\))\s+\S/u.test(value)
+);
+
+const stripListMarker = (value: string): string => value.replace(
+  /^\s*(?:[-+*•‣◦⁃–—]|[\p{N}]{1,2}[.)\-–—:]|\([\p{N}]{1,2}\))\s+/u,
+  '',
+);
 
 const isBlockStart = (value: string): boolean => (
   /^\s{0,3}#{1,6}\s+\S/.test(value)
@@ -136,10 +147,10 @@ export const createContentWritingAnalysisDocument = (
     if (isListLine(line)) {
       const values: string[] = [];
       while (index < lines.length && isListLine(lines[index])) {
-        values.push(lines[index].replace(/^\s*(?:[-+*]|\d+[.)])\s+/, ''));
+        values.push(stripListMarker(lines[index]));
         index += 1;
       }
-      pushNode(/^\s*\d+[.)]\s+/.test(line) ? 'orderedList' : 'bulletList', values.join(' '));
+      pushNode(isOrderedListLine(line) ? 'orderedList' : 'bulletList', values.join(' '));
       continue;
     }
 

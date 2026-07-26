@@ -360,7 +360,20 @@ export const executeStructuredContentWritingWorkflow = async (
       if (!toText(processed.output)) {
         throw new Error(`The ${definition.title} step returned an empty usable output.`);
       }
-      processed.output = processed.output.trim();
+      const isGeneratedArticleProse = (
+        definition.type === 'section'
+        || definition.type === 'introduction'
+        || definition.type === 'faq'
+        || definition.type === 'conclusion'
+        || definition.type === 'section_repair'
+        || definition.type === 'final_review'
+        || definition.type === 'quality_repair'
+      );
+      // Keep every persisted and live-visible prose result identical to the
+      // editor import: normalize list markers and remove generated bold text.
+      processed.output = isGeneratedArticleProse
+        ? normalizeFinalContentWritingResult(processed.output)
+        : processed.output.trim();
     } catch (error) {
       const failure = createWorkflowFailure({
         session: options.session,

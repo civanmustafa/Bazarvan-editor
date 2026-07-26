@@ -151,6 +151,23 @@ test('structured writing assembles one markdown draft without duplicate section 
   );
 });
 
+test('generated writing removes bold formatting and normalizes Arabic list markers', async () => {
+  const { normalizeFinalContentWritingResult } = await importWorkflow();
+  const normalized = normalizeFinalContentWritingResult([
+    '**مصطلح أساسي** و__جملة مهمة__ مع <strong>نص ظاهر</strong>.',
+    '',
+    '١. **العنصر الأول**',
+    '۲) العنصر الثاني',
+    '• العنصر الثالث',
+  ].join('\n'));
+
+  assert.doesNotMatch(normalized, /\*\*|__|<\/?(?:strong|b)\b/i);
+  assert.match(normalized, /مصطلح أساسي وجملة مهمة مع نص ظاهر/);
+  assert.match(normalized, /^1\. العنصر الأول$/m);
+  assert.match(normalized, /^2\. العنصر الثاني$/m);
+  assert.match(normalized, /^- العنصر الثالث$/m);
+});
+
 test('stopped writing recovers only completed prose stages as an importable partial draft', async () => {
   const { recoverContentWritingDraft } = await importWorkflow();
   const recovered = recoverContentWritingDraft({

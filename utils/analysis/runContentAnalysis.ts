@@ -268,7 +268,10 @@ export const runContentAnalysis = ({
     const sectionText = sectionNodes.map(n => n.text).join(' ');
     const sectionParagraphs = sectionNodes.filter(n => n.type === 'paragraph' && n.text.trim().length > 0);
     const hasList = sectionNodes.some(n => n.type === 'bulletList' || n.type === 'orderedList');
-    const hasNumber = /\d/.test(sectionText);
+    // A numbered list is itself a valid numeric element even though its
+    // Markdown markers are not part of the normalized list-node text.
+    const hasNumber = sectionNodes.some(node => node.type === 'orderedList')
+      || /\p{N}/u.test(sectionText);
     return {
       text: sectionText,
       nodes: sectionNodes,
