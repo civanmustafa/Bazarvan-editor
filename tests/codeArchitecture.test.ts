@@ -140,6 +140,7 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   }
   assert.doesNotMatch(rightSidebar, /جاري التفكير|جاري الاتصال بـ ChatGPT/);
   assert.match(monitor, /internal_link_review/);
+  assert.match(monitor, /timeout: \['انتهت مهلة الموديل', 'Model timed out'\]/);
 });
 
 test('API handlers share the same HTTP request and response adapters', async () => {

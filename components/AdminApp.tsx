@@ -687,6 +687,7 @@ const getApiAttemptReasonLabel = (reason?: string): string => {
     quota: 'الحصة مستنفدة',
     auth: 'المفتاح غير صالح أو غير مصرح',
     server: 'خطأ مؤقت من الخادم',
+    timeout: 'انتهت مهلة الموديل',
     blocked: 'محظور من خدمة Gemini',
     unknown: 'سبب غير معروف',
   };

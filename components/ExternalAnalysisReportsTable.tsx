@@ -63,6 +63,7 @@ const failureReasonLabel = (reason: string, locale: 'ar' | 'en'): string => {
     quota: 'الحصة مستنفدة',
     auth: 'المفتاح غير صالح أو غير مصرح',
     server: 'خطأ مؤقت من الخادم',
+    timeout: 'انتهت مهلة الموديل',
     blocked: 'محظور من الخدمة',
     cancelled: 'ألغيت المحاولة',
     unknown: 'سبب غير معروف',

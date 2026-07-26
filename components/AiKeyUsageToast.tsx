@@ -54,6 +54,15 @@ const ACTION_LABELS: Record<string, [string, string]> = {
   'copy-meta': ['إنشاء وصف الميتا', 'Generate meta description'],
 };
 
+const ATTEMPT_REASON_LABELS: Record<string, [string, string]> = {
+  quota: ['الحصة مستنفدة', 'Quota exhausted'],
+  auth: ['المفتاح غير صالح أو غير مصرح', 'Invalid or unauthorized key'],
+  server: ['خطأ مؤقت من الخادم', 'Temporary server error'],
+  timeout: ['انتهت مهلة الموديل', 'Model timed out'],
+  blocked: ['محظور من الخدمة', 'Blocked by provider'],
+  unknown: ['سبب غير معروف', 'Unknown reason'],
+};
+
 const STAGE_LABELS: Record<string, [string, string]> = {
   queued: ['في قائمة التنفيذ', 'Queued'],
   preparing: ['جار التجهيز', 'Preparing'],
@@ -450,7 +459,11 @@ const AiExecutionMonitor: React.FC = () => {
                   <span>{isArabic ? 'فشل' : 'Failed'}</span>
                   {entry.model && <span className="font-mono" dir="ltr">{entry.model}</span>}
                   {entry.status && <span className="font-mono" dir="ltr">HTTP {entry.status}</span>}
-                  {entry.reason && <span className="max-w-56 truncate" title={entry.reason}>{entry.reason}</span>}
+                  {entry.reason && (
+                    <span className="max-w-56 truncate" title={getLabel(ATTEMPT_REASON_LABELS, entry.reason, isArabic)}>
+                      {getLabel(ATTEMPT_REASON_LABELS, entry.reason, isArabic)}
+                    </span>
+                  )}
                 </div>
               ))}
               {!selected.keySuffix && selected.entries.length === 0 && (

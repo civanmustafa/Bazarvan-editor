@@ -112,12 +112,15 @@ test('all paid provider engines use the shared automatic fallback policy', async
   assert.match(settingsPage, /الرجوع التلقائي للمفاتيح والمزودات مفعّل/);
 });
 
-test('a local Gemini timeout is treated as a request failure without cooling or rotating keys', async () => {
+test('a local Gemini timeout moves to the next model with a different key without disabling it', async () => {
   const engine = await readWorkspaceFile('server/aiExecutionEngine.ts');
 
   assert.match(engine, /class GeminiRequestTimeoutError extends Error/);
   assert.match(engine, /error instanceof GeminiRequestTimeoutError/);
   assert.match(engine, /outcome: 'cancelled',\s+status: lastError\.status,\s+reason: 'cancelled',\s+cooldownSeconds: 0/);
-  assert.match(engine, /if \(requestLevelTimeout\) break/);
-  assert.match(engine, /لن يتم تبديل المفتاح/);
+  assert.match(engine, /timedOutKeyFingerprints\.add\(keyFingerprint\)/);
+  assert.match(engine, /\.\.\.timedOutKeyFingerprints/);
+  assert.match(engine, /if \(modelTimedOutLocally\) break/);
+  assert.doesNotMatch(engine, /if \(requestLevelTimeout\) break/);
+  assert.match(engine, /سيتم الانتقال فورًا إلى الموديل التالي بمفتاح مختلف دون تعطيل المفتاح الحالي/);
 });
