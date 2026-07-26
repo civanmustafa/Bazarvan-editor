@@ -36,6 +36,7 @@ import {
   type CompetitorComparisonMapResult,
   type CompetitorComparisonSource,
 } from '../utils/competitorComparisonWorkflow';
+import { sanitizeCompetitorSlots } from '../utils/competitorContent';
 
 type CompetitorMapCacheRow = {
   result: unknown;
@@ -74,17 +75,23 @@ const createRetryError = (options: {
   progress: options.progress,
 });
 
-const createSources = (input: ExternalEngineeringPromptInput): CompetitorComparisonSource[] => (
-  Array.from(
-    { length: Math.max(input.competitorTexts.length, input.competitorUrls.length) },
+const createSources = (input: ExternalEngineeringPromptInput): CompetitorComparisonSource[] => {
+  const competitors = sanitizeCompetitorSlots(
+    input.competitorTexts,
+    input.competitorUrls,
+  );
+  return (
+    Array.from(
+    { length: Math.max(competitors.texts.length, competitors.urls.length) },
     (_, index) => ({
       competitorNumber: index + 1,
-      url: input.competitorUrls[index]?.trim() || '',
+      url: competitors.urls[index] || '',
       title: '',
-      text: input.competitorTexts[index]?.trim() || '',
+      text: competitors.texts[index] || '',
     }),
   ).filter(source => source.text || source.url)
-);
+  );
+};
 
 const attachSourceMetadata = (
   result: CompetitorComparisonMapResult,

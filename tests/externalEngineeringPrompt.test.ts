@@ -8,6 +8,7 @@ import {
 } from '../server/externalEngineeringPrompt.ts';
 import type { ExternalEngineeringCommand } from '../server/externalEngineeringCommands.ts';
 import type { AiAnalysisOptions } from '../types.ts';
+import { COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT } from '../utils/competitorContent.ts';
 import { truncatePromptTextDistributed } from '../utils/promptText.ts';
 
 const longText = (marker: string, length: number): string => (
@@ -91,6 +92,19 @@ test('competitor context is capped and URL Context is only a missing-text fallba
     getExternalEngineeringPromptMetrics(command, urlOnlyInput).usesUrlContextFallback,
     true,
   );
+});
+
+test('external engineering excludes both text and URL for a dual extraction failure slot', () => {
+  const input = createInput();
+  input.competitorTexts[1] = COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT;
+  input.competitorUrls[1] = 'https://failed-competitor.example/article';
+  const command = createCommand({ competitorContent: true });
+
+  const prompt = buildExternalEngineeringPrompt(command, input);
+  assert.doesNotMatch(prompt, /\[تعذر استخراج محتوى المنافس\]/);
+  assert.doesNotMatch(prompt, /failed-competitor\.example/);
+  assert.match(prompt, /COMPETITOR_1_/);
+  assert.match(prompt, /COMPETITOR_3_/);
 });
 
 test('a worst-case external engineering prompt stays below the bounded request budget', () => {

@@ -30,6 +30,7 @@ import {
 } from './externalGeminiRunner';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import { isCompetitorComparisonCommand } from '../utils/competitorComparisonWorkflow';
+import { sanitizeCompetitorSlots } from '../utils/competitorContent';
 import { executeExternalCompetitorComparisonWorkflow } from './externalCompetitorComparisonExecutor';
 
 type ExternalEngineeringArticleRow = {
@@ -129,9 +130,15 @@ const toEngineeringPromptInput = (
     : isRecord(metadata.competitors)
       ? metadata.competitors
       : {};
+  const sanitizedCompetitors = sanitizeCompetitorSlots(
+    toCompetitorSlots(competitors.texts),
+    toCompetitorSlots(competitors.urls),
+  );
 
   // Use the same persisted canonical competitor texts as content writing. Extraction
-  // preview metadata must never be attached as an additional competitor copy.
+  // preview metadata must never be attached as an additional competitor copy. A
+  // terminal extraction marker also removes that slot's URL so URL-context analysis
+  // cannot accidentally re-introduce a competitor whose extraction failed twice.
   return {
     title: toTrimmedString(article.title),
     plainText: toTrimmedString(article.plain_text),
@@ -143,8 +150,8 @@ const toEngineeringPromptInput = (
       lsi: toStringList(keywords.lsi),
     },
     goalContext: isRecord(article.goal_context) ? article.goal_context : {},
-    competitorUrls: toCompetitorSlots(competitors.urls),
-    competitorTexts: toCompetitorSlots(competitors.texts),
+    competitorUrls: sanitizedCompetitors.urls,
+    competitorTexts: sanitizedCompetitors.texts,
   };
 };
 

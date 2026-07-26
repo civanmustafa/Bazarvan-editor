@@ -1,5 +1,6 @@
 import type { ExternalEngineeringCommand } from './externalEngineeringCommands';
 import { truncatePromptTextDistributed } from '../utils/promptText.ts';
+import { sanitizeCompetitorSlots } from '../utils/competitorContent.ts';
 
 export type ExternalEngineeringPromptInput = {
   title: string;
@@ -62,10 +63,11 @@ const buildCompetitorBlocks = (
   texts: string[],
   urls: string[],
 ): string => {
-  const slots = Array.from({ length: Math.max(texts.length, urls.length) }, (_, index) => ({
+  const sanitized = sanitizeCompetitorSlots(texts, urls);
+  const slots = Array.from({ length: Math.max(sanitized.texts.length, sanitized.urls.length) }, (_, index) => ({
     index,
-    text: texts[index]?.trim() || '',
-    url: urls[index]?.trim() || '',
+    text: sanitized.texts[index] || '',
+    url: sanitized.urls[index] || '',
   })).filter(slot => slot.text || slot.url);
   const textSlotCount = slots.filter(slot => slot.text).length;
   const perCompetitorLimit = textSlotCount > 0
@@ -208,18 +210,22 @@ export const getExternalEngineeringPromptMetrics = (
   input: ExternalEngineeringPromptInput,
   prompt?: string,
 ): ExternalEngineeringPromptMetrics => {
+  const sanitizedCompetitors = sanitizeCompetitorSlots(
+    input.competitorTexts,
+    input.competitorUrls,
+  );
   const competitorBlocks = command.options.competitorContent
-    ? buildCompetitorBlocks(input.competitorTexts, input.competitorUrls)
+    ? buildCompetitorBlocks(sanitizedCompetitors.texts, sanitizedCompetitors.urls)
     : '';
   const hasCompetitorText = command.options.competitorContent
-    && input.competitorTexts.some(value => Boolean(value.trim()));
+    && sanitizedCompetitors.texts.some(Boolean);
   return {
     promptChars: prompt?.length || buildExternalEngineeringPrompt(command, input).length,
     articleChars: command.options.editorText ? truncateArticleText(input.plainText).length : 0,
     competitorChars: competitorBlocks.length,
     usesUrlContextFallback: command.options.competitorContent
       && !hasCompetitorText
-      && input.competitorUrls.some(value => Boolean(value.trim())),
+      && sanitizedCompetitors.urls.some(Boolean),
   };
 };
 

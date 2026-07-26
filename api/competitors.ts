@@ -1,10 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  COMPETITOR_CONTENT_MAX_CHARS,
   COMPETITOR_SEARCH_CANDIDATE_LIMIT,
   COMPETITOR_SEARCH_RESULT_LIMIT,
   MAX_ARTICLE_COMPETITORS,
   type CompetitorSearchMode,
 } from '../constants/competitors';
+import {
+  getUsableCompetitorText,
+  isCompetitorExtractionFailureText,
+} from '../utils/competitorContent';
 import {
   canonicalizeCompetitorUrl,
   FirecrawlCompetitorError,
@@ -390,6 +395,63 @@ const removeCompetitor = async (
   if (syncError) throw syncError;
 };
 
+const saveManualCompetitorText = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+  position: number,
+  rawContentText: unknown,
+) => {
+  if (!Number.isInteger(position) || position < 1 || position > MAX_ARTICLE_COMPETITORS) {
+    throw new CompetitorApiError({
+      message: 'Competitor position is invalid.',
+      code: 'competitor_position_invalid',
+    });
+  }
+  const contentText = getUsableCompetitorText(rawContentText);
+  if (!contentText || isCompetitorExtractionFailureText(rawContentText)) {
+    throw new CompetitorApiError({
+      message: 'Manual competitor text is required.',
+      code: 'competitor_manual_text_required',
+    });
+  }
+  if (contentText.length > COMPETITOR_CONTENT_MAX_CHARS) {
+    throw new CompetitorApiError({
+      message: `Manual competitor text exceeds ${COMPETITOR_CONTENT_MAX_CHARS} characters.`,
+      status: 413,
+      code: 'competitor_manual_text_too_large',
+    });
+  }
+
+  const { data, error } = await supabase
+    .from('article_competitors')
+    .update({
+      content_text: contentText,
+      word_count: contentText.split(/\s+/u).filter(Boolean).length,
+      status: 'completed',
+      extraction_provider: 'manual',
+      error_code: null,
+      error_message: null,
+      fetched_at: new Date().toISOString(),
+    })
+    .eq('article_id', articleId)
+    .eq('position', position)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new CompetitorApiError({
+      message: 'Competitor source was not found.',
+      status: 404,
+      code: 'competitor_not_found',
+    });
+  }
+
+  const { error: syncError } = await supabase.rpc('sync_article_competitors_metadata', {
+    p_article_id: articleId,
+  });
+  if (syncError) throw syncError;
+};
+
 const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   if (req.method === 'OPTIONS') {
     return { status: 204, headers: getCorsPreflightHeaders(req, 'POST, OPTIONS') };
@@ -398,7 +460,10 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     return { status: 405, body: { ok: false, error: 'Method not allowed. Use POST.' } };
   }
   assertAllowedOrigin(req);
-  assertRequestContentLength(req, 96 * 1024);
+  // Manual Arabic text can consume several UTF-8 bytes per character. Keep the
+  // transport ceiling aligned with COMPETITOR_CONTENT_MAX_CHARS while retaining
+  // one bounded limit for every action handled by this endpoint.
+  assertRequestContentLength(req, (COMPETITOR_CONTENT_MAX_CHARS * 4) + (32 * 1024));
   const body = await readJsonBody(req);
   const action = toText(body.action);
   const principal = await authenticateApiRequest(req);
@@ -444,6 +509,20 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
 
   await requireArticleWriteAccess(supabase, articleId, principal.userId);
+  if (action === 'save_manual_text') {
+    consumeApiRateLimit('competitors-save-manual-text', principal.userId, 60);
+    await saveManualCompetitorText(
+      supabase,
+      articleId,
+      Number(body.position),
+      body.contentText,
+    );
+    return {
+      status: 200,
+      body: { ok: true, action },
+      headers: getCorsResponseHeaders(req),
+    };
+  }
   if (action === 'ensure_discovery') {
     consumeApiRateLimit('competitors-ensure-discovery', principal.userId, 30);
     const { data: jobId, error: enqueueError } = await supabase.rpc(
@@ -697,7 +776,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new CompetitorApiError({
-    message: 'action must be list, ensure_discovery, search, preview, programmatic_extract, extract, cancel, cancel_discovery, or remove.',
+    message: 'action must be list, ensure_discovery, search, preview, programmatic_extract, save_manual_text, extract, cancel, cancel_discovery, or remove.',
     code: 'invalid_action',
   });
 };

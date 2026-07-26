@@ -23,6 +23,12 @@ import {
   normalizeCompetitorText,
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
+import {
+  COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
+  getUsableCompetitorText,
+  isCompetitorExtractionFailureText,
+  sanitizeCompetitorSlots,
+} from '../utils/competitorContent.ts';
 
 const readWorkspaceFile = async (relativePath: string): Promise<string> => (
   readFile(fileURLToPath(new URL(`../${relativePath}`, import.meta.url)), 'utf8')
@@ -307,25 +313,26 @@ test('competitor discovery stop control requests durable cancellation and keeps 
   assert.match(executor, /signal: context\.signal/);
 });
 
-test('competitor extraction preserves partial success and bounds transient retries', async () => {
+test('competitor extraction tries Firecrawl once and falls back programmatically without AI', async () => {
   const [executor, panel] = await Promise.all([
     readWorkspaceFile('server/competitorExtractionExecutor.ts'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
   ]);
 
-  assert.equal(COMPETITOR_EXTRACTION_MAX_ATTEMPTS, 3);
-  assert.match(executor, /retryExhausted/);
-  assert.match(executor, /status: shouldRetry \? 'retry_scheduled' : 'failed'/);
-  assert.match(executor, /\$\{normalized\.code\}_retry_exhausted/);
-  assert.ok(
-    executor.indexOf('await syncArticleCompetitors(context.job.article_id)')
-      < executor.indexOf('throw new ExternalAnalysisRetryError'),
-  );
+  assert.equal(COMPETITOR_EXTRACTION_MAX_ATTEMPTS, 1);
+  assert.match(executor, /getCompetitorPreview/);
+  assert.match(executor, /getProgrammaticCompetitorContent/);
+  assert.match(executor, /stage: 'programmatic_fallback'/);
+  assert.match(executor, /COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT/);
+  assert.match(executor, /status: 'failed'/);
+  assert.doesNotMatch(executor, /throw new ExternalAnalysisRetryError/);
+  assert.doesNotMatch(executor, /shouldRetry|retryExhausted/);
+  assert.match(panel, /progressStage === 'programmatic_fallback'/);
   assert.match(panel, /hasNewCompletedSource/);
   assert.match(panel, /hydratedCompetitorsRef/);
 });
 
-test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini', async () => {
+test('bulk competitor import uses Firecrawl then programmatic fallback and never Gemini', async () => {
   const [executor, panel, sidebar] = await Promise.all([
     readWorkspaceFile('server/competitorExtractionExecutor.ts'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
@@ -335,6 +342,9 @@ test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini'
   assert.match(executor, /provider: 'firecrawl'/);
   assert.match(executor, /model: FIRECRAWL_MODEL/);
   assert.match(executor, /getCompetitorPreview/);
+  assert.match(executor, /provider: 'programmatic'/);
+  assert.match(executor, /model: PROGRAMMATIC_MODEL/);
+  assert.match(executor, /programmatic_after_firecrawl/);
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
   assert.match(panel, /سحب \$\{selectedResults\.length\} موقع عبر Firecrawl/);
   assert.match(panel, /سحب المنافس عبر Firecrawl/);
@@ -349,6 +359,37 @@ test('bulk competitor import stays on Firecrawl and is not mislabeled as Gemini'
   assert.match(sidebar, /const firecrawlPendingHint = isArabicLocale/);
   assert.match(sidebar, /لم يبدأ اتصال Firecrawl بعد/);
   assert.doesNotMatch(sidebar, /لم يبدأ استخراج Gemini|Gemini extraction has not started/);
+});
+
+test('dual extraction failure is excluded until the canonical marker is manually replaced', async () => {
+  assert.equal(isCompetitorExtractionFailureText(COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT), true);
+  assert.equal(getUsableCompetitorText(COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT), '');
+  assert.equal(getUsableCompetitorText('Manual competitor article text.'), 'Manual competitor article text.');
+  assert.deepEqual(
+    sanitizeCompetitorSlots(
+      ['First competitor', COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT, 'Manual replacement'],
+      ['https://one.example', 'https://failed.example', 'https://manual.example'],
+    ),
+    {
+      texts: ['First competitor', '', 'Manual replacement'],
+      urls: ['https://one.example', '', 'https://manual.example'],
+    },
+  );
+
+  const [api, executor, sidebar, engineeringExecutor, writingContext] = await Promise.all([
+    readWorkspaceFile('api/competitors.ts'),
+    readWorkspaceFile('server/competitorExtractionExecutor.ts'),
+    readWorkspaceFile('components/RightSidebar.tsx'),
+    readWorkspaceFile('server/externalEngineeringAnalysisExecutor.ts'),
+    readWorkspaceFile('utils/contentWritingContext.ts'),
+  ]);
+  assert.match(executor, /firecrawl_programmatic_failed/);
+  assert.match(api, /action === 'save_manual_text'/);
+  assert.match(api, /sync_article_competitors_metadata/);
+  assert.match(sidebar, /saveArticleCompetitorManualText/);
+  assert.match(sidebar, /isCompetitorExtractionFailureText\(event\.currentTarget\.value\)/);
+  assert.match(engineeringExecutor, /sanitizeCompetitorSlots/);
+  assert.match(writingContext, /getUsableCompetitorText/);
 });
 
 test('competitor sidebar keeps one canonical text surface and no Firecrawl result card', async () => {

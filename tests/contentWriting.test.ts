@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT } from '../utils/competitorContent.ts';
 
 const importContentWriting = async (): Promise<any> => {
   const result = await build({
@@ -121,6 +122,29 @@ test('content-writing readiness requires three complete competitors and article 
   assert.equal(bundle.ready, false);
   assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
   assert.equal(bundle.competitors.length, 2);
+});
+
+test('content writing excludes a competitor carrying the dual extraction failure marker', async () => {
+  const {
+    buildContentWritingPromptBundle,
+    normalizeContentWritingCompetitor,
+  } = await importContentWriting();
+  assert.equal(
+    normalizeContentWritingCompetitor({
+      position: 2,
+      url: 'https://failed.example/article',
+      content: COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
+    }),
+    null,
+  );
+
+  const bundle = buildContentWritingPromptBundle(createReadyArticle([
+    'Usable competitor one',
+    COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
+    'Usable competitor three',
+  ]));
+  assert.equal(bundle.ready, false);
+  assert.doesNotMatch(bundle.messages.map((message: { content: string }) => message.content).join('\n'), /\[تعذر استخراج محتوى المنافس\]/);
 });
 
 test('content writing can start from an empty article body', async () => {

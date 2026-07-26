@@ -3,6 +3,7 @@ import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAc
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
+import { sanitizeCompetitorSlots } from '../utils/competitorContent';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
@@ -190,8 +191,15 @@ const hasCompetitorInput = (metadata: unknown): boolean => {
     : isRecord(source.competitors)
       ? source.competitors
       : {};
-  return toStringList(competitors.urls).slice(0, MAX_ARTICLE_COMPETITORS).length > 0
-    || toStringList(competitors.texts).slice(0, MAX_ARTICLE_COMPETITORS).length > 0;
+  const sanitized = sanitizeCompetitorSlots(
+    Array.isArray(competitors.texts)
+      ? competitors.texts.slice(0, MAX_ARTICLE_COMPETITORS)
+      : [],
+    Array.isArray(competitors.urls)
+      ? competitors.urls.slice(0, MAX_ARTICLE_COMPETITORS)
+      : [],
+  );
+  return sanitized.urls.some(Boolean) || sanitized.texts.some(Boolean);
 };
 
 const enqueueSemanticJob = async (

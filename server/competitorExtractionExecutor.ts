@@ -4,7 +4,14 @@ import {
 import { COMPETITOR_EXTRACTION_MAX_ATTEMPTS } from '../constants/competitors';
 import { getCompetitorPreview } from './competitorPreviewCache';
 import {
-  ExternalAnalysisRetryError,
+  getProgrammaticCompetitorContent,
+  ProgrammaticCompetitorExtractionError,
+} from './programmaticCompetitorExtractor';
+import {
+  COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE,
+  COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
+} from '../utils/competitorContent';
+import {
   registerExternalAnalysisJobExecutor,
   type ExternalAnalysisExecutionContext,
 } from './externalAnalysisExecutor';
@@ -15,11 +22,14 @@ import {
 
 /**
  * Architecture boundary:
- * - This queued executor is Firecrawl-only for both retrieval and main-content extraction.
+ * - Firecrawl gets exactly one attempt per URL.
+ * - A failed Firecrawl request falls back immediately to the deterministic programmatic
+ *   extractor. This fallback never invokes Gemini/OpenAI and never schedules Firecrawl again.
  * - It must persist the full text in article_competitors.content_text, then synchronize that
  *   text into the article competitor attachment consumed by analysis and content writing.
- * - Do not add Gemini/OpenAI fallback here. AI extraction is a separate explicit editor path,
- *   while the programmatic button owns its own optional AI fallback.
+ * - If both methods fail, the canonical editor field receives the shared failure marker.
+ *   Failed rows stay excluded from persisted analysis attachments until the user replaces
+ *   that marker with manual text, which the authenticated API promotes to a completed row.
  */
 type CompetitorRow = {
   id: string;
@@ -42,6 +52,7 @@ type CompetitorFailure = {
 };
 
 const FIRECRAWL_MODEL = 'v2/scrape';
+const PROGRAMMATIC_MODEL = 'deterministic-main-content';
 
 const getFirecrawlKeySuffix = (): string => (
   String(process.env.FIRECRAWL_API_KEY || '').trim().slice(-6)
@@ -159,45 +170,122 @@ const executeCompetitorExtraction = async (
       successfulCount += 1;
     } catch (error) {
       if (context.signal.aborted) throw context.signal.reason ?? error;
-      const normalized = error instanceof FirecrawlCompetitorError
+      const firecrawlError = error instanceof FirecrawlCompetitorError
         ? error
         : new FirecrawlCompetitorError({
             message: error instanceof Error ? error.message : 'Unknown competitor extraction error.',
             status: 502,
             code: 'competitor_extraction_failed',
-            retryable: true,
+            retryable: false,
           });
-      const retryExhausted = normalized.retryable
-        && currentAttempt >= COMPETITOR_EXTRACTION_MAX_ATTEMPTS;
-      const shouldRetry = normalized.retryable && !retryExhausted;
-      const failureCode = retryExhausted
-        ? `${normalized.code}_retry_exhausted`
-        : normalized.code;
-      const failureMessage = retryExhausted
-        ? `Stopped after ${COMPETITOR_EXTRACTION_MAX_ATTEMPTS} attempts. ${normalized.message}`
-        : normalized.message;
-      failures.push({
-        position: row.position,
-        code: failureCode,
-        message: failureMessage,
-        retryable: shouldRetry,
-        attempt: currentAttempt,
-      });
       attempts.push({
         requestIndex: row.position,
         outcome: 'failed',
         model: FIRECRAWL_MODEL,
         keySuffix: getFirecrawlKeySuffix(),
-        status: normalized.status,
-        reason: failureCode,
+        status: firecrawlError.status,
+        reason: firecrawlError.code,
         attempt: currentAttempt,
       });
+
       await updateCompetitor(row.id, {
-        status: shouldRetry ? 'retry_scheduled' : 'failed',
-        extraction_provider: 'firecrawl',
-        error_code: failureCode,
-        error_message: failureMessage.slice(0, 2_000),
+        status: 'extracting',
+        extraction_provider: 'programmatic_after_firecrawl',
+        error_code: firecrawlError.code,
+        error_message: firecrawlError.message.slice(0, 2_000),
       }, ['queued', 'extracting', 'retry_scheduled']);
+      await context.reportProgress({
+        progress: {
+          stage: 'programmatic_fallback',
+          current: row.position,
+          total: rows.length,
+          competitorId: row.id,
+          title: row.title,
+          url: row.canonical_url,
+          firecrawlErrorCode: firecrawlError.code,
+          successfulCount,
+          failedCount: failures.length,
+        },
+        provider: 'programmatic',
+        model: PROGRAMMATIC_MODEL,
+        keyAttempts: attempts,
+      });
+
+      try {
+        const content = await getProgrammaticCompetitorContent({
+          url: row.canonical_url || row.source_url,
+          signal: context.signal,
+        });
+        attempts.push({
+          requestIndex: row.position,
+          outcome: 'success',
+          model: PROGRAMMATIC_MODEL,
+          keySuffix: '',
+          status: 200,
+          reason: content.cacheHit ? 'programmatic_cache_hit' : 'firecrawl_failed_programmatic_succeeded',
+          cacheHit: content.cacheHit,
+          attempt: currentAttempt,
+        });
+        await updateCompetitor(row.id, {
+          source_url: content.url,
+          canonical_url: content.canonicalUrl,
+          domain: content.domain,
+          title: content.title,
+          description: content.description,
+          headings: content.headings,
+          content_text: content.text,
+          word_count: content.wordCount,
+          status: 'completed',
+          extraction_provider: content.cacheHit
+            ? 'programmatic_after_firecrawl_cache'
+            : 'programmatic_after_firecrawl',
+          error_code: null,
+          error_message: null,
+          fetched_at: new Date().toISOString(),
+        }, ['extracting']);
+        successfulCount += 1;
+      } catch (programmaticError) {
+        if (context.signal.aborted) throw context.signal.reason ?? programmaticError;
+        const normalizedProgrammaticError = programmaticError instanceof ProgrammaticCompetitorExtractionError
+          ? programmaticError
+          : new ProgrammaticCompetitorExtractionError({
+              message: programmaticError instanceof Error
+                ? programmaticError.message
+                : 'Unknown programmatic competitor extraction error.',
+              status: 502,
+              code: 'programmatic_extraction_failed',
+              retryable: false,
+            });
+        const failureMessage = [
+          `Firecrawl failed (${firecrawlError.code}): ${firecrawlError.message}`,
+          `Programmatic extraction failed (${normalizedProgrammaticError.code}): ${normalizedProgrammaticError.message}`,
+        ].join(' ');
+        failures.push({
+          position: row.position,
+          code: COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE,
+          message: failureMessage,
+          retryable: false,
+          attempt: currentAttempt,
+        });
+        attempts.push({
+          requestIndex: row.position,
+          outcome: 'failed',
+          model: PROGRAMMATIC_MODEL,
+          keySuffix: '',
+          status: normalizedProgrammaticError.status,
+          reason: normalizedProgrammaticError.code,
+          attempt: currentAttempt,
+        });
+        await updateCompetitor(row.id, {
+          content_text: COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
+          word_count: 0,
+          status: 'failed',
+          extraction_provider: 'firecrawl_programmatic_failed',
+          error_code: COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE,
+          error_message: failureMessage.slice(0, 2_000),
+          fetched_at: new Date().toISOString(),
+        }, ['extracting']);
+      }
     }
 
     await context.reportProgress({
@@ -214,7 +302,8 @@ const executeCompetitorExtraction = async (
     });
   }
 
-  // Make every completed source available to the article before a failed URL is retried.
+  // Completed Firecrawl/programmatic sources are synchronized. Terminal failure markers
+  // remain only on failed rows and are intentionally omitted by the database merge function.
   await syncArticleCompetitors(context.job.article_id);
   const finalRows = await readCompetitors(context.job.article_id);
   successfulCount = finalRows.filter(row => row.status === 'completed').length;
@@ -227,26 +316,6 @@ const executeCompetitorExtraction = async (
       retryable: false,
       attempt: currentAttempt,
     }));
-  const retryableFailures = failures.filter(failure => failure.retryable);
-  if (retryableFailures.length > 0) {
-    const first = retryableFailures[0];
-    throw new ExternalAnalysisRetryError({
-      code: first.code,
-      message: `${retryableFailures.length} competitor page(s) will be retried: ${first.message}`,
-      progress: {
-        stage: 'retry_scheduled',
-        current: rows.length,
-        total: rows.length,
-        successfulCount,
-        failedCount: persistedFailures.length,
-        retryingCount: retryableFailures.length,
-        attempt: currentAttempt,
-        maxAttempts: COMPETITOR_EXTRACTION_MAX_ATTEMPTS,
-        failures: [...persistedFailures, ...retryableFailures],
-      },
-    });
-  }
-
   return {
     result: {
       status: persistedFailures.length > 0 ? 'partial' : 'completed',

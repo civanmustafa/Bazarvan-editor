@@ -585,6 +585,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const extractionRetryScheduled = activeJob?.status === 'retry_scheduled';
   const extractionPreparing = activeJob?.status === 'running'
     && progressStage !== 'extracting_competitor'
+    && progressStage !== 'programmatic_fallback'
     && progressStage !== 'competitor_processed';
   const displayedCurrent = Math.min(
     Math.max(0, current),
@@ -607,6 +608,10 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
             ? isArabic
               ? `عامل السحب يجهّز المهمة 0/${total || 1}`
               : `Extraction worker is preparing 0/${total || 1}`
+            : progressStage === 'programmatic_fallback'
+              ? isArabic
+                ? `فشل Firecrawl؛ جار الاستخراج البرمجي ${Math.max(1, displayedCurrent)}/${total || 1}`
+                : `Firecrawl failed; running programmatic extraction ${Math.max(1, displayedCurrent)}/${total || 1}`
             : isArabic
               ? `سحب المنافس عبر Firecrawl ${Math.max(1, displayedCurrent)}/${total || 1}`
               : `Importing via Firecrawl ${Math.max(1, displayedCurrent)}/${total || 1}`
@@ -620,6 +625,10 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
       ? isArabic
         ? 'تم حفظ المهمة في الطابور، ولم يبدأ اتصال Firecrawl بعد.'
         : 'The job is queued; no Firecrawl request has started yet.'
+      : activeJob?.status === 'running' && progressStage === 'programmatic_fallback'
+        ? isArabic
+          ? 'فشل Firecrawl لهذا الرابط؛ بدأ الاستخراج البرمجي تلقائيًا دون إعادة محاولة Firecrawl ودون استخدام الذكاء الاصطناعي.'
+          : 'Firecrawl failed for this URL; programmatic extraction started automatically without retrying Firecrawl or using AI.'
       : activeJob?.status === 'running'
         ? isArabic
           ? 'اتصال Firecrawl جارٍ. قد يستغرق الرابط الواحد حتى 75 ثانية قبل نجاحه أو ظهور خطئه.'
@@ -635,8 +644,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           </h3>
           <p className="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
             {isArabic
-              ? 'ابحث واختر حتى 5 مواقع. السحب الجماعي يتم في الخادم عبر Firecrawl دون استخدام Gemini، ثم يُحفظ النص الكامل في المقالة.'
-              : 'Search and select up to 5 sites. Bulk import runs on the server through Firecrawl without Gemini, then saves the full text to the article.'}
+              ? 'ابحث واختر حتى 5 مواقع. يحاول الخادم Firecrawl مرة واحدة، ثم ينتقل تلقائيًا إلى الاستخراج البرمجي عند فشله، دون استخدام Gemini.'
+              : 'Search and select up to 5 sites. The server tries Firecrawl once, then automatically falls back to programmatic extraction without using Gemini.'}
           </p>
         </div>
         {isLoadingState && <LoaderCircle size={16} className="shrink-0 animate-spin text-[#d4af37]" />}

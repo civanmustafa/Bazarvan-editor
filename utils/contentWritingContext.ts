@@ -12,6 +12,7 @@ import {
   chunkContentWritingCompetitor,
   type ContentWritingSourceChunk,
 } from './contentWritingKnowledge';
+import { getUsableCompetitorText } from './competitorContent';
 
 export const CONTENT_WRITING_REQUIRED_COMPETITOR_COUNT = 3;
 
@@ -85,7 +86,7 @@ export const normalizeContentWritingCompetitor = (
   fallbackPosition = 0,
 ): ContentWritingCompetitorInput | null => {
   if (!isRecord(value)) return null;
-  const content = toText(
+  const content = getUsableCompetitorText(
     value.content
     ?? value.contentText
     ?? value.content_text

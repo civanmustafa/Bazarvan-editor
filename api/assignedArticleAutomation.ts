@@ -19,6 +19,7 @@ import {
   renderSemanticKeywordPrompt,
   type SemanticKeywordInput,
 } from '../utils/semanticKeywordPolicy';
+import { sanitizeCompetitorSlots } from '../utils/competitorContent';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type AutomationStatus = 'generated' | 'analyzed' | 'skipped' | 'failed';
@@ -210,13 +211,10 @@ const getCompetitorData = (metadata: Record<string, any>): { texts: string[]; ur
     : isRecord(metadata.competitors)
       ? metadata.competitors
       : {};
-  const texts = Array.isArray(competitors.texts) ? competitors.texts.map(toTrimmedString) : [];
-  const urls = Array.isArray(competitors.urls) ? competitors.urls.map(toTrimmedString) : [];
-
-  return {
-    texts: texts.filter(Boolean),
-    urls,
-  };
+  return sanitizeCompetitorSlots(
+    Array.isArray(competitors.texts) ? competitors.texts : [],
+    Array.isArray(competitors.urls) ? competitors.urls : [],
+  );
 };
 
 const buildCompetitorBlocks = (texts: string[], urls: string[]): string => texts

@@ -27,8 +27,13 @@ import { createEmptyCompetitorSlots, MAX_ARTICLE_COMPETITORS } from '../constant
 import {
     CompetitorDiscoveryRequestError,
     extractCompetitorProgrammatically,
+    saveArticleCompetitorManualText,
     type CompetitorDiscoveryRow,
 } from '../utils/competitorDiscovery';
+import {
+    getUsableCompetitorText,
+    isCompetitorExtractionFailureText,
+} from '../utils/competitorContent';
 import {
     COMPETITOR_COMPARISON_COMMAND_ID,
     type CompetitorComparisonMapResult,
@@ -616,7 +621,10 @@ const collectCompetitorStatTexts = (
     const texts: string[] = [];
     const slotCount = Math.max(plainTexts.length, extractions.length);
     for (let index = 0; index < slotCount; index += 1) {
-        const plainText = stripExtractionLabels(normalizePlainCompetitorText(plainTexts[index] || ''));
+        if (isCompetitorExtractionFailureText(plainTexts[index])) continue;
+        const plainText = stripExtractionLabels(normalizePlainCompetitorText(
+            getUsableCompetitorText(plainTexts[index]),
+        ));
         const extractedText = stripExtractionLabels(normalizePlainCompetitorText(
             extractions[index]?.content?.text || '',
         ));
@@ -686,7 +694,12 @@ const buildReadyCommandCompetitorBlocks = (
     const slots = Array.from({ length: slotCount }, (_, index) => {
         const extraction = extractions[index];
         const content = extraction?.content;
-        const plainText = stripExtractionLabels(normalizePlainCompetitorText(plainTexts[index] || ''));
+        if (isCompetitorExtractionFailureText(plainTexts[index])) {
+            return { index, extraction, content, text: '' };
+        }
+        const plainText = stripExtractionLabels(normalizePlainCompetitorText(
+            getUsableCompetitorText(plainTexts[index]),
+        ));
         const extractedText = stripExtractionLabels(normalizePlainCompetitorText(content?.text || ''));
         const text = plainText || extractedText;
         return { index, extraction, content, text };
@@ -836,6 +849,7 @@ const RightSidebar: React.FC = () => {
     const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => loadStoredCompetitorTexts());
     const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => loadStoredCompetitorExtractions());
     const programmaticExtractionControllersRef = useRef<Record<number, AbortController>>({});
+    const managedCompetitorPositionsRef = useRef<Set<number>>(new Set());
     const [selectedReadyCommandIds, setSelectedReadyCommandIds] = useState<string[]>([]);
     const [isGeminiExpanded, setIsGeminiExpanded] = useState(true);
     const [isGeminiPaidExpanded, setIsGeminiPaidExpanded] = useState(false);
@@ -924,6 +938,7 @@ const RightSidebar: React.FC = () => {
             const normalizedUrls = urls.map(url => url.trim()).filter(Boolean).slice(0, MAX_ARTICLE_COMPETITORS);
             if (normalizedUrls.length === 0) return;
 
+            managedCompetitorPositionsRef.current = new Set();
             setCompetitorUrls(prev => createDefaultCompetitorUrls().map((_, index) => normalizedUrls[index] || prev[index] || ''));
             setCompetitorExtractions(prev => createDefaultCompetitorExtractions().map((emptyState, index) => (
                 normalizedUrls[index] ? emptyState : prev[index] || emptyState
@@ -938,6 +953,7 @@ const RightSidebar: React.FC = () => {
 
     const handleDiscoveredCompetitors = useCallback((rows: CompetitorDiscoveryRow[]) => {
         const rowsByPosition = new Map(rows.map(row => [row.position, row]));
+        managedCompetitorPositionsRef.current = new Set(rows.map(row => row.position));
         setBulkCompetitorText('');
         setCompetitorUrls(createDefaultCompetitorUrls().map((_, index) => {
             const row = rowsByPosition.get(index + 1);
@@ -946,7 +962,12 @@ const RightSidebar: React.FC = () => {
         setCompetitorHtmls(createDefaultCompetitorHtmls());
         setCompetitorTexts(createDefaultCompetitorTexts().map((_, index) => {
             const row = rowsByPosition.get(index + 1);
-            return row?.status === 'completed' ? row.contentText : '';
+            return row && (
+                row.status === 'completed'
+                || isCompetitorExtractionFailureText(row.contentText)
+            )
+                ? row.contentText
+                : '';
         }));
         setCompetitorExtractions(createDefaultCompetitorExtractions().map((emptyState, index) => {
             const row = rowsByPosition.get(index + 1);
@@ -956,9 +977,11 @@ const RightSidebar: React.FC = () => {
                     status: 'success',
                     source: row.extractionProvider.startsWith('firecrawl')
                         ? 'firecrawl'
-                        : row.extractionProvider === 'programmatic'
+                        : row.extractionProvider.startsWith('programmatic')
                             ? 'programmatic'
-                            : 'url',
+                            : row.extractionProvider === 'manual'
+                                ? 'text'
+                                : 'url',
                     error: '',
                     content: {
                         url: row.canonicalUrl || row.sourceUrl,
@@ -978,7 +1001,9 @@ const RightSidebar: React.FC = () => {
             if (row.status === 'failed' || row.status === 'cancelled') {
                 return {
                     status: 'error',
-                    source: 'url',
+                    source: row.extractionProvider === 'firecrawl_programmatic_failed'
+                        ? 'programmatic'
+                        : 'url',
                     content: null,
                     error: row.errorMessage || (row.status === 'cancelled' ? 'Extraction cancelled.' : 'Extraction failed.'),
                 } satisfies CompetitorExtractionState;
@@ -1017,6 +1042,7 @@ const RightSidebar: React.FC = () => {
 
         const resetCompetitors = (event: Event) => {
             const restoredInputs = (event as CustomEvent<StoredCompetitorInputs | undefined>).detail;
+            managedCompetitorPositionsRef.current = new Set();
             setBulkCompetitorText('');
             setCompetitorUrls(normalizeStoredList(restoredInputs?.urls, createDefaultCompetitorUrls()));
             setCompetitorHtmls(normalizeStoredList(restoredInputs?.htmls, createDefaultCompetitorHtmls()));
@@ -1066,10 +1092,13 @@ const RightSidebar: React.FC = () => {
 
     const readyCommandCompetitorSources = useMemo<CompetitorComparisonSource[]>(() => {
         const slotCount = Math.max(competitorExtractions.length, competitorTexts.length, competitorUrls.length);
-        return Array.from({ length: slotCount }, (_, index) => {
+        return Array.from({ length: slotCount }, (_, index): CompetitorComparisonSource | null => {
             const extraction = competitorExtractions[index];
             const content = extraction?.content;
-            const plainText = stripExtractionLabels(normalizePlainCompetitorText(competitorTexts[index] || ''));
+            if (isCompetitorExtractionFailureText(competitorTexts[index])) return null;
+            const plainText = stripExtractionLabels(normalizePlainCompetitorText(
+                getUsableCompetitorText(competitorTexts[index]),
+            ));
             const extractedText = stripExtractionLabels(normalizePlainCompetitorText(content?.text || ''));
             return {
                 competitorNumber: index + 1,
@@ -1077,7 +1106,9 @@ const RightSidebar: React.FC = () => {
                 title: content?.title || '',
                 text: plainText || extractedText,
             };
-        }).filter(source => Boolean(source.text.trim() || source.url.trim()));
+        }).filter((source): source is CompetitorComparisonSource => Boolean(
+            source && (source.text.trim() || source.url.trim()),
+        ));
     }, [competitorExtractions, competitorTexts, competitorUrls]);
 
     const competitorTextStats = useMemo(() => {
@@ -1327,6 +1358,58 @@ ${readyCommandCompetitorBlocks}`;
 
     const handleCompetitorTextChange = (index: number, value: string) => {
         setCompetitorTexts(prev => prev.map((text, textIndex) => textIndex === index ? value : text));
+        setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index
+            ? {
+                status: value.trim() ? 'success' : 'idle',
+                source: 'text',
+                content: null,
+                error: '',
+                notice: '',
+            }
+            : item
+        ));
+    };
+
+    const handleCompetitorTextCommit = async (index: number) => {
+        const contentText = getUsableCompetitorText(competitorTexts[index]);
+        if (
+            !activeArticleId
+            || !contentText
+            || !managedCompetitorPositionsRef.current.has(index + 1)
+        ) {
+            return;
+        }
+
+        try {
+            await saveArticleCompetitorManualText({
+                articleId: activeArticleId,
+                position: index + 1,
+                contentText,
+            });
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index
+                ? {
+                    ...item,
+                    status: 'success',
+                    source: 'text',
+                    error: '',
+                    notice: tRs.manualCompetitorTextSaved,
+                }
+                : item
+            ));
+        } catch (error) {
+            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index
+                ? {
+                    ...item,
+                    status: 'error',
+                    source: 'text',
+                    error: error instanceof Error
+                        ? error.message
+                        : tRs.manualCompetitorTextSaveFailed,
+                    notice: '',
+                }
+                : item
+            ));
+        }
     };
 
     const setCompetitorPlainTextFromExtraction = (
@@ -2348,9 +2431,19 @@ ${readyCommandCompetitorBlocks}`;
                                     <textarea
                                         value={plainText}
                                         onChange={(event) => handleCompetitorTextChange(index, event.target.value)}
+                                        onFocus={(event) => {
+                                            if (isCompetitorExtractionFailureText(event.currentTarget.value)) {
+                                                event.currentTarget.select();
+                                            }
+                                        }}
+                                        onBlur={() => void handleCompetitorTextCommit(index)}
                                         placeholder={tRs.competitorPlainTextPlaceholder}
                                         rows={5}
-                                        className="w-full resize-y rounded-md border border-gray-300 bg-gray-50 px-2 py-2 text-xs leading-5 text-[#333333] outline-none placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500"
+                                        className={`w-full resize-y rounded-md border px-2 py-2 text-xs leading-5 outline-none placeholder:text-gray-400 focus:ring-1 dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500 ${
+                                            isCompetitorExtractionFailureText(plainText)
+                                                ? 'border-red-300 bg-red-50 text-red-700 focus:border-red-400 focus:ring-red-300 dark:border-red-800 dark:bg-red-950/20 dark:text-red-300'
+                                                : 'border-gray-300 bg-gray-50 text-[#333333] focus:border-[#d4af37] focus:ring-[#d4af37] dark:border-[#3C3C3C]'
+                                        }`}
                                         dir="auto"
                                     />
                                     <div className="mt-1 text-[10px] font-semibold leading-4 text-gray-500 dark:text-gray-400">

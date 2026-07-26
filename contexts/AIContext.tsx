@@ -34,6 +34,7 @@ import { PROMPT_TEMPLATE_IDS, getPromptTemplate, renderPromptTemplate } from '..
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { formatGoalContextValue, normalizeGoalContext } from '../utils/goalContext';
+import { getUsableCompetitorText } from '../utils/competitorContent';
 import { saveRemoteArticleAiResult } from '../utils/supabaseArticles';
 import { getSelectedGeminiFreeModel, isGeminiFreeModelFallbackEnabled } from '../utils/geminiModelPreference';
 import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from '../utils/authenticatedApi';
@@ -2401,7 +2402,7 @@ const stripExtractionLabels = (value: string): string => (
 const buildAutomaticReadyCommandCompetitorBlocks = (plainTexts: string[], urls: string[]): string => {
     const blocks = plainTexts
         .map((value, index) => {
-            const text = stripExtractionLabels(value);
+            const text = stripExtractionLabels(getUsableCompetitorText(value));
             if (!text) return '';
 
             return `### Competitor ${index + 1} - plain text
