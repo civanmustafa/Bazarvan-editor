@@ -42,6 +42,13 @@ export type AiExecutionActivity = {
   completedAt?: string;
 };
 
+export type AiExecutionModelAttemptSummary = {
+  model: string;
+  successCount: number;
+  failureCount: number;
+  isCurrent: boolean;
+};
+
 type AiExecutionActivityInput = {
   id?: string;
   articleId?: string;
@@ -175,6 +182,29 @@ export const formatAiProviderName = (provider: unknown): string => {
   if (token === 'gemini' || token === 'geminifree') return 'Gemini';
   if (token === 'openai' || token === 'chatgpt') return 'OpenAI';
   return value || 'AI';
+};
+
+export const summarizeAiExecutionModelAttempts = (
+  activity: Pick<AiExecutionActivity, 'model' | 'requestedModel' | 'entries'>,
+): AiExecutionModelAttemptSummary[] => {
+  const orderedModels: string[] = [];
+  const addModel = (value: unknown): void => {
+    const model = toText(value);
+    if (model && !orderedModels.includes(model)) orderedModels.push(model);
+  };
+  addModel(activity.requestedModel);
+  activity.entries.forEach(entry => addModel(entry.model));
+  addModel(activity.model);
+
+  return orderedModels.map(model => {
+    const entries = activity.entries.filter(entry => toText(entry.model) === model);
+    return {
+      model,
+      successCount: entries.filter(entry => entry.outcome === 'success').length,
+      failureCount: entries.filter(entry => entry.outcome === 'failed').length,
+      isCurrent: model === toText(activity.model),
+    };
+  });
 };
 
 export const getVisibleAiExecutionMessage = (

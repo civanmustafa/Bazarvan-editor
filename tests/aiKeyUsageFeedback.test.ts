@@ -12,6 +12,7 @@ import {
   getVisibleAiExecutionMessage,
   requestAiExecutionActivityCancel,
   resetAiExecutionActivitiesForTests,
+  summarizeAiExecutionModelAttempts,
   updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity.ts';
 
@@ -177,6 +178,34 @@ test('unified AI activity follows live key, model, and paid-to-free fallback sta
   assert.ok(completed.entries.some(entry => entry.keySuffix === 'PAID01' && entry.outcome === 'failed'));
   assert.ok(completed.entries.some(entry => entry.keySuffix === 'FREE02' && entry.outcome === 'success'));
   assert.equal(getAiExecutionActivities()[0].id, 'activity-test');
+});
+
+test('expanded AI activity summarizes successful and failed attempts by model', () => {
+  const models = summarizeAiExecutionModelAttempts({
+    requestedModel: 'gemini-pro-test',
+    model: 'gemini-flash-test',
+    entries: [
+      { keySuffix: 'PAID01', outcome: 'failed', status: 429, model: 'gemini-pro-test' },
+      { keySuffix: 'PAID02', outcome: 'failed', status: 503, model: 'gemini-pro-test' },
+      { keySuffix: 'FREE01', outcome: 'failed', status: 429, model: 'gemini-flash-test' },
+      { keySuffix: 'FREE02', outcome: 'success', status: 200, model: 'gemini-flash-test' },
+    ],
+  });
+
+  assert.deepEqual(models, [
+    {
+      model: 'gemini-pro-test',
+      successCount: 0,
+      failureCount: 2,
+      isCurrent: false,
+    },
+    {
+      model: 'gemini-flash-test',
+      successCount: 1,
+      failureCount: 1,
+      isCurrent: true,
+    },
+  ]);
 });
 
 test('unified AI activity identifies its article and stops the original operation', async () => {
