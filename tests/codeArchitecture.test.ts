@@ -659,9 +659,10 @@ test('content writing editor UI runs through durable authenticated sessions', as
 });
 
 test('single-result AI actions share one suggestion presenter and keep bulk review isolated', async () => {
-  const [aiContext, suggestionModal] = await Promise.all([
+  const [aiContext, suggestionModal, interactionContext] = await Promise.all([
     readWorkspaceFile('contexts/AIContext.tsx'),
     readWorkspaceFile('components/SuggestionModal.tsx'),
+    readWorkspaceFile('contexts/InteractionContext.tsx'),
   ]);
   const quickCommandFlow = aiContext.slice(
     aiContext.indexOf('const handleAiRequest = useCallback'),
@@ -677,4 +678,8 @@ test('single-result AI actions share one suggestion presenter and keep bulk revi
   assert.match(singleCriterionFixFlow, /presentSuggestion\(/);
   assert.doesNotMatch(singleCriterionFixFlow, /replaceBulkFixReviewItems|setFixAllProgress|setSuggestion\(/);
   assert.match(suggestionModal, /data-ai-suggestion-panel="true"/);
+  assert.match(suggestionModal, /data-unified-suggestion-engine="true"/);
+  assert.match(suggestionModal, /context => context\.dismissSuggestion/);
+  assert.doesNotMatch(suggestionModal, /context => context\.setSuggestion/);
+  assert.match(interactionContext, /setPinnedTooltip\(null\)[\s\S]*handleAiFix\(violation\.rule, violation\)/);
 });

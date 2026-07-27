@@ -54,7 +54,7 @@ const SuggestionModal: React.FC = () => {
   const setTitle = useEditorSelector(context => context.setTitle);
   const articleLanguage = useEditorSelector(context => context.articleLanguage);
   const suggestion = useAISelector(context => context.suggestion);
-  const setSuggestion = useAISelector(context => context.setSuggestion);
+  const dismissSuggestion = useAISelector(context => context.dismissSuggestion);
   const markHistorySuggestionApplied = useAISelector(context => context.markHistorySuggestionApplied);
   const { closeModal } = useModal();
 
@@ -112,7 +112,7 @@ const SuggestionModal: React.FC = () => {
   }, [getClampedPosition, isDragging]);
 
   const handleCancel = () => {
-    setSuggestion(null);
+    dismissSuggestion();
     closeModal();
   };
 
@@ -173,7 +173,7 @@ const SuggestionModal: React.FC = () => {
     if (suggestion?.historyItemId) {
       markHistorySuggestionApplied(suggestion.historyItemId, acceptedSuggestion);
     }
-    setSuggestion(null);
+    dismissSuggestion();
     closeModal();
   };
 
@@ -192,6 +192,7 @@ const SuggestionModal: React.FC = () => {
         className="fixed pointer-events-auto bg-white dark:bg-[#2A2A2A] rounded-lg shadow-2xl border border-gray-300 dark:border-[#3C3C3C] flex flex-col"
         data-ai-suggestion-panel="true"
         data-toolbar-ai-suggestion-panel="true"
+        data-unified-suggestion-engine="true"
         style={{ left: position.x, top: position.y, width: panelWidth, maxHeight: panelMaxHeight, zIndex: 10000 }}
       >
         <div

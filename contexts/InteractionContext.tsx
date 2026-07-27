@@ -867,6 +867,12 @@ export const InteractionProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     buttonElement.style.cursor = 'not-allowed';
                     buttonElement.style.opacity = '1';
                     buttonElement.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border:2px solid rgba(255,255,255,.55);border-top-color:white;border-radius:999px;"></span>${uiLanguage === 'ar' ? 'جاري الإصلاح...' : 'Fixing...'}`;
+                    // The pinned criterion tooltip is only the request launcher.
+                    // Close it before opening the shared suggestion review engine
+                    // so the user never sees two competing proposal windows.
+                    setTooltip(null);
+                    setPinnedTooltip(null);
+                    tooltipFixTargetsRef.current.clear();
                     handleAiFix(violation.rule, violation);
                 }
                 return;

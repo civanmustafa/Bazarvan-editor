@@ -4880,7 +4880,7 @@ interface AIContextType {
     isAiCommandLoading: boolean;
     aiFixingInfo: { title: string; from: number } | null;
     suggestion: SuggestionState | null;
-    setSuggestion: React.Dispatch<React.SetStateAction<SuggestionState | null>>;
+    dismissSuggestion: () => void;
     headingsAnalysis: HeadingAnalysisResult[] | null;
     setHeadingsAnalysis: React.Dispatch<React.SetStateAction<HeadingAnalysisResult[] | null>>;
     isHeadingsAnalysisMinimized: boolean;
@@ -5001,12 +5001,34 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const previousArticleUserRef = useRef<string | null>(currentUser);
     const openAiModel = getAiProviderModel(aiProviderCapabilities, 'chatgpt');
 
-    // Quick commands, floating commands, and single criterion fixes all use
-    // this presenter so they always open the same suggestion review window.
+    /*
+     * This is the only entry point for every single-result suggestion source:
+     * quick commands, the floating toolbar, the editor toolbar, and criterion
+     * violation fixes. Keep source-specific generation outside this presenter;
+     * normalization and the review window stay identical here.
+     */
     const presentSuggestion = useCallback((nextSuggestion: SuggestionState) => {
-        setSuggestion(nextSuggestion);
+        const seen = new Set<string>();
+        const normalizedSuggestions = nextSuggestion.suggestions
+            .map(value => value.trim())
+            .filter(value => {
+                if (!value || seen.has(value)) return false;
+                seen.add(value);
+                return true;
+            });
+        if (normalizedSuggestions.length === 0) return;
+
+        setSuggestion({
+            ...nextSuggestion,
+            original: nextSuggestion.original?.trim(),
+            suggestions: normalizedSuggestions,
+        });
         openModal('suggestion');
     }, [openModal]);
+
+    const dismissSuggestion = useCallback(() => {
+        setSuggestion(null);
+    }, []);
 
     useEffect(() => {
         setQuickAiProvider(provider => (
@@ -7109,7 +7131,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, []);
 
     const value = useMemo<AIContextType>(() => ({
-        aiResults, aiInsertionPatches, aiCompetitorComparisonResults, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, setSuggestion,
+        aiResults, aiInsertionPatches, aiCompetitorComparisonResults, isAiLoading, quickAiProvider, setQuickAiProvider, isAiCommandLoading, aiFixingInfo, suggestion, dismissSuggestion,
         headingsAnalysis, setHeadingsAnalysis, isHeadingsAnalysisMinimized, setIsHeadingsAnalysisMinimized,
         aiHistory, bulkFixReviewItems, fixAllProgress, aiRequestProgress, cancelAiRequest, runPlainAiAnalysis, handleAiRequest, handleAnalyzeHeadings, handleAiAnalyze,
         buildSmartAnalysisPrompt, validateAiArticleContext, importManualAiResponse, parseAiPatchResponse, generateSemanticKeywords, generateGoalContext,
@@ -7132,6 +7154,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         isAiCommandLoading,
         aiFixingInfo,
         suggestion,
+        dismissSuggestion,
         headingsAnalysis,
         isHeadingsAnalysisMinimized,
         aiHistory,
