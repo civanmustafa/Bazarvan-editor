@@ -241,3 +241,50 @@ test('free-form final stages expose the complete registries without inventing ex
   assert.deepEqual(usage.sentSourceChunkIds, []);
   assert.deepEqual(usage.referencedKnowledgeItemIds, []);
 });
+
+test('structured revision stages distinguish planned evidence from evidence declared by applied edits', async () => {
+  const { buildContentWritingStageKnowledgeUsage } = await importStageKnowledge();
+  const revisionPlan = {
+    operations: [{
+      id: 'R001',
+      requiredIdeaIds: ['K001'],
+      requiredClaimIds: ['CL001'],
+    }],
+  };
+  const planned = buildContentWritingStageKnowledgeUsage({
+    step: step({
+      stepKey: 'final-review',
+      stepType: 'final_review',
+      metadata: {
+        revisionPhase: 'plan',
+        revisionPlan,
+      },
+    }),
+    snapshot,
+  });
+  const applied = buildContentWritingStageKnowledgeUsage({
+    step: step({
+      stepKey: 'final-review-apply',
+      stepType: 'final_review',
+      metadata: {
+        revisionPhase: 'apply',
+        revisionPlan,
+        revisionEdits: [{
+          coveredIdeaIds: ['K001'],
+          usedClaimIds: ['CL001'],
+          usedSourceChunkIds: ['C1-S001'],
+        }],
+      },
+    }),
+    snapshot,
+  });
+
+  assert.equal(planned.referenceKind, 'planned');
+  assert.deepEqual(planned.referencedKnowledgeItemIds, ['K001']);
+  assert.deepEqual(planned.referencedClaimIds, ['CL001']);
+  assert.equal(applied.referenceKind, 'declared_used');
+  assert.deepEqual(applied.referencedKnowledgeItemIds, ['K001']);
+  assert.deepEqual(applied.referencedClaimIds, ['CL001']);
+  assert.deepEqual(applied.referencedSourceChunkIds, ['C1-S001']);
+  assert.deepEqual(applied.referencedSourceIds, ['SRC1']);
+});

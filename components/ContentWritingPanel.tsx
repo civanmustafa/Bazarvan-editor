@@ -230,6 +230,20 @@ const getStepLabel = (step: ContentWritingStep, isArabic: boolean): string => {
     final_review: isArabic ? 'المراجعة النهائية' : 'Final review',
     quality_repair: isArabic ? 'إصلاح معايير الجودة' : 'Quality repair',
   };
+  const revisionPhase = String(step.metadata.revisionPhase || '');
+  if (step.stepType === 'final_review' && revisionPhase) {
+    if (revisionPhase === 'plan') {
+      return isArabic ? 'خطة المراجعة النهائية' : 'Final review plan';
+    }
+    return isArabic ? 'تطبيق تعديلات المراجعة النهائية' : 'Apply final review edits';
+  }
+  if (step.stepType === 'quality_repair' && revisionPhase) {
+    const pass = Math.max(1, Number(step.metadata.repairPass) || 1)
+      .toLocaleString(isArabic ? 'ar' : 'en');
+    return revisionPhase === 'plan'
+      ? `${isArabic ? 'خطة إصلاح الجودة' : 'Quality repair plan'} ${pass}`
+      : `${isArabic ? 'تطبيق إصلاح الجودة' : 'Apply quality repair'} ${pass}`;
+  }
   if (step.stepType === 'quality_repair' || step.stepType === 'section_repair') {
     const sequence = Number(step.stepKey.match(/(\d+)$/)?.[1]) || 1;
     return `${labels[step.stepType]} ${sequence.toLocaleString(isArabic ? 'ar' : 'en')}`;
@@ -862,7 +876,13 @@ const ContentWritingPanel: React.FC = () => {
     ? progress.workflowStepKey.trim()
     : '';
   const completedWorkflowSteps = workflowSteps.filter(step => step.status === 'completed').length;
-  const qualityRepairStepCount = workflowSteps.filter(step => step.stepType === 'quality_repair').length;
+  const qualityRepairStepCount = new Set(
+    workflowSteps
+      .filter(step => step.stepType === 'quality_repair')
+      .map(step => Math.max(1, Number(step.metadata.repairPass) || (
+        Number(step.stepKey.match(/quality-repair-(\d+)/)?.[1]) || 1
+      ))),
+  ).size;
   const currentWorkflowStep = workflowSteps.find(step => step.stepKey === workflowStepKey);
   const automaticWorkflowStepKey = (
     (workflowStepKey && workflowSteps.some(step => step.stepKey === workflowStepKey)

@@ -6,13 +6,17 @@ import {
   type ContentWritingSourceChunk,
 } from './contentWritingKnowledge';
 import type { ContentWritingClaimLedgerItem } from './contentWritingClaims';
+import type {
+  ContentWritingRevisionDocument,
+  ContentWritingRevisionPlan,
+} from './contentWritingRevision';
 import {
   getPromptTemplate,
   PROMPT_TEMPLATE_IDS,
   renderPromptTemplate,
 } from '../constants/promptRegistry';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 4;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 5;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
@@ -498,6 +502,8 @@ export const buildContentWritingFinalReviewPrompt = (options: {
   knowledge?: ContentWritingKnowledgeBase;
   coverageAudit?: ContentWritingCoverageAudit;
   qualityContract?: string;
+  qualityReportJson?: string;
+  documentTargetsJson?: string;
   template?: string;
 }): string => renderPromptTemplate(
   options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.finalReview),
@@ -506,11 +512,51 @@ export const buildContentWritingFinalReviewPrompt = (options: {
     quality_contract_block: options.qualityContract
       ? `عقد الجودة البرمجي:\n${options.qualityContract}`
       : '',
+    quality_report_json: options.qualityReportJson || '{}',
     knowledge_json: options.knowledge ? contentWritingKnowledgeToPromptJson(options.knowledge) : '{}',
     coverage_audit_json: JSON.stringify(options.coverageAudit || {}, null, 2),
+    document_targets_json: options.documentTargetsJson || '[]',
     assembled_draft: options.draft,
   },
 );
+
+export const buildContentWritingRevisionApplyPrompt = (options: {
+  plan: ContentWritingRevisionPlan;
+  document: ContentWritingRevisionDocument;
+  knowledge: ContentWritingKnowledgeBase;
+  qualityContract?: string;
+  language: string;
+  template?: string;
+}): string => {
+  const targetIds = new Set(options.plan.operations.map(operation => operation.targetId));
+  const targetSegments = options.document.targets
+    .filter(target => targetIds.has(target.id))
+    .map(target => ({
+      id: target.id,
+      regionId: target.regionId,
+      sectionKey: target.sectionKey || null,
+      kind: target.kind,
+      heading: target.heading,
+      markdown: target.markdown,
+    }));
+  const requiredIdeaIds = new Set(
+    options.plan.operations.flatMap(operation => operation.requiredIdeaIds),
+  );
+  const knowledgeItems = options.knowledge.items.filter(item => requiredIdeaIds.has(item.id));
+  return renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.revisionApply),
+    {
+      language_instruction: options.language === 'en'
+        ? 'اكتب النصوص البديلة باللغة الإنجليزية.'
+        : 'اكتب النصوص البديلة باللغة العربية.',
+      quality_contract: options.qualityContract || '- حافظ على جودة النسخة السابقة ولا تُدخل مخالفة جديدة.',
+      revision_plan_json: JSON.stringify(options.plan, null, 2),
+      target_segments_json: JSON.stringify(targetSegments, null, 2),
+      knowledge_items_json: JSON.stringify(knowledgeItems, null, 2),
+      claim_ledger_json: JSON.stringify(options.knowledge.claimLedger, null, 2),
+    },
+  );
+};
 
 const GENERATED_LIST_DIGIT_MAP: Record<string, string> = {
   '٠': '0',
@@ -649,9 +695,36 @@ export const recoverContentWritingDraft = (options: {
   const completedWithOutput = options.steps
     .filter(step => step.status === 'completed' && Boolean(String(step.outputText || '').trim()))
     .sort((left, right) => left.ordinal - right.ordinal);
+  const acceptedRevision = [...completedWithOutput]
+    .reverse()
+    .find(step => (
+      (step.stepType === 'quality_repair' || step.stepType === 'final_review')
+      && step.metadata?.revisionPhase === 'apply'
+      && step.metadata?.revisionDecision
+      && typeof step.metadata.revisionDecision === 'object'
+      && (step.metadata.revisionDecision as Record<string, unknown>).accepted === true
+      && Boolean(toText(step.metadata?.acceptedDraft, 200_000))
+    ));
+  if (acceptedRevision) {
+    return {
+      markdown: normalizeFinalContentWritingResult(
+        toText(acceptedRevision.metadata?.acceptedDraft, 200_000),
+      ),
+      source: 'review_step',
+      includedStepCount: 1,
+    };
+  }
+
+  // Legacy workflow versions persisted a complete article as the step output.
+  // Structured revision plans and edit bundles are JSON and must never be
+  // mistaken for recoverable article prose.
   const reviewedDraft = [...completedWithOutput]
     .reverse()
-    .find(step => step.stepType === 'quality_repair' || step.stepType === 'final_review');
+    .find(step => (
+      (step.stepType === 'quality_repair' || step.stepType === 'final_review')
+      && !step.metadata?.revisionPhase
+      && /^#[ \t]+\S/m.test(String(step.outputText || ''))
+    ));
   if (reviewedDraft?.outputText) {
     return {
       markdown: normalizeFinalContentWritingResult(reviewedDraft.outputText),

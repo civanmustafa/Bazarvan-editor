@@ -266,6 +266,52 @@ test('stopped writing prefers the latest completed full-draft review over assemb
   assert.equal(recovered.markdown, '# Saved title\n\nFinal reviewed body.');
 });
 
+test('stopped writing recovers only an accepted targeted revision candidate and ignores plan JSON', async () => {
+  const { recoverContentWritingDraft } = await importWorkflow();
+  const acceptedDraft = '# Saved title\n\nAccepted targeted revision.';
+  const recovered = recoverContentWritingDraft({
+    articleTitle: 'Saved title',
+    language: 'en',
+    steps: [
+      {
+        stepKey: 'outline',
+        stepType: 'outline',
+        ordinal: 2,
+        status: 'completed',
+        outputText: outlineJson,
+      },
+      {
+        stepKey: 'final-review',
+        stepType: 'final_review',
+        ordinal: 11,
+        status: 'completed',
+        outputText: '{"operations":[{"id":"R001"}]}',
+        metadata: {
+          revisionPhase: 'plan',
+          revisionPlan: { operations: [{ id: 'R001' }] },
+        },
+      },
+      {
+        stepKey: 'final-review-apply',
+        stepType: 'final_review',
+        ordinal: 12,
+        status: 'completed',
+        outputText: '{"edits":[{"operationId":"R001"}]}',
+        metadata: {
+          revisionPhase: 'apply',
+          revisionDecision: { accepted: true },
+          acceptedDraft,
+        },
+      },
+    ],
+  });
+
+  assert.ok(recovered);
+  assert.equal(recovered.source, 'review_step');
+  assert.equal(recovered.markdown, acceptedDraft);
+  assert.doesNotMatch(recovered.markdown, /operations|operationId/);
+});
+
 test('final review prompts receive the complete assembled draft', async () => {
   const { buildContentWritingFinalReviewPrompt } = await importWorkflow();
   const marker = `START-${'complete body '.repeat(1_000)}-END`;

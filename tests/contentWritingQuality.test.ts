@@ -168,7 +168,7 @@ test('minimum score is the authoritative quality gate for new and persisted repo
   assert.equal(normalized?.passed, true);
 });
 
-test('repair prompt prioritizes machine-detected failures and includes the full draft', async () => {
+test('repair planning prompt classifies failures and reads the full draft without rewriting it', async () => {
   const { buildContentWritingRepairPrompt, evaluateContentWritingQuality } = await importQuality();
   const markdown = '# عنوان\n\nنص قصير جدًا.';
   const report = evaluateContentWritingQuality({ ...articleInput, markdown }).report;
@@ -179,8 +179,10 @@ test('repair prompt prioritizes machine-detected failures and includes the full 
     language: 'ar',
   });
 
-  assert.match(prompt, /المشكلات التي اكتشفها المحرك/);
+  assert.match(prompt, /المخالفات المرتبة/);
   assert.match(prompt, /عقد جودة تجريبي/);
   assert.match(prompt, /نص قصير جدًا/);
   assert.match(prompt, /blocking/);
+  assert.match(prompt, /"scope": "global"/);
+  assert.match(prompt, /لا تُرجع المقالة ولا النصوص البديلة/);
 });

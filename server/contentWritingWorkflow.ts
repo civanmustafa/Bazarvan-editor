@@ -8,6 +8,7 @@ import {
   buildContentWritingFinalReviewPrompt,
   buildContentWritingIntroductionPrompt,
   buildContentWritingOutlinePrompt,
+  buildContentWritingRevisionApplyPrompt,
   buildContentWritingSectionRepairPrompt,
   buildContentWritingSectionPrompt,
   createContentWritingWorkflowSteps,
@@ -51,6 +52,7 @@ import {
 import {
   buildContentWritingRepairPrompt,
   evaluateContentWritingQuality,
+  normalizeContentWritingQualityReport,
   type ContentWritingQualityReport,
 } from '../utils/contentWritingQuality';
 import { normalizeGoalContext } from '../utils/goalContext';
@@ -58,6 +60,16 @@ import {
   CONTENT_WRITING_EVIDENCE_TRACE_VERSION,
   type ContentWritingEvidenceTrace,
 } from '../utils/contentWritingEvidence';
+import {
+  applyContentWritingRevisionEdits,
+  buildContentWritingRevisionDocument,
+  compareContentWritingQualityReports,
+  contentWritingRevisionTargetsToPromptJson,
+  evaluateContentWritingRevisionKnowledge,
+  parseContentWritingRevisionEdits,
+  parseContentWritingRevisionPlan,
+  type ContentWritingRevisionPlan,
+} from '../utils/contentWritingRevision';
 import type { GoalContext, Keywords } from '../types';
 import {
   executeContentWritingTurn,
@@ -165,6 +177,13 @@ const buildCompactArticleContext = (
 ${contentWritingKnowledgeToPromptJson(knowledge)}
 </persisted_competitor_coverage_matrix>`;
 };
+
+const buildTargetedRevisionArticleContext = (
+  compactArticleContext: string,
+): string => compactArticleContext.replace(
+  /<current_article_text>[\s\S]*?<\/current_article_text>/gi,
+  '<current_article_text withheld="targeted-revision">Only the explicitly targeted segments are attached to this revision step.</current_article_text>',
+);
 
 const getStepUsage = (step: ContentWritingStep): unknown => {
   const execution = isRecord(step.metadata?.execution) ? step.metadata.execution : {};
@@ -364,7 +383,8 @@ export const executeStructuredContentWritingWorkflow = async (
       if (!toText(processed.output)) {
         throw new Error(`The ${definition.title} step returned an empty usable output.`);
       }
-      const isGeneratedArticleProse = (
+      const isStructuredRevisionPayload = Boolean(definition.metadata.revisionPhase);
+      const isGeneratedArticleProse = !isStructuredRevisionPayload && (
         definition.type === 'section'
         || definition.type === 'introduction'
         || definition.type === 'faq'
@@ -870,87 +890,20 @@ export const executeStructuredContentWritingWorkflow = async (
   const finalDefinition: ContentWritingWorkflowStepDefinition = {
     ...baseFinalDefinition,
     ordinal: coverageAuditDefinition.ordinal + coverageAudit.repairs.length + 1,
+    title: 'Final review plan',
+    metadata: {
+      ...baseFinalDefinition.metadata,
+      revisionPhase: 'plan',
+      revisionKind: 'final_review',
+    },
   };
-  await ensureStep(finalDefinition);
-  const finalResult = await runStep({
-    definition: finalDefinition,
-    prompt: buildContentWritingFinalReviewPrompt({
-      articleTitle: article.title,
-      draft: assembledDraft,
-      knowledge,
-      coverageAudit,
-      qualityContract: qualityRuntime?.contract,
-      template: promptTemplate(PROMPT_TEMPLATE_IDS.finalReview),
-    }),
-    stepIndex: finalDefinition.ordinal,
-    stepCount: definitions.length + coverageAudit.repairs.length,
-    maxOutputTokens: 32_000,
-    articleContextOverride: compactArticleContext,
-    processOutput: output => ({ output: normalizeFinalContentWritingResult(output) }),
-  });
-  if (!finalResult.ok) return finalResult.execution;
-
-  let finalOutput = finalResult.output;
-  let finalStep = finalResult.step;
-  let execution = finalResult.execution;
-  let qualityReport: ContentWritingQualityReport | null = null;
+  let finalOutput = assembledDraft;
+  let finalStep = coverageAuditResult.step;
+  let execution = coverageAuditResult.execution || conclusionResult.execution;
   let repairPasses = 0;
-
-  if (qualityRuntime) {
-    let evaluation = evaluateContentWritingQuality({
-      markdown: finalOutput,
-      articleTitle: article.title,
-      keywords: qualityRuntime.keywords,
-      goalContext: qualityRuntime.goalContext,
-      articleLanguage: article.language === 'en' ? 'en' : 'ar',
-      configuration: qualityRuntime.configuration,
-      repairPasses,
-    });
-    qualityReport = evaluation.report;
-
-    for (
-      let pass = 1;
-      !qualityReport.passed && pass <= qualityRuntime.configuration.maxRepairPasses;
-      pass += 1
-    ) {
-      const repairDefinition: ContentWritingWorkflowStepDefinition = {
-        key: `quality-repair-${String(pass).padStart(2, '0')}`,
-        type: 'quality_repair',
-        ordinal: finalDefinition.ordinal + pass,
-        title: `Quality repair ${pass}`,
-        metadata: {
-          workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
-          qualityPolicyVersion: qualityRuntime.configuration.policyVersion,
-          repairPass: pass,
-        },
-      };
-      await ensureStep(repairDefinition);
-      const repairResult = await runStep({
-        definition: repairDefinition,
-        prompt: buildContentWritingRepairPrompt({
-          report: qualityReport,
-          draft: finalOutput,
-          qualityContract: qualityRuntime.contract,
-          language: article.language === 'en' ? 'en' : 'ar',
-          template: promptTemplate(PROMPT_TEMPLATE_IDS.qualityRepair),
-        }),
-        stepIndex: repairDefinition.ordinal,
-        stepCount: definitions.length
-          + coverageAudit.repairs.length
-          + qualityRuntime.configuration.maxRepairPasses,
-        maxOutputTokens: 32_000,
-        articleContextOverride: compactArticleContext,
-        processOutput: output => ({
-          output: normalizeFinalContentWritingResult(output),
-          metadata: { qualityReportBeforeRepair: qualityReport },
-        }),
-      });
-      if (!repairResult.ok) return repairResult.execution;
-      repairPasses = pass;
-      finalOutput = repairResult.output;
-      finalStep = repairResult.step;
-      execution = repairResult.execution || execution;
-      evaluation = evaluateContentWritingQuality({
+  let activeSectionCoverageByKey = new Map(sectionCoverageByKey);
+  let qualityReport: ContentWritingQualityReport | null = qualityRuntime
+    ? evaluateContentWritingQuality({
         markdown: finalOutput,
         articleTitle: article.title,
         keywords: qualityRuntime.keywords,
@@ -958,11 +911,315 @@ export const executeStructuredContentWritingWorkflow = async (
         articleLanguage: article.language === 'en' ? 'en' : 'ar',
         configuration: qualityRuntime.configuration,
         repairPasses,
+      }).report
+    : null;
+  const totalRevisionStepCount = definitions.length
+    + coverageAudit.repairs.length
+    + 2
+    + ((qualityRuntime?.configuration.maxRepairPasses || 0) * 2);
+
+  const applyPersistedRevisionOutcome = (step: ContentWritingStep): boolean => {
+    const decision = isRecord(step.metadata?.revisionDecision)
+      ? step.metadata.revisionDecision
+      : {};
+    if (decision.accepted !== true) return false;
+    const acceptedDraft = toText(step.metadata?.acceptedDraft);
+    if (!acceptedDraft) return false;
+    finalOutput = normalizeFinalContentWritingResult(acceptedDraft);
+    qualityReport = normalizeContentWritingQualityReport(
+      step.metadata?.qualityReportAfterRevision,
+    ) || qualityReport;
+    if (Array.isArray(step.metadata?.sectionCoveragesAfter)) {
+      const nextCoverages = new Map<string, ContentWritingSectionCoverage>();
+      step.metadata.sectionCoveragesAfter.forEach(item => {
+        if (!isRecord(item)) return;
+        const sectionKey = toText(item.sectionKey);
+        if (!sectionKey) return;
+        nextCoverages.set(
+          sectionKey,
+          normalizeContentWritingSectionCoverage(item.coverage),
+        );
       });
-      qualityReport = evaluation.report;
+      if (nextCoverages.size > 0) activeSectionCoverageByKey = nextCoverages;
+    }
+    return true;
+  };
+
+  const runRevisionApplication = async (revisionOptions: {
+    definition: ContentWritingWorkflowStepDefinition;
+    plan: ContentWritingRevisionPlan;
+    stepIndex: number;
+  }): Promise<StepRunResult> => {
+    const revisionDocument = buildContentWritingRevisionDocument({
+      markdown: finalOutput,
+      outline,
+    });
+    const qualityBeforeRevision = qualityReport;
+    const draftBeforeRevision = finalOutput;
+    const coverageBeforeRevision = new Map(activeSectionCoverageByKey);
+    const result = await runStep({
+      definition: revisionOptions.definition,
+      prompt: buildContentWritingRevisionApplyPrompt({
+        plan: revisionOptions.plan,
+        document: revisionDocument,
+        knowledge,
+        qualityContract: qualityRuntime?.contract,
+        language: article.language,
+        template: promptTemplate(PROMPT_TEMPLATE_IDS.revisionApply),
+      }),
+      stepIndex: revisionOptions.stepIndex,
+      stepCount: totalRevisionStepCount,
+      maxOutputTokens: 20_000,
+      articleContextOverride: buildTargetedRevisionArticleContext(compactArticleContext),
+      processOutput: output => {
+        const edits = parseContentWritingRevisionEdits(output, revisionOptions.plan);
+        const application = applyContentWritingRevisionEdits(revisionDocument, edits);
+        const knowledgeGuard = evaluateContentWritingRevisionKnowledge({
+          beforeMarkdown: draftBeforeRevision,
+          candidateMarkdown: application.candidateMarkdown,
+          document: revisionDocument,
+          application,
+          knowledge,
+          sectionCoverages: coverageBeforeRevision,
+        });
+        const qualityAfterRevision = qualityRuntime && qualityBeforeRevision
+          ? evaluateContentWritingQuality({
+              markdown: application.candidateMarkdown,
+              articleTitle: article.title,
+              keywords: qualityRuntime.keywords,
+              goalContext: qualityRuntime.goalContext,
+              articleLanguage: article.language === 'en' ? 'en' : 'ar',
+              configuration: qualityRuntime.configuration,
+              repairPasses,
+            }).report
+          : null;
+        const qualityGuard = qualityBeforeRevision && qualityAfterRevision
+          ? compareContentWritingQualityReports(qualityBeforeRevision, qualityAfterRevision)
+          : null;
+        const reasons = Array.from(new Set([
+          ...application.errors,
+          ...(application.appliedEdits.length === 0 ? ['no_valid_revision_edits'] : []),
+          ...(application.candidateMarkdown === draftBeforeRevision ? ['candidate_unchanged'] : []),
+          ...knowledgeGuard.reasons,
+          ...(qualityGuard?.reasons || ['quality_guard_unavailable']),
+        ]));
+        const accepted = reasons.length === 0
+          && knowledgeGuard.accepted
+          && qualityGuard?.accepted === true;
+        return {
+          output: JSON.stringify({
+            edits: application.appliedEdits,
+            decision: {
+              accepted,
+              reasons,
+              unchangedTargetIds: application.unchangedTargetIds,
+            },
+          }, null, 2),
+          metadata: {
+            revisionPhase: 'apply',
+            revisionPlan: revisionOptions.plan,
+            revisionEdits: application.appliedEdits,
+            revisionDecision: {
+              accepted,
+              reasons,
+              unchangedTargetIds: application.unchangedTargetIds,
+              appliedEditCount: application.appliedEdits.length,
+            },
+            qualityReportBeforeRevision: qualityBeforeRevision,
+            qualityReportAfterRevision: qualityAfterRevision,
+            qualityGuard,
+            knowledgeGuard,
+            acceptedDraft: accepted ? application.candidateMarkdown : null,
+            sectionCoveragesAfter: knowledgeGuard.sectionCoverages,
+          },
+        };
+      },
+    });
+    if (result.ok) applyPersistedRevisionOutcome(result.step);
+    return result;
+  };
+
+  const finalReviewDocument = buildContentWritingRevisionDocument({
+    markdown: finalOutput,
+    outline,
+  });
+  await ensureStep(finalDefinition);
+  const finalResult = await runStep({
+    definition: finalDefinition,
+    prompt: buildContentWritingFinalReviewPrompt({
+      articleTitle: article.title,
+      draft: finalOutput,
+      knowledge,
+      coverageAudit,
+      qualityContract: qualityRuntime?.contract,
+      qualityReportJson: JSON.stringify(qualityReport || {}, null, 2),
+      documentTargetsJson: contentWritingRevisionTargetsToPromptJson(finalReviewDocument),
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.finalReview),
+    }),
+    stepIndex: finalDefinition.ordinal,
+    stepCount: totalRevisionStepCount,
+    maxOutputTokens: 8_000,
+    articleContextOverride: compactArticleContext,
+    processOutput: output => {
+      const revisionPlan = parseContentWritingRevisionPlan(output, finalReviewDocument);
+      return {
+        output: JSON.stringify(revisionPlan, null, 2),
+        metadata: {
+          revisionPhase: 'plan',
+          revisionKind: 'final_review',
+          revisionPlan,
+          plannedOperationCount: revisionPlan.operations.length,
+        },
+      };
+    },
+  });
+  if (!finalResult.ok) return finalResult.execution;
+  finalStep = finalResult.step;
+  execution = finalResult.execution || execution;
+  const finalReviewPlan = parseContentWritingRevisionPlan(
+    finalResult.step.metadata?.revisionPlan || finalResult.output,
+    finalReviewDocument,
+  );
+  if (finalReviewPlan.operations.length > 0 && qualityRuntime && qualityReport) {
+    const finalApplyDefinition: ContentWritingWorkflowStepDefinition = {
+      key: 'final-review-apply',
+      type: 'final_review',
+      ordinal: finalDefinition.ordinal + 1,
+      title: 'Apply final review edits',
+      metadata: {
+        workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+        revisionPhase: 'apply',
+        revisionKind: 'final_review',
+      },
+    };
+    await ensureStep(finalApplyDefinition);
+    const finalApplyResult = await runRevisionApplication({
+      definition: finalApplyDefinition,
+      plan: finalReviewPlan,
+      stepIndex: finalApplyDefinition.ordinal,
+    });
+    if (!finalApplyResult.ok) return finalApplyResult.execution;
+    finalStep = finalApplyResult.step;
+    execution = finalApplyResult.execution || execution;
+  }
+
+  if (qualityRuntime) {
+    for (
+      let pass = 1;
+      qualityReport && !qualityReport.passed && pass <= qualityRuntime.configuration.maxRepairPasses;
+      pass += 1
+    ) {
+      repairPasses = pass;
+      const repairDocument = buildContentWritingRevisionDocument({
+        markdown: finalOutput,
+        outline,
+      });
+      const repairPlanDefinition: ContentWritingWorkflowStepDefinition = {
+        key: `quality-repair-${String(pass).padStart(2, '0')}-plan`,
+        type: 'quality_repair',
+        ordinal: finalDefinition.ordinal + 2 + ((pass - 1) * 2),
+        title: `Quality repair ${pass} plan`,
+        metadata: {
+          workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+          qualityPolicyVersion: qualityRuntime.configuration.policyVersion,
+          repairPass: pass,
+          revisionPhase: 'plan',
+          revisionKind: 'quality_repair',
+        },
+      };
+      await ensureStep(repairPlanDefinition);
+      const repairPlanResult = await runStep({
+        definition: repairPlanDefinition,
+        prompt: buildContentWritingRepairPrompt({
+          report: qualityReport,
+          draft: finalOutput,
+          qualityContract: qualityRuntime.contract,
+          language: article.language === 'en' ? 'en' : 'ar',
+          documentTargetsJson: contentWritingRevisionTargetsToPromptJson(repairDocument),
+          template: promptTemplate(PROMPT_TEMPLATE_IDS.qualityRepair),
+        }),
+        stepIndex: repairPlanDefinition.ordinal,
+        stepCount: totalRevisionStepCount,
+        maxOutputTokens: 8_000,
+        articleContextOverride: compactArticleContext,
+        processOutput: output => {
+          const revisionPlan = parseContentWritingRevisionPlan(output, repairDocument);
+          return {
+            output: JSON.stringify(revisionPlan, null, 2),
+            metadata: {
+              revisionPhase: 'plan',
+              revisionKind: 'quality_repair',
+              repairPass: pass,
+              revisionPlan,
+              plannedOperationCount: revisionPlan.operations.length,
+              qualityReportBeforeRepair: qualityReport,
+            },
+          };
+        },
+      });
+      if (!repairPlanResult.ok) return repairPlanResult.execution;
+      finalStep = repairPlanResult.step;
+      execution = repairPlanResult.execution || execution;
+      const repairPlan = parseContentWritingRevisionPlan(
+        repairPlanResult.step.metadata?.revisionPlan || repairPlanResult.output,
+        repairDocument,
+      );
+      if (repairPlan.operations.length === 0) {
+        qualityReport = {
+          ...qualityReport,
+          repairPasses,
+        };
+        break;
+      }
+
+      const repairApplyDefinition: ContentWritingWorkflowStepDefinition = {
+        key: `quality-repair-${String(pass).padStart(2, '0')}-apply`,
+        type: 'quality_repair',
+        ordinal: repairPlanDefinition.ordinal + 1,
+        title: `Apply quality repair ${pass}`,
+        metadata: {
+          workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+          qualityPolicyVersion: qualityRuntime.configuration.policyVersion,
+          repairPass: pass,
+          revisionPhase: 'apply',
+          revisionKind: 'quality_repair',
+        },
+      };
+      await ensureStep(repairApplyDefinition);
+      const repairApplyResult = await runRevisionApplication({
+        definition: repairApplyDefinition,
+        plan: repairPlan,
+        stepIndex: repairApplyDefinition.ordinal,
+      });
+      if (!repairApplyResult.ok) return repairApplyResult.execution;
+      finalStep = repairApplyResult.step;
+      execution = repairApplyResult.execution || execution;
+      if (qualityReport) {
+        qualityReport = {
+          ...qualityReport,
+          repairPasses,
+        };
+      }
     }
   }
 
+  const finalCoverage = summarizeContentWritingCoverage({
+    knowledge,
+    sectionCoverages: Array.from(activeSectionCoverageByKey.values()),
+  });
+  const finalClaimUsage = summarizeContentWritingClaimUsage({
+    claimLedger: knowledge.claimLedger,
+    usedClaimIds: Array.from(activeSectionCoverageByKey.values())
+      .flatMap(coverage => coverage.usedClaimIds),
+  });
+  const revisionApplySteps = Array.from(stepMap.values()).filter(step => (
+    step.status === 'completed'
+    && isRecord(step.metadata?.revisionDecision)
+  ));
+  const acceptedRevisionCount = revisionApplySteps.filter(
+    step => (step.metadata.revisionDecision as JsonObject).accepted === true,
+  ).length;
+  const rejectedRevisionCount = revisionApplySteps.length - acceptedRevisionCount;
   const persistedExecution = getPersistedExecution(finalStep);
   const usage = getWorkflowUsage(stepMap.values());
   return {
@@ -976,13 +1233,22 @@ export const executeStructuredContentWritingWorkflow = async (
       provider: options.session.provider,
       structured: true,
       workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
-      stepCount: definitions.length + coverageAudit.repairs.length + repairPasses,
+      stepCount: stepMap.size,
       completedStepCount: getCompletedCount(stepMap.values()),
       finalStepKey: finalStep.step_key,
       qualityPolicyVersion: qualityRuntime?.configuration.policyVersion || null,
       qualityGatePassed: qualityReport?.passed ?? null,
       qualityReport,
       qualityRepairCount: repairPasses,
+      revisionSafety: {
+        mode: 'targeted_hybrid',
+        acceptedRevisionCount,
+        rejectedRevisionCount,
+        unchangedContentProtected: true,
+        qualityRegressionRollback: true,
+        knowledgeCoverageRollback: true,
+        blockedClaimRollback: true,
+      },
       usage,
       knowledgeCoverage: {
         sourceChunkCount: competitorChunks.length,
@@ -1002,17 +1268,18 @@ export const executeStructuredContentWritingWorkflow = async (
         allowedClaimCount: knowledge.claimLedger.allowedClaimIds.length,
         qualifiedClaimCount: knowledge.claimLedger.qualifiedClaimIds.length,
         blockedClaimCount: knowledge.claimLedger.blockedClaimIds.length,
-        usedClaimCount: claimUsageAfterRepairs.usedClaimIds.length,
+        usedClaimCount: finalClaimUsage.usedClaimIds.length,
         declaredBlockedClaimIdsBeforeFinalReview: claimUsageAfterRepairs.blockedClaimIds,
+        declaredBlockedClaimIdsAfterRevisions: finalClaimUsage.blockedClaimIds,
         coverageByCompetitor: knowledge.competitorCoverageMatrix.coverageByCompetitor.map(item => ({
           competitorNumber: item.competitorNumber,
           ideaCount: item.knowledgeItemIds.length,
           highPriorityIdeaCount: item.highPriorityItemIds.length,
         })),
         beforeAuditPercent: coverageBeforeAudit.coveragePercent,
-        afterRepairPercent: coverageAfterRepairs.coveragePercent,
-        coveredIdeaCount: coverageAfterRepairs.coveredIdeaIds.length,
-        missingIdeaIds: coverageAfterRepairs.missingIdeaIds,
+        afterRepairPercent: finalCoverage.coveragePercent,
+        coveredIdeaCount: finalCoverage.coveredIdeaIds.length,
+        missingIdeaIds: finalCoverage.missingIdeaIds,
         targetedRepairCount: coverageAudit.repairs.length,
       },
     },

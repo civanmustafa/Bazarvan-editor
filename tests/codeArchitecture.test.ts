@@ -534,7 +534,7 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
   assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 12/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 13/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);
@@ -570,13 +570,14 @@ test('semantic keyword generation shares one editable prompt and one determinist
 });
 
 test('source registry and claim ledger constrain every content-writing repair surface', async () => {
-  const [claims, knowledge, workflow, serverWorkflow, promptRegistry, quality] = await Promise.all([
+  const [claims, knowledge, workflow, serverWorkflow, promptRegistry, quality, revision] = await Promise.all([
     readWorkspaceFile('utils/contentWritingClaims.ts'),
     readWorkspaceFile('utils/contentWritingKnowledge.ts'),
     readWorkspaceFile('utils/contentWritingWorkflow.ts'),
     readWorkspaceFile('server/contentWritingWorkflow.ts'),
     readWorkspaceFile('constants/promptRegistry.ts'),
     readWorkspaceFile('utils/contentWritingQuality.ts'),
+    readWorkspaceFile('utils/contentWritingRevision.ts'),
   ]);
 
   assert.match(claims, /normalizeContentWritingSourceClaims/);
@@ -591,8 +592,15 @@ test('source registry and claim ledger constrain every content-writing repair su
   assert.match(serverWorkflow, /usedClaimIds: repairedCoverage\.usedClaimIds/);
   assert.match(promptRegistry, /contentWriting\.sourceClaimsLedger/);
   assert.match(promptRegistry, /محرك المصادر وسجل الادعاءات/);
-  assert.match(promptRegistry, /لا تعِد إدخال ادعاء usagePolicy له blocked/);
+  assert.match(promptRegistry, /لا تُدخل ادعاء blocked/);
   assert.match(quality, /PROMPT_TEMPLATE_IDS\.qualityRepair/);
+  assert.match(revision, /blocked_claim_introduced/);
+  assert.match(revision, /knowledge_coverage_decreased/);
+  assert.match(serverWorkflow, /compareContentWritingQualityReports/);
+  assert.match(serverWorkflow, /acceptedDraft: accepted \? application\.candidateMarkdown : null/);
+  assert.match(serverWorkflow, /buildTargetedRevisionArticleContext\(compactArticleContext\)/);
+  assert.match(serverWorkflow, /withheld="targeted-revision"/);
+  assert.match(promptRegistry, /لا تُرجع المقالة كاملة/);
   assert.doesNotMatch(
     `${claims}\n${knowledge}\n${workflow}\n${serverWorkflow}\n${promptRegistry}\n${quality}`,
     /search\s*console|searchConsole/i,

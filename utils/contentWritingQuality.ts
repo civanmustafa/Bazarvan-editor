@@ -345,6 +345,7 @@ export const buildContentWritingRepairPrompt = (options: {
   draft: string;
   qualityContract: string;
   language: 'ar' | 'en';
+  documentTargetsJson?: string;
   template?: string;
 }): string => {
   const failures = options.report.criteria
@@ -363,6 +364,12 @@ export const buildContentWritingRepairPrompt = (options: {
   const languageInstruction = options.language === 'en'
     ? 'حافظ على المقالة كاملة باللغة الإنجليزية.'
     : 'حافظ على المقالة كاملة باللغة العربية.';
+  const repairScopes = failures.map(criterion => ({
+    criterionId: criterion.id,
+    scope: getContentWritingCriterionRepairScope(criterion.id),
+    title: criterion.title,
+    severity: criterion.severity,
+  }));
   return renderPromptTemplate(
     options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.qualityRepair),
     {
@@ -371,9 +378,39 @@ export const buildContentWritingRepairPrompt = (options: {
       minimum_score: options.report.minimumScore,
       quality_contract: options.qualityContract,
       machine_issues: audit || 'لم ينتج المحرك تفاصيل فردية؛ حسّن الالتزام بعقد الجودة كاملًا.',
+      repair_scopes_json: JSON.stringify(repairScopes, null, 2),
+      document_targets_json: options.documentTargetsJson || '[]',
       article_to_repair: options.draft,
     },
   );
+};
+
+export const getContentWritingCriterionRepairScope = (
+  criterionId: string,
+): 'local' | 'structural' | 'global' => {
+  const id = String(criterionId || '');
+  if (
+    id === 'quality.targetWordRange'
+    || id === 'wordCount'
+    || id === 'keywordStuffing'
+    || id.startsWith('keyword.')
+  ) {
+    return 'global';
+  }
+  if (
+    id === 'quality.totalH2Count'
+    || id === 'h2Count'
+    || id === 'h2Structure'
+    || id === 'faqSection'
+    || id === 'lastH2IsConclusion'
+    || id === 'conclusionHasList'
+    || id === 'conclusionHasNumber'
+    || id === 'tablesCount'
+    || id.startsWith('product')
+  ) {
+    return 'structural';
+  }
+  return 'local';
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (

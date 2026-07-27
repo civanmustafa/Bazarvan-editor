@@ -58,12 +58,12 @@ export const getContentWritingStepDescription = (
       'Compares the draft with the plan and required knowledge, detecting gaps, repetition, and unsafe claims before targeting repairs.',
     ],
     final_review: [
-      'يجمع النظام المقالة كاملة ويراجع ترابطها ونية البحث والأصالة ودقة استخدام الادعاءات، ثم ينتج نسخة تحريرية كاملة محسّنة.',
-      'Reviews the assembled article for coherence, search intent, originality, and claim safety, then produces a polished full draft.',
+      'يقرأ النظام المقالة كاملة، لكنه يُنشئ خطة تعديلات محددة ثم يعيد توليد الأجزاء المتأثرة فقط. تُرفض النسخة المرشحة إذا تراجعت الجودة أو التغطية أو سلامة الادعاءات.',
+      'Reads the complete article, creates a targeted edit plan, and regenerates only affected parts. A candidate is rejected if quality, coverage, or claim safety regresses.',
     ],
     quality_repair: [
-      'يعالج النظام المخالفات التي اكتشفها قياس الجودة، مثل عدد الكلمات والعناوين والبنية والكلمات المفتاحية، ثم يعيد قياس النسخة الجديدة. قد تتكرر هذه المرحلة أكثر من مرة.',
-      'Repairs exact quality-gate failures such as length, headings, structure, and keywords, then measures the new draft again. Multiple passes may run.',
+      'يصنف النظام المخالفات إلى محلية وبنيوية وعامة، ويعيد فقط الأجزاء المطلوبة، ثم يقارن النسخة المرشحة بالسابقة ويتراجع تلقائيًا عند ظهور مخالفة جديدة.',
+      'Classifies failures as local, structural, or global, regenerates only required parts, and automatically rolls back any candidate that introduces a regression.',
     ],
     section_repair: [
       'يعيد النظام كتابة القسم المحدد فقط لمعالجة نقص التغطية، مع الاحتفاظ ببقية المقالة كما هي.',
@@ -348,6 +348,158 @@ const ProseResult: React.FC<{
   );
 };
 
+const revisionTargetLabel = (targetId: string, isArabic: boolean): string => {
+  if (targetId === 'introduction') return isArabic ? 'المقدمة' : 'Introduction';
+  if (targetId.startsWith('faq')) return isArabic ? 'قسم الأسئلة الشائعة' : 'FAQ section';
+  if (targetId.startsWith('conclusion')) return isArabic ? 'الخاتمة' : 'Conclusion';
+  const headingMatch = targetId.match(/^section-(\d+):heading$/);
+  if (headingMatch) {
+    const section = Number(headingMatch[1]).toLocaleString(isArabic ? 'ar' : 'en');
+    return isArabic ? `عنوان القسم ${section}` : `Heading of section ${section}`;
+  }
+  const sectionMatch = targetId.match(/^section-(\d+)(?::block-(\d+))?/);
+  if (sectionMatch) {
+    const section = Number(sectionMatch[1]).toLocaleString(isArabic ? 'ar' : 'en');
+    if (sectionMatch[2]) {
+      const block = Number(sectionMatch[2]).toLocaleString(isArabic ? 'ar' : 'en');
+      return isArabic ? `الفقرة ${block} في القسم ${section}` : `Block ${block} in section ${section}`;
+    }
+    return isArabic ? `القسم ${section}` : `Section ${section}`;
+  }
+  return isArabic ? 'منطقة محددة في المقالة' : 'A specific article region';
+};
+
+const RevisionResult: React.FC<{
+  step: ContentWritingStep;
+  isArabic: boolean;
+}> = ({ step, isArabic }) => {
+  const phase = String(step.metadata.revisionPhase || '');
+  const plan = isRecord(step.metadata.revisionPlan) ? step.metadata.revisionPlan : {};
+  const operations = Array.isArray(plan.operations)
+    ? plan.operations.filter(isRecord)
+    : [];
+  if (phase === 'plan') {
+    return (
+      <div className="space-y-2" dir={isArabic ? 'rtl' : 'ltr'}>
+        <div className="flex items-center gap-2 rounded-md bg-blue-50 p-2 font-bold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+          <ClipboardCheck size={14} />
+          <span>
+            {operations.length > 0
+              ? (isArabic
+                ? `حُددت ${operations.length.toLocaleString('ar')} تعديلات مستهدفة دون إعادة كتابة المقالة.`
+                : `${operations.length.toLocaleString('en')} targeted edits were planned without rewriting the article.`)
+              : (isArabic
+                ? 'لم تكتشف المرحلة تعديلًا آمنًا وضروريًا؛ بقيت المقالة كما هي.'
+                : 'No safe necessary edit was found; the article remains unchanged.')}
+          </span>
+        </div>
+        {operations.map((operation, index) => {
+          const scope = String(operation.scope || '');
+          const action = String(operation.action || '');
+          const scopeLabel = {
+            local: isArabic ? 'محلي' : 'Local',
+            structural: isArabic ? 'بنيوي' : 'Structural',
+            global: isArabic ? 'عام بخروج مستهدف' : 'Global with targeted output',
+          }[scope] || (isArabic ? 'مستهدف' : 'Targeted');
+          const actionLabel = {
+            replace: isArabic ? 'استبدال الجزء' : 'Replace part',
+            insert_before: isArabic ? 'إدراج قبله' : 'Insert before',
+            insert_after: isArabic ? 'إدراج بعده' : 'Insert after',
+            delete: isArabic ? 'حذف الجزء' : 'Delete part',
+          }[action] || (isArabic ? 'تعديل' : 'Edit');
+          return (
+            <article key={String(operation.id || index)} className="rounded-md border border-gray-200 bg-gray-50 p-2.5 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="rounded bg-violet-50 px-1.5 py-1 text-[9px] font-black text-violet-700 dark:bg-violet-900/20 dark:text-violet-300">{scopeLabel}</span>
+                <span className="rounded bg-white px-1.5 py-1 text-[9px] font-black text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">{actionLabel}</span>
+                <span className="font-black text-gray-800 dark:text-gray-100">
+                  {revisionTargetLabel(String(operation.targetId || ''), isArabic)}
+                </span>
+              </div>
+              <p className="mt-1.5 leading-5 text-gray-700 dark:text-gray-300">{String(operation.instructions || '')}</p>
+              {Boolean(operation.reason) && <p className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">{String(operation.reason)}</p>}
+            </article>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const decision = isRecord(step.metadata.revisionDecision) ? step.metadata.revisionDecision : {};
+  const accepted = decision.accepted === true;
+  const edits = Array.isArray(step.metadata.revisionEdits)
+    ? step.metadata.revisionEdits.filter(isRecord)
+    : [];
+  const qualityGuard = isRecord(step.metadata.qualityGuard) ? step.metadata.qualityGuard : {};
+  const knowledgeGuard = isRecord(step.metadata.knowledgeGuard) ? step.metadata.knowledgeGuard : {};
+  const reasonLabels: Record<string, [string, string]> = {
+    quality_score_decreased: ['انخفضت درجة الجودة', 'Quality score decreased'],
+    new_quality_failure: ['ظهرت مخالفة جودة جديدة', 'A new quality failure appeared'],
+    quality_criterion_regressed: ['تراجع معيار كان أفضل سابقًا', 'A previously better criterion regressed'],
+    knowledge_coverage_decreased: ['فُقدت فكرة من التغطية', 'Knowledge coverage decreased'],
+    blocked_claim_introduced: ['ظهر ادعاء محظور', 'A blocked claim appeared'],
+    no_valid_revision_edits: ['لم يرجع النموذج تعديلًا صالحًا', 'No valid edit was returned'],
+    candidate_unchanged: ['لم تغيّر الرقع النص فعليًا', 'The patches did not change the text'],
+    quality_guard_unavailable: ['تعذر تشغيل مقارنة الجودة', 'The quality comparison was unavailable'],
+  };
+  const reasons = textList(decision.reasons);
+  return (
+    <div className="space-y-2" dir={isArabic ? 'rtl' : 'ltr'}>
+      <div className={`flex items-start gap-2 rounded-md p-2 font-bold ${
+        accepted
+          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
+          : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'
+      }`}>
+        {accepted ? <CheckCircle2 size={14} className="mt-0.5 shrink-0" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" />}
+        <span>
+          {accepted
+            ? (isArabic
+              ? 'قُبلت النسخة المرشحة بعد اجتياز مقارنة الجودة والتغطية وسجل الادعاءات.'
+              : 'The candidate was accepted after passing quality, coverage, and claim-ledger comparisons.')
+            : (isArabic
+              ? 'رُفضت النسخة المرشحة تلقائيًا واستُعيدت النسخة السابقة دون تغيير.'
+              : 'The candidate was automatically rejected and the previous version was restored unchanged.')}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <div className="rounded-md bg-gray-50 p-2 text-center dark:bg-[#1F1F1F]">
+          <div className="font-black text-gray-800 dark:text-gray-100">
+            {String(qualityGuard.scoreBefore ?? '—')} ← {String(qualityGuard.scoreAfter ?? '—')}
+          </div>
+          <div className="text-[9px] font-bold text-gray-500">{isArabic ? 'درجة الجودة: قبل ← بعد' : 'Quality: before ← after'}</div>
+        </div>
+        <div className="rounded-md bg-gray-50 p-2 text-center dark:bg-[#1F1F1F]">
+          <div className="font-black text-gray-800 dark:text-gray-100">
+            {String(knowledgeGuard.coverageBeforePercent ?? '—')}% ← {String(knowledgeGuard.coverageAfterPercent ?? '—')}%
+          </div>
+          <div className="text-[9px] font-bold text-gray-500">{isArabic ? 'تغطية الأفكار: قبل ← بعد' : 'Coverage: before ← after'}</div>
+        </div>
+      </div>
+      {reasons.length > 0 && (
+        <div className="rounded-md bg-red-50/70 p-2 text-[10px] font-bold leading-5 text-red-700 dark:bg-red-900/10 dark:text-red-300">
+          {reasons.map(reason => (
+            <div key={reason}>• {reasonLabels[reason]?.[isArabic ? 0 : 1] || (isArabic ? 'لم تجتز النسخة أحد حواجز الأمان.' : 'The candidate failed a safety guard.')}</div>
+          ))}
+        </div>
+      )}
+      {edits.length > 0 && (
+        <div className="space-y-1.5">
+          {edits.map((edit, index) => (
+            <article key={String(edit.operationId || index)} className="rounded-md border border-gray-200 bg-gray-50 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+              <div className="font-black text-gray-700 dark:text-gray-200">
+                {revisionTargetLabel(String(edit.targetId || ''), isArabic)}
+              </div>
+              <div className="mt-1 text-[9px] font-bold text-gray-500">
+                {isArabic ? 'أُعيد توليد هذا الجزء فقط؛ بقية المقالة لم تُرسل للاستبدال.' : 'Only this part was regenerated; the rest of the article was not replaced.'}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ContentWritingStepResult: React.FC<ContentWritingStepResultProps> = ({
   step,
   workflowSteps,
@@ -421,6 +573,8 @@ const ContentWritingStepResult: React.FC<ContentWritingStepResultProps> = ({
           transparency={transparency}
           isArabic={isArabic}
         />
+      ) : step.metadata.revisionPhase ? (
+        <RevisionResult step={step} isArabic={isArabic} />
       ) : (
         <>
           <ProseResult outputText={outputText} stepType={step.stepType} isArabic={isArabic} />

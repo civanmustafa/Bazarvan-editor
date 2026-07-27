@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 12;
+export const PROMPT_REGISTRY_VERSION = 13;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -43,6 +43,7 @@ export const PROMPT_TEMPLATE_IDS = {
   sectionRepair: 'contentWriting.sectionRepair',
   finalReview: 'contentWriting.finalReview',
   qualityRepair: 'contentWriting.qualityRepair',
+  revisionApply: 'contentWriting.revisionApply',
   internalLinkReview: 'internalLinking.reviewSuggestions',
 } as const;
 
@@ -390,11 +391,11 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
   {
     id: PROMPT_TEMPLATE_IDS.finalReview,
     group: PROMPT_GROUP_IDS.finalReview,
-    label: 'المراجعة التحريرية النهائية',
-    description: 'يراجع المقالة كاملة كمحرر مستقل بعد اكتمال جميع الأقسام.',
-    usage: 'يعيد المقالة كاملة بعد تحسين الترابط والتكرار والدقة والبنية وSEO وAEO وGEO.',
-    variables: ['{{article_title}}', '{{quality_contract_block}}', '{{knowledge_json}}', '{{coverage_audit_json}}', '{{assembled_draft}}'],
-    requiredVariables: ['article_title', 'knowledge_json', 'coverage_audit_json', 'assembled_draft'],
+    label: 'خطة المراجعة التحريرية النهائية',
+    description: 'يقرأ المقالة كاملة ويعيد خطة تعديلات منظمة دون إعادة كتابة أي قسم.',
+    usage: 'يحدد الفقرات أو الأقسام التي تحتاج تعديلًا، ويترك الأجزاء السليمة دون لمس.',
+    variables: ['{{article_title}}', '{{quality_contract_block}}', '{{quality_report_json}}', '{{knowledge_json}}', '{{coverage_audit_json}}', '{{document_targets_json}}', '{{assembled_draft}}'],
+    requiredVariables: ['article_title', 'knowledge_json', 'coverage_audit_json', 'document_targets_json', 'assembled_draft'],
     attachments: [
       attachment('articleContext', 'موجز المقالة الذكي', 'العنوان والكلمات والجمهور واحتياجاته والنتيجة والزاوية والأدلة ونية البحث.'),
       attachment('qualityContract', 'عقد الجودة', 'كل شروط سياسة الجودة الحالية.'),
@@ -408,17 +409,33 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
   {
     id: PROMPT_TEMPLATE_IDS.qualityRepair,
     group: PROMPT_GROUP_IDS.qualityGate,
-    label: 'إصلاح بوابة الجودة',
-    description: 'يصلح المقالة كاملة اعتمادًا على تقرير القياس البرمجي.',
-    usage: 'يعمل فقط عند عدم اجتياز بوابة الجودة، ثم يعيد النظام فحص المقالة كاملة.',
-    variables: ['{{language_instruction}}', '{{quality_score}}', '{{minimum_score}}', '{{quality_contract}}', '{{machine_issues}}', '{{article_to_repair}}'],
-    requiredVariables: ['language_instruction', 'quality_score', 'minimum_score', 'quality_contract', 'machine_issues', 'article_to_repair'],
+    label: 'خطة إصلاح بوابة الجودة',
+    description: 'يصنف المخالفات إلى محلية وبنيوية وعامة، ثم يعيد خطة تعديلات مستهدفة.',
+    usage: 'يقرأ المقالة حسب نطاق المخالفة ولا يعيد كتابتها؛ تطبيق الأجزاء المتأثرة يتم في أمر مستقل.',
+    variables: ['{{language_instruction}}', '{{quality_score}}', '{{minimum_score}}', '{{quality_contract}}', '{{machine_issues}}', '{{repair_scopes_json}}', '{{document_targets_json}}', '{{article_to_repair}}'],
+    requiredVariables: ['language_instruction', 'quality_score', 'minimum_score', 'quality_contract', 'machine_issues', 'repair_scopes_json', 'document_targets_json', 'article_to_repair'],
     attachments: [
       attachment('qualityReport', 'تقرير الجودة', 'الدرجة والحالة والمعايير المخالفة مرتبة حسب الخطورة.'),
       attachment('qualityContract', 'عقد الجودة', 'القواعد الكمية والبنيوية الملزمة.'),
       attachment('completeArticle', 'المقالة الكاملة', 'آخر نسخة كاملة قبل محاولة الإصلاح.'),
       attachment('keywordsAndIntent', 'الكلمات ونية البحث', 'السياق المستمر للجلسة للحفاظ على الدقة والاتجاه.'),
       attachment('claimLedger', 'سجل الادعاءات', 'يبقى ضمن سياق الجلسة لمنع إعادة إدخال ادعاء محظور أثناء إصلاح الجودة.'),
+    ],
+  },
+  {
+    id: PROMPT_TEMPLATE_IDS.revisionApply,
+    group: PROMPT_GROUP_IDS.qualityGate,
+    label: 'تطبيق التعديلات المستهدفة',
+    description: 'يعيد توليد الأجزاء التي اختارتها خطة المراجعة أو إصلاح الجودة فقط.',
+    usage: 'يرجع رقع Markdown منظمة؛ يطبقها النظام برمجيًا ثم يقارن النسخة المرشحة بالسابقة.',
+    variables: ['{{language_instruction}}', '{{quality_contract}}', '{{revision_plan_json}}', '{{target_segments_json}}', '{{knowledge_items_json}}', '{{claim_ledger_json}}'],
+    requiredVariables: ['language_instruction', 'quality_contract', 'revision_plan_json', 'target_segments_json', 'knowledge_items_json', 'claim_ledger_json'],
+    attachments: [
+      attachment('revisionPlan', 'خطة التعديلات', 'العمليات المسموح بتنفيذها ومعرّفات أهدافها فقط.'),
+      attachment('targetSegments', 'الأجزاء المتأثرة', 'نصوص الفقرات أو الأقسام المطلوب تعديلها دون بقية المقالة.'),
+      attachment('qualityContract', 'عقد الجودة', 'القواعد التي يجب ألا يكسرها النص البديل.'),
+      attachment('knowledgeItems', 'مصفوفة المعرفة', 'الأفكار المرتبطة بالتعديلات للمحافظة على التغطية.'),
+      attachment('claimLedger', 'سجل الادعاءات', 'الادعاءات المسموحة والمؤهلة والمحظورة.'),
     ],
   },
   {
@@ -786,46 +803,100 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 
 حافظ على المادة الصحيحة الموجودة، وأصلح النقص أو الضعف المطلوب فقط، وتجنب التكرار، ولا تضف عنوان H2 أو حقائق غير مدعومة. احذف الادعاء blocked بدل اختراع إثبات له، ولا تضع معرّفه في usedClaimIds بعد حذفه.`,
 
-  [PROMPT_TEMPLATE_IDS.finalReview]: `نفّذ المراجعة التحريرية النهائية للمقالة "{{article_title}}".
+  [PROMPT_TEMPLATE_IDS.finalReview]: `أنشئ خطة المراجعة التحريرية النهائية للمقالة "{{article_title}}" دون إعادة كتابة المقالة.
 
-اعمل كمحرر دلالي مستقل، لا ككاتب الأقسام الأصلي. راجع المسودة المجمعة كاملة مقابل التعليمات الدائمة وموجز المقالة الذكي والكلمات المستهدفة ونية البحث ومصفوفة تغطية المنافسين وسجل المصادر والادعاءات وتدقيق التغطية المكتمل. صحح الترابط والتكرار والادعاءات غير المدعومة وبنية Markdown وجودة اللغة والاستخدام الطبيعي للكلمات.
+اقرأ المسودة كاملة ومصفوفة المعرفة وسجل المصادر والادعاءات وتدقيق التغطية وتقرير الجودة. حدد فقط المواضع التي تحتاج تعديلًا حقيقيًا، واترك كل فقرة أو قسم سليم دون لمس. لا تُرجع نص المقالة ولا نصًا بديلًا في هذه المرحلة.
 
-تحقق صراحة من: الالتزام بالجمهور واحتياجاته والنتيجة والزاوية والأدلة المحددة في الموجز، وتغطية نية البحث، واكتمال الإجابة، وتغطية الأفكار المشتركة المهمة والفريدة المفيدة، والأساس الواقعي، وتقديم قيمة تتجاوز المنافسين عبر فرص originalityOpportunity المناسبة، والإجابات المباشرة القابلة للاقتباس في AEO وGEO، والتدرج المنطقي، والدعوة المناسبة للخطوة التالية.
-
-طبّق سجل الادعاءات كقيد ملزم: احذف كل ادعاء usagePolicy له blocked أو أعده إلى صياغة عامة لا تحمل الادعاء، وحافظ على التأهيل المطلوب للادعاء qualify، ولا تنشئ رقمًا أو مقارنة أو علاقة سببية أو معلومة زمنية جديدة. احذف أي عبارة غير مدعومة بالسياق بدل اختراع دليل.
+أنواع النطاق:
+- local: مخالفة داخل فقرة أو كتلة واحدة، مثل التكرار أو الصياغة أو الترقيم أو طول الفقرة.
+- structural: تعديل قسم كامل أو إدراج/حذف منطقة بنيوية، مثل FAQ أو الخاتمة أو ترتيب H2.
+- global: مشكلة عامة تحتاج قراءة المقالة كاملة، لكن يجب تفكيك إصلاحها إلى أهداف محددة؛ لا يوجد هدف باسم article.
 
 {{quality_contract_block}}
 
-<competitor_coverage_matrix>
-{{knowledge_json}}
-</competitor_coverage_matrix>
+تقرير الجودة الحالي:
+{{quality_report_json}}
 
-<coverage_audit>
+مصفوفة المعرفة وسجل الادعاءات:
+{{knowledge_json}}
+
+تدقيق التغطية:
 {{coverage_audit_json}}
-</coverage_audit>
+
+الأهداف الصالحة ومعرّفاتها:
+{{document_targets_json}}
 
 <assembled_draft>
 {{assembled_draft}}
 </assembled_draft>
 
-أرجع المقالة المصححة كاملة بصيغة Markdown فقط. احتفظ بعنوان H1 واحد فقط وبكل الأقسام اللازمة، ولا تضف سياج كود أو شرحًا أو ملاحظات مراجعة أو خطوات تفكير.`,
+أرجع JSON صالحًا فقط:
+{"operations":[{"id":"R001","scope":"local","action":"replace","targetId":"section-01:block-02","instructions":"تعليمات دقيقة تحافظ على المعنى وتصلح المشكلة فقط","reason":"سبب موجز","criterionIds":["paragraphLength"],"requiredIdeaIds":["K001"],"requiredClaimIds":["CL001"]}]}
 
-  [PROMPT_TEMPLATE_IDS.qualityRepair]: `نفّذ إصلاحًا مركزًا لجودة المقالة كاملة.
+استخدم targetId موجودًا فقط. العمليات المسموحة: replace وdelete للكتل المحلية، وreplace أو insert_before أو insert_after أو delete للمناطق البنيوية. لا تجمع تعديل منطقة كاملة مع تعديل كتلة داخل المنطقة نفسها. إذا لم توجد حاجة آمنة للتعديل فأرجع {"operations":[]}.`,
+
+  [PROMPT_TEMPLATE_IDS.qualityRepair]: `أنشئ خطة إصلاح مستهدفة لبوابة الجودة دون إعادة كتابة المقالة.
 
 {{language_instruction}}
-حصلت المسودة في محرك الجودة البرمجي على {{quality_score}}/100، والدرجة المطلوبة {{minimum_score}}/100.
+حصلت المسودة على {{quality_score}}/100، والدرجة المطلوبة {{minimum_score}}/100.
 
-أصلح كل خطأ حرج أولًا، ثم الأخطاء المهمة والتحذيرات. حافظ على المحتوى الدقيق والمفيد ونية البحث والاستخدام الطبيعي للكلمات. التزم بسجل الادعاءات المحفوظ في سياق الجلسة، ولا تعِد إدخال ادعاء usagePolicy له blocked، ولا تخترع حقائق أو أسعارًا أو إحصاءات أو ادعاءات. أرجع المقالة المصححة كاملة بصيغة Markdown وبعنوان H1 واحد فقط.
+التزم بالتصنيف البرمجي للمخالفات:
+- local: أرسل الفقرة أو الكتلة المخالفة فقط إلى مرحلة التطبيق.
+- structural: عدّل المنطقة البنيوية المتأثرة فقط.
+- global: اقرأ المقالة كاملة، لكن أرجع تعديلات محددة على أهداف معلومة بدل إرجاع نسخة كاملة.
 
 عقد الجودة:
 {{quality_contract}}
 
-المشكلات التي اكتشفها المحرك:
+المخالفات المرتبة:
 {{machine_issues}}
 
-<article_to_repair>
+تصنيف المخالفات:
+{{repair_scopes_json}}
+
+الأهداف الصالحة ومعرّفاتها:
+{{document_targets_json}}
+
+<article_to_read_only>
 {{article_to_repair}}
-</article_to_repair>`,
+</article_to_read_only>
+
+أرجع JSON صالحًا فقط:
+{"operations":[{"id":"Q001","scope":"local","action":"replace","targetId":"section-01:block-02","instructions":"أصلح المعيار المحدد مع المحافظة على المعنى والأفكار والادعاءات المسموحة","reason":"سبب الإصلاح","criterionIds":["paragraphLength"],"requiredIdeaIds":[],"requiredClaimIds":[]}]}
+
+لا تُرجع المقالة ولا النصوص البديلة. لا تستخدم هدفًا عامًا باسم article. إذا تعذر تحديد تعديل آمن فأرجع {"operations":[]}.`,
+
+  [PROMPT_TEMPLATE_IDS.revisionApply]: `طبّق خطة التعديلات على الأجزاء المرفقة فقط.
+
+{{language_instruction}}
+
+عقد الجودة:
+{{quality_contract}}
+
+خطة التعديلات المعتمدة:
+{{revision_plan_json}}
+
+الأجزاء المسموح تعديلها:
+{{target_segments_json}}
+
+الأفكار المرتبطة:
+{{knowledge_items_json}}
+
+سجل الادعاءات:
+{{claim_ledger_json}}
+
+قواعد ملزمة:
+- لا تُرجع المقالة كاملة.
+- أرجع تعديلًا واحدًا لكل operationId تستطيع تنفيذه بأمان.
+- لا تغيّر targetId أو action.
+- حافظ على الفكرة والمعنى الصحيحين، وعلى كل requiredIdeaIds والادعاءات المسموحة.
+- لا تُدخل ادعاء blocked، ولا تخترع رقمًا أو مقارنة أو حقيقة أو مصدرًا.
+- في local لا تضف H1 أو H2، إلا إذا كان kind للهدف heading؛ عندها أرجع سطر H2 واحدًا فقط.
+- في استبدال أو إدراج قسم بنيوي، يجب أن يبدأ replacementMarkdown بعنوان H2.
+- delete يستخدم replacementMarkdown فارغًا.
+
+أرجع JSON صالحًا فقط:
+{"edits":[{"operationId":"R001","replacementMarkdown":"النص البديل للجزء المحدد فقط","coveredIdeaIds":["K001"],"usedSourceChunkIds":["C1-S001"],"usedClaimIds":["CL001"]}]}`,
 
   [PROMPT_TEMPLATE_IDS.internalLinkReview]: `أنت مراجع ثانوي لاقتراحات الربط الداخلي، ولست محرك إنشاء روابط.
 

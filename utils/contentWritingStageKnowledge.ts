@@ -36,6 +36,20 @@ const unique = (values: readonly string[]): string[] => Array.from(new Set(
   values.map(value => String(value || '').trim()).filter(Boolean),
 ));
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+const recordList = (value: unknown): Record<string, unknown>[] => (
+  Array.isArray(value) ? value.filter(isRecord) : []
+);
+
+const textList = (value: unknown): string[] => (
+  Array.isArray(value)
+    ? value.map(item => String(item || '').trim()).filter(Boolean)
+    : []
+);
+
 const sourceIdsForReferences = (
   snapshot: ContentWritingTransparencySnapshot,
   knowledgeItemIds: readonly string[],
@@ -205,7 +219,48 @@ export const buildContentWritingStageKnowledgeUsage = (options: {
     };
   }
 
-  // Introduction, FAQ, conclusion, final review, and quality repair receive the
+  if (
+    (step.stepType === 'final_review' || step.stepType === 'quality_repair')
+    && step.metadata.revisionPhase
+  ) {
+    const usage = completeRegistryUsage(
+      step.stepType,
+      snapshot,
+      step.metadata.revisionPhase === 'plan' ? 'planned' : 'declared_used',
+    );
+    const plan = isRecord(step.metadata.revisionPlan) ? step.metadata.revisionPlan : {};
+    const operations = recordList(plan.operations);
+    const edits = recordList(step.metadata.revisionEdits);
+    const referencedKnowledgeItemIds = unique(
+      step.metadata.revisionPhase === 'plan'
+        ? operations.flatMap(operation => textList(operation.requiredIdeaIds))
+        : edits.flatMap(edit => textList(edit.coveredIdeaIds)),
+    );
+    const referencedClaimIds = unique(
+      step.metadata.revisionPhase === 'plan'
+        ? operations.flatMap(operation => textList(operation.requiredClaimIds))
+        : edits.flatMap(edit => textList(edit.usedClaimIds)),
+    );
+    const referencedSourceChunkIds = unique(
+      step.metadata.revisionPhase === 'apply'
+        ? edits.flatMap(edit => textList(edit.usedSourceChunkIds))
+        : [],
+    );
+    return {
+      ...usage,
+      referencedKnowledgeItemIds,
+      referencedClaimIds,
+      referencedSourceChunkIds,
+      referencedSourceIds: sourceIdsForReferences(
+        snapshot,
+        referencedKnowledgeItemIds,
+        referencedClaimIds,
+        referencedSourceChunkIds,
+      ),
+    };
+  }
+
+  // Introduction, FAQ, conclusion, and legacy final repair stages receive the
   // complete normalized matrix/source/claim registries in the compact session
   // context, but their prose output does not declare individual IDs used.
   return completeRegistryUsage(step.stepType, snapshot);
