@@ -1,6 +1,10 @@
 import { INITIAL_GOAL_CONTEXT } from '../constants';
 import { translations } from '../components/translations';
 import type { ClientGoalContexts, GoalContext } from '../types';
+import {
+  formatContentWritingTargetWordRange,
+  parseContentWritingTargetWordRange,
+} from './contentWritingTargets';
 
 type GoalTabTranslations = typeof translations.ar.goalTab;
 
@@ -47,6 +51,7 @@ export type GoalContextPresetOption = {
 
 const TARGET_LOCATION_AUDIENCE_SCOPES = ['local', 'country', 'regional'];
 const GOAL_CONTEXT_FREE_TEXT_KEYS = new Set<keyof GoalContext>([
+  'targetWordRange',
   'targetCountry',
   'targetAudience',
   'audienceNeeds',
@@ -92,7 +97,9 @@ export const getSmartContentBriefMissingKeys = (
   context: Partial<GoalContext> | null | undefined,
 ): Array<keyof GoalContext> => {
   const normalized = normalizeGoalContext(context);
-  return SMART_CONTENT_BRIEF_REQUIRED_KEYS.filter(key => !normalized[key].trim());
+  return SMART_CONTENT_BRIEF_REQUIRED_KEYS.filter(
+    key => !String(normalized[key] || '').trim(),
+  );
 };
 
 const GOAL_CONTEXT_PRESETS: GoalContextPreset[] = [
@@ -281,8 +288,13 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
         asStoredString(source.freshnessRequirements),
       )
     : INITIAL_GOAL_CONTEXT.evidenceRequirements;
+  const rawTargetWordRange = asStoredString(normalized.targetWordRange).trim();
+  const parsedTargetWordRange = parseContentWritingTargetWordRange(rawTargetWordRange);
 
   return {
+    targetWordRange: parsedTargetWordRange
+      ? formatContentWritingTargetWordRange(parsedTargetWordRange)
+      : rawTargetWordRange,
     pageType: normalizeMappedChoice(normalized.pageType, pageTypeMap, INITIAL_GOAL_CONTEXT.pageType),
     objective: normalizeMappedChoice(normalized.objective, objectiveMap, INITIAL_GOAL_CONTEXT.objective),
     audienceScope,
@@ -401,6 +413,13 @@ export const getGoalContextFields = (t: GoalTabTranslations): GoalContextFieldCo
   );
 
   return [
+    {
+      key: 'targetWordRange',
+      label: t.targetWordRange,
+      kind: 'text',
+      placeholder: t.targetWordRangePlaceholder,
+      helpText: t.targetWordRangeHelp,
+    },
     {
       key: 'pageType',
       label: t.pageType,
@@ -683,7 +702,7 @@ export const formatGoalContextForCopy = (
   fields
     .filter(field => isGoalContextFieldVisible(field, normalizedContext))
     .forEach(field => {
-      const rawValue = normalizedContext[field.key];
+      const rawValue = normalizedContext[field.key] || '';
       const value = getFieldOptionLabel(fields, field.key, rawValue);
       lines.push(`${field.label}:`);
       lines.push(value || '-');

@@ -64,9 +64,9 @@ const POLICY_V1: ContentWritingQualityPolicy = {
   version: 1,
   label: 'Bazarvan editorial policy v1',
   targetWords: { min: 1_100, max: 1_450 },
-  // The editor's H2 count includes FAQ and conclusion, so five body sections
-  // produce seven total H2 headings for a 1,100-1,450 word article.
-  outlineSections: { min: 5, max: 5 },
+  // This is only the standalone fallback. Every writing session replaces both
+  // ranges with its manual or competitor-derived length decision.
+  outlineSections: { min: 4, max: 7 },
   questionH2Minimum: 3,
   headingCharacters: {
     h2: { min: 40, max: 70 },
@@ -196,8 +196,42 @@ export const normalizeContentWritingQualityConfiguration = (value: {
   policyVersion?: unknown;
   minimumScore?: unknown;
   maxRepairPasses?: unknown;
+  policy?: unknown;
 } = {}): ContentWritingQualityConfiguration => {
-  const policy = resolveContentWritingQualityPolicy(value.policyVersion);
+  const basePolicy = resolveContentWritingQualityPolicy(value.policyVersion);
+  const runtimePolicy = value.policy && typeof value.policy === 'object' && !Array.isArray(value.policy)
+    ? value.policy as Record<string, unknown>
+    : {};
+  const normalizeRuntimeRange = (
+    source: unknown,
+    fallback: { min: number; max: number },
+    minimum: number,
+    maximum: number,
+  ): { min: number; max: number } => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return fallback;
+    const record = source as Record<string, unknown>;
+    const left = boundedInteger(record.min, fallback.min, minimum, maximum);
+    const right = boundedInteger(record.max, fallback.max, minimum, maximum);
+    return {
+      min: Math.min(left, right),
+      max: Math.max(left, right),
+    };
+  };
+  const policy: ContentWritingQualityPolicy = {
+    ...basePolicy,
+    targetWords: normalizeRuntimeRange(
+      runtimePolicy.targetWords,
+      basePolicy.targetWords,
+      100,
+      50_000,
+    ),
+    outlineSections: normalizeRuntimeRange(
+      runtimePolicy.outlineSections,
+      basePolicy.outlineSections,
+      1,
+      50,
+    ),
+  };
   return {
     policyVersion: policy.version,
     minimumScore: boundedInteger(

@@ -40,6 +40,7 @@ const createReadyArticle = (competitorContents: string[]) => ({
     lsi: ['كلمة LSI'],
   },
   goalContext: {
+    targetWordRange: '',
     pageType: 'article',
     objective: 'educate',
     audienceScope: 'global',
@@ -206,12 +207,32 @@ test('content-writing still requires the four core brief fields and company name
   assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'company_name'));
 });
 
+test('content-writing accepts a supported manual word range and rejects malformed input', async () => {
+  const { buildContentWritingPromptBundle } = await importContentWriting();
+  const validInput = createReadyArticle(['واحد']);
+  validInput.goalContext.targetWordRange = '1200*1800';
+  const validBundle = buildContentWritingPromptBundle(validInput);
+  const storedGoalContext = JSON.parse(validBundle.variables.goal_context);
+
+  assert.equal(validBundle.ready, true);
+  assert.equal(storedGoalContext.targetWordRange, '1200*1800');
+
+  const invalidInput = createReadyArticle(['واحد']);
+  invalidInput.goalContext.targetWordRange = 'حوالي 1500 كلمة';
+  const invalidBundle = buildContentWritingPromptBundle(invalidInput);
+  assert.equal(invalidBundle.ready, false);
+  assert.ok(invalidBundle.readinessIssues.some(
+    (issue: { code: string }) => issue.code === 'goal_context.targetWordRange',
+  ));
+});
+
 test('smart brief text fields preserve spaces while typing and trim only at normalization boundaries', async () => {
   const {
     normalizeGoalContext,
     updateGoalContextField,
   } = await importGoalContext();
   const textKeys = [
+    'targetWordRange',
     'targetCountry',
     'targetAudience',
     'audienceNeeds',

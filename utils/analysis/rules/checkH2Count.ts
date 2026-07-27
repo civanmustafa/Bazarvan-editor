@@ -1,9 +1,13 @@
 import type { CheckResult } from '../../../types';
+import {
+    deriveContentWritingOutlineSections,
+    parseContentWritingTargetWordRange,
+} from '../../contentWritingTargets';
 import { createCheckResult, getStatus, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkH2Count = (context: AnalysisContext): CheckResult => {
-    const { headings, totalWordCount, t, uiLanguage } = context;
+    const { headings, totalWordCount, goalContext, t, uiLanguage } = context;
     const tRule = t.structureAnalysis['عدد H2'];
     const title = tRule.title;
     const description = tRule.description;
@@ -15,11 +19,20 @@ export const checkH2Count = (context: AnalysisContext): CheckResult => {
     let max = Infinity;
     let requiredText = "N/A";
 
-    const details = uiLanguage === 'ar' 
+    let details = uiLanguage === 'ar'
         ? "• 1000 - 1500 كلمة: يتطلب وجود 6 إلى 7 عناوين H2.\n• 1500 - 2000 كلمة: يتطلب وجود 8 إلى 9 عناوين H2.\n• 2000 - 2500 كلمة: يتطلب وجود 9 إلى 10 عناوين H2.\n\n*ملاحظة: إذا كان المقال خارج هذه النطاقات، يعتبر المعيار ناجحاً تلقائياً ولكن يستمر في عرض الإحصائيات للتنظيم.*"
         : "• 1000 - 1500 words: Requires 6 to 7 H2 headings.\n• 1500 - 2000 words: Requires 8 to 9 H2 headings.\n• 2000 - 2500 words: Requires 9 to 10 H2 headings.\n\n*Note: If the word count is outside these ranges, the criteria passes automatically but continues to show stats for organization.*";
 
-    if (totalWordCount >= 1000 && totalWordCount <= 1500) {
+    const manualTarget = parseContentWritingTargetWordRange(goalContext.targetWordRange);
+    if (manualTarget) {
+        const bodySections = deriveContentWritingOutlineSections(manualTarget);
+        min = bodySections.min + 2;
+        max = bodySections.max + 2;
+        requiredText = t.common.range(min, max);
+        details = uiLanguage === 'ar'
+            ? `بحسب نطاق ${manualTarget.min}-${manualTarget.max} كلمة: ${bodySections.min}-${bodySections.max} أقسام متن ديناميكية، إضافة إلى قسمي الأسئلة الشائعة والخاتمة.`
+            : `For the ${manualTarget.min}-${manualTarget.max} word target: ${bodySections.min}-${bodySections.max} dynamic body sections, plus FAQ and conclusion.`;
+    } else if (totalWordCount >= 1000 && totalWordCount <= 1500) {
         min = 6; max = 7; requiredText = t.common.range(6, 7);
     } else if (totalWordCount > 1500 && totalWordCount <= 2000) {
         min = 8; max = 9; requiredText = t.common.range(8, 9);

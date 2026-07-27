@@ -36,6 +36,10 @@ import {
   type ContentWritingPromptMessage,
 } from '../utils/contentWritingContext';
 import { normalizeGoalContext } from '../utils/goalContext';
+import {
+  applyContentWritingLengthTargetToQualityConfiguration,
+  resolveContentWritingLengthTarget,
+} from '../utils/contentWritingTargets';
 import { CONTENT_WRITING_WORKFLOW_VERSION } from '../utils/contentWritingWorkflow';
 import {
   aiExecutionEngine,
@@ -375,12 +379,31 @@ export const prepareContentWritingConversation = async (
   });
   assertContentWritingBundleReady(bundle);
   const normalizedGoalContext = normalizeGoalContext(articleSource.input.goalContext);
-  const qualityConfiguration = settings.qualityConfiguration;
-  const qualityContract = buildContentWritingQualityContract({
+  const lengthTarget = resolveContentWritingLengthTarget({
+    manualRange: normalizedGoalContext.targetWordRange,
+    competitors: bundle.competitors,
+  });
+  const qualityConfiguration = applyContentWritingLengthTargetToQualityConfiguration(
+    settings.qualityConfiguration,
+    lengthTarget,
+  );
+  const baseQualityContract = buildContentWritingQualityContract({
     configuration: qualityConfiguration,
     language: articleSource.input.language,
     goalContext: normalizedGoalContext,
   });
+  const lengthDecisionLine = lengthTarget.mode === 'manual'
+    ? (
+        articleSource.input.language === 'en'
+          ? `- The user-defined word range ${lengthTarget.targetWords.min}-${lengthTarget.targetWords.max} is authoritative for this session.`
+          : `- نطاق الكلمات الذي حدده المستخدم ${lengthTarget.targetWords.min}-${lengthTarget.targetWords.max} هو النطاق الملزم لهذه الجلسة.`
+      )
+    : (
+        articleSource.input.language === 'en'
+          ? `- Automatic length: the largest actual competitor text has ${lengthTarget.baselineCompetitor?.wordCount || 0} words; the center is ×1.20 (${lengthTarget.centerWords}) and the passing range uses ±10%.`
+          : `- الطول التلقائي: أكبر نص منافس فعلي يحتوي ${lengthTarget.baselineCompetitor?.wordCount || 0} كلمة؛ حُسب المركز بضربه ×1.20 (${lengthTarget.centerWords}) وهامش النجاح ±10%.`
+      );
+  const qualityContract = `${baseQualityContract}\n${lengthDecisionLine}`;
   const qualityContractHeading = articleSource.input.language === 'en'
     ? 'Mandatory quality criteria for this session:'
     : 'معايير الجودة الملزمة لهذه الجلسة:';
@@ -454,6 +477,7 @@ export const prepareContentWritingConversation = async (
       })),
       competitorChunks: bundle.competitorChunks,
       compactArticleContextBase,
+      lengthTarget,
       qualityPolicyVersion: qualityConfiguration.policyVersion,
       qualityConfiguration,
       qualityContract,

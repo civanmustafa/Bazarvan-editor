@@ -95,6 +95,20 @@ test('only the four core brief fields are required and optional defaults can be 
   assert.deepEqual(getSmartContentBriefMissingKeys(withoutKnowledgeLevel), []);
 });
 
+test('word range is optional, canonicalized, and exposed in the keywords and goals fields', async () => {
+  const [{ getGoalContextFields, normalizeGoalContext }, { translations }] = await Promise.all([
+    importWorkspaceModule('../utils/goalContext.ts'),
+    importWorkspaceModule('../components/translations.ts'),
+  ]);
+  const fields = getGoalContextFields(translations.ar.goalTab);
+  const field = fields.find((item: { key: string }) => item.key === 'targetWordRange');
+
+  assert.ok(field);
+  assert.equal(field.kind, 'text');
+  assert.equal(normalizeGoalContext({ targetWordRange: '١٨٠٠/١٢٠٠' }).targetWordRange, '1200-1800');
+  assert.equal(normalizeGoalContext({}).targetWordRange, '');
+});
+
 test('page objective and search intent use distinct perspectives and labels', async () => {
   const [{ getGoalContextFields, getGoalContextPresetOptions }, { translations }] = await Promise.all([
     importWorkspaceModule('../utils/goalContext.ts'),

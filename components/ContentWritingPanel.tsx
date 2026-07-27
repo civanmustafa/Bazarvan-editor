@@ -101,6 +101,10 @@ type ApplicationNotice = {
 const ACTIVE_POLL_MS = 2_500;
 const LIST_POLL_MS = 6_000;
 
+const isRecordValue = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
 const STATUS_STYLES: Record<ContentWritingSessionStatus, string> = {
   queued: 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300',
   running: 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300',
@@ -369,6 +373,37 @@ const ContentWritingPanel: React.FC = () => {
   const hasActiveSession = sessions.some(isContentWritingSessionActive);
   const activeDetail = selectedDetail?.session.id === selectedSessionId ? selectedDetail : null;
   const selectedSession = activeDetail?.session || sessions.find(session => session.id === selectedSessionId) || null;
+  const selectedLengthTarget = useMemo(() => {
+    if (!selectedSession) return null;
+    const source = isRecordValue(selectedSession.contextSnapshot.lengthTarget)
+      ? selectedSession.contextSnapshot.lengthTarget
+      : null;
+    const targetWords = isRecordValue(source?.targetWords) ? source.targetWords : null;
+    const outlineSections = isRecordValue(source?.outlineSections) ? source.outlineSections : null;
+    const baselineCompetitor = isRecordValue(source?.baselineCompetitor)
+      ? source.baselineCompetitor
+      : null;
+    const minWords = Number(targetWords?.min);
+    const maxWords = Number(targetWords?.max);
+    const minSections = Number(outlineSections?.min);
+    const maxSections = Number(outlineSections?.max);
+    if (
+      !Number.isFinite(minWords)
+      || !Number.isFinite(maxWords)
+      || !Number.isFinite(minSections)
+      || !Number.isFinite(maxSections)
+    ) {
+      return null;
+    }
+    return {
+      mode: source?.mode === 'manual' ? 'manual' as const : 'automatic' as const,
+      minWords,
+      maxWords,
+      minSections,
+      maxSections,
+      baselineWords: Number(baselineCompetitor?.wordCount) || 0,
+    };
+  }, [selectedSession]);
   const workflowSteps = useMemo(() => activeDetail?.steps || [], [activeDetail?.steps]);
   const recoverableDraft = useMemo(() => {
     if (!selectedSession || !activeDetail) return null;
@@ -1105,6 +1140,28 @@ const ContentWritingPanel: React.FC = () => {
                     ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
                     : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>
                     {isArabic ? 'الجودة' : 'Quality'} {selectedSession.qualityScore}/100 · v{selectedSession.qualityPolicyVersion}
+                  </div>
+                )}
+                {selectedLengthTarget && (
+                  <div className="mt-1.5 rounded-md border border-[#d4af37]/30 bg-[#d4af37]/5 px-2 py-1.5 text-[10px] font-bold leading-5 text-gray-600 dark:bg-[#d4af37]/10 dark:text-gray-300">
+                    <div>
+                      {isArabic ? 'هدف الكلمات' : 'Word target'}:{' '}
+                      {selectedLengthTarget.minWords.toLocaleString(isArabic ? 'ar' : 'en')}
+                      {'–'}
+                      {selectedLengthTarget.maxWords.toLocaleString(isArabic ? 'ar' : 'en')}
+                      {' · '}
+                      {isArabic ? 'أقسام المتن' : 'Body sections'}:{' '}
+                      {selectedLengthTarget.minSections.toLocaleString(isArabic ? 'ar' : 'en')}
+                      {'–'}
+                      {selectedLengthTarget.maxSections.toLocaleString(isArabic ? 'ar' : 'en')}
+                    </div>
+                    <div className="text-[9px] text-gray-500 dark:text-gray-400">
+                      {selectedLengthTarget.mode === 'manual'
+                        ? (isArabic ? 'نطاق حدده المستخدم' : 'User-defined range')
+                        : (isArabic
+                            ? `تلقائي: أكبر منافس ${selectedLengthTarget.baselineWords.toLocaleString('ar')} كلمة × 1.20، بهامش ±10%`
+                            : `Automatic: largest competitor ${selectedLengthTarget.baselineWords.toLocaleString('en')} words × 1.20, with ±10% tolerance`)}
+                    </div>
                   </div>
                 )}
                 {sessionKeyUsageEntries.length > 0 && (

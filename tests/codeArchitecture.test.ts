@@ -518,6 +518,27 @@ test('smart content brief keeps only its core fields required and is controlled 
   );
 });
 
+test('content writing resolves manual or competitor-derived length and dynamic sections once per session', async () => {
+  const [targets, engine, workflow, quality, goalFields] = await Promise.all([
+    readWorkspaceFile('utils/contentWritingTargets.ts'),
+    readWorkspaceFile('server/contentWritingEngine.ts'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('utils/contentWritingQuality.ts'),
+    readWorkspaceFile('components/GoalContextFields.tsx'),
+  ]);
+
+  assert.match(targets, /CONTENT_WRITING_AUTOMATIC_WORD_MULTIPLIER = 1\.2/);
+  assert.match(targets, /CONTENT_WRITING_AUTOMATIC_WORD_TOLERANCE = 0\.1/);
+  assert.match(targets, /findLargestCompetitor/);
+  assert.match(targets, /deriveContentWritingOutlineSections/);
+  assert.match(engine, /resolveContentWritingLengthTarget/);
+  assert.match(engine, /lengthTarget,/);
+  assert.match(workflow, /balanceContentWritingOutlineWordTargets/);
+  assert.match(workflow, /targetWords: qualityRuntime\?\.configuration\.policy\.targetWords/);
+  assert.match(quality, /\.filter\(\(\[id\]\) => id !== 'wordCount'\)/);
+  assert.match(goalFields, /parseContentWritingTargetWordRange/);
+});
+
 test('competitor coverage matrix is deterministic and controlled by the prompt registry', async () => {
   const [knowledge, workflow, serverWorkflow, promptRegistry] = await Promise.all([
     readWorkspaceFile('utils/contentWritingKnowledge.ts'),
@@ -534,7 +555,7 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
   assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 13/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 14/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);

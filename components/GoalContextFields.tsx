@@ -11,6 +11,7 @@ import {
   SMART_CONTENT_BRIEF_REQUIRED_KEYS,
   type GoalContextFieldConfig,
 } from '../utils/goalContext';
+import { parseContentWritingTargetWordRange } from '../utils/contentWritingTargets';
 
 type GoalContextFieldsProps = {
   goalContext: GoalContext;
@@ -253,6 +254,11 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
       {fields.filter(field => isGoalContextFieldVisible(field, goalContext)).map(field => {
         const fieldId = `goal-context-${field.key}`;
         const fieldLabelId = `${fieldId}-label`;
+        const invalidTargetWordRange = (
+          field.key === 'targetWordRange'
+          && Boolean(String(goalContext.targetWordRange || '').trim())
+          && !parseContentWritingTargetWordRange(goalContext.targetWordRange)
+        );
         return (
           <div key={field.key} className="block">
             <label
@@ -268,7 +274,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
             {field.kind === 'select' ? (
               <select
                 id={fieldId}
-                value={goalContext[field.key]}
+                value={goalContext[field.key] || ''}
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={fieldClass}
                 required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)}
@@ -281,7 +287,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
             ) : field.kind === 'multi-choice' ? (
               <GoalContextMultiChoice
                 field={field}
-                value={goalContext[field.key]}
+                value={goalContext[field.key] || ''}
                 onChange={value => onChange(field.key, value)}
                 labelledBy={fieldLabelId}
                 chooseLabel={t.goalTab.multiChoiceSelect}
@@ -292,7 +298,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
             ) : field.kind === 'textarea' ? (
               <textarea
                 id={fieldId}
-                value={goalContext[field.key]}
+                value={goalContext[field.key] || ''}
                 onChange={(event) => onChange(field.key, event.target.value)}
                 className={`${fieldClass} min-h-20 resize-y`}
                 placeholder={field.placeholder}
@@ -302,15 +308,20 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
             ) : (
               <input
                 id={fieldId}
-                value={goalContext[field.key]}
+                value={goalContext[field.key] || ''}
                 onChange={(event) => onChange(field.key, event.target.value)}
-                className={fieldClass}
+                className={`${fieldClass} ${invalidTargetWordRange ? 'border-red-400 focus:border-red-500' : ''}`}
                 placeholder={field.placeholder}
                 required={SMART_CONTENT_BRIEF_REQUIRED_KEYS.includes(field.key)}
+                aria-invalid={invalidTargetWordRange}
               />
             )}
             {field.helpText && (
-              <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+              <p className={`mt-1 text-[11px] font-semibold leading-5 ${
+                invalidTargetWordRange
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-gray-500 dark:text-gray-400'
+              }`}>
                 {field.helpText}
               </p>
             )}

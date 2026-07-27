@@ -433,6 +433,7 @@ export const INITIAL_KEYWORDS: Keywords = {
 };
 
 export const INITIAL_GOAL_CONTEXT = {
+  targetWordRange: '',
   pageType: '',
   objective: '',
   audienceScope: '',

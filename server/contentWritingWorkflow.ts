@@ -1,6 +1,7 @@
 import {
   CONTENT_WRITING_WORKFLOW_VERSION,
   assembleContentWritingDraft,
+  balanceContentWritingOutlineWordTargets,
   buildContentWritingCompetitorIndexPrompt,
   buildContentWritingConclusionPrompt,
   buildContentWritingCoverageAuditPrompt,
@@ -502,6 +503,7 @@ export const executeStructuredContentWritingWorkflow = async (
       language: article.language,
       knowledge,
       qualityContract: qualityRuntime?.contract,
+      targetWords: qualityRuntime?.configuration.policy.targetWords,
       minimumSections: qualityRuntime?.configuration.policy.outlineSections.min,
       maximumSections: qualityRuntime?.configuration.policy.outlineSections.max,
       template: promptTemplate(PROMPT_TEMPLATE_IDS.outline),
@@ -521,15 +523,35 @@ export const executeStructuredContentWritingWorkflow = async (
         );
       }
       const coveredOutline = ensureContentWritingOutlineKnowledgeCoverage(parsedOutline, knowledge);
-      return { output: JSON.stringify(coveredOutline, null, 2), metadata: { outline: coveredOutline } };
+      const balancedOutline = qualityRuntime
+        ? balanceContentWritingOutlineWordTargets(
+            coveredOutline,
+            qualityRuntime.configuration.policy.targetWords,
+          )
+        : coveredOutline;
+      return {
+        output: JSON.stringify(balancedOutline, null, 2),
+        metadata: {
+          outline: balancedOutline,
+          lengthTarget: options.session.context_snapshot?.lengthTarget || null,
+          targetWordRange: qualityRuntime?.configuration.policy.targetWords || null,
+          outlineSectionRange: qualityRuntime?.configuration.policy.outlineSections || null,
+        },
+      };
     },
   });
   if (!outlineResult.ok) return outlineResult.execution;
   const normalizedOutline = normalizeContentWritingOutline(outlineResult.step.metadata?.outline)
     || normalizeContentWritingOutline(outlineResult.output);
-  const outline = normalizedOutline
+  const outlineWithCoverage = normalizedOutline
     ? ensureContentWritingOutlineKnowledgeCoverage(normalizedOutline, knowledge)
     : null;
+  const outline = outlineWithCoverage && qualityRuntime
+    ? balanceContentWritingOutlineWordTargets(
+        outlineWithCoverage,
+        qualityRuntime.configuration.policy.targetWords,
+      )
+    : outlineWithCoverage;
   if (!outline) {
     return createWorkflowFailure({
       session: options.session,
@@ -1240,6 +1262,14 @@ export const executeStructuredContentWritingWorkflow = async (
       qualityGatePassed: qualityReport?.passed ?? null,
       qualityReport,
       qualityRepairCount: repairPasses,
+      lengthTarget: options.session.context_snapshot?.lengthTarget || null,
+      targetWordRange: qualityRuntime?.configuration.policy.targetWords || null,
+      outlineSectionRange: qualityRuntime?.configuration.policy.outlineSections || null,
+      selectedOutlineSectionCount: outline.sections.length,
+      bodyTargetWordCount: outline.sections.reduce(
+        (sum, section) => sum + (section.targetWords || 0),
+        0,
+      ),
       revisionSafety: {
         mode: 'targeted_hybrid',
         acceptedRevisionCount,

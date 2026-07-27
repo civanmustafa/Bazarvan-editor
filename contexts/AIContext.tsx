@@ -111,6 +111,7 @@ const getGeminiModelForProvider = (provider: GeminiPatchProvider = 'gemini'): st
 );
 
 const GOAL_CONTEXT_LABELS: Record<string, string> = {
+    targetWordRange: 'نطاق عدد الكلمات',
     pageType: 'نوع الصفحة',
     objective: 'هدف الصفحة',
     audienceScope: 'نطاق الجمهور',

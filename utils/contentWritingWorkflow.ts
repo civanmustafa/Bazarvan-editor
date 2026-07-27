@@ -15,8 +15,12 @@ import {
   PROMPT_TEMPLATE_IDS,
   renderPromptTemplate,
 } from '../constants/promptRegistry';
+import {
+  getContentWritingBodyWordBudget,
+  type ContentWritingWordRange,
+} from './contentWritingTargets';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 5;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 6;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
@@ -254,6 +258,59 @@ export const ensureContentWritingOutlineKnowledgeCoverage = (
   return { sections };
 };
 
+export const balanceContentWritingOutlineWordTargets = (
+  outline: ContentWritingOutline,
+  targetWords: ContentWritingWordRange,
+): ContentWritingOutline => {
+  if (outline.sections.length === 0) return outline;
+  const bodyBudget = getContentWritingBodyWordBudget(targetWords);
+  const desiredBodyWords = Math.max(
+    outline.sections.length * 80,
+    Math.min(
+      Math.round((bodyBudget.min + bodyBudget.max) / 2),
+      outline.sections.length * 300,
+    ),
+  );
+  const weights = outline.sections.map(section => Math.max(
+    1,
+    1
+      + ((section.requiredIdeaIds?.length || 0) * 0.8)
+      + ((section.requiredClaimIds?.length || 0) * 0.25)
+      + ((section.subheadings?.length || 0) * 0.35),
+  ));
+  const targets = outline.sections.map(() => 80);
+  let remaining = desiredBodyWords - targets.reduce((sum, value) => sum + value, 0);
+
+  while (remaining > 0) {
+    const activeIndexes = targets
+      .map((value, index) => ({ value, index }))
+      .filter(item => item.value < 300)
+      .map(item => item.index);
+    if (activeIndexes.length === 0) break;
+    const activeWeight = activeIndexes.reduce((sum, index) => sum + weights[index], 0);
+    let distributed = 0;
+    activeIndexes.forEach(index => {
+      const proportional = Math.max(
+        1,
+        Math.floor((remaining * weights[index]) / Math.max(1, activeWeight)),
+      );
+      const increment = Math.min(300 - targets[index], proportional, remaining - distributed);
+      if (increment <= 0) return;
+      targets[index] += increment;
+      distributed += increment;
+    });
+    if (distributed <= 0) break;
+    remaining -= distributed;
+  }
+
+  return {
+    sections: outline.sections.map((section, index) => ({
+      ...section,
+      targetWords: targets[index],
+    })),
+  };
+};
+
 export const createContentWritingWorkflowSteps = (
   outline: ContentWritingOutline,
 ): ContentWritingWorkflowStepDefinition[] => {
@@ -342,12 +399,21 @@ export const buildContentWritingOutlinePrompt = (options: {
   language: string;
   knowledge: ContentWritingKnowledgeBase;
   qualityContract?: string;
+  targetWords?: ContentWritingWordRange;
   minimumSections?: number;
   maximumSections?: number;
   template?: string;
 }): string => renderPromptTemplate(
   options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.outline),
   {
+    ...(() => {
+      const targetWords = options.targetWords || { min: 1_100, max: 1_450 };
+      const bodyBudget = getContentWritingBodyWordBudget(targetWords);
+      return {
+        target_word_range: `${targetWords.min}-${targetWords.max}`,
+        body_word_budget_range: `${bodyBudget.min}-${bodyBudget.max}`,
+      };
+    })(),
     article_title: options.articleTitle,
     knowledge_json: contentWritingKnowledgeToPromptJson(options.knowledge),
     quality_contract_block: options.qualityContract

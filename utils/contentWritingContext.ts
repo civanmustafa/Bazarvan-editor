@@ -14,6 +14,7 @@ import {
 } from './contentWritingKnowledge';
 import { getUsableCompetitorText } from './competitorContent';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
+import { parseContentWritingTargetWordRange } from './contentWritingTargets';
 
 export const CONTENT_WRITING_MIN_COMPETITOR_COUNT = 1;
 export const CONTENT_WRITING_MAX_COMPETITOR_COUNT = MAX_ARTICLE_COMPETITORS;
@@ -148,6 +149,15 @@ const getGoalContextIssues = (goalContext: Partial<GoalContext>): ContentWriting
   required.forEach(([key, label]) => {
     if (!hasText(goalContext[key])) issues.push({ code: `goal_context.${key}`, label });
   });
+  if (
+    hasText(goalContext.targetWordRange)
+    && !parseContentWritingTargetWordRange(goalContext.targetWordRange)
+  ) {
+    issues.push({
+      code: 'goal_context.targetWordRange',
+      label: 'نطاق عدد الكلمات (مثال: 1200-1800)',
+    });
+  }
   return issues;
 };
 
@@ -189,6 +199,7 @@ const createGoalContextValue = (goalContext: Partial<GoalContext>): string => {
     searchIntent: toText(goalContext.searchIntent),
   };
   const optionalFields: Array<keyof GoalContext> = [
+    'targetWordRange',
     'targetCountry',
     'targetAudience',
     'audienceKnowledgeLevel',

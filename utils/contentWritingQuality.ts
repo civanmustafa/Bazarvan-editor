@@ -233,27 +233,45 @@ const collectCriteria = (
   configuration: ContentWritingQualityConfiguration,
 ): ContentWritingQualityCriterionResult[] => {
   const targetWords = configuration.policy.targetWords;
-  const targetH2Count = configuration.policy.outlineSections.min + 2;
+  const targetBodyH2Count = configuration.policy.outlineSections;
+  const targetH2Count = {
+    min: targetBodyH2Count.min + 2,
+    max: targetBodyH2Count.max + 2,
+  };
   const currentH2Count = Number(analysis.structureAnalysis.h2Count?.current) || 0;
+  const wordRangePassed = (
+    analysis.wordCount >= targetWords.min
+    && analysis.wordCount <= targetWords.max
+  );
+  const h2RangePassed = (
+    currentH2Count >= targetH2Count.min
+    && currentH2Count <= targetH2Count.max
+  );
   const policyCriteria = [
     normalizeCriterion('quality.targetWordRange', {
       title: 'نطاق طول المقالة المعتمد',
-      status: analysis.wordCount >= targetWords.min && analysis.wordCount <= targetWords.max ? 'pass' : 'fail',
+      status: wordRangePassed ? 'pass' : 'fail',
       current: analysis.wordCount,
       required: `${targetWords.min}-${targetWords.max}`,
-      progress: analysis.wordCount >= targetWords.min && analysis.wordCount <= targetWords.max ? 1 : 0,
-      violationCount: analysis.wordCount >= targetWords.min && analysis.wordCount <= targetWords.max ? 0 : 1,
+      progress: wordRangePassed ? 1 : 0,
+      violationCount: wordRangePassed ? 0 : 1,
     }, configuration),
     normalizeCriterion('quality.totalH2Count', {
-      title: 'العدد الدقيق لعناوين H2',
-      status: currentH2Count === targetH2Count ? 'pass' : 'fail',
+      title: 'النطاق المعتمد لعدد عناوين H2',
+      status: h2RangePassed ? 'pass' : 'fail',
       current: currentH2Count,
-      required: targetH2Count,
-      progress: currentH2Count === targetH2Count ? 1 : 0,
-      violationCount: currentH2Count === targetH2Count ? 0 : 1,
+      required: targetH2Count.min === targetH2Count.max
+        ? targetH2Count.min
+        : `${targetH2Count.min}-${targetH2Count.max}`,
+      progress: h2RangePassed ? 1 : 0,
+      violationCount: h2RangePassed ? 0 : 1,
     }, configuration),
   ];
   const structure = Object.entries(analysis.structureAnalysis)
+    // The session-specific range above is the single authoritative word-count
+    // criterion. Keeping the editor's generic >=800 rule here would create a
+    // second, contradictory requirement for short or custom assignments.
+    .filter(([id]) => id !== 'wordCount')
     .map(([id, result]) => normalizeCriterion(id, result, configuration));
   const keyword = analysis.keywordAnalysis;
   const keywordCriteria: ContentWritingQualityCriterionResult[] = [
@@ -285,10 +303,11 @@ export const evaluateContentWritingQuality = (options: {
   keywords: Keywords;
   goalContext: GoalContext;
   articleLanguage: 'ar' | 'en';
-  configuration?: Partial<ContentWritingQualityConfiguration> & {
+  configuration?: {
     policyVersion?: number;
     minimumScore?: number;
     maxRepairPasses?: number;
+    policy?: unknown;
   };
   repairPasses?: number;
 }): ContentWritingQualityEvaluation => {

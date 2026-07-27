@@ -63,6 +63,29 @@ test('deterministic quality evaluation returns a versioned blocking report', asy
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'keyword.primary'));
 });
 
+test('session word range is the single authoritative word-count criterion', async () => {
+  const { evaluateContentWritingQuality } = await importQuality();
+  const body = Array.from({ length: 150 }, (_, index) => `word${index}`).join(' ');
+  const evaluation = evaluateContentWritingQuality({
+    ...articleInput,
+    markdown: body,
+    configuration: {
+      policy: {
+        targetWords: { min: 120, max: 180 },
+        outlineSections: { min: 4, max: 6 },
+      },
+    },
+  });
+  const targetCriterion = evaluation.report.criteria.find(
+    (criterion: any) => criterion.id === 'quality.targetWordRange',
+  );
+
+  assert.equal(evaluation.report.wordCount, 150);
+  assert.equal(targetCriterion?.status, 'pass');
+  assert.equal(targetCriterion?.required, '120-180');
+  assert.ok(!evaluation.report.criteria.some((criterion: any) => criterion.id === 'wordCount'));
+});
+
 test('quality analysis detects the second introduction paragraph and Arabic numbered conclusion list', async () => {
   const { createContentWritingAnalysisDocument, evaluateContentWritingQuality } = await importQuality();
   const sentence = (prefix: string, count: number): string => (

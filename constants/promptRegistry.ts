@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 13;
+export const PROMPT_REGISTRY_VERSION = 14;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -283,8 +283,8 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     label: 'إنشاء مخطط المقالة',
     description: 'ينشئ أقسام المتن ويربط أفكار مصفوفة المنافسين بالقسم الأنسب.',
     usage: 'يعمل بعد بناء مصفوفة التغطية وقبل الكتابة؛ يوازن بين الأساس المشترك والأفكار الفريدة وفرص القيمة الإضافية.',
-    variables: ['{{article_title}}', '{{knowledge_json}}', '{{quality_contract_block}}', '{{output_language}}', '{{minimum_sections}}', '{{maximum_sections}}'],
-    requiredVariables: ['article_title', 'knowledge_json', 'output_language', 'minimum_sections', 'maximum_sections'],
+    variables: ['{{article_title}}', '{{knowledge_json}}', '{{quality_contract_block}}', '{{output_language}}', '{{minimum_sections}}', '{{maximum_sections}}', '{{target_word_range}}', '{{body_word_budget_range}}'],
+    requiredVariables: ['article_title', 'knowledge_json', 'output_language', 'minimum_sections', 'maximum_sections', 'target_word_range', 'body_word_budget_range'],
     attachments: [
       attachment('articleContext', 'موجز المقالة الذكي', 'العنوان واللغة والكلمات والهدف والجمهور واحتياجاته والنتيجة والزاوية والأدلة.'),
       attachment('coverageMatrix', 'مصفوفة تغطية المنافسين', 'الأفكار والكيانات مع المنافسين الذين غطوها ومستوى انتشارها وأولويتها وفرصة التميز.'),
@@ -657,6 +657,9 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 الشروط:
 - استخدم {{output_language}} في كل العناوين والملخصات.
 - أرجع من {{minimum_sections}} إلى {{maximum_sections}} أقسام متن فريدة ومرتبة منطقيًا.
+- نطاق المقالة الكامل الملزم هو {{target_word_range}} كلمة، وميزانية أقسام المتن مجتمعة هي {{body_word_budget_range}} كلمة.
+- اختر عدد الأقسام داخل النطاق المسموح بحسب عدد عناقيد الأفكار الفعلية: استخدم عددًا أكبر عندما توجد أفكار مستقلة كثيرة، ولا تنشئ أقسامًا حشوًا.
+- وزّع targetWords على الأقسام بنسبة عمق الأفكار المطلوبة، واجعل مجموعها داخل ميزانية المتن. سيعيد النظام موازنة الأرقام برمجيًا قبل الكتابة.
 - لا تضع المقدمة أو الخاتمة أو الأسئلة الشائعة ضمن أقسام المتن.
 - غطِّ نية البحث وموضوعات المنافسين المهمة دون نسخ صياغتهم.
 - استخدم الأفكار المشتركة والعالية الأولوية لتأسيس الإجابة الأساسية، ولا تهمل فكرة فريدة مفيدة لمجرد أنها ظهرت لدى منافس واحد.

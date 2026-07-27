@@ -1,15 +1,41 @@
 import type { CheckResult } from '../../../types';
+import { parseContentWritingTargetWordRange } from '../../contentWritingTargets';
 import { createCheckResult, getStatus } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkWordCount = (context: AnalysisContext): CheckResult => {
-    const { totalWordCount, analysisGoal, t, uiLanguage } = context;
+    const { totalWordCount, analysisGoal, goalContext, t, uiLanguage } = context;
     const tRule = t.structureAnalysis['عدد الكلمات'];
     const title = tRule.title;
     let description = tRule.description;
     let requiredText = tRule.required;
     let minWords = 800;
     let warnMin = 600;
+    const manualTarget = parseContentWritingTargetWordRange(goalContext.targetWordRange);
+
+    if (manualTarget) {
+        const isInsideTarget = (
+            totalWordCount >= manualTarget.min
+            && totalWordCount <= manualTarget.max
+        );
+        const progress = isInsideTarget
+            ? 1
+            : totalWordCount < manualTarget.min
+                ? Math.min(totalWordCount / manualTarget.min, 1)
+                : Math.min(manualTarget.max / Math.max(totalWordCount, 1), 1);
+        description = uiLanguage === 'ar'
+            ? `النطاق الذي عيّنه المستخدم هو ${manualTarget.min} إلى ${manualTarget.max} كلمة، ويُعد المقال مخالفًا إذا كان أقل أو أكثر منه.`
+            : `The user-defined target is ${manualTarget.min} to ${manualTarget.max} words; content outside this range fails the criterion.`;
+
+        return createCheckResult(
+            title,
+            isInsideTarget ? 'pass' : 'fail',
+            totalWordCount,
+            t.common.range(manualTarget.min, manualTarget.max),
+            progress,
+            description,
+        );
+    }
 
     if (analysisGoal === 'برنامج سياحي') {
         let numberOfDays = 0;

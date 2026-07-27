@@ -18,6 +18,7 @@ export interface Keywords {
 }
 
 export interface GoalContext {
+  targetWordRange?: string;
   pageType: string;
   objective: string;
   audienceScope: string;
