@@ -297,13 +297,14 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     await requireArticleReadAccess(supabase, session.article_id, principal.userId);
     const messages = body.includeMessages === false ? undefined : await getContentWritingMessages(session.id);
     const includeStepContent = body.includeStepContent === true;
+    const includeStepMetadata = includeStepContent || body.includeStepMetadata === true;
     const includeStepOutput = includeStepContent || body.includeStepOutput === true;
     const steps = body.includeSteps === false
       ? undefined
       : await getContentWritingSteps(session.id, {
         includeContent: includeStepContent,
         includeOutput: includeStepOutput,
-        includeMetadata: includeStepContent,
+        includeMetadata: includeStepMetadata,
       });
     return {
       status: 200,

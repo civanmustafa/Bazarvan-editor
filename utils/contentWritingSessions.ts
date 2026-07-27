@@ -390,6 +390,7 @@ export const getContentWritingSessionDetail = async (
     includeMessages?: boolean;
     includeSteps?: boolean;
     includeStepContent?: boolean;
+    includeStepMetadata?: boolean;
     includeStepOutput?: boolean;
   } = {},
 ): Promise<ContentWritingSessionDetail> => {
@@ -399,6 +400,7 @@ export const getContentWritingSessionDetail = async (
     includeMessages: options.includeMessages === true,
     includeSteps: options.includeSteps !== false,
     includeStepContent: options.includeStepContent === true,
+    includeStepMetadata: options.includeStepMetadata === true,
     includeStepOutput: options.includeStepOutput === true,
   });
   const session = normalizeSession(payload.session);

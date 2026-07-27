@@ -47,6 +47,9 @@ import { normalizeContentWritingQualityConfiguration } from '../constants/conten
 import type { ExternalAiBridgeProvider } from '../types';
 import ContentWritingExternalBridgePanel from './ContentWritingExternalBridgePanel';
 import ContentWritingReviewModal from './ContentWritingReviewModal';
+import ContentWritingStepResult, {
+  getContentWritingStepDescription,
+} from './ContentWritingStepResult';
 import {
   ContentWritingRequestError,
   cancelContentWritingSession,
@@ -227,6 +230,10 @@ const getStepLabel = (step: ContentWritingStep, isArabic: boolean): string => {
     final_review: isArabic ? 'المراجعة النهائية' : 'Final review',
     quality_repair: isArabic ? 'إصلاح معايير الجودة' : 'Quality repair',
   };
+  if (step.stepType === 'quality_repair' || step.stepType === 'section_repair') {
+    const sequence = Number(step.stepKey.match(/(\d+)$/)?.[1]) || 1;
+    return `${labels[step.stepType]} ${sequence.toLocaleString(isArabic ? 'ar' : 'en')}`;
+  }
   if (step.stepType !== 'section') return labels[step.stepType];
   const sectionIndex = Math.max(1, Number(step.metadata.sectionIndex) || step.ordinal - 1);
   return `${isArabic ? 'القسم' : 'Section'} ${sectionIndex}: ${step.title}`;
@@ -426,9 +433,12 @@ const ContentWritingPanel: React.FC = () => {
     const requestId = ++detailRequestRef.current;
     if (!options.silent) setIsDetailLoading(true);
     try {
-      // Live step review needs only the persisted output. Keep the much larger prompt text
-      // server-side so active-session polling stays bounded.
-      const detail = await getContentWritingSessionDetail(sessionId, { includeStepOutput: true });
+      // Load persisted output and compact evidence metadata, while keeping the
+      // much larger raw prompt text server-side so active polling stays bounded.
+      const detail = await getContentWritingSessionDetail(sessionId, {
+        includeStepOutput: true,
+        includeStepMetadata: true,
+      });
       if (requestId !== detailRequestRef.current) return;
       setSelectedDetail(detail);
       mergeSession(detail.session);
@@ -862,6 +872,7 @@ const ContentWritingPanel: React.FC = () => {
     ? progress.workflowStepKey.trim()
     : '';
   const completedWorkflowSteps = workflowSteps.filter(step => step.status === 'completed').length;
+  const qualityRepairStepCount = workflowSteps.filter(step => step.stepType === 'quality_repair').length;
   const currentWorkflowStep = workflowSteps.find(step => step.stepKey === workflowStepKey);
   const automaticWorkflowStepKey = (
     (workflowStepKey && workflowSteps.some(step => step.stepKey === workflowStepKey)
@@ -1165,10 +1176,18 @@ const ContentWritingPanel: React.FC = () => {
                   <span>{isArabic ? 'مراحل التوليد المنظم' : 'Structured writing steps'}</span>
                   <span className="tabular-nums text-gray-400">{completedWorkflowSteps}/{workflowSteps.length}</span>
                 </div>
+                {qualityRepairStepCount > 1 && (
+                  <div className="mb-2 rounded-md border border-blue-100 bg-blue-50/60 p-2 text-[10px] font-bold leading-5 text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/10 dark:text-blue-300">
+                    {isArabic
+                      ? `يوجد ${qualityRepairStepCount.toLocaleString('ar')} محاولات مستقلة لإصلاح الجودة. ظهور علامة خضراء يعني أن المحاولة السابقة اكتملت، بينما تعمل المحاولة التالية على المخالفات المتبقية.`
+                      : `There are ${qualityRepairStepCount.toLocaleString('en')} separate quality-repair passes. A green check means the previous pass completed while the next pass works on remaining failures.`}
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   {workflowSteps.map(step => {
                     const isExpanded = expandedWorkflowStepKey === step.stepKey;
                     const outputText = typeof step.outputText === 'string' ? step.outputText.trim() : '';
+                    const stepDescription = getContentWritingStepDescription(step, isArabic);
                     const resultPanelId = `content-writing-step-result-${step.id}`;
                     return (
                       <div
@@ -1219,13 +1238,19 @@ const ContentWritingPanel: React.FC = () => {
                             <div className="mb-2 font-black text-gray-600 dark:text-gray-300">
                               {isArabic ? 'نتيجة المرحلة' : 'Step result'}
                             </div>
-                            {outputText ? (
-                              <div
-                                className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-gray-50 p-2.5 leading-6 text-gray-700 custom-scrollbar dark:bg-[#1F1F1F] dark:text-gray-200"
-                                dir="auto"
-                              >
-                                {outputText}
+                            {stepDescription && (
+                              <div className="mb-2 rounded-md border border-blue-100 bg-blue-50/60 p-2.5 font-semibold leading-5 text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/10 dark:text-blue-200">
+                                {stepDescription}
                               </div>
+                            )}
+                            {outputText ? (
+                              <ContentWritingStepResult
+                                step={step}
+                                workflowSteps={workflowSteps}
+                                contextSnapshot={activeDetail?.session.contextSnapshot || {}}
+                                outputText={outputText}
+                                isArabic={isArabic}
+                              />
                             ) : step.status === 'running' ? (
                               <div className="flex items-center gap-2 rounded-md bg-blue-50 p-2.5 font-bold leading-5 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
                                 <Loader2 size={13} className="shrink-0 animate-spin" />
@@ -1422,7 +1447,7 @@ const ContentWritingPanel: React.FC = () => {
           qualityReport={reviewSnapshot.qualityReport}
           allowQualityOverride={currentUserRole === 'admin'}
           isApplying={isApplying}
-          onConfirm={() => void confirmApplication()}
+          onConfirm={qualityOverrideReason => void confirmApplication(qualityOverrideReason)}
           onClose={closeReview}
         />
       )}

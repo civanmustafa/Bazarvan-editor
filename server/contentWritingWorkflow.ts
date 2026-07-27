@@ -54,6 +54,10 @@ import {
   type ContentWritingQualityReport,
 } from '../utils/contentWritingQuality';
 import { normalizeGoalContext } from '../utils/goalContext';
+import {
+  CONTENT_WRITING_EVIDENCE_TRACE_VERSION,
+  type ContentWritingEvidenceTrace,
+} from '../utils/contentWritingEvidence';
 import type { GoalContext, Keywords } from '../types';
 import {
   executeContentWritingTurn,
@@ -549,6 +553,15 @@ export const executeStructuredContentWritingWorkflow = async (
       knowledgeItemIds: requiredIdeaIds,
       sourceChunkIds: relevantChunks.map(chunk => chunk.id),
     });
+    const assignedKnowledgeItems = knowledge.items.filter(item => requiredIdeaIds.includes(item.id));
+    const evidenceTrace: ContentWritingEvidenceTrace = {
+      version: CONTENT_WRITING_EVIDENCE_TRACE_VERSION,
+      sectionKey: definition.key,
+      sectionTitle: section.title,
+      knowledgeItems: assignedKnowledgeItems,
+      claims: relevantClaims,
+      sourceChunks: relevantChunks,
+    };
     const result = await runStep({
       definition,
       prompt: buildContentWritingSectionPrompt({
@@ -556,7 +569,7 @@ export const executeStructuredContentWritingWorkflow = async (
         section,
         sectionIndex: index,
         previousSection: index > 0 ? outputs[sectionDefinitions[index - 1].key] : undefined,
-        knowledgeItems: knowledge.items.filter(item => requiredIdeaIds.includes(item.id)),
+        knowledgeItems: assignedKnowledgeItems,
         claims: relevantClaims,
         sourceChunks: relevantChunks,
         coverageLedger: {
@@ -584,7 +597,13 @@ export const executeStructuredContentWritingWorkflow = async (
           competitorChunks.map(chunk => chunk.id),
           knowledge.claimLedger.claims.map(claim => claim.id),
         );
-        return { output: parsed.markdown, metadata: { sectionCoverage: parsed.coverage } };
+        return {
+          output: parsed.markdown,
+          metadata: {
+            sectionCoverage: parsed.coverage,
+            evidenceTrace,
+          },
+        };
       },
     });
     if (!result.ok) return result.execution;
@@ -752,6 +771,15 @@ export const executeStructuredContentWritingWorkflow = async (
     const repairClaims = repairClaimIds.size > 0
       ? knowledge.claimLedger.claims.filter(claim => repairClaimIds.has(claim.id))
       : selectedRepairClaims;
+    const repairKnowledgeItems = knowledge.items.filter(item => repair.ideaIds.includes(item.id));
+    const repairEvidenceTrace: ContentWritingEvidenceTrace = {
+      version: CONTENT_WRITING_EVIDENCE_TRACE_VERSION,
+      sectionKey: repair.sectionKey,
+      sectionTitle: sectionDefinitions[sectionIndex].title,
+      knowledgeItems: repairKnowledgeItems,
+      claims: repairClaims,
+      sourceChunks: repairChunks,
+    };
     const repairDefinition: ContentWritingWorkflowStepDefinition = {
       key: `section-repair-${String(repairIndex + 1).padStart(2, '0')}`,
       type: 'section_repair',
@@ -772,7 +800,7 @@ export const executeStructuredContentWritingWorkflow = async (
         sectionKey: repair.sectionKey,
         originalMarkdown: outputs[repair.sectionKey],
         repair,
-        knowledgeItems: knowledge.items.filter(item => repair.ideaIds.includes(item.id)),
+        knowledgeItems: repairKnowledgeItems,
         claims: repairClaims,
         sourceChunks: repairChunks,
         template: promptTemplate(PROMPT_TEMPLATE_IDS.sectionRepair),
@@ -790,7 +818,11 @@ export const executeStructuredContentWritingWorkflow = async (
         );
         return {
           output: parsed.markdown,
-          metadata: { sectionCoverage: parsed.coverage, repairedSectionKey: repair.sectionKey },
+          metadata: {
+            sectionCoverage: parsed.coverage,
+            repairedSectionKey: repair.sectionKey,
+            evidenceTrace: repairEvidenceTrace,
+          },
         };
       },
     });

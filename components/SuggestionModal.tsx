@@ -190,6 +190,7 @@ const SuggestionModal: React.FC = () => {
     >
       <div
         className="fixed pointer-events-auto bg-white dark:bg-[#2A2A2A] rounded-lg shadow-2xl border border-gray-300 dark:border-[#3C3C3C] flex flex-col"
+        data-ai-suggestion-panel="true"
         data-toolbar-ai-suggestion-panel="true"
         style={{ left: position.x, top: position.y, width: panelWidth, maxHeight: panelMaxHeight, zIndex: 10000 }}
       >

@@ -78,11 +78,15 @@ test('structured writing results are fetched without reloading full step prompts
   ]);
 
   assert.match(api, /const includeStepOutput = includeStepContent \|\| body\.includeStepOutput === true/);
+  assert.match(api, /const includeStepMetadata = includeStepContent \|\| body\.includeStepMetadata === true/);
   assert.match(api, /includeOutput: includeStepOutput/);
+  assert.match(api, /includeMetadata: includeStepMetadata/);
   assert.match(service, /options\.includeContent \|\| options\.includeOutput \? \['output_text'\] : \[\]/);
   assert.match(service, /options\.includeContent \? \['prompt_text'\] : \[\]/);
   assert.match(client, /includeStepOutput\?: boolean/);
-  assert.match(panel, /getContentWritingSessionDetail\(sessionId, \{ includeStepOutput: true \}\)/);
+  assert.match(client, /includeStepMetadata\?: boolean/);
+  assert.match(panel, /includeStepOutput: true/);
+  assert.match(panel, /includeStepMetadata: true/);
   assert.match(panel, /automaticWorkflowStepKey/);
   assert.match(panel, /content-writing-step-result-/);
 });
@@ -302,6 +306,14 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(panel, /recoverContentWritingDraft/);
   assert.match(panel, /المسودة الجزئية المستردة/);
   assert.match(panel, /snapshot\.sessionId && !snapshot\.isPartial/);
+  assert.match(panel, /qualityRepairStepCount > 1/);
+  assert.match(panel, /محاولات مستقلة لإصلاح الجودة/);
+  assert.match(panel, /getContentWritingStepDescription/);
+  assert.match(panel, /step\.stepType === 'quality_repair' \|\| step\.stepType === 'section_repair'/);
+  assert.match(
+    panel,
+    /onConfirm=\{qualityOverrideReason => void confirmApplication\(qualityOverrideReason\)\}/,
+  );
   assert.match(modal, /aria-modal="true"/);
   assert.match(modal, /onConfirm/);
   assert.match(modal, /prepareContentWritingResultForEditor/);

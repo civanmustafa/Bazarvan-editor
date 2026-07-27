@@ -599,10 +599,13 @@ test('source registry and claim ledger constrain every content-writing repair su
 });
 
 test('content writing editor UI runs through durable authenticated sessions', async () => {
-  const [panel, client, rightSidebar] = await Promise.all([
+  const [panel, client, rightSidebar, workflow, stepResult, transparencyPanel] = await Promise.all([
     readWorkspaceFile('components/ContentWritingPanel.tsx'),
     readWorkspaceFile('utils/contentWritingSessions.ts'),
     readWorkspaceFile('components/RightSidebar.tsx'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('components/ContentWritingStepResult.tsx'),
+    readWorkspaceFile('components/ContentWritingTransparencyPanel.tsx'),
   ]);
 
   assert.match(rightSidebar, /lazy\(\(\) => import\('\.\/ContentWritingPanel'\)\)/);
@@ -625,6 +628,7 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(panel, /resumeContentWritingSession\(/);
   assert.match(panel, /workflowSteps\.map/);
   assert.match(panel, /includeStepOutput: true/);
+  assert.match(panel, /includeStepMetadata: true/);
   assert.match(panel, /expandedWorkflowStepKey/);
   assert.match(panel, /aria-expanded=\{isExpanded\}/);
   assert.match(panel, /outputText/);
@@ -632,16 +636,45 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(panel, /selectedDetail\?\.session\.id === selectedSessionId/);
   assert.match(panel, /activeDetail\.session\.resultText/);
   assert.match(panel, /recordContentWritingSessionApplication/);
+  assert.match(panel, /contextSnapshot=\{activeDetail\?\.session\.contextSnapshot/);
   assert.doesNotMatch(panel, /getSupabaseClient|localStorage|sessionStorage/);
+  assert.match(workflow, /evidenceTrace/);
+  assert.match(workflow, /CONTENT_WRITING_EVIDENCE_TRACE_VERSION/);
+  assert.match(stepResult, /ContentWritingEvidenceTrace/);
+  assert.match(transparencyPanel, /data-content-writing-transparency="complete"/);
+  assert.match(transparencyPanel, /knowledge\.claimLedger\.claims/);
+  assert.match(transparencyPanel, /source\.chunkIds\.map/);
   assert.match(client, /getAuthenticatedApiToken\(\)/);
   assert.match(client, /getAuthenticatedApiHeaders\(/);
   assert.match(client, /includeMessages: options\.includeMessages === true/);
   assert.match(client, /includeSteps: options\.includeSteps !== false/);
   assert.match(client, /includeStepOutput: options\.includeStepOutput === true/);
+  assert.match(client, /includeStepMetadata: options\.includeStepMetadata === true/);
   assert.match(client, /action: 'start'/);
   assert.match(client, /action: 'get'/);
   assert.match(client, /action: 'list'/);
   assert.match(client, /action: 'cancel'/);
   assert.match(client, /action: 'resume'/);
   assert.match(client, /action: 'recordApplication'/);
+});
+
+test('single-result AI actions share one suggestion presenter and keep bulk review isolated', async () => {
+  const [aiContext, suggestionModal] = await Promise.all([
+    readWorkspaceFile('contexts/AIContext.tsx'),
+    readWorkspaceFile('components/SuggestionModal.tsx'),
+  ]);
+  const quickCommandFlow = aiContext.slice(
+    aiContext.indexOf('const handleAiRequest = useCallback'),
+    aiContext.indexOf('const handleAnalyzeHeadings = useCallback'),
+  );
+  const singleCriterionFixFlow = aiContext.slice(
+    aiContext.indexOf('const handleAiFix = useCallback'),
+    aiContext.indexOf('const getRelatedBulkFixRules = useCallback'),
+  );
+
+  assert.match(aiContext, /const presentSuggestion = useCallback/);
+  assert.match(quickCommandFlow, /presentSuggestion\(/);
+  assert.match(singleCriterionFixFlow, /presentSuggestion\(/);
+  assert.doesNotMatch(singleCriterionFixFlow, /replaceBulkFixReviewItems|setFixAllProgress|setSuggestion\(/);
+  assert.match(suggestionModal, /data-ai-suggestion-panel="true"/);
 });

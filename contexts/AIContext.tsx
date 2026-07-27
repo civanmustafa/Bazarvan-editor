@@ -5001,6 +5001,13 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const previousArticleUserRef = useRef<string | null>(currentUser);
     const openAiModel = getAiProviderModel(aiProviderCapabilities, 'chatgpt');
 
+    // Quick commands, floating commands, and single criterion fixes all use
+    // this presenter so they always open the same suggestion review window.
+    const presentSuggestion = useCallback((nextSuggestion: SuggestionState) => {
+        setSuggestion(nextSuggestion);
+        openModal('suggestion');
+    }, [openModal]);
+
     useEffect(() => {
         setQuickAiProvider(provider => (
             !isAiProviderAvailable(provider)
@@ -5278,10 +5285,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return { from: fuzzyMatch.from, to: fuzzyMatch.to, currentText: fuzzyText };
     }, [editor, getSafeRangeText, normalizeRangeText]);
 
-    useEffect(() => {
-        if (suggestion) openModal('suggestion');
-    }, [suggestion, openModal]);
-    
     useEffect(() => {
         if (headingsAnalysis && !isHeadingsAnalysisMinimized) openModal('headingsAnalysis');
     }, [headingsAnalysis, isHeadingsAnalysisMinimized, openModal]);
@@ -6279,7 +6282,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                             to,
                         });
                     }
-                    setSuggestion({ original: originalText, suggestions, action, from, to, historyItemId });
+                    presentSuggestion({ original: originalText, suggestions, action, from, to, historyItemId });
                 }
             }
         } catch (e) {
@@ -6288,7 +6291,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setIsAiCommandLoading(false);
         }
-    }, [editor, title, text, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, stopAiRequestIfArticleContextMissing]);
+    }, [editor, title, text, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, presentSuggestion, stopAiRequestIfArticleContextMissing]);
 
     const handleAnalyzeHeadings = useCallback(async () => {
         const provider = quickAiProvider;
@@ -6497,20 +6500,9 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const handleAiFix = useCallback(async (rule: CheckResult, item: any) => {
         if (!editor || !analysisResults.structureAnalysis) return;
-        if (stopAiRequestIfArticleContextMissing('الإصلاح المتعدد')) return;
+        if (stopAiRequestIfArticleContextMissing('إصلاح المخالفة')) return;
         const provider = quickAiProvider;
         setAiFixingInfo({ title: rule.title, from: item.from });
-        replaceBulkFixReviewItems([]);
-        setFixAllProgress({
-            current: 0,
-            total: 1,
-            running: true,
-            failed: 0,
-            errors: [],
-            stage: 'preparing',
-            detail: 'تحضير طلب الإصلاح...',
-            geminiProgress: null,
-        });
         setIsAiLoading(prev => ({ ...prev, [provider]: true }));
         try {
             const groups = groupBulkFixViolationsByTextUnit(editor, [{ rule, item }]);
@@ -6519,22 +6511,15 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 throw new Error('Could not identify the violating text unit.');
             }
 
-            setFixAllProgress(p => ({ ...p, current: 1, stage: 'requesting', detail: 'إرسال النص إلى Gemini لإنشاء اقتراح الإصلاح...' }));
             const proposedItem = await createBulkFixReviewItemForGroup(
                 group,
                 new Set([rule.title]),
                 0,
                 provider,
                 undefined,
-                progress => setFixAllProgress(p => ({
-                    ...p,
-                    stage: progress.stage || p.stage,
-                    detail: progress.message || p.detail,
-                    geminiProgress: progress,
-                })),
+                undefined,
                 'single',
             );
-            replaceBulkFixReviewItems([proposedItem]);
             const suggestions = (proposedItem.variants && proposedItem.variants.length > 0
                 ? proposedItem.variants.map(variant => variant.fixedText)
                 : [proposedItem.fixedText]
@@ -6549,7 +6534,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 bulkFixReviewItem: proposedItem,
             });
             if (suggestions.length > 0) {
-                setSuggestion({
+                presentSuggestion({
                     original: proposedItem.originalText,
                     suggestions,
                     action: 'replace-text',
@@ -6558,25 +6543,14 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     historyItemId,
                 });
             }
-            setFixAllProgress(p => ({ ...p, running: false, stage: 'done', detail: 'تم إنشاء اقتراح الإصلاح.' }));
         } catch (error) {
-            if (isGeminiAnalysisCancelledError(error)) {
-                setFixAllProgress(previous => ({
-                    ...previous,
-                    running: false,
-                    stage: 'cancelled',
-                    detail: 'تم إيقاف التحليل يدويًا.',
-                }));
-                return;
-            }
-            const message = error instanceof Error ? error.message : 'Unknown fix error';
+            if (isGeminiAnalysisCancelledError(error)) return;
             console.error('Single fix proposal failed:', rule.title, error);
-            setFixAllProgress({ current: 1, total: 1, running: false, failed: 1, errors: [`${rule.title}: ${message}`], stage: 'failed', detail: message });
         } finally {
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setAiFixingInfo(null);
         }
-    }, [editor, analysisResults.structureAnalysis, createBulkFixReviewItemForGroup, logToAiHistory, replaceBulkFixReviewItems, quickAiProvider, stopAiRequestIfArticleContextMissing]);
+    }, [editor, analysisResults.structureAnalysis, createBulkFixReviewItemForGroup, logToAiHistory, presentSuggestion, quickAiProvider, stopAiRequestIfArticleContextMissing]);
 
     const getRelatedBulkFixRules = useCallback((rulesToFix: string[]): BulkFixRelatedRule[] => {
         if (!editor || !analysisResults.structureAnalysis || rulesToFix.length === 0) return [];

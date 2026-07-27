@@ -15,6 +15,24 @@ const importKnowledge = async (): Promise<any> => {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 };
 
+const importTransparency = async (): Promise<any> => {
+  const entryPoints = [
+    '../utils/contentWritingTransparency.ts',
+    '../utils/contentWritingEvidence.ts',
+  ];
+  return Promise.all(entryPoints.map(async entryPoint => {
+    const result = await build({
+      entryPoints: [fileURLToPath(new URL(entryPoint, import.meta.url))],
+      bundle: true,
+      format: 'esm',
+      platform: 'node',
+      target: 'node20',
+      write: false,
+    });
+    return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+  }));
+};
+
 test('competitor chunking preserves every source character with stable IDs', async () => {
   const {
     chunkContentWritingCompetitor,
@@ -63,6 +81,101 @@ test('knowledge normalization deterministically covers chunks omitted by the mod
   const restored = normalizeContentWritingKnowledgeBase(knowledge, chunks);
   assert.deepEqual(restored.modelProcessedChunkIds, knowledge.modelProcessedChunkIds);
   assert.deepEqual(restored.fallbackChunkIds, knowledge.fallbackChunkIds);
+});
+
+test('transparency snapshot exposes the validated matrix, source policy, claims, and original excerpts', async () => {
+  const modules = await importTransparency();
+  const { buildContentWritingTransparencySnapshot } = modules.find((module: any) => (
+    typeof module.buildContentWritingTransparencySnapshot === 'function'
+  ));
+  const chunks = [
+    {
+      id: 'C1-S001',
+      competitorNumber: 1,
+      title: 'Official source',
+      url: 'https://example.com/official',
+      text: 'Original supporting excerpt.',
+    },
+    {
+      id: 'C2-S001',
+      competitorNumber: 2,
+      title: 'Commercial source',
+      url: 'https://example.org/article',
+      text: 'A second competitor excerpt.',
+    },
+  ];
+  const snapshot = buildContentWritingTransparencySnapshot({
+    competitorChunks: chunks,
+    knowledgeValue: {
+      processedChunkIds: chunks.map(chunk => chunk.id),
+      items: [{
+        id: 'K001',
+        topic: 'Shared topic',
+        detail: 'A reusable fact.',
+        priority: 'high',
+        sourceChunkIds: chunks.map(chunk => chunk.id),
+      }],
+      sourceAssessments: [
+        { competitorNumber: 1, category: 'official', freshness: 'current' },
+        { competitorNumber: 2, category: 'commercial', freshness: 'unknown' },
+      ],
+      claims: [{
+        id: 'CL001',
+        statement: 'A high-risk claim.',
+        claimType: 'factual',
+        riskLevel: 'high',
+        knowledgeItemIds: ['K001'],
+        supportingSourceChunkIds: ['C1-S001'],
+      }],
+    },
+  });
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.chunks[0].text, 'Original supporting excerpt.');
+  assert.equal(snapshot.knowledge.items[0].coverageLevel, 'all_competitors');
+  assert.equal(snapshot.knowledge.sourceRegistry.sources[0].usePolicy, 'primary_support');
+  assert.equal(snapshot.knowledge.sourceRegistry.sources[1].usePolicy, 'reference_only');
+  assert.equal(snapshot.knowledge.claimLedger.claims[0].usagePolicy, 'blocked');
+});
+
+test('section evidence trace distinguishes available inputs from declared usage', async () => {
+  const modules = await importTransparency();
+  const { normalizeContentWritingEvidenceTrace, normalizeContentWritingSectionCoverage } = modules.find((module: any) => (
+    typeof module.normalizeContentWritingEvidenceTrace === 'function'
+  ));
+  const trace = normalizeContentWritingEvidenceTrace({
+    version: 1,
+    sectionKey: 'section-01',
+    sectionTitle: 'Section',
+    knowledgeItems: [{
+      id: 'K001',
+      topic: 'Topic',
+      detail: 'Detail',
+      kind: 'topic',
+      priority: 'high',
+      sourceChunkIds: ['C1-S001'],
+      competitorNumbers: [1],
+      coverageLevel: 'single_competitor',
+    }],
+    claims: [],
+    sourceChunks: [{
+      id: 'C1-S001',
+      competitorNumber: 1,
+      title: 'Source',
+      url: 'https://example.com',
+      text: 'Exact excerpt.',
+    }],
+  });
+  const usage = normalizeContentWritingSectionCoverage({
+    coveredIdeaIds: ['K001'],
+    usedSourceChunkIds: [],
+    usedClaimIds: [],
+  });
+
+  assert.ok(trace);
+  assert.equal(trace.sourceChunks[0].text, 'Exact excerpt.');
+  assert.deepEqual(usage.coveredIdeaIds, ['K001']);
+  assert.deepEqual(usage.usedSourceChunkIds, []);
 });
 
 test('competitor coverage matrix is derived from validated source chunks', async () => {
