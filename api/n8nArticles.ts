@@ -6,6 +6,10 @@ import {
   normalizeArticleStatus,
   type ArticleStatus,
 } from '../constants/articleStatuses';
+import {
+  formatContentWritingTargetWordRange,
+  parseContentWritingTargetWordRange,
+} from '../utils/contentWritingTargets';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type ArticleVisibility = 'private' | 'public';
@@ -145,6 +149,34 @@ const getFirstString = (source: Record<string, any>, keys: string[]): string => 
   return '';
 };
 
+const getFirstValue = (
+  sources: readonly Record<string, any>[],
+  keys: readonly string[],
+): unknown => {
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = source[key];
+      if (value === null || value === undefined) continue;
+      if (typeof value === 'string' && !value.trim()) continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      return value;
+    }
+  }
+  return undefined;
+};
+
+const serializeGoalContextValue = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim();
+  if (!Array.isArray(value)) return '';
+  return uniqueStrings(value.flatMap(item => {
+    if (typeof item === 'string') return [item.trim()];
+    if (isRecord(item)) {
+      return [toTrimmedString(item.value || item.id || item.label || item.name)];
+    }
+    return [];
+  })).join(' || ');
+};
+
 const normalizeToken = (value: unknown): string => toTrimmedString(value).toLowerCase().replace(/\s+/g, '-');
 const normalizeChoiceToken = (value: unknown): string => toTrimmedString(value)
   .normalize('NFKC')
@@ -233,6 +265,107 @@ const SEARCH_INTENT_ALIASES: Record<string, string[]> = {
   navigational: ['navigational', 'Reach a specific brand or page', 'الوصول إلى علامة أو صفحة محددة', 'وصول', 'تنقل'],
   'support-intent': ['support-intent', 'Solve a problem or learn usage', 'حل مشكلة أو معرفة طريقة الاستخدام', 'حل', 'مساعدة', 'استخدام'],
 };
+
+const GOAL_CONTEXT_FIELD_ALIASES = {
+  targetWordRange: [
+    'targetWordRange',
+    'target_word_range',
+    'wordCountRange',
+    'word_count_range',
+    'wordRange',
+    'word_range',
+    'targetWords',
+    'target_words',
+  ],
+  pageType: ['pageType', 'page_type', 'type'],
+  objective: ['objective', 'pageObjective', 'page_objective'],
+  audienceScope: ['audienceScope', 'audience_scope', 'scope'],
+  targetCountry: [
+    'targetCountry',
+    'target_country',
+    'targetLocation',
+    'target_location',
+    'targetMarket',
+    'target_market',
+    'country',
+  ],
+  targetAudience: [
+    'targetAudience',
+    'target_audience',
+    'audience',
+    'audienceDescription',
+    'audience_description',
+  ],
+  audienceKnowledgeLevel: [
+    'audienceKnowledgeLevel',
+    'audience_knowledge_level',
+    'knowledgeLevel',
+    'knowledge_level',
+  ],
+  audienceNeeds: [
+    'audienceNeeds',
+    'audience_needs',
+    'readerNeeds',
+    'reader_needs',
+  ],
+  readerOutcome: [
+    'readerOutcome',
+    'reader_outcome',
+    'expectedOutcome',
+    'expected_outcome',
+  ],
+  desiredAction: [
+    'desiredAction',
+    'desired_action',
+    'callToAction',
+    'call_to_action',
+    'cta',
+  ],
+  marketingStage: [
+    'marketingStage',
+    'marketing_stage',
+    'funnelStage',
+    'funnel_stage',
+  ],
+  uniqueAngle: [
+    'uniqueAngle',
+    'unique_angle',
+    'contentAngle',
+    'content_angle',
+  ],
+  evidenceRequirements: [
+    'evidenceRequirements',
+    'evidence_requirements',
+    'sourceRequirements',
+    'source_requirements',
+  ],
+  freshnessRequirements: [
+    'freshnessRequirements',
+    'freshness_requirements',
+    'informationFreshness',
+    'information_freshness',
+  ],
+  brandVoice: [
+    'brandVoice',
+    'brand_voice',
+    'toneOfVoice',
+    'tone_of_voice',
+  ],
+  topicSensitivity: [
+    'topicSensitivity',
+    'topic_sensitivity',
+    'sensitivity',
+  ],
+  searchIntent: ['searchIntent', 'search_intent', 'intent'],
+  generatedBrief: [
+    'generatedBrief',
+    'generated_brief',
+    'smartBrief',
+    'smart_brief',
+    'contentBrief',
+    'content_brief',
+  ],
+} as const;
 
 const uniqueStrings = (values: string[]): string[] => {
   const seen = new Set<string>();
@@ -377,44 +510,99 @@ const getKeywordsPayload = (body: Record<string, any>) => {
   });
 };
 
-const getGoalContextPayload = (body: Record<string, any>) => {
-  const source = isRecord(body.goalContext)
-    ? body.goalContext
-    : isRecord(body.goal_context)
-      ? body.goal_context
-      : isRecord(body.pageContext)
-        ? body.pageContext
-        : isRecord(body.page_context)
-          ? body.page_context
-          : {};
+const getGoalContextSources = (body: Record<string, any>): Record<string, any>[] => [
+  body,
+  body.goalContext,
+  body.goal_context,
+  body.pageContext,
+  body.page_context,
+  body.generalContext,
+  body.general_context,
+  body.articleContext,
+  body.article_context,
+  body.contentContext,
+  body.content_context,
+].filter(isRecord);
 
-  const pageType = getFirstString(body, ['pageType', 'page_type']) || getFirstString(source, ['pageType', 'page_type', 'type']);
-  const objective = getFirstString(body, ['objective', 'pageObjective', 'page_objective']) || getFirstString(source, ['objective', 'pageObjective', 'page_objective']);
-  const audienceScope = getFirstString(body, ['audienceScope', 'audience_scope']) || getFirstString(source, ['audienceScope', 'audience_scope', 'scope']);
-  const searchIntent = getFirstString(body, ['searchIntent', 'search_intent', 'intent']) || getFirstString(source, ['searchIntent', 'search_intent', 'intent']);
-  const generatedBrief = getFirstString(body, [
-    'generatedBrief',
-    'generated_brief',
-    'smartBrief',
-    'smart_brief',
-    'contentBrief',
-    'content_brief',
-  ]) || getFirstString(source, [
-    'generatedBrief',
-    'generated_brief',
-    'smartBrief',
-    'smart_brief',
-    'contentBrief',
-    'content_brief',
-  ]);
+const normalizeN8nTargetWordRange = (
+  sources: readonly Record<string, any>[],
+): string => {
+  const toBound = (value: unknown): string => {
+    if (typeof value === 'number' && Number.isFinite(value)) return String(Math.round(value));
+    return toTrimmedString(value);
+  };
+  const rawRange = getFirstValue(sources, GOAL_CONTEXT_FIELD_ALIASES.targetWordRange);
+  let candidate = '';
+  if (typeof rawRange === 'string' || typeof rawRange === 'number') {
+    const value = String(rawRange).trim();
+    candidate = typeof rawRange === 'number' ? `${value}-${value}` : value;
+  } else if (Array.isArray(rawRange) && rawRange.length >= 2) {
+    candidate = `${String(rawRange[0]).trim()}-${String(rawRange[1]).trim()}`;
+  } else if (isRecord(rawRange)) {
+    const minimum = toBound(getFirstValue(
+      [rawRange],
+      ['min', 'minimum', 'from', 'minWords', 'min_words'],
+    ));
+    const maximum = toBound(getFirstValue(
+      [rawRange],
+      ['max', 'maximum', 'to', 'maxWords', 'max_words'],
+    ));
+    if (minimum && maximum) candidate = `${minimum}-${maximum}`;
+  }
+
+  if (!candidate) {
+    const minimum = toBound(getFirstValue(sources, [
+      'minimumWordCount',
+      'minimum_word_count',
+      'minWordCount',
+      'min_word_count',
+      'minWords',
+      'min_words',
+    ]));
+    const maximum = toBound(getFirstValue(sources, [
+      'maximumWordCount',
+      'maximum_word_count',
+      'maxWordCount',
+      'max_word_count',
+      'maxWords',
+      'max_words',
+    ]));
+    if (minimum && maximum) candidate = `${minimum}-${maximum}`;
+  }
+
+  const parsed = parseContentWritingTargetWordRange(candidate);
+  return parsed ? formatContentWritingTargetWordRange(parsed) : candidate;
+};
+
+export const getGoalContextPayload = (body: Record<string, any>) => {
+  const sources = getGoalContextSources(body);
+  const getValue = (key: keyof typeof GOAL_CONTEXT_FIELD_ALIASES): string => (
+    serializeGoalContextValue(getFirstValue(sources, GOAL_CONTEXT_FIELD_ALIASES[key]))
+  );
+  const pageType = getValue('pageType');
+  const objective = getValue('objective');
+  const audienceScope = getValue('audienceScope');
+  const searchIntent = getValue('searchIntent');
 
   return compactObject({
-    pageType: resolveMappedChoice(pageType, PAGE_TYPE_ALIASES, 'article'),
-    objective: resolveMappedChoice(objective, OBJECTIVE_ALIASES, 'educate'),
-    audienceScope: resolveMappedChoice(audienceScope, AUDIENCE_SCOPE_ALIASES, 'global'),
-    targetCountry: getFirstString(body, ['targetCountry', 'target_country', 'targetLocation', 'target_location']) || getFirstString(source, ['targetCountry', 'target_country', 'targetLocation', 'target_location', 'country']),
-    searchIntent: resolveMappedChoice(searchIntent, SEARCH_INTENT_ALIASES, 'informational'),
-    generatedBrief,
+    targetWordRange: normalizeN8nTargetWordRange(sources),
+    pageType: resolveMappedChoice(pageType, PAGE_TYPE_ALIASES, ''),
+    objective: resolveMappedChoice(objective, OBJECTIVE_ALIASES, ''),
+    audienceScope: resolveMappedChoice(audienceScope, AUDIENCE_SCOPE_ALIASES, ''),
+    targetCountry: getValue('targetCountry'),
+    targetAudience: getValue('targetAudience'),
+    audienceKnowledgeLevel: getValue('audienceKnowledgeLevel'),
+    audienceNeeds: getValue('audienceNeeds'),
+    readerOutcome: getValue('readerOutcome'),
+    desiredAction: getValue('desiredAction'),
+    marketingStage: getValue('marketingStage'),
+    uniqueAngle: getValue('uniqueAngle'),
+    evidenceRequirements: getValue('evidenceRequirements'),
+    freshnessRequirements: getValue('freshnessRequirements'),
+    brandVoice: getValue('brandVoice'),
+    topicSensitivity: getValue('topicSensitivity'),
+    searchIntent: resolveMappedChoice(searchIntent, SEARCH_INTENT_ALIASES, ''),
+    generatedBrief: getValue('generatedBrief'),
   });
 };
 

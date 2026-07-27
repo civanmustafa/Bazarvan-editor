@@ -13,7 +13,7 @@ POST /api/n8n/articles
 | Header | `Content-Type` | `application/json` |
 | Header | `Authorization` | `Bearer YOUR_N8N_INGEST_TOKEN` |
 
-> ملاحظة مهمة: لا ترسل `targetAudience`. اعتمد في الاستهداف على `visibility` و `visibleToEmails` أو `visibleToEmailsCsv`.
+> جميع حقول السياق العام، بما فيها `targetAudience` و`targetWordRange`، اختيارية ومدعومة. أي حقل لا يرسله n8n يبقى فارغًا، ولا يضع المحرر له قيمة افتراضية.
 
 ## الحقول الأساسية للمقالة
 
@@ -115,47 +115,76 @@ POST /api/n8n/articles
 
 ## سياق الصفحة والجمهور
 
-يمكن إرسال هذه الحقول مباشرة أو داخل:
+يمكن إرسال هذه الحقول مباشرة أو داخل أي كائن من الأسماء التالية:
 
 ```json
 {
-  "goalContext": {}
+  "goalContext": {},
+  "goal_context": {},
+  "pageContext": {},
+  "page_context": {},
+  "generalContext": {},
+  "general_context": {},
+  "articleContext": {},
+  "article_context": {},
+  "contentContext": {},
+  "content_context": {}
 }
 ```
 
-أو:
+إذا أرسل الحقل مباشرة وفي كائن متداخل معًا، تكون القيمة المباشرة هي المعتمدة. يمكن إرسال حقول الاختيارات المتعددة كنص واحد أو Array، ويحوّلها المحرر إلى الصيغة الداخلية.
 
-```json
-{
-  "goal_context": {}
-}
-```
+| الحقل | أسماء بديلة مقبولة | النوع |
+|---|---|---|
+| `targetWordRange` | `target_word_range`, `wordCountRange`, `word_count_range`, `wordRange`, `word_range`, `targetWords`, `target_words` | نص مثل `1200-1800`، أو Array مثل `[1200,1800]`، أو Object مثل `{"min":1200,"max":1800}`. يقبل أيضًا حدّين منفصلين مثل `min_words` و`max_words`. |
+| `pageType` | `page_type`, `type` | اختيار مفرد |
+| `objective` | `pageObjective`, `page_objective` | اختيار مفرد |
+| `audienceScope` | `audience_scope`, `scope` | اختيار مفرد |
+| `targetCountry` | `target_country`, `targetLocation`, `target_location`, `targetMarket`, `target_market`, `country` | نص |
+| `targetAudience` | `target_audience`, `audience`, `audienceDescription`, `audience_description` | نص أو Array |
+| `audienceKnowledgeLevel` | `audience_knowledge_level`, `knowledgeLevel`, `knowledge_level` | نص أو Array |
+| `audienceNeeds` | `audience_needs`, `readerNeeds`, `reader_needs` | نص أو Array |
+| `readerOutcome` | `reader_outcome`, `expectedOutcome`, `expected_outcome` | نص أو Array |
+| `desiredAction` | `desired_action`, `callToAction`, `call_to_action`, `cta` | نص أو Array |
+| `marketingStage` | `marketing_stage`, `funnelStage`, `funnel_stage` | نص أو Array |
+| `uniqueAngle` | `unique_angle`, `contentAngle`, `content_angle` | نص أو Array |
+| `evidenceRequirements` | `evidence_requirements`, `sourceRequirements`, `source_requirements` | نص أو Array |
+| `freshnessRequirements` | `freshness_requirements`, `informationFreshness`, `information_freshness` | نص أو Array |
+| `brandVoice` | `brand_voice`, `toneOfVoice`, `tone_of_voice` | نص أو Array |
+| `topicSensitivity` | `topic_sensitivity`, `sensitivity` | نص أو Array |
+| `searchIntent` | `search_intent`, `intent` | اختيار مفرد |
+| `generatedBrief` | `generated_brief`, `smartBrief`, `smart_brief`, `contentBrief`, `content_brief` | نص |
 
-أو:
+لا توجد قيم افتراضية لحقول هذا القسم في مسار n8n: الحقل غير المرسل أو المرسل فارغًا يبقى فارغًا.
 
-```json
-{
-  "pageContext": {}
-}
-```
+القيم الداخلية للاختيارات المفردة:
 
-| الحقل | أسماء بديلة مقبولة | الافتراضي | الخيارات الداخلية | الخيارات العربية المقبولة |
-|---|---|---|---|---|
-| `pageType` | `page_type`, `type` | `article` | `article`, `news`, `service`, `category`, `comparison`, `product`, `landing`, `guide` | `مقالة/دليل`, `خبر`, `خدمة`, `تصنيف منتجات/خدمات`, `مقارنة`, `منتج`, `هبوط`, `دليل` |
-| `objective` | `pageObjective`, `page_objective` | `educate` | `educate`, `compare`, `convert`, `category-support`, `trust`, `support` | `شرح وتثقيف`, `مقارنة ومساعدة على الاختيار`, `تحويل مباشر`, `محتوى داعم لصفحة تصنيف`, `بناء الثقة وتقليل الاعتراضات`, `دعم بعد القرار أو الاستخدام` |
-| `audienceScope` | `audience_scope`, `scope` | `global` | `local`, `country`, `regional`, `global` | `مدينة أو منطقة محلية`, `دولة واحدة محددة`, `إقليم`, `عالمي` |
-| `targetCountry` | `target_country`, `targetLocation`, `target_location`, `country` | فارغ | نص حر | مثال: `إسطنبول`, `تركيا`, `الخليج` |
-| `searchIntent` | `search_intent`, `intent` | `informational` | `informational`, `commercial`, `commercial-support`, `transactional`, `navigational`, `support-intent` | `شرح وتعلّم`, `مقارنة واختيار`, `معلومات تجارية داعمة`, `تنفيذ إجراء/شراء`, `الوصول إلى علامة أو صفحة محددة`, `حل مشكلة أو معرفة طريقة الاستخدام` |
+- `pageType`: `article`, `news`, `service`, `category`, `comparison`, `product`, `landing`, `guide`.
+- `objective`: `educate`, `compare`, `convert`, `category-support`, `trust`, `support`.
+- `audienceScope`: `local`, `country`, `regional`, `global`.
+- `searchIntent`: `informational`, `commercial`, `commercial-support`, `transactional`, `navigational`, `support-intent`.
 
 مثال:
 
 ```json
 {
   "goalContext": {
+    "targetWordRange": "1200/1800",
     "pageType": "مقالة/دليل",
     "objective": "شرح وتثقيف",
-    "audienceScope": "عالمي",
-    "searchIntent": "شرح وتعلّم"
+    "audienceScope": "country",
+    "targetCountry": "تركيا",
+    "targetAudience": ["business-owners", "decision-makers"],
+    "audienceKnowledgeLevel": ["beginner", "non-technical"],
+    "audienceNeeds": "clear-practical-answers",
+    "readerOutcome": "make-informed-decision",
+    "marketingStage": "consideration",
+    "uniqueAngle": "practical-actionable",
+    "evidenceRequirements": "official-primary-sources",
+    "brandVoice": "formal-professional",
+    "topicSensitivity": "standard",
+    "searchIntent": "شرح وتعلّم",
+    "generatedBrief": "موجز نصي اختياري قادم من n8n"
   }
 }
 ```
@@ -254,9 +283,19 @@ POST /api/n8n/articles
     "lsi": "كلمة LSI 1 / كلمة LSI 2 * كلمة LSI 3. كلمة LSI 4"
   },
   "goalContext": {
+    "targetWordRange": "1200-1800",
     "pageType": "مقالة/دليل",
     "objective": "شرح وتثقيف",
     "audienceScope": "عالمي",
+    "targetAudience": ["business-owners", "decision-makers"],
+    "audienceKnowledgeLevel": "beginner",
+    "audienceNeeds": "clear-practical-answers",
+    "readerOutcome": "make-informed-decision",
+    "marketingStage": "consideration",
+    "uniqueAngle": "practical-actionable",
+    "evidenceRequirements": "official-primary-sources",
+    "brandVoice": "formal-professional",
+    "topicSensitivity": "standard",
     "searchIntent": "شرح وتعلّم"
   },
   "competitors": [

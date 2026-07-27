@@ -128,18 +128,26 @@ lsi_keywords
 ```json
 {
   "goalContext": {
+    "targetWordRange": "1200-1800",
     "pageType": "article",
     "objective": "educate",
     "audienceScope": "global",
-    "targetCountry": "",
-    "searchIntent": "informational"
+    "targetAudience": ["business-owners", "decision-makers"],
+    "audienceKnowledgeLevel": "beginner",
+    "audienceNeeds": "clear-practical-answers",
+    "readerOutcome": "make-informed-decision",
+    "marketingStage": "consideration",
+    "uniqueAngle": "practical-actionable",
+    "evidenceRequirements": "official-primary-sources",
+    "brandVoice": "formal-professional",
+    "topicSensitivity": "standard",
+    "searchIntent": "informational",
+    "generatedBrief": "موجز اختياري قادم من n8n"
   }
 }
 ```
 
-مهم: إذا كان أي حقل فارغا، لا تحتاج إرساله أصلا. وإذا أرسله n8n فارغا، سيقوم المحرر بتجاهله عند الحفظ.
-
-تم حذف `targetAudience` من مسار n8n، لذلك لا ترسله.
+جميع حقول السياق العام مدعومة بصيغتي `camelCase` و`snake_case`، ويمكن إرسالها مباشرة أو داخل `goalContext` و`goal_context` و`pageContext` و`generalContext` ونظائرها ذات الشرطة السفلية. إذا لم يرسل n8n حقلًا، يبقى فارغًا ولا يستبدله المحرر بقيمة افتراضية. راجع الجدول الكامل في `docs/n8n-fields-reference-ar.md`.
 
 ## القيم التي يمكن إرسالها لسياق الصفحة
 
