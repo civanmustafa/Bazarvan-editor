@@ -964,7 +964,11 @@ const StructureTab: React.FC = () => {
           name: tSt.callToAction,
           icon: <MousePointerClick size={16} className="text-[#d4af37]" />,
           items: [
-              analysis.callToActionSection,
+              analysis.callToActionHeading,
+              analysis.callToActionWordCount,
+              analysis.callToActionParagraphsSentences,
+              analysis.callToActionBulletList,
+              analysis.callToActionFinalSentence,
           ],
       }] : []),
       ...(isConclusionPageContext(goalContext) ? [{

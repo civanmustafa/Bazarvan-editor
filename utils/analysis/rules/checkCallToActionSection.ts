@@ -17,6 +17,14 @@ const ENGLISH_CALL_TO_ACTION_SECTION_KEYWORDS = [
     'compare plans', 'choose your plan', 'download now', 'claim your offer',
 ];
 
+export type CallToActionSectionChecks = {
+    callToActionHeading: CheckResult;
+    callToActionWordCount: CheckResult;
+    callToActionParagraphsSentences: CheckResult;
+    callToActionBulletList: CheckResult;
+    callToActionFinalSentence: CheckResult;
+};
+
 type SectionEvaluation = {
     heading: AnalysisDocumentNode;
     sectionNodes: AnalysisDocumentNode[];
@@ -94,7 +102,10 @@ const evaluateSection = (
     const headingHasCta = includesAnyTerm(heading.text, ctaTerms, articleLanguage);
     const headingHasPrimaryKeyword = headingPrimaryKeywordCount === 1;
     const firstListIndex = sectionNodes.findIndex(isListNode);
-    const lastListIndex = sectionNodes.map((node, index) => (isListNode(node) ? index : -1)).filter(index => index !== -1).pop() ?? -1;
+    const lastListIndex = sectionNodes
+        .map((node, index) => (isListNode(node) ? index : -1))
+        .filter(index => index !== -1)
+        .pop() ?? -1;
     const preListNodes = firstListIndex >= 0 ? sectionNodes.slice(0, firstListIndex) : sectionNodes;
     const preListParagraphs = preListNodes.filter(node => node.type === 'paragraph' && node.text.trim().length > 0);
     const paragraphText = sectionNodes
@@ -147,28 +158,39 @@ const evaluateSection = (
     };
 };
 
-export const checkCallToActionSection = (context: AnalysisContext): CheckResult => {
-    const { nodes, headings, t, articleLanguage, totalDocSize } = context;
-    const tRule = t.structureAnalysis['دعوة اتخاذ اجراء'];
-    const ctaTerms = articleLanguage === 'ar'
+const getCtaTerms = (articleLanguage: 'ar' | 'en'): string[] => (
+    articleLanguage === 'ar'
         ? CALL_TO_ACTION_SECTION_KEYWORDS
-        : ENGLISH_CALL_TO_ACTION_SECTION_KEYWORDS;
+        : ENGLISH_CALL_TO_ACTION_SECTION_KEYWORDS
+);
+
+const createNoH2Checks = (context: AnalysisContext): CallToActionSectionChecks => {
+    const { t, articleLanguage } = context;
+    const details = getCtaTerms(articleLanguage).join(', ');
+    const fail = (key: keyof typeof t.structureAnalysis) => {
+        const rule = t.structureAnalysis[key];
+        return createCheckResult(rule.title, 'fail', t.common.noH2, rule.required, 0, rule.description, details);
+    };
+
+    return {
+        callToActionHeading: fail('عنوان الإجراء'),
+        callToActionWordCount: fail('طول دعوة اتخاذ اجراء'),
+        callToActionParagraphsSentences: fail('فقرات وجمل دعوة اتخاذ اجراء'),
+        callToActionBulletList: fail('قائمة نقطية'),
+        callToActionFinalSentence: fail('فقرة إجراء'),
+    };
+};
+
+export const checkCallToActionSection = (context: AnalysisContext): CallToActionSectionChecks => {
+    const { nodes, t, articleLanguage, totalDocSize } = context;
+    const ctaTerms = getCtaTerms(articleLanguage);
+    const details = ctaTerms.join(', ');
     const h2Indices = nodes
         .map((node, index) => (node.type === 'heading' && node.level === 2 ? index : -1))
         .filter(index => index !== -1);
 
-    const baseResult = createCheckResult(
-        tRule.title,
-        'fail',
-        t.common.noH2,
-        tRule.required,
-        0,
-        tRule.description,
-        ctaTerms.join(', ')
-    );
-
     if (h2Indices.length === 0) {
-        return baseResult;
+        return createNoH2Checks(context);
     }
 
     const evaluations = h2Indices.map((headingIndex, index) => {
@@ -181,112 +203,135 @@ export const checkCallToActionSection = (context: AnalysisContext): CheckResult 
             context
         );
     });
-
-    const passed = evaluations.find(evaluation => (
-        evaluation.headingHasCta &&
-        evaluation.headingHasPrimaryKeyword &&
-        evaluation.preListParagraphCount >= 1 &&
-        evaluation.preListParagraphCount <= 2 &&
-        evaluation.wordCount >= 70 &&
-        evaluation.wordCount <= 125 &&
-        evaluation.sentenceCount >= 3 &&
-        evaluation.sentenceCount <= 4 &&
-        evaluation.bulletListCount === 1 &&
-        evaluation.orderedListCount === 0 &&
-        evaluation.listItemCount >= 3 &&
-        evaluation.listItemCount <= 4 &&
-        evaluation.finalSentenceHasCta
-    ));
-
-    if (passed) {
-        return createCheckResult(
-            tRule.title,
-            'pass',
-            t.common.good,
-            tRule.required,
-            1,
-            tRule.description,
-            ctaTerms.join(', ')
-        );
-    }
-
     const best = evaluations
         .sort((first, second) => second.score - first.score || second.heading.pos - first.heading.pos)[0];
-    const violations: NonNullable<CheckResult['violatingItems']> = [];
     const targetRange = sectionRange(best);
 
-    if (!best.headingHasCta) {
-        violations.push({
+    const headingRule = t.structureAnalysis['عنوان الإجراء'];
+    const headingStatus = best.headingHasCta && best.headingHasPrimaryKeyword ? 'pass' : 'fail';
+    const headingResult = createCheckResult(
+        headingRule.title,
+        headingStatus,
+        best.headingHasCta && best.headingHasPrimaryKeyword
+            ? t.common.found
+            : articleLanguage === 'ar'
+                ? `كلمة إجراء: ${best.headingHasCta ? 'نعم' : 'لا'} | الكلمة الأساسية: ${best.headingPrimaryKeywordCount}`
+                : `CTA term: ${best.headingHasCta ? 'Yes' : 'No'} | primary keyword: ${best.headingPrimaryKeywordCount}`,
+        headingRule.required,
+        headingStatus === 'pass' ? 1 : 0,
+        headingRule.description,
+        details
+    );
+    if (headingStatus === 'fail') {
+        headingResult.violationCount = 1;
+        headingResult.violatingItems = [{
             ...nodeRange(best.heading),
             message: articleLanguage === 'ar'
-                ? 'عنوان H2 يجب أن يتضمن كلمة دعوة لاتخاذ إجراء من قائمة المعيار.'
-                : 'The H2 heading must include a call-to-action term from the criterion list.',
-        });
+                ? 'عنوان H2 يجب أن يتضمن كلمة دعوة لاتخاذ إجراء من قائمة المعيار، والكلمة المفتاحية الأساسية مرة واحدة ضمن سياق طبيعي.'
+                : 'The H2 heading must include a CTA term from the criterion list and the primary keyword once in a natural context.',
+        }];
     }
-    if (!best.headingHasPrimaryKeyword) {
-        violations.push({
-            ...nodeRange(best.heading),
-            message: articleLanguage === 'ar'
-                ? `عنوان H2 يجب أن يتضمن الكلمة المفتاحية الأساسية مرة واحدة وضمن سياق طبيعي. الحالي: ${best.headingPrimaryKeywordCount}`
-                : `The H2 heading must include the primary keyword once in a natural context. Current: ${best.headingPrimaryKeywordCount}`,
-        });
-    }
-    if (best.preListParagraphCount < 1 || best.preListParagraphCount > 2) {
-        violations.push({
-            ...targetRange,
-            message: articleLanguage === 'ar'
-                ? `قبل القائمة يجب وجود 1-2 فقرة فقط. الحالي: ${best.preListParagraphCount}`
-                : `Before the list there must be 1-2 paragraphs. Current: ${best.preListParagraphCount}`,
-        });
-    }
-    if (best.wordCount < 70 || best.wordCount > 125) {
-        violations.push({
+
+    const wordCountRule = t.structureAnalysis['طول دعوة اتخاذ اجراء'];
+    const wordCountStatus = best.wordCount >= 70 && best.wordCount <= 125 ? 'pass' : 'fail';
+    const wordCountResult = createCheckResult(
+        wordCountRule.title,
+        wordCountStatus,
+        best.wordCount,
+        wordCountRule.required,
+        wordCountStatus === 'pass' ? 1 : 0,
+        wordCountRule.description,
+        details
+    );
+    if (wordCountStatus === 'fail') {
+        wordCountResult.violationCount = 1;
+        wordCountResult.violatingItems = [{
             ...targetRange,
             message: articleLanguage === 'ar'
                 ? `قسم دعوة اتخاذ الاجراء يجب أن يكون 70-125 كلمة. الحالي: ${best.wordCount}`
                 : `The call-to-action section must be 70-125 words. Current: ${best.wordCount}`,
-        });
+        }];
     }
-    if (best.sentenceCount < 3 || best.sentenceCount > 4) {
-        violations.push({
+
+    const paragraphRule = t.structureAnalysis['فقرات وجمل دعوة اتخاذ اجراء'];
+    const paragraphsSentencesStatus = (
+        best.preListParagraphCount >= 1 &&
+        best.preListParagraphCount <= 2 &&
+        best.sentenceCount >= 3 &&
+        best.sentenceCount <= 4
+    ) ? 'pass' : 'fail';
+    const paragraphResult = createCheckResult(
+        paragraphRule.title,
+        paragraphsSentencesStatus,
+        articleLanguage === 'ar'
+            ? `${best.preListParagraphCount} فقرات قبل القائمة، ${best.sentenceCount} جمل`
+            : `${best.preListParagraphCount} paragraphs before list, ${best.sentenceCount} sentences`,
+        paragraphRule.required,
+        paragraphsSentencesStatus === 'pass' ? 1 : 0,
+        paragraphRule.description,
+        details
+    );
+    if (paragraphsSentencesStatus === 'fail') {
+        paragraphResult.violationCount = 1;
+        paragraphResult.violatingItems = [{
             ...targetRange,
             message: articleLanguage === 'ar'
-                ? `قسم دعوة اتخاذ الاجراء يجب أن يتضمن 3-4 جمل خارج بنود القائمة. الحالي: ${best.sentenceCount}`
-                : `The call-to-action section must include 3-4 sentences outside list items. Current: ${best.sentenceCount}`,
-        });
+                ? `قبل القائمة يجب وجود 1-2 فقرة، والقسم يجب أن يتضمن 3-4 جمل خارج بنود القائمة. الحالي: ${best.preListParagraphCount} فقرات و${best.sentenceCount} جمل`
+                : `Before the list there must be 1-2 paragraphs, and the section must include 3-4 sentences outside list items. Current: ${best.preListParagraphCount} paragraphs and ${best.sentenceCount} sentences`,
+        }];
     }
-    if (best.bulletListCount !== 1 || best.orderedListCount !== 0 || best.listItemCount < 3 || best.listItemCount > 4) {
-        violations.push({
+
+    const listRule = t.structureAnalysis['قائمة نقطية'];
+    const listStatus = best.bulletListCount === 1 && best.orderedListCount === 0 && best.listItemCount >= 3 && best.listItemCount <= 4
+        ? 'pass'
+        : 'fail';
+    const listResult = createCheckResult(
+        listRule.title,
+        listStatus,
+        articleLanguage === 'ar'
+            ? `${best.listItemCount || 0} نقاط`
+            : `${best.listItemCount || 0} items`,
+        listRule.required,
+        listStatus === 'pass' ? 1 : 0,
+        listRule.description,
+        details
+    );
+    if (listStatus === 'fail') {
+        listResult.violationCount = 1;
+        listResult.violatingItems = [{
             ...targetRange,
             message: articleLanguage === 'ar'
                 ? `يجب استخدام قائمة نقطية آلية واحدة من 3-4 نقاط فقط. الحالي: ${best.listItemCount || 0}`
                 : `Use exactly one automatic bullet list with 3-4 items. Current: ${best.listItemCount || 0}`,
-        });
+        }];
     }
-    if (!best.finalSentenceHasCta) {
-        violations.push({
+
+    const finalRule = t.structureAnalysis['فقرة إجراء'];
+    const finalStatus = best.finalSentenceHasCta ? 'pass' : 'fail';
+    const finalResult = createCheckResult(
+        finalRule.title,
+        finalStatus,
+        best.finalSentenceHasCta ? t.common.yes : t.common.no,
+        finalRule.required,
+        finalStatus === 'pass' ? 1 : 0,
+        finalRule.description,
+        details
+    );
+    if (finalStatus === 'fail') {
+        finalResult.violationCount = 1;
+        finalResult.violatingItems = [{
             ...targetRange,
             message: articleLanguage === 'ar'
                 ? 'بعد القائمة يجب وجود جملة تفاعلية واحدة تشجع على اتخاذ الاجراء وتتضمن كلمة من قائمة المعيار.'
                 : 'After the list, add one interactive sentence that encourages action and includes a term from the criterion list.',
-        });
+        }];
     }
 
-    const result = createCheckResult(
-        tRule.title,
-        'fail',
-        `${violations.length} ${t.common.violations}`,
-        tRule.required,
-        Math.max(0, best.score / 11),
-        tRule.description,
-        ctaTerms.join(', ')
-    );
-    result.violationCount = violations.length;
-    result.violatingItems = violations;
-
-    if (headings.length === 0) {
-        result.current = t.common.noHeadings;
-    }
-
-    return result;
+    return {
+        callToActionHeading: headingResult,
+        callToActionWordCount: wordCountResult,
+        callToActionParagraphsSentences: paragraphResult,
+        callToActionBulletList: listResult,
+        callToActionFinalSentence: finalResult,
+    };
 };

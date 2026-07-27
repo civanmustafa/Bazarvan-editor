@@ -59,7 +59,11 @@ test('deterministic quality evaluation returns a versioned blocking report', asy
   assert.ok(evaluation.report.blockingFailureCount > 0);
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'quality.targetWordRange'));
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'quality.totalH2Count'));
-  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionSection'));
+  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionHeading'));
+  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionWordCount'));
+  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionParagraphsSentences'));
+  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionBulletList'));
+  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionFinalSentence'));
   assert.ok(!evaluation.report.criteria.some((criterion: any) => criterion.id === 'lastH2IsConclusion'));
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'keyword.primary'));
 });
@@ -88,7 +92,11 @@ test('service quality analysis requires CTA section and hides conclusion criteri
   const evaluation = evaluateContentWritingQuality({ ...articleInput, markdown });
   const criterion = (id: string) => evaluation.report.criteria.find((item: any) => item.id === id);
 
-  assert.equal(criterion('callToActionSection')?.status, 'pass');
+  assert.equal(criterion('callToActionHeading')?.status, 'pass');
+  assert.equal(criterion('callToActionWordCount')?.status, 'pass');
+  assert.equal(criterion('callToActionParagraphsSentences')?.status, 'pass');
+  assert.equal(criterion('callToActionBulletList')?.status, 'pass');
+  assert.equal(criterion('callToActionFinalSentence')?.status, 'pass');
   assert.equal(criterion('lastH2IsConclusion'), undefined);
 });
 
@@ -161,7 +169,11 @@ test('quality analysis detects the second introduction paragraph and Arabic numb
   assert.equal(criterion('secondParagraph')?.status, 'pass');
   assert.equal(criterion('conclusionHasNumber')?.status, 'pass');
   assert.equal(criterion('conclusionHasList')?.status, 'pass');
-  assert.equal(criterion('callToActionSection'), undefined);
+  assert.equal(criterion('callToActionHeading'), undefined);
+  assert.equal(criterion('callToActionWordCount'), undefined);
+  assert.equal(criterion('callToActionParagraphsSentences'), undefined);
+  assert.equal(criterion('callToActionBulletList'), undefined);
+  assert.equal(criterion('callToActionFinalSentence'), undefined);
 });
 
 test('quality analysis treats consecutive visible Markdown lines as separate introduction paragraphs', async () => {

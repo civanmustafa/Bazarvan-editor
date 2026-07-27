@@ -431,7 +431,7 @@ export const getContentWritingCriterionRepairScope = (
     || id === 'lastH2IsConclusion'
     || id === 'conclusionHasList'
     || id === 'conclusionHasNumber'
-    || id === 'callToActionSection'
+    || id.startsWith('callToAction')
     || id === 'tablesCount'
     || id.startsWith('product')
   ) {

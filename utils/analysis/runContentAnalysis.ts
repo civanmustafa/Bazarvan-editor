@@ -346,7 +346,7 @@ export const runContentAnalysis = ({
   const structureAnalysis = updateStructureAnalysis || !previousAnalysis
     ? (() => {
         const conclusionChecks = checkConclusion(analysisContext);
-        const callToActionSection = checkCallToActionSection(analysisContext);
+        const callToActionChecks = checkCallToActionSection(analysisContext);
         const usesCallToActionSection = isCallToActionPageContext(goalContext);
         const inactiveCheck = (result: CheckResult): CheckResult => ({
           ...result,
@@ -396,7 +396,11 @@ export const runContentAnalysis = ({
           conclusionWordCount: usesCallToActionSection ? inactiveCheck(conclusionChecks.conclusionWordCount) : conclusionChecks.conclusionWordCount,
           conclusionHasNumber: usesCallToActionSection ? inactiveCheck(conclusionChecks.conclusionHasNumber) : conclusionChecks.conclusionHasNumber,
           conclusionHasList: usesCallToActionSection ? inactiveCheck(conclusionChecks.conclusionHasList) : conclusionChecks.conclusionHasList,
-          callToActionSection: usesCallToActionSection ? callToActionSection : inactiveCheck(callToActionSection),
+          callToActionHeading: usesCallToActionSection ? callToActionChecks.callToActionHeading : inactiveCheck(callToActionChecks.callToActionHeading),
+          callToActionWordCount: usesCallToActionSection ? callToActionChecks.callToActionWordCount : inactiveCheck(callToActionChecks.callToActionWordCount),
+          callToActionParagraphsSentences: usesCallToActionSection ? callToActionChecks.callToActionParagraphsSentences : inactiveCheck(callToActionChecks.callToActionParagraphsSentences),
+          callToActionBulletList: usesCallToActionSection ? callToActionChecks.callToActionBulletList : inactiveCheck(callToActionChecks.callToActionBulletList),
+          callToActionFinalSentence: usesCallToActionSection ? callToActionChecks.callToActionFinalSentence : inactiveCheck(callToActionChecks.callToActionFinalSentence),
           sentenceBeginnings: checkSentenceBeginnings(analysisContext),
           warningWords: checkWarningWords(analysisContext),
           punctuationSpacing: checkPunctuationSpacing(analysisContext),
