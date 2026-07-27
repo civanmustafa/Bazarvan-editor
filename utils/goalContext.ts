@@ -149,9 +149,9 @@ const CONTEXT_OPTION_TRANSLATION_KEYS: Partial<Record<keyof GoalContext, Record<
     service: 'service',
     category: 'categoryPage',
     comparison: 'comparisonPage',
-    product: 'product',
     landing: 'landing',
     guide: 'guide',
+    product: 'product',
   },
   objective: {
     educate: 'educate',
@@ -227,6 +227,17 @@ const normalizeMappedChoice = (value: unknown, choiceMap: Record<string, string>
   return choiceMap[token] || asStoredString(value) || fallback;
 };
 
+export const CALL_TO_ACTION_PAGE_TYPES = ['service', 'category', 'product', 'landing'] as const;
+export const CONCLUSION_PAGE_TYPES = ['article', 'news', 'comparison', 'guide'] as const;
+
+export const isCallToActionPageContext = (goalContext?: Partial<GoalContext> | null): boolean => (
+  CALL_TO_ACTION_PAGE_TYPES.includes(normalizeGoalContext(goalContext).pageType as typeof CALL_TO_ACTION_PAGE_TYPES[number])
+);
+
+export const isConclusionPageContext = (goalContext?: Partial<GoalContext> | null): boolean => (
+  CONCLUSION_PAGE_TYPES.includes(normalizeGoalContext(goalContext).pageType as typeof CONCLUSION_PAGE_TYPES[number])
+);
+
 const usesTargetLocation = (audienceScope: string): boolean => (
   TARGET_LOCATION_AUDIENCE_SCOPES.includes(audienceScope)
 );
@@ -253,12 +264,39 @@ export const normalizeGoalContext = (value?: Partial<GoalContext> | null): GoalC
   };
 
   const pageTypeMap: Record<string, string> = {
+    article: 'article',
+    'article/guide': 'article',
+    'مقالة': 'article',
+    'مقالة/دليل': 'article',
     faq: 'article',
+    news: 'news',
+    'خبر': 'news',
+    service: 'service',
+    'service page': 'service',
+    'خدمة': 'service',
+    'صفحة خدمة': 'service',
+    'صفحة الخدمة': 'service',
+    category: 'category',
+    'category page': 'category',
+    'تصنيف': 'category',
+    'صفحة تصنيف': 'category',
+    'تصنيف منتجات/خدمات': 'category',
+    'صفحة تصنيف منتجات/خدمات': 'category',
+    comparison: 'comparison',
+    'comparison page': 'comparison',
+    'مقارنة': 'comparison',
+    'صفحة مقارنة': 'comparison',
     product: 'product',
     'product page': 'product',
     'صفحة منتج': 'product',
     'صفحة المنتج': 'product',
     'منتج': 'product',
+    landing: 'landing',
+    'landing page': 'landing',
+    'هبوط': 'landing',
+    'صفحة هبوط': 'landing',
+    guide: 'guide',
+    'دليل': 'guide',
   };
   const objectiveMap: Record<string, string> = {
     sell: 'convert',

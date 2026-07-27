@@ -117,6 +117,7 @@ const POLICY_V1: ContentWritingQualityPolicy = {
     answerParagraph: 'blocking',
     lastH2IsConclusion: 'blocking',
     conclusionWordCount: 'blocking',
+    callToActionSection: 'blocking',
     keywordStuffing: 'blocking',
     productUsageHeading: 'blocking',
     productTechnicalSpecsHeading: 'blocking',
@@ -149,6 +150,7 @@ const POLICY_V1: ContentWritingQualityPolicy = {
     answerParagraph: 2,
     lastH2IsConclusion: 3,
     conclusionWordCount: 2,
+    callToActionSection: 3,
     keywordStuffing: 3,
     paragraphLength: 2,
     sentenceLength: 2,
@@ -254,6 +256,8 @@ const range = (value: { min: number; max: number }): string => (
   value.min === value.max ? String(value.min) : `${value.min}-${value.max}`
 );
 
+const CALL_TO_ACTION_QUALITY_PAGE_TYPES = new Set(['service', 'category', 'product', 'landing']);
+
 export const buildContentWritingQualityContract = (options: {
   configuration: ContentWritingQualityConfiguration;
   language: string;
@@ -261,7 +265,9 @@ export const buildContentWritingQualityContract = (options: {
 }): string => {
   const { policy } = options.configuration;
   const isArabic = options.language !== 'en';
-  const isProduct = options.goalContext?.pageType === 'product';
+  const pageType = String(options.goalContext?.pageType || '').trim();
+  const isProduct = pageType === 'product';
+  const isCallToActionPage = CALL_TO_ACTION_QUALITY_PAGE_TYPES.has(pageType);
   const lines = isArabic ? [
     `سياسة الجودة: الإصدار ${policy.version}.`,
     `استهدف ${range(policy.targetWords)} كلمة و${range(policy.outlineSections)} أقسام H2 للمتن.`,
@@ -270,8 +276,12 @@ export const buildContentWritingQualityContract = (options: {
     `فقرات المتن ${range(policy.bodyParagraph.words)} كلمة و${range(policy.bodyParagraph.sentences)} جمل، والجملة ${range(policy.sentenceWords)} كلمة قدر الإمكان.`,
     'اجعل قسم H2 إما 80-150 كلمة بلا H3، أو 180-220 كلمة مع 2-3 عناوين H3 و3-5 فقرات.',
     `كل جواب FAQ فقرة من ${range(policy.faqAnswer.words)} كلمة و${range(policy.faqAnswer.sentences)} جمل.`,
-    `ضع FAQ قبل الخاتمة، واجعل الخاتمة آخر H2 بطول ${range(policy.conclusion.words)} كلمة.`,
-    `الخاتمة تبدأ بمؤشر ختامي، وتحتوي رقمًا وقائمة يسبقها تمهيد صحيح.`,
+    isCallToActionPage
+      ? 'أضف قسم H2 مستقل بعنوان دعوة اتخاذ اجراء يتضمن كلمة من كلمات الشراء/الطلب/التواصل/الاكتشاف، ويتضمن الكلمة المفتاحية الأساسية طبيعيًا دون حشو.'
+      : `ضع FAQ قبل الخاتمة، واجعل الخاتمة آخر H2 بطول ${range(policy.conclusion.words)} كلمة.`,
+    isCallToActionPage
+      ? 'قسم دعوة اتخاذ اجراء يكون 70-125 كلمة، وفيه 1-2 فقرة قبل قائمة نقطية آلية من 3-4 نقاط، و3-4 جمل خارج بنود القائمة، وبعد القائمة جملة تفاعلية تحث على اتخاذ الاجراء.'
+      : `الخاتمة تبدأ بمؤشر ختامي، وتحتوي رقمًا وقائمة يسبقها تمهيد صحيح.`,
     `قبل كل قائمة ضع تمهيدًا من ${range(policy.listIntroduction.words)} كلمة و${range(policy.listIntroduction.sentences)} جمل وينتهي بـ${policy.listIntroduction.requiredEnding}.`,
     'وزّع الكلمات الأساسية والصيغ البديلة وLSI طبيعيًا وتجنب الحشو والنسخ والادعاءات غير المدعومة.',
   ] : [
@@ -282,8 +292,12 @@ export const buildContentWritingQualityContract = (options: {
     `Body paragraphs should have ${range(policy.bodyParagraph.words)} words and ${range(policy.bodyParagraph.sentences)} sentences; aim for ${range(policy.sentenceWords)} words per sentence.`,
     'Make each H2 section either 80-150 words without H3, or 180-220 words with 2-3 H3 headings and 3-5 paragraphs.',
     `Each FAQ answer must have ${range(policy.faqAnswer.words)} words and ${range(policy.faqAnswer.sentences)} sentences.`,
-    `Place FAQ before the conclusion; the conclusion must be the last H2 and contain ${range(policy.conclusion.words)} words.`,
-    'The conclusion must start with a concluding indicator and include a number plus a properly introduced list.',
+    isCallToActionPage
+      ? 'Add an independent H2 call-to-action section whose heading includes a buying, ordering, contact, discovery, or engagement CTA term and naturally includes the primary keyword without stuffing.'
+      : `Place FAQ before the conclusion; the conclusion must be the last H2 and contain ${range(policy.conclusion.words)} words.`,
+    isCallToActionPage
+      ? 'The call-to-action section must be 70-125 words, include 1-2 paragraphs before one automatic bullet list of 3-4 items, contain 3-4 sentences outside list items, and end with an interactive CTA sentence after the list.'
+      : 'The conclusion must start with a concluding indicator and include a number plus a properly introduced list.',
     `Every list needs a ${range(policy.listIntroduction.words)}-word, ${range(policy.listIntroduction.sentences)}-sentence introduction ending with a colon or question mark.`,
     'Distribute target terms naturally and avoid stuffing, copying, and unsupported claims.',
   ];

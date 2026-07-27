@@ -200,6 +200,7 @@ export interface StructureAnalysis {
     conclusionWordCount: CheckResult;
     conclusionHasList: CheckResult;
     conclusionHasNumber: CheckResult;
+    callToActionSection: CheckResult;
     sentenceBeginnings: CheckResult;
     warningWords: CheckResult;
     punctuationSpacing: CheckResult;

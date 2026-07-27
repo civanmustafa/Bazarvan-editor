@@ -6,7 +6,7 @@ import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { useInteractionSelector } from '../contexts/InteractionContext';
 import { useAISelector } from '../contexts/AIContext';
-import { isProductPageContext } from '../utils/goalContext';
+import { isCallToActionPageContext, isConclusionPageContext, isProductPageContext } from '../utils/goalContext';
 import SpiderStats, { SpiderStatMetric } from './SpiderStats';
 import {
     buildGeminiFreeModelOptions,
@@ -960,7 +960,14 @@ const StructureTab: React.FC = () => {
               analysis.slowWords,
           ],
       },
-      {
+      ...(isCallToActionPageContext(goalContext) ? [{
+          name: tSt.callToAction,
+          icon: <MousePointerClick size={16} className="text-[#d4af37]" />,
+          items: [
+              analysis.callToActionSection,
+          ],
+      }] : []),
+      ...(isConclusionPageContext(goalContext) ? [{
           name: tSt.conclusion,
           icon: <Flag size={16} className="text-[#d4af37]" />,
           items: [
@@ -970,7 +977,7 @@ const StructureTab: React.FC = () => {
               analysis.conclusionHasNumber,
               analysis.conclusionHasList,
           ],
-      },
+      }] : []),
     ];
 
     const getCriterionScore = (item: CheckResult): number => {

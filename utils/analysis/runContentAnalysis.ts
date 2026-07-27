@@ -37,6 +37,7 @@ import { checkCtaWords } from './rules/checkCtaWords';
 import { checkInteractiveLanguage } from './rules/checkInteractiveLanguage';
 import { checkArabicOnly } from './rules/checkArabicOnly';
 import { checkConclusion } from './rules/checkConclusion';
+import { checkCallToActionSection } from './rules/checkCallToActionSection';
 import { checkSentenceBeginnings } from './rules/checkSentenceBeginnings';
 import { checkWarningWords } from './rules/checkWarningWords';
 import { checkPunctuationSpacing } from './rules/checkPunctuationSpacing';
@@ -50,6 +51,7 @@ import { checkProductTechnicalSpecsHeading, checkProductUsageHeading, checkProdu
 import { checkTablesCount } from './rules/checkTablesCount';
 import { checkHeadingLength } from './rules/checkHeadingLength';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../../constants';
+import { isCallToActionPageContext } from '../goalContext';
 
 export interface ContentAnalysisInput {
   editorState?: any;
@@ -99,6 +101,24 @@ const createEmptyDuplicateStats = (totalWordCount: number): DuplicateStats => ({
   commonDuplicatesCount: 0,
 });
 
+const getListItemCountFromNode = (node: any): number | undefined => {
+  if (!Array.isArray(node?.content)) return undefined;
+  const directItems = node.content.filter((child: any) => child?.type === 'listItem').length;
+  return directItems || undefined;
+};
+
+const getNodeTextForAnalysis = (node: any): string => (
+  node?.type === 'bulletList' || node?.type === 'orderedList'
+    ? (node.content || []).map(getNodeText).join(' ')
+    : getNodeText(node)
+);
+
+const getNodeContentTextForAnalysis = (node: any): string => (
+  node?.type === 'bulletList' || node?.type === 'orderedList'
+    ? (node.content || []).map(getNodeContentAsText).join(' ')
+    : getNodeContentAsText(node)
+);
+
 export const createAnalysisNodesFromEditorState = (editorState: any): AnalysisDocumentNode[] => {
   if (!Array.isArray(editorState?.content)) {
     return [];
@@ -110,13 +130,16 @@ export const createAnalysisNodesFromEditorState = (editorState: any): AnalysisDo
   editorState.content.forEach((node: any) => {
     if (!node || typeof node !== 'object') return;
     const nodeSize = getNodeSizeFromJSON(node);
-    const text = getNodeText(node);
-    const contentText = getNodeContentAsText(node);
+    const text = getNodeTextForAnalysis(node);
+    const contentText = getNodeContentTextForAnalysis(node);
     nodes.push({
       type: node.type,
       level: node.attrs?.level,
       text,
       ...(contentText !== text ? { contentText } : {}),
+      ...(node.type === 'bulletList' || node.type === 'orderedList'
+        ? { listItemCount: getListItemCountFromNode(node) }
+        : {}),
       nodeSize,
       pos,
     });
@@ -323,6 +346,16 @@ export const runContentAnalysis = ({
   const structureAnalysis = updateStructureAnalysis || !previousAnalysis
     ? (() => {
         const conclusionChecks = checkConclusion(analysisContext);
+        const callToActionSection = checkCallToActionSection(analysisContext);
+        const usesCallToActionSection = isCallToActionPageContext(goalContext);
+        const inactiveCheck = (result: CheckResult): CheckResult => ({
+          ...result,
+          status: 'info',
+          current: t.common.notApplicable,
+          progress: 1,
+          violationCount: 0,
+          violatingItems: undefined,
+        });
         const rawStructureAnalysis: StructureAnalysis = {
           wordCount: checkWordCount(analysisContext),
           firstTitle: checkFirstTitle(analysisContext),
@@ -358,11 +391,12 @@ export const runContentAnalysis = ({
           ctaWords: checkCtaWords(analysisContext),
           interactiveLanguage: checkInteractiveLanguage(analysisContext),
           arabicOnly: checkArabicOnly(analysisContext),
-          lastH2IsConclusion: conclusionChecks.lastH2IsConclusion,
-          conclusionParagraph: conclusionChecks.conclusionParagraph,
-          conclusionWordCount: conclusionChecks.conclusionWordCount,
-          conclusionHasNumber: conclusionChecks.conclusionHasNumber,
-          conclusionHasList: conclusionChecks.conclusionHasList,
+          lastH2IsConclusion: usesCallToActionSection ? inactiveCheck(conclusionChecks.lastH2IsConclusion) : conclusionChecks.lastH2IsConclusion,
+          conclusionParagraph: usesCallToActionSection ? inactiveCheck(conclusionChecks.conclusionParagraph) : conclusionChecks.conclusionParagraph,
+          conclusionWordCount: usesCallToActionSection ? inactiveCheck(conclusionChecks.conclusionWordCount) : conclusionChecks.conclusionWordCount,
+          conclusionHasNumber: usesCallToActionSection ? inactiveCheck(conclusionChecks.conclusionHasNumber) : conclusionChecks.conclusionHasNumber,
+          conclusionHasList: usesCallToActionSection ? inactiveCheck(conclusionChecks.conclusionHasList) : conclusionChecks.conclusionHasList,
+          callToActionSection: usesCallToActionSection ? callToActionSection : inactiveCheck(callToActionSection),
           sentenceBeginnings: checkSentenceBeginnings(analysisContext),
           warningWords: checkWarningWords(analysisContext),
           punctuationSpacing: checkPunctuationSpacing(analysisContext),

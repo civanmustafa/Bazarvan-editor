@@ -96,12 +96,14 @@ const createNode = (
   text: string,
   pos: number,
   level?: number,
+  listItemCount?: number,
 ): AnalysisDocumentNode => ({
   type,
   text,
   contentText: text,
   pos,
   nodeSize: Math.max(2, text.length + 2),
+  ...(listItemCount !== undefined ? { listItemCount } : {}),
   ...(level ? { level } : {}),
 });
 
@@ -144,7 +146,12 @@ export const createContentWritingAnalysisDocument = (
         values.push(stripListMarker(lines[index]));
         index += 1;
       }
-      pushNode(isOrderedListLine(line) ? 'orderedList' : 'bulletList', values.join(' '));
+      const normalizedText = stripInlineMarkdown(values.join(' '));
+      if (normalizedText) {
+        const node = createNode(isOrderedListLine(line) ? 'orderedList' : 'bulletList', normalizedText, pos, undefined, values.length);
+        nodes.push(node);
+        pos += node.nodeSize || 2;
+      }
       continue;
     }
 
@@ -271,7 +278,7 @@ const collectCriteria = (
     // The session-specific range above is the single authoritative word-count
     // criterion. Keeping the editor's generic >=800 rule here would create a
     // second, contradictory requirement for short or custom assignments.
-    .filter(([id]) => id !== 'wordCount')
+    .filter(([id, result]) => id !== 'wordCount' && result.status !== 'info')
     .map(([id, result]) => normalizeCriterion(id, result, configuration));
   const keyword = analysis.keywordAnalysis;
   const keywordCriteria: ContentWritingQualityCriterionResult[] = [
@@ -424,6 +431,7 @@ export const getContentWritingCriterionRepairScope = (
     || id === 'lastH2IsConclusion'
     || id === 'conclusionHasList'
     || id === 'conclusionHasNumber'
+    || id === 'callToActionSection'
     || id === 'tablesCount'
     || id.startsWith('product')
   ) {

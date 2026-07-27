@@ -14,6 +14,7 @@ export interface AnalysisDocumentNode {
     level?: number;
     text: string;
     contentText?: string;
+    listItemCount?: number;
     nodeSize?: number;
     synthetic?: boolean;
     node?: any;

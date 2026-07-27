@@ -59,8 +59,37 @@ test('deterministic quality evaluation returns a versioned blocking report', asy
   assert.ok(evaluation.report.blockingFailureCount > 0);
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'quality.targetWordRange'));
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'quality.totalH2Count'));
-  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'lastH2IsConclusion'));
+  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionSection'));
+  assert.ok(!evaluation.report.criteria.some((criterion: any) => criterion.id === 'lastH2IsConclusion'));
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'keyword.primary'));
+});
+
+test('service quality analysis requires CTA section and hides conclusion criteria', async () => {
+  const { evaluateContentWritingQuality } = await importQuality();
+  const markdown = [
+    '# دليل التحول الرقمي للشركات الحديثة',
+    '',
+    'مقدمة قصيرة تمهد للموضوع.',
+    '',
+    '## اطلب استشارة التحول الرقمي المناسبة لشركتك',
+    '',
+    'تمنحك هذه الخطوة رؤية واضحة لما تحتاجه شركتك قبل البدء، وتساعدك على اختيار مسار عملي يوازن بين التكلفة والنتائج. عندما تراجع احتياجاتك مع فريق متخصص، يصبح قرار التحول أكثر دقة وأقرب إلى واقع أعمالك.',
+    '',
+    'هذه أبرز المكاسب التي تساعدك على الانتقال بثقة:',
+    '',
+    '- تحديد أولويات التطوير حسب أثرها المباشر على العمليات',
+    '- اختيار الأدوات التي تناسب حجم العمل والميزانية',
+    '- بناء خطة تنفيذ قابلة للقياس والمتابعة الشهرية',
+    '- تدريب الفريق على استخدام الحلول الجديدة بكفاءة',
+    '',
+    'ابدأ الآن بطلب استشارة سريعة لتعرف أفضل مسار يناسب شركتك قبل الاستثمار.',
+  ].join('\n');
+
+  const evaluation = evaluateContentWritingQuality({ ...articleInput, markdown });
+  const criterion = (id: string) => evaluation.report.criteria.find((item: any) => item.id === id);
+
+  assert.equal(criterion('callToActionSection')?.status, 'pass');
+  assert.equal(criterion('lastH2IsConclusion'), undefined);
 });
 
 test('session word range is the single authoritative word-count criterion', async () => {
@@ -123,11 +152,16 @@ test('quality analysis detects the second introduction paragraph and Arabic numb
   );
   assert.equal(document.nodes.filter((node: any) => node.type === 'orderedList').length, 1);
 
-  const evaluation = evaluateContentWritingQuality({ ...articleInput, markdown });
+  const evaluation = evaluateContentWritingQuality({
+    ...articleInput,
+    goalContext: { ...articleInput.goalContext, pageType: 'article' },
+    markdown,
+  });
   const criterion = (id: string) => evaluation.report.criteria.find((item: any) => item.id === id);
   assert.equal(criterion('secondParagraph')?.status, 'pass');
   assert.equal(criterion('conclusionHasNumber')?.status, 'pass');
   assert.equal(criterion('conclusionHasList')?.status, 'pass');
+  assert.equal(criterion('callToActionSection'), undefined);
 });
 
 test('quality analysis treats consecutive visible Markdown lines as separate introduction paragraphs', async () => {

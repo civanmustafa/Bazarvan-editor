@@ -67,6 +67,7 @@ const STRUCTURE_ANALYSIS_TITLE_KEYS = {
   conclusionWordCount: 'طول الخاتمة',
   conclusionHasList: 'قائمة الخاتمة',
   conclusionHasNumber: 'أرقام بالخاتمة',
+  callToActionSection: 'دعوة اتخاذ اجراء',
   sentenceBeginnings: 'بدايات الجمل',
   warningWords: 'كلمات تحذيرية',
   punctuationSpacing: 'فراغات الترقيم',
