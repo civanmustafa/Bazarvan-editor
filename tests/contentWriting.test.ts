@@ -66,15 +66,21 @@ const createReadyArticle = (competitorContents: string[]) => ({
   })),
 });
 
-test('content-writing context preserves all three competitor texts without truncation', async () => {
+test('content-writing context preserves every available competitor up to five without truncation', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const longContent = `${'محتوى كامل '.repeat(12_000)}END-OF-COMPETITOR`;
-  const input = createReadyArticle([longContent, 'المنافس الثاني', 'المنافس الثالث']);
+  const input = createReadyArticle([
+    longContent,
+    'المنافس الثاني',
+    'المنافس الثالث',
+    'المنافس الرابع',
+    'المنافس الخامس',
+  ]);
   const bundle = buildContentWritingPromptBundle(input, { maxInputTokens: 1_000_000 });
   const competitors = JSON.parse(bundle.variables.competitors_json);
 
   assert.equal(bundle.ready, true);
-  assert.equal(competitors.length, 3);
+  assert.equal(competitors.length, 5);
   const goalContext = JSON.parse(bundle.variables.goal_context);
   assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'desiredAction'));
   assert.ok(!Object.prototype.hasOwnProperty.call(goalContext, 'freshnessRequirements'));
@@ -115,13 +121,15 @@ test('content-writing competitor instructions stay escaped inside one untrusted-
   assert.match(bundle.messages[0].content, /قواعد نظام ثابتة مرفقة تلقائيًا/);
 });
 
-test('content-writing readiness requires three complete competitors and article prerequisites', async () => {
+test('content-writing readiness accepts any available competitor count from one to five', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
-  const bundle = buildContentWritingPromptBundle(createReadyArticle(['واحد', 'اثنان']));
+  const oneCompetitor = buildContentWritingPromptBundle(createReadyArticle(['واحد']));
+  const noCompetitors = buildContentWritingPromptBundle(createReadyArticle([]));
 
-  assert.equal(bundle.ready, false);
-  assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
-  assert.equal(bundle.competitors.length, 2);
+  assert.equal(oneCompetitor.ready, true);
+  assert.equal(oneCompetitor.competitors.length, 1);
+  assert.equal(noCompetitors.ready, false);
+  assert.ok(noCompetitors.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
 });
 
 test('content writing excludes a competitor carrying the dual extraction failure marker', async () => {
@@ -143,7 +151,8 @@ test('content writing excludes a competitor carrying the dual extraction failure
     COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
     'Usable competitor three',
   ]));
-  assert.equal(bundle.ready, false);
+  assert.equal(bundle.ready, true);
+  assert.equal(bundle.competitors.length, 2);
   assert.doesNotMatch(bundle.messages.map((message: { content: string }) => message.content).join('\n'), /\[تعذر استخراج محتوى المنافس\]/);
 });
 

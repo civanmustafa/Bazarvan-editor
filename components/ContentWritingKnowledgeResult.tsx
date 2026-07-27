@@ -84,7 +84,16 @@ const ContentWritingKnowledgeResult: React.FC<ContentWritingKnowledgeResultProps
   }), [competitorChunks, knowledgeValue, outputText]);
   const knowledge = useMemo(() => presentContentWritingKnowledge(outputText), [outputText]);
   if (transparency) {
-    return <ContentWritingTransparencyPanel snapshot={transparency} isArabic={isArabic} />;
+    return (
+      <div className="space-y-2.5" dir={isArabic ? 'rtl' : 'ltr'}>
+        <div className="rounded-md border border-violet-200 bg-violet-50 p-2.5 text-[10px] font-bold leading-5 text-violet-800 dark:border-violet-900/50 dark:bg-violet-900/10 dark:text-violet-200">
+          {isArabic
+            ? 'هذه هي المرحلة المسؤولة عن إنشاء مصفوفة المعرفة وسجل المصادر والادعاءات. قرأت جميع المنافسين المتاحين، ثم حفظت النتيجة الموحّدة لتستخدمها المراحل اللاحقة.'
+            : 'This stage creates the knowledge matrix, source registry, and claims ledger from every available competitor, then persists them for later stages.'}
+        </div>
+        <ContentWritingTransparencyPanel snapshot={transparency} isArabic={isArabic} />
+      </div>
+    );
   }
   if (!knowledge) {
     return (

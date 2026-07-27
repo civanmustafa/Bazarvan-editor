@@ -333,6 +333,12 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(panel, /محاولات مستقلة لإصلاح الجودة/);
   assert.match(panel, /getContentWritingStepDescription/);
   assert.match(panel, /step\.stepType === 'quality_repair' \|\| step\.stepType === 'section_repair'/);
+  const stepResult = await readWorkspaceFile('components/ContentWritingStepResult.tsx');
+  const stageKnowledge = await readWorkspaceFile('components/ContentWritingStageKnowledgeUsage.tsx');
+  assert.match(stepResult, /ContentWritingStageKnowledgeUsagePanel/);
+  assert.match(stepResult, /buildContentWritingStageKnowledgeUsage/);
+  assert.match(stageKnowledge, /المعرفة والمصادر والادعاءات في هذه المرحلة/);
+  assert.match(stageKnowledge, /الاستخدام التفصيلي غير مصرّح به/);
   assert.match(
     panel,
     /onConfirm=\{qualityOverrideReason => void confirmApplication\(qualityOverrideReason\)\}/,

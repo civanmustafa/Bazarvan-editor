@@ -13,8 +13,10 @@ import {
   type ContentWritingSourceChunk,
 } from './contentWritingKnowledge';
 import { getUsableCompetitorText } from './competitorContent';
+import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 
-export const CONTENT_WRITING_REQUIRED_COMPETITOR_COUNT = 3;
+export const CONTENT_WRITING_MIN_COMPETITOR_COUNT = 1;
+export const CONTENT_WRITING_MAX_COMPETITOR_COUNT = MAX_ARTICLE_COMPETITORS;
 
 export type ContentWritingCompetitorInput = {
   id?: string;
@@ -156,7 +158,7 @@ export const validateContentWritingReadiness = (
   const secondaryKeywords = normalizeList(input.keywords.secondaries);
   const lsiKeywords = normalizeList(input.keywords.lsi);
   const competitors = normalizeContentWritingCompetitors(input.competitors)
-    .slice(0, CONTENT_WRITING_REQUIRED_COMPETITOR_COUNT);
+    .slice(0, CONTENT_WRITING_MAX_COMPETITOR_COUNT);
 
   if (!hasText(input.title)) issues.push({ code: 'article_title', label: 'عنوان المقالة' });
   if (!hasText(input.keywords.primary)) issues.push({ code: 'primary_keyword', label: 'الكلمة المفتاحية الأساسية' });
@@ -164,10 +166,10 @@ export const validateContentWritingReadiness = (
   if (lsiKeywords.length === 0) issues.push({ code: 'lsi_keywords', label: 'كلمات LSI' });
   if (!hasText(input.keywords.company)) issues.push({ code: 'company_name', label: 'اسم الشركة' });
   issues.push(...getGoalContextIssues(input.goalContext));
-  if (competitors.length < CONTENT_WRITING_REQUIRED_COMPETITOR_COUNT) {
+  if (competitors.length < CONTENT_WRITING_MIN_COMPETITOR_COUNT) {
     issues.push({
       code: 'competitors',
-      label: `المحتوى الكامل لثلاثة منافسين (${competitors.length}/${CONTENT_WRITING_REQUIRED_COMPETITOR_COUNT})`,
+      label: `محتوى منافس واحد على الأقل (${competitors.length}/${CONTENT_WRITING_MIN_COMPETITOR_COUNT})`,
     });
   }
 

@@ -16,11 +16,13 @@ import {
 import type { ContentWritingStep } from '../utils/contentWritingSessions';
 import ContentWritingKnowledgeResult from './ContentWritingKnowledgeResult';
 import ContentWritingEvidenceTrace from './ContentWritingEvidenceTrace';
+import ContentWritingStageKnowledgeUsagePanel from './ContentWritingStageKnowledgeUsage';
 import {
   buildContentWritingTransparencySnapshot,
   type ContentWritingTransparencySnapshot,
 } from '../utils/contentWritingTransparency';
 import { reconstructContentWritingEvidenceTrace } from '../utils/contentWritingEvidence';
+import { buildContentWritingStageKnowledgeUsage } from '../utils/contentWritingStageKnowledge';
 
 type ContentWritingStepResultProps = {
   step: ContentWritingStep;
@@ -392,6 +394,14 @@ const ContentWritingStepResult: React.FC<ContentWritingStepResultProps> = ({
     });
   }, [step, transparency, workflowSteps]);
   const evidenceTrace = step.metadata.evidenceTrace || reconstructedEvidenceTrace;
+  const stageKnowledgeUsage = useMemo(() => {
+    if (!transparency) return null;
+    return buildContentWritingStageKnowledgeUsage({
+      step,
+      snapshot: transparency,
+      evidenceTrace,
+    });
+  }, [evidenceTrace, step, transparency]);
 
   return (
     <div>
@@ -424,6 +434,13 @@ const ContentWritingStepResult: React.FC<ContentWritingStepResultProps> = ({
             />
           )}
         </>
+      )}
+      {transparency && stageKnowledgeUsage && step.stepType !== 'competitor_index' && (
+        <ContentWritingStageKnowledgeUsagePanel
+          snapshot={transparency}
+          usage={stageKnowledgeUsage}
+          isArabic={isArabic}
+        />
       )}
     </div>
   );
