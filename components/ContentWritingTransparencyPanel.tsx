@@ -9,6 +9,7 @@ import {
   ShieldX,
 } from 'lucide-react';
 import type { ContentWritingTransparencySnapshot } from '../utils/contentWritingTransparency';
+import ContentWritingChunkDisclosure from './ContentWritingChunkDisclosure';
 
 type ContentWritingTransparencyPanelProps = {
   snapshot: ContentWritingTransparencySnapshot;
@@ -155,6 +156,12 @@ const ContentWritingTransparencyPanel: React.FC<ContentWritingTransparencyPanelP
                 {isArabic ? 'المقاطع الداعمة: ' : 'Supporting excerpts: '}
                 <span className="font-mono">{item.sourceChunkIds.join('، ')}</span>
               </div>
+              <ContentWritingChunkDisclosure
+                chunkIds={item.sourceChunkIds}
+                chunks={chunks}
+                isArabic={isArabic}
+                className="mt-2"
+              />
               {item.originalityOpportunity && (
                 <div className="mt-2 rounded border-s-2 border-[#d4af37] bg-[#d4af37]/5 px-2 py-1.5 leading-5 text-gray-600 dark:text-gray-300">
                   <Lightbulb size={12} className="me-1 inline text-[#d4af37]" />

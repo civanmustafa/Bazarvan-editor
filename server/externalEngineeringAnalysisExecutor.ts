@@ -32,6 +32,10 @@ import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import { isCompetitorComparisonCommand } from '../utils/competitorComparisonWorkflow';
 import { sanitizeCompetitorSlots } from '../utils/competitorContent';
 import { executeExternalCompetitorComparisonWorkflow } from './externalCompetitorComparisonExecutor';
+import {
+  EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS,
+  countExternalEngineeringArticleWords,
+} from '../utils/externalAnalysisArticleText';
 
 type ExternalEngineeringArticleRow = {
   id: string;
@@ -159,10 +163,11 @@ const assertEngineeringInputs = (
   input: ExternalEngineeringPromptInput,
   command: NonNullable<ReturnType<typeof getExternalEngineeringCommand>>,
 ): void => {
-  if (!input.plainText) {
+  const articleWordCount = countExternalEngineeringArticleWords(input.plainText);
+  if (articleWordCount < EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS) {
     throw new ExternalAnalysisTerminalError({
-      code: 'engineering_article_text_missing',
-      message: 'The engineering command bundle was cancelled because the article text is empty.',
+      code: 'engineering_article_text_too_short',
+      message: `The engineering command bundle requires more than 100 article words; ${articleWordCount} were available.`,
       cancelEngineeringBundle: true,
     });
   }
@@ -207,6 +212,8 @@ const getJobCommandPosition = (
 const executeExternalEngineeringAnalysis = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
+  // Resolve the template at execution time from the administrator's persisted
+  // prompt registry. Never freeze a stale built-in prompt inside a queued job.
   const promptRegistry = await readPromptRegistrySettings();
   const command = getExternalEngineeringCommand(
     context.job.command_id,

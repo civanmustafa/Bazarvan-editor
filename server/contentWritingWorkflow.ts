@@ -14,6 +14,7 @@ import {
   buildContentWritingSectionPrompt,
   createContentWritingWorkflowSteps,
   ensureContentWritingOutlineKnowledgeCoverage,
+  fitContentWritingOutlineSectionRange,
   getContentWritingCompetitorIndexStep,
   getContentWritingOutlineStep,
   normalizeContentWritingOutline,
@@ -514,15 +515,22 @@ export const executeStructuredContentWritingWorkflow = async (
     articleContextOverride: compactArticleContext,
     processOutput: output => {
       const parsedOutline = parseContentWritingOutline(output);
+      const policyOutline = qualityRuntime
+        ? fitContentWritingOutlineSectionRange(
+            parsedOutline,
+            knowledge,
+            qualityRuntime.configuration.policy.outlineSections,
+          )
+        : parsedOutline;
       if (qualityRuntime && (
-        parsedOutline.sections.length < qualityRuntime.configuration.policy.outlineSections.min
-        || parsedOutline.sections.length > qualityRuntime.configuration.policy.outlineSections.max
+        policyOutline.sections.length < qualityRuntime.configuration.policy.outlineSections.min
+        || policyOutline.sections.length > qualityRuntime.configuration.policy.outlineSections.max
       )) {
         throw new Error(
           `The outline must contain ${qualityRuntime.configuration.policy.outlineSections.min}-${qualityRuntime.configuration.policy.outlineSections.max} sections for quality policy ${qualityRuntime.configuration.policyVersion}.`,
         );
       }
-      const coveredOutline = ensureContentWritingOutlineKnowledgeCoverage(parsedOutline, knowledge);
+      const coveredOutline = ensureContentWritingOutlineKnowledgeCoverage(policyOutline, knowledge);
       const balancedOutline = qualityRuntime
         ? balanceContentWritingOutlineWordTargets(
             coveredOutline,

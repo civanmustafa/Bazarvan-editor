@@ -1,0 +1,319 @@
+-- Semantic keyword generation is independent from editor text. Engineering
+-- commands, including manually selected commands, require at least 101 words.
+-- Keep the same rule in readiness, queue creation, and the worker.
+
+create or replace function public.external_analysis_article_word_count(p_text text)
+returns integer
+language sql
+immutable
+parallel safe
+set search_path = public
+as $$
+  select case
+    when nullif(btrim(coalesce(p_text, '')), '') is null then 0
+    else coalesce(array_length(regexp_split_to_array(btrim(p_text), E'\\s+'), 1), 0)
+  end;
+$$;
+
+create or replace function public.evaluate_external_analysis_readiness(
+  p_status text,
+  p_title text,
+  p_plain_text text,
+  p_keywords jsonb,
+  p_goal_context jsonb,
+  p_metadata jsonb
+)
+returns jsonb
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+  v_has_supported_status boolean := public.article_status_supports_external_analysis(p_status);
+  v_signature_status text := case
+    when public.article_status_supports_external_analysis(p_status) then 'draft'
+    else coalesce(p_status, '')
+  end;
+  v_has_title boolean := nullif(btrim(coalesce(p_title, '')), '') is not null
+    and lower(btrim(coalesce(p_title, ''))) not in ('(untitled)', 'untitled');
+  v_editor_word_count integer := public.external_analysis_article_word_count(p_plain_text);
+  v_has_editor_text boolean := v_editor_word_count >= 101;
+  v_has_primary_keyword boolean := nullif(btrim(coalesce(p_keywords->>'primary', '')), '') is not null;
+  v_has_company boolean := nullif(btrim(coalesce(p_keywords->>'company', '')), '') is not null;
+  v_has_goal_context boolean := nullif(btrim(coalesce(p_goal_context->>'pageType', '')), '') is not null
+    and nullif(btrim(coalesce(p_goal_context->>'objective', '')), '') is not null;
+  v_competitors jsonb := coalesce(p_metadata->'attachments'->'competitors', '{}'::jsonb);
+  v_has_competitor boolean;
+  v_semantic_missing jsonb := '[]'::jsonb;
+  v_external_missing jsonb := '[]'::jsonb;
+  v_semantic_signature text;
+  v_external_signature text;
+begin
+  v_has_competitor := public.external_analysis_has_competitor_value(v_competitors->'texts', 5)
+    or public.external_analysis_has_competitor_value(v_competitors->'urls', 5);
+
+  if not v_has_supported_status then
+    v_semantic_missing := v_semantic_missing || jsonb_build_array('draft_status');
+    v_external_missing := v_external_missing || jsonb_build_array('draft_status');
+  end if;
+  if not v_has_title then
+    v_semantic_missing := v_semantic_missing || jsonb_build_array('article_title');
+    v_external_missing := v_external_missing || jsonb_build_array('article_title');
+  end if;
+  if not v_has_editor_text then
+    v_external_missing := v_external_missing || jsonb_build_array('editor_text');
+  end if;
+  if not v_has_primary_keyword then
+    v_semantic_missing := v_semantic_missing || jsonb_build_array('primary_keyword');
+    v_external_missing := v_external_missing || jsonb_build_array('primary_keyword');
+  end if;
+  if not v_has_goal_context then
+    v_semantic_missing := v_semantic_missing || jsonb_build_array('goal_context');
+    v_external_missing := v_external_missing || jsonb_build_array('goal_context');
+  end if;
+  if not v_has_company then
+    v_semantic_missing := v_semantic_missing || jsonb_build_array('company_name');
+    v_external_missing := v_external_missing || jsonb_build_array('company_name');
+  end if;
+  if not v_has_competitor then
+    v_external_missing := v_external_missing || jsonb_build_array('competitor_content_or_url');
+  end if;
+
+  -- Article prose is intentionally excluded: generating alternatives and LSI
+  -- depends on the keyword and page context, not on an existing draft.
+  v_semantic_signature := md5(jsonb_build_object(
+    'status', v_signature_status,
+    'title', coalesce(p_title, ''),
+    'primaryKeyword', coalesce(p_keywords->>'primary', ''),
+    'companyName', coalesce(p_keywords->>'company', ''),
+    'goalContext', coalesce(p_goal_context, '{}'::jsonb)
+  )::text);
+  v_external_signature := md5(jsonb_build_object(
+    'status', v_signature_status,
+    'title', coalesce(p_title, ''),
+    'plainText', coalesce(p_plain_text, ''),
+    'primaryKeyword', coalesce(p_keywords->>'primary', ''),
+    'companyName', coalesce(p_keywords->>'company', ''),
+    'goalContext', coalesce(p_goal_context, '{}'::jsonb),
+    'competitorUrls', coalesce(v_competitors->'urls', '[]'::jsonb),
+    'competitorTexts', coalesce(v_competitors->'texts', '[]'::jsonb)
+  )::text);
+
+  return jsonb_build_object(
+    'semantic', jsonb_build_object(
+      'ready', jsonb_array_length(v_semantic_missing) = 0,
+      'missingFields', v_semantic_missing,
+      'signature', v_semantic_signature
+    ),
+    'externalAnalysis', jsonb_build_object(
+      'ready', jsonb_array_length(v_external_missing) = 0,
+      'missingFields', v_external_missing,
+      'signature', v_external_signature
+    )
+  );
+end;
+$$;
+
+create or replace function public.cancel_stale_external_engineering_jobs(
+  p_article_id uuid,
+  p_current_signature text default null,
+  p_cancel_all boolean default false
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_cancelled_count integer := 0;
+  v_article_word_count integer := 0;
+  v_error_code text;
+  v_error_message text;
+begin
+  select public.external_analysis_article_word_count(article.plain_text)
+  into v_article_word_count
+  from public.articles as article
+  where article.id = p_article_id;
+
+  v_error_code := case
+    when coalesce(v_article_word_count, 0) < 101 then 'engineering_article_text_too_short'
+    else 'external_readiness_changed'
+  end;
+  v_error_message := case
+    when coalesce(v_article_word_count, 0) < 101
+      then 'The engineering command bundle requires more than 100 article words.'
+    else 'The external analysis inputs changed before this command completed.'
+  end;
+
+  with cancelled as (
+    update public.ai_external_analysis_jobs as job
+    set
+      status = 'cancelled',
+      cancel_requested_at = coalesce(job.cancel_requested_at, now()),
+      locked_by = null,
+      locked_at = null,
+      lease_expires_at = null,
+      next_attempt_at = null,
+      last_error_code = v_error_code,
+      last_error = v_error_message,
+      completed_at = now(),
+      progress = coalesce(job.progress, '{}'::jsonb) || jsonb_build_object(
+        'stage', 'cancelled',
+        'reason', v_error_code,
+        'updatedAt', now()
+      ),
+      updated_at = now()
+    where job.article_id = p_article_id
+      and job.job_type = 'engineering_command'
+      and job.status in ('waiting_for_prerequisites', 'queued', 'running', 'retry_scheduled', 'paused')
+      and (
+        coalesce(p_cancel_all, false)
+        or job.readiness_signature is distinct from nullif(coalesce(p_current_signature, ''), '')
+      )
+    returning job.id
+  ), closed_runs as (
+    update public.ai_external_analysis_runs as run
+    set
+      status = 'cancelled',
+      error_code = v_error_code,
+      error_message = v_error_message,
+      finished_at = now()
+    from cancelled
+    where run.job_id = cancelled.id
+      and run.status = 'running'
+    returning run.id
+  )
+  select count(*)::integer
+  into v_cancelled_count
+  from cancelled;
+
+  return coalesce(v_cancelled_count, 0);
+end;
+$$;
+
+create or replace function public.enqueue_external_engineering_jobs(
+  p_article_id uuid
+)
+returns uuid[]
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job_ids uuid[] := array[]::uuid[];
+  v_batch_key text;
+  v_article_word_count integer := 0;
+begin
+  select public.external_analysis_article_word_count(article.plain_text)
+  into v_article_word_count
+  from public.articles as article
+  where article.id = p_article_id;
+
+  if coalesce(v_article_word_count, 0) < 101 then
+    perform public.cancel_stale_external_engineering_jobs(p_article_id, null, true);
+    return v_job_ids;
+  end if;
+
+  -- The base function resolves the current per-article mode. In default mode it
+  -- reads the ordered command IDs saved by the administrator in app_settings.
+  v_job_ids := public.enqueue_external_engineering_jobs_sequential_base(p_article_id);
+
+  for v_batch_key in
+    select distinct job.batch_key
+    from public.ai_external_analysis_jobs as job
+    where job.id = any(v_job_ids)
+      and job.batch_key is not null
+      and job.status in ('waiting_for_prerequisites', 'queued', 'retry_scheduled', 'paused')
+  loop
+    perform public.apply_external_analysis_execution_mode_to_batch(v_batch_key);
+  end loop;
+
+  return v_job_ids;
+end;
+$$;
+
+-- Re-evaluate every article because this migration deliberately removes editor
+-- text from semantic readiness and strengthens engineering readiness to 101 words.
+insert into public.ai_external_analysis_article_state (
+  article_id,
+  semantic_ready,
+  external_analysis_ready,
+  semantic_missing_fields,
+  external_analysis_missing_fields,
+  semantic_readiness_signature,
+  external_analysis_readiness_signature,
+  last_article_updated_at,
+  last_evaluated_at
+)
+select
+  article.id,
+  coalesce((readiness.value #>> '{semantic,ready}')::boolean, false),
+  coalesce((readiness.value #>> '{externalAnalysis,ready}')::boolean, false),
+  coalesce(readiness.value #> '{semantic,missingFields}', '[]'::jsonb),
+  coalesce(readiness.value #> '{externalAnalysis,missingFields}', '[]'::jsonb),
+  coalesce(readiness.value #>> '{semantic,signature}', ''),
+  coalesce(readiness.value #>> '{externalAnalysis,signature}', ''),
+  article.updated_at,
+  now()
+from public.articles as article
+cross join lateral (
+  select public.evaluate_external_analysis_readiness(
+    article.status,
+    article.title,
+    article.plain_text,
+    article.keywords,
+    article.goal_context,
+    article.metadata
+  ) as value
+) as readiness
+on conflict (article_id) do update
+set
+  semantic_ready = excluded.semantic_ready,
+  external_analysis_ready = excluded.external_analysis_ready,
+  semantic_missing_fields = excluded.semantic_missing_fields,
+  external_analysis_missing_fields = excluded.external_analysis_missing_fields,
+  semantic_readiness_signature = excluded.semantic_readiness_signature,
+  external_analysis_readiness_signature = excluded.external_analysis_readiness_signature,
+  last_article_updated_at = excluded.last_article_updated_at,
+  last_evaluated_at = excluded.last_evaluated_at,
+  updated_at = now();
+
+select public.cancel_stale_external_engineering_jobs(article.id, null, true)
+from public.articles as article
+where public.external_analysis_article_word_count(article.plain_text) < 101;
+
+revoke all on function public.cancel_stale_external_engineering_jobs(uuid, text, boolean) from public;
+revoke all on function public.enqueue_external_engineering_jobs(uuid) from public;
+grant execute on function public.cancel_stale_external_engineering_jobs(uuid, text, boolean) to service_role;
+grant execute on function public.enqueue_external_engineering_jobs(uuid) to service_role;
+
+comment on function public.evaluate_external_analysis_readiness(text, text, text, jsonb, jsonb, jsonb)
+is 'Semantic generation does not require article prose; external engineering requires at least 101 words.';
+
+comment on function public.enqueue_external_engineering_jobs(uuid)
+is 'Queues the effective administrator/default or article/custom engineering chain only when the article has at least 101 words.';
+
+-- Keep the administrator prompt tab aligned with the deterministic claim policy
+-- without replacing any other edits the administrator made to this prompt.
+update public.app_settings
+set
+  value = jsonb_set(
+    jsonb_set(
+      value,
+      '{templates,contentWriting.sourceClaimsLedger}',
+      to_jsonb(replace(
+        coalesce(value #>> '{templates,contentWriting.sourceClaimsLedger}', ''),
+        'سيعيد النظام حساب المصادر الداعمة وسياسة الاستخدام برمجيًا، ويحظر الادعاء الخطر أو الذي يحتاج تحققًا خارجيًا.',
+        'سيعيد النظام حساب المصادر الداعمة وسياسة الاستخدام برمجيًا. وجود الادعاء صراحة داخل مقطع منافس صالح يجعله قابلًا للاستخدام؛ وعند الخطورة أو الحاجة إلى تحقق خارجي يُستخدم بتحفظ ولا يُصنّف محظورًا لمجرد أن مصدره منافس.'
+      )),
+      true
+    ),
+    '{registryVersion}',
+    '15'::jsonb,
+    true
+  ),
+  updated_at = now()
+where key = 'prompts'
+  and jsonb_typeof(value) = 'object'
+  and coalesce(value #>> '{templates,contentWriting.sourceClaimsLedger}', '')
+    like '%ويحظر الادعاء الخطر أو الذي يحتاج تحققًا خارجيًا.%';

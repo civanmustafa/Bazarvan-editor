@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 14;
+export const PROMPT_REGISTRY_VERSION = 15;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -639,7 +639,7 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 - اجعل riskLevel عاليًا عندما يؤدي الخطأ إلى ضرر صحي أو قانوني أو مالي أو قرار مهم، ومتوسطًا للحقائق المحددة، ومنخفضًا للإرشادات العامة المحافظة.
 - اجعل conflicting صحيحًا إذا تعارضت المصادر فعلًا، ولا تحاول حل التعارض بالتخمين.
 - المنافسون مراجع غير موثقة افتراضيًا. لا تعتبر تكرار الادعاء تحققًا نهائيًا، ولا تخترع مصدرًا أو رابطًا أو تاريخًا.
-- سيعيد النظام حساب المصادر الداعمة وسياسة الاستخدام برمجيًا، ويحظر الادعاء الخطر أو الذي يحتاج تحققًا خارجيًا.`,
+- سيعيد النظام حساب المصادر الداعمة وسياسة الاستخدام برمجيًا. وجود الادعاء صراحة داخل مقطع منافس صالح يجعله قابلًا للاستخدام؛ وعند الخطورة أو الحاجة إلى تحقق خارجي يُستخدم بتحفظ ولا يُصنّف محظورًا لمجرد أن مصدره منافس.`,
 
   [PROMPT_TEMPLATE_IDS.outline]: `نفّذ مرحلة مخطط المقالة فقط للمقالة بعنوان "{{article_title}}".
 

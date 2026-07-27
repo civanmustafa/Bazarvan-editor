@@ -555,7 +555,7 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
   assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 14/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 15/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);
@@ -603,7 +603,7 @@ test('source registry and claim ledger constrain every content-writing repair su
 
   assert.match(claims, /normalizeContentWritingSourceClaims/);
   assert.match(claims, /requires_external_verification/);
-  assert.match(claims, /usagePolicy: 'blocked'/);
+  assert.match(claims, /usagePolicy: 'qualify'/);
   assert.match(claims, /summarizeContentWritingClaimUsage/);
   assert.match(knowledge, /sourceRegistry: sourceClaims\.sourceRegistry/);
   assert.match(knowledge, /claimLedger: sourceClaims\.claimLedger/);
@@ -660,6 +660,7 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(panel, /includeStepOutput: true/);
   assert.match(panel, /includeStepMetadata: true/);
   assert.match(panel, /expandedWorkflowStepKey/);
+  assert.match(panel, /workflowStepSelectionLockedRef\.current = true/);
   assert.match(panel, /aria-expanded=\{isExpanded\}/);
   assert.match(panel, /outputText/);
   assert.match(panel, /ستظهر هنا مباشرة فور اكتمالها/);
@@ -674,6 +675,8 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(transparencyPanel, /data-content-writing-transparency="complete"/);
   assert.match(transparencyPanel, /knowledge\.claimLedger\.claims/);
   assert.match(transparencyPanel, /source\.chunkIds\.map/);
+  assert.match(transparencyPanel, /ContentWritingChunkDisclosure/);
+  assert.match(stepResult, /ContentWritingChunkDisclosure/);
   assert.match(client, /getAuthenticatedApiToken\(\)/);
   assert.match(client, /getAuthenticatedApiHeaders\(/);
   assert.match(client, /includeMessages: options\.includeMessages === true/);

@@ -258,6 +258,78 @@ export const ensureContentWritingOutlineKnowledgeCoverage = (
   return { sections };
 };
 
+export const fitContentWritingOutlineSectionRange = (
+  outline: ContentWritingOutline,
+  knowledge: ContentWritingKnowledgeBase,
+  range: ContentWritingWordRange,
+): ContentWritingOutline => {
+  const minimum = Math.max(CONTENT_WRITING_MIN_OUTLINE_SECTIONS, Math.round(range.min));
+  const maximum = Math.max(minimum, Math.min(CONTENT_WRITING_MAX_OUTLINE_SECTIONS, Math.round(range.max)));
+  let sections = outline.sections.map(section => ({ ...section }));
+
+  if (sections.length > maximum) {
+    const retained = sections.slice(0, maximum);
+    const mergeTarget = retained[retained.length - 1];
+    sections.slice(maximum).forEach(overflow => {
+      mergeTarget.brief = [mergeTarget.brief, overflow.title, overflow.brief]
+        .filter(Boolean)
+        .join('\n');
+      mergeTarget.subheadings = Array.from(new Set([
+        ...(mergeTarget.subheadings || []),
+        overflow.title,
+        ...(overflow.subheadings || []),
+      ])).slice(0, 12);
+      mergeTarget.requiredIdeaIds = Array.from(new Set([
+        ...(mergeTarget.requiredIdeaIds || []),
+        ...(overflow.requiredIdeaIds || []),
+      ]));
+      mergeTarget.requiredClaimIds = Array.from(new Set([
+        ...(mergeTarget.requiredClaimIds || []),
+        ...(overflow.requiredClaimIds || []),
+      ]));
+      mergeTarget.sourceChunkIds = Array.from(new Set([
+        ...(mergeTarget.sourceChunkIds || []),
+        ...(overflow.sourceChunkIds || []),
+      ]));
+    });
+    sections = retained;
+  }
+
+  const existingTitles = new Set(sections.map(section => section.title.toLocaleLowerCase()));
+  const candidates = knowledge.items
+    .filter(item => !existingTitles.has(item.topic.toLocaleLowerCase()))
+    .sort((left, right) => (
+      (right.priority === 'high' ? 2 : right.priority === 'medium' ? 1 : 0)
+      - (left.priority === 'high' ? 2 : left.priority === 'medium' ? 1 : 0)
+      || right.coverageCount - left.coverageCount
+    ));
+  while (sections.length < minimum && candidates.length > 0) {
+    const item = candidates.shift();
+    if (!item) break;
+    existingTitles.add(item.topic.toLocaleLowerCase());
+    sections.push({
+      title: item.topic,
+      brief: item.detail,
+      requiredIdeaIds: [item.id],
+      sourceChunkIds: [...item.sourceChunkIds],
+    });
+  }
+
+  // This fallback is only reachable when the model returned at least four valid
+  // sections but the knowledge index has no unused topic to fill a stricter policy.
+  while (sections.length < minimum && sections.length > 0) {
+    const source = sections[sections.length % outline.sections.length];
+    const ordinal = sections.length + 1;
+    sections.push({
+      title: `${source.title} (${ordinal})`,
+      brief: source.brief,
+      subheadings: source.subheadings ? [...source.subheadings] : undefined,
+    });
+  }
+
+  return { sections };
+};
+
 export const balanceContentWritingOutlineWordTargets = (
   outline: ContentWritingOutline,
   targetWords: ContentWritingWordRange,

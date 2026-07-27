@@ -88,7 +88,7 @@ test('external analysis queue enforces one canonical job and retries by job id',
   assert.doesNotMatch(resultsTab, /enqueueExternalEngineeringAnalysis\(articleId, \[job\.command_id\]\)/);
 });
 
-test('engineering command bundles cannot start or retry without saved article text', async () => {
+test('engineering commands require 101 words while semantic generation remains text-independent', async () => {
   const [
     migration,
     api,
@@ -98,7 +98,7 @@ test('engineering command bundles cannot start or retry without saved article te
     queue,
     deploymentGuide,
   ] = await Promise.all([
-    readWorkspaceFile('supabase/migrations/20260726010000_external_engineering_article_text_guard.sql'),
+    readWorkspaceFile('supabase/migrations/20260727010000_external_analysis_word_threshold.sql'),
     readWorkspaceFile('api/externalAnalysis.ts'),
     readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
     readWorkspaceFile('server/externalEngineeringAnalysisExecutor.ts'),
@@ -111,31 +111,42 @@ test('engineering command bundles cannot start or retry without saved article te
     migration,
     /v_external_missing := v_external_missing \|\| jsonb_build_array\('editor_text'\)/,
   );
+  assert.doesNotMatch(
+    migration,
+    /v_semantic_missing := v_semantic_missing \|\| jsonb_build_array\('editor_text'\)/,
+  );
   assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
   assert.match(migration, /create or replace function public\.enqueue_external_engineering_jobs/);
   assert.ok(
-    migration.indexOf("if not coalesce(v_has_article_text, false) then")
+    migration.indexOf("if coalesce(v_article_word_count, 0) < 101 then")
       < migration.indexOf('enqueue_external_engineering_jobs_sequential_base'),
   );
   assert.match(migration, /perform public\.cancel_stale_external_engineering_jobs\(p_article_id, null, true\)/);
-  assert.match(migration, /external_analysis_ready = false/);
-  assert.match(migration, /engineering_article_text_missing/);
+  assert.match(migration, /engineering_article_text_too_short/);
+  assert.match(migration, /get_external_analysis_default_command_ids|administrator\/default/);
 
   assert.ok(
-    api.indexOf("!toTrimmedString(article.plain_text) ? 'editor_text' : ''")
+    api.indexOf("articleWordCount < EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS ? 'editor_text' : ''")
       < api.indexOf("'enqueue_external_engineering_jobs'"),
   );
   assert.match(controls, /const engineeringCanQueue = Boolean\(/);
-  assert.match(controls, /لا يمكن تشغيل الحزمة لأن نص المقالة فارغ/);
+  assert.doesNotMatch(
+    controls.slice(
+      controls.indexOf('const SEMANTIC_REQUIREMENT_FIELDS'),
+      controls.indexOf('const ENGINEERING_REQUIREMENT_FIELDS'),
+    ),
+    /editor_text/,
+  );
   assert.match(engineeringExecutor, /throw new ExternalAnalysisTerminalError/);
   const articleTextGuard = engineeringExecutor.slice(
-    engineeringExecutor.indexOf("if (!input.plainText)"),
+    engineeringExecutor.indexOf('const articleWordCount = countExternalEngineeringArticleWords'),
     engineeringExecutor.indexOf('command.options.targetKeywords'),
   );
   assert.match(articleTextGuard, /ExternalAnalysisTerminalError/);
+  assert.match(articleTextGuard, /EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS/);
   assert.doesNotMatch(articleTextGuard, /createRetryError|retry_scheduled/);
   assert.match(worker, /error instanceof ExternalAnalysisTerminalError/);
   assert.match(worker, /cancelExternalEngineeringBundle\(job\.article_id\)/);
   assert.match(queue, /cancel_stale_external_engineering_jobs/);
-  assert.match(deploymentGuide, /20260726010000_external_engineering_article_text_guard\.sql/);
+  assert.match(deploymentGuide, /20260727010000_external_analysis_word_threshold\.sql/);
 });

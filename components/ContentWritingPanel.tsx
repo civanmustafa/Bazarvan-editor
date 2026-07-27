@@ -303,6 +303,7 @@ const ContentWritingPanel: React.FC = () => {
   const [isApplying, setIsApplying] = useState(false);
   const [applicationNotice, setApplicationNotice] = useState<ApplicationNotice | null>(null);
   const [expandedWorkflowStepKey, setExpandedWorkflowStepKey] = useState('');
+  const workflowStepSelectionLockedRef = useRef(false);
   const activeArticleRef = useRef(articleId);
   const detailRequestRef = useRef(0);
   const startInFlightRef = useRef(false);
@@ -945,6 +946,12 @@ const ContentWritingPanel: React.FC = () => {
   }, [selectedSession, workflowSteps]);
 
   useEffect(() => {
+    workflowStepSelectionLockedRef.current = false;
+    setExpandedWorkflowStepKey('');
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (workflowStepSelectionLockedRef.current) return;
     setExpandedWorkflowStepKey(automaticWorkflowStepKey);
   }, [automaticWorkflowStepKey, selectedSessionId]);
 
@@ -1267,9 +1274,12 @@ const ContentWritingPanel: React.FC = () => {
                       >
                         <button
                           type="button"
-                          onClick={() => setExpandedWorkflowStepKey(current => (
-                            current === step.stepKey ? '' : step.stepKey
-                          ))}
+                          onClick={() => {
+                            workflowStepSelectionLockedRef.current = true;
+                            setExpandedWorkflowStepKey(current => (
+                              current === step.stepKey ? '' : step.stepKey
+                            ));
+                          }}
                           aria-expanded={isExpanded}
                           aria-controls={resultPanelId}
                           className="flex min-h-11 w-full items-center justify-between gap-2 px-2.5 py-2 text-start text-[11px] hover:bg-gray-50 dark:hover:bg-white/5"

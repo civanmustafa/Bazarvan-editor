@@ -4,6 +4,10 @@ import { getExternalEngineeringCommand } from '../server/externalEngineeringComm
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import { sanitizeCompetitorSlots } from '../utils/competitorContent';
+import {
+  EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS,
+  countExternalEngineeringArticleWords,
+} from '../utils/externalAnalysisArticleText';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
@@ -280,11 +284,11 @@ const enqueueEngineeringJobs = async (
   );
 
   const keywords = isRecord(article.keywords) ? article.keywords : {};
-  const needsEditorText = activeCommands.some(command => command.options.editorText);
   const needsCompetitorInput = activeCommands.some(command => command.options.competitorContent);
+  const articleWordCount = countExternalEngineeringArticleWords(article.plain_text);
   const missingFields = [
     ...toStringList(state.external_analysis_missing_fields),
-    needsEditorText && !toTrimmedString(article.plain_text) ? 'editor_text' : '',
+    articleWordCount < EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS ? 'editor_text' : '',
     needsCompetitorInput && !hasCompetitorInput(article.metadata) ? 'competitor_content_or_url' : '',
   ].filter(Boolean);
   if (!state.external_analysis_ready || !state.external_analysis_readiness_signature || missingFields.length > 0) {
@@ -292,7 +296,11 @@ const enqueueEngineeringJobs = async (
       message: 'External engineering analysis prerequisites are incomplete.',
       status: 409,
       code: 'missing_prerequisites',
-      details: { missingFields: uniqueStrings(missingFields) },
+      details: {
+        missingFields: uniqueStrings(missingFields),
+        articleWordCount,
+        minimumArticleWordCount: EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS,
+      },
     });
   }
 

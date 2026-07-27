@@ -103,10 +103,12 @@ test('source and claim engine derives safe policies from validated evidence link
   assert.equal(normalized.claimLedger.claims[0].supportLevel, 'multiple_competitors');
   assert.equal(normalized.claimLedger.claims[0].usagePolicy, 'allowed');
   assert.equal(normalized.claimLedger.claims[1].verificationStatus, 'requires_external_verification');
-  assert.equal(normalized.claimLedger.claims[1].usagePolicy, 'blocked');
-  assert.equal(normalized.claimLedger.claims[2].usagePolicy, 'blocked');
+  assert.equal(normalized.claimLedger.claims[1].usagePolicy, 'qualify');
+  assert.equal(normalized.claimLedger.claims[2].usagePolicy, 'qualify');
   assert.equal(normalized.claimLedger.claims[3].verificationStatus, 'conflicting');
-  assert.deepEqual(normalized.claimLedger.blockedClaimIds, ['CL002', 'CL003', 'CL004']);
+  assert.equal(normalized.claimLedger.claims[3].usagePolicy, 'qualify');
+  assert.deepEqual(normalized.claimLedger.blockedClaimIds, []);
+  assert.deepEqual(normalized.claimLedger.qualifiedClaimIds, ['CL002', 'CL003', 'CL004']);
   assert.deepEqual(
     normalized.sourceRegistry.sources.find(
       (source: { id: string }) => source.id === 'SRC2',

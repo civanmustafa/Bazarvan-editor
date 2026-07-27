@@ -10,6 +10,7 @@ import {
 import type { ContentWritingTransparencySnapshot } from '../utils/contentWritingTransparency';
 import type { ContentWritingStageKnowledgeUsage } from '../utils/contentWritingStageKnowledge';
 import ContentWritingTransparencyPanel from './ContentWritingTransparencyPanel';
+import ContentWritingChunkDisclosure from './ContentWritingChunkDisclosure';
 
 type ContentWritingStageKnowledgeUsageProps = {
   snapshot: ContentWritingTransparencySnapshot;
@@ -162,6 +163,12 @@ const ContentWritingStageKnowledgeUsagePanel: React.FC<ContentWritingStageKnowle
                   <div className="font-bold text-violet-800 dark:text-violet-200">
                     {chunk.title || (isArabic ? `مقتطف من المنافس ${chunk.competitorNumber}` : `Excerpt from competitor ${chunk.competitorNumber}`)}
                   </div>
+                  <ContentWritingChunkDisclosure
+                    chunkIds={[chunk.id]}
+                    chunks={snapshot.chunks}
+                    isArabic={isArabic}
+                    className="mt-1.5"
+                  />
                 </div>
               ))}
             </div>

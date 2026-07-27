@@ -17,6 +17,7 @@ import type { ContentWritingStep } from '../utils/contentWritingSessions';
 import ContentWritingKnowledgeResult from './ContentWritingKnowledgeResult';
 import ContentWritingEvidenceTrace from './ContentWritingEvidenceTrace';
 import ContentWritingStageKnowledgeUsagePanel from './ContentWritingStageKnowledgeUsage';
+import ContentWritingChunkDisclosure from './ContentWritingChunkDisclosure';
 import {
   buildContentWritingTransparencySnapshot,
   type ContentWritingTransparencySnapshot,
@@ -120,7 +121,7 @@ const OutlineResult: React.FC<{
                   </span>
                 ))}
               </div>
-              {(section.requiredIdeaIds.length > 0 || section.requiredClaimIds.length > 0) && (
+              {(section.requiredIdeaIds.length > 0 || section.requiredClaimIds.length > 0 || section.sourceChunkIds.length > 0) && (
                 <details className="mt-2 rounded-md border border-gray-200 bg-white p-2 dark:border-[#3C3C3C] dark:bg-[#252525]">
                   <summary className="cursor-pointer list-none text-[9px] font-black text-blue-700 dark:text-blue-300">
                     {isArabic ? 'ما الذي سيعتمد عليه هذا القسم؟' : 'What will this section rely on?'}
@@ -164,6 +165,18 @@ const OutlineResult: React.FC<{
                             );
                           })}
                         </div>
+                      </div>
+                    )}
+                    {section.sourceChunkIds.length > 0 && transparency && (
+                      <div>
+                        <div className="mb-1 text-[9px] font-black text-gray-500">
+                          {isArabic ? 'المقاطع الأصلية الداعمة' : 'Supporting original excerpts'}
+                        </div>
+                        <ContentWritingChunkDisclosure
+                          chunkIds={section.sourceChunkIds}
+                          chunks={transparency.chunks}
+                          isArabic={isArabic}
+                        />
                       </div>
                     )}
                   </div>
@@ -313,6 +326,14 @@ const CoverageAuditResult: React.FC<{
               <div>{isArabic ? 'الأفكار: ' : 'Ideas: '}{repair.ideaIds.join('، ') || '—'}</div>
               <div>{isArabic ? 'الادعاءات: ' : 'Claims: '}{repair.claimIds.join('، ') || '—'}</div>
               <div>{isArabic ? 'المقتطفات: ' : 'Excerpts: '}{repair.sourceChunkIds.join('، ') || '—'}</div>
+              {transparency && (
+                <ContentWritingChunkDisclosure
+                  chunkIds={repair.sourceChunkIds}
+                  chunks={transparency.chunks}
+                  isArabic={isArabic}
+                  className="mt-1.5 font-sans"
+                />
+              )}
             </div>
           )}
         </article>

@@ -55,7 +55,6 @@ type RequirementItem = {
 const SEMANTIC_REQUIREMENT_FIELDS = [
   'draft_status',
   'article_title',
-  'editor_text',
   'primary_keyword',
   'goal_context',
   'company_name',
@@ -225,7 +224,6 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const semanticMissingFields = new Set(readinessState?.semantic_missing_fields || []);
   const engineeringMissingFields = new Set(readinessState?.external_analysis_missing_fields || []);
   const competitorMissingFields = new Set(readinessState?.competitor_discovery_missing_fields || []);
-  if (semanticMissingFields.has('editor_text')) engineeringMissingFields.add('editor_text');
   if (!hasAlternativeKeywords) engineeringMissingFields.add('alternative_keywords');
   if (!hasLsiKeywords) engineeringMissingFields.add('lsi_keywords');
 
@@ -601,8 +599,8 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
                   <div className="mt-1.5 border-t border-red-100 pt-1.5 text-[10px] font-bold text-red-600 dark:border-red-900/40 dark:text-red-300">
                     {engineeringArticleTextMissing
                       ? (locale === 'ar'
-                          ? 'لا يمكن تشغيل الحزمة لأن نص المقالة فارغ. اكتب نص المقالة واحفظها أولًا.'
-                          : 'The bundle cannot run while the article text is empty. Write and save the article first.')
+                          ? 'لا يمكن تشغيل الحزمة قبل أن يحتوي نص المقالة المحفوظ على أكثر من 100 كلمة.'
+                          : 'The bundle requires more than 100 saved article words before it can run.')
                       : (locale === 'ar'
                           ? 'توجد شروط أساسية ناقصة. افتح مؤشر الشروط لمعرفة التفاصيل.'
                           : 'Core requirements are missing. Open the requirements indicator for details.')}

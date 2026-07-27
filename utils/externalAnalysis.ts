@@ -144,7 +144,7 @@ const MISSING_FIELD_LABELS: Record<string, { ar: string; en: string }> = {
     ar: 'عنوان المقالة أو الكلمة المفتاحية الأساسية',
     en: 'Article title or primary keyword',
   },
-  editor_text: { ar: 'نص المقالة', en: 'Article text' },
+  editor_text: { ar: 'نص المقالة (أكثر من 100 كلمة)', en: 'Article text (more than 100 words)' },
   primary_keyword: { ar: 'الكلمة المفتاحية الأساسية', en: 'Primary keyword' },
   alternative_keywords: { ar: 'الصيغ البديلة', en: 'Alternative keyword forms' },
   lsi_keywords: { ar: 'كلمات LSI', en: 'LSI terms' },

@@ -55,6 +55,43 @@ test('structured writing rejects incomplete or duplicate outlines', async () => 
   assert.equal(normalizeContentWritingOutline({ sections: ['One', 'One', 'Two', 'Three'] }), null);
 });
 
+test('outline fitting satisfies an exact 5-5 policy without discarding overflow evidence', async () => {
+  const {
+    fitContentWritingOutlineSectionRange,
+    parseContentWritingOutline,
+  } = await importWorkflow();
+  const sixSectionOutline = parseContentWritingOutline(JSON.stringify({
+    sections: [
+      ...JSON.parse(outlineJson).sections,
+      { title: 'Fifth topic', brief: 'Fifth coverage brief', sourceChunkIds: ['C5-S001'] },
+      { title: 'Sixth topic', brief: 'Sixth coverage brief', sourceChunkIds: ['C6-S001'] },
+    ],
+  }));
+  const fitted = fitContentWritingOutlineSectionRange(sixSectionOutline, { items: [] }, { min: 5, max: 5 });
+
+  assert.equal(fitted.sections.length, 5);
+  assert.match(fitted.sections[4].brief, /Sixth topic/);
+  assert.deepEqual(fitted.sections[4].sourceChunkIds, ['C5-S001', 'C6-S001']);
+
+  const expanded = fitContentWritingOutlineSectionRange(
+    parseContentWritingOutline(outlineJson),
+    {
+      items: [{
+        id: 'K005',
+        topic: 'Fifth documented topic',
+        detail: 'Evidence-backed fifth section.',
+        priority: 'high',
+        coverageCount: 2,
+        sourceChunkIds: ['C1-S005'],
+      }],
+    },
+    { min: 5, max: 5 },
+  );
+  assert.equal(expanded.sections.length, 5);
+  assert.equal(expanded.sections[4].title, 'Fifth documented topic');
+  assert.deepEqual(expanded.sections[4].sourceChunkIds, ['C1-S005']);
+});
+
 test('outline coverage assigns usable claims and excludes blocked claims', async () => {
   const {
     ensureContentWritingOutlineKnowledgeCoverage,

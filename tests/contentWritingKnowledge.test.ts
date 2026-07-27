@@ -135,7 +135,7 @@ test('transparency snapshot exposes the validated matrix, source policy, claims,
   assert.equal(snapshot.knowledge.items[0].coverageLevel, 'all_competitors');
   assert.equal(snapshot.knowledge.sourceRegistry.sources[0].usePolicy, 'primary_support');
   assert.equal(snapshot.knowledge.sourceRegistry.sources[1].usePolicy, 'reference_only');
-  assert.equal(snapshot.knowledge.claimLedger.claims[0].usagePolicy, 'blocked');
+  assert.equal(snapshot.knowledge.claimLedger.claims[0].usagePolicy, 'qualify');
 });
 
 test('section evidence trace distinguishes available inputs from declared usage', async () => {

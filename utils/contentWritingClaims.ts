@@ -276,7 +276,7 @@ const deriveClaimPolicy = (options: {
   'verificationStatus' | 'usagePolicy'
 > => {
   if (options.conflicting) {
-    return { verificationStatus: 'conflicting', usagePolicy: 'blocked' };
+    return { verificationStatus: 'conflicting', usagePolicy: 'qualify' };
   }
   const sensitive = ['medical', 'legal', 'financial'].includes(options.claimType);
   const freshnessSensitive = ['statistic', 'time_sensitive'].includes(options.claimType);
@@ -290,7 +290,7 @@ const deriveClaimPolicy = (options: {
   ) {
     return {
       verificationStatus: 'requires_external_verification',
-      usagePolicy: 'blocked',
+      usagePolicy: 'qualify',
     };
   }
   if (options.competitorCount > 1) {
