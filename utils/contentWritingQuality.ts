@@ -91,12 +91,6 @@ const stripListMarker = (value: string): string => value.replace(
   '',
 );
 
-const isBlockStart = (value: string): boolean => (
-  /^\s{0,3}#{1,6}\s+\S/.test(value)
-  || isListLine(value)
-  || isTableRow(value)
-);
-
 const createNode = (
   type: string,
   text: string,
@@ -166,13 +160,13 @@ export const createContentWritingAnalysisDocument = (
       continue;
     }
 
-    const paragraphLines = [line.replace(/^\s*>\s?/, '')];
+    // Keep quality analysis aligned with parseMarkdownToHtml(), which renders
+    // every non-empty plain-text line as its own editor paragraph. Merging
+    // adjacent lines here made a visibly present second introduction paragraph
+    // disappear from the quality document.
+    const paragraphLine = line.replace(/^\s*>\s?/, '');
     index += 1;
-    while (index < lines.length && lines[index].trim() && !isBlockStart(lines[index])) {
-      paragraphLines.push(lines[index].replace(/^\s*>\s?/, ''));
-      index += 1;
-    }
-    pushNode('paragraph', paragraphLines.join(' '));
+    pushNode('paragraph', paragraphLine);
   }
 
   const normalizedArticleTitle = stripInlineMarkdown(articleTitle);
@@ -329,7 +323,11 @@ export const evaluateContentWritingQuality = (options: {
       policyVersion: configuration.policyVersion,
       minimumScore: configuration.minimumScore,
       score,
-      passed: blockingFailureCount === 0 && score >= configuration.minimumScore,
+      // The administrator-configured minimum score is the quality gate.
+      // Blocking failures remain visible, weighted, and repair-prioritized, but
+      // must not silently add a second threshold that the settings UI does not
+      // expose.
+      passed: score >= configuration.minimumScore,
       blockingFailureCount,
       failedCount,
       warningCount,
@@ -410,7 +408,9 @@ export const normalizeContentWritingQualityReport = (value: unknown): ContentWri
     policyVersion: Math.max(1, Math.round(policyVersion)),
     minimumScore: Math.max(0, Math.min(100, Math.round(minimumScore))),
     score: Math.max(0, Math.min(100, Math.round(score))),
-    passed: value.passed === true,
+    // Recompute the gate for persisted reports created before the minimum score
+    // became the single authoritative pass condition.
+    passed: score >= minimumScore,
     blockingFailureCount: Math.max(0, Number(value.blockingFailureCount) || 0),
     failedCount: Math.max(0, Number(value.failedCount) || 0),
     warningCount: Math.max(0, Number(value.warningCount) || 0),

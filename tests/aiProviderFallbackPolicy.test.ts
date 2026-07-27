@@ -16,6 +16,9 @@ const capabilities: AiProviderCapabilities = {
     gemini: { enabled: true, configured: true, available: true, model: 'gemini-free-test' },
   },
   defaultProvider: 'openai',
+  contentWriting: {
+    qualityOverrideReasonRequired: true,
+  },
 };
 
 test('provider fallback order is deterministic and skips unavailable providers', () => {

@@ -62,6 +62,7 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     contentWritingQualityPolicyVersion: CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION,
     contentWritingMinimumQualityScore: CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE,
     contentWritingMaxRepairPasses: CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES,
+    contentWritingQualityOverrideReasonRequired: true,
   },
   prompts: normalizePromptRegistrySettings({
     registryVersion: PROMPT_REGISTRY_VERSION,
@@ -214,6 +215,10 @@ const normalizeSystemSection = (
       defaults.contentWritingMaxRepairPasses,
       0,
       CONTENT_WRITING_MAX_REPAIR_PASSES,
+    ));
+    setWhenPresent('contentWritingQualityOverrideReasonRequired', field => normalizeBoolean(
+      field,
+      defaults.contentWritingQualityOverrideReasonRequired,
     ));
     return normalized;
   }

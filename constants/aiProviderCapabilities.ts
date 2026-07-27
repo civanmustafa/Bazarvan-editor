@@ -18,6 +18,9 @@ export type AiProviderCapability = {
 export type AiProviderCapabilities = {
   providers: Record<AiRuntimeProvider, AiProviderCapability>;
   defaultProvider: AiRuntimeProvider;
+  contentWriting: {
+    qualityOverrideReasonRequired: boolean;
+  };
 };
 
 export const AI_RUNTIME_PROVIDER_ORDER: readonly AiRuntimeProvider[] = [
@@ -76,6 +79,9 @@ export const getDefaultAiProviderCapabilities = (): AiProviderCapabilities => ({
     },
   },
   defaultProvider: 'gemini',
+  contentWriting: {
+    qualityOverrideReasonRequired: true,
+  },
 });
 
 export const normalizeAiProviderCapabilities = (value: unknown): AiProviderCapabilities => {
@@ -91,12 +97,22 @@ export const normalizeAiProviderCapabilities = (value: unknown): AiProviderCapab
   const requestedDefault = typeof source.defaultProvider === 'string'
     ? source.defaultProvider as AiRuntimeProvider
     : fallback.defaultProvider;
+  const contentWritingSource = isRecord(source.contentWriting) ? source.contentWriting : {};
   const defaultProvider = AI_RUNTIME_PROVIDER_ORDER.includes(requestedDefault)
     && providers[requestedDefault].available
     ? requestedDefault
     : AI_RUNTIME_PROVIDER_ORDER.find(provider => providers[provider].available) || 'gemini';
 
-  return { providers, defaultProvider };
+  return {
+    providers,
+    defaultProvider,
+    contentWriting: {
+      qualityOverrideReasonRequired:
+        typeof contentWritingSource.qualityOverrideReasonRequired === 'boolean'
+          ? contentWritingSource.qualityOverrideReasonRequired
+          : fallback.contentWriting.qualityOverrideReasonRequired,
+    },
+  };
 };
 
 export const getRuntimeProviderForPatchProvider = (

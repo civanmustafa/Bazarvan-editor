@@ -66,6 +66,17 @@ const toTextList = (value: unknown): string[] => Array.isArray(value)
   ? value.map(toText).filter(Boolean)
   : [];
 
+const readContentWritingQualityOverrideReasonRequired = async (): Promise<boolean> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'ai')
+    .maybeSingle();
+  if (error && error.code !== '42P01') throw error;
+  const settings = isRecord(data?.value) ? data.value : {};
+  return settings.contentWritingQualityOverrideReasonRequired !== false;
+};
+
 const requireContentWritingProvider = (value: unknown): ContentWritingProvider => {
   const provider = toText(value) as ContentWritingProvider;
   if (!['gemini', 'geminiPaid', 'openai'].includes(provider)) {
@@ -449,17 +460,12 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     const qualityReport = await resolveSessionQualityReport(session);
     const qualityOverrideReason = toText(body.qualityOverrideReason).slice(0, 500);
     if (qualityReport && !qualityReport.passed) {
-      if (principal.role !== 'admin') {
+      if (
+        await readContentWritingQualityOverrideReasonRequired()
+        && qualityOverrideReason.length < 8
+      ) {
         throw new ContentWritingApiError({
-          message: 'The article has not passed the configured content quality gate.',
-          status: 409,
-          code: 'content_writing_quality_gate_failed',
-          details: { qualityReport },
-        });
-      }
-      if (qualityOverrideReason.length < 8) {
-        throw new ContentWritingApiError({
-          message: 'An administrator override reason of at least 8 characters is required.',
+          message: 'A quality override reason of at least 8 characters is required.',
           status: 422,
           code: 'content_writing_quality_override_reason_required',
           details: { qualityReport },
@@ -469,7 +475,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     const applied = await recordContentWritingApplication({
       sessionId: session.id,
       appliedBy: principal.userId,
-      qualityOverrideReason: qualityReport && !qualityReport.passed
+      qualityOverrideReason: qualityReport && !qualityReport.passed && qualityOverrideReason
         ? qualityOverrideReason
         : undefined,
     });

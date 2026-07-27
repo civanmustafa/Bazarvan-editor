@@ -256,7 +256,6 @@ const ContentWritingPanel: React.FC = () => {
     chatGptOpenMode,
     isAiProviderEnabled,
     isAiProviderAvailable,
-    currentUserRole,
   } = useUser();
   const articleId = useEditorSelector(context => context.activeArticleId);
   const articleTitle = useEditorSelector(context => context.title);
@@ -775,15 +774,6 @@ const ContentWritingPanel: React.FC = () => {
   const confirmApplication = async (qualityOverrideReason?: string) => {
     const snapshot = reviewSnapshot;
     if (!snapshot || isApplying) return;
-    if (!snapshot.isPartial && !snapshot.qualityReport.passed && currentUserRole !== 'admin') {
-      setApplicationNotice({
-        tone: 'error',
-        message: isArabic
-          ? 'لا يمكن اعتماد المقالة قبل اجتياز بوابة الجودة.'
-          : 'The article cannot be approved before it passes the quality gate.',
-      });
-      return;
-    }
     setIsApplying(true);
     setApplicationNotice(null);
     try {
@@ -1445,7 +1435,10 @@ const ContentWritingPanel: React.FC = () => {
           resultMarkdown={reviewSnapshot.markdown}
           isPartial={reviewSnapshot.isPartial}
           qualityReport={reviewSnapshot.qualityReport}
-          allowQualityOverride={currentUserRole === 'admin'}
+          allowQualityOverride
+          qualityOverrideReasonRequired={
+            aiProviderCapabilities.contentWriting.qualityOverrideReasonRequired
+          }
           isApplying={isApplying}
           onConfirm={qualityOverrideReason => void confirmApplication(qualityOverrideReason)}
           onClose={closeReview}

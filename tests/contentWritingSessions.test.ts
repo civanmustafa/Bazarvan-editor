@@ -163,6 +163,28 @@ test('content-writing quality policy migration persists versioned reports, repai
   assertBalancedSqlParentheses(migration);
 });
 
+test('content-writing quality override policy follows the live setting for admins and employees', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260727000000_content_writing_quality_override_policy.sql',
+  );
+  const api = await readWorkspaceFile('api/contentWriting.ts');
+
+  assert.match(migration, /contentWritingQualityOverrideReasonRequired/);
+  assert.match(migration, /v_quality_score >= v_quality_minimum/);
+  assert.match(migration, /v_session\.created_by <> p_applied_by and not v_is_admin/);
+  assert.match(migration, /v_override_reason_required/);
+  assert.doesNotMatch(migration, /if not v_is_admin or char_length/);
+  assert.match(api, /readContentWritingQualityOverrideReasonRequired/);
+  assert.match(api, /A quality override reason of at least 8 characters is required/);
+  const qualityOverrideBlock = api.slice(
+    api.indexOf('const qualityReport = await resolveSessionQualityReport(session);'),
+    api.indexOf('const applied = await recordContentWritingApplication({'),
+  );
+  assert.doesNotMatch(qualityOverrideBlock, /principal\.role !== 'admin'/);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing knowledge workflow migration enables indexing, audits, and targeted repairs', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260723010000_content_writing_knowledge_workflow.sql',
@@ -277,7 +299,8 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /action === 'recordApplication'/);
   assert.match(api, /recordContentWritingApplication/);
   assert.match(api, /resolveSessionQualityReport/);
-  assert.match(api, /content_writing_quality_gate_failed/);
+  assert.match(api, /content_writing_quality_override_reason_required/);
+  assert.match(api, /readContentWritingQualityOverrideReasonRequired/);
   assert.match(api, /getContentWritingSteps/);
   assert.match(registry, /path: '\/api\/content-writing'/);
   assert.match(registry, /path: '\/api\/content-writing\/external-result'/);
@@ -321,6 +344,13 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(modal, /!isPartial && !qualityReport\.passed/);
   assert.match(modal, /qualityReport\.score/);
   assert.match(modal, /qualityOverrideReason/);
+  assert.match(modal, /qualityOverrideReasonRequired/);
+  assert.match(panel, /aiProviderCapabilities\.contentWriting\.qualityOverrideReasonRequired/);
+  const confirmationBlock = panel.slice(
+    panel.indexOf('const confirmApplication = async'),
+    panel.indexOf('const progress =', panel.indexOf('const confirmApplication = async')),
+  );
+  assert.doesNotMatch(confirmationBlock, /currentUserRole !== 'admin'/);
   assert.match(editorContext, /const applyGeneratedArticleContent = useCallback/);
   assert.match(editorContext, /handleSaveDraft\(\{ reason: 'manual', force: true \}\)/);
   assert.match(editorContext, /parseMarkdownToArticleHtml/);

@@ -25,6 +25,7 @@ type ContentWritingReviewModalProps = {
   isPartial?: boolean;
   qualityReport: ContentWritingQualityReport;
   allowQualityOverride: boolean;
+  qualityOverrideReasonRequired: boolean;
   isApplying: boolean;
   onConfirm: (qualityOverrideReason?: string) => void;
   onClose: () => void;
@@ -51,6 +52,7 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
   isPartial = false,
   qualityReport,
   allowQualityOverride,
+  qualityOverrideReasonRequired,
   isApplying,
   onConfirm,
   onClose,
@@ -74,7 +76,9 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
   const currentWordCount = countWords(currentText);
   const generatedWordCount = countWords(generatedText);
   const qualityNeedsOverride = !isPartial && !qualityReport.passed;
-  const canOverrideQuality = allowQualityOverride && qualityOverrideReason.trim().length >= 8;
+  const canOverrideQuality = allowQualityOverride && (
+    !qualityOverrideReasonRequired || qualityOverrideReason.trim().length >= 8
+  );
 
   useEffect(() => {
     setQualityOverrideReason('');
@@ -244,10 +248,10 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
               </div>
             </details>
           )}
-          {qualityNeedsOverride && allowQualityOverride && (
+          {qualityNeedsOverride && allowQualityOverride && qualityOverrideReasonRequired && (
             <label className="mt-3 block">
               <span className="mb-1 block text-xs font-black text-red-700 dark:text-red-300">
-                {isArabic ? 'سبب تجاوز بوابة الجودة بواسطة المشرف' : 'Administrator quality override reason'}
+                {isArabic ? 'سبب تجاوز بوابة الجودة' : 'Quality override reason'}
               </span>
               <textarea
                 value={qualityOverrideReason}
@@ -298,7 +302,11 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => onConfirm(qualityNeedsOverride ? qualityOverrideReason.trim() : undefined)}
+              onClick={() => onConfirm(
+                qualityNeedsOverride && qualityOverrideReason.trim()
+                  ? qualityOverrideReason.trim()
+                  : undefined,
+              )}
               disabled={isApplying || !prepared.markdown || (qualityNeedsOverride && !canOverrideQuality)}
               className="flex h-9 items-center justify-center gap-2 rounded-md bg-[#d4af37] px-4 text-xs font-black text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
             >

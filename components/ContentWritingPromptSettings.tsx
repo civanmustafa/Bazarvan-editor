@@ -22,8 +22,9 @@ type ContentWritingPromptSettingsProps = {
       | 'contentWritingMaxInputTokens'
       | 'contentWritingQualityPolicyVersion'
       | 'contentWritingMinimumQualityScore'
-      | 'contentWritingMaxRepairPasses',
-    value: string | number,
+      | 'contentWritingMaxRepairPasses'
+      | 'contentWritingQualityOverrideReasonRequired',
+    value: string | number | boolean,
   ) => void;
 };
 
@@ -34,12 +35,14 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
   const qualityPolicyVersion = Number(values.contentWritingQualityPolicyVersion || CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION);
   const minimumQualityScore = Number(values.contentWritingMinimumQualityScore || CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE);
   const maxRepairPasses = Number(values.contentWritingMaxRepairPasses ?? CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES);
+  const qualityOverrideReasonRequired = values.contentWritingQualityOverrideReasonRequired !== false;
 
   const resetDefaults = () => {
     onChange('contentWritingMaxInputTokens', CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET);
     onChange('contentWritingQualityPolicyVersion', CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION);
     onChange('contentWritingMinimumQualityScore', CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE);
     onChange('contentWritingMaxRepairPasses', CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES);
+    onChange('contentWritingQualityOverrideReasonRequired', true);
   };
 
   return (
@@ -121,8 +124,25 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
         </label>
       </div>
 
+      <label className="flex max-w-2xl cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-[#3C3C3C] dark:bg-[#242424]">
+        <input
+          type="checkbox"
+          checked={qualityOverrideReasonRequired}
+          onChange={event => onChange('contentWritingQualityOverrideReasonRequired', event.target.checked)}
+          className="mt-1 size-4 rounded border-gray-300 text-[#d4af37] focus:ring-[#d4af37]"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-black text-gray-700 dark:text-gray-200">
+            إلزام سبب عند تجاوز بوابة الجودة
+          </span>
+          <span className="mt-1 block text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+            عند التفعيل يجب على المسؤول والموظف كتابة سبب من 8 أحرف على الأقل لاعتماد مقالة لم تجتز البوابة. عند التعطيل يمكنهما الاعتماد دون إدخال سبب.
+          </span>
+        </span>
+      </label>
+
       <p className="text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-        تُثبَّت نسخة السياسة والأوامر داخل كل جلسة. يؤثر تعديلها في الجلسات الجديدة فقط، حتى لا تتغير شروط جلسة أثناء الاستئناف.
+        تُثبَّت نسخة سياسة التوليد والأوامر داخل كل جلسة حتى لا تتغير شروطها أثناء الاستئناف. أما خيار سبب تجاوز بوابة الجودة فيُطبق فورًا عند الاعتماد.
       </p>
     </div>
   );

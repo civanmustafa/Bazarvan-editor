@@ -107,6 +107,67 @@ test('quality analysis detects the second introduction paragraph and Arabic numb
   assert.equal(criterion('conclusionHasList')?.status, 'pass');
 });
 
+test('quality analysis treats consecutive visible Markdown lines as separate introduction paragraphs', async () => {
+  const { createContentWritingAnalysisDocument, evaluateContentWritingQuality } = await importQuality();
+  const sentence = (prefix: string, count: number): string => (
+    Array.from({ length: count }, (_, index) => `${prefix}${index + 1}`).join(' ')
+  );
+  const firstParagraph = `${sentence('مقدمة', 15)}. ${sentence('تمهيد', 15)}.`;
+  const secondParagraph = `${sentence('تفصيل', 20)}. ${sentence('توضيح', 20)}.`;
+  const markdown = [
+    firstParagraph,
+    secondParagraph,
+    '## قسم تجريبي طويل وواضح للمستخدم المستهدف',
+    'نص القسم.',
+  ].join('\n');
+
+  const document = createContentWritingAnalysisDocument(markdown, articleInput.articleTitle);
+  const firstH2Index = document.nodes.findIndex(
+    (node: any) => node.type === 'heading' && node.level === 2,
+  );
+  assert.equal(
+    document.nodes.slice(0, firstH2Index).filter((node: any) => node.type === 'paragraph').length,
+    2,
+  );
+
+  const evaluation = evaluateContentWritingQuality({ ...articleInput, markdown });
+  const secondParagraphCriterion = evaluation.report.criteria.find(
+    (item: any) => item.id === 'secondParagraph',
+  );
+  assert.notEqual(secondParagraphCriterion?.current, 0);
+  assert.equal(secondParagraphCriterion?.status, 'pass');
+});
+
+test('minimum score is the authoritative quality gate for new and persisted reports', async () => {
+  const { normalizeContentWritingQualityReport } = await importQuality();
+  const normalized = normalizeContentWritingQualityReport({
+    policyVersion: 1,
+    minimumScore: 80,
+    score: 81,
+    passed: false,
+    blockingFailureCount: 1,
+    failedCount: 1,
+    warningCount: 0,
+    passedCount: 10,
+    wordCount: 1_200,
+    repairPasses: 2,
+    criteria: [{
+      id: 'secondParagraph',
+      title: 'الفقرة الثانية',
+      status: 'fail',
+      severity: 'blocking',
+      weight: 2,
+      current: 0,
+      required: '40-80 كلمة, 2-4 جمل',
+      violationCount: 1,
+      messages: [],
+    }],
+    generatedAt: new Date(0).toISOString(),
+  });
+
+  assert.equal(normalized?.passed, true);
+});
+
 test('repair prompt prioritizes machine-detected failures and includes the full draft', async () => {
   const { buildContentWritingRepairPrompt, evaluateContentWritingQuality } = await importQuality();
   const markdown = '# عنوان\n\nنص قصير جدًا.';

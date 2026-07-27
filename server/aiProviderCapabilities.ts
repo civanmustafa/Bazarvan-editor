@@ -55,5 +55,9 @@ export const readAiProviderCapabilities = async (userId?: string): Promise<AiPro
       },
     },
     defaultProvider: settings.defaultProvider || defaults.defaultProvider,
+    contentWriting: {
+      qualityOverrideReasonRequired:
+        settings.contentWritingQualityOverrideReasonRequired !== false,
+    },
   });
 };
