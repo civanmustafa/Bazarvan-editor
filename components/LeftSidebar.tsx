@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check, Sparkles, Loader2, Hash, Percent } from 'lucide-react';
+import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check, Sparkles, Loader2, Hash, Percent, ChevronLeft, ChevronRight } from 'lucide-react';
 import GoalTab from './GoalTab';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
@@ -332,7 +332,17 @@ const MiniStat: React.FC<{ icon: React.ReactNode; value: string | number; title:
 };
 
 
-const LeftSidebar: React.FC = () => {
+type LeftSidebarProps = {
+  collapsed?: boolean;
+  isHidden?: boolean;
+  onToggleCollapsed?: () => void;
+};
+
+const LeftSidebar: React.FC<LeftSidebarProps> = ({
+  collapsed = false,
+  isHidden = false,
+  onToggleCollapsed,
+}) => {
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
   const keywords = useEditorSelector(context => context.keywords);
   const setKeywords = useEditorSelector(context => context.setKeywords);
@@ -379,10 +389,10 @@ const LeftSidebar: React.FC = () => {
 
   const getTabClass = (tabName: 'keywords' | 'duplicates') => {
     const isActive = activeTab === tabName;
-    return `flex-1 flex items-center justify-center gap-2 py-3 px-4 text-sm font-semibold border-b-2 transition-all duration-200 ${
+    return `relative flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-md px-2 text-xs font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] ${
       isActive
-        ? 'border-[#d4af37] text-[#d4af37] dark:text-white'
-        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white'
+        ? 'bg-[#d4af37]/15 text-[#8a6f1d] ring-1 ring-inset ring-[#d4af37]/35 shadow-sm dark:bg-[#d4af37]/15 dark:text-[#f2d675]'
+        : 'text-gray-500 hover:bg-white/80 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white'
     }`;
   };
 
@@ -395,6 +405,25 @@ const LeftSidebar: React.FC = () => {
     setIsDuplicatesTabActive(activeTab === 'duplicates');
     return () => setIsDuplicatesTabActive(false);
   }, [activeTab, setIsDuplicatesTabActive]);
+
+  React.useEffect(() => {
+    const handleTabShortcut = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const nextTab = event.code === 'Digit6'
+        ? 'keywords'
+        : event.code === 'Digit7'
+          ? 'duplicates'
+          : null;
+      if (!nextTab) return;
+
+      event.preventDefault();
+      handleTabChange(nextTab);
+      if (collapsed) onToggleCollapsed?.();
+    };
+
+    window.addEventListener('keydown', handleTabShortcut);
+    return () => window.removeEventListener('keydown', handleTabShortcut);
+  }, [collapsed, handleTabChange, onToggleCollapsed]);
   
   const handleHighlightToggle = (term: string, type: 'primary' | 'company') => {
     if (!term) {
@@ -1295,41 +1324,97 @@ const LeftSidebar: React.FC = () => {
         onClose={() => setIsQuickClientModalOpen(false)}
         onCreated={handleQuickClientCreated}
       />
-      <aside className="relative z-30 basis-[20.57%] bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg flex flex-col h-full min-w-0">
-        <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
-            <button onClick={() => handleTabChange('keywords')} className={getTabClass('keywords')}>
-                <KeyRound size={16} />
-                <span>{tLk.targetKeywords}</span>
-            </button>
-            <button onClick={() => handleTabChange('duplicates')} className={getTabClass('duplicates')}>
-                <Repeat size={16} />
-                <span>{tLk.duplicates}</span>
-            </button>
+      <aside className={`${isHidden ? 'hidden' : 'flex'} relative z-30 h-full min-w-0 flex-none flex-col overflow-hidden rounded-lg bg-[#F2F3F5] shadow-lg transition-[width,flex-basis] duration-150 dark:bg-[#1F1F1F] ${collapsed ? 'w-12 basis-12' : 'w-auto basis-[20.57%]'}`}>
+        <div className={`${collapsed ? 'flex' : 'hidden'} h-full flex-col items-center gap-3 px-1.5 py-2`}>
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-white hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white"
+            aria-label={uiLanguage === 'ar' ? 'إظهار لوحة الكلمات والأهداف' : 'Show keywords and goals panel'}
+            title={uiLanguage === 'ar' ? 'إظهار لوحة الكلمات والأهداف' : 'Show keywords and goals panel'}
+          >
+            {uiLanguage === 'ar' ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+          </button>
+          <div
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-[#d4af37]/15 text-[#8a6f1d] ring-1 ring-inset ring-[#d4af37]/35 dark:text-[#f2d675]"
+            title={activeTab === 'keywords' ? `${tLk.targetKeywords} — Alt+6` : `${tLk.duplicates} — Alt+7`}
+          >
+            {activeTab === 'keywords' ? <KeyRound size={17} /> : <Repeat size={17} />}
+          </div>
         </div>
 
-        <div className="flex-shrink-0 p-3 bg-[#F2F3F5] dark:bg-[#1F1F1F] border-b border-gray-200 dark:border-[#3C3C3C]">
-             {activeTab === 'keywords' ? (
-                 // Compact keyword/goal tab network: primary, synonyms, company, and LSI.
-                 <SpiderStats metrics={keywordDetailSpiderMetrics} compact />
-             ) : (
-                <div className="space-y-2">
-                    <div className="grid grid-cols-3 gap-1.5">
-                        <MiniStat icon={<Hash size={14} />} value={duplicateRepeatedPhrasesCount} title={duplicateMiniStats.repeatedPhrases} tone={duplicateRepeatedPhrasesCount > 0 ? 'red' : 'green'} />
-                        <MiniStat icon={<Repeat size={14} />} value={duplicateOccurrencesCount} title={duplicateMiniStats.totalOccurrences} tone={duplicateOccurrencesCount > 0 ? 'red' : 'green'} />
-                        <MiniStat icon={<Percent size={14} />} value={uniqueWordsPercentage} title={duplicateMiniStats.uniquePercentage} tone="gold" />
-                    </div>
-                    {/* Compact duplicate stats shown under the tab buttons for the duplicate tab. */}
-                    <SpiderStats metrics={duplicateHeaderSpiderMetrics} compact />
-                </div>
-             )}
-        </div>
-        <div className="flex-grow overflow-y-auto custom-scrollbar">
-            {activeTab === 'keywords' && renderKeywordsTab()}
-            {activeTab === 'duplicates' && (
-                <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">جار تحميل التكرارات...</div>}>
-                  <DuplicatesTab />
-                </React.Suspense>
-            )}
+        <div className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col`}>
+          <div className="flex items-stretch gap-1 border-b border-gray-200 p-1.5 dark:border-[#3C3C3C]">
+            <div role="tablist" aria-label={uiLanguage === 'ar' ? 'لوحة الكلمات والتكرارات' : 'Keywords and duplicates panel'} className="flex min-w-0 flex-1 gap-1 rounded-lg bg-gray-200/70 p-1 dark:bg-black/20">
+              <button
+                type="button"
+                role="tab"
+                id="keywords-sidebar-tab"
+                aria-controls="keywords-sidebar-panel"
+                aria-selected={activeTab === 'keywords'}
+                onClick={() => handleTabChange('keywords')}
+                className={getTabClass('keywords')}
+                title={`${tLk.targetKeywords} — Alt+6`}
+              >
+                  <KeyRound size={16} />
+                  <span className="truncate">{tLk.targetKeywords}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="duplicates-sidebar-tab"
+                aria-controls="duplicates-sidebar-panel"
+                aria-selected={activeTab === 'duplicates'}
+                onClick={() => handleTabChange('duplicates')}
+                className={getTabClass('duplicates')}
+                title={`${tLk.duplicates} — Alt+7`}
+              >
+                  <Repeat size={16} />
+                  <span className="truncate">{tLk.duplicates}</span>
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              className="inline-flex h-[44px] w-9 flex-none items-center justify-center rounded-md text-gray-400 hover:bg-gray-200/80 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] dark:hover:bg-white/5 dark:hover:text-white"
+              aria-label={uiLanguage === 'ar' ? 'طي لوحة الكلمات والأهداف' : 'Collapse keywords and goals panel'}
+              title={uiLanguage === 'ar' ? 'طي لوحة الكلمات والأهداف' : 'Collapse keywords and goals panel'}
+            >
+              {uiLanguage === 'ar' ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+            </button>
+          </div>
+
+          <div
+            id={activeTab === 'keywords' ? 'keywords-sidebar-panel' : 'duplicates-sidebar-panel'}
+            role="tabpanel"
+            aria-labelledby={activeTab === 'keywords' ? 'keywords-sidebar-tab' : 'duplicates-sidebar-tab'}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <div className="flex-shrink-0 border-b border-gray-200 bg-[#F2F3F5] p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+                {activeTab === 'keywords' ? (
+                    // Compact keyword/goal tab network: primary, synonyms, company, and LSI.
+                    <SpiderStats metrics={keywordDetailSpiderMetrics} compact />
+                ) : (
+                  <div className="space-y-2">
+                      <div className="grid grid-cols-3 gap-1.5">
+                          <MiniStat icon={<Hash size={14} />} value={duplicateRepeatedPhrasesCount} title={duplicateMiniStats.repeatedPhrases} tone={duplicateRepeatedPhrasesCount > 0 ? 'red' : 'green'} />
+                          <MiniStat icon={<Repeat size={14} />} value={duplicateOccurrencesCount} title={duplicateMiniStats.totalOccurrences} tone={duplicateOccurrencesCount > 0 ? 'red' : 'green'} />
+                          <MiniStat icon={<Percent size={14} />} value={uniqueWordsPercentage} title={duplicateMiniStats.uniquePercentage} tone="gold" />
+                      </div>
+                      {/* Compact duplicate stats shown under the tab buttons for the duplicate tab. */}
+                      <SpiderStats metrics={duplicateHeaderSpiderMetrics} compact />
+                  </div>
+                )}
+            </div>
+            <div className="flex-grow overflow-y-auto custom-scrollbar">
+                {activeTab === 'keywords' && renderKeywordsTab()}
+                {activeTab === 'duplicates' && (
+                    <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">جار تحميل التكرارات...</div>}>
+                      <DuplicatesTab />
+                    </React.Suspense>
+                )}
+            </div>
+          </div>
         </div>
       </aside>
     </>

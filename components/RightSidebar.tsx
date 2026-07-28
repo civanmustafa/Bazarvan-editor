@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2, Code2, X, ExternalLink } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, ChevronLeft, ChevronRight, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2, Code2, X, ExternalLink } from 'lucide-react';
 import StructureTab from './StructureTab';
 import { useUser } from '../contexts/UserContext';
 import { useAISelector } from '../contexts/AIContext';
@@ -744,7 +744,17 @@ ${url}
   "error": ""
 }`;
 
-const RightSidebar: React.FC = () => {
+type RightSidebarProps = {
+    collapsed?: boolean;
+    isHidden?: boolean;
+    onToggleCollapsed?: () => void;
+};
+
+const RightSidebar: React.FC<RightSidebarProps> = ({
+    collapsed = false,
+    isHidden = false,
+    onToggleCollapsed,
+}) => {
     const {
         t,
         engineeringPrompts,
@@ -832,6 +842,22 @@ const RightSidebar: React.FC = () => {
         setIsStructureTabActive(activeTab === 'structure');
         return () => setIsStructureTabActive(false);
     }, [activeTab, setIsStructureTabActive]);
+
+    useEffect(() => {
+        const tabOrder = ['structure', 'ai', 'competitors', 'writing', 'links'] as const;
+        const handleTabShortcut = (event: KeyboardEvent) => {
+            if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            const digit = Number(event.code.replace('Digit', ''));
+            if (!event.code.startsWith('Digit') || digit < 1 || digit > tabOrder.length) return;
+
+            event.preventDefault();
+            setActiveTab(tabOrder[digit - 1]);
+            if (collapsed) onToggleCollapsed?.();
+        };
+
+        window.addEventListener('keydown', handleTabShortcut);
+        return () => window.removeEventListener('keydown', handleTabShortcut);
+    }, [collapsed, onToggleCollapsed]);
 
     useEffect(() => () => {
         Object.values(programmaticExtractionControllersRef.current).forEach(controller => controller.abort());
@@ -2764,37 +2790,96 @@ ${readyCommandCompetitorBlocks}`;
         </div>
     );
 
+    const sidebarTabs = ([
+        {
+            id: 'structure',
+            label: t.locale === 'ar' ? 'تحليل الهيكل' : 'Structure analysis',
+            icon: <LayoutTemplate size={18} />,
+        },
+        {
+            id: 'ai',
+            label: t.locale === 'ar' ? 'التحليل الذكي' : 'Smart analysis',
+            icon: <BrainCircuit size={18} />,
+        },
+        {
+            id: 'competitors',
+            label: t.locale === 'ar' ? 'المنافسون' : 'Competitors',
+            icon: <Users size={18} />,
+        },
+        {
+            id: 'writing',
+            label: t.locale === 'ar' ? 'كتابة المحتوى' : 'Content writing',
+            icon: <PenLine size={18} />,
+        },
+        {
+            id: 'links',
+            label: t.locale === 'ar' ? 'الربط الداخلي' : 'Internal linking',
+            icon: <Link2 size={18} />,
+        },
+    ] as const).map((tab, index) => ({ ...tab, shortcut: `Alt+${index + 1}` }));
+    const activeSidebarTab = sidebarTabs.find(tab => tab.id === activeTab) || sidebarTabs[0];
+
     return (
-        <aside className="basis-[18.7%] flex flex-col h-full min-w-0 bg-[#F2F3F5] dark:bg-[#1F1F1F] rounded-lg shadow-lg overflow-hidden border-s border-gray-300 dark:border-[#333]">
-            <div className="flex border-b border-gray-200 dark:border-[#3C3C3C]">
-                {(['structure', 'ai', 'competitors', 'writing', 'links'] as const).map(tab => (
+        <aside className={`${isHidden ? 'hidden' : 'flex'} h-full min-w-0 flex-none flex-col overflow-hidden rounded-lg border-s border-gray-300 bg-[#F2F3F5] shadow-lg transition-[width,flex-basis] duration-150 dark:border-[#333] dark:bg-[#1F1F1F] ${collapsed ? 'w-12 basis-12' : 'w-auto basis-[18.7%]'}`}>
+            <div className={`${collapsed ? 'flex' : 'hidden'} h-full flex-col items-center gap-3 px-1.5 py-2`}>
+                <button
+                    type="button"
+                    onClick={onToggleCollapsed}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-white hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white"
+                    aria-label={t.locale === 'ar' ? 'إظهار لوحة أدوات التحليل' : 'Show analysis tools panel'}
+                    title={t.locale === 'ar' ? 'إظهار لوحة أدوات التحليل' : 'Show analysis tools panel'}
+                >
+                    {t.locale === 'ar' ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+                </button>
+                <div
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-[#d4af37]/15 text-[#8a6f1d] ring-1 ring-inset ring-[#d4af37]/35 dark:text-[#f2d675]"
+                    title={`${activeSidebarTab.label} — ${activeSidebarTab.shortcut}`}
+                >
+                    {activeSidebarTab.icon}
+                </div>
+            </div>
+
+            <div className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col`}>
+              <div className="flex items-stretch gap-1 border-b border-gray-200 p-1.5 dark:border-[#3C3C3C]">
+                <div role="tablist" aria-label={t.locale === 'ar' ? 'أدوات تحليل المقالة' : 'Article analysis tools'} className="flex min-w-0 flex-1 gap-1 rounded-lg bg-gray-200/70 p-1 dark:bg-black/20">
+                {sidebarTabs.map(tab => (
                     <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        aria-label={tab === 'structure'
-                            ? (t.locale === 'ar' ? 'تحليل الهيكل' : 'Structure analysis')
-                            : tab === 'ai'
-                              ? (t.locale === 'ar' ? 'التحليل الذكي' : 'Smart analysis')
-                              : tab === 'competitors'
-                                ? (t.locale === 'ar' ? 'المنافسون' : 'Competitors')
-                                : tab === 'writing'
-                                  ? (t.locale === 'ar' ? 'كتابة المحتوى' : 'Content writing')
-                                  : (t.locale === 'ar' ? 'الربط الداخلي' : 'Internal linking')}
-                        className={`flex-1 py-3 flex justify-center items-center transition-colors ${activeTab === tab ? 'text-[#d4af37] border-b-2 border-[#d4af37] bg-white dark:bg-[#2A2A2A]' : 'text-gray-400 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/15'}`}
+                        type="button"
+                        role="tab"
+                        key={tab.id}
+                        id={`analysis-sidebar-${tab.id}-tab`}
+                        aria-controls="analysis-sidebar-panel"
+                        aria-selected={activeTab === tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        aria-label={`${tab.label} — ${tab.shortcut}`}
+                        title={`${tab.label} — ${tab.shortcut}`}
+                        className={`relative flex h-9 min-w-0 flex-1 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] ${
+                            activeTab === tab.id
+                                ? 'bg-[#d4af37]/15 text-[#8a6f1d] ring-1 ring-inset ring-[#d4af37]/35 shadow-sm dark:text-[#f2d675]'
+                                : 'text-gray-400 hover:bg-white/80 hover:text-gray-800 dark:hover:bg-white/5 dark:hover:text-white'
+                        }`}
                     >
-                        {tab === 'structure'
-                            ? <LayoutTemplate size={18} />
-                            : tab === 'ai'
-                              ? <BrainCircuit size={18} />
-                              : tab === 'competitors'
-                                ? <Users size={18} />
-                                : tab === 'writing'
-                                  ? <PenLine size={18} />
-                                  : <Link2 size={18} />}
+                        {tab.icon}
+                        <span className="sr-only">{tab.label}</span>
                     </button>
                 ))}
-            </div>
-            <div className="flex-grow overflow-y-auto custom-scrollbar">
+                </div>
+                <button
+                    type="button"
+                    onClick={onToggleCollapsed}
+                    className="inline-flex h-[44px] w-9 flex-none items-center justify-center rounded-md text-gray-400 hover:bg-gray-200/80 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] dark:hover:bg-white/5 dark:hover:text-white"
+                    aria-label={t.locale === 'ar' ? 'طي لوحة أدوات التحليل' : 'Collapse analysis tools panel'}
+                    title={t.locale === 'ar' ? 'طي لوحة أدوات التحليل' : 'Collapse analysis tools panel'}
+                >
+                    {t.locale === 'ar' ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+                </button>
+              </div>
+            <div
+                id="analysis-sidebar-panel"
+                role="tabpanel"
+                aria-labelledby={`analysis-sidebar-${activeTab}-tab`}
+                className="flex-grow overflow-y-auto custom-scrollbar"
+            >
                 {activeTab === 'structure'
                     ? <StructureTab />
                     : activeTab === 'ai'
@@ -2820,6 +2905,7 @@ ${readyCommandCompetitorBlocks}`;
                                 <InternalLinkingPanel />
                             </React.Suspense>
                             )}
+            </div>
             </div>
         </aside>
     );

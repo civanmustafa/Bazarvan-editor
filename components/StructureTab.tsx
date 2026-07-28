@@ -235,7 +235,11 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
     <>
         <div
             ref={cardRef}
-            className={`group relative min-h-14 rounded-lg transition-all duration-200 cursor-pointer bg-white hover:bg-[#d4af37]/10 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20 flex flex-col justify-between border border-gray-100 dark:border-[#3C3C3C] hover:border-[#d4af37]/30 dark:hover:border-[#d4af37]/30 shadow-sm`}
+            className={`group relative min-h-14 cursor-pointer rounded-lg border bg-white shadow-sm transition-colors dark:bg-[#2A2A2A] ${
+                isHighlighted
+                    ? 'border-[#d4af37]/50 bg-[#d4af37]/5 ring-1 ring-inset ring-[#d4af37]/25 dark:border-[#d4af37]/40 dark:bg-[#d4af37]/10'
+                    : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50 dark:border-[#3C3C3C] dark:hover:border-[#4A4A4A] dark:hover:bg-white/[0.04]'
+            } flex flex-col justify-between`}
             onClick={onClick}
             onMouseEnter={() => setHoverRect(cardRef.current?.getBoundingClientRect() || null)}
             onMouseLeave={() => setHoverRect(null)}
@@ -263,7 +267,7 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
                             e.stopPropagation();
                             onInfoClick(item);
                         }}
-                        className="p-0.5 rounded-md text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 hover:text-[#d4af37] transition-all"
+                        className="rounded-md p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/5 dark:hover:text-gray-200"
                         aria-label={t.structureTab.showDetails}
                     >
                         <AlertCircleIcon size={13} />
@@ -281,7 +285,7 @@ const ChecklistItem: React.FC<{ item: CheckResult; onClick?: () => void; isHighl
                         ? '#810701' 
                         : item.status === 'warn'
                         ? '#F59E0B'
-                        : '#d4af37',
+                        : '#64748B',
                 }}
                 ></div>
             </div>
@@ -313,7 +317,11 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
             onClick={onClick}
             onMouseEnter={() => setHoverRect(rowRef.current?.getBoundingClientRect() || null)}
             onMouseLeave={() => setHoverRect(null)}
-            className={`group flex items-center justify-between gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-all border border-transparent ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/10 border-[#d4af37]/20 dark:border-[#d4af37]/20' : 'hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
+            className={`group flex cursor-pointer items-center justify-between gap-2 rounded-md border px-2 py-1.5 transition-colors ${
+                isHighlighted
+                    ? 'border-[#d4af37]/25 bg-[#d4af37]/10 dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10'
+                    : 'border-transparent hover:bg-gray-100/80 dark:hover:bg-white/5'
+            }`}
         >
             <div className="flex min-w-0 flex-1 items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${statusColor} flex-shrink-0 shadow-sm`}></span>
@@ -325,7 +333,7 @@ const ChecklistItemList: React.FC<{ item: CheckResult; onClick?: () => void; isH
                 ) : null}
                 <button
                 onClick={(e) => { e.stopPropagation(); onInfoClick(item); }}
-                className="p-0.5 rounded-md text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/25 hover:text-[#d4af37]"
+                className="rounded-md p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/5 dark:hover:text-gray-200"
                 aria-label={t.structureTab.showDetails}
                 >
                 <AlertCircleIcon size={13} />

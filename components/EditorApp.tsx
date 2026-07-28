@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorContent } from '@tiptap/react';
 import { ArrowUp, Sparkles } from 'lucide-react';
 
@@ -24,8 +24,41 @@ import '../styles/editor.css';
 
 const RightSidebar = React.lazy(() => import('./RightSidebar'));
 
+const EDITOR_WORKSPACE_PREFERENCES_KEY = 'bazarvan-editor-workspace-preferences-v1';
+
+type EditorWorkspacePreferences = {
+  keywordsPanelCollapsed: boolean;
+  analysisPanelCollapsed: boolean;
+};
+
+const getEditorWorkspacePreferencesKey = (userId: string | null): string => (
+  `${EDITOR_WORKSPACE_PREFERENCES_KEY}:${userId || 'local'}`
+);
+
+const loadEditorWorkspacePreferences = (userId: string | null): EditorWorkspacePreferences => {
+  const defaults: EditorWorkspacePreferences = {
+    keywordsPanelCollapsed: false,
+    analysisPanelCollapsed: false,
+  };
+
+  if (typeof window === 'undefined') return defaults;
+
+  try {
+    const storedValue = window.localStorage.getItem(getEditorWorkspacePreferencesKey(userId));
+    if (!storedValue) return defaults;
+    const parsedValue = JSON.parse(storedValue) as Partial<EditorWorkspacePreferences>;
+    return {
+      keywordsPanelCollapsed: parsedValue.keywordsPanelCollapsed === true,
+      analysisPanelCollapsed: parsedValue.analysisPanelCollapsed === true,
+    };
+  } catch (error) {
+    console.warn('Could not load editor workspace preferences:', error);
+    return defaults;
+  }
+};
+
 const EditorView: React.FC = () => {
-  const { isDarkMode, t } = useUser();
+  const { currentUserId, isDarkMode, t } = useUser();
   const editor = useEditorSelector(context => context.editor);
   const scrollContainerRef = useEditorSelector(context => context.scrollContainerRef);
   const handleScrollToTop = useInteractionSelector(context => context.handleScrollToTop);
@@ -36,17 +69,75 @@ const EditorView: React.FC = () => {
   const setIsHeadingsAnalysisMinimized = useAISelector(context => context.setIsHeadingsAnalysisMinimized);
   const headingsAnalysis = useAISelector(context => context.headingsAnalysis);
   const { openModal } = useModal();
+  const [workspacePreferences, setWorkspacePreferences] = useState<EditorWorkspacePreferences>(
+    () => loadEditorWorkspacePreferences(currentUserId),
+  );
+  const [isFocusMode, setIsFocusMode] = useState(false);
 
   const displayTooltip = pinnedTooltip || tooltip;
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        getEditorWorkspacePreferencesKey(currentUserId),
+        JSON.stringify(workspacePreferences),
+      );
+    } catch (error) {
+      console.warn('Could not save editor workspace preferences:', error);
+    }
+  }, [currentUserId, workspacePreferences]);
+
+  useEffect(() => {
+    const handleWorkspaceShortcut = (event: KeyboardEvent) => {
+      const usesPrimaryModifier = event.ctrlKey || event.metaKey;
+      if (usesPrimaryModifier && event.shiftKey && event.code === 'KeyF') {
+        event.preventDefault();
+        setIsFocusMode(currentValue => !currentValue);
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        setIsFocusMode(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleWorkspaceShortcut);
+    return () => window.removeEventListener('keydown', handleWorkspaceShortcut);
+  }, []);
+
+  const toggleKeywordsPanel = useCallback(() => {
+    setWorkspacePreferences(currentPreferences => ({
+      ...currentPreferences,
+      keywordsPanelCollapsed: !currentPreferences.keywordsPanelCollapsed,
+    }));
+  }, []);
+
+  const toggleAnalysisPanel = useCallback(() => {
+    setWorkspacePreferences(currentPreferences => ({
+      ...currentPreferences,
+      analysisPanelCollapsed: !currentPreferences.analysisPanelCollapsed,
+    }));
+  }, []);
+
+  const toggleFocusMode = useCallback(() => {
+    setIsFocusMode(currentValue => !currentValue);
+  }, []);
+
   return (
     <div className={`h-screen overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
-      <main className="flex h-full p-2 gap-2 bg-[#FAFAFA] dark:bg-[#181818]">
-        <LeftSidebar />
-        <div className="relative basis-[60.73%] flex flex-col h-full min-w-0">
+      <main className="relative flex h-full gap-2 bg-[#FAFAFA] p-2 dark:bg-[#181818]">
+        <LeftSidebar
+          collapsed={workspacePreferences.keywordsPanelCollapsed}
+          isHidden={isFocusMode}
+          onToggleCollapsed={toggleKeywordsPanel}
+        />
+        <div className="relative flex h-full min-w-0 flex-1 basis-[60.73%] flex-col transition-[flex-basis] duration-150">
           <TipsCarousel />
           <AiExecutionMonitor />
-          <EditorToolbar />
+          <EditorToolbar
+            isFocusMode={isFocusMode}
+            onToggleFocusMode={toggleFocusMode}
+          />
           <div
             ref={scrollContainerRef}
             data-bazarvan-editor-panel="true"
@@ -66,9 +157,13 @@ const EditorView: React.FC = () => {
         </div>
 
         <React.Suspense
-          fallback={<aside className="basis-[18.7%] h-full min-w-0 rounded-lg border-s border-gray-300 bg-[#F2F3F5] dark:border-[#333] dark:bg-[#1F1F1F]" />}
+          fallback={isFocusMode ? null : <aside className="h-full min-w-0 basis-[18.7%] rounded-lg border-s border-gray-300 bg-[#F2F3F5] dark:border-[#333] dark:bg-[#1F1F1F]" />}
         >
-          <RightSidebar />
+          <RightSidebar
+            collapsed={workspacePreferences.analysisPanelCollapsed}
+            isHidden={isFocusMode}
+            onToggleCollapsed={toggleAnalysisPanel}
+          />
         </React.Suspense>
         {displayTooltip && (
           <div

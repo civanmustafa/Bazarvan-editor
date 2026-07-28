@@ -3,7 +3,7 @@ import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { useInteractionSelector } from '../contexts/InteractionContext';
 import { useAISelector } from '../contexts/AIContext';
-import { Languages } from 'lucide-react';
+import { Focus, Languages } from 'lucide-react';
 
 import { IconTooltip, Separator } from './toolbar/ToolbarItems';
 import FormattingActions from './toolbar/FormattingActions';
@@ -28,7 +28,15 @@ const ARTICLE_ACCESS_ROLE_LABELS: Record<string, string> = {
   editor: 'تعديل',
 };
 
-const EditorToolbar: React.FC = () => {
+type EditorToolbarProps = {
+    isFocusMode?: boolean;
+    onToggleFocusMode?: () => void;
+};
+
+const EditorToolbar: React.FC<EditorToolbarProps> = ({
+    isFocusMode = false,
+    onToggleFocusMode,
+}) => {
     const {
         isDarkMode,
         setIsDarkMode,
@@ -119,6 +127,9 @@ const EditorToolbar: React.FC = () => {
   
     const isAnyGeminiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt;
     const hasArticleSettings = Boolean(activeArticleSettings.status || activeArticleSettings.accessRole);
+    const focusModeLabel = isFocusMode
+      ? (uiLanguage === 'ar' ? 'إنهاء وضع التركيز' : 'Exit focus mode')
+      : (uiLanguage === 'ar' ? 'وضع التركيز' : 'Focus mode');
   
     const handleLanguageToggle = () => {
       const newLang = articleLanguage === 'ar' ? 'en' : 'ar';
@@ -266,6 +277,27 @@ const EditorToolbar: React.FC = () => {
             <FormattingActions editor={editor} activeState={activeState} t={t} />
 
             <div className="ms-auto flex items-center gap-1">
+                {onToggleFocusMode && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onToggleFocusMode}
+                      aria-pressed={isFocusMode}
+                      aria-label={`${focusModeLabel} — Ctrl+Shift+F`}
+                      title={`${focusModeLabel} — Ctrl+Shift+F`}
+                      className={`group relative inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] ${
+                        isFocusMode
+                          ? 'bg-[#d4af37]/15 text-[#9a781c] ring-1 ring-inset ring-[#d4af37]/35 dark:text-[#f2d675]'
+                          : 'text-gray-500 hover:bg-gray-200/80 hover:text-gray-800 dark:text-gray-300 dark:hover:bg-white/5 dark:hover:text-white'
+                      }`}
+                    >
+                      <Focus size={17} />
+                      <span className="hidden 2xl:inline">{uiLanguage === 'ar' ? 'تركيز' : 'Focus'}</span>
+                      <IconTooltip label={`${focusModeLabel} (Ctrl+Shift+F)`} />
+                    </button>
+                    <Separator />
+                  </>
+                )}
                 <UtilityActions 
                     t={t}
                     isAllKeywordsHighlighted={isAllKeywordsHighlighted}

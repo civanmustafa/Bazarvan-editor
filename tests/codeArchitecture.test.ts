@@ -88,7 +88,10 @@ test('all editor AI execution paths publish to one inline live activity monitor'
     readWorkspaceFile('components/InternalLinkingPanel.tsx'),
   ]);
 
-  assert.match(editorApp, /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s*\/>\s*<EditorToolbar\s*\/>/);
+  assert.match(
+    editorApp,
+    /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s*\/>\s*<EditorToolbar\s+isFocusMode=\{isFocusMode\}\s+onToggleFocusMode=\{toggleFocusMode\}\s*\/>/,
+  );
   assert.match(editorApp, /import AiExecutionMonitor from '\.\/AiKeyUsageToast'/);
   assert.match(monitor, /data-ai-execution-monitor="inline"/);
   assert.doesNotMatch(monitor, /fixed bottom-4 left-4/);
