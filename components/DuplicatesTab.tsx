@@ -201,7 +201,7 @@ const DuplicatesTab: React.FC = () => {
   };
 
   return (
-    <div className="p-3">
+    <div className="p-[0.075rem]">
       {Object.entries(analysis)
         .reverse()
         .filter(([_, phrases]) => (phrases as any[]).length > 0)
@@ -219,10 +219,10 @@ const DuplicatesTab: React.FC = () => {
             const keywordPhrases = phrases.filter(p => p.containsKeyword);
 
             return (
-                <div key={key} className="mb-2 bg-white dark:bg-[#2A2A2A] border border-gray-200 dark:border-[#3C3C3C] rounded-lg overflow-hidden transition-all duration-300">
+                <div key={key} className="mb-[0.05rem] bg-white dark:bg-[#2A2A2A] border border-gray-200 dark:border-[#3C3C3C] rounded-lg overflow-hidden transition-all duration-300">
                     <div
                         onClick={() => toggleSection(key)}
-                        className="w-full p-3 transition cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
+                        className="w-full p-[0.075rem] transition cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
                     >
                         <div className="flex justify-between items-center">
                             <span className="font-bold text-sm text-[#333333] dark:text-[#C7C7C7]">{`${t.phrases} ${nGramMap[key]}`}</span>
@@ -244,20 +244,20 @@ const DuplicatesTab: React.FC = () => {
                                 <ChevronDown className={`transition-transform text-gray-500 dark:text-gray-400 ${openSections[key] ? 'rotate-180' : ''}`} />
                             </div>
                         </div>
-                        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 flex justify-between items-center">
-                            <div className="flex gap-4">
+                        <div className="mt-[0.05rem] text-xs text-gray-500 dark:text-gray-400 flex justify-between items-center">
+                            <div className="flex gap-[0.1rem]">
                                 <span><span className="font-bold text-[#333] dark:text-gray-300">{totalPhrases}</span> {t.phrases}</span>
                                 <span className="text-[#d4af37] dark:text-[#f2d675]"><span className="font-bold">{keywordPhrasesCount}</span> {t.keyword}</span>
                                 <span className="text-gray-600 dark:text-gray-300"><span className="font-bold">{commonPhrasesCount}</span> {t.common}</span>
                             </div>
                         </div>
-                        <div className="w-full bg-gray-200 dark:bg-[#1F1F1F] rounded-full h-1.5 mt-2 flex overflow-hidden">
+                        <div className="w-full bg-gray-200 dark:bg-[#1F1F1F] rounded-full h-1.5 mt-[0.05rem] flex overflow-hidden">
                             <div className="bg-[#d4af37]/100 h-full" style={{ width: `${keywordPercentage}%` }} title={`${t.keyword}: ${keywordPercentage.toFixed(1)}%`}></div>
                             <div className="bg-gray-400 dark:bg-gray-500 h-full" style={{ width: `${commonPercentage}%` }} title={`${t.common}: ${commonPercentage.toFixed(1)}%`}></div>
                         </div>
                     </div>
                     {openSections[key] && (
-                        <div className="p-3 border-t border-gray-200 dark:border-[#3C3C3C] bg-gray-50/50 dark:bg-[#1F1F1F]">
+                        <div className="p-[0.075rem] border-t border-gray-200 dark:border-[#3C3C3C] bg-gray-50/50 dark:bg-[#1F1F1F]">
                           {commonPhrases.length > 0 && (
                             <PhraseList
                               phrases={commonPhrases}

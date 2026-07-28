@@ -2013,13 +2013,13 @@ ${readyCommandCompetitorBlocks}`;
 
     const renderAiTab = () => (
         <div ref={smartAnalysisTabRef} className="flex flex-col h-full">
-            <div className="flex p-2 mx-2 mt-2 mb-1 bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
+            <div className="flex p-[0.05rem] mx-[0.05rem] mt-[0.05rem] mb-[0.025rem] bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
                 <button onClick={() => setAiSubTab('new')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'new' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{tRs.newAnalysis}</button>
                 <button onClick={() => setAiSubTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'history' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.aiHistory.title}</button>
                 <button onClick={() => setAiSubTab('external')} className={`flex-1 px-1 py-1.5 text-[10px] font-bold leading-4 rounded-md transition-all ${aiSubTab === 'external' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.locale === 'ar' ? 'التحليل الخارجي' : 'External analysis'}</button>
             </div>
 
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-4">
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-[0.1rem] space-y-[0.1rem]">
                 {aiSubTab === 'new' ? (
                     <>
                         <div ref={commandsMenuRef} className="relative">
@@ -2271,7 +2271,7 @@ ${readyCommandCompetitorBlocks}`;
 
     const renderCompetitorsTab = () => (
         <div className="flex h-full flex-col">
-            <div className="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-4">
+            <div className="flex-grow overflow-y-auto custom-scrollbar p-[0.1rem] space-y-[0.1rem]">
                 <CompetitorDiscoveryPanel
                     articleId={activeArticleId}
                     articleTitle={articleTitle}
@@ -2810,7 +2810,7 @@ ${readyCommandCompetitorBlocks}`;
 
     return (
         <aside className={`${isHidden ? 'hidden' : 'flex'} h-full min-w-0 flex-none flex-col overflow-hidden rounded-lg border-s border-gray-300 bg-[#F2F3F5] shadow-lg transition-[width,flex-basis] duration-150 dark:border-[#333] dark:bg-[#1F1F1F] ${collapsed ? 'w-12 basis-12' : 'w-auto basis-[18.7%]'}`}>
-            <div className={`${collapsed ? 'flex' : 'hidden'} h-full flex-col items-center gap-3 px-1.5 py-2`}>
+            <div className={`${collapsed ? 'flex' : 'hidden'} h-full flex-col items-center gap-[0.075rem] px-[0.0375rem] py-[0.05rem]`}>
                 <button
                     type="button"
                     onClick={onToggleCollapsed}
@@ -2829,8 +2829,8 @@ ${readyCommandCompetitorBlocks}`;
             </div>
 
             <div className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col`}>
-              <div className="relative z-40 flex items-stretch gap-1 border-b border-gray-200 p-1.5 dark:border-[#3C3C3C]">
-                <div role="tablist" aria-label={t.locale === 'ar' ? 'أدوات الذكاء الاصطناعي' : 'AI tools'} className="flex min-w-0 flex-1 gap-1 rounded-lg bg-gray-200/70 p-1 dark:bg-black/20">
+              <div className="relative z-40 flex items-stretch gap-[0.025rem] border-b border-gray-200 p-[0.0375rem] dark:border-[#3C3C3C]">
+                <div role="tablist" aria-label={t.locale === 'ar' ? 'أدوات الذكاء الاصطناعي' : 'AI tools'} className="flex min-w-0 flex-1 gap-[0.025rem] rounded-lg bg-gray-200/70 p-[0.025rem] dark:bg-black/20">
                 {sidebarTabs.map((tab, tabIndex) => (
                     <button
                         type="button"
@@ -2879,7 +2879,7 @@ ${readyCommandCompetitorBlocks}`;
                         : activeTab === 'writing'
                           ? (
                             <React.Suspense fallback={(
-                                <div className="flex h-full items-center justify-center p-4 text-xs font-bold text-gray-400">
+                                <div className="flex h-full items-center justify-center p-[0.1rem] text-xs font-bold text-gray-400">
                                     {t.locale === 'ar' ? 'جار تحميل كتابة المحتوى...' : 'Loading content writing...'}
                                 </div>
                             )}>
@@ -2888,7 +2888,7 @@ ${readyCommandCompetitorBlocks}`;
                             )
                           : (
                             <React.Suspense fallback={(
-                                <div className="flex h-full items-center justify-center p-4 text-xs font-bold text-gray-400">
+                                <div className="flex h-full items-center justify-center p-[0.1rem] text-xs font-bold text-gray-400">
                                     {t.locale === 'ar' ? 'جار تحميل الربط الداخلي...' : 'Loading internal linking...'}
                                 </div>
                             )}>

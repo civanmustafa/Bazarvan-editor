@@ -1012,8 +1012,8 @@ const ContentWritingPanel: React.FC = () => {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-white px-3 py-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="flex items-center justify-between gap-[0.05rem] border-b border-gray-200 bg-white px-[0.075rem] py-[0.075rem] dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+        <div className="flex min-w-0 items-center gap-[0.05rem]">
           <FileText size={17} className="shrink-0 text-[#d4af37]" />
           <h3 className="truncate text-sm font-bold text-gray-800 dark:text-gray-100">
             {isArabic ? 'كتابة المحتوى' : 'Content writing'}
@@ -1032,7 +1032,7 @@ const ContentWritingPanel: React.FC = () => {
       </div>
 
       <div className="flex-grow overflow-y-auto custom-scrollbar">
-        <section className="space-y-3 border-b border-gray-200 p-3 dark:border-[#3C3C3C]">
+        <section className="space-y-[0.075rem] border-b border-gray-200 p-[0.075rem] dark:border-[#3C3C3C]">
           {visibleProviders.length > 0 ? (
             <div className={`grid gap-1.5 ${visibleProviders.length >= 3 ? 'grid-cols-3' : visibleProviders.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
               {visibleProviders.map(item => {
