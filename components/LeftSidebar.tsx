@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, ListTree, Plus, Check, Sparkles, Loader2, Hash, Percent, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Copy, CheckCircle, XCircle, AlertCircle, Users, ListChecks, X, Eye, Trash2, KeyRound, Repeat, LayoutGrid, LayoutTemplate, ListTree, Plus, Check, Sparkles, Loader2, Hash, Percent, ChevronLeft, ChevronRight } from 'lucide-react';
 import GoalTab from './GoalTab';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
@@ -24,6 +24,9 @@ import {
 import QuickClientCreateModal from './QuickClientCreateModal';
 
 const DuplicatesTab = React.lazy(() => import('./DuplicatesTab'));
+const StructureTab = React.lazy(() => import('./StructureTab'));
+
+type LeftSidebarTab = 'keywords' | 'duplicates' | 'criteria';
 
 const mergeUniqueKeywordTerms = (existing: string[], incoming: string[], maxItems: number): string[] => {
   const seen = new Set<string>();
@@ -350,6 +353,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const setGoalContext = useEditorSelector(context => context.setGoalContext);
   const analysisResults = useEditorSelector(context => context.analysisResults);
   const setIsDuplicatesTabActive = useEditorSelector(context => context.setIsDuplicatesTabActive);
+  const setIsStructureTabActive = useEditorSelector(context => context.setIsStructureTabActive);
   const applyHighlights = useInteractionSelector(context => context.applyHighlights);
   const clearAllHighlights = useInteractionSelector(context => context.clearAllHighlights);
   const highlightedItem = useInteractionSelector(context => context.highlightedItem);
@@ -364,7 +368,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   
   const { keywordAnalysis, duplicateAnalysis, duplicateStats } = analysisResults;
 
-  const [activeTab, setActiveTab] = React.useState<'keywords' | 'duplicates'>('keywords');
+  const [activeTab, setActiveTab] = React.useState<LeftSidebarTab>('keywords');
   const [lsiInputValue, setLsiInputValue] = React.useState('');
   const [autoDistributeText, setAutoDistributeText] = React.useState('');
   const [isGeneratingSemanticKeywords, setIsGeneratingSemanticKeywords] = React.useState(false);
@@ -387,7 +391,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     [activeArticleId, activeClients, keywords.clientId, keywords.company, linkedArticleClientId],
   );
 
-  const getTabClass = (tabName: 'keywords' | 'duplicates') => {
+  const criteriaTabLabel = uiLanguage === 'ar' ? 'المعايير' : 'Criteria';
+
+  const getTabClass = (tabName: LeftSidebarTab) => {
     const isActive = activeTab === tabName;
     return `relative flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-md px-2 text-xs font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] ${
       isActive
@@ -396,24 +402,31 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     }`;
   };
 
-  const handleTabChange = React.useCallback((tabName: 'keywords' | 'duplicates') => {
+  const handleTabChange = React.useCallback((tabName: LeftSidebarTab) => {
     setActiveTab(tabName);
     setIsDuplicatesTabActive(tabName === 'duplicates');
-  }, [setIsDuplicatesTabActive]);
+    setIsStructureTabActive(tabName === 'criteria');
+  }, [setIsDuplicatesTabActive, setIsStructureTabActive]);
 
   React.useEffect(() => {
     setIsDuplicatesTabActive(activeTab === 'duplicates');
-    return () => setIsDuplicatesTabActive(false);
-  }, [activeTab, setIsDuplicatesTabActive]);
+    setIsStructureTabActive(activeTab === 'criteria');
+    return () => {
+      setIsDuplicatesTabActive(false);
+      setIsStructureTabActive(false);
+    };
+  }, [activeTab, setIsDuplicatesTabActive, setIsStructureTabActive]);
 
   React.useEffect(() => {
     const handleTabShortcut = (event: KeyboardEvent) => {
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      const nextTab = event.code === 'Digit6'
+      const nextTab: LeftSidebarTab | null = event.code === 'Digit1'
         ? 'keywords'
-        : event.code === 'Digit7'
+        : event.code === 'Digit2'
           ? 'duplicates'
-          : null;
+          : event.code === 'Digit3'
+            ? 'criteria'
+            : null;
       if (!nextTab) return;
 
       event.preventDefault();
@@ -1337,15 +1350,23 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           </button>
           <div
             className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-[#d4af37]/15 text-[#8a6f1d] ring-1 ring-inset ring-[#d4af37]/35 dark:text-[#f2d675]"
-            title={activeTab === 'keywords' ? `${tLk.targetKeywords} — Alt+6` : `${tLk.duplicates} — Alt+7`}
+            title={activeTab === 'keywords'
+              ? `${tLk.targetKeywords} — Alt+1`
+              : activeTab === 'duplicates'
+                ? `${tLk.duplicates} — Alt+2`
+                : `${criteriaTabLabel} — Alt+3`}
           >
-            {activeTab === 'keywords' ? <KeyRound size={17} /> : <Repeat size={17} />}
+            {activeTab === 'keywords'
+              ? <KeyRound size={17} />
+              : activeTab === 'duplicates'
+                ? <Repeat size={17} />
+                : <LayoutTemplate size={17} />}
           </div>
         </div>
 
         <div className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col`}>
           <div className="flex items-stretch gap-1 border-b border-gray-200 p-1.5 dark:border-[#3C3C3C]">
-            <div role="tablist" aria-label={uiLanguage === 'ar' ? 'لوحة الكلمات والتكرارات' : 'Keywords and duplicates panel'} className="flex min-w-0 flex-1 gap-1 rounded-lg bg-gray-200/70 p-1 dark:bg-black/20">
+            <div role="tablist" aria-label={uiLanguage === 'ar' ? 'الكلمات والتكرارات والمعايير' : 'Keywords, duplicates, and criteria'} className="flex min-w-0 flex-1 gap-1 rounded-lg bg-gray-200/70 p-1 dark:bg-black/20">
               <button
                 type="button"
                 role="tab"
@@ -1354,7 +1375,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 aria-selected={activeTab === 'keywords'}
                 onClick={() => handleTabChange('keywords')}
                 className={getTabClass('keywords')}
-                title={`${tLk.targetKeywords} — Alt+6`}
+                title={`${tLk.targetKeywords} — Alt+1`}
               >
                   <KeyRound size={16} />
                   <span className="truncate">{tLk.targetKeywords}</span>
@@ -1367,10 +1388,23 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 aria-selected={activeTab === 'duplicates'}
                 onClick={() => handleTabChange('duplicates')}
                 className={getTabClass('duplicates')}
-                title={`${tLk.duplicates} — Alt+7`}
+                title={`${tLk.duplicates} — Alt+2`}
               >
                   <Repeat size={16} />
                   <span className="truncate">{tLk.duplicates}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="criteria-sidebar-tab"
+                aria-controls="criteria-sidebar-panel"
+                aria-selected={activeTab === 'criteria'}
+                onClick={() => handleTabChange('criteria')}
+                className={getTabClass('criteria')}
+                title={`${criteriaTabLabel} — Alt+3`}
+              >
+                  <LayoutTemplate size={16} />
+                  <span className="truncate">{criteriaTabLabel}</span>
               </button>
             </div>
             <button
@@ -1385,12 +1419,21 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           </div>
 
           <div
-            id={activeTab === 'keywords' ? 'keywords-sidebar-panel' : 'duplicates-sidebar-panel'}
+            id={activeTab === 'keywords'
+              ? 'keywords-sidebar-panel'
+              : activeTab === 'duplicates'
+                ? 'duplicates-sidebar-panel'
+                : 'criteria-sidebar-panel'}
             role="tabpanel"
-            aria-labelledby={activeTab === 'keywords' ? 'keywords-sidebar-tab' : 'duplicates-sidebar-tab'}
+            aria-labelledby={activeTab === 'keywords'
+              ? 'keywords-sidebar-tab'
+              : activeTab === 'duplicates'
+                ? 'duplicates-sidebar-tab'
+                : 'criteria-sidebar-tab'}
             className="flex min-h-0 flex-1 flex-col"
           >
-            <div className="flex-shrink-0 border-b border-gray-200 bg-[#F2F3F5] p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+            {activeTab !== 'criteria' && (
+              <div className="flex-shrink-0 border-b border-gray-200 bg-[#F2F3F5] p-3 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
                 {activeTab === 'keywords' ? (
                     // Compact keyword/goal tab network: primary, synonyms, company, and LSI.
                     <SpiderStats metrics={keywordDetailSpiderMetrics} compact />
@@ -1405,12 +1448,18 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       <SpiderStats metrics={duplicateHeaderSpiderMetrics} compact />
                   </div>
                 )}
-            </div>
+              </div>
+            )}
             <div className="flex-grow overflow-y-auto custom-scrollbar">
                 {activeTab === 'keywords' && renderKeywordsTab()}
                 {activeTab === 'duplicates' && (
                     <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">جار تحميل التكرارات...</div>}>
                       <DuplicatesTab />
+                    </React.Suspense>
+                )}
+                {activeTab === 'criteria' && (
+                    <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">{uiLanguage === 'ar' ? 'جار تحميل المعايير...' : 'Loading criteria...'}</div>}>
+                      <StructureTab />
                     </React.Suspense>
                 )}
             </div>
