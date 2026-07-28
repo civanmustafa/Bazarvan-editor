@@ -1,4 +1,5 @@
 import type { GoalContext } from '../types';
+import { isCallToActionPageContext } from '../utils/goalContext';
 
 export const CONTENT_WRITING_ACTIVE_QUALITY_POLICY_VERSION = 1;
 export const CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE = 90;
@@ -264,8 +265,6 @@ const range = (value: { min: number; max: number }): string => (
   value.min === value.max ? String(value.min) : `${value.min}-${value.max}`
 );
 
-const CALL_TO_ACTION_QUALITY_PAGE_TYPES = new Set(['service', 'category', 'product', 'landing']);
-
 export const buildContentWritingQualityContract = (options: {
   configuration: ContentWritingQualityConfiguration;
   language: string;
@@ -275,7 +274,7 @@ export const buildContentWritingQualityContract = (options: {
   const isArabic = options.language !== 'en';
   const pageType = String(options.goalContext?.pageType || '').trim();
   const isProduct = pageType === 'product';
-  const isCallToActionPage = CALL_TO_ACTION_QUALITY_PAGE_TYPES.has(pageType);
+  const isCallToActionPage = isCallToActionPageContext(options.goalContext);
   const lines = isArabic ? [
     `سياسة الجودة: الإصدار ${policy.version}.`,
     `استهدف ${range(policy.targetWords)} كلمة و${range(policy.outlineSections)} أقسام H2 للمتن.`,

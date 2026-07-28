@@ -2,6 +2,7 @@ import {
   CONTENT_WRITING_WORKFLOW_VERSION,
   assembleContentWritingDraft,
   balanceContentWritingOutlineWordTargets,
+  buildContentWritingCallToActionPrompt,
   buildContentWritingCompetitorIndexPrompt,
   buildContentWritingConclusionPrompt,
   buildContentWritingCoverageAuditPrompt,
@@ -124,6 +125,23 @@ type QualityRuntime = {
   goalContext: GoalContext;
 };
 
+const getSessionGoalContext = (session: ContentWritingSession): GoalContext => {
+  const qualityInput = isRecord(session.context_snapshot?.qualityInput)
+    ? session.context_snapshot.qualityInput
+    : {};
+  const article = isRecord(session.context_snapshot?.article)
+    ? session.context_snapshot.article
+    : {};
+  const source = isRecord(qualityInput.goalContext)
+    ? qualityInput.goalContext
+    : isRecord(session.context_snapshot?.goalContext)
+      ? session.context_snapshot.goalContext
+      : isRecord(article.goalContext)
+        ? article.goalContext
+        : {};
+  return normalizeGoalContext(source);
+};
+
 const getQualityRuntime = (
   session: ContentWritingSession,
   language: string,
@@ -133,7 +151,6 @@ const getQualityRuntime = (
     : null;
   if (!source) return null;
   const keywordSource = isRecord(source.keywords) ? source.keywords : {};
-  const goalSource = isRecord(source.goalContext) ? source.goalContext : {};
   const keywords: Keywords = {
     primary: toText(keywordSource.primary),
     secondaries: toTextList(keywordSource.secondaries),
@@ -141,7 +158,7 @@ const getQualityRuntime = (
     lsi: toTextList(keywordSource.lsi),
   };
   if (!keywords.primary) return null;
-  const goalContext = normalizeGoalContext(goalSource);
+  const goalContext = getSessionGoalContext(session);
   const configuration = normalizeContentWritingQualityConfiguration(
     isRecord(session.context_snapshot?.qualityConfiguration)
       ? session.context_snapshot.qualityConfiguration
@@ -286,6 +303,9 @@ export const executeStructuredContentWritingWorkflow = async (
 ): Promise<ContentWritingExecutionResult> => {
   const article = getArticleSnapshot(options.session);
   const qualityRuntime = getQualityRuntime(options.session, article.language);
+  const goalContext = qualityRuntime?.goalContext || getSessionGoalContext(options.session);
+  const primaryKeyword = qualityRuntime?.keywords.primary || '';
+  const companyName = qualityRuntime?.keywords.company || '';
   const promptTemplates = isRecord(options.session.context_snapshot?.promptTemplates)
     ? options.session.context_snapshot.promptTemplates as Record<string, string>
     : {};
@@ -411,6 +431,7 @@ export const executeStructuredContentWritingWorkflow = async (
         || definition.type === 'introduction'
         || definition.type === 'faq'
         || definition.type === 'conclusion'
+        || definition.type === 'call_to_action'
         || definition.type === 'section_repair'
         || definition.type === 'final_review'
         || definition.type === 'quality_repair'
@@ -593,7 +614,7 @@ export const executeStructuredContentWritingWorkflow = async (
     });
   }
 
-  const definitions = createContentWritingWorkflowSteps(outline);
+  const definitions = createContentWritingWorkflowSteps(outline, goalContext);
   for (const definition of definitions) {
     if (
       definition.key !== 'competitor-index'
@@ -694,6 +715,8 @@ export const executeStructuredContentWritingWorkflow = async (
     outline,
     outputs,
     includeFaq: false,
+    goalContext,
+    primaryKeyword,
   });
   const introductionResult = await runStep({
     definition: introductionDefinition,
@@ -717,6 +740,8 @@ export const executeStructuredContentWritingWorkflow = async (
     outline,
     outputs,
     includeFaq: false,
+    goalContext,
+    primaryKeyword,
   });
   const faqResult = await runStep({
     definition: faqDefinition,
@@ -733,27 +758,40 @@ export const executeStructuredContentWritingWorkflow = async (
   if (!faqResult.ok) return faqResult.execution;
   outputs.faq = faqResult.output;
 
-  const conclusionDefinition = definitions.find(definition => definition.type === 'conclusion')!;
+  const finalSectionDefinition = definitions.find(definition => (
+    definition.type === 'conclusion' || definition.type === 'call_to_action'
+  ))!;
   const introductionBodyAndFaqDraft = assembleContentWritingDraft({
     articleTitle: article.title,
     language: article.language,
     outline,
     outputs,
+    goalContext,
+    primaryKeyword,
   });
-  const conclusionResult = await runStep({
-    definition: conclusionDefinition,
-    prompt: buildContentWritingConclusionPrompt({
-      outline,
-      draft: introductionBodyAndFaqDraft,
-      template: promptTemplate(PROMPT_TEMPLATE_IDS.conclusion),
-    }),
-    stepIndex: conclusionDefinition.ordinal,
+  const finalSectionResult = await runStep({
+    definition: finalSectionDefinition,
+    prompt: finalSectionDefinition.type === 'call_to_action'
+      ? buildContentWritingCallToActionPrompt({
+          outline,
+          draft: introductionBodyAndFaqDraft,
+          goalContext,
+          primaryKeyword,
+          companyName,
+          template: promptTemplate(PROMPT_TEMPLATE_IDS.callToAction),
+        })
+      : buildContentWritingConclusionPrompt({
+          outline,
+          draft: introductionBodyAndFaqDraft,
+          template: promptTemplate(PROMPT_TEMPLATE_IDS.conclusion),
+        }),
+    stepIndex: finalSectionDefinition.ordinal,
     stepCount: definitions.length,
     maxOutputTokens: 4_000,
     articleContextOverride: compactArticleContext,
   });
-  if (!conclusionResult.ok) return conclusionResult.execution;
-  outputs.conclusion = conclusionResult.output;
+  if (!finalSectionResult.ok) return finalSectionResult.execution;
+  outputs[finalSectionDefinition.key] = finalSectionResult.output;
 
   const coverageBeforeAudit = summarizeContentWritingCoverage({
     knowledge,
@@ -769,6 +807,8 @@ export const executeStructuredContentWritingWorkflow = async (
     language: article.language,
     outline,
     outputs,
+    goalContext,
+    primaryKeyword,
   });
   const coverageAuditDefinition = definitions.find(definition => definition.type === 'coverage_audit')!;
   const coverageAuditResult = await runStep({
@@ -938,6 +978,8 @@ export const executeStructuredContentWritingWorkflow = async (
     language: article.language,
     outline,
     outputs,
+    goalContext,
+    primaryKeyword,
   });
   const baseFinalDefinition = definitions.find(definition => definition.type === 'final_review')!;
   const finalDefinition: ContentWritingWorkflowStepDefinition = {
@@ -952,7 +994,7 @@ export const executeStructuredContentWritingWorkflow = async (
   };
   let finalOutput = assembledDraft;
   let finalStep = coverageAuditResult.step;
-  let execution = coverageAuditResult.execution || conclusionResult.execution;
+  let execution = coverageAuditResult.execution || finalSectionResult.execution;
   let repairPasses = 0;
   let activeSectionCoverageByKey = new Map(sectionCoverageByKey);
   let qualityReport: ContentWritingQualityReport | null = qualityRuntime
@@ -1006,6 +1048,7 @@ export const executeStructuredContentWritingWorkflow = async (
     const revisionDocument = buildContentWritingRevisionDocument({
       markdown: finalOutput,
       outline,
+      goalContext,
     });
     const qualityBeforeRevision = qualityReport;
     const draftBeforeRevision = finalOutput;
@@ -1095,6 +1138,7 @@ export const executeStructuredContentWritingWorkflow = async (
   const finalReviewDocument = buildContentWritingRevisionDocument({
     markdown: finalOutput,
     outline,
+    goalContext,
   });
   await ensureStep(finalDefinition);
   const finalResult = await runStep({
@@ -1166,6 +1210,7 @@ export const executeStructuredContentWritingWorkflow = async (
       const repairDocument = buildContentWritingRevisionDocument({
         markdown: finalOutput,
         outline,
+        goalContext,
       });
       const repairPlanDefinition: ContentWritingWorkflowStepDefinition = {
         key: `quality-repair-${String(pass).padStart(2, '0')}-plan`,

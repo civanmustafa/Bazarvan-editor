@@ -7,6 +7,7 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20260723000000_content_writing_quality_policy.sql',
   '20260723010000_content_writing_knowledge_workflow.sql',
   '20260723020000_content_writing_resume_preferences.sql',
+  '20260728000000_dynamic_content_writing_final_section.sql',
 ] as const;
 
 export const CONTENT_WRITING_RELEASE_ARTIFACTS = [

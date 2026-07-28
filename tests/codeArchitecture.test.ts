@@ -565,7 +565,7 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
   assert.match(workflow, /competitor_phrase_intelligence_json/);
   assert.match(serverWorkflow, /deterministic_competitor_phrase_intelligence/);
   assert.match(serverWorkflow, /competitorPhraseIntelligence/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 16/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 17/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /competitor_phrase_intelligence_json/);
   assert.match(promptRegistry, /originalityOpportunity/);

@@ -98,6 +98,7 @@ test('service quality analysis requires CTA section and hides conclusion criteri
   assert.equal(criterion('callToActionBulletList')?.status, 'pass');
   assert.equal(criterion('callToActionFinalSentence')?.status, 'pass');
   assert.equal(criterion('lastH2IsConclusion'), undefined);
+  assert.equal(criterion('paragraphLength')?.status, 'pass');
 });
 
 test('session word range is the single authoritative word-count criterion', async () => {

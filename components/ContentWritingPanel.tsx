@@ -230,6 +230,7 @@ const getStepLabel = (step: ContentWritingStep, isArabic: boolean): string => {
     outline: isArabic ? 'مخطط المقالة' : 'Article outline',
     introduction: isArabic ? 'المقدمة' : 'Introduction',
     conclusion: isArabic ? 'الخاتمة' : 'Conclusion',
+    call_to_action: isArabic ? 'دعوة اتخاذ الإجراء' : 'Call to action',
     faq: isArabic ? 'الأسئلة الشائعة' : 'FAQ',
     final_review: isArabic ? 'المراجعة النهائية' : 'Final review',
     quality_repair: isArabic ? 'إصلاح معايير الجودة' : 'Quality repair',
@@ -408,13 +409,26 @@ const ContentWritingPanel: React.FC = () => {
   const workflowSteps = useMemo(() => activeDetail?.steps || [], [activeDetail?.steps]);
   const recoverableDraft = useMemo(() => {
     if (!selectedSession || !activeDetail) return null;
+    const qualityInput = isRecordValue(activeDetail.session.contextSnapshot.qualityInput)
+      ? activeDetail.session.contextSnapshot.qualityInput
+      : {};
+    const sessionGoalContext = isRecordValue(qualityInput.goalContext)
+      ? qualityInput.goalContext
+      : goalContext;
+    const sessionKeywords = isRecordValue(qualityInput.keywords)
+      ? qualityInput.keywords
+      : {};
     return recoverContentWritingDraft({
       articleTitle,
       language: articleLanguage,
       sessionResultText: activeDetail.session.resultText,
       steps: workflowSteps,
+      goalContext: sessionGoalContext,
+      primaryKeyword: typeof sessionKeywords.primary === 'string'
+        ? sessionKeywords.primary
+        : keywords.primary,
     });
-  }, [activeDetail, articleLanguage, articleTitle, selectedSession, workflowSteps]);
+  }, [activeDetail, articleLanguage, articleTitle, goalContext, keywords.primary, selectedSession, workflowSteps]);
   const isRecoverableDraftPartial = Boolean(
     recoverableDraft
     && (selectedSession?.status !== 'completed' || !activeDetail?.session.resultText),

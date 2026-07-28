@@ -220,6 +220,20 @@ test('content-writing resume migration applies the user-selected provider and pr
   assertBalancedSqlParentheses(migration);
 });
 
+test('dynamic final-section migration enables a durable call-to-action workflow step', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260728000000_dynamic_content_writing_final_section.sql',
+  );
+
+  assert.match(migration, /'call_to_action'/);
+  assert.match(migration, /dynamic_final_section_version smallint not null default 1/);
+  assert.match(migration, /content_writing_steps_step_type_check/);
+  assert.match(migration, /create or replace function public\.ensure_content_writing_step/);
+  assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
   const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),

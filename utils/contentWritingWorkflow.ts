@@ -23,8 +23,10 @@ import {
   competitorPhraseIntelligenceToPromptJson,
   type CompetitorPhraseIntelligenceResult,
 } from './competitorPhraseAnalysis';
+import type { GoalContext } from '../types';
+import { getContentWritingFinalSectionKind } from './goalContext';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 6;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 7;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
@@ -35,6 +37,7 @@ export type ContentWritingWorkflowStepType =
   | 'section'
   | 'introduction'
   | 'conclusion'
+  | 'call_to_action'
   | 'faq'
   | 'coverage_audit'
   | 'section_repair'
@@ -389,6 +392,7 @@ export const balanceContentWritingOutlineWordTargets = (
 
 export const createContentWritingWorkflowSteps = (
   outline: ContentWritingOutline,
+  goalContext?: Partial<GoalContext> | null,
 ): ContentWritingWorkflowStepDefinition[] => {
   const sectionSteps = outline.sections.map((section, index) => ({
     key: `section-${String(index + 1).padStart(2, '0')}`,
@@ -403,6 +407,30 @@ export const createContentWritingWorkflowSteps = (
     },
   }));
   const nextOrdinal = sectionSteps.length + 3;
+  const finalSectionKind = getContentWritingFinalSectionKind(goalContext);
+  const finalSectionDefinition: ContentWritingWorkflowStepDefinition = finalSectionKind === 'call_to_action'
+    ? {
+        key: 'call-to-action',
+        type: 'call_to_action',
+        ordinal: nextOrdinal + 2,
+        title: 'Call to action',
+        metadata: {
+          workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+          finalSectionKind,
+          pageType: String(goalContext?.pageType || ''),
+        },
+      }
+    : {
+        key: 'conclusion',
+        type: 'conclusion',
+        ordinal: nextOrdinal + 2,
+        title: 'Conclusion',
+        metadata: {
+          workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+          finalSectionKind,
+          pageType: String(goalContext?.pageType || ''),
+        },
+      };
   return [
     getContentWritingCompetitorIndexStep(),
     getContentWritingOutlineStep(),
@@ -421,13 +449,7 @@ export const createContentWritingWorkflowSteps = (
       title: 'Frequently asked questions',
       metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION },
     },
-    {
-      key: 'conclusion',
-      type: 'conclusion',
-      ordinal: nextOrdinal + 2,
-      title: 'Conclusion',
-      metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION },
-    },
+    finalSectionDefinition,
     {
       key: 'coverage-audit',
       type: 'coverage_audit',
@@ -630,6 +652,24 @@ export const buildContentWritingConclusionPrompt = (options: {
   },
 );
 
+export const buildContentWritingCallToActionPrompt = (options: {
+  outline: ContentWritingOutline;
+  draft: string;
+  goalContext: Partial<GoalContext>;
+  primaryKeyword: string;
+  companyName?: string;
+  template?: string;
+}): string => renderPromptTemplate(
+  options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.callToAction),
+  {
+    outline_json: outlineJson(options.outline),
+    completed_draft: options.draft,
+    page_goal_json: JSON.stringify(options.goalContext, null, 2),
+    primary_keyword: options.primaryKeyword,
+    company_name: options.companyName || '',
+  },
+);
+
 export const buildContentWritingFaqPrompt = (options: {
   outline: ContentWritingOutline;
   draft: string;
@@ -779,6 +819,8 @@ export const assembleContentWritingDraft = (options: {
   outline: ContentWritingOutline;
   outputs: Record<string, string>;
   includeFaq?: boolean;
+  goalContext?: Partial<GoalContext> | null;
+  primaryKeyword?: string;
 }): string => {
   const articleTitle = options.articleTitle.replace(/[\r\n]+/g, ' ').trim();
   const sectionParts = options.outline.sections.map((section, index) => {
@@ -787,15 +829,43 @@ export const assembleContentWritingDraft = (options: {
   });
   const introduction = removeLeadingHeading(options.outputs.introduction || '');
   const conclusion = removeLeadingHeading(options.outputs.conclusion || '');
+  const callToAction = normalizeGeneratedContentWritingMarkdown(
+    options.outputs['call-to-action'] || '',
+  );
   const faq = removeLeadingHeading(options.outputs.faq || '', 2);
   const faqTitle = options.language === 'en' ? 'Frequently asked questions' : 'الأسئلة الشائعة';
   const conclusionTitle = options.language === 'en' ? 'Conclusion' : 'الخاتمة';
+  const inferredFinalSectionKind = callToAction
+    ? 'call_to_action'
+    : getContentWritingFinalSectionKind(options.goalContext);
+  const callToActionLines = callToAction.split(/\r?\n/);
+  const callToActionHeadingIndex = callToActionLines.findIndex(line => /^##[ \t]+\S/.test(line.trim()));
+  const callToActionSection = callToAction
+    ? callToActionHeadingIndex >= 0
+      ? callToActionLines.slice(callToActionHeadingIndex).join('\n').trim()
+      : [
+          `## ${
+            options.language === 'en'
+              ? `Contact us about ${options.primaryKeyword || 'this service'}`
+              : `تواصل معنا بشأن ${options.primaryKeyword || 'هذه الخدمة'}`
+          }`,
+          '',
+          removeLeadingHeading(callToAction),
+        ].join('\n').trim()
+    : '';
+  const finalSection = inferredFinalSectionKind === 'call_to_action'
+    ? callToActionSection || (
+        conclusion ? `## ${conclusionTitle}\n\n${conclusion}` : ''
+      )
+    : conclusion
+      ? `## ${conclusionTitle}\n\n${conclusion}`
+      : '';
   return joinNonEmpty([
     `# ${articleTitle}`,
     introduction,
     ...sectionParts,
     options.includeFaq !== false && faq ? `## ${faqTitle}\n\n${faq}` : '',
-    conclusion ? `## ${conclusionTitle}\n\n${conclusion}` : '',
+    finalSection,
   ]);
 };
 
@@ -828,6 +898,8 @@ export const recoverContentWritingDraft = (options: {
   language: string;
   sessionResultText?: string | null;
   steps: readonly RecoverableContentWritingStep[];
+  goalContext?: Partial<GoalContext> | null;
+  primaryKeyword?: string;
 }): RecoveredContentWritingDraft | null => {
   const sessionResult = String(options.sessionResultText || '').trim();
   if (sessionResult) {
@@ -894,6 +966,7 @@ export const recoverContentWritingDraft = (options: {
       || step.stepType === 'introduction'
       || step.stepType === 'faq'
       || step.stepType === 'conclusion'
+      || step.stepType === 'call_to_action'
     ) {
       outputs[step.stepKey] = output;
       includedStepCount += 1;
@@ -917,6 +990,8 @@ export const recoverContentWritingDraft = (options: {
     language: options.language,
     outline,
     outputs,
+    goalContext: options.goalContext,
+    primaryKeyword: options.primaryKeyword,
   }).trim();
   return markdown
     ? { markdown, source: 'assembled_steps', includedStepCount }

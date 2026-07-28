@@ -49,6 +49,7 @@ export type ContentWritingSession = {
   quality_override_by: string | null;
   quality_override_at: string | null;
   knowledge_workflow_version: number;
+  dynamic_final_section_version: number;
   created_at: string;
   updated_at: string;
 };
@@ -71,6 +72,7 @@ export type ContentWritingStepType =
   | 'section'
   | 'introduction'
   | 'conclusion'
+  | 'call_to_action'
   | 'faq'
   | 'coverage_audit'
   | 'section_repair'
@@ -490,6 +492,7 @@ export const listContentWritingSessions = async (options: {
       'quality_override_by',
       'quality_override_at',
       'knowledge_workflow_version',
+      'dynamic_final_section_version',
       'created_at',
       'updated_at',
     ].join(','))

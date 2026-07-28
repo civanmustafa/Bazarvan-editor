@@ -49,6 +49,24 @@ test('structured writing parses a bounded outline and creates deterministic sequ
   assert.deepEqual(steps.map((step: { ordinal: number }) => step.ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 });
 
+test('service writing replaces the conclusion stage with a goal-aware call-to-action stage', async () => {
+  const {
+    parseContentWritingOutline,
+    createContentWritingWorkflowSteps,
+  } = await importWorkflow();
+  const outline = parseContentWritingOutline(outlineJson);
+  const steps = createContentWritingWorkflowSteps(outline, {
+    pageType: 'service',
+    objective: 'convert',
+    searchIntent: 'transactional',
+  });
+
+  assert.ok(steps.some((step: { key: string; type: string }) => (
+    step.key === 'call-to-action' && step.type === 'call_to_action'
+  )));
+  assert.ok(!steps.some((step: { type: string }) => step.type === 'conclusion'));
+});
+
 test('structured writing rejects incomplete or duplicate outlines', async () => {
   const { normalizeContentWritingOutline } = await importWorkflow();
   assert.equal(normalizeContentWritingOutline({ sections: ['One', 'Two', 'Three'] }), null);
@@ -186,6 +204,66 @@ test('structured writing assembles one markdown draft without duplicate section 
     draft.indexOf('## Frequently asked questions') < draft.indexOf('## Conclusion'),
     'FAQ must appear before the conclusion so the conclusion remains the final H2.',
   );
+});
+
+test('service writing assembles the generated CTA as the final H2 without adding a conclusion', async () => {
+  const {
+    parseContentWritingOutline,
+    assembleContentWritingDraft,
+  } = await importWorkflow();
+  const outline = parseContentWritingOutline(outlineJson);
+  const draft = assembleContentWritingDraft({
+    articleTitle: 'خدمات التحول الرقمي',
+    language: 'ar',
+    outline,
+    goalContext: { pageType: 'service' },
+    primaryKeyword: 'التحول الرقمي',
+    outputs: {
+      introduction: 'مقدمة الصفحة.',
+      'section-01': 'المتن الأول.',
+      'section-02': 'المتن الثاني.',
+      'section-03': 'المتن الثالث.',
+      'section-04': 'المتن الرابع.',
+      faq: '### ما الخدمة المناسبة؟\n\nإجابة واضحة.',
+      'call-to-action': [
+        '## اطلب خدمات التحول الرقمي المناسبة لأعمالك',
+        '',
+        'نص دعوة الإجراء.',
+      ].join('\n'),
+    },
+  });
+
+  assert.match(draft, /## اطلب خدمات التحول الرقمي المناسبة لأعمالك/);
+  assert.doesNotMatch(draft, /## الخاتمة/);
+  assert.ok(
+    draft.indexOf('## الأسئلة الشائعة') < draft.indexOf('## اطلب خدمات التحول الرقمي'),
+    'CTA must be the final H2 after FAQ for service pages.',
+  );
+});
+
+test('call-to-action prompt receives the page goal and enforces CTA criteria instead of conclusion rules', async () => {
+  const {
+    parseContentWritingOutline,
+    buildContentWritingCallToActionPrompt,
+  } = await importWorkflow();
+  const prompt = buildContentWritingCallToActionPrompt({
+    outline: parseContentWritingOutline(outlineJson),
+    draft: 'مسودة الصفحة.',
+    goalContext: {
+      pageType: 'service',
+      objective: 'convert',
+      searchIntent: 'transactional',
+      readerOutcome: 'طلب استشارة',
+    },
+    primaryKeyword: 'خدمات التحول الرقمي',
+    companyName: 'بازارفان',
+  });
+
+  assert.match(prompt, /قسم دعوة اتخاذ الإجراء/);
+  assert.match(prompt, /خدمات التحول الرقمي/);
+  assert.match(prompt, /طلب استشارة/);
+  assert.match(prompt, /70-125/);
+  assert.match(prompt, /لا تستخدم مؤشرًا ختاميًا/);
 });
 
 test('generated writing removes bold formatting and normalizes Arabic list markers', async () => {

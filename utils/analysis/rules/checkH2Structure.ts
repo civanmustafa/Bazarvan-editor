@@ -2,6 +2,7 @@ import type { CheckResult, AnalysisStatus } from '../../../types';
 import { createCheckResult, getWordCount, countOccurrences, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../../../constants';
+import { isCallToActionPageContext } from '../../goalContext';
 
 export const checkH2Structure = (context: AnalysisContext): CheckResult => {
     const { nodes, totalDocSize, t, articleLanguage, uiLanguage } = context;
@@ -11,6 +12,7 @@ export const checkH2Structure = (context: AnalysisContext): CheckResult => {
     const details = tRule.details;
     const L_FAQ_KEYWORDS = articleLanguage === 'ar' ? FAQ_KEYWORDS : ['questions', 'faq', 'frequently asked questions'];
     const L_CONCLUSION_KEYWORDS = articleLanguage === 'ar' ? CONCLUSION_KEYWORDS : ['conclusion', 'summary', 'in conclusion', 'in summary', 'finally', 'to sum up', 'lastly', 'in the end'];
+    const usesCallToActionSection = isCallToActionPageContext(context.goalContext);
     
     const h2Indices = nodes
         .map((node, index) => (node.type === 'heading' && node.level === 2 ? index : -1))
@@ -30,8 +32,9 @@ export const checkH2Structure = (context: AnalysisContext): CheckResult => {
         
         const isFaqH2 = L_FAQ_KEYWORDS.some(k => countOccurrences(h2Node.text, k, articleLanguage) > 0);
         const isConclusionH2 = h2Node.pos === lastH2NodePos && L_CONCLUSION_KEYWORDS.some(k => countOccurrences(h2Node.text, k, articleLanguage) > 0);
+        const isCallToActionH2 = usesCallToActionSection && h2Node.pos === lastH2NodePos;
 
-        if (isFaqH2 || isConclusionH2) {
+        if (isFaqH2 || isConclusionH2 || isCallToActionH2) {
             continue;
         }
         relevantH2Count++;

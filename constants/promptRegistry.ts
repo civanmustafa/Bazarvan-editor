@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 16;
+export const PROMPT_REGISTRY_VERSION = 17;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -39,6 +39,7 @@ export const PROMPT_TEMPLATE_IDS = {
   introduction: 'contentWriting.introduction',
   faq: 'contentWriting.faq',
   conclusion: 'contentWriting.conclusion',
+  callToAction: 'contentWriting.callToAction',
   coverageAudit: 'contentWriting.coverageAudit',
   sectionRepair: 'contentWriting.sectionRepair',
   finalReview: 'contentWriting.finalReview',
@@ -330,7 +331,7 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     group: PROMPT_GROUP_IDS.writing,
     label: 'كتابة الأسئلة الشائعة',
     description: 'ينشئ أسئلة وأجوبة مستندة إلى المقالة ونية البحث.',
-    usage: 'يعمل بعد كتابة المتن والمقدمة، ويُدرج قسم الأسئلة قبل الخاتمة.',
+    usage: 'يعمل بعد كتابة المتن والمقدمة، ويُدرج قسم الأسئلة قبل القسم النهائي الديناميكي: الخاتمة أو دعوة اتخاذ الإجراء.',
     variables: ['{{outline_json}}', '{{completed_draft}}'],
     requiredVariables: ['outline_json', 'completed_draft'],
     attachments: [
@@ -351,6 +352,22 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
       attachment('outline', 'المخطط', 'المخطط المعتمد للمقالة.'),
       attachment('completedDraft', 'المقالة قبل الخاتمة', 'المقدمة والمتن والأسئلة الشائعة.'),
       attachment('qualityContract', 'شروط الخاتمة', 'الطول والقائمة والرقم والتمهيد المطلوب.'),
+    ],
+  },
+  {
+    id: PROMPT_TEMPLATE_IDS.callToAction,
+    group: PROMPT_GROUP_IDS.writing,
+    label: 'كتابة دعوة اتخاذ الإجراء',
+    description: 'ينشئ القسم الختامي التحويلي لصفحات الخدمة والتصنيف والمنتج والهبوط وفق هدف الصفحة ومعايير CTA.',
+    usage: 'يحل ديناميكيًا محل مرحلة الخاتمة عندما يكون نوع الصفحة خدميًا أو تجاريًا، ويكتب عنوان H2 ومتن دعوة الإجراء كاملين.',
+    variables: ['{{outline_json}}', '{{completed_draft}}', '{{page_goal_json}}', '{{primary_keyword}}', '{{company_name}}'],
+    requiredVariables: ['outline_json', 'completed_draft', 'page_goal_json', 'primary_keyword', 'company_name'],
+    attachments: [
+      attachment('outline', 'المخطط', 'المخطط المعتمد للمحتوى.'),
+      attachment('completedDraft', 'الصفحة قبل دعوة الإجراء', 'المقدمة والمتن والأسئلة الشائعة قبل القسم الختامي التحويلي.'),
+      attachment('pageGoal', 'هدف الصفحة', 'نوع الصفحة والهدف ونية البحث والنتيجة المطلوبة من القارئ.'),
+      attachment('keywords', 'الكلمة الأساسية واسم الشركة', 'تستخدم الكلمة الأساسية مرة واحدة طبيعيًا في عنوان H2، ويستخدم اسم الشركة عند توفره.'),
+      attachment('qualityContract', 'معايير دعوة الإجراء', 'العنوان والطول والفقرات والقائمة والجملة التفاعلية النهائية.'),
     ],
   },
   {
@@ -758,6 +775,34 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 </completed_draft>
 
 اكتب خاتمة مركزة من 70-120 كلمة تغلق المقالة دون ادعاءات غير مدعومة. ابدأ الفقرة الأولى بمؤشر ختامي طبيعي. أدرج رقمًا مفيدًا سبق استخدامه وكان مسموحًا في سجل الادعاءات؛ وإذا لم يوجد رقم مسموح فلا تخترع رقمًا واستخدم تعدادًا رقميًا وصفيًا مناسبًا. أضف قائمة Markdown فعلية قصيرة، واجعل كل عنصر في سطر مستقل، ويسبقها تمهيد مستقل من 15-40 كلمة ينتهي بنقطتين أو علامة سؤال. لا تكتب التعداد داخل فقرة عادية. أرجع متن الخاتمة فقط بصيغة Markdown، دون عنوان أو تكرار عنوان المقالة.`,
+
+  [PROMPT_TEMPLATE_IDS.callToAction]: `نفّذ مرحلة كتابة قسم دعوة اتخاذ الإجراء فقط، بدل الخاتمة المعلوماتية.
+
+المخطط المعتمد:
+{{outline_json}}
+
+هدف الصفحة وسياق التحويل:
+{{page_goal_json}}
+
+الكلمة المفتاحية الأساسية: {{primary_keyword}}
+اسم الشركة أو العلامة: {{company_name}}
+
+مسودة الصفحة المكتملة حتى الآن:
+<completed_draft>
+{{completed_draft}}
+</completed_draft>
+
+اكتب قسمًا ختاميًا تحويليًا متوافقًا مع هدف الصفحة الفعلي وما يستطيع القارئ فعله بعد القراءة، دون اختراع عرض أو سعر أو ضمان أو وسيلة تواصل أو ادعاء غير موجود في السياق وسجل الادعاءات.
+
+قواعد ملزمة:
+- أرجع قسم Markdown كاملًا يبدأ بعنوان H2 واحد.
+- يجب أن يتضمن عنوان H2 كلمة دعوة واضحة للشراء أو الطلب أو التواصل أو الحجز أو الاكتشاف، وأن يتضمن الكلمة المفتاحية الأساسية مرة واحدة طبيعيًا دون حشو.
+- اجعل متن القسم 70-125 كلمة.
+- اكتب قبل القائمة النقطية فقرة أو فقرتين، واجعل مجموع جمل المتن خارج بنود القائمة 3-4 جمل.
+- أضف قائمة Markdown نقطية واحدة فقط من 3-4 عناصر، ولا تستخدم قائمة مرقمة.
+- اختم بعد القائمة بجملة تفاعلية واحدة تشجع على الإجراء وتتضمن عبارة دعوة واضحة.
+- لا تستخدم مؤشرًا ختاميًا مثل "في الختام"، ولا تطبق شروط خاتمة المقالة الخاصة بالرقم أو الملخص.
+- لا تكرر عنوان الصفحة، ولا تضع H1 أو H3، ولا تضف شرحًا خارج القسم.`,
 
   [PROMPT_TEMPLATE_IDS.coverageAudit]: `نفّذ تدقيق تغطية المعرفة فقط.
 

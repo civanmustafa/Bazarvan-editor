@@ -260,7 +260,7 @@ export const buildContentWritingStageKnowledgeUsage = (options: {
     };
   }
 
-  // Introduction, FAQ, conclusion, and legacy final repair stages receive the
+  // Introduction, FAQ, conclusion/CTA, and legacy final repair stages receive the
   // complete normalized matrix/source/claim registries in the compact session
   // context, but their prose output does not declare individual IDs used.
   return completeRegistryUsage(step.stepType, snapshot);

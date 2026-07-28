@@ -159,6 +159,25 @@ const knowledge: ContentWritingKnowledgeBase = {
   fallbackChunkIds: [],
 };
 
+test('service revision documents expose the final CTA as a stable targeted region', async () => {
+  const { buildContentWritingRevisionDocument } = await importRevision();
+  const serviceMarkdown = markdown
+    .replace('## الخاتمة\n\nخاتمة سليمة.', [
+      '## اطلب خدمات التحول الرقمي الآن',
+      '',
+      'دعوة إجراء سليمة.',
+    ].join('\n'));
+  const document = buildContentWritingRevisionDocument({
+    markdown: serviceMarkdown,
+    outline,
+    goalContext: { pageType: 'service' },
+  });
+  const target = document.targets.find((item: { id: string }) => item.id === 'call-to-action');
+
+  assert.equal(target?.kind, 'call_to_action');
+  assert.match(target?.markdown || '', /اطلب خدمات التحول الرقمي/);
+});
+
 test('targeted revision applies only the selected paragraph and preserves every healthy region', async () => {
   const {
     applyContentWritingRevisionEdits,

@@ -5,6 +5,7 @@ import {
 } from '../../contentWritingTargets';
 import { createCheckResult, getStatus, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
+import { isCallToActionPageContext } from '../../goalContext';
 
 export const checkH2Count = (context: AnalysisContext): CheckResult => {
     const { headings, totalWordCount, goalContext, t, uiLanguage } = context;
@@ -26,12 +27,15 @@ export const checkH2Count = (context: AnalysisContext): CheckResult => {
     const manualTarget = parseContentWritingTargetWordRange(goalContext.targetWordRange);
     if (manualTarget) {
         const bodySections = deriveContentWritingOutlineSections(manualTarget);
+        const finalSectionLabel = isCallToActionPageContext(goalContext)
+            ? (uiLanguage === 'ar' ? 'دعوة اتخاذ الإجراء' : 'the call-to-action section')
+            : (uiLanguage === 'ar' ? 'الخاتمة' : 'the conclusion');
         min = bodySections.min + 2;
         max = bodySections.max + 2;
         requiredText = t.common.range(min, max);
         details = uiLanguage === 'ar'
-            ? `بحسب نطاق ${manualTarget.min}-${manualTarget.max} كلمة: ${bodySections.min}-${bodySections.max} أقسام متن ديناميكية، إضافة إلى قسمي الأسئلة الشائعة والخاتمة.`
-            : `For the ${manualTarget.min}-${manualTarget.max} word target: ${bodySections.min}-${bodySections.max} dynamic body sections, plus FAQ and conclusion.`;
+            ? `بحسب نطاق ${manualTarget.min}-${manualTarget.max} كلمة: ${bodySections.min}-${bodySections.max} أقسام متن ديناميكية، إضافة إلى قسمي الأسئلة الشائعة و${finalSectionLabel}.`
+            : `For the ${manualTarget.min}-${manualTarget.max} word target: ${bodySections.min}-${bodySections.max} dynamic body sections, plus FAQ and ${finalSectionLabel}.`;
     } else if (totalWordCount >= 1000 && totalWordCount <= 1500) {
         min = 6; max = 7; requiredText = t.common.range(6, 7);
     } else if (totalWordCount > 1500 && totalWordCount <= 2000) {

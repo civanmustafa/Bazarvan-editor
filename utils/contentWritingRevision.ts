@@ -6,6 +6,8 @@ import {
 } from './contentWritingKnowledge';
 import { summarizeContentWritingClaimUsage } from './contentWritingClaims';
 import type { ContentWritingOutline } from './contentWritingWorkflow';
+import type { GoalContext } from '../types';
+import { isCallToActionPageContext } from './goalContext';
 
 export const CONTENT_WRITING_MAX_REVISION_OPERATIONS = 16;
 
@@ -16,6 +18,7 @@ export type ContentWritingRevisionTargetKind =
   | 'section'
   | 'faq'
   | 'conclusion'
+  | 'call_to_action'
   | 'unknown_section'
   | 'heading'
   | 'block';
@@ -220,6 +223,7 @@ const isConclusionHeading = (value: string): boolean => (
 export const buildContentWritingRevisionDocument = (options: {
   markdown: string;
   outline: ContentWritingOutline;
+  goalContext?: Partial<GoalContext> | null;
 }): ContentWritingRevisionDocument => {
   const markdown = normalizeMarkdown(options.markdown);
   const outlineByTitle = new Map(
@@ -266,11 +270,20 @@ export const buildContentWritingRevisionDocument = (options: {
     if (range.start >= range.end) return;
     const normalizedTitle = normalizeHeading(heading.title);
     const sectionKey = outlineByTitle.get(normalizedTitle);
+    const isFinalCallToAction = (
+      isCallToActionPageContext(options.goalContext)
+      && index === headings.length - 1
+      && !sectionKey
+      && !isFaqHeading(heading.title)
+      && !isConclusionHeading(heading.title)
+    );
     let id = sectionKey || (
       isFaqHeading(heading.title)
         ? 'faq'
         : isConclusionHeading(heading.title)
           ? 'conclusion'
+          : isFinalCallToAction
+            ? 'call-to-action'
           : `h2-${String(index + 1).padStart(2, '0')}`
     );
     if (usedIds.has(id)) id = `${id}-${String(index + 1).padStart(2, '0')}`;
@@ -281,6 +294,8 @@ export const buildContentWritingRevisionDocument = (options: {
         ? 'faq'
         : id.startsWith('conclusion')
           ? 'conclusion'
+          : id.startsWith('call-to-action')
+            ? 'call_to_action'
           : 'unknown_section';
     const regionMarkdown = markdown.slice(range.start, range.end);
     regions.push({

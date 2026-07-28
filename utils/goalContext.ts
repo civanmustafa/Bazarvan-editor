@@ -238,6 +238,14 @@ export const isConclusionPageContext = (goalContext?: Partial<GoalContext> | nul
   CONCLUSION_PAGE_TYPES.includes(normalizeGoalContext(goalContext).pageType as typeof CONCLUSION_PAGE_TYPES[number])
 );
 
+export type ContentWritingFinalSectionKind = 'conclusion' | 'call_to_action';
+
+export const getContentWritingFinalSectionKind = (
+  goalContext?: Partial<GoalContext> | null,
+): ContentWritingFinalSectionKind => (
+  isCallToActionPageContext(goalContext) ? 'call_to_action' : 'conclusion'
+);
+
 const usesTargetLocation = (audienceScope: string): boolean => (
   TARGET_LOCATION_AUDIENCE_SCOPES.includes(audienceScope)
 );

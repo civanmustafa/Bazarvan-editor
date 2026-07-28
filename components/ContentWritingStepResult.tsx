@@ -70,6 +70,10 @@ export const getContentWritingStepDescription = (
       'يعيد النظام كتابة القسم المحدد فقط لمعالجة نقص التغطية، مع الاحتفاظ ببقية المقالة كما هي.',
       'Rewrites only the targeted section to close a coverage gap while preserving the rest of the article.',
     ],
+    call_to_action: [
+      'يكتب النظام قسمًا ختاميًا تحويليًا وفق نوع الصفحة وهدفها ونية البحث، ويطبّق معايير دعوة الإجراء بدل معايير خاتمة المقالة.',
+      'Writes a conversion-focused final section from the page type, objective, and search intent, applying CTA criteria instead of article-conclusion rules.',
+    ],
   };
   const description = descriptions[step.stepType];
   return description ? description[isArabic ? 0 : 1] : '';
@@ -373,6 +377,7 @@ const revisionTargetLabel = (targetId: string, isArabic: boolean): string => {
   if (targetId === 'introduction') return isArabic ? 'المقدمة' : 'Introduction';
   if (targetId.startsWith('faq')) return isArabic ? 'قسم الأسئلة الشائعة' : 'FAQ section';
   if (targetId.startsWith('conclusion')) return isArabic ? 'الخاتمة' : 'Conclusion';
+  if (targetId.startsWith('call-to-action')) return isArabic ? 'دعوة اتخاذ الإجراء' : 'Call to action';
   const headingMatch = targetId.match(/^section-(\d+):heading$/);
   if (headingMatch) {
     const section = Number(headingMatch[1]).toLocaleString(isArabic ? 'ar' : 'en');

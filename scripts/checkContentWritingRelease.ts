@@ -49,6 +49,7 @@ const requiredServerMarkers = [
   'quality_report',
   'knowledge_workflow_version',
   'resume_preference_version',
+  'dynamic_final_section_version',
 ];
 for (const marker of requiredServerMarkers) {
   if (!serverBundle.includes(marker)) {
@@ -68,6 +69,7 @@ const requiredWorkerMarkers = [
   'requires_external_verification',
   'competitor_index',
   'coverage_audit',
+  'call_to_action',
 ];
 for (const marker of requiredWorkerMarkers) {
   if (!workerBundle.includes(marker)) {

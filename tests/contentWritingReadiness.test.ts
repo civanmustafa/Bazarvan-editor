@@ -50,7 +50,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 8);
+  assert.equal(result.requiredMigrationCount, 9);
   assert.deepEqual(result.checks, { sessions: true, messages: true, steps: true });
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'content_writing_messages',
@@ -65,6 +65,7 @@ test('content-writing readiness checks every required schema surface', async () 
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_policy_version/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_report/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /knowledge_workflow_version/);
+  assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /dynamic_final_section_version/);
 });
 
 test('public readiness reports a safe 503 reason without exposing Supabase details', async () => {
@@ -99,6 +100,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260723000000_content_writing_quality_policy\.sql/);
   assert.match(releaseRegistry, /20260723010000_content_writing_knowledge_workflow\.sql/);
   assert.match(releaseRegistry, /20260723020000_content_writing_resume_preferences\.sql/);
+  assert.match(releaseRegistry, /20260728000000_dynamic_content_writing_final_section\.sql/);
   assert.match(
     await readWorkspaceFile('server/contentWritingReadiness.ts'),
     /resume_preference_version/,
@@ -107,6 +109,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseScript, /CONTENT_WRITING_REQUIRED_MIGRATIONS/);
   assert.match(releaseScript, /claim_next_content_writing_session/);
   assert.match(releaseScript, /resume_preference_version/);
+  assert.match(releaseScript, /dynamic_final_section_version/);
   assert.match(server, /app\.get\('\/readyz', readyzHandler\)/);
   assert.match(server, /toPublicContentWritingReadiness/);
   assert.match(server, /toPublicExternalAnalysisQueueReadiness/);

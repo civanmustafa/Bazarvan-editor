@@ -2,6 +2,7 @@ import type { CheckResult, AnalysisStatus } from '../../../types';
 import { createCheckResult, getWordCount, getSentenceCount, getAnalysisNodeSize } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 import { getTolerantViolationStatus } from '../criteriaEvaluation';
+import { isCallToActionPageContext } from '../../goalContext';
 
 export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
     const { nodes, nonEmptyParagraphs, conclusionSection, isPosInFaqSection, t, uiLanguage } = context;
@@ -18,6 +19,12 @@ export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
     const introNodes = firstHeadingIndex === -1 ? nodes : nodes.slice(0, firstHeadingIndex);
     const introParagraphPositions = new Set(introNodes.filter(n => n.type === 'paragraph').map(p => p.pos));
     const openingParagraphPositions = new Set(nonEmptyParagraphs.slice(0, 2).map(p => p.pos));
+    const finalCallToActionStart = isCallToActionPageContext(context.goalContext)
+        ? nodes
+            .filter(node => node.type === 'heading' && node.level === 2)
+            .map(node => node.pos)
+            .pop()
+        : undefined;
 
     const conclusionParas = conclusionSection ? conclusionSection.paragraphs : [];
     const conclusionParaPositions = new Set(conclusionParas.map(p => p.pos));
@@ -36,6 +43,7 @@ export const checkParagraphLength = (context: AnalysisContext): CheckResult => {
         if (openingParagraphPositions.has(p.pos)) return false;
         if (introParagraphPositions.has(p.pos)) return false;
         if (conclusionParaPositions.has(p.pos)) return false;
+        if (finalCallToActionStart !== undefined && p.pos > finalCallToActionStart) return false;
         if (listIntroParagraphPositions.has(p.pos)) return false;
         if (isPosInFaqSection(p.pos)) return false;
         return true;
