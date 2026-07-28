@@ -535,16 +535,21 @@ test('content writing resolves manual or competitor-derived length and dynamic s
   assert.match(engine, /lengthTarget,/);
   assert.match(workflow, /balanceContentWritingOutlineWordTargets/);
   assert.match(workflow, /targetWords: qualityRuntime\?\.configuration\.policy\.targetWords/);
-  assert.match(quality, /\.filter\(\(\[id\]\) => id !== 'wordCount'\)/);
+  assert.match(
+    quality,
+    /\.filter\(\(\[id, result\]\) => id !== 'wordCount' && result\.status !== 'info'\)/,
+  );
   assert.match(goalFields, /parseContentWritingTargetWordRange/);
 });
 
-test('competitor coverage matrix is deterministic and controlled by the prompt registry', async () => {
-  const [knowledge, workflow, serverWorkflow, promptRegistry] = await Promise.all([
+test('competitor coverage matrix and phrase intelligence are deterministic and controlled by the prompt registry', async () => {
+  const [knowledge, phraseAnalysis, workflow, serverWorkflow, promptRegistry, settings] = await Promise.all([
     readWorkspaceFile('utils/contentWritingKnowledge.ts'),
+    readWorkspaceFile('utils/competitorPhraseAnalysis.ts'),
     readWorkspaceFile('utils/contentWritingWorkflow.ts'),
     readWorkspaceFile('server/contentWritingWorkflow.ts'),
     readWorkspaceFile('constants/promptRegistry.ts'),
+    readWorkspaceFile('components/ContentWritingPromptSettings.tsx'),
   ]);
 
   assert.match(knowledge, /CONTENT_WRITING_KNOWLEDGE_VERSION = 3/);
@@ -555,12 +560,20 @@ test('competitor coverage matrix is deterministic and controlled by the prompt r
   assert.match(workflow, /title: 'Competitor coverage and claim ledger'/);
   assert.match(serverWorkflow, /persisted_competitor_coverage_matrix/);
   assert.match(serverWorkflow, /originalityOpportunityIdeaCount/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 15/);
+  assert.match(phraseAnalysis, /createCompetitorPhraseIntelligence/);
+  assert.match(phraseAnalysis, /competitorPhraseIntelligenceToPromptJson/);
+  assert.match(workflow, /competitor_phrase_intelligence_json/);
+  assert.match(serverWorkflow, /deterministic_competitor_phrase_intelligence/);
+  assert.match(serverWorkflow, /competitorPhraseIntelligence/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 16/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
+  assert.match(promptRegistry, /competitor_phrase_intelligence_json/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);
+  assert.match(settings, /contentWritingCompetitorPhraseIntelligenceEnabled/);
+  assert.match(settings, /تفعيل ذكاء عبارات المنافسين/);
   assert.doesNotMatch(
-    `${knowledge}\n${workflow}\n${serverWorkflow}\n${promptRegistry}`,
+    `${knowledge}\n${phraseAnalysis}\n${workflow}\n${serverWorkflow}\n${promptRegistry}`,
     /search\s*console|searchConsole/i,
   );
 });

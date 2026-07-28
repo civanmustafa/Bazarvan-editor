@@ -57,6 +57,10 @@ import {
   normalizeContentWritingQualityReport,
   type ContentWritingQualityReport,
 } from '../utils/contentWritingQuality';
+import {
+  competitorPhraseIntelligenceToPromptJson,
+  type CompetitorPhraseIntelligenceResult,
+} from '../utils/competitorPhraseAnalysis';
 import { normalizeGoalContext } from '../utils/goalContext';
 import {
   CONTENT_WRITING_EVIDENCE_TRACE_VERSION,
@@ -168,16 +172,32 @@ const getCompetitorChunks = (session: ContentWritingSession): ContentWritingSour
   normalizeContentWritingSourceChunks(session.context_snapshot?.competitorChunks)
 );
 
+const getCompetitorPhraseIntelligence = (
+  session: ContentWritingSession,
+): CompetitorPhraseIntelligenceResult | null => (
+  isRecord(session.context_snapshot?.competitorPhraseIntelligence)
+    ? session.context_snapshot.competitorPhraseIntelligence as unknown as CompetitorPhraseIntelligenceResult
+    : null
+);
+
 const buildCompactArticleContext = (
   session: ContentWritingSession,
   knowledge: ContentWritingKnowledgeBase,
 ): string => {
   const base = toText(session.context_snapshot?.compactArticleContextBase);
+  const competitorPhraseIntelligence = getCompetitorPhraseIntelligence(session);
+  const phraseIntelligenceBlock = competitorPhraseIntelligence?.enabled
+    ? `
+
+<deterministic_competitor_phrase_intelligence>
+${competitorPhraseIntelligenceToPromptJson(competitorPhraseIntelligence)}
+</deterministic_competitor_phrase_intelligence>`
+    : '';
   return `${base || 'Use the persisted article, keyword, goal, and audience context for this session.'}
 
 <persisted_competitor_coverage_matrix>
 ${contentWritingKnowledgeToPromptJson(knowledge)}
-</persisted_competitor_coverage_matrix>`;
+</persisted_competitor_coverage_matrix>${phraseIntelligenceBlock}`;
 };
 
 const buildTargetedRevisionArticleContext = (
@@ -440,6 +460,7 @@ export const executeStructuredContentWritingWorkflow = async (
   };
 
   const competitorChunks = getCompetitorChunks(options.session);
+  const competitorPhraseIntelligence = getCompetitorPhraseIntelligence(options.session);
   const competitorIndexDefinition = getContentWritingCompetitorIndexStep();
   if (competitorChunks.length === 0) {
     return createWorkflowFailure({
@@ -459,6 +480,7 @@ export const executeStructuredContentWritingWorkflow = async (
       language: article.language,
       template: promptTemplate(PROMPT_TEMPLATE_IDS.competitorIndex),
       sourceClaimsTemplate: promptTemplate(PROMPT_TEMPLATE_IDS.sourceClaimsLedger),
+      competitorPhraseIntelligence,
     }),
     stepIndex: competitorIndexDefinition.ordinal,
     stepCount: 2,
@@ -475,6 +497,7 @@ export const executeStructuredContentWritingWorkflow = async (
           competitorCoverageMatrix: knowledge.competitorCoverageMatrix,
           sourceRegistry: knowledge.sourceRegistry,
           claimLedger: knowledge.claimLedger,
+          competitorPhraseIntelligence,
         },
       };
     },

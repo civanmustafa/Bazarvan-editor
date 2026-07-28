@@ -18,6 +18,7 @@ const capabilities: AiProviderCapabilities = {
   defaultProvider: 'openai',
   contentWriting: {
     qualityOverrideReasonRequired: true,
+    competitorPhraseIntelligenceEnabled: true,
   },
 };
 

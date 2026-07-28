@@ -173,6 +173,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       contentWritingMinimumQualityScore: 1,
       contentWritingMaxRepairPasses: 99,
       contentWritingQualityOverrideReasonRequired: false,
+      contentWritingCompetitorPhraseIntelligenceEnabled: false,
       unknownSecret: 'must-not-survive',
     },
     articles: {
@@ -191,6 +192,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.ai.contentWritingMinimumQualityScore, 50);
   assert.equal(normalized.ai.contentWritingMaxRepairPasses, 3);
   assert.equal(normalized.ai.contentWritingQualityOverrideReasonRequired, false);
+  assert.equal(normalized.ai.contentWritingCompetitorPhraseIntelligenceEnabled, false);
   assert.equal(normalized.ai.unknownSecret, undefined);
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');
@@ -538,19 +540,24 @@ test('AiProviderCapabilities centrally gates OpenAI and resolves a safe default 
   assert.equal(isAiPatchProviderAvailable(disabled, 'chatgpt'), false);
   assert.equal(getDefaultAiPatchProvider(disabled), 'gemini');
   assert.equal(disabled.contentWriting.qualityOverrideReasonRequired, true);
+  assert.equal(disabled.contentWriting.competitorPhraseIntelligenceEnabled, true);
 
   const enabled = normalizeAiProviderCapabilities({
     providers: {
       openai: { enabled: true, configured: true, model: 'gpt-admin-default' },
     },
     defaultProvider: 'openai',
-    contentWriting: { qualityOverrideReasonRequired: false },
+    contentWriting: {
+      qualityOverrideReasonRequired: false,
+      competitorPhraseIntelligenceEnabled: false,
+    },
   });
   assert.equal(isAiPatchProviderEnabled(enabled, 'chatgpt'), true);
   assert.equal(isAiPatchProviderAvailable(enabled, 'chatgpt'), true);
   assert.equal(getDefaultAiPatchProvider(enabled), 'chatgpt');
   assert.equal(enabled.providers.openai.model, 'gpt-admin-default');
   assert.equal(enabled.contentWriting.qualityOverrideReasonRequired, false);
+  assert.equal(enabled.contentWriting.competitorPhraseIntelligenceEnabled, false);
 
   const missingKey = normalizeAiProviderCapabilities({
     providers: {

@@ -48,6 +48,7 @@ const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
 const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
 const ContentWritingPanel = React.lazy(() => import('./ContentWritingPanel'));
 const InternalLinkingPanel = React.lazy(() => import('./InternalLinkingPanel'));
+const CompetitorPhraseIntelligencePanel = React.lazy(() => import('./CompetitorPhraseIntelligencePanel'));
 
 type ReadyCommand = {
     id: string;
@@ -742,6 +743,7 @@ const RightSidebar: React.FC = () => {
         t,
         engineeringPrompts,
         chatGptOpenMode,
+        aiProviderCapabilities,
         isAiProviderEnabled,
         isAiProviderAvailable,
     } = useUser();
@@ -1069,6 +1071,9 @@ const RightSidebar: React.FC = () => {
         [competitorStatSources],
     );
 
+    const competitorPhraseIntelligenceEnabled = (
+        aiProviderCapabilities.contentWriting.competitorPhraseIntelligenceEnabled !== false
+    );
     const appendSelectedAttachments = (prompt: string, options: AiAnalysisOptions): string => {
         if (!options.competitorContent) return prompt;
         if (!readyCommandCompetitorBlocks.trim()) return prompt;
@@ -2543,6 +2548,23 @@ ${readyCommandCompetitorBlocks}`;
                         </div>
                     )}
                 </div>
+
+                {competitorPhraseIntelligenceEnabled && (
+                    <React.Suspense
+                        fallback={(
+                            <div className="rounded-lg border border-violet-200 bg-violet-50/70 p-3 text-xs font-bold text-violet-600 dark:border-violet-900/60 dark:bg-violet-950/20 dark:text-violet-300">
+                                {t.locale === 'ar' ? 'جارٍ تجهيز تحليل أهمية العبارات…' : 'Preparing phrase importance analysis…'}
+                            </div>
+                        )}
+                    >
+                        <CompetitorPhraseIntelligencePanel
+                            locale={t.locale}
+                            sources={competitorStatSources}
+                            keywords={articleKeywords}
+                            competitorUrls={competitorUrls}
+                        />
+                    </React.Suspense>
+                )}
 
                 <div className="rounded-lg border border-[#d4af37]/35 bg-[#d4af37]/5 p-3 dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10">
                     <div className="mb-1 flex items-center justify-between gap-2">

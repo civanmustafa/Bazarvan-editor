@@ -23,7 +23,8 @@ type ContentWritingPromptSettingsProps = {
       | 'contentWritingQualityPolicyVersion'
       | 'contentWritingMinimumQualityScore'
       | 'contentWritingMaxRepairPasses'
-      | 'contentWritingQualityOverrideReasonRequired',
+      | 'contentWritingQualityOverrideReasonRequired'
+      | 'contentWritingCompetitorPhraseIntelligenceEnabled',
     value: string | number | boolean,
   ) => void;
 };
@@ -36,6 +37,7 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
   const minimumQualityScore = Number(values.contentWritingMinimumQualityScore || CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE);
   const maxRepairPasses = Number(values.contentWritingMaxRepairPasses ?? CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES);
   const qualityOverrideReasonRequired = values.contentWritingQualityOverrideReasonRequired !== false;
+  const competitorPhraseIntelligenceEnabled = values.contentWritingCompetitorPhraseIntelligenceEnabled !== false;
 
   const resetDefaults = () => {
     onChange('contentWritingMaxInputTokens', CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET);
@@ -43,6 +45,7 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
     onChange('contentWritingMinimumQualityScore', CONTENT_WRITING_DEFAULT_MINIMUM_QUALITY_SCORE);
     onChange('contentWritingMaxRepairPasses', CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES);
     onChange('contentWritingQualityOverrideReasonRequired', true);
+    onChange('contentWritingCompetitorPhraseIntelligenceEnabled', true);
   };
 
   return (
@@ -141,8 +144,25 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
         </span>
       </label>
 
+      <label className="flex max-w-2xl cursor-pointer items-start gap-3 rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/5 p-3 dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10">
+        <input
+          type="checkbox"
+          checked={competitorPhraseIntelligenceEnabled}
+          onChange={event => onChange('contentWritingCompetitorPhraseIntelligenceEnabled', event.target.checked)}
+          className="mt-1 size-4 rounded border-gray-300 text-[#d4af37] focus:ring-[#d4af37]"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-black text-gray-700 dark:text-gray-200">
+            تفعيل ذكاء عبارات المنافسين في كتابة المحتوى
+          </span>
+          <span className="mt-1 block text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+            عند التفعيل يحلل النظام العبارات المشتركة والمكررة ويقارنها بالكلمة الأساسية والصيغ البديلة وLSI، ثم يمرر الإشارات المهمة إلى مصفوفة المنافسين ومراحل الكتابة دون حشو أو نسخ.
+          </span>
+        </span>
+      </label>
+
       <p className="text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-        تُثبَّت نسخة سياسة التوليد والأوامر داخل كل جلسة حتى لا تتغير شروطها أثناء الاستئناف. أما خيار سبب تجاوز بوابة الجودة فيُطبق فورًا عند الاعتماد.
+        تُثبَّت نسخة سياسة التوليد والأوامر وإشارات عبارات المنافسين داخل كل جلسة حتى لا تتغير شروطها أثناء الاستئناف. أما خيار سبب تجاوز بوابة الجودة فيُطبق فورًا عند الاعتماد.
       </p>
     </div>
   );

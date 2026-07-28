@@ -17,11 +17,12 @@ import EditorToolbar from './EditorToolbar';
 import AiExecutionMonitor from './AiKeyUsageToast';
 import LeftSidebar from './LeftSidebar';
 import ModalManager from './ModalManager';
-import RightSidebar from './RightSidebar';
 import SelectionToolbar from './SelectionToolbar';
 import SpotlightSearch from './SpotlightSearch';
 import TipsCarousel from './TipsCarousel';
 import '../styles/editor.css';
+
+const RightSidebar = React.lazy(() => import('./RightSidebar'));
 
 const EditorView: React.FC = () => {
   const { isDarkMode, t } = useUser();
@@ -64,7 +65,11 @@ const EditorView: React.FC = () => {
           </button>
         </div>
 
-        <RightSidebar />
+        <React.Suspense
+          fallback={<aside className="basis-[18.7%] h-full min-w-0 rounded-lg border-s border-gray-300 bg-[#F2F3F5] dark:border-[#333] dark:bg-[#1F1F1F]" />}
+        >
+          <RightSidebar />
+        </React.Suspense>
         {displayTooltip && (
           <div
             ref={tooltipRef}

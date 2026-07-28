@@ -20,6 +20,7 @@ export type AiProviderCapabilities = {
   defaultProvider: AiRuntimeProvider;
   contentWriting: {
     qualityOverrideReasonRequired: boolean;
+    competitorPhraseIntelligenceEnabled: boolean;
   };
 };
 
@@ -81,6 +82,7 @@ export const getDefaultAiProviderCapabilities = (): AiProviderCapabilities => ({
   defaultProvider: 'gemini',
   contentWriting: {
     qualityOverrideReasonRequired: true,
+    competitorPhraseIntelligenceEnabled: true,
   },
 });
 
@@ -111,6 +113,10 @@ export const normalizeAiProviderCapabilities = (value: unknown): AiProviderCapab
         typeof contentWritingSource.qualityOverrideReasonRequired === 'boolean'
           ? contentWritingSource.qualityOverrideReasonRequired
           : fallback.contentWriting.qualityOverrideReasonRequired,
+      competitorPhraseIntelligenceEnabled:
+        typeof contentWritingSource.competitorPhraseIntelligenceEnabled === 'boolean'
+          ? contentWritingSource.competitorPhraseIntelligenceEnabled
+          : fallback.contentWriting.competitorPhraseIntelligenceEnabled,
     },
   };
 };

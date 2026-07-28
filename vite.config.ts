@@ -68,8 +68,8 @@ export default defineConfig(({ mode }) => {
               if (!id.includes('node_modules')) return undefined;
               if (id.includes('@tiptap')) return 'tiptap';
               if (id.includes('prosemirror')) return 'prosemirror';
-              if (id.includes('react') || id.includes('scheduler')) return 'react';
               if (id.includes('lucide-react')) return 'icons';
+              if (id.includes('react') || id.includes('scheduler')) return 'react';
               return 'vendor';
             },
           },

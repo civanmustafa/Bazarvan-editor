@@ -34,6 +34,20 @@ test('content writing UI stays out of the initial editor sidebar chunk', async (
   assert.doesNotMatch(rightSidebar, /import ContentWritingPanel from/);
 });
 
+test('the heavy editor sidebar is lazy and icon modules stay out of the React runtime chunk', async () => {
+  const [editorApp, viteConfig] = await Promise.all([
+    readFile(new URL('../components/EditorApp.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../vite.config.ts', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(editorApp, /React\.lazy\(\(\) => import\('\.\/RightSidebar'\)\)/);
+  assert.match(editorApp, /<React\.Suspense/);
+  assert.ok(
+    viteConfig.indexOf("id.includes('lucide-react')") < viteConfig.indexOf("id.includes('react')"),
+    'lucide-react must be assigned before the broad React chunk rule',
+  );
+});
+
 test('high-frequency editor contexts expose selectors and memoized provider values', async () => {
   const [editorContext, aiContext, interactionContext, userContext] = await Promise.all([
     readWorkspaceFile('contexts/EditorContext.tsx'),

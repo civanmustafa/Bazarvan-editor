@@ -58,6 +58,8 @@ export const readAiProviderCapabilities = async (userId?: string): Promise<AiPro
     contentWriting: {
       qualityOverrideReasonRequired:
         settings.contentWritingQualityOverrideReasonRequired !== false,
+      competitorPhraseIntelligenceEnabled:
+        settings.contentWritingCompetitorPhraseIntelligenceEnabled !== false,
     },
   });
 };

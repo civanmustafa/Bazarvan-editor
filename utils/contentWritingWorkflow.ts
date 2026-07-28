@@ -19,6 +19,10 @@ import {
   getContentWritingBodyWordBudget,
   type ContentWritingWordRange,
 } from './contentWritingTargets';
+import {
+  competitorPhraseIntelligenceToPromptJson,
+  type CompetitorPhraseIntelligenceResult,
+} from './competitorPhraseAnalysis';
 
 export const CONTENT_WRITING_WORKFLOW_VERSION = 6;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
@@ -448,9 +452,13 @@ export const buildContentWritingCompetitorIndexPrompt = (options: {
   language: string;
   template?: string;
   sourceClaimsTemplate?: string;
+  competitorPhraseIntelligence?: CompetitorPhraseIntelligenceResult | null;
 }): string => {
   const variables = {
     source_ids_json: JSON.stringify(options.chunks.map(chunk => chunk.id)),
+    competitor_phrase_intelligence_json: competitorPhraseIntelligenceToPromptJson(
+      options.competitorPhraseIntelligence || null,
+    ),
     output_language: options.language === 'en' ? 'اللغة الإنجليزية' : 'اللغة العربية',
   };
   return [

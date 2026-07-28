@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  competitorPhraseIntelligenceToPromptJson,
+  createCompetitorPhraseIntelligence,
   createCompetitorTextStats,
   createSharedCompetitorPhrases,
 } from '../utils/competitorPhraseAnalysis.ts';
@@ -82,14 +84,126 @@ test('shared phrase comparison normalizes Arabic letter variants', () => {
     { competitorNumber: 2, text: 'ادارة المحتوى بطريقه فعاله دائما' },
   ]);
 
-  assert.ok(shared.some(item => item.text === 'اداره المحتوي بطريقه فعاله'));
+  assert.ok(shared.some(item => item.text === 'إدارة المحتوى بطريقة فعالة'));
+});
+
+test('Arabic phrases keep their original spelling and stop at punctuation', () => {
+  const stats = createCompetitorTextStats([
+    'للقراءة، الإلكترونية مفيدة لجميع القراء. للقراءة، الإلكترونية مفيدة لجميع القراء.',
+  ]);
+
+  assert.ok(
+    stats.repeatedPhrases.some(
+      item => item.text === 'الإلكترونية مفيدة لجميع القراء'
+        && item.size === 4
+        && item.count === 2,
+    ),
+  );
+  assert.ok(stats.topWords.some(item => item.word === 'الإلكترونية'));
+  assert.ok(
+    stats.repeatedPhrases.every(
+      item => item.text !== 'للقراءة الإلكترونية مفيدة',
+    ),
+  );
+});
+
+test('phrases do not cross a new line or paragraph boundary', () => {
+  const stats = createCompetitorTextStats([
+    'تحسين محركات\nالبحث مهم للجميع\nتحسين محركات\nالبحث مهم للجميع',
+  ]);
+
+  assert.ok(stats.repeatedPhrases.some(item => item.text === 'البحث مهم للجميع'));
+  assert.ok(
+    stats.repeatedPhrases.every(
+      item => item.text !== 'تحسين محركات البحث',
+    ),
+  );
+});
+
+test('shared phrases also respect punctuation boundaries', () => {
+  const shared = createSharedCompetitorPhrases([
+    { competitorNumber: 1, text: 'للقراءة، الإلكترونية مفيدة للجميع.' },
+    { competitorNumber: 2, text: 'للقراءة، الإلكترونية مفيدة للجميع.' },
+  ]);
+
+  assert.ok(shared.some(item => item.text === 'الإلكترونية مفيدة للجميع'));
+  assert.ok(shared.every(item => item.text !== 'للقراءة الإلكترونية مفيدة'));
+});
+
+test('phrase intelligence combines every competitor with keyword relevance and preserves low-priority signals', () => {
+  const result = createCompetitorPhraseIntelligence({
+    sources: [
+      {
+        competitorNumber: 1,
+        text: 'content strategy improves organic search. content strategy improves organic search.',
+      },
+      {
+        competitorNumber: 2,
+        text: 'content strategy improves organic search and search intent.',
+      },
+      {
+        competitorNumber: 3,
+        text: 'random brand slogan random brand slogan',
+      },
+      {
+        competitorNumber: 4,
+        text: 'content strategy improves organic search for growing companies.',
+      },
+    ],
+    keywords: {
+      primary: 'content strategy',
+      secondaries: ['organic search'],
+      lsi: ['search intent'],
+    },
+  });
+
+  const mustCover = result.mustCover.find(
+    item => item.text === 'content strategy improves organic search',
+  );
+  assert.ok(mustCover);
+  assert.equal(mustCover.competitorCount, 3);
+  assert.deepEqual(mustCover.competitors.map(item => item.competitorNumber), [1, 2, 4]);
+  assert.deepEqual(
+    new Set(mustCover.matchedKeywordTerms),
+    new Set(['content', 'strategy', 'organic', 'search']),
+  );
+  assert.ok(result.lowPriority.some(item => item.text === 'random brand slogan'));
+
+  const promptPayload = JSON.parse(competitorPhraseIntelligenceToPromptJson(result));
+  assert.equal(promptPayload.enabled, true);
+  assert.equal(promptPayload.analyzedCompetitorCount, 4);
+  assert.ok(promptPayload.mustCover.some(
+    (item: { text: string }) => item.text === 'content strategy improves organic search',
+  ));
+  assert.ok(promptPayload.lowPriority.some(
+    (item: { text: string }) => item.text === 'random brand slogan',
+  ));
+});
+
+test('administrator can disable phrase intelligence without losing analyzed competitor count', () => {
+  const result = createCompetitorPhraseIntelligence({
+    enabled: false,
+    sources: [
+      { competitorNumber: 1, text: 'content strategy improves organic search' },
+      { competitorNumber: 2, text: 'content strategy improves organic search' },
+    ],
+    keywords: {
+      primary: 'content strategy',
+      secondaries: [],
+      lsi: [],
+    },
+  });
+
+  assert.equal(result.enabled, false);
+  assert.equal(result.analyzedCompetitorCount, 2);
+  assert.deepEqual(result.items, []);
 });
 
 test('competitor phrase sections stay inside each card and the shared section stays last', async () => {
-  const source = await readFile(
-    new URL('../components/RightSidebar.tsx', import.meta.url),
-    'utf8',
-  );
+  const [source, intelligencePanel] = await Promise.all([
+    readFile(new URL('../components/RightSidebar.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/CompetitorPhraseIntelligencePanel.tsx', import.meta.url), 'utf8'),
+  ]);
   const cardsStart = source.indexOf('{competitorUrls.map((url, index) => {');
   const aggregateStatsStart = source.indexOf(
     "{t.locale === 'ar' ? 'إحصاءات نصوص المنافسين'",
@@ -99,11 +213,23 @@ test('competitor phrase sections stay inside each card and the shared section st
     "'العبارات المشتركة المقترحة للمقالة'",
     aggregateStatsStart,
   );
+  const intelligenceSectionStart = source.indexOf(
+    '<CompetitorPhraseIntelligencePanel',
+    aggregateStatsStart,
+  );
   const cardSection = source.slice(cardsStart, aggregateStatsStart);
 
   assert.ok(cardsStart >= 0);
   assert.ok(aggregateStatsStart > cardsStart);
-  assert.ok(sharedSectionStart > aggregateStatsStart);
+  assert.ok(intelligenceSectionStart > aggregateStatsStart);
+  assert.ok(sharedSectionStart > intelligenceSectionStart);
   assert.match(cardSection, /const repeatedPhrases = competitorTextStatsBySlot\[index\]/);
   assert.match(cardSection, /repeatedPhrases\.map\(item =>/);
+  assert.match(source, /React\.lazy\(\(\) => import\('\.\/CompetitorPhraseIntelligencePanel'\)\)/);
+  assert.match(
+    source,
+    /aiProviderCapabilities\.contentWriting\.competitorPhraseIntelligenceEnabled/,
+  );
+  assert.match(intelligencePanel, /createCompetitorPhraseIntelligence/);
+  assert.match(intelligencePanel, /تحليل أهمية العبارات/);
 });

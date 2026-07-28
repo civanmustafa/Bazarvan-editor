@@ -40,6 +40,10 @@ import {
   applyContentWritingLengthTargetToQualityConfiguration,
   resolveContentWritingLengthTarget,
 } from '../utils/contentWritingTargets';
+import {
+  competitorPhraseIntelligenceToPromptJson,
+  createCompetitorPhraseIntelligence,
+} from '../utils/competitorPhraseAnalysis';
 import { CONTENT_WRITING_WORKFLOW_VERSION } from '../utils/contentWritingWorkflow';
 import {
   aiExecutionEngine,
@@ -150,6 +154,7 @@ const getContentWritingSettings = async (): Promise<{
   maxInputTokens: number;
   allowModelFallback: boolean;
   qualityConfiguration: ContentWritingQualityConfiguration;
+  competitorPhraseIntelligenceEnabled: boolean;
 }> => {
   const [{ data, error }, promptRegistry] = await Promise.all([
     getExternalAnalysisSupabaseAdmin()
@@ -184,6 +189,8 @@ const getContentWritingSettings = async (): Promise<{
       minimumScore: ai.contentWritingMinimumQualityScore,
       maxRepairPasses: ai.contentWritingMaxRepairPasses,
     }),
+    competitorPhraseIntelligenceEnabled:
+      ai.contentWritingCompetitorPhraseIntelligenceEnabled !== false,
   };
 };
 
@@ -404,11 +411,25 @@ export const prepareContentWritingConversation = async (
           : `- الطول التلقائي: أكبر نص منافس فعلي يحتوي ${lengthTarget.baselineCompetitor?.wordCount || 0} كلمة؛ حُسب المركز بضربه ×1.20 (${lengthTarget.centerWords}) وهامش النجاح ±10%.`
       );
   const qualityContract = `${baseQualityContract}\n${lengthDecisionLine}`;
+  const competitorPhraseIntelligence = createCompetitorPhraseIntelligence({
+    sources: bundle.competitors.map((competitor, index) => ({
+      competitorNumber: index + 1,
+      text: competitor.content,
+    })),
+    keywords: articleSource.input.keywords,
+    enabled: settings.competitorPhraseIntelligenceEnabled,
+  });
   const qualityContractHeading = articleSource.input.language === 'en'
     ? 'Mandatory quality criteria for this session:'
     : 'معايير الجودة الملزمة لهذه الجلسة:';
+  const competitorPhraseIntelligenceHeading = articleSource.input.language === 'en'
+    ? 'Deterministic competitor phrase intelligence for this session:'
+    : 'ذكاء عبارات المنافسين المحسوب برمجيًا لهذه الجلسة:';
+  const competitorPhraseIntelligenceBlock = settings.competitorPhraseIntelligenceEnabled
+    ? `\n\n${competitorPhraseIntelligenceHeading}\n${competitorPhraseIntelligenceToPromptJson(competitorPhraseIntelligence)}`
+    : '';
   const messages = bundle.messages.map(message => message.stage === 'generationRequest'
-    ? { ...message, content: `${message.content}\n\n${qualityContractHeading}\n${qualityContract}` }
+    ? { ...message, content: `${message.content}\n\n${qualityContractHeading}\n${qualityContract}${competitorPhraseIntelligenceBlock}` }
     : message);
   const estimatedInputTokens = estimateContentWritingInputTokens(
     messages.map(message => message.content).join('\n\n'),
@@ -476,6 +497,8 @@ export const prepareContentWritingConversation = async (
         contentLength: competitor.content.length,
       })),
       competitorChunks: bundle.competitorChunks,
+      competitorPhraseIntelligenceEnabled: settings.competitorPhraseIntelligenceEnabled,
+      competitorPhraseIntelligence,
       compactArticleContextBase,
       lengthTarget,
       qualityPolicyVersion: qualityConfiguration.policyVersion,
