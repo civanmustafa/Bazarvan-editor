@@ -2329,7 +2329,9 @@ ${readyCommandCompetitorBlocks}`;
                         ? null
                         : extraction.content;
                     const plainText = competitorTexts[index] || '';
-                    const repeatedPhrases = competitorTextStatsBySlot[index]?.repeatedPhrases || [];
+                    const competitorStats = competitorTextStatsBySlot[index];
+                    const repeatedPhrases = competitorStats?.repeatedPhrases || [];
+                    const competitorWordCount = competitorStats?.totalWords || 0;
                     const isLoading = extraction.status === 'loading';
                     const isUrlLoading = isLoading && extraction.source === 'url';
                     const isProgrammaticLoading = isLoading && extraction.source === 'programmatic';
@@ -2486,11 +2488,24 @@ ${readyCommandCompetitorBlocks}`;
 
                             <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-2 text-xs dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
                                 <div className="mb-2 flex items-center justify-between gap-2">
-                                    <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">
-                                        {t.locale === 'ar' ? 'العبارات المكررة من 3 إلى 5 كلمات' : 'Repeated 3-4-5 word phrases'}
-                                    </span>
+                                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                        <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">
+                                            {t.locale === 'ar' ? 'العبارات المكررة من 3 إلى 5 كلمات' : 'Repeated phrases of 3 to 5 words'}
+                                        </span>
+                                        <span
+                                            className="shrink-0 rounded-full border border-[#d4af37]/30 bg-[#d4af37]/10 px-2 py-0.5 text-[10px] font-black tabular-nums text-[#8a6f1d] dark:border-[#d4af37]/25 dark:text-[#f2d675]"
+                                            title={t.locale === 'ar'
+                                                ? 'عدد كلمات نص المنافس المعتمد، ويُستخدم لحساب هدف الكتابة التلقائي.'
+                                                : 'Word count of the canonical competitor text used for the automatic writing target.'}
+                                        >
+                                            {competitorWordCount.toLocaleString(t.locale === 'ar' ? 'ar' : 'en')}{' '}
+                                            {t.locale === 'ar' ? 'كلمة' : 'words'}
+                                        </span>
+                                    </div>
                                     <span className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-500 dark:bg-[#2A2A2A] dark:text-gray-400">
-                                        {repeatedPhrases.length}
+                                        {t.locale === 'ar'
+                                            ? `${repeatedPhrases.length.toLocaleString('ar')} عبارات رئيسية`
+                                            : `${repeatedPhrases.length.toLocaleString('en')} canonical`}
                                     </span>
                                 </div>
                                 {repeatedPhrases.length === 0 ? (
@@ -2502,16 +2517,40 @@ ${readyCommandCompetitorBlocks}`;
                                 ) : (
                                     <div className="max-h-72 space-y-1.5 overflow-y-auto custom-scrollbar">
                                         {repeatedPhrases.map(item => (
-                                            <div key={`${item.size}-${item.text}`} className="flex items-start justify-between gap-2 rounded border border-gray-200 bg-white px-2 py-1.5 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
-                                                <div className="min-w-0">
-                                                    <div className="whitespace-normal break-words leading-5 text-gray-700 dark:text-gray-200">{item.text}</div>
-                                                    <div className="mt-0.5 text-[10px] font-bold text-gray-400">
-                                                        {item.size} {t.locale === 'ar' ? 'كلمات' : 'words'}
+                                            <div key={`${item.size}-${item.text}`} className="rounded border border-gray-200 bg-white px-2 py-1.5 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="whitespace-normal break-words leading-5 text-gray-700 dark:text-gray-200">{item.text}</div>
+                                                        <div className="mt-0.5 text-[10px] font-bold text-gray-400">
+                                                            {item.size} {t.locale === 'ar' ? 'كلمات' : 'words'}
+                                                        </div>
                                                     </div>
+                                                    <span className="shrink-0 rounded bg-[#d4af37]/10 px-1.5 py-0.5 text-[11px] font-black tabular-nums text-[#8a6f1d] dark:text-[#f2d675]">
+                                                        {item.count}
+                                                    </span>
                                                 </div>
-                                                <span className="shrink-0 rounded bg-[#d4af37]/10 px-1.5 py-0.5 text-[11px] font-black tabular-nums text-[#8a6f1d] dark:text-[#f2d675]">
-                                                    {item.count}
-                                                </span>
+                                                {Boolean(item.containedPhrases?.length) && (
+                                                    <details className="mt-1.5 border-t border-gray-100 pt-1.5 dark:border-[#3C3C3C]">
+                                                        <summary className="cursor-pointer text-[10px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                                                            {t.locale === 'ar'
+                                                                ? `تتضمن ${item.containedPhrases!.length.toLocaleString('ar')} عبارات أقصر مدمجة`
+                                                                : `Includes ${item.containedPhrases!.length.toLocaleString('en')} collapsed shorter phrases`}
+                                                        </summary>
+                                                        <div className="mt-1 space-y-1">
+                                                            {item.containedPhrases!.map(phrase => (
+                                                                <div
+                                                                    key={`${phrase.size}-${phrase.normalizedText}`}
+                                                                    className="flex items-start justify-between gap-2 rounded bg-gray-50 px-2 py-1 text-[10px] text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-400"
+                                                                >
+                                                                    <span className="min-w-0 break-words">{phrase.text}</span>
+                                                                    <span className="shrink-0 tabular-nums">
+                                                                        {phrase.size} {t.locale === 'ar' ? 'كلمات' : 'words'}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </details>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -2607,8 +2646,8 @@ ${readyCommandCompetitorBlocks}`;
                     </div>
                     <p className="mb-3 text-[10px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
                         {t.locale === 'ar'
-                            ? 'تظهر هنا فقط عبارات 3-4-5 كلمات الواردة لدى منافسين اثنين أو أكثر، باعتبارها مؤشرات مهمة يمكن الاستفادة منها في مقالتنا.'
-                            : 'Only 3–5 word phrases found in at least two competitors appear here, as useful signals for our article.'}
+                            ? 'تظهر هنا العبارات الرئيسية المشتركة فقط. تُدمج العبارات الأقصر داخل الأطول عندما لا يكون لها ظهور مستقل، حتى لا تصل إلى محرر المحتوى كمتطلبات مكررة.'
+                            : 'Only canonical shared phrases appear here. Shorter phrases are collapsed into longer ones when they have no independent occurrence, preventing duplicate writing requirements.'}
                     </p>
 
                     {sharedCompetitorPhrases.length === 0 ? (
@@ -2682,6 +2721,25 @@ ${readyCommandCompetitorBlocks}`;
                                                 );
                                             })}
                                         </div>
+                                        {Boolean(item.containedPhrases?.length) && (
+                                            <details className="mt-2 border-t border-[#d4af37]/15 pt-2">
+                                                <summary className="cursor-pointer text-[10px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                                                    {t.locale === 'ar'
+                                                        ? `تتضمن ${item.containedPhrases!.length.toLocaleString('ar')} عبارات أقصر مدمجة`
+                                                        : `Includes ${item.containedPhrases!.length.toLocaleString('en')} collapsed shorter phrases`}
+                                                </summary>
+                                                <div className="mt-1 flex flex-wrap gap-1">
+                                                    {item.containedPhrases!.map(phrase => (
+                                                        <span
+                                                            key={`${phrase.size}-${phrase.normalizedText}`}
+                                                            className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[9px] font-bold text-gray-500 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-400"
+                                                        >
+                                                            {phrase.text}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </details>
+                                        )}
                                     </div>
                                 );
                             })}

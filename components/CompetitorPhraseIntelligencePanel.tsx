@@ -84,7 +84,9 @@ const CompetitorPhraseIntelligencePanel: React.FC<CompetitorPhraseIntelligencePa
           <span>{isArabic ? 'تحليل أهمية العبارات' : 'Phrase importance analysis'}</span>
         </div>
         <span className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-500 dark:bg-[#2A2A2A] dark:text-gray-400">
-          {intelligence.items.length}
+          {isArabic
+            ? `${intelligence.items.length.toLocaleString('ar')} عبارات رئيسية`
+            : `${intelligence.items.length.toLocaleString('en')} canonical`}
         </span>
       </div>
       <p className="mb-3 text-[10px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
@@ -209,6 +211,26 @@ const CompetitorPhraseIntelligencePanel: React.FC<CompetitorPhraseIntelligencePa
                   );
                 })}
               </div>
+
+              {Boolean(item.containedPhrases?.length) && (
+                <details className="mt-2 border-t border-gray-200 pt-2 dark:border-[#3C3C3C]">
+                  <summary className="cursor-pointer text-[10px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                    {isArabic
+                      ? `تتضمن ${item.containedPhrases!.length.toLocaleString('ar')} عبارات أقصر مدمجة`
+                      : `Includes ${item.containedPhrases!.length.toLocaleString('en')} collapsed shorter phrases`}
+                  </summary>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {item.containedPhrases!.map(phrase => (
+                      <span
+                        key={`${phrase.size}-${phrase.normalizedText}`}
+                        className="rounded-full border border-gray-200 bg-white px-2 py-1 text-[9px] font-bold text-gray-500 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-400"
+                      >
+                        {phrase.text}
+                      </span>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           ))}
         </div>
@@ -229,6 +251,13 @@ const CompetitorPhraseIntelligencePanel: React.FC<CompetitorPhraseIntelligencePa
               >
                 <div className="font-bold text-gray-600 dark:text-gray-300">{item.text}</div>
                 <div className="mt-0.5 text-gray-400">{item.rationale}</div>
+                {Boolean(item.containedPhrases?.length) && (
+                  <div className="mt-1 text-[9px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">
+                    {isArabic
+                      ? `${item.containedPhrases!.length.toLocaleString('ar')} عبارات أقصر مدمجة`
+                      : `${item.containedPhrases!.length.toLocaleString('en')} collapsed shorter phrases`}
+                  </div>
+                )}
               </div>
             ))}
           </div>

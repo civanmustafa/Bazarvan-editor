@@ -4,6 +4,7 @@ export type CompetitorRepeatedPhrase = {
     text: string;
     size: number;
     count: number;
+    containedPhrases?: CompetitorContainedPhrase[];
 };
 
 export type CompetitorWordFrequency = {
@@ -33,6 +34,15 @@ export type SharedCompetitorPhrase = {
     size: number;
     totalCount: number;
     competitors: SharedCompetitorPhraseOccurrence[];
+    containedPhrases?: CompetitorContainedPhrase[];
+};
+
+export type CompetitorContainedPhrase = {
+    text: string;
+    normalizedText: string;
+    size: number;
+    totalCount: number;
+    competitorCount: number;
 };
 
 export type CompetitorPhraseIntelligenceDecision =
@@ -62,6 +72,7 @@ export type CompetitorPhraseIntelligenceItem = {
     decision: CompetitorPhraseIntelligenceDecision;
     signalTypes: CompetitorPhraseIntelligenceSignal[];
     rationale: string;
+    containedPhrases?: CompetitorContainedPhrase[];
 };
 
 export type CompetitorPhraseIntelligenceResult = {
@@ -245,6 +256,108 @@ const sortRepeatedPhrases = (
     || left.text.localeCompare(right.text)
 );
 
+type ContainmentCandidate = {
+    text: string;
+    normalizedText: string;
+    size: number;
+    totalCount: number;
+    competitors: SharedCompetitorPhraseOccurrence[];
+};
+
+const getContainmentTokens = (value: string): string[] => (
+    tokenizeCompetitorPhraseSegments(value)
+        .flat()
+        .map(token => token.normalized)
+);
+
+const containsContiguousPhrase = (
+    parentTokens: string[],
+    childTokens: string[],
+): boolean => {
+    if (childTokens.length >= parentTokens.length || childTokens.length === 0) return false;
+    for (let index = 0; index <= parentTokens.length - childTokens.length; index += 1) {
+        if (childTokens.every((token, childIndex) => token === parentTokens[index + childIndex])) {
+            return true;
+        }
+    }
+    return false;
+};
+
+const parentCoversEveryChildOccurrence = (
+    parent: ContainmentCandidate,
+    child: ContainmentCandidate,
+): boolean => {
+    const parentCounts = new Map(
+        parent.competitors.map(occurrence => [occurrence.competitorNumber, occurrence.count]),
+    );
+    return child.competitors.every(occurrence => (
+        (parentCounts.get(occurrence.competitorNumber) || 0) >= occurrence.count
+    ));
+};
+
+const collapseContainedPhrases = <T>(
+    items: T[],
+    toCandidate: (item: T) => ContainmentCandidate,
+): Array<T & { containedPhrases?: CompetitorContainedPhrase[] }> => {
+    if (items.length < 2) return items;
+
+    const entries = items.map((item, originalIndex) => {
+        const candidate = toCandidate(item);
+        return {
+            candidate,
+            originalIndex,
+            tokens: getContainmentTokens(candidate.normalizedText || candidate.text),
+        };
+    });
+    const processingOrder = [...entries].sort((left, right) => (
+        right.candidate.size - left.candidate.size
+        || right.candidate.competitors.length - left.candidate.competitors.length
+        || right.candidate.totalCount - left.candidate.totalCount
+        || left.originalIndex - right.originalIndex
+    ));
+    const rootByOriginalIndex = new Map<number, number>();
+    const containedByRoot = new Map<number, CompetitorContainedPhrase[]>();
+
+    processingOrder.forEach(child => {
+        const parent = processingOrder.find(candidate => (
+            candidate.candidate.size > child.candidate.size
+            && containsContiguousPhrase(candidate.tokens, child.tokens)
+            && parentCoversEveryChildOccurrence(candidate.candidate, child.candidate)
+        ));
+        if (!parent) {
+            rootByOriginalIndex.set(child.originalIndex, child.originalIndex);
+            return;
+        }
+
+        const rootIndex = rootByOriginalIndex.get(parent.originalIndex) ?? parent.originalIndex;
+        rootByOriginalIndex.set(child.originalIndex, rootIndex);
+        const nested = containedByRoot.get(rootIndex) || [];
+        nested.push({
+            text: child.candidate.text,
+            normalizedText: child.candidate.normalizedText,
+            size: child.candidate.size,
+            totalCount: child.candidate.totalCount,
+            competitorCount: child.candidate.competitors.length,
+        });
+        containedByRoot.set(rootIndex, nested);
+    });
+
+    return items.flatMap((item, originalIndex) => {
+        if ((rootByOriginalIndex.get(originalIndex) ?? originalIndex) !== originalIndex) return [];
+        const containedPhrases = containedByRoot.get(originalIndex)
+            ?.sort((left, right) => (
+                right.size - left.size
+                || right.competitorCount - left.competitorCount
+                || right.totalCount - left.totalCount
+                || left.text.localeCompare(right.text)
+            ));
+        return [{
+            ...item,
+            ...(containedPhrases?.length ? { containedPhrases } : {}),
+        }];
+    });
+};
+
 const isMeaningfulPhraseToken = (token: CompetitorPhraseToken): boolean => (
     token.normalized.length > 1 && !COMPETITOR_STOP_WORDS.has(token.normalized)
 );
@@ -406,9 +519,18 @@ export const createCompetitorTextStats = (
         .sort((left, right) => right.count - left.count || left.word.localeCompare(right.word))
         .slice(0, 5);
 
-    const repeatedPhrases = Array.from(phraseCounts.values())
+    const repeatedPhrases = collapseContainedPhrases(
+        Array.from(phraseCounts.values())
         .filter(item => item.count > 1)
-        .sort(sortRepeatedPhrases);
+        .sort(sortRepeatedPhrases),
+        item => ({
+            text: item.text,
+            normalizedText: getContainmentTokens(item.text).join(' '),
+            size: item.size,
+            totalCount: item.count,
+            competitors: [{ competitorNumber: 1, count: item.count }],
+        }),
+    );
 
     return {
         totalWords: words.length,
@@ -448,7 +570,7 @@ export const createSharedCompetitorPhrases = (
         });
     });
 
-    return Array.from(phrases.values())
+    const sharedPhrases = Array.from(phrases.values())
         .map((value): SharedCompetitorPhrase => ({
             text: value.text,
             size: value.size,
@@ -464,6 +586,13 @@ export const createSharedCompetitorPhrases = (
             || right.totalCount - left.totalCount
             || left.text.localeCompare(right.text)
         ));
+    return collapseContainedPhrases(sharedPhrases, item => ({
+        text: item.text,
+        normalizedText: getContainmentTokens(item.text).join(' '),
+        size: item.size,
+        totalCount: item.totalCount,
+        competitors: item.competitors,
+    }));
 };
 
 export const createCompetitorPhraseIntelligence = (
@@ -572,7 +701,14 @@ export const createCompetitorPhraseIntelligence = (
         })
         .filter((item): item is CompetitorPhraseIntelligenceItem => Boolean(item))
         .sort(sortCompetitorPhraseIntelligenceItems);
-    const items = rankedItems.map((item, index) => ({
+    const collapsedItems = collapseContainedPhrases(rankedItems, item => ({
+        text: item.text,
+        normalizedText: item.normalizedText,
+        size: item.size,
+        totalCount: item.totalCount,
+        competitors: item.competitors,
+    }));
+    const items = collapsedItems.map((item, index) => ({
         ...item,
         id: `CP${String(index + 1).padStart(3, '0')}`,
     }));
@@ -622,7 +758,7 @@ export const competitorPhraseIntelligenceToPromptJson = (
         ? {
             enabled: result.enabled,
             rule: result.enabled
-                ? 'Use must_cover/supporting phrases as topical coverage signals, not as copy-paste phrases or keyword stuffing. Treat low_priority/ignored phrases as do-not-chase signals unless the source chunks prove real value.'
+                ? 'Use only the canonical must_cover/supporting phrases as topical coverage signals, not as copy-paste phrases or keyword stuffing. Shorter phrases fully contained in a canonical phrase have already been collapsed and must not be added as separate requirements. Treat low_priority/ignored phrases as do-not-chase signals unless the source chunks prove real value.'
                 : 'Competitor phrase intelligence is disabled by the administrator.',
             analyzedCompetitorCount: result.analyzedCompetitorCount,
             keywordTerms: result.keywordTerms,

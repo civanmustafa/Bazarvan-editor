@@ -38,6 +38,7 @@ import {
 import { normalizeGoalContext } from '../utils/goalContext';
 import {
   applyContentWritingLengthTargetToQualityConfiguration,
+  countContentWritingTargetWords,
   resolveContentWritingLengthTarget,
 } from '../utils/contentWritingTargets';
 import {
@@ -497,6 +498,7 @@ export const prepareContentWritingConversation = async (
         title: competitor.title || null,
         url: competitor.url || null,
         contentLength: competitor.content.length,
+        wordCount: countContentWritingTargetWords(competitor.content),
       })),
       competitorChunks: bundle.competitorChunks,
       competitorPhraseIntelligenceEnabled: settings.competitorPhraseIntelligenceEnabled,

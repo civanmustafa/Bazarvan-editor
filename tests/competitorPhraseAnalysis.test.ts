@@ -15,14 +15,15 @@ test('competitor repeated phrases are analyzed independently and sorted longest 
 
   assert.ok(stats.repeatedPhrases.length > 0);
   assert.equal(stats.repeatedPhrases[0].size, 5);
-  assert.deepEqual(
-    stats.repeatedPhrases.find(item => item.text === 'alpha beta gamma delta epsilon'),
-    {
-      text: 'alpha beta gamma delta epsilon',
-      size: 5,
-      count: 2,
-    },
+  const parent = stats.repeatedPhrases.find(
+    item => item.text === 'alpha beta gamma delta epsilon',
   );
+  assert.ok(parent);
+  assert.equal(parent.size, 5);
+  assert.equal(parent.count, 2);
+  assert.ok(parent.containedPhrases?.some(
+    item => item.text === 'alpha beta gamma delta' && item.size === 4,
+  ));
 
   for (let index = 1; index < stats.repeatedPhrases.length; index += 1) {
     assert.ok(
@@ -30,6 +31,56 @@ test('competitor repeated phrases are analyzed independently and sorted longest 
       'phrase lengths must be in descending order',
     );
   }
+});
+
+test('fully contained shorter phrases collapse under the longest repeated phrase', () => {
+  const stats = createCompetitorTextStats(
+    ['افضل جهاز كشف الذهب الخام. افضل جهاز كشف الذهب الخام.'],
+    {
+      articleLanguage: 'ar',
+      primaryKeyword: 'كشف الذهب',
+    },
+  );
+  const parent = stats.repeatedPhrases.find(
+    item => item.text === 'افضل جهاز كشف الذهب الخام',
+  );
+
+  assert.ok(parent);
+  assert.equal(parent.size, 5);
+  assert.ok(parent.containedPhrases?.some(
+    item => item.text === 'افضل جهاز كشف الذهب' && item.size === 4,
+  ));
+  assert.ok(parent.containedPhrases?.some(
+    item => item.text === 'جهاز كشف الذهب' && item.size === 3,
+  ));
+  assert.ok(parent.containedPhrases?.some(
+    item => item.text === 'كشف الذهب الخام' && item.size === 3,
+  ));
+  assert.ok(stats.repeatedPhrases.every(
+    item => item.text !== 'افضل جهاز كشف الذهب'
+      && item.text !== 'جهاز كشف الذهب'
+      && item.text !== 'كشف الذهب الخام',
+  ));
+});
+
+test('a shorter phrase remains canonical when it also appears independently', () => {
+  const stats = createCompetitorTextStats(
+    [
+      'افضل جهاز كشف الذهب الخام. افضل جهاز كشف الذهب الخام. '
+      + 'كشف الذهب الخام. كشف الذهب الخام.',
+    ],
+    {
+      articleLanguage: 'ar',
+      primaryKeyword: 'كشف الذهب',
+    },
+  );
+
+  assert.ok(stats.repeatedPhrases.some(
+    item => item.text === 'افضل جهاز كشف الذهب الخام',
+  ));
+  assert.ok(stats.repeatedPhrases.some(
+    item => item.text === 'كشف الذهب الخام' && item.count === 4,
+  ));
 });
 
 test('phrase analysis never creates an n-gram across competitor text boundaries', () => {
@@ -58,16 +109,17 @@ test('shared phrases include phrases used once by two or more named competitors'
   ]);
 
   const phrase = shared.find(item => item.text === 'content strategy improves organic search');
-  assert.deepEqual(phrase, {
-    text: 'content strategy improves organic search',
-    size: 5,
-    totalCount: 3,
-    competitors: [
-      { competitorNumber: 1, count: 1 },
-      { competitorNumber: 2, count: 1 },
-      { competitorNumber: 4, count: 1 },
-    ],
-  });
+  assert.ok(phrase);
+  assert.equal(phrase.size, 5);
+  assert.equal(phrase.totalCount, 3);
+  assert.deepEqual(phrase.competitors, [
+    { competitorNumber: 1, count: 1 },
+    { competitorNumber: 2, count: 1 },
+    { competitorNumber: 4, count: 1 },
+  ]);
+  assert.ok(phrase.containedPhrases?.some(
+    item => item.text === 'content strategy improves organic' && item.size === 4,
+  ));
   assert.ok(shared.every(item => item.competitors.length >= 2));
 
   for (let index = 1; index < shared.length; index += 1) {
@@ -252,6 +304,38 @@ test('phrase intelligence combines every competitor with keyword relevance and p
   ));
 });
 
+test('content writing receives canonical phrases without fully contained shorter requirements', () => {
+  const result = createCompetitorPhraseIntelligence({
+    sources: [
+      { competitorNumber: 1, text: 'افضل جهاز كشف الذهب الخام.' },
+      { competitorNumber: 2, text: 'افضل جهاز كشف الذهب الخام.' },
+    ],
+    articleLanguage: 'ar',
+    keywords: {
+      primary: 'كشف الذهب',
+      secondaries: ['جهاز كشف الذهب'],
+      lsi: [],
+    },
+  });
+  const parent = result.mustCover.find(
+    item => item.text === 'افضل جهاز كشف الذهب الخام',
+  );
+  const promptPayload = JSON.parse(competitorPhraseIntelligenceToPromptJson(result));
+  const sentTexts = [
+    ...promptPayload.mustCover,
+    ...promptPayload.supporting,
+    ...promptPayload.review,
+    ...promptPayload.lowPriority,
+  ].map((item: { text: string }) => item.text);
+
+  assert.ok(parent);
+  assert.ok(parent.containedPhrases?.some(
+    item => item.text === 'جهاز كشف الذهب',
+  ));
+  assert.deepEqual(sentTexts, ['افضل جهاز كشف الذهب الخام']);
+  assert.ok(promptPayload.rule.includes('already been collapsed'));
+});
+
 test('administrator can disable phrase intelligence without losing analyzed competitor count', () => {
   const result = createCompetitorPhraseIntelligence({
     enabled: false,
@@ -272,9 +356,10 @@ test('administrator can disable phrase intelligence without losing analyzed comp
 });
 
 test('competitor phrase sections stay inside each card and the shared section stays last', async () => {
-  const [source, intelligencePanel] = await Promise.all([
+  const [source, intelligencePanel, contentWritingEngine] = await Promise.all([
     readFile(new URL('../components/RightSidebar.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/CompetitorPhraseIntelligencePanel.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../server/contentWritingEngine.ts', import.meta.url), 'utf8'),
   ]);
   const cardsStart = source.indexOf('{competitorUrls.map((url, index) => {');
   const aggregateStatsStart = source.indexOf(
@@ -295,8 +380,11 @@ test('competitor phrase sections stay inside each card and the shared section st
   assert.ok(aggregateStatsStart > cardsStart);
   assert.ok(intelligenceSectionStart > aggregateStatsStart);
   assert.ok(sharedSectionStart > intelligenceSectionStart);
-  assert.match(cardSection, /const repeatedPhrases = competitorTextStatsBySlot\[index\]/);
+  assert.match(cardSection, /const competitorStats = competitorTextStatsBySlot\[index\]/);
   assert.match(cardSection, /repeatedPhrases\.map\(item =>/);
+  assert.match(cardSection, /العبارات المكررة من 3 إلى 5 كلمات/);
+  assert.match(cardSection, /competitorWordCount\.toLocaleString/);
+  assert.match(cardSection, /item\.containedPhrases/);
   assert.match(source, /React\.lazy\(\(\) => import\('\.\/CompetitorPhraseIntelligencePanel'\)\)/);
   assert.match(
     source,
@@ -307,4 +395,8 @@ test('competitor phrase sections stay inside each card and the shared section st
   assert.match(intelligencePanel, /#d4af37/);
   assert.doesNotMatch(intelligencePanel, /violet|sky-/);
   assert.match(source, /articleLanguage=\{articleLanguage\}/);
+  assert.match(intelligencePanel, /item\.containedPhrases/);
+  assert.match(contentWritingEngine, /wordCount: countContentWritingTargetWords\(competitor\.content\)/);
+  assert.match(contentWritingEngine, /manualRange: normalizedGoalContext\.targetWordRange/);
+  assert.match(contentWritingEngine, /competitors: bundle\.competitors/);
 });
