@@ -16,6 +16,9 @@ import {
   type ClientPageCrawlJob,
 } from './clientPageCrawlQueue';
 import { indexCompletedClientPage } from './clientSemanticIndexStore';
+import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
+import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
+import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 
 const boundedInteger = (
   value: string | undefined,
@@ -28,6 +31,12 @@ const boundedInteger = (
 };
 
 const pollIntervalMs = boundedInteger(process.env.CLIENT_PAGE_CRAWLER_POLL_MS, 2_500, 500, 60_000);
+const maximumIdlePollIntervalMs = boundedInteger(
+  process.env.CLIENT_PAGE_CRAWLER_IDLE_MAX_MS,
+  30_000,
+  pollIntervalMs,
+  60_000,
+);
 const leaseSeconds = boundedInteger(process.env.CLIENT_PAGE_CRAWLER_LEASE_SECONDS, 180, 60, 1_800);
 const workerConcurrency = boundedInteger(process.env.CLIENT_PAGE_CRAWLER_CONCURRENCY, 2, 1, 5);
 const crawlTimeoutMs = boundedInteger(process.env.CLIENT_PAGE_CRAWLER_TIMEOUT_MS, 45_000, 5_000, 120_000);
@@ -54,10 +63,6 @@ let lastRecoveryAt = 0;
 let lastLoggedError = '';
 let lastLoggedErrorAt = 0;
 const activeControllers = new Map<string, AbortController>();
-
-const sleep = (milliseconds: number): Promise<void> => (
-  new Promise(resolve => setTimeout(resolve, milliseconds))
-);
 
 const errorMessage = (error: unknown): string => (
   error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000)
@@ -216,30 +221,26 @@ const recoverStaleJobsIfDue = async (): Promise<void> => {
   }
 };
 
-const runWorkerSlot = async (slot: number): Promise<void> => {
-  const slotWorkerId = `${workerId}:slot-${slot}`;
-  while (!shuttingDown) {
-    try {
-      if (slot === 1) await recoverStaleJobsIfDue();
-      const job = await claimNextClientPageCrawlJob({
-        workerId: slotWorkerId,
-        leaseSeconds,
-      });
-      if (!job) {
-        await sleep(pollIntervalMs);
-        continue;
-      }
-      await executeClaimedJob(job, slotWorkerId);
-    } catch (error) {
-      logThrottledError(`Worker slot ${slot} failed`, error);
-      await sleep(pollIntervalMs);
-    }
-  }
-};
+const queueWorker = new AdaptiveQueueWorker<ClientPageCrawlJob>({
+  workerName: 'client-page-crawler',
+  workerId,
+  concurrency: workerConcurrency,
+  minimumIdleDelayMs: pollIntervalMs,
+  maximumIdleDelayMs: maximumIdlePollIntervalMs,
+  isShuttingDown: () => shuttingDown,
+  beforeClaim: recoverStaleJobsIfDue,
+  claim: slotWorkerId => claimNextClientPageCrawlJob({
+    workerId: slotWorkerId,
+    leaseSeconds,
+  }),
+  execute: executeClaimedJob,
+  onError: logThrottledError,
+});
 
 const shutdown = (signal: string): void => {
   if (shuttingDown) return;
   shuttingDown = true;
+  queueWorker.stop();
   console.log(`[client-page-crawler] Received ${signal}; active jobs will be recovered after lease expiry.`);
   for (const controller of activeControllers.values()) {
     controller.abort(new ClientPageCrawlShutdownError());
@@ -251,6 +252,24 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 console.log(
   `[client-page-crawler] Started ${workerConcurrency} slot(s) as ${workerId};`
+  + ` idlePoll=${pollIntervalMs}-${maximumIdlePollIntervalMs}ms`
   + ` timeout=${crawlTimeoutMs}ms maxBytes=${maximumBytes}.`,
 );
-await Promise.all(Array.from({ length: workerConcurrency }, (_, index) => runWorkerSlot(index + 1)));
+const unsubscribeWakeSignal = subscribeToWorkerQueueWakeSignal({
+  client: getExternalAnalysisSupabaseAdmin(),
+  queueName: 'client_page_crawl',
+  subscriberId: workerId,
+  onWake: queueWorker.wake,
+  onStatus: status => {
+    if (status === 'SUBSCRIBED') {
+      console.log('[client-page-crawler] Realtime queue wake signal subscribed.');
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      logThrottledError('Realtime queue wake signal unavailable; adaptive polling remains active', status);
+    }
+  },
+});
+try {
+  await queueWorker.run();
+} finally {
+  unsubscribeWakeSignal();
+}

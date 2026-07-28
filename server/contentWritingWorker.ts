@@ -15,6 +15,9 @@ import {
   updateContentWritingProgress,
   type ContentWritingSession,
 } from './contentWritingSessionService';
+import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
+import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
+import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 
 const boundedInteger = (
   value: string | undefined,
@@ -27,6 +30,12 @@ const boundedInteger = (
 };
 
 const pollIntervalMs = boundedInteger(process.env.CONTENT_WRITING_WORKER_POLL_MS, 1_500, 250, 60_000);
+const maximumIdlePollIntervalMs = boundedInteger(
+  process.env.CONTENT_WRITING_WORKER_IDLE_MAX_MS,
+  30_000,
+  pollIntervalMs,
+  60_000,
+);
 const leaseSeconds = boundedInteger(process.env.CONTENT_WRITING_SESSION_LEASE_SECONDS, 1_800, 60, 3_600);
 const workerConcurrency = boundedInteger(process.env.CONTENT_WRITING_WORKER_CONCURRENCY, 1, 1, 3);
 const workerId = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
@@ -56,10 +65,6 @@ let shuttingDown = false;
 let lastLoggedError = '';
 let lastLoggedErrorAt = 0;
 const activeControllers = new Map<string, AbortController>();
-
-const sleep = (milliseconds: number): Promise<void> => (
-  new Promise(resolve => setTimeout(resolve, milliseconds))
-);
 
 const errorMessage = (error: unknown): string => (
   error instanceof Error ? error.message.slice(0, 4_000) : String(error).slice(0, 4_000)
@@ -265,26 +270,25 @@ const executeClaimedSession = async (
   }
 };
 
-const runWorkerSlot = async (slot: number): Promise<void> => {
-  const slotWorkerId = `${workerId}:slot-${slot}`;
-  while (!shuttingDown) {
-    try {
-      const session = await claimNextContentWritingSession({ workerId: slotWorkerId, leaseSeconds });
-      if (!session) {
-        await sleep(pollIntervalMs);
-        continue;
-      }
-      await executeClaimedSession(session, slotWorkerId);
-    } catch (error) {
-      logThrottledError(`Worker slot ${slot} failed`, error);
-      await sleep(pollIntervalMs);
-    }
-  }
-};
+const queueWorker = new AdaptiveQueueWorker<ContentWritingSession>({
+  workerName: 'content-writing-worker',
+  workerId,
+  concurrency: workerConcurrency,
+  minimumIdleDelayMs: pollIntervalMs,
+  maximumIdleDelayMs: maximumIdlePollIntervalMs,
+  isShuttingDown: () => shuttingDown,
+  claim: slotWorkerId => claimNextContentWritingSession({
+    workerId: slotWorkerId,
+    leaseSeconds,
+  }),
+  execute: executeClaimedSession,
+  onError: logThrottledError,
+});
 
 const shutdown = (signal: string): void => {
   if (shuttingDown) return;
   shuttingDown = true;
+  queueWorker.stop();
   console.log(`[content-writing-worker] Received ${signal}; active sessions will be recovered after lease expiry.`);
   for (const controller of activeControllers.values()) {
     controller.abort(new ContentWritingWorkerShutdownError());
@@ -294,5 +298,25 @@ const shutdown = (signal: string): void => {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-console.log(`[content-writing-worker] Started ${workerConcurrency} slot(s) as ${workerId}.`);
-await Promise.all(Array.from({ length: workerConcurrency }, (_, index) => runWorkerSlot(index + 1)));
+console.log(
+  `[content-writing-worker] Started ${workerConcurrency} slot(s) as ${workerId};`
+  + ` idlePoll=${pollIntervalMs}-${maximumIdlePollIntervalMs}ms.`,
+);
+const unsubscribeWakeSignal = subscribeToWorkerQueueWakeSignal({
+  client: getExternalAnalysisSupabaseAdmin(),
+  queueName: 'content_writing',
+  subscriberId: workerId,
+  onWake: queueWorker.wake,
+  onStatus: status => {
+    if (status === 'SUBSCRIBED') {
+      console.log('[content-writing-worker] Realtime queue wake signal subscribed.');
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      logThrottledError('Realtime queue wake signal unavailable; adaptive polling remains active', status);
+    }
+  },
+});
+try {
+  await queueWorker.run();
+} finally {
+  unsubscribeWakeSignal();
+}

@@ -12,6 +12,7 @@ import {
   completeExternalAnalysisJob,
   finalizeExternalAnalysisJobCancel,
   heartbeatExternalAnalysisJob,
+  getExternalAnalysisSupabaseAdmin,
   recoverStaleExternalAnalysisJobs,
   renewExternalAnalysisJobLease,
   scheduleExternalAnalysisJobRetry,
@@ -25,6 +26,8 @@ import {
   getExternalAnalysisJobExecutor,
   getSupportedExternalAnalysisJobTypes,
 } from './externalAnalysisExecutor';
+import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
+import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 
 const parseBoundedInteger = (
   value: string | undefined,
@@ -41,6 +44,12 @@ const pollIntervalMs = parseBoundedInteger(
   process.env.EXTERNAL_ANALYSIS_WORKER_POLL_MS,
   5_000,
   1_000,
+  60_000,
+);
+const maximumIdlePollIntervalMs = parseBoundedInteger(
+  process.env.EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS,
+  30_000,
+  pollIntervalMs,
   60_000,
 );
 const leaseSeconds = parseBoundedInteger(
@@ -90,10 +99,6 @@ class ExternalAnalysisCancellationError extends Error {
     this.code = code;
   }
 }
-
-const sleep = (milliseconds: number): Promise<void> => (
-  new Promise((resolve) => setTimeout(resolve, milliseconds))
-);
 
 const errorMessage = (error: unknown): string => {
   if (error instanceof Error) return error.message.slice(0, 2_000);
@@ -334,56 +339,69 @@ const executeClaimedJob = async (
   }
 };
 
-const runWorkerSlot = async (slotIndex: number): Promise<void> => {
-  const slotWorkerId = `${workerId}:slot-${slotIndex + 1}`;
-  while (!shuttingDown) {
-    try {
-      if (slotIndex === 0) await recoverStaleJobsIfDue();
-
-      if (workerJobTypes.length === 0) {
-        if (!idleNoticeShown) {
-          console.log('[external-analysis-worker] No allowed executors are configured; queue claiming is idle.');
-          idleNoticeShown = true;
-        }
-        await sleep(pollIntervalMs);
-        continue;
+const queueWorker = new AdaptiveQueueWorker<ExternalAnalysisJob>({
+  workerName: 'external-analysis-worker',
+  workerId,
+  concurrency: workerConcurrency,
+  minimumIdleDelayMs: pollIntervalMs,
+  maximumIdleDelayMs: maximumIdlePollIntervalMs,
+  isShuttingDown: () => shuttingDown,
+  beforeClaim: async () => {
+    if (workerJobTypes.length > 0) await recoverStaleJobsIfDue();
+  },
+  claim: async slotWorkerId => {
+    if (workerJobTypes.length === 0) {
+      if (!idleNoticeShown) {
+        console.log('[external-analysis-worker] No allowed executors are configured; queue claiming is idle.');
+        idleNoticeShown = true;
       }
-
-      idleNoticeShown = false;
-      const job = await claimNextExternalAnalysisJob({
-        workerId: slotWorkerId,
-        supportedJobTypes: workerJobTypes,
-        leaseSeconds,
-      });
-
-      if (!job) {
-        await sleep(pollIntervalMs);
-        continue;
-      }
-
-      await executeClaimedJob(job, slotWorkerId);
-    } catch (error) {
-      logThrottledError('Worker loop failed', error);
-      await sleep(pollIntervalMs);
+      return null;
     }
-  }
-};
+
+    idleNoticeShown = false;
+    return claimNextExternalAnalysisJob({
+      workerId: slotWorkerId,
+      supportedJobTypes: workerJobTypes,
+      leaseSeconds,
+    });
+  },
+  execute: executeClaimedJob,
+  onError: logThrottledError,
+});
 
 const runWorker = async (): Promise<void> => {
   console.log(
-    `[external-analysis-worker] Started ${workerId}; jobTypes=${workerJobTypes.join(',') || 'none'}; concurrency=${workerConcurrency}, poll=${pollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m (global setting takes precedence).`,
+    `[external-analysis-worker] Started ${workerId}; jobTypes=${workerJobTypes.join(',') || 'none'}; concurrency=${workerConcurrency}, idlePoll=${pollIntervalMs}-${maximumIdlePollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m (global setting takes precedence).`,
   );
 
-  await Promise.all(
-    Array.from({ length: workerConcurrency }, (_, index) => runWorkerSlot(index)),
-  );
+  const unsubscribeWakeSignal: () => void = workerJobTypes.length > 0
+    ? subscribeToWorkerQueueWakeSignal({
+        client: getExternalAnalysisSupabaseAdmin(),
+        queueName: 'external_analysis',
+        subscriberId: workerId,
+        onWake: queueWorker.wake,
+        onStatus: status => {
+          if (status === 'SUBSCRIBED') {
+            console.log('[external-analysis-worker] Realtime queue wake signal subscribed.');
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            logThrottledError('Realtime queue wake signal unavailable; adaptive polling remains active', status);
+          }
+        },
+      })
+    : (): void => undefined;
 
-  console.log('[external-analysis-worker] Stopped.');
+  try {
+    await queueWorker.run();
+  } finally {
+    unsubscribeWakeSignal();
+    console.log('[external-analysis-worker] Stopped.');
+  }
 };
 
 const requestShutdown = (signal: NodeJS.Signals): void => {
   if (shuttingDown) return;
   shuttingDown = true;
+  queueWorker.stop();
   console.log(`[external-analysis-worker] Received ${signal}; stopping.`);
   activeControllers.forEach(controller => {
     controller.abort(new Error(`Worker stopped by ${signal}.`));
