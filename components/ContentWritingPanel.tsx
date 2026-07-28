@@ -50,6 +50,7 @@ import ContentWritingReviewModal from './ContentWritingReviewModal';
 import ContentWritingStepResult, {
   getContentWritingStepDescription,
 } from './ContentWritingStepResult';
+import ContentWritingStageAuditPanel from './ContentWritingStageAuditPanel';
 import {
   ContentWritingRequestError,
   cancelContentWritingSession,
@@ -1334,6 +1335,11 @@ const ContentWritingPanel: React.FC = () => {
                                 {stepDescription}
                               </div>
                             )}
+                            <ContentWritingStageAuditPanel
+                              step={step}
+                              contextSnapshot={activeDetail?.session.contextSnapshot || {}}
+                              isArabic={isArabic}
+                            />
                             {outputText ? (
                               <ContentWritingStepResult
                                 step={step}

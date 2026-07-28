@@ -50,6 +50,7 @@ export type CompetitorPhraseIntelligenceSignal =
     | 'low_keyword_relevance';
 
 export type CompetitorPhraseIntelligenceItem = {
+    id?: string;
     text: string;
     normalizedText: string;
     size: number;
@@ -441,7 +442,7 @@ export const createCompetitorPhraseIntelligence = (
         });
     });
 
-    const items = Array.from(candidates.entries())
+    const rankedItems = Array.from(candidates.entries())
         .map(([normalizedText, candidate]): CompetitorPhraseIntelligenceItem | null => {
             const competitors = Array.from(candidate.competitors.entries())
                 .map(([competitorNumber, count]) => ({ competitorNumber, count }))
@@ -498,6 +499,10 @@ export const createCompetitorPhraseIntelligence = (
         })
         .filter((item): item is CompetitorPhraseIntelligenceItem => Boolean(item))
         .sort(sortCompetitorPhraseIntelligenceItems);
+    const items = rankedItems.map((item, index) => ({
+        ...item,
+        id: `CP${String(index + 1).padStart(3, '0')}`,
+    }));
 
     const maxItemsPerBucket = Math.max(5, Math.min(80, Math.round(options.maxItemsPerBucket || 40)));
     const mustCover = items.filter(item => item.decision === 'must_cover').slice(0, maxItemsPerBucket);
@@ -526,6 +531,7 @@ export const createCompetitorPhraseIntelligence = (
 };
 
 const serializePromptPhrase = (item: CompetitorPhraseIntelligenceItem) => ({
+    id: item.id,
     text: item.text,
     decision: item.decision,
     score: item.score,

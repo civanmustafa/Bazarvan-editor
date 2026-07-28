@@ -62,6 +62,10 @@ import {
   competitorPhraseIntelligenceToPromptJson,
   type CompetitorPhraseIntelligenceResult,
 } from '../utils/competitorPhraseAnalysis';
+import {
+  buildContentWritingPhraseAudit,
+  getContentWritingPhraseAuditOutput,
+} from '../utils/contentWritingPhraseAudit';
 import { normalizeGoalContext } from '../utils/goalContext';
 import {
   CONTENT_WRITING_EVIDENCE_TRACE_VERSION,
@@ -461,12 +465,25 @@ export const executeStructuredContentWritingWorkflow = async (
       return { ok: false, execution: failure };
     }
 
+    const phraseAuditOutput = getContentWritingPhraseAuditOutput({
+      outputText: processed.output,
+      metadata: processed.metadata,
+    });
+    const competitorPhraseAudit = buildContentWritingPhraseAudit({
+      stepType: definition.type,
+      intelligence: getCompetitorPhraseIntelligence(options.session),
+      outputText: phraseAuditOutput.text,
+      outputSubject: phraseAuditOutput.subject,
+    });
     const completed = await completeContentWritingStep({
       sessionId: options.session.id,
       workerId: options.workerId,
       stepKey: definition.key,
       outputText: processed.output,
-      metadata: getExecutionMetadata(execution, processed.metadata),
+      metadata: getExecutionMetadata(execution, {
+        ...(processed.metadata || {}),
+        competitorPhraseAudit,
+      }),
     });
     if (!completed) throw new Error(`Could not complete content writing step ${definition.key}.`);
     stepMap.set(definition.key, completed);
