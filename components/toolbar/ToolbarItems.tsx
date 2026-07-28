@@ -1,6 +1,7 @@
 import React from 'react';
 
 type TooltipPlacement = 'top' | 'bottom';
+type TooltipAlignment = 'start' | 'center' | 'end';
 
 const tooltipPositionClasses: Record<TooltipPlacement, { label: string; arrow: string }> = {
   top: {
@@ -13,16 +14,40 @@ const tooltipPositionClasses: Record<TooltipPlacement, { label: string; arrow: s
   },
 };
 
-export const IconTooltip: React.FC<{ label: string; placement?: TooltipPlacement }> = ({ label, placement = 'bottom' }) => {
+const tooltipAlignmentClasses: Record<TooltipAlignment, { label: string; arrow: string }> = {
+  start: {
+    label: 'start-0',
+    arrow: 'start-3',
+  },
+  center: {
+    label: 'left-1/2 -translate-x-1/2',
+    arrow: 'left-1/2 -translate-x-1/2',
+  },
+  end: {
+    label: 'end-0',
+    arrow: 'end-3',
+  },
+};
+
+export const IconTooltip: React.FC<{
+  label: string;
+  placement?: TooltipPlacement;
+  align?: TooltipAlignment;
+}> = ({
+  label,
+  placement = 'bottom',
+  align = 'center',
+}) => {
   const position = tooltipPositionClasses[placement];
+  const alignment = tooltipAlignmentClasses[align];
 
   return (
     <span
-      className={`pointer-events-none absolute left-1/2 ${position.label} z-[1000] -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-[11px] font-semibold leading-none text-white opacity-0 shadow-xl transition-opacity delay-150 duration-150 whitespace-nowrap group-hover:opacity-100 group-focus-visible:opacity-100`}
+      className={`pointer-events-none absolute ${alignment.label} ${position.label} z-[1000] rounded-md bg-gray-900 px-2 py-1 text-[11px] font-semibold leading-none text-white opacity-0 shadow-xl transition-opacity delay-150 duration-150 whitespace-nowrap group-hover:opacity-100 group-focus-visible:opacity-100`}
       role="tooltip"
     >
       {label}
-      <span className={`absolute left-1/2 ${position.arrow} -translate-x-1/2`} />
+      <span className={`absolute ${alignment.arrow} ${position.arrow}`} />
     </span>
   );
 };

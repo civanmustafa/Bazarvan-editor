@@ -48,6 +48,7 @@ import {
     createCompetitorTextStats,
     createSharedCompetitorPhrases,
 } from '../utils/competitorPhraseAnalysis';
+import { IconTooltip } from './toolbar/ToolbarItems';
 
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
 const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
@@ -2828,9 +2829,9 @@ ${readyCommandCompetitorBlocks}`;
             </div>
 
             <div className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col`}>
-              <div className="flex items-stretch gap-1 border-b border-gray-200 p-1.5 dark:border-[#3C3C3C]">
+              <div className="relative z-40 flex items-stretch gap-1 border-b border-gray-200 p-1.5 dark:border-[#3C3C3C]">
                 <div role="tablist" aria-label={t.locale === 'ar' ? 'أدوات الذكاء الاصطناعي' : 'AI tools'} className="flex min-w-0 flex-1 gap-1 rounded-lg bg-gray-200/70 p-1 dark:bg-black/20">
-                {sidebarTabs.map(tab => (
+                {sidebarTabs.map((tab, tabIndex) => (
                     <button
                         type="button"
                         role="tab"
@@ -2840,8 +2841,7 @@ ${readyCommandCompetitorBlocks}`;
                         aria-selected={activeTab === tab.id}
                         onClick={() => setActiveTab(tab.id)}
                         aria-label={`${tab.label} — ${tab.shortcut}`}
-                        title={`${tab.label} — ${tab.shortcut}`}
-                        className={`relative flex h-9 min-w-0 flex-1 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] ${
+                        className={`group relative flex h-9 min-w-0 flex-1 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] ${
                             activeTab === tab.id
                                 ? 'bg-[#d4af37]/15 text-[#8a6f1d] ring-1 ring-inset ring-[#d4af37]/35 shadow-sm dark:text-[#f2d675]'
                                 : 'text-gray-400 hover:bg-white/80 hover:text-gray-800 dark:hover:bg-white/5 dark:hover:text-white'
@@ -2849,6 +2849,10 @@ ${readyCommandCompetitorBlocks}`;
                     >
                         {tab.icon}
                         <span className="sr-only">{tab.label}</span>
+                        <IconTooltip
+                            label={tab.label}
+                            align={tabIndex === 0 ? 'start' : tabIndex === sidebarTabs.length - 1 ? 'end' : 'center'}
+                        />
                     </button>
                 ))}
                 </div>

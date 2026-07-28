@@ -22,6 +22,7 @@ import {
   saveArticleClientSelection,
 } from '../utils/articleClientContext';
 import QuickClientCreateModal from './QuickClientCreateModal';
+import { IconTooltip } from './toolbar/ToolbarItems';
 
 const DuplicatesTab = React.lazy(() => import('./DuplicatesTab'));
 const StructureTab = React.lazy(() => import('./StructureTab'));
@@ -395,7 +396,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
   const getTabClass = (tabName: LeftSidebarTab) => {
     const isActive = activeTab === tabName;
-    return `relative flex h-9 min-w-0 flex-1 items-center justify-center gap-2 rounded-md px-2 text-xs font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] ${
+    return `group relative flex h-9 min-w-0 flex-1 items-center justify-center rounded-md px-2 text-xs font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] ${
       isActive
         ? 'bg-[#d4af37]/15 text-[#8a6f1d] ring-1 ring-inset ring-[#d4af37]/35 shadow-sm dark:bg-[#d4af37]/15 dark:text-[#f2d675]'
         : 'text-gray-500 hover:bg-white/80 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white'
@@ -1365,7 +1366,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         </div>
 
         <div className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col`}>
-          <div className="flex items-stretch gap-1 border-b border-gray-200 p-1.5 dark:border-[#3C3C3C]">
+          <div className="relative z-40 flex items-stretch gap-1 border-b border-gray-200 p-1.5 dark:border-[#3C3C3C]">
             <div role="tablist" aria-label={uiLanguage === 'ar' ? 'الكلمات والتكرارات والمعايير' : 'Keywords, duplicates, and criteria'} className="flex min-w-0 flex-1 gap-1 rounded-lg bg-gray-200/70 p-1 dark:bg-black/20">
               <button
                 type="button"
@@ -1373,12 +1374,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 id="keywords-sidebar-tab"
                 aria-controls="keywords-sidebar-panel"
                 aria-selected={activeTab === 'keywords'}
+                aria-label={`${tLk.targetKeywords} — Alt+1`}
                 onClick={() => handleTabChange('keywords')}
                 className={getTabClass('keywords')}
-                title={`${tLk.targetKeywords} — Alt+1`}
               >
                   <KeyRound size={16} />
-                  <span className="truncate">{tLk.targetKeywords}</span>
+                  <span className="sr-only">{tLk.targetKeywords}</span>
+                  <IconTooltip label={tLk.targetKeywords} align="start" />
               </button>
               <button
                 type="button"
@@ -1386,12 +1388,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 id="duplicates-sidebar-tab"
                 aria-controls="duplicates-sidebar-panel"
                 aria-selected={activeTab === 'duplicates'}
+                aria-label={`${tLk.duplicates} — Alt+2`}
                 onClick={() => handleTabChange('duplicates')}
                 className={getTabClass('duplicates')}
-                title={`${tLk.duplicates} — Alt+2`}
               >
                   <Repeat size={16} />
-                  <span className="truncate">{tLk.duplicates}</span>
+                  <span className="sr-only">{tLk.duplicates}</span>
+                  <IconTooltip label={tLk.duplicates} />
               </button>
               <button
                 type="button"
@@ -1399,12 +1402,13 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 id="criteria-sidebar-tab"
                 aria-controls="criteria-sidebar-panel"
                 aria-selected={activeTab === 'criteria'}
+                aria-label={`${criteriaTabLabel} — Alt+3`}
                 onClick={() => handleTabChange('criteria')}
                 className={getTabClass('criteria')}
-                title={`${criteriaTabLabel} — Alt+3`}
               >
                   <LayoutTemplate size={16} />
-                  <span className="truncate">{criteriaTabLabel}</span>
+                  <span className="sr-only">{criteriaTabLabel}</span>
+                  <IconTooltip label={criteriaTabLabel} align="end" />
               </button>
             </div>
             <button
