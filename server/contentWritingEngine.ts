@@ -486,6 +486,7 @@ export const prepareContentWritingConversation = async (
     contextSnapshot: {
       workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
       faqIndependenceVersion: 1,
+      finalSectionStructureVersion: 1,
       article: {
         id: articleSource.article.id,
         title: articleSource.article.title,

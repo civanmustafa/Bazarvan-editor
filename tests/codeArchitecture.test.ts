@@ -518,13 +518,16 @@ test('smart content brief keeps only its core fields required and is controlled 
   );
 });
 
-test('content writing resolves manual or competitor-derived length and dynamic sections once per session', async () => {
-  const [targets, engine, workflow, quality, goalFields] = await Promise.all([
+test('content writing and editor standards share manual or competitor-derived dynamic length targets', async () => {
+  const [targets, engine, workflow, quality, goalFields, analysisHook, wordRule, competitorStorage] = await Promise.all([
     readWorkspaceFile('utils/contentWritingTargets.ts'),
     readWorkspaceFile('server/contentWritingEngine.ts'),
     readWorkspaceFile('server/contentWritingWorkflow.ts'),
     readWorkspaceFile('utils/contentWritingQuality.ts'),
     readWorkspaceFile('components/GoalContextFields.tsx'),
+    readWorkspaceFile('hooks/useContentAnalysis.ts'),
+    readWorkspaceFile('utils/analysis/rules/checkWordCount.ts'),
+    readWorkspaceFile('utils/competitorStorage.ts'),
   ]);
 
   assert.match(targets, /CONTENT_WRITING_AUTOMATIC_WORD_MULTIPLIER = 1\.2/);
@@ -540,6 +543,30 @@ test('content writing resolves manual or competitor-derived length and dynamic s
     /\.filter\(\(\[id, result\]\) => id !== 'wordCount' && result\.status !== 'info'\)/,
   );
   assert.match(goalFields, /parseContentWritingTargetWordRange/);
+  assert.match(analysisHook, /resolveContentWritingLengthTarget/);
+  assert.match(analysisHook, /COMPETITOR_TEXTS_CHANGED_EVENT/);
+  assert.match(wordRule, /lengthTarget\?\.mode === 'automatic'/);
+  assert.match(wordRule, /automaticTarget\.baselineCompetitor\.wordCount/);
+  assert.match(competitorStorage, /COMPETITOR_TEXTS_CHANGED_EVENT/);
+});
+
+test('content writing enforces one goal-aware final section after FAQ across assembly and revisions', async () => {
+  const [workflow, serverWorkflow, resultUi, engine] = await Promise.all([
+    readWorkspaceFile('utils/contentWritingWorkflow.ts'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('components/ContentWritingStepResult.tsx'),
+    readWorkspaceFile('server/contentWritingEngine.ts'),
+  ]);
+
+  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 9/);
+  assert.match(workflow, /auditContentWritingFinalSectionStructure/);
+  assert.match(workflow, /final_structure_faq_not_penultimate/);
+  assert.match(workflow, /final_structure_duplicate_final_heading/);
+  assert.match(workflow, /truncateGeneratedBodyBeforeH2/);
+  assert.match(serverWorkflow, /finalSectionStructureGuard/);
+  assert.match(serverWorkflow, /finalSectionStructureGuard\.accepted/);
+  assert.match(resultUi, /final_structure_duplicate_final_heading/);
+  assert.match(engine, /finalSectionStructureVersion: 1/);
 });
 
 test('competitor coverage matrix and phrase intelligence are deterministic and controlled by the prompt registry', async () => {

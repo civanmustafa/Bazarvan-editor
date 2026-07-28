@@ -29,8 +29,11 @@ import {
   getContentWritingFaqIntentBlueprints,
   type ContentWritingFaqQuestionSeed,
 } from './contentWritingFaq';
+import {
+  FAQ_KEYWORDS,
+} from '../constants';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 8;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 9;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
@@ -871,6 +874,215 @@ const removeLeadingHeading = (value: string, maximumLevel = 6): string => {
   return lines.join('\n').trim();
 };
 
+const ENGLISH_FAQ_HEADINGS = ['faq', 'faqs', 'frequently asked questions', 'questions and answers'];
+const ARABIC_EXPLICIT_CONCLUSION_HEADINGS = [
+  'الخاتمة',
+  'خاتمة',
+  'الخلاصة',
+  'خلاصة',
+  'في الختام',
+  'الملخص النهائي',
+  'ملخص نهائي',
+  'الخلاصة النهائية',
+];
+const ENGLISH_CONCLUSION_HEADINGS = [
+  'conclusion',
+  'summary',
+  'final summary',
+  'in conclusion',
+  'wrap up',
+  'wrapping up',
+];
+const ARABIC_CALL_TO_ACTION_HEADINGS = [
+  'اشتر',
+  'اطلب',
+  'احجز',
+  'تواصل',
+  'اتصل',
+  'ابدأ',
+  'سجل',
+  'انضم',
+  'جرب',
+  'اكتشف',
+  'احصل',
+  'تسوق',
+  'راسل',
+  'استشر',
+];
+const ENGLISH_CALL_TO_ACTION_HEADINGS = [
+  'buy now',
+  'order now',
+  'book now',
+  'reserve now',
+  'shop now',
+  'request a quote',
+  'get a quote',
+  'contact us',
+  'call us',
+  'talk to us',
+  'start now',
+  'get started',
+  'try now',
+  'sign up',
+  'subscribe',
+  'join now',
+  'discover more',
+  'view plans',
+  'choose your plan',
+];
+
+const normalizeStructuralHeading = (value: string): string => value
+  .normalize('NFKC')
+  .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+  .replace(/[*_`~\[\](){}:؛،,.!?؟]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toLocaleLowerCase();
+
+const headingContainsOneOf = (
+  value: string,
+  keywords: readonly string[],
+): boolean => {
+  const normalized = normalizeStructuralHeading(value);
+  return keywords.some(keyword => {
+    const candidate = normalizeStructuralHeading(keyword);
+    return candidate.length > 0 && normalized.includes(candidate);
+  });
+};
+
+const headingStartsWithOneOf = (
+  value: string,
+  keywords: readonly string[],
+): boolean => {
+  const normalized = normalizeStructuralHeading(value);
+  return keywords.some(keyword => {
+    const candidate = normalizeStructuralHeading(keyword);
+    return candidate.length > 0 && (
+      normalized === candidate
+      || normalized.startsWith(`${candidate} `)
+    );
+  });
+};
+
+const getMarkdownH2Sections = (value: string): Array<{
+  heading: string;
+  startLine: number;
+  endLine: number;
+}> => {
+  const lines = normalizeGeneratedContentWritingMarkdown(value).split(/\r?\n/);
+  const starts = lines
+    .map((line, index) => {
+      const match = line.trim().match(/^##[ \t]+(.+?)\s*$/);
+      return match ? { heading: match[1].trim(), startLine: index } : null;
+    })
+    .filter((item): item is { heading: string; startLine: number } => Boolean(item));
+  return starts.map((item, index) => ({
+    ...item,
+    endLine: starts[index + 1]?.startLine ?? lines.length,
+  }));
+};
+
+const isFaqHeading = (value: string): boolean => headingContainsOneOf(
+  value,
+  [...FAQ_KEYWORDS, ...ENGLISH_FAQ_HEADINGS],
+);
+
+const isConclusionHeading = (value: string): boolean => headingContainsOneOf(
+  value,
+  [...ARABIC_EXPLICIT_CONCLUSION_HEADINGS, ...ENGLISH_CONCLUSION_HEADINGS],
+);
+
+const isCallToActionHeading = (value: string): boolean => headingStartsWithOneOf(
+  value,
+  [...ARABIC_CALL_TO_ACTION_HEADINGS, ...ENGLISH_CALL_TO_ACTION_HEADINGS],
+);
+
+const truncateGeneratedBodyBeforeH2 = (
+  value: string,
+  maximumLeadingHeadingLevel = 6,
+): string => {
+  const body = removeLeadingHeading(value, maximumLeadingHeadingLevel);
+  const lines = body.split(/\r?\n/);
+  const nextH2Index = lines.findIndex(line => /^##[ \t]+\S/.test(line.trim()));
+  return (nextH2Index >= 0 ? lines.slice(0, nextH2Index) : lines).join('\n').trim();
+};
+
+const extractGeneratedFinalSectionBody = (
+  value: string,
+  kind: 'conclusion' | 'call_to_action',
+): string => {
+  const normalized = normalizeGeneratedContentWritingMarkdown(value);
+  const lines = normalized.split(/\r?\n/);
+  const sections = getMarkdownH2Sections(normalized);
+  const predicate = kind === 'conclusion' ? isConclusionHeading : isCallToActionHeading;
+  const matching = [...sections].reverse().find(section => predicate(section.heading));
+  const selected = matching || sections[0];
+  if (!selected) return truncateGeneratedBodyBeforeH2(normalized);
+  return lines
+    .slice(
+      kind === 'conclusion' ? selected.startLine + 1 : selected.startLine,
+      selected.endLine,
+    )
+    .join('\n')
+    .trim();
+};
+
+export type ContentWritingFinalSectionStructureAudit = {
+  accepted: boolean;
+  finalSectionKind: 'conclusion' | 'call_to_action';
+  h2Headings: string[];
+  faqHeadingCount: number;
+  finalHeading: string;
+  reasons: string[];
+};
+
+export const auditContentWritingFinalSectionStructure = (options: {
+  markdown: string;
+  goalContext?: Partial<GoalContext> | null;
+}): ContentWritingFinalSectionStructureAudit => {
+  const finalSectionKind = getContentWritingFinalSectionKind(options.goalContext);
+  const sections = getMarkdownH2Sections(options.markdown);
+  const h2Headings = sections.map(section => section.heading);
+  const faqIndexes = sections
+    .map((section, index) => (isFaqHeading(section.heading) ? index : -1))
+    .filter(index => index >= 0);
+  const conclusionIndexes = sections
+    .map((section, index) => (isConclusionHeading(section.heading) ? index : -1))
+    .filter(index => index >= 0);
+  const finalIndex = sections.length - 1;
+  const finalHeading = sections[finalIndex]?.heading || '';
+  const duplicateFinalHeadingCount = finalHeading
+    ? h2Headings.filter(heading => (
+        normalizeStructuralHeading(heading) === normalizeStructuralHeading(finalHeading)
+      )).length
+    : 0;
+  const reasons: string[] = [];
+
+  if (faqIndexes.length !== 1) reasons.push('final_structure_faq_count');
+  if (faqIndexes.length === 1 && faqIndexes[0] !== finalIndex - 1) {
+    reasons.push('final_structure_faq_not_penultimate');
+  }
+  if (!finalHeading) reasons.push('final_structure_final_heading_missing');
+  if (duplicateFinalHeadingCount > 1) reasons.push('final_structure_duplicate_final_heading');
+
+  if (finalSectionKind === 'conclusion') {
+    if (conclusionIndexes.length !== 1) reasons.push('final_structure_conclusion_count');
+    if (!isConclusionHeading(finalHeading)) reasons.push('final_structure_conclusion_not_last');
+  } else {
+    if (conclusionIndexes.length > 0) reasons.push('final_structure_conclusion_forbidden');
+    if (!isCallToActionHeading(finalHeading)) reasons.push('final_structure_cta_not_last');
+  }
+
+  return {
+    accepted: reasons.length === 0,
+    finalSectionKind,
+    h2Headings,
+    faqHeadingCount: faqIndexes.length,
+    finalHeading,
+    reasons: Array.from(new Set(reasons)),
+  };
+};
+
 const joinNonEmpty = (parts: Array<string | undefined | null>): string => (
   parts.map(part => String(part || '').trim()).filter(Boolean).join('\n\n')
 );
@@ -886,20 +1098,24 @@ export const assembleContentWritingDraft = (options: {
 }): string => {
   const articleTitle = options.articleTitle.replace(/[\r\n]+/g, ' ').trim();
   const sectionParts = options.outline.sections.map((section, index) => {
-    const output = removeLeadingHeading(options.outputs[`section-${String(index + 1).padStart(2, '0')}`] || '');
+    const output = truncateGeneratedBodyBeforeH2(
+      options.outputs[`section-${String(index + 1).padStart(2, '0')}`] || '',
+    );
     return output ? `## ${section.title}\n\n${output}` : '';
   });
-  const introduction = removeLeadingHeading(options.outputs.introduction || '');
-  const conclusion = removeLeadingHeading(options.outputs.conclusion || '');
-  const callToAction = normalizeGeneratedContentWritingMarkdown(
-    options.outputs['call-to-action'] || '',
+  const introduction = truncateGeneratedBodyBeforeH2(options.outputs.introduction || '');
+  const conclusion = extractGeneratedFinalSectionBody(
+    options.outputs.conclusion || '',
+    'conclusion',
   );
-  const faq = removeLeadingHeading(options.outputs.faq || '', 2);
+  const callToAction = extractGeneratedFinalSectionBody(
+    options.outputs['call-to-action'] || '',
+    'call_to_action',
+  );
+  const faq = truncateGeneratedBodyBeforeH2(options.outputs.faq || '', 2);
   const faqTitle = options.language === 'en' ? 'Frequently asked questions' : 'الأسئلة الشائعة';
   const conclusionTitle = options.language === 'en' ? 'Conclusion' : 'الخاتمة';
-  const inferredFinalSectionKind = callToAction
-    ? 'call_to_action'
-    : getContentWritingFinalSectionKind(options.goalContext);
+  const inferredFinalSectionKind = getContentWritingFinalSectionKind(options.goalContext);
   const callToActionLines = callToAction.split(/\r?\n/);
   const callToActionHeadingIndex = callToActionLines.findIndex(line => /^##[ \t]+\S/.test(line.trim()));
   const callToActionSection = callToAction

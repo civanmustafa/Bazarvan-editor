@@ -6,7 +6,13 @@ import { useUser } from '../contexts/UserContext';
 import { useAISelector } from '../contexts/AIContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
-import { COMPETITOR_HTML_STORAGE_KEY, COMPETITOR_RESET_EVENT, COMPETITOR_TEXT_STORAGE_KEY, COMPETITOR_URLS_STORAGE_KEY } from '../utils/competitorStorage';
+import {
+    COMPETITOR_HTML_STORAGE_KEY,
+    COMPETITOR_RESET_EVENT,
+    COMPETITOR_TEXT_STORAGE_KEY,
+    COMPETITOR_TEXTS_CHANGED_EVENT,
+    COMPETITOR_URLS_STORAGE_KEY,
+} from '../utils/competitorStorage';
 import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ExternalAiBridgeProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
 import { GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
@@ -1047,6 +1053,14 @@ const RightSidebar: React.FC = () => {
             text: getCompetitorStatText(index, competitorTexts, competitorExtractions),
         })).filter(source => source.text);
     }, [competitorExtractions, competitorTexts]);
+
+    useEffect(() => {
+        window.dispatchEvent(new CustomEvent(COMPETITOR_TEXTS_CHANGED_EVENT, {
+            detail: {
+                texts: competitorStatSources.map(source => source.text),
+            },
+        }));
+    }, [competitorStatSources]);
 
     const competitorPhraseAnalysisContext = useMemo(() => ({
         articleLanguage,

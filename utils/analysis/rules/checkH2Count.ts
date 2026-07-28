@@ -8,7 +8,7 @@ import type { AnalysisContext } from '../analysisUtils';
 import { isCallToActionPageContext } from '../../goalContext';
 
 export const checkH2Count = (context: AnalysisContext): CheckResult => {
-    const { headings, totalWordCount, goalContext, t, uiLanguage } = context;
+    const { headings, totalWordCount, goalContext, lengthTarget, t, uiLanguage } = context;
     const tRule = t.structureAnalysis['عدد H2'];
     const title = tRule.title;
     const description = tRule.description;
@@ -25,17 +25,34 @@ export const checkH2Count = (context: AnalysisContext): CheckResult => {
         : "• 1000 - 1500 words: Requires 6 to 7 H2 headings.\n• 1500 - 2000 words: Requires 8 to 9 H2 headings.\n• 2000 - 2500 words: Requires 9 to 10 H2 headings.\n\n*Note: If the word count is outside these ranges, the criteria passes automatically but continues to show stats for organization.*";
 
     const manualTarget = parseContentWritingTargetWordRange(goalContext.targetWordRange);
-    if (manualTarget) {
-        const bodySections = deriveContentWritingOutlineSections(manualTarget);
+    const automaticTarget = (
+        !manualTarget
+        && lengthTarget?.mode === 'automatic'
+        && lengthTarget.baselineCompetitor
+    )
+        ? lengthTarget
+        : null;
+    const resolvedTarget = manualTarget || automaticTarget?.targetWords || null;
+    if (resolvedTarget) {
+        const bodySections = automaticTarget?.outlineSections
+            || deriveContentWritingOutlineSections(resolvedTarget);
         const finalSectionLabel = isCallToActionPageContext(goalContext)
             ? (uiLanguage === 'ar' ? 'دعوة اتخاذ الإجراء' : 'the call-to-action section')
             : (uiLanguage === 'ar' ? 'الخاتمة' : 'the conclusion');
         min = bodySections.min + 2;
         max = bodySections.max + 2;
         requiredText = t.common.range(min, max);
-        details = uiLanguage === 'ar'
-            ? `بحسب نطاق ${manualTarget.min}-${manualTarget.max} كلمة: ${bodySections.min}-${bodySections.max} أقسام متن ديناميكية، إضافة إلى قسمي الأسئلة الشائعة و${finalSectionLabel}.`
-            : `For the ${manualTarget.min}-${manualTarget.max} word target: ${bodySections.min}-${bodySections.max} dynamic body sections, plus FAQ and ${finalSectionLabel}.`;
+        details = automaticTarget
+            ? (
+                uiLanguage === 'ar'
+                    ? `الخانة فارغة؛ لذلك استُخدم أكبر منافس (${automaticTarget.baselineCompetitor!.wordCount} كلمة) × 1.20 مع هامش ±10%، فصار نطاق المقال ${resolvedTarget.min}-${resolvedTarget.max} كلمة: ${bodySections.min}-${bodySections.max} أقسام متن ديناميكية، إضافة إلى قسمي الأسئلة الشائعة و${finalSectionLabel}.`
+                    : `The field is empty, so the largest competitor (${automaticTarget.baselineCompetitor!.wordCount} words) × 1.20 with a ±10% tolerance sets the ${resolvedTarget.min}-${resolvedTarget.max} article range: ${bodySections.min}-${bodySections.max} dynamic body sections, plus FAQ and ${finalSectionLabel}.`
+            )
+            : (
+                uiLanguage === 'ar'
+                    ? `بحسب نطاق ${resolvedTarget.min}-${resolvedTarget.max} كلمة: ${bodySections.min}-${bodySections.max} أقسام متن ديناميكية، إضافة إلى قسمي الأسئلة الشائعة و${finalSectionLabel}.`
+                    : `For the ${resolvedTarget.min}-${resolvedTarget.max} word target: ${bodySections.min}-${bodySections.max} dynamic body sections, plus FAQ and ${finalSectionLabel}.`
+            );
     } else if (totalWordCount >= 1000 && totalWordCount <= 1500) {
         min = 6; max = 7; requiredText = t.common.range(6, 7);
     } else if (totalWordCount > 1500 && totalWordCount <= 2000) {

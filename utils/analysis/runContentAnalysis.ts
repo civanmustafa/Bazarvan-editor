@@ -52,6 +52,7 @@ import { checkTablesCount } from './rules/checkTablesCount';
 import { checkHeadingLength } from './rules/checkHeadingLength';
 import { FAQ_KEYWORDS, CONCLUSION_KEYWORDS } from '../../constants';
 import { isCallToActionPageContext } from '../goalContext';
+import type { ContentWritingLengthTarget } from '../contentWritingTargets';
 
 export interface ContentAnalysisInput {
   editorState?: any;
@@ -60,6 +61,7 @@ export interface ContentAnalysisInput {
   textContent: string;
   keywords: Keywords;
   goalContext: GoalContext;
+  lengthTarget?: ContentWritingLengthTarget | null;
   articleLanguage: 'ar' | 'en';
   uiLanguage: 'ar' | 'en';
   tableCount?: number;
@@ -210,6 +212,7 @@ export const runContentAnalysis = ({
   textContent,
   keywords,
   goalContext,
+  lengthTarget,
   articleLanguage,
   uiLanguage,
   tableCount,
@@ -327,6 +330,7 @@ export const runContentAnalysis = ({
     totalWordCount,
     keywords,
     goalContext,
+    lengthTarget,
     analysisGoal,
     articleLanguage,
     uiLanguage,

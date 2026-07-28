@@ -167,6 +167,76 @@ test('editor standards use the manual word range as a strict pass/fail criterion
   assert.equal(above.status, 'fail');
 });
 
+test('editor standards use largest competitor times 1.20 when the manual field is empty', async () => {
+  const [
+    { checkWordCount },
+    { checkH2Count },
+    { resolveContentWritingLengthTarget },
+  ] = await Promise.all([
+    importWorkspaceModule('../utils/analysis/rules/checkWordCount.ts'),
+    importWorkspaceModule('../utils/analysis/rules/checkH2Count.ts'),
+    importWorkspaceModule('../utils/contentWritingTargets.ts'),
+  ]);
+  const words = (count: number): string => Array.from(
+    { length: count },
+    (_, index) => `competitor${index}`,
+  ).join(' ');
+  const lengthTarget = resolveContentWritingLengthTarget({
+    manualRange: '',
+    competitors: [
+      { position: 1, content: words(800) },
+      { position: 2, content: words(1_000) },
+    ],
+  });
+  const heading = (index: number) => ({
+    level: 2,
+    text: `Section ${index + 1}`,
+    pos: index,
+    nodeSize: 1,
+  });
+  const t = {
+    structureAnalysis: {
+      'عدد الكلمات': {
+        title: 'عدد الكلمات',
+        description: '',
+        required: '',
+      },
+      'عدد H2': {
+        title: 'عدد H2',
+        description: '',
+        required: '',
+      },
+    },
+    common: {
+      range: (min: number, max: number) => `${min}-${max}`,
+    },
+    violationMessages: {
+      h2Count: (current: number, required: string) => `${current}/${required}`,
+    },
+  };
+  const context = {
+    analysisGoal: '',
+    goalContext: { targetWordRange: '', pageType: 'article' },
+    lengthTarget,
+    totalWordCount: 1_200,
+    uiLanguage: 'ar',
+    t,
+  };
+  const wordCount = checkWordCount(context);
+  const h2Count = checkH2Count({
+    ...context,
+    headings: Array.from({ length: 7 }, (_, index) => heading(index)),
+  });
+
+  assert.equal(lengthTarget.centerWords, 1_200);
+  assert.deepEqual(lengthTarget.targetWords, { min: 1_080, max: 1_320 });
+  assert.equal(wordCount.status, 'pass');
+  assert.equal(wordCount.required, '1080-1320');
+  assert.match(wordCount.description, /1000.*1\.20.*1200.*10%/);
+  assert.equal(h2Count.status, 'pass');
+  assert.match(h2Count.details, /1000.*1\.20.*1080-1320/);
+});
+
 test('editor H2 standard follows the dynamic section range for a manual target', async () => {
   const { checkH2Count } = await importWorkspaceModule(
     '../utils/analysis/rules/checkH2Count.ts',

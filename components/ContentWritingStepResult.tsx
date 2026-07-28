@@ -464,6 +464,9 @@ const RevisionResult: React.FC<{
   const qualityGuard = isRecord(step.metadata.qualityGuard) ? step.metadata.qualityGuard : {};
   const knowledgeGuard = isRecord(step.metadata.knowledgeGuard) ? step.metadata.knowledgeGuard : {};
   const faqGuard = isRecord(step.metadata.faqIndependenceGuard) ? step.metadata.faqIndependenceGuard : {};
+  const finalStructureGuard = isRecord(step.metadata.finalSectionStructureGuard)
+    ? step.metadata.finalSectionStructureGuard
+    : {};
   const faqBefore = isRecord(faqGuard.before) ? faqGuard.before : {};
   const faqAfter = isRecord(faqGuard.after) ? faqGuard.after : {};
   const reasonLabels: Record<string, [string, string]> = {
@@ -479,6 +482,14 @@ const RevisionResult: React.FC<{
     faq_body_duplication_increased: ['زاد تكرار أفكار المتن داخل الأسئلة الشائعة', 'FAQ duplication of body ideas increased'],
     faq_internal_duplication_increased: ['زاد التشابه بين الأسئلة الشائعة', 'Similarity between FAQ entries increased'],
     unaudited_faq_question_added: ['أُضيف سؤال لم يمر بتدقيق الاستقلالية والأدلة', 'A question was added without independence and evidence review'],
+    final_structure_faq_count: ['يجب وجود قسم أسئلة شائعة واحد فقط', 'Exactly one FAQ section is required'],
+    final_structure_faq_not_penultimate: ['يجب أن تكون الأسئلة الشائعة قبل القسم النهائي مباشرة', 'FAQ must appear immediately before the final section'],
+    final_structure_final_heading_missing: ['القسم النهائي مفقود', 'The final section is missing'],
+    final_structure_duplicate_final_heading: ['تكرر عنوان القسم النهائي', 'The final-section heading was duplicated'],
+    final_structure_conclusion_count: ['يجب وجود خاتمة واحدة فقط', 'Exactly one conclusion is required'],
+    final_structure_conclusion_not_last: ['يجب أن تكون الخاتمة آخر قسم', 'The conclusion must be the final section'],
+    final_structure_conclusion_forbidden: ['لا يسمح بخاتمة مستقلة لهذا النوع من الصفحات', 'A separate conclusion is not allowed for this page type'],
+    final_structure_cta_not_last: ['يجب أن تكون دعوة اتخاذ الإجراء آخر قسم', 'The call to action must be the final section'],
   };
   const reasons = textList(decision.reasons);
   return (
@@ -529,6 +540,27 @@ const RevisionResult: React.FC<{
           </div>
         )}
       </div>
+      {Object.keys(finalStructureGuard).length > 0 && (
+        <div className={`rounded-md border p-2 text-[10px] font-bold leading-5 ${
+          finalStructureGuard.accepted === true
+            ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/10 dark:text-emerald-300'
+            : 'border-red-200 bg-red-50/70 text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-300'
+        }`}>
+          <div>
+            {isArabic ? 'تدقيق ترتيب الأقسام النهائية' : 'Final-section order audit'}:
+            {' '}
+            {finalStructureGuard.accepted === true
+              ? (isArabic ? 'سليم' : 'Passed')
+              : (isArabic ? 'مرفوض' : 'Rejected')}
+          </div>
+          <div className="mt-1 text-gray-600 dark:text-gray-300">
+            {(Array.isArray(finalStructureGuard.h2Headings)
+              ? finalStructureGuard.h2Headings.map(String)
+              : []
+            ).join(' ← ')}
+          </div>
+        </div>
+      )}
       {reasons.length > 0 && (
         <div className="rounded-md bg-red-50/70 p-2 text-[10px] font-bold leading-5 text-red-700 dark:bg-red-900/10 dark:text-red-300">
           {reasons.map(reason => (

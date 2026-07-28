@@ -8,6 +8,8 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20260723010000_content_writing_knowledge_workflow.sql',
   '20260723020000_content_writing_resume_preferences.sql',
   '20260728000000_dynamic_content_writing_final_section.sql',
+  '20260728010000_content_writing_faq_independence.sql',
+  '20260728040000_content_writing_final_structure.sql',
 ] as const;
 
 export const CONTENT_WRITING_RELEASE_ARTIFACTS = [

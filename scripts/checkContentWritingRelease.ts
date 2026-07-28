@@ -50,6 +50,7 @@ const requiredServerMarkers = [
   'knowledge_workflow_version',
   'resume_preference_version',
   'dynamic_final_section_version',
+  'finalSectionStructureVersion',
 ];
 for (const marker of requiredServerMarkers) {
   if (!serverBundle.includes(marker)) {
@@ -70,6 +71,8 @@ const requiredWorkerMarkers = [
   'competitor_index',
   'coverage_audit',
   'call_to_action',
+  'faqIndependenceGuard',
+  'finalSectionStructureGuard',
 ];
 for (const marker of requiredWorkerMarkers) {
   if (!workerBundle.includes(marker)) {

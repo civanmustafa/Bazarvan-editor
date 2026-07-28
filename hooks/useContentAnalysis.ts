@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Keywords, FullAnalysis, GoalContext, StructureAnalysis } from '../types';
 import { createAnalysisNodesFromEditorState, runContentAnalysis, type ContentAnalysisInput } from '../utils/analysis/runContentAnalysis';
 import { countNodesByType } from '../utils/analysis/analysisUtils';
 import { translations } from '../components/translations';
+import {
+  resolveContentWritingLengthTarget,
+  type ContentWritingLengthTarget,
+} from '../utils/contentWritingTargets';
+import {
+  COMPETITOR_TEXTS_CHANGED_EVENT,
+  readStoredCompetitorInputs,
+  type CompetitorTextsChangedDetail,
+} from '../utils/competitorStorage';
+import { getUsableCompetitorText } from '../utils/competitorContent';
 
 type ContentAnalysisWorkerResponse =
   | { requestId: number; result: FullAnalysis; error?: never }
@@ -181,12 +191,14 @@ const createAnalysisInput = (
   refreshScope: ContentAnalysisRefreshScope,
   previousAnalysis?: FullAnalysis,
   articleTitle = '',
+  lengthTarget?: ContentWritingLengthTarget | null,
 ): ContentAnalysisInput => ({
   analysisNodes: createAnalysisNodesFromEditorState(editorState),
   articleTitle,
   textContent: typeof textContent === 'string' ? textContent : '',
   keywords,
   goalContext,
+  lengthTarget,
   articleLanguage,
   uiLanguage,
   tableCount: countNodesByType(editorState, 'table'),
@@ -224,8 +236,36 @@ export const useContentAnalysis = (
   enabled = true,
   articleTitle = '',
 ): FullAnalysis => {
+  const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => (
+    readStoredCompetitorInputs().texts
+      .map(getUsableCompetitorText)
+      .filter(Boolean)
+  ));
+  const lengthTarget = useMemo(() => {
+    const resolved = resolveContentWritingLengthTarget({
+      manualRange: goalContext.targetWordRange,
+      competitors: competitorTexts.map((content, index) => ({
+        position: index + 1,
+        content,
+      })),
+    });
+    return resolved.mode === 'manual' || resolved.baselineCompetitor
+      ? resolved
+      : null;
+  }, [competitorTexts, goalContext.targetWordRange]);
   const [analysisResults, setAnalysisResults] = useState<FullAnalysis>(() =>
-    runContentAnalysisSafely(createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, DEFAULT_REFRESH_SCOPE, undefined, articleTitle))
+    runContentAnalysisSafely(createAnalysisInput(
+      editorState,
+      textContent,
+      keywords,
+      goalContext,
+      articleLanguage,
+      uiLanguage,
+      DEFAULT_REFRESH_SCOPE,
+      undefined,
+      articleTitle,
+      lengthTarget,
+    ))
   );
   const [workerDisabled, setWorkerDisabled] = useState(false);
   const activeWorkerRef = useRef<Worker | null>(null);
@@ -239,6 +279,20 @@ export const useContentAnalysis = (
     latestAnalysisRef.current = nextResult;
     setAnalysisResults(nextResult);
   };
+
+  useEffect(() => {
+    const handleCompetitorTextsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<CompetitorTextsChangedDetail>).detail;
+      const texts = Array.isArray(detail?.texts)
+        ? detail.texts.map(getUsableCompetitorText).filter(Boolean)
+        : readStoredCompetitorInputs().texts.map(getUsableCompetitorText).filter(Boolean);
+      setCompetitorTexts(texts);
+    };
+    window.addEventListener(COMPETITOR_TEXTS_CHANGED_EVENT, handleCompetitorTextsChanged);
+    return () => {
+      window.removeEventListener(COMPETITOR_TEXTS_CHANGED_EVENT, handleCompetitorTextsChanged);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -257,7 +311,18 @@ export const useContentAnalysis = (
       return;
     }
 
-    const input = createAnalysisInput(editorState, textContent, keywords, goalContext, articleLanguage, uiLanguage, refreshScope, latestAnalysisRef.current, articleTitle);
+    const input = createAnalysisInput(
+      editorState,
+      textContent,
+      keywords,
+      goalContext,
+      articleLanguage,
+      uiLanguage,
+      refreshScope,
+      latestAnalysisRef.current,
+      articleTitle,
+      lengthTarget,
+    );
     const requestId = latestRequestIdRef.current + 1;
     latestRequestIdRef.current = requestId;
     const job: ContentAnalysisWorkerJob = {
@@ -349,6 +414,7 @@ export const useContentAnalysis = (
     enabled,
     workerDisabled,
     articleTitle,
+    lengthTarget,
   ]);
 
   return analysisResults;

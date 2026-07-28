@@ -219,6 +219,7 @@ test('structured writing assembles one markdown draft without duplicate section 
       'section-04': 'Fourth body.',
       conclusion: 'Closing text.',
       faq: '### What matters?\n\nA clear answer.',
+      'call-to-action': '## Contact us now\n\nA stale CTA from another page goal.',
     },
   });
 
@@ -227,16 +228,97 @@ test('structured writing assembles one markdown draft without duplicate section 
   assert.match(draft, /## Conclusion/);
   assert.match(draft, /## Frequently asked questions/);
   assert.match(draft, /### What matters\?/);
+  assert.doesNotMatch(draft, /stale CTA/);
   assert.ok(
     draft.indexOf('## Frequently asked questions') < draft.indexOf('## Conclusion'),
     'FAQ must appear before the conclusion so the conclusion remains the final H2.',
   );
 });
 
+test('draft assembly strips nested final sections and keeps FAQ immediately before one conclusion', async () => {
+  const {
+    parseContentWritingOutline,
+    assembleContentWritingDraft,
+    auditContentWritingFinalSectionStructure,
+  } = await importWorkflow();
+  const outline = parseContentWritingOutline(outlineJson);
+  const draft = assembleContentWritingDraft({
+    articleTitle: 'Safe article',
+    language: 'en',
+    outline,
+    outputs: {
+      introduction: 'Opening.\n\n## Conclusion\n\nLeaked introduction conclusion.',
+      'section-01': 'Useful body.\n\n## Conclusion\n\nLeaked body conclusion.',
+      'section-02': 'Second body.',
+      'section-03': 'Third body.',
+      'section-04': 'Fourth body.',
+      faq: '## Frequently asked questions\n\n### What is new?\n\nA new answer.\n\n## Conclusion\n\nLeaked FAQ conclusion.',
+      conclusion: [
+        '## Conclusion',
+        '',
+        'First generated closing.',
+        '',
+        '## Conclusion',
+        '',
+        'The single selected closing.',
+      ].join('\n'),
+    },
+  });
+  const audit = auditContentWritingFinalSectionStructure({
+    markdown: draft,
+    goalContext: { pageType: 'article' },
+  });
+
+  assert.equal((draft.match(/^## Conclusion$/gm) || []).length, 1);
+  assert.doesNotMatch(draft, /Leaked .* conclusion/);
+  assert.match(draft, /The single selected closing/);
+  assert.ok(
+    draft.indexOf('## Frequently asked questions') < draft.indexOf('## Conclusion'),
+  );
+  assert.equal(audit.accepted, true);
+  assert.deepEqual(audit.reasons, []);
+});
+
+test('final structure audit rejects duplicated final sections and FAQ in the wrong position', async () => {
+  const { auditContentWritingFinalSectionStructure } = await importWorkflow();
+  const duplicate = auditContentWritingFinalSectionStructure({
+    markdown: [
+      '# Page',
+      '## Contact us now',
+      'First CTA.',
+      '## Frequently asked questions',
+      '### Question?',
+      'Answer.',
+      '## Contact us now',
+      'Second CTA.',
+    ].join('\n\n'),
+    goalContext: { pageType: 'service' },
+  });
+  const misplaced = auditContentWritingFinalSectionStructure({
+    markdown: [
+      '# Article',
+      '## Frequently asked questions',
+      '### Question?',
+      'Answer.',
+      '## Extra body section',
+      'Body.',
+      '## Conclusion',
+      'Closing.',
+    ].join('\n\n'),
+    goalContext: { pageType: 'article' },
+  });
+
+  assert.equal(duplicate.accepted, false);
+  assert.ok(duplicate.reasons.includes('final_structure_duplicate_final_heading'));
+  assert.equal(misplaced.accepted, false);
+  assert.ok(misplaced.reasons.includes('final_structure_faq_not_penultimate'));
+});
+
 test('service writing assembles the generated CTA as the final H2 without adding a conclusion', async () => {
   const {
     parseContentWritingOutline,
     assembleContentWritingDraft,
+    auditContentWritingFinalSectionStructure,
   } = await importWorkflow();
   const outline = parseContentWritingOutline(outlineJson);
   const draft = assembleContentWritingDraft({
@@ -266,6 +348,10 @@ test('service writing assembles the generated CTA as the final H2 without adding
     draft.indexOf('## الأسئلة الشائعة') < draft.indexOf('## اطلب خدمات التحول الرقمي'),
     'CTA must be the final H2 after FAQ for service pages.',
   );
+  assert.equal(auditContentWritingFinalSectionStructure({
+    markdown: draft,
+    goalContext: { pageType: 'service' },
+  }).accepted, true);
 });
 
 test('product writing never restores a conclusion as a fallback final section', async () => {

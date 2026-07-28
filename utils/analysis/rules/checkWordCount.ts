@@ -4,7 +4,7 @@ import { createCheckResult, getStatus } from '../analysisUtils';
 import type { AnalysisContext } from '../analysisUtils';
 
 export const checkWordCount = (context: AnalysisContext): CheckResult => {
-    const { totalWordCount, analysisGoal, goalContext, t, uiLanguage } = context;
+    const { totalWordCount, analysisGoal, goalContext, lengthTarget, t, uiLanguage } = context;
     const tRule = t.structureAnalysis['عدد الكلمات'];
     const title = tRule.title;
     let description = tRule.description;
@@ -32,6 +32,34 @@ export const checkWordCount = (context: AnalysisContext): CheckResult => {
             isInsideTarget ? 'pass' : 'fail',
             totalWordCount,
             t.common.range(manualTarget.min, manualTarget.max),
+            progress,
+            description,
+        );
+    }
+
+    const automaticTarget = (
+        lengthTarget?.mode === 'automatic'
+        && lengthTarget.baselineCompetitor
+    )
+        ? lengthTarget
+        : null;
+    if (automaticTarget) {
+        const { min, max } = automaticTarget.targetWords;
+        const isInsideTarget = totalWordCount >= min && totalWordCount <= max;
+        const progress = isInsideTarget
+            ? 1
+            : totalWordCount < min
+                ? Math.min(totalWordCount / min, 1)
+                : Math.min(max / Math.max(totalWordCount, 1), 1);
+        description = uiLanguage === 'ar'
+            ? `لأن خانة عدد الكلمات فارغة، حُسب الهدف من أكبر نص منافس فعلي (${automaticTarget.baselineCompetitor.wordCount} كلمة) × 1.20 = ${automaticTarget.centerWords} كلمة، مع هامش نجاح ±10% ليصبح النطاق ${min}-${max} كلمة.`
+            : `Because the word-count field is empty, the target uses the largest actual competitor text (${automaticTarget.baselineCompetitor.wordCount} words) × 1.20 = ${automaticTarget.centerWords} words, with a ±10% passing tolerance (${min}-${max} words).`;
+
+        return createCheckResult(
+            title,
+            isInsideTarget ? 'pass' : 'fail',
+            totalWordCount,
+            t.common.range(min, max),
             progress,
             description,
         );

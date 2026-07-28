@@ -1,5 +1,6 @@
 import {
   CONTENT_WRITING_WORKFLOW_VERSION,
+  auditContentWritingFinalSectionStructure,
   assembleContentWritingDraft,
   balanceContentWritingOutlineWordTargets,
   buildContentWritingCallToActionPrompt,
@@ -1076,7 +1077,14 @@ export const executeStructuredContentWritingWorkflow = async (
     if (decision.accepted !== true) return false;
     const acceptedDraft = toText(step.metadata?.acceptedDraft);
     if (!acceptedDraft) return false;
-    finalOutput = normalizeFinalContentWritingResult(acceptedDraft);
+    const normalizedAcceptedDraft = normalizeFinalContentWritingResult(acceptedDraft);
+    if (!auditContentWritingFinalSectionStructure({
+      markdown: normalizedAcceptedDraft,
+      goalContext,
+    }).accepted) {
+      return false;
+    }
+    finalOutput = normalizedAcceptedDraft;
     qualityReport = normalizeContentWritingQualityReport(
       step.metadata?.qualityReportAfterRevision,
     ) || qualityReport;
@@ -1139,6 +1147,10 @@ export const executeStructuredContentWritingWorkflow = async (
           candidateMarkdown: application.candidateMarkdown,
           audit: faqAudit,
         });
+        const finalSectionStructureGuard = auditContentWritingFinalSectionStructure({
+          markdown: application.candidateMarkdown,
+          goalContext,
+        });
         const qualityAfterRevision = qualityRuntime && qualityBeforeRevision
           ? evaluateContentWritingQuality({
               markdown: application.candidateMarkdown,
@@ -1159,11 +1171,13 @@ export const executeStructuredContentWritingWorkflow = async (
           ...(application.candidateMarkdown === draftBeforeRevision ? ['candidate_unchanged'] : []),
           ...knowledgeGuard.reasons,
           ...faqIndependenceGuard.reasons,
+          ...finalSectionStructureGuard.reasons,
           ...(qualityGuard?.reasons || ['quality_guard_unavailable']),
         ]));
         const accepted = reasons.length === 0
           && knowledgeGuard.accepted
           && faqIndependenceGuard.accepted
+          && finalSectionStructureGuard.accepted
           && qualityGuard?.accepted === true;
         return {
           output: JSON.stringify({
@@ -1189,6 +1203,7 @@ export const executeStructuredContentWritingWorkflow = async (
             qualityGuard,
             knowledgeGuard,
             faqIndependenceGuard,
+            finalSectionStructureGuard,
             acceptedDraft: accepted ? application.candidateMarkdown : null,
             sectionCoveragesAfter: knowledgeGuard.sectionCoverages,
           },
@@ -1384,6 +1399,10 @@ export const executeStructuredContentWritingWorkflow = async (
   const rejectedRevisionCount = revisionApplySteps.length - acceptedRevisionCount;
   const persistedExecution = getPersistedExecution(finalStep);
   const usage = getWorkflowUsage(stepMap.values());
+  const finalSectionStructure = auditContentWritingFinalSectionStructure({
+    markdown: finalOutput,
+    goalContext,
+  });
   return {
     ok: true,
     status: execution?.status || persistedExecution.status || 200,
@@ -1428,6 +1447,7 @@ export const executeStructuredContentWritingWorkflow = async (
         rejectedQuestionCount: faqAudit.rejectedCount,
         needsInformationQuestionCount: faqAudit.needsInformationCount,
       } : null,
+      finalSectionStructure,
       usage,
       knowledgeCoverage: {
         sourceChunkCount: competitorChunks.length,

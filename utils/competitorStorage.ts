@@ -2,6 +2,11 @@ export const COMPETITOR_URLS_STORAGE_KEY = 'bazarvan-competitor-links';
 export const COMPETITOR_HTML_STORAGE_KEY = 'bazarvan-competitor-html-snippets';
 export const COMPETITOR_TEXT_STORAGE_KEY = 'bazarvan-competitor-text-snippets';
 export const COMPETITOR_RESET_EVENT = 'bazarvan:competitors-reset';
+export const COMPETITOR_TEXTS_CHANGED_EVENT = 'bazarvan:competitor-texts-changed';
+
+export type CompetitorTextsChangedDetail = {
+    texts: string[];
+};
 
 export type StoredCompetitorInputs = {
     urls: string[];

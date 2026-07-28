@@ -234,6 +234,21 @@ test('dynamic final-section migration enables a durable call-to-action workflow 
   assertBalancedSqlParentheses(migration);
 });
 
+test('final structure migration upgrades unfinished sessions without rewriting completed articles', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260728040000_content_writing_final_structure.sql',
+  );
+
+  assert.match(migration, /'\{workflowVersion\}'/);
+  assert.match(migration, /'\{finalSectionStructureVersion\}'/);
+  assert.match(migration, /step\.step_type in \('conclusion', 'call_to_action'\)/);
+  assert.match(migration, /session\.status in \('queued', 'running', 'retry_scheduled', 'failed'\)/);
+  assert.doesNotMatch(migration, /session\.status\s*=\s*'completed'/);
+  assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
   const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),

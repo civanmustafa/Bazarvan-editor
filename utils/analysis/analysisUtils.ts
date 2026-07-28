@@ -1,6 +1,7 @@
 import type { Keywords, CheckResult, AnalysisStatus, DuplicateAnalysis, GoalContext } from '../../types';
 import { translations } from '../../components/translations';
 import { isProductPageContext } from '../goalContext';
+import type { ContentWritingLengthTarget } from '../contentWritingTargets';
 
 /*
  * Shared analysis utilities.
@@ -31,6 +32,7 @@ export interface AnalysisContext {
     totalWordCount: number;
     keywords: Keywords;
     goalContext: GoalContext;
+    lengthTarget?: ContentWritingLengthTarget | null;
     analysisGoal: string;
     articleLanguage: 'ar' | 'en';
     uiLanguage: 'ar' | 'en';
