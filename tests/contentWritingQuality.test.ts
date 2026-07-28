@@ -15,6 +15,18 @@ const importQuality = async (): Promise<any> => {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 };
 
+const importQualityContract = async (): Promise<any> => {
+  const result = await build({
+    entryPoints: [fileURLToPath(new URL('../constants/contentWritingQuality.ts', import.meta.url))],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node20',
+    write: false,
+  });
+  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+};
+
 const articleInput = {
   articleTitle: 'دليل التحول الرقمي للشركات الحديثة',
   keywords: {
@@ -101,6 +113,60 @@ test('service quality analysis requires CTA section and hides conclusion criteri
   assert.equal(criterion('ctaWords')?.status, 'pass');
   assert.equal(criterion('lastH2IsConclusion'), undefined);
   assert.equal(criterion('paragraphLength')?.status, 'pass');
+});
+
+test('product quality uses CTA and product criteria while rejecting a separate conclusion', async () => {
+  const [{ evaluateContentWritingQuality }, {
+    buildContentWritingQualityContract,
+    normalizeContentWritingQualityConfiguration,
+  }] = await Promise.all([importQuality(), importQualityContract()]);
+  const goalContext = {
+    ...articleInput.goalContext,
+    pageType: 'product',
+    objective: 'convert',
+    searchIntent: 'transactional',
+  };
+  const contract = buildContentWritingQualityContract({
+    configuration: normalizeContentWritingQualityConfiguration({}),
+    language: 'en',
+    goalContext,
+  });
+  const evaluation = evaluateContentWritingQuality({
+    articleTitle: 'Professional camera for commercial photography',
+    keywords: {
+      primary: 'professional camera',
+      secondaries: [],
+      company: 'Bazarvan',
+      lsi: [],
+    },
+    goalContext,
+    articleLanguage: 'en',
+    markdown: [
+      '# Professional camera for commercial photography',
+      '',
+      'A short product introduction.',
+      '',
+      '## Order your professional camera from Bazarvan today',
+      '',
+      'Choose the product that fits your work. Contact us to review the available options.',
+      '',
+      '## Conclusion',
+      '',
+      'A separate conclusion that must not be accepted on a product page.',
+    ].join('\n'),
+  });
+  const criterion = (id: string) => evaluation.report.criteria.find((item: any) => item.id === id);
+
+  assert.match(contract, /instead of a conclusion/i);
+  assert.match(contract, /usage and specifications headings/i);
+  assert.match(contract, /warranty content/i);
+  assert.match(contract, /at least 2 tables/i);
+  assert.equal(criterion('callToActionHeading')?.status, 'fail');
+  assert.equal(criterion('productUsageHeading')?.status, 'fail');
+  assert.equal(criterion('productTechnicalSpecsHeading')?.status, 'fail');
+  assert.equal(criterion('productWarrantyContent')?.status, 'fail');
+  assert.equal(criterion('tablesCount')?.status, 'fail');
+  assert.equal(criterion('lastH2IsConclusion'), undefined);
 });
 
 test('session word range is the single authoritative word-count criterion', async () => {

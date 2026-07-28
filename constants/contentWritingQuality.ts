@@ -284,7 +284,7 @@ export const buildContentWritingQualityContract = (options: {
     'اجعل قسم H2 إما 80-150 كلمة بلا H3، أو 180-220 كلمة مع 2-3 عناوين H3 و3-5 فقرات.',
     `كل جواب FAQ فقرة من ${range(policy.faqAnswer.words)} كلمة و${range(policy.faqAnswer.sentences)} جمل.`,
     isCallToActionPage
-      ? 'أضف قسم H2 مستقل بعنوان دعوة اتخاذ اجراء يتضمن كلمة من كلمات الشراء/الطلب/التواصل/الاكتشاف، ويتضمن الكلمة المفتاحية الأساسية طبيعيًا دون حشو.'
+      ? 'أضف قسم H2 مستقل لدعوة اتخاذ الإجراء بدل الخاتمة، واجعله آخر H2 دون إضافة قسم خاتمة منفصل. يجب أن يتضمن عنوانه كلمة من كلمات الشراء/الطلب/التواصل/الاكتشاف، والكلمة المفتاحية الأساسية طبيعيًا دون حشو.'
       : `ضع FAQ قبل الخاتمة، واجعل الخاتمة آخر H2 بطول ${range(policy.conclusion.words)} كلمة.`,
     isCallToActionPage
       ? 'قسم دعوة اتخاذ اجراء يكون 70-125 كلمة، وفيه 1-2 فقرة قبل قائمة نقطية آلية من 3-4 نقاط، و3-4 جمل خارج بنود القائمة، وبعد القائمة جملة تفاعلية تحث على اتخاذ الاجراء.'
@@ -300,7 +300,7 @@ export const buildContentWritingQualityContract = (options: {
     'Make each H2 section either 80-150 words without H3, or 180-220 words with 2-3 H3 headings and 3-5 paragraphs.',
     `Each FAQ answer must have ${range(policy.faqAnswer.words)} words and ${range(policy.faqAnswer.sentences)} sentences.`,
     isCallToActionPage
-      ? 'Add an independent H2 call-to-action section whose heading includes a buying, ordering, contact, discovery, or engagement CTA term and naturally includes the primary keyword without stuffing.'
+      ? 'Add an independent H2 call-to-action section instead of a conclusion. It must be the final H2 with no separate conclusion section, and its heading must include a buying, ordering, contact, discovery, or engagement CTA term plus the primary keyword naturally without stuffing.'
       : `Place FAQ before the conclusion; the conclusion must be the last H2 and contain ${range(policy.conclusion.words)} words.`,
     isCallToActionPage
       ? 'The call-to-action section must be 70-125 words, include 1-2 paragraphs before one automatic bullet list of 3-4 items, contain 3-4 sentences outside list items, and end with an interactive CTA sentence after the list.'

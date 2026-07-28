@@ -17,6 +17,27 @@ const ENGLISH_CALL_TO_ACTION_SECTION_KEYWORDS = [
     'compare plans', 'choose your plan', 'download now', 'claim your offer',
 ];
 
+const ARABIC_EXPLICIT_CONCLUSION_HEADINGS = [
+    'الخاتمة',
+    'خاتمة',
+    'الخلاصة',
+    'خلاصة',
+    'في الختام',
+    'وفي الختام',
+    'الملخص النهائي',
+    'ملخص نهائي',
+    'الخلاصة النهائية',
+];
+
+const ENGLISH_EXPLICIT_CONCLUSION_HEADINGS = [
+    'conclusion',
+    'summary',
+    'final summary',
+    'in conclusion',
+    'wrap up',
+    'wrapping up',
+];
+
 export type CallToActionSectionChecks = {
     callToActionHeading: CheckResult;
     callToActionWordCount: CheckResult;
@@ -55,6 +76,20 @@ const includesAnyTerm = (text: string, terms: string[], lang: 'ar' | 'en'): bool
     return terms.some(term => {
         const normalizedTerm = normalizeForSearch(term, lang);
         return normalizedTerm && normalizedText.includes(normalizedTerm);
+    });
+};
+
+const isExplicitConclusionHeading = (text: string, lang: 'ar' | 'en'): boolean => {
+    const normalizedText = normalizeForSearch(text, lang)
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const terms = lang === 'ar'
+        ? ARABIC_EXPLICIT_CONCLUSION_HEADINGS
+        : ENGLISH_EXPLICIT_CONCLUSION_HEADINGS;
+    return terms.some(term => {
+        const normalizedTerm = normalizeForSearch(term, lang);
+        return normalizedText === normalizedTerm || normalizedText.startsWith(`${normalizedTerm} `);
     });
 };
 
@@ -206,17 +241,28 @@ export const checkCallToActionSection = (context: AnalysisContext): CallToAction
     const best = evaluations
         .sort((first, second) => second.score - first.score || second.heading.pos - first.heading.pos)[0];
     const targetRange = sectionRange(best);
+    const lastH2 = nodes[h2Indices[h2Indices.length - 1]];
+    const isLastH2 = best.heading.pos === lastH2.pos;
+    const conclusionHeadings = h2Indices
+        .map(index => nodes[index])
+        .filter(heading => isExplicitConclusionHeading(heading.text, articleLanguage));
+    const hasConclusionHeading = conclusionHeadings.length > 0;
 
     const headingRule = t.structureAnalysis['عنوان الإجراء'];
-    const headingStatus = best.headingHasCta && best.headingHasPrimaryKeyword ? 'pass' : 'fail';
+    const headingStatus = (
+        best.headingHasCta
+        && best.headingHasPrimaryKeyword
+        && isLastH2
+        && !hasConclusionHeading
+    ) ? 'pass' : 'fail';
     const headingResult = createCheckResult(
         headingRule.title,
         headingStatus,
-        best.headingHasCta && best.headingHasPrimaryKeyword
+        headingStatus === 'pass'
             ? t.common.found
             : articleLanguage === 'ar'
-                ? `كلمة إجراء: ${best.headingHasCta ? 'نعم' : 'لا'} | الكلمة الأساسية: ${best.headingPrimaryKeywordCount}`
-                : `CTA term: ${best.headingHasCta ? 'Yes' : 'No'} | primary keyword: ${best.headingPrimaryKeywordCount}`,
+                ? `كلمة إجراء: ${best.headingHasCta ? 'نعم' : 'لا'} | الكلمة الأساسية: ${best.headingPrimaryKeywordCount} | آخر H2: ${isLastH2 ? 'نعم' : 'لا'} | خاتمة منفصلة: ${hasConclusionHeading ? 'نعم' : 'لا'}`
+                : `CTA term: ${best.headingHasCta ? 'Yes' : 'No'} | primary keyword: ${best.headingPrimaryKeywordCount} | final H2: ${isLastH2 ? 'Yes' : 'No'} | separate conclusion: ${hasConclusionHeading ? 'Yes' : 'No'}`,
         headingRule.required,
         headingStatus === 'pass' ? 1 : 0,
         headingRule.description,
@@ -225,10 +271,10 @@ export const checkCallToActionSection = (context: AnalysisContext): CallToAction
     if (headingStatus === 'fail') {
         headingResult.violationCount = 1;
         headingResult.violatingItems = [{
-            ...nodeRange(best.heading),
+            ...nodeRange(conclusionHeadings[0] || best.heading),
             message: articleLanguage === 'ar'
-                ? 'عنوان H2 يجب أن يتضمن كلمة دعوة لاتخاذ إجراء من قائمة المعيار، والكلمة المفتاحية الأساسية مرة واحدة ضمن سياق طبيعي.'
-                : 'The H2 heading must include a CTA term from the criterion list and the primary keyword once in a natural context.',
+                ? 'يجب أن يكون عنوان دعوة اتخاذ الإجراء هو آخر H2، وأن يتضمن كلمة إجراء والكلمة المفتاحية الأساسية مرة واحدة، وألا توجد خاتمة منفصلة في الصفحة.'
+                : 'The call-to-action heading must be the final H2, include a CTA term and the primary keyword once, and the page must not contain a separate conclusion section.',
         }];
     }
 

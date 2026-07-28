@@ -854,9 +854,7 @@ export const assembleContentWritingDraft = (options: {
         ].join('\n').trim()
     : '';
   const finalSection = inferredFinalSectionKind === 'call_to_action'
-    ? callToActionSection || (
-        conclusion ? `## ${conclusionTitle}\n\n${conclusion}` : ''
-      )
+    ? callToActionSection
     : conclusion
       ? `## ${conclusionTitle}\n\n${conclusion}`
       : '';

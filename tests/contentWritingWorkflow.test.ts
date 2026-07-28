@@ -67,6 +67,33 @@ test('service writing replaces the conclusion stage with a goal-aware call-to-ac
   assert.ok(!steps.some((step: { type: string }) => step.type === 'conclusion'));
 });
 
+test('every page type selects its required final section deterministically', async () => {
+  const {
+    parseContentWritingOutline,
+    createContentWritingWorkflowSteps,
+  } = await importWorkflow();
+  const outline = parseContentWritingOutline(outlineJson);
+  const expectedByPageType: Record<string, 'call_to_action' | 'conclusion'> = {
+    service: 'call_to_action',
+    category: 'call_to_action',
+    product: 'call_to_action',
+    landing: 'call_to_action',
+    article: 'conclusion',
+    news: 'conclusion',
+    comparison: 'conclusion',
+    guide: 'conclusion',
+  };
+
+  Object.entries(expectedByPageType).forEach(([pageType, expectedType]) => {
+    const steps = createContentWritingWorkflowSteps(outline, { pageType });
+    const finalSteps = steps.filter((step: { type: string }) => (
+      step.type === 'call_to_action' || step.type === 'conclusion'
+    ));
+    assert.equal(finalSteps.length, 1, `${pageType} must have exactly one final-section stage`);
+    assert.equal(finalSteps[0].type, expectedType);
+  });
+});
+
 test('structured writing rejects incomplete or duplicate outlines', async () => {
   const { normalizeContentWritingOutline } = await importWorkflow();
   assert.equal(normalizeContentWritingOutline({ sections: ['One', 'Two', 'Three'] }), null);
@@ -239,6 +266,39 @@ test('service writing assembles the generated CTA as the final H2 without adding
     draft.indexOf('## الأسئلة الشائعة') < draft.indexOf('## اطلب خدمات التحول الرقمي'),
     'CTA must be the final H2 after FAQ for service pages.',
   );
+});
+
+test('product writing never restores a conclusion as a fallback final section', async () => {
+  const {
+    parseContentWritingOutline,
+    assembleContentWritingDraft,
+  } = await importWorkflow();
+  const outline = parseContentWritingOutline(outlineJson);
+  const shared = {
+    articleTitle: 'Professional camera',
+    language: 'en',
+    outline,
+    goalContext: { pageType: 'product' },
+    primaryKeyword: 'professional camera',
+  };
+  const withCta = assembleContentWritingDraft({
+    ...shared,
+    outputs: {
+      conclusion: 'A legacy conclusion that must never be restored.',
+      'call-to-action': '## Order your professional camera today\n\nChoose the suitable model.',
+    },
+  });
+  const withoutCta = assembleContentWritingDraft({
+    ...shared,
+    outputs: {
+      conclusion: 'A legacy conclusion that must never be restored.',
+    },
+  });
+
+  assert.match(withCta, /## Order your professional camera today/);
+  assert.doesNotMatch(withCta, /legacy conclusion/i);
+  assert.doesNotMatch(withoutCta, /legacy conclusion/i);
+  assert.doesNotMatch(withoutCta, /## Conclusion/);
 });
 
 test('call-to-action prompt receives the page goal and enforces CTA criteria instead of conclusion rules', async () => {
