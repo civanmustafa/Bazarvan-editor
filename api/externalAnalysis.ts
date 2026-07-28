@@ -433,6 +433,38 @@ const cancelExternalAnalysisJob = async (
   });
   if (error) throw error;
   const job = Array.isArray(data) ? data[0] : data;
+  if (existingJob.job_type === 'full_article_pipeline') {
+    const progress = isRecord(existingJob.progress) ? existingJob.progress : {};
+    const childJobIds = uniqueStrings([
+      toTrimmedString(progress.childJobId),
+      toTrimmedString(progress.semanticJobId),
+      toTrimmedString(progress.briefJobId),
+      toTrimmedString(progress.discoveryJobId),
+      toTrimmedString(progress.extractionJobId),
+      toTrimmedString(progress.analysisJobId),
+    ]);
+    for (const childJobId of childJobIds) {
+      const { error: childCancelError } = await supabase.rpc(
+        'request_external_analysis_job_cancel',
+        {
+          p_job_id: childJobId,
+          p_requested_by: requestedBy,
+        },
+      );
+      if (childCancelError && childCancelError.code !== 'P0002') throw childCancelError;
+    }
+    const contentWritingSessionId = toTrimmedString(progress.contentWritingSessionId);
+    if (contentWritingSessionId) {
+      const { error: sessionCancelError } = await supabase.rpc(
+        'request_content_writing_session_cancel',
+        {
+          p_session_id: contentWritingSessionId,
+          p_requested_by: requestedBy,
+        },
+      );
+      if (sessionCancelError && sessionCancelError.code !== 'P0002') throw sessionCancelError;
+    }
+  }
   return { job: job || existingJob, alreadyTerminal: false };
 };
 
@@ -577,6 +609,46 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
     const result = await enqueueSemanticJob(supabase, article, state);
     return { status: result.job && !result.alreadyActive ? 201 : 200, body: { ok: true, action, ...result } };
   }
+  if (action === 'full_pipeline') {
+    const provider = toTrimmedString(body.provider);
+    const model = toTrimmedString(body.model);
+    const competitorCount = Math.max(1, Math.min(5, Math.round(Number(body.competitorCount) || 5)));
+    if (!['gemini', 'geminiPaid', 'openai'].includes(provider) || !model) {
+      throw new ExternalAnalysisApiError({
+        message: 'A valid content-writing provider and model are required.',
+        code: 'full_pipeline_provider_required',
+      });
+    }
+    const idempotencyKey = toTrimmedString(body.idempotencyKey)
+      || `full-article-pipeline:${article.id}:${Date.now()}`;
+    const { data, error } = await supabase.rpc('enqueue_full_article_pipeline', {
+      p_article_id: article.id,
+      p_requested_by: profile.id,
+      p_provider: provider,
+      p_model: model,
+      p_competitor_count: competitorCount,
+      p_idempotency_key: idempotencyKey,
+    });
+    if (error) throw error;
+    const job = Array.isArray(data) ? data[0] : data;
+    if (!job) {
+      throw new ExternalAnalysisApiError({
+        message: 'The full article workflow could not be queued.',
+        status: 409,
+        code: 'full_pipeline_enqueue_failed',
+      });
+    }
+    return {
+      status: ACTIVE_JOB_STATUSES.includes(String(job.status)) ? 201 : 200,
+      body: {
+        ok: true,
+        action,
+        job,
+        competitorCount,
+        qualityGatePolicy: 'insert_regardless',
+      },
+    };
+  }
   if (action === 'engineering') {
     const result = await enqueueEngineeringJobs(
       supabase,
@@ -619,7 +691,7 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new ExternalAnalysisApiError({
-    message: 'action must be semantic, engineering, use_default_commands, cancel, cancel_all, or retry.',
+    message: 'action must be semantic, full_pipeline, engineering, use_default_commands, cancel, cancel_all, or retry.',
     code: 'invalid_action',
   });
 };

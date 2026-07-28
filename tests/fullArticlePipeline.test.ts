@@ -1,0 +1,122 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+import {
+  buildContentBriefPrompt,
+  parseContentBriefText,
+} from '../utils/contentBriefGeneration.ts';
+
+const readWorkspaceFile = (relativePath: string): Promise<string> => (
+  readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
+);
+
+test('smart brief parsing accepts the strict JSON contract and safe plain text', () => {
+  assert.equal(
+    parseContentBriefText('{"briefText":"موجز صالح للتحرير"}'),
+    'موجز صالح للتحرير',
+  );
+  assert.equal(
+    parseContentBriefText('```json\n{"result":{"generatedBrief":"موجز متداخل"}}\n```'),
+    'موجز متداخل',
+  );
+  assert.equal(parseContentBriefText('موجز نصي مباشر'), 'موجز نصي مباشر');
+});
+
+test('smart brief prompt preserves manual choices as read-only context', () => {
+  const prompt = buildContentBriefPrompt({
+    title: 'عنوان المقالة',
+    primaryKeyword: 'الكلمة الأساسية',
+    alternativeKeywords: ['صيغة أولى'],
+    articleLanguage: 'ar',
+    goalContext: {
+      pageType: 'article',
+      objective: 'educate',
+      audienceScope: 'country',
+      searchIntent: 'informational',
+      generatedBrief: 'الموجز السابق',
+    },
+  }, [
+    '{{article_title}}',
+    '{{primary_keyword}}',
+    '{{alternative_keywords}}',
+    '{{manual_choices_json}}',
+    '{{existing_generated_brief}}',
+  ].join('\n'));
+
+  assert.match(prompt, /عنوان المقالة/);
+  assert.match(prompt, /صيغة أولى/);
+  assert.match(prompt, /"pageType": "article"/);
+  assert.doesNotMatch(prompt, /"generatedBrief":/);
+  assert.match(prompt, /الموجز السابق/);
+});
+
+test('full workflow is durable, ordered, cancellable, and inserts regardless of quality gate', async () => {
+  const [
+    migration,
+    executor,
+    briefExecutor,
+    worker,
+    ecosystem,
+    api,
+    component,
+    supabaseArticles,
+  ] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260728030000_full_article_pipeline.sql'),
+    readWorkspaceFile('server/fullArticlePipelineExecutor.ts'),
+    readWorkspaceFile('server/contentBriefGenerationExecutor.ts'),
+    readWorkspaceFile('server/externalAnalysisWorker.ts'),
+    readWorkspaceFile('ecosystem.config.cjs'),
+    readWorkspaceFile('api/externalAnalysis.ts'),
+    readWorkspaceFile('components/FullArticlePipelineControl.tsx'),
+    readWorkspaceFile('utils/supabaseArticles.ts'),
+  ]);
+
+  for (const jobType of ['content_brief_generation', 'full_article_pipeline']) {
+    assert.match(migration, new RegExp(`'${jobType}'`));
+  }
+  assert.match(migration, /apply_full_article_pipeline_content/);
+  assert.match(migration, /article_versions/);
+  assert.match(migration, /insertedRegardlessOfQualityGate/);
+  assert.match(migration, /revoke all on function public\.apply_full_article_pipeline_content/);
+  assert.match(migration, /grant execute on function public\.apply_full_article_pipeline_content[\s\S]*to service_role/);
+
+  const orderedMarkers = [
+    "'semantic_keywords_lsi', 1",
+    "'content_brief_generation', 2",
+    "'competitor_discovery', 3",
+    "'competitor_extraction', 4",
+    "'content_writing', 5",
+    "'article_application', 6",
+    "'comprehensive_competitor_analysis', 7",
+  ];
+  const executeBlock = executor.slice(executor.indexOf('const executeFullArticlePipeline'));
+  let previousIndex = -1;
+  for (const marker of orderedMarkers) {
+    const index = executeBlock.indexOf(marker);
+    assert.ok(index > previousIndex, `Missing or out-of-order pipeline marker: ${marker}`);
+    previousIndex = index;
+  }
+  assert.match(executor, /qualityGatePolicy: 'insert_regardless'/);
+  assert.match(executor, /apply_full_article_pipeline_content/);
+  assert.match(executor, /recordContentWritingApplication/);
+  assert.match(executor, /إدراج تلقائي صريح من مسار الزر الشامل/);
+  assert.match(executor, /COMPREHENSIVE_COMMAND_ID/);
+  assert.match(executor, /cancelContentWritingSession/);
+  assert.match(executor, /request_external_analysis_job_cancel/);
+
+  assert.match(briefExecutor, /readPromptRegistrySettings/);
+  assert.match(briefExecutor, /generatedBrief: briefText/);
+  assert.match(worker, /readAiJobRetryMinutes/);
+  assert.match(worker, /administratorRetryMinutes/);
+  assert.match(ecosystem, /name: 'bazarvan-full-article-pipeline-worker'/);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'full_article_pipeline'/);
+  assert.match(ecosystem, /semantic_keywords_lsi,content_brief_generation,engineering_command/);
+
+  assert.match(api, /action === 'full_pipeline'/);
+  assert.match(api, /enqueue_full_article_pipeline/);
+  assert.match(api, /request_content_writing_session_cancel/);
+  assert.match(component, /بدء الإنشاء الشامل/);
+  assert.match(component, /يُدرج المقالة حتى عند عدم اجتياز بوابة الجودة/);
+  assert.match(component, /استئناف الآن/);
+  assert.match(supabaseArticles, /hasStructuredEditorJson\(row\.content_json\)[\s\S]*row\.content_html/);
+});

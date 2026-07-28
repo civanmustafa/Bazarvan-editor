@@ -608,6 +608,8 @@ const API_KEY_UNAVAILABLE_LABEL = 'غير متاح';
 const API_KEY_POOL_LABEL = 'مجموعة مفاتيح';
 const EXTERNAL_ANALYSIS_API_SOURCES = new Set([
   'semantic_keywords_lsi',
+  'content_brief_generation',
+  'full_article_pipeline',
   'engineering_command',
   'competitor_discovery',
   'competitor_extraction',
@@ -627,6 +629,8 @@ const getApiProviderLabel = (service?: string, provider?: string): string => {
 const getApiSourceLabel = (source?: string): string => {
   const labels: Record<string, string> = {
     semantic_keywords_lsi: 'توليد الصيغ و LSI',
+    content_brief_generation: 'توليد موجز المقالة الذكي',
+    full_article_pipeline: 'إنشاء المقالة بالكامل',
     goal_context_generation: 'توليد سياق الأهداف',
     draft_title_generation: 'اقتراح عنوان',
     smart_analysis: 'التحليل الذكي',

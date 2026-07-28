@@ -8,6 +8,8 @@ import { getSupabaseClient } from './supabaseClient';
 
 export type ExternalAnalysisJobType =
   | 'semantic_keywords_lsi'
+  | 'content_brief_generation'
+  | 'full_article_pipeline'
   | 'engineering_command'
   | 'competitor_discovery'
   | 'competitor_extraction';
@@ -177,6 +179,10 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   requested_by: row.requested_by || null,
   job_type: row.job_type === 'semantic_keywords_lsi'
     ? 'semantic_keywords_lsi'
+    : row.job_type === 'content_brief_generation'
+      ? 'content_brief_generation'
+      : row.job_type === 'full_article_pipeline'
+        ? 'full_article_pipeline'
     : row.job_type === 'competitor_discovery'
       ? 'competitor_discovery'
       : row.job_type === 'competitor_extraction'
@@ -601,6 +607,20 @@ const requestExternalAnalysis = async (
 export const enqueueExternalSemanticAnalysis = (articleId: string) => (
   requestExternalAnalysis(articleId, { action: 'semantic' })
 );
+
+export const enqueueFullArticlePipeline = (options: {
+  articleId: string;
+  provider: 'gemini' | 'geminiPaid' | 'openai';
+  model: string;
+  competitorCount: number;
+  idempotencyKey: string;
+}) => requestExternalAnalysis(options.articleId, {
+  action: 'full_pipeline',
+  provider: options.provider,
+  model: options.model,
+  competitorCount: options.competitorCount,
+  idempotencyKey: options.idempotencyKey,
+});
 
 export const enqueueExternalEngineeringAnalysis = (
   articleId: string,

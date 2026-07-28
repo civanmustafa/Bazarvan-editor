@@ -1,5 +1,7 @@
 import './loadEnv';
 import './externalSemanticAnalysisExecutor';
+import './contentBriefGenerationExecutor';
+import './fullArticlePipelineExecutor';
 import './externalEngineeringAnalysisExecutor';
 import './competitorDiscoveryExecutor';
 import './competitorExtractionExecutor';
@@ -28,6 +30,7 @@ import {
 } from './externalAnalysisExecutor';
 import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
 import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
+import { readAiJobRetryMinutes } from './aiJobService';
 
 const parseBoundedInteger = (
   value: string | undefined,
@@ -120,7 +123,9 @@ const recoverStaleJobsIfDue = async (): Promise<void> => {
   if (now - lastRecoveryAt < recoveryIntervalMs) return;
   lastRecoveryAt = now;
 
-  const recovered = await recoverStaleExternalAnalysisJobs(retryDelayMinutes);
+  const administratorRetryMinutes = await readAiJobRetryMinutes()
+    .catch(() => retryDelayMinutes);
+  const recovered = await recoverStaleExternalAnalysisJobs(administratorRetryMinutes);
   if (recovered > 0) {
     console.log(`[external-analysis-worker] Recovered ${recovered} stale job(s).`);
   }
@@ -312,12 +317,17 @@ const executeClaimedJob = async (
 
     const retry = retryDetails(error);
     try {
+      const administratorRetryMinutes = await readAiJobRetryMinutes()
+        .catch(() => retry.delayMinutes);
       const scheduled = await scheduleExternalAnalysisJobRetry({
         jobId: job.id,
         workerId: slotWorkerId,
         errorCode: retry.code,
         errorMessage: retry.message,
-        retryDelayMinutes: retry.delayMinutes,
+        retryDelayMinutes: error instanceof ExternalAnalysisRetryError
+          && error.retryDelayMinutes !== undefined
+          ? retry.delayMinutes
+          : administratorRetryMinutes,
         progress: retry.progress,
       });
       if (scheduled.status === 'cancelled') {

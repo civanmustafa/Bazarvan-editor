@@ -185,6 +185,33 @@ const ExternalAnalysisReportsTable: React.FC<{
   }, [page, totalPages]);
 
   const renderTask = (job: ExternalAnalysisReportJob) => {
+    if (job.job_type === 'full_article_pipeline') {
+      const stageIndex = Number(job.progress?.stageIndex) || 0;
+      return (
+        <div>
+          <div className="font-black text-gray-800 dark:text-gray-100">
+            {locale === 'ar' ? 'إنشاء المقالة بالكامل' : 'Complete article workflow'}
+          </div>
+          <div className="mt-1 text-[11px] text-gray-500">
+            {locale === 'ar' ? `المرحلة ${stageIndex}/7` : `Stage ${stageIndex}/7`}
+          </div>
+        </div>
+      );
+    }
+    if (job.job_type === 'content_brief_generation') {
+      return (
+        <div>
+          <div className="font-black text-gray-800 dark:text-gray-100">
+            {locale === 'ar' ? 'توليد موجز المقالة الذكي' : 'Smart article brief'}
+          </div>
+          <div className="mt-1 text-[11px] text-gray-500">
+            {job.origin === 'auto'
+              ? (locale === 'ar' ? 'مهمة تلقائية' : 'Automatic task')
+              : (locale === 'ar' ? 'طلب يدوي' : 'Manual request')}
+          </div>
+        </div>
+      );
+    }
     if (job.job_type === 'semantic_keywords_lsi') {
       return (
         <div>

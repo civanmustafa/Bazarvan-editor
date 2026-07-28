@@ -408,8 +408,17 @@ const toRemoteArticleActivity = (
   stats: normalizeStats(row.stats),
 });
 
+const hasStructuredEditorJson = (value: unknown): boolean => {
+  if (typeof value === 'string') return Boolean(value.trim());
+  if (Array.isArray(value)) return value.length > 0;
+  if (!isRecord(value)) return false;
+  return typeof value.type === 'string' || Array.isArray(value.content);
+};
+
 const normalizeArticleSnapshotContent = (row: Pick<ArticleRow, 'content_json' | 'content_html' | 'plain_text'>): any => (
-  row.content_json || row.content_html || row.plain_text || ''
+  hasStructuredEditorJson(row.content_json)
+    ? row.content_json
+    : row.content_html || row.plain_text || ''
 );
 
 const toArticleStorageSnapshot = (

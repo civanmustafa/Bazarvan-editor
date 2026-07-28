@@ -201,9 +201,10 @@ test('smart brief UI contains checkbox multi-select and a manual Enter-to-add in
 });
 
 test('generated smart brief is stored in an independent editable card without replacing manual choices', async () => {
-  const [goalTab, aiContext] = await Promise.all([
+  const [goalTab, aiContext, briefGeneration] = await Promise.all([
     readFile(fileURLToPath(new URL('../components/GoalTab.tsx', import.meta.url)), 'utf8'),
     readFile(fileURLToPath(new URL('../contexts/AIContext.tsx', import.meta.url)), 'utf8'),
+    readFile(fileURLToPath(new URL('../utils/contentBriefGeneration.ts', import.meta.url)), 'utf8'),
   ]);
 
   assert.match(goalTab, /id="generated-content-brief"/);
@@ -211,8 +212,8 @@ test('generated smart brief is stored in an independent editable card without re
   assert.match(goalTab, /generatedBrief: result\.briefText/);
   assert.doesNotMatch(goalTab, /setGoalContext\(result\.context\)/);
   assert.match(aiContext, /Promise<\{ briefText\?: string/);
-  assert.match(aiContext, /manual_choices_json/);
-  assert.match(aiContext, /existing_generated_brief/);
+  assert.match(briefGeneration, /manual_choices_json/);
+  assert.match(briefGeneration, /existing_generated_brief/);
   assert.match(aiContext, /return \{ briefText \}/);
   assert.doesNotMatch(aiContext, /normalizeGeneratedGoalContext/);
 });

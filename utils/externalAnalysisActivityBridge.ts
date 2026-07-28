@@ -70,6 +70,8 @@ const resolveState = (
 
 const resolveSurface = (job: ExternalAnalysisJobRow, stage: string): string => {
   if (job.job_type === 'semantic_keywords_lsi') return 'semantic_keywords_lsi';
+  if (job.job_type === 'content_brief_generation') return 'goal_context_generation';
+  if (job.job_type === 'full_article_pipeline') return 'full_article_pipeline';
   if (job.command_id !== 'smartAnalysis.competitorContentComparison') return 'engineering_command';
   if (stage.includes('repairing_competitor_synthesis')) {
     return 'competitor_comparison_synthesis_repair';
@@ -86,11 +88,19 @@ export const projectExternalAnalysisActivity = (
 ): ExternalAnalysisActivityProjection => {
   const progress = isRecord(job.progress) ? job.progress : {};
   const gemini = isRecord(progress.gemini) ? progress.gemini : {};
+  const childProgress = isRecord(progress.childProgress) ? progress.childProgress : {};
   const result = isRecord(job.result) ? job.result : {};
   const stage = normalizeStage(progress.stage, job.status);
   const state = resolveState(job.status);
-  const provider = toText(gemini.provider) || toText(result.provider) || 'gemini';
-  const model = toText(gemini.model) || toText(result.model);
+  const provider = toText(gemini.provider)
+    || toText(childProgress.provider)
+    || toText(progress.provider)
+    || toText(result.provider)
+    || (job.job_type === 'full_article_pipeline' ? '' : 'gemini');
+  const model = toText(gemini.model)
+    || toText(childProgress.model)
+    || toText(progress.model)
+    || toText(result.model);
   const requestedModel = toText(gemini.requestedModel) || model;
   const message = toText(progress.message)
     || toText(gemini.message)

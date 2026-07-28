@@ -29,7 +29,13 @@ export type ExternalAnalysisTaskCandidate = ExternalAnalysisTaskIdentityInput & 
 export const getExternalAnalysisTaskIdentity = (
   task: ExternalAnalysisTaskIdentityInput,
 ): string => {
-  if (!['semantic_keywords_lsi', 'engineering_command', 'competitor_discovery'].includes(task.job_type)) {
+  if (![
+    'semantic_keywords_lsi',
+    'content_brief_generation',
+    'full_article_pipeline',
+    'engineering_command',
+    'competitor_discovery',
+  ].includes(task.job_type)) {
     return `job:${task.id}`;
   }
   const signature = String(task.readiness_signature || '').trim();
@@ -38,6 +44,12 @@ export const getExternalAnalysisTaskIdentity = (
     const commandId = String(task.command_id || '').trim();
     if (!commandId) return `job:${task.id}`;
     return `${task.article_id}:engineering_command:${commandId}:${signature}`;
+  }
+  if (task.job_type === 'content_brief_generation') {
+    return `${task.article_id}:content_brief_generation:${task.id}`;
+  }
+  if (task.job_type === 'full_article_pipeline') {
+    return `${task.article_id}:full_article_pipeline:${task.id}`;
   }
   if (task.job_type === 'competitor_discovery') {
     return `${task.article_id}:competitor_discovery:${signature}`;

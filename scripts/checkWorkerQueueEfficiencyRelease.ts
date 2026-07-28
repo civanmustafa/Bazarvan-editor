@@ -36,6 +36,6 @@ console.log(JSON.stringify({
   ok: true,
   migration,
   idleFallbackMaximumMs: 30_000,
-  estimatedMaximumIdleClaimsPerHour: 600,
+  estimatedMaximumIdleClaimsPerHour: 720,
   bundles,
 }, null, 2));

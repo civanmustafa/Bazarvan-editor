@@ -45,13 +45,35 @@ module.exports = {
       kill_timeout: 10000,
       env: {
         NODE_ENV: 'production',
-        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,engineering_command',
+        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,engineering_command',
         EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.EXTERNAL_ANALYSIS_WORKER_POLL_MS || '5000',
         EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS || '30000',
         EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS || '300',
         EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
         EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: process.env.EXTERNAL_ANALYSIS_WORKER_CONCURRENCY || '2',
         GEMINI_PER_KEY_TIMEOUT_MS: process.env.GEMINI_PER_KEY_TIMEOUT_MS || '75000',
+      },
+    },
+    // The coordinator waits for the specialized workers and never performs provider
+    // or Firecrawl work itself. A dedicated process prevents multiple long workflows
+    // from occupying all Gemini worker slots while their child tasks are running.
+    {
+      name: 'bazarvan-full-article-pipeline-worker',
+      script: 'server-dist/external-analysis-worker.mjs',
+      cwd: __dirname,
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: true,
+      restart_delay: 2000,
+      kill_timeout: 15000,
+      env: {
+        NODE_ENV: 'production',
+        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'full_article_pipeline',
+        EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.FULL_ARTICLE_PIPELINE_WORKER_POLL_MS || '5000',
+        EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.FULL_ARTICLE_PIPELINE_WORKER_IDLE_MAX_MS || '30000',
+        EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.FULL_ARTICLE_PIPELINE_LEASE_SECONDS || '1800',
+        EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
+        EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: '1',
       },
     },
     {

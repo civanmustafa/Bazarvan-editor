@@ -843,6 +843,7 @@ interface EditorContextType {
         expectedArticleId: string;
         markdown: string;
     }) => Promise<GeneratedContentApplicationResult>;
+    reloadActiveArticleFromRemote: (expectedArticleId: string) => Promise<boolean>;
     handleRestoreDraft: () => void;
     handleNewArticle: (lang: 'ar' | 'en') => Promise<void>;
     handleLoadArticle: (title: string, article: ArticleActivity | RemoteArticleActivity) => Promise<void>;
@@ -1736,6 +1737,55 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         title,
     ]);
 
+    const reloadActiveArticleFromRemote = useCallback(async (
+        expectedArticleId: string,
+    ): Promise<boolean> => {
+        if (
+            !editor
+            || editor.isDestroyed
+            || !currentUser
+            || !expectedArticleId
+            || activeArticleId !== expectedArticleId
+        ) {
+            return false;
+        }
+
+        const requestId = articleLoadRequestIdRef.current + 1;
+        articleLoadRequestIdRef.current = requestId;
+        isArticleContentLoadingRef.current = true;
+        try {
+            const remoteSnapshot = await loadRemoteArticleSnapshot(expectedArticleId, currentUser);
+            if (
+                !remoteSnapshot
+                || editor.isDestroyed
+                || activeArticleId !== expectedArticleId
+                || articleLoadRequestIdRef.current !== requestId
+            ) {
+                return false;
+            }
+            return applyArticleSnapshotToEditor(editor, {
+                requestId,
+                titleToUse: remoteSnapshot.title || title,
+                snapshot: remoteSnapshot,
+                remoteArticleId: expectedArticleId,
+                clearWhenEmpty: false,
+            });
+        } catch (error) {
+            console.error(`Failed to reload article "${expectedArticleId}" from Supabase:`, error);
+            return false;
+        } finally {
+            if (articleLoadRequestIdRef.current === requestId) {
+                isArticleContentLoadingRef.current = false;
+            }
+        }
+    }, [
+        activeArticleId,
+        applyArticleSnapshotToEditor,
+        currentUser,
+        editor,
+        title,
+    ]);
+
     const handleSaveDraftRef = useRef(handleSaveDraft);
     useEffect(() => {
         handleSaveDraftRef.current = handleSaveDraft;
@@ -1992,6 +2042,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleClearKeywords,
         handleSaveDraft,
         applyGeneratedArticleContent,
+        reloadActiveArticleFromRemote,
         handleRestoreDraft,
         handleNewArticle,
         handleLoadArticle,
@@ -2016,6 +2067,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleClearKeywords,
         handleSaveDraft,
         applyGeneratedArticleContent,
+        reloadActiveArticleFromRemote,
         handleRestoreDraft,
         handleNewArticle,
         handleLoadArticle,

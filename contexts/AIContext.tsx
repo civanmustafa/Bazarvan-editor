@@ -31,6 +31,7 @@ import { GEMINI_ANALYSIS_MODEL, GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_M
 import { getAiProviderModel, getDefaultAiPatchProvider } from '../constants/aiProviderCapabilities';
 import { CONTENT_SUMMARY_STORAGE_KEY, ENGINEERING_PROMPT_IDS, getEngineeringPrompt, renderEngineeringPrompt } from '../constants/engineeringPrompts';
 import { PROMPT_TEMPLATE_IDS, getPromptTemplate, renderPromptTemplate } from '../constants/promptRegistry';
+import { buildContentBriefPrompt, parseContentBriefText } from '../utils/contentBriefGeneration';
 import { COMMON_ENGLISH_TERMS, CONCLUSION_KEYWORDS, CTA_WORDS, FAQ_KEYWORDS, INTERACTIVE_WORDS, SLOW_WORDS, TRANSITIONAL_WORDS, WARNING_ADVICE_WORDS, WORDS_TO_DELETE } from '../constants';
 import { countOccurrences, DUPLICATE_WORDS_EXCLUSION_LIST, normalizeArabicText } from '../utils/analysis/analysisUtils';
 import { formatGoalContextValue, normalizeGoalContext } from '../utils/goalContext';
@@ -234,50 +235,6 @@ const buildAiOutputLanguageInstruction = (articleLanguage: string): string => (
             '- اكتب النصوص المقترحة الجاهزة للإدراج أو الاستبدال أو النسخ داخل المقال باللغة العربية.',
         ].join('\n')
 );
-
-const normalizeGeneratedBriefText = (rawValue: unknown, rawResponse: string): string => {
-    const readCandidate = (value: unknown): string => (
-        typeof value === 'string' ? value.trim() : ''
-    );
-    let candidate = '';
-
-    if (typeof rawValue === 'string') {
-        candidate = readCandidate(rawValue);
-    } else if (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)) {
-        const root = rawValue as Record<string, unknown>;
-        const nested = root.result && typeof root.result === 'object' && !Array.isArray(root.result)
-            ? root.result as Record<string, unknown>
-            : {};
-        candidate = [
-            root.briefText,
-            root.generatedBrief,
-            root.contentBrief,
-            root.brief,
-            root.summary,
-            nested.briefText,
-            nested.generatedBrief,
-            nested.contentBrief,
-            nested.brief,
-            nested.summary,
-        ].map(readCandidate).find(Boolean) || '';
-    }
-
-    if (!candidate) {
-        const plainResponse = rawResponse
-            .replace(/^```(?:json|markdown|text)?\s*/i, '')
-            .replace(/\s*```$/i, '')
-            .trim();
-        if (
-            plainResponse &&
-            !plainResponse.startsWith('{') &&
-            !plainResponse.startsWith('[')
-        ) {
-            candidate = plainResponse;
-        }
-    }
-
-    return candidate.slice(0, 12_000);
-};
 
 const formatGoalContext = (goalContext: GoalContext): string => {
     const normalizedContext = normalizeGoalContext(goalContext);
@@ -5514,23 +5471,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return { error: 'أدخل الكلمة المفتاحية الأساسية أو عنوان المقالة أولًا.' };
         }
 
-        const {
-            generatedBrief: existingGeneratedBrief,
-            ...manualChoices
-        } = normalizeGoalContext(goalContext);
-        const prompt = renderPromptTemplate(
+        const prompt = buildContentBriefPrompt({
+            title: articleTitle,
+            primaryKeyword: primary,
+            alternativeKeywords: secondaries,
+            articleLanguage,
+            goalContext,
+        },
             getPromptTemplate(
                 engineeringPrompts as unknown as Record<string, string>,
                 PROMPT_TEMPLATE_IDS.contentBriefGeneration,
             ),
-            {
-                article_title: articleTitle || 'غير محدد',
-                primary_keyword: primary || 'غير محددة',
-                alternative_keywords: secondaries.length > 0 ? secondaries.join(', ') : 'غير محددة',
-                article_language: articleLanguage === 'ar' ? 'العربية' : 'الإنجليزية',
-                manual_choices_json: JSON.stringify(manualChoices, null, 2),
-                existing_generated_brief: existingGeneratedBrief || 'لا يوجد موجز مولد سابق.',
-            },
         );
 
         const usageContext = buildApiUsageContext('goal_context_generation');
@@ -5549,8 +5500,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             }
             throw error;
         }
-        const parsed = extractJson(result);
-        const briefText = normalizeGeneratedBriefText(parsed, result);
+        const briefText = parseContentBriefText(result);
 
         if (!briefText) {
             const looksLikeApiError = /Gemini|API|خطأ|مهلة|فشل/i.test(result);

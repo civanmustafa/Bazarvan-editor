@@ -51,6 +51,7 @@ import ContentWritingStepResult, {
   getContentWritingStepDescription,
 } from './ContentWritingStepResult';
 import ContentWritingStageAuditPanel from './ContentWritingStageAuditPanel';
+import FullArticlePipelineControl from './FullArticlePipelineControl';
 import {
   ContentWritingRequestError,
   cancelContentWritingSession,
@@ -285,6 +286,7 @@ const ContentWritingPanel: React.FC = () => {
   const editor = useEditorSelector(context => context.editor);
   const handleSaveDraft = useEditorSelector(context => context.handleSaveDraft);
   const applyGeneratedArticleContent = useEditorSelector(context => context.applyGeneratedArticleContent);
+  const reloadActiveArticleFromRemote = useEditorSelector(context => context.reloadActiveArticleFromRemote);
   const saveStatus = useEditorSelector(context => context.saveStatus);
   const isArabic = t.locale !== 'en';
   const [provider, setProvider] = useState<ContentWritingProvider>(aiProviderCapabilities.defaultProvider);
@@ -1101,6 +1103,23 @@ const ContentWritingPanel: React.FC = () => {
               </p>
             </div>
           ) : null}
+
+          <FullArticlePipelineControl
+            articleId={articleId}
+            articleTitle={articleTitle}
+            provider={provider}
+            model={selectedModel}
+            isArabic={isArabic}
+            disabled={
+              !selectedProviderConfig?.available
+              || hasActiveSession
+              || actionState !== 'idle'
+              || saveStatus === 'saving'
+              || isApplying
+            }
+            onBeforeStart={() => handleSaveDraft({ reason: 'manual', force: true })}
+            onReloadArticle={reloadActiveArticleFromRemote}
+          />
 
           <button
             type="button"

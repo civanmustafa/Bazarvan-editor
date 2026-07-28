@@ -272,7 +272,7 @@ test('automatic competitor discovery is durable, idempotent, and uses the centra
   assert.match(worker, /retry\.message\.replace\(\/\\s\+\/g/);
   assert.match(ecosystem, /name: 'bazarvan-competitor-worker'/);
   assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'competitor_discovery,competitor_extraction'/);
-  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,engineering_command'/);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,engineering_command'/);
   assert.match(panel, /getPersistedCompetitorDiscovery/);
   assert.match(panel, /ensureArticleCompetitorDiscovery/);
   assert.match(card, /بحث المنافسين/);
