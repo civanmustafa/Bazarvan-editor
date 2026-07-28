@@ -417,6 +417,7 @@ export const prepareContentWritingConversation = async (
       text: competitor.content,
     })),
     keywords: articleSource.input.keywords,
+    articleLanguage: articleSource.input.language === 'en' ? 'en' : 'ar',
     enabled: settings.competitorPhraseIntelligenceEnabled,
   });
   const qualityContractHeading = articleSource.input.language === 'en'
@@ -483,6 +484,7 @@ export const prepareContentWritingConversation = async (
     maxInputTokens: bundle.maxInputTokens,
     contextSnapshot: {
       workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+      faqIndependenceVersion: 1,
       article: {
         id: articleSource.article.id,
         title: articleSource.article.title,

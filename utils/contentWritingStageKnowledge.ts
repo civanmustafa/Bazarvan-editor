@@ -219,6 +219,33 @@ export const buildContentWritingStageKnowledgeUsage = (options: {
     };
   }
 
+  if (step.stepType === 'faq' && isRecord(step.metadata.faqIndependenceAudit)) {
+    const usage = completeRegistryUsage(step.stepType, snapshot, 'declared_used');
+    const candidates = recordList(step.metadata.faqIndependenceAudit.candidates)
+      .filter(candidate => candidate.decision === 'accepted');
+    const referencedKnowledgeItemIds = unique(
+      candidates.flatMap(candidate => textList(candidate.evidenceIdeaIds)),
+    );
+    const referencedClaimIds = unique(
+      candidates.flatMap(candidate => textList(candidate.usedClaimIds)),
+    );
+    const referencedSourceChunkIds = unique(
+      candidates.flatMap(candidate => textList(candidate.sourceChunkIds)),
+    );
+    return {
+      ...usage,
+      referencedKnowledgeItemIds,
+      referencedClaimIds,
+      referencedSourceChunkIds,
+      referencedSourceIds: sourceIdsForReferences(
+        snapshot,
+        referencedKnowledgeItemIds,
+        referencedClaimIds,
+        referencedSourceChunkIds,
+      ),
+    };
+  }
+
   if (
     (step.stepType === 'final_review' || step.stepType === 'quality_repair')
     && step.metadata.revisionPhase
@@ -260,7 +287,7 @@ export const buildContentWritingStageKnowledgeUsage = (options: {
     };
   }
 
-  // Introduction, FAQ, conclusion/CTA, and legacy final repair stages receive the
+  // Introduction, legacy FAQ results, conclusion/CTA, and legacy final repair stages receive the
   // complete normalized matrix/source/claim registries in the compact session
   // context, but their prose output does not declare individual IDs used.
   return completeRegistryUsage(step.stepType, snapshot);

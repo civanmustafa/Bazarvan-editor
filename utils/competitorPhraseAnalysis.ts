@@ -79,11 +79,19 @@ export type CompetitorPhraseIntelligenceResult = {
 export type CompetitorPhraseIntelligenceOptions = {
     sources: CompetitorPhraseSource[];
     keywords?: Partial<Keywords>;
+    articleLanguage?: 'ar' | 'en';
     enabled?: boolean;
     maxItemsPerBucket?: number;
 };
 
+export type CompetitorPhraseAnalysisContext = {
+    articleLanguage?: 'ar' | 'en';
+    primaryKeyword?: string;
+};
+
 const COMPETITOR_PHRASE_LENGTHS = [3, 4, 5] as const;
+const ARABIC_SCRIPT_PATTERN = /[\u0600-\u06FF]/u;
+const LATIN_SCRIPT_PATTERN = /[A-Za-z]/u;
 
 type CompetitorPhraseToken = {
     text: string;
@@ -121,6 +129,17 @@ const COMPETITOR_STOP_WORDS = new Set(
     COMPETITOR_STOP_WORDS_RAW.map(normalizeCompetitorToken),
 );
 
+const shouldUseArabicOnlyPhrases = (
+    context: CompetitorPhraseAnalysisContext | undefined,
+): boolean => (
+    context?.articleLanguage === 'ar'
+    && ARABIC_SCRIPT_PATTERN.test(String(context.primaryKeyword || ''))
+);
+
+const isArabicAnalysisToken = (token: CompetitorPhraseToken): boolean => (
+    !LATIN_SCRIPT_PATTERN.test(token.text)
+);
+
 const tokenizeCompetitorPhraseSegments = (value: string): CompetitorPhraseToken[][] => (
     value
         // Punctuation, symbols, and line breaks are phrase boundaries. Splitting
@@ -146,14 +165,50 @@ export const tokenizeCompetitorPhraseText = (value: string): string[] => (
 
 const countCompetitorPhrases = (
     segments: CompetitorPhraseToken[][],
+    options: { arabicOnly?: boolean } = {},
 ): Map<string, CountedCompetitorPhrase> => {
     const phraseCounts = new Map<string, CountedCompetitorPhrase>();
+    const seenOccurrences = new Set<string>();
 
-    segments.forEach(tokens => {
+    segments.forEach((tokens, segmentIndex) => {
         COMPETITOR_PHRASE_LENGTHS.forEach(size => {
             for (let index = 0; index <= tokens.length - size; index += 1) {
-                const phraseTokens = tokens.slice(index, index + size);
+                let phraseStart = index;
+                let phraseEnd = index + size;
+                while (
+                    phraseStart < phraseEnd
+                    && COMPETITOR_STOP_WORDS.has(tokens[phraseStart].normalized)
+                ) {
+                    phraseStart += 1;
+                }
+                while (
+                    phraseEnd > phraseStart
+                    && COMPETITOR_STOP_WORDS.has(tokens[phraseEnd - 1].normalized)
+                ) {
+                    phraseEnd -= 1;
+                }
+
+                const phraseTokens = tokens.slice(phraseStart, phraseEnd);
+                if (
+                    phraseTokens.length < COMPETITOR_PHRASE_LENGTHS[0]
+                    || phraseTokens.length > COMPETITOR_PHRASE_LENGTHS[COMPETITOR_PHRASE_LENGTHS.length - 1]
+                ) {
+                    continue;
+                }
+                if (
+                    options.arabicOnly
+                    && (
+                        phraseTokens.some(token => !isArabicAnalysisToken(token))
+                        || !phraseTokens.some(token => ARABIC_SCRIPT_PATTERN.test(token.text))
+                    )
+                ) {
+                    continue;
+                }
+
                 const key = phraseTokens.map(token => token.normalized).join(' ');
+                const occurrenceKey = `${segmentIndex}:${phraseStart}:${phraseEnd}:${key}`;
+                if (seenOccurrences.has(occurrenceKey)) continue;
+                seenOccurrences.add(occurrenceKey);
                 const current = phraseCounts.get(key);
                 phraseCounts.set(key, {
                     text: current?.text || phraseTokens.map(token => token.text).join(' '),
@@ -194,7 +249,10 @@ const isMeaningfulPhraseToken = (token: CompetitorPhraseToken): boolean => (
     token.normalized.length > 1 && !COMPETITOR_STOP_WORDS.has(token.normalized)
 );
 
-const createKeywordTermMap = (keywords: Partial<Keywords> | undefined): Map<string, string> => {
+const createKeywordTermMap = (
+    keywords: Partial<Keywords> | undefined,
+    options: { arabicOnly?: boolean } = {},
+): Map<string, string> => {
     const keywordTerms = [
         keywords?.primary,
         ...(Array.isArray(keywords?.secondaries) ? keywords.secondaries : []),
@@ -205,6 +263,7 @@ const createKeywordTermMap = (keywords: Partial<Keywords> | undefined): Map<stri
         tokenizeCompetitorPhraseSegments(String(term || ''))
             .flat()
             .filter(isMeaningfulPhraseToken)
+            .filter(token => !options.arabicOnly || isArabicAnalysisToken(token))
             .forEach(token => {
                 if (!terms.has(token.normalized)) terms.set(token.normalized, token.text);
             });
@@ -304,7 +363,11 @@ const sortCompetitorPhraseIntelligenceItems = (
     || left.text.localeCompare(right.text)
 );
 
-export const createCompetitorTextStats = (texts: string[]): CompetitorTextStats => {
+export const createCompetitorTextStats = (
+    texts: string[],
+    context?: CompetitorPhraseAnalysisContext,
+): CompetitorTextStats => {
+    const arabicOnly = shouldUseArabicOnlyPhrases(context);
     const tokenizedTexts = texts
         .map(tokenizeCompetitorPhraseSegments)
         .filter(segments => segments.length > 0);
@@ -319,7 +382,11 @@ export const createCompetitorTextStats = (texts: string[]): CompetitorTextStats 
             word: currentWord?.word || token.text,
             count: (currentWord?.count || 0) + 1,
         });
-        if (token.normalized.length > 1 && !COMPETITOR_STOP_WORDS.has(token.normalized)) {
+        if (
+            token.normalized.length > 1
+            && !COMPETITOR_STOP_WORDS.has(token.normalized)
+            && (!arabicOnly || isArabicAnalysisToken(token))
+        ) {
             const currentFilteredWord = filteredWordCounts.get(token.normalized);
             filteredWordCounts.set(token.normalized, {
                 word: currentFilteredWord?.word || token.text,
@@ -331,7 +398,7 @@ export const createCompetitorTextStats = (texts: string[]): CompetitorTextStats 
     tokenizedTexts.forEach(segments => {
         mergeCompetitorPhraseCounts(
             phraseCounts,
-            countCompetitorPhrases(segments),
+            countCompetitorPhrases(segments, { arabicOnly }),
         );
     });
 
@@ -353,7 +420,9 @@ export const createCompetitorTextStats = (texts: string[]): CompetitorTextStats 
 
 export const createSharedCompetitorPhrases = (
     sources: CompetitorPhraseSource[],
+    context?: CompetitorPhraseAnalysisContext,
 ): SharedCompetitorPhrase[] => {
+    const arabicOnly = shouldUseArabicOnlyPhrases(context);
     const phrases = new Map<string, {
         text: string;
         size: number;
@@ -363,7 +432,7 @@ export const createSharedCompetitorPhrases = (
 
     sources.forEach(source => {
         const segments = tokenizeCompetitorPhraseSegments(source.text);
-        countCompetitorPhrases(segments).forEach((value, key) => {
+        countCompetitorPhrases(segments, { arabicOnly }).forEach((value, key) => {
             const current = phrases.get(key) || {
                 text: value.text,
                 size: value.size,
@@ -406,7 +475,11 @@ export const createCompetitorPhraseIntelligence = (
             text: String(source.text || '').trim(),
         }))
         .filter(source => source.text);
-    const keywordTermsByToken = createKeywordTermMap(options.keywords);
+    const arabicOnly = shouldUseArabicOnlyPhrases({
+        articleLanguage: options.articleLanguage,
+        primaryKeyword: options.keywords?.primary,
+    });
+    const keywordTermsByToken = createKeywordTermMap(options.keywords, { arabicOnly });
     const keywordTerms = Array.from(keywordTermsByToken.values())
         .sort((left, right) => left.localeCompare(right));
 
@@ -426,7 +499,7 @@ export const createCompetitorPhraseIntelligence = (
 
     usableSources.forEach(source => {
         const segments = tokenizeCompetitorPhraseSegments(source.text);
-        countCompetitorPhrases(segments).forEach((value, key) => {
+        countCompetitorPhrases(segments, { arabicOnly }).forEach((value, key) => {
             const current = candidates.get(key) || {
                 text: value.text,
                 size: value.size,

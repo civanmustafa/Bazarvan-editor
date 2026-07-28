@@ -242,6 +242,42 @@ test('free-form final stages expose the complete registries without inventing ex
   assert.deepEqual(usage.referencedKnowledgeItemIds, []);
 });
 
+test('FAQ transparency exposes only evidence used by accepted independent questions', async () => {
+  const { buildContentWritingStageKnowledgeUsage } = await importStageKnowledge();
+  const usage = buildContentWritingStageKnowledgeUsage({
+    step: step({
+      stepKey: 'faq',
+      stepType: 'faq',
+      metadata: {
+        faqIndependenceAudit: {
+          candidates: [
+            {
+              decision: 'accepted',
+              evidenceIdeaIds: ['K001'],
+              usedClaimIds: ['CL001'],
+              sourceChunkIds: ['C1-S001'],
+            },
+            {
+              decision: 'rejected',
+              evidenceIdeaIds: ['K002'],
+              usedClaimIds: ['CL002'],
+              sourceChunkIds: ['C2-S001'],
+            },
+          ],
+        },
+      },
+    }),
+    snapshot,
+  });
+
+  assert.equal(usage.scope, 'complete');
+  assert.equal(usage.referenceKind, 'declared_used');
+  assert.deepEqual(usage.referencedKnowledgeItemIds, ['K001']);
+  assert.deepEqual(usage.referencedClaimIds, ['CL001']);
+  assert.deepEqual(usage.referencedSourceChunkIds, ['C1-S001']);
+  assert.deepEqual(usage.referencedSourceIds, ['SRC1']);
+});
+
 test('structured revision stages distinguish planned evidence from evidence declared by applied edits', async () => {
   const { buildContentWritingStageKnowledgeUsage } = await importStageKnowledge();
   const revisionPlan = {

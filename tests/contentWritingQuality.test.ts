@@ -81,6 +81,40 @@ test('deterministic quality evaluation returns a versioned blocking report', asy
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'keyword.primary'));
 });
 
+test('quality gate treats a paraphrased body answer in FAQ as a blocking independence failure', async () => {
+  const { evaluateContentWritingQuality } = await importQuality();
+  const repeatedAnswer = 'يتم تأكيد الطلب بعد اكتمال عملية الدفع وفق الوسيلة المختارة، ثم ينتقل مباشرة إلى مرحلة التجهيز.';
+  const evaluation = evaluateContentWritingQuality({
+    ...articleInput,
+    markdown: [
+      '# دليل التحول الرقمي للشركات الحديثة',
+      '',
+      'مقدمة تمهد للموضوع وتوضح للقارئ ما الذي سيجده في الصفحة.',
+      '',
+      '## كيف تعمل آلية الدفع وتجهيز الطلب؟',
+      '',
+      repeatedAnswer,
+      '',
+      '## الأسئلة الشائعة',
+      '',
+      '### متى يتم تأكيد الطلب؟',
+      '',
+      repeatedAnswer,
+      '',
+      '## اطلب استشارة التحول الرقمي المناسبة لشركتك',
+      '',
+      'ابدأ بطلب الاستشارة المناسبة لمراجعة احتياجاتك وتحديد الخطوة التالية.',
+    ].join('\n'),
+  });
+  const criterion = evaluation.report.criteria.find(
+    (item: any) => item.id === 'quality.faqIndependence',
+  );
+
+  assert.equal(criterion?.severity, 'blocking');
+  assert.equal(criterion?.status, 'fail');
+  assert.ok(criterion?.messages.some((message: string) => message.includes('يعيد معلومة')));
+});
+
 test('service quality analysis requires CTA section and hides conclusion criteria', async () => {
   const { evaluateContentWritingQuality } = await importQuality();
   const markdown = [

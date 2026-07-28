@@ -25,8 +25,12 @@ import {
 } from './competitorPhraseAnalysis';
 import type { GoalContext } from '../types';
 import { getContentWritingFinalSectionKind } from './goalContext';
+import {
+  getContentWritingFaqIntentBlueprints,
+  type ContentWritingFaqQuestionSeed,
+} from './contentWritingFaq';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 7;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 8;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
@@ -673,14 +677,72 @@ export const buildContentWritingCallToActionPrompt = (options: {
 export const buildContentWritingFaqPrompt = (options: {
   outline: ContentWritingOutline;
   draft: string;
+  goalContext: Partial<GoalContext>;
+  knowledge: ContentWritingKnowledgeBase;
+  questionSeeds: readonly ContentWritingFaqQuestionSeed[];
   template?: string;
-}): string => renderPromptTemplate(
-  options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.faq),
-  {
+}): string => {
+  const intentBlueprints = getContentWritingFaqIntentBlueprints(options.goalContext);
+  const variables = {
     outline_json: outlineJson(options.outline),
     completed_draft: options.draft,
-  },
-);
+    page_goal_json: JSON.stringify(options.goalContext, null, 2),
+    faq_intent_blueprints_json: JSON.stringify(intentBlueprints, null, 2),
+    faq_question_seeds_json: JSON.stringify(options.questionSeeds, null, 2),
+    faq_knowledge_json: JSON.stringify({
+      attachmentStatus: 'complete_registry_attached_in_session_context',
+      knowledgeItemIds: options.knowledge.items.map(item => item.id),
+      sourceIds: options.knowledge.sourceRegistry.sources.map(source => source.id),
+      allowedClaimIds: options.knowledge.claimLedger.allowedClaimIds,
+      qualifiedClaimIds: options.knowledge.claimLedger.qualifiedClaimIds,
+      blockedClaimIds: options.knowledge.claimLedger.blockedClaimIds,
+      instruction: 'Read the complete persisted competitor matrix, source registry, and claim ledger attached to the session context.',
+    }, null, 2),
+  };
+  const rendered = renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.faq),
+    variables,
+  );
+  return `${rendered}
+
+<mandatory_faq_independence_protocol>
+هذه التعليمات محمية وملزمة حتى إذا كانت صيغة القالب الإداري أقدم:
+- حلّل كل فقرة وصف وجدول وقائمة في المسودة إلى أفكار وادعاءات؛ اختلاف الكلمات لا يعني اختلاف الفكرة.
+- أنشئ 8-12 مرشحًا إن سمحت الأدلة، ثم اقبل فقط 4-6 أسئلة مستقلة ذات قيمة معلوماتية جديدة. يجوز قبول عدد أقل بدل اختراع معلومات أو حشو أسئلة مكررة.
+- لا تقبل سؤالًا إذا كان جوابه يعيد معلومة صريحة في المتن أو جدول أو قائمة، حتى بصياغة مختلفة.
+- استخدم الجدول لبناء سؤال قرار أو توافق أو حالة خاصة، لا لسرد خلاياه من جديد.
+- لا تستخدم sourceType بقيمة people_also_ask إلا لسؤال وارد حرفيًا في faq_question_seeds_json بهذه الصفة. السؤال المولد حسب الهدف ليس People Also Ask حقيقيًا.
+- يجب أن يعلن كل سؤال مقبول معلومة جديدة واحدة على الأقل ودليلًا صالحًا من مصفوفة المعرفة أو سجل الادعاءات أو مقاطع المصادر.
+- لا تقبل أكثر من سؤال واحد للنية نفسها، ولا تقبل سؤالين متقاربين معنويًا.
+- لا تستخدم ادعاءً محظورًا. إذا كان السؤال مهمًا لكن لا توجد إجابة موثقة، اجعله needs_information ولا تكتب جوابًا.
+- informationGainScore وbodySimilarityScore وfaqSimilarityScore أرقام من 0 إلى 1، مبنية على المعنى لا على التطابق اللفظي فقط.
+- كل جواب مقبول 35-75 كلمة و2-3 جمل، بصياغة أصلية مباشرة، دون دعوة بيع مكررة.
+
+أرجع JSON صالحًا فقط بهذا الشكل، دون Markdown أو شرح خارجه:
+{
+  "candidates": [
+    {
+      "id": "FAQC001",
+      "question": "السؤال",
+      "answer": "الجواب، أو فارغ عند الرفض/نقص المعلومات",
+      "intent": "selection|compatibility|usage|purchase|payment|shipping|returns|warranty|pricing|requirements|process|timing|troubleshooting|safety|comparison|eligibility|support|implications|privacy|cancellation|other",
+      "sourceType": "people_also_ask|competitor_question|knowledge_matrix|page_context|goal_based_extension",
+      "sourceLabel": "وصف مفهوم للمصدر",
+      "decision": "accepted|rejected|needs_information",
+      "decisionReason": "سبب واضح للمستخدم",
+      "newInformation": ["المعلومة الجديدة الدقيقة"],
+      "nearestArticleExcerpt": "أقرب فكرة موجودة في المتن",
+      "informationGainScore": 0.75,
+      "bodySimilarityScore": 0.25,
+      "faqSimilarityScore": 0.10,
+      "evidenceIdeaIds": ["K001"],
+      "usedClaimIds": ["CL001"],
+      "sourceChunkIds": ["C1-S001"]
+    }
+  ]
+}
+</mandatory_faq_independence_protocol>`;
+};
 
 export const buildContentWritingFinalReviewPrompt = (options: {
   articleTitle: string;

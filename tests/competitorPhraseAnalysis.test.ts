@@ -130,6 +130,78 @@ test('shared phrases also respect punctuation boundaries', () => {
   assert.ok(shared.every(item => item.text !== 'للقراءة الإلكترونية مفيدة'));
 });
 
+test('Arabic phrase analysis trims function words from phrase boundaries without double counting', () => {
+  const stats = createCompetitorTextStats(
+    ['في كشف الذهب الخام. في كشف الذهب الخام.'],
+    {
+      articleLanguage: 'ar',
+      primaryKeyword: 'كشف الذهب',
+    },
+  );
+
+  assert.deepEqual(
+    stats.repeatedPhrases.find(item => item.text === 'كشف الذهب الخام'),
+    {
+      text: 'كشف الذهب الخام',
+      size: 3,
+      count: 2,
+    },
+  );
+  assert.ok(stats.repeatedPhrases.every(item => !item.text.startsWith('في ')));
+});
+
+test('Arabic article with an Arabic primary keyword removes Latin phrases from every competitor analysis', () => {
+  const context = {
+    articleLanguage: 'ar' as const,
+    primaryKeyword: 'كشف الذهب',
+  };
+  const sources = [
+    {
+      competitorNumber: 1,
+      text: 'في كشف الذهب الخام. best raw gold detector guide.',
+    },
+    {
+      competitorNumber: 2,
+      text: 'كشف الذهب الخام مهم. best raw gold detector guide.',
+    },
+  ];
+  const stats = createCompetitorTextStats(
+    sources.map(source => `${source.text} ${source.text}`),
+    context,
+  );
+  const shared = createSharedCompetitorPhrases(sources, context);
+  const intelligence = createCompetitorPhraseIntelligence({
+    sources,
+    articleLanguage: 'ar',
+    keywords: {
+      primary: 'كشف الذهب',
+      secondaries: [],
+      lsi: ['gold detector'],
+    },
+  });
+
+  assert.ok(stats.repeatedPhrases.some(item => item.text === 'كشف الذهب الخام'));
+  assert.ok(stats.repeatedPhrases.every(item => !/[A-Za-z]/u.test(item.text)));
+  assert.ok(stats.topWords.every(item => !/[A-Za-z]/u.test(item.word)));
+  assert.ok(shared.some(item => item.text === 'كشف الذهب الخام'));
+  assert.ok(shared.every(item => !/[A-Za-z]/u.test(item.text)));
+  assert.ok(intelligence.items.some(item => item.text === 'كشف الذهب الخام'));
+  assert.ok(intelligence.items.every(item => !/[A-Za-z]/u.test(item.text)));
+  assert.ok(intelligence.keywordTerms.every(item => !/[A-Za-z]/u.test(item)));
+});
+
+test('Latin phrase filtering requires both an Arabic article and an Arabic primary keyword', () => {
+  const stats = createCompetitorTextStats(
+    ['best raw gold detector. best raw gold detector.'],
+    {
+      articleLanguage: 'ar',
+      primaryKeyword: 'gold detector',
+    },
+  );
+
+  assert.ok(stats.repeatedPhrases.some(item => item.text === 'best raw gold detector'));
+});
+
 test('phrase intelligence combines every competitor with keyword relevance and preserves low-priority signals', () => {
   const result = createCompetitorPhraseIntelligence({
     sources: [
@@ -232,4 +304,7 @@ test('competitor phrase sections stay inside each card and the shared section st
   );
   assert.match(intelligencePanel, /createCompetitorPhraseIntelligence/);
   assert.match(intelligencePanel, /تحليل أهمية العبارات/);
+  assert.match(intelligencePanel, /#d4af37/);
+  assert.doesNotMatch(intelligencePanel, /violet|sky-/);
+  assert.match(source, /articleLanguage=\{articleLanguage\}/);
 });

@@ -22,6 +22,10 @@ import {
   PROMPT_TEMPLATE_IDS,
   renderPromptTemplate,
 } from '../constants/promptRegistry';
+import {
+  evaluateContentWritingFaqDraftIndependence,
+  type ContentWritingFaqDraftIndependence,
+} from './contentWritingFaq';
 
 export type ContentWritingQualityCriterionResult = {
   id: string;
@@ -238,6 +242,7 @@ const keywordResult = (
 const collectCriteria = (
   analysis: FullAnalysis,
   configuration: ContentWritingQualityConfiguration,
+  faqIndependence: ContentWritingFaqDraftIndependence,
 ): ContentWritingQualityCriterionResult[] => {
   const targetWords = configuration.policy.targetWords;
   const targetBodyH2Count = configuration.policy.outlineSections;
@@ -272,6 +277,37 @@ const collectCriteria = (
         : `${targetH2Count.min}-${targetH2Count.max}`,
       progress: h2RangePassed ? 1 : 0,
       violationCount: h2RangePassed ? 0 : 1,
+    }, configuration),
+    normalizeCriterion('quality.faqIndependence', {
+      title: 'استقلالية الأسئلة الشائعة وقيمتها الجديدة',
+      status: faqIndependence.passed ? 'pass' : 'fail',
+      current: faqIndependence.passed
+        ? faqIndependence.entries.length
+        : faqIndependence.bodyDuplicateQuestions.length + faqIndependence.faqDuplicateQuestions.length,
+      required: 'أسئلة موثقة لا تعيد أفكار المتن ولا تكرر بعضها',
+      progress: faqIndependence.passed ? 1 : 0,
+      violationCount: faqIndependence.bodyDuplicateQuestions.length
+        + faqIndependence.faqDuplicateQuestions.length
+        + (faqIndependence.faqFound && faqIndependence.entries.length > 0 ? 0 : 1),
+      violatingItems: [
+        ...faqIndependence.bodyDuplicateQuestions.map(question => ({
+          from: 0,
+          to: 0,
+          text: question,
+          message: `السؤال «${question}» يعيد معلومة موجودة في متن المقالة بدل إضافة قيمة جديدة.`,
+        })),
+        ...faqIndependence.faqDuplicateQuestions.map(question => ({
+          from: 0,
+          to: 0,
+          text: question,
+          message: `السؤال «${question}» قريب معنويًا من سؤال شائع آخر.`,
+        })),
+        ...(!faqIndependence.faqFound || faqIndependence.entries.length === 0 ? [{
+          from: 0,
+          to: 0,
+          message: 'لم يُعثر على أسئلة وأجوبة صالحة يمكن تدقيق استقلاليتها.',
+        }] : []),
+      ],
     }, configuration),
   ];
   const structure = Object.entries(analysis.structureAnalysis)
@@ -329,7 +365,8 @@ export const evaluateContentWritingQuality = (options: {
     uiLanguage: options.articleLanguage,
     tableCount: document.tableCount,
   });
-  const criteria = collectCriteria(analysis, configuration);
+  const faqIndependence = evaluateContentWritingFaqDraftIndependence(options.markdown);
+  const criteria = collectCriteria(analysis, configuration, faqIndependence);
   const scoredCriteria = criteria.flatMap(criterion => {
     const value = criterionScoreValue(criterion.status);
     return value === null ? [] : [{ criterion, value }];
@@ -425,6 +462,7 @@ export const getContentWritingCriterionRepairScope = (
   }
   if (
     id === 'quality.totalH2Count'
+    || id === 'quality.faqIndependence'
     || id === 'h2Count'
     || id === 'h2Structure'
     || id === 'faqSection'

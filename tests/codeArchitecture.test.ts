@@ -565,7 +565,7 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
   assert.match(workflow, /competitor_phrase_intelligence_json/);
   assert.match(serverWorkflow, /deterministic_competitor_phrase_intelligence/);
   assert.match(serverWorkflow, /competitorPhraseIntelligence/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 17/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 18/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /competitor_phrase_intelligence_json/);
   assert.match(promptRegistry, /originalityOpportunity/);
@@ -576,6 +576,30 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
     `${knowledge}\n${phraseAnalysis}\n${workflow}\n${serverWorkflow}\n${promptRegistry}`,
     /search\s*console|searchConsole/i,
   );
+});
+
+test('FAQ writing uses a goal-aware evidence-backed independence audit with visible decisions', async () => {
+  const [faqEngine, workflow, serverWorkflow, quality, resultUi, promptRegistry] = await Promise.all([
+    readWorkspaceFile('utils/contentWritingFaq.ts'),
+    readWorkspaceFile('utils/contentWritingWorkflow.ts'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('utils/contentWritingQuality.ts'),
+    readWorkspaceFile('components/ContentWritingFaqAudit.tsx'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+  ]);
+
+  assert.match(faqEngine, /PAGE_TYPE_INTENTS/);
+  assert.match(faqEngine, /extractContentWritingFaqQuestionSeeds/);
+  assert.match(faqEngine, /normalizeContentWritingFaqAudit/);
+  assert.match(faqEngine, /evaluateContentWritingFaqRevision/);
+  assert.match(workflow, /mandatory_faq_independence_protocol/);
+  assert.match(serverWorkflow, /faqIndependenceAudit/);
+  assert.match(serverWorkflow, /faqIndependenceGuard/);
+  assert.match(quality, /quality\.faqIndependence/);
+  assert.match(resultUi, /الأسئلة المقبولة وما أضافته/);
+  assert.match(resultUi, /الأسئلة المستبعدة وأسباب القرار/);
+  assert.match(promptRegistry, /faq_intent_blueprints_json/);
+  assert.match(promptRegistry, /faq_question_seeds_json/);
 });
 
 test('semantic keyword generation shares one editable prompt and one deterministic policy', async () => {

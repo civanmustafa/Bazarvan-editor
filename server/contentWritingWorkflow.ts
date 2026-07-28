@@ -66,6 +66,13 @@ import {
   buildContentWritingPhraseAudit,
   getContentWritingPhraseAuditOutput,
 } from '../utils/contentWritingPhraseAudit';
+import {
+  contentWritingFaqAuditToMarkdown,
+  evaluateContentWritingFaqRevision,
+  extractContentWritingFaqQuestionSeeds,
+  normalizeContentWritingFaqAudit,
+  type ContentWritingFaqAudit,
+} from '../utils/contentWritingFaq';
 import { normalizeGoalContext } from '../utils/goalContext';
 import {
   CONTENT_WRITING_EVIDENCE_TRACE_VERSION,
@@ -760,19 +767,51 @@ export const executeStructuredContentWritingWorkflow = async (
     goalContext,
     primaryKeyword,
   });
+  const faqQuestionSeeds = extractContentWritingFaqQuestionSeeds({
+    knowledge,
+    chunks: competitorChunks,
+    goalContext,
+  });
+  let faqAudit: ContentWritingFaqAudit | null = null;
   const faqResult = await runStep({
     definition: faqDefinition,
     prompt: buildContentWritingFaqPrompt({
       outline,
       draft: articleWithoutFaq,
+      goalContext,
+      knowledge,
+      questionSeeds: faqQuestionSeeds,
       template: promptTemplate(PROMPT_TEMPLATE_IDS.faq),
     }),
     stepIndex: faqDefinition.ordinal,
     stepCount: definitions.length,
     maxOutputTokens: 6_000,
     articleContextOverride: compactArticleContext,
+    processOutput: output => {
+      const audit = normalizeContentWritingFaqAudit({
+        value: output,
+        draft: articleWithoutFaq,
+        knowledge,
+        chunks: competitorChunks,
+        goalContext,
+        questionSeeds: faqQuestionSeeds,
+      });
+      faqAudit = audit;
+      return {
+        output: contentWritingFaqAuditToMarkdown(audit),
+        metadata: {
+          faqIndependenceAudit: audit,
+          acceptedQuestionCount: audit.acceptedCount,
+          rejectedQuestionCount: audit.rejectedCount,
+          needsInformationQuestionCount: audit.needsInformationCount,
+        },
+      };
+    },
   });
   if (!faqResult.ok) return faqResult.execution;
+  if (!faqAudit && isRecord(faqResult.step.metadata?.faqIndependenceAudit)) {
+    faqAudit = faqResult.step.metadata.faqIndependenceAudit as unknown as ContentWritingFaqAudit;
+  }
   outputs.faq = faqResult.output;
 
   const finalSectionDefinition = definitions.find(definition => (
@@ -1095,6 +1134,11 @@ export const executeStructuredContentWritingWorkflow = async (
           knowledge,
           sectionCoverages: coverageBeforeRevision,
         });
+        const faqIndependenceGuard = evaluateContentWritingFaqRevision({
+          beforeMarkdown: draftBeforeRevision,
+          candidateMarkdown: application.candidateMarkdown,
+          audit: faqAudit,
+        });
         const qualityAfterRevision = qualityRuntime && qualityBeforeRevision
           ? evaluateContentWritingQuality({
               markdown: application.candidateMarkdown,
@@ -1114,10 +1158,12 @@ export const executeStructuredContentWritingWorkflow = async (
           ...(application.appliedEdits.length === 0 ? ['no_valid_revision_edits'] : []),
           ...(application.candidateMarkdown === draftBeforeRevision ? ['candidate_unchanged'] : []),
           ...knowledgeGuard.reasons,
+          ...faqIndependenceGuard.reasons,
           ...(qualityGuard?.reasons || ['quality_guard_unavailable']),
         ]));
         const accepted = reasons.length === 0
           && knowledgeGuard.accepted
+          && faqIndependenceGuard.accepted
           && qualityGuard?.accepted === true;
         return {
           output: JSON.stringify({
@@ -1142,6 +1188,7 @@ export const executeStructuredContentWritingWorkflow = async (
             qualityReportAfterRevision: qualityAfterRevision,
             qualityGuard,
             knowledgeGuard,
+            faqIndependenceGuard,
             acceptedDraft: accepted ? application.candidateMarkdown : null,
             sectionCoveragesAfter: knowledgeGuard.sectionCoverages,
           },
@@ -1371,7 +1418,16 @@ export const executeStructuredContentWritingWorkflow = async (
         qualityRegressionRollback: true,
         knowledgeCoverageRollback: true,
         blockedClaimRollback: true,
+        faqIndependenceRollback: true,
       },
+      faqIndependence: faqAudit ? {
+        version: faqAudit.version,
+        pageType: faqAudit.pageType,
+        discoveredQuestionSeedCount: faqAudit.questionSeeds.length,
+        acceptedQuestionCount: faqAudit.acceptedCount,
+        rejectedQuestionCount: faqAudit.rejectedCount,
+        needsInformationQuestionCount: faqAudit.needsInformationCount,
+      } : null,
       usage,
       knowledgeCoverage: {
         sourceChunkCount: competitorChunks.length,

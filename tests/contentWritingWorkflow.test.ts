@@ -326,6 +326,62 @@ test('call-to-action prompt receives the page goal and enforces CTA criteria ins
   assert.match(prompt, /لا تستخدم مؤشرًا ختاميًا/);
 });
 
+test('FAQ prompt receives page-specific intents, discovered questions, evidence, and a protected independence protocol', async () => {
+  const {
+    parseContentWritingOutline,
+    buildContentWritingFaqPrompt,
+  } = await importWorkflow();
+  const prompt = buildContentWritingFaqPrompt({
+    outline: parseContentWritingOutline(outlineJson),
+    draft: '## المواصفات\n\nيعرض هذا القسم المواصفات المتاحة في جدول واضح.',
+    goalContext: {
+      pageType: 'product',
+      objective: 'convert',
+      searchIntent: 'transactional',
+    },
+    knowledge: {
+      version: 3,
+      items: [{
+        id: 'K001',
+        topic: 'اختيار المقاس',
+        detail: 'يعتمد الاختيار على عدد المستخدمين.',
+        sourceChunkIds: ['C1-S001'],
+      }],
+      competitorCoverageMatrix: {},
+      sourceRegistry: {
+        sources: [{ id: 'SRC1' }],
+      },
+      claimLedger: {
+        allowedClaimIds: ['CL001'],
+        qualifiedClaimIds: [],
+        blockedClaimIds: [],
+        claims: [{
+          id: 'CL001',
+          statement: 'اختيار المقاس يعتمد على عدد المستخدمين.',
+        }],
+      },
+      processedChunkIds: ['C1-S001'],
+      fallbackChunkIds: [],
+    },
+    questionSeeds: [{
+      id: 'FQS001',
+      question: 'كيف أختار المقاس المناسب؟',
+      sourceType: 'people_also_ask',
+      sourceChunkIds: ['C1-S001'],
+      knowledgeItemIds: ['K001'],
+    }],
+  });
+
+  assert.match(prompt, /"pageType": "product"/);
+  assert.match(prompt, /"intent": "payment"/);
+  assert.match(prompt, /كيف أختار المقاس المناسب/);
+  assert.match(prompt, /complete_registry_attached_in_session_context/);
+  assert.match(prompt, /"allowedClaimIds": \[\s*"CL001"/);
+  assert.match(prompt, /mandatory_faq_independence_protocol/);
+  assert.match(prompt, /اختلاف الكلمات لا يعني اختلاف الفكرة/);
+  assert.match(prompt, /needs_information/);
+});
+
 test('generated writing removes bold formatting and normalizes Arabic list markers', async () => {
   const { normalizeFinalContentWritingResult } = await importWorkflow();
   const normalized = normalizeFinalContentWritingResult([

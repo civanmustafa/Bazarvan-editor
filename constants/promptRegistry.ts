@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 17;
+export const PROMPT_REGISTRY_VERSION = 18;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -330,13 +330,30 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     id: PROMPT_TEMPLATE_IDS.faq,
     group: PROMPT_GROUP_IDS.writing,
     label: 'كتابة الأسئلة الشائعة',
-    description: 'ينشئ أسئلة وأجوبة مستندة إلى المقالة ونية البحث.',
-    usage: 'يعمل بعد كتابة المتن والمقدمة، ويُدرج قسم الأسئلة قبل القسم النهائي الديناميكي: الخاتمة أو دعوة اتخاذ الإجراء.',
-    variables: ['{{outline_json}}', '{{completed_draft}}'],
-    requiredVariables: ['outline_json', 'completed_draft'],
+    description: 'يبني مرشحي People Also Ask حسب هدف الصفحة، ويرفض إعادة أفكار المتن بصياغة مختلفة، ويربط المقبول بأدلته.',
+    usage: 'يعمل بعد كتابة المتن والمقدمة، ويفحص القيمة المعلوماتية والتنوع والأدلة قبل إدراج الأسئلة المقبولة فقط.',
+    variables: [
+      '{{outline_json}}',
+      '{{completed_draft}}',
+      '{{page_goal_json}}',
+      '{{faq_intent_blueprints_json}}',
+      '{{faq_question_seeds_json}}',
+      '{{faq_knowledge_json}}',
+    ],
+    requiredVariables: [
+      'outline_json',
+      'completed_draft',
+      'page_goal_json',
+      'faq_intent_blueprints_json',
+      'faq_question_seeds_json',
+      'faq_knowledge_json',
+    ],
     attachments: [
       attachment('outline', 'المخطط', 'المخطط المعتمد للمقالة.'),
       attachment('completedDraft', 'المسودة المكتملة', 'المقدمة والمتن قبل الأسئلة والخاتمة.'),
+      attachment('pageGoal', 'هدف الصفحة', 'نوع الصفحة والهدف ونية البحث لتحديد أنواع الأسئلة الملائمة.'),
+      attachment('questionSeeds', 'مرشحو People Also Ask', 'الأسئلة المكتشفة فعليًا في المصادر والسياق مع تمييز مصدرها الحقيقي.'),
+      attachment('knowledge', 'مصفوفة المعرفة والأدلة', 'الأفكار وسجل الادعاءات والمصادر التي يجوز الاعتماد عليها في الإجابات.'),
       attachment('articleContext', 'موجز المقالة الذكي', 'الكلمات والهدف والجمهور والنتيجة المطلوبة ومصفوفة المنافسين.'),
     ],
   },
@@ -752,17 +769,31 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 
 اكتب فقرتين مفيدتين فقط تمهّدان طبيعيًا للمتن وتطابقان نية البحث، وافصل بينهما بسطر فارغ حتى تبقيا فقرتين مستقلتين في المحرر. تحتوي الفقرة الأولى على 30-60 كلمة و2-4 جمل، والثانية على 40-80 كلمة و2-4 جمل. لا تضف رقمًا أو ادعاءً جديدًا غير موجود ومسموح في سجل الادعاءات المحفوظ. أرجع متن المقدمة فقط بصيغة Markdown، دون عنوان أو قائمة أو تكرار عنوان المقالة.`,
 
-  [PROMPT_TEMPLATE_IDS.faq]: `نفّذ مرحلة الأسئلة الشائعة فقط.
+  [PROMPT_TEMPLATE_IDS.faq]: `نفّذ مرحلة بناء وتدقيق الأسئلة الشائعة فقط.
 
 المخطط المعتمد:
 {{outline_json}}
+
+هدف الصفحة:
+{{page_goal_json}}
+
+أنواع الأسئلة الملائمة لهذا الهدف:
+{{faq_intent_blueprints_json}}
+
+الأسئلة المكتشفة في المصادر والسياق:
+{{faq_question_seeds_json}}
+
+مصفوفة المعرفة وسجل المصادر والادعاءات:
+{{faq_knowledge_json}}
 
 مسودة المقالة المكتملة:
 <completed_draft>
 {{completed_draft}}
 </completed_draft>
 
-اكتب أسئلة شائعة مفيدة اعتمادًا على نية البحث والمقالة والكلمات ومصفوفة تغطية المنافسين المحفوظة في سياق الجلسة. التزم بسجل الادعاءات: لا تستخدم ادعاءً محظورًا ولا تضف رقمًا أو حقيقة قابلة للتحقق من خارج السجل. أرجع الأسئلة والأجوبة فقط بصيغة Markdown، واستخدم H3 للأسئلة. يجب أن يكون كل جواب فقرة من 35-75 كلمة و2-3 جمل. لا تضف عنوان قسم FAQ ولا تكرر ادعاءات غير مدعومة.`,
+لا تستخرج أسئلة من المقالة لمجرد تحويل الجمل إلى صيغة استفهام. استخدم أسئلة People Also Ask الحقيقية عند وجودها، ثم وسّعها حسب طبيعة هدف الصفحة والجداول والاستخدام والشراء والدفع والشحن والضمان والحالات الخاصة. قارن معنى كل جواب بكل أفكار المسودة، وارفض أي مرشح يعيد معلومة مكتوبة بوضوح حتى لو اختلفت الصياغة. التزم بسجل الادعاءات ولا تخترع إجابة عند غياب الدليل.
+
+أرجع قائمة مرشحين منظمة تتضمن المقبول والمرفوض وما يحتاج معلومات، وسبب القرار والقيمة الجديدة وأقرب فكرة في المقالة ومصدر الأدلة. سيطبق النظام بروتوكول الاستقلالية المحمي ويحوّل الأسئلة المقبولة فقط إلى Markdown.`,
 
   [PROMPT_TEMPLATE_IDS.conclusion]: `نفّذ مرحلة كتابة الخاتمة فقط.
 

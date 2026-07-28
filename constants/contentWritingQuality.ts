@@ -108,6 +108,7 @@ const POLICY_V1: ContentWritingQualityPolicy = {
   criterionSeverity: {
     'quality.targetWordRange': 'blocking',
     'quality.totalH2Count': 'blocking',
+    'quality.faqIndependence': 'blocking',
     wordCount: 'blocking',
     firstTitle: 'blocking',
     summaryParagraph: 'blocking',
@@ -146,6 +147,7 @@ const POLICY_V1: ContentWritingQualityPolicy = {
   criterionWeights: {
     'quality.targetWordRange': 3,
     'quality.totalH2Count': 3,
+    'quality.faqIndependence': 3,
     wordCount: 2,
     summaryParagraph: 2,
     secondParagraph: 2,
@@ -283,6 +285,7 @@ export const buildContentWritingQualityContract = (options: {
     `فقرات المتن ${range(policy.bodyParagraph.words)} كلمة و${range(policy.bodyParagraph.sentences)} جمل، والجملة ${range(policy.sentenceWords)} كلمة قدر الإمكان.`,
     'اجعل قسم H2 إما 80-150 كلمة بلا H3، أو 180-220 كلمة مع 2-3 عناوين H3 و3-5 فقرات.',
     `كل جواب FAQ فقرة من ${range(policy.faqAnswer.words)} كلمة و${range(policy.faqAnswer.sentences)} جمل.`,
+    'يجب أن يضيف كل سؤال شائع معلومة موثقة أو قرارًا أو حالة خاصة لم يشرحها المتن بوضوح؛ إعادة فكرة المقالة بصياغة مختلفة مخالفة مانعة، كما يُمنع تكرار الأسئلة فيما بينها.',
     isCallToActionPage
       ? 'أضف قسم H2 مستقل لدعوة اتخاذ الإجراء بدل الخاتمة، واجعله آخر H2 دون إضافة قسم خاتمة منفصل. يجب أن يتضمن عنوانه كلمة من كلمات الشراء/الطلب/التواصل/الاكتشاف، والكلمة المفتاحية الأساسية طبيعيًا دون حشو.'
       : `ضع FAQ قبل الخاتمة، واجعل الخاتمة آخر H2 بطول ${range(policy.conclusion.words)} كلمة.`,
@@ -299,6 +302,7 @@ export const buildContentWritingQualityContract = (options: {
     `Body paragraphs should have ${range(policy.bodyParagraph.words)} words and ${range(policy.bodyParagraph.sentences)} sentences; aim for ${range(policy.sentenceWords)} words per sentence.`,
     'Make each H2 section either 80-150 words without H3, or 180-220 words with 2-3 H3 headings and 3-5 paragraphs.',
     `Each FAQ answer must have ${range(policy.faqAnswer.words)} words and ${range(policy.faqAnswer.sentences)} sentences.`,
+    'Every FAQ must add an evidence-backed fact, decision rule, or edge case not already explained in the body; paraphrasing the article or another FAQ is a blocking failure.',
     isCallToActionPage
       ? 'Add an independent H2 call-to-action section instead of a conclusion. It must be the final H2 with no separate conclusion section, and its heading must include a buying, ordering, contact, discovery, or engagement CTA term plus the primary keyword naturally without stuffing.'
       : `Place FAQ before the conclusion; the conclusion must be the last H2 and contain ${range(policy.conclusion.words)} words.`,

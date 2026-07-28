@@ -165,8 +165,8 @@ const statusTone = (status: CompetitorDiscoveryRow['status']): string => {
 const requestErrorMessage = (error: unknown, isArabic: boolean, fallback: string): string => {
   if (isArabic && error instanceof CompetitorDiscoveryRequestError) {
     const labels: Record<string, string> = {
-      firecrawl_not_configured: 'مفتاح Firecrawl غير مضاف إلى بيئة السيرفر.',
-      firecrawl_quota_exceeded: 'تم استنفاد حصة Firecrawl الحالية. راجع الرصيد أو أعد المحاولة لاحقًا.',
+      firecrawl_not_configured: 'مفتاح خدمة السحب غير مضاف إلى بيئة الخادم.',
+      firecrawl_quota_exceeded: 'تم استنفاد حصة خدمة السحب الحالية. راجع الرصيد أو أعد المحاولة لاحقًا.',
       competitor_extraction_already_active: 'توجد مهمة سحب منافسين نشطة لهذه المقالة بالفعل.',
       competitor_selection_limit: `يمكن اختيار ${MAX_ARTICLE_COMPETITORS} مواقع كحد أقصى.`,
       invalid_competitor_query: 'عبارة البحث غير صالحة أو قصيرة جدًا.',
@@ -610,33 +610,33 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               : `Extraction worker is preparing 0/${total || 1}`
             : progressStage === 'programmatic_fallback'
               ? isArabic
-                ? `فشل Firecrawl؛ جار الاستخراج البرمجي ${Math.max(1, displayedCurrent)}/${total || 1}`
+                ? `فشلت خدمة السحب؛ جارٍ الاستخراج البرمجي ${Math.max(1, displayedCurrent)}/${total || 1}`
                 : `Firecrawl failed; running programmatic extraction ${Math.max(1, displayedCurrent)}/${total || 1}`
             : isArabic
-              ? `سحب المنافس عبر Firecrawl ${Math.max(1, displayedCurrent)}/${total || 1}`
+              ? `سحب محتوى المنافس ${Math.max(1, displayedCurrent)}/${total || 1}`
               : `Importing via Firecrawl ${Math.max(1, displayedCurrent)}/${total || 1}`
     : '';
   const activeJobError = activeJob?.last_error?.trim() || '';
   const activeJobWarning = extractionQueueStalled
     ? isArabic
-      ? 'تم حفظ المهمة، لكن عامل bazarvan-competitor-worker لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل عامل المنافسين في هوستينجر، ثم أعد المحاولة.'
+      ? 'تم حفظ المهمة، لكن عامل المنافسين لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل عامل المنافسين في هوستينجر، ثم أعد المحاولة.'
       : 'The job was saved, but bazarvan-competitor-worker did not claim it within 90 seconds. Stop it, start the competitor worker on Hostinger, then retry.'
     : extractionWaitingForWorker
       ? isArabic
-        ? 'تم حفظ المهمة في الطابور، ولم يبدأ اتصال Firecrawl بعد.'
+        ? 'تم حفظ المهمة في الطابور، ولم تبدأ خدمة السحب بعد.'
         : 'The job is queued; no Firecrawl request has started yet.'
       : activeJob?.status === 'running' && progressStage === 'programmatic_fallback'
         ? isArabic
-          ? 'فشل Firecrawl لهذا الرابط؛ بدأ الاستخراج البرمجي تلقائيًا دون إعادة محاولة Firecrawl ودون استخدام الذكاء الاصطناعي.'
+          ? 'فشلت خدمة السحب لهذا الرابط؛ بدأ الاستخراج البرمجي تلقائيًا دون إعادة محاولة الخدمة ودون استخدام الذكاء الاصطناعي.'
           : 'Firecrawl failed for this URL; programmatic extraction started automatically without retrying Firecrawl or using AI.'
       : activeJob?.status === 'running'
         ? isArabic
-          ? 'اتصال Firecrawl جارٍ. قد يستغرق الرابط الواحد حتى 75 ثانية قبل نجاحه أو ظهور خطئه.'
+          ? 'خدمة السحب تعمل الآن. قد يستغرق الرابط الواحد حتى 75 ثانية قبل نجاحه أو ظهور خطئه.'
           : 'Firecrawl is running. One URL can take up to 75 seconds before it succeeds or reports an error.'
         : '';
 
   return (
-    <section className="space-y-3 border-b border-gray-200 pb-4 dark:border-[#3C3C3C]">
+    <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
       <div className="flex items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-black text-gray-800 dark:text-gray-100">
@@ -644,7 +644,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           </h3>
           <p className="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
             {isArabic
-              ? 'ابحث واختر حتى 5 مواقع. يحاول الخادم Firecrawl مرة واحدة، ثم ينتقل تلقائيًا إلى الاستخراج البرمجي عند فشله، دون استخدام Gemini.'
+              ? 'ابحث واختر حتى 5 مواقع. يحاول الخادم خدمة السحب مرة واحدة، ثم ينتقل تلقائيًا إلى الاستخراج البرمجي عند فشلها، دون استخدام نموذج ذكي.'
               : 'Search and select up to 5 sites. The server tries Firecrawl once, then automatically falls back to programmatic extraction without using Gemini.'}
           </p>
         </div>
@@ -654,7 +654,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
       {!state.providerConfigured && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] font-bold text-amber-800 dark:border-amber-900/40 dark:bg-amber-500/10 dark:text-amber-300">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          <span>{isArabic ? 'يجب إضافة FIRECRAWL_API_KEY إلى بيئة السيرفر أولًا.' : 'FIRECRAWL_API_KEY must be configured on the server.'}</span>
+          <span>{isArabic ? 'يجب إعداد مفتاح خدمة السحب في الخادم أولًا.' : 'FIRECRAWL_API_KEY must be configured on the server.'}</span>
         </div>
       )}
 
@@ -704,7 +704,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         <div className={`flex items-start gap-2 rounded-md border px-2.5 py-2 text-[11px] font-bold ${
           discoveryQueueStalled
             ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/40 dark:bg-amber-500/10 dark:text-amber-300'
-            : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/40 dark:bg-blue-500/10 dark:text-blue-300'
+            : 'border-[#d4af37]/30 bg-[#d4af37]/10 text-[#8a6f1d] dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10 dark:text-[#f2d675]'
         }`}>
           {discoveryQueueStalled
             ? <AlertTriangle size={14} className="mt-0.5 shrink-0" />
@@ -714,7 +714,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               ? (isArabic ? 'جاري إيقاف البحث عن المنافسين بأمان.' : 'Stopping competitor discovery safely.')
               : discoveryQueueStalled
                 ? (isArabic
-                  ? 'تم حفظ مهمة بحث المنافسين، لكن عامل bazarvan-competitor-worker لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل عامل المنافسين في هوستينجر، ثم أعد المحاولة.'
+                  ? 'تم حفظ مهمة بحث المنافسين، لكن عامل المنافسين لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل عامل المنافسين في هوستينجر، ثم أعد المحاولة.'
                   : 'The competitor search job was saved, but bazarvan-competitor-worker did not claim it within 90 seconds. Stop it, start the competitor worker on Hostinger, then retry.')
               : discoveryWaitingForWorker
                 ? (isArabic
@@ -738,7 +738,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
             className={`flex size-6 shrink-0 items-center justify-center rounded-md border disabled:cursor-wait disabled:opacity-50 ${
               discoveryQueueStalled
                 ? 'border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-500/10'
-                : 'border-blue-200 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-500/10'
+                : 'border-[#d4af37]/35 text-[#8a6f1d] hover:bg-[#d4af37]/15 dark:border-[#d4af37]/25 dark:text-[#f2d675] dark:hover:bg-[#d4af37]/15'
             }`}
           >
             {discoveryCancelRequested
@@ -884,7 +884,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           >
             {isStarting ? <LoaderCircle size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
             <span>{isArabic
-              ? `سحب ${selectedResults.length} موقع عبر Firecrawl`
+              ? `سحب ${selectedResults.length} موقع`
               : `Import ${selectedResults.length} site(s) via Firecrawl`}</span>
           </button>
         </div>
@@ -896,14 +896,14 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           className={`rounded-md border px-2.5 py-2.5 text-xs ${
             extractionQueueStalled || extractionRetryScheduled
               ? 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-500/10'
-              : 'border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-500/10'
+              : 'border-[#d4af37]/30 bg-[#d4af37]/10 dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10'
           }`}
         >
           <div className="flex items-center justify-between gap-2">
             <span className={`inline-flex min-w-0 items-center gap-2 font-black ${
               extractionQueueStalled || extractionRetryScheduled
                 ? 'text-amber-800 dark:text-amber-300'
-                : 'text-blue-800 dark:text-blue-300'
+                : 'text-[#8a6f1d] dark:text-[#f2d675]'
             }`}>
               {extractionQueueStalled
                 ? <AlertTriangle size={14} className="shrink-0" />
@@ -915,19 +915,19 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               onClick={() => void handleCancel()}
               disabled={actionId === 'cancel'}
               title={isArabic ? 'إيقاف السحب' : 'Stop extraction'}
-              className="flex size-7 shrink-0 items-center justify-center rounded-md border border-blue-200 text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-500/10"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md border border-[#d4af37]/35 text-[#8a6f1d] hover:bg-[#d4af37]/15 disabled:opacity-50 dark:border-[#d4af37]/25 dark:text-[#f2d675] dark:hover:bg-[#d4af37]/15"
             >
               {actionId === 'cancel' ? <LoaderCircle size={13} className="animate-spin" /> : <Square size={12} fill="currentColor" />}
             </button>
           </div>
           {progressTitle && !extractionWaitingForWorker && (
-            <div className="mt-1 truncate text-[11px] text-blue-700 dark:text-blue-300">{progressTitle}</div>
+            <div className="mt-1 truncate text-[11px] text-[#8a6f1d] dark:text-[#f2d675]">{progressTitle}</div>
           )}
           {activeJobWarning && (
             <div className={`mt-1 text-[10px] font-bold leading-4 ${
               extractionQueueStalled
                 ? 'text-amber-800 dark:text-amber-300'
-                : 'text-blue-700 dark:text-blue-300'
+                : 'text-[#8a6f1d] dark:text-[#f2d675]'
             }`}>
               {activeJobWarning}
             </div>
@@ -973,8 +973,10 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                       <span>{row.wordCount} {isArabic ? 'كلمة' : 'words'}</span>
                       <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] dark:bg-emerald-500/10">
                         {row.extractionProvider.startsWith('firecrawl')
-                          ? 'Firecrawl'
-                          : row.extractionProvider || (isArabic ? 'غير محدد' : 'Unknown')}
+                          ? (isArabic ? 'خدمة السحب' : 'Firecrawl')
+                          : isArabic
+                            ? 'استخراج برمجي'
+                            : row.extractionProvider || 'Unknown'}
                       </span>
                     </div>
                   )}

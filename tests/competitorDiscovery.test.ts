@@ -305,7 +305,7 @@ test('competitor discovery stop control requests durable cancellation and keeps 
   assert.match(panel, /discoveryQueueStalled/);
   assert.match(panel, /COMPETITOR_DISCOVERY_QUEUE_STALL_MS/);
   assert.match(panel, /بانتظار عامل بحث المنافسين/);
-  assert.match(panel, /عامل bazarvan-competitor-worker لم يستلمها خلال 90 ثانية/);
+  assert.match(panel, /عامل المنافسين لم يستلمها خلال 90 ثانية/);
   assert.match(panel, /إيقاف البحث عن المنافسين/);
   assert.match(panel, /جاري إيقاف البحث عن المنافسين بأمان/);
   assert.match(controlsMigration, /status = case when job\.status = 'running' then 'running' else 'cancelled' end/);
@@ -346,8 +346,8 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.match(executor, /model: PROGRAMMATIC_MODEL/);
   assert.match(executor, /programmatic_after_firecrawl/);
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
-  assert.match(panel, /سحب \$\{selectedResults\.length\} موقع عبر Firecrawl/);
-  assert.match(panel, /سحب المنافس عبر Firecrawl/);
+  assert.match(panel, /سحب \$\{selectedResults\.length\} موقع/);
+  assert.match(panel, /البحث وسحب المنافسين/);
   assert.match(panel, /بانتظار عامل السحب 0\//);
   assert.match(panel, /لم يبدأ عامل السحب 0\//);
   assert.match(panel, /COMPETITOR_EXTRACTION_QUEUE_STALL_MS/);
@@ -357,7 +357,7 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.match(sidebar, /source: 'firecrawl'/);
   assert.match(sidebar, /isFirecrawlLoading/);
   assert.match(sidebar, /const firecrawlPendingHint = isArabicLocale/);
-  assert.match(sidebar, /لم يبدأ اتصال Firecrawl بعد/);
+  assert.match(sidebar, /لم تبدأ خدمة السحب بعد/);
   assert.doesNotMatch(sidebar, /لم يبدأ استخراج Gemini|Gemini extraction has not started/);
 });
 

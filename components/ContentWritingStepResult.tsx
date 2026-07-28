@@ -24,6 +24,7 @@ import {
 } from '../utils/contentWritingTransparency';
 import { reconstructContentWritingEvidenceTrace } from '../utils/contentWritingEvidence';
 import { buildContentWritingStageKnowledgeUsage } from '../utils/contentWritingStageKnowledge';
+import ContentWritingFaqAudit from './ContentWritingFaqAudit';
 
 type ContentWritingStepResultProps = {
   step: ContentWritingStep;
@@ -73,6 +74,10 @@ export const getContentWritingStepDescription = (
     call_to_action: [
       'يكتب النظام قسمًا ختاميًا تحويليًا وفق نوع الصفحة وهدفها ونية البحث، ويطبّق معايير دعوة الإجراء بدل معايير خاتمة المقالة.',
       'Writes a conversion-focused final section from the page type, objective, and search intent, applying CTA criteria instead of article-conclusion rules.',
+    ],
+    faq: [
+      'يجمع النظام مرشحي People Also Ask والأسئلة المرتبطة بهدف الصفحة، ثم يقارن معنى كل جواب بالمتن والأسئلة الأخرى. لا يُدرج إلا السؤال الذي يضيف معلومة موثقة جديدة، مع حفظ المقبول والمرفوض وسبب القرار.',
+      'Collects People Also Ask and page-goal candidates, then compares each answer with the body and other FAQs. Only evidence-backed questions with new information are inserted, while every acceptance and rejection remains reviewable.',
     ],
   };
   const description = descriptions[step.stepType];
@@ -458,6 +463,9 @@ const RevisionResult: React.FC<{
     : [];
   const qualityGuard = isRecord(step.metadata.qualityGuard) ? step.metadata.qualityGuard : {};
   const knowledgeGuard = isRecord(step.metadata.knowledgeGuard) ? step.metadata.knowledgeGuard : {};
+  const faqGuard = isRecord(step.metadata.faqIndependenceGuard) ? step.metadata.faqIndependenceGuard : {};
+  const faqBefore = isRecord(faqGuard.before) ? faqGuard.before : {};
+  const faqAfter = isRecord(faqGuard.after) ? faqGuard.after : {};
   const reasonLabels: Record<string, [string, string]> = {
     quality_score_decreased: ['انخفضت درجة الجودة', 'Quality score decreased'],
     new_quality_failure: ['ظهرت مخالفة جودة جديدة', 'A new quality failure appeared'],
@@ -467,6 +475,10 @@ const RevisionResult: React.FC<{
     no_valid_revision_edits: ['لم يرجع النموذج تعديلًا صالحًا', 'No valid edit was returned'],
     candidate_unchanged: ['لم تغيّر الرقع النص فعليًا', 'The patches did not change the text'],
     quality_guard_unavailable: ['تعذر تشغيل مقارنة الجودة', 'The quality comparison was unavailable'],
+    faq_removed: ['أزيل قسم الأسئلة الشائعة أو أصبح فارغًا', 'The FAQ section was removed or became empty'],
+    faq_body_duplication_increased: ['زاد تكرار أفكار المتن داخل الأسئلة الشائعة', 'FAQ duplication of body ideas increased'],
+    faq_internal_duplication_increased: ['زاد التشابه بين الأسئلة الشائعة', 'Similarity between FAQ entries increased'],
+    unaudited_faq_question_added: ['أُضيف سؤال لم يمر بتدقيق الاستقلالية والأدلة', 'A question was added without independence and evidence review'],
   };
   const reasons = textList(decision.reasons);
   return (
@@ -487,7 +499,7 @@ const RevisionResult: React.FC<{
               : 'The candidate was automatically rejected and the previous version was restored unchanged.')}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-1.5">
+      <div className={`grid gap-1.5 ${Object.keys(faqGuard).length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
         <div className="rounded-md bg-gray-50 p-2 text-center dark:bg-[#1F1F1F]">
           <div className="font-black text-gray-800 dark:text-gray-100">
             {String(qualityGuard.scoreBefore ?? '—')} ← {String(qualityGuard.scoreAfter ?? '—')}
@@ -500,6 +512,22 @@ const RevisionResult: React.FC<{
           </div>
           <div className="text-[9px] font-bold text-gray-500">{isArabic ? 'تغطية الأفكار: قبل ← بعد' : 'Coverage: before ← after'}</div>
         </div>
+        {Object.keys(faqGuard).length > 0 && (
+          <div className="rounded-md bg-gray-50 p-2 text-center dark:bg-[#1F1F1F]">
+            <div className="font-black text-gray-800 dark:text-gray-100">
+              {String(faqBefore.bodyDuplicateQuestions && Array.isArray(faqBefore.bodyDuplicateQuestions)
+                ? faqBefore.bodyDuplicateQuestions.length
+                : 0)}
+              {' ← '}
+              {String(faqAfter.bodyDuplicateQuestions && Array.isArray(faqAfter.bodyDuplicateQuestions)
+                ? faqAfter.bodyDuplicateQuestions.length
+                : 0)}
+            </div>
+            <div className="text-[9px] font-bold text-gray-500">
+              {isArabic ? 'تكرار FAQ: قبل ← بعد' : 'FAQ duplication: before ← after'}
+            </div>
+          </div>
+        )}
       </div>
       {reasons.length > 0 && (
         <div className="rounded-md bg-red-50/70 p-2 text-[10px] font-bold leading-5 text-red-700 dark:bg-red-900/10 dark:text-red-300">
@@ -603,6 +631,13 @@ const ContentWritingStepResult: React.FC<ContentWritingStepResultProps> = ({
         <RevisionResult step={step} isArabic={isArabic} />
       ) : (
         <>
+          {step.stepType === 'faq' && (
+            <ContentWritingFaqAudit
+              auditValue={step.metadata.faqIndependenceAudit}
+              transparency={transparency}
+              isArabic={isArabic}
+            />
+          )}
           <ProseResult outputText={outputText} stepType={step.stepType} isArabic={isArabic} />
           {(step.stepType === 'section' || step.stepType === 'section_repair') && (
             <ContentWritingEvidenceTrace

@@ -1048,27 +1048,47 @@ const RightSidebar: React.FC = () => {
         })).filter(source => source.text);
     }, [competitorExtractions, competitorTexts]);
 
+    const competitorPhraseAnalysisContext = useMemo(() => ({
+        articleLanguage,
+        primaryKeyword: articleKeywords.primary,
+    }), [articleKeywords.primary, articleLanguage]);
+
     const competitorTextStats = useMemo(
-        () => createCompetitorTextStats(competitorStatSources.map(source => source.text)),
-        [competitorStatSources],
+        () => createCompetitorTextStats(
+            competitorStatSources.map(source => source.text),
+            competitorPhraseAnalysisContext,
+        ),
+        [competitorPhraseAnalysisContext, competitorStatSources],
     );
 
     const competitorTextStatsBySlot = useMemo(() => {
         const statsByCompetitor = new Map(
             competitorStatSources.map(source => [
                 source.competitorNumber,
-                createCompetitorTextStats([source.text]),
+                createCompetitorTextStats([source.text], competitorPhraseAnalysisContext),
             ]),
         );
         return Array.from(
             { length: Math.max(competitorUrls.length, competitorTexts.length, competitorExtractions.length) },
-            (_, index) => statsByCompetitor.get(index + 1) || createCompetitorTextStats([]),
+            (_, index) => (
+                statsByCompetitor.get(index + 1)
+                || createCompetitorTextStats([], competitorPhraseAnalysisContext)
+            ),
         );
-    }, [competitorExtractions.length, competitorStatSources, competitorTexts.length, competitorUrls.length]);
+    }, [
+        competitorExtractions.length,
+        competitorPhraseAnalysisContext,
+        competitorStatSources,
+        competitorTexts.length,
+        competitorUrls.length,
+    ]);
 
     const sharedCompetitorPhrases = useMemo(
-        () => createSharedCompetitorPhrases(competitorStatSources),
-        [competitorStatSources],
+        () => createSharedCompetitorPhrases(
+            competitorStatSources,
+            competitorPhraseAnalysisContext,
+        ),
+        [competitorPhraseAnalysisContext, competitorStatSources],
     );
 
     const competitorPhraseIntelligenceEnabled = (
@@ -2229,10 +2249,10 @@ ${readyCommandCompetitorBlocks}`;
                     onCompetitorsChange={handleDiscoveredCompetitors}
                 />
 
-                <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                     <div className="mb-2 text-xs font-bold text-gray-700 dark:text-gray-200">
                         {t.locale === 'ar'
-                            ? 'نموذج Gemini لزر «استخراج بالذكاء» لكل رابط فقط'
+                            ? 'نموذج الاستخراج الذكي لكل رابط'
                             : 'Gemini model for each link’s “AI extraction” button only'}
                     </div>
                     <div className={`grid gap-2 ${isGeminiFreeEnabled && isGeminiPaidEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -2240,7 +2260,9 @@ ${readyCommandCompetitorBlocks}`;
                             type="button"
                             onClick={() => setCompetitorGeminiProvider('gemini')}
                             disabled={!isGeminiFreeAvailable}
-                            title={!isGeminiFreeAvailable ? 'Gemini مفعّل دون مفتاح API مهيأ على الخادم' : 'Gemini'}
+                            title={!isGeminiFreeAvailable
+                                ? (t.locale === 'ar' ? 'النموذج المجاني مفعّل دون مفتاح مهيأ على الخادم' : 'Gemini is enabled without a configured server API key')
+                                : (t.locale === 'ar' ? 'النموذج المجاني' : 'Gemini')}
                             className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors ${
                                 competitorGeminiProvider === 'gemini'
                                     ? 'bg-[#d4af37] text-white'
@@ -2248,14 +2270,16 @@ ${readyCommandCompetitorBlocks}`;
                             }`}
                         >
                             <Sparkles size={14} />
-                            Gemini
+                            {t.locale === 'ar' ? 'النموذج المجاني' : 'Gemini'}
                         </button>}
                         {isGeminiPaidEnabled && (
                             <button
                                 type="button"
                                 onClick={() => setCompetitorGeminiProvider('geminiPaid')}
                                 disabled={!isGeminiPaidAvailable}
-                                title={!isGeminiPaidAvailable ? 'Gemini Pro مفعّل دون مفتاح API مهيأ على الخادم' : 'Gemini Pro'}
+                                title={!isGeminiPaidAvailable
+                                    ? (t.locale === 'ar' ? 'النموذج المتقدم مفعّل دون مفتاح مهيأ على الخادم' : 'Gemini Pro is enabled without a configured server API key')
+                                    : (t.locale === 'ar' ? 'النموذج المتقدم' : 'Gemini Pro')}
                                 className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                                     competitorGeminiProvider === 'geminiPaid'
                                         ? 'bg-[#d4af37] text-white'
@@ -2263,13 +2287,13 @@ ${readyCommandCompetitorBlocks}`;
                                 }`}
                             >
                                 <BadgeDollarSign size={14} />
-                                Gemini Pro
+                                {t.locale === 'ar' ? 'النموذج المتقدم' : 'Gemini Pro'}
                             </button>
                         )}
                     </div>
                 </div>
 
-                <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                     <textarea
                         value={bulkCompetitorText}
                         onChange={(event) => setBulkCompetitorText(event.target.value)}
@@ -2311,13 +2335,13 @@ ${readyCommandCompetitorBlocks}`;
                     const isProgrammaticLoading = isLoading && extraction.source === 'programmatic';
                     const isFirecrawlLoading = isLoading && extraction.source === 'firecrawl';
                     const firecrawlPendingHint = isArabicLocale
-                        ? 'هذا الرابط ينتظر عامل سحب المنافسين؛ لم يبدأ اتصال Firecrawl بعد.'
+                        ? 'هذا الرابط ينتظر عامل سحب المنافسين؛ لم تبدأ خدمة السحب بعد.'
                         : 'This URL is waiting for the competitor extraction worker; the Firecrawl request has not started yet.';
                     const extractionPreviewTitle = extraction.source === 'programmatic'
                         ? tRs.programmaticExtractionPreview
                         : tRs.htmlExtractionPreview;
                     return (
-                        <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                        <div key={index} className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                             <div className="mb-2 flex min-w-0 items-center gap-2">
                                 <label
                                     htmlFor={`competitor-url-${index}`}
@@ -2376,7 +2400,7 @@ ${readyCommandCompetitorBlocks}`;
                                             </button>
                                         </div>
                                         {isFirecrawlLoading && (
-                                            <div className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5 text-[10px] font-bold leading-4 text-blue-700 dark:border-blue-900/40 dark:bg-blue-500/10 dark:text-blue-300">
+                                            <div className="rounded-md border border-[#d4af37]/30 bg-[#d4af37]/10 px-2 py-1.5 text-[10px] font-bold leading-4 text-[#8a6f1d] dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10 dark:text-[#f2d675]">
                                                 {firecrawlPendingHint}
                                             </div>
                                         )}
@@ -2405,7 +2429,7 @@ ${readyCommandCompetitorBlocks}`;
                             </div>
 
                             {extraction.notice && (
-                                <div className="mt-2 rounded-md bg-blue-50 px-2 py-2 text-[11px] font-semibold leading-5 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                                <div className="mt-2 rounded-md border border-[#d4af37]/25 bg-[#d4af37]/10 px-2 py-2 text-[11px] font-semibold leading-5 text-[#8a6f1d] dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10 dark:text-[#f2d675]">
                                     {extraction.notice}
                                 </div>
                             )}
@@ -2433,14 +2457,14 @@ ${readyCommandCompetitorBlocks}`;
                                                 </span>
                                             )}
                                             {typeof content.qualityScore === 'number' && (
-                                                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                                                <span className="rounded-full bg-[#d4af37]/10 px-2 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
                                                     {tRs.extractionQuality}: {Math.round(content.qualityScore)}%
                                                 </span>
                                             )}
                                         </div>
                                         <span className="shrink-0 text-[11px] text-gray-400">{content.wordCount} {t.common.words}</span>
                                     </div>
-                                    <div className="rounded-md border border-blue-100 bg-blue-50/70 px-2 py-1.5 text-[10px] font-semibold leading-4 text-blue-700 dark:border-blue-900/30 dark:bg-blue-500/10 dark:text-blue-300">
+                                    <div className="rounded-md border border-[#d4af37]/20 bg-[#d4af37]/5 px-2 py-1.5 text-[10px] font-semibold leading-4 text-[#8a6f1d] dark:border-[#d4af37]/20 dark:bg-[#d4af37]/10 dark:text-[#f2d675]">
                                         {tRs.extractionPreviewUsageHint}
                                     </div>
                                     <div className="rounded-md bg-gray-50 p-2 dark:bg-[#1F1F1F]">
@@ -2450,9 +2474,9 @@ ${readyCommandCompetitorBlocks}`;
                                                 <span className="text-gray-400">{tRs.noTableOfContents}</span>
                                             ) : (
                                                 <ul className="space-y-1">
-                                                    {content.headings.h1.map((item, itemIndex) => <li key={`h1-${itemIndex}`} className="font-bold">H1: {item}</li>)}
-                                                    {content.headings.h2.map((item, itemIndex) => <li key={`h2-${itemIndex}`} className="ps-3">H2: {item}</li>)}
-                                                    {content.headings.h3.map((item, itemIndex) => <li key={`h3-${itemIndex}`} className="ps-6 text-gray-500 dark:text-gray-400">H3: {item}</li>)}
+                                                    {content.headings.h1.map((item, itemIndex) => <li key={`h1-${itemIndex}`} className="font-bold">{t.locale === 'ar' ? 'العنوان الرئيسي' : 'H1'}: {item}</li>)}
+                                                    {content.headings.h2.map((item, itemIndex) => <li key={`h2-${itemIndex}`} className="ps-3">{t.locale === 'ar' ? 'عنوان فرعي' : 'H2'}: {item}</li>)}
+                                                    {content.headings.h3.map((item, itemIndex) => <li key={`h3-${itemIndex}`} className="ps-6 text-gray-500 dark:text-gray-400">{t.locale === 'ar' ? 'عنوان فرعي ثانوي' : 'H3'}: {item}</li>)}
                                                 </ul>
                                             )}
                                         </div>
@@ -2463,7 +2487,7 @@ ${readyCommandCompetitorBlocks}`;
                             <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-2 text-xs dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
                                 <div className="mb-2 flex items-center justify-between gap-2">
                                     <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300">
-                                        {t.locale === 'ar' ? 'عبارات 3-4-5 كلمات المكررة' : 'Repeated 3-4-5 word phrases'}
+                                        {t.locale === 'ar' ? 'العبارات المكررة من 3 إلى 5 كلمات' : 'Repeated 3-4-5 word phrases'}
                                     </span>
                                     <span className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-500 dark:bg-[#2A2A2A] dark:text-gray-400">
                                         {repeatedPhrases.length}
@@ -2497,7 +2521,7 @@ ${readyCommandCompetitorBlocks}`;
                     );
                 })}
 
-                <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                     <div className="mb-3 flex items-center gap-2 text-xs font-bold text-gray-800 dark:text-gray-100">
                         <FileText size={14} className="text-[#d4af37]" />
                         <span>{t.locale === 'ar' ? 'إحصاءات نصوص المنافسين' : 'Competitor Text Stats'}</span>
@@ -2552,13 +2576,14 @@ ${readyCommandCompetitorBlocks}`;
                 {competitorPhraseIntelligenceEnabled && (
                     <React.Suspense
                         fallback={(
-                            <div className="rounded-lg border border-violet-200 bg-violet-50/70 p-3 text-xs font-bold text-violet-600 dark:border-violet-900/60 dark:bg-violet-950/20 dark:text-violet-300">
+                            <div className="rounded-xl border border-[#d4af37]/30 bg-[#d4af37]/10 p-3 text-xs font-bold text-[#8a6f1d] dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10 dark:text-[#f2d675]">
                                 {t.locale === 'ar' ? 'جارٍ تجهيز تحليل أهمية العبارات…' : 'Preparing phrase importance analysis…'}
                             </div>
                         )}
                     >
                         <CompetitorPhraseIntelligencePanel
                             locale={t.locale}
+                            articleLanguage={articleLanguage}
                             sources={competitorStatSources}
                             keywords={articleKeywords}
                             competitorUrls={competitorUrls}
@@ -2566,7 +2591,7 @@ ${readyCommandCompetitorBlocks}`;
                     </React.Suspense>
                 )}
 
-                <div className="rounded-lg border border-[#d4af37]/35 bg-[#d4af37]/5 p-3 dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10">
+                <div className="rounded-xl border border-[#d4af37]/35 bg-[#d4af37]/5 p-3 shadow-sm dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10">
                     <div className="mb-1 flex items-center justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2 text-xs font-bold text-gray-800 dark:text-gray-100">
                             <Lightbulb size={14} className="shrink-0 text-[#d4af37]" />
