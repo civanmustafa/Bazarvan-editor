@@ -367,8 +367,14 @@ const LeftSidebar: React.FC = () => {
   const [isQuickClientModalOpen, setIsQuickClientModalOpen] = React.useState(false);
   const tLk = t.leftSidebar;
   const selectedCompanyClient = React.useMemo(
-    () => resolveCompanyClient(activeClients, keywords, linkedArticleClientId),
-    [activeClients, keywords.clientId, keywords.company, linkedArticleClientId],
+    // A client link belongs to a saved article only. Ignoring the previous link while
+    // starting an unsaved article prevents its company from being selected again.
+    () => resolveCompanyClient(
+      activeClients,
+      keywords,
+      activeArticleId ? linkedArticleClientId : '',
+    ),
+    [activeArticleId, activeClients, keywords.clientId, keywords.company, linkedArticleClientId],
   );
 
   const getTabClass = (tabName: 'keywords' | 'duplicates') => {

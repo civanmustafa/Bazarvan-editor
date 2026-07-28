@@ -117,6 +117,7 @@ test('editor and settings use Client Center as the shared company source', async
 
   assert.match(leftSidebar, /useClientDirectory\(\)/);
   assert.match(leftSidebar, /buildUnifiedCompanyKeywords/);
+  assert.match(leftSidebar, /activeArticleId \? linkedArticleClientId : ''/);
   assert.match(leftSidebar, /company-client-combobox/);
   assert.match(leftSidebar, /create-new-client-option/);
   assert.match(leftSidebar, /QuickClientCreateModal/);
@@ -131,6 +132,8 @@ test('editor and settings use Client Center as the shared company source', async
   assert.match(goalTab, /keywords\.clientId/);
   assert.match(internalLinkingPanel, /buildUnifiedCompanyKeywords/);
   assert.match(editorContext, /saveArticleClientSelection\(savedArticle\.id, keywords\.clientId\)/);
+  assert.match(editorContext, /latestDraftMetaRef\.current = \{\s*title: '',\s*keywords: emptyKeywords,/);
+  assert.match(editorContext, /goalContext: emptyGoalContext/);
   assert.doesNotMatch(settingsPage, /مستقلة عن سجل العميل/);
   assert.match(userActivity, /clientId\s*=\s*typeof source\.clientId/);
   assert.match(userActivity, /\.\.\.\(clientId \? \{ clientId \} : \{\}\)/);

@@ -1826,7 +1826,12 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const handleNewArticle = useCallback(async (lang: 'ar' | 'en') => {
         await handleSaveDraft();
         if (editor) {
+            const emptyKeywords = normalizeKeywords(INITIAL_KEYWORDS);
+            const emptyGoalContext = normalizeGoalContext();
+
             articleLoadRequestIdRef.current += 1;
+            clearEditorSnapshotTimer();
+            clearDraftPersistTimer();
             removeSessionValue(ACTIVE_ARTICLE_TITLE_KEY);
             removeSessionValue(ACTIVE_ARTICLE_ID_KEY);
             clearStoredCompetitorInputs();
@@ -1836,14 +1841,33 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleKey('');
             setActiveArticleId(null);
             setActiveArticleSettings(EMPTY_ACTIVE_ARTICLE_SETTINGS);
-            setKeywords(INITIAL_KEYWORDS);
-            setGoalContext(normalizeGoalContext());
+            setKeywords(emptyKeywords);
+            setGoalContext(emptyGoalContext);
+            setArticleLanguage(lang);
+
+            // React state updates apply after this handler. Update the synchronous
+            // snapshot source first so the empty article cannot inherit the previous
+            // article's company, keywords, language, or general context.
+            latestDraftMetaRef.current = {
+                title: '',
+                keywords: emptyKeywords,
+                articleLanguage: lang,
+                goalContext: emptyGoalContext,
+            };
             setEditorContentSafely(editor, createEmptyEditorContent(), createEmptyEditorContent());
             captureEditorSnapshot(editor);
             handleLanguageChange(lang);
             setCurrentView('editor');
         }
-    }, [editor, handleSaveDraft, setCurrentView, handleLanguageChange, captureEditorSnapshot]);
+    }, [
+        editor,
+        handleSaveDraft,
+        setCurrentView,
+        handleLanguageChange,
+        captureEditorSnapshot,
+        clearEditorSnapshotTimer,
+        clearDraftPersistTimer,
+    ]);
 
     const handleLoadArticle = useCallback(async (titleStr: string, article: ArticleActivity | RemoteArticleActivity) => {
         if (editor && article) {
