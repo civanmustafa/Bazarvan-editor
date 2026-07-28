@@ -695,8 +695,8 @@ const InternalLinkingPanel: React.FC = () => {
 
   if (!activeArticleId) {
     return (
-      <div dir="rtl" className="space-y-[0.1rem] p-[0.1rem] text-right">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-[0.1rem] text-sm leading-7 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+      <div dir="rtl" className="space-y-[0.25rem] p-[0.25rem] text-right">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-[0.25rem] text-sm leading-7 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
           <div className="mb-2 flex items-center gap-2 font-black">
             <Link2 size={18} />
             الربط الداخلي
@@ -708,8 +708,8 @@ const InternalLinkingPanel: React.FC = () => {
   }
 
   return (
-    <div dir="rtl" className="space-y-[0.1rem] p-[0.075rem] text-right">
-      <div className="rounded-xl border border-[#d4af37]/35 bg-[#d4af37]/5 p-[0.075rem]">
+    <div dir="rtl" className="space-y-[0.25rem] p-[0.1875rem] text-right">
+      <div className="rounded-xl border border-[#d4af37]/35 bg-[#d4af37]/5 p-[0.1875rem]">
         <div className="flex items-center gap-2 text-sm font-black text-gray-800 dark:text-gray-100">
           <Link2 size={18} className="text-[#d4af37]" />
           محرك الربط الداخلي

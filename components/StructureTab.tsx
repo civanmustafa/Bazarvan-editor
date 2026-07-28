@@ -1035,20 +1035,20 @@ const StructureTab: React.FC = () => {
       : '';
 
   return (
-    <div className="min-w-0 overflow-x-hidden p-[0.05rem] space-y-[0.075rem]">
+    <div className="min-w-0 overflow-x-hidden p-[0.125rem] space-y-[0.1875rem]">
        {/* Criteria tab stats:
            SpiderStats represents each criteria category: structure, headings, language quality,
            product page criteria, interaction/CTA, and conclusion. Each point moves outward as that category improves.
            Edit this display here; edit the underlying rule calculations in utils/analysis/rules/* and useContentAnalysis.ts. */}
-       <div className="px-[0.025rem] py-[0.025rem]">
-         <div className="mb-[0.05rem] grid grid-cols-2 gap-[0.0375rem]">
+       <div className="px-[0.0625rem] py-[0.0625rem]">
+         <div className="mb-[0.125rem] grid grid-cols-2 gap-[0.09375rem]">
            <MiniStat icon={<AlertCircleIcon size={14} />} value={stats.violatingCriteriaCount} title={criteriaMiniStats.violatingCriteria} tone={stats.violatingCriteriaCount > 0 ? 'red' : 'gold'} />
            <MiniStat icon={<Hash size={14} />} value={stats.totalErrorsCount} title={criteriaMiniStats.violations} tone={stats.totalErrorsCount > 0 ? 'red' : 'gold'} />
          </div>
          <SpiderStats metrics={criteriaSpiderMetrics} compact />
        </div>
-       <div className="px-[0.025rem]">
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(112px,0.46fr)] gap-[0.05rem]">
+       <div className="px-[0.0625rem]">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(112px,0.46fr)] gap-[0.125rem]">
               <button
                   onClick={() => setIsFixModalOpen(true)}
                   disabled={fixAllProgress.running || fixableViolationsCount === 0}
@@ -1135,7 +1135,7 @@ const StructureTab: React.FC = () => {
        </div>
 
       {viewMode === 'grid' ? (
-        <div className="space-y-[0.1rem] px-0">
+        <div className="space-y-[0.25rem] px-0">
           {analysisGroups.map((group) => {
             const validItems = group.items.filter(Boolean);
             if (validItems.length === 0) return null;
@@ -1163,13 +1163,13 @@ const StructureTab: React.FC = () => {
           })}
         </div>
       ) : (
-        <div className="space-y-[0.075rem] px-0">
+        <div className="space-y-[0.1875rem] px-0">
           {analysisGroups.map((group) => {
             const validItems = group.items.filter(Boolean);
             if (validItems.length === 0) return null;
 
             return (
-                <div key={group.name} className="bg-white dark:bg-[#2A2A2A] p-[0.0625rem] rounded-xl border border-gray-200 dark:border-[#3C3C3C] shadow-sm">
+                <div key={group.name} className="bg-white dark:bg-[#2A2A2A] p-[0.15625rem] rounded-xl border border-gray-200 dark:border-[#3C3C3C] shadow-sm">
                   <h3 className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500 mb-2">
                     {group.icon}
                     <span>{group.name}</span>

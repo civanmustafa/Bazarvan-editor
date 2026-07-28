@@ -125,17 +125,17 @@ const ModernProgressBar: React.FC<{ analysis: KeywordStats, isCompact?: boolean,
 
 const ModernSection: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode; onClick?: () => void; actions?: React.ReactNode; }> = ({ icon, title, children, onClick, actions }) => (
     <div 
-        className={`bg-white dark:bg-[#2A2A2A] rounded-xl shadow-sm border border-gray-300 dark:border-[#3C3C3C] p-[0.05rem] transition-all duration-200 ${onClick ? 'cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20' : ''}`}
+        className={`bg-white dark:bg-[#2A2A2A] rounded-xl shadow-sm border border-gray-300 dark:border-[#3C3C3C] p-[0.125rem] transition-all duration-200 ${onClick ? 'cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20' : ''}`}
         onClick={onClick}
     >
-        <div className="mb-[0.05rem] flex items-center justify-between gap-[0.05rem]">
-            <h3 className="flex min-w-0 items-center gap-[0.05rem] text-sm font-bold text-[#333333] dark:text-[#C7C7C7]">
+        <div className="mb-[0.125rem] flex items-center justify-between gap-[0.125rem]">
+            <h3 className="flex min-w-0 items-center gap-[0.125rem] text-sm font-bold text-[#333333] dark:text-[#C7C7C7]">
                 {icon}
                 <span className="truncate">{title}</span>
             </h3>
             {actions}
         </div>
-        <div className="space-y-[0.05rem]" onClick={onClick ? e => e.stopPropagation() : undefined}>
+        <div className="space-y-[0.125rem]" onClick={onClick ? e => e.stopPropagation() : undefined}>
             {children}
         </div>
     </div>
@@ -167,17 +167,17 @@ const AdvancedKeywordCard: React.FC<{
 
   return (
     <div 
-      className={`relative bg-white dark:bg-[#2A2A2A] rounded-xl p-[0.05rem] space-y-[0.025rem] transition-all duration-300 border border-gray-300 dark:border-[#3C3C3C] ${onClick ? 'cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20' : ''}`}
+      className={`relative bg-white dark:bg-[#2A2A2A] rounded-xl p-[0.125rem] space-y-[0.0625rem] transition-all duration-300 border border-gray-300 dark:border-[#3C3C3C] ${onClick ? 'cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20' : ''}`}
       onClick={onClick}
     >
-      <div className="flex justify-between items-center gap-[0.075rem]">
+      <div className="flex justify-between items-center gap-[0.1875rem]">
         {/* Main Content */}
-        <div className="flex-grow space-y-[0.025rem]">
-            <div className="flex items-center gap-[0.05rem]">
+        <div className="flex-grow space-y-[0.0625rem]">
+            <div className="flex items-center gap-[0.125rem]">
                 <span className="text-[#d4af37]">{icon}</span>
                 <h4 className="text-lg font-bold text-[#333333] dark:text-[#C7C7C7]">{title}</h4>
             </div>
-             <div className="text-sm text-gray-500 dark:text-gray-400 pt-[0.05rem] space-y-[0.025rem]">
+             <div className="text-sm text-gray-500 dark:text-gray-400 pt-[0.125rem] space-y-[0.0625rem]">
                 <div className={`font-semibold text-xs ${textColor}`}>
                     <span>{t.current}: </span>
                     <span>{analysis.count} / {(analysis.percentage * 100).toFixed(1)}%</span>
@@ -190,7 +190,7 @@ const AdvancedKeywordCard: React.FC<{
         </div>
         
         {/* Percentage and Actions */}
-        <div className="flex flex-col items-center flex-shrink-0 gap-[0.025rem] pt-[0.05rem]">
+        <div className="flex flex-col items-center flex-shrink-0 gap-[0.0625rem] pt-[0.125rem]">
             <RadialProgress progress={percentage} status={analysis.status}>
                 <span className={`font-bold ${textColor} flex items-baseline`}>
                     <span className="text-xl">{count}</span>
@@ -325,7 +325,7 @@ const MiniStat: React.FC<{ icon: React.ReactNode; value: string | number; title:
 
     return (
         <div
-            className={`flex min-w-0 items-center justify-center gap-[0.0375rem] rounded-lg border px-[0.05rem] py-[0.0375rem] ${toneClass}`}
+            className={`flex min-w-0 items-center justify-center gap-[0.09375rem] rounded-lg border px-[0.125rem] py-[0.09375rem] ${toneClass}`}
             title={title}
             aria-label={title}
         >
@@ -996,7 +996,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     );
     if (keywordViewMode === 'modern') {
         return (
-          <div className="p-[0.05rem] space-y-[0.075rem]">
+          <div className="p-[0.125rem] space-y-[0.1875rem]">
             {autoDistributeSection}
             <ModernSection 
                 icon={<KeyRound size={20} />} 
@@ -1159,7 +1159,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     }
 
     return (
-        <div className="p-[0.025rem] space-y-[0.075rem]">
+        <div className="p-[0.0625rem] space-y-[0.1875rem]">
             {autoDistributeSection}
             <AdvancedKeywordCard
                 title={tLk.primaryKeyword}
@@ -1311,10 +1311,10 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </AdvancedKeywordCard>
             
              <div 
-               className="bg-white dark:bg-[#2A2A2A] rounded-xl p-[0.05rem] space-y-[0.05rem] transition-all duration-300 border border-gray-300 dark:border-[#3C3C3C] cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
+               className="bg-white dark:bg-[#2A2A2A] rounded-xl p-[0.125rem] space-y-[0.125rem] transition-all duration-300 border border-gray-300 dark:border-[#3C3C3C] cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
                onClick={() => handleHighlightToggle(keywords.company, 'company')}
              >
-                <div className="flex items-center gap-[0.05rem]">
+                <div className="flex items-center gap-[0.125rem]">
                     <span className="text-[#d4af37]"><Users size={20} /></span>
                     <h4 className="text-sm font-bold text-[#333333] dark:text-[#C7C7C7]">{tLk.companyName}</h4>
                 </div>
@@ -1339,7 +1339,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         onCreated={handleQuickClientCreated}
       />
       <aside className={`${isHidden ? 'hidden' : 'flex'} relative z-30 h-full min-w-0 flex-none flex-col overflow-hidden rounded-lg bg-[#F2F3F5] shadow-lg transition-[width,flex-basis] duration-150 dark:bg-[#1F1F1F] ${collapsed ? 'w-12 basis-12' : 'w-auto basis-[20.57%]'}`}>
-        <div className={`${collapsed ? 'flex' : 'hidden'} h-full flex-col items-center gap-[0.075rem] px-[0.0375rem] py-[0.05rem]`}>
+        <div className={`${collapsed ? 'flex' : 'hidden'} h-full flex-col items-center gap-[0.1875rem] px-[0.09375rem] py-[0.125rem]`}>
           <button
             type="button"
             onClick={onToggleCollapsed}
@@ -1366,8 +1366,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         </div>
 
         <div className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col`}>
-          <div className="relative z-40 flex items-stretch gap-[0.025rem] border-b border-gray-200 p-[0.0375rem] dark:border-[#3C3C3C]">
-            <div role="tablist" aria-label={uiLanguage === 'ar' ? 'الكلمات والتكرارات والمعايير' : 'Keywords, duplicates, and criteria'} className="flex min-w-0 flex-1 gap-[0.025rem] rounded-lg bg-gray-200/70 p-[0.025rem] dark:bg-black/20">
+          <div className="relative z-40 flex items-stretch gap-[0.0625rem] border-b border-gray-200 p-[0.09375rem] dark:border-[#3C3C3C]">
+            <div role="tablist" aria-label={uiLanguage === 'ar' ? 'الكلمات والتكرارات والمعايير' : 'Keywords, duplicates, and criteria'} className="flex min-w-0 flex-1 gap-[0.0625rem] rounded-lg bg-gray-200/70 p-[0.0625rem] dark:bg-black/20">
               <button
                 type="button"
                 role="tab"
@@ -1437,7 +1437,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             className="flex min-h-0 flex-1 flex-col"
           >
             {activeTab !== 'criteria' && (
-              <div className="flex-shrink-0 border-b border-gray-200 bg-[#F2F3F5] p-[0.075rem] dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+              <div className="flex-shrink-0 border-b border-gray-200 bg-[#F2F3F5] p-[0.1875rem] dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
                 {activeTab === 'keywords' ? (
                     // Compact keyword/goal tab network: primary, synonyms, company, and LSI.
                     <SpiderStats metrics={keywordDetailSpiderMetrics} compact />
@@ -1457,12 +1457,12 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             <div className="flex-grow overflow-y-auto custom-scrollbar">
                 {activeTab === 'keywords' && renderKeywordsTab()}
                 {activeTab === 'duplicates' && (
-                    <React.Suspense fallback={<div className="p-[0.1rem] text-center text-xs font-bold text-gray-400">جار تحميل التكرارات...</div>}>
+                    <React.Suspense fallback={<div className="p-[0.25rem] text-center text-xs font-bold text-gray-400">جار تحميل التكرارات...</div>}>
                       <DuplicatesTab />
                     </React.Suspense>
                 )}
                 {activeTab === 'criteria' && (
-                    <React.Suspense fallback={<div className="p-[0.1rem] text-center text-xs font-bold text-gray-400">{uiLanguage === 'ar' ? 'جار تحميل المعايير...' : 'Loading criteria...'}</div>}>
+                    <React.Suspense fallback={<div className="p-[0.25rem] text-center text-xs font-bold text-gray-400">{uiLanguage === 'ar' ? 'جار تحميل المعايير...' : 'Loading criteria...'}</div>}>
                       <StructureTab />
                     </React.Suspense>
                 )}

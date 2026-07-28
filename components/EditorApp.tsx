@@ -125,7 +125,7 @@ const EditorView: React.FC = () => {
 
   return (
     <div className={`h-screen overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
-      <main className="relative flex h-full gap-[0.05rem] bg-[#FAFAFA] p-[0.05rem] dark:bg-[#181818]">
+      <main className="relative flex h-full gap-[0.125rem] bg-[#FAFAFA] p-[0.125rem] dark:bg-[#181818]">
         <LeftSidebar
           collapsed={workspacePreferences.keywordsPanelCollapsed}
           isHidden={isFocusMode}
