@@ -888,6 +888,9 @@ const StructureTab: React.FC = () => {
         };
     }, [modalContent, isFixModalOpen]);
 
+    const usesCallToActionSection = isCallToActionPageContext(goalContext);
+    const usesConclusionSection = isConclusionPageContext(goalContext);
+
     const analysisGroups = [
       {
           name: tSt.basicStructure,
@@ -953,14 +956,14 @@ const StructureTab: React.FC = () => {
           name: tSt.interactionCta,
           icon: <MousePointerClick size={16} className="text-[#d4af37]" />,
           items: [
-              analysis.ctaWords,
+              usesCallToActionSection ? analysis.ctaWords : undefined,
               analysis.interactiveLanguage,
               analysis.warningWords,
               analysis.differentTransitionalWords,
               analysis.slowWords,
           ],
       },
-      ...(isCallToActionPageContext(goalContext) ? [{
+      ...(usesCallToActionSection ? [{
           name: tSt.callToAction,
           icon: <MousePointerClick size={16} className="text-[#d4af37]" />,
           items: [
@@ -971,7 +974,7 @@ const StructureTab: React.FC = () => {
               analysis.callToActionFinalSentence,
           ],
       }] : []),
-      ...(isConclusionPageContext(goalContext) ? [{
+      ...(usesConclusionSection ? [{
           name: tSt.conclusion,
           icon: <Flag size={16} className="text-[#d4af37]" />,
           items: [

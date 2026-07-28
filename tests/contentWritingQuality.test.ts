@@ -64,6 +64,7 @@ test('deterministic quality evaluation returns a versioned blocking report', asy
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionParagraphsSentences'));
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionBulletList'));
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'callToActionFinalSentence'));
+  assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'ctaWords'));
   assert.ok(!evaluation.report.criteria.some((criterion: any) => criterion.id === 'lastH2IsConclusion'));
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'keyword.primary'));
 });
@@ -97,6 +98,7 @@ test('service quality analysis requires CTA section and hides conclusion criteri
   assert.equal(criterion('callToActionParagraphsSentences')?.status, 'pass');
   assert.equal(criterion('callToActionBulletList')?.status, 'pass');
   assert.equal(criterion('callToActionFinalSentence')?.status, 'pass');
+  assert.equal(criterion('ctaWords')?.status, 'pass');
   assert.equal(criterion('lastH2IsConclusion'), undefined);
   assert.equal(criterion('paragraphLength')?.status, 'pass');
 });
@@ -175,6 +177,7 @@ test('quality analysis detects the second introduction paragraph and Arabic numb
   assert.equal(criterion('callToActionParagraphsSentences'), undefined);
   assert.equal(criterion('callToActionBulletList'), undefined);
   assert.equal(criterion('callToActionFinalSentence'), undefined);
+  assert.equal(criterion('ctaWords'), undefined);
 });
 
 test('quality analysis treats consecutive visible Markdown lines as separate introduction paragraphs', async () => {

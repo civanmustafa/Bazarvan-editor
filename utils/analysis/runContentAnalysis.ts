@@ -347,6 +347,7 @@ export const runContentAnalysis = ({
     ? (() => {
         const conclusionChecks = checkConclusion(analysisContext);
         const callToActionChecks = checkCallToActionSection(analysisContext);
+        const ctaWords = checkCtaWords(analysisContext);
         const usesCallToActionSection = isCallToActionPageContext(goalContext);
         const inactiveCheck = (result: CheckResult): CheckResult => ({
           ...result,
@@ -388,7 +389,7 @@ export const runContentAnalysis = ({
           differentTransitionalWords: checkTransitionalWords(analysisContext),
           immediateDuplicateWords: checkImmediateDuplicateWords(analysisContext),
           automaticLists: checkAutomaticLists(analysisContext),
-          ctaWords: checkCtaWords(analysisContext),
+          ctaWords: usesCallToActionSection ? ctaWords : inactiveCheck(ctaWords),
           interactiveLanguage: checkInteractiveLanguage(analysisContext),
           arabicOnly: checkArabicOnly(analysisContext),
           lastH2IsConclusion: usesCallToActionSection ? inactiveCheck(conclusionChecks.lastH2IsConclusion) : conclusionChecks.lastH2IsConclusion,
