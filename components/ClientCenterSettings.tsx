@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  CircleHelp,
   ExternalLink,
   Globe2,
   Link2,
@@ -1078,7 +1079,9 @@ const ClientCenterSettings: React.FC = () => {
             تتبّع روابط nofollow أيضًا
           </label>
           <div className="mt-3 flex flex-wrap gap-3 text-[11px] font-bold text-gray-500">
-            <span>الروابط الداخلية النشطة: {siteCrawlState.activeInternalLinkCount.toLocaleString('ar')}</span>
+            <span className="text-gray-700 dark:text-gray-200">
+              الروابط الداخلية النشطة: {siteCrawlState.activeInternalLinkCount.toLocaleString('ar')}
+            </span>
             <span>المزوّد: {crawlProviderLabels[activeSiteCrawl?.provider || siteCrawlProvider]}</span>
             {activeSiteCrawl && (
               <>
@@ -1088,6 +1091,14 @@ const ClientCenterSettings: React.FC = () => {
                 <span>الفاشلة: {activeSiteCrawl.pagesFailed.toLocaleString('ar')}</span>
               </>
             )}
+          </div>
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-semibold leading-5 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
+            <CircleHelp className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
+            <p>
+              يمثّل هذا الرقم علاقات الربط الموجودة في آخر زحف ناجح لكل صفحة مصدر:
+              صفحة المصدر + الرابط الهدف + نص الرابط. يُحسب المزيج المتطابق مرة واحدة حتى لو
+              تكرر داخل الصفحة، ولا يمثّل عدد صفحات الموقع أو اقتراحات الربط الداخلي.
+            </p>
           </div>
         </form>
       )}

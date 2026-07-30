@@ -62,6 +62,9 @@ test('Client Center phase 2 UI manages scoped clients without excluded fields', 
     assert.match(component, new RegExp(operation));
   }
   assert.match(component, /label="الدومين"/);
+  assert.match(component, /يمثّل هذا الرقم علاقات الربط الموجودة في آخر زحف ناجح لكل صفحة مصدر/);
+  assert.match(component, /صفحة المصدر \+ الرابط الهدف \+ نص الرابط/);
+  assert.match(component, /لا يمثّل عدد صفحات الموقع أو اقتراحات الربط الداخلي/);
   assert.doesNotMatch(component, /دومينات العميل/);
   assert.doesNotMatch(component, /domainPrimary|domainSubdomains|handleAddDomain/);
   assert.match(settings, /<ClientCenterSettings \/>/);
