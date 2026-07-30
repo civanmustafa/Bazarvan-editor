@@ -226,9 +226,10 @@ test('local site crawler extracts approved links and normalizes tracking URLs', 
 });
 
 test('local site crawl migration and API are bounded and service-role controlled', async () => {
-  const [migration, sourceMigration, api, worker, registry] = await Promise.all([
+  const [migration, sourceMigration, pgcryptoFix, api, worker, registry] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260728060000_local_client_site_crawler.sql'),
     readWorkspaceFile('supabase/migrations/20260728050000_client_page_crawl_source.sql'),
+    readWorkspaceFile('supabase/migrations/20260731010000_client_site_crawl_pgcrypto_fix.sql'),
     readWorkspaceFile('api/clientSiteCrawler.ts'),
     readWorkspaceFile('server/clientPageCrawlWorker.ts'),
     readWorkspaceFile('server/apiRouteRegistry.ts'),
@@ -241,6 +242,10 @@ test('local site crawl migration and API are bounded and service-role controlled
   assert.match(migration, /max_depth between 0 and 20/);
   assert.match(migration, /client_site_crawl_runs_one_active_idx/);
   assert.match(migration, /process_completed_client_page_links/);
+  assert.match(migration, /set search_path = public, extensions, pg_temp/);
+  assert.match(pgcryptoFix, /alter function public\.process_completed_client_page_links\(\)/);
+  assert.match(pgcryptoFix, /set search_path = public, extensions, pg_temp/);
+  assert.match(pgcryptoFix, /where extension\.extname = 'pgcrypto'/);
   assert.match(migration, /grant execute on function public\.start_client_site_crawl[^;]+to service_role/);
   assert.match(migration, /revoke all on function public\.start_client_site_crawl[^;]+authenticated/);
   assert.match(api, /authenticateApiRequest/);
@@ -249,6 +254,7 @@ test('local site crawl migration and API are bounded and service-role controlled
   assert.match(worker, /internalLinks: result\.internalLinks/);
   assert.match(registry, /client-site-crawl/);
   assertBalancedSqlParentheses(migration);
+  assertBalancedSqlParentheses(pgcryptoFix);
 });
 
 test('hybrid crawler keeps provider keys server-only and records the requested strategy', async () => {

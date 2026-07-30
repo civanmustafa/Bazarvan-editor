@@ -363,7 +363,7 @@ create or replace function public.process_completed_client_page_links()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions, pg_temp
 as $$
 declare
   v_links jsonb;
