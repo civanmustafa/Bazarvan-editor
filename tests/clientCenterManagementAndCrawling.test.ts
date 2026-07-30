@@ -65,6 +65,9 @@ test('Client Center phase 2 UI manages scoped clients without excluded fields', 
   assert.match(component, /يمثّل هذا الرقم علاقات الربط الموجودة في آخر زحف ناجح لكل صفحة مصدر/);
   assert.match(component, /صفحة المصدر \+ الرابط الهدف \+ نص الرابط/);
   assert.match(component, /لا يمثّل عدد صفحات الموقع أو اقتراحات الربط الداخلي/);
+  assert.match(component, /تاريخ الزحف: \{formatDate\(page\.lastSuccessAt\)\}/);
+  assert.match(settings, /يبدأ بالمزود الافتراضي وموديله اللذين يحددهما المسؤول/);
+  assert.match(settings, /أول موديل Gemini في توليد عبارات الربط الذكي/);
   assert.doesNotMatch(component, /دومينات العميل/);
   assert.doesNotMatch(component, /domainPrimary|domainSubdomains|handleAddDomain/);
   assert.match(settings, /<ClientCenterSettings \/>/);

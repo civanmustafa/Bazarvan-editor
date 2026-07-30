@@ -287,6 +287,12 @@ const PageDetails: React.FC<{
       <div className="rounded-md border border-[#d4af37]/30 bg-[#d4af37]/5 p-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-black text-[#9b7d20]">ملف عبارات الربط الذكي</span>
+          <span
+            className="font-bold text-gray-400"
+            title="تاريخ آخر زحف ناجح وفّر بيانات الصفحة المستخدمة في ملف العبارات"
+          >
+            تاريخ الزحف: {formatDate(page.lastSuccessAt)}
+          </span>
           {aiLinkProfile ? (
             <>
               <span className={`rounded-full px-2 py-1 text-[10px] font-black ${statusClass(

@@ -458,7 +458,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           />
           <ToggleField
             label="توليد عبارات الربط الذكي أثناء الزحف"
-            description="يحلل مقتطفًا منظفًا من محتوى كل صفحة بعد الزحف، ويخزن العبارات الأساسية والبديلة والسلبية فقط دون تخزين النص الكامل."
+            description="يحلل مقتطفًا منظفًا من محتوى كل صفحة بعد الزحف، ويبدأ بالمزود الافتراضي وموديله اللذين يحددهما المسؤول أدناه، ثم يطبق سياسة البدائل المفعلة. لا يُخزن النص الكامل."
             checked={settings.ai.clientLinkAiEnrichmentEnabled !== false}
             onChange={value => updateSetting('ai', 'clientLinkAiEnrichmentEnabled', value)}
           />
@@ -478,7 +478,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </FieldLabel>
           <FieldLabel
             label="موديل Gemini المجاني الافتراضي"
-            description="القائمة مقتصرة على أقوى أربعة موديلات مجانية. يبدأ الافتراضي بالأقوى، وتُجرّب جميع المفاتيح عليه قبل الانتقال إلى الموديل التالي عند تفعيل التبديل."
+            description="يختاره المسؤول ليكون أول موديل Gemini في توليد عبارات الربط الذكي وبقية الطلبات. تُجرّب البدائل فقط عند تفعيل التبديل بين موديلات Gemini المجانية."
           >
             <SelectInput
               value={normalizeGeminiFreeModel(String(settings.ai.defaultGeminiModel || ''), geminiFreeModelValues)}
