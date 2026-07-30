@@ -11,6 +11,10 @@ import {
 } from '../utils/internalLinkingEngine.ts';
 import { buildClientPageSemanticProfile } from '../utils/clientSemanticIndex.ts';
 import {
+  parseGeneratedClientLinkPhraseProfile,
+  type ClientPageAiLinkProfile,
+} from '../utils/clientLinkPhraseProfile.ts';
+import {
   calculateInternalLinkSuggestionBudget,
   normalizeInternalLinkQualityPolicy,
 } from '../utils/internalLinkQualityPolicy.ts';
@@ -56,6 +60,34 @@ const readyPage = (overrides: Partial<InternalLinkTargetPage> = {}): InternalLin
   ...overrides,
 });
 
+const aiLinkProfile = (
+  overrides: Partial<ClientPageAiLinkProfile> = {},
+): ClientPageAiLinkProfile => ({
+  pageId: '11111111-1111-4111-8111-111111111111',
+  clientId: '22222222-2222-4222-8222-222222222222',
+  profileVersion: 1,
+  sourceSignature: 'page_signature_1',
+  generationStatus: 'ready',
+  reviewStatus: 'approved',
+  primaryPhrase: 'إدارة السمعة الرقمية',
+  alternativePhrases: ['سمعة العلامة التجارية'],
+  longTailPhrases: ['بناء سمعة رقمية موثوقة للشركات'],
+  relatedEntities: ['العلامة التجارية'],
+  negativePhrases: ['وظائف إدارة السمعة الرقمية'],
+  pageIntent: 'commercial',
+  confidence: 94,
+  provider: 'openai',
+  model: 'gpt-test',
+  errorCode: '',
+  errorMessage: '',
+  generatedAt: '2026-07-30T00:00:00.000Z',
+  reviewedBy: null,
+  reviewedAt: null,
+  createdAt: '2026-07-30T00:00:00.000Z',
+  updatedAt: '2026-07-30T00:00:00.000Z',
+  ...overrides,
+});
+
 test('deterministic engine proposes a real body anchor with transparent evidence', () => {
   const input = {
     articleTitle: 'دليل التحول الرقمي',
@@ -74,7 +106,7 @@ test('deterministic engine proposes a real body anchor with transparent evidence
   assert.ok(first[0].matchedTerms.length >= 2);
   assert.ok(first[0].reasons.some(reason => reason.includes('عنوان')));
   assert.ok(first[0].bm25Score > 0);
-  assert.equal(first[0].algorithmVersion, 'bm25-quality-v3');
+  assert.equal(first[0].algorithmVersion, 'bm25-ai-phrases-v4');
   const anchorWordCount = first[0].anchorText.match(/[A-Za-z0-9\u0600-\u06FF]+/g)?.length || 0;
   assert.ok(anchorWordCount >= 2 && anchorWordCount <= 5);
   assert.equal(first[0].paragraphNumber, 1);
@@ -120,6 +152,70 @@ test('semantic index expands client synonyms and enforces article-page language 
     articleLanguage: 'en',
     pages: [target],
   }), []);
+});
+
+test('approved AI phrases expand matching while negative contexts and rejection suppress them', () => {
+  const target = readyPage({
+    pageTitle: 'استشارات استراتيجية متخصصة',
+    metaDescription: '',
+    h1: 'خبراء الاستشارات',
+    h2: [],
+    h3: [],
+    extractedTerms: [],
+    extractedPhrases: [],
+    aiLinkProfile: aiLinkProfile(),
+  });
+  const positiveText = 'تساعد إدارة السمعة الرقمية الشركات على بناء ثقة مستدامة مع جمهورها.';
+  const positive = generateInternalLinkSuggestions({
+    articleTitle: 'حماية العلامة التجارية',
+    articleText: positiveText,
+    pages: [target],
+  });
+  assert.equal(positive.length, 1);
+  assert.ok(positiveText.includes(positive[0].anchorText));
+  assert.ok(positive[0].reasons.includes('تطابق مع العبارة الأساسية المعتمدة للصفحة'));
+
+  assert.deepEqual(generateInternalLinkSuggestions({
+    articleTitle: 'فرص العمل',
+    articleText: 'ننشر وظائف إدارة السمعة الرقمية للشركات والباحثين عن فرص مهنية.',
+    pages: [target],
+  }), []);
+
+  assert.deepEqual(generateInternalLinkSuggestions({
+    articleTitle: 'حماية العلامة التجارية',
+    articleText: positiveText,
+    pages: [{
+      ...target,
+      aiLinkProfile: aiLinkProfile({ reviewStatus: 'rejected' }),
+    }],
+  }), []);
+});
+
+test('AI phrase parser sanitizes provider JSON and applies strict limits', () => {
+  const parsed = parseGeneratedClientLinkPhraseProfile(`\`\`\`json
+  {
+    "primaryPhrase": "إدارة السمعة الرقمية",
+    "alternativePhrases": [
+      "إدارة السمعة الرقمية",
+      "سمعة العلامة التجارية",
+      "اضغط هنا",
+      "https://attacker.example"
+    ],
+    "longTailPhrases": ["بناء سمعة رقمية قوية للشركات"],
+    "relatedEntities": ["العلامة التجارية"],
+    "negativePhrases": ["وظائف إدارة السمعة الرقمية", "سمعة العلامة التجارية"],
+    "pageIntent": "commercial",
+    "confidence": 120
+  }
+  \`\`\``, 'عبارة احتياطية');
+  assert.ok(parsed);
+  assert.equal(parsed.primaryPhrase, 'إدارة السمعة الرقمية');
+  assert.deepEqual(parsed.alternativePhrases, ['سمعة العلامة التجارية']);
+  assert.deepEqual(parsed.longTailPhrases, ['بناء سمعة رقمية قوية للشركات']);
+  assert.deepEqual(parsed.negativePhrases, ['وظائف إدارة السمعة الرقمية']);
+  assert.equal(parsed.pageIntent, 'commercial');
+  assert.equal(parsed.confidence, 100);
+  assert.equal(parseGeneratedClientLinkPhraseProfile('not json', 'عبارة احتياطية'), null);
 });
 
 test('engine excludes duplicate targets, unsafe page states, and dismissed suggestions', () => {
@@ -272,6 +368,10 @@ test('inventory signature is deterministic and changes with the indexed website 
     first,
     createInternalLinkInventorySignature([page], 'https://example.com/current-article'),
   );
+  assert.notEqual(first, createInternalLinkInventorySignature([{
+    ...page,
+    aiLinkProfile: aiLinkProfile(),
+  }]));
   assert.match(first, /^inventory_[a-z0-9]+_[a-z0-9]+$/);
 });
 

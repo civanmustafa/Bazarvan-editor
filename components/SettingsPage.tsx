@@ -456,6 +456,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             checked={Boolean(settings.ai.openAiEnabled)}
             onChange={value => updateSetting('ai', 'openAiEnabled', value)}
           />
+          <ToggleField
+            label="توليد عبارات الربط الذكي أثناء الزحف"
+            description="يحلل مقتطفًا منظفًا من محتوى كل صفحة بعد الزحف، ويخزن العبارات الأساسية والبديلة والسلبية فقط دون تخزين النص الكامل."
+            checked={settings.ai.clientLinkAiEnrichmentEnabled !== false}
+            onChange={value => updateSetting('ai', 'clientLinkAiEnrichmentEnabled', value)}
+          />
           <FieldLabel
             label="المزود الافتراضي"
             description="هذا هو مزود البداية فقط؛ قد يتغير المزود أثناء التنفيذ إذا حدث فشل قابل للرجوع."

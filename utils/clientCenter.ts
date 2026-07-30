@@ -9,6 +9,12 @@ import {
   normalizeInternalLinkQualityPolicy,
   type InternalLinkQualityPolicyValues,
 } from './internalLinkQualityPolicy';
+import type {
+  ClientLinkPageIntent,
+  ClientLinkProfileGenerationStatus,
+  ClientLinkProfileReviewStatus,
+  ClientPageAiLinkProfile,
+} from './clientLinkPhraseProfile';
 
 export type ClientAssignmentAccess = 'viewer' | 'editor';
 export type ClientPageSource = 'manual' | 'csv' | 'sitemap' | 'crawl';
@@ -140,6 +146,7 @@ export type ClientCenterDetails = {
   jobs: ClientCenterCrawlJob[];
   dictionaries: ClientLinkDictionaryEntry[];
   semanticProfiles: ClientPageSemanticProfile[];
+  aiLinkProfiles: ClientPageAiLinkProfile[];
   qualityPolicies: InternalLinkQualityPolicyRecord[];
 };
 
@@ -272,6 +279,31 @@ const SEMANTIC_PROFILE_COLUMNS = [
   'completeness_score',
   'completeness_details',
   'indexed_at',
+].join(',');
+
+const AI_LINK_PROFILE_COLUMNS = [
+  'page_id',
+  'client_id',
+  'profile_version',
+  'source_signature',
+  'generation_status',
+  'review_status',
+  'primary_phrase',
+  'alternative_phrases',
+  'long_tail_phrases',
+  'related_entities',
+  'negative_phrases',
+  'page_intent',
+  'confidence',
+  'provider',
+  'model',
+  'error_code',
+  'error_message',
+  'generated_at',
+  'reviewed_by',
+  'reviewed_at',
+  'created_at',
+  'updated_at',
 ].join(',');
 
 const QUALITY_POLICY_COLUMNS = [
@@ -490,6 +522,50 @@ export const mapClientSemanticProfile = (row: any): ClientPageSemanticProfile =>
   indexedAt: text(row.indexed_at),
 });
 
+const mapAiGenerationStatus = (value: unknown): ClientLinkProfileGenerationStatus => (
+  value === 'ready' || value === 'skipped' || value === 'failed' ? value : 'pending'
+);
+
+const mapAiReviewStatus = (value: unknown): ClientLinkProfileReviewStatus => (
+  value === 'approved' || value === 'rejected' ? value : 'pending'
+);
+
+const mapAiPageIntent = (value: unknown): ClientLinkPageIntent | '' => (
+  value === 'informational'
+  || value === 'commercial'
+  || value === 'transactional'
+  || value === 'navigational'
+  || value === 'local'
+  || value === 'mixed'
+    ? value
+    : ''
+);
+
+export const mapClientPageAiLinkProfile = (row: any): ClientPageAiLinkProfile => ({
+  pageId: text(row.page_id),
+  clientId: text(row.client_id),
+  profileVersion: Math.max(1, Number(row.profile_version) || 1),
+  sourceSignature: text(row.source_signature),
+  generationStatus: mapAiGenerationStatus(row.generation_status),
+  reviewStatus: mapAiReviewStatus(row.review_status),
+  primaryPhrase: text(row.primary_phrase),
+  alternativePhrases: stringArray(row.alternative_phrases),
+  longTailPhrases: stringArray(row.long_tail_phrases),
+  relatedEntities: stringArray(row.related_entities),
+  negativePhrases: stringArray(row.negative_phrases),
+  pageIntent: mapAiPageIntent(row.page_intent),
+  confidence: Math.max(0, Math.min(100, Number(row.confidence) || 0)),
+  provider: text(row.provider),
+  model: text(row.model),
+  errorCode: text(row.error_code),
+  errorMessage: text(row.error_message),
+  generatedAt: text(row.generated_at) || null,
+  reviewedBy: text(row.reviewed_by) || null,
+  reviewedAt: text(row.reviewed_at) || null,
+  createdAt: text(row.created_at),
+  updatedAt: text(row.updated_at),
+});
+
 export const mapInternalLinkQualityPolicy = (row: any): InternalLinkQualityPolicyRecord => {
   const values = normalizeInternalLinkQualityPolicy({
     minimumScore: row.minimum_score,
@@ -540,6 +616,7 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
     jobsResult,
     dictionariesResult,
     semanticProfilesResult,
+    aiLinkProfilesResult,
     qualityPoliciesResult,
   ] = await Promise.all([
     supabase.from('client_domains').select(DOMAIN_COLUMNS).eq('client_id', clientId)
@@ -554,6 +631,8 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
       .order('dictionary_type', { ascending: true }).order('label', { ascending: true }),
     supabase.from('client_page_semantic_profiles').select(SEMANTIC_PROFILE_COLUMNS)
       .eq('client_id', clientId).order('indexed_at', { ascending: false }).limit(500),
+    supabase.from('client_page_ai_link_profiles').select(AI_LINK_PROFILE_COLUMNS)
+      .eq('client_id', clientId).order('updated_at', { ascending: false }).limit(500),
     supabase.from('internal_link_quality_policies').select(QUALITY_POLICY_COLUMNS)
       .or(`scope.eq.global,client_id.eq.${clientId}`)
       .order('scope', { ascending: true }),
@@ -565,6 +644,7 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
     jobsResult,
     dictionariesResult,
     semanticProfilesResult,
+    aiLinkProfilesResult,
     qualityPoliciesResult,
   ].forEach(result => throwIfError(result.error));
   return {
@@ -574,8 +654,23 @@ export const loadClientCenterDetails = async (clientId: string): Promise<ClientC
     jobs: (jobsResult.data || []).map(mapJob),
     dictionaries: (dictionariesResult.data || []).map(mapClientLinkDictionary),
     semanticProfiles: (semanticProfilesResult.data || []).map(mapClientSemanticProfile),
+    aiLinkProfiles: (aiLinkProfilesResult.data || []).map(mapClientPageAiLinkProfile),
     qualityPolicies: (qualityPoliciesResult.data || []).map(mapInternalLinkQualityPolicy),
   };
+};
+
+export const reviewClientPageAiLinkProfile = async (
+  pageId: string,
+  reviewStatus: ClientLinkProfileReviewStatus,
+): Promise<ClientPageAiLinkProfile> => {
+  const { data, error } = await getSupabaseClient()
+    .rpc('review_client_page_ai_link_profile', {
+      p_page_id: pageId,
+      p_review_status: reviewStatus,
+    })
+    .single();
+  throwIfError(error);
+  return mapClientPageAiLinkProfile(data);
 };
 
 const toClientPayload = (input: ClientCenterClientInput) => ({

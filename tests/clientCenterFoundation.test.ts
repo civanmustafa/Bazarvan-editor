@@ -156,6 +156,7 @@ test('Client Center readiness probes every required table and hides provider det
     internalLinkActions: true,
     linkDictionaries: true,
     semanticProfiles: true,
+    aiLinkProfiles: true,
     suggestionRuns: true,
     qualityPolicies: true,
     clientDraftCreation: true,
@@ -168,6 +169,7 @@ test('Client Center readiness probes every required table and hides provider det
     'client_internal_links',
     'client_link_dictionaries',
     'client_link_suggestion_runs',
+    'client_page_ai_link_profiles',
     'client_page_crawl_jobs',
     'client_page_semantic_profiles',
     'client_pages',
@@ -221,6 +223,7 @@ test('Client Center release gate is wired to build and readiness', async () => {
   assert.match(registry, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(registry, /20260724060000_internal_link_quality_policies\.sql/);
   assert.match(registry, /20260725010000_client_draft_creation\.sql/);
+  assert.match(registry, /20260730040000_client_page_ai_link_profiles\.sql/);
   assert.match(script, /CLIENT_CENTER_REQUIRED_MIGRATION/);
   assert.match(script, /CLIENT_CENTER_ACCEPTANCE_VERSION/);
   assert.match(script, /CLIENT_CENTER_ACCEPTANCE_CASES/);
@@ -234,6 +237,7 @@ test('Client Center release gate is wired to build and readiness', async () => {
   assert.match(guide, /20260724050000_editor_internal_link_suggestions\.sql/);
   assert.match(guide, /20260724060000_internal_link_quality_policies\.sql/);
   assert.match(guide, /20260725010000_client_draft_creation\.sql/);
+  assert.match(guide, /20260730040000_client_page_ai_link_profiles\.sql/);
   assert.match(guide, /المرحلة العاشرة/);
   assert.match(guide, /13 حالة قبول/);
   assert.match(packageJson.scripts?.postbuild || '', /check:client-center-release/);

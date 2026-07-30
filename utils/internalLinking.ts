@@ -1,5 +1,6 @@
 import {
   listClientCenterClients,
+  mapClientPageAiLinkProfile,
   mapClientLinkDictionary,
   mapClientSemanticProfile,
   mapInternalLinkQualityPolicy,
@@ -196,7 +197,13 @@ export const loadInternalLinkTargetPages = async (
   clientId: string,
 ): Promise<InternalLinkTargetPage[]> => {
   const supabase = getSupabaseClient();
-  const [pagesResult, dictionariesResult, profilesResult, domainsResult] = await Promise.all([
+  const [
+    pagesResult,
+    dictionariesResult,
+    profilesResult,
+    aiProfilesResult,
+    domainsResult,
+  ] = await Promise.all([
     supabase
       .from('client_pages')
       .select(PAGE_COLUMNS)
@@ -234,12 +241,41 @@ export const loadInternalLinkTargetPages = async (
       .eq('client_id', clientId)
       .limit(2000),
     supabase
+      .from('client_page_ai_link_profiles')
+      .select([
+        'page_id',
+        'client_id',
+        'profile_version',
+        'source_signature',
+        'generation_status',
+        'review_status',
+        'primary_phrase',
+        'alternative_phrases',
+        'long_tail_phrases',
+        'related_entities',
+        'negative_phrases',
+        'page_intent',
+        'confidence',
+        'provider',
+        'model',
+        'error_code',
+        'error_message',
+        'generated_at',
+        'reviewed_by',
+        'reviewed_at',
+        'created_at',
+        'updated_at',
+      ].join(','))
+      .eq('client_id', clientId)
+      .eq('generation_status', 'ready')
+      .limit(2000),
+    supabase
       .from('client_domains')
       .select('hostname,include_subdomains')
       .eq('client_id', clientId)
       .eq('is_active', true),
   ]);
-  [pagesResult, dictionariesResult, profilesResult, domainsResult]
+  [pagesResult, dictionariesResult, profilesResult, aiProfilesResult, domainsResult]
     .forEach(result => throwIfError(result.error));
 
   const dictionaries = (dictionariesResult.data || []).map(mapClientLinkDictionary);
@@ -257,11 +293,17 @@ export const loadInternalLinkTargetPages = async (
       .map(mapClientSemanticProfile)
       .map(profile => [profile.pageId, profile] as const),
   );
+  const aiLinkProfiles = new Map(
+    (aiProfilesResult.data || [])
+      .map(mapClientPageAiLinkProfile)
+      .map(profile => [profile.pageId, profile] as const),
+  );
   return (pagesResult.data || []).map(mapTargetPage).map(page => {
     const storedProfile = storedProfiles.get(page.id);
     return {
       ...page,
       allowedDomains,
+      aiLinkProfile: aiLinkProfiles.get(page.id),
       semanticProfile: isClientSemanticProfileCurrent(storedProfile, {
         ...page,
         clientId: page.clientId || clientId,
@@ -349,7 +391,7 @@ export const recordInternalLinkSuggestionRun = async (input: {
       page_count: Math.max(0, Math.min(1_000_000, input.pageCount)),
       suggestion_count: Math.max(0, Math.min(10_000, input.suggestions.length)),
       top_score: input.suggestions[0]?.score ?? null,
-      algorithm_version: input.suggestions[0]?.algorithmVersion || 'bm25-quality-v3',
+      algorithm_version: input.suggestions[0]?.algorithmVersion || 'bm25-ai-phrases-v4',
       result_summary: {
         paragraphCount: paragraphNumbers.size,
         strongCount: input.suggestions.filter(item => item.confidence === 'strong').length,

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
+import { CLIENT_LINK_AI_EXCERPT_MAX_CHARACTERS } from '../utils/clientLinkPhraseProfile.ts';
 
 export type AllowedClientDomain = {
   hostname: string;
@@ -33,6 +34,7 @@ export type ClientPageCrawlResult = {
   contentHash: string;
   extractedTerms: string[];
   extractedPhrases: string[];
+  contentExcerpt?: string;
   wordCount: number;
   responseContentType: string;
   redirectCount: number;
@@ -394,6 +396,30 @@ const extractVisibleText = (html: string): string => cleanText(
   500_000,
 );
 
+export const buildClientLinkAiContentExcerpt = (
+  visibleText: string,
+  maximumCharacters = CLIENT_LINK_AI_EXCERPT_MAX_CHARACTERS,
+): string => {
+  const maximum = Math.max(2_000, Math.min(maximumCharacters, 40_000));
+  const normalized = visibleText.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maximum) return normalized;
+
+  const separator = '\n\n[…]\n\n';
+  const available = maximum - (separator.length * 2);
+  const headLength = Math.floor(available * 0.5);
+  const middleLength = Math.floor(available * 0.25);
+  const tailLength = available - headLength - middleLength;
+  const middleStart = Math.max(
+    headLength,
+    Math.floor((normalized.length - middleLength) / 2),
+  );
+  return [
+    normalized.slice(0, headLength),
+    normalized.slice(middleStart, middleStart + middleLength),
+    normalized.slice(-tailLength),
+  ].join(separator);
+};
+
 const normalizeToken = (value: string): string => value
   .toLocaleLowerCase()
   .replace(/[\u064b-\u065f\u0670\u06d6-\u06ed]/g, '')
@@ -562,6 +588,7 @@ export const extractClientPageMetadataFromHtml = (options: {
     contentHash: createHash('sha256').update(visibleText).digest('hex'),
     extractedTerms: terms.terms,
     extractedPhrases: terms.phrases,
+    contentExcerpt: buildClientLinkAiContentExcerpt(visibleText),
     wordCount: terms.wordCount,
     responseContentType: options.responseContentType.slice(0, 300),
     redirectCount: Math.max(0, Math.min(options.redirectCount || 0, 10)),

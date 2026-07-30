@@ -162,12 +162,14 @@ const executeClaimedJob = async (
       },
     });
     const result = providerResult.page;
+    const persistedPage = { ...result };
+    delete persistedPage.contentExcerpt;
 
     if (controller.signal.reason instanceof ClientPageCrawlLostLeaseError) return;
     const completed = await completeClientPageCrawlJob({
       jobId: job.id,
       workerId: slotWorkerId,
-      page: result,
+      page: persistedPage,
       resultSummary: {
         extraction: providerResult.provider === 'local'
           ? 'deterministic_html'
@@ -185,12 +187,15 @@ const executeClaimedJob = async (
       },
     });
     if (completed) {
+      stopHeartbeat();
       try {
         await indexCompletedClientPage({
           pageId: input.page.id,
           clientId: input.page.client_id,
           inputUrl: input.page.input_url,
+          requestedBy: job.requested_by,
           result,
+          signal: controller.signal,
         });
       } catch (indexError) {
         logThrottledError(`Semantic indexing failed for ${input.page.id}`, indexError);

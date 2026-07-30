@@ -55,6 +55,7 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     externalAnalysisCommandExecutionMode: 'independent_batch',
     defaultGeminiPaidModel: GEMINI_PAID_ANALYSIS_MODEL,
     defaultOpenAiModel: OPENAI_ANALYSIS_MODEL,
+    clientLinkAiEnrichmentEnabled: true,
     [CONTENT_WRITING_TEMPLATE_FIELDS.instructions]: DEFAULT_CONTENT_WRITING_TEMPLATES.instructions,
     [CONTENT_WRITING_TEMPLATE_FIELDS.articleContext]: DEFAULT_CONTENT_WRITING_TEMPLATES.articleContext,
     [CONTENT_WRITING_TEMPLATE_FIELDS.generationRequest]: DEFAULT_CONTENT_WRITING_TEMPLATES.generationRequest,
@@ -176,6 +177,10 @@ const normalizeSystemSection = (
     ));
     setWhenPresent('defaultGeminiPaidModel', field => normalizeGeminiPaidModelId(field));
     setWhenPresent('defaultOpenAiModel', field => normalizeString(field, defaults.defaultOpenAiModel, 120) || defaults.defaultOpenAiModel);
+    setWhenPresent('clientLinkAiEnrichmentEnabled', field => normalizeBoolean(
+      field,
+      defaults.clientLinkAiEnrichmentEnabled,
+    ));
     setWhenPresent(CONTENT_WRITING_TEMPLATE_FIELDS.instructions, field => normalizeContentWritingTemplate(
       field,
       defaults[CONTENT_WRITING_TEMPLATE_FIELDS.instructions],

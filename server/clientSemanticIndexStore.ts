@@ -6,6 +6,7 @@ import {
   type ClientLinkDictionaryType,
   type ClientPageSemanticProfile,
 } from '../utils/clientSemanticIndex';
+import { enrichClientPageAiLinkProfile } from './clientPageAiLinkProfile';
 
 const asText = (value: unknown): string => typeof value === 'string' ? value : '';
 const asTextArray = (value: unknown): string[] => (
@@ -61,7 +62,9 @@ export const indexCompletedClientPage = async (input: {
   pageId: string;
   clientId: string;
   inputUrl: string;
+  requestedBy?: string | null;
   result: ClientPageCrawlResult;
+  signal?: AbortSignal;
 }): Promise<ClientPageSemanticProfile> => {
   const dictionaries = await loadActiveClientLinkDictionariesForIndex(input.clientId);
   const profile = buildClientPageSemanticProfile({
@@ -86,5 +89,20 @@ export const indexCompletedClientPage = async (input: {
     .from('client_page_semantic_profiles')
     .upsert(semanticProfilePayload(profile), { onConflict: 'page_id' });
   if (error) throw error;
+  try {
+    await enrichClientPageAiLinkProfile({
+      pageId: input.pageId,
+      clientId: input.clientId,
+      requestedBy: input.requestedBy,
+      result: input.result,
+      deterministicProfile: profile,
+      signal: input.signal,
+    });
+  } catch (error) {
+    console.warn('[client-page-crawler] AI link phrase enrichment failed safely:', {
+      pageId: input.pageId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
   return profile;
 };

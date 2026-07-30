@@ -37,6 +37,7 @@ import {
   normalizeClientPrimaryDomain,
   refreshClientCenterPage,
   rebuildClientSemanticProfiles,
+  reviewClientPageAiLinkProfile,
   saveClientCenterAssignment,
   saveClientCenterPrimaryDomain,
   saveClientLinkDictionary,
@@ -55,6 +56,10 @@ import {
   type ClientLinkDictionaryType,
   type ClientPageSemanticProfile,
 } from '../utils/clientSemanticIndex';
+import type {
+  ClientLinkProfileReviewStatus,
+  ClientPageAiLinkProfile,
+} from '../utils/clientLinkPhraseProfile';
 import {
   DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
   normalizeInternalLinkQualityPolicy,
@@ -78,6 +83,7 @@ const EMPTY_DETAILS: ClientCenterDetails = {
   jobs: [],
   dictionaries: [],
   semanticProfiles: [],
+  aiLinkProfiles: [],
   qualityPolicies: [],
 };
 
@@ -207,6 +213,28 @@ const jobStatusLabels: Record<string, string> = {
   cancelled: 'ملغاة',
 };
 
+const aiGenerationStatusLabels: Record<ClientPageAiLinkProfile['generationStatus'], string> = {
+  pending: 'جارٍ التوليد',
+  ready: 'تم التوليد',
+  skipped: 'تم التجاوز',
+  failed: 'فشل التوليد',
+};
+
+const aiReviewStatusLabels: Record<ClientPageAiLinkProfile['reviewStatus'], string> = {
+  pending: 'بانتظار مراجعة المسؤول',
+  approved: 'معتمد',
+  rejected: 'مرفوض',
+};
+
+const aiIntentLabels: Record<Exclude<ClientPageAiLinkProfile['pageIntent'], ''>, string> = {
+  informational: 'معلوماتي',
+  commercial: 'تجاري',
+  transactional: 'إجرائي',
+  navigational: 'تنقلي',
+  local: 'محلي',
+  mixed: 'مختلط',
+};
+
 const statusClass = (status: string): string => {
   if (status === 'ready' || status === 'completed') {
     return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
@@ -223,7 +251,18 @@ const statusClass = (status: string): string => {
 const PageDetails: React.FC<{
   page: ClientCenterPage;
   semanticProfile?: ClientPageSemanticProfile;
-}> = ({ page, semanticProfile }) => (
+  aiLinkProfile?: ClientPageAiLinkProfile;
+  canReviewAiProfile: boolean;
+  isSaving: boolean;
+  onReviewAiProfile: (status: ClientLinkProfileReviewStatus) => void;
+}> = ({
+  page,
+  semanticProfile,
+  aiLinkProfile,
+  canReviewAiProfile,
+  isSaving,
+  onReviewAiProfile,
+}) => (
   <div className="mt-3 grid grid-cols-1 gap-2 border-t border-gray-100 pt-3 text-xs dark:border-[#3C3C3C] md:grid-cols-2 lg:grid-cols-3">
     <div><span className="font-black text-gray-400">العنوان:</span> <span className="text-gray-700 dark:text-gray-200">{page.pageTitle || '-'}</span></div>
     <div><span className="font-black text-gray-400">H1:</span> <span className="text-gray-700 dark:text-gray-200">{page.h1 || '-'}</span></div>
@@ -242,6 +281,133 @@ const PageDetails: React.FC<{
       >
         {decodeClientUrlForDisplay(page.finalUrl) || '-'}
       </span>
+    </div>
+    <div className="md:col-span-2 lg:col-span-3">
+      <div className="rounded-md border border-[#d4af37]/30 bg-[#d4af37]/5 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-black text-[#9b7d20]">ملف عبارات الربط الذكي</span>
+          {aiLinkProfile ? (
+            <>
+              <span className={`rounded-full px-2 py-1 text-[10px] font-black ${statusClass(
+                aiLinkProfile.generationStatus === 'ready'
+                  ? 'completed'
+                  : aiLinkProfile.generationStatus === 'failed'
+                    ? 'failed'
+                    : 'pending',
+              )}`}>
+                {aiGenerationStatusLabels[aiLinkProfile.generationStatus]}
+              </span>
+              <span className={`rounded-full px-2 py-1 text-[10px] font-black ${
+                aiLinkProfile.reviewStatus === 'approved'
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                  : aiLinkProfile.reviewStatus === 'rejected'
+                    ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                    : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+              }`}>
+                {aiReviewStatusLabels[aiLinkProfile.reviewStatus]}
+              </span>
+              {aiLinkProfile.generationStatus === 'ready' && (
+                <span className="font-bold text-gray-400">الثقة: {aiLinkProfile.confidence}%</span>
+              )}
+              {aiLinkProfile.pageIntent && (
+                <span className="font-bold text-gray-400">
+                  النية: {aiIntentLabels[aiLinkProfile.pageIntent]}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="font-bold text-gray-400">
+              يُنشأ بعد إعادة زحف الصفحة عند تفعيل الإثراء الذكي.
+            </span>
+          )}
+        </div>
+        {aiLinkProfile?.generationStatus === 'ready' && (
+          <div className="mt-3 space-y-2">
+            <div>
+              <span className="font-black text-gray-500">العبارة الأساسية:</span>{' '}
+              <span className="font-black text-gray-800 dark:text-gray-100">
+                {aiLinkProfile.primaryPhrase}
+              </span>
+            </div>
+            {aiLinkProfile.alternativePhrases.length > 0 && (
+              <div>
+                <span className="font-black text-gray-500">الصيغ البديلة:</span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {aiLinkProfile.alternativePhrases.map(phrase => (
+                    <span key={phrase} className="rounded-full bg-blue-50 px-2 py-1 font-bold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+                      {phrase}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {aiLinkProfile.longTailPhrases.length > 0 && (
+              <div>
+                <span className="font-black text-gray-500">الصيغ الطويلة:</span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {aiLinkProfile.longTailPhrases.map(phrase => (
+                    <span key={phrase} className="rounded-full bg-purple-50 px-2 py-1 font-bold text-purple-700 dark:bg-purple-950/30 dark:text-purple-300">
+                      {phrase}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {aiLinkProfile.relatedEntities.length > 0 && (
+              <div>
+                <span className="font-black text-gray-500">الكيانات المرتبطة:</span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {aiLinkProfile.relatedEntities.map(entity => (
+                    <span key={entity} className="rounded-full bg-cyan-50 px-2 py-1 font-bold text-cyan-700 dark:bg-cyan-950/30 dark:text-cyan-300">
+                      {entity}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {aiLinkProfile.negativePhrases.length > 0 && (
+              <div>
+                <span className="font-black text-gray-500">سياقات تمنع الاقتراح:</span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {aiLinkProfile.negativePhrases.map(phrase => (
+                    <span key={phrase} className="rounded-full bg-red-50 px-2 py-1 font-bold text-red-700 dark:bg-red-950/30 dark:text-red-300">
+                      {phrase}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="font-bold text-gray-400">
+              المزود: {aiLinkProfile.provider || '-'} · الموديل: {aiLinkProfile.model || '-'}
+            </div>
+            {canReviewAiProfile && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isSaving || aiLinkProfile.reviewStatus === 'approved'}
+                  className={secondaryButtonClass}
+                  onClick={() => onReviewAiProfile('approved')}
+                >
+                  <CheckCircle2 size={14} /> اعتماد
+                </button>
+                <button
+                  type="button"
+                  disabled={isSaving || aiLinkProfile.reviewStatus === 'rejected'}
+                  className={dangerButtonClass}
+                  onClick={() => onReviewAiProfile('rejected')}
+                >
+                  <XCircle size={14} /> رفض
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {aiLinkProfile && aiLinkProfile.generationStatus !== 'ready' && (
+          <div className="mt-2 font-semibold text-gray-500 dark:text-gray-300">
+            {aiLinkProfile.errorMessage || 'لم يكتمل توليد العبارات بعد.'}
+          </div>
+        )}
+      </div>
     </div>
     {page.extractedTerms.length > 0 && (
       <div className="md:col-span-2 lg:col-span-3">
@@ -315,6 +481,9 @@ const ClientCenterSettings: React.FC = () => {
   const semanticProfileByPage = useMemo(() => new Map(
     details.semanticProfiles.map(profile => [profile.pageId, profile] as const),
   ), [details.semanticProfiles]);
+  const aiLinkProfileByPage = useMemo(() => new Map(
+    details.aiLinkProfiles.map(profile => [profile.pageId, profile] as const),
+  ), [details.aiLinkProfiles]);
 
   const indexablePages = useMemo(() => details.pages.filter(page => (
     page.crawlStatus === 'ready' && page.isEnabled && page.robotsIndex !== false
@@ -811,7 +980,7 @@ const ClientCenterSettings: React.FC = () => {
   const renderPagesTab = () => (
     <div className="space-y-4">
       <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs font-semibold leading-6 text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
-        تُقرأ صفحات الموقع العامة فقط. يستخرج النظام العنوان والوصف والعناوين واللغة والفهرسة والمصطلحات بخوارزميات برمجية، ولا يستخدم مقالات المحرر أو الذكاء الاصطناعي.
+        تُقرأ صفحات الموقع العامة فقط ولا تُستخدم مقالات المحرر. يستخرج النظام البيانات والفهرس الأساسي بخوارزميات برمجية، ثم يمكنه توليد عبارات ربط ذكية اختيارية عند توفر مزود مفعّل، من دون تخزين النص الكامل للصفحة.
       </div>
       {canEditPages && (
         <form onSubmit={handleStartSiteCrawl} className="rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/5 p-4">
@@ -1029,6 +1198,24 @@ const ClientCenterSettings: React.FC = () => {
                 <PageDetails
                   page={page}
                   semanticProfile={semanticProfileByPage.get(page.id)}
+                  aiLinkProfile={aiLinkProfileByPage.get(page.id)}
+                  canReviewAiProfile={isAdmin}
+                  isSaving={isSaving}
+                  onReviewAiProfile={status => void runMutation(
+                    async () => {
+                      const reviewed = await reviewClientPageAiLinkProfile(page.id, status);
+                      setDetails(current => ({
+                        ...current,
+                        aiLinkProfiles: [
+                          ...current.aiLinkProfiles.filter(profile => profile.pageId !== reviewed.pageId),
+                          reviewed,
+                        ],
+                      }));
+                    },
+                    status === 'approved'
+                      ? 'تم اعتماد ملف عبارات الربط.'
+                      : 'تم رفض ملف عبارات الربط.',
+                  )}
                 />
               )}
             </article>

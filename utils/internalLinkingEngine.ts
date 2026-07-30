@@ -4,6 +4,10 @@ import {
   type ClientPageSemanticProfile,
 } from './clientSemanticIndex.ts';
 import {
+  isClientPageAiLinkProfileActive,
+  type ClientPageAiLinkProfile,
+} from './clientLinkPhraseProfile.ts';
+import {
   calculateInternalLinkSuggestionBudget,
   INTERNAL_LINK_ANCHOR_MAX_WORDS,
   INTERNAL_LINK_ANCHOR_MIN_WORDS,
@@ -32,6 +36,7 @@ export type InternalLinkTargetPage = {
   extractedPhrases?: string[];
   isEnabled?: boolean;
   semanticProfile?: ClientPageSemanticProfile;
+  aiLinkProfile?: ClientPageAiLinkProfile;
   allowedDomains?: Array<{
     hostname: string;
     includeSubdomains: boolean;
@@ -54,7 +59,7 @@ export type InternalLinkSuggestion = {
   alternativeAnchors: string[];
   bm25Score: number;
   completenessScore: number;
-  algorithmVersion: 'bm25-quality-v3';
+  algorithmVersion: 'bm25-ai-phrases-v4';
 };
 
 export type InternalLinkingInput = {
@@ -86,7 +91,20 @@ type TargetSignal = {
   tokens: string[];
   weight: number;
   frequency: number;
-  source: 'title' | 'heading' | 'description' | 'phrase' | 'term' | 'slug' | 'synonym' | 'topic' | 'stem';
+  source:
+    | 'title'
+    | 'heading'
+    | 'description'
+    | 'phrase'
+    | 'term'
+    | 'slug'
+    | 'synonym'
+    | 'topic'
+    | 'stem'
+    | 'ai_primary'
+    | 'ai_alternative'
+    | 'ai_long_tail'
+    | 'ai_entity';
 };
 
 const ARABIC_DIACRITICS = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g;
@@ -189,6 +207,11 @@ export const createInternalLinkInventorySignature = (
       normalizeInternalLinkUrl(resolveInternalLinkTargetUrl(page)),
       page.semanticProfile?.sourceSignature || page.contentHash || '',
       page.semanticProfile?.dictionarySignature || '',
+      page.aiLinkProfile?.sourceSignature || '',
+      page.aiLinkProfile?.profileVersion ?? '',
+      page.aiLinkProfile?.generationStatus || '',
+      page.aiLinkProfile?.reviewStatus || '',
+      page.aiLinkProfile?.confidence ?? '',
       page.isEnabled === false ? '0' : '1',
       page.crawlStatus,
       page.httpStatus ?? '',
@@ -260,6 +283,41 @@ const semanticSource = (
 };
 
 const pageSignals = (page: InternalLinkTargetPage): TargetSignal[] => {
+  const aiProfile = isClientPageAiLinkProfileActive(page.aiLinkProfile)
+    ? page.aiLinkProfile
+    : undefined;
+  const aiWeightFactor = aiProfile?.reviewStatus === 'approved'
+    ? 1
+    : 0.78 + (Math.min(100, aiProfile?.confidence || 0) / 500);
+  const appendAiSignals = (signals: TargetSignal[]): TargetSignal[] => {
+    if (!aiProfile) return signals;
+    addSignals(
+      signals,
+      [aiProfile.primaryPhrase],
+      12.5 * aiWeightFactor,
+      'ai_primary',
+    );
+    addSignals(
+      signals,
+      aiProfile.alternativePhrases,
+      9.5 * aiWeightFactor,
+      'ai_alternative',
+    );
+    addSignals(
+      signals,
+      aiProfile.longTailPhrases,
+      8 * aiWeightFactor,
+      'ai_long_tail',
+    );
+    addSignals(
+      signals,
+      aiProfile.relatedEntities,
+      4.5 * aiWeightFactor,
+      'ai_entity',
+    );
+    return signals;
+  };
+
   if (page.semanticProfile) {
     const indexedSignals: TargetSignal[] = page.semanticProfile.weightedTerms.map(term => ({
       value: term.term,
@@ -289,7 +347,7 @@ const pageSignals = (page: InternalLinkTargetPage): TargetSignal[] => {
         source: 'stem',
       });
     }
-    return indexedSignals.filter(signal => signal.tokens.length > 0);
+    return appendAiSignals(indexedSignals).filter(signal => signal.tokens.length > 0);
   }
 
   const signals: TargetSignal[] = [];
@@ -301,7 +359,7 @@ const pageSignals = (page: InternalLinkTargetPage): TargetSignal[] => {
   addSignals(signals, [page.metaDescription], 2, 'description');
   addSignals(signals, page.extractedTerms || [], 2.25, 'term');
   addSignals(signals, [page.slug?.replace(/[-_]+/g, ' ')], 1.25, 'slug');
-  return signals;
+  return appendAiSignals(signals);
 };
 
 const readUrlHostname = (value: string): string => {
@@ -395,6 +453,7 @@ const chooseAnchor = (
   documentFrequency: Map<string, number>,
   totalPages: number,
   forbiddenAnchors: Set<string>,
+  negativePhrases: string[],
 ): {
   text: string;
   score: number;
@@ -427,6 +486,8 @@ const chooseAnchor = (
     paragraphText: string;
   }>();
   for (const span of spans) {
+    const paddedSpan = ` ${span.normalized} `;
+    if (negativePhrases.some(phrase => paddedSpan.includes(` ${phrase} `))) continue;
     const words = extractWordMatches(span.text);
     const upper = Math.min(MAX_ANCHOR_WORDS, words.length);
     for (let size = MIN_ANCHOR_WORDS; size <= upper; size += 1) {
@@ -552,12 +613,18 @@ const buildSuggestion = (
   qualityPolicy: InternalLinkQualityPolicyValues,
   forbiddenAnchors: Set<string>,
 ): InternalLinkSuggestion | null => {
+  const negativePhrases = isClientPageAiLinkProfileActive(page.aiLinkProfile)
+    ? page.aiLinkProfile.negativePhrases
+      .map(normalizeInternalLinkText)
+      .filter(Boolean)
+    : [];
   const anchor = chooseAnchor(
     spans,
     signals,
     documentFrequency,
     totalPages,
     forbiddenAnchors,
+    negativePhrases,
   );
   if (!anchor) return null;
 
@@ -601,6 +668,10 @@ const buildSuggestion = (
     + (matchedSources.has('topic') ? 4 : 0)
     + (matchedSources.has('stem') ? 3 : 0)
     + (matchedSources.has('description') ? 3 : 0)
+    + (matchedSources.has('ai_primary') ? 13 : 0)
+    + (matchedSources.has('ai_alternative') ? 9 : 0)
+    + (matchedSources.has('ai_long_tail') ? 7 : 0)
+    + (matchedSources.has('ai_entity') ? 3 : 0)
   );
   const anchorBonus = Math.min(22, anchor.score * 0.72) + (anchor.exactPhrase ? 8 : 0);
   const normalizedBm25 = 1 - Math.exp(-bm25Score / 8);
@@ -623,6 +694,9 @@ const buildSuggestion = (
     || matchedSources.has('phrase')
     || matchedSources.has('synonym')
     || matchedSources.has('topic')
+    || matchedSources.has('ai_primary')
+    || matchedSources.has('ai_alternative')
+    || matchedSources.has('ai_long_tail')
     || (
       matchedTokenWeights.size > qualityPolicy.minimumMatchedTerms
       && bm25Score >= 1.5
@@ -638,6 +712,10 @@ const buildSuggestion = (
   if (matchedSources.has('synonym')) reasons.push('مطابقة عبر قاموس المرادفات');
   if (matchedSources.has('topic')) reasons.push('موضوع مرتبط في قاموس العميل');
   if (matchedSources.has('stem')) reasons.push('تطابق بالجذر العربي الخفيف');
+  if (matchedSources.has('ai_primary')) reasons.push('تطابق مع العبارة الأساسية المعتمدة للصفحة');
+  if (matchedSources.has('ai_alternative')) reasons.push('تطابق مع صياغة ذكية بديلة');
+  if (matchedSources.has('ai_long_tail')) reasons.push('تطابق مع عبارة ذكية طويلة');
+  if (matchedSources.has('ai_entity')) reasons.push('كيان مرتبط بموضوع الصفحة');
   if (reasons.length === 0) reasons.push('تقارب موضوعي في الكلمات الأساسية');
 
   const matchedTerms = [...matchedTokenWeights.entries()]
@@ -663,7 +741,7 @@ const buildSuggestion = (
     alternativeAnchors: anchor.alternativeAnchors,
     bm25Score: Number(bm25Score.toFixed(2)),
     completenessScore,
-    algorithmVersion: 'bm25-quality-v3',
+    algorithmVersion: 'bm25-ai-phrases-v4',
   };
 };
 

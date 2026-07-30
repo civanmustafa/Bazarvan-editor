@@ -11,6 +11,7 @@ import {
   CLIENT_CENTER_QUALITY_POLICY_MIGRATION,
   CLIENT_CENTER_SEMANTIC_INDEX_MIGRATION,
   CLIENT_CENTER_SITE_CRAWLER_MIGRATION,
+  CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
   CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
@@ -45,6 +46,7 @@ for (const migration of [
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
   CLIENT_CENTER_HYBRID_CRAWLER_MIGRATION,
   CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
+  CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
@@ -83,6 +85,7 @@ for (const [sourcePath, marker] of [
   ['server/crawlerProviderUsage.ts', 'recordCrawlerProviderUsageEvent'],
   ['utils/clientSemanticIndex.ts', 'isGenericClientPageTitle'],
   ['utils/internalLinkingEngine.ts', 'resolveInternalLinkTargetUrl'],
+  ['server/clientPageAiLinkProfile.ts', 'client_page_link_profile'],
 ] as const) {
   const source = await readFile(path.join(root, ...sourcePath.split('/')), 'utf8');
   if (!source.includes(marker)) {
@@ -114,6 +117,7 @@ for (const marker of [
   'client_site_crawl_runs',
   'client_internal_links',
   'client_page_semantic_profiles',
+  'client_page_ai_link_profiles',
   'client_link_suggestion_runs',
   'internal_link_quality_policies',
   'client_draft_creation_schema_version',
@@ -137,6 +141,7 @@ for (const marker of [
   'firecrawl',
   'browserless',
   'rendered_html',
+  'client_page_link_profile',
 ]) {
   if (!crawlerBundle.includes(marker)) {
     throw new Error(`Client Center crawler bundle is missing marker: ${marker}`);
@@ -158,6 +163,7 @@ console.log(JSON.stringify({
     CRAWLER_PROVIDER_SECRETS_MIGRATION,
     CLIENT_CENTER_HYBRID_CRAWLER_MIGRATION,
     CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
+    CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
   ],
   crawler: 'server-dist/client-page-crawl-worker.mjs',
   readinessEndpoint: '/readyz',

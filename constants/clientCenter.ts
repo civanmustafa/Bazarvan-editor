@@ -7,7 +7,8 @@ export const CLIENT_CENTER_QUALITY_POLICY_MIGRATION = '20260724060000_internal_l
 export const CLIENT_CENTER_DRAFT_CREATION_MIGRATION = '20260725010000_client_draft_creation.sql';
 export const CLIENT_CENTER_CRAWL_SOURCE_MIGRATION = '20260728050000_client_page_crawl_source.sql';
 export const CLIENT_CENTER_SITE_CRAWLER_MIGRATION = '20260728060000_local_client_site_crawler.sql';
-export const CLIENT_CENTER_REQUIRED_MIGRATION = CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION;
+export const CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION = '20260730040000_client_page_ai_link_profiles.sql';
+export const CLIENT_CENTER_REQUIRED_MIGRATION = CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION;
 
 export const CLIENT_CENTER_SCHEMA_PROBES = [
   {
@@ -74,6 +75,11 @@ export const CLIENT_CENTER_SCHEMA_PROBES = [
     id: 'semanticProfiles',
     table: 'client_page_semantic_profiles',
     columns: 'page_id,client_id,profile_version,source_signature,dictionary_signature,page_language,path_segments,weighted_terms,phrases,light_stems,dictionary_matches,document_length,completeness_score,completeness_details,indexed_at,updated_at',
+  },
+  {
+    id: 'aiLinkProfiles',
+    table: 'client_page_ai_link_profiles',
+    columns: 'page_id,client_id,profile_version,source_signature,generation_status,review_status,primary_phrase,alternative_phrases,long_tail_phrases,related_entities,negative_phrases,page_intent,confidence,provider,model,error_code,error_message,generated_at,reviewed_by,reviewed_at,created_at,updated_at',
   },
   {
     id: 'suggestionRuns',

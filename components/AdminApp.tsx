@@ -618,6 +618,7 @@ const EXTERNAL_ANALYSIS_API_SOURCES = new Set([
   'engineering_command',
   'competitor_discovery',
   'competitor_extraction',
+  'client_page_link_profile',
 ]);
 
 const getActivityMetadata = (event: RemoteAppActivityEvent): Record<string, any> => (
@@ -654,6 +655,7 @@ const getApiSourceLabel = (source?: string): string => {
     assigned_automation_semantic_retry: 'إعادة أتمتة الصيغ و LSI',
     assigned_automation_competitor: 'أتمتة تحليل المنافسين',
     quick_provider: 'أمر سريع',
+    client_page_link_profile: 'توليد عبارات الربط لصفحة عميل',
     unknown: 'غير محدد',
   };
   return labels[source || 'unknown'] || source || 'غير محدد';
