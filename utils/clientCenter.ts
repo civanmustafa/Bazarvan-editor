@@ -825,6 +825,16 @@ export const normalizeClientPageUrl = (value: string): string => {
   }
 };
 
+export const decodeClientUrlForDisplay = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  try {
+    return decodeURI(trimmed);
+  } catch {
+    return trimmed;
+  }
+};
+
 export const isUrlAllowedForClientDomains = (
   value: string,
   domains: ClientCenterDomain[],

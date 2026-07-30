@@ -26,6 +26,7 @@ import { listRemoteProfiles, type RemoteProfile } from '../utils/supabaseArticle
 import {
   addClientCenterPages,
   createClientCenterClient,
+  decodeClientUrlForDisplay,
   deleteClientCenterAssignment,
   deleteClientCenterPage,
   deleteClientLinkDictionary,
@@ -232,7 +233,16 @@ const PageDetails: React.FC<{
     <div><span className="font-black text-gray-400">الفهرسة:</span> <span className="text-gray-700 dark:text-gray-200">{page.robotsIndex === false ? 'noindex' : page.robotsIndex === true ? 'index' : '-'}</span></div>
     <div><span className="font-black text-gray-400">اكتمال الملف الخوارزمي:</span> <span className="text-gray-700 dark:text-gray-200">{semanticProfile ? `${semanticProfile.completenessScore}%` : 'غير مبني'}</span></div>
     <div className="md:col-span-2 lg:col-span-3"><span className="font-black text-gray-400">الوصف:</span> <span className="text-gray-700 dark:text-gray-200">{page.metaDescription || '-'}</span></div>
-    <div className="md:col-span-2 lg:col-span-3"><span className="font-black text-gray-400">الرابط النهائي:</span> <span className="break-all text-gray-700 dark:text-gray-200">{page.finalUrl || '-'}</span></div>
+    <div className="md:col-span-2 lg:col-span-3">
+      <span className="font-black text-gray-400">الرابط النهائي:</span>{' '}
+      <span
+        className="break-all text-gray-700 dark:text-gray-200"
+        dir="ltr"
+        title={page.finalUrl || undefined}
+      >
+        {decodeClientUrlForDisplay(page.finalUrl) || '-'}
+      </span>
+    </div>
     {page.extractedTerms.length > 0 && (
       <div className="md:col-span-2 lg:col-span-3">
         <span className="font-black text-gray-400">أبرز المصطلحات المستخرجة برمجيًا:</span>

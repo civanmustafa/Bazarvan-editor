@@ -87,6 +87,7 @@ test('Client Center phase 2 UI manages scoped clients without excluded fields', 
 
 test('manual client URLs are normalized and restricted to registered domains', async () => {
   const {
+    decodeClientUrlForDisplay,
     isUrlAllowedForClientDomains,
     normalizeClientHostname,
     normalizeClientPrimaryDomain,
@@ -100,6 +101,16 @@ test('manual client URLs are normalized and restricted to registered domains', a
     'https://example.com/page',
   );
   assert.equal(normalizeClientPageUrl('javascript:alert(1)'), '');
+  assert.equal(
+    decodeClientUrlForDisplay(
+      'https://example.com/%D8%A7%D9%84%D8%AE%D8%AF%D9%85%D8%A7%D8%AA?category=%D8%AA%D8%B3%D9%88%D9%8A%D9%82',
+    ),
+    'https://example.com/الخدمات?category=تسويق',
+  );
+  assert.equal(
+    decodeClientUrlForDisplay('https://example.com/%E0%A4%A'),
+    'https://example.com/%E0%A4%A',
+  );
 
   const domains = [{
     id: 'domain-1',
