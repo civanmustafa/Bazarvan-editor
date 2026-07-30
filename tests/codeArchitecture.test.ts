@@ -15,10 +15,14 @@ const assertFileMissing = async (relativePath: string): Promise<void> => {
   );
 };
 
-test('settings route registry accepts the engineering prompts tab', () => {
+test('settings route registry accepts every standalone settings tab', () => {
   assert.deepEqual(parseAppRoute('/settings/prompts'), {
     name: 'settings',
     section: 'prompts',
+  });
+  assert.deepEqual(parseAppRoute('/settings/crawler'), {
+    name: 'settings',
+    section: 'crawler',
   });
   assert.equal(parseAppRoute('/settings/not-registered').name, 'notFound');
 });
