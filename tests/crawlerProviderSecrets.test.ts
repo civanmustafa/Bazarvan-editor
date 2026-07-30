@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   __crawlerProviderSecretsTestUtils,
+  isCrawlerSettingsEncryptionConfigured,
   normalizeCrawlerExternalProvider,
 } from '../server/crawlerProviderSecrets.ts';
 import {
@@ -57,6 +58,51 @@ test('crawler provider keys are encrypted with provider-bound authenticated data
       delete process.env.AI_SETTINGS_ENCRYPTION_KEY;
     } else {
       process.env.AI_SETTINGS_ENCRYPTION_KEY = previousAiKey;
+    }
+  }
+});
+
+test('crawler provider encryption can reuse the existing server-side Supabase credential', () => {
+  const previousDedicatedKey = process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY;
+  const previousAiKey = process.env.AI_SETTINGS_ENCRYPTION_KEY;
+  const previousServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY;
+  delete process.env.AI_SETTINGS_ENCRYPTION_KEY;
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'server-only-service-role-test-secret';
+  try {
+    assert.equal(isCrawlerSettingsEncryptionConfigured(), true);
+    const plaintext = 'browserless-admin-settings-key';
+    const encrypted = __crawlerProviderSecretsTestUtils.encryptSecret(
+      'browserless',
+      plaintext,
+    );
+    assert.equal(
+      __crawlerProviderSecretsTestUtils.decryptSecret({
+        provider: 'browserless',
+        ...encrypted,
+        enabled: true,
+        key_suffix: plaintext.slice(-4),
+        updated_by: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }),
+      plaintext,
+    );
+  } finally {
+    if (previousDedicatedKey === undefined) {
+      delete process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY;
+    } else {
+      process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY = previousDedicatedKey;
+    }
+    if (previousAiKey === undefined) {
+      delete process.env.AI_SETTINGS_ENCRYPTION_KEY;
+    } else {
+      process.env.AI_SETTINGS_ENCRYPTION_KEY = previousAiKey;
+    }
+    if (previousServiceRoleKey === undefined) {
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    } else {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = previousServiceRoleKey;
     }
   }
 });

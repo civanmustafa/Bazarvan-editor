@@ -150,6 +150,7 @@ test('Client Center readiness probes every required table and hides provider det
     crawlJobs: true,
     siteCrawlRuns: true,
     crawlerProviderSecrets: true,
+    crawlerProviderUsage: true,
     internalLinkGraph: true,
     articleClientContexts: true,
     internalLinkActions: true,
@@ -173,6 +174,7 @@ test('Client Center readiness probes every required table and hides provider det
     'client_site_crawl_runs',
     'clients',
     'crawler_provider_secrets',
+    'crawler_provider_usage_events',
     'internal_link_actions',
     'internal_link_quality_policies',
   ]);

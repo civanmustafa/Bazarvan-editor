@@ -12,6 +12,7 @@ import {
   CLIENT_CENTER_SEMANTIC_INDEX_MIGRATION,
   CLIENT_CENTER_SITE_CRAWLER_MIGRATION,
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
+  CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
 } from '../constants/clientCenter.ts';
 import {
@@ -43,6 +44,7 @@ for (const migration of [
   CLIENT_CENTER_SITE_CRAWLER_MIGRATION,
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
   CLIENT_CENTER_HYBRID_CRAWLER_MIGRATION,
+  CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
@@ -77,6 +79,8 @@ for (const [sourcePath, marker] of [
   ['server/crawlerProviderSecrets.ts', 'resolveCrawlerProviderCredential'],
   ['api/clientSiteCrawler.ts', 'start_client_site_crawl'],
   ['api/adminCrawlerProviderSecrets.ts', 'admin:crawler-provider-secrets'],
+  ['api/adminCrawlerProviderUsage.ts', 'admin:crawler-provider-usage'],
+  ['server/crawlerProviderUsage.ts', 'recordCrawlerProviderUsageEvent'],
   ['utils/clientSemanticIndex.ts', 'isGenericClientPageTitle'],
   ['utils/internalLinkingEngine.ts', 'resolveInternalLinkTargetUrl'],
 ] as const) {
@@ -153,6 +157,7 @@ console.log(JSON.stringify({
     CLIENT_CENTER_SITE_CRAWLER_MIGRATION,
     CRAWLER_PROVIDER_SECRETS_MIGRATION,
     CLIENT_CENTER_HYBRID_CRAWLER_MIGRATION,
+    CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
   ],
   crawler: 'server-dist/client-page-crawl-worker.mjs',
   readinessEndpoint: '/readyz',

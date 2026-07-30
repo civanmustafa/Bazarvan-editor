@@ -6,6 +6,7 @@ import {
   ClientPageCrawlerError,
 } from './clientPageCrawler';
 import { crawlClientPageWithProvider } from './clientPageCrawlerProviders';
+import { recordCrawlerProviderUsageEvent } from './crawlerProviderUsage';
 import {
   claimNextClientPageCrawlJob,
   completeClientPageCrawlJob,
@@ -148,6 +149,17 @@ const executeClaimedJob = async (
       signal: controller.signal,
       timeoutMs: crawlTimeoutMs,
       maximumBytes,
+      onAttempt: async attempt => {
+        await recordCrawlerProviderUsageEvent({
+          crawlJobId: job.id,
+          crawlRunId: job.crawl_run_id,
+          clientId: job.client_id,
+          pageId: job.page_id,
+          requestedBy: job.requested_by,
+          jobAttempt: job.attempt_count,
+          attempt,
+        });
+      },
     });
     const result = providerResult.page;
 

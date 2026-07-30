@@ -31,6 +31,7 @@ import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import ExternalAnalysisReportsTable from './ExternalAnalysisReportsTable';
 import ContentWritingReportsTable from './ContentWritingReportsTable';
+import CrawlerProviderUsageReportsTable from './CrawlerProviderUsageReportsTable';
 import {
   getArticleTrashInfo,
   getRemoteAppSessionById,
@@ -71,6 +72,10 @@ import {
   listContentWritingReportSessions,
   type ContentWritingReportSession,
 } from '../utils/contentWritingReports';
+import {
+  listCrawlerProviderReportEvents,
+  type CrawlerProviderReportEvent,
+} from '../utils/crawlerProviderReports';
 
 type AdminAppProps = {
   section: AdminRouteSection;
@@ -847,6 +852,10 @@ const ReportsPage: React.FC<{
   contentWritingSessions: ContentWritingReportSession[];
   isContentWritingLoading: boolean;
   contentWritingError: string;
+  crawlerProviderEvents: CrawlerProviderReportEvent[];
+  isCrawlerProviderUsageLoading: boolean;
+  crawlerProviderUsageError: string;
+  crawlerProviderUsageSchemaAvailable: boolean;
   secretStatus: SecretStatus;
   isSecretStatusLoading: boolean;
   onRefreshSecretStatus: () => void;
@@ -863,6 +872,10 @@ const ReportsPage: React.FC<{
   contentWritingSessions,
   isContentWritingLoading,
   contentWritingError,
+  crawlerProviderEvents,
+  isCrawlerProviderUsageLoading,
+  crawlerProviderUsageError,
+  crawlerProviderUsageSchemaAvailable,
   secretStatus,
   isSecretStatusLoading,
   onRefreshSecretStatus,
@@ -891,6 +904,10 @@ const ReportsPage: React.FC<{
   const freeGeminiApiCalls = apiUsageRequests.filter(request => request.provider === 'gemini').length;
   const paidGeminiApiCalls = apiUsageRequests.filter(request => request.provider === 'geminiPaid').length;
   const openAiApiCalls = apiUsageRequests.filter(request => request.provider === 'openai' || request.service === 'openai').length;
+  const externalCrawlerCalls = crawlerProviderEvents.filter(event => event.provider !== 'local');
+  const successfulCrawlerCalls = externalCrawlerCalls.filter(event => event.status === 'completed').length;
+  const failedCrawlerCalls = externalCrawlerCalls.filter(event => event.status === 'failed').length;
+  const adminCrawlerKeyCalls = externalCrawlerCalls.filter(event => event.credentialSource === 'admin').length;
   const completedWritingSessions = contentWritingSessions.filter(session => session.status === 'completed').length;
   const failedWritingSessions = contentWritingSessions.filter(session => session.status === 'failed').length;
   const externalWritingSessions = contentWritingSessions.filter(session => session.executionMode === 'external').length;
@@ -930,6 +947,13 @@ const ReportsPage: React.FC<{
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <AdminStat icon={<Key size={18} />} label="استدعاءات خدمات الزحف" value={externalCrawlerCalls.length} />
+        <AdminStat icon={<CheckCircle2 size={18} />} label="زحف خارجي ناجح" value={successfulCrawlerCalls} />
+        <AdminStat icon={<XCircle size={18} />} label="زحف خارجي فاشل" value={failedCrawlerCalls} />
+        <AdminStat icon={<Shield size={18} />} label="استخدام مفاتيح المسؤول" value={adminCrawlerKeyCalls} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
         <AdminStat icon={<FileText size={18} />} label="جلسات كتابة المحتوى" value={contentWritingSessions.length} />
         <AdminStat icon={<CheckCircle2 size={18} />} label="كتابة مكتملة" value={completedWritingSessions} />
         <AdminStat icon={<ExternalLink size={18} />} label="كتابة خارجية" value={externalWritingSessions} />
@@ -941,6 +965,17 @@ const ReportsPage: React.FC<{
         isLoading={isSecretStatusLoading}
         onRefresh={onRefreshSecretStatus}
       />
+
+      <section className="space-y-4">
+        <SectionTitle>تقارير استخدام مفاتيح وخدمات الزحف</SectionTitle>
+        <CrawlerProviderUsageReportsTable
+          events={crawlerProviderEvents}
+          isLoading={isCrawlerProviderUsageLoading}
+          error={crawlerProviderUsageError}
+          schemaAvailable={crawlerProviderUsageSchemaAvailable}
+          locale={t.locale === 'en' ? 'en' : 'ar'}
+        />
+      </section>
 
       <section className="space-y-4">
         <SectionTitle>تقارير التحليل الخارجي</SectionTitle>
@@ -1491,6 +1526,10 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   const [contentWritingSessions, setContentWritingSessions] = useState<ContentWritingReportSession[]>([]);
   const [isContentWritingLoading, setIsContentWritingLoading] = useState(false);
   const [contentWritingError, setContentWritingError] = useState('');
+  const [crawlerProviderEvents, setCrawlerProviderEvents] = useState<CrawlerProviderReportEvent[]>([]);
+  const [isCrawlerProviderUsageLoading, setIsCrawlerProviderUsageLoading] = useState(false);
+  const [crawlerProviderUsageError, setCrawlerProviderUsageError] = useState('');
+  const [crawlerProviderUsageSchemaAvailable, setCrawlerProviderUsageSchemaAvailable] = useState(true);
   const [sessionDetail, setSessionDetail] = useState<RemoteAppSession | null>(null);
   const [sessionDetailEvents, setSessionDetailEvents] = useState<RemoteAppActivityEvent[]>([]);
   const [snapshot, setSnapshot] = useState<ArticleStorageSnapshot | null>(null);
@@ -1531,11 +1570,14 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     const shouldLoadExternalAnalysis = section === 'reports' || section === 'dailyReport';
     setIsExternalAnalysisLoading(shouldLoadExternalAnalysis);
     setIsContentWritingLoading(shouldLoadExternalAnalysis);
+    setIsCrawlerProviderUsageLoading(shouldLoadExternalAnalysis);
     if (shouldLoadExternalAnalysis) setExternalAnalysisError('');
     if (shouldLoadExternalAnalysis) setContentWritingError('');
+    if (shouldLoadExternalAnalysis) setCrawlerProviderUsageError('');
     try {
       let externalReportLoadError = '';
       let contentWritingLoadError = '';
+      let crawlerProviderLoadError = '';
       const reportFrom = getIstanbulDayStart(selectedReportDate).toISOString();
       const reportTo = getIstanbulDayEnd(selectedReportDate).toISOString();
       const externalReportPromise = shouldLoadExternalAnalysis
@@ -1560,7 +1602,21 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
             return [] as ContentWritingReportSession[];
           })
         : Promise.resolve(null);
-      const [articleRows, profileRows, logRows, sessionRows, activityRows, externalReportRows, contentWritingRows] = await Promise.all([
+      const crawlerProviderPromise = shouldLoadExternalAnalysis
+        ? listCrawlerProviderReportEvents({
+            from: reportFrom,
+            to: reportTo,
+            limit: 2_000,
+          }).catch(reportError => {
+            console.error('Failed to load crawler provider usage reports:', reportError);
+            crawlerProviderLoadError = 'تعذر تحميل تقارير استخدام خدمات الزحف.';
+            return {
+              schemaAvailable: true,
+              events: [] as CrawlerProviderReportEvent[],
+            };
+          })
+        : Promise.resolve(null);
+      const [articleRows, profileRows, logRows, sessionRows, activityRows, externalReportRows, contentWritingRows, crawlerProviderRows] = await Promise.all([
         listRemoteArticles(),
         listRemoteProfiles(),
         listRemoteN8nIngestLogs(80),
@@ -1568,6 +1624,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
         listRemoteAppActivityEvents({ limit: 1000 }),
         externalReportPromise,
         contentWritingPromise,
+        crawlerProviderPromise,
       ]);
       setArticles(sortArticles(articleRows));
       setProfiles(profileRows);
@@ -1576,8 +1633,13 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       setActivityEvents(activityRows);
       if (externalReportRows) setExternalAnalysisJobs(externalReportRows);
       if (contentWritingRows) setContentWritingSessions(contentWritingRows);
+      if (crawlerProviderRows) {
+        setCrawlerProviderEvents(crawlerProviderRows.events);
+        setCrawlerProviderUsageSchemaAvailable(crawlerProviderRows.schemaAvailable);
+      }
       if (shouldLoadExternalAnalysis) setExternalAnalysisError(externalReportLoadError);
       if (shouldLoadExternalAnalysis) setContentWritingError(contentWritingLoadError);
+      if (shouldLoadExternalAnalysis) setCrawlerProviderUsageError(crawlerProviderLoadError);
     } catch (loadError) {
       console.error('Failed to load admin data:', loadError);
       setError('تعذر تحميل بيانات مركز المتابعة من Supabase.');
@@ -1585,6 +1647,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       setIsLoading(false);
       setIsExternalAnalysisLoading(false);
       setIsContentWritingLoading(false);
+      setIsCrawlerProviderUsageLoading(false);
     }
   }, [currentUser, isAdmin, section, selectedReportDate]);
 
@@ -2119,6 +2182,10 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
           contentWritingSessions={contentWritingSessions}
           isContentWritingLoading={isContentWritingLoading}
           contentWritingError={contentWritingError}
+          crawlerProviderEvents={crawlerProviderEvents}
+          isCrawlerProviderUsageLoading={isCrawlerProviderUsageLoading}
+          crawlerProviderUsageError={crawlerProviderUsageError}
+          crawlerProviderUsageSchemaAvailable={crawlerProviderUsageSchemaAvailable}
           secretStatus={secretStatus}
           isSecretStatusLoading={isSecretStatusLoading}
           onRefreshSecretStatus={refreshSecretStatus}

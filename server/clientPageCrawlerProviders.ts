@@ -17,6 +17,9 @@ import {
   resolveCrawlerProviderCredential,
   type CrawlerCredentialSource,
 } from './crawlerProviderSecrets.ts';
+import type {
+  CrawlerProviderAttemptTelemetry,
+} from './crawlerProviderUsage.ts';
 
 export type ClientPageProviderCrawlResult = {
   page: ClientPageCrawlResult;
@@ -24,6 +27,10 @@ export type ClientPageProviderCrawlResult = {
   credentialSource: CrawlerCredentialSource | null;
   fallbackReason: string | null;
 };
+
+type ProviderAttemptReporter = (
+  attempt: CrawlerProviderAttemptTelemetry,
+) => void | Promise<void>;
 
 const toRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === 'object' && !Array.isArray(value)
@@ -34,6 +41,45 @@ const toRecord = (value: unknown): Record<string, unknown> => (
 const toText = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
+
+const emitProviderAttempt = async (
+  reporter: ProviderAttemptReporter | undefined,
+  attempt: CrawlerProviderAttemptTelemetry,
+): Promise<void> => {
+  if (!reporter) return;
+  try {
+    await reporter(attempt);
+  } catch (error) {
+    console.warn(
+      '[client-page-crawler] Could not persist provider usage telemetry:',
+      error instanceof Error ? error.message : error,
+    );
+  }
+};
+
+const attemptErrorDetails = (error: unknown): {
+  errorCode: string;
+  errorMessage: string;
+  httpStatus: number | null;
+  retryable: boolean;
+} => {
+  if (error instanceof ClientPageCrawlerError) {
+    return {
+      errorCode: error.code,
+      errorMessage: error.message.slice(0, 2_000),
+      httpStatus: error.status >= 100 && error.status <= 599 ? error.status : null,
+      retryable: error.retryable,
+    };
+  }
+  return {
+    errorCode: 'client_page_crawl_provider_error',
+    errorMessage: error instanceof Error
+      ? error.message.slice(0, 2_000)
+      : String(error).slice(0, 2_000),
+    httpStatus: null,
+    retryable: true,
+  };
+};
 
 const boundedInteger = (
   value: string | undefined,
@@ -313,31 +359,86 @@ const crawlWithBrowserless = async (options: {
 
 const crawlExternalProvider = async (options: {
   provider: CrawlerExternalProvider;
+  requestedProvider: ClientSiteCrawlProvider;
   url: string;
   domains: AllowedClientDomain[];
   signal?: AbortSignal;
   timeoutMs: number;
   maximumBytes: number;
+  fallbackReason: string | null;
+  onAttempt?: ProviderAttemptReporter;
 }): Promise<ClientPageProviderCrawlResult> => {
-  await validatePublicClientUrl(options.url, options.domains);
-  const credential = await resolveCrawlerProviderCredential(options.provider);
-  if (!credential) {
-    throw new ClientPageCrawlerError({
-      code: `${options.provider}_not_configured`,
-      message: `${options.provider} is not configured by an administrator.`,
-      status: 503,
-      retryable: false,
+  const startedAtMs = Date.now();
+  const startedAt = new Date(startedAtMs).toISOString();
+  let credentialSource: CrawlerCredentialSource | null = null;
+  let keySuffix: string | null = null;
+  try {
+    await validatePublicClientUrl(options.url, options.domains);
+    const credential = await resolveCrawlerProviderCredential(options.provider);
+    if (!credential) {
+      throw new ClientPageCrawlerError({
+        code: `${options.provider}_not_configured`,
+        message: `${options.provider} is not configured by an administrator.`,
+        status: 503,
+        retryable: false,
+      });
+    }
+    credentialSource = credential.source;
+    keySuffix = credential.keySuffix;
+    const page = options.provider === 'firecrawl'
+      ? await crawlWithFirecrawl({ ...options, apiKey: credential.apiKey })
+      : await crawlWithBrowserless({ ...options, apiKey: credential.apiKey });
+    const completedAt = new Date().toISOString();
+    await emitProviderAttempt(options.onAttempt, {
+      requestedProvider: options.requestedProvider,
+      provider: options.provider,
+      credentialSource,
+      keySuffix,
+      status: 'completed',
+      targetUrl: options.url,
+      finalUrl: page.finalUrl,
+      httpStatus: page.httpStatus,
+      durationMs: Date.now() - startedAtMs,
+      wordCount: page.wordCount,
+      internalLinkCount: page.internalLinks.length,
+      responseContentType: page.responseContentType,
+      fallbackReason: options.fallbackReason,
+      errorCode: null,
+      errorMessage: null,
+      retryable: null,
+      startedAt,
+      completedAt,
     });
+    return {
+      page,
+      provider: options.provider,
+      credentialSource,
+      fallbackReason: options.fallbackReason,
+    };
+  } catch (error) {
+    const details = attemptErrorDetails(error);
+    await emitProviderAttempt(options.onAttempt, {
+      requestedProvider: options.requestedProvider,
+      provider: options.provider,
+      credentialSource,
+      keySuffix,
+      status: 'failed',
+      targetUrl: options.url,
+      finalUrl: null,
+      httpStatus: details.httpStatus,
+      durationMs: Date.now() - startedAtMs,
+      wordCount: null,
+      internalLinkCount: null,
+      responseContentType: null,
+      fallbackReason: options.fallbackReason,
+      errorCode: details.errorCode,
+      errorMessage: details.errorMessage,
+      retryable: details.retryable,
+      startedAt,
+      completedAt: new Date().toISOString(),
+    });
+    throw error;
   }
-  const page = options.provider === 'firecrawl'
-    ? await crawlWithFirecrawl({ ...options, apiKey: credential.apiKey })
-    : await crawlWithBrowserless({ ...options, apiKey: credential.apiKey });
-  return {
-    page,
-    provider: options.provider,
-    credentialSource: credential.source,
-    fallbackReason: null,
-  };
 };
 
 const localResultNeedsExternalFallback = (
@@ -359,6 +460,70 @@ const localErrorAllowsExternalFallback = (error: unknown): boolean => {
     ].includes(error.code);
 };
 
+const crawlLocalProvider = async (options: {
+  requestedProvider: ClientSiteCrawlProvider;
+  url: string;
+  domains: AllowedClientDomain[];
+  signal?: AbortSignal;
+  timeoutMs: number;
+  maximumBytes: number;
+  onAttempt?: ProviderAttemptReporter;
+}): Promise<ClientPageCrawlResult> => {
+  const startedAtMs = Date.now();
+  const startedAt = new Date(startedAtMs).toISOString();
+  try {
+    const page = await crawlClientPage(options);
+    const fallbackReason = options.requestedProvider === 'auto'
+      && localResultNeedsExternalFallback(page)
+      ? 'local_rendered_content_sparse'
+      : null;
+    await emitProviderAttempt(options.onAttempt, {
+      requestedProvider: options.requestedProvider,
+      provider: 'local',
+      credentialSource: null,
+      keySuffix: null,
+      status: 'completed',
+      targetUrl: options.url,
+      finalUrl: page.finalUrl,
+      httpStatus: page.httpStatus,
+      durationMs: Date.now() - startedAtMs,
+      wordCount: page.wordCount,
+      internalLinkCount: page.internalLinks.length,
+      responseContentType: page.responseContentType,
+      fallbackReason,
+      errorCode: null,
+      errorMessage: null,
+      retryable: null,
+      startedAt,
+      completedAt: new Date().toISOString(),
+    });
+    return page;
+  } catch (error) {
+    const details = attemptErrorDetails(error);
+    await emitProviderAttempt(options.onAttempt, {
+      requestedProvider: options.requestedProvider,
+      provider: 'local',
+      credentialSource: null,
+      keySuffix: null,
+      status: 'failed',
+      targetUrl: options.url,
+      finalUrl: null,
+      httpStatus: details.httpStatus,
+      durationMs: Date.now() - startedAtMs,
+      wordCount: null,
+      internalLinkCount: null,
+      responseContentType: null,
+      fallbackReason: null,
+      errorCode: details.errorCode,
+      errorMessage: details.errorMessage,
+      retryable: details.retryable,
+      startedAt,
+      completedAt: new Date().toISOString(),
+    });
+    throw error;
+  }
+};
+
 const tryAutomaticExternalFallback = async (options: {
   url: string;
   domains: AllowedClientDomain[];
@@ -366,11 +531,15 @@ const tryAutomaticExternalFallback = async (options: {
   timeoutMs: number;
   maximumBytes: number;
   fallbackReason: string;
+  onAttempt?: ProviderAttemptReporter;
 }): Promise<ClientPageProviderCrawlResult | null> => {
   for (const provider of ['firecrawl', 'browserless'] as const) {
     try {
-      const result = await crawlExternalProvider({ ...options, provider });
-      return { ...result, fallbackReason: options.fallbackReason };
+      return await crawlExternalProvider({
+        ...options,
+        provider,
+        requestedProvider: 'auto',
+      });
     } catch (error) {
       if (
         error instanceof ClientPageCrawlerError
@@ -398,6 +567,7 @@ export const crawlClientPageWithProvider = async (options: {
   signal?: AbortSignal;
   timeoutMs?: number;
   maximumBytes?: number;
+  onAttempt?: ProviderAttemptReporter;
 }): Promise<ClientPageProviderCrawlResult> => {
   const provider = normalizeClientSiteCrawlProvider(options.provider);
   const timeoutMs = Math.max(5_000, Math.min(options.timeoutMs ?? 45_000, 120_000));
@@ -411,15 +581,21 @@ export const crawlClientPageWithProvider = async (options: {
     signal: options.signal,
     timeoutMs,
     maximumBytes,
+    requestedProvider: provider,
+    onAttempt: options.onAttempt,
   };
 
   if (provider === 'firecrawl' || provider === 'browserless') {
-    return crawlExternalProvider({ ...shared, provider });
+    return crawlExternalProvider({
+      ...shared,
+      provider,
+      fallbackReason: null,
+    });
   }
 
   if (provider === 'local') {
     return {
-      page: await crawlClientPage(shared),
+      page: await crawlLocalProvider(shared),
       provider: 'local',
       credentialSource: null,
       fallbackReason: null,
@@ -429,7 +605,7 @@ export const crawlClientPageWithProvider = async (options: {
   let localPage: ClientPageCrawlResult | null = null;
   let localError: unknown = null;
   try {
-    localPage = await crawlClientPage(shared);
+    localPage = await crawlLocalProvider(shared);
     if (!localResultNeedsExternalFallback(localPage)) {
       return {
         page: localPage,

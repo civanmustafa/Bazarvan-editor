@@ -168,7 +168,7 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
         <div className="border-r-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
           {!overview?.schemaAvailable
             ? 'طبّق ترحيل مفاتيح خدمات الزحف قبل الحفظ.'
-            : 'أضف CRAWLER_SETTINGS_ENCRYPTION_KEY أو AI_SETTINGS_ENCRYPTION_KEY إلى بيئة الخادم ثم أعد تشغيل PM2.'}
+            : 'تعذر تهيئة التشفير الخادمي. تأكد من أن اتصال Supabase الخادمي يعمل ثم أعد تشغيل التطبيق.'}
         </div>
       )}
       {error && (

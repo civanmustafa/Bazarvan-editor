@@ -1,6 +1,7 @@
 import adminUsersHandler from '../api/adminUsers';
 import adminAiProviderSecretsHandler from '../api/adminAiProviderSecrets';
 import adminCrawlerProviderSecretsHandler from '../api/adminCrawlerProviderSecrets';
+import adminCrawlerProviderUsageHandler from '../api/adminCrawlerProviderUsage';
 import aiCapabilitiesHandler from '../api/aiCapabilities';
 import articlesSaveHandler from '../api/articlesSave';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
@@ -45,6 +46,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'user-ai-provider-secrets', method: 'ALL', path: '/api/user/ai-provider-secrets', handler: userAiProviderSecretsHandler },
   { id: 'admin-ai-provider-secrets', method: 'ALL', path: '/api/admin/ai-provider-secrets', handler: adminAiProviderSecretsHandler },
   { id: 'admin-crawler-provider-secrets', method: 'ALL', path: '/api/admin/crawler-provider-secrets', handler: adminCrawlerProviderSecretsHandler },
+  { id: 'admin-crawler-provider-usage', method: 'ALL', path: '/api/admin/crawler-provider-usage', handler: adminCrawlerProviderUsageHandler },
   { id: 'admin-users', method: 'ALL', path: '/api/admin/users', handler: adminUsersHandler },
 ] as const;
 

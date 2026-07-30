@@ -259,6 +259,37 @@ test('hybrid crawler keeps provider keys server-only and records the requested s
   assertBalancedSqlParentheses(hybridMigration);
 });
 
+test('crawler provider usage reports audit every attempt without storing raw keys', async () => {
+  const [
+    migration,
+    telemetry,
+    worker,
+    reportApi,
+    reportUi,
+    adminApp,
+  ] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260730030000_crawler_provider_usage_reports.sql'),
+    readWorkspaceFile('server/crawlerProviderUsage.ts'),
+    readWorkspaceFile('server/clientPageCrawlWorker.ts'),
+    readWorkspaceFile('api/adminCrawlerProviderUsage.ts'),
+    readWorkspaceFile('components/CrawlerProviderUsageReportsTable.tsx'),
+    readWorkspaceFile('components/AdminApp.tsx'),
+  ]);
+
+  assert.match(migration, /create table if not exists public\.crawler_provider_usage_events/);
+  assert.match(migration, /credential_source/);
+  assert.match(migration, /key_suffix/);
+  assert.match(migration, /revoke all on table public\.crawler_provider_usage_events from public, anon, authenticated/);
+  assert.doesNotMatch(migration, /\bapi_key\b/);
+  assert.match(telemetry, /recordCrawlerProviderUsageEvent/);
+  assert.match(worker, /onAttempt: async attempt => \{[\s\S]+recordCrawlerProviderUsageEvent/);
+  assert.match(reportApi, /principal\.role !== 'admin'/);
+  assert.match(reportApi, /admin:crawler-provider-usage/);
+  assert.match(reportUi, /مصدر المفتاح/);
+  assert.match(adminApp, /CrawlerProviderUsageReportsTable/);
+  assertBalancedSqlParentheses(migration);
+});
+
 test('Client Center phase 3 migration restricts durable crawl RPCs to service role', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260724020000_client_center_management_and_crawling.sql',

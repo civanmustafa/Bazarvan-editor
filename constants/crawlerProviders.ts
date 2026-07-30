@@ -12,6 +12,8 @@ export const CRAWLER_PROVIDER_SECRETS_MIGRATION =
   '20260730010000_crawler_provider_secrets.sql';
 export const CLIENT_CENTER_HYBRID_CRAWLER_MIGRATION =
   '20260730020000_hybrid_client_site_crawler.sql';
+export const CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION =
+  '20260730030000_crawler_provider_usage_reports.sql';
 
 export const isCrawlerExternalProvider = (
   value: unknown,

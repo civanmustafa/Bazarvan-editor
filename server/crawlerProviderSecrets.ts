@@ -1,6 +1,7 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createHash,
   randomBytes,
 } from 'node:crypto';
 import {
@@ -46,6 +47,7 @@ export type CrawlerProviderSecretsOverview = {
 export type ResolvedCrawlerProviderCredential = {
   apiKey: string;
   source: CrawlerCredentialSource;
+  keySuffix: string;
 };
 
 export class CrawlerProviderSecretError extends Error {
@@ -94,15 +96,23 @@ const parseEncryptionKey = (): Buffer | null => {
     || process.env.AI_SETTINGS_ENCRYPTION_KEY
     || '',
   ).trim();
-  if (!rawValue) return null;
-  if (/^[a-f0-9]{64}$/i.test(rawValue)) return Buffer.from(rawValue, 'hex');
+  if (rawValue) {
+    if (/^[a-f0-9]{64}$/i.test(rawValue)) return Buffer.from(rawValue, 'hex');
 
-  const base64Value = rawValue.startsWith('base64:')
-    ? rawValue.slice('base64:'.length)
-    : rawValue;
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64Value)) return null;
-  const decoded = Buffer.from(base64Value, 'base64');
-  return decoded.length === ENCRYPTION_KEY_BYTES ? decoded : null;
+    const base64Value = rawValue.startsWith('base64:')
+      ? rawValue.slice('base64:'.length)
+      : rawValue;
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64Value)) return null;
+    const decoded = Buffer.from(base64Value, 'base64');
+    return decoded.length === ENCRYPTION_KEY_BYTES ? decoded : null;
+  }
+
+  const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!serviceRoleKey) return null;
+  return createHash('sha256')
+    .update('bazarvan:crawler-provider-secrets:service-role-derived:v1\0', 'utf8')
+    .update(serviceRoleKey, 'utf8')
+    .digest();
 };
 
 export const isCrawlerSettingsEncryptionConfigured = (): boolean => (
@@ -113,7 +123,7 @@ const requireEncryptionKey = (): Buffer => {
   const key = parseEncryptionKey();
   if (!key) {
     throw new CrawlerProviderSecretError(
-      'CRAWLER_SETTINGS_ENCRYPTION_KEY or AI_SETTINGS_ENCRYPTION_KEY must contain 32 bytes encoded as Base64 or 64 hexadecimal characters.',
+      'Crawler secret encryption is unavailable because the server credential is not configured.',
       503,
       'CRAWLER_SECRET_ENCRYPTION_KEY_MISSING',
     );
@@ -297,10 +307,13 @@ export const resolveCrawlerProviderCredential = async (
     return {
       apiKey: normalizeApiKey(decryptSecret(row)),
       source: 'admin',
+      keySuffix: row.key_suffix,
     };
   }
   const fallback = getEnvironmentCrawlerApiKey(provider);
-  return fallback ? { apiKey: fallback, source: 'hostinger' } : null;
+  return fallback
+    ? { apiKey: fallback, source: 'hostinger', keySuffix: fallback.slice(-4) }
+    : null;
 };
 
 export const saveCrawlerProviderSecret = async (options: {

@@ -7,7 +7,7 @@ export const CLIENT_CENTER_QUALITY_POLICY_MIGRATION = '20260724060000_internal_l
 export const CLIENT_CENTER_DRAFT_CREATION_MIGRATION = '20260725010000_client_draft_creation.sql';
 export const CLIENT_CENTER_CRAWL_SOURCE_MIGRATION = '20260728050000_client_page_crawl_source.sql';
 export const CLIENT_CENTER_SITE_CRAWLER_MIGRATION = '20260728060000_local_client_site_crawler.sql';
-export const CLIENT_CENTER_REQUIRED_MIGRATION = CLIENT_CENTER_HYBRID_CRAWLER_MIGRATION;
+export const CLIENT_CENTER_REQUIRED_MIGRATION = CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION;
 
 export const CLIENT_CENTER_SCHEMA_PROBES = [
   {
@@ -44,6 +44,11 @@ export const CLIENT_CENTER_SCHEMA_PROBES = [
     id: 'crawlerProviderSecrets',
     table: 'crawler_provider_secrets',
     columns: 'provider,enabled,key_suffix,updated_at',
+  },
+  {
+    id: 'crawlerProviderUsage',
+    table: 'crawler_provider_usage_events',
+    columns: 'id,crawl_job_id,crawl_run_id,client_id,page_id,requested_by,job_attempt,requested_provider,provider,credential_source,key_suffix,status,target_url,final_url,http_status,duration_ms,word_count,internal_link_count,fallback_reason,error_code,retryable,started_at,completed_at,created_at',
   },
   {
     id: 'internalLinkGraph',
@@ -84,9 +89,11 @@ export const CLIENT_CENTER_SCHEMA_PROBES = [
 import {
   CLIENT_CENTER_HYBRID_CRAWLER_MIGRATION,
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
+  CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
 } from './crawlerProviders.ts';
 
 export {
   CLIENT_CENTER_HYBRID_CRAWLER_MIGRATION,
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
+  CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
 } from './crawlerProviders.ts';
