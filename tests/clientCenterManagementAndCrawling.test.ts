@@ -4,6 +4,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import {
+  extractClientPageLinksFromHtml,
   extractClientPageMetadataFromHtml,
 } from '../server/clientPageCrawler.ts';
 
@@ -164,6 +165,98 @@ test('deterministic crawler extracts page metadata without AI', () => {
   assert.match(result.contentHash, /^[a-f0-9]{64}$/);
   assert.ok(result.extractedTerms.includes('التحول'));
   assert.equal(result.extractedTerms.includes('وهميه'), false);
+});
+
+test('local site crawler extracts approved links and normalizes tracking URLs', () => {
+  const links = extractClientPageLinksFromHtml({
+    finalUrl: 'https://example.com/start',
+    domains: [{ hostname: 'example.com', includeSubdomains: false }],
+    html: `
+      <a href="/services?utm_source=newsletter#details">خدمات <strong>الشركة</strong></a>
+      <a href="/services?utm_source=other">خدمات الشركة</a>
+      <a href="/private" rel="nofollow sponsored">منطقة خاصة</a>
+      <a href="/guide.pdf">دليل PDF</a>
+      <a href="https://outside.example/page">رابط خارجي</a>
+      <a href="mailto:test@example.com">بريد</a>
+    `,
+  });
+
+  assert.equal(links.length, 3);
+  assert.deepEqual(links[0], {
+    targetUrl: 'https://example.com/services',
+    anchorText: 'خدمات الشركة',
+    relNofollow: false,
+    relSponsored: false,
+    relUgc: false,
+    crawlable: true,
+    occurrenceCount: 2,
+  });
+  assert.equal(links[1].targetUrl, 'https://example.com/private');
+  assert.equal(links[1].relNofollow, true);
+  assert.equal(links[1].relSponsored, true);
+  assert.equal(links[2].targetUrl, 'https://example.com/guide.pdf');
+  assert.equal(links[2].crawlable, false);
+});
+
+test('local site crawl migration and API are bounded and service-role controlled', async () => {
+  const [migration, sourceMigration, api, worker, registry] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260728060000_local_client_site_crawler.sql'),
+    readWorkspaceFile('supabase/migrations/20260728050000_client_page_crawl_source.sql'),
+    readWorkspaceFile('api/clientSiteCrawler.ts'),
+    readWorkspaceFile('server/clientPageCrawlWorker.ts'),
+    readWorkspaceFile('server/apiRouteRegistry.ts'),
+  ]);
+
+  assert.match(sourceMigration, /add value if not exists 'crawl'/);
+  assert.match(migration, /create table if not exists public\.client_site_crawl_runs/);
+  assert.match(migration, /create table if not exists public\.client_internal_links/);
+  assert.match(migration, /max_pages between 1 and 2000/);
+  assert.match(migration, /max_depth between 0 and 20/);
+  assert.match(migration, /client_site_crawl_runs_one_active_idx/);
+  assert.match(migration, /process_completed_client_page_links/);
+  assert.match(migration, /grant execute on function public\.start_client_site_crawl[^;]+to service_role/);
+  assert.match(migration, /revoke all on function public\.start_client_site_crawl[^;]+authenticated/);
+  assert.match(api, /authenticateApiRequest/);
+  assert.match(api, /sanitizeDiscoveredClientUrl/);
+  assert.match(api, /CLIENT_SITE_CRAWL_API_RATE_LIMIT/);
+  assert.match(worker, /internalLinks: result\.internalLinks/);
+  assert.match(registry, /client-site-crawl/);
+  assertBalancedSqlParentheses(migration);
+});
+
+test('hybrid crawler keeps provider keys server-only and records the requested strategy', async () => {
+  const [
+    secretMigration,
+    hybridMigration,
+    secretApi,
+    providerAdapter,
+    worker,
+    settingsPage,
+  ] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260730010000_crawler_provider_secrets.sql'),
+    readWorkspaceFile('supabase/migrations/20260730020000_hybrid_client_site_crawler.sql'),
+    readWorkspaceFile('api/adminCrawlerProviderSecrets.ts'),
+    readWorkspaceFile('server/clientPageCrawlerProviders.ts'),
+    readWorkspaceFile('server/clientPageCrawlWorker.ts'),
+    readWorkspaceFile('components/SettingsPage.tsx'),
+  ]);
+
+  assert.match(secretMigration, /create table if not exists public\.crawler_provider_secrets/);
+  assert.match(secretMigration, /provider in \('firecrawl', 'browserless'\)/);
+  assert.match(secretMigration, /revoke all on table public\.crawler_provider_secrets from authenticated/);
+  assert.match(secretMigration, /grant select, insert, update, delete[\s\S]+to service_role/);
+  assert.match(hybridMigration, /provider in \('auto', 'local', 'firecrawl', 'browserless'\)/);
+  assert.match(hybridMigration, /p_provider text/);
+  assert.match(secretApi, /principal\.role !== 'admin'/);
+  assert.match(secretApi, /Cache-Control': 'no-store'/);
+  assert.match(providerAdapter, /formats: \['html'\]/);
+  assert.match(providerAdapter, /\/content\?token=/);
+  assert.match(providerAdapter, /validatePublicClientUrl/);
+  assert.match(worker, /crawlClientPageWithProvider/);
+  assert.match(worker, /credentialSource/);
+  assert.match(settingsPage, /AdminCrawlerProviderSecretsSettings/);
+  assertBalancedSqlParentheses(secretMigration);
+  assertBalancedSqlParentheses(hybridMigration);
 });
 
 test('Client Center phase 3 migration restricts durable crawl RPCs to service role', async () => {

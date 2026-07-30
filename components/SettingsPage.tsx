@@ -11,6 +11,7 @@ import {
   ListTree,
   NotebookTabs,
   PaintRoller,
+  Radar,
   RefreshCw,
   Save,
   Shield,
@@ -24,6 +25,7 @@ import ClientGoalSettings from './ClientGoalSettings';
 import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import ContentWritingPromptSettings from './ContentWritingPromptSettings';
 import AdminAiProviderSecretsSettings from './AdminAiProviderSecretsSettings';
+import AdminCrawlerProviderSecretsSettings from './AdminCrawlerProviderSecretsSettings';
 import UserAiProviderSecretsSettings from './UserAiProviderSecretsSettings';
 import AdminPromptRegistrySettings from './AdminPromptRegistrySettings';
 import ClientCenterSettings from './ClientCenterSettings';
@@ -55,7 +57,7 @@ type SettingsPageProps = {
   section: string | null;
 };
 
-type SettingsSectionKey = SystemSettingKey | 'clients' | 'users';
+type SettingsSectionKey = SystemSettingKey | 'clients' | 'users' | 'crawler';
 
 type SettingsTab = {
   key: SettingsSectionKey;
@@ -243,6 +245,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const tabs: SettingsTab[] = useMemo(() => [
     { key: 'system', label: 'النظام', path: '/settings/system', icon: <Shield size={16} /> },
     { key: 'ai', label: 'الذكاء الاصطناعي', path: '/settings/ai', icon: <Key size={16} /> },
+    { key: 'crawler', label: 'خدمات الزحف', path: '/settings/crawler', icon: <Radar size={16} /> },
     { key: 'prompts', label: 'الأوامر الهندسية', path: '/settings/prompts', icon: <TerminalSquare size={16} /> },
     { key: 'n8n', label: 'n8n', path: '/settings/n8n', icon: <Workflow size={16} /> },
     { key: 'clients', label: 'العملاء', path: '/settings/clients', icon: <Users size={16} /> },
@@ -570,6 +573,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     </div>
   );
 
+  const renderCrawlerSettings = () => (
+    <div className="space-y-6">
+      <SettingsSection title="مفاتيح خدمات الزحف الخارجية">
+        <AdminCrawlerProviderSecretsSettings />
+      </SettingsSection>
+    </div>
+  );
+
   const renderSystemSettings = () => (
     <div className="space-y-6">
       <SettingsSection title="النظام">
@@ -686,6 +697,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     }
 
     if (selectedSection === 'ai') return renderAiSettings();
+    if (selectedSection === 'crawler') return renderCrawlerSettings();
     if (selectedSection === 'prompts') return renderPromptSettings();
     if (selectedSection === 'n8n') return renderN8nSettings();
     if (selectedSection === 'clients') return renderClientSettings();

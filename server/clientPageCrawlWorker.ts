@@ -4,8 +4,8 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
   ClientPageCrawlerError,
-  crawlClientPage,
 } from './clientPageCrawler';
+import { crawlClientPageWithProvider } from './clientPageCrawlerProviders';
 import {
   claimNextClientPageCrawlJob,
   completeClientPageCrawlJob,
@@ -138,7 +138,8 @@ const executeClaimedJob = async (
       });
     }
 
-    const result = await crawlClientPage({
+    const providerResult = await crawlClientPageWithProvider({
+      provider: input.provider,
       url: input.page.input_url,
       domains: input.domains.map(domain => ({
         hostname: domain.hostname,
@@ -148,6 +149,7 @@ const executeClaimedJob = async (
       timeoutMs: crawlTimeoutMs,
       maximumBytes,
     });
+    const result = providerResult.page;
 
     if (controller.signal.reason instanceof ClientPageCrawlLostLeaseError) return;
     const completed = await completeClientPageCrawlJob({
@@ -155,12 +157,19 @@ const executeClaimedJob = async (
       workerId: slotWorkerId,
       page: result,
       resultSummary: {
-        extraction: 'deterministic_html',
+        extraction: providerResult.provider === 'local'
+          ? 'deterministic_html'
+          : 'rendered_html',
+        provider: providerResult.provider,
+        credentialSource: providerResult.credentialSource,
+        fallbackReason: providerResult.fallbackReason,
         finalUrl: result.finalUrl,
         httpStatus: result.httpStatus,
         wordCount: result.wordCount,
         redirectCount: result.redirectCount,
         crawlDurationMs: result.crawlDurationMs,
+        robotsFollow: result.robotsFollow,
+        internalLinks: result.internalLinks,
       },
     });
     if (completed) {
@@ -174,7 +183,11 @@ const executeClaimedJob = async (
       } catch (indexError) {
         logThrottledError(`Semantic indexing failed for ${input.page.id}`, indexError);
       }
-      console.log(`[client-page-crawler] Completed ${job.id} for ${input.page.input_url}.`);
+      console.log(
+        `[client-page-crawler] Completed ${job.id} for ${input.page.input_url};`
+        + ` provider=${providerResult.provider}`
+        + ` internalLinks=${result.internalLinks.length}.`,
+      );
     }
   } catch (error) {
     const abortReason = controller.signal.reason;

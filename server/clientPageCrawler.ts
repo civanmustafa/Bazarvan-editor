@@ -7,6 +7,16 @@ export type AllowedClientDomain = {
   includeSubdomains: boolean;
 };
 
+export type ExtractedClientPageLink = {
+  targetUrl: string;
+  anchorText: string;
+  relNofollow: boolean;
+  relSponsored: boolean;
+  relUgc: boolean;
+  crawlable: boolean;
+  occurrenceCount: number;
+};
+
 export type ClientPageCrawlResult = {
   finalUrl: string;
   canonicalUrl: string;
@@ -27,6 +37,7 @@ export type ClientPageCrawlResult = {
   responseContentType: string;
   redirectCount: number;
   crawlDurationMs: number;
+  internalLinks: ExtractedClientPageLink[];
 };
 
 export class ClientPageCrawlerError extends Error {
@@ -64,6 +75,8 @@ const TRACKING_QUERY_KEYS = new Set([
   'mc_cid',
   'mc_eid',
 ]);
+
+const NON_HTML_PATH_EXTENSION = /\.(?:7z|avi|avif|bmp|csv|doc|docx|epub|gif|gz|ico|jpe?g|m4a|m4v|mov|mp3|mp4|mpeg|odp|ods|odt|pdf|png|ppt|pptx|rar|rss|svg|tar|tiff?|txt|wav|webm|webp|xls|xlsx|xml|zip)$/i;
 
 const ARABIC_STOP_WORDS = new Set([
   'في', 'من', 'إلى', 'الى', 'على', 'عن', 'مع', 'هذا', 'هذه', 'ذلك', 'تلك', 'هو', 'هي', 'هم',
@@ -139,13 +152,18 @@ export const sanitizeDiscoveredClientUrl = (
     }
     url.hash = '';
     url.hostname = hostname;
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (key.toLowerCase().startsWith('utm_') || TRACKING_QUERY_KEYS.has(key.toLowerCase())) {
+        url.searchParams.delete(key);
+      }
+    }
     return url.toString().slice(0, 2_048);
   } catch {
     return fallback;
   }
 };
 
-const validatePublicClientUrl = async (
+export const validatePublicClientUrl = async (
   value: string,
   domains: AllowedClientDomain[],
 ): Promise<URL> => {
@@ -442,6 +460,67 @@ const parseRobots = (value: string): { index: boolean; follow: boolean } => {
   };
 };
 
+export const extractClientPageLinksFromHtml = (options: {
+  html: string;
+  finalUrl: string;
+  domains: AllowedClientDomain[];
+  maximumLinks?: number;
+}): ExtractedClientPageLink[] => {
+  const maximumLinks = Math.max(1, Math.min(options.maximumLinks ?? 1_000, 2_000));
+  const links = new Map<string, ExtractedClientPageLink>();
+  const expression = /<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi;
+
+  for (const match of options.html.matchAll(expression)) {
+    const attributes = parseAttributes(`<a ${match[1] || ''}>`);
+    const rawHref = attributes.href?.trim() || '';
+    if (!rawHref || rawHref.startsWith('#')) continue;
+
+    let resolvedUrl = '';
+    try {
+      resolvedUrl = sanitizeDiscoveredClientUrl(
+        new URL(rawHref, options.finalUrl).toString(),
+        '',
+        options.domains,
+      );
+    } catch {
+      continue;
+    }
+    if (!resolvedUrl) continue;
+
+    const relations = new Set(
+      (attributes.rel || '').toLowerCase().split(/[\s,]+/).filter(Boolean),
+    );
+    const anchorText = cleanText(match[2] || '', 500);
+    const target = new URL(resolvedUrl);
+    const crawlable = !NON_HTML_PATH_EXTENSION.test(target.pathname);
+    const key = [
+      resolvedUrl,
+      anchorText,
+      relations.has('nofollow') ? '1' : '0',
+      relations.has('sponsored') ? '1' : '0',
+      relations.has('ugc') ? '1' : '0',
+    ].join('\n');
+    const existing = links.get(key);
+    if (existing) {
+      existing.occurrenceCount = Math.min(10_000, existing.occurrenceCount + 1);
+      continue;
+    }
+
+    links.set(key, {
+      targetUrl: resolvedUrl,
+      anchorText,
+      relNofollow: relations.has('nofollow'),
+      relSponsored: relations.has('sponsored'),
+      relUgc: relations.has('ugc'),
+      crawlable,
+      occurrenceCount: 1,
+    });
+    if (links.size >= maximumLinks) break;
+  }
+
+  return [...links.values()];
+};
+
 export const extractClientPageMetadataFromHtml = (options: {
   html: string;
   finalUrl: string;
@@ -487,6 +566,7 @@ export const extractClientPageMetadataFromHtml = (options: {
     responseContentType: options.responseContentType.slice(0, 300),
     redirectCount: Math.max(0, Math.min(options.redirectCount || 0, 10)),
     crawlDurationMs: Math.max(0, options.crawlDurationMs || 0),
+    internalLinks: [],
   };
 };
 
@@ -635,6 +715,11 @@ export const crawlClientPage = async (options: {
       ),
       robotsIndex: extracted.robotsIndex && headerRobots.index,
       robotsFollow: extracted.robotsFollow && headerRobots.follow,
+      internalLinks: extractClientPageLinksFromHtml({
+        html,
+        finalUrl: finalUrl.toString(),
+        domains: options.domains,
+      }),
     };
   } finally {
     fetched.cleanup();

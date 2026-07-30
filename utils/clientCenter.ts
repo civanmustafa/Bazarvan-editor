@@ -11,7 +11,7 @@ import {
 } from './internalLinkQualityPolicy';
 
 export type ClientAssignmentAccess = 'viewer' | 'editor';
-export type ClientPageSource = 'manual' | 'csv' | 'sitemap';
+export type ClientPageSource = 'manual' | 'csv' | 'sitemap' | 'crawl';
 export type ClientPageStatus =
   | 'pending'
   | 'crawling'
@@ -116,6 +116,8 @@ export type ClientCenterCrawlJob = {
   finishedAt: string | null;
   errorCode: string;
   errorMessage: string;
+  crawlRunId: string | null;
+  crawlDepth: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -237,6 +239,8 @@ const JOB_COLUMNS = [
   'finished_at',
   'error_code',
   'error_message',
+  'crawl_run_id',
+  'crawl_depth',
   'created_at',
   'updated_at',
 ].join(',');
@@ -328,7 +332,9 @@ const mapAssignment = (row: any): ClientCenterAssignment => ({
 const mapPage = (row: any): ClientCenterPage => ({
   id: text(row.id),
   clientId: text(row.client_id),
-  source: row.source === 'csv' || row.source === 'sitemap' ? row.source : 'manual',
+  source: row.source === 'csv' || row.source === 'sitemap' || row.source === 'crawl'
+    ? row.source
+    : 'manual',
   inputUrl: text(row.input_url),
   finalUrl: text(row.final_url),
   canonicalUrl: text(row.canonical_url),
@@ -380,6 +386,8 @@ const mapJob = (row: any): ClientCenterCrawlJob => ({
   finishedAt: typeof row.finished_at === 'string' ? row.finished_at : null,
   errorCode: text(row.error_code),
   errorMessage: text(row.error_message),
+  crawlRunId: typeof row.crawl_run_id === 'string' ? row.crawl_run_id : null,
+  crawlDepth: Number(row.crawl_depth) || 0,
   createdAt: text(row.created_at),
   updatedAt: text(row.updated_at),
 });

@@ -1,9 +1,11 @@
 import adminUsersHandler from '../api/adminUsers';
 import adminAiProviderSecretsHandler from '../api/adminAiProviderSecrets';
+import adminCrawlerProviderSecretsHandler from '../api/adminCrawlerProviderSecrets';
 import aiCapabilitiesHandler from '../api/aiCapabilities';
 import articlesSaveHandler from '../api/articlesSave';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import chatgptHandler from '../api/chatgpt';
+import clientSiteCrawlerHandler from '../api/clientSiteCrawler';
 import contentWritingHandler from '../api/contentWriting';
 import contentWritingExternalResultHandler from '../api/contentWritingExternalResult';
 import competitorsHandler from '../api/competitors';
@@ -29,6 +31,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'gemini-progress', method: 'ALL', path: '/api/gemini/progress/:progressId', handler: geminiProgressHandler },
   { id: 'gemini', method: 'ALL', path: '/api/gemini', handler: geminiHandler },
   { id: 'chatgpt', method: 'ALL', path: '/api/chatgpt', handler: chatgptHandler },
+  { id: 'client-site-crawl', method: 'ALL', path: '/api/client-site-crawl', handler: clientSiteCrawlerHandler },
   { id: 'content-writing', method: 'ALL', path: '/api/content-writing', handler: contentWritingHandler },
   { id: 'content-writing-external-result', method: 'ALL', path: '/api/content-writing/external-result', handler: contentWritingExternalResultHandler },
   { id: 'ai-capabilities', method: 'ALL', path: '/api/ai/capabilities', handler: aiCapabilitiesHandler },
@@ -41,6 +44,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'system-settings', method: 'ALL', path: '/api/system/settings', handler: systemSettingsHandler },
   { id: 'user-ai-provider-secrets', method: 'ALL', path: '/api/user/ai-provider-secrets', handler: userAiProviderSecretsHandler },
   { id: 'admin-ai-provider-secrets', method: 'ALL', path: '/api/admin/ai-provider-secrets', handler: adminAiProviderSecretsHandler },
+  { id: 'admin-crawler-provider-secrets', method: 'ALL', path: '/api/admin/crawler-provider-secrets', handler: adminCrawlerProviderSecretsHandler },
   { id: 'admin-users', method: 'ALL', path: '/api/admin/users', handler: adminUsersHandler },
 ] as const;
 

@@ -15,6 +15,7 @@ import {
   Save,
   Search,
   ShieldCheck,
+  Square,
   Trash2,
   UserPlus,
   Users,
@@ -59,6 +60,13 @@ import {
   type InternalLinkQualityPolicyValues,
 } from '../utils/internalLinkQualityPolicy';
 import { notifyClientDirectoryChanged } from '../hooks/useClientDirectory';
+import {
+  cancelClientSiteCrawl,
+  loadClientSiteCrawlState,
+  startClientSiteCrawl,
+  type ClientSiteCrawlProvider,
+  type ClientSiteCrawlState,
+} from '../utils/clientSiteCrawler';
 
 type ClientCenterTab = 'profile' | 'pages' | 'index' | 'access';
 
@@ -80,6 +88,25 @@ const EMPTY_CLIENT_INPUT: ClientCenterClientInput = {
   industry: '',
   companySummary: '',
   isActive: true,
+};
+
+const EMPTY_SITE_CRAWL_STATE: ClientSiteCrawlState = {
+  runs: [],
+  activeInternalLinkCount: 0,
+  providerAvailability: {
+    auto: true,
+    local: true,
+    firecrawl: false,
+    browserless: false,
+  },
+  links: [],
+};
+
+const crawlProviderLabels: Record<ClientSiteCrawlProvider, string> = {
+  auto: 'تلقائي: محلي ثم خارجي عند الحاجة',
+  local: 'محلي فقط',
+  firecrawl: 'Firecrawl',
+  browserless: 'Browserless',
 };
 
 const inputClass = 'w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-[#d4af37] focus:ring-2 focus:ring-[#d4af37]/20 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100';
@@ -239,6 +266,15 @@ const ClientCenterSettings: React.FC = () => {
   const [assignmentUserId, setAssignmentUserId] = useState('');
   const [assignmentAccess, setAssignmentAccess] = useState<ClientAssignmentAccess>('viewer');
   const [urlsInput, setUrlsInput] = useState('');
+  const [siteCrawlState, setSiteCrawlState] = useState<ClientSiteCrawlState>(
+    EMPTY_SITE_CRAWL_STATE,
+  );
+  const [siteCrawlStartUrl, setSiteCrawlStartUrl] = useState('');
+  const [siteCrawlMaxPages, setSiteCrawlMaxPages] = useState(250);
+  const [siteCrawlMaxDepth, setSiteCrawlMaxDepth] = useState(6);
+  const [siteCrawlFollowNofollow, setSiteCrawlFollowNofollow] = useState(false);
+  const [siteCrawlProvider, setSiteCrawlProvider] =
+    useState<ClientSiteCrawlProvider>('auto');
   const [pageQuery, setPageQuery] = useState('');
   const [expandedPageId, setExpandedPageId] = useState('');
   const [dictionaryType, setDictionaryType] = useState<ClientLinkDictionaryType>('synonym');
@@ -262,6 +298,9 @@ const ClientCenterSettings: React.FC = () => {
     || details.domains[0]
     || null
   ), [details.domains]);
+  const activeSiteCrawl = siteCrawlState.runs.find(run => (
+    run.status === 'queued' || run.status === 'running'
+  )) || null;
 
   const semanticProfileByPage = useMemo(() => new Map(
     details.semanticProfiles.map(profile => [profile.pageId, profile] as const),
@@ -333,6 +372,18 @@ const ClientCenterSettings: React.FC = () => {
     }
   }, []);
 
+  const refreshSiteCrawlState = useCallback(async (clientId: string, quiet = false) => {
+    if (!clientId) {
+      setSiteCrawlState(EMPTY_SITE_CRAWL_STATE);
+      return;
+    }
+    try {
+      setSiteCrawlState(await loadClientSiteCrawlState(clientId));
+    } catch (loadError) {
+      if (!quiet) showError(loadError);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshClients();
   }, [refreshClients]);
@@ -340,10 +391,25 @@ const ClientCenterSettings: React.FC = () => {
   useEffect(() => {
     if (!selectedClientId) {
       setDetails(EMPTY_DETAILS);
+      setSiteCrawlState(EMPTY_SITE_CRAWL_STATE);
       return;
     }
-    void refreshDetails(selectedClientId);
-  }, [refreshDetails, selectedClientId]);
+    void Promise.all([
+      refreshDetails(selectedClientId),
+      refreshSiteCrawlState(selectedClientId),
+    ]);
+  }, [refreshDetails, refreshSiteCrawlState, selectedClientId]);
+
+  useEffect(() => {
+    setSiteCrawlStartUrl('');
+    setSiteCrawlProvider('auto');
+  }, [selectedClientId]);
+
+  useEffect(() => {
+    if (!siteCrawlStartUrl && primaryClientDomain?.hostname) {
+      setSiteCrawlStartUrl(`https://${primaryClientDomain.hostname}/`);
+    }
+  }, [primaryClientDomain?.hostname, siteCrawlStartUrl]);
 
   useEffect(() => {
     if (selectedClient) setClientInput(clientToInput(selectedClient));
@@ -370,12 +436,21 @@ const ClientCenterSettings: React.FC = () => {
   ));
 
   useEffect(() => {
-    if (!selectedClientId || !hasActiveJobs) return;
+    if (!selectedClientId || (!hasActiveJobs && !activeSiteCrawl)) return;
     const timer = window.setInterval(() => {
-      void refreshDetails(selectedClientId, true);
+      void Promise.all([
+        refreshDetails(selectedClientId, true),
+        refreshSiteCrawlState(selectedClientId, true),
+      ]);
     }, 7_000);
     return () => window.clearInterval(timer);
-  }, [hasActiveJobs, refreshDetails, selectedClientId]);
+  }, [
+    activeSiteCrawl,
+    hasActiveJobs,
+    refreshDetails,
+    refreshSiteCrawlState,
+    selectedClientId,
+  ]);
 
   const latestJobByPage = useMemo(() => {
     const result = new Map<string, ClientCenterDetails['jobs'][number]>();
@@ -521,6 +596,52 @@ const ClientCenterSettings: React.FC = () => {
       );
     } catch (addError) {
       showError(addError);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleStartSiteCrawl = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedClientId || !siteCrawlStartUrl.trim() || isSaving) return;
+    setIsSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await startClientSiteCrawl({
+        clientId: selectedClientId,
+        startUrl: siteCrawlStartUrl,
+        maxPages: siteCrawlMaxPages,
+        maxDepth: siteCrawlMaxDepth,
+        followNofollow: siteCrawlFollowNofollow,
+        provider: siteCrawlProvider,
+      });
+      await Promise.all([
+        refreshDetails(selectedClientId, true),
+        refreshSiteCrawlState(selectedClientId, true),
+      ]);
+      showMessage('بدأ زحف الموقع. سيكتشف النظام الروابط ويضيف الصفحات تلقائيًا ضمن الحدود والمزوّد المحددين.');
+    } catch (crawlError) {
+      showError(crawlError);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancelSiteCrawl = async (runId: string) => {
+    if (!selectedClientId || isSaving) return;
+    setIsSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await cancelClientSiteCrawl(selectedClientId, runId);
+      await Promise.all([
+        refreshDetails(selectedClientId, true),
+        refreshSiteCrawlState(selectedClientId, true),
+      ]);
+      showMessage('تم إيقاف الزحف. قد يُكمل العامل الصفحة التي كان يعالجها دون جدولة صفحات جديدة.');
+    } catch (crawlError) {
+      showError(crawlError);
     } finally {
       setIsSaving(false);
     }
@@ -682,6 +803,140 @@ const ClientCenterSettings: React.FC = () => {
       <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs font-semibold leading-6 text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
         تُقرأ صفحات الموقع العامة فقط. يستخرج النظام العنوان والوصف والعناوين واللغة والفهرسة والمصطلحات بخوارزميات برمجية، ولا يستخدم مقالات المحرر أو الذكاء الاصطناعي.
       </div>
+      {canEditPages && (
+        <form onSubmit={handleStartSiteCrawl} className="rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/5 p-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
+            <div className="min-w-0 flex-1">
+              <Field
+                label="زحف الموقع عبر API"
+                description="يدير المحرر قائمة الصفحات وشبكة الروابط محليًا، ويمكنه استخدام خدمة خارجية لعرض JavaScript عند الحاجة."
+              >
+                <input
+                  dir="ltr"
+                  className={`${inputClass} text-left`}
+                  value={siteCrawlStartUrl}
+                  onChange={event => setSiteCrawlStartUrl(event.target.value)}
+                  placeholder="https://example.com/"
+                  disabled={Boolean(activeSiteCrawl)}
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:w-[36rem]">
+              <Field label="مزوّد جلب الصفحات">
+                <select
+                  className={inputClass}
+                  value={siteCrawlProvider}
+                  disabled={Boolean(activeSiteCrawl)}
+                  onChange={event =>
+                    setSiteCrawlProvider(event.target.value as ClientSiteCrawlProvider)}
+                >
+                  {(Object.keys(crawlProviderLabels) as ClientSiteCrawlProvider[]).map(provider => (
+                    <option
+                      key={provider}
+                      value={provider}
+                      disabled={!siteCrawlState.providerAvailability[provider]}
+                    >
+                      {crawlProviderLabels[provider]}
+                      {!siteCrawlState.providerAvailability[provider] ? ' — غير مهيأ' : ''}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="أقصى عدد صفحات">
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  className={inputClass}
+                  value={siteCrawlMaxPages}
+                  disabled={Boolean(activeSiteCrawl)}
+                  onChange={event => setSiteCrawlMaxPages(
+                    Math.max(1, Math.min(2000, Number(event.target.value) || 1)),
+                  )}
+                />
+              </Field>
+              <Field label="أقصى عمق">
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  className={inputClass}
+                  value={siteCrawlMaxDepth}
+                  disabled={Boolean(activeSiteCrawl)}
+                  onChange={event => setSiteCrawlMaxDepth(
+                    Math.max(0, Math.min(20, Number(event.target.value) || 0)),
+                  )}
+                />
+              </Field>
+            </div>
+            {activeSiteCrawl ? (
+              <button
+                type="button"
+                className={secondaryButtonClass}
+                disabled={isSaving}
+                onClick={() => void handleCancelSiteCrawl(activeSiteCrawl.id)}
+              >
+                <Square size={15} /> إيقاف الزحف
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={isSaving || !siteCrawlStartUrl.trim()}
+                className={primaryButtonClass}
+              >
+                {isSaving ? <LoaderCircle className="animate-spin" size={16} /> : <Globe2 size={16} />}
+                بدء زحف الموقع
+              </button>
+            )}
+          </div>
+          <label className="mt-3 flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={siteCrawlFollowNofollow}
+              disabled={Boolean(activeSiteCrawl)}
+              onChange={event => setSiteCrawlFollowNofollow(event.target.checked)}
+            />
+            تتبّع روابط nofollow أيضًا
+          </label>
+          <div className="mt-3 flex flex-wrap gap-3 text-[11px] font-bold text-gray-500">
+            <span>الروابط الداخلية النشطة: {siteCrawlState.activeInternalLinkCount.toLocaleString('ar')}</span>
+            <span>المزوّد: {crawlProviderLabels[activeSiteCrawl?.provider || siteCrawlProvider]}</span>
+            {activeSiteCrawl && (
+              <>
+                <span>المكتشفة: {activeSiteCrawl.pagesDiscovered.toLocaleString('ar')}</span>
+                <span>المجدولة: {activeSiteCrawl.pagesQueued.toLocaleString('ar')}</span>
+                <span>المكتملة: {activeSiteCrawl.pagesCompleted.toLocaleString('ar')}</span>
+                <span>الفاشلة: {activeSiteCrawl.pagesFailed.toLocaleString('ar')}</span>
+              </>
+            )}
+          </div>
+        </form>
+      )}
+      {siteCrawlState.runs.length > 0 && (
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+          {siteCrawlState.runs.slice(0, 4).map(run => (
+            <div key={run.id} className="rounded-md border border-gray-200 p-3 text-xs dark:border-[#3C3C3C]">
+              <div className="flex items-center justify-between gap-2">
+                <span className={`rounded-full px-2 py-1 font-black ${statusClass(run.status)}`}>
+                  {run.status === 'running' ? 'جارٍ زحف الموقع'
+                    : run.status === 'queued' ? 'بانتظار البدء'
+                      : run.status === 'completed' ? 'اكتمل زحف الموقع'
+                        : run.status === 'partial' ? 'اكتمل جزئيًا'
+                          : 'ملغى'}
+                </span>
+                <span className="font-bold text-gray-400">{formatDate(run.createdAt)}</span>
+              </div>
+              <div dir="ltr" className="mt-2 truncate text-left font-semibold text-gray-500">{run.startUrl}</div>
+              <div className="mt-2 flex flex-wrap gap-2 font-bold text-gray-500">
+                <span>{crawlProviderLabels[run.provider]}</span>
+                <span>{run.pagesCompleted.toLocaleString('ar')} مكتملة</span>
+                <span>{run.pagesQueued.toLocaleString('ar')} مجدولة</span>
+                <span>عمق {run.maxDepth.toLocaleString('ar')}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {canEditPages && (
         <form onSubmit={handleAddPages} className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
           <Field label="إدخال الروابط يدويًا" description="ضع كل رابط في سطر مستقل. الحد الأقصى 100 رابط في العملية، ويجب أن تتبع الروابط الدومين الرئيسي.">

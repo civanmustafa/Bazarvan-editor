@@ -16,6 +16,8 @@ export type ClientPageCrawlJob = {
   lease_expires_at: string | null;
   error_code: string | null;
   error_message: string | null;
+  crawl_run_id: string | null;
+  crawl_depth: number;
   created_at: string;
   updated_at: string;
 };
@@ -80,9 +82,10 @@ export const heartbeatClientPageCrawlJob = async (options: {
 export const getClientPageCrawlInput = async (job: ClientPageCrawlJob): Promise<{
   page: ClientPageForCrawl;
   domains: ClientDomainForCrawl[];
+  provider: string;
 }> => {
   const supabase = getExternalAnalysisSupabaseAdmin();
-  const [pageResult, domainResult] = await Promise.all([
+  const [pageResult, domainResult, runResult] = await Promise.all([
     supabase.from('client_pages')
       .select('id,client_id,input_url,is_enabled')
       .eq('id', job.page_id)
@@ -92,13 +95,24 @@ export const getClientPageCrawlInput = async (job: ClientPageCrawlJob): Promise<
       .select('hostname,include_subdomains')
       .eq('client_id', job.client_id)
       .eq('is_active', true),
+    job.crawl_run_id
+      ? supabase.from('client_site_crawl_runs')
+        .select('provider')
+        .eq('id', job.crawl_run_id)
+        .eq('client_id', job.client_id)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ]);
   if (pageResult.error) throw pageResult.error;
   if (domainResult.error) throw domainResult.error;
+  if (runResult.error) throw runResult.error;
   if (!pageResult.data) throw new Error('The page registered for this crawl job no longer exists.');
   return {
     page: pageResult.data as ClientPageForCrawl,
     domains: (domainResult.data || []) as ClientDomainForCrawl[],
+    provider: typeof runResult.data?.provider === 'string'
+      ? runResult.data.provider
+      : 'local',
   };
 };
 

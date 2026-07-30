@@ -1,0 +1,111 @@
+# الزاحف الهجين لمواقع العملاء
+
+## الهدف
+
+الزاحف جزء من محرر Bazarvan. تبدأ الواجهة عملية الزحف عبر API داخلي موثّق بجلسة Supabase، ثم يدير العامل `bazarvan-client-page-crawler` قائمة الصفحات وخريطة الروابط محليًا. يمكن جلب HTML مباشرة أو عبر Firecrawl أو Browserless، بينما تبقى حدود النطاق والعمق والصفحات والحفظ داخل المحرر.
+
+## تدفق العمل
+
+1. يختار المستخدم عميلًا مسموحًا له بتعديله من **الإعدادات ← مركز العملاء ← روابط الموقع**.
+2. يرسل المحرر `POST /api/client-site-crawl` مع رابط البداية وحد الصفحات والعمق.
+3. يتحقق الخادم من الجلسة والصلاحية والنطاق، ثم ينشئ تشغيلًا ومهمة صفحة البداية.
+4. يجلب العامل الصفحة بالمزوّد المختار ويستخرج بيانات SEO والروابط الداخلية.
+5. تحفظ قاعدة البيانات خريطة الروابط الحالية وتجدول الأهداف الجديدة حتى بلوغ حد الصفحات أو العمق.
+6. تستعلم الواجهة دوريًا من API عن التقدم، ويمكنها إيقاف التشغيل.
+
+## بدء زحف
+
+```http
+POST /api/client-site-crawl
+Authorization: Bearer <supabase-access-token>
+Content-Type: application/json
+
+{
+  "action": "start",
+  "clientId": "uuid",
+  "startUrl": "https://example.com/",
+  "maxPages": 250,
+  "maxDepth": 6,
+  "followNofollow": false,
+  "provider": "auto"
+}
+```
+
+قيم `provider`:
+
+- `auto`: يجرب الجلب المحلي أولًا، ثم Firecrawl وبعده Browserless عند فشل الجلب أو ظهور صفحة JavaScript فارغة.
+- `local`: يمنع استخدام أي رصيد خارجي.
+- `firecrawl`: يستخدم Firecrawl مباشرة لكل صفحة.
+- `browserless`: يستخدم Browserless مباشرة لكل صفحة.
+
+الحدود التي يفرضها الخادم:
+
+- الصفحات: من 1 إلى 2000 لكل تشغيل.
+- العمق: من 0 إلى 20.
+- تشغيل نشط واحد لكل عميل.
+- النطاق الرئيسي والنطاقات الفرعية المعتمدة فقط.
+- عناوين HTTP وHTTPS العامة فقط، مع منع عناوين الشبكات المحلية والخاصة.
+
+## قراءة الحالة وخريطة الروابط
+
+```http
+GET /api/client-site-crawl?clientId=<uuid>
+Authorization: Bearer <supabase-access-token>
+```
+
+لإرجاع آخر 500 رابط داخلي نشط مع التشغيلات:
+
+```http
+GET /api/client-site-crawl?clientId=<uuid>&includeLinks=true
+Authorization: Bearer <supabase-access-token>
+```
+
+كل رابط محفوظ يحتوي على:
+
+- الصفحة المصدر والصفحة الهدف إن كانت مسجلة.
+- URL الهدف.
+- نص الرابط.
+- `nofollow` و`sponsored` و`ugc`.
+- قابلية جدولة الهدف كصفحة HTML.
+- عدد مرات تكرار الرابط داخل الصفحة.
+- وقت آخر مشاهدة.
+
+## إيقاف زحف
+
+```http
+POST /api/client-site-crawl
+Authorization: Bearer <supabase-access-token>
+Content-Type: application/json
+
+{
+  "action": "cancel",
+  "runId": "uuid"
+}
+```
+
+تلغى المهام المنتظرة فورًا. قد يكمل العامل الصفحة الجاري جلبها، لكنه لا يوسع التشغيل الملغى إلى صفحات جديدة.
+
+## النشر
+
+نفّذ الترحيلات بالترتيب:
+
+1. `20260728050000_client_page_crawl_source.sql`
+2. `20260728060000_local_client_site_crawler.sql`
+3. `20260730010000_crawler_provider_secrets.sql`
+4. `20260730020000_hybrid_client_site_crawler.sql`
+
+ثم ابنِ المشروع وأعد تحميل عمليات PM2. يستخدم الزاحف متغيرات `CLIENT_PAGE_CRAWLER_*` الموجودة، ويمكن تحديد معدل API عبر:
+
+```dotenv
+CLIENT_SITE_CRAWL_API_RATE_LIMIT=30
+CLIENT_PAGE_CRAWLER_AUTO_MIN_WORDS=40
+```
+
+أنشئ `CRAWLER_SETTINGS_ENCRYPTION_KEY` من 32 بايت، أو دع الخادم يستخدم `AI_SETTINGS_ENCRYPTION_KEY` الموجود. بعد ذلك يدخل المسؤول المفاتيح من **الإعدادات ← خدمات الزحف**. القيم الخام تُشفّر بـ AES-256-GCM، ولا يعيد API إلى المتصفح إلا حالة التهيئة وآخر أربعة أحرف.
+
+## حدود النسخة الحالية
+
+- الجلب المحلي يعتمد على HTML الذي يعيده الخادم؛ يعالج الوضع التلقائي صفحات JavaScript عبر Firecrawl أو Browserless عند تهيئتهما.
+- يحترم `meta robots` و`X-Robots-Tag` وخصائص `nofollow` عند توسيع الزحف. تحليل قواعد `robots.txt` على مستوى الموقع ليس مضافًا بعد.
+- لا يدخل إلى صفحات تسجيل الدخول ولا يرسل ملفات تعريف ارتباط خاصة بالعميل.
+- ملفات PDF والصور والمستندات تسجّل كأهداف روابط عند اكتشافها، لكنها لا تُجدول كصفحات HTML.
