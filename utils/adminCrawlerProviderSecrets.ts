@@ -19,6 +19,21 @@ export type CrawlerProviderSecretsResponse = {
   schemaAvailable: boolean;
   encryptionConfigured: boolean;
   providers: Record<CrawlerExternalProvider, CrawlerProviderSecretStatus>;
+  usagePolicy: CrawlerUsagePolicy;
+  monthlyUsage: Record<CrawlerExternalProvider, CrawlerProviderMonthlyUsage>;
+};
+
+export type CrawlerUsagePolicy = {
+  externalReuseDays: number;
+  maxExternalRequestsPerRun: number;
+  firecrawlMonthlyRequestLimit: number;
+  browserlessMonthlyRequestLimit: number;
+};
+
+export type CrawlerProviderMonthlyUsage = {
+  used: number;
+  limit: number;
+  remaining: number;
 };
 
 const requestCrawlerProviderSecrets = async (options: {
@@ -70,4 +85,14 @@ export const clearCrawlerProviderSecret = (
 ): Promise<CrawlerProviderSecretsResponse> => requestCrawlerProviderSecrets({
   method: 'DELETE',
   body: { provider },
+});
+
+export const saveCrawlerUsagePolicy = (
+  usagePolicy: CrawlerUsagePolicy,
+): Promise<CrawlerProviderSecretsResponse> => requestCrawlerProviderSecrets({
+  method: 'PUT',
+  body: {
+    action: 'save_usage_policy',
+    usagePolicy,
+  },
 });

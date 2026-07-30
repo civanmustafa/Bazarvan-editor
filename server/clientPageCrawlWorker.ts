@@ -13,11 +13,14 @@ import {
   failClientPageCrawlJob,
   getClientPageCrawlInput,
   heartbeatClientPageCrawlJob,
+  loadCachedClientPageLinks,
   recoverStaleClientPageCrawlJobs,
+  reuseFreshClientPageCrawlJob,
   type ClientPageCrawlJob,
 } from './clientPageCrawlQueue';
 import { indexCompletedClientPage } from './clientSemanticIndexStore';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
+import { reserveCrawlerExternalRequest } from './crawlerUsagePolicy';
 import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
 import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 
@@ -139,6 +142,32 @@ const executeClaimedJob = async (
       });
     }
 
+    if (
+      job.crawl_run_id
+      && (input.provider === 'firecrawl' || input.provider === 'browserless')
+    ) {
+      const cachedLinks = await loadCachedClientPageLinks(job);
+      const reused = await reuseFreshClientPageCrawlJob({
+        jobId: job.id,
+        workerId: slotWorkerId,
+        resultSummary: {
+          extraction: 'cached_link_graph',
+          provider: 'cache',
+          reused: true,
+          cachedAt: new Date().toISOString(),
+          robotsFollow: input.page.robots_follow !== false,
+          internalLinks: cachedLinks,
+        },
+      });
+      if (reused) {
+        console.log(
+          `[client-page-crawler] Reused recent page and cached link graph for`
+          + ` ${input.page.input_url}; no provider request was sent.`,
+        );
+        return;
+      }
+    }
+
     const providerResult = await crawlClientPageWithProvider({
       provider: input.provider,
       url: input.page.input_url,
@@ -149,6 +178,10 @@ const executeClaimedJob = async (
       signal: controller.signal,
       timeoutMs: crawlTimeoutMs,
       maximumBytes,
+      beforeExternalAttempt: provider => reserveCrawlerExternalRequest({
+        crawlRunId: job.crawl_run_id,
+        provider,
+      }),
       onAttempt: async attempt => {
         await recordCrawlerProviderUsageEvent({
           crawlJobId: job.id,

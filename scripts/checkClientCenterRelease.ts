@@ -13,6 +13,7 @@ import {
   CLIENT_CENTER_SITE_CRAWLER_MIGRATION,
   CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
   CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION,
+  CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION,
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
   CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
@@ -49,6 +50,7 @@ for (const migration of [
   CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
   CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
   CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION,
+  CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
@@ -85,6 +87,7 @@ for (const [sourcePath, marker] of [
   ['api/adminCrawlerProviderSecrets.ts', 'admin:crawler-provider-secrets'],
   ['api/adminCrawlerProviderUsage.ts', 'admin:crawler-provider-usage'],
   ['server/crawlerProviderUsage.ts', 'recordCrawlerProviderUsageEvent'],
+  ['server/crawlerUsagePolicy.ts', 'reserveCrawlerExternalRequest'],
   ['utils/clientSemanticIndex.ts', 'isGenericClientPageTitle'],
   ['utils/internalLinkingEngine.ts', 'resolveInternalLinkTargetUrl'],
   ['server/clientPageAiLinkProfile.ts', 'client_page_link_profile'],
@@ -143,6 +146,8 @@ for (const marker of [
   'firecrawl',
   'browserless',
   'rendered_html',
+  'reuse_fresh_client_page_crawl_job',
+  'reserve_crawler_external_request',
   'client_page_link_profile',
 ]) {
   if (!crawlerBundle.includes(marker)) {
@@ -167,6 +172,7 @@ console.log(JSON.stringify({
     CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
     CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
     CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION,
+    CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION,
   ],
   crawler: 'server-dist/client-page-crawl-worker.mjs',
   readinessEndpoint: '/readyz',

@@ -32,6 +32,10 @@ type ProviderAttemptReporter = (
   attempt: CrawlerProviderAttemptTelemetry,
 ) => void | Promise<void>;
 
+type ExternalProviderAttemptGuard = (
+  provider: CrawlerExternalProvider,
+) => void | Promise<void>;
+
 const toRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -367,11 +371,13 @@ const crawlExternalProvider = async (options: {
   maximumBytes: number;
   fallbackReason: string | null;
   onAttempt?: ProviderAttemptReporter;
+  beforeExternalAttempt?: ExternalProviderAttemptGuard;
 }): Promise<ClientPageProviderCrawlResult> => {
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
   let credentialSource: CrawlerCredentialSource | null = null;
   let keySuffix: string | null = null;
+  let requestReserved = false;
   try {
     await validatePublicClientUrl(options.url, options.domains);
     const credential = await resolveCrawlerProviderCredential(options.provider);
@@ -385,6 +391,8 @@ const crawlExternalProvider = async (options: {
     }
     credentialSource = credential.source;
     keySuffix = credential.keySuffix;
+    await options.beforeExternalAttempt?.(options.provider);
+    requestReserved = true;
     const page = options.provider === 'firecrawl'
       ? await crawlWithFirecrawl({ ...options, apiKey: credential.apiKey })
       : await crawlWithBrowserless({ ...options, apiKey: credential.apiKey });
@@ -417,26 +425,28 @@ const crawlExternalProvider = async (options: {
     };
   } catch (error) {
     const details = attemptErrorDetails(error);
-    await emitProviderAttempt(options.onAttempt, {
-      requestedProvider: options.requestedProvider,
-      provider: options.provider,
-      credentialSource,
-      keySuffix,
-      status: 'failed',
-      targetUrl: options.url,
-      finalUrl: null,
-      httpStatus: details.httpStatus,
-      durationMs: Date.now() - startedAtMs,
-      wordCount: null,
-      internalLinkCount: null,
-      responseContentType: null,
-      fallbackReason: options.fallbackReason,
-      errorCode: details.errorCode,
-      errorMessage: details.errorMessage,
-      retryable: details.retryable,
-      startedAt,
-      completedAt: new Date().toISOString(),
-    });
+    if (requestReserved) {
+      await emitProviderAttempt(options.onAttempt, {
+        requestedProvider: options.requestedProvider,
+        provider: options.provider,
+        credentialSource,
+        keySuffix,
+        status: 'failed',
+        targetUrl: options.url,
+        finalUrl: null,
+        httpStatus: details.httpStatus,
+        durationMs: Date.now() - startedAtMs,
+        wordCount: null,
+        internalLinkCount: null,
+        responseContentType: null,
+        fallbackReason: options.fallbackReason,
+        errorCode: details.errorCode,
+        errorMessage: details.errorMessage,
+        retryable: details.retryable,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      });
+    }
     throw error;
   }
 };
@@ -532,6 +542,7 @@ const tryAutomaticExternalFallback = async (options: {
   maximumBytes: number;
   fallbackReason: string;
   onAttempt?: ProviderAttemptReporter;
+  beforeExternalAttempt?: ExternalProviderAttemptGuard;
 }): Promise<ClientPageProviderCrawlResult | null> => {
   for (const provider of ['firecrawl', 'browserless'] as const) {
     try {
@@ -549,11 +560,22 @@ const tryAutomaticExternalFallback = async (options: {
       }
       if (
         error instanceof ClientPageCrawlerError
+        && (
+          error.code === 'crawler_provider_monthly_limit_reached'
+          || error.code === 'crawler_run_external_limit_reached'
+        )
+      ) {
+        throw error;
+      }
+      if (
+        error instanceof ClientPageCrawlerError
         && error.code !== `${provider}_not_configured`
       ) {
         console.warn(
           `[client-page-crawler] Auto fallback ${provider} failed: ${error.code}.`,
         );
+        // One URL gets at most one billable external attempt in automatic mode.
+        return null;
       }
     }
   }
@@ -568,6 +590,7 @@ export const crawlClientPageWithProvider = async (options: {
   timeoutMs?: number;
   maximumBytes?: number;
   onAttempt?: ProviderAttemptReporter;
+  beforeExternalAttempt?: ExternalProviderAttemptGuard;
 }): Promise<ClientPageProviderCrawlResult> => {
   const provider = normalizeClientSiteCrawlProvider(options.provider);
   const timeoutMs = Math.max(5_000, Math.min(options.timeoutMs ?? 45_000, 120_000));
@@ -583,6 +606,7 @@ export const crawlClientPageWithProvider = async (options: {
     maximumBytes,
     requestedProvider: provider,
     onAttempt: options.onAttempt,
+    beforeExternalAttempt: options.beforeExternalAttempt,
   };
 
   if (provider === 'firecrawl' || provider === 'browserless') {

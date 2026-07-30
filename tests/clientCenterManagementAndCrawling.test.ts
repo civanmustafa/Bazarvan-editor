@@ -329,6 +329,45 @@ test('crawler provider usage reports audit every attempt without storing raw key
   assertBalancedSqlParentheses(migration);
 });
 
+test('economic external crawling reuses fresh graphs and enforces atomic budgets', async () => {
+  const [
+    migration,
+    worker,
+    providerAdapter,
+    policy,
+    api,
+    settings,
+    clientCenter,
+  ] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260731020000_economic_external_client_crawler.sql'),
+    readWorkspaceFile('server/clientPageCrawlWorker.ts'),
+    readWorkspaceFile('server/clientPageCrawlerProviders.ts'),
+    readWorkspaceFile('server/crawlerUsagePolicy.ts'),
+    readWorkspaceFile('api/clientSiteCrawler.ts'),
+    readWorkspaceFile('components/AdminCrawlerProviderSecretsSettings.tsx'),
+    readWorkspaceFile('components/ClientCenterSettings.tsx'),
+  ]);
+
+  assert.match(migration, /create table if not exists public\.crawler_provider_monthly_usage/);
+  assert.match(migration, /create or replace function public\.reuse_fresh_client_page_crawl_job/);
+  assert.match(migration, /create or replace function public\.reserve_crawler_external_request/);
+  assert.match(migration, /last_success_at >= now\(\) - make_interval/);
+  assert.match(migration, /jsonb_build_object\('reused', true, 'provider', 'cache'\)/);
+  assert.match(migration, /reserved_attempts < v_limit/);
+  assert.match(api, /Only administrators can force a full external refresh/);
+  assert.match(migration, /revoke all on function public\.reserve_crawler_external_request[^;]+authenticated/);
+  assert.match(worker, /reuseFreshClientPageCrawlJob/);
+  assert.match(worker, /beforeExternalAttempt: provider => reserveCrawlerExternalRequest/);
+  assert.match(providerAdapter, /One URL gets at most one billable external attempt/);
+  assert.match(policy, /maxExternalRequestsPerRun/);
+  assert.match(api, /estimatedExternalRequests/);
+  assert.match(api, /confirmFullExternalRefresh/);
+  assert.match(settings, /سياسة منع تكرار الطلبات الخارجية/);
+  assert.match(clientCenter, /تقدير الاستهلاك قبل البدء/);
+  assert.match(clientCenter, /المعاد استخدامها/);
+  assertBalancedSqlParentheses(migration);
+});
+
 test('AI link phrase profiles are structured, reviewable, and never persist raw page content', async () => {
   const [migration, enrichment, worker, clientCenter, settings, engine] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260730040000_client_page_ai_link_profiles.sql'),

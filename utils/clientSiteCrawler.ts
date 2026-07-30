@@ -24,6 +24,11 @@ export type ClientSiteCrawlRun = {
   pagesQueued: number;
   pagesCompleted: number;
   pagesFailed: number;
+  pagesReused: number;
+  externalRequestsUsed: number;
+  maxExternalRequests: number;
+  externalReuseDays: number;
+  forceExternalRefresh: boolean;
   limitReached: boolean;
   startedAt: string | null;
   finishedAt: string | null;
@@ -49,7 +54,31 @@ export type ClientSiteCrawlState = {
   runs: ClientSiteCrawlRun[];
   activeInternalLinkCount: number;
   providerAvailability: Record<ClientSiteCrawlProvider, boolean>;
+  usagePolicy: {
+    externalReuseDays: number;
+    maxExternalRequestsPerRun: number;
+    firecrawlMonthlyRequestLimit: number;
+    browserlessMonthlyRequestLimit: number;
+  };
+  monthlyUsage: Record<'firecrawl' | 'browserless', {
+    used: number;
+    limit: number;
+    remaining: number;
+  }>;
   links: ClientInternalLink[];
+};
+
+export type ClientSiteCrawlEstimate = {
+  knownPages: number;
+  reusablePages: number;
+  estimatedExternalRequests: number;
+  maximumExternalRequests: number;
+  unknownCapacity: number;
+  externalReuseDays: number;
+  maxExternalRequestsPerRun: number;
+  monthlyRemaining: number;
+  provider: ClientSiteCrawlProvider;
+  forceExternalRefresh: boolean;
 };
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -68,6 +97,11 @@ const mapRun = (row: any): ClientSiteCrawlRun => ({
   pagesQueued: Number(row.pages_queued) || 0,
   pagesCompleted: Number(row.pages_completed) || 0,
   pagesFailed: Number(row.pages_failed) || 0,
+  pagesReused: Number(row.pages_reused) || 0,
+  externalRequestsUsed: Number(row.external_requests_used) || 0,
+  maxExternalRequests: Number(row.max_external_requests) || 0,
+  externalReuseDays: Number(row.external_reuse_days) || 14,
+  forceExternalRefresh: row.force_external_refresh === true,
   limitReached: row.limit_reached === true,
   startedAt: typeof row.started_at === 'string' ? row.started_at : null,
   finishedAt: typeof row.finished_at === 'string' ? row.finished_at : null,
@@ -134,6 +168,27 @@ export const loadClientSiteCrawlState = async (
       firecrawl: payload.providerAvailability?.firecrawl === true,
       browserless: payload.providerAvailability?.browserless === true,
     },
+    usagePolicy: {
+      externalReuseDays: Number(payload.usagePolicy?.externalReuseDays) || 14,
+      maxExternalRequestsPerRun:
+        Number(payload.usagePolicy?.maxExternalRequestsPerRun) || 100,
+      firecrawlMonthlyRequestLimit:
+        Number(payload.usagePolicy?.firecrawlMonthlyRequestLimit) || 500,
+      browserlessMonthlyRequestLimit:
+        Number(payload.usagePolicy?.browserlessMonthlyRequestLimit) || 500,
+    },
+    monthlyUsage: {
+      firecrawl: {
+        used: Number(payload.monthlyUsage?.firecrawl?.used) || 0,
+        limit: Number(payload.monthlyUsage?.firecrawl?.limit) || 0,
+        remaining: Number(payload.monthlyUsage?.firecrawl?.remaining) || 0,
+      },
+      browserless: {
+        used: Number(payload.monthlyUsage?.browserless?.used) || 0,
+        limit: Number(payload.monthlyUsage?.browserless?.limit) || 0,
+        remaining: Number(payload.monthlyUsage?.browserless?.remaining) || 0,
+      },
+    },
     links: Array.isArray(payload.links) ? payload.links.map(mapLink) : [],
   };
 };
@@ -145,6 +200,8 @@ export const startClientSiteCrawl = async (input: {
   maxDepth: number;
   followNofollow?: boolean;
   provider?: ClientSiteCrawlProvider;
+  forceExternalRefresh?: boolean;
+  confirmFullExternalRefresh?: boolean;
 }): Promise<ClientSiteCrawlRun> => {
   const payload = await requestClientSiteCrawler(input.clientId, {
     method: 'POST',
@@ -154,6 +211,37 @@ export const startClientSiteCrawl = async (input: {
     },
   });
   return mapRun(payload.run);
+};
+
+export const estimateClientSiteCrawl = async (input: {
+  clientId: string;
+  startUrl: string;
+  maxPages: number;
+  maxDepth: number;
+  followNofollow?: boolean;
+  provider?: ClientSiteCrawlProvider;
+  forceExternalRefresh?: boolean;
+}): Promise<ClientSiteCrawlEstimate> => {
+  const payload = await requestClientSiteCrawler(input.clientId, {
+    method: 'POST',
+    body: {
+      action: 'estimate',
+      ...input,
+    },
+  });
+  const estimate = payload.estimate || {};
+  return {
+    knownPages: Number(estimate.knownPages) || 0,
+    reusablePages: Number(estimate.reusablePages) || 0,
+    estimatedExternalRequests: Number(estimate.estimatedExternalRequests) || 0,
+    maximumExternalRequests: Number(estimate.maximumExternalRequests) || 0,
+    unknownCapacity: Number(estimate.unknownCapacity) || 0,
+    externalReuseDays: Number(estimate.externalReuseDays) || 14,
+    maxExternalRequestsPerRun: Number(estimate.maxExternalRequestsPerRun) || 100,
+    monthlyRemaining: Number(estimate.monthlyRemaining) || 0,
+    provider: estimate.provider as ClientSiteCrawlProvider || 'auto',
+    forceExternalRefresh: estimate.forceExternalRefresh === true,
+  };
 };
 
 export const cancelClientSiteCrawl = async (

@@ -27,6 +27,7 @@ export type ClientPageForCrawl = {
   client_id: string;
   input_url: string;
   is_enabled: boolean;
+  robots_follow: boolean | null;
 };
 
 export type ClientDomainForCrawl = {
@@ -87,7 +88,7 @@ export const getClientPageCrawlInput = async (job: ClientPageCrawlJob): Promise<
   const supabase = getExternalAnalysisSupabaseAdmin();
   const [pageResult, domainResult, runResult] = await Promise.all([
     supabase.from('client_pages')
-      .select('id,client_id,input_url,is_enabled')
+      .select('id,client_id,input_url,is_enabled,robots_follow')
       .eq('id', job.page_id)
       .eq('client_id', job.client_id)
       .maybeSingle(),
@@ -129,6 +130,49 @@ export const completeClientPageCrawlJob = async (options: {
     p_result_summary: options.resultSummary || {},
   })
 );
+
+export const reuseFreshClientPageCrawlJob = async (options: {
+  jobId: string;
+  workerId: string;
+  resultSummary: Record<string, unknown>;
+}): Promise<boolean> => (
+  callRpc<boolean>('reuse_fresh_client_page_crawl_job', {
+    p_job_id: options.jobId,
+    p_worker_id: options.workerId,
+    p_result_summary: options.resultSummary,
+  })
+);
+
+export const loadCachedClientPageLinks = async (
+  job: ClientPageCrawlJob,
+): Promise<Array<{
+  targetUrl: string;
+  anchorText: string;
+  relNofollow: boolean;
+  relSponsored: boolean;
+  relUgc: boolean;
+  crawlable: boolean;
+  occurrenceCount: number;
+}>> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('client_internal_links')
+    .select('target_url,anchor_text,rel_nofollow,rel_sponsored,rel_ugc,crawlable,occurrence_count')
+    .eq('client_id', job.client_id)
+    .eq('source_page_id', job.page_id)
+    .eq('is_active', true)
+    .order('last_seen_at', { ascending: false })
+    .limit(1_000);
+  if (error) throw error;
+  return (data || []).map(row => ({
+    targetUrl: String(row.target_url || ''),
+    anchorText: String(row.anchor_text || ''),
+    relNofollow: row.rel_nofollow === true,
+    relSponsored: row.rel_sponsored === true,
+    relUgc: row.rel_ugc === true,
+    crawlable: row.crawlable !== false,
+    occurrenceCount: Math.max(1, Number(row.occurrence_count) || 1),
+  }));
+};
 
 export const failClientPageCrawlJob = async (options: {
   jobId: string;

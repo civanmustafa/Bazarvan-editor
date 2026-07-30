@@ -20,6 +20,11 @@ import {
   readCrawlerProviderSecretsOverview,
   saveCrawlerProviderSecret,
 } from '../server/crawlerProviderSecrets';
+import {
+  readCrawlerProviderMonthlyUsage,
+  readCrawlerUsagePolicy,
+  saveCrawlerUsagePolicy,
+} from '../server/crawlerUsagePolicy';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -40,13 +45,21 @@ const withCors = (req: any, result: ApiResult): ApiResult => {
   }
 };
 
-const readOverview = async (): Promise<ApiResult> => ({
-  status: 200,
-  body: {
-    ok: true,
-    ...await readCrawlerProviderSecretsOverview(),
-  },
-});
+const readOverview = async (): Promise<ApiResult> => {
+  const [secrets, usagePolicy] = await Promise.all([
+    readCrawlerProviderSecretsOverview(),
+    readCrawlerUsagePolicy(),
+  ]);
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      ...secrets,
+      usagePolicy,
+      monthlyUsage: await readCrawlerProviderMonthlyUsage(usagePolicy),
+    },
+  };
+};
 
 const handleRequest = async (req: any): Promise<ApiResult> => {
   assertAllowedOrigin(req);
@@ -78,6 +91,13 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
   const body = await readRequestBody(req);
   if (!isRecord(body)) {
     return { status: 400, body: { error: 'A JSON request object is required.' } };
+  }
+  if (req.method === 'PUT' && body.action === 'save_usage_policy') {
+    await saveCrawlerUsagePolicy({
+      value: body.usagePolicy,
+      updatedBy: principal.userId,
+    });
+    return readOverview();
   }
   const provider = normalizeCrawlerExternalProvider(body.provider);
   if (req.method === 'DELETE') {

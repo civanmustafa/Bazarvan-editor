@@ -9,7 +9,8 @@ export const CLIENT_CENTER_CRAWL_SOURCE_MIGRATION = '20260728050000_client_page_
 export const CLIENT_CENTER_SITE_CRAWLER_MIGRATION = '20260728060000_local_client_site_crawler.sql';
 export const CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION = '20260730040000_client_page_ai_link_profiles.sql';
 export const CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION = '20260731010000_client_site_crawl_pgcrypto_fix.sql';
-export const CLIENT_CENTER_REQUIRED_MIGRATION = CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION;
+export const CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION = '20260731020000_economic_external_client_crawler.sql';
+export const CLIENT_CENTER_REQUIRED_MIGRATION = CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION;
 
 export const CLIENT_CENTER_SCHEMA_PROBES = [
   {
@@ -40,7 +41,7 @@ export const CLIENT_CENTER_SCHEMA_PROBES = [
   {
     id: 'siteCrawlRuns',
     table: 'client_site_crawl_runs',
-    columns: 'id,client_id,started_by,start_url,status,provider,max_pages,max_depth,pages_discovered,pages_queued,pages_completed,pages_failed,limit_reached',
+    columns: 'id,client_id,started_by,start_url,status,provider,max_pages,max_depth,pages_discovered,pages_queued,pages_completed,pages_failed,pages_reused,external_requests_used,max_external_requests,external_reuse_days,force_external_refresh,limit_reached',
   },
   {
     id: 'crawlerProviderSecrets',
@@ -51,6 +52,11 @@ export const CLIENT_CENTER_SCHEMA_PROBES = [
     id: 'crawlerProviderUsage',
     table: 'crawler_provider_usage_events',
     columns: 'id,crawl_job_id,crawl_run_id,client_id,page_id,requested_by,job_attempt,requested_provider,provider,credential_source,key_suffix,status,target_url,final_url,http_status,duration_ms,word_count,internal_link_count,fallback_reason,error_code,retryable,started_at,completed_at,created_at',
+  },
+  {
+    id: 'crawlerProviderMonthlyUsage',
+    table: 'crawler_provider_monthly_usage',
+    columns: 'provider,month_start,reserved_attempts,updated_at',
   },
   {
     id: 'internalLinkGraph',

@@ -19,6 +19,10 @@ import {
   normalizeClientSiteCrawlProvider,
 } from '../constants/crawlerProviders';
 import { readCrawlerProviderSecretsOverview } from '../server/crawlerProviderSecrets';
+import {
+  readCrawlerProviderMonthlyUsage,
+  readCrawlerUsagePolicy,
+} from '../server/crawlerUsagePolicy';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
@@ -56,7 +60,7 @@ const assertClientAccess = async (
   clientId: string,
   userId: string,
   write = false,
-): Promise<void> => {
+): Promise<string> => {
   const { data, error } = await supabase.rpc('client_access_level_for_user', {
     target_client_id: clientId,
     target_user_id: userId,
@@ -70,6 +74,7 @@ const assertClientAccess = async (
       'client_access_denied',
     );
   }
+  return access;
 };
 
 const loadAllowedDomains = async (
@@ -119,10 +124,10 @@ const listCrawlState = async (
   clientId: string,
   includeLinks: boolean,
 ): Promise<ApiResult> => {
-  const [runsResult, linksCountResult, providerOverview] = await Promise.all([
+  const [runsResult, linksCountResult, providerOverview, usagePolicy] = await Promise.all([
     supabase
       .from('client_site_crawl_runs')
-      .select('id,client_id,started_by,start_url,status,provider,max_pages,max_depth,follow_nofollow,pages_discovered,pages_queued,pages_completed,pages_failed,limit_reached,started_at,finished_at,created_at,updated_at')
+      .select('id,client_id,started_by,start_url,status,provider,max_pages,max_depth,follow_nofollow,pages_discovered,pages_queued,pages_completed,pages_failed,pages_reused,external_requests_used,max_external_requests,external_reuse_days,force_external_refresh,limit_reached,started_at,finished_at,created_at,updated_at')
       .eq('client_id', clientId)
       .order('created_at', { ascending: false })
       .limit(30),
@@ -132,6 +137,7 @@ const listCrawlState = async (
       .eq('client_id', clientId)
       .eq('is_active', true),
     readCrawlerProviderSecretsOverview(),
+    readCrawlerUsagePolicy(),
   ]);
   if (runsResult.error) throw runsResult.error;
   if (linksCountResult.error) throw linksCountResult.error;
@@ -161,7 +167,165 @@ const listCrawlState = async (
         firecrawl: providerOverview.providers.firecrawl.effectiveConfigured,
         browserless: providerOverview.providers.browserless.effectiveConfigured,
       },
+      usagePolicy,
+      monthlyUsage: await readCrawlerProviderMonthlyUsage(usagePolicy),
       links,
+    },
+  };
+};
+
+const isFreshReusablePage = (
+  page: Record<string, unknown>,
+  reuseDays: number,
+  activeLinkSources: Set<string>,
+): boolean => {
+  const lastSuccess = Date.parse(text(page.last_success_at));
+  const ageLimit = Date.now() - reuseDays * 86_400_000;
+  const status = text(page.crawl_status);
+  const httpStatus = Number(page.http_status) || 0;
+  return page.is_enabled === true
+    && ['ready', 'needs_review', 'redirected', 'noindex'].includes(status)
+    && httpStatus >= 200
+    && httpStatus <= 399
+    && Number.isFinite(lastSuccess)
+    && lastSuccess >= ageLimit
+    && (
+      Number(page.word_count) >= 40
+      || activeLinkSources.has(text(page.id))
+    );
+};
+
+const estimateCrawl = async (
+  supabase: SupabaseAdmin,
+  userId: string,
+  body: Record<string, unknown>,
+): Promise<ApiResult> => {
+  const clientId = text(body.clientId);
+  if (!clientId) {
+    throw new ClientSiteCrawlerApiError('clientId is required.', 400, 'client_id_required');
+  }
+  await assertClientAccess(supabase, clientId, userId);
+  const domains = await loadAllowedDomains(supabase, clientId);
+  const startUrl = normalizeStartUrl(body.startUrl, domains);
+  const maxPages = integer(body.maxPages, 250, 1, 2_000);
+  const maxDepth = integer(body.maxDepth, 6, 0, 20);
+  const followNofollow = body.followNofollow === true;
+  const provider = normalizeClientSiteCrawlProvider(body.provider);
+  const forceExternalRefresh = body.forceExternalRefresh === true;
+  const policy = await readCrawlerUsagePolicy();
+  const [pagesResult, linksResult, monthlyUsage] = await Promise.all([
+    supabase
+      .from('client_pages')
+      .select('id,input_url,final_url,canonical_url,crawl_status,http_status,word_count,robots_follow,last_success_at,is_enabled')
+      .eq('client_id', clientId)
+      .eq('is_enabled', true)
+      .limit(2_000),
+    supabase
+      .from('client_internal_links')
+      .select('source_page_id,target_page_id,target_url,rel_nofollow,crawlable')
+      .eq('client_id', clientId)
+      .eq('is_active', true)
+      .limit(20_000),
+    readCrawlerProviderMonthlyUsage(policy),
+  ]);
+  if (pagesResult.error) throw pagesResult.error;
+  if (linksResult.error) throw linksResult.error;
+
+  const pages = (pagesResult.data || []) as Array<Record<string, unknown>>;
+  const links = (linksResult.data || []) as Array<Record<string, unknown>>;
+  const pagesById = new Map(pages.map(page => [text(page.id), page]));
+  const pagesByUrl = new Map<string, string>();
+  pages.forEach(page => {
+    for (const value of [page.input_url, page.final_url, page.canonical_url]) {
+      const url = text(value);
+      if (url) pagesByUrl.set(url, text(page.id));
+    }
+  });
+  const linksBySource = new Map<string, Array<Record<string, unknown>>>();
+  const activeLinkSources = new Set<string>();
+  links.forEach(link => {
+    const sourceId = text(link.source_page_id);
+    if (!sourceId) return;
+    activeLinkSources.add(sourceId);
+    const current = linksBySource.get(sourceId) || [];
+    current.push(link);
+    linksBySource.set(sourceId, current);
+  });
+
+  const startPageId = pagesByUrl.get(startUrl) || '';
+  const visited = new Set<string>();
+  const queue: Array<{ id: string; depth: number }> = startPageId
+    ? [{ id: startPageId, depth: 0 }]
+    : [];
+  while (queue.length > 0 && visited.size < maxPages) {
+    const current = queue.shift();
+    if (!current || visited.has(current.id)) continue;
+    const currentPage = pagesById.get(current.id);
+    if (!currentPage) continue;
+    visited.add(current.id);
+    if (
+      current.depth >= maxDepth
+      || (currentPage.robots_follow === false && !followNofollow)
+    ) continue;
+    for (const link of linksBySource.get(current.id) || []) {
+      if (
+        link.crawlable === false
+        || (link.rel_nofollow === true && !followNofollow)
+      ) continue;
+      const targetId = text(link.target_page_id)
+        || pagesByUrl.get(text(link.target_url))
+        || '';
+      if (targetId && !visited.has(targetId)) {
+        queue.push({ id: targetId, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  const knownPages = startPageId ? visited.size : 1;
+  const directExternal = provider === 'firecrawl' || provider === 'browserless';
+  const reusablePages = directExternal && !forceExternalRefresh
+    ? [...visited].filter(id => {
+      const page = pagesById.get(id);
+      return page
+        ? isFreshReusablePage(page, policy.externalReuseDays, activeLinkSources)
+        : false;
+    }).length
+    : 0;
+  const providerRemaining = directExternal
+    ? monthlyUsage[provider].remaining
+    : provider === 'auto'
+      ? monthlyUsage.firecrawl.remaining + monthlyUsage.browserless.remaining
+      : 0;
+  const maximumExternalRequests = directExternal || provider === 'auto'
+    ? Math.min(
+        maxPages,
+        policy.maxExternalRequestsPerRun,
+        providerRemaining,
+      )
+    : 0;
+  const estimatedExternalRequests = directExternal
+    ? Math.min(
+        Math.max(startPageId ? knownPages - reusablePages : 1, 0),
+        maximumExternalRequests,
+      )
+    : 0;
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      estimate: {
+        knownPages,
+        reusablePages,
+        estimatedExternalRequests,
+        maximumExternalRequests,
+        unknownCapacity: Math.max(0, maxPages - knownPages),
+        externalReuseDays: policy.externalReuseDays,
+        maxExternalRequestsPerRun: policy.maxExternalRequestsPerRun,
+        monthlyRemaining: directExternal ? monthlyUsage[provider].remaining : providerRemaining,
+        provider,
+        forceExternalRefresh,
+      },
     },
   };
 };
@@ -179,7 +343,7 @@ const startCrawl = async (
       'client_id_required',
     );
   }
-  await assertClientAccess(supabase, clientId, userId, true);
+  const access = await assertClientAccess(supabase, clientId, userId, true);
   const domains = await loadAllowedDomains(supabase, clientId);
   if (domains.length === 0) {
     throw new ClientSiteCrawlerApiError(
@@ -194,6 +358,33 @@ const startCrawl = async (
   const maxDepth = integer(body.maxDepth, 6, 0, 20);
   const followNofollow = body.followNofollow === true;
   const provider = normalizeClientSiteCrawlProvider(body.provider);
+  const forceExternalRefresh = body.forceExternalRefresh === true;
+  if (forceExternalRefresh && access !== 'admin') {
+    throw new ClientSiteCrawlerApiError(
+      'Only administrators can force a full external refresh.',
+      403,
+      'full_external_refresh_admin_required',
+    );
+  }
+  if (forceExternalRefresh && body.confirmFullExternalRefresh !== true) {
+    throw new ClientSiteCrawlerApiError(
+      'A full external refresh requires explicit confirmation.',
+      400,
+      'full_external_refresh_confirmation_required',
+    );
+  }
+  if (
+    forceExternalRefresh
+    && provider !== 'firecrawl'
+    && provider !== 'browserless'
+  ) {
+    throw new ClientSiteCrawlerApiError(
+      'A full external refresh requires Firecrawl or Browserless.',
+      400,
+      'full_external_refresh_provider_required',
+    );
+  }
+  const usagePolicy = await readCrawlerUsagePolicy();
   if (provider === 'firecrawl' || provider === 'browserless') {
     const overview = await readCrawlerProviderSecretsOverview();
     if (!overview.providers[provider].effectiveConfigured) {
@@ -212,6 +403,9 @@ const startCrawl = async (
     p_max_depth: maxDepth,
     p_follow_nofollow: followNofollow,
     p_provider: provider,
+    p_external_reuse_days: usagePolicy.externalReuseDays,
+    p_force_external_refresh: forceExternalRefresh,
+    p_max_external_requests: usagePolicy.maxExternalRequestsPerRun,
   });
   if (error) {
     const activeConflict = /active site crawl|duplicate key|unique/i.test(error.message || '');
@@ -223,7 +417,6 @@ const startCrawl = async (
       activeConflict ? 'client_site_crawl_already_active' : 'client_site_crawl_start_failed',
     );
   }
-
   return {
     status: 202,
     body: {
@@ -315,11 +508,13 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
   const action = text(body.action) || 'start';
   const result = action === 'cancel'
     ? await cancelCrawl(supabase, principal.userId, body)
+    : action === 'estimate'
+      ? await estimateCrawl(supabase, principal.userId, body)
     : action === 'start'
       ? await startCrawl(supabase, principal.userId, body)
       : (() => {
         throw new ClientSiteCrawlerApiError(
-          'Unsupported action. Use start or cancel.',
+          'Unsupported action. Use start, estimate, or cancel.',
           400,
           'unsupported_client_site_crawl_action',
         );

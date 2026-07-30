@@ -69,8 +69,10 @@ import {
 import { notifyClientDirectoryChanged } from '../hooks/useClientDirectory';
 import {
   cancelClientSiteCrawl,
+  estimateClientSiteCrawl,
   loadClientSiteCrawlState,
   startClientSiteCrawl,
+  type ClientSiteCrawlEstimate,
   type ClientSiteCrawlProvider,
   type ClientSiteCrawlState,
 } from '../utils/clientSiteCrawler';
@@ -106,6 +108,16 @@ const EMPTY_SITE_CRAWL_STATE: ClientSiteCrawlState = {
     local: true,
     firecrawl: false,
     browserless: false,
+  },
+  usagePolicy: {
+    externalReuseDays: 14,
+    maxExternalRequestsPerRun: 100,
+    firecrawlMonthlyRequestLimit: 500,
+    browserlessMonthlyRequestLimit: 500,
+  },
+  monthlyUsage: {
+    firecrawl: { used: 0, limit: 500, remaining: 500 },
+    browserless: { used: 0, limit: 500, remaining: 500 },
   },
   links: [],
 };
@@ -458,6 +470,11 @@ const ClientCenterSettings: React.FC = () => {
   const [siteCrawlFollowNofollow, setSiteCrawlFollowNofollow] = useState(false);
   const [siteCrawlProvider, setSiteCrawlProvider] =
     useState<ClientSiteCrawlProvider>('auto');
+  const [siteCrawlForceExternalRefresh, setSiteCrawlForceExternalRefresh] =
+    useState(false);
+  const [siteCrawlEstimate, setSiteCrawlEstimate] =
+    useState<ClientSiteCrawlEstimate | null>(null);
+  const [isEstimatingSiteCrawl, setIsEstimatingSiteCrawl] = useState(false);
   const [pageQuery, setPageQuery] = useState('');
   const [expandedPageId, setExpandedPageId] = useState('');
   const [dictionaryType, setDictionaryType] = useState<ClientLinkDictionaryType>('synonym');
@@ -589,7 +606,23 @@ const ClientCenterSettings: React.FC = () => {
   useEffect(() => {
     setSiteCrawlStartUrl('');
     setSiteCrawlProvider('auto');
+    setSiteCrawlForceExternalRefresh(false);
+    setSiteCrawlEstimate(null);
   }, [selectedClientId]);
+
+  useEffect(() => {
+    setSiteCrawlEstimate(null);
+    if (siteCrawlProvider !== 'firecrawl' && siteCrawlProvider !== 'browserless') {
+      setSiteCrawlForceExternalRefresh(false);
+    }
+  }, [
+    siteCrawlFollowNofollow,
+    siteCrawlForceExternalRefresh,
+    siteCrawlMaxDepth,
+    siteCrawlMaxPages,
+    siteCrawlProvider,
+    siteCrawlStartUrl,
+  ]);
 
   useEffect(() => {
     if (!siteCrawlStartUrl && primaryClientDomain?.hostname) {
@@ -790,6 +823,10 @@ const ClientCenterSettings: React.FC = () => {
   const handleStartSiteCrawl = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedClientId || !siteCrawlStartUrl.trim() || isSaving) return;
+    const confirmedFullRefresh = !siteCrawlForceExternalRefresh || window.confirm(
+      'سيؤدي التحديث الخارجي الكامل إلى تجاهل البيانات الحديثة وإرسال طلب خارجي لكل صفحة ضمن الحدود. هل تريد المتابعة؟',
+    );
+    if (!confirmedFullRefresh) return;
     setIsSaving(true);
     setError('');
     setMessage('');
@@ -801,16 +838,43 @@ const ClientCenterSettings: React.FC = () => {
         maxDepth: siteCrawlMaxDepth,
         followNofollow: siteCrawlFollowNofollow,
         provider: siteCrawlProvider,
+        forceExternalRefresh: siteCrawlForceExternalRefresh,
+        confirmFullExternalRefresh: siteCrawlForceExternalRefresh,
       });
       await Promise.all([
         refreshDetails(selectedClientId, true),
         refreshSiteCrawlState(selectedClientId, true),
       ]);
-      showMessage('بدأ زحف الموقع. سيكتشف النظام الروابط ويضيف الصفحات تلقائيًا ضمن الحدود والمزوّد المحددين.');
+      showMessage(
+        siteCrawlForceExternalRefresh
+          ? 'بدأ التحديث الخارجي الكامل ضمن الحدود الصارمة المحفوظة في إعدادات المسؤول.'
+          : 'بدأ الزحف الاقتصادي. ستُعاد استخدام الصفحات الحديثة وشبكة روابطها قبل إرسال أي طلب خارجي.',
+      );
     } catch (crawlError) {
       showError(crawlError);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleEstimateSiteCrawl = async () => {
+    if (!selectedClientId || !siteCrawlStartUrl.trim() || isEstimatingSiteCrawl) return;
+    setIsEstimatingSiteCrawl(true);
+    setError('');
+    try {
+      setSiteCrawlEstimate(await estimateClientSiteCrawl({
+        clientId: selectedClientId,
+        startUrl: siteCrawlStartUrl,
+        maxPages: siteCrawlMaxPages,
+        maxDepth: siteCrawlMaxDepth,
+        followNofollow: siteCrawlFollowNofollow,
+        provider: siteCrawlProvider,
+        forceExternalRefresh: siteCrawlForceExternalRefresh,
+      }));
+    } catch (estimateError) {
+      showError(estimateError);
+    } finally {
+      setIsEstimatingSiteCrawl(false);
     }
   };
 
@@ -1075,15 +1139,74 @@ const ClientCenterSettings: React.FC = () => {
               </button>
             )}
           </div>
-          <label className="mt-3 flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300">
-            <input
-              type="checkbox"
-              checked={siteCrawlFollowNofollow}
-              disabled={Boolean(activeSiteCrawl)}
-              onChange={event => setSiteCrawlFollowNofollow(event.target.checked)}
-            />
-            تتبّع روابط nofollow أيضًا
-          </label>
+          <div className="mt-3 flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={siteCrawlFollowNofollow}
+                disabled={Boolean(activeSiteCrawl)}
+                onChange={event => setSiteCrawlFollowNofollow(event.target.checked)}
+              />
+              تتبّع روابط nofollow أيضًا
+            </label>
+            {isAdmin && (
+              siteCrawlProvider === 'firecrawl'
+              || siteCrawlProvider === 'browserless'
+            ) && (
+              <label className="flex items-center gap-2 text-xs font-bold text-red-700 dark:text-red-300">
+                <input
+                  type="checkbox"
+                  checked={siteCrawlForceExternalRefresh}
+                  disabled={Boolean(activeSiteCrawl)}
+                  onChange={event =>
+                    setSiteCrawlForceExternalRefresh(event.target.checked)}
+                />
+                تحديث خارجي كامل وتجاهل النسخ الحديثة
+              </label>
+            )}
+            {!activeSiteCrawl && (
+              <button
+                type="button"
+                className={secondaryButtonClass}
+                disabled={isEstimatingSiteCrawl || !siteCrawlStartUrl.trim()}
+                onClick={() => void handleEstimateSiteCrawl()}
+              >
+                {isEstimatingSiteCrawl
+                  ? <LoaderCircle className="animate-spin" size={15} />
+                  : <CircleHelp size={15} />}
+                تقدير الاستهلاك قبل البدء
+              </button>
+            )}
+          </div>
+          {(siteCrawlProvider === 'firecrawl' || siteCrawlProvider === 'browserless') && (
+            <div className="mt-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-[11px] font-semibold leading-5 text-green-800 dark:border-green-900/60 dark:bg-green-950/30 dark:text-green-200">
+              الوضع الاقتصادي مفعّل: الصفحة التي نجح زحفها خلال آخر{' '}
+              {siteCrawlState.usagePolicy.externalReuseDays.toLocaleString('ar')} يومًا
+              تُستعمل مع شبكة روابطها المخزنة دون طلب خارجي. الحد الصارم لكل زحف{' '}
+              {siteCrawlState.usagePolicy.maxExternalRequestsPerRun.toLocaleString('ar')} طلب.
+            </div>
+          )}
+          {siteCrawlEstimate && (
+            <div className="mt-3 grid grid-cols-2 gap-2 rounded-md border border-[#d4af37]/30 bg-white/70 p-3 text-[11px] font-bold text-gray-600 dark:bg-[#252525] dark:text-gray-200 sm:grid-cols-5">
+              <span>صفحات معروفة بالمسار: {siteCrawlEstimate.knownPages.toLocaleString('ar')}</span>
+              <span>ستُعاد من المخزون: {siteCrawlEstimate.reusablePages.toLocaleString('ar')}</span>
+              <span>طلبات متوقعة: {siteCrawlEstimate.estimatedExternalRequests.toLocaleString('ar')}</span>
+              <span>أقصى طلبات ممكنة: {siteCrawlEstimate.maximumExternalRequests.toLocaleString('ar')}</span>
+              <span>المتبقي الشهري: {siteCrawlEstimate.monthlyRemaining.toLocaleString('ar')}</span>
+              {siteCrawlEstimate.unknownCapacity > 0 && (
+                <span className="col-span-2 text-amber-700 dark:text-amber-300 sm:col-span-5">
+                  قد تُكتشف حتى {siteCrawlEstimate.unknownCapacity.toLocaleString('ar')} صفحة
+                  إضافية غير موجودة في الشبكة الحالية؛ يحميها الحد الأقصى أعلاه.
+                </span>
+              )}
+              {siteCrawlEstimate.provider === 'auto' && (
+                <span className="col-span-2 text-blue-700 dark:text-blue-300 sm:col-span-5">
+                  في الوضع التلقائي يبدأ كل رابط محليًا؛ لذلك لا يمكن تثبيت عدد
+                  الطلبات الخارجية مسبقًا. الرقم الأقصى هو الحارس المالي الصارم.
+                </span>
+              )}
+            </div>
+          )}
           <div className="mt-3 flex flex-wrap gap-3 text-[11px] font-bold text-gray-500">
             <span className="text-gray-700 dark:text-gray-200">
               الروابط الداخلية النشطة: {siteCrawlState.activeInternalLinkCount.toLocaleString('ar')}
@@ -1094,6 +1217,12 @@ const ClientCenterSettings: React.FC = () => {
                 <span>المكتشفة: {activeSiteCrawl.pagesDiscovered.toLocaleString('ar')}</span>
                 <span>المجدولة: {activeSiteCrawl.pagesQueued.toLocaleString('ar')}</span>
                 <span>المكتملة: {activeSiteCrawl.pagesCompleted.toLocaleString('ar')}</span>
+                <span>المعاد استخدامها: {activeSiteCrawl.pagesReused.toLocaleString('ar')}</span>
+                <span>
+                  الطلبات الخارجية: {activeSiteCrawl.externalRequestsUsed.toLocaleString('ar')}
+                  {' / '}
+                  {activeSiteCrawl.maxExternalRequests.toLocaleString('ar')}
+                </span>
                 <span>الفاشلة: {activeSiteCrawl.pagesFailed.toLocaleString('ar')}</span>
               </>
             )}
@@ -1126,6 +1255,12 @@ const ClientCenterSettings: React.FC = () => {
               <div className="mt-2 flex flex-wrap gap-2 font-bold text-gray-500">
                 <span>{crawlProviderLabels[run.provider]}</span>
                 <span>{run.pagesCompleted.toLocaleString('ar')} مكتملة</span>
+                <span>{run.pagesReused.toLocaleString('ar')} من المخزون</span>
+                <span>
+                  {run.externalRequestsUsed.toLocaleString('ar')}
+                  {' / '}
+                  {run.maxExternalRequests.toLocaleString('ar')} طلب خارجي
+                </span>
                 <span>{run.pagesQueued.toLocaleString('ar')} مجدولة</span>
                 <span>عمق {run.maxDepth.toLocaleString('ar')}</span>
               </div>

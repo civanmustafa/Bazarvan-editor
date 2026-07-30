@@ -12,9 +12,11 @@ import {
   clearCrawlerProviderSecret,
   loadCrawlerProviderSecrets,
   saveAndEnableCrawlerProviderSecret,
+  saveCrawlerUsagePolicy,
   setCrawlerProviderSecretEnabled,
   type CrawlerProviderSecretStatus,
   type CrawlerProviderSecretsResponse,
+  type CrawlerUsagePolicy,
 } from '../utils/adminCrawlerProviderSecrets';
 
 const PROVIDERS: Array<{
@@ -52,6 +54,13 @@ const emptyStatus = (
   activeSource: 'hostinger',
 });
 
+const DEFAULT_USAGE_POLICY: CrawlerUsagePolicy = {
+  externalReuseDays: 14,
+  maxExternalRequestsPerRun: 100,
+  firecrawlMonthlyRequestLimit: 500,
+  browserlessMonthlyRequestLimit: 500,
+};
+
 const AdminCrawlerProviderSecretsSettings: React.FC = () => {
   const [overview, setOverview] =
     useState<CrawlerProviderSecretsResponse | null>(null);
@@ -66,6 +75,9 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
   const [busyProvider, setBusyProvider] =
     useState<CrawlerExternalProvider | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSavingPolicy, setIsSavingPolicy] = useState(false);
+  const [usagePolicy, setUsagePolicy] =
+    useState<CrawlerUsagePolicy>(DEFAULT_USAGE_POLICY);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -73,7 +85,9 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
     setIsLoading(true);
     setError('');
     try {
-      setOverview(await loadCrawlerProviderSecrets());
+      const value = await loadCrawlerProviderSecrets();
+      setOverview(value);
+      setUsagePolicy(value.usagePolicy || DEFAULT_USAGE_POLICY);
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -146,6 +160,26 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
       () => clearCrawlerProviderSecret(provider),
       'تم حذف المفتاح الإداري.',
     );
+  };
+
+  const saveUsagePolicy = async () => {
+    setIsSavingPolicy(true);
+    setError('');
+    setMessage('');
+    try {
+      const value = await saveCrawlerUsagePolicy(usagePolicy);
+      setOverview(value);
+      setUsagePolicy(value.usagePolicy || DEFAULT_USAGE_POLICY);
+      setMessage('تم حفظ سياسة إعادة الاستخدام والحدود الصارمة للطلبات الخارجية.');
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : 'تعذر حفظ سياسة استخدام خدمات الزحف.',
+      );
+    } finally {
+      setIsSavingPolicy(false);
+    }
   };
 
   if (isLoading) {
@@ -303,6 +337,70 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
           </div>
         );
       })}
+
+      <div className="border-t border-gray-200 pt-4 dark:border-[#3C3C3C]">
+        <div className="text-sm font-black text-gray-800 dark:text-gray-100">
+          سياسة منع تكرار الطلبات الخارجية
+        </div>
+        <p className="mt-1 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+          يُعاد استخدام الصفحة وشبكة روابطها إذا كان آخر زحف ناجح ضمن مدة الحداثة.
+          وتُطبّق الحدود التالية داخل قاعدة البيانات قبل إرسال أي طلب مدفوع.
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {([
+            ['externalReuseDays', 'حداثة البيانات (يوم)', 1, 90],
+            ['maxExternalRequestsPerRun', 'حد الطلبات لكل زحف', 1, 2000],
+            ['firecrawlMonthlyRequestLimit', 'حد Firecrawl الشهري', 1, 1000000],
+            ['browserlessMonthlyRequestLimit', 'حد Browserless الشهري', 1, 1000000],
+          ] as const).map(([key, label, minimum, maximum]) => (
+            <label key={key} className="block">
+              <span className="mb-1 block text-xs font-bold text-gray-600 dark:text-gray-300">
+                {label}
+              </span>
+              <input
+                type="number"
+                min={minimum}
+                max={maximum}
+                value={usagePolicy[key]}
+                disabled={isSavingPolicy}
+                onChange={event => setUsagePolicy(current => ({
+                  ...current,
+                  [key]: Math.max(
+                    minimum,
+                    Math.min(maximum, Number(event.target.value) || minimum),
+                  ),
+                }))}
+                className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-bold text-gray-500 dark:text-gray-300">
+          <span>
+            Firecrawl هذا الشهر:{' '}
+            {(overview?.monthlyUsage?.firecrawl?.used || 0).toLocaleString('ar')}
+            {' / '}
+            {usagePolicy.firecrawlMonthlyRequestLimit.toLocaleString('ar')}
+          </span>
+          <span>
+            Browserless هذا الشهر:{' '}
+            {(overview?.monthlyUsage?.browserless?.used || 0).toLocaleString('ar')}
+            {' / '}
+            {usagePolicy.browserlessMonthlyRequestLimit.toLocaleString('ar')}
+          </span>
+          <button
+            type="button"
+            onClick={() => void saveUsagePolicy()}
+            disabled={isSavingPolicy}
+            className="mr-auto inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#d4af37] px-3 py-2 text-sm font-bold text-white hover:bg-[#b8922e] disabled:opacity-50"
+          >
+            {isSavingPolicy
+              ? <LoaderCircle size={16} className="animate-spin" />
+              : <Save size={16} />}
+            <span>حفظ سياسة الاستخدام</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
