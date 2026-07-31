@@ -20,6 +20,7 @@ import { useUser } from './UserContext';
 import { normalizeGoalContext } from '../utils/goalContext';
 import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT, readStoredCompetitorInputs, writeStoredCompetitorInputs } from '../utils/competitorStorage';
 import {
+    type ArticleImportOrigin,
     ArticleStorageSnapshot,
     createEditorContentReference,
     createEditorContentReferenceWithChunkFallback,
@@ -34,6 +35,7 @@ import {
     saveArticleSnapshotDurably,
     saveEditorContentDurably,
 } from '../utils/editorContentStore';
+import type { ArticleImportMode, ArticleImportPreview } from '../utils/articleImport';
 import {
     loadRemoteArticleSnapshot,
     recordRemoteArticleTime,
@@ -152,9 +154,12 @@ const readJsonStorageValue = (key: string): any | null => {
     }
 };
 
-const readCurrentArticleAttachments = (): ArticleStorageSnapshot['attachments'] => ({
+const readCurrentArticleAttachments = (
+    importOrigin?: ArticleImportOrigin | null,
+): ArticleStorageSnapshot['attachments'] => ({
     competitors: readStoredCompetitorInputs(),
     contentSummary: readJsonStorageValue(CONTENT_SUMMARY_STORAGE_KEY),
+    ...(importOrigin ? { importOrigin } : {}),
 });
 
 const ARTICLE_AI_RESULTS_RESTORE_EVENT = 'bazarvan:article-ai-results-restored';
@@ -846,6 +851,10 @@ interface EditorContextType {
     reloadActiveArticleFromRemote: (expectedArticleId: string) => Promise<boolean>;
     handleRestoreDraft: () => void;
     handleNewArticle: (lang: 'ar' | 'en') => Promise<void>;
+    applyImportedArticleContent: (
+        preview: ArticleImportPreview,
+        mode: ArticleImportMode,
+    ) => Promise<{ ok: boolean; error?: string }>;
     handleLoadArticle: (title: string, article: ArticleActivity | RemoteArticleActivity) => Promise<void>;
 }
 
@@ -875,6 +884,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [articleKey, setArticleKey] = useState<string>(() => initialActiveArticleTitleRef.current || initialAutoDraftTitle);
     const [activeArticleId, setActiveArticleId] = useState<string | null>(() => initialActiveArticleIdRef.current);
     const [activeArticleSettings, setActiveArticleSettings] = useState<ActiveArticleSettings>(EMPTY_ACTIVE_ARTICLE_SETTINGS);
+    const [importOrigin, setImportOrigin] = useState<ArticleImportOrigin | null>(null);
+    const pendingImportedSaveRef = useRef(false);
     const [editorState, setEditorState] = useState<any | null>(null);
     const [text, setText] = useState<string>('');
     const [keywords, setKeywords] = useState<Keywords>(() => {
@@ -1101,6 +1112,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setKeywords(nextKeywords);
             setGoalContext(nextGoalContext);
             setArticleLanguage(lang);
+            setImportOrigin(snapshot?.attachments?.importOrigin || null);
 
             if (hasResolvedContent || options.clearWhenEmpty !== false) {
                 setEditorContentSafely(
@@ -1499,7 +1511,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
             const newTitle = title.trim();
             const finalTitleToSave = newTitle || articleKey || '(untitled)';
-            const attachments = readCurrentArticleAttachments();
+            const attachments = readCurrentArticleAttachments(importOrigin);
 
             if (!articleKey && newTitle) {
                 setArticleKey(newTitle);
@@ -1626,7 +1638,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
             return false;
         }
-    }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, articleLanguage, goalContext, analysisResults, clearEditorSnapshotTimer, clearDraftPersistTimer]);
+    }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, articleLanguage, goalContext, analysisResults, importOrigin, clearEditorSnapshotTimer, clearDraftPersistTimer]);
 
     const handleSaveDraft = useCallback(async (options: SaveDraftOptions = {}): Promise<boolean> => {
         const reason = options.reason || 'manual';
@@ -1792,6 +1804,15 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [handleSaveDraft]);
 
     useEffect(() => {
+        if (!pendingImportedSaveRef.current) return;
+        pendingImportedSaveRef.current = false;
+        const timer = window.setTimeout(() => {
+            void handleSaveDraftRef.current({ reason: 'manual', force: true });
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, [articleLanguage, importOrigin, title]);
+
+    useEffect(() => {
         const handleAutoSaveRequest = () => {
             void handleSaveDraftRef.current({ reason: 'auto', force: false });
         };
@@ -1891,6 +1912,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleKey('');
             setActiveArticleId(null);
             setActiveArticleSettings(EMPTY_ACTIVE_ARTICLE_SETTINGS);
+            setImportOrigin(null);
             setKeywords(emptyKeywords);
             setGoalContext(emptyGoalContext);
             setArticleLanguage(lang);
@@ -1917,6 +1939,83 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         captureEditorSnapshot,
         clearEditorSnapshotTimer,
         clearDraftPersistTimer,
+    ]);
+
+    const applyImportedArticleContent = useCallback(async (
+        preview: ArticleImportPreview,
+        mode: ArticleImportMode,
+    ): Promise<{ ok: boolean; error?: string }> => {
+        if (!editor || editor.isDestroyed) {
+            return { ok: false, error: 'محرر المقالة غير متاح حاليًا.' };
+        }
+        if (!preview.contentHtml.trim() || !preview.plainText.trim()) {
+            return { ok: false, error: 'لم تُرجع المعاينة محتوى صالحًا للإدخال.' };
+        }
+
+        if (mode === 'replace' && editor.getText().trim()) {
+            const backupSaved = await handleSaveDraft({ reason: 'manual', force: true });
+            if (!backupSaved) {
+                return { ok: false, error: 'تعذر حفظ نسخة من المقالة الحالية قبل استبدالها.' };
+            }
+        }
+        if (mode === 'new') {
+            await handleNewArticle(preview.language);
+        }
+        if (editor.isDestroyed) {
+            return { ok: false, error: 'أُغلق المحرر قبل اكتمال الاستيراد.' };
+        }
+
+        isArticleContentLoadingRef.current = true;
+        try {
+            if (mode === 'insert') {
+                editor.chain().focus().insertContent(preview.contentHtml).run();
+            } else {
+                const importedTitle = preview.title.trim() || '(untitled)';
+                const origin: ArticleImportOrigin = {
+                    sourceUrl: preview.sourceUrl,
+                    canonicalUrl: preview.canonicalUrl,
+                    fetchedUrl: preview.fetchedUrl,
+                    importedAt: new Date().toISOString(),
+                    contentHash: preview.contentHash,
+                    extractionProvider: preview.extractionProvider,
+                    skippedImageCount: preview.skippedImageCount,
+                    mode,
+                };
+                setTitle(importedTitle);
+                setArticleKey(importedTitle);
+                setArticleLanguage(preview.language);
+                setImportOrigin(origin);
+                latestDraftMetaRef.current = {
+                    ...latestDraftMetaRef.current,
+                    title: importedTitle,
+                    articleLanguage: preview.language,
+                };
+                setEditorContentSafely(editor, preview.contentHtml, createEmptyEditorContent());
+                applyArticleLanguageFormatting(editor, preview.language, false);
+            }
+        } finally {
+            isArticleContentLoadingRef.current = false;
+        }
+
+        hasEditorChangedAfterArticleLoadRef.current = true;
+        clearEditorSnapshotTimer();
+        clearDraftPersistTimer();
+        captureEditorSnapshot(editor);
+        if (mode === 'insert') {
+            window.setTimeout(() => {
+                void handleSaveDraftRef.current({ reason: 'manual', force: true });
+            }, 0);
+        } else {
+            pendingImportedSaveRef.current = true;
+        }
+        return { ok: true };
+    }, [
+        captureEditorSnapshot,
+        clearDraftPersistTimer,
+        clearEditorSnapshotTimer,
+        editor,
+        handleNewArticle,
+        handleSaveDraft,
     ]);
 
     const handleLoadArticle = useCallback(async (titleStr: string, article: ArticleActivity | RemoteArticleActivity) => {
@@ -2045,6 +2144,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         reloadActiveArticleFromRemote,
         handleRestoreDraft,
         handleNewArticle,
+        applyImportedArticleContent,
         handleLoadArticle,
     }), [
         editor,
@@ -2070,6 +2170,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         reloadActiveArticleFromRemote,
         handleRestoreDraft,
         handleNewArticle,
+        applyImportedArticleContent,
         handleLoadArticle,
     ]);
 

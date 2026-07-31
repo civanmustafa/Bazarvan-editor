@@ -3,7 +3,7 @@ import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { useInteractionSelector } from '../contexts/InteractionContext';
 import { useAISelector } from '../contexts/AIContext';
-import { Focus, Languages } from 'lucide-react';
+import { FileInput, Focus } from 'lucide-react';
 
 import { IconTooltip, Separator } from './toolbar/ToolbarItems';
 import FormattingActions from './toolbar/FormattingActions';
@@ -12,7 +12,7 @@ import AIActions from './toolbar/AIActions';
 import DocumentActions from './toolbar/DocumentActions';
 import FindAndReplace from './toolbar/FindAndReplace';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
-import { ARTICLE_STATUS_OPTIONS } from '../constants/articleStatuses';
+import ArticleImportModal from './ArticleImportModal';
 
 /*
  * Toolbar composition:
@@ -23,11 +23,6 @@ import { ARTICLE_STATUS_OPTIONS } from '../constants/articleStatuses';
  *
  * Add a new toolbar command in the matching toolbar/* component, then pass only the needed handler here.
  */
-const ARTICLE_ACCESS_ROLE_LABELS: Record<string, string> = {
-  viewer: 'عرض',
-  editor: 'تعديل',
-};
-
 type EditorToolbarProps = {
     isFocusMode?: boolean;
     onToggleFocusMode?: () => void;
@@ -44,7 +39,6 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
         setCurrentView,
         uiLanguage,
         t,
-        isIdle,
     } = useUser();
 
     const editor = useEditorSelector(context => context.editor);
@@ -58,11 +52,6 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
     const restoreStatus = useEditorSelector(context => context.restoreStatus);
     const draftExists = useEditorSelector(context => context.draftExists);
     const onNewArticle = useEditorSelector(context => context.handleNewArticle);
-    const articleLanguage = useEditorSelector(context => context.articleLanguage);
-    const onLanguageChange = useEditorSelector(context => context.handleLanguageChange);
-    const activeArticleSettings = useEditorSelector(context => context.activeArticleSettings);
-    const handleActiveArticleStatusChange = useEditorSelector(context => context.handleActiveArticleStatusChange);
-
     const clearAllHighlights = useInteractionSelector(context => context.clearAllHighlights);
     const onToggleAllKeywordsHighlight = useInteractionSelector(context => context.handleToggleAllKeywordsHighlight);
     const onRemoveEmptyLines = useInteractionSelector(context => context.handleRemoveEmptyLines);
@@ -123,19 +112,14 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
     const [isFindReplaceVisible, setIsFindReplaceVisible] = useState(false);
     const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
-    const [isStatusSaving, setIsStatusSaving] = useState(false);
+    const [isArticleImportModalOpen, setIsArticleImportModalOpen] = useState(false);
+    const [articleImportUrl, setArticleImportUrl] = useState('');
   
     const isAnyGeminiLoading = isAiCommandLoading || isAiLoading.gemini || isAiLoading.geminiPaid || isAiLoading.chatgpt;
-    const hasArticleSettings = Boolean(activeArticleSettings.status || activeArticleSettings.accessRole);
     const focusModeLabel = isFocusMode
       ? (uiLanguage === 'ar' ? 'إنهاء وضع التركيز' : 'Exit focus mode')
       : (uiLanguage === 'ar' ? 'وضع التركيز' : 'Focus mode');
   
-    const handleLanguageToggle = () => {
-      const newLang = articleLanguage === 'ar' ? 'en' : 'ar';
-      onLanguageChange(newLang);
-    };
-
     const handleToggleFindReplace = useCallback(() => {
         setIsFindReplaceVisible(prev => !prev);
     }, []);
@@ -148,15 +132,6 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
         setIsNewArticleLanguageModalOpen(false);
         onNewArticle(lang);
     }, [onNewArticle]);
-
-    const handleStatusChange = useCallback(async (status: string) => {
-      setIsStatusSaving(true);
-      const saved = await handleActiveArticleStatusChange(status as any);
-      setIsStatusSaving(false);
-      if (!saved) {
-        alert('تعذر تغيير حالة المقالة من داخل المحرر. حاول مرة أخرى.');
-      }
-    }, [handleActiveArticleStatusChange]);
 
     // Mirror TipTap selection/formatting state into button active states and counters.
     useEffect(() => {
@@ -209,64 +184,41 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
     return (
       <>
       <div className="sticky top-0 z-20 flex flex-col gap-1 p-1 bg-[#F2F3F5] dark:bg-[#1F1F1F] border-b border-gray-300 dark:border-[#3C3C3C]">
-        <div className="flex items-center gap-4 w-full">
+        <div className="grid w-full grid-cols-[minmax(0,3fr)_minmax(0,1fr)] items-center gap-2">
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={t.titlePlaceholder}
-            className="title-input flex-grow py-0.5 px-2 text-base font-bold bg-transparent border-none rounded-md text-[#333333] placeholder:text-gray-400 focus:ring-0 focus:outline-none dark:text-gray-100 dark:placeholder:text-gray-500"
+            className="title-input min-w-0 py-1.5 px-2 text-base font-bold bg-transparent border-none rounded-md text-[#333333] placeholder:text-gray-400 focus:ring-0 focus:outline-none dark:text-gray-100 dark:placeholder:text-gray-500"
             aria-label={t.articleTitle}
           />
-          {hasArticleSettings && (
-            <div className="flex max-w-[280px] flex-wrap items-center gap-1">
-              {activeArticleSettings.status && (
-                <label className="inline-flex items-center gap-1 rounded-md bg-[#d4af37]/10 px-2 py-1 text-[11px] font-black text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]">
-                  <span>status:</span>
-                  <select
-                    value={activeArticleSettings.status}
-                    disabled={isStatusSaving}
-                    onChange={(event) => { void handleStatusChange(event.target.value); }}
-                    className="max-w-[124px] bg-transparent text-[11px] font-black outline-none disabled:opacity-60"
-                  >
-                    {ARTICLE_STATUS_OPTIONS.map(({ value, label }) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {activeArticleSettings.accessRole && (
-                <span className="rounded-md bg-gray-200 px-2 py-1 text-[11px] font-black text-gray-600 dark:bg-[#2A2A2A] dark:text-gray-300">
-                  accessRole: {ARTICLE_ACCESS_ROLE_LABELS[activeArticleSettings.accessRole] || activeArticleSettings.accessRole}
-                </span>
-              )}
-            </div>
-          )}
-          <div className="flex-shrink-0 flex items-center gap-4">
-              <button
-                onClick={handleLanguageToggle}
-                aria-label={t.toggleArticleLanguage}
-                className="group relative p-1.5 rounded-md text-gray-600 dark:text-gray-300 bg-transparent hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-[#1F1F1F] focus:ring-[#d4af37]"
-              >
-                <div className="flex items-center gap-1.5 px-1">
-                  <Languages size={16} />
-                  <span className="text-xs font-bold">{articleLanguage.toUpperCase()}</span>
-                </div>
-                <IconTooltip label={t.toggleArticleLanguage} />
-              </button>
-            <div className="flex items-center gap-2" title={isIdle ? t.idle : t.active}>
-                <div className={`w-3 h-3 rounded-full transition-colors duration-500 ${isIdle ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
-                <span className="text-xs text-gray-500 dark:text-gray-400 select-none">{isIdle ? t.idle : t.active}</span>
-            </div>
-
-            <div className="text-sm text-gray-600 dark:text-gray-400 bg-gray-200 dark:bg-[#2A2A2A] px-3 py-1 rounded-md">
-              {selectionCount.chars > 0 ? (
-                <span>{`${selectionCount.words} ${t.words}`} / {`${selectionCount.chars} ${t.characters}`}</span>
-              ) : (
-                <span>{`${totalWordCount} ${t.words}`} / {`${totalCharCount} ${t.characters}`}</span>
-              )}
-            </div>
-          </div>
+          <form
+            className="flex min-w-0 items-center gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setIsArticleImportModalOpen(true);
+            }}
+          >
+            <input
+              id="article-import-inline-url"
+              type="url"
+              dir="ltr"
+              value={articleImportUrl}
+              onChange={(event) => setArticleImportUrl(event.target.value)}
+              placeholder={uiLanguage === 'ar' ? 'رابط المقالة أو الخبر' : 'Article or news URL'}
+              aria-label={uiLanguage === 'ar' ? 'رابط المقالة أو الخبر' : 'Article or news URL'}
+              className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-[#d4af37] focus:ring-2 focus:ring-[#d4af37]/20 dark:border-[#444] dark:bg-[#171717] dark:text-gray-100 dark:placeholder:text-gray-500"
+            />
+            <button
+              type="submit"
+              className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-md bg-[#b28b22] px-3 text-xs font-black text-white transition hover:bg-[#94731c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#1F1F1F]"
+              title={uiLanguage === 'ar' ? 'سحب المقالة من الرابط' : 'Fetch article from URL'}
+            >
+              <FileInput size={15} />
+              <span>{uiLanguage === 'ar' ? 'سحب' : 'Fetch'}</span>
+            </button>
+          </form>
         </div>
 
         {isFindReplaceVisible && (
@@ -277,6 +229,14 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <FormattingActions editor={editor} activeState={activeState} t={t} />
 
             <div className="ms-auto flex items-center gap-1">
+                <div className="hidden whitespace-nowrap rounded-md bg-gray-200 px-2 py-1 text-xs text-gray-600 xl:block dark:bg-[#2A2A2A] dark:text-gray-400">
+                  {selectionCount.chars > 0 ? (
+                    <span>{`${selectionCount.words} ${t.words}`} / {`${selectionCount.chars} ${t.characters}`}</span>
+                  ) : (
+                    <span>{`${totalWordCount} ${t.words}`} / {`${totalCharCount} ${t.characters}`}</span>
+                  )}
+                </div>
+                <Separator />
                 {onToggleFocusMode && (
                   <>
                     <button
@@ -347,6 +307,13 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
           t={t}
           uiLanguage={uiLanguage}
           onChoose={handleChooseNewArticleLanguage}
+        />
+      )}
+      {isArticleImportModalOpen && (
+        <ArticleImportModal
+          initialUrl={articleImportUrl}
+          autoFetch={Boolean(articleImportUrl.trim())}
+          onClose={() => setIsArticleImportModalOpen(false)}
         />
       )}
       </>

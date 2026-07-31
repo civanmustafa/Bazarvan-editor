@@ -3,6 +3,7 @@ import adminAiProviderSecretsHandler from '../api/adminAiProviderSecrets';
 import adminCrawlerProviderSecretsHandler from '../api/adminCrawlerProviderSecrets';
 import adminCrawlerProviderUsageHandler from '../api/adminCrawlerProviderUsage';
 import aiCapabilitiesHandler from '../api/aiCapabilities';
+import articleImportHandler from '../api/articleImport';
 import articlesSaveHandler from '../api/articlesSave';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import chatgptHandler from '../api/chatgpt';
@@ -38,6 +39,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'ai-capabilities', method: 'ALL', path: '/api/ai/capabilities', handler: aiCapabilitiesHandler },
   { id: 'prompt-registry', method: 'ALL', path: '/api/ai/prompt-registry', handler: promptRegistryHandler },
   { id: 'competitors', method: 'ALL', path: '/api/competitors', handler: competitorsHandler },
+  { id: 'article-import', method: 'ALL', path: '/api/articles/import-preview', handler: articleImportHandler },
   { id: 'n8n-articles', method: 'ALL', path: '/api/n8n/articles', handler: n8nArticlesHandler },
   { id: 'articles-save', method: 'ALL', path: '/api/articles/save', handler: articlesSaveHandler },
   { id: 'external-analysis', method: 'ALL', path: '/api/external-analysis', handler: externalAnalysisHandler },

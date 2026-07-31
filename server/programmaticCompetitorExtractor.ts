@@ -507,17 +507,19 @@ const decodeBody = (body: Uint8Array, contentType: string): string => {
   }
 };
 
-const fetchProgrammaticHtml = async (options: {
-  url: string;
-  signal?: AbortSignal;
-  timeoutMs: number;
-  maximumBytes: number;
-}): Promise<{
+export type ProgrammaticHtmlDocument = {
   html: string;
   finalUrl: string;
   contentType: string;
   redirects: number;
-}> => {
+};
+
+export const fetchProgrammaticHtml = async (options: {
+  url: string;
+  signal?: AbortSignal;
+  timeoutMs: number;
+  maximumBytes: number;
+}): Promise<ProgrammaticHtmlDocument> => {
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(new Error('Programmatic competitor extraction timed out.')),

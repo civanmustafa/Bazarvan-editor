@@ -58,6 +58,17 @@ export type ArticleCompetitorSnapshot = {
   texts: string[];
 };
 
+export type ArticleImportOrigin = {
+  sourceUrl: string;
+  canonicalUrl: string;
+  fetchedUrl?: string;
+  importedAt: string;
+  contentHash: string;
+  extractionProvider: 'rich_html' | 'programmatic_text_fallback';
+  skippedImageCount: number;
+  mode: 'new' | 'replace';
+};
+
 export type ArticleStorageSnapshot = {
   kind: 'articleSnapshot';
   version: 1;
@@ -81,6 +92,7 @@ export type ArticleStorageSnapshot = {
   attachments?: {
     competitors?: ArticleCompetitorSnapshot;
     contentSummary?: any;
+    importOrigin?: ArticleImportOrigin;
   };
   savedAiResults?: {
     gemini?: string;
