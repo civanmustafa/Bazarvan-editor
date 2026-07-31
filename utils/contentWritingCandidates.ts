@@ -7,9 +7,56 @@ import {
   type ContentWritingSectionCoverage,
 } from './contentWritingKnowledge';
 
-export const CONTENT_WRITING_CANDIDATE_ENGINE_VERSION = 1;
+export const CONTENT_WRITING_CANDIDATE_ENGINE_VERSION = 2;
 export const CONTENT_WRITING_DEFAULT_CANDIDATE_COUNT = 2;
 export const CONTENT_WRITING_MAX_CANDIDATE_COUNT = 3;
+
+export type ContentWritingCandidateStrategy = {
+  key: 'balanced' | 'focused_comprehensive' | 'deep_investigative' | 'targeted_recovery';
+  nameAr: string;
+  nameEn: string;
+  descriptionAr: string;
+  descriptionEn: string;
+};
+
+export const getContentWritingCandidateStrategy = (
+  candidateIndex: number,
+): ContentWritingCandidateStrategy => {
+  if (candidateIndex === 1) {
+    return {
+      key: 'focused_comprehensive',
+      nameAr: 'الكتابة المركّزة الشاملة',
+      nameEn: 'Focused comprehensive writing',
+      descriptionAr: 'تغطي جميع الأفكار والأدلة المطلوبة مباشرة وبوضوح، مع تقليل الحشو والتكرار.',
+      descriptionEn: 'Covers every required idea and source directly and clearly while minimizing padding and repetition.',
+    };
+  }
+  if (candidateIndex === 2) {
+    return {
+      key: 'deep_investigative',
+      nameAr: 'الكتابة العميقة الاستقصائية',
+      nameEn: 'Deep investigative writing',
+      descriptionAr: 'تستخدم بناءً مختلفًا وتبحث عن التفاصيل والثغرات والاستثناءات التي قد يغفلها الأسلوب المباشر.',
+      descriptionEn: 'Uses a different structure and actively investigates details, gaps, and exceptions a direct draft may miss.',
+    };
+  }
+  if (candidateIndex >= 3) {
+    return {
+      key: 'targeted_recovery',
+      nameAr: 'الكتابة الإصلاحية الموجّهة',
+      nameEn: 'Targeted recovery writing',
+      descriptionAr: 'مرشح احتياطي يعالج الشروط القاطعة التي لم يجتزها المرشحان الأساسيان.',
+      descriptionEn: 'A fallback candidate focused on hard gates missed by the two primary candidates.',
+    };
+  }
+  return {
+    key: 'balanced',
+    nameAr: 'الكتابة المتوازنة',
+    nameEn: 'Balanced writing',
+    descriptionAr: 'مرشح واحد يجمع التغطية العميقة مع الوضوح والتركيز وتقليل الحشو.',
+    descriptionEn: 'A single candidate combining deep coverage with clarity, focus, and minimal padding.',
+  };
+};
 
 export type ContentWritingCandidateEvaluation = {
   version: number;
@@ -148,24 +195,36 @@ export const buildContentWritingCandidatePrompt = (options: {
   stageLabel: string;
   remediationFailures?: readonly string[];
 }): string => {
+  const strategyDefinition = getContentWritingCandidateStrategy(options.candidateIndex);
+  if (options.candidateIndex <= 0) {
+    return `${options.prompt}
+
+<protected_single_candidate_protocol>
+- طبّق استراتيجية «${strategyDefinition.nameAr}» لمرحلة: ${options.stageLabel}.
+- ابدأ بحصر جميع الأفكار والأدلة والشروط المطلوبة، ثم عالجها بعمق كافٍ، وبعد ذلك احذف الحشو والتكرار وحافظ على أوضح صياغة ممكنة.
+- Apply the “${strategyDefinition.nameEn}” strategy: secure complete evidence-backed coverage first, then remove padding and repetition while preserving sufficient depth.
+- لا تذكر اسم الاستراتيجية أو عملية التوليد داخل النص الناتج.
+- التزم تمامًا بعقد الإخراج الأصلي للمرحلة؛ لا تغيّر JSON أو Markdown المطلوب.
+</protected_single_candidate_protocol>`;
+  }
   const strategy = options.candidateIndex === 1
     ? [
-        'ابنِ المرشح الأول بمنهج تغطية مباشر: قدّم كل فكرة مطلوبة بوضوح، واربطها بأدلتها، واحترم البنية والميزانية دون حشو.',
+        `طبّق استراتيجية «${strategyDefinition.nameAr}» بمنهج تغطية مباشر: قدّم كل فكرة مطلوبة بوضوح، واربطها بأدلتها، واحترم البنية والميزانية دون حشو.`,
         'Build candidate one with a direct coverage-first approach: express every required idea clearly, preserve evidence, and respect structure and budget without padding.',
       ]
     : options.candidateIndex === 2
       ? [
-          'ابنِ مرشحًا مستقلًا حقًا ببناء بلاغي وتنظيم مختلفين، وابحث خصوصًا عن التفاصيل التي قد يغفلها الحل المباشر. لا تعِد صياغة مرشح آخر ولا تفترض أنك رأيته.',
+          `طبّق استراتيجية «${strategyDefinition.nameAr}» وابنِ مرشحًا مستقلًا حقًا ببناء بلاغي وتنظيم مختلفين، وابحث خصوصًا عن التفاصيل التي قد يغفلها الحل المباشر. لا تعِد صياغة مرشح آخر ولا تفترض أنك رأيته.`,
           'Build a genuinely independent candidate with a different rhetorical structure, actively checking for details a direct draft may miss. Do not paraphrase or assume access to another candidate.',
         ]
       : [
-          `أنشئ مرشح إنقاذ يعالج البوابات التي لم يجتزها المرشحان السابقان فقط: ${(options.remediationFailures || []).join(', ') || 'متطلبات المرحلة'}.`,
+          `طبّق استراتيجية «${strategyDefinition.nameAr}» وأنشئ مرشح إنقاذ يعالج البوابات التي لم يجتزها المرشحان السابقان فقط: ${(options.remediationFailures || []).join(', ') || 'متطلبات المرحلة'}.`,
           `Create a recovery candidate focused on the hard gates missed by the earlier candidates: ${(options.remediationFailures || []).join(', ') || 'stage requirements'}.`,
         ];
   return `${options.prompt}
 
 <protected_multi_candidate_protocol>
-- هذه محاولة مستقلة رقم ${options.candidateIndex} لمرحلة: ${options.stageLabel}.
+- هذه محاولة مستقلة رقم ${options.candidateIndex} باسم «${strategyDefinition.nameAr}» لمرحلة: ${options.stageLabel}.
 - ${strategy[0]}
 - ${strategy[1]}
 - لا تذكر وجود مرشحين ولا عملية الاختيار داخل النص الناتج.

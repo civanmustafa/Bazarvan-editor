@@ -64,7 +64,10 @@ test('candidate selection prefers a hard-gate pass over a higher raw score failu
 });
 
 test('candidate prompts enforce independent strategies without changing the output contract', async () => {
-  const { buildContentWritingCandidatePrompt } = await importCandidates();
+  const {
+    buildContentWritingCandidatePrompt,
+    getContentWritingCandidateStrategy,
+  } = await importCandidates();
   const first = buildContentWritingCandidatePrompt({
     prompt: 'Return JSON only.',
     candidateIndex: 1,
@@ -77,7 +80,29 @@ test('candidate prompts enforce independent strategies without changing the outp
   });
 
   assert.match(first, /منهج تغطية مباشر/);
+  assert.match(first, /الكتابة المركّزة الشاملة/);
   assert.match(second, /مرشحًا مستقلًا حقًا/);
+  assert.match(second, /الكتابة العميقة الاستقصائية/);
   assert.match(second, /لا تغيّر JSON أو Markdown المطلوب/);
   assert.notEqual(first, second);
+
+  assert.equal(getContentWritingCandidateStrategy(1).key, 'focused_comprehensive');
+  assert.equal(getContentWritingCandidateStrategy(2).key, 'deep_investigative');
+});
+
+test('single-candidate mode uses an explicit balanced writing strategy', async () => {
+  const {
+    buildContentWritingCandidatePrompt,
+    getContentWritingCandidateStrategy,
+  } = await importCandidates();
+  const balanced = buildContentWritingCandidatePrompt({
+    prompt: 'Return Markdown only.',
+    candidateIndex: 0,
+    stageLabel: 'Introduction',
+  });
+
+  assert.equal(getContentWritingCandidateStrategy(0).key, 'balanced');
+  assert.match(balanced, /الكتابة المتوازنة/);
+  assert.match(balanced, /حصر جميع الأفكار والأدلة والشروط المطلوبة/);
+  assert.match(balanced, /لا تغيّر JSON أو Markdown المطلوب/);
 });

@@ -180,7 +180,7 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
               قراءتان مستقلتان لمصفوفة المعرفة
             </span>
             <span className="mt-1 block text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-              ينفذ قراءتين مستقلتين لجميع مقاطع المنافسين، ثم يرسل النتيجتين إلى طلب مصالحة ثالث ويبقي مصدر كل فكرة ظاهرًا للمراجعة.
+              ينفذ «القراءة الشاملة المباشرة» و«قراءة صيد الثغرات» لجميع مقاطع المنافسين، ثم يرسل النتيجتين إلى طلب مصالحة ثالث ويبقي مصدر كل فكرة ظاهرًا للمراجعة.
             </span>
           </span>
         </label>
@@ -194,10 +194,17 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
           />
           <span className="min-w-0">
             <span className="block text-sm font-black text-gray-700 dark:text-gray-200">
-              مرشحان للمراحل الكتابية
+              وضع المقارنة الثنائية للكتابة
             </span>
             <span className="mt-1 block text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-              يولد مرشحين مستقلين للأقسام والمقدمة والأسئلة والقسم النهائي والإصلاحات، ثم يستبعد المخالفات القاطعة ويعتمد الأعلى درجة مع حفظ البديل.
+              عند التفعيل يولد «الكتابة المركّزة الشاملة» و«الكتابة العميقة الاستقصائية»، ثم يقارنهما ويعتمد الأفضل. عند التعطيل يستخدم مرشحًا واحدًا باسم «الكتابة المتوازنة» يجمع العمق والتركيز.
+            </span>
+            <span className={`mt-1.5 inline-flex rounded px-2 py-1 text-[10px] font-black ${multiCandidateGenerationEnabled
+              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'
+              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'}`}>
+              {multiCandidateGenerationEnabled
+                ? 'الحالي: كتابة مركّزة + كتابة عميقة'
+                : 'الحالي: كتابة متوازنة بمرشح واحد'}
             </span>
           </span>
         </label>

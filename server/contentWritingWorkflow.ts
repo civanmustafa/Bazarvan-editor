@@ -96,6 +96,7 @@ import {
   buildContentWritingCandidatePrompt,
   evaluateContentWritingCandidate,
   getContentWritingCandidateMetadata,
+  getContentWritingCandidateStrategy,
   mergeContentWritingCandidateFailureCodes,
   selectBestContentWritingCandidate,
   type ContentWritingCandidateEvaluation,
@@ -552,7 +553,42 @@ export const executeStructuredContentWritingWorkflow = async (
     };
   }): Promise<StepRunResult> => {
     if (!multiCandidateGenerationEnabled) {
-      return runStep(candidateOptions);
+      const balancedStrategy = getContentWritingCandidateStrategy(0);
+      const strategyMetadata: JsonObject = {
+        candidateMode: 'single_balanced',
+        candidateStrategyKey: balancedStrategy.key,
+        candidateStrategyNameAr: balancedStrategy.nameAr,
+        candidateStrategyNameEn: balancedStrategy.nameEn,
+        candidateStrategyDescriptionAr: balancedStrategy.descriptionAr,
+        candidateStrategyDescriptionEn: balancedStrategy.descriptionEn,
+      };
+      return runStep({
+        ...candidateOptions,
+        definition: {
+          ...candidateOptions.definition,
+          metadata: {
+            ...candidateOptions.definition.metadata,
+            ...strategyMetadata,
+          },
+        },
+        prompt: buildContentWritingCandidatePrompt({
+          prompt: candidateOptions.prompt,
+          candidateIndex: 0,
+          stageLabel: candidateOptions.definition.title,
+        }),
+        processOutput: output => {
+          const processed = candidateOptions.processOutput
+            ? candidateOptions.processOutput(output)
+            : { output };
+          return {
+            ...processed,
+            metadata: {
+              ...(processed.metadata || {}),
+              ...strategyMetadata,
+            },
+          };
+        },
+      });
     }
     const canonicalExisting = stepMap.get(candidateOptions.definition.key)
       || await ensureStep(candidateOptions.definition);
@@ -598,20 +634,28 @@ export const executeStructuredContentWritingWorkflow = async (
     const createCandidateDefinition = (
       candidateIndex: number,
       remediationFailures: readonly string[] = [],
-    ): ContentWritingWorkflowStepDefinition => ({
-      key: `${candidateOptions.definition.key}-candidate-${candidateIndex}`,
-      type: candidateOptions.definition.type,
-      ordinal: candidateOptions.definition.ordinal,
-      title: `${candidateOptions.definition.title} — candidate ${candidateIndex}`,
-      metadata: {
-        ...candidateOptions.definition.metadata,
-        candidatePhase: 'generation',
-        parentStepKey: candidateOptions.definition.key,
-        candidateIndex,
-        candidateLabel: `Candidate ${candidateIndex}`,
-        remediationFailures,
-      },
-    });
+    ): ContentWritingWorkflowStepDefinition => {
+      const strategy = getContentWritingCandidateStrategy(candidateIndex);
+      return {
+        key: `${candidateOptions.definition.key}-candidate-${candidateIndex}`,
+        type: candidateOptions.definition.type,
+        ordinal: candidateOptions.definition.ordinal,
+        title: `${candidateOptions.definition.title} — ${strategy.nameAr}`,
+        metadata: {
+          ...candidateOptions.definition.metadata,
+          candidatePhase: 'generation',
+          parentStepKey: candidateOptions.definition.key,
+          candidateIndex,
+          candidateLabel: strategy.nameAr,
+          candidateStrategyKey: strategy.key,
+          candidateStrategyNameAr: strategy.nameAr,
+          candidateStrategyNameEn: strategy.nameEn,
+          candidateStrategyDescriptionAr: strategy.descriptionAr,
+          candidateStrategyDescriptionEn: strategy.descriptionEn,
+          remediationFailures,
+        },
+      };
+    };
     const runOneCandidate = async (
       candidateIndex: number,
       remediationFailures: readonly string[] = [],
@@ -798,19 +842,35 @@ export const executeStructuredContentWritingWorkflow = async (
   if (dualKnowledgeExtractionEnabled) {
     const createKnowledgePassDefinition = (
       pass: 1 | 2,
-    ): ContentWritingWorkflowStepDefinition => ({
-      key: `competitor-index-pass-${pass}`,
-      type: 'competitor_index',
-      ordinal: competitorIndexDefinition.ordinal,
-      title: `Competitor knowledge extraction ${pass}`,
-      metadata: {
-        workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
-        candidatePhase: 'knowledge_extraction',
-        parentStepKey: competitorIndexDefinition.key,
-        candidateIndex: pass,
-        candidateLabel: `Independent reading ${pass}`,
-      },
-    });
+    ): ContentWritingWorkflowStepDefinition => {
+      const strategy = pass === 1
+        ? {
+            key: 'comprehensive_direct',
+            nameAr: 'القراءة الشاملة المباشرة',
+            nameEn: 'Comprehensive direct reading',
+          }
+        : {
+            key: 'gap_hunting',
+            nameAr: 'قراءة صيد الثغرات',
+            nameEn: 'Gap-hunting reading',
+          };
+      return {
+        key: `competitor-index-pass-${pass}`,
+        type: 'competitor_index',
+        ordinal: competitorIndexDefinition.ordinal,
+        title: strategy.nameAr,
+        metadata: {
+          workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+          candidatePhase: 'knowledge_extraction',
+          parentStepKey: competitorIndexDefinition.key,
+          candidateIndex: pass,
+          candidateLabel: strategy.nameAr,
+          knowledgeStrategyKey: strategy.key,
+          knowledgeStrategyNameAr: strategy.nameAr,
+          knowledgeStrategyNameEn: strategy.nameEn,
+        },
+      };
+    };
     const knowledgePassDefinitions = [
       createKnowledgePassDefinition(1),
       createKnowledgePassDefinition(2),

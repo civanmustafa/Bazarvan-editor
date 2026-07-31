@@ -6,6 +6,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { parseMarkdownToHtml } from '../utils/editorUtils';
+import { getContentWritingCandidateStrategy } from '../utils/contentWritingCandidates';
 import type { ContentWritingStep } from '../utils/contentWritingSessions';
 import ContentWritingKnowledgeResult from './ContentWritingKnowledgeResult';
 
@@ -154,8 +155,8 @@ const KnowledgeEnsemble: React.FC<{
   const origins = records(ensemble.itemOrigins);
   const originLabels: Record<string, [string, string]> = {
     both: ['أكدتها القراءتان', 'Confirmed by both readings'],
-    first_only: ['اكتشفتها القراءة الأولى', 'Found by reading one'],
-    second_only: ['سدّت بها القراءة الثانية ثغرة', 'Gap found by reading two'],
+    first_only: ['اكتشفتها القراءة الشاملة المباشرة', 'Found by the comprehensive direct reading'],
+    second_only: ['اكتشفتها قراءة صيد الثغرات', 'Found by the gap-hunting reading'],
     reconciled_or_fallback: ['حُسمت أثناء المصالحة أو التحقق', 'Resolved during reconciliation or validation'],
   };
   return (
@@ -168,8 +169,8 @@ const KnowledgeEnsemble: React.FC<{
           </div>
           <div className="mt-1 text-[10px] font-semibold leading-5 text-blue-700/80 dark:text-blue-300/80">
             {isArabic
-              ? `الأولى ${number(ensemble.firstPassItemCount).toLocaleString('ar')} فكرة، الثانية ${number(ensemble.secondPassItemCount).toLocaleString('ar')}، والنتيجة الموحدة ${number(ensemble.finalItemCount).toLocaleString('ar')}. أضافت القراءة الثانية وحدها ${number(ensemble.secondPassOnlyItemCount).toLocaleString('ar')} فكرة مدعومة.`
-              : `Pass one found ${number(ensemble.firstPassItemCount).toLocaleString('en')} items, pass two ${number(ensemble.secondPassItemCount).toLocaleString('en')}, and reconciliation retained ${number(ensemble.finalItemCount).toLocaleString('en')}. Pass two alone contributed ${number(ensemble.secondPassOnlyItemCount).toLocaleString('en')} supported items.`}
+              ? `القراءة الشاملة المباشرة: ${number(ensemble.firstPassItemCount).toLocaleString('ar')} فكرة، وقراءة صيد الثغرات: ${number(ensemble.secondPassItemCount).toLocaleString('ar')}، والنتيجة الموحدة: ${number(ensemble.finalItemCount).toLocaleString('ar')}. أضافت قراءة صيد الثغرات وحدها ${number(ensemble.secondPassOnlyItemCount).toLocaleString('ar')} فكرة مدعومة.`
+              : `The comprehensive direct reading found ${number(ensemble.firstPassItemCount).toLocaleString('en')} items, gap hunting found ${number(ensemble.secondPassItemCount).toLocaleString('en')}, and reconciliation retained ${number(ensemble.finalItemCount).toLocaleString('en')}. Gap hunting alone contributed ${number(ensemble.secondPassOnlyItemCount).toLocaleString('en')} supported items.`}
           </div>
         </div>
       </div>
@@ -178,10 +179,10 @@ const KnowledgeEnsemble: React.FC<{
           {isArabic ? 'مشتركة' : 'Shared'} {number(ensemble.sharedItemCount).toLocaleString(isArabic ? 'ar' : 'en')}
         </span>
         <span className="rounded bg-white px-2 py-1 text-blue-700 dark:bg-black/20 dark:text-blue-200">
-          {isArabic ? 'من الأولى فقط' : 'Pass one only'} {number(ensemble.firstPassOnlyItemCount).toLocaleString(isArabic ? 'ar' : 'en')}
+          {isArabic ? 'من القراءة الشاملة فقط' : 'Comprehensive reading only'} {number(ensemble.firstPassOnlyItemCount).toLocaleString(isArabic ? 'ar' : 'en')}
         </span>
         <span className="rounded bg-white px-2 py-1 text-blue-700 dark:bg-black/20 dark:text-blue-200">
-          {isArabic ? 'من الثانية فقط' : 'Pass two only'} {number(ensemble.secondPassOnlyItemCount).toLocaleString(isArabic ? 'ar' : 'en')}
+          {isArabic ? 'من صيد الثغرات فقط' : 'Gap hunting only'} {number(ensemble.secondPassOnlyItemCount).toLocaleString(isArabic ? 'ar' : 'en')}
         </span>
         <span className={`rounded px-2 py-1 ${ensemble.allChunksAccountedFor === true
           ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'
@@ -192,10 +193,18 @@ const KnowledgeEnsemble: React.FC<{
         </span>
       </div>
       <div className="space-y-1.5">
-        {candidateSteps.map((candidate, index) => (
+        {candidateSteps.map((candidate, index) => {
+          const pass = number(candidate.metadata.candidateIndex) || index + 1;
+          const strategyName = isArabic
+            ? text(candidate.metadata.knowledgeStrategyNameAr)
+            : text(candidate.metadata.knowledgeStrategyNameEn);
+          const fallbackName = pass === 1
+            ? (isArabic ? 'القراءة الشاملة المباشرة' : 'Comprehensive direct reading')
+            : (isArabic ? 'قراءة صيد الثغرات' : 'Gap-hunting reading');
+          return (
           <details key={candidate.id} className="rounded-md border border-blue-100 bg-white dark:border-blue-900/40 dark:bg-[#202020]">
             <summary className="cursor-pointer px-2.5 py-2 text-[10px] font-black text-blue-700 dark:text-blue-300">
-              {isArabic ? `عرض القراءة المستقلة ${index + 1}` : `Review independent reading ${index + 1}`}
+              {isArabic ? `عرض ${strategyName || fallbackName}` : `Review ${strategyName || fallbackName}`}
             </summary>
             <div className="border-t border-blue-100 p-2 dark:border-blue-900/40">
               <ContentWritingKnowledgeResult
@@ -206,7 +215,8 @@ const KnowledgeEnsemble: React.FC<{
               />
             </div>
           </details>
-        ))}
+          );
+        })}
       </div>
       {origins.length > 0 && (
         <details className="rounded-md border border-blue-100 bg-white dark:border-blue-900/40 dark:bg-[#202020]">
@@ -264,7 +274,23 @@ const ContentWritingCandidateComparison: React.FC<ContentWritingCandidateCompari
   const selection = isRecord(step.metadata.candidateSelection)
     ? step.metadata.candidateSelection
     : null;
-  if (!selection) return null;
+  if (!selection) {
+    if (text(step.metadata.candidateMode) !== 'single_balanced') return null;
+    const balanced = getContentWritingCandidateStrategy(0);
+    return (
+      <section className="mb-3 rounded-lg border border-amber-200 bg-amber-50/50 p-2.5 dark:border-amber-900/50 dark:bg-amber-900/10">
+        <div className="font-black text-amber-800 dark:text-amber-200">
+          {isArabic ? balanced.nameAr : balanced.nameEn}
+        </div>
+        <div className="mt-1 text-[10px] font-semibold leading-5 text-amber-700/80 dark:text-amber-300/80">
+          {isArabic ? balanced.descriptionAr : balanced.descriptionEn}
+        </div>
+        <div className="mt-1 text-[9px] font-black text-amber-700 dark:text-amber-300">
+          {isArabic ? 'وضع مرشح واحد' : 'Single-candidate mode'}
+        </div>
+      </section>
+    );
+  }
   const evaluations = records(selection.candidates);
   return (
     <section className="mb-3 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/40 p-2.5 dark:border-emerald-900/50 dark:bg-emerald-900/10">
@@ -288,6 +314,7 @@ const ContentWritingCandidateComparison: React.FC<ContentWritingCandidateCompari
           const stepKey = text(evaluation.stepKey);
           const candidateStep = candidateSteps.find(candidate => candidate.stepKey === stepKey);
           const selected = evaluation.selected === true;
+          const strategy = getContentWritingCandidateStrategy(number(evaluation.candidateIndex));
           return (
             <details
               key={stepKey || index}
@@ -297,7 +324,7 @@ const ContentWritingCandidateComparison: React.FC<ContentWritingCandidateCompari
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-2">
                 <span className="font-black text-gray-700 dark:text-gray-200">
-                  {isArabic ? `المرشح ${number(evaluation.candidateIndex).toLocaleString('ar')}` : `Candidate ${number(evaluation.candidateIndex).toLocaleString('en')}`}
+                  {isArabic ? strategy.nameAr : strategy.nameEn}
                 </span>
                 <span className="flex items-center gap-1.5">
                   {selected && (
@@ -312,6 +339,9 @@ const ContentWritingCandidateComparison: React.FC<ContentWritingCandidateCompari
                 </span>
               </summary>
               <div className="space-y-2 border-t border-gray-100 p-2.5 dark:border-[#333]">
+                <div className="text-[10px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+                  {isArabic ? strategy.descriptionAr : strategy.descriptionEn}
+                </div>
                 <CandidateMetrics evaluation={evaluation} isArabic={isArabic} />
                 {candidateStep?.metadata.revisionPhase === 'apply' ? (
                   <RevisionCandidateSummary step={candidateStep} isArabic={isArabic} />

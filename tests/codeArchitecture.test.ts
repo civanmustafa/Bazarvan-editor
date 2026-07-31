@@ -566,7 +566,7 @@ test('content writing enforces one goal-aware final section after FAQ across ass
     readWorkspaceFile('server/contentWritingEngine.ts'),
   ]);
 
-  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 10/);
+  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 11/);
   assert.match(workflow, /auditContentWritingFinalSectionStructure/);
   assert.match(workflow, /final_structure_faq_not_penultimate/);
   assert.match(workflow, /final_structure_duplicate_final_heading/);
@@ -600,7 +600,7 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
   assert.match(workflow, /competitor_phrase_intelligence_json/);
   assert.match(serverWorkflow, /deterministic_competitor_phrase_intelligence/);
   assert.match(serverWorkflow, /competitorPhraseIntelligence/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 19/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 20/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /competitor_phrase_intelligence_json/);
   assert.match(promptRegistry, /originalityOpportunity/);
@@ -612,6 +612,11 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
   assert.match(serverWorkflow, /buildContentWritingKnowledgeReconciliationPrompt/);
   assert.match(serverWorkflow, /knowledgeEnsemble/);
   assert.match(serverWorkflow, /runCandidateStage/);
+  assert.match(serverWorkflow, /candidateMode: 'single_balanced'/);
+  assert.match(serverWorkflow, /knowledgeStrategyKey/);
+  assert.match(settings, /الكتابة المركّزة الشاملة/);
+  assert.match(settings, /الكتابة العميقة الاستقصائية/);
+  assert.match(settings, /الكتابة المتوازنة/);
   assert.match(promptRegistry, /contentWriting\.knowledgeReconciliation/);
   assert.doesNotMatch(
     `${knowledge}\n${phraseAnalysis}\n${workflow}\n${serverWorkflow}\n${promptRegistry}`,

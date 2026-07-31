@@ -88,7 +88,7 @@ const stageInputExplanation = (
     return isArabic
       ? [
           step.metadata.knowledgeEnsemble
-            ? 'جميع مقتطفات المنافسين المتاحة أُرسلت إلى قراءتين مستقلتين، ثم صولح بين النتيجتين في طلب ثالث باتحاد الأفكار المدعومة.'
+            ? 'جميع مقتطفات المنافسين المتاحة أُرسلت إلى «القراءة الشاملة المباشرة» و«قراءة صيد الثغرات»، ثم صولح بين النتيجتين في طلب ثالث باتحاد الأفكار المدعومة.'
             : 'جميع مقتطفات المنافسين المتاحة تُرسل لبناء مصفوفة المعرفة وسجل المصادر والادعاءات.',
           'سجل ذكاء العبارات يُرفق داخل طلب التوليد، ويُكرر في تعليمات هذه المرحلة بوصفه مدخلًا مباشرًا للتصنيف.',
           'العبارات المهمة إشارات لتغطية الموضوع وليست نصوصًا مطلوب نسخها حرفيًا.',
@@ -105,8 +105,10 @@ const stageInputExplanation = (
     return isArabic
       ? [
           ...(step.metadata.candidateSelection
-            ? ['وُلّد مرشحان مستقلان لهذا القسم، وقِيس فقد الأفكار والادعاءات المحظورة والتكرار وميزانية الكلمات قبل اعتماد الأعلى درجة.']
-            : []),
+            ? ['وُلّدت «الكتابة المركّزة الشاملة» و«الكتابة العميقة الاستقصائية» لهذا القسم، وقِيس فقد الأفكار والادعاءات المحظورة والتكرار وميزانية الكلمات قبل اعتماد الأعلى درجة.']
+            : step.metadata.candidateMode === 'single_balanced'
+              ? ['استُخدمت «الكتابة المتوازنة» بمرشح واحد يجمع عمق التغطية مع الوضوح وتقليل الحشو.']
+              : []),
           'تستقبل المرحلة السياق المختصر للجلسة، وفيه مصفوفة المعرفة وسجل المصادر والادعاءات وسجل ذكاء العبارات.',
           'تُرفق معها النصوص الأصلية للمقتطفات المرتبطة بهذا القسم فقط، إضافة إلى الأفكار والادعاءات المستهدفة.',
           'تطابق العبارة في الناتج يحدد موضع ظهورها، أما مجرد إرسالها فلا يعني أنها استُخدمت.',
@@ -114,7 +116,9 @@ const stageInputExplanation = (
       : [
           ...(step.metadata.candidateSelection
             ? ['Two independent candidates were generated, then checked for idea loss, blocked claims, repetition, and word budget before selection.']
-            : []),
+            : step.metadata.candidateMode === 'single_balanced'
+              ? ['Balanced writing used one candidate combining deep coverage with clarity and minimal padding.']
+              : []),
           'The stage receives compact session context containing the knowledge, source, claim, and phrase-intelligence registries.',
           'Only original excerpts related to this section are attached, together with its targeted ideas and claims.',
           'An output match shows where a phrase appeared; attachment alone does not prove use.',
@@ -124,15 +128,19 @@ const stageInputExplanation = (
     return isArabic
       ? [
           ...(step.metadata.candidateSelection
-            ? ['أُنشئ تطبيقان مستقلان لخطة التعديل، ولم يُعتمد أي منهما إلا بعد مقارنته بالنسخة السابقة.']
-            : []),
+            ? ['أُنشئ تطبيقان مستقلان لخطة التعديل باستراتيجيتي الكتابة المركّزة والكتابة العميقة، ولم يُعتمد أي منهما إلا بعد مقارنته بالنسخة السابقة.']
+            : step.metadata.candidateMode === 'single_balanced'
+              ? ['طُبّقت خطة التعديل باستراتيجية «الكتابة المتوازنة» مع إبقاء حواجز المقارنة بالنسخة السابقة.']
+              : []),
           'تستقبل مرحلة التطبيق سجل المعرفة وذكاء العبارات، لكن نص المقالة الكامل يُحجب عن الاستبدال.',
           'تُرسل فقط الأجزاء المحددة في خطة التعديل، ثم تُقارن النسخة المرشحة بالنسخة السابقة قبل اعتمادها.',
         ]
       : [
           ...(step.metadata.candidateSelection
             ? ['Two independent applications of the edit plan were produced, and neither could be accepted without beating the previous safe version.']
-            : []),
+            : step.metadata.candidateMode === 'single_balanced'
+              ? ['The edit plan used balanced writing while retaining comparison guards against the previous version.']
+              : []),
           'The apply stage receives knowledge and phrase intelligence, while the full article is withheld from replacement.',
           'Only planned targets are sent, then the candidate is compared with the previous article before acceptance.',
         ];
@@ -162,8 +170,10 @@ const stageInputExplanation = (
   return isArabic
     ? [
         ...(step.metadata.candidateSelection
-          ? ['وُلّد مرشحان مستقلان لهذه المرحلة، ثم اختير الناتج الذي اجتاز البوابات القاطعة وحقق الدرجة الأعلى.']
-          : []),
+          ? ['وُلّدت «الكتابة المركّزة الشاملة» و«الكتابة العميقة الاستقصائية»، ثم اختير الناتج الذي اجتاز البوابات القاطعة وحقق الدرجة الأعلى.']
+          : step.metadata.candidateMode === 'single_balanced'
+            ? ['استُخدمت «الكتابة المتوازنة» بمرشح واحد يجمع العمق والتركيز.']
+            : []),
         'تستقبل المرحلة السياق المختصر للجلسة، وفيه مصفوفة المعرفة وسجل المصادر والادعاءات وسجل ذكاء العبارات.',
         'تستقبل كذلك ما يلزم من المخطط أو المسودة الحالية وفق وظيفة المرحلة.',
         'العبارات المهمة تُستخدم كإشارات للتغطية الطبيعية، لا كتعليمات للحشو أو النسخ.',
@@ -171,7 +181,9 @@ const stageInputExplanation = (
     : [
         ...(step.metadata.candidateSelection
           ? ['Two independent candidates were generated, then the hard-gate pass with the highest score was selected.']
-          : []),
+          : step.metadata.candidateMode === 'single_balanced'
+            ? ['Balanced writing used one candidate combining depth and focus.']
+            : []),
         'The stage receives compact session context containing the knowledge, source, claim, and phrase-intelligence registries.',
         'It also receives the outline or current draft required for this stage.',
         'Important phrases are natural coverage signals, not keyword-stuffing or copying instructions.',

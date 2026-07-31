@@ -49,7 +49,7 @@ export const getContentWritingStepDescription = (
 ): string => {
   const descriptions: Partial<Record<ContentWritingStep['stepType'], [string, string]>> = {
     competitor_index: [
-      'ينفذ النظام قراءتين مستقلتين لجميع مقاطع المنافسين، ثم يصالح بينهما باتحاد موثّق للأفكار ويقيّم المصادر والادعاءات قبل الكتابة.',
+      'ينفذ النظام «القراءة الشاملة المباشرة» و«قراءة صيد الثغرات» لجميع مقاطع المنافسين، ثم يصالح بينهما باتحاد موثّق للأفكار ويقيّم المصادر والادعاءات قبل الكتابة.',
       'Runs two independent readings of every competitor chunk, reconciles their supported union, and assesses sources and claims before drafting.',
     ],
     outline: [

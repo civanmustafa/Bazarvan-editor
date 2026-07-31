@@ -33,7 +33,7 @@ import {
   FAQ_KEYWORDS,
 } from '../constants';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 10;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 11;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
@@ -494,7 +494,7 @@ export const buildContentWritingCompetitorIndexPrompt = (options: {
   const extractionPassProtocol = options.extractionPass
     ? `
 <protected_knowledge_extraction_pass>
-- هذه قراءة مستقلة رقم ${options.extractionPass} من المصادر. لا تفترض وجود قراءة أخرى ولا تحاول تخمين نتيجتها.
+- هذه قراءة مستقلة رقم ${options.extractionPass} من المصادر باسم «${options.extractionPass === 1 ? 'القراءة الشاملة المباشرة' : 'قراءة صيد الثغرات'}». لا تفترض وجود قراءة أخرى ولا تحاول تخمين نتيجتها.
 ${options.extractionPass === 1
   ? '- استخدم منهج التغطية الشاملة المباشرة، وسجّل كل فكرة ذرية مفيدة مع مصدرها.'
   : '- استخدم منهج صائد الثغرات: ركّز على التفاصيل الفريدة والجداول والخطوات والشروط والاستثناءات والأرقام والأسئلة وطرق الاستخدام والشراء والدفع والتعارضات التي يسهل إغفالها.'}

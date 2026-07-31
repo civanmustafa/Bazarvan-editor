@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 19;
+export const PROMPT_REGISTRY_VERSION = 20;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -255,7 +255,7 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     group: PROMPT_GROUP_IDS.writing,
     label: 'بناء مصفوفة تغطية المنافسين',
     description: 'يحوّل المصادر إلى أفكار موحدة ويبيّن من غطّى كل فكرة وانتشارها وفرصة تقديم قيمة إضافية.',
-    usage: 'عند تفعيل الاستخراج المعمق يعمل في قراءتين مستقلتين متوازيتين، ثم تُرسل النتيجتان إلى أمر المصالحة. يتحقق النظام برمجيًا من ربط الأفكار بالمنافسين، ثم تستخدم المراحل اللاحقة المصفوفة الموحدة.',
+    usage: 'عند التفعيل يعمل في «القراءة الشاملة المباشرة» و«قراءة صيد الثغرات» بالتوازي، ثم تُرسل النتيجتان إلى أمر المصالحة. يتحقق النظام برمجيًا من ربط الأفكار بالمنافسين، ثم تستخدم المراحل اللاحقة المصفوفة الموحدة.',
     variables: ['{{source_ids_json}}', '{{competitor_phrase_intelligence_json}}', '{{output_language}}'],
     requiredVariables: ['source_ids_json', 'competitor_phrase_intelligence_json', 'output_language'],
     attachments: [
@@ -289,8 +289,8 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     variables: ['{{source_ids_json}}', '{{first_knowledge_json}}', '{{second_knowledge_json}}', '{{output_language}}'],
     requiredVariables: ['source_ids_json', 'first_knowledge_json', 'second_knowledge_json', 'output_language'],
     attachments: [
-      attachment('firstExtraction', 'القراءة الأولى', 'استخراج شامل مستقل للأفكار والمصادر والادعاءات.'),
-      attachment('secondExtraction', 'القراءة الثانية', 'استخراج مستقل يركز على الثغرات والتفاصيل الفريدة والاستثناءات.'),
+      attachment('firstExtraction', 'القراءة الشاملة المباشرة', 'استخراج شامل مستقل للأفكار والمصادر والادعاءات.'),
+      attachment('secondExtraction', 'قراءة صيد الثغرات', 'استخراج مستقل يركز على الثغرات والتفاصيل الفريدة والاستثناءات.'),
       attachment('sourceManifest', 'سجل المقاطع', 'القائمة المغلقة لمعرّفات المقاطع التي يجوز ربط الأفكار والادعاءات بها.'),
       attachment('reconciledKnowledge', 'المصفوفة الموحدة', 'اتحاد الأفكار المدعومة مع حفظ التعارضات وجمع المصادر وإزالة التكرار الدلالي.'),
     ],
@@ -703,12 +703,12 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 قائمة معرّفات المقاطع المغلقة:
 {{source_ids_json}}
 
-القراءة الأولى:
+القراءة الشاملة المباشرة:
 <first_knowledge_extraction>
 {{first_knowledge_json}}
 </first_knowledge_extraction>
 
-القراءة الثانية:
+قراءة صيد الثغرات:
 <second_knowledge_extraction>
 {{second_knowledge_json}}
 </second_knowledge_extraction>
