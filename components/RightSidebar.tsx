@@ -746,12 +746,14 @@ ${url}
 
 type RightSidebarProps = {
     collapsed?: boolean;
+    expandedFlexBasis?: string;
     isHidden?: boolean;
     onToggleCollapsed?: () => void;
 };
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
     collapsed = false,
+    expandedFlexBasis,
     isHidden = false,
     onToggleCollapsed,
 }) => {
@@ -2809,7 +2811,10 @@ ${readyCommandCompetitorBlocks}`;
     const activeSidebarTab = sidebarTabs.find(tab => tab.id === activeTab) || sidebarTabs[0];
 
     return (
-        <aside className={`${isHidden ? 'hidden' : 'flex'} h-full min-w-0 flex-none flex-col overflow-hidden rounded-lg border-s border-gray-300 bg-[#F2F3F5] shadow-lg transition-[width,flex-basis] duration-150 dark:border-[#333] dark:bg-[#1F1F1F] ${collapsed ? 'w-12 basis-12' : 'w-auto basis-[18.7%]'}`}>
+        <aside
+            className={`${isHidden ? 'hidden' : 'flex'} h-full min-w-0 flex-none flex-col overflow-hidden rounded-lg border-s border-gray-300 bg-[#F2F3F5] shadow-lg transition-[width,flex-basis] duration-150 dark:border-[#333] dark:bg-[#1F1F1F] ${collapsed ? 'w-12 basis-12' : 'w-auto basis-[18.7%]'}`}
+            style={collapsed || !expandedFlexBasis ? undefined : { flexBasis: expandedFlexBasis }}
+        >
             <div className={`${collapsed ? 'flex' : 'hidden'} h-full flex-col items-center gap-[0.1875rem] px-[0.09375rem] py-[0.125rem]`}>
                 <button
                     type="button"

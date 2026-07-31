@@ -13,6 +13,10 @@ import {
   navigateToAppPath,
 } from '../utils/appRoutes';
 import { getCachedRemoteArticleById, getRemoteArticleById } from '../utils/supabaseArticles';
+import {
+  EDITOR_WORKSPACE_LAYOUT,
+  getExpandedSidebarFlexBasis,
+} from '../utils/editorWorkspaceLayout';
 import EditorToolbar from './EditorToolbar';
 import AiExecutionMonitor from './AiKeyUsageToast';
 import LeftSidebar from './LeftSidebar';
@@ -123,11 +127,23 @@ const EditorView: React.FC = () => {
     setIsFocusMode(currentValue => !currentValue);
   }, []);
 
+  const leftSidebarFlexBasis = getExpandedSidebarFlexBasis({
+    basePercent: EDITOR_WORKSPACE_LAYOUT.leftSidebarExpandedPercent,
+    peerExpandedPercent: EDITOR_WORKSPACE_LAYOUT.rightSidebarExpandedPercent,
+    peerCollapsed: workspacePreferences.analysisPanelCollapsed,
+  });
+  const rightSidebarFlexBasis = getExpandedSidebarFlexBasis({
+    basePercent: EDITOR_WORKSPACE_LAYOUT.rightSidebarExpandedPercent,
+    peerExpandedPercent: EDITOR_WORKSPACE_LAYOUT.leftSidebarExpandedPercent,
+    peerCollapsed: workspacePreferences.keywordsPanelCollapsed,
+  });
+
   return (
     <div className={`h-screen overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
       <main className="relative flex h-full gap-[0.125rem] bg-[#FAFAFA] p-[0.125rem] dark:bg-[#181818]">
         <LeftSidebar
           collapsed={workspacePreferences.keywordsPanelCollapsed}
+          expandedFlexBasis={leftSidebarFlexBasis}
           isHidden={isFocusMode}
           onToggleCollapsed={toggleKeywordsPanel}
         />
@@ -157,10 +173,16 @@ const EditorView: React.FC = () => {
         </div>
 
         <React.Suspense
-          fallback={isFocusMode ? null : <aside className="h-full min-w-0 basis-[18.7%] rounded-lg border-s border-gray-300 bg-[#F2F3F5] dark:border-[#333] dark:bg-[#1F1F1F]" />}
+          fallback={isFocusMode ? null : (
+            <aside
+              className={`h-full min-w-0 flex-none rounded-lg border-s border-gray-300 bg-[#F2F3F5] dark:border-[#333] dark:bg-[#1F1F1F] ${workspacePreferences.analysisPanelCollapsed ? 'w-12 basis-12' : 'w-auto basis-[18.7%]'}`}
+              style={workspacePreferences.analysisPanelCollapsed ? undefined : { flexBasis: rightSidebarFlexBasis }}
+            />
+          )}
         >
           <RightSidebar
             collapsed={workspacePreferences.analysisPanelCollapsed}
+            expandedFlexBasis={rightSidebarFlexBasis}
             isHidden={isFocusMode}
             onToggleCollapsed={toggleAnalysisPanel}
           />
