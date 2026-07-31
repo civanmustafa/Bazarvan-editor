@@ -3,6 +3,7 @@ export type AppRoute =
   | { name: 'editor'; articleId: string | null }
   | { name: 'admin'; section: AdminRouteSection; id: string | null; date: string | null }
   | { name: 'settings'; section: string | null }
+  | { name: 'guide' }
   | { name: 'notFound' };
 
 export type AdminRouteSection =
@@ -51,6 +52,10 @@ export const parseAppRoute = (path = window.location.pathname): AppRoute => {
     return { name: 'editor', articleId: decodeSegment(second) };
   }
 
+  if (first === 'guide' && !second) {
+    return { name: 'guide' };
+  }
+
   if (first === 'settings') {
     const section = decodeSegment(second);
     if (section && !SETTINGS_ROUTE_SECTIONS.has(section)) return { name: 'notFound' };
@@ -88,11 +93,12 @@ export const parseAppRoute = (path = window.location.pathname): AppRoute => {
   return { name: 'notFound' };
 };
 
-export const getRouteView = (route: AppRoute): 'dashboard' | 'editor' | 'admin' | 'settings' | 'notFound' => {
+export const getRouteView = (route: AppRoute): 'dashboard' | 'editor' | 'admin' | 'settings' | 'guide' | 'notFound' => {
   if (route.name === 'dashboard') return 'dashboard';
   if (route.name === 'editor') return 'editor';
   if (route.name === 'admin') return 'admin';
   if (route.name === 'settings') return 'settings';
+  if (route.name === 'guide') return 'guide';
   return 'notFound';
 };
 

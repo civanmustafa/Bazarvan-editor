@@ -50,7 +50,7 @@ const PROMPT_REGISTRY_REFRESH_MS = 5 * 60_000;
  * Durable preferences use Supabase; hooks/useUserActivity.ts remains a local startup cache.
  */
 type UserRole = 'admin' | 'user';
-type AppView = 'login' | 'dashboard' | 'editor' | 'admin' | 'settings' | 'notFound';
+type AppView = 'login' | 'dashboard' | 'editor' | 'admin' | 'settings' | 'guide' | 'notFound';
 type Profile = {
     id: string;
     email: string | null;
@@ -118,6 +118,7 @@ const getStoredSessionView = (): Exclude<AppView, 'login'> => {
             savedView === 'dashboard' ||
             savedView === 'admin' ||
             savedView === 'settings' ||
+            savedView === 'guide' ||
             savedView === 'notFound'
             ? savedView
             : 'dashboard';

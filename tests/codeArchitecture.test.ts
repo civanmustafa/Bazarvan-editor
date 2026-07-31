@@ -27,6 +27,24 @@ test('settings route registry accepts every standalone settings tab', () => {
   assert.equal(parseAppRoute('/settings/not-registered').name, 'notFound');
 });
 
+test('the searchable user guide is globally routed and reachable from the app shell', async () => {
+  const [app, guide, registry, search] = await Promise.all([
+    readWorkspaceFile('App.tsx'),
+    readWorkspaceFile('components/UserGuidePage.tsx'),
+    readWorkspaceFile('constants/userGuide.ts'),
+    readWorkspaceFile('utils/userGuideSearch.ts'),
+  ]);
+  assert.deepEqual(parseAppRoute('/guide'), { name: 'guide' });
+  assert.match(app, /دليل الاستخدام/);
+  assert.match(app, /navigateToAppPath\('\/guide'\)/);
+  assert.match(guide, /searchUserGuide/);
+  assert.match(guide, /USER_GUIDE_CATEGORIES/);
+  assert.match(registry, /knowledge-and-candidate-modes/);
+  assert.match(registry, /الكتابة العميقة الاستقصائية/);
+  assert.match(registry, /الكتابة المركّزة الشاملة/);
+  assert.match(search, /normalizeUserGuideSearchText/);
+});
+
 test('development and production use one API route registry', async () => {
   const [registry, viteConfig, productionServer] = await Promise.all([
     readWorkspaceFile('server/apiRouteRegistry.ts'),

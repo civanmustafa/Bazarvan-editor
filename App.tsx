@@ -30,6 +30,7 @@ const Dashboard = lazy(() => import('./components/Dashboard'));
 const AdminApp = lazy(() => import('./components/AdminApp'));
 const SettingsPage = lazy(() => import('./components/SettingsPage'));
 const EditorApp = lazy(() => import('./components/EditorApp'));
+const UserGuidePage = lazy(() => import('./components/UserGuidePage'));
 
 /*
  * App shell map:
@@ -283,6 +284,10 @@ const AppContent: React.FC = () => {
             return <SettingsPage section={route.section} />;
         }
 
+        if (route.name === 'guide') {
+            return <UserGuidePage />;
+        }
+
         if (route.name === 'editor') {
             return <EditorApp articleId={route.articleId} />;
         }
@@ -307,6 +312,18 @@ const AppContent: React.FC = () => {
         >
           {renderView()}
         </Suspense>
+        {currentView !== 'login' && route.name !== 'guide' && route.name !== 'notFound' && (
+          <button
+            type="button"
+            onClick={() => navigateToAppPath('/guide')}
+            className="fixed bottom-4 left-4 z-[70] inline-flex min-h-10 items-center gap-2 rounded-full border border-[#d4af37]/50 bg-[#171717] px-3 py-2 text-xs font-black text-[#f1d77d] shadow-xl transition hover:-translate-y-0.5 hover:bg-[#292516] focus:outline-none focus:ring-4 focus:ring-[#d4af37]/25"
+            aria-label="فتح دليل الاستخدام"
+            title="دليل الاستخدام"
+          >
+            <span className="flex size-6 items-center justify-center rounded-full bg-[#d4af37] text-sm text-[#171717]">؟</span>
+            <span className="hidden sm:inline">دليل الاستخدام</span>
+          </button>
+        )}
       </>
     );
 }
