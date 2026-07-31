@@ -87,12 +87,16 @@ const stageInputExplanation = (
   if (step.stepType === 'competitor_index') {
     return isArabic
       ? [
-          'جميع مقتطفات المنافسين المتاحة تُرسل لبناء مصفوفة المعرفة وسجل المصادر والادعاءات.',
+          step.metadata.knowledgeEnsemble
+            ? 'جميع مقتطفات المنافسين المتاحة أُرسلت إلى قراءتين مستقلتين، ثم صولح بين النتيجتين في طلب ثالث باتحاد الأفكار المدعومة.'
+            : 'جميع مقتطفات المنافسين المتاحة تُرسل لبناء مصفوفة المعرفة وسجل المصادر والادعاءات.',
           'سجل ذكاء العبارات يُرفق داخل طلب التوليد، ويُكرر في تعليمات هذه المرحلة بوصفه مدخلًا مباشرًا للتصنيف.',
           'العبارات المهمة إشارات لتغطية الموضوع وليست نصوصًا مطلوب نسخها حرفيًا.',
         ]
       : [
-          'All available competitor excerpts are sent to build the knowledge matrix, source registry, and claims ledger.',
+          step.metadata.knowledgeEnsemble
+            ? 'Every available competitor excerpt was sent through two independent readings, then reconciled in a third request as an evidence-backed union.'
+            : 'All available competitor excerpts are sent to build the knowledge matrix, source registry, and claims ledger.',
           'Phrase intelligence is attached to the generation request and repeated in this stage instructions as a direct classification input.',
           'Important phrases are topical coverage signals, not text to copy verbatim.',
         ];
@@ -100,11 +104,17 @@ const stageInputExplanation = (
   if (step.stepType === 'section' || step.stepType === 'section_repair') {
     return isArabic
       ? [
+          ...(step.metadata.candidateSelection
+            ? ['وُلّد مرشحان مستقلان لهذا القسم، وقِيس فقد الأفكار والادعاءات المحظورة والتكرار وميزانية الكلمات قبل اعتماد الأعلى درجة.']
+            : []),
           'تستقبل المرحلة السياق المختصر للجلسة، وفيه مصفوفة المعرفة وسجل المصادر والادعاءات وسجل ذكاء العبارات.',
           'تُرفق معها النصوص الأصلية للمقتطفات المرتبطة بهذا القسم فقط، إضافة إلى الأفكار والادعاءات المستهدفة.',
           'تطابق العبارة في الناتج يحدد موضع ظهورها، أما مجرد إرسالها فلا يعني أنها استُخدمت.',
         ]
       : [
+          ...(step.metadata.candidateSelection
+            ? ['Two independent candidates were generated, then checked for idea loss, blocked claims, repetition, and word budget before selection.']
+            : []),
           'The stage receives compact session context containing the knowledge, source, claim, and phrase-intelligence registries.',
           'Only original excerpts related to this section are attached, together with its targeted ideas and claims.',
           'An output match shows where a phrase appeared; attachment alone does not prove use.',
@@ -113,10 +123,16 @@ const stageInputExplanation = (
   if (step.metadata.revisionPhase === 'apply') {
     return isArabic
       ? [
+          ...(step.metadata.candidateSelection
+            ? ['أُنشئ تطبيقان مستقلان لخطة التعديل، ولم يُعتمد أي منهما إلا بعد مقارنته بالنسخة السابقة.']
+            : []),
           'تستقبل مرحلة التطبيق سجل المعرفة وذكاء العبارات، لكن نص المقالة الكامل يُحجب عن الاستبدال.',
           'تُرسل فقط الأجزاء المحددة في خطة التعديل، ثم تُقارن النسخة المرشحة بالنسخة السابقة قبل اعتمادها.',
         ]
       : [
+          ...(step.metadata.candidateSelection
+            ? ['Two independent applications of the edit plan were produced, and neither could be accepted without beating the previous safe version.']
+            : []),
           'The apply stage receives knowledge and phrase intelligence, while the full article is withheld from replacement.',
           'Only planned targets are sent, then the candidate is compared with the previous article before acceptance.',
         ];
@@ -145,11 +161,17 @@ const stageInputExplanation = (
   }
   return isArabic
     ? [
+        ...(step.metadata.candidateSelection
+          ? ['وُلّد مرشحان مستقلان لهذه المرحلة، ثم اختير الناتج الذي اجتاز البوابات القاطعة وحقق الدرجة الأعلى.']
+          : []),
         'تستقبل المرحلة السياق المختصر للجلسة، وفيه مصفوفة المعرفة وسجل المصادر والادعاءات وسجل ذكاء العبارات.',
         'تستقبل كذلك ما يلزم من المخطط أو المسودة الحالية وفق وظيفة المرحلة.',
         'العبارات المهمة تُستخدم كإشارات للتغطية الطبيعية، لا كتعليمات للحشو أو النسخ.',
       ]
     : [
+        ...(step.metadata.candidateSelection
+          ? ['Two independent candidates were generated, then the hard-gate pass with the highest score was selected.']
+          : []),
         'The stage receives compact session context containing the knowledge, source, claim, and phrase-intelligence registries.',
         'It also receives the outline or current draft required for this stage.',
         'Important phrases are natural coverage signals, not keyword-stuffing or copying instructions.',

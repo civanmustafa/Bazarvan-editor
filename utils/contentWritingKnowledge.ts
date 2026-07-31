@@ -5,7 +5,7 @@ import {
 } from './contentWritingClaims';
 
 export const CONTENT_WRITING_COMPETITOR_CHUNK_SIZE = 1_600;
-export const CONTENT_WRITING_KNOWLEDGE_VERSION = 3;
+export const CONTENT_WRITING_KNOWLEDGE_VERSION = 4;
 
 export type ContentWritingSourceChunk = {
   id: string;
@@ -65,6 +65,32 @@ export type ContentWritingKnowledgeBase = {
   processedChunkIds: string[];
   modelProcessedChunkIds: string[];
   fallbackChunkIds: string[];
+};
+
+export type ContentWritingKnowledgeEnsembleItemOrigin = {
+  finalKnowledgeItemId: string;
+  firstPassKnowledgeItemIds: string[];
+  secondPassKnowledgeItemIds: string[];
+  origin: 'both' | 'first_only' | 'second_only' | 'reconciled_or_fallback';
+};
+
+export type ContentWritingKnowledgeEnsembleSummary = {
+  version: number;
+  firstPassItemCount: number;
+  secondPassItemCount: number;
+  finalItemCount: number;
+  firstPassModelChunkCount: number;
+  secondPassModelChunkCount: number;
+  finalModelChunkCount: number;
+  expectedChunkCount: number;
+  finalFallbackChunkCount: number;
+  firstPassOnlyItemCount: number;
+  secondPassOnlyItemCount: number;
+  sharedItemCount: number;
+  reconciledOrFallbackItemCount: number;
+  invalidSourceReferenceCount: number;
+  allChunksAccountedFor: boolean;
+  itemOrigins: ContentWritingKnowledgeEnsembleItemOrigin[];
 };
 
 export type ContentWritingSectionCoverage = {
@@ -187,7 +213,7 @@ export const normalizeContentWritingSourceChunks = (
     if (!isRecord(item)) return [];
     const id = toText(item.id, 120);
     const text = typeof item.text === 'string' ? item.text : '';
-    const competitorNumber = Math.max(1, Math.min(3, Math.round(Number(item.competitorNumber) || 1)));
+    const competitorNumber = Math.max(1, Math.min(10_000, Math.round(Number(item.competitorNumber) || 1)));
     if (!id || seen.has(id) || !text) return [];
     seen.add(id);
     return [{
@@ -367,6 +393,114 @@ export const parseContentWritingKnowledgeBase = (
     throw new Error('The competitor index did not return any usable knowledge items.');
   }
   return knowledge;
+};
+
+const knowledgeTokenSet = (value: string): Set<string> => new Set(
+  value
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token => token.length >= 3)
+    .slice(0, 1_000),
+);
+
+const knowledgeSimilarity = (
+  left: ContentWritingKnowledgeItem,
+  right: ContentWritingKnowledgeItem,
+): number => {
+  const leftTokens = knowledgeTokenSet(`${left.topic} ${left.detail}`);
+  const rightTokens = knowledgeTokenSet(`${right.topic} ${right.detail}`);
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+  let intersection = 0;
+  leftTokens.forEach(token => {
+    if (rightTokens.has(token)) intersection += 1;
+  });
+  const tokenScore = intersection / Math.max(1, leftTokens.size + rightTokens.size - intersection);
+  const leftSources = new Set(left.sourceChunkIds);
+  const sourceIntersection = right.sourceChunkIds.filter(id => leftSources.has(id)).length;
+  const sourceScore = sourceIntersection / Math.max(
+    1,
+    new Set([...left.sourceChunkIds, ...right.sourceChunkIds]).size,
+  );
+  return (tokenScore * 0.72) + (sourceScore * 0.28);
+};
+
+const findMatchingKnowledgeItemIds = (
+  item: ContentWritingKnowledgeItem,
+  candidates: readonly ContentWritingKnowledgeItem[],
+): string[] => candidates
+  .filter(candidate => candidate.kind !== 'source_fallback')
+  .map(candidate => ({ candidate, score: knowledgeSimilarity(item, candidate) }))
+  .filter(match => match.score >= 0.36)
+  .sort((left, right) => right.score - left.score)
+  .slice(0, 5)
+  .map(match => match.candidate.id);
+
+export const buildContentWritingKnowledgeEnsembleSummary = (options: {
+  firstPass: ContentWritingKnowledgeBase;
+  secondPass: ContentWritingKnowledgeBase;
+  finalKnowledge: ContentWritingKnowledgeBase;
+  chunks: readonly ContentWritingSourceChunk[];
+}): ContentWritingKnowledgeEnsembleSummary => {
+  const validChunkIds = new Set(options.chunks.map(chunk => chunk.id));
+  const itemOrigins = options.finalKnowledge.items.map(
+    (item): ContentWritingKnowledgeEnsembleItemOrigin => {
+      const firstPassKnowledgeItemIds = findMatchingKnowledgeItemIds(
+        item,
+        options.firstPass.items,
+      );
+      const secondPassKnowledgeItemIds = findMatchingKnowledgeItemIds(
+        item,
+        options.secondPass.items,
+      );
+      const origin = firstPassKnowledgeItemIds.length > 0 && secondPassKnowledgeItemIds.length > 0
+        ? 'both'
+        : firstPassKnowledgeItemIds.length > 0
+          ? 'first_only'
+          : secondPassKnowledgeItemIds.length > 0
+            ? 'second_only'
+            : 'reconciled_or_fallback';
+      return {
+        finalKnowledgeItemId: item.id,
+        firstPassKnowledgeItemIds,
+        secondPassKnowledgeItemIds,
+        origin,
+      };
+    },
+  );
+  const invalidSourceReferenceCount = options.finalKnowledge.items.reduce(
+    (count, item) => count + item.sourceChunkIds.filter(id => !validChunkIds.has(id)).length,
+    0,
+  ) + options.finalKnowledge.claimLedger.claims.reduce(
+    (count, claim) => count
+      + claim.supportingSourceChunkIds.filter(id => !validChunkIds.has(id)).length,
+    0,
+  );
+  const finalAccountedChunkIds = new Set([
+    ...options.finalKnowledge.items.flatMap(item => item.sourceChunkIds),
+    ...options.finalKnowledge.fallbackChunkIds,
+  ]);
+  return {
+    version: 1,
+    firstPassItemCount: options.firstPass.items.length,
+    secondPassItemCount: options.secondPass.items.length,
+    finalItemCount: options.finalKnowledge.items.length,
+    firstPassModelChunkCount: options.firstPass.modelProcessedChunkIds.length,
+    secondPassModelChunkCount: options.secondPass.modelProcessedChunkIds.length,
+    finalModelChunkCount: options.finalKnowledge.modelProcessedChunkIds.length,
+    expectedChunkCount: options.chunks.length,
+    finalFallbackChunkCount: options.finalKnowledge.fallbackChunkIds.length,
+    firstPassOnlyItemCount: itemOrigins.filter(item => item.origin === 'first_only').length,
+    secondPassOnlyItemCount: itemOrigins.filter(item => item.origin === 'second_only').length,
+    sharedItemCount: itemOrigins.filter(item => item.origin === 'both').length,
+    reconciledOrFallbackItemCount: itemOrigins
+      .filter(item => item.origin === 'reconciled_or_fallback').length,
+    invalidSourceReferenceCount,
+    allChunksAccountedFor: options.chunks.every(chunk => finalAccountedChunkIds.has(chunk.id))
+      && invalidSourceReferenceCount === 0,
+    itemOrigins,
+  };
 };
 
 const tokenize = (value: string): Set<string> => new Set(

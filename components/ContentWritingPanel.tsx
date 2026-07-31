@@ -409,7 +409,11 @@ const ContentWritingPanel: React.FC = () => {
       baselineWords: Number(baselineCompetitor?.wordCount) || 0,
     };
   }, [selectedSession]);
-  const workflowSteps = useMemo(() => activeDetail?.steps || [], [activeDetail?.steps]);
+  const allWorkflowSteps = useMemo(() => activeDetail?.steps || [], [activeDetail?.steps]);
+  const workflowSteps = useMemo(
+    () => allWorkflowSteps.filter(step => !step.metadata.candidatePhase),
+    [allWorkflowSteps],
+  );
   const recoverableDraft = useMemo(() => {
     if (!selectedSession || !activeDetail) return null;
     const qualityInput = isRecordValue(activeDetail.session.contextSnapshot.qualityInput)
@@ -1294,6 +1298,13 @@ const ContentWritingPanel: React.FC = () => {
                 <div className="space-y-1.5">
                   {workflowSteps.map(step => {
                     const isExpanded = expandedWorkflowStepKey === step.stepKey;
+                    const hasRunningCandidate = allWorkflowSteps.some(candidate => (
+                      candidate.status === 'running'
+                      && candidate.metadata.parentStepKey === step.stepKey
+                    ));
+                    const displayedStepStatus: ContentWritingStepStatus = hasRunningCandidate
+                      ? 'running'
+                      : step.status;
                     const outputText = typeof step.outputText === 'string' ? step.outputText.trim() : '';
                     const stepDescription = getContentWritingStepDescription(step, isArabic);
                     const resultPanelId = `content-writing-step-result-${step.id}`;
@@ -1301,7 +1312,7 @@ const ContentWritingPanel: React.FC = () => {
                       <div
                         key={step.id}
                         className={`overflow-hidden rounded-md border ${
-                          step.status === 'running'
+                          displayedStepStatus === 'running'
                             ? 'border-blue-300 bg-blue-50/40 dark:border-blue-800 dark:bg-blue-500/5'
                             : 'border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#252525]'
                         }`}
@@ -1318,8 +1329,8 @@ const ContentWritingPanel: React.FC = () => {
                           aria-controls={resultPanelId}
                           className="flex min-h-11 w-full items-center justify-between gap-2 px-2.5 py-2 text-start text-[11px] hover:bg-gray-50 dark:hover:bg-white/5"
                         >
-                          <span className={`flex min-w-0 items-start gap-2 font-bold ${STEP_STATUS_STYLES[step.status]}`}>
-                            <span className="mt-0.5 shrink-0"><StepStatusIcon status={step.status} /></span>
+                          <span className={`flex min-w-0 items-start gap-2 font-bold ${STEP_STATUS_STYLES[displayedStepStatus]}`}>
+                            <span className="mt-0.5 shrink-0"><StepStatusIcon status={displayedStepStatus} /></span>
                             <span className="min-w-0 break-words leading-5 text-gray-700 dark:text-gray-200">
                               {getStepLabel(step, isArabic)}
                             </span>
@@ -1330,8 +1341,8 @@ const ContentWritingPanel: React.FC = () => {
                                 {isArabic ? 'محاولة' : 'Attempt'} {step.attemptCount}
                               </span>
                             )}
-                            <span className={`rounded px-1.5 py-1 text-[9px] font-black ${STEP_STATUS_STYLES[step.status]}`}>
-                              {getStepStatusLabel(step.status, isArabic)}
+                            <span className={`rounded px-1.5 py-1 text-[9px] font-black ${STEP_STATUS_STYLES[displayedStepStatus]}`}>
+                              {getStepStatusLabel(displayedStepStatus, isArabic)}
                             </span>
                             <ChevronDown
                               size={14}
@@ -1344,7 +1355,7 @@ const ContentWritingPanel: React.FC = () => {
                           <div
                             id={resultPanelId}
                             className="border-t border-gray-100 px-2.5 py-2.5 text-[11px] dark:border-[#333]"
-                            aria-live={step.status === 'running' ? 'polite' : undefined}
+                            aria-live={displayedStepStatus === 'running' ? 'polite' : undefined}
                           >
                             <div className="mb-2 font-black text-gray-600 dark:text-gray-300">
                               {isArabic ? 'نتيجة المرحلة' : 'Step result'}
@@ -1362,12 +1373,12 @@ const ContentWritingPanel: React.FC = () => {
                             {outputText ? (
                               <ContentWritingStepResult
                                 step={step}
-                                workflowSteps={workflowSteps}
+                                workflowSteps={allWorkflowSteps}
                                 contextSnapshot={activeDetail?.session.contextSnapshot || {}}
                                 outputText={outputText}
                                 isArabic={isArabic}
                               />
-                            ) : step.status === 'running' ? (
+                            ) : displayedStepStatus === 'running' ? (
                               <div className="flex items-center gap-2 rounded-md bg-blue-50 p-2.5 font-bold leading-5 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
                                 <Loader2 size={13} className="shrink-0 animate-spin" />
                                 <span>

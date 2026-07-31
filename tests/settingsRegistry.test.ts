@@ -174,6 +174,8 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       contentWritingMaxRepairPasses: 99,
       contentWritingQualityOverrideReasonRequired: false,
       contentWritingCompetitorPhraseIntelligenceEnabled: false,
+      contentWritingDualKnowledgeExtractionEnabled: false,
+      contentWritingMultiCandidateGenerationEnabled: false,
       unknownSecret: 'must-not-survive',
     },
     articles: {
@@ -193,6 +195,8 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.ai.contentWritingMaxRepairPasses, 3);
   assert.equal(normalized.ai.contentWritingQualityOverrideReasonRequired, false);
   assert.equal(normalized.ai.contentWritingCompetitorPhraseIntelligenceEnabled, false);
+  assert.equal(normalized.ai.contentWritingDualKnowledgeExtractionEnabled, false);
+  assert.equal(normalized.ai.contentWritingMultiCandidateGenerationEnabled, false);
   assert.equal(normalized.ai.unknownSecret, undefined);
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');

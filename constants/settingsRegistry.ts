@@ -65,6 +65,8 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     contentWritingMaxRepairPasses: CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES,
     contentWritingQualityOverrideReasonRequired: true,
     contentWritingCompetitorPhraseIntelligenceEnabled: true,
+    contentWritingDualKnowledgeExtractionEnabled: true,
+    contentWritingMultiCandidateGenerationEnabled: true,
   },
   prompts: normalizePromptRegistrySettings({
     registryVersion: PROMPT_REGISTRY_VERSION,
@@ -229,6 +231,14 @@ const normalizeSystemSection = (
     setWhenPresent('contentWritingCompetitorPhraseIntelligenceEnabled', field => normalizeBoolean(
       field,
       defaults.contentWritingCompetitorPhraseIntelligenceEnabled,
+    ));
+    setWhenPresent('contentWritingDualKnowledgeExtractionEnabled', field => normalizeBoolean(
+      field,
+      defaults.contentWritingDualKnowledgeExtractionEnabled,
+    ));
+    setWhenPresent('contentWritingMultiCandidateGenerationEnabled', field => normalizeBoolean(
+      field,
+      defaults.contentWritingMultiCandidateGenerationEnabled,
     ));
     return normalized;
   }

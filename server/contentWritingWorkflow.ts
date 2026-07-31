@@ -10,6 +10,7 @@ import {
   buildContentWritingFaqPrompt,
   buildContentWritingFinalReviewPrompt,
   buildContentWritingIntroductionPrompt,
+  buildContentWritingKnowledgeReconciliationPrompt,
   buildContentWritingOutlinePrompt,
   buildContentWritingRevisionApplyPrompt,
   buildContentWritingSectionRepairPrompt,
@@ -27,6 +28,7 @@ import {
 } from '../utils/contentWritingWorkflow';
 import {
   contentWritingKnowledgeToPromptJson,
+  buildContentWritingKnowledgeEnsembleSummary,
   normalizeContentWritingKnowledgeBase,
   normalizeContentWritingSectionCoverage,
   normalizeContentWritingSourceChunks,
@@ -37,6 +39,7 @@ import {
   summarizeContentWritingCoverage,
   type ContentWritingCoverageAudit,
   type ContentWritingKnowledgeBase,
+  type ContentWritingKnowledgeEnsembleSummary,
   type ContentWritingSectionCoverage,
   type ContentWritingSourceChunk,
 } from '../utils/contentWritingKnowledge';
@@ -89,6 +92,15 @@ import {
   parseContentWritingRevisionPlan,
   type ContentWritingRevisionPlan,
 } from '../utils/contentWritingRevision';
+import {
+  buildContentWritingCandidatePrompt,
+  evaluateContentWritingCandidate,
+  getContentWritingCandidateMetadata,
+  mergeContentWritingCandidateFailureCodes,
+  selectBestContentWritingCandidate,
+  type ContentWritingCandidateEvaluation,
+  type ContentWritingCandidateSelection,
+} from '../utils/contentWritingCandidates';
 import type { GoalContext, Keywords } from '../types';
 import {
   executeContentWritingTurn,
@@ -119,6 +131,12 @@ type StructuredWorkflowOptions = {
 type StepRunResult =
   | { ok: true; step: ContentWritingStep; output: string; execution?: ContentWritingExecutionResult }
   | { ok: false; execution: ContentWritingExecutionResult };
+
+type ProcessedStepOutput = { output: string; metadata?: JsonObject };
+
+type CandidateStepResult = Extract<StepRunResult, { ok: true }> & {
+  evaluation: ContentWritingCandidateEvaluation;
+};
 
 const isRecord = (value: unknown): value is JsonObject => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -254,7 +272,10 @@ const getWorkflowUsage = (steps: Iterable<ContentWritingStep>) => {
 };
 
 const getCompletedCount = (steps: Iterable<ContentWritingStep>): number => (
-  Array.from(steps).filter(step => step.status === 'completed').length
+  Array.from(steps).filter(step => (
+    step.status === 'completed'
+    && !step.metadata?.candidatePhase
+  )).length
 );
 
 const createWorkflowFailure = (options: {
@@ -505,6 +526,241 @@ export const executeStructuredContentWritingWorkflow = async (
     return { ok: true, step: completed, output: processed.output, execution };
   };
 
+  const multiCandidateGenerationEnabled = (
+    options.session.context_snapshot?.multiCandidateGenerationEnabled === true
+  );
+
+  const runCandidateStage = async (candidateOptions: {
+    definition: ContentWritingWorkflowStepDefinition;
+    prompt: string;
+    stepIndex: number;
+    stepCount: number;
+    maxOutputTokens: number;
+    articleContextOverride?: string;
+    processOutput?: (output: string) => ProcessedStepOutput;
+    evaluate: (
+      result: Extract<StepRunResult, { ok: true }>,
+      candidateIndex: number,
+    ) => ContentWritingCandidateEvaluation;
+    finalize?: (candidates: CandidateStepResult[]) => {
+      output: string;
+      metadata?: JsonObject;
+      mode: ContentWritingCandidateSelection['mode'];
+      selectedCandidateStepKey: string;
+      selectedCandidateIndex: number;
+      selectionReason: string;
+    };
+  }): Promise<StepRunResult> => {
+    if (!multiCandidateGenerationEnabled) {
+      return runStep(candidateOptions);
+    }
+    const canonicalExisting = stepMap.get(candidateOptions.definition.key)
+      || await ensureStep(candidateOptions.definition);
+    if (canonicalExisting.status === 'completed' && toText(canonicalExisting.output_text)) {
+      return {
+        ok: true,
+        step: canonicalExisting,
+        output: toText(canonicalExisting.output_text),
+      };
+    }
+    const canonicalRunning = await startContentWritingStep({
+      sessionId: options.session.id,
+      workerId: options.workerId,
+      stepKey: candidateOptions.definition.key,
+      promptText: `Protected multi-candidate selection for ${candidateOptions.definition.title}.`,
+    });
+    if (!canonicalRunning) {
+      const latest = (await getContentWritingSteps(
+        options.session.id,
+        { includeContent: true, includeMetadata: true },
+      )).find(step => step.step_key === candidateOptions.definition.key);
+      if (latest?.status === 'completed' && toText(latest.output_text)) {
+        stepMap.set(candidateOptions.definition.key, latest);
+        return { ok: true, step: latest, output: toText(latest.output_text) };
+      }
+      throw new Error(`Could not start candidate selection ${candidateOptions.definition.key}.`);
+    }
+    stepMap.set(candidateOptions.definition.key, canonicalRunning);
+    emitProgress(
+      candidateOptions.definition,
+      candidateOptions.stepIndex,
+      candidateOptions.stepCount,
+      {
+        stage: 'workflow-candidates',
+        provider: options.session.provider,
+        model: options.session.model,
+        message: `Generating two independent candidates for ${candidateOptions.definition.title}.`,
+        candidateCount: 2,
+        completed: false,
+      },
+    );
+
+    const createCandidateDefinition = (
+      candidateIndex: number,
+      remediationFailures: readonly string[] = [],
+    ): ContentWritingWorkflowStepDefinition => ({
+      key: `${candidateOptions.definition.key}-candidate-${candidateIndex}`,
+      type: candidateOptions.definition.type,
+      ordinal: candidateOptions.definition.ordinal,
+      title: `${candidateOptions.definition.title} — candidate ${candidateIndex}`,
+      metadata: {
+        ...candidateOptions.definition.metadata,
+        candidatePhase: 'generation',
+        parentStepKey: candidateOptions.definition.key,
+        candidateIndex,
+        candidateLabel: `Candidate ${candidateIndex}`,
+        remediationFailures,
+      },
+    });
+    const runOneCandidate = async (
+      candidateIndex: number,
+      remediationFailures: readonly string[] = [],
+    ): Promise<StepRunResult> => {
+      const definition = createCandidateDefinition(candidateIndex, remediationFailures);
+      await ensureStep(definition);
+      return runStep({
+        definition,
+        prompt: buildContentWritingCandidatePrompt({
+          prompt: candidateOptions.prompt,
+          candidateIndex,
+          stageLabel: candidateOptions.definition.title,
+          remediationFailures,
+        }),
+        stepIndex: candidateOptions.stepIndex,
+        stepCount: candidateOptions.stepCount,
+        maxOutputTokens: candidateOptions.maxOutputTokens,
+        articleContextOverride: candidateOptions.articleContextOverride,
+        processOutput: candidateOptions.processOutput,
+      });
+    };
+
+    const initialResults = await Promise.all([
+      runOneCandidate(1),
+      runOneCandidate(2),
+    ]);
+    const failedResult = initialResults.find(
+      (result): result is Extract<StepRunResult, { ok: false }> => !result.ok,
+    );
+    if (failedResult) {
+      await failContentWritingStep({
+        sessionId: options.session.id,
+        workerId: options.workerId,
+        stepKey: candidateOptions.definition.key,
+        errorCode: failedResult.execution.errorCode || 'content_writing_candidate_failed',
+        errorMessage: failedResult.execution.errorMessage || 'A writing candidate failed.',
+      });
+      return failedResult;
+    }
+    const evaluated: CandidateStepResult[] = initialResults.map((result, index) => ({
+      ...result as Extract<StepRunResult, { ok: true }>,
+      evaluation: candidateOptions.evaluate(
+        result as Extract<StepRunResult, { ok: true }>,
+        index + 1,
+      ),
+    }));
+    if (!evaluated.some(candidate => candidate.evaluation.passedHardGates)) {
+      const failureCodes = mergeContentWritingCandidateFailureCodes(
+        evaluated.map(candidate => candidate.evaluation),
+      );
+      const recoveryResult = await runOneCandidate(3, failureCodes);
+      if (recoveryResult.ok) {
+        evaluated.push({
+          ...recoveryResult,
+          evaluation: candidateOptions.evaluate(recoveryResult, 3),
+        });
+      }
+    }
+
+    const selected = selectBestContentWritingCandidate(evaluated);
+    if (!selected) {
+      const failure = createWorkflowFailure({
+        session: options.session,
+        status: 422,
+        code: 'content_writing_candidate_selection_empty',
+        message: `No usable candidate was produced for ${candidateOptions.definition.title}.`,
+        step: candidateOptions.definition,
+      });
+      await failContentWritingStep({
+        sessionId: options.session.id,
+        workerId: options.workerId,
+        stepKey: candidateOptions.definition.key,
+        errorCode: failure.errorCode || 'content_writing_candidate_selection_empty',
+        errorMessage: failure.errorMessage || 'No usable candidate was produced.',
+      });
+      return { ok: false, execution: failure };
+    }
+    const finalized = candidateOptions.finalize?.(evaluated) || {
+      output: selected.output,
+      metadata: getContentWritingCandidateMetadata(selected.step.metadata),
+      mode: 'best_candidate' as const,
+      selectedCandidateStepKey: selected.step.step_key,
+      selectedCandidateIndex: selected.evaluation.candidateIndex,
+      selectionReason: selected.evaluation.passedHardGates
+        ? 'highest_score_after_hard_gates'
+        : 'best_available_candidate_pending_later_repairs',
+    };
+    const candidateSelection: ContentWritingCandidateSelection = {
+      version: 1,
+      enabled: true,
+      parentStepKey: candidateOptions.definition.key,
+      mode: finalized.mode,
+      selectedCandidateStepKey: finalized.selectedCandidateStepKey,
+      selectedCandidateIndex: finalized.selectedCandidateIndex,
+      selectionReason: finalized.selectionReason,
+      candidates: evaluated.map(candidate => ({
+        ...candidate.evaluation,
+        stepKey: candidate.step.step_key,
+        title: candidate.step.title,
+        selected: candidate.step.step_key === finalized.selectedCandidateStepKey,
+      })),
+    };
+    const phraseAuditOutput = getContentWritingPhraseAuditOutput({
+      outputText: finalized.output,
+      metadata: finalized.metadata,
+    });
+    const competitorPhraseAudit = buildContentWritingPhraseAudit({
+      stepType: candidateOptions.definition.type,
+      intelligence: getCompetitorPhraseIntelligence(options.session),
+      outputText: phraseAuditOutput.text,
+      outputSubject: phraseAuditOutput.subject,
+    });
+    const completed = await completeContentWritingStep({
+      sessionId: options.session.id,
+      workerId: options.workerId,
+      stepKey: candidateOptions.definition.key,
+      outputText: finalized.output,
+      metadata: {
+        ...(finalized.metadata || {}),
+        candidateSelection,
+        competitorPhraseAudit,
+      },
+    });
+    if (!completed) {
+      throw new Error(`Could not complete candidate selection ${candidateOptions.definition.key}.`);
+    }
+    stepMap.set(candidateOptions.definition.key, completed);
+    emitProgress(
+      candidateOptions.definition,
+      candidateOptions.stepIndex,
+      candidateOptions.stepCount,
+      {
+        stage: 'workflow-candidate-selected',
+        provider: options.session.provider,
+        model: options.session.model,
+        message: `Selected candidate ${finalized.selectedCandidateIndex || 'union'} for ${candidateOptions.definition.title}.`,
+        candidateCount: evaluated.length,
+        selectedCandidateIndex: finalized.selectedCandidateIndex,
+        completed: false,
+      },
+    );
+    return {
+      ok: true,
+      step: completed,
+      output: finalized.output,
+      execution: selected.execution,
+    };
+  };
+
   const competitorChunks = getCompetitorChunks(options.session);
   const competitorPhraseIntelligence = getCompetitorPhraseIntelligence(options.session);
   const competitorIndexDefinition = getContentWritingCompetitorIndexStep();
@@ -519,35 +775,142 @@ export const executeStructuredContentWritingWorkflow = async (
   }
 
   await ensureStep(competitorIndexDefinition);
-  const competitorIndexResult = await runStep({
-    definition: competitorIndexDefinition,
-    prompt: buildContentWritingCompetitorIndexPrompt({
-      chunks: competitorChunks,
-      language: article.language,
-      template: promptTemplate(PROMPT_TEMPLATE_IDS.competitorIndex),
-      sourceClaimsTemplate: promptTemplate(PROMPT_TEMPLATE_IDS.sourceClaimsLedger),
-      competitorPhraseIntelligence,
-    }),
-    stepIndex: competitorIndexDefinition.ordinal,
-    stepCount: 2,
-    maxOutputTokens: 16_000,
-    processOutput: output => {
-      const knowledge = parseContentWritingKnowledgeBase(output, competitorChunks);
-      return {
-        output,
-        metadata: {
-          knowledge,
-          sourceChunkCount: competitorChunks.length,
-          modelIndexedChunkCount: knowledge.modelProcessedChunkIds.length,
-          fallbackChunkCount: knowledge.fallbackChunkIds.length,
-          competitorCoverageMatrix: knowledge.competitorCoverageMatrix,
-          sourceRegistry: knowledge.sourceRegistry,
-          claimLedger: knowledge.claimLedger,
+  const processKnowledgeOutput = (output: string): ProcessedStepOutput => {
+    const knowledge = parseContentWritingKnowledgeBase(output, competitorChunks);
+    return {
+      output,
+      metadata: {
+        knowledge,
+        sourceChunkCount: competitorChunks.length,
+        modelIndexedChunkCount: knowledge.modelProcessedChunkIds.length,
+        fallbackChunkCount: knowledge.fallbackChunkIds.length,
+        competitorCoverageMatrix: knowledge.competitorCoverageMatrix,
+        sourceRegistry: knowledge.sourceRegistry,
+        claimLedger: knowledge.claimLedger,
+        competitorPhraseIntelligence,
+      },
+    };
+  };
+  const dualKnowledgeExtractionEnabled = (
+    options.session.context_snapshot?.dualKnowledgeExtractionEnabled === true
+  );
+  let competitorIndexResult: StepRunResult;
+  if (dualKnowledgeExtractionEnabled) {
+    const createKnowledgePassDefinition = (
+      pass: 1 | 2,
+    ): ContentWritingWorkflowStepDefinition => ({
+      key: `competitor-index-pass-${pass}`,
+      type: 'competitor_index',
+      ordinal: competitorIndexDefinition.ordinal,
+      title: `Competitor knowledge extraction ${pass}`,
+      metadata: {
+        workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+        candidatePhase: 'knowledge_extraction',
+        parentStepKey: competitorIndexDefinition.key,
+        candidateIndex: pass,
+        candidateLabel: `Independent reading ${pass}`,
+      },
+    });
+    const knowledgePassDefinitions = [
+      createKnowledgePassDefinition(1),
+      createKnowledgePassDefinition(2),
+    ] as const;
+    await Promise.all(knowledgePassDefinitions.map(ensureStep));
+    const knowledgePassResults = await Promise.all(
+      knowledgePassDefinitions.map((definition, index) => runStep({
+        definition,
+        prompt: buildContentWritingCompetitorIndexPrompt({
+          chunks: competitorChunks,
+          language: article.language,
+          template: promptTemplate(PROMPT_TEMPLATE_IDS.competitorIndex),
+          sourceClaimsTemplate: promptTemplate(PROMPT_TEMPLATE_IDS.sourceClaimsLedger),
           competitorPhraseIntelligence,
+          extractionPass: (index + 1) as 1 | 2,
+        }),
+        stepIndex: competitorIndexDefinition.ordinal,
+        stepCount: 2,
+        maxOutputTokens: 16_000,
+        processOutput: processKnowledgeOutput,
+      })),
+    );
+    const failedKnowledgePass = knowledgePassResults.find(
+      (result): result is Extract<StepRunResult, { ok: false }> => !result.ok,
+    );
+    if (failedKnowledgePass) return failedKnowledgePass.execution;
+    const firstPassResult = knowledgePassResults[0] as Extract<StepRunResult, { ok: true }>;
+    const secondPassResult = knowledgePassResults[1] as Extract<StepRunResult, { ok: true }>;
+    const firstPass = normalizeContentWritingKnowledgeBase(
+      firstPassResult.step.metadata?.knowledge || firstPassResult.output,
+      competitorChunks,
+    );
+    const secondPass = normalizeContentWritingKnowledgeBase(
+      secondPassResult.step.metadata?.knowledge || secondPassResult.output,
+      competitorChunks,
+    );
+    competitorIndexResult = await runStep({
+      definition: {
+        ...competitorIndexDefinition,
+        title: 'Reconciled competitor coverage and claim ledger',
+        metadata: {
+          ...competitorIndexDefinition.metadata,
+          ensemblePhase: 'reconciliation',
+          extractionPassStepKeys: knowledgePassDefinitions.map(definition => definition.key),
         },
-      };
-    },
-  });
+      },
+      prompt: buildContentWritingKnowledgeReconciliationPrompt({
+        firstPass,
+        secondPass,
+        chunks: competitorChunks,
+        language: article.language,
+        template: promptTemplate(PROMPT_TEMPLATE_IDS.knowledgeReconciliation),
+      }),
+      stepIndex: competitorIndexDefinition.ordinal,
+      stepCount: 2,
+      maxOutputTokens: 20_000,
+      processOutput: output => {
+        const processed = processKnowledgeOutput(output);
+        const finalKnowledge = normalizeContentWritingKnowledgeBase(
+          processed.metadata?.knowledge || output,
+          competitorChunks,
+        );
+        const knowledgeEnsemble: ContentWritingKnowledgeEnsembleSummary = (
+          buildContentWritingKnowledgeEnsembleSummary({
+            firstPass,
+            secondPass,
+            finalKnowledge,
+            chunks: competitorChunks,
+          })
+        );
+        if (!knowledgeEnsemble.allChunksAccountedFor) {
+          throw new Error('The reconciled knowledge index did not account for every source chunk.');
+        }
+        return {
+          ...processed,
+          metadata: {
+            ...(processed.metadata || {}),
+            knowledge: finalKnowledge,
+            knowledgeEnsemble,
+            extractionPassStepKeys: knowledgePassDefinitions.map(definition => definition.key),
+          },
+        };
+      },
+    });
+  } else {
+    competitorIndexResult = await runStep({
+      definition: competitorIndexDefinition,
+      prompt: buildContentWritingCompetitorIndexPrompt({
+        chunks: competitorChunks,
+        language: article.language,
+        template: promptTemplate(PROMPT_TEMPLATE_IDS.competitorIndex),
+        sourceClaimsTemplate: promptTemplate(PROMPT_TEMPLATE_IDS.sourceClaimsLedger),
+        competitorPhraseIntelligence,
+      }),
+      stepIndex: competitorIndexDefinition.ordinal,
+      stepCount: 2,
+      maxOutputTokens: 16_000,
+      processOutput: processKnowledgeOutput,
+    });
+  }
   if (!competitorIndexResult.ok) return competitorIndexResult.execution;
   const knowledge = normalizeContentWritingKnowledgeBase(
     competitorIndexResult.step.metadata?.knowledge || competitorIndexResult.output,
@@ -681,7 +1044,8 @@ export const executeStructuredContentWritingWorkflow = async (
       claims: relevantClaims,
       sourceChunks: relevantChunks,
     };
-    const result = await runStep({
+    const sectionTargetWords = Math.max(80, Math.round(Number(section.targetWords) || 140));
+    const result = await runCandidateStage({
       definition,
       prompt: buildContentWritingSectionPrompt({
         outline,
@@ -724,6 +1088,22 @@ export const executeStructuredContentWritingWorkflow = async (
           },
         };
       },
+      evaluate: (candidate, candidateIndex) => evaluateContentWritingCandidate({
+        candidateIndex,
+        outputText: candidate.output,
+        metadata: candidate.step.metadata,
+        requiredIdeaIds,
+        requiredClaimIds: section.requiredClaimIds || [],
+        blockedClaimIds: knowledge.claimLedger.blockedClaimIds,
+        targetWordRange: {
+          min: Math.max(60, Math.round(sectionTargetWords * 0.85)),
+          max: Math.round(sectionTargetWords * 1.15),
+        },
+        comparisonTexts: sectionDefinitions
+          .slice(0, index)
+          .map(previousDefinition => outputs[previousDefinition.key])
+          .filter(Boolean),
+      }),
     });
     if (!result.ok) return result.execution;
     outputs[definition.key] = result.output;
@@ -743,7 +1123,7 @@ export const executeStructuredContentWritingWorkflow = async (
     goalContext,
     primaryKeyword,
   });
-  const introductionResult = await runStep({
+  const introductionResult = await runCandidateStage({
     definition: introductionDefinition,
     prompt: buildContentWritingIntroductionPrompt({
       outline,
@@ -754,6 +1134,17 @@ export const executeStructuredContentWritingWorkflow = async (
     stepCount: definitions.length,
     maxOutputTokens: 4_000,
     articleContextOverride: compactArticleContext,
+    evaluate: (candidate, candidateIndex) => evaluateContentWritingCandidate({
+      candidateIndex,
+      outputText: candidate.output,
+      metadata: candidate.step.metadata,
+      targetWordRange: qualityRuntime ? {
+        min: qualityRuntime.configuration.policy.introduction.firstParagraphWords.min
+          + qualityRuntime.configuration.policy.introduction.secondParagraphWords.min,
+        max: qualityRuntime.configuration.policy.introduction.firstParagraphWords.max
+          + qualityRuntime.configuration.policy.introduction.secondParagraphWords.max,
+      } : { min: 70, max: 140 },
+    }),
   });
   if (!introductionResult.ok) return introductionResult.execution;
   outputs.introduction = introductionResult.output;
@@ -774,7 +1165,7 @@ export const executeStructuredContentWritingWorkflow = async (
     goalContext,
   });
   let faqAudit: ContentWritingFaqAudit | null = null;
-  const faqResult = await runStep({
+  const faqResult = await runCandidateStage({
     definition: faqDefinition,
     prompt: buildContentWritingFaqPrompt({
       outline,
@@ -808,6 +1199,59 @@ export const executeStructuredContentWritingWorkflow = async (
         },
       };
     },
+    evaluate: (candidate, candidateIndex) => evaluateContentWritingCandidate({
+      candidateIndex,
+      outputText: candidate.output,
+      metadata: candidate.step.metadata,
+      requireFaqCandidates: true,
+    }),
+    finalize: candidates => {
+      const combinedCandidates = candidates
+        .flatMap(candidate => {
+          const audit = isRecord(candidate.step.metadata?.faqIndependenceAudit)
+            ? candidate.step.metadata.faqIndependenceAudit
+            : {};
+          return Array.isArray(audit.candidates) ? audit.candidates : [];
+        })
+        .filter(isRecord)
+        .sort((left, right) => (
+          Number(right.decision === 'accepted') - Number(left.decision === 'accepted')
+          || Number(right.sourceType === 'people_also_ask') - Number(left.sourceType === 'people_also_ask')
+          || Number(right.informationGainScore || 0) - Number(left.informationGainScore || 0)
+          || Number(left.bodySimilarityScore || 0) - Number(right.bodySimilarityScore || 0)
+        ))
+        .map((candidate, index) => ({
+          ...candidate,
+          id: `FAQM${String(index + 1).padStart(3, '0')}`,
+        }));
+      const mergedAudit = normalizeContentWritingFaqAudit({
+        value: { candidates: combinedCandidates },
+        draft: articleWithoutFaq,
+        knowledge,
+        chunks: competitorChunks,
+        goalContext,
+        questionSeeds: faqQuestionSeeds,
+      });
+      faqAudit = mergedAudit;
+      return {
+        output: contentWritingFaqAuditToMarkdown(mergedAudit),
+        metadata: {
+          faqIndependenceAudit: mergedAudit,
+          acceptedQuestionCount: mergedAudit.acceptedCount,
+          rejectedQuestionCount: mergedAudit.rejectedCount,
+          needsInformationQuestionCount: mergedAudit.needsInformationCount,
+          faqCandidateUnion: {
+            sourceCandidateCount: candidates.length,
+            mergedCandidateCount: combinedCandidates.length,
+            acceptedCount: mergedAudit.acceptedCount,
+          },
+        },
+        mode: 'faq_union',
+        selectedCandidateStepKey: 'faq-union',
+        selectedCandidateIndex: 0,
+        selectionReason: 'semantic_union_with_independence_guards',
+      };
+    },
   });
   if (!faqResult.ok) return faqResult.execution;
   if (!faqAudit && isRecord(faqResult.step.metadata?.faqIndependenceAudit)) {
@@ -826,7 +1270,7 @@ export const executeStructuredContentWritingWorkflow = async (
     goalContext,
     primaryKeyword,
   });
-  const finalSectionResult = await runStep({
+  const finalSectionResult = await runCandidateStage({
     definition: finalSectionDefinition,
     prompt: finalSectionDefinition.type === 'call_to_action'
       ? buildContentWritingCallToActionPrompt({
@@ -846,6 +1290,14 @@ export const executeStructuredContentWritingWorkflow = async (
     stepCount: definitions.length,
     maxOutputTokens: 4_000,
     articleContextOverride: compactArticleContext,
+    evaluate: (candidate, candidateIndex) => evaluateContentWritingCandidate({
+      candidateIndex,
+      outputText: candidate.output,
+      metadata: candidate.step.metadata,
+      targetWordRange: finalSectionDefinition.type === 'conclusion'
+        ? qualityRuntime?.configuration.policy.conclusion.words || { min: 70, max: 120 }
+        : { min: 70, max: 125 },
+    }),
   });
   if (!finalSectionResult.ok) return finalSectionResult.execution;
   outputs[finalSectionDefinition.key] = finalSectionResult.output;
@@ -962,7 +1414,11 @@ export const executeStructuredContentWritingWorkflow = async (
       },
     };
     await ensureStep(repairDefinition);
-    const repairResult = await runStep({
+    const repairTargetWords = Math.max(
+      80,
+      Math.round(Number(outline.sections[sectionIndex].targetWords) || 140),
+    );
+    const repairResult = await runCandidateStage({
       definition: repairDefinition,
       prompt: buildContentWritingSectionRepairPrompt({
         outline,
@@ -995,6 +1451,22 @@ export const executeStructuredContentWritingWorkflow = async (
           },
         };
       },
+      evaluate: (candidate, candidateIndex) => evaluateContentWritingCandidate({
+        candidateIndex,
+        outputText: candidate.output,
+        metadata: candidate.step.metadata,
+        requiredIdeaIds: repair.ideaIds,
+        requiredClaimIds: repair.claimIds,
+        blockedClaimIds: knowledge.claimLedger.blockedClaimIds,
+        targetWordRange: {
+          min: Math.max(60, Math.round(repairTargetWords * 0.85)),
+          max: Math.round(repairTargetWords * 1.15),
+        },
+        comparisonTexts: Object.entries(outputs)
+          .filter(([key]) => key !== repair.sectionKey)
+          .map(([, value]) => value)
+          .filter(Boolean),
+      }),
     });
     if (!repairResult.ok) return repairResult.execution;
     outputs[repair.sectionKey] = repairResult.output;
@@ -1117,7 +1589,7 @@ export const executeStructuredContentWritingWorkflow = async (
     const qualityBeforeRevision = qualityReport;
     const draftBeforeRevision = finalOutput;
     const coverageBeforeRevision = new Map(activeSectionCoverageByKey);
-    const result = await runStep({
+    const result = await runCandidateStage({
       definition: revisionOptions.definition,
       prompt: buildContentWritingRevisionApplyPrompt({
         plan: revisionOptions.plan,
@@ -1209,6 +1681,13 @@ export const executeStructuredContentWritingWorkflow = async (
           },
         };
       },
+      evaluate: (candidate, candidateIndex) => evaluateContentWritingCandidate({
+        candidateIndex,
+        outputText: candidate.output,
+        metadata: candidate.step.metadata,
+        blockedClaimIds: knowledge.claimLedger.blockedClaimIds,
+        requireAcceptedRevision: true,
+      }),
     });
     if (result.ok) applyPersistedRevisionOutcome(result.step);
     return result;
@@ -1414,8 +1893,10 @@ export const executeStructuredContentWritingWorkflow = async (
       provider: options.session.provider,
       structured: true,
       workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
-      stepCount: stepMap.size,
+      stepCount: Array.from(stepMap.values()).filter(step => !step.metadata?.candidatePhase).length,
       completedStepCount: getCompletedCount(stepMap.values()),
+      candidateRequestStepCount: Array.from(stepMap.values())
+        .filter(step => Boolean(step.metadata?.candidatePhase)).length,
       finalStepKey: finalStep.step_key,
       qualityPolicyVersion: qualityRuntime?.configuration.policyVersion || null,
       qualityGatePassed: qualityReport?.passed ?? null,

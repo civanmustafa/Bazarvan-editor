@@ -25,6 +25,7 @@ import {
 import { reconstructContentWritingEvidenceTrace } from '../utils/contentWritingEvidence';
 import { buildContentWritingStageKnowledgeUsage } from '../utils/contentWritingStageKnowledge';
 import ContentWritingFaqAudit from './ContentWritingFaqAudit';
+import ContentWritingCandidateComparison from './ContentWritingCandidateComparison';
 
 type ContentWritingStepResultProps = {
   step: ContentWritingStep;
@@ -48,8 +49,8 @@ export const getContentWritingStepDescription = (
 ): string => {
   const descriptions: Partial<Record<ContentWritingStep['stepType'], [string, string]>> = {
     competitor_index: [
-      'يقرأ النظام محتوى المنافسين، ويوحّد الأفكار المتشابهة، ويقيّم المصادر والادعاءات قبل البدء في كتابة المقالة.',
-      'Reads competitor content, merges equivalent ideas, and assesses sources and claims before drafting.',
+      'ينفذ النظام قراءتين مستقلتين لجميع مقاطع المنافسين، ثم يصالح بينهما باتحاد موثّق للأفكار ويقيّم المصادر والادعاءات قبل الكتابة.',
+      'Runs two independent readings of every competitor chunk, reconciles their supported union, and assesses sources and claims before drafting.',
     ],
     outline: [
       'يحوّل النظام المعرفة المستخلصة إلى خطة مرتبة لأقسام المقالة، ويحدد غرض كل قسم وحجمه من دون كتابة النص بعد.',
@@ -594,7 +595,10 @@ const ContentWritingStepResult: React.FC<ContentWritingStepResultProps> = ({
   isArabic,
 }) => {
   const transparency = useMemo<ContentWritingTransparencySnapshot | null>(() => {
-    const knowledgeStep = workflowSteps.find(candidate => candidate.stepType === 'competitor_index');
+    const knowledgeStep = workflowSteps.find(candidate => (
+      candidate.stepType === 'competitor_index'
+      && !candidate.metadata.candidatePhase
+    ));
     return buildContentWritingTransparencySnapshot({
       knowledgeValue: knowledgeStep?.metadata?.knowledge,
       competitorChunks: contextSnapshot.competitorChunks,
@@ -643,6 +647,12 @@ const ContentWritingStepResult: React.FC<ContentWritingStepResultProps> = ({
 
   return (
     <div>
+      <ContentWritingCandidateComparison
+        step={step}
+        workflowSteps={workflowSteps}
+        competitorChunks={contextSnapshot.competitorChunks}
+        isArabic={isArabic}
+      />
       {step.stepType === 'competitor_index' ? (
         <ContentWritingKnowledgeResult
           outputText={outputText}

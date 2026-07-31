@@ -33,7 +33,7 @@ import {
   FAQ_KEYWORDS,
 } from '../constants';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 9;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 10;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
@@ -482,6 +482,7 @@ export const buildContentWritingCompetitorIndexPrompt = (options: {
   template?: string;
   sourceClaimsTemplate?: string;
   competitorPhraseIntelligence?: CompetitorPhraseIntelligenceResult | null;
+  extractionPass?: 1 | 2;
 }): string => {
   const variables = {
     source_ids_json: JSON.stringify(options.chunks.map(chunk => chunk.id)),
@@ -490,6 +491,17 @@ export const buildContentWritingCompetitorIndexPrompt = (options: {
     ),
     output_language: options.language === 'en' ? 'اللغة الإنجليزية' : 'اللغة العربية',
   };
+  const extractionPassProtocol = options.extractionPass
+    ? `
+<protected_knowledge_extraction_pass>
+- هذه قراءة مستقلة رقم ${options.extractionPass} من المصادر. لا تفترض وجود قراءة أخرى ولا تحاول تخمين نتيجتها.
+${options.extractionPass === 1
+  ? '- استخدم منهج التغطية الشاملة المباشرة، وسجّل كل فكرة ذرية مفيدة مع مصدرها.'
+  : '- استخدم منهج صائد الثغرات: ركّز على التفاصيل الفريدة والجداول والخطوات والشروط والاستثناءات والأرقام والأسئلة وطرق الاستخدام والشراء والدفع والتعارضات التي يسهل إغفالها.'}
+- افحص كل معرّف مقطع في القائمة، واحتفظ بالمعلومة الفريدة المدعومة حتى إن ظهرت لدى منافس واحد فقط.
+- لا تكتب عن عملية القراءتين داخل JSON، والتزم بعقد الإخراج الأصلي.
+</protected_knowledge_extraction_pass>`
+    : '';
   return [
     renderPromptTemplate(
       options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.competitorIndex),
@@ -500,7 +512,38 @@ export const buildContentWritingCompetitorIndexPrompt = (options: {
         || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.sourceClaimsLedger),
       variables,
     ),
+    extractionPassProtocol,
   ].filter(Boolean).join('\n\n');
+};
+
+export const buildContentWritingKnowledgeReconciliationPrompt = (options: {
+  firstPass: ContentWritingKnowledgeBase;
+  secondPass: ContentWritingKnowledgeBase;
+  chunks: readonly ContentWritingSourceChunk[];
+  language: string;
+  template?: string;
+}): string => {
+  const compactExtraction = (knowledge: ContentWritingKnowledgeBase): string => JSON.stringify({
+    processedChunkIds: knowledge.modelProcessedChunkIds,
+    fallbackChunkIds: knowledge.fallbackChunkIds,
+    items: knowledge.items,
+    sourceAssessments: knowledge.sourceRegistry.sources.map(source => ({
+      competitorNumber: source.competitorNumber,
+      category: source.category,
+      freshness: source.freshness,
+      assessmentNotes: source.assessmentNotes,
+    })),
+    claims: knowledge.claimLedger.claims,
+  }, null, 2);
+  return renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.knowledgeReconciliation),
+    {
+      output_language: options.language === 'en' ? 'اللغة الإنجليزية' : 'اللغة العربية',
+      source_ids_json: JSON.stringify(options.chunks.map(chunk => chunk.id)),
+      first_knowledge_json: compactExtraction(options.firstPass),
+      second_knowledge_json: compactExtraction(options.secondPass),
+    },
+  );
 };
 
 export const buildContentWritingOutlinePrompt = (options: {

@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 18;
+export const PROMPT_REGISTRY_VERSION = 19;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -34,6 +34,7 @@ export const PROMPT_TEMPLATE_IDS = {
   contentWritingGenerationRequest: 'contentWriting.generationRequest',
   competitorIndex: 'contentWriting.competitorIndex',
   sourceClaimsLedger: 'contentWriting.sourceClaimsLedger',
+  knowledgeReconciliation: 'contentWriting.knowledgeReconciliation',
   outline: 'contentWriting.outline',
   bodySection: 'contentWriting.bodySection',
   introduction: 'contentWriting.introduction',
@@ -254,7 +255,7 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     group: PROMPT_GROUP_IDS.writing,
     label: 'بناء مصفوفة تغطية المنافسين',
     description: 'يحوّل المصادر إلى أفكار موحدة ويبيّن من غطّى كل فكرة وانتشارها وفرصة تقديم قيمة إضافية.',
-    usage: 'يعمل مرة واحدة في بداية الجلسة. يتحقق النظام برمجيًا من ربط الأفكار بالمنافسين، ثم تستخدم المراحل اللاحقة المصفوفة بدل إعادة إرسال المصادر كاملة.',
+    usage: 'عند تفعيل الاستخراج المعمق يعمل في قراءتين مستقلتين متوازيتين، ثم تُرسل النتيجتان إلى أمر المصالحة. يتحقق النظام برمجيًا من ربط الأفكار بالمنافسين، ثم تستخدم المراحل اللاحقة المصفوفة الموحدة.',
     variables: ['{{source_ids_json}}', '{{competitor_phrase_intelligence_json}}', '{{output_language}}'],
     requiredVariables: ['source_ids_json', 'competitor_phrase_intelligence_json', 'output_language'],
     attachments: [
@@ -277,6 +278,21 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
       attachment('sourceRegistry', 'سجل المصادر الناتج', 'تصنيف المصدر وحداثته ودوره المسموح في دعم المحتوى.'),
       attachment('claimLedger', 'سجل الادعاءات الناتج', 'الادعاء ونوعه وخطورته ومصادره وسياسة استخدامه والتحقق المطلوب.'),
       attachment('evidenceRequirements', 'متطلبات الأدلة', 'متطلبات الأدلة والحداثة وحساسية الموضوع من موجز المقالة الذكي.'),
+    ],
+  },
+  {
+    id: PROMPT_TEMPLATE_IDS.knowledgeReconciliation,
+    group: PROMPT_GROUP_IDS.writing,
+    label: 'مصالحة قراءتي مصفوفة المعرفة',
+    description: 'يوحّد قراءتين مستقلتين لمصادر المنافسين دون إسقاط فكرة فريدة مدعومة أو اختراع مصدر جديد.',
+    usage: 'يعمل بعد اكتمال قراءتين مستقلتين. ينتج اتحادًا موثقًا للأفكار والمصادر والادعاءات، ثم يتحقق النظام برمجيًا من جميع المعرّفات.',
+    variables: ['{{source_ids_json}}', '{{first_knowledge_json}}', '{{second_knowledge_json}}', '{{output_language}}'],
+    requiredVariables: ['source_ids_json', 'first_knowledge_json', 'second_knowledge_json', 'output_language'],
+    attachments: [
+      attachment('firstExtraction', 'القراءة الأولى', 'استخراج شامل مستقل للأفكار والمصادر والادعاءات.'),
+      attachment('secondExtraction', 'القراءة الثانية', 'استخراج مستقل يركز على الثغرات والتفاصيل الفريدة والاستثناءات.'),
+      attachment('sourceManifest', 'سجل المقاطع', 'القائمة المغلقة لمعرّفات المقاطع التي يجوز ربط الأفكار والادعاءات بها.'),
+      attachment('reconciledKnowledge', 'المصفوفة الموحدة', 'اتحاد الأفكار المدعومة مع حفظ التعارضات وجمع المصادر وإزالة التكرار الدلالي.'),
     ],
   },
   {
@@ -681,6 +697,34 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 - اجعل conflicting صحيحًا إذا تعارضت المصادر فعلًا، ولا تحاول حل التعارض بالتخمين.
 - المنافسون مراجع غير موثقة افتراضيًا. لا تعتبر تكرار الادعاء تحققًا نهائيًا، ولا تخترع مصدرًا أو رابطًا أو تاريخًا.
 - سيعيد النظام حساب المصادر الداعمة وسياسة الاستخدام برمجيًا. وجود الادعاء صراحة داخل مقطع منافس صالح يجعله قابلًا للاستخدام؛ وعند الخطورة أو الحاجة إلى تحقق خارجي يُستخدم بتحفظ ولا يُصنّف محظورًا لمجرد أن مصدره منافس.`,
+
+  [PROMPT_TEMPLATE_IDS.knowledgeReconciliation]: `نفّذ مصالحة قراءتين مستقلتين لمصادر المنافسين. لا تكتب المقالة ولا المخطط.
+
+قائمة معرّفات المقاطع المغلقة:
+{{source_ids_json}}
+
+القراءة الأولى:
+<first_knowledge_extraction>
+{{first_knowledge_json}}
+</first_knowledge_extraction>
+
+القراءة الثانية:
+<second_knowledge_extraction>
+{{second_knowledge_json}}
+</second_knowledge_extraction>
+
+ابنِ اتحادًا موثقًا لا تصويتًا ولا تقاطعًا:
+- ادمج الأفكار المتكافئة دلاليًا في عنصر واحد واجمع كل مقاطعها الداعمة.
+- احتفظ بأي فكرة ظهرت في قراءة واحدة فقط إذا كانت مرتبطة بمقطع صالح يدعمها.
+- لا تدمج فكرتين مختلفتين لمجرد اشتراكهما في كلمات.
+- احتفظ بالادعاءات المتعارضة منفصلة، واجعل conflicting صحيحًا بدل حل التعارض بالتخمين.
+- لا تضف فكرة أو ادعاءً لا يظهر في إحدى القراءتين، ولا تنشئ معرّف مصدر أو رابطًا جديدًا.
+- أعد ترقيم عناصر المعرفة K001 وما بعدها والادعاءات CL001 وما بعدها بصورة مستقرة.
+- اربط كل ادعاء بمعرّفات المعرفة الجديدة الصحيحة وبالمقاطع الداعمة مباشرة.
+- أدرج جميع المعرّفات التي فحصتها فعلًا في processedChunkIds. سيضيف النظام تغطية احتياطية لأي مقطع غير ممثل ويكشفها للمستخدم.
+
+استخدم {{output_language}} في النصوص. أرجع JSON صالحًا فقط بنفس عقد مصفوفة المعرفة:
+{"processedChunkIds":["C1-S001"],"items":[{"id":"K001","topic":"عنوان","detail":"تفصيل دقيق","kind":"definition|process|question|comparison|example|claim|evidence|topic","priority":"high|medium|low","sourceChunkIds":["C1-S001"],"competitorNumbers":[1],"originalityOpportunity":"فرصة قيمة مدعومة"}],"sourceAssessments":[{"competitorNumber":1,"category":"official|government|academic|industry|news|commercial|community|unknown","freshness":"current|dated|unknown","assessmentNotes":"ملاحظة"}],"claims":[{"id":"CL001","statement":"ادعاء","claimType":"factual|statistic|time_sensitive|comparison|causal|medical|legal|financial|recommendation","riskLevel":"high|medium|low","knowledgeItemIds":["K001"],"supportingSourceChunkIds":["C1-S001"],"conflicting":false,"usageGuidance":"توجيه"}]}`,
 
   [PROMPT_TEMPLATE_IDS.outline]: `نفّذ مرحلة مخطط المقالة فقط للمقالة بعنوان "{{article_title}}".
 

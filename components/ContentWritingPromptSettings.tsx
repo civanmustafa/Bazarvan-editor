@@ -24,7 +24,9 @@ type ContentWritingPromptSettingsProps = {
       | 'contentWritingMinimumQualityScore'
       | 'contentWritingMaxRepairPasses'
       | 'contentWritingQualityOverrideReasonRequired'
-      | 'contentWritingCompetitorPhraseIntelligenceEnabled',
+      | 'contentWritingCompetitorPhraseIntelligenceEnabled'
+      | 'contentWritingDualKnowledgeExtractionEnabled'
+      | 'contentWritingMultiCandidateGenerationEnabled',
     value: string | number | boolean,
   ) => void;
 };
@@ -38,6 +40,8 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
   const maxRepairPasses = Number(values.contentWritingMaxRepairPasses ?? CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES);
   const qualityOverrideReasonRequired = values.contentWritingQualityOverrideReasonRequired !== false;
   const competitorPhraseIntelligenceEnabled = values.contentWritingCompetitorPhraseIntelligenceEnabled !== false;
+  const dualKnowledgeExtractionEnabled = values.contentWritingDualKnowledgeExtractionEnabled !== false;
+  const multiCandidateGenerationEnabled = values.contentWritingMultiCandidateGenerationEnabled !== false;
 
   const resetDefaults = () => {
     onChange('contentWritingMaxInputTokens', CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET);
@@ -46,6 +50,8 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
     onChange('contentWritingMaxRepairPasses', CONTENT_WRITING_DEFAULT_MAX_REPAIR_PASSES);
     onChange('contentWritingQualityOverrideReasonRequired', true);
     onChange('contentWritingCompetitorPhraseIntelligenceEnabled', true);
+    onChange('contentWritingDualKnowledgeExtractionEnabled', true);
+    onChange('contentWritingMultiCandidateGenerationEnabled', true);
   };
 
   return (
@@ -161,8 +167,44 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
         </span>
       </label>
 
+      <div className="grid gap-3 lg:grid-cols-2">
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/50 dark:bg-blue-900/10">
+          <input
+            type="checkbox"
+            checked={dualKnowledgeExtractionEnabled}
+            onChange={event => onChange('contentWritingDualKnowledgeExtractionEnabled', event.target.checked)}
+            className="mt-1 size-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-black text-gray-700 dark:text-gray-200">
+              قراءتان مستقلتان لمصفوفة المعرفة
+            </span>
+            <span className="mt-1 block text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+              ينفذ قراءتين مستقلتين لجميع مقاطع المنافسين، ثم يرسل النتيجتين إلى طلب مصالحة ثالث ويبقي مصدر كل فكرة ظاهرًا للمراجعة.
+            </span>
+          </span>
+        </label>
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900/50 dark:bg-emerald-900/10">
+          <input
+            type="checkbox"
+            checked={multiCandidateGenerationEnabled}
+            onChange={event => onChange('contentWritingMultiCandidateGenerationEnabled', event.target.checked)}
+            className="mt-1 size-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-black text-gray-700 dark:text-gray-200">
+              مرشحان للمراحل الكتابية
+            </span>
+            <span className="mt-1 block text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+              يولد مرشحين مستقلين للأقسام والمقدمة والأسئلة والقسم النهائي والإصلاحات، ثم يستبعد المخالفات القاطعة ويعتمد الأعلى درجة مع حفظ البديل.
+            </span>
+          </span>
+        </label>
+      </div>
+
       <p className="text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-        تُثبَّت نسخة سياسة التوليد والأوامر وإشارات عبارات المنافسين داخل كل جلسة حتى لا تتغير شروطها أثناء الاستئناف. أما خيار سبب تجاوز بوابة الجودة فيُطبق فورًا عند الاعتماد.
+        تُثبَّت نسخة سياسة التوليد والأوامر وإشارات عبارات المنافسين وخيارات تعدد القراءات والمرشحين داخل كل جلسة حتى لا تتغير شروطها أثناء الاستئناف. أما خيار سبب تجاوز بوابة الجودة فيُطبق فورًا عند الاعتماد.
       </p>
     </div>
   );

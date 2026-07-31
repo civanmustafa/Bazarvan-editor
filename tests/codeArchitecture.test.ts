@@ -566,7 +566,7 @@ test('content writing enforces one goal-aware final section after FAQ across ass
     readWorkspaceFile('server/contentWritingEngine.ts'),
   ]);
 
-  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 9/);
+  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 10/);
   assert.match(workflow, /auditContentWritingFinalSectionStructure/);
   assert.match(workflow, /final_structure_faq_not_penultimate/);
   assert.match(workflow, /final_structure_duplicate_final_heading/);
@@ -587,7 +587,7 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
     readWorkspaceFile('components/ContentWritingPromptSettings.tsx'),
   ]);
 
-  assert.match(knowledge, /CONTENT_WRITING_KNOWLEDGE_VERSION = 3/);
+  assert.match(knowledge, /CONTENT_WRITING_KNOWLEDGE_VERSION = 4/);
   assert.match(knowledge, /buildContentWritingCompetitorCoverageMatrix/);
   assert.match(knowledge, /deriveCompetitorNumbers\(sourceChunkIds, chunksById\)/);
   assert.match(knowledge, /coverageLevel: deriveCoverageLevel/);
@@ -600,13 +600,19 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
   assert.match(workflow, /competitor_phrase_intelligence_json/);
   assert.match(serverWorkflow, /deterministic_competitor_phrase_intelligence/);
   assert.match(serverWorkflow, /competitorPhraseIntelligence/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 18/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 19/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /competitor_phrase_intelligence_json/);
   assert.match(promptRegistry, /originalityOpportunity/);
   assert.match(promptRegistry, /مصفوفة تغطية المنافسين/);
   assert.match(settings, /contentWritingCompetitorPhraseIntelligenceEnabled/);
   assert.match(settings, /تفعيل ذكاء عبارات المنافسين/);
+  assert.match(settings, /contentWritingDualKnowledgeExtractionEnabled/);
+  assert.match(settings, /contentWritingMultiCandidateGenerationEnabled/);
+  assert.match(serverWorkflow, /buildContentWritingKnowledgeReconciliationPrompt/);
+  assert.match(serverWorkflow, /knowledgeEnsemble/);
+  assert.match(serverWorkflow, /runCandidateStage/);
+  assert.match(promptRegistry, /contentWriting\.knowledgeReconciliation/);
   assert.doesNotMatch(
     `${knowledge}\n${phraseAnalysis}\n${workflow}\n${serverWorkflow}\n${promptRegistry}`,
     /search\s*console|searchConsole/i,

@@ -52,6 +52,22 @@ test('competitor chunking preserves every source character with stable IDs', asy
   assert.equal(reconstructContentWritingCompetitor(chunks), content);
 });
 
+test('source chunk normalization preserves competitors beyond the previous three-source limit', async () => {
+  const { normalizeContentWritingSourceChunks } = await importKnowledge();
+  const chunks = normalizeContentWritingSourceChunks([
+    {
+      id: 'C5-S001',
+      competitorNumber: 5,
+      title: 'Fifth competitor',
+      url: 'https://example.com/five',
+      text: 'A distinct fifth-competitor source.',
+    },
+  ]);
+
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].competitorNumber, 5);
+});
+
 test('knowledge normalization deterministically covers chunks omitted by the model', async () => {
   const {
     chunkContentWritingCompetitor,
@@ -232,6 +248,70 @@ test('competitor coverage matrix is derived from validated source chunks', async
   assert.deepEqual(promptPayload.competitorCoverageMatrix, knowledge.competitorCoverageMatrix);
   const restored = normalizeContentWritingKnowledgeBase(knowledge, chunks);
   assert.deepEqual(restored.competitorCoverageMatrix, knowledge.competitorCoverageMatrix);
+});
+
+test('knowledge ensemble summary exposes ideas contributed by the second reading alone', async () => {
+  const {
+    buildContentWritingKnowledgeEnsembleSummary,
+    normalizeContentWritingKnowledgeBase,
+  } = await importKnowledge();
+  const chunks = [
+    { id: 'C1-S001', competitorNumber: 1, title: 'One', url: '', text: 'Shared source detail.' },
+    { id: 'C2-S001', competitorNumber: 2, title: 'Two', url: '', text: 'Unique payment condition.' },
+  ];
+  const firstPass = normalizeContentWritingKnowledgeBase({
+    processedChunkIds: chunks.map(chunk => chunk.id),
+    items: [{
+      id: 'K001',
+      topic: 'Shared topic',
+      detail: 'Shared source detail.',
+      sourceChunkIds: ['C1-S001'],
+    }],
+  }, chunks);
+  const secondPass = normalizeContentWritingKnowledgeBase({
+    processedChunkIds: chunks.map(chunk => chunk.id),
+    items: [
+      {
+        id: 'K001',
+        topic: 'Shared topic',
+        detail: 'Shared source detail.',
+        sourceChunkIds: ['C1-S001'],
+      },
+      {
+        id: 'K002',
+        topic: 'Payment condition',
+        detail: 'A unique documented payment condition.',
+        sourceChunkIds: ['C2-S001'],
+      },
+    ],
+  }, chunks);
+  const finalKnowledge = normalizeContentWritingKnowledgeBase({
+    processedChunkIds: chunks.map(chunk => chunk.id),
+    items: [
+      {
+        id: 'K001',
+        topic: 'Shared topic',
+        detail: 'Shared source detail.',
+        sourceChunkIds: ['C1-S001'],
+      },
+      {
+        id: 'K002',
+        topic: 'Payment condition',
+        detail: 'A unique documented payment condition.',
+        sourceChunkIds: ['C2-S001'],
+      },
+    ],
+  }, chunks);
+  const summary = buildContentWritingKnowledgeEnsembleSummary({
+    firstPass,
+    secondPass,
+    finalKnowledge,
+    chunks,
+  });
+
+  assert.equal(summary.allChunksAccountedFor, true);
+  assert.equal(summary.secondPassOnlyItemCount, 1);
+  assert.equal(summary.sharedItemCount, 1);
 });
 
 test('section results and coverage audits accept only known persisted IDs', async () => {

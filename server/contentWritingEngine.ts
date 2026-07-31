@@ -156,6 +156,8 @@ const getContentWritingSettings = async (): Promise<{
   allowModelFallback: boolean;
   qualityConfiguration: ContentWritingQualityConfiguration;
   competitorPhraseIntelligenceEnabled: boolean;
+  dualKnowledgeExtractionEnabled: boolean;
+  multiCandidateGenerationEnabled: boolean;
 }> => {
   const [{ data, error }, promptRegistry] = await Promise.all([
     getExternalAnalysisSupabaseAdmin()
@@ -192,6 +194,10 @@ const getContentWritingSettings = async (): Promise<{
     }),
     competitorPhraseIntelligenceEnabled:
       ai.contentWritingCompetitorPhraseIntelligenceEnabled !== false,
+    dualKnowledgeExtractionEnabled:
+      ai.contentWritingDualKnowledgeExtractionEnabled !== false,
+    multiCandidateGenerationEnabled:
+      ai.contentWritingMultiCandidateGenerationEnabled !== false,
   };
 };
 
@@ -504,6 +510,8 @@ export const prepareContentWritingConversation = async (
       competitorChunks: bundle.competitorChunks,
       competitorPhraseIntelligenceEnabled: settings.competitorPhraseIntelligenceEnabled,
       competitorPhraseIntelligence,
+      dualKnowledgeExtractionEnabled: settings.dualKnowledgeExtractionEnabled,
+      multiCandidateGenerationEnabled: settings.multiCandidateGenerationEnabled,
       compactArticleContextBase,
       lengthTarget,
       qualityPolicyVersion: qualityConfiguration.policyVersion,

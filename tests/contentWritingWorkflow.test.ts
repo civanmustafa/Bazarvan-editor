@@ -201,6 +201,56 @@ test('competitor analysis prompt appends the editable source and claim ledger co
   assert.match(prompt, /لا تعتبر تكرار الادعاء تحققًا نهائيًا/);
 });
 
+test('knowledge reconciliation prompt preserves supported union from two independent readings', async () => {
+  const { buildContentWritingKnowledgeReconciliationPrompt } = await importWorkflow();
+  const baseKnowledge: any = {
+    version: 4,
+    competitorCoverageMatrix: {},
+    sourceRegistry: { sources: [] },
+    claimLedger: {
+      claims: [],
+      allowedClaimIds: [],
+      qualifiedClaimIds: [],
+      blockedClaimIds: [],
+    },
+    processedChunkIds: ['C1-S001'],
+    fallbackChunkIds: [],
+  };
+  const prompt = buildContentWritingKnowledgeReconciliationPrompt({
+    language: 'ar',
+    chunks: [{
+      id: 'C1-S001',
+      competitorNumber: 1,
+      title: 'Source',
+      url: 'https://example.com',
+      text: 'Source text.',
+    }],
+    firstPass: {
+      ...baseKnowledge,
+      items: [{
+        id: 'K001',
+        topic: 'الفكرة الأولى',
+        detail: 'تفصيل أول',
+        sourceChunkIds: ['C1-S001'],
+      }],
+    },
+    secondPass: {
+      ...baseKnowledge,
+      items: [{
+        id: 'K002',
+        topic: 'فكرة فريدة',
+        detail: 'تفصيل اكتشفته القراءة الثانية',
+        sourceChunkIds: ['C1-S001'],
+      }],
+    },
+  });
+
+  assert.match(prompt, /الفكرة الأولى/);
+  assert.match(prompt, /فكرة فريدة/);
+  assert.match(prompt, /اتحادًا موثقًا لا تصويتًا ولا تقاطعًا/);
+  assert.match(prompt, /C1-S001/);
+});
+
 test('structured writing assembles one markdown draft without duplicate section headings', async () => {
   const {
     parseContentWritingOutline,
