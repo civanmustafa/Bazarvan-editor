@@ -37,6 +37,7 @@ import {
 } from '../utils/editorContentStore';
 import type { ArticleImportMode, ArticleImportPreview } from '../utils/articleImport';
 import {
+    loadRemoteArticleGoalContext,
     loadRemoteArticleSnapshot,
     recordRemoteArticleTime,
     saveRemoteArticleSnapshot,
@@ -847,6 +848,7 @@ interface EditorContextType {
         markdown: string;
     }) => Promise<GeneratedContentApplicationResult>;
     reloadActiveArticleFromRemote: (expectedArticleId: string) => Promise<boolean>;
+    reloadActiveGoalContextFromRemote: (expectedArticleId: string) => Promise<boolean>;
     handleRestoreDraft: () => void;
     handleNewArticle: (lang: 'ar' | 'en') => Promise<void>;
     applyImportedArticleContent: (
@@ -1796,6 +1798,38 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         title,
     ]);
 
+    const reloadActiveGoalContextFromRemote = useCallback(async (
+        expectedArticleId: string,
+    ): Promise<boolean> => {
+        if (!currentUser || !expectedArticleId || activeArticleId !== expectedArticleId) {
+            return false;
+        }
+
+        try {
+            const remote = await loadRemoteArticleGoalContext(expectedArticleId);
+            const generatedBrief = remote?.goalContext.generatedBrief?.trim() || '';
+            if (!remote || !generatedBrief || activeArticleId !== expectedArticleId) {
+                return false;
+            }
+
+            // The automatic pipeline already persisted the brief in Supabase.
+            // Merge only that generated field so local manual choices are never
+            // replaced while the user is reading or editing the article.
+            setGoalContext(previousContext => {
+                const nextContext = {
+                    ...previousContext,
+                    generatedBrief,
+                };
+                writeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY, JSON.stringify(nextContext));
+                return nextContext;
+            });
+            return true;
+        } catch (error) {
+            console.error(`Failed to reload the generated brief for article "${expectedArticleId}":`, error);
+            return false;
+        }
+    }, [activeArticleId, currentUser]);
+
     const handleSaveDraftRef = useRef(handleSaveDraft);
     useEffect(() => {
         handleSaveDraftRef.current = handleSaveDraft;
@@ -2140,6 +2174,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleSaveDraft,
         applyGeneratedArticleContent,
         reloadActiveArticleFromRemote,
+        reloadActiveGoalContextFromRemote,
         handleRestoreDraft,
         handleNewArticle,
         applyImportedArticleContent,
@@ -2166,6 +2201,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleSaveDraft,
         applyGeneratedArticleContent,
         reloadActiveArticleFromRemote,
+        reloadActiveGoalContextFromRemote,
         handleRestoreDraft,
         handleNewArticle,
         applyImportedArticleContent,

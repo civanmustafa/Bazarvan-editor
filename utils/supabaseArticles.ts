@@ -138,6 +138,11 @@ export type RemoteArticleStatus = ArticleRow['status'];
 export type RemoteArticleLanguage = ArticleRow['article_language'];
 export type RemoteArticleAccessRole = 'viewer' | 'editor';
 
+export type RemoteArticleGoalContextSnapshot = {
+  goalContext: ReturnType<typeof normalizeGoalContext>;
+  updatedAt: string;
+};
+
 export type RemoteArticleSettingsPatch = Partial<{
   visibility: RemoteArticleVisibility;
   status: RemoteArticleStatus;
@@ -1052,6 +1057,24 @@ export const loadRemoteArticleSnapshot = async (
   const snapshot = toArticleStorageSnapshot(row, username);
   cacheRemoteArticleSnapshot(articleId, snapshot);
   return snapshot;
+};
+
+export const loadRemoteArticleGoalContext = async (
+  articleId: string,
+): Promise<RemoteArticleGoalContextSnapshot | null> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('articles')
+    .select('goal_context,updated_at')
+    .eq('id', articleId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    goalContext: normalizeGoalContext(data.goal_context),
+    updatedAt: String(data.updated_at || ''),
+  };
 };
 
 export const saveRemoteArticleSnapshot = async (

@@ -31,6 +31,7 @@ type Props = {
   isArabic: boolean;
   onBeforeStart: () => Promise<boolean>;
   onReloadArticle: (articleId: string) => Promise<boolean>;
+  onReloadGoalContext: (articleId: string) => Promise<boolean>;
 };
 
 const STAGES = [
@@ -81,6 +82,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   isArabic,
   onBeforeStart,
   onReloadArticle,
+  onReloadGoalContext,
 }) => {
   const [competitorCount, setCompetitorCount] = useState(5);
   const [job, setJob] = useState<ExternalAnalysisJobRow | null>(null);
@@ -88,6 +90,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(true);
   const reloadedJobsRef = useRef(new Set<string>());
+  const syncedBriefJobsRef = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     if (!articleId) return;
@@ -98,6 +101,18 @@ const FullArticlePipelineControl: React.FC<Props> = ({
         new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
       ))[0] || null;
     setJob(pipeline);
+    const briefJobId = String(pipeline?.progress?.briefJobId || '').trim();
+    const contentBriefSavedAt = String(pipeline?.progress?.contentBriefSavedAt || '').trim();
+    if (
+      pipeline
+      && briefJobId
+      && contentBriefSavedAt
+      && !syncedBriefJobsRef.current.has(briefJobId)
+    ) {
+      syncedBriefJobsRef.current.add(briefJobId);
+      const synchronized = await onReloadGoalContext(articleId);
+      if (!synchronized) syncedBriefJobsRef.current.delete(briefJobId);
+    }
     if (
       pipeline
       && !reloadedJobsRef.current.has(pipeline.id)
@@ -110,7 +125,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
       reloadedJobsRef.current.add(pipeline.id);
       await onReloadArticle(articleId);
     }
-  }, [articleId, onReloadArticle]);
+  }, [articleId, onReloadArticle, onReloadGoalContext]);
 
   useEffect(() => {
     void refresh().catch(loadError => {

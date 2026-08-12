@@ -287,6 +287,7 @@ const ContentWritingPanel: React.FC = () => {
   const handleSaveDraft = useEditorSelector(context => context.handleSaveDraft);
   const applyGeneratedArticleContent = useEditorSelector(context => context.applyGeneratedArticleContent);
   const reloadActiveArticleFromRemote = useEditorSelector(context => context.reloadActiveArticleFromRemote);
+  const reloadActiveGoalContextFromRemote = useEditorSelector(context => context.reloadActiveGoalContextFromRemote);
   const saveStatus = useEditorSelector(context => context.saveStatus);
   const isArabic = t.locale !== 'en';
   const [provider, setProvider] = useState<ContentWritingProvider>(aiProviderCapabilities.defaultProvider);
@@ -1123,6 +1124,7 @@ const ContentWritingPanel: React.FC = () => {
             }
             onBeforeStart={() => handleSaveDraft({ reason: 'manual', force: true })}
             onReloadArticle={reloadActiveArticleFromRemote}
+            onReloadGoalContext={reloadActiveGoalContextFromRemote}
           />
 
           <button

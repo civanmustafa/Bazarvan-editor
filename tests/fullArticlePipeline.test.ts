@@ -59,6 +59,8 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
     ecosystem,
     api,
     component,
+    contentWritingPanel,
+    editorContext,
     supabaseArticles,
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260728030000_full_article_pipeline.sql'),
@@ -68,6 +70,8 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
     readWorkspaceFile('ecosystem.config.cjs'),
     readWorkspaceFile('api/externalAnalysis.ts'),
     readWorkspaceFile('components/FullArticlePipelineControl.tsx'),
+    readWorkspaceFile('components/ContentWritingPanel.tsx'),
+    readWorkspaceFile('contexts/EditorContext.tsx'),
     readWorkspaceFile('utils/supabaseArticles.ts'),
   ]);
 
@@ -103,6 +107,8 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
   assert.match(executor, /COMPREHENSIVE_COMMAND_ID/);
   assert.match(executor, /cancelContentWritingSession/);
   assert.match(executor, /request_external_analysis_job_cancel/);
+  assert.match(executor, /contentBriefSavedAt/);
+  assert.match(executor, /generatedBrief,[\s\S]*last_saved_at/);
 
   assert.match(briefExecutor, /readPromptRegistrySettings/);
   assert.match(briefExecutor, /generatedBrief: briefText/);
@@ -118,5 +124,11 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
   assert.match(component, /بدء الإنشاء الشامل/);
   assert.match(component, /يُدرج المقالة حتى عند عدم اجتياز بوابة الجودة/);
   assert.match(component, /استئناف الآن/);
+  assert.match(component, /onReloadGoalContext/);
+  assert.match(component, /contentBriefSavedAt/);
+  assert.match(contentWritingPanel, /onReloadGoalContext=\{reloadActiveGoalContextFromRemote\}/);
+  assert.match(editorContext, /reloadActiveGoalContextFromRemote/);
+  assert.match(editorContext, /\.\.\.previousContext,[\s\S]*generatedBrief/);
+  assert.match(supabaseArticles, /select\('goal_context,updated_at'\)/);
   assert.match(supabaseArticles, /hasStructuredEditorJson\(row\.content_json\)[\s\S]*row\.content_html/);
 });

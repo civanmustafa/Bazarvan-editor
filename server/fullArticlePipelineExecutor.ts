@@ -452,11 +452,25 @@ const executeFullArticlePipeline = async (
     const briefJobId = text(savedProgress.briefJobId) || await enqueueBrief(context.job.id, requestedBy);
     activeExternalChildId = briefJobId;
     await reportStage(context, 'content_brief_generation', 2, { briefJobId });
-    await waitForExternalJob({
+    const brief = await waitForExternalJob({
       context,
       jobId: briefJobId,
       stage: 'content_brief_generation',
       stageIndex: 2,
+    });
+    const generatedBrief = text(brief.result?.briefText);
+    if (!generatedBrief) {
+      retryError({
+        code: 'full_pipeline_content_brief_missing',
+        message: 'The completed content-brief stage did not contain a saved brief.',
+        stage: 'content_brief_generation',
+        stageIndex: 2,
+        details: { briefJobId },
+      });
+    }
+    await reportStage(context, 'content_brief_generation', 2, {
+      briefJobId,
+      contentBriefSavedAt: text(brief.result?.articleUpdatedAt) || new Date().toISOString(),
     });
     activeExternalChildId = '';
 
@@ -572,6 +586,20 @@ const executeFullArticlePipeline = async (
       qualityGatePassed: writingSession.quality_report?.passed === true,
     });
     const article = await readArticle(context.job.article_id);
+    const latestGoalContext = isRecord(article.goal_context) ? article.goal_context : {};
+    if (text(latestGoalContext.generatedBrief) !== generatedBrief) {
+      const { error: briefPersistenceError } = await getExternalAnalysisSupabaseAdmin()
+        .from('articles')
+        .update({
+          goal_context: {
+            ...latestGoalContext,
+            generatedBrief,
+          },
+          last_saved_at: new Date().toISOString(),
+        })
+        .eq('id', article.id);
+      if (briefPersistenceError) throw briefPersistenceError;
+    }
     const prepared = prepareContentWritingResultForEditor(
       writingSession.result_text || '',
       text(article.title),
