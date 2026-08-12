@@ -50,6 +50,7 @@ const requiredServerMarkers = [
   'knowledge_workflow_version',
   'resume_preference_version',
   'dynamic_final_section_version',
+  'parallel_substeps_version',
   'finalSectionStructureVersion',
 ];
 for (const marker of requiredServerMarkers) {

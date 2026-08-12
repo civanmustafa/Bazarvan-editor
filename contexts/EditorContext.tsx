@@ -51,6 +51,7 @@ import { shouldClearArticleAiResults } from '../constants/articleStatuses';
 import { parseMarkdownToArticleHtml } from '../utils/editorUtils';
 import { prepareContentWritingResultForEditor } from '../utils/contentWritingWorkflow';
 import { canPersistArticleDraft } from '../utils/articleSavePolicy';
+import { hasMeaningfulArticleContent } from '../utils/articleContent.ts';
 import { handleEditorLinkClick } from '../utils/editorLinkInteraction';
 import { saveArticleClientSelection } from '../utils/articleClientContext';
 
@@ -398,10 +399,7 @@ const getSafeEditorContent = (value: unknown, fallback: any = createEmptyEditorC
     return recoveredText || fallback;
 };
 
-const isUsableEditorContent = (value: unknown): boolean => (
-    normalizeStoredEditorContent(value) !== null ||
-    extractTextFromStoredEditorContent(value).trim().length > 0
-);
+const isUsableEditorContent = (value: unknown): boolean => hasMeaningfulArticleContent(value);
 
 const setEditorContentSafely = (editor: Editor, value: unknown, fallback: any = createEmptyEditorContent()): boolean => {
     try {

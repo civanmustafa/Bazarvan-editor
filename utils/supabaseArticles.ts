@@ -7,6 +7,7 @@ import {
 } from './editorContentStore';
 import { getSupabaseClient } from './supabaseClient';
 import { normalizeGoalContext } from './goalContext';
+import { hasMeaningfulArticleContent } from './articleContent.ts';
 import {
   shouldClearArticleAiResults,
   type ArticleStatus,
@@ -408,17 +409,14 @@ const toRemoteArticleActivity = (
   stats: normalizeStats(row.stats),
 });
 
-const hasStructuredEditorJson = (value: unknown): boolean => {
-  if (typeof value === 'string') return Boolean(value.trim());
-  if (Array.isArray(value)) return value.length > 0;
-  if (!isRecord(value)) return false;
-  return typeof value.type === 'string' || Array.isArray(value.content);
-};
+const hasStructuredEditorJson = (value: unknown): boolean => hasMeaningfulArticleContent(value);
 
 const normalizeArticleSnapshotContent = (row: Pick<ArticleRow, 'content_json' | 'content_html' | 'plain_text'>): any => (
   hasStructuredEditorJson(row.content_json)
     ? row.content_json
-    : row.content_html || row.plain_text || ''
+    : hasMeaningfulArticleContent(row.content_html)
+      ? row.content_html
+      : row.plain_text || ''
 );
 
 const toArticleStorageSnapshot = (

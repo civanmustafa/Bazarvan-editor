@@ -76,6 +76,18 @@ test('article save transaction is atomic and idempotent', async () => {
   assert.doesNotMatch(publicSaveImplementation, /recordArticleVersion/);
 });
 
+test('database preserves a saved article body when an empty TipTap document is submitted', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260805000000_protect_saved_article_content.sql',
+  );
+
+  assert.match(migration, /function public\.preserve_saved_article_content\s*\(/);
+  assert.match(migration, /before update of content_json, content_html, plain_text on public\.articles/);
+  assert.match(migration, /new\.content_json := old\.content_json/);
+  assert.match(migration, /new\.content_html := old\.content_html/);
+  assert.match(migration, /new\.plain_text := old\.plain_text/);
+});
+
 test('dashboard, access/save, and performance migrations have balanced SQL delimiters', async () => {
   const migrations = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260711010000_dashboard_filtered_pagination.sql'),

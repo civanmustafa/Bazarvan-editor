@@ -50,6 +50,7 @@ export type ContentWritingSession = {
   quality_override_at: string | null;
   knowledge_workflow_version: number;
   dynamic_final_section_version: number;
+  parallel_substeps_version: number;
   created_at: string;
   updated_at: string;
 };
@@ -286,7 +287,9 @@ export const getContentWritingSteps = async (
     .from('content_writing_steps')
     .select(columns.join(','))
     .eq('session_id', sessionId)
-    .order('ordinal', { ascending: true });
+    .order('ordinal', { ascending: true })
+    .order('created_at', { ascending: true })
+    .order('step_key', { ascending: true });
   if (error) throwServiceError('step read', error);
   const rows = Array.isArray(data) ? data as unknown as JsonObject[] : [];
   return rows.map(row => ({
@@ -493,6 +496,7 @@ export const listContentWritingSessions = async (options: {
       'quality_override_at',
       'knowledge_workflow_version',
       'dynamic_final_section_version',
+      'parallel_substeps_version',
       'created_at',
       'updated_at',
     ].join(','))

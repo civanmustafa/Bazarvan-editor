@@ -50,7 +50,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 11);
+  assert.equal(result.requiredMigrationCount, 12);
   assert.deepEqual(result.checks, { sessions: true, messages: true, steps: true });
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'content_writing_messages',
@@ -66,6 +66,7 @@ test('content-writing readiness checks every required schema surface', async () 
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /quality_report/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /knowledge_workflow_version/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /dynamic_final_section_version/);
+  assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /parallel_substeps_version/);
 });
 
 test('public readiness reports a safe 503 reason without exposing Supabase details', async () => {
@@ -112,6 +113,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseScript, /claim_next_content_writing_session/);
   assert.match(releaseScript, /resume_preference_version/);
   assert.match(releaseScript, /dynamic_final_section_version/);
+  assert.match(releaseScript, /parallel_substeps_version/);
   assert.match(releaseScript, /faqIndependenceGuard/);
   assert.match(releaseScript, /finalSectionStructureGuard/);
   assert.match(server, /app\.get\('\/readyz', readyzHandler\)/);

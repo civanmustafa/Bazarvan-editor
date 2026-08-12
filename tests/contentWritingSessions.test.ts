@@ -69,6 +69,29 @@ test('structured content-writing migration persists resumable steps without API 
   assertBalancedSqlParentheses(migration);
 });
 
+test('parallel content-writing substeps may share their parent stage ordinal', async () => {
+  const [migration, workflow, service] = await Promise.all([
+    readWorkspaceFile(
+      'supabase/migrations/20260812000000_allow_parallel_content_writing_substeps.sql',
+    ),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('server/contentWritingSessionService.ts'),
+  ]);
+
+  assert.match(
+    migration,
+    /drop constraint if exists content_writing_steps_session_id_ordinal_key/,
+  );
+  assert.match(migration, /parallel_substeps_version smallint not null default 1/);
+  assert.match(migration, /create index if not exists content_writing_steps_session_ordinal_idx/);
+  assert.match(migration, /Parallel candidate and ensemble child steps may share/);
+  assert.match(workflow, /ordinal: candidateOptions\.definition\.ordinal/);
+  assert.match(workflow, /ordinal: competitorIndexDefinition\.ordinal/);
+  assert.match(service, /\.order\('ordinal',[\s\S]*\.order\('created_at',[\s\S]*\.order\('step_key'/);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('structured writing results are fetched without reloading full step prompts', async () => {
   const [api, service, client, panel] = await Promise.all([
     readWorkspaceFile('api/contentWriting.ts'),
