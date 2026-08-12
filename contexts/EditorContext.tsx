@@ -45,7 +45,7 @@ import {
     type RemoteArticleActivity,
     type RemoteArticleStatus,
 } from '../utils/supabaseArticles';
-import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
+import { buildEditorArticlePath, navigateToAppPath, peekNewEditorArticleRequest } from '../utils/appRoutes';
 import { recordAppActivity } from '../utils/appActivity';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 import { shouldClearArticleAiResults } from '../constants/articleStatuses';
@@ -850,7 +850,10 @@ interface EditorContextType {
     reloadActiveArticleFromRemote: (expectedArticleId: string) => Promise<boolean>;
     reloadActiveGoalContextFromRemote: (expectedArticleId: string) => Promise<boolean>;
     handleRestoreDraft: () => void;
-    handleNewArticle: (lang: 'ar' | 'en') => Promise<void>;
+    handleNewArticle: (
+        lang: 'ar' | 'en',
+        options?: { saveCurrentArticle?: boolean },
+    ) => Promise<void>;
     applyImportedArticleContent: (
         preview: ArticleImportPreview,
         mode: ArticleImportMode,
@@ -875,9 +878,20 @@ export const useEditorSelector = <Selected,>(
 
 export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { currentUser, currentUserId, currentView, setCurrentView, preferredLanguage, uiLanguage, isIdle } = useUser();
-    const initialActiveArticleTitleRef = useRef<string | null>(currentView === 'editor' ? readActiveArticleTitle() : null);
-    const initialActiveArticleIdRef = useRef<string | null>(currentView === 'editor' ? readActiveArticleId() : null);
-    const initialAutoDraftTitle = currentView === 'editor' && !initialActiveArticleTitleRef.current
+    // A queued "new article" request must start from an isolated blank document.
+    // Do not let the editor bootstrap the previous active article or auto-draft while
+    // EditorRouteContent is still waiting to consume that request.
+    const initialNewArticleRequestRef = useRef<'ar' | 'en' | null>(
+        currentView === 'editor' ? peekNewEditorArticleRequest() : null,
+    );
+    const isInitializingNewArticle = initialNewArticleRequestRef.current !== null;
+    const initialActiveArticleTitleRef = useRef<string | null>(
+        currentView === 'editor' && !isInitializingNewArticle ? readActiveArticleTitle() : null,
+    );
+    const initialActiveArticleIdRef = useRef<string | null>(
+        currentView === 'editor' && !isInitializingNewArticle ? readActiveArticleId() : null,
+    );
+    const initialAutoDraftTitle = currentView === 'editor' && !isInitializingNewArticle && !initialActiveArticleTitleRef.current
         ? readStorageValue(AUTO_DRAFT_TITLE_KEY) || ''
         : '';
     const [title, setTitle] = useState<string>(() => initialActiveArticleTitleRef.current || initialAutoDraftTitle);
@@ -889,13 +903,16 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [editorState, setEditorState] = useState<any | null>(null);
     const [text, setText] = useState<string>('');
     const [keywords, setKeywords] = useState<Keywords>(() => {
+        if (isInitializingNewArticle) return normalizeKeywords(INITIAL_KEYWORDS);
         try {
           const saved = readStorageValue(AUTO_DRAFT_KEYWORDS_KEY);
           return saved ? normalizeKeywords(JSON.parse(saved)) : INITIAL_KEYWORDS;
         } catch { return INITIAL_KEYWORDS; }
     });
-    const [articleLanguage, setArticleLanguage] = useState<'ar' | 'en'>('ar');
-    const [goalContext, setGoalContext] = useState<GoalContext>(() => getStoredGoalContext(AUTO_DRAFT_GOAL_CONTEXT_KEY));
+    const [articleLanguage, setArticleLanguage] = useState<'ar' | 'en'>(() => initialNewArticleRequestRef.current || 'ar');
+    const [goalContext, setGoalContext] = useState<GoalContext>(() => (
+        isInitializingNewArticle ? normalizeGoalContext() : getStoredGoalContext(AUTO_DRAFT_GOAL_CONTEXT_KEY)
+    ));
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
     const [saveError, setSaveError] = useState('');
     const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restored'>('idle');
@@ -922,6 +939,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const pendingInitialArticleRestoreRef = useRef<string | null>(initialActiveArticleTitleRef.current);
     const pendingAutoDraftRestoreRef = useRef(
         currentView === 'editor' &&
+        !isInitializingNewArticle &&
         !initialActiveArticleTitleRef.current &&
         Boolean(readStoredContentReference(AUTO_DRAFT_KEY))
     );
@@ -1035,7 +1053,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // TipTap editor instance. onUpdate is also the automatic local draft writer.
     const editor = useTiptapEditor({
         extensions,
-        content: currentView === 'editor' && !initialActiveArticleTitleRef.current
+        content: currentView === 'editor' && !isInitializingNewArticle && !initialActiveArticleTitleRef.current
             ? getInitialContent()
             : createEmptyEditorContent(),
         editorProps: {
@@ -1053,8 +1071,10 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         },
         onCreate: ({ editor }) => {
             captureEditorSnapshot(editor, currentView === 'editor' && !pendingAutoDraftRestoreRef.current);
-            const savedLang = getStoredLanguage(AUTO_DRAFT_LANGUAGE_KEY) || getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
-            const targetLang = savedLang || preferredLanguage || 'ar';
+            const savedLang = isInitializingNewArticle
+                ? null
+                : getStoredLanguage(AUTO_DRAFT_LANGUAGE_KEY) || getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
+            const targetLang = initialNewArticleRequestRef.current || savedLang || preferredLanguage || 'ar';
             setArticleLanguage(targetLang);
         },
     });
@@ -1148,6 +1168,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 localTextFallback: true,
                 textFallback: targetEditor.getText(),
             });
+            if (articleLoadRequestIdRef.current !== options.requestId || targetEditor.isDestroyed) return false;
             writeStorageValue(AUTO_DRAFT_TITLE_KEY, resolvedTitle);
             writeStorageValue(AUTO_DRAFT_KEYWORDS_KEY, JSON.stringify(nextKeywords));
             writeStorageValue(AUTO_DRAFT_LANGUAGE_KEY, lang);
@@ -1284,6 +1305,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (!editor || !pendingAutoDraftRestoreRef.current) return;
 
         let cancelled = false;
+        const requestId = articleLoadRequestIdRef.current;
         const restoreAutoDraftBackup = async () => {
             const reference = readStoredContentReference(AUTO_DRAFT_KEY);
             if (!reference) {
@@ -1295,7 +1317,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 const backupContent = await resolveEditorContentReference(reference, {
                     allowUnreferencedLocalFallback: true,
                 });
-                if (cancelled) return;
+                if (cancelled || articleLoadRequestIdRef.current !== requestId || !pendingAutoDraftRestoreRef.current) return;
                 if (!backupContent || !isUsableEditorContent(backupContent)) {
                     pendingAutoDraftRestoreRef.current = false;
                     return;
@@ -1926,17 +1948,41 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setTimeout(() => setRestoreStatus('idle'), 2000);
     }, [editor, handleLanguageChange, captureEditorSnapshot]);
 
-    const handleNewArticle = useCallback(async (lang: 'ar' | 'en') => {
-        await handleSaveDraft();
+    const handleNewArticle = useCallback(async (
+        lang: 'ar' | 'en',
+        options: { saveCurrentArticle?: boolean } = {},
+    ) => {
+        // The toolbar keeps the current article before clearing it. A new-article
+        // request mounted from the dashboard has no current editor document to save;
+        // saving there would recreate the last auto-draft as a duplicate article.
+        if (options.saveCurrentArticle !== false) {
+            await handleSaveDraft();
+        }
         if (editor) {
             const emptyKeywords = normalizeKeywords(INITIAL_KEYWORDS);
             const emptyGoalContext = normalizeGoalContext();
 
             articleLoadRequestIdRef.current += 1;
+            pendingInitialArticleRestoreRef.current = null;
+            pendingAutoDraftRestoreRef.current = false;
+            pendingImportedSaveRef.current = false;
+            queuedForcedSaveRef.current = null;
+            pendingRemoteSaveRequestRef.current = null;
+            initialActiveArticleTitleRef.current = null;
+            initialActiveArticleIdRef.current = null;
+            isArticleContentLoadingRef.current = false;
+            hasEditorChangedAfterArticleLoadRef.current = false;
+            loadedArticleSnapshotSavedAtRef.current = 0;
+            lastSavedArticleSignatureRef.current = '';
             clearEditorSnapshotTimer();
             clearDraftPersistTimer();
             removeSessionValue(ACTIVE_ARTICLE_TITLE_KEY);
             removeSessionValue(ACTIVE_ARTICLE_ID_KEY);
+            removeStorageValue(AUTO_DRAFT_KEY);
+            removeStorageValue(AUTO_DRAFT_TITLE_KEY);
+            removeStorageValue(AUTO_DRAFT_KEYWORDS_KEY);
+            removeStorageValue(AUTO_DRAFT_LANGUAGE_KEY);
+            removeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY);
             clearStoredCompetitorInputs();
             removeStorageValue(CONTENT_SUMMARY_STORAGE_KEY);
             window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT));
@@ -1948,6 +1994,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setKeywords(emptyKeywords);
             setGoalContext(emptyGoalContext);
             setArticleLanguage(lang);
+            setSaveStatus('idle');
+            setSaveError('');
 
             // React state updates apply after this handler. Update the synchronous
             // snapshot source first so the empty article cannot inherit the previous

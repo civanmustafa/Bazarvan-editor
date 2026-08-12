@@ -264,7 +264,7 @@ const EditorRouteContent: React.FC<{ articleId: string | null }> = ({ articleId 
     const requestedLanguage = consumeNewEditorArticleRequest();
     if (!requestedLanguage) return;
     newArticleRequestHandledRef.current = true;
-    void handleNewArticle(requestedLanguage).catch(error => {
+    void handleNewArticle(requestedLanguage, { saveCurrentArticle: false }).catch(error => {
       console.error('Failed to prepare a new routed article:', error);
       setNewArticleError('تعذر تجهيز مقالة جديدة. أعد المحاولة من لوحة التحكم.');
     });

@@ -147,17 +147,19 @@ export const navigateToNewEditorArticle = (language: 'ar' | 'en') => {
   navigateToAppPath('/editor');
 };
 
-export const consumeNewEditorArticleRequest = (): 'ar' | 'en' | null => {
+export const peekNewEditorArticleRequest = (): 'ar' | 'en' | null => {
   try {
     const rawRequest = sessionStorage.getItem(NEW_ARTICLE_REQUEST_KEY);
     if (!rawRequest) return null;
-    sessionStorage.removeItem(NEW_ARTICLE_REQUEST_KEY);
     const request = JSON.parse(rawRequest) as { language?: unknown; requestedAt?: unknown };
     const requestedAt = Number(request.requestedAt || 0);
-    if (!Number.isFinite(requestedAt) || Date.now() - requestedAt > 5 * 60 * 1000) return null;
+    if (!Number.isFinite(requestedAt) || Date.now() - requestedAt > 5 * 60 * 1000) {
+      sessionStorage.removeItem(NEW_ARTICLE_REQUEST_KEY);
+      return null;
+    }
     return request.language === 'en' ? 'en' : 'ar';
   } catch (error) {
-    console.warn('Could not consume the new article request:', error);
+    console.warn('Could not read the new article request:', error);
     try {
       sessionStorage.removeItem(NEW_ARTICLE_REQUEST_KEY);
     } catch {
@@ -165,4 +167,14 @@ export const consumeNewEditorArticleRequest = (): 'ar' | 'en' | null => {
     }
     return null;
   }
+};
+
+export const consumeNewEditorArticleRequest = (): 'ar' | 'en' | null => {
+  const language = peekNewEditorArticleRequest();
+  try {
+    sessionStorage.removeItem(NEW_ARTICLE_REQUEST_KEY);
+  } catch (error) {
+    console.warn('Could not consume the new article request:', error);
+  }
+  return language;
 };
