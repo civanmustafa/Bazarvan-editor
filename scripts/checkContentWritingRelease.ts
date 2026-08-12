@@ -51,6 +51,8 @@ const requiredServerMarkers = [
   'resume_preference_version',
   'dynamic_final_section_version',
   'parallel_substeps_version',
+  'inspect_gemini_api_key_availability',
+  'modelKeyReports',
   'finalSectionStructureVersion',
 ];
 for (const marker of requiredServerMarkers) {

@@ -21,6 +21,10 @@ import {
   getContentWritingPhraseAuditOutput,
   type ContentWritingPhraseAuditItem,
 } from '../utils/contentWritingPhraseAudit';
+import {
+  collectAiModelKeyReports,
+  formatAiKeySuffix,
+} from '../utils/aiKeyUsageFeedback';
 import type { ContentWritingStep } from '../utils/contentWritingSessions';
 
 type ContentWritingStageAuditPanelProps = {
@@ -301,6 +305,10 @@ const ContentWritingStageAuditPanel: React.FC<ContentWritingStageAuditPanelProps
   const explanations = stageInputExplanation(step, isArabic);
   const execution = isRecord(step.metadata.execution) ? step.metadata.execution : {};
   const providerMetadata = isRecord(execution.providerMetadata) ? execution.providerMetadata : {};
+  const modelKeyReports = useMemo(
+    () => collectAiModelKeyReports({ execution, providerMetadata }),
+    [execution, providerMetadata],
+  );
   const usage = isRecord(providerMetadata.usage) ? providerMetadata.usage : {};
   const totalTokens = numberValue(usage.totalTokens || usage.total_tokens);
   const inputTokens = numberValue(
@@ -455,6 +463,106 @@ const ContentWritingStageAuditPanel: React.FC<ContentWritingStageAuditPanelProps
             ))}
           </div>
         </details>
+
+        {modelKeyReports.length > 0 && (
+          <details className="overflow-hidden rounded-md border border-blue-200 bg-white dark:border-blue-900/50 dark:bg-[#252525]">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-2 font-black text-blue-800 dark:text-blue-200">
+              <Fingerprint size={14} />
+              <span>{isArabic ? 'تقرير الموديلات والمفاتيح' : 'Model and key report'}</span>
+            </summary>
+            <div className="space-y-2 border-t border-blue-100 p-2.5 dark:border-blue-900/40">
+              <p className="rounded bg-blue-50 p-2 text-[10px] font-bold leading-5 text-blue-900 dark:bg-blue-900/15 dark:text-blue-100">
+                {isArabic
+                  ? 'يعرض التقرير كل موديل فحصه المحرك، والمفاتيح التي أُرسل بها طلب فعلي، والمفاتيح غير المتاحة مؤقتًا أو المعطلة. لا تُعرض قيمة أي مفتاح؛ يظهر آخر جزء آمن منه فقط.'
+                  : 'This report lists every evaluated model, actual key attempts, and temporarily unavailable or disabled keys. Secret key values are never shown; only a safe suffix is displayed.'}
+              </p>
+              {modelKeyReports.map((report, reportIndex) => {
+                const availability = report.lastAvailability;
+                const statusLabel = {
+                  succeeded: isArabic ? 'نجح' : 'Succeeded',
+                  exhausted: isArabic ? 'اكتملت المفاتيح المؤهلة' : 'Eligible keys completed',
+                  temporarily_unavailable: isArabic ? 'غير متاح مؤقتًا' : 'Temporarily unavailable',
+                  attempting: isArabic ? 'قيد المحاولة' : 'Attempting',
+                  pending: isArabic ? 'قيد الانتظار' : 'Pending',
+                }[report.status] || report.status;
+                const availabilityItems: Array<readonly [string, number, string]> = availability ? [
+                  [isArabic ? 'متاح' : 'Eligible', availability.eligibleCount, 'text-emerald-700 dark:text-emerald-300'],
+                  [isArabic ? 'محجوز' : 'Leased', availability.leasedCount, 'text-blue-700 dark:text-blue-300'],
+                  [isArabic ? 'تبريد' : 'Cooldown', availability.cooldownCount, 'text-amber-700 dark:text-amber-300'],
+                  [isArabic ? 'معطل' : 'Disabled', availability.disabledCount, 'text-red-700 dark:text-red-300'],
+                  [isArabic ? 'غير نشط' : 'Inactive', availability.inactiveCount, 'text-gray-600 dark:text-gray-300'],
+                  [isArabic ? 'جُرّب' : 'Tried', availability.excludedCount, 'text-violet-700 dark:text-violet-300'],
+                ] : [];
+                return (
+                  <article key={`${report.model}-${reportIndex}`} className="rounded-md border border-gray-200 p-2.5 dark:border-[#3C3C3C]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="break-all font-black text-gray-900 dark:text-gray-100">{report.model}</div>
+                      <span className={`rounded px-2 py-1 text-[9px] font-black ${
+                        report.status === 'succeeded'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200'
+                          : report.status === 'temporarily_unavailable'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
+                            : 'bg-gray-100 text-gray-700 dark:bg-[#333] dark:text-gray-200'
+                      }`}>{statusLabel}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-black">
+                      {report.provider && (
+                        <span className="rounded bg-blue-50 px-2 py-1 text-blue-700 dark:bg-blue-900/20 dark:text-blue-200">
+                          {isArabic ? 'المزود' : 'Provider'}: {report.provider}
+                        </span>
+                      )}
+                      {report.credentialSource && (
+                        <span className="rounded bg-violet-50 px-2 py-1 text-violet-700 dark:bg-violet-900/20 dark:text-violet-200">
+                          {isArabic ? 'مصدر المفاتيح' : 'Key source'}: {report.credentialSource}
+                        </span>
+                      )}
+                      <span className="rounded bg-gray-100 px-2 py-1 text-gray-700 dark:bg-[#333] dark:text-gray-200">
+                        {isArabic ? 'مفاتيح جُرّبت' : 'Keys tried'}: {report.attemptedKeyCount.toLocaleString(locale)}/{report.configuredKeyCount.toLocaleString(locale)}
+                      </span>
+                      <span className="rounded bg-gray-100 px-2 py-1 text-gray-700 dark:bg-[#333] dark:text-gray-200">
+                        {isArabic ? 'طلبات فعلية' : 'API attempts'}: {report.attemptCount.toLocaleString(locale)}
+                      </span>
+                      {report.waitedMs > 0 && (
+                        <span className="rounded bg-amber-50 px-2 py-1 text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                          {isArabic ? 'انتظار' : 'Waited'}: {(report.waitedMs / 1_000).toLocaleString(locale, { maximumFractionDigits: 1 })} {isArabic ? 'ث' : 'sec'}
+                        </span>
+                      )}
+                    </div>
+                    {availabilityItems.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {availabilityItems.map(([label, value, style]) => (
+                          <span key={label} className={`rounded border border-gray-100 px-2 py-1 text-[9px] font-black dark:border-[#3C3C3C] ${style}`}>
+                            {label}: {value.toLocaleString(locale)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {report.entries.length > 0 ? (
+                      <div className="mt-2 space-y-1">
+                        {report.entries.map((entry, entryIndex) => (
+                          <div key={`${entry.keySuffix}-${entry.outcome}-${entryIndex}`} className="flex flex-wrap items-center gap-1.5 rounded bg-gray-50 px-2 py-1.5 text-[9px] font-bold dark:bg-[#1F1F1F]">
+                            <span className="font-black text-gray-800 dark:text-gray-100">{formatAiKeySuffix(entry.keySuffix)}</span>
+                            <span className={entry.outcome === 'success' ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}>
+                              {entry.outcome === 'success' ? (isArabic ? 'نجح' : 'Success') : (isArabic ? 'فشل' : 'Failed')}
+                            </span>
+                            {entry.status ? <span className="text-gray-500">HTTP {entry.status}</span> : null}
+                            {entry.reason ? <span className="text-gray-500">{entry.reason}</span> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-2 rounded bg-gray-50 p-2 text-[9px] font-bold text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-300">
+                        {isArabic
+                          ? 'لم يُرسل طلب فعلي بمفتاح على هذا الموديل؛ يوضح توزيع الحالة أعلاه سبب عدم الأهلية.'
+                          : 'No key made an API attempt on this model; the availability breakdown above explains why.'}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </details>
+        )}
 
         {audit.attachedToStage ? (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2.5 text-[10px] font-bold leading-5 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-900/15 dark:text-emerald-100">

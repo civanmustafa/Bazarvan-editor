@@ -8,8 +8,9 @@ import {
   normalizeGeminiFreeModelId,
 } from "../constants/modelRegistry";
 import {
-  claimGeminiApiKey,
+  claimGeminiApiKeyDetailed,
   getGeminiKeyFailureCooldownSeconds,
+  type GeminiKeyAvailability,
 } from "./geminiKeyCoordinator";
 import { recordAiExecutionTelemetry } from './aiExecutionTelemetry';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
@@ -80,13 +81,31 @@ type GeminiAttemptDetail = {
   model?: string;
 };
 
+type GeminiModelKeyReport = {
+  model: string;
+  status: 'pending' | 'attempting' | 'succeeded' | 'exhausted' | 'temporarily_unavailable';
+  configuredKeyCount: number;
+  attemptedKeyCount: number;
+  attemptCount: number;
+  availabilityCheckCount: number;
+  waitedMs: number;
+  lastAvailability: GeminiKeyAvailability | null;
+  keyAttempts: Array<{
+    keySuffix: string;
+    outcome: 'success' | 'failed';
+    status: number;
+    reason?: GeminiAttemptFailureReason;
+  }>;
+  successfulKeySuffix?: string;
+};
+
 type GeminiHistoryContent = {
   role: "user" | "model";
   parts: { text: string }[];
 };
 
 type GeminiProvider = "gemini" | "geminiPaid";
-type GeminiProgressStage = "queued" | "attempting" | "failed-key" | "switching-key" | "switching-model" | "switching-provider" | "success" | "failed" | "cancelled";
+type GeminiProgressStage = "queued" | "waiting-key" | "attempting" | "failed-key" | "switching-key" | "switching-model" | "switching-provider" | "success" | "failed" | "cancelled";
 
 type GeminiProgressState = {
   id: string;
@@ -107,6 +126,10 @@ type GeminiProgressState = {
   keySuffix?: string;
   status?: number;
   reason?: GeminiAttemptFailureReason;
+  temporarilyUnavailableKeyCount?: number;
+  disabledKeyCount?: number;
+  nextEligibleAt?: string;
+  waitedMs?: number;
   message: string;
   updatedAt: string;
   completed: boolean;
@@ -514,6 +537,16 @@ const getGeminiRequestTimeout = (): number => {
 
 const GEMINI_PER_KEY_TIMEOUT_MS = getGeminiRequestTimeout();
 
+const getGeminiKeyAvailabilityMaxWait = (): number => {
+  const rawValue = process.env.GEMINI_KEY_AVAILABILITY_MAX_WAIT_MS;
+  const parsedValue = rawValue ? Number(rawValue) : 120_000;
+  if (!Number.isFinite(parsedValue)) return 120_000;
+  return Math.max(0, Math.min(180_000, Math.floor(parsedValue)));
+};
+
+const GEMINI_KEY_AVAILABILITY_MAX_WAIT_MS = getGeminiKeyAvailabilityMaxWait();
+const GEMINI_KEY_AVAILABILITY_POLL_MS = 2_000;
+
 const isGeminiJobCancelledError = (error: unknown): error is GeminiJobCancelledError => (
   error instanceof GeminiJobCancelledError
 );
@@ -576,6 +609,54 @@ const waitForVisibleGeminiProgress = async (
   if (remainingDelay > 0) {
     await wait(remainingDelay);
   }
+};
+
+const waitForGeminiKeyAvailability = async (
+  durationMs: number,
+  signal?: AbortSignal,
+): Promise<void> => {
+  if (durationMs <= 0) return;
+  if (signal?.aborted) throw new GeminiJobCancelledError();
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, durationMs);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(new GeminiJobCancelledError());
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+};
+
+export const getGeminiKeyAvailabilityWaitMs = (
+  availability: GeminiKeyAvailability,
+  nowMs: number,
+  deadlineMs: number,
+): number => {
+  const remainingMs = Math.max(0, deadlineMs - nowMs);
+  if (remainingMs === 0) return 0;
+  if (availability.eligibleCount > 0) {
+    return Math.min(500, remainingMs);
+  }
+  const temporaryCount = availability.leasedCount + availability.cooldownCount;
+  if (temporaryCount === 0) {
+    return availability.source === 'unknown' ? Math.min(1_000, remainingMs) : 0;
+  }
+  const nextEligibleAtMs = availability.nextEligibleAt
+    ? Date.parse(availability.nextEligibleAt)
+    : Number.NaN;
+  if (!Number.isFinite(nextEligibleAtMs)) {
+    return Math.min(1_000, remainingMs);
+  }
+  const untilEligibleMs = Math.max(0, nextEligibleAtMs - nowMs + 100);
+  if (untilEligibleMs > remainingMs) return 0;
+  return Math.min(
+    Math.max(250, untilEligibleMs),
+    GEMINI_KEY_AVAILABILITY_POLL_MS,
+    remainingMs,
+  );
 };
 
 const getGeminiFailureReason = (details: GeminiErrorDetails): GeminiRotatableKeyFailureReason => {
@@ -656,14 +737,16 @@ const buildGeminiFailureMessage = (
   model: string,
   keyCount: number,
   attempts: GeminiAttemptDetail[],
+  modelKeyReports: GeminiModelKeyReport[],
   lastError: GeminiErrorDetails | null,
 ): string => {
   const providerLabel = getGeminiProviderLabel(provider);
   const attemptedKeyCount = getUniqueAttemptCount(attempts);
+  const keyModelAttemptCount = getUniqueKeyModelAttemptCount(attempts);
   const summary = summarizeAttemptReasons(attempts);
   const parts = [
-    `فشل طلب ${providerLabel} للنموذج ${model}.`,
-    `تمت تجربة ${attemptedKeyCount} من ${keyCount} مفتاح.`,
+    `فشل طلب ${providerLabel} بعد فحص ${modelKeyReports.length} موديل.`,
+    `نُفذت ${keyModelAttemptCount} محاولة مفتاح/موديل باستخدام ${attemptedKeyCount} مفتاح مختلف من أصل ${keyCount}.`,
   ];
 
   const reasonParts = [
@@ -677,6 +760,27 @@ const buildGeminiFailureMessage = (
 
   if (reasonParts.length > 0) {
     parts.push(`الأسباب: ${reasonParts.join('، ')}.`);
+  }
+
+  const lastReport = [...modelKeyReports].reverse().find(report => report.lastAvailability);
+  if (lastReport?.lastAvailability) {
+    const availability = lastReport.lastAvailability;
+    const availabilityParts = [
+      availability.eligibleCount ? `${availability.eligibleCount} متاح` : '',
+      availability.leasedCount ? `${availability.leasedCount} محجوز مؤقتًا` : '',
+      availability.cooldownCount ? `${availability.cooldownCount} داخل التبريد` : '',
+      availability.disabledCount ? `${availability.disabledCount} معطّل` : '',
+      availability.inactiveCount ? `${availability.inactiveCount} غير نشط` : '',
+      availability.excludedCount ? `${availability.excludedCount} جُرّب على الموديل` : '',
+    ].filter(Boolean);
+    if (availabilityParts.length > 0) {
+      parts.push(`حالة المفاتيح عند آخر فحص للموديل ${lastReport.model}: ${availabilityParts.join('، ')}.`);
+    }
+  }
+
+  const waitedMs = modelKeyReports.reduce((total, report) => total + report.waitedMs, 0);
+  if (waitedMs > 0) {
+    parts.push(`انتظر المحرك ${(waitedMs / 1_000).toFixed(1)} ثانية للمفاتيح غير المتاحة مؤقتًا قبل إنهاء الطلب.`);
   }
 
   if (summary.quota > 0 && summary.quota === attemptedKeyCount) {
@@ -796,6 +900,7 @@ const executeGeminiCredentialTierInternal = async (
 
     let lastError: GeminiErrorDetails | null = null;
     const attempts: GeminiAttemptDetail[] = [];
+    const modelKeyReports: GeminiModelKeyReport[] = [];
     let lastAttemptedModel = selectedModel;
     let lastOrderedKeys = GEMINI_API_KEYS;
     let lastAttemptTimedOutLocally = false;
@@ -827,6 +932,18 @@ const executeGeminiCredentialTierInternal = async (
       lastAttemptedModel = activeModel;
       const orderedKeys = GEMINI_API_KEYS;
       lastOrderedKeys = orderedKeys;
+      const modelKeyReport: GeminiModelKeyReport = {
+        model: activeModel,
+        status: 'pending',
+        configuredKeyCount: orderedKeys.length,
+        attemptedKeyCount: 0,
+        attemptCount: 0,
+        availabilityCheckCount: 0,
+        waitedMs: 0,
+        lastAvailability: null,
+        keyAttempts: [],
+      };
+      modelKeyReports.push(modelKeyReport);
       if (modelIndex > 0) {
         setGeminiProgress(progressId, {
           stage: "switching-model",
@@ -853,7 +970,8 @@ const executeGeminiCredentialTierInternal = async (
         await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_SWITCH_DELAY_MS);
       }
 
-      for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1) {
+      let keyIndex = 0;
+      while (keyIndex < orderedKeys.length) {
         throwIfGeminiExecutionCancelled(progressId, options.signal);
         const attemptedForModel = new Set(
           attempts
@@ -870,14 +988,66 @@ const executeGeminiCredentialTierInternal = async (
             : undefined,
           leaseSeconds: Math.ceil(GEMINI_PER_KEY_TIMEOUT_MS / 1_000) + 30,
         };
-        const keyLease = await claimGeminiApiKey(leaseOptions);
+        const claimResult = await claimGeminiApiKeyDetailed(leaseOptions);
+        const keyLease = claimResult.lease;
         if (!keyLease) {
+          modelKeyReport.availabilityCheckCount += 1;
+          modelKeyReport.lastAvailability = claimResult.availability;
+          const availabilityWaitedMs = modelKeyReports.reduce(
+            (total, report) => total + report.waitedMs,
+            0,
+          );
+          const waitMs = getGeminiKeyAvailabilityWaitMs(
+            claimResult.availability,
+            Date.now(),
+            Date.now() + Math.max(
+              0,
+              GEMINI_KEY_AVAILABILITY_MAX_WAIT_MS - availabilityWaitedMs,
+            ),
+          );
+          if (waitMs > 0) {
+            const temporaryCount = claimResult.availability.leasedCount
+              + claimResult.availability.cooldownCount;
+            modelKeyReport.status = 'temporarily_unavailable';
+            setGeminiProgress(progressId, {
+              stage: 'waiting-key',
+              provider: selectedProvider,
+              model: activeModel,
+              requestedModel: selectedModel,
+              currentModelIndex: modelIndex + 1,
+              modelCount: modelOrder.length,
+              modelOrder,
+              attemptedModels: modelOrder.slice(0, modelIndex + 1),
+              keyCount: orderedKeys.length,
+              attemptedKeyCount: getUniqueAttemptCountForModel(attempts, activeModel),
+              attemptedModelKeyCount: getUniqueAttemptCountForModel(attempts, activeModel),
+              totalAttemptCount: attempts.length,
+              temporarilyUnavailableKeyCount: temporaryCount,
+              disabledKeyCount: claimResult.availability.disabledCount,
+              nextEligibleAt: claimResult.availability.nextEligibleAt || undefined,
+              waitedMs: modelKeyReport.waitedMs,
+              completed: false,
+              message: `لا يوجد مفتاح متاح فورًا للموديل ${activeModel}. ينتظر المحرك المفاتيح المحجوزة أو المبردة مؤقتًا ثم يعيد الفحص؛ لم تُعتبر المفاتيح مستنفدة.`,
+            });
+            const waitStartedAt = Date.now();
+            await waitForGeminiKeyAvailability(waitMs, options.signal);
+            modelKeyReport.waitedMs += Date.now() - waitStartedAt;
+            continue;
+          }
+          const temporaryCount = claimResult.availability.leasedCount
+            + claimResult.availability.cooldownCount;
+          modelKeyReport.status = temporaryCount > 0
+            ? 'temporarily_unavailable'
+            : 'exhausted';
           lastError = {
             status: 429,
-            message: `No eligible ${selectedProvider} API key is currently available for ${activeModel}.`,
+            message: temporaryCount > 0
+              ? `Gemini keys for ${activeModel} remain temporarily unavailable beyond the bounded wait window.`
+              : `Every eligible ${selectedProvider} API key was evaluated for ${activeModel}; remaining keys are excluded, inactive, or disabled.`,
           };
           break;
         }
+        modelKeyReport.status = 'attempting';
         const GEMINI_API_KEY = keyLease.apiKey;
         const keyFingerprint = keyLease.fingerprint;
         const keySuffix = keyLease.suffix;
@@ -978,6 +1148,16 @@ const executeGeminiCredentialTierInternal = async (
               cooldownSeconds: 0,
             });
 
+            modelKeyReport.status = 'succeeded';
+            modelKeyReport.attemptedKeyCount = successAttemptedKeyCount;
+            modelKeyReport.attemptCount += 1;
+            modelKeyReport.successfulKeySuffix = keySuffix;
+            modelKeyReport.keyAttempts.push({
+              keySuffix,
+              outcome: 'success',
+              status: 200,
+            });
+
             return {
               status: 200,
               body: {
@@ -1000,7 +1180,12 @@ const executeGeminiCredentialTierInternal = async (
                 // Keep failed key/model attempts with a successful response so the
                 // admin activity log can describe one complete AI request.
                 attempts,
-                keyModelAttemptCount: getUniqueKeyModelAttemptCount(attempts),
+                keyModelAttemptCount: getUniqueKeyModelAttemptCount(attempts) + 1,
+                modelKeyReports,
+                keyAvailabilityWaitedMs: modelKeyReports.reduce(
+                  (total, report) => total + report.waitedMs,
+                  0,
+                ),
                 progressId,
               },
             };
@@ -1053,7 +1238,15 @@ const executeGeminiCredentialTierInternal = async (
               model: activeModel,
             });
             const failedModelAttemptedKeyCount = getUniqueAttemptCountForModel(attempts, activeModel);
-            const hasNextKey = keyIndex < orderedKeys.length - 1;
+            modelKeyReport.attemptedKeyCount = failedModelAttemptedKeyCount;
+            modelKeyReport.attemptCount += 1;
+            modelKeyReport.keyAttempts.push({
+              keySuffix,
+              outcome: 'failed',
+              status: lastError.status,
+              reason,
+            });
+            const hasNextKey = failedModelAttemptedKeyCount < orderedKeys.length;
             const hasNextModel = modelIndex < modelOrder.length - 1;
             setGeminiProgress(progressId, {
               stage: "failed-key",
@@ -1114,29 +1307,33 @@ const executeGeminiCredentialTierInternal = async (
             } else if (hasNextModel) {
               await waitForVisibleGeminiProgress(progressId, GEMINI_PROGRESS_STEP_DELAY_MS);
             }
+            keyIndex += 1;
             break;
           }
         }
       }
+      if (modelKeyReport.status === 'attempting' || modelKeyReport.status === 'pending') {
+        modelKeyReport.status = 'exhausted';
+      }
     }
 
     throwIfGeminiExecutionCancelled(progressId, options.signal);
-    const responseStatus = lastAttemptTimedOutLocally
+    const lastAttempt = attempts[attempts.length - 1];
+    const finalAttemptTimedOutLocally = lastAttempt?.reason === 'timeout';
+    const responseStatus = finalAttemptTimedOutLocally
       ? 504
       : lastError && lastError.status >= 400 && lastError.status < 500
         ? lastError.status
         : 502;
-    const lastAttempt = attempts[attempts.length - 1];
     const failureBody = {
-      error: lastAttemptTimedOutLocally
-        ? `انتهت مهلة نماذج Gemini المتاحة بعد ${GEMINI_PER_KEY_TIMEOUT_MS} مللي ثانية لكل محاولة. جُرّبت جميع المفاتيح المتاحة على جميع الموديلات البديلة دون تعطيل أي مفتاح؛ خفّض حجم المدخل أو أعد المحاولة.`
-        : buildGeminiFailureMessage(
-            selectedProvider,
-            lastAttemptedModel,
-            GEMINI_API_KEYS.length,
-            attempts,
-            lastError,
-          ),
+      error: buildGeminiFailureMessage(
+        selectedProvider,
+        lastAttemptedModel,
+        GEMINI_API_KEYS.length,
+        attempts,
+        modelKeyReports,
+        lastError,
+      ),
       provider: selectedProvider,
       model: lastAttemptedModel,
       credentialSource: credentials.source,
@@ -1144,7 +1341,7 @@ const executeGeminiCredentialTierInternal = async (
       modelFallbackEnabled: modelOrder.length > 1,
       modelCount: modelOrder.length,
       modelOrder,
-      attemptedModels: Array.from(new Set(attempts.map(item => item.model).filter(Boolean))),
+      attemptedModels: modelKeyReports.map(report => report.model),
       keyCount: GEMINI_API_KEYS.length,
       attemptedKeyCount: getUniqueAttemptCount(attempts),
       keyModelAttemptCount: getUniqueKeyModelAttemptCount(attempts),
@@ -1152,12 +1349,15 @@ const executeGeminiCredentialTierInternal = async (
       keySuffix: lastAttempt?.keySuffix,
       attempts,
       attemptSummary: summarizeAttemptReasons(attempts),
-      requestLevelTimeout: lastAttemptTimedOutLocally,
+      modelKeyReports,
+      keyAvailabilityWaitedMs: modelKeyReports.reduce(
+        (total, report) => total + report.waitedMs,
+        0,
+      ),
+      requestLevelTimeout: finalAttemptTimedOutLocally,
       progressId,
     };
-    const attemptedModels = Array.from(new Set(
-      attempts.map(item => item.model).filter((model): model is string => Boolean(model)),
-    ));
+    const attemptedModels = modelKeyReports.map(report => report.model);
     setGeminiProgress(progressId, {
       stage: "failed",
       provider: selectedProvider,
@@ -1179,7 +1379,7 @@ const executeGeminiCredentialTierInternal = async (
       status: lastAttempt?.status,
       reason: lastAttempt?.reason,
       completed: true,
-      message: lastAttemptTimedOutLocally
+      message: finalAttemptTimedOutLocally
         ? `انتهت مهلة طلب Gemini بعد تجربة ${attemptedModels.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل؛ لم يُصنّف أي مفتاح كمعطّل.`
         : modelOrder.length > 1
         ? `فشل طلب Gemini بعد تجربة ${attemptedModels.length} موديل و ${getUniqueKeyModelAttemptCount(attempts)} محاولة مفتاح/موديل.${lastAttempt?.keySuffix ? ` آخر مفتاح: ...${lastAttempt.keySuffix}.` : ''}`
@@ -1443,12 +1643,31 @@ export const sanitizeAiExecutionResult = (result: ApiResult): ApiResult => {
         return publicAttempt;
       })
     : body.attempts;
+  const publicModelKeyReports = Array.isArray(body.modelKeyReports)
+    ? body.modelKeyReports.map(report => {
+        if (!report || typeof report !== 'object' || Array.isArray(report)) return report;
+        const reportRecord = report as Record<string, unknown>;
+        const { keyFingerprint: _reportFingerprint, ...publicReport } = reportRecord;
+        const keyAttempts = Array.isArray(reportRecord.keyAttempts)
+          ? reportRecord.keyAttempts.map(attempt => {
+              if (!attempt || typeof attempt !== 'object' || Array.isArray(attempt)) return attempt;
+              const { keyFingerprint: _attemptFingerprint, ...publicAttempt } = attempt as Record<string, unknown>;
+              return publicAttempt;
+            })
+          : reportRecord.keyAttempts;
+        return {
+          ...publicReport,
+          ...(keyAttempts !== undefined ? { keyAttempts } : {}),
+        };
+      })
+    : body.modelKeyReports;
   const { keyFingerprint: _fingerprint, ...publicBody } = body;
   return {
     ...result,
     body: {
       ...publicBody,
       ...(publicAttempts !== undefined ? { attempts: publicAttempts } : {}),
+      ...(publicModelKeyReports !== undefined ? { modelKeyReports: publicModelKeyReports } : {}),
     },
   };
 };

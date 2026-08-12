@@ -48,6 +48,20 @@ const toSafeAttempts = (value: unknown): JsonRecord[] => (
     : []
 );
 
+const toSafeModelKeyReports = (value: unknown): JsonRecord[] => (
+  Array.isArray(value)
+    ? value.filter(isRecord).map(report => {
+        const { keyFingerprint: _keyFingerprint, ...safeReport } = report;
+        return {
+          ...safeReport,
+          ...(Array.isArray(report.keyAttempts)
+            ? { keyAttempts: report.keyAttempts.map(toSafeAttempt).filter(Boolean) }
+            : {}),
+        };
+      })
+    : []
+);
+
 const toFallbackStep = (
   result: ApiResult,
   fallbackProvider: AiRuntimeProvider,
@@ -137,6 +151,7 @@ export const mergeCredentialFallbackResult = (options: {
   const previousBody = isRecord(options.previous.body) ? options.previous.body : {};
   const nextBody = isRecord(options.next.body) ? options.next.body : {};
   const previousAttempts = toSafeAttempts(previousBody.attempts);
+  const previousModelKeyReports = toSafeModelKeyReports(previousBody.modelKeyReports);
   const previousAttemptGroups = getNestedFallbackAttempts(previousBody, 'credentialFallbackAttempts');
   return {
     ...options.next,
@@ -150,11 +165,13 @@ export const mergeCredentialFallbackResult = (options: {
       ],
       credentialFallbackAttempts: [
         ...previousAttemptGroups,
-        ...(previousAttempts.length > 0
+        ...(previousAttempts.length > 0 || previousModelKeyReports.length > 0
           ? [{
               provider: options.provider,
               credentialSource: toText(previousBody.credentialSource),
               attempts: previousAttempts,
+              modelKeyReports: previousModelKeyReports,
+              keyAvailabilityWaitedMs: Number(previousBody.keyAvailabilityWaitedMs) || 0,
             }]
           : []),
         ...getNestedFallbackAttempts(nextBody, 'credentialFallbackAttempts'),
@@ -171,6 +188,7 @@ export const mergeProviderFallbackResult = (options: {
   const previousBody = isRecord(options.previous.body) ? options.previous.body : {};
   const nextBody = isRecord(options.next.body) ? options.next.body : {};
   const previousAttempts = toSafeAttempts(previousBody.attempts);
+  const previousModelKeyReports = toSafeModelKeyReports(previousBody.modelKeyReports);
   const previousAttemptGroups = getNestedFallbackAttempts(previousBody, 'providerFallbackAttempts');
   const previousCredentialAttemptGroups = getNestedFallbackAttempts(
     previousBody,
@@ -193,11 +211,13 @@ export const mergeProviderFallbackResult = (options: {
       providerFallbackAttempts: [
         ...previousAttemptGroups,
         ...previousCredentialAttemptGroups,
-        ...(previousAttempts.length > 0
+        ...(previousAttempts.length > 0 || previousModelKeyReports.length > 0
           ? [{
               provider: toProvider(previousBody.provider, options.requestedProvider),
               credentialSource: toText(previousBody.credentialSource),
               attempts: previousAttempts,
+              modelKeyReports: previousModelKeyReports,
+              keyAvailabilityWaitedMs: Number(previousBody.keyAvailabilityWaitedMs) || 0,
             }]
           : []),
         ...getNestedFallbackAttempts(nextBody, 'providerFallbackAttempts'),

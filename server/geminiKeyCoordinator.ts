@@ -20,6 +20,23 @@ export type GeminiApiKeyLease = {
   }) => Promise<void>;
 };
 
+export type GeminiKeyAvailability = {
+  source: 'supabase' | 'memory' | 'unknown';
+  configuredCount: number;
+  excludedCount: number;
+  inactiveCount: number;
+  disabledCount: number;
+  leasedCount: number;
+  cooldownCount: number;
+  eligibleCount: number;
+  nextEligibleAt: string | null;
+};
+
+export type GeminiApiKeyClaimResult = {
+  lease: GeminiApiKeyLease | null;
+  availability: GeminiKeyAvailability;
+};
+
 type KeyMetadata = {
   apiKey: string;
   fingerprint: string;
@@ -126,6 +143,86 @@ const localModelKey = (
   fingerprint: string,
 ): string => `${provider}:${model}:${fingerprint}`;
 
+const emptyAvailability = (
+  source: GeminiKeyAvailability['source'],
+  configuredCount: number,
+): GeminiKeyAvailability => ({
+  source,
+  configuredCount,
+  excludedCount: 0,
+  inactiveCount: 0,
+  disabledCount: 0,
+  leasedCount: 0,
+  cooldownCount: 0,
+  eligibleCount: 0,
+  nextEligibleAt: null,
+});
+
+const inspectLocalAvailability = (options: {
+  provider: GeminiKeyProvider;
+  model: string;
+  keys: KeyMetadata[];
+  excludedFingerprints: Set<string>;
+}): GeminiKeyAvailability => {
+  const now = Date.now();
+  const availability = emptyAvailability('memory', options.keys.length);
+  let nextEligibleAt = Number.POSITIVE_INFINITY;
+
+  options.keys.forEach(key => {
+    if (options.excludedFingerprints.has(key.fingerprint)) {
+      availability.excludedCount += 1;
+      return;
+    }
+    const state = localKeyStates.get(localStateKey(options.provider, key.fingerprint));
+    if (state?.disabled) {
+      availability.disabledCount += 1;
+      return;
+    }
+    const leaseExpiresAt = state?.leaseExpiresAt || 0;
+    const cooldownUntil = localModelCooldowns.get(
+      localModelKey(options.provider, options.model, key.fingerprint),
+    ) || 0;
+    if (leaseExpiresAt > now) availability.leasedCount += 1;
+    else if (cooldownUntil > now) availability.cooldownCount += 1;
+    else availability.eligibleCount += 1;
+
+    const temporaryUntil = Math.max(leaseExpiresAt, cooldownUntil);
+    if (temporaryUntil > now) nextEligibleAt = Math.min(nextEligibleAt, temporaryUntil);
+  });
+
+  availability.nextEligibleAt = Number.isFinite(nextEligibleAt)
+    ? new Date(nextEligibleAt).toISOString()
+    : null;
+  return availability;
+};
+
+const toAvailability = (
+  row: Record<string, unknown> | null | undefined,
+  configuredCount: number,
+): GeminiKeyAvailability => {
+  const count = (value: unknown): number => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+  };
+  const nextEligibleAt = typeof row?.next_eligible_at === 'string'
+    && !Number.isNaN(Date.parse(row.next_eligible_at))
+    ? row.next_eligible_at
+    : null;
+  return {
+    source: 'supabase',
+    configuredCount: row?.configured_count === undefined || row?.configured_count === null
+      ? configuredCount
+      : count(row.configured_count),
+    excludedCount: count(row?.excluded_count),
+    inactiveCount: count(row?.inactive_count),
+    disabledCount: count(row?.disabled_count),
+    leasedCount: count(row?.leased_count),
+    cooldownCount: count(row?.cooldown_count),
+    eligibleCount: count(row?.eligible_count),
+    nextEligibleAt,
+  };
+};
+
 const claimLocalKey = (options: {
   provider: GeminiKeyProvider;
   model: string;
@@ -197,16 +294,18 @@ const claimLocalKey = (options: {
   };
 };
 
-export const claimGeminiApiKey = async (options: {
+export const claimGeminiApiKeyDetailed = async (options: {
   provider: GeminiKeyProvider;
   model: string;
   keys: string[];
   excludedFingerprints?: Iterable<string>;
   leaseOwner?: string;
   leaseSeconds?: number;
-}): Promise<GeminiApiKeyLease | null> => {
+}): Promise<GeminiApiKeyClaimResult> => {
   const keys = toMetadata(options.keys);
-  if (keys.length === 0) return null;
+  if (keys.length === 0) {
+    return { lease: null, availability: emptyAvailability('memory', 0) };
+  }
   const excludedFingerprints = new Set(options.excludedFingerprints || []);
   const leaseOwner = (options.leaseOwner || `gemini-${randomUUID()}`).slice(0, 200);
   const leaseSeconds = Math.max(30, Math.min(options.leaseSeconds || 180, 600));
@@ -225,35 +324,67 @@ export const claimGeminiApiKey = async (options: {
       });
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
-      if (!row?.key_fingerprint || !row?.lease_token) return null;
+      if (!row?.key_fingerprint || !row?.lease_token) {
+        const { data: availabilityData, error: availabilityError } = await supabase.rpc(
+          'inspect_gemini_api_key_availability',
+          {
+            p_provider: options.provider,
+            p_model: options.model,
+            p_candidate_fingerprints: keys.map(key => key.fingerprint),
+            p_excluded_fingerprints: Array.from(excludedFingerprints),
+          },
+        );
+        if (availabilityError) {
+          warnCoordinator('Could not inspect Gemini key availability', availabilityError);
+          return {
+            lease: null,
+            availability: emptyAvailability('unknown', keys.length),
+          };
+        }
+        const availabilityRow = Array.isArray(availabilityData)
+          ? availabilityData[0]
+          : availabilityData;
+        return {
+          lease: null,
+          availability: toAvailability(availabilityRow, keys.length),
+        };
+      }
       const selected = keys.find(key => key.fingerprint === String(row.key_fingerprint));
-      if (!selected) return null;
+      if (!selected) {
+        return { lease: null, availability: emptyAvailability('unknown', keys.length) };
+      }
 
       let completed = false;
       return {
-        apiKey: selected.apiKey,
-        fingerprint: selected.fingerprint,
-        suffix: selected.suffix,
-        source: 'supabase',
-        complete: async result => {
-          if (completed) return;
-          completed = true;
-          try {
-            const { error: reportError } = await supabase.rpc('report_gemini_api_key_result', {
-              p_provider: options.provider,
-              p_model: options.model,
-              p_key_fingerprint: selected.fingerprint,
-              p_lease_owner: leaseOwner,
-              p_lease_token: row.lease_token,
-              p_outcome: result.outcome,
-              p_status: result.status ?? null,
-              p_reason: result.reason ?? null,
-              p_cooldown_seconds: result.cooldownSeconds ?? 0,
-            });
-            if (reportError) throw reportError;
-          } catch (error) {
-            warnCoordinator('Could not report Gemini key result; the lease will expire automatically', error);
-          }
+        lease: {
+          apiKey: selected.apiKey,
+          fingerprint: selected.fingerprint,
+          suffix: selected.suffix,
+          source: 'supabase',
+          complete: async result => {
+            if (completed) return;
+            completed = true;
+            try {
+              const { error: reportError } = await supabase.rpc('report_gemini_api_key_result', {
+                p_provider: options.provider,
+                p_model: options.model,
+                p_key_fingerprint: selected.fingerprint,
+                p_lease_owner: leaseOwner,
+                p_lease_token: row.lease_token,
+                p_outcome: result.outcome,
+                p_status: result.status ?? null,
+                p_reason: result.reason ?? null,
+                p_cooldown_seconds: result.cooldownSeconds ?? 0,
+              });
+              if (reportError) throw reportError;
+            } catch (error) {
+              warnCoordinator('Could not report Gemini key result; the lease will expire automatically', error);
+            }
+          },
+        },
+        availability: {
+          ...emptyAvailability('supabase', keys.length),
+          eligibleCount: 1,
         },
       };
     } catch (error) {
@@ -261,7 +392,13 @@ export const claimGeminiApiKey = async (options: {
     }
   }
 
-  return claimLocalKey({
+  const availability = inspectLocalAvailability({
+    provider: options.provider,
+    model: options.model,
+    keys,
+    excludedFingerprints,
+  });
+  const lease = claimLocalKey({
     provider: options.provider,
     model: options.model,
     keys,
@@ -269,4 +406,16 @@ export const claimGeminiApiKey = async (options: {
     leaseOwner,
     leaseSeconds,
   });
+  return { lease, availability };
 };
+
+export const claimGeminiApiKey = async (options: {
+  provider: GeminiKeyProvider;
+  model: string;
+  keys: string[];
+  excludedFingerprints?: Iterable<string>;
+  leaseOwner?: string;
+  leaseSeconds?: number;
+}): Promise<GeminiApiKeyLease | null> => (
+  (await claimGeminiApiKeyDetailed(options)).lease
+);

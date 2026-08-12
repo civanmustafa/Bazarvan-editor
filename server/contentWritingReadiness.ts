@@ -32,13 +32,14 @@ export type ContentWritingReadinessClient = {
       limit: (count: number) => PromiseLike<ProbeResult>;
     };
   };
+  rpc: (name: string, args: Record<string, unknown>) => PromiseLike<ProbeResult>;
 };
 
 export type ContentWritingReadinessResult = {
   ok: boolean;
   checkedAt: string;
   requiredMigrationCount: number;
-  checks: Record<(typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id'], boolean>;
+  checks: Record<(typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id'] | 'keyCoordinator', boolean>;
   code?: 'content_writing_schema_unavailable';
   detail?: string;
 };
@@ -82,7 +83,10 @@ export const checkContentWritingReadiness = async (options: {
 
   const timeoutMs = Math.max(500, Math.min(options.timeoutMs || 5_000, 15_000));
   const checks = Object.fromEntries(
-    CONTENT_WRITING_SCHEMA_PROBES.map(probe => [probe.id, false]),
+    [
+      ...CONTENT_WRITING_SCHEMA_PROBES.map(probe => [probe.id, false] as const),
+      ['keyCoordinator', false] as const,
+    ],
   ) as ContentWritingReadinessResult['checks'];
   const failures: string[] = [];
   let client: ContentWritingReadinessClient;
@@ -102,7 +106,7 @@ export const checkContentWritingReadiness = async (options: {
     return result;
   }
 
-  await Promise.all(CONTENT_WRITING_SCHEMA_PROBES.map(async probe => {
+  await Promise.all([...CONTENT_WRITING_SCHEMA_PROBES.map(async probe => {
     try {
       const result = await withTimeout(
         client.from(probe.table).select(probe.columns).limit(1),
@@ -116,7 +120,23 @@ export const checkContentWritingReadiness = async (options: {
     } catch (error) {
       failures.push(`${probe.id}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
     }
-  }));
+  }), (async () => {
+    try {
+      const result = await withTimeout(client.rpc('inspect_gemini_api_key_availability', {
+        p_provider: 'gemini',
+        p_model: 'readiness-probe',
+        p_candidate_fingerprints: [],
+        p_excluded_fingerprints: [],
+      }), timeoutMs);
+      if (result.error) {
+        failures.push(describeProbeFailure('keyCoordinator', result.error));
+        return;
+      }
+      checks.keyCoordinator = true;
+    } catch (error) {
+      failures.push(`keyCoordinator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
+    }
+  })()]);
 
   const ok = failures.length === 0;
   const result: ContentWritingReadinessResult = {

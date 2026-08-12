@@ -23,6 +23,7 @@ const readWorkspaceFile = (relativePath: string): Promise<string> => (
 const createProbeClient = (options: {
   failedTable?: string;
   calls?: Array<{ table: string; columns: string; limit: number }>;
+  rpcCalls?: string[];
 } = {}) => ({
   from: (table: string) => ({
     select: (columns: string) => ({
@@ -37,21 +38,32 @@ const createProbeClient = (options: {
       },
     }),
   }),
+  rpc: async (name: string) => {
+    options.rpcCalls?.push(name);
+    return { data: [] as unknown[], error: null as null };
+  },
 });
 
 test('content-writing readiness checks every required schema surface', async () => {
   const readiness = await importReadiness();
   readiness.__resetContentWritingReadinessForTests();
   const calls: Array<{ table: string; columns: string; limit: number }> = [];
+  const rpcCalls: string[] = [];
   const result = await readiness.checkContentWritingReadiness({
-    client: createProbeClient({ calls }),
+    client: createProbeClient({ calls, rpcCalls }),
     force: true,
     timeoutMs: 1_000,
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 12);
-  assert.deepEqual(result.checks, { sessions: true, messages: true, steps: true });
+  assert.equal(result.requiredMigrationCount, 13);
+  assert.deepEqual(result.checks, {
+    sessions: true,
+    messages: true,
+    steps: true,
+    keyCoordinator: true,
+  });
+  assert.deepEqual(rpcCalls, ['inspect_gemini_api_key_availability']);
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'content_writing_messages',
     'content_writing_sessions',
@@ -104,6 +116,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260728000000_dynamic_content_writing_final_section\.sql/);
   assert.match(releaseRegistry, /20260728010000_content_writing_faq_independence\.sql/);
   assert.match(releaseRegistry, /20260728040000_content_writing_final_structure\.sql/);
+  assert.match(releaseRegistry, /20260812010000_gemini_key_availability_waiting\.sql/);
   assert.match(
     await readWorkspaceFile('server/contentWritingReadiness.ts'),
     /resume_preference_version/,

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  collectAiModelKeyReports,
   collectAiKeyUsageEntries,
   formatAiKeySuffix,
   notifyAiKeyUsageFeedback,
@@ -91,6 +92,70 @@ test('AI key feedback reads nested content-writing execution metadata', () => {
     ['9876', 'failed'],
   ]);
   assert.equal(formatAiKeySuffix('...abcdefghi'), '••••defghi');
+});
+
+test('content-writing audit groups safe key attempts and availability by model', () => {
+  const reports = collectAiModelKeyReports({
+    execution: {
+      providerMetadata: {
+        attempts: [
+          { keySuffix: 'FAIL01', status: 503, reason: 'server', model: 'gemini-a' },
+          { keySuffix: 'FAIL02', status: 429, reason: 'quota', model: 'gemini-b' },
+        ],
+        modelKeyReports: [
+          {
+            model: 'gemini-a',
+            status: 'exhausted',
+            configuredKeyCount: 13,
+            attemptedKeyCount: 1,
+            attemptCount: 1,
+            availabilityCheckCount: 2,
+            waitedMs: 60_000,
+            keyAttempts: [
+              { keySuffix: 'FAIL01', outcome: 'failed', status: 503, reason: 'server' },
+            ],
+            lastAvailability: {
+              source: 'supabase',
+              configuredCount: 13,
+              excludedCount: 1,
+              inactiveCount: 0,
+              disabledCount: 2,
+              leasedCount: 3,
+              cooldownCount: 7,
+              eligibleCount: 0,
+              nextEligibleAt: '2026-08-12T12:00:00.000Z',
+            },
+          },
+          {
+            model: 'gemini-b',
+            status: 'succeeded',
+            configuredKeyCount: 13,
+            attemptedKeyCount: 2,
+            attemptCount: 2,
+            availabilityCheckCount: 0,
+            waitedMs: 0,
+            successfulKeySuffix: 'GOOD03',
+            keyAttempts: [
+              { keySuffix: 'FAIL02', outcome: 'failed', status: 429, reason: 'quota' },
+              { keySuffix: 'GOOD03', outcome: 'success', status: 200 },
+            ],
+            lastAvailability: null,
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(reports.length, 2);
+  assert.deepEqual(reports[0].entries.map(entry => [entry.keySuffix, entry.outcome]), [
+    ['FAIL01', 'failed'],
+  ]);
+  assert.equal(reports[0].lastAvailability?.leasedCount, 3);
+  assert.equal(reports[0].waitedMs, 60_000);
+  assert.deepEqual(reports[1].entries.map(entry => [entry.keySuffix, entry.outcome]), [
+    ['FAIL02', 'failed'],
+    ['GOOD03', 'success'],
+  ]);
 });
 
 test('AI key feedback includes credential and provider fallback suffixes', () => {

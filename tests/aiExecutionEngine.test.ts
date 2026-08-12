@@ -42,11 +42,11 @@ test('one server engine owns Gemini execution, key rotation, and model fallback'
   ]);
 
   assert.match(engine, /new GoogleGenAI/);
-  assert.match(engine, /claimGeminiApiKey/);
+  assert.match(engine, /claimGeminiApiKeyDetailed/);
   assert.match(engine, /getGeminiModelOrder/);
   assert.ok(
     engine.indexOf('for (let modelIndex = 0; modelIndex < modelOrder.length; modelIndex += 1)')
-      < engine.indexOf('for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex += 1)'),
+      < engine.indexOf('while (keyIndex < orderedKeys.length)'),
     'Gemini must exhaust the available keys on the strongest active model before moving to the next model.',
   );
   assert.match(engine, /recordAiExecutionTelemetry/);
@@ -88,6 +88,8 @@ test('public AI responses remove key fingerprints while preserving safe attempt 
 
   assert.match(engine, /export const sanitizeAiExecutionResult/);
   assert.match(engine, /keyFingerprint: _fingerprint/);
+  assert.match(engine, /keyFingerprint: _reportFingerprint/);
+  assert.match(engine, /keyFingerprint: _attemptFingerprint/);
   assert.match(openAiEngine, /const sanitizeResult/);
   assert.match(openAiEngine, /keyFingerprint: _fingerprint/);
 });
@@ -112,7 +114,7 @@ test('all paid provider engines use the shared automatic fallback policy', async
   assert.match(settingsPage, /الرجوع التلقائي للمفاتيح والمزودات مفعّل/);
 });
 
-test('quick free Gemini commands exhaust all keys and models after a local timeout', async () => {
+test('quick free Gemini commands evaluate all eligible keys and models after a local timeout', async () => {
   const [engine, aiContext] = await Promise.all([
     readWorkspaceFile('server/aiExecutionEngine.ts'),
     readWorkspaceFile('contexts/AIContext.tsx'),
@@ -121,10 +123,36 @@ test('quick free Gemini commands exhaust all keys and models after a local timeo
   assert.match(engine, /class GeminiRequestTimeoutError extends Error/);
   assert.match(engine, /error instanceof GeminiRequestTimeoutError/);
   assert.match(engine, /outcome: 'cancelled',\s+status: lastError\.status,\s+reason: 'cancelled',\s+cooldownSeconds: 0/);
-  assert.match(engine, /const hasNextKey = keyIndex < orderedKeys\.length - 1/);
+  assert.match(engine, /const hasNextKey = failedModelAttemptedKeyCount < orderedKeys\.length/);
   assert.doesNotMatch(engine, /timedOutKeyFingerprints|modelTimedOutLocally/);
-  assert.match(engine, /جميع المفاتيح المتاحة على جميع الموديلات البديلة/);
+  assert.match(engine, /لم تُعتبر المفاتيح مستنفدة/);
   assert.match(engine, /allowModelFallback = requestBody\?\.allowModelFallback === true\s+&& settings\.allowModelFallback/);
   assert.match(aiContext, /requireFreeModelFallback \|\| isGeminiFreeModelFallbackEnabled\(\)/);
   assert.match(aiContext, /geminiProvider === 'gemini',\s+\);/);
+});
+
+test('Gemini coordination waits for temporary key states and publishes safe per-model reports', async () => {
+  const [engine, coordinator, migration, auditPanel] = await Promise.all([
+    readWorkspaceFile('server/aiExecutionEngine.ts'),
+    readWorkspaceFile('server/geminiKeyCoordinator.ts'),
+    readWorkspaceFile('supabase/migrations/20260812010000_gemini_key_availability_waiting.sql'),
+    readWorkspaceFile('components/ContentWritingStageAuditPanel.tsx'),
+  ]);
+
+  assert.match(engine, /stage: 'waiting-key'/);
+  assert.match(engine, /GEMINI_KEY_AVAILABILITY_MAX_WAIT_MS/);
+  assert.match(engine, /getGeminiKeyAvailabilityWaitMs/);
+  assert.match(engine, /modelKeyReports/);
+  assert.match(engine, /keyAvailabilityWaitedMs/);
+  assert.match(coordinator, /claimGeminiApiKeyDetailed/);
+  assert.match(coordinator, /inspect_gemini_api_key_availability/);
+  assert.match(migration, /returns table \(/);
+  assert.match(migration, /leased_count integer/);
+  assert.match(migration, /cooldown_count integer/);
+  assert.match(migration, /next_eligible_at timestamptz/);
+  assert.match(migration, /grant execute on function public\.inspect_gemini_api_key_availability[^;]+to service_role/s);
+  assert.doesNotMatch(migration, /returns table \([^)]*key_fingerprint/s);
+  assert.match(auditPanel, /تقرير الموديلات والمفاتيح/);
+  assert.match(auditPanel, /collectAiModelKeyReports/);
+  assertBalancedSqlParentheses(migration);
 });

@@ -18,6 +18,33 @@ export type AiKeyUsageFeedback = {
   createdAt: string;
 };
 
+export type AiModelKeyAvailability = {
+  source: string;
+  configuredCount: number;
+  excludedCount: number;
+  inactiveCount: number;
+  disabledCount: number;
+  leasedCount: number;
+  cooldownCount: number;
+  eligibleCount: number;
+  nextEligibleAt?: string;
+};
+
+export type AiModelKeyReport = {
+  provider?: string;
+  credentialSource?: string;
+  model: string;
+  status: string;
+  configuredKeyCount: number;
+  attemptedKeyCount: number;
+  attemptCount: number;
+  availabilityCheckCount: number;
+  waitedMs: number;
+  successfulKeySuffix?: string;
+  lastAvailability?: AiModelKeyAvailability;
+  entries: AiKeyUsageEntry[];
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -104,6 +131,115 @@ export const collectAiKeyUsageEntries = (
 
   visit(value, defaultOutcome);
   return collected;
+};
+
+export const collectAiModelKeyReports = (value: unknown): AiModelKeyReport[] => {
+  const rawReports: Record<string, unknown>[] = [];
+  const visit = (
+    source: unknown,
+    depth = 0,
+    inherited: { provider?: string; credentialSource?: string } = {},
+  ): void => {
+    if (depth > 6) return;
+    if (Array.isArray(source)) {
+      source.forEach(item => visit(item, depth + 1, inherited));
+      return;
+    }
+    if (!isRecord(source)) return;
+    const context = {
+      provider: toText(source.provider) || inherited.provider,
+      credentialSource: toText(source.credentialSource) || inherited.credentialSource,
+    };
+    if (Array.isArray(source.modelKeyReports)) {
+      source.modelKeyReports.forEach(report => {
+        if (isRecord(report)) rawReports.push({
+          ...report,
+          ...(context.provider ? { reportProvider: context.provider } : {}),
+          ...(context.credentialSource ? { reportCredentialSource: context.credentialSource } : {}),
+        });
+      });
+    }
+    const nestedKeys = [
+      'execution',
+      'providerMetadata',
+      'responseMetadata',
+      'result',
+      'gemini',
+      'credentialFallbackChain',
+      'providerFallbackChain',
+      'credentialFallbackAttempts',
+      'providerFallbackAttempts',
+    ] as const;
+    nestedKeys.forEach(key => {
+      if (source[key] !== undefined) visit(source[key], depth + 1, context);
+    });
+  };
+  visit(value);
+
+  const entries = collectAiKeyUsageEntries(value);
+  const number = (input: unknown): number => {
+    const parsed = Number(input);
+    return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+  };
+  const reports = rawReports.map((report): AiModelKeyReport | null => {
+    const model = toText(report.model);
+    if (!model) return null;
+    const availability = isRecord(report.lastAvailability)
+      ? report.lastAvailability
+      : null;
+    const successfulKeySuffix = normalizeAiKeySuffix(report.successfulKeySuffix);
+    const reportEntries = Array.isArray(report.keyAttempts)
+      ? collectAiKeyUsageEntries({ attempts: report.keyAttempts })
+        .map(entry => ({ ...entry, model }))
+      : [];
+    const modelEntries = reportEntries.length > 0
+      ? reportEntries
+      : entries.filter(entry => entry.model === model);
+    if (successfulKeySuffix && !modelEntries.some(entry => (
+      entry.keySuffix === successfulKeySuffix && entry.outcome === 'success'
+    ))) {
+      modelEntries.push({ keySuffix: successfulKeySuffix, outcome: 'success', status: 200, model });
+    }
+    return {
+      ...(toText(report.reportProvider) ? { provider: toText(report.reportProvider) } : {}),
+      ...(toText(report.reportCredentialSource)
+        ? { credentialSource: toText(report.reportCredentialSource) }
+        : {}),
+      model,
+      status: toText(report.status) || 'unknown',
+      configuredKeyCount: number(report.configuredKeyCount),
+      attemptedKeyCount: number(report.attemptedKeyCount),
+      attemptCount: number(report.attemptCount),
+      availabilityCheckCount: number(report.availabilityCheckCount),
+      waitedMs: number(report.waitedMs),
+      ...(successfulKeySuffix ? { successfulKeySuffix } : {}),
+      ...(availability ? {
+        lastAvailability: {
+          source: toText(availability.source) || 'unknown',
+          configuredCount: number(availability.configuredCount),
+          excludedCount: number(availability.excludedCount),
+          inactiveCount: number(availability.inactiveCount),
+          disabledCount: number(availability.disabledCount),
+          leasedCount: number(availability.leasedCount),
+          cooldownCount: number(availability.cooldownCount),
+          eligibleCount: number(availability.eligibleCount),
+          ...(toText(availability.nextEligibleAt)
+            ? { nextEligibleAt: toText(availability.nextEligibleAt) }
+            : {}),
+        },
+      } : {}),
+      entries: modelEntries,
+    };
+  }).filter((report): report is AiModelKeyReport => Boolean(report));
+
+  return reports.filter((report, index) => reports.findIndex(candidate => (
+    candidate.model === report.model
+    && candidate.provider === report.provider
+    && candidate.credentialSource === report.credentialSource
+    && candidate.status === report.status
+    && candidate.attemptCount === report.attemptCount
+    && candidate.waitedMs === report.waitedMs
+  )) === index);
 };
 
 export const notifyAiKeyUsageFeedback = (options: {
