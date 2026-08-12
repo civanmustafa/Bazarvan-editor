@@ -21,6 +21,7 @@ import {
   analyzeAndSelectCompetitors,
   extractCompetitorOwnDomains,
   isCompetitorOwnDomain,
+  isCompetitorLanguageCompatible,
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
 import { loadArticleClientOwnDomains } from '../server/clientCompetitorExclusions.ts';
@@ -185,6 +186,19 @@ const readCompetitorDiscoveryState = async (
     .maybeSingle();
   if (error) throw error;
   return data || null;
+};
+
+const readArticleLanguage = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+): Promise<'ar' | 'en'> => {
+  const { data, error } = await supabase
+    .from('articles')
+    .select('article_language')
+    .eq('id', articleId)
+    .single();
+  if (error) throw error;
+  return data?.article_language === 'en' ? 'en' : 'ar';
 };
 
 const persistCompetitorDiscoveryResult = async (
@@ -566,7 +580,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     const queryType = normalizeSearchMode(body.queryType);
     const articleTitle = toText(body.articleTitle).slice(0, 500);
     const primaryKeyword = toText(body.primaryKeyword).slice(0, 500);
-    const language = body.language === 'en' ? 'en' : 'ar';
+    const language = await readArticleLanguage(supabase, articleId);
     const pageType = toText(body.pageType).slice(0, 100);
     const searchIntent = toText(body.searchIntent).slice(0, 100);
     const audienceScope = toText(body.audienceScope).slice(0, 100);
@@ -682,9 +696,28 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       articleId,
       toText(body.companyName),
     );
-    const results = normalizeSelectedResults(body.results)
+    const articleLanguage = await readArticleLanguage(supabase, articleId);
+    const normalizedResults = normalizeSelectedResults(body.results);
+    const languageFilteredCount = articleLanguage === 'ar'
+      ? normalizedResults.filter(result => !isCompetitorLanguageCompatible(
+          'ar',
+          `${result.title} ${result.description}`,
+        )).length
+      : 0;
+    const results = normalizedResults
+      .filter(result => articleLanguage !== 'ar' || isCompetitorLanguageCompatible(
+        'ar',
+        `${result.title} ${result.description}`,
+      ))
       .filter(result => !isCompetitorOwnDomain(result.domain, ownDomains));
     if (results.length === 0) {
+      if (languageFilteredCount > 0) {
+        throw new CompetitorApiError({
+          message: 'لا يمكن اعتماد صفحة لاتينية كمنافس لمقالة عربية. اختر نتائج عربية ثم أعد المحاولة.',
+          code: 'competitor_language_mismatch',
+          details: { languageFilteredCount },
+        });
+      }
       throw new CompetitorApiError({
         message: 'The selected URL belongs to the client domain and cannot be added as a competitor.',
         code: 'client_domain_not_a_competitor',

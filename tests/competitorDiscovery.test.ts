@@ -18,8 +18,10 @@ import {
 } from '../server/firecrawlCompetitorService.ts';
 import {
   analyzeAndSelectCompetitors,
+  assessCompetitorLanguage,
   extractCompetitorOwnDomains,
   isCompetitorOwnDomain,
+  isCompetitorLanguageCompatible,
   normalizeCompetitorText,
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
@@ -195,6 +197,63 @@ test('central competitor engine auto-selects strong commercial matches for user 
   assert.ok(selection.results.filter(result => result.autoSelected).every(result => result.inferredPageType !== 'video'));
 });
 
+test('Arabic competitor selection fully excludes Latin pages while allowing natural brand names', () => {
+  const latinAssessment = assessCompetitorLanguage(
+    'ar',
+    'Best Branding Companies in the UAE. Compare leading branding agencies, services, pricing, and portfolios.',
+  );
+  assert.equal(latinAssessment.compatible, false);
+  assert.equal(latinAssessment.detectedLanguage, 'latin');
+  assert.equal(isCompetitorLanguageCompatible(
+    'ar',
+    'تقدم شركة Brand Studio خدمات البراندنج وبناء الهوية البصرية في الإمارات للشركات الناشئة والمؤسسات.',
+  ), true);
+
+  const selection = analyzeAndSelectCompetitors({
+    context: {
+      query: 'شركة براندينج في الإمارات',
+      articleTitle: 'أفضل شركة براندينج في الإمارات',
+      primaryKeyword: 'شركة براندينج في الإمارات',
+      language: 'ar',
+      pageType: 'service',
+      searchIntent: 'commercial',
+    },
+    candidates: [
+      searchResult(
+        'english-first.example',
+        'Best Branding Companies in the UAE',
+        'Compare leading branding agencies in Dubai, their services, pricing, strategy, and creative portfolios.',
+        1,
+        'best-branding-agencies',
+      ),
+      searchResult(
+        'arabic-brand.example',
+        'شركة Brand Studio للبراندنج في الإمارات',
+        'خدمات عربية متكاملة لبناء العلامة التجارية والهوية البصرية والاستراتيجية الإبداعية للشركات في دبي وأبوظبي.',
+        2,
+        'خدمات-البراندنج',
+      ),
+      searchResult(
+        'arabic-agency.example',
+        'أفضل شركات البراندينج في الإمارات',
+        'مقارنة عربية لخدمات شركات بناء العلامات التجارية وتصميم الهوية البصرية وإدارة تجربة العلامة في الإمارات.',
+        3,
+        'شركات-براندينج',
+      ),
+    ],
+    maxResults: 10,
+    maxSelected: 5,
+  });
+
+  assert.equal(selection.summary.languageFilteredCount, 1);
+  assert.equal(selection.summary.filteredCount, 1);
+  assert.equal(selection.results.some(result => result.domain === 'english-first.example'), false);
+  assert.equal(selection.results.some(result => result.domain === 'arabic-brand.example'), true);
+  assert.ok(selection.results.filter(result => result.autoSelected).every(result => (
+    result.signals.languageMatch >= 50
+  )));
+});
+
 test('manual and queued competitor discovery load the linked client domain exclusion', async () => {
   const [apiSource, executorSource, exclusionSource] = await Promise.all([
     readWorkspaceFile('api/competitors.ts'),
@@ -345,6 +404,9 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.match(executor, /provider: 'programmatic'/);
   assert.match(executor, /model: PROGRAMMATIC_MODEL/);
   assert.match(executor, /programmatic_after_firecrawl/);
+  assert.match(executor, /isCompetitorLanguageCompatible\('ar', content\.text\)/);
+  assert.match(executor, /competitor_language_mismatch/);
+  assert.match(executor, /\.select\('article_language'\)/);
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
   assert.match(panel, /سحب \$\{selectedResults\.length\} موقع/);
   assert.match(panel, /البحث وسحب المنافسين/);

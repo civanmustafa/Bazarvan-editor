@@ -414,10 +414,12 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
       setSelectionSummary(response.selection);
       setSelectedUrls(new Set(rows.filter(row => row.autoSelected).map(row => row.canonicalUrl)));
       if (rows.length === 0) {
-        setNotice(isArabic ? 'لم يعثر محرك البحث على نتائج مناسبة.' : 'No suitable search results were found.');
+        setNotice(isArabic
+          ? `لم يعثر محرك البحث على نتائج عربية مناسبة.${response.selection.languageFilteredCount > 0 ? ` استُبعدت ${response.selection.languageFilteredCount} نتيجة لاتينية لأنها لا تطابق لغة المقالة.` : ''}`
+          : 'No suitable search results were found.');
       } else if (response.selection.autoSelectedCount > 0) {
         setNotice(isArabic
-          ? `تم تحديد أفضل ${response.selection.autoSelectedCount} نتائج تلقائيًا. راجعها وعدّل الاختيار قبل السحب.`
+          ? `تم تحديد أفضل ${response.selection.autoSelectedCount} نتائج عربية تلقائيًا.${response.selection.languageFilteredCount > 0 ? ` استُبعدت ${response.selection.languageFilteredCount} نتيجة لاتينية.` : ''} راجعها وعدّل الاختيار قبل السحب.`
           : `The best ${response.selection.autoSelectedCount} results were selected automatically. Review them before importing.`);
       }
     } catch (searchError) {
@@ -778,6 +780,11 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 <span>{isArabic ? 'نوع الصفحة' : 'Page type'}: {pageTypeLabels[selectionSummary.targetPageType]?.[locale] || pageTypeLabels.unknown[locale]}</span>
                 <span>{isArabic ? 'الثقة' : 'Confidence'}: {selectionSummary.confidence}%</span>
                 <span>{isArabic ? 'فُحص' : 'Reviewed'}: {selectionSummary.reviewedCount}/{selectionSummary.candidateCount}</span>
+                {articleLanguage === 'ar' && selectionSummary.languageFilteredCount > 0 && (
+                  <span className="text-amber-700 dark:text-amber-300">
+                    {isArabic ? 'لاتيني مستبعد' : 'Latin excluded'}: {selectionSummary.languageFilteredCount}
+                  </span>
+                )}
               </div>
             </div>
           )}

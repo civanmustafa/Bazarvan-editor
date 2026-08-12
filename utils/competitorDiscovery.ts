@@ -69,6 +69,7 @@ export type CompetitorSelectionSummary = {
   candidateCount: number;
   reviewedCount: number;
   filteredCount: number;
+  languageFilteredCount: number;
   autoSelectedCount: number;
   autoSelectedUrls: string[];
 };
@@ -325,6 +326,7 @@ const parseCompetitorSelectionSummary = (
     candidateCount: Math.max(0, Number(selection.candidateCount) || 0),
     reviewedCount: Math.max(0, Number(selection.reviewedCount) || results.length),
     filteredCount: Math.max(0, Number(selection.filteredCount) || 0),
+    languageFilteredCount: Math.max(0, Number(selection.languageFilteredCount) || 0),
     autoSelectedCount: Math.max(0, Number(selection.autoSelectedCount) || 0),
     autoSelectedUrls: toStringList(selection.autoSelectedUrls),
   };

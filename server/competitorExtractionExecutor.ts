@@ -19,6 +19,7 @@ import {
   getExternalAnalysisSupabaseAdmin,
   type ExternalAnalysisJson,
 } from './externalAnalysisQueue';
+import { isCompetitorLanguageCompatible } from './competitorSelectionEngine.ts';
 
 /**
  * Architecture boundary:
@@ -68,6 +69,16 @@ const readCompetitors = async (articleId: string): Promise<CompetitorRow[]> => {
   return (data || []) as CompetitorRow[];
 };
 
+const readArticleLanguage = async (articleId: string): Promise<'ar' | 'en'> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('articles')
+    .select('article_language')
+    .eq('id', articleId)
+    .single();
+  if (error) throw error;
+  return data?.article_language === 'en' ? 'en' : 'ar';
+};
+
 const updateCompetitor = async (
   competitorId: string,
   values: Record<string, unknown>,
@@ -93,7 +104,10 @@ const syncArticleCompetitors = async (articleId: string): Promise<void> => {
 const executeCompetitorExtraction = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
-  const rows = await readCompetitors(context.job.article_id);
+  const [rows, articleLanguage] = await Promise.all([
+    readCompetitors(context.job.article_id),
+    readArticleLanguage(context.job.article_id),
+  ]);
   if (rows.length === 0) {
     return {
       result: {
@@ -142,32 +156,62 @@ const executeCompetitorExtraction = async (
         url: row.canonical_url || row.source_url,
         signal: context.signal,
       });
-      attempts.push({
-        requestIndex: row.position,
-        outcome: 'success',
-        model: FIRECRAWL_MODEL,
-        keySuffix: content.providerKeySuffix,
-        status: 200,
-        reason: content.cacheHit ? 'preview_cache_hit' : '',
-        cacheHit: content.cacheHit,
-        attempt: context.job.attempt_count,
-      });
-      await updateCompetitor(row.id, {
-        source_url: content.url,
-        canonical_url: content.canonicalUrl,
-        domain: content.domain,
-        title: content.title,
-        description: content.description,
-        headings: content.headings,
-        content_text: content.text,
-        word_count: content.wordCount,
-        status: 'completed',
-        extraction_provider: content.cacheHit ? 'firecrawl_cache' : 'firecrawl',
-        error_code: null,
-        error_message: null,
-        fetched_at: new Date().toISOString(),
-      }, ['queued', 'extracting', 'retry_scheduled']);
-      successfulCount += 1;
+      if (articleLanguage === 'ar' && !isCompetitorLanguageCompatible('ar', content.text)) {
+        const message = 'The extracted competitor page is Latin-language content and was excluded from the Arabic article.';
+        attempts.push({
+          requestIndex: row.position,
+          outcome: 'failed',
+          model: FIRECRAWL_MODEL,
+          keySuffix: content.providerKeySuffix,
+          status: 422,
+          reason: 'competitor_language_mismatch',
+          cacheHit: content.cacheHit,
+          attempt: currentAttempt,
+        });
+        failures.push({
+          position: row.position,
+          code: 'competitor_language_mismatch',
+          message,
+          retryable: false,
+          attempt: currentAttempt,
+        });
+        await updateCompetitor(row.id, {
+          content_text: '',
+          word_count: 0,
+          status: 'failed',
+          extraction_provider: content.cacheHit ? 'firecrawl_cache' : 'firecrawl',
+          error_code: 'competitor_language_mismatch',
+          error_message: message,
+          fetched_at: new Date().toISOString(),
+        }, ['queued', 'extracting', 'retry_scheduled']);
+      } else {
+        attempts.push({
+          requestIndex: row.position,
+          outcome: 'success',
+          model: FIRECRAWL_MODEL,
+          keySuffix: content.providerKeySuffix,
+          status: 200,
+          reason: content.cacheHit ? 'preview_cache_hit' : '',
+          cacheHit: content.cacheHit,
+          attempt: context.job.attempt_count,
+        });
+        await updateCompetitor(row.id, {
+          source_url: content.url,
+          canonical_url: content.canonicalUrl,
+          domain: content.domain,
+          title: content.title,
+          description: content.description,
+          headings: content.headings,
+          content_text: content.text,
+          word_count: content.wordCount,
+          status: 'completed',
+          extraction_provider: content.cacheHit ? 'firecrawl_cache' : 'firecrawl',
+          error_code: null,
+          error_message: null,
+          fetched_at: new Date().toISOString(),
+        }, ['queued', 'extracting', 'retry_scheduled']);
+        successfulCount += 1;
+      }
     } catch (error) {
       if (context.signal.aborted) throw context.signal.reason ?? error;
       const firecrawlError = error instanceof FirecrawlCompetitorError
@@ -216,34 +260,66 @@ const executeCompetitorExtraction = async (
           url: row.canonical_url || row.source_url,
           signal: context.signal,
         });
-        attempts.push({
-          requestIndex: row.position,
-          outcome: 'success',
-          model: PROGRAMMATIC_MODEL,
-          keySuffix: '',
-          status: 200,
-          reason: content.cacheHit ? 'programmatic_cache_hit' : 'firecrawl_failed_programmatic_succeeded',
-          cacheHit: content.cacheHit,
-          attempt: currentAttempt,
-        });
-        await updateCompetitor(row.id, {
-          source_url: content.url,
-          canonical_url: content.canonicalUrl,
-          domain: content.domain,
-          title: content.title,
-          description: content.description,
-          headings: content.headings,
-          content_text: content.text,
-          word_count: content.wordCount,
-          status: 'completed',
-          extraction_provider: content.cacheHit
-            ? 'programmatic_after_firecrawl_cache'
-            : 'programmatic_after_firecrawl',
-          error_code: null,
-          error_message: null,
-          fetched_at: new Date().toISOString(),
-        }, ['extracting']);
-        successfulCount += 1;
+        if (articleLanguage === 'ar' && !isCompetitorLanguageCompatible('ar', content.text)) {
+          const message = 'The extracted competitor page is Latin-language content and was excluded from the Arabic article.';
+          attempts.push({
+            requestIndex: row.position,
+            outcome: 'failed',
+            model: PROGRAMMATIC_MODEL,
+            keySuffix: '',
+            status: 422,
+            reason: 'competitor_language_mismatch',
+            cacheHit: content.cacheHit,
+            attempt: currentAttempt,
+          });
+          failures.push({
+            position: row.position,
+            code: 'competitor_language_mismatch',
+            message,
+            retryable: false,
+            attempt: currentAttempt,
+          });
+          await updateCompetitor(row.id, {
+            content_text: '',
+            word_count: 0,
+            status: 'failed',
+            extraction_provider: content.cacheHit
+              ? 'programmatic_after_firecrawl_cache'
+              : 'programmatic_after_firecrawl',
+            error_code: 'competitor_language_mismatch',
+            error_message: message,
+            fetched_at: new Date().toISOString(),
+          }, ['extracting']);
+        } else {
+          attempts.push({
+            requestIndex: row.position,
+            outcome: 'success',
+            model: PROGRAMMATIC_MODEL,
+            keySuffix: '',
+            status: 200,
+            reason: content.cacheHit ? 'programmatic_cache_hit' : 'firecrawl_failed_programmatic_succeeded',
+            cacheHit: content.cacheHit,
+            attempt: currentAttempt,
+          });
+          await updateCompetitor(row.id, {
+            source_url: content.url,
+            canonical_url: content.canonicalUrl,
+            domain: content.domain,
+            title: content.title,
+            description: content.description,
+            headings: content.headings,
+            content_text: content.text,
+            word_count: content.wordCount,
+            status: 'completed',
+            extraction_provider: content.cacheHit
+              ? 'programmatic_after_firecrawl_cache'
+              : 'programmatic_after_firecrawl',
+            error_code: null,
+            error_message: null,
+            fetched_at: new Date().toISOString(),
+          }, ['extracting']);
+          successfulCount += 1;
+        }
       } catch (programmaticError) {
         if (context.signal.aborted) throw context.signal.reason ?? programmaticError;
         const normalizedProgrammaticError = programmaticError instanceof ProgrammaticCompetitorExtractionError

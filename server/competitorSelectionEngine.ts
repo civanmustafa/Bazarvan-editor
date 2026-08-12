@@ -75,6 +75,7 @@ export type CompetitorSelectionSummary = {
   candidateCount: number;
   reviewedCount: number;
   filteredCount: number;
+  languageFilteredCount: number;
   autoSelectedCount: number;
   autoSelectedUrls: string[];
 };
@@ -98,7 +99,7 @@ export type CompetitorSelectionContext = {
   ownDomains?: string[];
 };
 
-const ENGINE_VERSION = 'competitor-selection-v1';
+const ENGINE_VERSION = 'competitor-selection-v2-arabic-language-guard';
 const INTENTS = ['informational', 'commercial', 'transactional', 'navigational', 'local', 'support'] as const;
 type RankedIntent = typeof INTENTS[number];
 type IntentVector = Record<RankedIntent, number>;
@@ -480,15 +481,59 @@ const queryRelevanceScore = (context: CompetitorSelectionContext, result: Compet
   return roundScore(score);
 };
 
-const languageMatchScore = (language: 'ar' | 'en', value: string): number => {
-  const arabicLetters = (value.match(/[\u0600-\u06ff]/g) || []).length;
-  const latinLetters = (value.match(/[a-z]/gi) || []).length;
-  const total = arabicLetters + latinLetters;
-  if (total < 12) return 65;
-  const arabicRatio = arabicLetters / total;
-  if (language === 'ar') return arabicRatio >= 0.45 ? 100 : arabicRatio >= 0.18 ? 72 : 24;
-  return arabicRatio <= 0.15 ? 100 : arabicRatio <= 0.42 ? 70 : 28;
+export type CompetitorLanguageAssessment = {
+  compatible: boolean;
+  detectedLanguage: 'ar' | 'latin' | 'mixed' | 'unknown';
+  arabicLetterCount: number;
+  latinLetterCount: number;
+  arabicRatio: number;
+  score: number;
 };
+
+export const assessCompetitorLanguage = (
+  language: 'ar' | 'en',
+  value: unknown,
+): CompetitorLanguageAssessment => {
+  const text = String(value || '')
+    .replace(/https?:\/\/\S+|www\.\S+|\b\S+@\S+\.\S+\b/gi, ' ');
+  const arabicLetters = (text.match(/[\u0621-\u063a\u0641-\u064a\u066e-\u06d3\u06fa-\u06ff]/g) || []).length;
+  const latinLetters = (text.match(/\p{Script=Latin}/gu) || []).length;
+  const total = arabicLetters + latinLetters;
+  if (total < 12) {
+    return {
+      compatible: true,
+      detectedLanguage: 'unknown',
+      arabicLetterCount: arabicLetters,
+      latinLetterCount: latinLetters,
+      arabicRatio: total ? arabicLetters / total : 0,
+      score: 65,
+    };
+  }
+  const arabicRatio = arabicLetters / total;
+  const detectedLanguage = arabicRatio >= 0.7
+    ? 'ar'
+    : arabicRatio <= 0.15
+      ? 'latin'
+      : 'mixed';
+  const score = language === 'ar'
+    ? arabicRatio >= 0.45 ? 100 : arabicRatio >= 0.25 && arabicLetters >= 8 ? 72 : 24
+    : arabicRatio <= 0.15 ? 100 : arabicRatio <= 0.42 ? 70 : 28;
+  return {
+    compatible: language === 'ar'
+      ? arabicLetters >= 8 && arabicRatio >= 0.25
+      : score >= 50,
+    detectedLanguage,
+    arabicLetterCount: arabicLetters,
+    latinLetterCount: latinLetters,
+    arabicRatio,
+    score,
+  };
+};
+
+export const isCompetitorLanguageCompatible = (
+  language: 'ar' | 'en',
+  value: unknown,
+): boolean => assessCompetitorLanguage(language, value).compatible;
 
 const metadataQualityScore = (result: CompetitorSearchResult): number => {
   let score = 30;
@@ -628,6 +673,7 @@ export const analyzeAndSelectCompetitors = (options: {
   ].map(domain => domain.toLowerCase().replace(/^www\./, '')));
 
   let filteredCount = 0;
+  let languageFilteredCount = 0;
   const scored = candidateClassifications.flatMap(({ candidate, pageType, intentVector }) => {
     const ownDomain = domainMatches(candidate.domain, ownDomains);
     const utilityPage = hasUtilityPath(candidate);
@@ -636,11 +682,21 @@ export const analyzeAndSelectCompetitors = (options: {
       return [];
     }
 
+    const languageAssessment = assessCompetitorLanguage(
+      context.language === 'en' ? 'en' : 'ar',
+      `${candidate.title} ${candidate.description}`,
+    );
+    if (context.language !== 'en' && !languageAssessment.compatible) {
+      filteredCount += 1;
+      languageFilteredCount += 1;
+      return [];
+    }
+
     const intentMatch = roundScore(cosineSimilarity(normalizedTargetVector, intentVector) * 100);
     const relevance = queryRelevanceScore(context, candidate);
     const searchStrength = roundScore(105 - Math.max(1, candidate.position) * 7);
     const pageMatch = pageTypeMatchScore(targetPageType, pageType.type);
-    const languageMatch = languageMatchScore(context.language === 'en' ? 'en' : 'ar', `${candidate.title} ${candidate.description}`);
+    const languageMatch = languageAssessment.score;
     const metadataQuality = metadataQualityScore(candidate);
     const locationMatch = locationMatchScore(context.targetCountry, candidate);
     const socialOrVideo = pageType.type === 'forum' || pageType.type === 'video' || SOCIAL_DOMAINS.has(candidate.domain);
@@ -734,6 +790,7 @@ export const analyzeAndSelectCompetitors = (options: {
       candidateCount: options.candidates.length,
       reviewedCount: results.length,
       filteredCount,
+      languageFilteredCount,
       autoSelectedCount: autoSelectedUrls.size,
       autoSelectedUrls: Array.from(autoSelectedUrls),
     },
