@@ -22,13 +22,25 @@ test('a titled article can be saved with an intentionally empty editor', () => {
   }), true);
 });
 
-test('an existing article cannot be overwritten by an empty editor', () => {
+test('an existing article can still be saved with an empty editor when article metadata is present', () => {
   assert.equal(canPersistArticleDraft({
     title: '',
     articleKey: '',
     articleId: '2b2ee011-04aa-4c38-b508-a35885a59200',
     plainText: '',
-  }), false);
+    keywords: {
+      primary: 'الكلمة الأساسية',
+      secondaries: ['صيغة بديلة'],
+      company: 'اسم الشركة',
+      lsi: ['كلمة LSI'],
+    },
+    goalContext: {
+      pageType: 'article',
+      objective: 'educate',
+      audienceScope: 'global',
+      searchIntent: 'informational',
+    },
+  }), true);
 });
 
 test('a completely unidentified empty draft is not persisted', () => {
@@ -40,7 +52,7 @@ test('a completely unidentified empty draft is not persisted', () => {
   }), false);
 });
 
-test('manual, automatic, and lifecycle saves share the empty-editor protection', async () => {
+test('manual, automatic, and lifecycle saves still route through the same save guard', async () => {
   const editorContext = await readFile(
     new URL('../contexts/EditorContext.tsx', import.meta.url),
     'utf8',

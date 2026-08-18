@@ -1502,9 +1502,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             articleKey,
             title,
             plainText: currentText,
+            keywords,
+            goalContext,
         })) {
             if (showStatus) {
-                setSaveError('أدخل عنوانًا أو محتوى قبل حفظ المقالة.');
+                setSaveError('أدخل عنوانًا أو بيانات المقالة أو محتوى قبل حفظ المقالة.');
                 setSaveStatus('error');
             }
             return false;
