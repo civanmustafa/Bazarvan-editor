@@ -1,8 +1,17 @@
 # مسار النشر المعتمد على هوستينجر
 
-استخدم مسار الخادم التالي عند نشر محرر بازارفان:
+## الحالة الحالية (2026-08-18)
 
-`/var/www/bazarvan-editor`
+النطاق `https://smarteditor.bazarvan.com` يعمل على Supabase الذاتي داخل نفس VPS.
+مسار التشغيل المعتمد هو:
+
+`/var/www/bazarvan-editor-staging`
+
+أزيلت عمليات PM2 القديمة (`bazarvan-editor` والعمال الستة) التي كانت تستخدم
+Supabase Cloud، وحُفظت قائمة PM2 الجديدة عبر `pm2 save`. لا تُشغّل المجلد
+`/var/www/bazarvan-editor` أو ملف بيئته القديم؛ فهو أرشيف محلي فقط. جميع مواضع
+عبارة **Supabase SQL Editor** في هذا الدليل تعني قاعدة Supabase الذاتية على VPS،
+وليس مشروع Cloud.
 
 ## ترحيلات التحليل الخارجي
 
@@ -132,7 +141,7 @@
 
 إذا سبق أن نفّذت ترحيلات مركز العملاء السابقة، فلا تعِد تنفيذها؛ نفّذ الترحيلات `20260730010000_crawler_provider_secrets.sql` و`20260730020000_hybrid_client_site_crawler.sql` و`20260730030000_crawler_provider_usage_reports.sql` و`20260730040000_client_page_ai_link_profiles.sql` و`20260731010000_client_site_crawl_pgcrypto_fix.sql` و`20260731020000_economic_external_client_crawler.sql` بالترتيب قبل تحديث الواجهة والخادم. لا يحتاج هذا الترحيل إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة؛ فالمفتاح مطلوب فقط عند تشغيل التوليد بعد الزحف. يبقى الزاحف المحلي متاحًا دون أي مفتاح، وتُضاف الخدمات الخارجية اختياريًا من **الإعدادات ← خدمات الزحف**.
 
-يشغّل ملف PM2 العامل `bazarvan-client-page-crawler` تلقائيًا. يمكن ضبط سرعته وحدود الصفحات من متغيرات `CLIENT_PAGE_CRAWLER_*` الموثقة في `deploy/env.server.example`. لا يلزم إضافة مفتاح تشفير جديد؛ يشتق الخادم حماية مفاتيح الزحف من `SUPABASE_SERVICE_ROLE_KEY` الموجود أصلًا، ثم يدخل المسؤول مفاتيح Firecrawl وBrowserless من الواجهة. يسجل العامل كل محاولة في تقرير يومي مفصل دون تخزين المفتاح الخام.
+يشغّل ملف PM2 العامل `bazarvan-staging-client-page-crawler` تلقائيًا؛ الاسم التاريخي غير المستخدم حاليًا هو `bazarvan-client-page-crawler`. يمكن ضبط سرعته وحدود الصفحات من متغيرات `CLIENT_PAGE_CRAWLER_*` الموثقة في `deploy/env.server.example`. لا يلزم إضافة مفتاح تشفير جديد؛ يشتق الخادم حماية مفاتيح الزحف من `SUPABASE_SERVICE_ROLE_KEY` الموجود أصلًا، ثم يدخل المسؤول مفاتيح Firecrawl وBrowserless من الواجهة. يسجل العامل كل محاولة في تقرير يومي مفصل دون تخزين المفتاح الخام.
 
 عقد API وتشغيل الزاحف موثّقان في `docs/local-client-site-crawler-ar.md`.
 
@@ -143,7 +152,7 @@
 1. نفّذ `supabase/migrations/20260722050000_admin_ai_provider_secrets.sql` داخل **Supabase SQL Editor** إذا لم يكن منفذًا سابقًا.
 2. نفّذ الترحيل الجديد `supabase/migrations/20260726000000_user_ai_provider_secrets.sql` مرة واحدة لإتاحة مفاتيح Gemini المجانية والمدفوعة وOpenAI المدفوعة لكل مستخدم.
 3. أنشئ مفتاح تشفير واحدًا على الخادم بالأمر `openssl rand -base64 32`.
-4. أضف القيمة الناتجة باسم `AI_SETTINGS_ENCRYPTION_KEY` داخل `/var/www/bazarvan-editor/.env.production`.
+4. أضف القيمة الناتجة باسم `AI_SETTINGS_ENCRYPTION_KEY` داخل `/var/www/bazarvan-editor-staging/.env.production`.
 5. لا تحذف القيم الحالية لـ `OPENAI_API_KEY` و`GEMINI_PAID_API_KEYS`؛ فهي تبقى مفاتيح هوستينجر الاحتياطية عند فشل مفاتيح المستخدم ثم مفاتيح المسؤول.
 
 تُشفّر مفاتيح المسؤول والمستخدمين الخام بخوارزمية AES-256-GCM قبل تخزينها، ولا تعيدها واجهة الإعدادات، ولا تستطيع أدوار Supabase من نوع `anon` أو `authenticated` قراءتها. ترتيب الاستخدام هو مفاتيح المستخدم أولًا، ثم مفاتيح المسؤول، ثم مفاتيح هوستينجر.
@@ -190,14 +199,23 @@ ARTICLE_IMPORT_MAX_BYTES=4194304
 بعد تنفيذ ترحيلات Supabase المطلوبة، اتصل بالخادم عبر SSH ونفّذ:
 
 ```bash
-cd /var/www/bazarvan-editor
+cd /var/www/bazarvan-editor-staging
 git pull --ff-only origin main
 set -a
 source .env.production
 set +a
 npm ci
 npm run build
-pm2 startOrReload ecosystem.config.cjs --update-env
+for app in \
+  bazarvan-editor-staging \
+  bazarvan-staging-competitor-worker \
+  bazarvan-staging-ai-worker \
+  bazarvan-staging-full-article-pipeline-worker \
+  bazarvan-staging-ai-job-worker \
+  bazarvan-staging-content-writing-worker \
+  bazarvan-staging-client-page-crawler; do
+  pm2 restart "$app" --update-env
+done
 pm2 save
 curl -fsS https://smarteditor.bazarvan.com/healthz
 curl -fsS https://smarteditor.bazarvan.com/readyz
@@ -209,20 +227,21 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - `source .env.production`: يحمّل متغيرات بيئة الإنتاج أثناء البناء وإعادة التشغيل.
 - `npm ci`: يثبت الاعتماديات طبقًا لملف القفل.
 - `npm run build`: يبني الواجهة والخادم والعوامل وينفّذ فحوص الإصدار.
-- `pm2 startOrReload ... --update-env`: يشغّل العمليات الجديدة أو يعيد تحميل القائمة الحالية مع متغيرات البيئة المحدثة.
+- حلقة `pm2 restart`: تعيد تشغيل عمليات النسخة الذاتية السبعة فقط مع متغيرات البيئة المحدثة؛ لا تستخدم `pm2 restart all`.
 - `pm2 save`: يحفظ قائمة العمليات لكي تعود بعد إعادة تشغيل الخادم.
 - `/healthz`: يتحقق من أن خادم الويب يعمل.
 - `/readyz`: يتحقق أيضًا من بناء الإنتاج، ومخططات Supabase المطلوبة، ومفتاح التشفير. يعرض حالة عامل المنافسين داخل `checks.externalAnalysisWorker` ويضع `degraded: true` عند تعطل طابوره، لكنه لا يعيد HTTP 503 بسبب تأخر مهمة وحده حتى لا تدخل مراقبة هوستينجر وPM2 في حلقة إعادة تشغيل تقطع المهام.
 
 ## ملاحظات وتشخيص المشكلات
 
-- يشغّل PM2 خادم الويب وجميع العوامل المضبوطة، ومنها `bazarvan-content-writing-worker` و`bazarvan-client-page-crawler`، من `/var/www/bazarvan-editor`. هذا هو المسار المعتمد.
+- يشغّل PM2 خادم الويب والعمال السبعة الذاتيين من `/var/www/bazarvan-editor-staging`. هذا هو المسار المعتمد.
+- أسماء العمليات الحالية تبدأ بـ`bazarvan-editor-staging` و`bazarvan-staging-*`؛ لا تُعد تشغيل الأسماء القديمة.
 - لا تستخدم `/var/www/bazarvan-smarteditor` في تعليمات النشر المستقبلية إلا إذا أُعيد ضبط PM2 عمدًا للعمل منه.
 - إذا لم تكن حالة النشر واضحة، اعرض جميع العمليات بالأمر `pm2 status`.
-- لفحص خادم الويب استخدم `pm2 describe bazarvan-editor`.
-- لفحص عامل البحث وسحب المنافسين المستقل عبر Firecrawl استخدم `pm2 describe bazarvan-competitor-worker`، ولسجله استخدم `pm2 logs bazarvan-competitor-worker --lines 100`.
-- يستخدم `bazarvan-ai-worker` فقط للتحليل الدلالي والأوامر الهندسية، لذلك لا تمنع أخطاء Gemini عامل Firecrawl من استلام مهام المنافسين.
-- إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات البحث والسحب متدهورة ويجب فحص `bazarvan-competitor-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
-- لفحص عامل كتابة المقالة استخدم `pm2 describe bazarvan-content-writing-worker`.
-- لفحص عامل زحف صفحات العملاء استخدم `pm2 describe bazarvan-client-page-crawler`.
+- لفحص خادم الويب استخدم `pm2 describe bazarvan-editor-staging`.
+- لفحص عامل البحث وسحب المنافسين المستقل عبر Firecrawl استخدم `pm2 describe bazarvan-staging-competitor-worker`، ولسجله استخدم `pm2 logs bazarvan-staging-competitor-worker --lines 100`.
+- يستخدم `bazarvan-staging-ai-worker` فقط للتحليل الدلالي والأوامر الهندسية، لذلك لا تمنع أخطاء Gemini عامل Firecrawl من استلام مهام المنافسين.
+- إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات البحث والسحب متدهورة ويجب فحص `bazarvan-staging-competitor-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
+- لفحص عامل كتابة المقالة استخدم `pm2 describe bazarvan-staging-content-writing-worker`.
+- لفحص عامل زحف صفحات العملاء استخدم `pm2 describe bazarvan-staging-client-page-crawler`.
 - عند فشل `/readyz` لا تعتبر النشر مكتملًا؛ راجع الترحيلات ومتغيرات البيئة وسجل العملية في PM2.

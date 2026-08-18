@@ -5,6 +5,10 @@ import {
   COMPETITOR_SEARCH_RESULT_LIMIT,
   UNSUPPORTED_COMPETITOR_FILE_EXTENSIONS,
 } from '../constants/competitors.ts';
+import {
+  resolveCrawlerProviderCredential,
+  type CrawlerCredentialSource,
+} from './crawlerProviderSecrets.ts';
 
 export type CompetitorSearchResult = {
   url: string;
@@ -35,12 +39,16 @@ export class FirecrawlCompetitorError extends Error {
   readonly status: number;
   readonly code: string;
   readonly retryable: boolean;
+  readonly keySuffix: string;
+  readonly credentialSource: CrawlerCredentialSource | null;
 
   constructor(options: {
     message: string;
     status?: number;
     code?: string;
     retryable?: boolean;
+    keySuffix?: string;
+    credentialSource?: CrawlerCredentialSource | null;
   }) {
     super(options.message);
     this.name = 'FirecrawlCompetitorError';
@@ -49,6 +57,8 @@ export class FirecrawlCompetitorError extends Error {
     this.retryable = options.retryable ?? (
       this.status === 408 || this.status === 429 || this.status >= 500
     );
+    this.keySuffix = options.keySuffix || '';
+    this.credentialSource = options.credentialSource ?? null;
   }
 }
 
@@ -225,11 +235,39 @@ const toText = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
 
-const getFirecrawlConfiguration = (): { apiKey: string; baseUrl: string } => {
-  const apiKey = String(process.env.FIRECRAWL_API_KEY || '').trim();
-  if (!apiKey) {
+type FirecrawlConfiguration = {
+  apiKey: string;
+  baseUrl: string;
+  keySuffix: string;
+  source: CrawlerCredentialSource;
+};
+
+export type FirecrawlCredentialSummary = {
+  configured: boolean;
+  keySuffix: string;
+  source: CrawlerCredentialSource | null;
+};
+
+export const getFirecrawlCredentialSummary = async (): Promise<FirecrawlCredentialSummary> => {
+  const credential = await resolveCrawlerProviderCredential('firecrawl');
+  return credential
+    ? {
+        configured: true,
+        keySuffix: credential.keySuffix,
+        source: credential.source,
+      }
+    : {
+        configured: false,
+        keySuffix: '',
+        source: null,
+      };
+};
+
+const getFirecrawlConfiguration = async (): Promise<FirecrawlConfiguration> => {
+  const credential = await resolveCrawlerProviderCredential('firecrawl');
+  if (!credential) {
     throw new FirecrawlCompetitorError({
-      message: 'FIRECRAWL_API_KEY is not configured on the server.',
+      message: 'Firecrawl API key is not configured in administrator crawler settings or the server environment.',
       status: 503,
       code: 'firecrawl_not_configured',
       retryable: true,
@@ -238,17 +276,25 @@ const getFirecrawlConfiguration = (): { apiKey: string; baseUrl: string } => {
   const baseUrl = String(process.env.FIRECRAWL_API_URL || 'https://api.firecrawl.dev')
     .trim()
     .replace(/\/+$/, '');
-  return { apiKey, baseUrl };
+  return {
+    apiKey: credential.apiKey,
+    baseUrl,
+    keySuffix: credential.keySuffix,
+    source: credential.source,
+  };
 };
 
-export const isFirecrawlConfigured = (): boolean => Boolean(process.env.FIRECRAWL_API_KEY?.trim());
+export const isFirecrawlConfigured = async (): Promise<boolean> => {
+  const summary = await getFirecrawlCredentialSummary();
+  return summary.configured;
+};
 
 const firecrawlRequest = async (
   path: string,
   body: Record<string, unknown>,
   options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<Record<string, unknown>> => {
-  const { apiKey, baseUrl } = getFirecrawlConfiguration();
+  const { apiKey, baseUrl, keySuffix, source } = await getFirecrawlConfiguration();
   const controller = new AbortController();
   const timeoutMs = Math.max(5_000, Math.min(options.timeoutMs ?? 70_000, 120_000));
   const timeout = setTimeout(() => controller.abort(new Error('Firecrawl request timed out.')), timeoutMs);
@@ -278,6 +324,8 @@ const firecrawlRequest = async (
         status: response.status || 502,
         code: classification.code,
         retryable: classification.retryable,
+        keySuffix,
+        credentialSource: source,
       });
     }
     return normalized;
@@ -289,6 +337,8 @@ const firecrawlRequest = async (
         status: options.signal?.aborted ? 499 : 504,
         code: options.signal?.aborted ? 'competitor_extraction_cancelled' : 'firecrawl_timeout',
         retryable: !options.signal?.aborted,
+        keySuffix,
+        credentialSource: source,
       });
     }
     throw new FirecrawlCompetitorError({
@@ -296,6 +346,8 @@ const firecrawlRequest = async (
       status: 502,
       code: 'firecrawl_network_error',
       retryable: true,
+      keySuffix,
+      credentialSource: source,
     });
   } finally {
     clearTimeout(timeout);

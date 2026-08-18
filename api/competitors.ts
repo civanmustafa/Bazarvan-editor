@@ -517,7 +517,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     const state = await listCompetitors(supabase, articleId, body.includeContent !== false);
     return {
       status: 200,
-      body: { ok: true, action, providerConfigured: isFirecrawlConfigured(), ...state },
+      body: { ok: true, action, providerConfigured: await isFirecrawlConfigured(), ...state },
       headers: getCorsResponseHeaders(req),
     };
   }
@@ -683,9 +683,9 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
   if (action === 'extract') {
     consumeApiRateLimit('competitors-extract', principal.userId, 10);
-    if (!isFirecrawlConfigured()) {
+    if (!(await isFirecrawlConfigured())) {
       throw new CompetitorApiError({
-        message: 'FIRECRAWL_API_KEY is not configured on the server.',
+        message: 'Firecrawl API key is not configured in administrator crawler settings or the server environment.',
         status: 503,
         code: 'firecrawl_not_configured',
       });

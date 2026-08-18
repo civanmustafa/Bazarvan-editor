@@ -1,5 +1,6 @@
 import {
   FirecrawlCompetitorError,
+  getFirecrawlCredentialSummary,
 } from './firecrawlCompetitorService';
 import { COMPETITOR_EXTRACTION_MAX_ATTEMPTS } from '../constants/competitors';
 import { getCompetitorPreview } from './competitorPreviewCache';
@@ -55,9 +56,10 @@ type CompetitorFailure = {
 const FIRECRAWL_MODEL = 'v2/scrape';
 const PROGRAMMATIC_MODEL = 'deterministic-main-content';
 
-const getFirecrawlKeySuffix = (): string => (
-  String(process.env.FIRECRAWL_API_KEY || '').trim().slice(-6)
-);
+const getFirecrawlKeySuffix = async (): Promise<string> => {
+  const summary = await getFirecrawlCredentialSummary();
+  return summary.keySuffix;
+};
 
 const readCompetitors = async (articleId: string): Promise<CompetitorRow[]> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
@@ -226,7 +228,7 @@ const executeCompetitorExtraction = async (
         requestIndex: row.position,
         outcome: 'failed',
         model: FIRECRAWL_MODEL,
-        keySuffix: getFirecrawlKeySuffix(),
+        keySuffix: firecrawlError.keySuffix || await getFirecrawlKeySuffix(),
         status: firecrawlError.status,
         reason: firecrawlError.code,
         attempt: currentAttempt,

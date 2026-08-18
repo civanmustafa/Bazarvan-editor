@@ -29,7 +29,7 @@ const PROVIDERS: Array<{
     id: 'firecrawl',
     title: 'Firecrawl API',
     description:
-      'يُستخدم لاستخراج HTML بعد تنفيذ JavaScript. في الوضع التلقائي لا يُستهلك إلا عندما تكون نتيجة الزاحف المحلي ناقصة أو يفشل الاتصال المباشر.',
+      'يُستخدم لبحث المنافسين وسحب محتواهم، وكذلك لاستخراج HTML بعد تنفيذ JavaScript في زحف مواقع العملاء. في الوضع التلقائي لا يُستهلك لزحف العملاء إلا عندما تكون نتيجة الزاحف المحلي ناقصة أو يفشل الاتصال المباشر.',
     environmentVariable: 'FIRECRAWL_API_KEY',
   },
   {
@@ -195,7 +195,7 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
     <div className="space-y-4">
       <div className="rounded-md border-r-4 border-[#d4af37] bg-[#d4af37]/10 px-3 py-3 text-xs font-semibold leading-6 text-gray-700 dark:text-gray-200">
         المفاتيح لا تُعاد إلى المتصفح بعد حفظها؛ يظهر آخر أربعة أحرف فقط.
-        الزاحف المحلي متاح دائمًا، والوضع التلقائي يستخدم الخدمات الخارجية عند الحاجة فقط.
+        مفتاح Firecrawl هنا يفعّل بحث المنافسين وسحب محتواهم لكل المستخدمين، والزاحف المحلي يبقى متاحًا دائمًا لمواقع العملاء.
       </div>
 
       {(!overview?.schemaAvailable || !overview?.encryptionConfigured) && (

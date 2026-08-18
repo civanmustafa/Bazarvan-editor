@@ -271,6 +271,22 @@ test('manual and queued competitor discovery load the linked client domain exclu
   assert.match(exclusionSource, /\.eq\('is_active', true\)/);
 });
 
+test('competitor Firecrawl operations use the admin crawler key before Hostinger fallback', async () => {
+  const [service, apiSource, settings, panel] = await Promise.all([
+    readWorkspaceFile('server/firecrawlCompetitorService.ts'),
+    readWorkspaceFile('api/competitors.ts'),
+    readWorkspaceFile('components/AdminCrawlerProviderSecretsSettings.tsx'),
+    readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
+  ]);
+
+  assert.match(service, /resolveCrawlerProviderCredential\('firecrawl'\)/);
+  assert.match(service, /export const isFirecrawlConfigured = async/);
+  assert.match(apiSource, /providerConfigured: await isFirecrawlConfigured\(\)/);
+  assert.match(apiSource, /!\(await isFirecrawlConfigured\(\)\)/);
+  assert.match(settings, /بحث المنافسين وسحب محتواهم/);
+  assert.match(panel, /إعدادات المسؤول ← خدمات الزحف/);
+});
+
 test('expanded intent lexicon recognizes Arabic support and transactional searches', () => {
   const support = analyzeAndSelectCompetitors({
     context: {

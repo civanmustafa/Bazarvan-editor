@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   canonicalizeCompetitorUrl,
+  getFirecrawlCredentialSummary,
   scrapeCompetitorWeb,
   type ScrapedCompetitorContent,
 } from './firecrawlCompetitorService';
@@ -65,9 +66,10 @@ const createCacheKey = (canonicalUrl: string): string => (
   createHash('sha256').update(canonicalUrl).digest('hex')
 );
 
-const getProviderKeySuffix = (): string => (
-  String(process.env.FIRECRAWL_API_KEY || '').trim().slice(-6)
-);
+const getProviderKeySuffix = async (): Promise<string> => {
+  const summary = await getFirecrawlCredentialSummary();
+  return summary.keySuffix;
+};
 
 const isMissingCacheTable = (error: { code?: string; message?: string } | null): boolean => (
   Boolean(error) && (
@@ -132,6 +134,7 @@ const savePreview = async (
   preview: ScrapedCompetitorContent,
   fetchedAt: string,
   expiresAt: string,
+  providerKeySuffix: string,
 ): Promise<void> => {
   const { error } = await getExternalAnalysisSupabaseAdmin()
     .from(CACHE_TABLE)
@@ -147,7 +150,7 @@ const savePreview = async (
       content_text: preview.text,
       word_count: preview.wordCount,
       extraction_provider: 'firecrawl',
-      provider_key_suffix: getProviderKeySuffix(),
+      provider_key_suffix: providerKeySuffix,
       fetched_at: fetchedAt,
       expires_at: expiresAt,
     }, { onConflict: 'cache_key' });
@@ -175,12 +178,13 @@ export const getCompetitorPreview = async (options: {
   });
   const fetchedAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + (getCacheHours() * 60 * 60 * 1000)).toISOString();
-  await savePreview(scraped, fetchedAt, expiresAt);
+  const providerKeySuffix = await getProviderKeySuffix();
+  await savePreview(scraped, fetchedAt, expiresAt, providerKeySuffix);
   return {
     ...scraped,
     cacheHit: false,
     provider: 'firecrawl',
-    providerKeySuffix: getProviderKeySuffix(),
+    providerKeySuffix,
     fetchedAt,
     expiresAt,
   };

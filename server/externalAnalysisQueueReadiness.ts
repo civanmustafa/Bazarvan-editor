@@ -1,5 +1,6 @@
 import { COMPETITOR_QUEUE_STALL_MS } from '../constants/competitors.ts';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
+import { isFirecrawlConfigured } from './firecrawlCompetitorService.ts';
 
 const WORKER_COMPETITOR_JOB_TYPES = ['competitor_discovery', 'competitor_extraction'];
 
@@ -91,7 +92,7 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
   }
 
   const firecrawlConfigured = options.firecrawlConfigured
-    ?? Boolean(process.env.FIRECRAWL_API_KEY?.trim());
+    ?? await isFirecrawlConfigured().catch(() => false);
   const checks: ExternalAnalysisQueueReadinessResult['checks'] = {
     queueTable: false,
     firecrawlConfigured,
@@ -149,7 +150,7 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
   }
 
   if (!firecrawlConfigured) {
-    detail = detail || 'FIRECRAWL_API_KEY is not configured.';
+    detail = detail || 'Firecrawl API key is not configured in administrator crawler settings or the server environment.';
   }
   const ok = Object.values(checks).every(Boolean);
   const result: ExternalAnalysisQueueReadinessResult = {
