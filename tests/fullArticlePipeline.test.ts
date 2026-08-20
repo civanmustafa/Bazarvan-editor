@@ -114,16 +114,20 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
   assert.match(briefExecutor, /generatedBrief: briefText/);
   assert.match(worker, /readAiJobRetryMinutes/);
   assert.match(worker, /administratorRetryMinutes/);
+  assert.match(worker, /EXTERNAL_ANALYSIS_MAX_RETRY_COUNT/);
+  assert.match(worker, /external_analysis_retry_limit_reached/);
   assert.match(ecosystem, /name: 'bazarvan-full-article-pipeline-worker'/);
   assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'full_article_pipeline'/);
   assert.match(ecosystem, /semantic_keywords_lsi,content_brief_generation,engineering_command/);
 
   assert.match(api, /action === 'full_pipeline'/);
+  assert.match(api, /action === 'list'/);
   assert.match(api, /enqueue_full_article_pipeline/);
   assert.match(api, /request_content_writing_session_cancel/);
   assert.match(component, /بدء الإنشاء الشامل/);
   assert.match(component, /يُدرج المقالة حتى عند عدم اجتياز بوابة الجودة/);
   assert.match(component, /استئناف الآن/);
+  assert.match(component, /listExternalAnalysisJobsViaApi/);
   assert.match(component, /onReloadGoalContext/);
   assert.match(component, /contentBriefSavedAt/);
   assert.match(contentWritingPanel, /onReloadGoalContext=\{reloadActiveGoalContextFromRemote\}/);

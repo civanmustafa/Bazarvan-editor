@@ -747,7 +747,11 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(panel, /isAiProviderAvailable\('geminiPaid'\)/);
   assert.match(panel, /isAiProviderEnabled\('chatgpt'\)/);
   assert.match(panel, /isAiProviderAvailable\('chatgpt'\)/);
-  assert.match(panel, /await handleSaveDraft\(\)/);
+  assert.ok(
+    (panel.match(/await handleSaveDraft\(\{ reason: 'manual', force: true \}\)/g) || []).length >= 2,
+    'starting either API or external writing must force a successful article save first',
+  );
+  assert.doesNotMatch(panel, /!saved && editor\?\.getText\(\)\.trim\(\)/);
   assert.match(panel, /startInFlightRef\.current/);
   assert.match(panel, /pendingStartRef\.current/);
   assert.match(panel, /createContentWritingIdempotencyKey\(articleId\)/);

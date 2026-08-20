@@ -161,6 +161,11 @@ export const isProtectedKeywordTerm = (
 
 // Counts keyword matches with language-aware boundaries.
 // Arabic uses light normalization plus common prefixes/suffixes.
+// In Unicode regular expressions, escaping a hyphen outside a character class
+// is an invalid identity escape (for example `multi\-iq`). Keep ordinary
+// punctuation literal and only escape characters that are special in patterns.
+const escapeRegex = (value: string): string => value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+
 export const countOccurrences = (text: string, sub: string, lang: 'ar' | 'en'): number => {
     if (!sub || !text) return 0;
 
@@ -172,7 +177,7 @@ export const countOccurrences = (text: string, sub: string, lang: 'ar' | 'en'): 
 
         const prefixes = '(ال|و|ف|ب|ك|ل|وبال|وال|فال|فل|وب|فب|كال|لل)?';
         const suffixes = '(ه|ها|هم|هن|ك|كم|كن|ي|نا|ان|ون|ين|ات|تم|كما|هما)?';
-        const escapedSub = normalizedSub.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const escapedSub = escapeRegex(normalizedSub);
         const regex = new RegExp(`(?<!\\p{L})${prefixes}${escapedSub}${suffixes}(?!\\p{L})`, 'gu');
         
         const matches = normalizedText.match(regex);
@@ -183,13 +188,11 @@ export const countOccurrences = (text: string, sub: string, lang: 'ar' | 'en'): 
 
         if (!normalizedSub) return 0;
         
-        const escapedSub = normalizedSub.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const escapedSub = escapeRegex(normalizedSub);
         const regex = new RegExp(`\\b${escapedSub}\\b`, 'gi');
         return (normalizedText.match(regex) || []).length;
     }
 };
-
-const escapeRegex = (value: string): string => value.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
 
 const ARABIC_OPTIONAL_MARKS_PATTERN = '[\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED\\u0640]*';
 

@@ -25,7 +25,7 @@ import {
 } from '../utils/aiExecutionActivity';
 import { formatAiKeySuffix } from '../utils/aiKeyUsageFeedback';
 
-const TERMINAL_NOTICE_TTL_MS = 18_000;
+const TERMINAL_NOTICE_TTL_MS = 60_000;
 
 const SURFACE_LABELS: Record<string, [string, string]> = {
   semantic_keywords_lsi: ['توليد الصيغ وLSI', 'Alternatives and LSI'],

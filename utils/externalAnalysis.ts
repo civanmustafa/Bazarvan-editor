@@ -604,6 +604,21 @@ const requestExternalAnalysis = async (
   return normalized;
 };
 
+export const listExternalAnalysisJobsViaApi = async (
+  articleId: string,
+  limit = 100,
+): Promise<ExternalAnalysisJobRow[]> => {
+  if (!articleId.trim()) return [];
+  const payload = await requestExternalAnalysis(articleId, {
+    action: 'list',
+    limit: Math.max(1, Math.min(limit, 250)),
+  });
+  const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+  return deduplicateExternalAnalysisTasks(
+    jobs.filter(isRecord).map(row => toJobRow(row)),
+  );
+};
+
 export const enqueueExternalSemanticAnalysis = (articleId: string) => (
   requestExternalAnalysis(articleId, { action: 'semantic' })
 );

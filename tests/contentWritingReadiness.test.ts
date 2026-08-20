@@ -135,7 +135,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(server, /const degraded = ok && !externalAnalysisWorker\.ok/);
   assert.doesNotMatch(server, /&& externalAnalysisWorker\.ok/);
   assert.match(deploymentGuide, /curl -fsS https:\/\/smarteditor\.bazarvan\.com\/readyz/);
-  assert.match(deploymentGuide, /pm2 describe bazarvan-competitor-worker/);
+  assert.match(deploymentGuide, /pm2 describe bazarvan-staging-competitor-worker/);
   assert.match(deploymentGuide, /لا تعِد تشغيل خادم الويب تلقائيًا/);
   assert.match(packageJson.scripts?.postbuild || '', /check:content-writing-release/);
 });

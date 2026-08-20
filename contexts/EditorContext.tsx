@@ -1030,7 +1030,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     // TipTap extensions live here. Add editor-level behavior or formatting support in this list.
     const extensions = useMemo(() => [
-        StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
+        StarterKit.configure({
+            heading: { levels: [1, 2, 3, 4] },
+            // A separately configured Link extension is registered below.
+            link: false,
+        }),
         TextAlign.configure({ types: ['heading', 'paragraph', 'listItem', 'tableCell', 'tableHeader'], alignments: ['left', 'center', 'right', 'justify'] }),
         Link.configure({
             openOnClick: false,

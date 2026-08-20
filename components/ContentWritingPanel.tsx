@@ -29,8 +29,10 @@ import {
   formatAiKeySuffix,
 } from '../utils/aiKeyUsageFeedback';
 import {
+  AI_EXECUTION_ACTIVITY_EVENT,
   beginAiExecutionActivity,
   finishAiExecutionActivity,
+  getAiExecutionActivities,
 } from '../utils/aiExecutionActivity';
 import {
   getContentWritingActivityId,
@@ -303,6 +305,8 @@ const ContentWritingPanel: React.FC = () => {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [actionState, setActionState] = useState<ActionState>('idle');
   const [errorPresentation, setErrorPresentation] = useState<ErrorPresentation | null>(null);
+  const [listLoadError, setListLoadError] = useState('');
+  const [hasRunningWritingActivity, setHasRunningWritingActivity] = useState(false);
   const [copied, setCopied] = useState(false);
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
   const [isApplying, setIsApplying] = useState(false);
@@ -345,6 +349,19 @@ const ContentWritingPanel: React.FC = () => {
 
   useEffect(() => {
     activeArticleRef.current = articleId;
+  }, [articleId]);
+
+  useEffect(() => {
+    const synchronizeActivity = () => {
+      setHasRunningWritingActivity(getAiExecutionActivities().some(activity => (
+        activity.state === 'running'
+        && activity.surface === 'content_writing'
+        && activity.articleId === articleId
+      )));
+    };
+    synchronizeActivity();
+    window.addEventListener(AI_EXECUTION_ACTIVITY_EVENT, synchronizeActivity);
+    return () => window.removeEventListener(AI_EXECUTION_ACTIVITY_EVENT, synchronizeActivity);
   }, [articleId]);
 
   const providerConfigs = useMemo(() => ([
@@ -529,6 +546,7 @@ const ContentWritingPanel: React.FC = () => {
     try {
       const rows = await listContentWritingSessions(targetArticleId);
       if (activeArticleRef.current !== targetArticleId) return;
+      setListLoadError('');
       setSessions(rows);
       const preferredId = options.selectNewest
         ? rows[0]?.id
@@ -541,7 +559,11 @@ const ContentWritingPanel: React.FC = () => {
         setSelectedDetail(null);
       }
     } catch (error) {
-      if (!options.silent) setErrorPresentation(getErrorPresentation(error, isArabic));
+      if (activeArticleRef.current === targetArticleId) {
+        const presentation = getErrorPresentation(error, isArabic);
+        setListLoadError(presentation.message);
+        if (!options.silent) setErrorPresentation(presentation);
+      }
     } finally {
       if (!options.silent && activeArticleRef.current === targetArticleId) setIsListLoading(false);
     }
@@ -553,6 +575,7 @@ const ContentWritingPanel: React.FC = () => {
     setSelectedSessionId('');
     setSelectedDetail(null);
     setErrorPresentation(null);
+    setListLoadError('');
     setCopied(false);
     setReviewSnapshot(null);
     setApplicationNotice(null);
@@ -576,12 +599,12 @@ const ContentWritingPanel: React.FC = () => {
   }, [loadDetail, selectedSession, selectedSessionId]);
 
   useEffect(() => {
-    if (!articleId || !sessions.some(isContentWritingSessionActive)) return;
+    if (!articleId || (!sessions.some(isContentWritingSessionActive) && !hasRunningWritingActivity)) return;
     const timer = window.setInterval(() => {
       void refreshSessions({ silent: true });
     }, LIST_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [articleId, refreshSessions, sessions]);
+  }, [articleId, hasRunningWritingActivity, refreshSessions, sessions]);
 
   const startSession = async () => {
     if (!articleId || !selectedProviderConfig?.available || hasActiveSession || startInFlightRef.current) return;
@@ -611,8 +634,8 @@ const ContentWritingPanel: React.FC = () => {
     setActionState('starting');
     setErrorPresentation(null);
     try {
-      const saved = await handleSaveDraft();
-      if (!saved && editor?.getText().trim()) {
+      const saved = await handleSaveDraft({ reason: 'manual', force: true });
+      if (!saved) {
         throw new Error(isArabic
           ? 'تعذر حفظ بيانات المقالة قبل بدء جلسة الكتابة.'
           : 'The article could not be saved before starting the writing session.');
@@ -675,8 +698,8 @@ const ContentWritingPanel: React.FC = () => {
   const prepareExternalConversation = useCallback(async () => {
     if (!articleId) throw new Error(isArabic ? 'احفظ المقالة أولًا.' : 'Save the article first.');
     const targetArticleId = articleId;
-    const saved = await handleSaveDraft();
-    if (!saved && editor?.getText().trim()) {
+    const saved = await handleSaveDraft({ reason: 'manual', force: true });
+    if (!saved) {
       throw new Error(isArabic
         ? 'تعذر حفظ بيانات المقالة قبل تجهيز المحادثة الخارجية.'
         : 'The article could not be saved before preparing the external conversation.');
@@ -685,7 +708,7 @@ const ContentWritingPanel: React.FC = () => {
       throw new Error(isArabic ? 'تغيرت المقالة النشطة.' : 'The active article changed.');
     }
     return prepareExternalContentWritingConversation(targetArticleId);
-  }, [articleId, editor, handleSaveDraft, isArabic]);
+  }, [articleId, handleSaveDraft, isArabic]);
 
   const importExternalResult = useCallback(async (
     externalProvider: ExternalAiBridgeProvider,
@@ -1529,9 +1552,26 @@ const ContentWritingPanel: React.FC = () => {
             <span className="text-xs font-bold text-gray-700 dark:text-gray-200">{isArabic ? 'سجل الكتابة' : 'Writing history'}</span>
             <span className="text-[10px] font-bold tabular-nums text-gray-400">{sessions.length}</span>
           </div>
+          {listLoadError && (
+            <div className="mb-2 flex items-start justify-between gap-2 rounded-md border border-red-200 bg-red-50 p-2 text-[10px] font-bold leading-5 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+              <span>{isArabic ? `تعذر تحديث سجل الكتابة: ${listLoadError}` : `Could not refresh writing history: ${listLoadError}`}</span>
+              <button
+                type="button"
+                onClick={() => void refreshSessions()}
+                className="shrink-0 rounded p-1 hover:bg-red-100 dark:hover:bg-red-900/30"
+                title={isArabic ? 'إعادة المحاولة' : 'Retry'}
+              >
+                <RefreshCw size={13} />
+              </button>
+            </div>
+          )}
           {sessions.length === 0 && !isListLoading ? (
-            <div className="py-5 text-center text-xs font-semibold text-gray-400">
-              {isArabic ? 'لا توجد جلسات كتابة بعد.' : 'No writing sessions yet.'}
+            <div className={`py-5 text-center text-xs font-semibold ${hasRunningWritingActivity ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400'}`}>
+              {hasRunningWritingActivity
+                ? (isArabic
+                    ? 'توجد عملية كتابة نشطة؛ جار مزامنة سجلها من الخادم...'
+                    : 'A writing operation is active; its server record is being synchronized...')
+                : (isArabic ? 'لا توجد جلسات كتابة بعد.' : 'No writing sessions yet.')}
             </div>
           ) : (
             <div className="divide-y divide-gray-100 overflow-hidden rounded-md border border-gray-200 bg-white dark:divide-[#333] dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">

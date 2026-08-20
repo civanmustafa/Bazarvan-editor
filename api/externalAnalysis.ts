@@ -78,6 +78,15 @@ const ENQUEUED_JOB_SELECT = [
   'updated_at',
 ].join(',');
 
+const FULL_JOB_SELECT = [
+  ENQUEUED_JOB_SELECT,
+  'requested_by',
+  'input_snapshot',
+  'result',
+  'cancel_requested_at',
+  'started_at',
+].join(',');
+
 class ExternalAnalysisApiError extends Error {
   status: number;
   code: string;
@@ -605,6 +614,18 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   await requireArticleWriteAccess(supabase, article.id, profile.id);
   const action = toTrimmedString(body.action);
 
+  if (action === 'list') {
+    const limit = Math.max(1, Math.min(250, Math.round(Number(body.limit) || 100)));
+    const { data: jobs, error } = await supabase
+      .from('ai_external_analysis_jobs')
+      .select(FULL_JOB_SELECT)
+      .eq('article_id', article.id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return { status: 200, body: { ok: true, action, jobs: jobs || [] } };
+  }
+
   if (action === 'semantic') {
     const result = await enqueueSemanticJob(supabase, article, state);
     return { status: result.job && !result.alreadyActive ? 201 : 200, body: { ok: true, action, ...result } };
@@ -691,7 +712,7 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new ExternalAnalysisApiError({
-    message: 'action must be semantic, full_pipeline, engineering, use_default_commands, cancel, cancel_all, or retry.',
+    message: 'action must be list, semantic, full_pipeline, engineering, use_default_commands, cancel, cancel_all, or retry.',
     code: 'invalid_action',
   });
 };

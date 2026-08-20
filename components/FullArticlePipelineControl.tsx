@@ -16,7 +16,7 @@ import {
   cancelExternalAnalysisJob,
   enqueueFullArticlePipeline,
   EXTERNAL_ANALYSIS_ACTIVE_STATUSES,
-  listExternalAnalysisJobs,
+  listExternalAnalysisJobsViaApi,
   retryExternalAnalysisJob,
   type ExternalAnalysisJobRow,
 } from '../utils/externalAnalysis';
@@ -73,6 +73,15 @@ const formatDate = (value: string | null, isArabic: boolean): string => {
   }).format(date);
 };
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (error && typeof error === 'object' && !Array.isArray(error)) {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+  return fallback;
+};
+
 const FullArticlePipelineControl: React.FC<Props> = ({
   articleId,
   articleTitle,
@@ -88,57 +97,64 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   const [job, setJob] = useState<ExternalAnalysisJobRow | null>(null);
   const [busy, setBusy] = useState<'start' | 'cancel' | 'retry' | ''>('');
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [expanded, setExpanded] = useState(true);
   const reloadedJobsRef = useRef(new Set<string>());
   const syncedBriefJobsRef = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     if (!articleId) return;
-    const rows = await listExternalAnalysisJobs(articleId, 50);
-    const pipeline = rows
-      .filter(row => row.job_type === 'full_article_pipeline')
-      .sort((left, right) => (
-        new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
-      ))[0] || null;
-    setJob(pipeline);
-    const briefJobId = String(pipeline?.progress?.briefJobId || '').trim();
-    const contentBriefSavedAt = String(pipeline?.progress?.contentBriefSavedAt || '').trim();
-    if (
-      pipeline
-      && briefJobId
-      && contentBriefSavedAt
-      && !syncedBriefJobsRef.current.has(briefJobId)
-    ) {
-      syncedBriefJobsRef.current.add(briefJobId);
-      const synchronized = await onReloadGoalContext(articleId);
-      if (!synchronized) syncedBriefJobsRef.current.delete(briefJobId);
+    try {
+      const rows = await listExternalAnalysisJobsViaApi(articleId, 50);
+      const pipeline = rows
+        .filter(row => row.job_type === 'full_article_pipeline')
+        .sort((left, right) => (
+          new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
+        ))[0] || null;
+      setJob(pipeline);
+      setLoadError('');
+      const briefJobId = String(pipeline?.progress?.briefJobId || '').trim();
+      const contentBriefSavedAt = String(pipeline?.progress?.contentBriefSavedAt || '').trim();
+      if (
+        pipeline
+        && briefJobId
+        && contentBriefSavedAt
+        && !syncedBriefJobsRef.current.has(briefJobId)
+      ) {
+        syncedBriefJobsRef.current.add(briefJobId);
+        const synchronized = await onReloadGoalContext(articleId);
+        if (!synchronized) syncedBriefJobsRef.current.delete(briefJobId);
+      }
+      if (
+        pipeline
+        && !reloadedJobsRef.current.has(pipeline.id)
+        && (
+          pipeline.status === 'completed'
+          || Boolean(pipeline.progress?.articleAppliedAt)
+          || Boolean(pipeline.result?.articleApplied)
+        )
+      ) {
+        reloadedJobsRef.current.add(pipeline.id);
+        await onReloadArticle(articleId);
+      }
+    } catch (refreshError) {
+      setLoadError(getErrorMessage(
+        refreshError,
+        isArabic ? 'تعذر تحميل حالة الإنشاء الشامل.' : 'Could not load the full workflow status.',
+      ));
     }
-    if (
-      pipeline
-      && !reloadedJobsRef.current.has(pipeline.id)
-      && (
-        pipeline.status === 'completed'
-        || Boolean(pipeline.progress?.articleAppliedAt)
-        || Boolean(pipeline.result?.articleApplied)
-      )
-    ) {
-      reloadedJobsRef.current.add(pipeline.id);
-      await onReloadArticle(articleId);
-    }
-  }, [articleId, onReloadArticle, onReloadGoalContext]);
+  }, [articleId, isArabic, onReloadArticle, onReloadGoalContext]);
 
   useEffect(() => {
-    void refresh().catch(loadError => {
-      console.error('Could not load the full article pipeline:', loadError);
-    });
+    setJob(null);
+    setLoadError('');
+    void refresh();
   }, [refresh]);
 
   useEffect(() => {
     if (!job || !isActive(job)) return;
     const timer = window.setInterval(() => {
-      void refresh().catch(loadError => {
-        console.error('Could not refresh the full article pipeline:', loadError);
-      });
+      void refresh();
     }, 4_000);
     return () => window.clearInterval(timer);
   }, [job, refresh]);
@@ -248,7 +264,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
       <div className="mt-3 flex items-end gap-2">
         <label className="min-w-0 flex-1">
           <span className="mb-1 block text-[10px] font-black text-gray-600 dark:text-gray-300">
-            {isArabic ? 'عدد المنافسين' : 'Competitors'}
+            {isArabic ? 'عدد منافسي الإنشاء الشامل' : 'Full-workflow competitors'}
           </span>
           <select
             value={competitorCount}
@@ -272,6 +288,26 @@ const FullArticlePipelineControl: React.FC<Props> = ({
           {isArabic ? 'بدء الإنشاء الشامل' : 'Start full workflow'}
         </button>
       </div>
+
+      <p className="mt-1.5 text-[9px] font-bold leading-4 text-gray-500 dark:text-gray-400">
+        {isArabic
+          ? 'هذا العدد خاص بزر «بدء الإنشاء الشامل»؛ زر «كتابة المقالة» يستخدم المنافسين المحفوظين حاليًا في المقالة.'
+          : 'This count only applies to “Start full workflow”; “Write article” uses the competitors already saved on the article.'}
+      </p>
+
+      {loadError && (
+        <div className="mt-2 flex items-start justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-bold leading-5 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="shrink-0 rounded p-1 hover:bg-red-100 dark:hover:bg-red-900/30"
+            title={isArabic ? 'إعادة المحاولة' : 'Retry'}
+          >
+            <RefreshCw size={13} />
+          </button>
+        </div>
+      )}
 
       {job && expanded && (
         <div className="mt-3 rounded-lg border border-gray-200 bg-white/80 p-2.5 dark:border-[#414141] dark:bg-[#202020]/80">
@@ -335,6 +371,13 @@ const FullArticlePipelineControl: React.FC<Props> = ({
           </div>
 
           <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-bold text-gray-500 dark:text-gray-400">
+            {(job.attempt_count > 0 || job.retry_count > 0) && (
+              <span className="rounded bg-gray-100 px-2 py-1 dark:bg-[#303030]">
+                {isArabic
+                  ? `المحاولات: ${job.attempt_count} · الإعادات: ${job.retry_count}`
+                  : `Attempts: ${job.attempt_count} · Retries: ${job.retry_count}`}
+              </span>
+            )}
             {Number.isFinite(selectedCompetitorCount) && selectedCompetitorCount > 0 && (
               <span className="rounded bg-gray-100 px-2 py-1 dark:bg-[#303030]">
                 {isArabic ? `المنافسون: ${selectedCompetitorCount}` : `Competitors: ${selectedCompetitorCount}`}
@@ -354,6 +397,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
 
           {job.last_error && (
             <div className="mt-2 rounded-md bg-red-50 px-2 py-1.5 text-[10px] font-bold leading-5 text-red-700 dark:bg-red-900/20 dark:text-red-300">
+              {job.last_error_code && <span className="me-1 font-mono" dir="ltr">[{job.last_error_code}]</span>}
               {job.last_error}
             </div>
           )}
