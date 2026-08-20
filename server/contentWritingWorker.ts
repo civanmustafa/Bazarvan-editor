@@ -199,6 +199,10 @@ const executeClaimedSession = async (
       const qualityReport = result.metadata.qualityReport && typeof result.metadata.qualityReport === 'object'
         ? result.metadata.qualityReport as Record<string, unknown>
         : null;
+      const finalWorkflowStepCount = Math.max(0, Number(result.metadata.stepCount) || 0);
+      const finalWorkflowStepKey = typeof result.metadata.finalStepKey === 'string'
+        ? result.metadata.finalStepKey
+        : '';
       const progress = {
         ...latestProgress,
         stage: 'completed',
@@ -207,6 +211,12 @@ const executeClaimedSession = async (
         status: result.status,
         message: 'Structured content writing and final review completed successfully.',
         completed: true,
+        ...(finalWorkflowStepCount > 0 ? {
+          workflowStepIndex: finalWorkflowStepCount,
+          workflowStepCount: finalWorkflowStepCount,
+          workflowCompletedSteps: finalWorkflowStepCount,
+        } : {}),
+        ...(finalWorkflowStepKey ? { workflowStepKey: finalWorkflowStepKey } : {}),
         ...(qualityReport ? {
           qualityScore: Number(qualityReport.score) || 0,
           qualityMinimumScore: Number(qualityReport.minimumScore) || 0,

@@ -283,10 +283,15 @@ const deriveClaimPolicy = (options: {
   const hasPrimarySource = options.supportingSources.some(
     source => source.usePolicy === 'primary_support',
   );
+  if (freshnessSensitive && !hasPrimarySource) {
+    return {
+      verificationStatus: 'requires_external_verification',
+      usagePolicy: 'blocked',
+    };
+  }
   if (
     options.riskLevel === 'high'
     || sensitive
-    || (freshnessSensitive && !hasPrimarySource)
   ) {
     return {
       verificationStatus: 'requires_external_verification',

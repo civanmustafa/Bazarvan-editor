@@ -108,7 +108,8 @@ test('structured writing results are fetched without reloading full step prompts
   assert.match(service, /options\.includeContent \? \['prompt_text'\] : \[\]/);
   assert.match(client, /includeStepOutput\?: boolean/);
   assert.match(client, /includeStepMetadata\?: boolean/);
-  assert.match(panel, /includeStepOutput: true/);
+  assert.match(panel, /includeStepOutput: options\.includeStepOutput === true/);
+  assert.match(panel, /!\('outputText' in step\)/);
   assert.match(panel, /includeStepMetadata: true/);
   assert.match(panel, /automaticWorkflowStepKey/);
   assert.match(panel, /content-writing-step-result-/);

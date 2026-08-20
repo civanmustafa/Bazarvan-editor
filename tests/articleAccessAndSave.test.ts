@@ -98,6 +98,20 @@ test('database preserves accidental empty saves and permits only an explicit tra
   assert.match(editorContext, /editorChangedAfterLoad: hasEditorChangedAfterArticleLoadRef\.current/);
 });
 
+test('article time tracking uses an authenticated atomic increment', async () => {
+  const [migration, articleClient] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260820020000_atomic_article_time_tracking.sql'),
+    readWorkspaceFile('utils/supabaseArticles.ts'),
+  ]);
+
+  assert.match(migration, /function public\.record_article_time\s*\(/);
+  assert.match(migration, /article_access_level_for_user\(p_article_id, v_user_id\) not in \('write', 'admin'\)/);
+  assert.match(migration, /time_spent_seconds = coalesce\(article\.time_spent_seconds, 0\) \+ p_seconds/);
+  assert.match(migration, /grant execute on function public\.record_article_time\(uuid, integer\) to authenticated, service_role/);
+  assert.match(articleClient, /rpc\('record_article_time'/);
+  assert.match(articleClient, /\['PGRST202', '42883'\]/);
+});
+
 test('dashboard, access/save, and performance migrations have balanced SQL delimiters', async () => {
   const migrations = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260711010000_dashboard_filtered_pagination.sql'),
@@ -108,6 +122,7 @@ test('dashboard, access/save, and performance migrations have balanced SQL delim
     readWorkspaceFile('supabase/migrations/20260714020000_external_analysis_exactly_once.sql'),
     readWorkspaceFile('supabase/migrations/20260714030000_automatic_competitor_discovery.sql'),
     readWorkspaceFile('supabase/migrations/20260820010000_allow_intentional_article_content_clear.sql'),
+    readWorkspaceFile('supabase/migrations/20260820020000_atomic_article_time_tracking.sql'),
   ]);
 
   migrations.forEach((migration) => {

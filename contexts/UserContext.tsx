@@ -223,7 +223,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [currentUserRole, setCurrentUserRole] = useState<UserRole>('user');
     const [currentView, setCurrentViewState] = useState<AppView>('login');
     const [isAuthLoading, setIsAuthLoading] = useState(true);
-    const [isDarkMode, setIsDarkMode] = useState(getInitialTheme);
+    const [isDarkMode, setIsDarkModeState] = useState(getInitialTheme);
+    const themePreferenceChangeVersionRef = useRef(0);
+    const setIsDarkMode = useCallback<React.Dispatch<React.SetStateAction<boolean>>>((value) => {
+        themePreferenceChangeVersionRef.current += 1;
+        setIsDarkModeState(value);
+    }, []);
     const [highlightStyle, setHighlightStyle] = useState<'background' | 'underline'>('background');
     const [chatGptOpenMode, setChatGptOpenMode] = useState<ChatGptOpenMode>('window');
     const [keywordViewMode, setKeywordViewMode] = useState<'classic' | 'modern'>('classic');
@@ -434,14 +439,19 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             document.documentElement.classList.remove('dark');
         }
         const theme = isDarkMode ? 'dark' : 'light';
+        const changeVersion = themePreferenceChangeVersionRef.current;
         if (currentUser) {
             saveUserPreference(currentUser, { preferredTheme: theme });
         }
-        if (currentUserId && preferencesReadyUserId === currentUserId) {
+        if (currentUserId && preferencesReadyUserId === currentUserId && changeVersion > 0) {
             void saveCurrentUserPreferencesPatch({
                 appearance: { theme },
+            }).then(() => {
+                if (themePreferenceChangeVersionRef.current === changeVersion) {
+                    themePreferenceChangeVersionRef.current = 0;
+                }
             }).catch(error => {
-                console.error('Failed to save theme preference to Supabase:', error);
+                console.error('Failed to save theme preference to the server database:', error);
             });
         }
         try {
@@ -618,7 +628,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setStructureViewMode(preferences.appearance.structureViewMode);
             setPreferredLanguage(preferences.editor.preferredLanguage);
             setUiLanguage(preferences.editor.uiLanguage);
-            setIsDarkMode(preferences.appearance.theme === 'dark');
+            themePreferenceChangeVersionRef.current = 0;
+            setIsDarkModeState(preferences.appearance.theme === 'dark');
             hydrateGeminiModelPreferences(preferences.ai);
 
             const normalizedContexts = normalizeClientGoalContexts(preferences.clientGoalContexts);
@@ -873,6 +884,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentView,
         isAuthLoading,
         isDarkMode,
+        setIsDarkMode,
         highlightStyle,
         chatGptOpenMode,
         keywordViewMode,

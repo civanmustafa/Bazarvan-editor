@@ -81,6 +81,50 @@ test('deterministic quality evaluation returns a versioned blocking report', asy
   assert.ok(evaluation.report.criteria.some((criterion: any) => criterion.id === 'keyword.primary'));
 });
 
+test('additional source criteria are merged and the quality score is recalculated', async () => {
+  const { addContentWritingQualityCriteria } = await importQuality();
+  const report = {
+    policyVersion: 1,
+    minimumScore: 90,
+    score: 100,
+    passed: true,
+    blockingFailureCount: 0,
+    failedCount: 0,
+    warningCount: 0,
+    passedCount: 1,
+    wordCount: 100,
+    repairPasses: 0,
+    criteria: [{
+      id: 'existing',
+      title: 'Existing',
+      status: 'pass',
+      severity: 'important',
+      weight: 10,
+      current: 1,
+      required: 1,
+      violationCount: 0,
+      messages: [] as string[],
+    }],
+    generatedAt: new Date(0).toISOString(),
+  };
+  const updated = addContentWritingQualityCriteria(report, [{
+    id: 'source.exactPrices',
+    title: 'Price source',
+    status: 'fail',
+    severity: 'blocking',
+    weight: 10,
+    current: 'unsupported',
+    required: 'current primary source',
+    violationCount: 1,
+    messages: ['Missing source'],
+  }]);
+
+  assert.equal(updated.score, 50);
+  assert.equal(updated.passed, false);
+  assert.equal(updated.blockingFailureCount, 1);
+  assert.equal(updated.failedCount, 1);
+});
+
 test('quality gate treats a paraphrased body answer in FAQ as a blocking independence failure', async () => {
   const { evaluateContentWritingQuality } = await importQuality();
   const repeatedAnswer = 'يتم تأكيد الطلب بعد اكتمال عملية الدفع وفق الوسيلة المختارة، ثم ينتقل مباشرة إلى مرحلة التجهيز.';

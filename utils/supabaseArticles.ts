@@ -1584,6 +1584,17 @@ export const recordRemoteArticleTime = async (articleId: string, seconds: number
   if (!articleId || seconds <= 0) return;
 
   const supabase = getSupabaseClient();
+  const timeDelta = Math.max(1, Math.min(3_600, Math.round(seconds)));
+  const { error: rpcError } = await supabase.rpc('record_article_time', {
+    p_article_id: articleId,
+    p_seconds: timeDelta,
+  });
+
+  if (!rpcError) return;
+  if (!['PGRST202', '42883'].includes(String(rpcError.code || ''))) throw rpcError;
+
+  // Compatibility fallback while a deployment is between the application update
+  // and its migration. It is removed from the normal path as soon as the RPC exists.
   const { data, error: readError } = await supabase
     .from('articles')
     .select('time_spent_seconds')
@@ -1592,7 +1603,7 @@ export const recordRemoteArticleTime = async (articleId: string, seconds: number
 
   if (readError) throw readError;
 
-  const nextSeconds = (toNumber((data as any)?.time_spent_seconds) || 0) + seconds;
+  const nextSeconds = (toNumber((data as any)?.time_spent_seconds) || 0) + timeDelta;
   const { error } = await supabase
     .from('articles')
     .update({ time_spent_seconds: nextSeconds })

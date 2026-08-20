@@ -305,7 +305,11 @@ const EditorRouteContent: React.FC<{ articleId: string | null }> = ({ articleId 
           await handleLoadArticle(article.title, article);
         }
       } catch (error) {
-        console.error(`Failed to open routed article "${articleId}":`, error);
+        if (openedFromCache) {
+          console.warn(`Opened cached routed article "${articleId}" because the server refresh failed:`, error);
+        } else {
+          console.error(`Failed to open routed article "${articleId}":`, error);
+        }
         if (!cancelled && !openedFromCache) {
           setArticleLoadError('لا يمكن فتح هذه المقالة. قد يكون الرابط غير صحيح أو لا تملك صلاحية الوصول.');
         }
@@ -336,7 +340,7 @@ const EditorRouteContent: React.FC<{ articleId: string | null }> = ({ articleId 
       <EditorView />
       {loadingArticleId && (
         <div className="fixed left-1/2 top-4 z-[10000] -translate-x-1/2 rounded-md border border-[#d4af37]/30 bg-white px-4 py-2 text-sm font-bold text-[#8a6f1d] shadow-lg dark:bg-[#2A2A2A] dark:text-[#f2d675]">
-          جار تحميل المقالة من Supabase...
+          جار تحديث المقالة من خادم Hostinger...
         </div>
       )}
     </>

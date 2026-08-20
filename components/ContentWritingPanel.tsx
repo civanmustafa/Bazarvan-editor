@@ -137,6 +137,26 @@ const getStatusLabel = (status: ContentWritingSessionStatus, isArabic: boolean):
   return labels[status][isArabic ? 0 : 1];
 };
 
+const hasUnpassedCompletedQuality = (session: ContentWritingSession): boolean => (
+  session.status === 'completed'
+  && (
+    session.qualityReport?.passed === false
+    || session.progress.qualityGatePassed === false
+  )
+);
+
+const getSessionStatusLabel = (session: ContentWritingSession, isArabic: boolean): string => (
+  hasUnpassedCompletedQuality(session)
+    ? (isArabic ? 'تم الإنشاء — الجودة غير مجتازة' : 'Generated — quality not passed')
+    : getStatusLabel(session.status, isArabic)
+);
+
+const getSessionStatusStyle = (session: ContentWritingSession): string => (
+  hasUnpassedCompletedQuality(session)
+    ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'
+    : STATUS_STYLES[session.status]
+);
+
 const getProviderLabel = (
   provider: ContentWritingProvider,
   executionMode: 'api' | 'external' = 'api',
@@ -517,18 +537,34 @@ const ContentWritingPanel: React.FC = () => {
     });
   }, []);
 
-  const loadDetail = useCallback(async (sessionId: string, options: { silent?: boolean } = {}) => {
+  const loadDetail = useCallback(async (
+    sessionId: string,
+    options: { silent?: boolean; includeStepOutput?: boolean } = {},
+  ) => {
     const requestId = ++detailRequestRef.current;
     if (!options.silent) setIsDetailLoading(true);
     try {
       // Load persisted output and compact evidence metadata, while keeping the
       // much larger raw prompt text server-side so active polling stays bounded.
       const detail = await getContentWritingSessionDetail(sessionId, {
-        includeStepOutput: true,
+        includeStepOutput: options.includeStepOutput === true,
         includeStepMetadata: true,
       });
       if (requestId !== detailRequestRef.current) return;
-      setSelectedDetail(detail);
+      setSelectedDetail(current => {
+        if (!current || current.session.id !== detail.session.id) return detail;
+        const previousSteps = new Map(current.steps.map(step => [step.id, step]));
+        return {
+          ...detail,
+          steps: detail.steps.map(step => {
+            if ('outputText' in step) return step;
+            const previous = previousSteps.get(step.id);
+            return previous && 'outputText' in previous
+              ? { ...step, outputText: previous.outputText }
+              : step;
+          }),
+        };
+      });
       mergeSession(detail.session);
     } catch (error) {
       if (requestId === detailRequestRef.current && !options.silent) {
@@ -587,13 +623,15 @@ const ContentWritingPanel: React.FC = () => {
 
   useEffect(() => {
     if (!selectedSessionId) return;
-    void loadDetail(selectedSessionId);
-  }, [loadDetail, selectedSessionId]);
+    void loadDetail(selectedSessionId, {
+      includeStepOutput: selectedSession?.status === 'failed' || selectedSession?.status === 'cancelled',
+    });
+  }, [loadDetail, selectedSession?.status, selectedSessionId]);
 
   useEffect(() => {
     if (!selectedSessionId || !isContentWritingSessionActive(selectedSession)) return;
     const timer = window.setInterval(() => {
-      void loadDetail(selectedSessionId, { silent: true });
+      void loadDetail(selectedSessionId, { silent: true, includeStepOutput: false });
     }, ACTIVE_POLL_MS);
     return () => window.clearInterval(timer);
   }, [loadDetail, selectedSession, selectedSessionId]);
@@ -887,8 +925,8 @@ const ContentWritingPanel: React.FC = () => {
             ? 'تعذر حفظ النص الحالي، لذلك لم يتم استبداله.'
             : 'The current article could not be saved, so it was not replaced.',
           save_failed: isArabic
-            ? 'أُدرج النص محليًا، لكن تعذر حفظه في Supabase. أبقِ المقالة مفتوحة وأعد الضغط على الحفظ.'
-            : 'The text was inserted locally but could not be saved to Supabase. Keep the article open and retry saving.',
+            ? 'أُدرج النص محليًا، لكن تعذر حفظه في قاعدة بيانات الخادم. أبقِ المقالة مفتوحة وأعد الضغط على الحفظ.'
+            : 'The text was inserted locally but could not be saved to the server database. Keep the article open and retry saving.',
         };
         setApplicationNotice({
           tone: 'error',
@@ -964,7 +1002,6 @@ const ContentWritingPanel: React.FC = () => {
         Number(step.stepKey.match(/quality-repair-(\d+)/)?.[1]) || 1
       ))),
   ).size;
-  const currentWorkflowStep = workflowSteps.find(step => step.stepKey === workflowStepKey);
   const automaticWorkflowStepKey = (
     (workflowStepKey && workflowSteps.some(step => step.stepKey === workflowStepKey)
       ? workflowStepKey
@@ -974,6 +1011,13 @@ const ContentWritingPanel: React.FC = () => {
     || workflowSteps[0]?.stepKey
     || ''
   );
+  const currentWorkflowStep = workflowSteps.find(step => step.stepKey === automaticWorkflowStepKey);
+  const currentCandidateSteps = allWorkflowSteps.filter(step => (
+    step.metadata.parentStepKey === automaticWorkflowStepKey
+    && Boolean(step.metadata.candidatePhase)
+  ));
+  const completedCandidateSteps = currentCandidateSteps.filter(step => step.status === 'completed').length;
+  const runningCandidateSteps = currentCandidateSteps.filter(step => step.status === 'running').length;
   const currentKeySuffix = typeof progress.keySuffix === 'string' ? progress.keySuffix.trim() : '';
   const sessionKeyUsageEntries = useMemo(() => {
     if (!selectedSession) return [];
@@ -1198,13 +1242,18 @@ const ContentWritingPanel: React.FC = () => {
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold ${STATUS_STYLES[selectedSession.status]}`}>
+                  <span className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold ${getSessionStatusStyle(selectedSession)}`}>
                     <StatusIcon status={selectedSession.status} size={13} />
-                    {getStatusLabel(selectedSession.status, isArabic)}
+                    {getSessionStatusLabel(selectedSession, isArabic)}
                   </span>
                   <span className="truncate text-[11px] font-bold text-gray-600 dark:text-gray-300">{getProviderLabel(selectedSession.provider, selectedSession.executionMode)}</span>
                 </div>
                 <div className="mt-1 truncate font-mono text-[10px] text-gray-400" dir="ltr">{selectedSession.model}</div>
+                {selectedSession.status === 'completed' && requestedProgressModel && requestedProgressModel !== selectedSession.model && (
+                  <div className="mt-1 text-[10px] font-bold text-amber-700 dark:text-amber-300" dir="ltr">
+                    {requestedProgressModel} → {selectedSession.model}
+                  </div>
+                )}
                 {selectedSession.qualityScore !== null && (
                   <div className={`mt-1.5 inline-flex rounded px-2 py-1 text-[10px] font-black ${selectedSession.qualityReport?.passed
                     ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
@@ -1280,6 +1329,12 @@ const ContentWritingPanel: React.FC = () => {
                         {displayedWorkflowStepLabel || (isArabic ? 'مرحلة التوليد' : 'Writing step')} {workflowStepIndex || 1}/{workflowStepCount}
                       </span>
                     )}
+                    {currentCandidateSteps.length > 0 && (
+                      <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">
+                        {isArabic ? 'المرشحون' : 'Candidates'} {completedCandidateSteps}/{currentCandidateSteps.length}
+                        {runningCandidateSteps > 0 ? ` · ${isArabic ? 'يعمل' : 'running'} ${runningCandidateSteps}` : ''}
+                      </span>
+                    )}
                     {modelCount > 0 && <span className="rounded bg-white px-1.5 py-1 dark:bg-[#2A2A2A]">{isArabic ? 'الموديل' : 'Model'} {modelIndex || 1}/{modelCount}</span>}
                     {currentProgressModel && (
                       <span
@@ -1346,6 +1401,12 @@ const ContentWritingPanel: React.FC = () => {
                           type="button"
                           onClick={() => {
                             workflowStepSelectionLockedRef.current = true;
+                            if (!isExpanded && !('outputText' in step) && selectedSessionId) {
+                              void loadDetail(selectedSessionId, {
+                                silent: true,
+                                includeStepOutput: true,
+                              });
+                            }
                             setExpandedWorkflowStepKey(current => (
                               current === step.stepKey ? '' : step.stepKey
                             ));
@@ -1594,8 +1655,8 @@ const ContentWritingPanel: React.FC = () => {
                     </div>
                     <div className="mt-1 text-[10px] text-gray-400">{formatDateTime(session.createdAt, isArabic)}</div>
                   </div>
-                  <span className={`shrink-0 rounded px-1.5 py-1 text-[10px] font-bold ${STATUS_STYLES[session.status]}`}>
-                    {getStatusLabel(session.status, isArabic)}
+                  <span className={`shrink-0 rounded px-1.5 py-1 text-[10px] font-bold ${getSessionStatusStyle(session)}`}>
+                    {getSessionStatusLabel(session, isArabic)}
                   </span>
                 </button>
               ))}

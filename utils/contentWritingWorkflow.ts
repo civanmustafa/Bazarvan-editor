@@ -23,7 +23,7 @@ import {
   competitorPhraseIntelligenceToPromptJson,
   type CompetitorPhraseIntelligenceResult,
 } from './competitorPhraseAnalysis';
-import type { GoalContext } from '../types';
+import type { GoalContext, Keywords } from '../types';
 import { getContentWritingFinalSectionKind } from './goalContext';
 import {
   getContentWritingFaqIntentBlueprints,
@@ -37,6 +37,65 @@ export const CONTENT_WRITING_WORKFLOW_VERSION = 11;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = 3;
+
+type ContentWritingKeywordBrief = Pick<Keywords, 'primary' | 'secondaries' | 'lsi' | 'company'>;
+
+const appendProtectedWritingProtocol = (
+  prompt: string,
+  options: {
+    keywords?: ContentWritingKeywordBrief;
+    qualityContract?: string;
+    phase: 'outline' | 'section' | 'introduction' | 'conclusion';
+    sectionIndex?: number;
+  },
+): string => {
+  const keywords = options.keywords;
+  const primary = String(keywords?.primary || '').trim();
+  const company = String(keywords?.company || '').trim();
+  const secondaries = (keywords?.secondaries || []).map(value => String(value || '').trim()).filter(Boolean);
+  const lsi = (keywords?.lsi || []).map(value => String(value || '').trim()).filter(Boolean);
+  const sectionIndex = Math.max(0, Math.round(options.sectionIndex || 0));
+  const assignedSecondary = secondaries.length > 0 ? secondaries[sectionIndex % secondaries.length] : '';
+  const assignedLsi = lsi.length > 0
+    ? Array.from(new Set([
+        lsi[sectionIndex % lsi.length],
+        lsi[(sectionIndex + 1) % lsi.length],
+      ].filter(Boolean)))
+    : [];
+  const keywordInstructions = options.phase === 'outline'
+    ? [
+        'وزّع الكلمات على الأقسام قبل الكتابة: خصص الكلمة الأساسية طبيعيًا لأقسام المتن، ووزّع الصيغ البديلة وLSI بالتناوب، وحدد مواضع اسم الشركة دون حشو.',
+        `الكلمة الأساسية: ${primary || 'غير محددة'}`,
+        `الصيغ البديلة: ${secondaries.join(' | ') || 'لا يوجد'}`,
+        `كلمات LSI: ${lsi.join(' | ') || 'لا يوجد'}`,
+        `اسم الشركة: ${company || 'غير محدد'}`,
+      ]
+    : options.phase === 'section'
+      ? [
+          primary ? `استخدم الكلمة الأساسية مرة واحدة طبيعيًا في متن هذا القسم: ${primary}` : '',
+          assignedSecondary ? `استخدم هذه الصيغة البديلة مرة واحدة إذا بقي السياق طبيعيًا: ${assignedSecondary}` : '',
+          assignedLsi.length > 0 ? `ادمج 1-2 من مصطلحات LSI التالية دون حشو: ${assignedLsi.join(' | ')}` : '',
+          company && (sectionIndex === 0) ? `اذكر اسم الشركة مرة واحدة في سياق مفيد: ${company}` : '',
+        ]
+      : options.phase === 'introduction'
+        ? [
+            primary ? `استخدم الكلمة الأساسية مرة واحدة في المقدمة: ${primary}` : '',
+            secondaries[0] ? `يمكن استخدام الصيغة البديلة التالية مرة واحدة إن كانت طبيعية: ${secondaries[0]}` : '',
+            lsi[0] ? `يمكن دمج مصطلح LSI التالي دون حشو: ${lsi[0]}` : '',
+          ]
+        : [
+            primary ? `استخدم الكلمة الأساسية مرة واحدة في الخاتمة: ${primary}` : '',
+            company ? `اذكر اسم الشركة مرة واحدة في سياق الخاتمة: ${company}` : '',
+          ];
+  const qualityBlock = options.qualityContract
+    ? `\n<protected_quality_contract>\n${options.qualityContract}\n</protected_quality_contract>`
+    : '';
+  return `${prompt}\n\n<protected_keyword_and_source_protocol>\n${keywordInstructions.filter(Boolean).map(value => `- ${value}`).join('\n')}
+- لا تكتب سعرًا أو رقمًا ماليًا أو قيمة زمنية حالية إلا من ادعاء مسموح تدعمه مادة رسمية أو أولية حالية في سجل الادعاءات.
+- أي ادعاء usagePolicy=blocked محظور تمامًا، ولا يكفي تخفيف صياغته أو نسبه إلى مصدر منافس.
+- حافظ على طبيعية النص؛ لا تكرر كلمة لمجرد استيفاء التوزيع إذا أدى ذلك إلى حشو.
+</protected_keyword_and_source_protocol>${qualityBlock}`;
+};
 
 export type ContentWritingWorkflowStepType =
   | 'competitor_index'
@@ -554,10 +613,11 @@ export const buildContentWritingOutlinePrompt = (options: {
   targetWords?: ContentWritingWordRange;
   minimumSections?: number;
   maximumSections?: number;
+  keywords?: ContentWritingKeywordBrief;
   template?: string;
-}): string => renderPromptTemplate(
-  options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.outline),
-  {
+}): string => appendProtectedWritingProtocol(renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.outline),
+    {
     ...(() => {
       const targetWords = options.targetWords || { min: 1_100, max: 1_450 };
       const bodyBudget = getContentWritingBodyWordBudget(targetWords);
@@ -574,8 +634,8 @@ export const buildContentWritingOutlinePrompt = (options: {
     output_language: options.language === 'en' ? 'اللغة الإنجليزية' : 'اللغة العربية',
     minimum_sections: options.minimumSections || CONTENT_WRITING_MIN_OUTLINE_SECTIONS,
     maximum_sections: options.maximumSections || CONTENT_WRITING_MAX_OUTLINE_SECTIONS,
-  },
-);
+    },
+  ), { keywords: options.keywords, qualityContract: options.qualityContract, phase: 'outline' });
 
 export const buildContentWritingSectionPrompt = (options: {
   outline: ContentWritingOutline;
@@ -595,10 +655,12 @@ export const buildContentWritingSectionPrompt = (options: {
       usedClaimIds: string[];
     }>;
   };
+  keywords?: ContentWritingKeywordBrief;
+  qualityContract?: string;
   template?: string;
-}): string => renderPromptTemplate(
-  options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.bodySection),
-  {
+}): string => appendProtectedWritingProtocol(renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.bodySection),
+    {
     section_number: options.sectionIndex + 1,
     section_count: options.outline.sections.length,
     outline_json: outlineJson(options.outline),
@@ -623,8 +685,13 @@ export const buildContentWritingSectionPrompt = (options: {
     previous_section_block: options.previousSection
       ? `القسم السابق كاملًا للترابط فقط:\n<previous_section>\n${options.previousSection}\n</previous_section>`
       : '',
-  },
-);
+    },
+  ), {
+    keywords: options.keywords,
+    qualityContract: options.qualityContract,
+    phase: 'section',
+    sectionIndex: options.sectionIndex,
+  });
 
 export const buildContentWritingCoverageAuditPrompt = (options: {
   outline: ContentWritingOutline;
@@ -681,26 +748,30 @@ export const buildContentWritingSectionRepairPrompt = (options: {
 export const buildContentWritingIntroductionPrompt = (options: {
   outline: ContentWritingOutline;
   bodyDraft: string;
+  keywords?: ContentWritingKeywordBrief;
+  qualityContract?: string;
   template?: string;
-}): string => renderPromptTemplate(
-  options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.introduction),
-  {
+}): string => appendProtectedWritingProtocol(renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.introduction),
+    {
     outline_json: outlineJson(options.outline),
     body_draft: options.bodyDraft,
-  },
-);
+    },
+  ), { keywords: options.keywords, qualityContract: options.qualityContract, phase: 'introduction' });
 
 export const buildContentWritingConclusionPrompt = (options: {
   outline: ContentWritingOutline;
   draft: string;
+  keywords?: ContentWritingKeywordBrief;
+  qualityContract?: string;
   template?: string;
-}): string => renderPromptTemplate(
-  options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.conclusion),
-  {
+}): string => appendProtectedWritingProtocol(renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.conclusion),
+    {
     outline_json: outlineJson(options.outline),
     completed_draft: options.draft,
-  },
-);
+    },
+  ), { keywords: options.keywords, qualityContract: options.qualityContract, phase: 'conclusion' });
 
 export const buildContentWritingCallToActionPrompt = (options: {
   outline: ContentWritingOutline;
@@ -708,17 +779,27 @@ export const buildContentWritingCallToActionPrompt = (options: {
   goalContext: Partial<GoalContext>;
   primaryKeyword: string;
   companyName?: string;
+  qualityContract?: string;
   template?: string;
-}): string => renderPromptTemplate(
-  options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.callToAction),
-  {
+}): string => appendProtectedWritingProtocol(renderPromptTemplate(
+    options.template || getPromptTemplate(undefined, PROMPT_TEMPLATE_IDS.callToAction),
+    {
     outline_json: outlineJson(options.outline),
     completed_draft: options.draft,
     page_goal_json: JSON.stringify(options.goalContext, null, 2),
     primary_keyword: options.primaryKeyword,
     company_name: options.companyName || '',
-  },
-);
+    },
+  ), {
+    keywords: {
+      primary: options.primaryKeyword,
+      secondaries: [],
+      lsi: [],
+      company: options.companyName || '',
+    },
+    qualityContract: options.qualityContract,
+    phase: 'conclusion',
+  });
 
 export const buildContentWritingFaqPrompt = (options: {
   outline: ContentWritingOutline;

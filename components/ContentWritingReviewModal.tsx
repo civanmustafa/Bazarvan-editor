@@ -288,8 +288,8 @@ const ContentWritingReviewModal: React.FC<ContentWritingReviewModalProps> = ({
                 ? 'سيُحفظ النص الحالي أولًا، ثم تستبدله المسودة الجزئية وتُحفظ. ستبقى جلسة الكتابة قابلة للاستئناف.'
                 : 'The current text is saved first, then replaced by the partial draft and saved. The writing session remains resumable.')
               : (isArabic
-                ? 'سيُحفظ النص الحالي أولًا، ثم يُستبدل جسم المقالة ويُحفظ في Supabase.'
-                : 'The current text is saved first, then the article body is replaced and saved to Supabase.')}
+                ? 'سيُحفظ النص الحالي أولًا، ثم يُستبدل جسم المقالة ويُحفظ في قاعدة بيانات خادم Hostinger.'
+                : 'The current text is saved first, then the article body is replaced and saved to the Hostinger server database.')}
           </div>
           <div className="flex shrink-0 items-center justify-end gap-2">
             <button

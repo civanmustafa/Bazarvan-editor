@@ -453,6 +453,7 @@ test('call-to-action prompt receives the page goal and enforces CTA criteria ins
     },
     primaryKeyword: 'خدمات التحول الرقمي',
     companyName: 'بازارفان',
+    qualityContract: 'QUALITY-CONTRACT',
   });
 
   assert.match(prompt, /قسم دعوة اتخاذ الإجراء/);
@@ -460,6 +461,9 @@ test('call-to-action prompt receives the page goal and enforces CTA criteria ins
   assert.match(prompt, /طلب استشارة/);
   assert.match(prompt, /70-125/);
   assert.match(prompt, /لا تستخدم مؤشرًا ختاميًا/);
+  assert.match(prompt, /protected_keyword_and_source_protocol/);
+  assert.match(prompt, /لا تكتب سعرًا أو رقمًا ماليًا/);
+  assert.match(prompt, /QUALITY-CONTRACT/);
 });
 
 test('FAQ prompt receives page-specific intents, discovered questions, evidence, and a protected independence protocol', async () => {

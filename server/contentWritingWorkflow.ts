@@ -57,9 +57,11 @@ import {
   PROMPT_TEMPLATE_IDS,
 } from '../constants/promptRegistry';
 import {
+  addContentWritingQualityCriteria,
   buildContentWritingRepairPrompt,
   evaluateContentWritingQuality,
   normalizeContentWritingQualityReport,
+  type ContentWritingQualityCriterionResult,
   type ContentWritingQualityReport,
 } from '../utils/contentWritingQuality';
 import {
@@ -206,6 +208,48 @@ const getQualityRuntime = (
     keywords,
     goalContext,
   };
+};
+
+const EXACT_PRICE_PATTERN = /(?:[$€£¥]\s*\d[\d.,]*|\d[\d.,]*\s*(?:USD|EUR|GBP|SAR|AED|QAR|KWD|دولار(?:اً|ا)?|ريال(?:اً|ا)?|درهم(?:اً|ا)?|دينار(?:اً|ا)?|جنيه(?:اً|ا)?|ليرة|ر\.?\s?س))/iu;
+
+const applySourceAccuracyGuard = (options: {
+  report: ContentWritingQualityReport;
+  markdown: string;
+  knowledge: ContentWritingKnowledgeBase;
+  usedClaimIds: readonly string[];
+}): ContentWritingQualityReport => {
+  if (!EXACT_PRICE_PATTERN.test(options.markdown)) return options.report;
+  const usedClaimIds = new Set(options.usedClaimIds);
+  const primarySourceIds = new Set(options.knowledge.sourceRegistry.primarySourceIds);
+  const currentPrimarySourceIds = new Set(
+    options.knowledge.sourceRegistry.sources
+      .filter(source => source.freshness === 'current' && primarySourceIds.has(source.id))
+      .map(source => source.id),
+  );
+  const hasSupportedPriceClaim = options.knowledge.claimLedger.claims.some(claim => (
+    usedClaimIds.has(claim.id)
+    && claim.usagePolicy !== 'blocked'
+    && ['statistic', 'time_sensitive', 'financial'].includes(claim.claimType)
+    && claim.supportingSourceIds.some(sourceId => currentPrimarySourceIds.has(sourceId))
+  ));
+  const existingWeight = Math.max(
+    1,
+    options.report.criteria.reduce((sum, criterion) => sum + Math.max(1, criterion.weight), 0),
+  );
+  const criterion: ContentWritingQualityCriterionResult = {
+    id: 'source.exactPrices',
+    title: 'دقة الأسعار والقيم المالية',
+    status: hasSupportedPriceClaim ? 'pass' : 'fail',
+    severity: 'blocking',
+    weight: existingWeight,
+    current: hasSupportedPriceClaim ? 'مصدر أولي حالي مرتبط' : 'سعر بلا مصدر أولي حالي مرتبط',
+    required: 'ادعاء مستخدم ومسموح تدعمه مادة رسمية أو أولية حالية',
+    violationCount: hasSupportedPriceClaim ? 0 : 1,
+    messages: hasSupportedPriceClaim
+      ? []
+      : ['يُحظر اعتماد سعر دقيق من صفحات المنافسين وحدها. أضف مصدرًا رسميًا حاليًا أو احذف القيمة الرقمية.'],
+  };
+  return addContentWritingQualityCriteria(options.report, [criterion]);
 };
 
 const getArticleSnapshot = (session: ContentWritingSession): { title: string; language: string } => {
@@ -999,6 +1043,7 @@ export const executeStructuredContentWritingWorkflow = async (
       targetWords: qualityRuntime?.configuration.policy.targetWords,
       minimumSections: qualityRuntime?.configuration.policy.outlineSections.min,
       maximumSections: qualityRuntime?.configuration.policy.outlineSections.max,
+      keywords: qualityRuntime?.keywords,
       template: promptTemplate(PROMPT_TEMPLATE_IDS.outline),
     }),
     stepIndex: outlineDefinition.ordinal,
@@ -1127,6 +1172,8 @@ export const executeStructuredContentWritingWorkflow = async (
             usedClaimIds: sectionCoverageByKey.get(previousDefinition.key)?.usedClaimIds || [],
           })),
         },
+        keywords: qualityRuntime?.keywords,
+        qualityContract: qualityRuntime?.contract,
         template: promptTemplate(PROMPT_TEMPLATE_IDS.bodySection),
       }),
       stepIndex: definition.ordinal,
@@ -1188,6 +1235,8 @@ export const executeStructuredContentWritingWorkflow = async (
     prompt: buildContentWritingIntroductionPrompt({
       outline,
       bodyDraft,
+      keywords: qualityRuntime?.keywords,
+      qualityContract: qualityRuntime?.contract,
       template: promptTemplate(PROMPT_TEMPLATE_IDS.introduction),
     }),
     stepIndex: introductionDefinition.ordinal,
@@ -1339,11 +1388,14 @@ export const executeStructuredContentWritingWorkflow = async (
           goalContext,
           primaryKeyword,
           companyName,
+          qualityContract: qualityRuntime?.contract,
           template: promptTemplate(PROMPT_TEMPLATE_IDS.callToAction),
         })
       : buildContentWritingConclusionPrompt({
           outline,
           draft: introductionBodyAndFaqDraft,
+          keywords: qualityRuntime?.keywords,
+          qualityContract: qualityRuntime?.contract,
           template: promptTemplate(PROMPT_TEMPLATE_IDS.conclusion),
         }),
     stepIndex: finalSectionDefinition.ordinal,
@@ -1586,8 +1638,11 @@ export const executeStructuredContentWritingWorkflow = async (
   let execution = coverageAuditResult.execution || finalSectionResult.execution;
   let repairPasses = 0;
   let activeSectionCoverageByKey = new Map(sectionCoverageByKey);
+  const getUsedClaimIds = (): string[] => Array.from(activeSectionCoverageByKey.values())
+    .flatMap(coverage => coverage.usedClaimIds);
   let qualityReport: ContentWritingQualityReport | null = qualityRuntime
-    ? evaluateContentWritingQuality({
+    ? applySourceAccuracyGuard({
+        report: evaluateContentWritingQuality({
         markdown: finalOutput,
         articleTitle: article.title,
         keywords: qualityRuntime.keywords,
@@ -1595,11 +1650,15 @@ export const executeStructuredContentWritingWorkflow = async (
         articleLanguage: article.language === 'en' ? 'en' : 'ar',
         configuration: qualityRuntime.configuration,
         repairPasses,
-      }).report
+        }).report,
+        markdown: finalOutput,
+        knowledge,
+        usedClaimIds: getUsedClaimIds(),
+      })
     : null;
-  const totalRevisionStepCount = definitions.length
-    + coverageAudit.repairs.length
-    + 2
+  let nextRevisionOrdinal = finalDefinition.ordinal + 1;
+  let totalRevisionStepCount = finalDefinition.ordinal
+    + 1
     + ((qualityRuntime?.configuration.maxRepairPasses || 0) * 2);
 
   const applyPersistedRevisionOutcome = (step: ContentWritingStep): boolean => {
@@ -1684,7 +1743,8 @@ export const executeStructuredContentWritingWorkflow = async (
           goalContext,
         });
         const qualityAfterRevision = qualityRuntime && qualityBeforeRevision
-          ? evaluateContentWritingQuality({
+          ? applySourceAccuracyGuard({
+              report: evaluateContentWritingQuality({
               markdown: application.candidateMarkdown,
               articleTitle: article.title,
               keywords: qualityRuntime.keywords,
@@ -1692,7 +1752,12 @@ export const executeStructuredContentWritingWorkflow = async (
               articleLanguage: article.language === 'en' ? 'en' : 'ar',
               configuration: qualityRuntime.configuration,
               repairPasses,
-            }).report
+              }).report,
+              markdown: application.candidateMarkdown,
+              knowledge,
+              usedClaimIds: Array.from(coverageBeforeRevision.values())
+                .flatMap(coverage => coverage.usedClaimIds),
+            })
           : null;
         const qualityGuard = qualityBeforeRevision && qualityAfterRevision
           ? compareContentWritingQualityReports(qualityBeforeRevision, qualityAfterRevision)
@@ -1799,7 +1864,7 @@ export const executeStructuredContentWritingWorkflow = async (
     const finalApplyDefinition: ContentWritingWorkflowStepDefinition = {
       key: 'final-review-apply',
       type: 'final_review',
-      ordinal: finalDefinition.ordinal + 1,
+      ordinal: nextRevisionOrdinal,
       title: 'Apply final review edits',
       metadata: {
         workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
@@ -1816,9 +1881,12 @@ export const executeStructuredContentWritingWorkflow = async (
     if (!finalApplyResult.ok) return finalApplyResult.execution;
     finalStep = finalApplyResult.step;
     execution = finalApplyResult.execution || execution;
+    nextRevisionOrdinal += 1;
   }
 
   if (qualityRuntime) {
+    totalRevisionStepCount = (nextRevisionOrdinal - 1)
+      + (qualityRuntime.configuration.maxRepairPasses * 2);
     for (
       let pass = 1;
       qualityReport && !qualityReport.passed && pass <= qualityRuntime.configuration.maxRepairPasses;
@@ -1833,7 +1901,7 @@ export const executeStructuredContentWritingWorkflow = async (
       const repairPlanDefinition: ContentWritingWorkflowStepDefinition = {
         key: `quality-repair-${String(pass).padStart(2, '0')}-plan`,
         type: 'quality_repair',
-        ordinal: finalDefinition.ordinal + 2 + ((pass - 1) * 2),
+        ordinal: nextRevisionOrdinal,
         title: `Quality repair ${pass} plan`,
         metadata: {
           workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
@@ -1876,6 +1944,7 @@ export const executeStructuredContentWritingWorkflow = async (
       if (!repairPlanResult.ok) return repairPlanResult.execution;
       finalStep = repairPlanResult.step;
       execution = repairPlanResult.execution || execution;
+      nextRevisionOrdinal += 1;
       const repairPlan = parseContentWritingRevisionPlan(
         repairPlanResult.step.metadata?.revisionPlan || repairPlanResult.output,
         repairDocument,
@@ -1891,7 +1960,7 @@ export const executeStructuredContentWritingWorkflow = async (
       const repairApplyDefinition: ContentWritingWorkflowStepDefinition = {
         key: `quality-repair-${String(pass).padStart(2, '0')}-apply`,
         type: 'quality_repair',
-        ordinal: repairPlanDefinition.ordinal + 1,
+        ordinal: nextRevisionOrdinal,
         title: `Apply quality repair ${pass}`,
         metadata: {
           workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
@@ -1910,6 +1979,7 @@ export const executeStructuredContentWritingWorkflow = async (
       if (!repairApplyResult.ok) return repairApplyResult.execution;
       finalStep = repairApplyResult.step;
       execution = repairApplyResult.execution || execution;
+      nextRevisionOrdinal += 1;
       if (qualityReport) {
         qualityReport = {
           ...qualityReport,

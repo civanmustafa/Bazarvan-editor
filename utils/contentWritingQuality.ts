@@ -340,6 +340,48 @@ const criterionScoreValue = (status: AnalysisStatus): number | null => {
   return null;
 };
 
+const summarizeQualityCriteria = (
+  criteria: readonly ContentWritingQualityCriterionResult[],
+): Pick<
+  ContentWritingQualityReport,
+  'score' | 'blockingFailureCount' | 'failedCount' | 'warningCount' | 'passedCount'
+> => {
+  const scoredCriteria = criteria.flatMap(criterion => {
+    const value = criterionScoreValue(criterion.status);
+    return value === null ? [] : [{ criterion, value }];
+  });
+  const totalWeight = scoredCriteria.reduce((sum, item) => sum + item.criterion.weight, 0);
+  const earnedWeight = scoredCriteria.reduce((sum, item) => sum + item.criterion.weight * item.value, 0);
+  return {
+    score: totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * 100) : 0,
+    blockingFailureCount: criteria.filter(criterion => (
+      criterion.severity === 'blocking' && criterion.status === 'fail'
+    )).length,
+    failedCount: criteria.filter(criterion => criterion.status === 'fail').length,
+    warningCount: criteria.filter(criterion => criterion.status === 'warn').length,
+    passedCount: criteria.filter(criterion => criterion.status === 'pass').length,
+  };
+};
+
+export const addContentWritingQualityCriteria = (
+  report: ContentWritingQualityReport,
+  additions: readonly ContentWritingQualityCriterionResult[],
+): ContentWritingQualityReport => {
+  const replacementIds = new Set(additions.map(criterion => criterion.id));
+  const criteria = [
+    ...report.criteria.filter(criterion => !replacementIds.has(criterion.id)),
+    ...additions,
+  ];
+  const summary = summarizeQualityCriteria(criteria);
+  return {
+    ...report,
+    ...summary,
+    passed: summary.score >= report.minimumScore,
+    criteria,
+    generatedAt: new Date().toISOString(),
+  };
+};
+
 export const evaluateContentWritingQuality = (options: {
   markdown: string;
   articleTitle: string;
@@ -367,34 +409,22 @@ export const evaluateContentWritingQuality = (options: {
   });
   const faqIndependence = evaluateContentWritingFaqDraftIndependence(options.markdown);
   const criteria = collectCriteria(analysis, configuration, faqIndependence);
-  const scoredCriteria = criteria.flatMap(criterion => {
-    const value = criterionScoreValue(criterion.status);
-    return value === null ? [] : [{ criterion, value }];
-  });
-  const totalWeight = scoredCriteria.reduce((sum, item) => sum + item.criterion.weight, 0);
-  const earnedWeight = scoredCriteria.reduce((sum, item) => sum + item.criterion.weight * item.value, 0);
-  const score = totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * 100) : 0;
-  const blockingFailureCount = criteria.filter(criterion => (
-    criterion.severity === 'blocking' && criterion.status === 'fail'
-  )).length;
-  const failedCount = criteria.filter(criterion => criterion.status === 'fail').length;
-  const warningCount = criteria.filter(criterion => criterion.status === 'warn').length;
-  const passedCount = criteria.filter(criterion => criterion.status === 'pass').length;
+  const summary = summarizeQualityCriteria(criteria);
   return {
     analysis,
     report: {
       policyVersion: configuration.policyVersion,
       minimumScore: configuration.minimumScore,
-      score,
+      score: summary.score,
       // The administrator-configured minimum score is the quality gate.
       // Blocking failures remain visible, weighted, and repair-prioritized, but
       // must not silently add a second threshold that the settings UI does not
       // expose.
-      passed: score >= configuration.minimumScore,
-      blockingFailureCount,
-      failedCount,
-      warningCount,
-      passedCount,
+      passed: summary.score >= configuration.minimumScore,
+      blockingFailureCount: summary.blockingFailureCount,
+      failedCount: summary.failedCount,
+      warningCount: summary.warningCount,
+      passedCount: summary.passedCount,
       wordCount: analysis.wordCount,
       repairPasses: Math.max(0, Math.round(options.repairPasses || 0)),
       criteria,
