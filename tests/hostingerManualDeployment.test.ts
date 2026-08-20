@@ -25,4 +25,3 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.match(script, /smarteditor\.bazarvan\.com\/healthz/);
   assert.match(script, /smarteditor\.bazarvan\.com\/readyz/);
 });
-
