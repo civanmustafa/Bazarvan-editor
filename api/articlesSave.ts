@@ -215,18 +215,21 @@ const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
   const snapshot = sanitizeSnapshot(body.snapshot);
   const articleId = normalizeArticleId(body.articleId);
   const saveReason = normalizeSaveReason(body.saveReason);
+  const clearContent = body.clearContent === true;
   const idempotencyKey = resolveIdempotencyKey(body.idempotencyKey, {
     userId: principal.userId,
     articleId,
     saveReason,
+    clearContent,
     snapshot: body.snapshot,
   });
   const supabase = getSupabaseUserClient(req);
-  const { data, error } = await supabase.rpc('save_article_snapshot', {
+  const { data, error } = await supabase.rpc('save_article_snapshot_with_content_policy', {
     p_article_id: articleId,
     p_idempotency_key: idempotencyKey,
     p_snapshot: snapshot,
     p_save_reason: saveReason,
+    p_allow_empty_body: clearContent,
   });
 
   if (error) throwRpcError(error as Record<string, any>);

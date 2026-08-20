@@ -65,7 +65,7 @@ test('article save transaction is atomic and idempotent', async () => {
   assert.match(migration, /pg_advisory_xact_lock/);
   assert.match(migration, /insert into public\.article_versions/);
   assert.match(migration, /insert into public\.article_save_requests/);
-  assert.match(articleApi, /rpc\('save_article_snapshot'/);
+  assert.match(articleApi, /rpc\('save_article_snapshot_with_content_policy'/);
   assert.doesNotMatch(articleApi, /\.from\('article_competitors'\)/);
   assert.match(articleClient, /saveRemoteArticleSnapshotViaServer\(snapshot, options\)/);
 
@@ -76,16 +76,26 @@ test('article save transaction is atomic and idempotent', async () => {
   assert.doesNotMatch(publicSaveImplementation, /recordArticleVersion/);
 });
 
-test('database preserves a saved article body when an empty TipTap document is submitted', async () => {
-  const migration = await readWorkspaceFile(
-    'supabase/migrations/20260805000000_protect_saved_article_content.sql',
-  );
+test('database preserves accidental empty saves and permits only an explicit transactional clear', async () => {
+  const [protectionMigration, clearMigration, articleApi, articleClient, editorContext] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260805000000_protect_saved_article_content.sql'),
+    readWorkspaceFile('supabase/migrations/20260820010000_allow_intentional_article_content_clear.sql'),
+    readWorkspaceFile('api/articlesSave.ts'),
+    readWorkspaceFile('utils/supabaseArticles.ts'),
+    readWorkspaceFile('contexts/EditorContext.tsx'),
+  ]);
 
-  assert.match(migration, /function public\.preserve_saved_article_content\s*\(/);
-  assert.match(migration, /before update of content_json, content_html, plain_text on public\.articles/);
-  assert.match(migration, /new\.content_json := old\.content_json/);
-  assert.match(migration, /new\.content_html := old\.content_html/);
-  assert.match(migration, /new\.plain_text := old\.plain_text/);
+  assert.match(protectionMigration, /before update of content_json, content_html, plain_text on public\.articles/);
+  assert.match(clearMigration, /current_setting\('app\.allow_empty_article_body', true\)/);
+  assert.match(clearMigration, /function public\.save_article_snapshot_with_content_policy\s*\(/);
+  assert.match(clearMigration, /perform set_config\('app\.allow_empty_article_body', 'on', true\)/);
+  assert.match(clearMigration, /return public\.save_article_snapshot\s*\(/);
+  assert.match(clearMigration, /new\.content_json := old\.content_json/);
+  assert.match(clearMigration, /new\.content_html := old\.content_html/);
+  assert.match(clearMigration, /new\.plain_text := old\.plain_text/);
+  assert.match(articleApi, /p_allow_empty_body: clearContent/);
+  assert.match(articleClient, /clearContent: options\.clearContent === true/);
+  assert.match(editorContext, /editorChangedAfterLoad: hasEditorChangedAfterArticleLoadRef\.current/);
 });
 
 test('dashboard, access/save, and performance migrations have balanced SQL delimiters', async () => {
@@ -97,6 +107,7 @@ test('dashboard, access/save, and performance migrations have balanced SQL delim
     readWorkspaceFile('supabase/migrations/20260714010000_competitor_preview_cache.sql'),
     readWorkspaceFile('supabase/migrations/20260714020000_external_analysis_exactly_once.sql'),
     readWorkspaceFile('supabase/migrations/20260714030000_automatic_competitor_discovery.sql'),
+    readWorkspaceFile('supabase/migrations/20260820010000_allow_intentional_article_content_clear.sql'),
   ]);
 
   migrations.forEach((migration) => {
@@ -146,7 +157,7 @@ test('competitor discovery is durable, RLS protected, and uses the canonical art
 test('article save API authenticates before invoking the save transaction', async () => {
   const articleApi = await readWorkspaceFile('api/articlesSave.ts');
   const authenticateAt = articleApi.indexOf('await authenticateApiRequest(req)');
-  const rpcAt = articleApi.indexOf("rpc('save_article_snapshot'");
+  const rpcAt = articleApi.indexOf("rpc('save_article_snapshot_with_content_policy'");
 
   assert.ok(authenticateAt > 0);
   assert.ok(rpcAt > authenticateAt);

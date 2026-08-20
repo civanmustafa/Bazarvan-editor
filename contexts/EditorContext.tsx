@@ -51,7 +51,7 @@ import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 import { shouldClearArticleAiResults } from '../constants/articleStatuses';
 import { parseMarkdownToArticleHtml } from '../utils/editorUtils';
 import { prepareContentWritingResultForEditor } from '../utils/contentWritingWorkflow';
-import { canPersistArticleDraft } from '../utils/articleSavePolicy';
+import { canPersistArticleDraft, shouldClearPersistedArticleBody } from '../utils/articleSavePolicy';
 import { hasMeaningfulArticleContent } from '../utils/articleContent.ts';
 import { handleEditorLinkClick } from '../utils/editorLinkInteraction';
 import { saveArticleClientSelection } from '../utils/articleClientContext';
@@ -1590,6 +1590,13 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 attachments,
                 savedAt: new Date().toISOString(),
             };
+            const clearContent = shouldClearPersistedArticleBody({
+                articleId: activeArticleId,
+                editorChangedAfterLoad: hasEditorChangedAfterArticleLoadRef.current,
+                content: contentJSON,
+                contentHtml: contentHTML,
+                plainText: currentText,
+            });
             void saveArticleSnapshotDurably(articleSnapshot).catch(error => {
                 console.error(`Failed to save local article snapshot "${finalTitleToSave}":`, error);
             });
@@ -1608,6 +1615,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 articleId: activeArticleId,
                 idempotencyKey: pendingRequest.idempotencyKey,
                 saveReason: reason,
+                clearContent,
             });
             if (keywords.clientId?.trim()) {
                 await saveArticleClientSelection(savedArticle.id, keywords.clientId).catch(error => {

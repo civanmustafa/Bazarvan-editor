@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { hasMeaningfulArticleContent } from '../utils/articleContent.ts';
-import { canPersistArticleDraft } from '../utils/articleSavePolicy.ts';
+import {
+  canPersistArticleDraft,
+  shouldClearPersistedArticleBody,
+} from '../utils/articleSavePolicy.ts';
 
 test('an empty TipTap document and <p></p> are not article content', () => {
   assert.equal(hasMeaningfulArticleContent('<p></p>'), false);
@@ -49,6 +52,33 @@ test('a completely unidentified empty draft is not persisted', () => {
     articleKey: '',
     articleId: null,
     plainText: '\n',
+  }), false);
+});
+
+test('only a deliberately emptied loaded article requests removal of its stored body', () => {
+  const emptyDocument = { type: 'doc', content: [{ type: 'paragraph' }] };
+  const baseInput = {
+    articleId: '2b2ee011-04aa-4c38-b508-a35885a59200',
+    editorChangedAfterLoad: true,
+    content: emptyDocument,
+    contentHtml: '<p></p>',
+    plainText: '',
+  };
+
+  assert.equal(shouldClearPersistedArticleBody(baseInput), true);
+  assert.equal(shouldClearPersistedArticleBody({
+    ...baseInput,
+    editorChangedAfterLoad: false,
+  }), false);
+  assert.equal(shouldClearPersistedArticleBody({
+    ...baseInput,
+    articleId: null,
+  }), false);
+  assert.equal(shouldClearPersistedArticleBody({
+    ...baseInput,
+    content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'نص' }] }] },
+    contentHtml: '<p>نص</p>',
+    plainText: 'نص',
   }), false);
 });
 

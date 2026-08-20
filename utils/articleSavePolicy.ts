@@ -10,6 +10,14 @@ export type ArticleSaveEligibilityInput = {
   goalContext?: Partial<GoalContext> | null;
 };
 
+export type ArticleBodyClearIntentInput = {
+  articleId?: string | null;
+  editorChangedAfterLoad: boolean;
+  content?: unknown;
+  contentHtml?: string | null;
+  plainText?: string | null;
+};
+
 const hasText = (value: string | null | undefined): boolean => (
   typeof value === 'string' && value.trim().length > 0
 );
@@ -50,3 +58,18 @@ export const canPersistArticleDraft = (
     || hasMeaningfulArticleContent(input.plainText || '')
   );
 };
+
+/**
+ * Empty editor documents are normally rejected by the database safeguard so a
+ * transient TipTap/load failure cannot erase a saved article. Only an existing
+ * article that the user actually edited after loading may request a real clear.
+ */
+export const shouldClearPersistedArticleBody = (
+  input: ArticleBodyClearIntentInput,
+): boolean => (
+  Boolean(input.articleId)
+  && input.editorChangedAfterLoad
+  && !hasMeaningfulArticleContent(input.content)
+  && !hasMeaningfulArticleContent(input.contentHtml || '')
+  && !hasMeaningfulArticleContent(input.plainText || '')
+);
