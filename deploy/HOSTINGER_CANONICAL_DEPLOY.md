@@ -234,7 +234,7 @@ git pull --ff-only origin main
 set -a
 source .env.production
 set +a
-npm ci
+npm ci --include=dev
 npm run build
 for app in \
   bazarvan-editor-staging \
@@ -255,7 +255,8 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 
 - `git pull --ff-only origin main`: يسحب آخر إصدار مرفوع إلى GitHub من دون إنشاء دمج تلقائي.
 - `source .env.production`: يحمّل متغيرات بيئة الإنتاج أثناء البناء وإعادة التشغيل.
-- `npm ci`: يثبت الاعتماديات طبقًا لملف القفل.
+- `npm ci --include=dev`: يثبت الاعتماديات طبقًا لملف القفل، بما فيها أدوات البناء
+  مثل Vite حتى مع تحميل `NODE_ENV=production` من ملف البيئة.
 - `npm run build`: يبني الواجهة والخادم والعوامل وينفّذ فحوص الإصدار.
 - حلقة `pm2 restart`: تعيد تشغيل عمليات النسخة الذاتية السبعة فقط مع متغيرات البيئة المحدثة؛ لا تستخدم `pm2 restart all`.
 - `pm2 save`: يحفظ قائمة العمليات لكي تعود بعد إعادة تشغيل الخادم.

@@ -81,7 +81,7 @@ set -a
 source .env.production
 set +a
 
-npm ci
+npm ci --include=dev
 npm run build
 
 for app_name in "${PM2_APPS[@]}"; do

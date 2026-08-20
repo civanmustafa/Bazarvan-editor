@@ -50,7 +50,7 @@ test('Hostinger script deploys the exact verified commit and restarts only appro
 
   assert.match(script, /git pull --ff-only origin/);
   assert.match(script, /REMOTE_COMMIT.*TARGET_COMMIT/s);
-  assert.match(script, /npm ci/);
+  assert.match(script, /npm ci --include=dev/);
   assert.match(script, /npm run build/);
   assert.match(script, /pm2 describe/);
   assert.match(script, /pm2 save/);
