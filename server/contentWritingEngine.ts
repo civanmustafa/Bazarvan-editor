@@ -37,6 +37,9 @@ import {
 } from '../utils/contentWritingContext';
 import { normalizeGoalContext } from '../utils/goalContext';
 import {
+  buildContentWritingEditorSourceLedger,
+} from '../utils/contentWritingEditorSource';
+import {
   applyContentWritingLengthTargetToQualityConfiguration,
   countContentWritingTargetWords,
   resolveContentWritingLengthTarget,
@@ -427,6 +430,7 @@ export const prepareContentWritingConversation = async (
     articleLanguage: articleSource.input.language === 'en' ? 'en' : 'ar',
     enabled: settings.competitorPhraseIntelligenceEnabled,
   });
+  const editorSourceLedger = buildContentWritingEditorSourceLedger(articleSource.input.articleText);
   const qualityContractHeading = articleSource.input.language === 'en'
     ? 'Mandatory quality criteria for this session:'
     : 'معايير الجودة الملزمة لهذه الجلسة:';
@@ -476,6 +480,31 @@ export const prepareContentWritingConversation = async (
       }, null, 2),
     },
   ).text;
+  const compactArticleContextWithoutRepeatedEditorText = editorSourceLedger.enabled
+    ? compactArticleContextBase.replace(
+        /<current_article_text>[\s\S]*?<\/current_article_text>/gi,
+        `<current_article_text indexed="mandatory-editor-source-ledger" fingerprint="${editorSourceLedger.fingerprint}">The complete frozen editor text is persisted as structured items in the session ledger. Exact relevant items are attached to each writing step.</current_article_text>`,
+      )
+    : compactArticleContextBase;
+  const compactArticleContextWithEditorContract = editorSourceLedger.enabled
+    ? `${compactArticleContextWithoutRepeatedEditorText}
+
+<mandatory_editor_source_manifest>
+${JSON.stringify(editorSourceLedger.items.map(item => ({
+  id: item.id,
+  kind: item.kind,
+  heading: item.heading,
+  label: item.label,
+})), null, 2)}
+</mandatory_editor_source_manifest>
+
+قواعد إلزامية لنص المحرر:
+- كل عنصر E في السجل مطلب دلالي واجب التغطية داخل المقالة الجديدة.
+- يجوز إعادة الصياغة والدمج ومنع التكرار، لكن لا يجوز إسقاط المعلومة أو الفكرة أو التوصية.
+- لا تنشر معلومة خطرة أو متعارضة بوصفها حقيقة؛ عالجها بصياغة آمنة ومتحفظة وأبقها ظاهرة في سجل التدقيق.
+- عند إنتاج JSON لقسم، صرّح بمعرّفات عناصر المحرر التي غطاها فعليًا.
+`
+    : compactArticleContextWithoutRepeatedEditorText;
 
   return {
     article: {
@@ -510,9 +539,13 @@ export const prepareContentWritingConversation = async (
       competitorChunks: bundle.competitorChunks,
       competitorPhraseIntelligenceEnabled: settings.competitorPhraseIntelligenceEnabled,
       competitorPhraseIntelligence,
+      editorSourceLedger,
+      editorSourcePolicy: editorSourceLedger.enabled
+        ? 'mandatory_semantic_coverage_with_targeted_repair'
+        : 'inactive_empty_editor',
       dualKnowledgeExtractionEnabled: settings.dualKnowledgeExtractionEnabled,
       multiCandidateGenerationEnabled: settings.multiCandidateGenerationEnabled,
-      compactArticleContextBase,
+      compactArticleContextBase: compactArticleContextWithEditorContract,
       lengthTarget,
       qualityPolicyVersion: qualityConfiguration.policyVersion,
       qualityConfiguration,

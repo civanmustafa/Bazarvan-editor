@@ -634,6 +634,7 @@ export const evaluateContentWritingRevisionKnowledge = (options: {
         coveredIdeaIds: [...coverage.coveredIdeaIds],
         usedSourceChunkIds: [...coverage.usedSourceChunkIds],
         usedClaimIds: [...coverage.usedClaimIds],
+        coveredEditorItemIds: [...(coverage.coveredEditorItemIds || [])],
       },
     ]),
   );
@@ -645,11 +646,13 @@ export const evaluateContentWritingRevisionKnowledge = (options: {
       coveredIdeaIds: [],
       usedSourceChunkIds: [],
       usedClaimIds: [],
+      coveredEditorItemIds: [],
     };
     const declared: ContentWritingSectionCoverage = {
       coveredIdeaIds: edit.coveredIdeaIds.filter(id => validIdeaIds.has(id)),
       usedSourceChunkIds: edit.usedSourceChunkIds.filter(id => validChunkIds.has(id)),
       usedClaimIds: edit.usedClaimIds.filter(id => validClaimIds.has(id)),
+      coveredEditorItemIds: [],
     };
     const replacesWholeSection = target.id === target.regionId
       && (edit.action === 'replace' || edit.action === 'delete');
@@ -668,6 +671,7 @@ export const evaluateContentWritingRevisionKnowledge = (options: {
             ...previous.usedClaimIds,
             ...declared.usedClaimIds,
           ])),
+          coveredEditorItemIds: [...(previous.coveredEditorItemIds || [])],
         });
   });
 

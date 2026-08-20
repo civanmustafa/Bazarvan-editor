@@ -97,6 +97,7 @@ export type ContentWritingSectionCoverage = {
   coveredIdeaIds: string[];
   usedSourceChunkIds: string[];
   usedClaimIds: string[];
+  coveredEditorItemIds: string[];
 };
 
 export type ContentWritingCoverageRepair = {
@@ -105,6 +106,7 @@ export type ContentWritingCoverageRepair = {
   ideaIds: string[];
   sourceChunkIds: string[];
   claimIds: string[];
+  editorItemIds: string[];
 };
 
 export type ContentWritingCoverageAudit = {
@@ -113,6 +115,7 @@ export type ContentWritingCoverageAudit = {
   unsupportedClaimIds: string[];
   blockedClaimIds: string[];
   duplicateTopics: string[];
+  missingEditorItemIds: string[];
   repairs: ContentWritingCoverageRepair[];
 };
 
@@ -556,6 +559,7 @@ export const parseContentWritingSectionResult = (
   validIdeaIds: readonly string[],
   validChunkIds: readonly string[],
   validClaimIds: readonly string[] = [],
+  validEditorItemIds: readonly string[] = [],
 ): { markdown: string; coverage: ContentWritingSectionCoverage } => {
   const source = parseJsonObject(value);
   if (!source) throw new Error('The section must be valid JSON.');
@@ -564,12 +568,15 @@ export const parseContentWritingSectionResult = (
   const ideaSet = new Set(validIdeaIds);
   const chunkSet = new Set(validChunkIds);
   const claimSet = new Set(validClaimIds);
+  const editorItemSet = new Set(validEditorItemIds);
   return {
     markdown,
     coverage: {
       coveredIdeaIds: toUniqueTextList(source.coveredIdeaIds).filter(id => ideaSet.has(id)),
       usedSourceChunkIds: toUniqueTextList(source.usedSourceChunkIds).filter(id => chunkSet.has(id)),
       usedClaimIds: toUniqueTextList(source.usedClaimIds).filter(id => claimSet.has(id)),
+      coveredEditorItemIds: toUniqueTextList(source.coveredEditorItemIds)
+        .filter(id => editorItemSet.has(id)),
     },
   };
 };
@@ -582,6 +589,7 @@ export const normalizeContentWritingSectionCoverage = (
     coveredIdeaIds: toUniqueTextList(source.coveredIdeaIds),
     usedSourceChunkIds: toUniqueTextList(source.usedSourceChunkIds),
     usedClaimIds: toUniqueTextList(source.usedClaimIds),
+    coveredEditorItemIds: toUniqueTextList(source.coveredEditorItemIds),
   };
 };
 
@@ -591,6 +599,7 @@ export const parseContentWritingCoverageAudit = (
     validIdeaIds: readonly string[];
     validChunkIds: readonly string[];
     validClaimIds?: readonly string[];
+    validEditorItemIds?: readonly string[];
     validSectionKeys: readonly string[];
   },
 ): ContentWritingCoverageAudit => {
@@ -599,6 +608,7 @@ export const parseContentWritingCoverageAudit = (
   const ideaIds = new Set(options.validIdeaIds);
   const chunkIds = new Set(options.validChunkIds);
   const claimIds = new Set(options.validClaimIds || []);
+  const editorItemIds = new Set(options.validEditorItemIds || []);
   const sectionKeys = new Set(options.validSectionKeys);
   const repairs = Array.isArray(source.repairs)
     ? source.repairs.flatMap((item): ContentWritingCoverageRepair[] => {
@@ -612,6 +622,8 @@ export const parseContentWritingCoverageAudit = (
         ideaIds: toUniqueTextList(item.ideaIds).filter(id => ideaIds.has(id)),
         sourceChunkIds: toUniqueTextList(item.sourceChunkIds).filter(id => chunkIds.has(id)),
         claimIds: toUniqueTextList(item.claimIds).filter(id => claimIds.has(id)),
+        editorItemIds: toUniqueTextList(item.editorItemIds)
+          .filter(id => editorItemIds.has(id)),
       }];
     }).slice(0, 3)
     : [];
@@ -623,6 +635,8 @@ export const parseContentWritingCoverageAudit = (
     blockedClaimIds: toUniqueTextList(source.blockedClaimIds)
       .filter(id => claimIds.has(id)),
     duplicateTopics: toUniqueTextList(source.duplicateTopics, 50, 500),
+    missingEditorItemIds: toUniqueTextList(source.missingEditorItemIds)
+      .filter(id => editorItemIds.has(id)),
     repairs,
   };
 };

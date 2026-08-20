@@ -158,6 +158,7 @@ export const normalizeContentWritingSectionCoverage = (
     coveredIdeaIds: toTextList(source.coveredIdeaIds),
     usedSourceChunkIds: toTextList(source.usedSourceChunkIds),
     usedClaimIds: toTextList(source.usedClaimIds),
+    coveredEditorItemIds: toTextList(source.coveredEditorItemIds),
   };
 };
 

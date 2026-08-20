@@ -584,7 +584,7 @@ test('content writing enforces one goal-aware final section after FAQ across ass
     readWorkspaceFile('server/contentWritingEngine.ts'),
   ]);
 
-  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 11/);
+  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 12/);
   assert.match(workflow, /auditContentWritingFinalSectionStructure/);
   assert.match(workflow, /final_structure_faq_not_penultimate/);
   assert.match(workflow, /final_structure_duplicate_final_heading/);
