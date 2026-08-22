@@ -753,6 +753,9 @@ export const executeContentWritingTurn = async (options: {
   };
   const allowModelFallback = options.session.provider === 'gemini'
     && options.session.context_snapshot?.allowModelFallback === true;
+  const credentialPurpose = options.session.progress?.resumed === true
+    ? 'content_writing_resume' as const
+    : 'standard' as const;
   const rawResult = options.session.provider === 'openai'
     ? await executeOpenAiRequest({
       instructions: instructions.content,
@@ -765,7 +768,7 @@ export const executeContentWritingTurn = async (options: {
       maxOutputTokens: options.maxOutputTokens || 8_000,
       conversationMode: 'independent',
       promptCacheKey: `content-writing:${options.session.id}`.slice(0, 200),
-    }, { signal: options.signal, telemetry })
+    }, { signal: options.signal, telemetry, credentialPurpose })
     : await aiExecutionEngine.executeGemini({
       systemInstruction: instructions.content,
       history: baseHistory.map(message => ({
@@ -781,6 +784,7 @@ export const executeContentWritingTurn = async (options: {
       signal: options.signal,
       telemetry,
       onProgress: options.onProgress,
+      credentialPurpose,
     });
   const publicResult = options.session.provider === 'openai'
     ? { ...rawResult, body: rawResult.body || {} }

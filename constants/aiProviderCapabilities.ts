@@ -21,6 +21,10 @@ export type AiProviderCapabilities = {
   contentWriting: {
     qualityOverrideReasonRequired: boolean;
     competitorPhraseIntelligenceEnabled: boolean;
+    resumeModel: {
+      provider: AiRuntimeProvider;
+      model: string;
+    } | null;
   };
 };
 
@@ -83,6 +87,7 @@ export const getDefaultAiProviderCapabilities = (): AiProviderCapabilities => ({
   contentWriting: {
     qualityOverrideReasonRequired: true,
     competitorPhraseIntelligenceEnabled: true,
+    resumeModel: null,
   },
 });
 
@@ -100,6 +105,13 @@ export const normalizeAiProviderCapabilities = (value: unknown): AiProviderCapab
     ? source.defaultProvider as AiRuntimeProvider
     : fallback.defaultProvider;
   const contentWritingSource = isRecord(source.contentWriting) ? source.contentWriting : {};
+  const resumeModelSource = isRecord(contentWritingSource.resumeModel)
+    ? contentWritingSource.resumeModel
+    : null;
+  const resumeProvider = resumeModelSource?.provider as AiRuntimeProvider;
+  const resumeModel = typeof resumeModelSource?.model === 'string'
+    ? resumeModelSource.model.trim().slice(0, 200)
+    : '';
   const defaultProvider = AI_RUNTIME_PROVIDER_ORDER.includes(requestedDefault)
     && providers[requestedDefault].available
     ? requestedDefault
@@ -117,6 +129,10 @@ export const normalizeAiProviderCapabilities = (value: unknown): AiProviderCapab
         typeof contentWritingSource.competitorPhraseIntelligenceEnabled === 'boolean'
           ? contentWritingSource.competitorPhraseIntelligenceEnabled
           : fallback.contentWriting.competitorPhraseIntelligenceEnabled,
+      resumeModel: resumeModel
+        && AI_RUNTIME_PROVIDER_ORDER.includes(resumeProvider)
+        ? { provider: resumeProvider, model: resumeModel }
+        : null,
     },
   };
 };

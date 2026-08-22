@@ -65,6 +65,9 @@ const getPublicOverview = (overview: AdminAiProviderSecretsOverview) => {
     providers: {
       openai_latest: enrich('openai_latest', openAiFallbackCount),
       gemini_latest: enrich('gemini_latest', geminiFallbackCount),
+      content_writing_resume_gemini: enrich('content_writing_resume_gemini', 0),
+      content_writing_resume_gemini_paid: enrich('content_writing_resume_gemini_paid', 0),
+      content_writing_resume_openai: enrich('content_writing_resume_openai', 0),
     },
   };
 };

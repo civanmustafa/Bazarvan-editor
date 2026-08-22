@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   __adminAiProviderSecretsTestUtils,
@@ -51,6 +52,53 @@ test('administrator AI key validation accepts one key and rejects lists', () => 
     () => __adminAiProviderSecretsTestUtils.normalizeApiKey('first-provider-key-12345,second-provider-key-67890'),
     /single non-whitespace value/i,
   );
+});
+
+test('content-writing resume key is isolated by provider and precedes ordinary rotation', async () => {
+  await withEncryptionKey(() => {
+    const plaintext = 'resume-gemini-provider-key-1234567890';
+    const encrypted = __adminAiProviderSecretsTestUtils.encryptSecret(
+      'content_writing_resume_gemini',
+      plaintext,
+    );
+    assert.equal(
+      __adminAiProviderSecretsTestUtils.decryptSecret({
+        provider: 'content_writing_resume_gemini',
+        ...encrypted,
+      } as any),
+      plaintext,
+    );
+    assert.throws(
+      () => __adminAiProviderSecretsTestUtils.decryptSecret({
+        provider: 'content_writing_resume_openai',
+        ...encrypted,
+      } as any),
+      /could not be decrypted/i,
+    );
+
+    const credentials = __adminAiProviderSecretsTestUtils.buildResolvedCredentialSet(
+      'admin-key-12345678901234567890',
+      true,
+      ['hostinger-key-123456789012345'],
+      ['user-key-123456789012345678901'],
+      plaintext,
+    );
+    assert.deepEqual(credentials.tiers.map((tier: { source: string }) => tier.source), [
+      'resume',
+      'user',
+      'admin',
+      'hostinger',
+    ]);
+    assert.equal(credentials.keys[0], plaintext);
+  });
+
+  const migration = await readFile(
+    new URL('../supabase/migrations/20260823000000_content_writing_resume_secret.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(migration, /content_writing_resume_gemini/);
+  assert.match(migration, /content_writing_resume_gemini_paid/);
+  assert.match(migration, /content_writing_resume_openai/);
 });
 
 test('administrator AI secret readiness checks schema and encryption independently', async () => {

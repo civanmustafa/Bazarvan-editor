@@ -58,6 +58,7 @@ export type OpenAiExecutionRequest = {
 export type OpenAiExecutionOptions = {
   signal?: AbortSignal;
   telemetry?: AiExecutionTelemetryContext;
+  credentialPurpose?: 'standard' | 'content_writing_resume';
 };
 
 class OpenAiRequestError extends Error {
@@ -271,6 +272,7 @@ const executeOpenAiProviderFallback = async (options: {
   capabilities: AiProviderCapabilities;
   signal?: AbortSignal;
   telemetry: AiExecutionTelemetryContext;
+  credentialPurpose?: 'standard' | 'content_writing_resume';
 }): Promise<ApiResult> => {
   if (!shouldAttemptAiFallback(options.primaryResult)) return options.primaryResult;
   const fallbackProvider = getAvailableAiProviderFallbacks(options.capabilities, 'openai')[0];
@@ -298,6 +300,7 @@ const executeOpenAiProviderFallback = async (options: {
     signal: options.signal,
     telemetry: options.telemetry,
     suppressTelemetry: true,
+    credentialPurpose: options.credentialPurpose,
   });
   return mergeProviderFallbackResult({
     previous: options.primaryResult,
@@ -383,10 +386,14 @@ export const executeOpenAiRequest = async (
         capabilities,
         signal: options.signal,
         telemetry,
+        credentialPurpose: options.credentialPurpose,
       }));
     }
 
-    const credentials = await resolveOpenAiApiKeys(telemetry.actorUserId);
+    const credentials = await resolveOpenAiApiKeys(
+      telemetry.actorUserId,
+      options.credentialPurpose,
+    );
     const keyCandidates = credentials.tiers.flatMap(tier => (
       randomizeKeyOrder(tier.keys).map(key => ({ key, credentialSource: tier.source }))
     ));
@@ -407,6 +414,7 @@ export const executeOpenAiRequest = async (
         capabilities,
         signal: options.signal,
         telemetry,
+        credentialPurpose: options.credentialPurpose,
       }));
     }
 
@@ -517,6 +525,7 @@ export const executeOpenAiRequest = async (
       capabilities,
       signal: options.signal,
       telemetry,
+      credentialPurpose: options.credentialPurpose,
     }));
   } catch (error) {
     return finalize({

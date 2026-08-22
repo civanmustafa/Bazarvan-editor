@@ -67,6 +67,7 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     contentWritingCompetitorPhraseIntelligenceEnabled: true,
     contentWritingDualKnowledgeExtractionEnabled: true,
     contentWritingMultiCandidateGenerationEnabled: true,
+    contentWritingResumeModel: '',
   },
   prompts: normalizePromptRegistrySettings({
     registryVersion: PROMPT_REGISTRY_VERSION,
@@ -239,6 +240,11 @@ const normalizeSystemSection = (
     setWhenPresent('contentWritingMultiCandidateGenerationEnabled', field => normalizeBoolean(
       field,
       defaults.contentWritingMultiCandidateGenerationEnabled,
+    ));
+    setWhenPresent('contentWritingResumeModel', field => normalizeString(
+      field,
+      defaults.contentWritingResumeModel,
+      256,
     ));
     return normalized;
   }

@@ -295,6 +295,7 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(engine, /systemInstruction: instructions\.content/);
   assert.match(engine, /executeContentWritingTurn/);
   assert.match(engine, /executeOpenAiRequest/);
+  assert.match(engine, /credentialPurpose = options\.session\.progress\?\.resumed === true/);
   assert.doesNotMatch(engine, /competitor\.content\.slice|content_text\.slice/);
   assert.match(workflow, /executeStructuredContentWritingWorkflow/);
   assert.match(workflow, /getContentWritingSteps/);
@@ -378,6 +379,8 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(panel, /resumeContentWritingSession\(\{/);
   assert.match(panel, /provider,/);
   assert.match(panel, /model: selectedModel/);
+  assert.doesNotMatch(panel, /setProvider\(selectedSession\.provider\)/);
+  assert.match(panel, /aiProviderCapabilities\.contentWriting\.resumeModel/);
   assert.match(panel, /سيُستأنف تنفيذ المراحل المتبقية باستخدام/);
   assert.match(panel, /recoverContentWritingDraft/);
   assert.match(panel, /المسودة الجزئية المستردة/);

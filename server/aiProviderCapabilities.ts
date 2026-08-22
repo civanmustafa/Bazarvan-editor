@@ -13,6 +13,7 @@ import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import {
   readAiProviderCredentialAvailability,
 } from './adminAiProviderSecrets';
+import { parseContentWritingResumeModel } from '../constants/contentWritingResume';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -30,6 +31,7 @@ export const readAiProviderCapabilities = async (userId?: string): Promise<AiPro
   const storedAi = isRecord(data?.value) ? data.value : {};
   const settings = normalizeSystemSettingsMap({ ai: storedAi }).ai;
   const credentialAvailability = await readAiProviderCredentialAvailability(userId);
+  const resumeModel = parseContentWritingResumeModel(settings.contentWritingResumeModel);
 
   return normalizeAiProviderCapabilities({
     providers: {
@@ -60,6 +62,7 @@ export const readAiProviderCapabilities = async (userId?: string): Promise<AiPro
         settings.contentWritingQualityOverrideReasonRequired !== false,
       competitorPhraseIntelligenceEnabled:
         settings.contentWritingCompetitorPhraseIntelligenceEnabled !== false,
+      resumeModel,
     },
   });
 };

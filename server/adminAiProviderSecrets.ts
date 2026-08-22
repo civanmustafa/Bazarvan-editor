@@ -13,10 +13,12 @@ import {
   resolveUserAiProviderKeys,
   type UserAiSecretProvider,
 } from './userAiProviderSecrets.ts';
+import { getContentWritingResumeSecretProvider } from '../constants/contentWritingResume.ts';
 
 export { ADMIN_AI_SECRET_PROVIDERS } from '../constants/adminAiProviderSecrets.ts';
 export type { AdminAiSecretProvider } from '../constants/adminAiProviderSecrets.ts';
-export type AiCredentialSource = 'user' | 'admin' | 'hostinger';
+export type AiCredentialSource = 'resume' | 'user' | 'admin' | 'hostinger';
+export type AiCredentialPurpose = 'standard' | 'content_writing_resume';
 
 export type ResolvedAiCredentialTier = {
   source: AiCredentialSource;
@@ -300,21 +302,28 @@ const buildResolvedCredentialSet = (
   adminEnabled: boolean,
   fallbackKeys: string[],
   userKeys: string[] = [],
+  resumeKey: string | null = null,
 ): ResolvedAiCredentialSet => {
   const normalizedUserKeys = Array.from(new Set(userKeys.map(key => key.trim()).filter(Boolean)));
   const normalizedAdminKey = adminEnabled && adminKey ? adminKey.trim() : '';
+  const normalizedResumeKey = resumeKey?.trim() || '';
   const keysBeforeHostinger = new Set([
+    ...(normalizedResumeKey ? [normalizedResumeKey] : []),
     ...normalizedUserKeys,
     ...(normalizedAdminKey ? [normalizedAdminKey] : []),
   ]);
   const normalizedFallbackKeys = Array.from(new Set(
     fallbackKeys.map(key => key.trim()).filter(key => key && !keysBeforeHostinger.has(key)),
   ));
-  const adminKeys = normalizedAdminKey && !normalizedUserKeys.includes(normalizedAdminKey)
+  const userKeysWithoutResume = normalizedUserKeys.filter(key => key !== normalizedResumeKey);
+  const adminKeys = normalizedAdminKey
+    && normalizedAdminKey !== normalizedResumeKey
+    && !normalizedUserKeys.includes(normalizedAdminKey)
     ? [normalizedAdminKey]
     : [];
   const tiers: ResolvedAiCredentialTier[] = [
-    ...(normalizedUserKeys.length > 0 ? [{ source: 'user' as const, keys: normalizedUserKeys }] : []),
+    ...(normalizedResumeKey ? [{ source: 'resume' as const, keys: [normalizedResumeKey] }] : []),
+    ...(userKeysWithoutResume.length > 0 ? [{ source: 'user' as const, keys: userKeysWithoutResume }] : []),
     ...(adminKeys.length > 0 ? [{ source: 'admin' as const, keys: adminKeys }] : []),
     ...(normalizedFallbackKeys.length > 0 ? [{ source: 'hostinger' as const, keys: normalizedFallbackKeys }] : []),
   ];
@@ -330,29 +339,65 @@ const resolveCredentialSet = async (
   fallbackKeys: string[],
   userId?: string,
   userProvider?: UserAiSecretProvider,
+  purpose: AiCredentialPurpose = 'standard',
+  runtimeProvider?: 'gemini' | 'geminiPaid' | 'openai',
 ): Promise<ResolvedAiCredentialSet> => {
-  const [row, userKeys] = await Promise.all([
+  const [row, userKeys, resumeRow] = await Promise.all([
     readSecretRow(provider),
     userProvider ? resolveUserAiProviderKeys(userId, userProvider) : Promise.resolve([]),
+    purpose === 'content_writing_resume' && runtimeProvider
+      ? readSecretRow(getContentWritingResumeSecretProvider(runtimeProvider))
+      : Promise.resolve(null),
   ]);
   const adminKey = row?.enabled ? normalizeApiKey(decryptSecret(row)) : null;
-  return buildResolvedCredentialSet(adminKey, row?.enabled === true, fallbackKeys, userKeys);
+  const resumeKey = resumeRow?.enabled ? normalizeApiKey(decryptSecret(resumeRow)) : null;
+  return buildResolvedCredentialSet(
+    adminKey,
+    row?.enabled === true,
+    fallbackKeys,
+    userKeys,
+    resumeKey,
+  );
 };
 
-export const resolveOpenAiApiKeys = async (userId?: string): Promise<ResolvedAiCredentialSet> => (
-  resolveCredentialSet('openai_latest', getEnvironmentOpenAiApiKeys(), userId, 'openai_paid')
+export const resolveOpenAiApiKeys = async (
+  userId?: string,
+  purpose: AiCredentialPurpose = 'standard',
+): Promise<ResolvedAiCredentialSet> => (
+  resolveCredentialSet(
+    'openai_latest',
+    getEnvironmentOpenAiApiKeys(),
+    userId,
+    'openai_paid',
+    purpose,
+    'openai',
+  )
 );
 
 export const resolveGeminiApiKeys = async (
   provider: 'gemini' | 'geminiPaid',
   userId?: string,
+  purpose: AiCredentialPurpose = 'standard',
 ): Promise<ResolvedAiCredentialSet> => {
   const fallbackKeys = getEnvironmentGeminiApiKeys(provider);
   if (provider === 'gemini') {
-    const userKeys = await resolveUserAiProviderKeys(userId, 'gemini_free');
-    return buildResolvedCredentialSet(null, false, fallbackKeys, userKeys);
+    const [userKeys, resumeRow] = await Promise.all([
+      resolveUserAiProviderKeys(userId, 'gemini_free'),
+      purpose === 'content_writing_resume'
+        ? readSecretRow(getContentWritingResumeSecretProvider(provider))
+        : Promise.resolve(null),
+    ]);
+    const resumeKey = resumeRow?.enabled ? normalizeApiKey(decryptSecret(resumeRow)) : null;
+    return buildResolvedCredentialSet(null, false, fallbackKeys, userKeys, resumeKey);
   }
-  return resolveCredentialSet('gemini_latest', fallbackKeys, userId, 'gemini_paid');
+  return resolveCredentialSet(
+    'gemini_latest',
+    fallbackKeys,
+    userId,
+    'gemini_paid',
+    purpose,
+    provider,
+  );
 };
 
 export const readAiProviderCredentialAvailability = async (userId?: string): Promise<{

@@ -514,23 +514,27 @@ const ContentWritingPanel: React.FC = () => {
   }, [providerConfigs, selectedProviderConfig]);
 
   useEffect(() => {
+    const resumeModel = aiProviderCapabilities.contentWriting.resumeModel;
     if (
       !selectedSession
       || selectedSession.executionMode !== 'api'
       || !['failed', 'cancelled'].includes(selectedSession.status)
       || resumeSelectionSessionRef.current === selectedSession.id
+      || providerTouchedRef.current
+      || touchedModelsRef.current.size > 0
+      || !resumeModel
     ) {
       return;
     }
+    const resumeProvider = providerConfigs.find(item => item.id === resumeModel.provider);
+    if (!resumeProvider?.enabled || !resumeProvider.available) return;
     resumeSelectionSessionRef.current = selectedSession.id;
-    providerTouchedRef.current = true;
-    touchedModelsRef.current.add(selectedSession.provider);
-    setProvider(selectedSession.provider);
+    setProvider(resumeModel.provider);
     setModelByProvider(current => ({
       ...current,
-      [selectedSession.provider]: selectedSession.model,
+      [resumeModel.provider]: resumeModel.model,
     }));
-  }, [selectedSession]);
+  }, [aiProviderCapabilities.contentWriting.resumeModel, providerConfigs, selectedSession]);
 
   const mergeSession = useCallback((incoming: ContentWritingSession) => {
     setSessions(current => {

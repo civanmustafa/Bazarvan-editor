@@ -1,10 +1,17 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { ADMIN_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/adminAiProviderSecrets.ts';
+import {
+  ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
+  CONTENT_WRITING_RESUME_SECRET_MIGRATION,
+} from '../constants/adminAiProviderSecrets.ts';
 import { USER_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/userAiProviderSecrets.ts';
 
 const root = process.cwd();
-for (const migration of [ADMIN_AI_PROVIDER_SECRETS_MIGRATION, USER_AI_PROVIDER_SECRETS_MIGRATION]) {
+for (const migration of [
+  ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
+  USER_AI_PROVIDER_SECRETS_MIGRATION,
+  CONTENT_WRITING_RESUME_SECRET_MIGRATION,
+]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
   if (!migrationInfo.isFile() || migrationInfo.size < 500) {
@@ -16,6 +23,7 @@ const deploymentGuide = await readFile(path.join(root, 'deploy', 'HOSTINGER_CANO
 for (const marker of [
   ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
   USER_AI_PROVIDER_SECRETS_MIGRATION,
+  CONTENT_WRITING_RESUME_SECRET_MIGRATION,
   'AI_SETTINGS_ENCRYPTION_KEY',
 ]) {
   if (!deploymentGuide.includes(marker)) {
@@ -37,6 +45,10 @@ for (const marker of [
 
 console.log(JSON.stringify({
   ok: true,
-  migrations: [ADMIN_AI_PROVIDER_SECRETS_MIGRATION, USER_AI_PROVIDER_SECRETS_MIGRATION],
+  migrations: [
+    ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
+    USER_AI_PROVIDER_SECRETS_MIGRATION,
+    CONTENT_WRITING_RESUME_SECRET_MIGRATION,
+  ],
   readinessEndpoint: '/readyz',
 }, null, 2));

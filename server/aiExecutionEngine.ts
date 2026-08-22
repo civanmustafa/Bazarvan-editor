@@ -143,6 +143,7 @@ export type AiExecutionOptions = {
   onProgress?: (progress: AiExecutionProgress) => void;
   telemetry?: AiExecutionTelemetryContext;
   suppressTelemetry?: boolean;
+  credentialPurpose?: 'standard' | 'content_writing_resume';
 };
 
 export type GeminiExecutionOptions = AiExecutionOptions;
@@ -852,6 +853,7 @@ const executeGeminiCredentialTierInternal = async (
     const credentials = internal.credentials || await resolveGeminiApiKeys(
       selectedProvider,
       internal.userId || normalizeAiExecutionTelemetryContext(options.telemetry).actorUserId,
+      options.credentialPurpose,
     );
     const GEMINI_API_KEYS = credentials.keys;
 
@@ -1449,7 +1451,7 @@ const executeGeminiProviderRequestInternal = async (
   const capabilityFailure = getProviderCapabilityFailure(provider, capabilities);
   if (capabilityFailure) return capabilityFailure;
 
-  const credentials = await resolveGeminiApiKeys(provider, userId);
+  const credentials = await resolveGeminiApiKeys(provider, userId, options.credentialPurpose);
   const credentialTiers = credentials.tiers.filter(tier => tier.keys.length > 0);
   if (credentialTiers.length === 0) {
     return executeGeminiCredentialTierInternal(requestBody, options, {

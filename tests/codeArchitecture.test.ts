@@ -453,8 +453,8 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
   assert.match(secretSettings, /saveAndEnableAdminAiProviderSecret/);
   assert.match(settingsPage, /\{isAdmin && \(\s*<SettingsSection title="مفاتيح المزودات الإدارية المشفّرة">/);
   assert.match(capabilityService, /readAiProviderCredentialAvailability\(userId\)/);
-  assert.match(openAiExecutionEngine, /resolveOpenAiApiKeys\(telemetry\.actorUserId\)/);
-  assert.match(aiExecutionEngine, /resolveGeminiApiKeys\(selectedProvider,\s*userId\)/);
+  assert.match(openAiExecutionEngine, /resolveOpenAiApiKeys\(\s*telemetry\.actorUserId,\s*options\.credentialPurpose/);
+  assert.match(aiExecutionEngine, /resolveGeminiApiKeys\(provider, userId, options\.credentialPurpose\)/);
   assert.doesNotMatch(openAiExecutionEngine, /process\.env\.OPENAI_API_KEYS?/);
   assert.doesNotMatch(aiExecutionEngine, /process\.env\.GEMINI_(?:PAID|PRO)_API_KEYS?/);
 });

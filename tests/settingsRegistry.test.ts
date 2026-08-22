@@ -176,6 +176,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       contentWritingCompetitorPhraseIntelligenceEnabled: false,
       contentWritingDualKnowledgeExtractionEnabled: false,
       contentWritingMultiCandidateGenerationEnabled: false,
+      contentWritingResumeModel: '  openai::gpt-4.1-mini  ',
       unknownSecret: 'must-not-survive',
     },
     articles: {
@@ -197,10 +198,30 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.ai.contentWritingCompetitorPhraseIntelligenceEnabled, false);
   assert.equal(normalized.ai.contentWritingDualKnowledgeExtractionEnabled, false);
   assert.equal(normalized.ai.contentWritingMultiCandidateGenerationEnabled, false);
+  assert.equal(normalized.ai.contentWritingResumeModel, 'openai::gpt-4.1-mini');
   assert.equal(normalized.ai.unknownSecret, undefined);
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');
   assert.equal(normalized.articles.defaultStatus, 'content_preparation');
+});
+
+test('AI capabilities expose an optional normalized content-writing resume model', async () => {
+  const capabilities = await importAiProviderCapabilities();
+  const normalized = capabilities.normalizeAiProviderCapabilities({
+    contentWriting: {
+      resumeModel: { provider: 'openai', model: '  gpt-4.1-mini  ' },
+    },
+  });
+  assert.deepEqual(normalized.contentWriting.resumeModel, {
+    provider: 'openai',
+    model: 'gpt-4.1-mini',
+  });
+  assert.equal(
+    capabilities.normalizeAiProviderCapabilities({
+      contentWriting: { resumeModel: { provider: 'invalid', model: 'x' } },
+    }).contentWriting.resumeModel,
+    null,
+  );
 });
 
 test('PromptRegistry keeps Arabic defaults, required attachments, and valid administrator overrides', async () => {
