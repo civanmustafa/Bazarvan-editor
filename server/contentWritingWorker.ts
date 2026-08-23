@@ -18,6 +18,7 @@ import {
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
 import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
+import { scheduleNextAutomaticContentWritingSession } from './contentWritingAutomation';
 
 const boundedInteger = (
   value: string | undefined,
@@ -287,6 +288,16 @@ const queueWorker = new AdaptiveQueueWorker<ContentWritingSession>({
   minimumIdleDelayMs: pollIntervalMs,
   maximumIdleDelayMs: maximumIdlePollIntervalMs,
   isShuttingDown: () => shuttingDown,
+  beforeClaim: async () => {
+    try {
+      await scheduleNextAutomaticContentWritingSession(`${workerId}:automation-scheduler`);
+    } catch (error) {
+      // Automatic discovery is an optional producer for this queue. A transient
+      // scheduler/schema failure must never prevent already queued manual or
+      // full-pipeline sessions from being claimed and executed.
+      logThrottledError('Automatic content-writing scheduling failed; continuing with queued sessions', error);
+    }
+  },
   claim: slotWorkerId => claimNextContentWritingSession({
     workerId: slotWorkerId,
     leaseSeconds,

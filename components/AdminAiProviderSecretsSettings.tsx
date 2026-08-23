@@ -58,10 +58,16 @@ const AdminAiProviderSecretsSettings: React.FC = () => {
   const [inputs, setInputs] = useState<Record<AdminAiSecretProvider, string>>({
     openai_latest: '',
     gemini_latest: '',
+    content_writing_resume_gemini: '',
+    content_writing_resume_gemini_paid: '',
+    content_writing_resume_openai: '',
   });
   const [visible, setVisible] = useState<Record<AdminAiSecretProvider, boolean>>({
     openai_latest: false,
     gemini_latest: false,
+    content_writing_resume_gemini: false,
+    content_writing_resume_gemini_paid: false,
+    content_writing_resume_openai: false,
   });
   const [busyProvider, setBusyProvider] = useState<AdminAiSecretProvider | null>(null);
   const [isLoading, setIsLoading] = useState(true);

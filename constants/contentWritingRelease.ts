@@ -12,6 +12,7 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20260728040000_content_writing_final_structure.sql',
   '20260812000000_allow_parallel_content_writing_substeps.sql',
   '20260812010000_gemini_key_availability_waiting.sql',
+  '20260823010000_automatic_content_writing_queue.sql',
 ] as const;
 
 export const CONTENT_WRITING_RELEASE_ARTIFACTS = [

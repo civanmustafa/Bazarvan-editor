@@ -15,6 +15,7 @@ import {
 } from '../constants/contentWritingQuality';
 import { navigateToAppPath } from '../utils/appRoutes';
 import ContentWritingResumeSettings from './ContentWritingResumeSettings';
+import ContentWritingAutomationSettings from './ContentWritingAutomationSettings';
 
 type ContentWritingPromptSettingsProps = {
   values: Record<string, unknown>;
@@ -28,7 +29,15 @@ type ContentWritingPromptSettingsProps = {
       | 'contentWritingCompetitorPhraseIntelligenceEnabled'
       | 'contentWritingDualKnowledgeExtractionEnabled'
       | 'contentWritingMultiCandidateGenerationEnabled'
-      | 'contentWritingResumeModel',
+      | 'contentWritingResumeModel'
+      | 'contentWritingAutomationEnabled'
+      | 'contentWritingAutomationIntervalMinutes'
+      | 'contentWritingAutomationProvider'
+      | 'contentWritingAutomationModel'
+      | 'contentWritingAutomationMinimumCompetitors'
+      | 'contentWritingAutomationRequireCompetitorTerminalState'
+      | 'contentWritingAutomationMaxAttempts'
+      | 'contentWritingAutomationRetryMinutes',
     value: string | number | boolean,
   ) => void;
 };
@@ -100,6 +109,8 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
       </label>
 
       <ContentWritingResumeSettings values={values} onChange={onChange} />
+
+      <ContentWritingAutomationSettings values={values} onChange={onChange} />
 
       <div className="grid gap-4 border-t border-gray-200 pt-5 dark:border-[#3C3C3C] md:grid-cols-3">
         <label className="block">

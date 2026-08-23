@@ -17,6 +17,11 @@ export const CONTENT_WRITING_SCHEMA_PROBES = [
     table: 'content_writing_steps',
     columns: 'id,session_id,step_key,step_type,status,ordinal',
   },
+  {
+    id: 'automationQueue',
+    table: 'content_writing_automation_items',
+    columns: 'id,article_id,status,run_generation,attempt_count,max_attempts,eligible_at,content_writing_session_id',
+  },
 ] as const;
 
 type ProbeResult = {
@@ -39,7 +44,10 @@ export type ContentWritingReadinessResult = {
   ok: boolean;
   checkedAt: string;
   requiredMigrationCount: number;
-  checks: Record<(typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id'] | 'keyCoordinator', boolean>;
+  checks: Record<
+    (typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id'] | 'keyCoordinator' | 'automationEvaluator',
+    boolean
+  >;
   code?: 'content_writing_schema_unavailable';
   detail?: string;
 };
@@ -86,6 +94,7 @@ export const checkContentWritingReadiness = async (options: {
     [
       ...CONTENT_WRITING_SCHEMA_PROBES.map(probe => [probe.id, false] as const),
       ['keyCoordinator', false] as const,
+      ['automationEvaluator', false] as const,
     ],
   ) as ContentWritingReadinessResult['checks'];
   const failures: string[] = [];
@@ -135,6 +144,19 @@ export const checkContentWritingReadiness = async (options: {
       checks.keyCoordinator = true;
     } catch (error) {
       failures.push(`keyCoordinator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
+    }
+  })(), (async () => {
+    try {
+      const result = await withTimeout(client.rpc('evaluate_content_writing_automation_readiness', {
+        p_article_id: '00000000-0000-0000-0000-000000000000',
+      }), timeoutMs);
+      if (result.error) {
+        failures.push(describeProbeFailure('automationEvaluator', result.error));
+        return;
+      }
+      checks.automationEvaluator = true;
+    } catch (error) {
+      failures.push(`automationEvaluator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
     }
   })()]);
 

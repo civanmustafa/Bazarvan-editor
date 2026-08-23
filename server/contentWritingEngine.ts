@@ -629,6 +629,7 @@ export const queueContentWritingSession = async (input: {
   provider: ContentWritingProvider;
   model?: string;
   idempotencyKey: string;
+  contextSnapshotPatch?: JsonObject;
 }): Promise<QueuedContentWritingSession> => {
   const [conversation, model] = await Promise.all([
     prepareContentWritingConversation(input.articleId),
@@ -653,6 +654,7 @@ export const queueContentWritingSession = async (input: {
       inputHash,
       contextSnapshot: {
         ...conversation.contextSnapshot,
+        ...(isRecord(input.contextSnapshotPatch) ? input.contextSnapshotPatch : {}),
         allowModelFallback: input.provider === 'gemini' && conversation.allowModelFallback,
       },
       messages: conversation.messages.map(message => ({ content: message.content })),

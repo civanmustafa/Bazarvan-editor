@@ -177,6 +177,14 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       contentWritingDualKnowledgeExtractionEnabled: false,
       contentWritingMultiCandidateGenerationEnabled: false,
       contentWritingResumeModel: '  openai::gpt-4.1-mini  ',
+      contentWritingAutomationEnabled: true,
+      contentWritingAutomationIntervalMinutes: 99_999,
+      contentWritingAutomationProvider: 'invalid-provider',
+      contentWritingAutomationModel: '  gemini-custom-model  ',
+      contentWritingAutomationMinimumCompetitors: 99,
+      contentWritingAutomationRequireCompetitorTerminalState: false,
+      contentWritingAutomationMaxAttempts: 99,
+      contentWritingAutomationRetryMinutes: 0,
       unknownSecret: 'must-not-survive',
     },
     articles: {
@@ -199,6 +207,14 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.ai.contentWritingDualKnowledgeExtractionEnabled, false);
   assert.equal(normalized.ai.contentWritingMultiCandidateGenerationEnabled, false);
   assert.equal(normalized.ai.contentWritingResumeModel, 'openai::gpt-4.1-mini');
+  assert.equal(normalized.ai.contentWritingAutomationEnabled, true);
+  assert.equal(normalized.ai.contentWritingAutomationIntervalMinutes, 1_440);
+  assert.equal(normalized.ai.contentWritingAutomationProvider, 'gemini');
+  assert.equal(normalized.ai.contentWritingAutomationModel, 'gemini-custom-model');
+  assert.equal(normalized.ai.contentWritingAutomationMinimumCompetitors, 5);
+  assert.equal(normalized.ai.contentWritingAutomationRequireCompetitorTerminalState, false);
+  assert.equal(normalized.ai.contentWritingAutomationMaxAttempts, 10);
+  assert.equal(normalized.ai.contentWritingAutomationRetryMinutes, 1);
   assert.equal(normalized.ai.unknownSecret, undefined);
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');

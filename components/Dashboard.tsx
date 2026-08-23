@@ -46,6 +46,7 @@ import {
     shouldClearArticleAiResults,
     type ArticleStatusFilter,
 } from '../constants/articleStatuses';
+import AutomaticContentWritingQueuePanel from './AutomaticContentWritingQueuePanel';
 
 const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
 
@@ -2193,6 +2194,11 @@ const Dashboard: React.FC = () => {
                         <SummaryStat icon={<Clock size={20} />} label={t.totalTime} value={formatSeconds(scopedTotalTime, t)} />
                     </div>
                 </div>
+
+                <AutomaticContentWritingQueuePanel
+                  isArabic={uiLanguage !== 'en'}
+                  isAdmin={isAdmin}
+                />
 
             </div>
         </div>

@@ -54,6 +54,8 @@ const requiredServerMarkers = [
   'inspect_gemini_api_key_availability',
   'modelKeyReports',
   'finalSectionStructureVersion',
+  '/api/content-writing/automation',
+  'content_writing_automation_items',
 ];
 for (const marker of requiredServerMarkers) {
   if (!serverBundle.includes(marker)) {
@@ -76,6 +78,8 @@ const requiredWorkerMarkers = [
   'call_to_action',
   'faqIndependenceGuard',
   'finalSectionStructureGuard',
+  'claim_next_content_writing_automation_item',
+  'automatic_ready',
 ];
 for (const marker of requiredWorkerMarkers) {
   if (!workerBundle.includes(marker)) {

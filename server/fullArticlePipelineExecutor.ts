@@ -564,6 +564,10 @@ const executeFullArticlePipeline = async (
         provider,
         model,
         idempotencyKey: `full-pipeline:${context.job.id}:content-writing`,
+        contextSnapshotPatch: {
+          triggerSource: 'full_pipeline',
+          fullArticlePipelineJobId: context.job.id,
+        },
       });
       writingSession = queued.session;
     }

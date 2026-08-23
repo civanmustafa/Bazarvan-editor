@@ -1,0 +1,2 @@
+deploy/hostinger-supabase/*.sh text eol=lf
+deploy/hostinger-supabase/*.yml text eol=lf

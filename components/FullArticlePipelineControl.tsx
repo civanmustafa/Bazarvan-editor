@@ -32,6 +32,7 @@ type Props = {
   onBeforeStart: () => Promise<boolean>;
   onReloadArticle: (articleId: string) => Promise<boolean>;
   onReloadGoalContext: (articleId: string) => Promise<boolean>;
+  onActivityChange?: (active: boolean) => void;
 };
 
 const STAGES = [
@@ -92,6 +93,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   onBeforeStart,
   onReloadArticle,
   onReloadGoalContext,
+  onActivityChange,
 }) => {
   const [competitorCount, setCompetitorCount] = useState(5);
   const [job, setJob] = useState<ExternalAnalysisJobRow | null>(null);
@@ -101,6 +103,10 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   const [expanded, setExpanded] = useState(true);
   const reloadedJobsRef = useRef(new Set<string>());
   const syncedBriefJobsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    onActivityChange?.(isActive(job) || busy === 'start' || busy === 'retry');
+  }, [busy, job, onActivityChange]);
 
   const refresh = useCallback(async () => {
     if (!articleId) return;
@@ -214,7 +220,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   };
 
   const retry = async () => {
-    if (!job || busy || !canRetry) return;
+    if (!job || busy || disabled || !canRetry) return;
     setBusy('retry');
     setError('');
     try {
@@ -340,7 +346,10 @@ const FullArticlePipelineControl: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={retry}
-                  disabled={busy !== ''}
+                  disabled={disabled || busy !== ''}
+                  title={disabled
+                    ? (isArabic ? 'يوجد مسار كتابة آخر نشط لهذه المقالة.' : 'Another writing workflow is active for this article.')
+                    : undefined}
                   className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2 py-1 text-[10px] font-black text-amber-700 disabled:opacity-50 dark:border-amber-800 dark:text-amber-300"
                 >
                   {busy === 'retry' ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}

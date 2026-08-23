@@ -48,6 +48,9 @@ test('Arabic guide search tolerates letter variants and ranks the requested writ
 
   const automation = searchUserGuide('n8n عدد الكلمات');
   assert.ok(automation.some(result => result.article.id === 'n8n-integration'));
+
+  const automaticWriting = searchUserGuide('طابور الكتابة التلقائية فترة بين المقالات');
+  assert.ok(automaticWriting.some(result => result.article.id === 'automatic-content-writing-queue'));
 });
 
 test('guide route is a first-class application page', () => {

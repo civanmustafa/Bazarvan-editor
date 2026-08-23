@@ -68,6 +68,14 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     contentWritingDualKnowledgeExtractionEnabled: true,
     contentWritingMultiCandidateGenerationEnabled: true,
     contentWritingResumeModel: '',
+    contentWritingAutomationEnabled: false,
+    contentWritingAutomationIntervalMinutes: 15,
+    contentWritingAutomationProvider: 'gemini',
+    contentWritingAutomationModel: '',
+    contentWritingAutomationMinimumCompetitors: 1,
+    contentWritingAutomationRequireCompetitorTerminalState: true,
+    contentWritingAutomationMaxAttempts: 3,
+    contentWritingAutomationRetryMinutes: 30,
   },
   prompts: normalizePromptRegistrySettings({
     registryVersion: PROMPT_REGISTRY_VERSION,
@@ -245,6 +253,48 @@ const normalizeSystemSection = (
       field,
       defaults.contentWritingResumeModel,
       256,
+    ));
+    setWhenPresent('contentWritingAutomationEnabled', field => normalizeBoolean(
+      field,
+      defaults.contentWritingAutomationEnabled,
+    ));
+    setWhenPresent('contentWritingAutomationIntervalMinutes', field => normalizeInteger(
+      field,
+      defaults.contentWritingAutomationIntervalMinutes,
+      1,
+      1_440,
+    ));
+    setWhenPresent('contentWritingAutomationProvider', field => normalizeEnum(
+      field,
+      ['gemini', 'geminiPaid', 'openai'],
+      defaults.contentWritingAutomationProvider,
+    ));
+    setWhenPresent('contentWritingAutomationModel', field => normalizeString(
+      field,
+      defaults.contentWritingAutomationModel,
+      256,
+    ));
+    setWhenPresent('contentWritingAutomationMinimumCompetitors', field => normalizeInteger(
+      field,
+      defaults.contentWritingAutomationMinimumCompetitors,
+      1,
+      5,
+    ));
+    setWhenPresent('contentWritingAutomationRequireCompetitorTerminalState', field => normalizeBoolean(
+      field,
+      defaults.contentWritingAutomationRequireCompetitorTerminalState,
+    ));
+    setWhenPresent('contentWritingAutomationMaxAttempts', field => normalizeInteger(
+      field,
+      defaults.contentWritingAutomationMaxAttempts,
+      1,
+      10,
+    ));
+    setWhenPresent('contentWritingAutomationRetryMinutes', field => normalizeInteger(
+      field,
+      defaults.contentWritingAutomationRetryMinutes,
+      1,
+      1_440,
     ));
     return normalized;
   }

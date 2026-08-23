@@ -54,6 +54,7 @@ import ContentWritingStepResult, {
 } from './ContentWritingStepResult';
 import ContentWritingStageAuditPanel from './ContentWritingStageAuditPanel';
 import FullArticlePipelineControl from './FullArticlePipelineControl';
+import ContentWritingAutomationArticleStatus from './ContentWritingAutomationArticleStatus';
 import {
   ContentWritingRequestError,
   cancelContentWritingSession,
@@ -165,6 +166,27 @@ const getProviderLabel = (
   if (provider === 'geminiPaid') return 'Gemini Pro';
   if (provider === 'openai') return 'OpenAI';
   return 'Gemini';
+};
+
+const getSessionTriggerLabel = (
+  session: ContentWritingSession,
+  isArabic: boolean,
+): string => {
+  const storedSource = typeof session.contextSnapshot.triggerSource === 'string'
+    ? session.contextSnapshot.triggerSource
+    : '';
+  const source = storedSource
+    || (session.idempotencyKey.startsWith('auto-ready:')
+      ? 'automatic_ready'
+      : session.idempotencyKey.startsWith('full-pipeline:')
+        ? 'full_pipeline'
+        : session.executionMode === 'external'
+          ? 'external'
+          : 'manual');
+  if (source === 'automatic_ready') return isArabic ? 'تلقائي — مقالة جاهزة' : 'Automatic — ready article';
+  if (source === 'full_pipeline') return isArabic ? 'الإنشاء الشامل' : 'Full workflow';
+  if (source === 'external') return isArabic ? 'استيراد خارجي' : 'External import';
+  return isArabic ? 'بدء يدوي' : 'Manual start';
 };
 
 const getModelPreferenceHint = (
@@ -329,6 +351,8 @@ const ContentWritingPanel: React.FC = () => {
   const [errorPresentation, setErrorPresentation] = useState<ErrorPresentation | null>(null);
   const [listLoadError, setListLoadError] = useState('');
   const [hasRunningWritingActivity, setHasRunningWritingActivity] = useState(false);
+  const [hasActiveAutomaticWriting, setHasActiveAutomaticWriting] = useState(false);
+  const [hasActiveFullPipeline, setHasActiveFullPipeline] = useState(false);
   const [copied, setCopied] = useState(false);
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
   const [isApplying, setIsApplying] = useState(false);
@@ -371,6 +395,8 @@ const ContentWritingPanel: React.FC = () => {
 
   useEffect(() => {
     activeArticleRef.current = articleId;
+    setHasActiveAutomaticWriting(false);
+    setHasActiveFullPipeline(false);
   }, [articleId]);
 
   useEffect(() => {
@@ -600,6 +626,7 @@ const ContentWritingPanel: React.FC = () => {
         setSelectedSessionId('');
         setSelectedDetail(null);
       }
+      return rows;
     } catch (error) {
       if (activeArticleRef.current === targetArticleId) {
         const presentation = getErrorPresentation(error, isArabic);
@@ -610,6 +637,22 @@ const ContentWritingPanel: React.FC = () => {
       if (!options.silent && activeArticleRef.current === targetArticleId) setIsListLoading(false);
     }
   }, [articleId, isArabic, selectedSessionId]);
+
+  const handleAutomaticSessionDiscovered = useCallback((sessionId: string, sourceArticleId: string) => {
+    if (
+      !sessionId
+      || sourceArticleId !== articleId
+      || activeArticleRef.current !== sourceArticleId
+      || sessions.some(session => session.id === sessionId && session.articleId === sourceArticleId)
+    ) return;
+    void (async () => {
+      const rows = await refreshSessions({ silent: true, selectNewest: false });
+      if (
+        activeArticleRef.current === sourceArticleId
+        && rows?.some(session => session.id === sessionId && session.articleId === sourceArticleId)
+      ) setSelectedSessionId(sessionId);
+    })();
+  }, [articleId, refreshSessions, sessions]);
 
   useEffect(() => {
     detailRequestRef.current += 1;
@@ -651,7 +694,14 @@ const ContentWritingPanel: React.FC = () => {
   }, [articleId, hasRunningWritingActivity, refreshSessions, sessions]);
 
   const startSession = async () => {
-    if (!articleId || !selectedProviderConfig?.available || hasActiveSession || startInFlightRef.current) return;
+    if (
+      !articleId
+      || !selectedProviderConfig?.available
+      || hasActiveSession
+      || hasActiveAutomaticWriting
+      || hasActiveFullPipeline
+      || startInFlightRef.current
+    ) return;
     const requestSignature = `${articleId}:${provider}:${selectedModel || 'default'}`;
     const pendingStart = pendingStartRef.current?.signature === requestSignature
       ? pendingStartRef.current
@@ -811,6 +861,8 @@ const ContentWritingPanel: React.FC = () => {
       !selectedSession
       || !['failed', 'cancelled'].includes(selectedSession.status)
       || hasActiveSession
+      || hasActiveAutomaticWriting
+      || hasActiveFullPipeline
       || !selectedProviderConfig?.available
     ) {
       return;
@@ -894,6 +946,19 @@ const ContentWritingPanel: React.FC = () => {
       });
       return;
     }
+    if (hasActiveAutomaticWriting || hasActiveFullPipeline) {
+      setApplicationNotice({
+        tone: 'warning',
+        message: hasActiveFullPipeline
+          ? (isArabic
+            ? 'لا يمكن اعتماد نتيجة أخرى أثناء الإنشاء الشامل، لأن هذا المسار قد يستبدل محتوى المحرر تلقائيًا.'
+            : 'Another result cannot be applied while the full workflow is active because it may replace the editor content automatically.')
+          : (isArabic
+            ? 'انتظر اكتمال جلسة الكتابة التلقائية الحالية قبل مراجعة نتيجة أخرى وإدراجها.'
+            : 'Wait for the current automatic writing session to finish before reviewing and inserting another result.'),
+      });
+      return;
+    }
     setApplicationNotice(null);
     setReviewSnapshot({
       sessionId: session.id,
@@ -910,9 +975,38 @@ const ContentWritingPanel: React.FC = () => {
     if (!isApplying) setReviewSnapshot(null);
   }, [isApplying]);
 
+  useEffect(() => {
+    if (!reviewSnapshot || isApplying || (!hasActiveAutomaticWriting && !hasActiveFullPipeline)) return;
+    setReviewSnapshot(null);
+    setApplicationNotice({
+      tone: 'warning',
+      message: hasActiveFullPipeline
+        ? (isArabic
+          ? 'أُغلقت المراجعة دون إدراج لأن الإنشاء الشامل بدأ العمل على المقالة.'
+          : 'The review was closed without insertion because the full workflow started working on the article.')
+        : (isArabic
+          ? 'أُغلقت المراجعة دون إدراج لأن الكتابة التلقائية بدأت العمل على المقالة.'
+          : 'The review was closed without insertion because automatic writing started working on the article.'),
+    });
+  }, [hasActiveAutomaticWriting, hasActiveFullPipeline, isApplying, isArabic, reviewSnapshot]);
+
   const confirmApplication = async (qualityOverrideReason?: string) => {
     const snapshot = reviewSnapshot;
     if (!snapshot || isApplying) return;
+    if (hasActiveAutomaticWriting || hasActiveFullPipeline) {
+      setReviewSnapshot(null);
+      setApplicationNotice({
+        tone: 'warning',
+        message: hasActiveFullPipeline
+          ? (isArabic
+            ? 'أُغلقت المراجعة دون إدراج لأن الإنشاء الشامل أصبح نشطًا.'
+            : 'The review was closed without insertion because the full workflow became active.')
+          : (isArabic
+            ? 'أُغلقت المراجعة دون إدراج لأن جلسة كتابة تلقائية أصبحت نشطة.'
+            : 'The review was closed without insertion because an automatic writing session became active.'),
+      });
+      return;
+    }
     setIsApplying(true);
     setApplicationNotice(null);
     try {
@@ -1182,6 +1276,14 @@ const ContentWritingPanel: React.FC = () => {
             </div>
           ) : null}
 
+          <ContentWritingAutomationArticleStatus
+            articleId={articleId}
+            isArabic={isArabic}
+            onSessionDiscovered={handleAutomaticSessionDiscovered}
+            onAutomaticActivityChange={setHasActiveAutomaticWriting}
+            onFullPipelineActivityChange={setHasActiveFullPipeline}
+          />
+
           <FullArticlePipelineControl
             articleId={articleId}
             articleTitle={articleTitle}
@@ -1191,6 +1293,7 @@ const ContentWritingPanel: React.FC = () => {
             disabled={
               !selectedProviderConfig?.available
               || hasActiveSession
+              || hasActiveAutomaticWriting
               || actionState !== 'idle'
               || saveStatus === 'saving'
               || isApplying
@@ -1198,12 +1301,20 @@ const ContentWritingPanel: React.FC = () => {
             onBeforeStart={() => handleSaveDraft({ reason: 'manual', force: true })}
             onReloadArticle={reloadActiveArticleFromRemote}
             onReloadGoalContext={reloadActiveGoalContextFromRemote}
+            onActivityChange={setHasActiveFullPipeline}
           />
 
           <button
             type="button"
             onClick={() => void startSession()}
-            disabled={!selectedProviderConfig?.available || hasActiveSession || actionState !== 'idle' || saveStatus === 'saving'}
+            disabled={
+              !selectedProviderConfig?.available
+              || hasActiveSession
+              || hasActiveAutomaticWriting
+              || hasActiveFullPipeline
+              || actionState !== 'idle'
+              || saveStatus === 'saving'
+            }
             className="flex h-10 w-full items-center justify-center gap-2 rounded-md bg-[#d4af37] px-3 text-sm font-bold text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-55"
           >
             {actionState === 'starting' || saveStatus === 'saving'
@@ -1211,8 +1322,10 @@ const ContentWritingPanel: React.FC = () => {
               : <Wand2 size={16} />}
             <span>{actionState === 'starting'
               ? (isArabic ? 'جار إنشاء الجلسة...' : 'Starting session...')
-              : hasActiveSession
+              : hasActiveSession || hasActiveAutomaticWriting
                 ? (isArabic ? 'توجد جلسة قيد التنفيذ' : 'A session is already active')
+                : hasActiveFullPipeline
+                  ? (isArabic ? 'الإنشاء الشامل قيد التنفيذ' : 'Full workflow is active')
                 : (isArabic ? 'كتابة المقالة' : 'Write article')}</span>
           </button>
 
@@ -1220,7 +1333,14 @@ const ContentWritingPanel: React.FC = () => {
             articleId={articleId}
             isArabic={isArabic}
             openMode={chatGptOpenMode}
-            disabled={hasActiveSession || actionState !== 'idle' || saveStatus === 'saving' || isApplying}
+            disabled={
+              hasActiveSession
+              || hasActiveAutomaticWriting
+              || hasActiveFullPipeline
+              || actionState !== 'idle'
+              || saveStatus === 'saving'
+              || isApplying
+            }
             prepareConversation={prepareExternalConversation}
             onImportResponse={importExternalResult}
             onError={error => setErrorPresentation(getErrorPresentation(error, isArabic))}
@@ -1253,6 +1373,9 @@ const ContentWritingPanel: React.FC = () => {
                     {getSessionStatusLabel(selectedSession, isArabic)}
                   </span>
                   <span className="truncate text-[11px] font-bold text-gray-600 dark:text-gray-300">{getProviderLabel(selectedSession.provider, selectedSession.executionMode)}</span>
+                  <span className="rounded bg-gray-100 px-1.5 py-1 text-[9px] font-black text-gray-600 dark:bg-[#383838] dark:text-gray-300">
+                    {getSessionTriggerLabel(selectedSession, isArabic)}
+                  </span>
                 </div>
                 <div className="mt-1 truncate font-mono text-[10px] text-gray-400" dir="ltr">{selectedSession.model}</div>
                 {selectedSession.status === 'completed' && requestedProgressModel && requestedProgressModel !== selectedSession.model && (
@@ -1528,10 +1651,24 @@ const ContentWritingPanel: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => void resumeSession()}
-                  disabled={hasActiveSession || actionState !== 'idle' || !selectedProviderConfig?.available}
+                  disabled={
+                    hasActiveSession
+                    || hasActiveAutomaticWriting
+                    || hasActiveFullPipeline
+                    || actionState !== 'idle'
+                    || !selectedProviderConfig?.available
+                  }
                   title={isArabic
-                    ? `استئناف بالموديل ${selectedModel} أولًا مع الاحتفاظ بالمراحل المكتملة`
-                    : `Resume with ${selectedModel} first while keeping completed steps`}
+                    ? (hasActiveFullPipeline
+                      ? 'لا يمكن الاستئناف أثناء الإنشاء الشامل.'
+                      : hasActiveAutomaticWriting
+                        ? 'لا يمكن الاستئناف أثناء الكتابة التلقائية.'
+                        : `استئناف بالموديل ${selectedModel} أولًا مع الاحتفاظ بالمراحل المكتملة`)
+                    : (hasActiveFullPipeline
+                      ? 'Resume is unavailable while the full workflow is active.'
+                      : hasActiveAutomaticWriting
+                        ? 'Resume is unavailable while automatic writing is active.'
+                        : `Resume with ${selectedModel} first while keeping completed steps`)}
                   className="mt-2 inline-flex h-8 items-center gap-1 rounded-md border border-red-200 bg-white px-2 text-[11px] font-bold hover:bg-red-50 disabled:opacity-50 dark:border-red-900/50 dark:bg-[#2A2A2A]"
                 >
                   {actionState === 'resuming' ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
@@ -1552,7 +1689,17 @@ const ContentWritingPanel: React.FC = () => {
                     <button
                       type="button"
                       onClick={openReview}
-                      disabled={isApplying || selectedSession.articleId !== articleId}
+                      disabled={
+                        isApplying
+                        || hasActiveAutomaticWriting
+                        || hasActiveFullPipeline
+                        || selectedSession.articleId !== articleId
+                      }
+                      title={hasActiveFullPipeline
+                        ? (isArabic ? 'انتظر انتهاء الإنشاء الشامل قبل الإدراج.' : 'Wait for the full workflow to finish before insertion.')
+                        : hasActiveAutomaticWriting
+                          ? (isArabic ? 'انتظر انتهاء الكتابة التلقائية قبل الإدراج.' : 'Wait for automatic writing to finish before insertion.')
+                          : undefined}
                       className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-2 text-[11px] font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:opacity-45 dark:text-[#f2d675]"
                     >
                       <Eye size={14} />
@@ -1657,6 +1804,9 @@ const ContentWritingPanel: React.FC = () => {
                     <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-700 dark:text-gray-200">
                       <StatusIcon status={session.status} size={13} />
                       <span>{getProviderLabel(session.provider, session.executionMode)}</span>
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] dark:bg-[#383838]">
+                        {getSessionTriggerLabel(session, isArabic)}
+                      </span>
                       <span className="truncate font-mono text-[10px] font-normal text-gray-400" dir="ltr">{session.model}</span>
                     </div>
                     <div className="mt-1 text-[10px] text-gray-400">{formatDateTime(session.createdAt, isArabic)}</div>

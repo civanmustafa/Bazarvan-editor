@@ -9,6 +9,7 @@ import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import chatgptHandler from '../api/chatgpt';
 import clientSiteCrawlerHandler from '../api/clientSiteCrawler';
 import contentWritingHandler from '../api/contentWriting';
+import contentWritingAutomationHandler from '../api/contentWritingAutomation';
 import contentWritingExternalResultHandler from '../api/contentWritingExternalResult';
 import competitorsHandler from '../api/competitors';
 import externalAnalysisHandler from '../api/externalAnalysis';
@@ -35,6 +36,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'chatgpt', method: 'ALL', path: '/api/chatgpt', handler: chatgptHandler },
   { id: 'client-site-crawl', method: 'ALL', path: '/api/client-site-crawl', handler: clientSiteCrawlerHandler },
   { id: 'content-writing', method: 'ALL', path: '/api/content-writing', handler: contentWritingHandler },
+  { id: 'content-writing-automation', method: 'ALL', path: '/api/content-writing/automation', handler: contentWritingAutomationHandler },
   { id: 'content-writing-external-result', method: 'ALL', path: '/api/content-writing/external-result', handler: contentWritingExternalResultHandler },
   { id: 'ai-capabilities', method: 'ALL', path: '/api/ai/capabilities', handler: aiCapabilitiesHandler },
   { id: 'prompt-registry', method: 'ALL', path: '/api/ai/prompt-registry', handler: promptRegistryHandler },

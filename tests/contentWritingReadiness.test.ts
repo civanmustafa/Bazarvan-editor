@@ -56,15 +56,21 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 13);
+  assert.equal(result.requiredMigrationCount, 14);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
     steps: true,
+    automationQueue: true,
     keyCoordinator: true,
+    automationEvaluator: true,
   });
-  assert.deepEqual(rpcCalls, ['inspect_gemini_api_key_availability']);
+  assert.deepEqual(rpcCalls.sort(), [
+    'evaluate_content_writing_automation_readiness',
+    'inspect_gemini_api_key_availability',
+  ]);
   assert.deepEqual(calls.map(call => call.table).sort(), [
+    'content_writing_automation_items',
     'content_writing_messages',
     'content_writing_sessions',
     'content_writing_steps',
@@ -117,6 +123,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260728010000_content_writing_faq_independence\.sql/);
   assert.match(releaseRegistry, /20260728040000_content_writing_final_structure\.sql/);
   assert.match(releaseRegistry, /20260812010000_gemini_key_availability_waiting\.sql/);
+  assert.match(releaseRegistry, /20260823010000_automatic_content_writing_queue\.sql/);
   assert.match(
     await readWorkspaceFile('server/contentWritingReadiness.ts'),
     /resume_preference_version/,

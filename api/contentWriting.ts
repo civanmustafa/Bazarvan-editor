@@ -34,6 +34,10 @@ import {
   type ContentWritingStep,
 } from '../server/contentWritingSessionService';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
+import {
+  reserveArticleForExplicitContentWriting,
+  type ExplicitContentWritingIntent,
+} from '../server/contentWritingAutomation';
 import { toPublicContentWritingSession } from '../server/contentWritingPresenter';
 import {
   evaluateContentWritingQuality,
@@ -210,6 +214,62 @@ const getSessionOrThrow = async (sessionId: string): Promise<ContentWritingSessi
   return session;
 };
 
+const reserveExplicitContentWritingOrThrow = async (input: {
+  articleId: string;
+  requestedBy: string;
+  intent: ExplicitContentWritingIntent;
+  allowedSessionId?: string | null;
+  provider?: ContentWritingProvider;
+  model?: string;
+}): Promise<void> => {
+  const reservation = await reserveArticleForExplicitContentWriting(input);
+  if (reservation.reserved) return;
+
+  if (reservation.reason === 'full_pipeline_active') {
+    throw new ContentWritingApiError({
+      message: 'The full article workflow is active for this article. Open or cancel it before continuing.',
+      status: 409,
+      code: 'content_writing_full_pipeline_conflict',
+      details: {
+        fullArticlePipelineJobId: reservation.activeFullPipelineJobId,
+        status: reservation.activeFullPipelineStatus,
+      },
+    });
+  }
+  if (reservation.reason === 'content_writing_active') {
+    throw new ContentWritingApiError({
+      message: 'Another content-writing session is already active for this article.',
+      status: 409,
+      code: 'content_writing_active_session_conflict',
+      details: { contentWritingSessionId: reservation.activeContentWritingSessionId },
+    });
+  }
+  throw new ContentWritingApiError({
+    message: 'Automatic content writing is already reserving or writing this article.',
+    status: 409,
+    code: 'content_writing_automation_conflict',
+    details: {
+      automationItemId: reservation.automationItemId,
+      contentWritingSessionId: reservation.automationSessionId,
+      reason: reservation.reason,
+    },
+  });
+};
+
+const findIdempotentContentWritingSessionId = async (
+  createdBy: string,
+  idempotencyKey: string,
+): Promise<string | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_sessions')
+    .select('id')
+    .eq('created_by', createdBy)
+    .eq('idempotency_key', idempotencyKey)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id ? String(data.id) : null;
+};
+
 const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
   assertAllowedOrigin(req);
   if (req.method === 'OPTIONS') {
@@ -240,12 +300,25 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         code: 'content_writing_idempotency_key_invalid',
       });
     }
+    const allowedSessionId = await findIdempotentContentWritingSessionId(
+      principal.userId,
+      idempotencyKey,
+    );
+    await reserveExplicitContentWritingOrThrow({
+      articleId,
+      requestedBy: principal.userId,
+      intent: 'manual',
+      allowedSessionId,
+      provider,
+      model: toText(body.model),
+    });
     const queued = await queueContentWritingSession({
       articleId,
       createdBy: principal.userId,
       provider,
       model: toText(body.model) || undefined,
       idempotencyKey,
+      contextSnapshotPatch: { triggerSource: 'manual' },
     });
     return {
       status: queued.created ? 202 : 200,
@@ -411,6 +484,14 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
       toText(body.model) || (provider === session.provider ? session.model : undefined),
       session.created_by,
     );
+    await reserveExplicitContentWritingOrThrow({
+      articleId: session.article_id,
+      requestedBy: principal.userId,
+      intent: 'resume',
+      allowedSessionId: session.id,
+      provider: preference.provider,
+      model: preference.model,
+    });
     const messages = await getContentWritingMessages(session.id);
     const inputHash = createContentWritingSessionInputHash(
       preference.provider,
@@ -457,6 +538,14 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         code: 'content_writing_apply_conflict',
       });
     }
+    await reserveExplicitContentWritingOrThrow({
+      articleId: session.article_id,
+      requestedBy: principal.userId,
+      intent: 'apply',
+      allowedSessionId: session.id,
+      provider: session.provider,
+      model: session.model,
+    });
     const qualityReport = await resolveSessionQualityReport(session);
     const qualityOverrideReason = toText(body.qualityOverrideReason).slice(0, 500);
     if (qualityReport && !qualityReport.passed) {

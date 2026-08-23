@@ -19,6 +19,7 @@ const capabilities: AiProviderCapabilities = {
   contentWriting: {
     qualityOverrideReasonRequired: true,
     competitorPhraseIntelligenceEnabled: true,
+    resumeModel: null,
   },
 };
 

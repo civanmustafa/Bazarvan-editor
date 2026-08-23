@@ -1,0 +1,69 @@
+name: bazarvan-supabase
+
+x-bazarvan-logging: &bazarvan-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  db:
+    container_name: bazarvan-supabase-db
+    cpus: 0.80
+    mem_limit: 1280m
+    mem_reservation: 512m
+    pids_limit: 256
+    oom_score_adj: 250
+    logging: *bazarvan-logging
+    labels:
+      com.bazarvan.stack: self-hosted-supabase
+
+  auth:
+    container_name: bazarvan-supabase-auth
+    cpus: 0.20
+    mem_limit: 256m
+    mem_reservation: 96m
+    pids_limit: 128
+    oom_score_adj: 450
+    logging: *bazarvan-logging
+    labels:
+      com.bazarvan.stack: self-hosted-supabase
+
+  rest:
+    container_name: bazarvan-supabase-rest
+    cpus: 0.20
+    mem_limit: 256m
+    mem_reservation: 64m
+    pids_limit: 128
+    oom_score_adj: 450
+    logging: *bazarvan-logging
+    labels:
+      com.bazarvan.stack: self-hosted-supabase
+
+  realtime:
+    container_name: bazarvan-supabase-realtime
+    cpus: 0.40
+    mem_limit: 512m
+    mem_reservation: 160m
+    pids_limit: 192
+    oom_score_adj: 400
+    logging: *bazarvan-logging
+    labels:
+      com.bazarvan.stack: self-hosted-supabase
+
+  api-gw:
+    container_name: bazarvan-supabase-api
+    cpus: 0.20
+    mem_limit: 192m
+    mem_reservation: 48m
+    pids_limit: 128
+    oom_score_adj: 500
+    ports: !override
+      - "127.0.0.1:${BAZARVAN_SUPABASE_API_PORT:-18000}:8000/tcp"
+    logging: *bazarvan-logging
+    labels:
+      com.bazarvan.stack: self-hosted-supabase
+
+networks:
+  default:
+    name: bazarvan-supabase-internal

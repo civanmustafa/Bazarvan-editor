@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
+import { reserveArticleForExplicitContentWriting } from '../server/contentWritingAutomation';
+import type { ContentWritingProvider } from '../server/contentWritingSessionService';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import { sanitizeCompetitorSlots } from '../utils/competitorContent';
 import {
@@ -109,6 +111,55 @@ class ExternalAnalysisApiError extends Error {
 const toTrimmedString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
+
+const reserveFullPipelineOrThrow = async (input: {
+  articleId: string;
+  requestedBy: string;
+  provider: ContentWritingProvider;
+  model: string;
+  resume: boolean;
+  allowedFullPipelineJobId?: string | null;
+}): Promise<void> => {
+  const reservation = await reserveArticleForExplicitContentWriting({
+    articleId: input.articleId,
+    requestedBy: input.requestedBy,
+    intent: input.resume ? 'full_pipeline_resume' : 'full_pipeline',
+    allowedFullPipelineJobId: input.allowedFullPipelineJobId,
+    provider: input.provider,
+    model: input.model,
+  });
+  if (reservation.reserved) return;
+
+  if (reservation.reason === 'content_writing_active') {
+    throw new ExternalAnalysisApiError({
+      message: 'Content writing is already active for this article. Open or cancel it before continuing.',
+      status: 409,
+      code: 'full_pipeline_content_writing_conflict',
+      details: { contentWritingSessionId: reservation.activeContentWritingSessionId },
+    });
+  }
+  if (reservation.reason === 'full_pipeline_active') {
+    throw new ExternalAnalysisApiError({
+      message: 'Another full article workflow is already active for this article.',
+      status: 409,
+      code: 'full_pipeline_active_conflict',
+      details: {
+        fullArticlePipelineJobId: reservation.activeFullPipelineJobId,
+        status: reservation.activeFullPipelineStatus,
+      },
+    });
+  }
+  throw new ExternalAnalysisApiError({
+    message: 'Automatic content writing is already reserving or writing this article.',
+    status: 409,
+    code: 'full_pipeline_automatic_writing_conflict',
+    details: {
+      automationItemId: reservation.automationItemId,
+      contentWritingSessionId: reservation.automationSessionId,
+      reason: reservation.reason,
+    },
+  });
+};
 
 const toStringList = (value: unknown): string[] => (
   Array.isArray(value)
@@ -532,7 +583,7 @@ const retryExternalAnalysisJob = async (
 
   const { data: existingJob, error: readError } = await supabase
     .from('ai_external_analysis_jobs')
-    .select('id,article_id,status,last_error_code')
+    .select('id,article_id,job_type,status,last_error_code,input_snapshot')
     .eq('id', jobId)
     .maybeSingle();
   if (readError) throw readError;
@@ -541,6 +592,22 @@ const retryExternalAnalysisJob = async (
       message: 'External analysis job was not found for this article.',
       status: 404,
       code: 'external_analysis_job_not_found',
+    });
+  }
+
+  if (existingJob.job_type === 'full_article_pipeline') {
+    const snapshot = isRecord(existingJob.input_snapshot) ? existingJob.input_snapshot : {};
+    const snapshotProvider = toTrimmedString(snapshot.provider);
+    const provider: ContentWritingProvider = snapshotProvider === 'geminiPaid' || snapshotProvider === 'openai'
+      ? snapshotProvider
+      : 'gemini';
+    await reserveFullPipelineOrThrow({
+      articleId,
+      requestedBy,
+      provider,
+      model: toTrimmedString(snapshot.model),
+      resume: true,
+      allowedFullPipelineJobId: String(existingJob.id),
     });
   }
 
@@ -642,6 +709,24 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
     }
     const idempotencyKey = toTrimmedString(body.idempotencyKey)
       || `full-article-pipeline:${article.id}:${Date.now()}`;
+    const { data: idempotentPipeline, error: idempotentPipelineError } = await supabase
+      .from('ai_external_analysis_jobs')
+      .select('id')
+      .eq('article_id', article.id)
+      .eq('job_type', 'full_article_pipeline')
+      .eq('idempotency_key', idempotencyKey)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (idempotentPipelineError) throw idempotentPipelineError;
+    await reserveFullPipelineOrThrow({
+      articleId: article.id,
+      requestedBy: profile.id,
+      provider: provider as ContentWritingProvider,
+      model,
+      resume: false,
+      allowedFullPipelineJobId: idempotentPipeline?.id ? String(idempotentPipeline.id) : null,
+    });
     const { data, error } = await supabase.rpc('enqueue_full_article_pipeline', {
       p_article_id: article.id,
       p_requested_by: profile.id,
