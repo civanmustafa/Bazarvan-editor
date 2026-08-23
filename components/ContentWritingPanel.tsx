@@ -33,6 +33,7 @@ import {
   beginAiExecutionActivity,
   finishAiExecutionActivity,
   getAiExecutionActivities,
+  updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
 import {
   getContentWritingActivityId,
@@ -348,6 +349,7 @@ const ContentWritingPanel: React.FC = () => {
   const [isListLoading, setIsListLoading] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [actionState, setActionState] = useState<ActionState>('idle');
+  const [competitorPreparationStage, setCompetitorPreparationStage] = useState('');
   const [errorPresentation, setErrorPresentation] = useState<ErrorPresentation | null>(null);
   const [listLoadError, setListLoadError] = useState('');
   const [hasRunningWritingActivity, setHasRunningWritingActivity] = useState(false);
@@ -664,6 +666,7 @@ const ContentWritingPanel: React.FC = () => {
     setCopied(false);
     setReviewSnapshot(null);
     setApplicationNotice(null);
+    setCompetitorPreparationStage('');
     setExpandedWorkflowStepKey('');
     trackedKeyFeedbackSessionsRef.current.clear();
     contentWritingActivityIdsRef.current.clear();
@@ -739,7 +742,31 @@ const ContentWritingPanel: React.FC = () => {
         provider,
         model: selectedModel || undefined,
         idempotencyKey: pendingStart.idempotencyKey,
+        onPreparationProgress: progress => {
+          if (activeArticleRef.current !== articleId) return;
+          setCompetitorPreparationStage(progress.stage);
+          const searching = progress.stage === 'competitor_discovery'
+            || progress.stage === 'searching_competitors';
+          const extracting = progress.stage === 'competitor_extraction'
+            || progress.stage === 'extracting_competitor'
+            || progress.stage === 'programmatic_fallback';
+          updateAiExecutionActivity(activityId, {
+            stage: progress.stage,
+            message: isArabic
+              ? searching
+                ? 'جار البحث عن أفضل المنافسين تلقائيًا...'
+                : extracting
+                  ? 'جار سحب نصوص المنافسين تلقائيًا قبل الكتابة...'
+                  : 'جار تجهيز نصوص المنافسين قبل بدء الكتابة...'
+              : searching
+                ? 'Automatically finding the strongest competitors...'
+                : extracting
+                  ? 'Automatically importing competitor texts before writing...'
+                  : 'Preparing competitor texts before writing...',
+          });
+        },
       });
+      setCompetitorPreparationStage('');
       pendingStartRef.current = null;
       if (activeArticleRef.current !== articleId) return;
       mergeSession(started.session);
@@ -785,6 +812,7 @@ const ContentWritingPanel: React.FC = () => {
       });
     } finally {
       startInFlightRef.current = false;
+      setCompetitorPreparationStage('');
       setActionState('idle');
     }
   };
@@ -1321,7 +1349,9 @@ const ContentWritingPanel: React.FC = () => {
               ? <Loader2 size={16} className="animate-spin" />
               : <Wand2 size={16} />}
             <span>{actionState === 'starting'
-              ? (isArabic ? 'جار إنشاء الجلسة...' : 'Starting session...')
+              ? competitorPreparationStage
+                ? (isArabic ? 'جار سحب نصوص المنافسين...' : 'Importing competitor texts...')
+                : (isArabic ? 'جار إنشاء الجلسة...' : 'Starting session...')
               : hasActiveSession || hasActiveAutomaticWriting
                 ? (isArabic ? 'توجد جلسة قيد التنفيذ' : 'A session is already active')
                 : hasActiveFullPipeline

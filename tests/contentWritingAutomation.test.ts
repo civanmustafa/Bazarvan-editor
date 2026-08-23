@@ -68,3 +68,42 @@ test('manual writing and the full workflow explicitly arbitrate with the automat
   assert.match(fullPipelineAPI, /intent: input\.resume \? 'full_pipeline_resume' : 'full_pipeline'/);
   assert.match(engine, /contextSnapshotPatch/);
 });
+
+test('Write article durably discovers and extracts competitor prose before queuing writing', async () => {
+  const [
+    migration,
+    executor,
+    worker,
+    ecosystem,
+    manualAPI,
+    browserClient,
+    scheduler,
+    guide,
+  ] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260823020000_content_writing_competitor_preparation.sql'),
+    readWorkspaceFile('server/contentWritingCompetitorPreparationExecutor.ts'),
+    readWorkspaceFile('server/externalAnalysisWorker.ts'),
+    readWorkspaceFile('ecosystem.config.cjs'),
+    readWorkspaceFile('api/contentWriting.ts'),
+    readWorkspaceFile('utils/contentWritingSessions.ts'),
+    readWorkspaceFile('server/contentWritingAutomation.ts'),
+    readWorkspaceFile('constants/userGuide.ts'),
+  ]);
+
+  assert.match(migration, /content_writing_preparation/);
+  assert.match(migration, /enqueue_content_writing_competitor_preparation/);
+  assert.match(migration, /enqueue_next_automatic_writing_competitor_preparation/);
+  assert.match(migration, /missingFields[\s\S]*competitors/);
+  assert.match(executor, /enqueue_competitor_discovery_job/);
+  assert.match(executor, /enqueue_competitor_extraction_job/);
+  assert.match(executor, /queueContentWritingSession/);
+  assert.match(executor, /readCurrentPreparationIntent/);
+  assert.match(worker, /contentWritingCompetitorPreparationExecutor/);
+  assert.match(ecosystem, /bazarvan-content-writing-preparation-worker/);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'content_writing_preparation'/);
+  assert.match(manualAPI, /action === 'getPreparation'/);
+  assert.match(manualAPI, /preparingCompetitors: true/);
+  assert.match(browserClient, /onPreparationProgress/);
+  assert.match(scheduler, /enqueueNextAutomaticCompetitorPreparation/);
+  assert.match(guide, /لا تبدأ الكتابة قبل وجود نص منافس فعلي/);
+});

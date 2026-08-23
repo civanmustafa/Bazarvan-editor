@@ -2,6 +2,7 @@ import './loadEnv';
 import './externalSemanticAnalysisExecutor';
 import './contentBriefGenerationExecutor';
 import './fullArticlePipelineExecutor';
+import './contentWritingCompetitorPreparationExecutor';
 import './externalEngineeringAnalysisExecutor';
 import './competitorDiscoveryExecutor';
 import './competitorExtractionExecutor';

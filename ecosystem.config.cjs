@@ -79,6 +79,28 @@ module.exports = {
         EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: '1',
       },
     },
+    // Coordinates automatic competitor discovery/extraction for the ordinary
+    // "Write article" path. Provider work remains in the specialized workers.
+    {
+      name: 'bazarvan-content-writing-preparation-worker',
+      script: 'server-dist/external-analysis-worker.mjs',
+      cwd: __dirname,
+      exec_mode: 'fork',
+      instances: 1,
+      autorestart: true,
+      restart_delay: 2000,
+      kill_timeout: 15000,
+      env: {
+        NODE_ENV: 'production',
+        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'content_writing_preparation',
+        EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.CONTENT_WRITING_PREPARATION_WORKER_POLL_MS || '5000',
+        EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.CONTENT_WRITING_PREPARATION_WORKER_IDLE_MAX_MS || '30000',
+        EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.CONTENT_WRITING_PREPARATION_LEASE_SECONDS || '1800',
+        EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
+        EXTERNAL_ANALYSIS_MAX_RETRY_COUNT: process.env.EXTERNAL_ANALYSIS_MAX_RETRY_COUNT || '5',
+        EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: '1',
+      },
+    },
     {
       name: 'bazarvan-ai-job-worker',
       script: 'server-dist/ai-job-worker.mjs',

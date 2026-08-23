@@ -72,6 +72,7 @@ const resolveSurface = (job: ExternalAnalysisJobRow, stage: string): string => {
   if (job.job_type === 'semantic_keywords_lsi') return 'semantic_keywords_lsi';
   if (job.job_type === 'content_brief_generation') return 'goal_context_generation';
   if (job.job_type === 'full_article_pipeline') return 'full_article_pipeline';
+  if (job.job_type === 'content_writing_preparation') return 'content_writing_preparation';
   if (job.command_id !== 'smartAnalysis.competitorContentComparison') return 'engineering_command';
   if (stage.includes('repairing_competitor_synthesis')) {
     return 'competitor_comparison_synthesis_repair';
@@ -96,7 +97,7 @@ export const projectExternalAnalysisActivity = (
     || toText(childProgress.provider)
     || toText(progress.provider)
     || toText(result.provider)
-    || (job.job_type === 'full_article_pipeline' ? '' : 'gemini');
+    || (job.job_type === 'full_article_pipeline' || job.job_type === 'content_writing_preparation' ? '' : 'gemini');
   const model = toText(gemini.model)
     || toText(childProgress.model)
     || toText(progress.model)

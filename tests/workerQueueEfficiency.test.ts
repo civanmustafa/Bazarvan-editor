@@ -114,7 +114,7 @@ test('all durable workers use adaptive polling and lightweight Realtime wake sig
   assert.match(aiWorker, /queueName: 'ai_jobs'/);
   assert.match(writingWorker, /queueName: 'content_writing'/);
   assert.match(crawlerWorker, /queueName: 'client_page_crawl'/);
-  assert.equal((ecosystem.match(/^\s*[A-Z_]+IDLE_MAX_MS:/gm) || []).length, 6);
+  assert.equal((ecosystem.match(/^\s*[A-Z_]+IDLE_MAX_MS:/gm) || []).length, 7);
   assert.match(deploymentEnvironment, /AI_JOB_WORKER_IDLE_MAX_MS=30000/);
   assert.match(deploymentEnvironment, /CONTENT_WRITING_WORKER_IDLE_MAX_MS=30000/);
 

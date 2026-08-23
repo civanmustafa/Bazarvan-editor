@@ -70,6 +70,65 @@ const toTextList = (value: unknown): string[] => Array.isArray(value)
   ? value.map(toText).filter(Boolean)
   : [];
 
+const CONTENT_WRITING_READINESS_LABELS: Record<string, string> = {
+  draft_status: 'حالة المقالة: تجهيز محتوى أو مسودة',
+  article_title: 'عنوان المقالة',
+  primary_keyword: 'الكلمة المفتاحية الأساسية',
+  alternative_keywords: 'الصيغ البديلة',
+  lsi_keywords: 'كلمات LSI',
+  company_name: 'اسم الشركة',
+  'goal_context.pageType': 'نوع الصفحة',
+  'goal_context.objective': 'هدف الصفحة',
+  'goal_context.audienceScope': 'سياق الجمهور',
+  'goal_context.searchIntent': 'نية البحث',
+  competitors: 'نص منافس واحد على الأقل',
+};
+
+const readContentWritingInputReadiness = async (articleId: string): Promise<{
+  missingFields: string[];
+  usableCompetitorCount: number;
+  pendingCompetitorCount: number;
+  processingComplete: boolean;
+}> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'evaluate_content_writing_automation_readiness',
+    { p_article_id: articleId },
+  );
+  if (error) throw error;
+  const source = isRecord(data) ? data : {};
+  return {
+    missingFields: toTextList(source.missingFields),
+    usableCompetitorCount: Math.max(0, Number(source.usableCompetitorCount) || 0),
+    pendingCompetitorCount: Math.max(0, Number(source.pendingCompetitorCount) || 0),
+    processingComplete: source.processingComplete === true,
+  };
+};
+
+const enqueueContentWritingCompetitorPreparation = async (input: {
+  articleId: string;
+  requestedBy: string;
+  provider: ContentWritingProvider;
+  model: string;
+  idempotencyKey: string;
+}): Promise<Record<string, any> | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'enqueue_content_writing_competitor_preparation',
+    {
+      p_article_id: input.articleId,
+      p_requested_by: input.requestedBy,
+      p_origin: 'manual',
+      p_provider: input.provider,
+      p_model: input.model,
+      p_content_writing_idempotency_key: input.idempotencyKey,
+      p_min_competitor_count: 1,
+      p_start_writing: true,
+    },
+  );
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  return isRecord(row) ? row : null;
+};
+
 const readContentWritingQualityOverrideReasonRequired = async (): Promise<boolean> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('app_settings')
@@ -312,6 +371,47 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
       provider,
       model: toText(body.model),
     });
+    const readiness = await readContentWritingInputReadiness(articleId);
+    const otherMissingFields = readiness.missingFields.filter(field => field !== 'competitors');
+    if (otherMissingFields.length > 0) {
+      throw new ContentWritingApiError({
+        message: 'Content writing prerequisites other than competitor texts are incomplete.',
+        status: 422,
+        code: 'content_writing_prerequisites_missing',
+        details: {
+          readinessIssues: otherMissingFields.map(code => ({
+            code,
+            label: CONTENT_WRITING_READINESS_LABELS[code] || code,
+          })),
+        },
+      });
+    }
+    if (readiness.usableCompetitorCount < 1 || !readiness.processingComplete) {
+      const preparationJob = await enqueueContentWritingCompetitorPreparation({
+        articleId,
+        requestedBy: principal.userId,
+        provider,
+        model: toText(body.model),
+        idempotencyKey,
+      });
+      if (preparationJob) {
+        return {
+          status: 202,
+          body: {
+            ok: true,
+            accepted: true,
+            created: true,
+            preparingCompetitors: true,
+            preparationJob: {
+              id: preparationJob.id,
+              articleId: preparationJob.article_id,
+              status: preparationJob.status,
+              progress: preparationJob.progress || {},
+            },
+          },
+        };
+      }
+    }
     const queued = await queueContentWritingSession({
       articleId,
       createdBy: principal.userId,
@@ -328,6 +428,88 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         created: queued.created,
         reusedActive: queued.reusedActive === true,
         session: toPublicContentWritingSession(queued.session),
+      },
+    };
+  }
+
+  if (action === 'getPreparation') {
+    consumeApiRateLimit(
+      'content-writing:preparation-status',
+      principal.userId,
+      getPositiveIntegerEnv('CONTENT_WRITING_PREPARATION_STATUS_RATE_LIMIT_PER_MINUTE', 60),
+    );
+    const preparationJobId = requireUuid(body.preparationJobId, 'preparationJobId');
+    const { data: preparationJob, error } = await supabase
+      .from('ai_external_analysis_jobs')
+      .select('id,article_id,requested_by,status,input_snapshot,progress,result,last_error,last_error_code,updated_at')
+      .eq('id', preparationJobId)
+      .eq('job_type', 'content_writing_preparation')
+      .maybeSingle();
+    if (error) throw error;
+    if (!preparationJob) {
+      throw new ContentWritingApiError({
+        message: 'Content-writing competitor preparation was not found.',
+        status: 404,
+        code: 'content_writing_preparation_not_found',
+      });
+    }
+    await requireArticleReadAccess(supabase, String(preparationJob.article_id), principal.userId);
+    const result = isRecord(preparationJob.result) ? preparationJob.result : {};
+    const preparationInput = isRecord(preparationJob.input_snapshot)
+      ? preparationJob.input_snapshot
+      : {};
+    const sessionId = toText(result.contentWritingSessionId);
+    let session = sessionId ? await getContentWritingSession(sessionId) : null;
+    let recoveredCreated = false;
+    let recoveredReusedActive = false;
+    // Covers the narrow race where an automatic preparation completes just as
+    // a manual click upgrades it to "continue into writing".
+    if (
+      !session
+      && preparationJob.status === 'completed'
+      && preparationInput.startWriting === true
+      && toText(preparationJob.requested_by) === principal.userId
+    ) {
+      await requireArticleWriteAccess(supabase, String(preparationJob.article_id), principal.userId);
+      const provider = requireContentWritingProvider(preparationInput.provider);
+      const idempotencyKey = toText(preparationInput.contentWritingIdempotencyKey);
+      if (IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+        const recovered = await queueContentWritingSession({
+          articleId: String(preparationJob.article_id),
+          createdBy: principal.userId,
+          provider,
+          model: toText(preparationInput.model) || undefined,
+          idempotencyKey,
+          contextSnapshotPatch: {
+            triggerSource: 'manual',
+            competitorPreparationJobId: preparationJob.id,
+            automaticCompetitorPreparation: true,
+            preparationRaceRecovered: true,
+          },
+        });
+        session = recovered.session;
+        recoveredCreated = recovered.created;
+        recoveredReusedActive = recovered.reusedActive === true;
+      }
+    }
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        preparationJob: {
+          id: preparationJob.id,
+          articleId: preparationJob.article_id,
+          status: preparationJob.status,
+          progress: preparationJob.progress || {},
+          lastError: preparationJob.last_error,
+          lastErrorCode: preparationJob.last_error_code,
+          updatedAt: preparationJob.updated_at,
+        },
+        ...(session ? {
+          created: result.created === true || recoveredCreated,
+          reusedActive: result.reusedActive === true || recoveredReusedActive,
+          session: toPublicContentWritingSession(session),
+        } : {}),
       },
     };
   }

@@ -342,6 +342,13 @@ export const startContentWritingSession = async (options: {
   provider: ContentWritingProvider;
   model?: string;
   idempotencyKey?: string;
+  onPreparationProgress?: (progress: {
+    jobId: string;
+    status: string;
+    stage: string;
+    current?: number;
+    total?: number;
+  }) => void;
 }): Promise<{ created: boolean; reusedActive: boolean; session: ContentWritingSession }> => {
   const payload = await requestContentWriting({
     action: 'start',
@@ -350,11 +357,46 @@ export const startContentWritingSession = async (options: {
     ...(options.model ? { model: options.model } : {}),
     idempotencyKey: options.idempotencyKey || createContentWritingIdempotencyKey(options.articleId),
   });
-  const session = normalizeSession(payload.session);
-  if (!session) throw new Error('Content writing API returned an invalid session.');
+  let session = normalizeSession(payload.session);
+  let created = payload.created === true;
+  let reusedActive = payload.reusedActive === true;
+  const preparationJobId = toText(payload.preparationJob?.id);
+  if (!session && payload.preparingCompetitors === true && preparationJobId) {
+    const terminalStatuses = new Set(['completed', 'failed', 'blocked', 'cancelled']);
+    while (!session) {
+      const preparation = await requestContentWriting({
+        action: 'getPreparation',
+        preparationJobId,
+      });
+      const job = isRecord(preparation.preparationJob) ? preparation.preparationJob : {};
+      const progress = isRecord(job.progress) ? job.progress : {};
+      const status = toText(job.status);
+      options.onPreparationProgress?.({
+        jobId: preparationJobId,
+        status,
+        stage: toText(progress.stage) || 'queued',
+        current: Number.isFinite(Number(progress.current)) ? Number(progress.current) : undefined,
+        total: Number.isFinite(Number(progress.total)) ? Number(progress.total) : undefined,
+      });
+      session = normalizeSession(preparation.session);
+      if (session) {
+        created = preparation.created === true;
+        reusedActive = preparation.reusedActive === true;
+        break;
+      }
+      if (terminalStatuses.has(status)) {
+        throw new Error(
+          toText(job.lastError)
+          || 'Automatic competitor preparation ended before the writing session was created.',
+        );
+      }
+      await new Promise(resolve => window.setTimeout(resolve, 2_000));
+    }
+  }
+  if (!session) throw new Error('Content writing API returned neither a session nor a competitor-preparation task.');
   return {
-    created: payload.created === true,
-    reusedActive: payload.reusedActive === true,
+    created,
+    reusedActive,
     session,
   };
 };

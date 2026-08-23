@@ -212,6 +212,24 @@ const ExternalAnalysisReportsTable: React.FC<{
         </div>
       );
     }
+    if (job.job_type === 'content_writing_preparation') {
+      const stageIndex = Number(job.progress?.stageIndex) || 0;
+      const usableCount = Number(job.result?.usableCompetitorCount)
+        || Number(job.progress?.usableCompetitorCount)
+        || 0;
+      return (
+        <div>
+          <div className="font-black text-gray-800 dark:text-gray-100">
+            {locale === 'ar' ? 'تجهيز منافسي كتابة المقالة' : 'Prepare writing competitors'}
+          </div>
+          <div className="mt-1 text-[11px] text-gray-500">
+            {locale === 'ar'
+              ? `المرحلة ${stageIndex}/3 · نصوص صالحة: ${usableCount}`
+              : `Stage ${stageIndex}/3 · Usable texts: ${usableCount}`}
+          </div>
+        </div>
+      );
+    }
     if (job.job_type === 'semantic_keywords_lsi') {
       return (
         <div>

@@ -226,6 +226,18 @@ const claimNextItem = async (
   return firstRow<ContentWritingAutomationItemRow>(data);
 };
 
+const enqueueNextAutomaticCompetitorPreparation = async (
+  settings: ContentWritingAutomationSettings,
+): Promise<void> => {
+  const { error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'enqueue_next_automatic_writing_competitor_preparation',
+    { p_min_competitor_count: settings.minimumCompetitors },
+  );
+  // Rolling deployment compatibility: the existing writing queue must keep
+  // operating while the new preparation migration is being applied.
+  if (error && !isContentWritingAutomationSchemaUnavailableError(error)) throw error;
+};
+
 const createAutomationSessionIdempotencyKey = (
   item: ContentWritingAutomationItemRow,
 ): string => (
@@ -297,7 +309,10 @@ export const scheduleNextAutomaticContentWritingSession = async (
   if (!settings.enabled) return null;
 
   const item = await claimNextItem(workerId, settings);
-  if (!item) return null;
+  if (!item) {
+    await enqueueNextAutomaticCompetitorPreparation(settings);
+    return null;
+  }
 
   const idempotencyKey = createAutomationSessionIdempotencyKey(item);
 

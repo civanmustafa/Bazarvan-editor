@@ -33,6 +33,7 @@ export const getExternalAnalysisTaskIdentity = (
     'semantic_keywords_lsi',
     'content_brief_generation',
     'full_article_pipeline',
+    'content_writing_preparation',
     'engineering_command',
     'competitor_discovery',
   ].includes(task.job_type)) {
@@ -50,6 +51,9 @@ export const getExternalAnalysisTaskIdentity = (
   }
   if (task.job_type === 'full_article_pipeline') {
     return `${task.article_id}:full_article_pipeline:${task.id}`;
+  }
+  if (task.job_type === 'content_writing_preparation') {
+    return `${task.article_id}:content_writing_preparation:${task.id}`;
   }
   if (task.job_type === 'competitor_discovery') {
     return `${task.article_id}:competitor_discovery:${signature}`;

@@ -4,6 +4,7 @@ export type ExternalAnalysisJobType =
   | 'semantic_keywords_lsi'
   | 'content_brief_generation'
   | 'full_article_pipeline'
+  | 'content_writing_preparation'
   | 'engineering_command'
   | 'competitor_discovery'
   | 'competitor_extraction';
