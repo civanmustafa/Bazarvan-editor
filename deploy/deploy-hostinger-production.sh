@@ -68,6 +68,7 @@ readonly PM2_APPS=(
   bazarvan-staging-content-writing-worker
   bazarvan-staging-client-page-crawler
 )
+readonly CONTENT_WRITING_PREPARATION_APP="bazarvan-staging-content-writing-preparation-worker"
 
 for app_name in "${PM2_APPS[@]}"; do
   if ! pm2 describe "${app_name}" >/dev/null 2>&1; then
@@ -87,6 +88,26 @@ npm run build
 for app_name in "${PM2_APPS[@]}"; do
   pm2 restart "${app_name}" --update-env
 done
+
+if pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null 2>&1; then
+  pm2 restart "${CONTENT_WRITING_PREPARATION_APP}" --update-env
+else
+  NODE_ENV=production \
+  EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=content_writing_preparation \
+  EXTERNAL_ANALYSIS_WORKER_POLL_MS="${CONTENT_WRITING_PREPARATION_WORKER_POLL_MS:-5000}" \
+  EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS="${CONTENT_WRITING_PREPARATION_WORKER_IDLE_MAX_MS:-30000}" \
+  EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS="${CONTENT_WRITING_PREPARATION_LEASE_SECONDS:-1800}" \
+  EXTERNAL_ANALYSIS_RETRY_MINUTES="${EXTERNAL_ANALYSIS_RETRY_MINUTES:-30}" \
+  EXTERNAL_ANALYSIS_MAX_RETRY_COUNT="${EXTERNAL_ANALYSIS_MAX_RETRY_COUNT:-5}" \
+  EXTERNAL_ANALYSIS_WORKER_CONCURRENCY=1 \
+    pm2 start server-dist/external-analysis-worker.mjs \
+      --name "${CONTENT_WRITING_PREPARATION_APP}" \
+      --cwd "${APP_DIR}" \
+      --restart-delay 2000 \
+      --kill-timeout 15000
+fi
+
+pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null
 pm2 save
 
 wait_for_endpoint() {

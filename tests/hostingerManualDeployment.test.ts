@@ -21,6 +21,9 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.doesNotMatch(script, /pm2 restart all/);
   assert.match(script, /bazarvan-editor-staging/);
   assert.match(script, /bazarvan-staging-content-writing-worker/);
+  assert.match(script, /bazarvan-staging-content-writing-preparation-worker/);
+  assert.match(script, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=content_writing_preparation/);
+  assert.match(script, /pm2 start server-dist\/external-analysis-worker\.mjs/);
   assert.match(script, /bazarvan-staging-client-page-crawler/);
   assert.match(script, /smarteditor\.bazarvan\.com\/healthz/);
   assert.match(script, /smarteditor\.bazarvan\.com\/readyz/);

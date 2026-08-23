@@ -89,6 +89,7 @@ Supabase Cloud، وحُفظت قائمة PM2 الجديدة عبر `pm2 save`. �
 12. `supabase/migrations/20260812000000_allow_parallel_content_writing_substeps.sql`
 13. `supabase/migrations/20260812010000_gemini_key_availability_waiting.sql`
 14. `supabase/migrations/20260823010000_automatic_content_writing_queue.sql`
+15. `supabase/migrations/20260823020000_content_writing_competitor_preparation.sql`
 
 تضيف هذه الترحيلات جلسات دائمة، وخطوات قابلة للاستئناف، وإدراج المقالة بعد المراجعة، وتسجيل النتائج الخارجية، ومنع تشغيل أكثر من جلسة نشطة، وتقارير جودة حتمية ذات إصدارات، وفهرسة معرفة المنافسين، وتدقيق التغطية، وإصلاح الأقسام المستهدفة، ومرحلة ختامية ديناميكية تستخدم دعوة اتخاذ الإجراء بدل الخاتمة للصفحات الخدمية والتجارية، وتدقيق استقلالية FAQ، وحارسًا يمنع تكرار القسم النهائي ويثبت FAQ قبله مباشرة، وطابور كتابة تلقائية دائمًا يعالج مقالة واحدة ثم يطبق فترة تهدئة قابلة للضبط.
 
@@ -226,6 +227,7 @@ for app in \
   bazarvan-staging-competitor-worker \
   bazarvan-staging-ai-worker \
   bazarvan-staging-full-article-pipeline-worker \
+  bazarvan-staging-content-writing-preparation-worker \
   bazarvan-staging-ai-job-worker \
   bazarvan-staging-content-writing-worker \
   bazarvan-staging-client-page-crawler; do
@@ -243,7 +245,7 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - `npm ci --include=dev`: يثبت الاعتماديات طبقًا لملف القفل، بما فيها أدوات البناء
   مثل Vite حتى مع تحميل `NODE_ENV=production` من ملف البيئة.
 - `npm run build`: يبني الواجهة والخادم والعوامل وينفّذ فحوص الإصدار.
-- حلقة `pm2 restart`: تعيد تشغيل عمليات النسخة الذاتية السبعة فقط مع متغيرات البيئة المحدثة؛ لا تستخدم `pm2 restart all`.
+- حلقة `pm2 restart`: تعيد تشغيل عمليات النسخة الذاتية الثماني فقط مع متغيرات البيئة المحدثة؛ لا تستخدم `pm2 restart all`. ينشئ سكربت النشر عامل تجهيز منافسي كتابة المقالة تلقائيًا في أول نشر، ثم يعيد تشغيله في النشرات اللاحقة.
 - `pm2 save`: يحفظ قائمة العمليات لكي تعود بعد إعادة تشغيل الخادم.
 - `/healthz`: يتحقق من أن خادم الويب يعمل.
 - `/readyz`: يتحقق أيضًا من بناء الإنتاج، ومخططات Supabase المطلوبة، ومفتاح التشفير. يعرض حالة عامل المنافسين داخل `checks.externalAnalysisWorker` ويضع `degraded: true` عند تعطل طابوره، لكنه لا يعيد HTTP 503 بسبب تأخر مهمة وحده حتى لا تدخل مراقبة هوستينجر وPM2 في حلقة إعادة تشغيل تقطع المهام.
@@ -259,5 +261,6 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - يستخدم `bazarvan-staging-ai-worker` فقط للتحليل الدلالي والأوامر الهندسية، لذلك لا تمنع أخطاء Gemini عامل Firecrawl من استلام مهام المنافسين.
 - إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات البحث والسحب متدهورة ويجب فحص `bazarvan-staging-competitor-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
 - لفحص عامل كتابة المقالة استخدم `pm2 describe bazarvan-staging-content-writing-worker`.
+- لفحص عامل تجهيز المنافسين قبل كتابة المقالة استخدم `pm2 describe bazarvan-staging-content-writing-preparation-worker`.
 - لفحص عامل زحف صفحات العملاء استخدم `pm2 describe bazarvan-staging-client-page-crawler`.
 - عند فشل `/readyz` لا تعتبر النشر مكتملًا؛ راجع الترحيلات ومتغيرات البيئة وسجل العملية في PM2.
