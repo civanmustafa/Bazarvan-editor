@@ -56,7 +56,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 14);
+  assert.equal(result.requiredMigrationCount, 15);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
@@ -64,8 +64,10 @@ test('content-writing readiness checks every required schema surface', async () 
     automationQueue: true,
     keyCoordinator: true,
     automationEvaluator: true,
+    competitorPreparationCoordinator: true,
   });
   assert.deepEqual(rpcCalls.sort(), [
+    'enqueue_content_writing_competitor_preparation',
     'evaluate_content_writing_automation_readiness',
     'inspect_gemini_api_key_availability',
   ]);
@@ -124,6 +126,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260728040000_content_writing_final_structure\.sql/);
   assert.match(releaseRegistry, /20260812010000_gemini_key_availability_waiting\.sql/);
   assert.match(releaseRegistry, /20260823010000_automatic_content_writing_queue\.sql/);
+  assert.match(releaseRegistry, /20260823020000_content_writing_competitor_preparation\.sql/);
   assert.match(
     await readWorkspaceFile('server/contentWritingReadiness.ts'),
     /resume_preference_version/,
@@ -136,6 +139,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseScript, /parallel_substeps_version/);
   assert.match(releaseScript, /faqIndependenceGuard/);
   assert.match(releaseScript, /finalSectionStructureGuard/);
+  assert.match(releaseScript, /Competitor-preparation worker bundle is missing marker/);
   assert.match(server, /app\.get\('\/readyz', readyzHandler\)/);
   assert.match(server, /toPublicContentWritingReadiness/);
   assert.match(server, /toPublicExternalAnalysisQueueReadiness/);

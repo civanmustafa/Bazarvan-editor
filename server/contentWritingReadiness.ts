@@ -45,7 +45,10 @@ export type ContentWritingReadinessResult = {
   checkedAt: string;
   requiredMigrationCount: number;
   checks: Record<
-    (typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id'] | 'keyCoordinator' | 'automationEvaluator',
+    (typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id']
+      | 'keyCoordinator'
+      | 'automationEvaluator'
+      | 'competitorPreparationCoordinator',
     boolean
   >;
   code?: 'content_writing_schema_unavailable';
@@ -95,6 +98,7 @@ export const checkContentWritingReadiness = async (options: {
       ...CONTENT_WRITING_SCHEMA_PROBES.map(probe => [probe.id, false] as const),
       ['keyCoordinator', false] as const,
       ['automationEvaluator', false] as const,
+      ['competitorPreparationCoordinator', false] as const,
     ],
   ) as ContentWritingReadinessResult['checks'];
   const failures: string[] = [];
@@ -157,6 +161,20 @@ export const checkContentWritingReadiness = async (options: {
       checks.automationEvaluator = true;
     } catch (error) {
       failures.push(`automationEvaluator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
+    }
+  })(), (async () => {
+    try {
+      const result = await withTimeout(client.rpc('enqueue_content_writing_competitor_preparation', {
+        p_article_id: null,
+        p_requested_by: null,
+      }), timeoutMs);
+      if (result.error && result.error.code !== 'P0002') {
+        failures.push(describeProbeFailure('competitorPreparationCoordinator', result.error));
+        return;
+      }
+      checks.competitorPreparationCoordinator = true;
+    } catch (error) {
+      failures.push(`competitorPreparationCoordinator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
     }
   })()]);
 

@@ -38,6 +38,7 @@ for (const artifact of CONTENT_WRITING_RELEASE_ARTIFACTS) {
 
 const serverBundle = await readFile(path.join(root, 'server-dist', 'server.mjs'), 'utf8');
 const workerBundle = await readFile(path.join(root, 'server-dist', 'content-writing-worker.mjs'), 'utf8');
+const preparationWorkerBundle = await readFile(path.join(root, 'server-dist', 'external-analysis-worker.mjs'), 'utf8');
 const requiredServerMarkers = [
   '/readyz',
   '/api/content-writing',
@@ -56,6 +57,7 @@ const requiredServerMarkers = [
   'finalSectionStructureVersion',
   '/api/content-writing/automation',
   'content_writing_automation_items',
+  'enqueue_content_writing_competitor_preparation',
 ];
 for (const marker of requiredServerMarkers) {
   if (!serverBundle.includes(marker)) {
@@ -84,6 +86,17 @@ const requiredWorkerMarkers = [
 for (const marker of requiredWorkerMarkers) {
   if (!workerBundle.includes(marker)) {
     throw new Error(`Content-writing worker bundle is missing marker: ${marker}`);
+  }
+}
+const requiredPreparationWorkerMarkers = [
+  'content_writing_preparation',
+  'minimumCompetitorCount',
+  'competitor_discovery',
+  'competitor_extraction',
+];
+for (const marker of requiredPreparationWorkerMarkers) {
+  if (!preparationWorkerBundle.includes(marker)) {
+    throw new Error(`Competitor-preparation worker bundle is missing marker: ${marker}`);
   }
 }
 
