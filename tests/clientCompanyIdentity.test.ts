@@ -126,6 +126,10 @@ test('editor and settings use Client Center as the shared company source', async
   assert.match(quickClientModal, /quick-client-language/);
   assert.match(clientGoals, /handleSaveClientGoalContext\(selectedClient\.id/);
   assert.doesNotMatch(clientGoals, /setCompanyName/);
+  assert.doesNotMatch(clientGoals, /useClientDirectory/);
+  assert.match(clientGoals, /\[selectedClientId, selectedSavedContext\]/);
+  assert.match(clientGoals, /unifiedPresets\[selectedClient\.id\]/);
+  assert.match(clientCenter, /selectedClientId=\{selectedClient\.id\}/);
   assert.match(clientCenter, /اسم الشركة\/العميل/);
   assert.match(clientCenter, /label="الدومين"/);
   assert.doesNotMatch(clientCenter, /دومينات العميل/);

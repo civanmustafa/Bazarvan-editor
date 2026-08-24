@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2,
   BookOpen,
@@ -17,6 +17,7 @@ import {
   Search,
   ShieldCheck,
   Square,
+  Target,
   Trash2,
   UserPlus,
   Users,
@@ -76,8 +77,17 @@ import {
   type ClientSiteCrawlProvider,
   type ClientSiteCrawlState,
 } from '../utils/clientSiteCrawler';
+import ClientGoalSettings from './ClientGoalSettings';
 
-type ClientCenterTab = 'profile' | 'pages' | 'index' | 'access';
+type ClientCenterTab = 'profile' | 'pages' | 'index' | 'access' | 'goal';
+
+const CLIENT_CENTER_TAB_KEYS: ClientCenterTab[] = [
+  'profile',
+  'pages',
+  'index',
+  'access',
+  'goal',
+];
 
 const EMPTY_DETAILS: ClientCenterDetails = {
   domains: [],
@@ -457,6 +467,7 @@ const ClientCenterSettings: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [clientQuery, setClientQuery] = useState('');
   const [domainInput, setDomainInput] = useState('');
   const [assignmentUserId, setAssignmentUserId] = useState('');
   const [assignmentAccess, setAssignmentAccess] = useState<ClientAssignmentAccess>('viewer');
@@ -488,8 +499,19 @@ const ClientCenterSettings: React.FC = () => {
     normalizeInternalLinkQualityPolicy(DEFAULT_INTERNAL_LINK_QUALITY_POLICY),
   );
   const [clientQualityPolicyEnabled, setClientQualityPolicyEnabled] = useState(false);
+  const tabButtonRefs = useRef<Partial<Record<ClientCenterTab, HTMLButtonElement | null>>>({});
 
   const selectedClient = clients.find(client => client.id === selectedClientId) || null;
+  const filteredClients = useMemo(() => {
+    const query = clientQuery.trim().toLocaleLowerCase('ar');
+    if (!query) return clients;
+    return clients.filter(client => [
+      client.name,
+      client.legalName,
+      client.industry,
+      client.country,
+    ].some(value => value?.toLocaleLowerCase('ar').includes(query)));
+  }, [clientQuery, clients]);
   const ownAssignment = details.assignments.find(assignment => assignment.userId === currentUserId && assignment.isActive);
   const canEditPages = isAdmin || ownAssignment?.accessLevel === 'editor';
   const primaryClientDomain = useMemo(() => (
@@ -533,6 +555,23 @@ const ClientCenterSettings: React.FC = () => {
   const showError = (value: unknown): void => {
     setError(value instanceof Error ? value.message : 'حدث خطأ غير متوقع في مركز العملاء.');
     setMessage('');
+  };
+
+  const handleTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentTab: ClientCenterTab,
+  ): void => {
+    const currentIndex = CLIENT_CENTER_TAB_KEYS.indexOf(currentTab);
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex + 1) % CLIENT_CENTER_TAB_KEYS.length;
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex - 1 + CLIENT_CENTER_TAB_KEYS.length) % CLIENT_CENTER_TAB_KEYS.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = CLIENT_CENTER_TAB_KEYS.length - 1;
+    if (nextIndex === currentIndex) return;
+    event.preventDefault();
+    const nextTab = CLIENT_CENTER_TAB_KEYS[nextIndex];
+    setSelectedTab(nextTab);
+    window.requestAnimationFrame(() => tabButtonRefs.current[nextTab]?.focus());
   };
 
   const refreshClients = useCallback(async (preferredClientId?: string) => {
@@ -1677,14 +1716,29 @@ const ClientCenterSettings: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/10 p-4">
-        <div className="flex items-start gap-3">
-          <Building2 className="mt-0.5 shrink-0 text-[#b8922e]" size={22} />
-          <div>
-            <h2 className="font-black text-gray-900 dark:text-gray-100">مركز العملاء</h2>
-            <p className="mt-1 text-xs font-semibold leading-6 text-gray-600 dark:text-gray-300">
-              سجل مركزي مستقل عن مقالات المحرر لإدارة العملاء ودوميناتهم وروابط مواقعهم. لا يتضمن الحقول المستبعدة، ولا يعتمد على Search Console.
-            </p>
+      <div className="overflow-hidden rounded-xl border border-[#d4af37]/30 bg-gradient-to-l from-[#d4af37]/15 via-[#d4af37]/5 to-transparent">
+        <div className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#d4af37] text-white shadow-sm">
+              <Building2 size={23} />
+            </span>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#9b7d20] dark:text-[#f2d675]">Client workspace</div>
+              <h2 className="mt-1 text-xl font-black text-gray-900 dark:text-gray-100">مركز العملاء</h2>
+              <p className="mt-1 max-w-3xl text-xs font-semibold leading-6 text-gray-600 dark:text-gray-300">
+                مساحة موحّدة لتنظيم بيانات العميل، صفحات موقعه، فهرسه، صلاحيات فريقه وسياق أهداف المحتوى.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:min-w-56">
+            <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2 text-center shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]/80">
+              <div className="text-lg font-black text-[#9b7d20] dark:text-[#f2d675]">{clients.length.toLocaleString('ar')}</div>
+              <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400">إجمالي العملاء</div>
+            </div>
+            <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2 text-center shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]/80">
+              <div className="text-lg font-black text-emerald-600 dark:text-emerald-400">{clients.filter(client => client.isActive).length.toLocaleString('ar')}</div>
+              <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400">عملاء نشطون</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1700,10 +1754,13 @@ const ClientCenterSettings: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[17rem_minmax(0,1fr)]">
-        <aside className="rounded-lg border border-gray-200 bg-white p-3 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A] lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 font-black text-gray-800 dark:text-gray-100"><Users size={17} /> العملاء</div>
+            <div>
+              <div className="flex items-center gap-2 font-black text-gray-800 dark:text-gray-100"><Users size={17} /> دليل العملاء</div>
+              <div className="mt-1 text-[10px] font-bold text-gray-400">اختر عميلًا لإدارة مساحته</div>
+            </div>
             {isAdmin && (
               <button type="button" className={primaryButtonClass} onClick={() => {
                 setClientInput(EMPTY_CLIENT_INPUT);
@@ -1712,26 +1769,44 @@ const ClientCenterSettings: React.FC = () => {
               }}><Plus size={15} /> جديد</button>
             )}
           </div>
+          {!isLoading && clients.length > 0 && (
+            <label className="relative mb-3 block">
+              <span className="sr-only">بحث في العملاء</span>
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
+              <input
+                type="search"
+                value={clientQuery}
+                onChange={event => setClientQuery(event.target.value)}
+                placeholder="بحث بالاسم أو المجال..."
+                className={`${inputClass} pr-9`}
+              />
+            </label>
+          )}
           {isLoading && <div className="flex items-center justify-center gap-2 p-5 text-sm font-bold text-gray-400"><LoaderCircle className="animate-spin" size={18} /> جارٍ التحميل</div>}
           {!isLoading && clients.length === 0 && <div className="rounded-md border border-dashed border-gray-200 p-4 text-center text-sm font-semibold text-gray-400 dark:border-[#3C3C3C]">لا يوجد عملاء متاحون.</div>}
-          <div className="space-y-1">
-            {clients.map(client => (
+          {!isLoading && clients.length > 0 && filteredClients.length === 0 && (
+            <div className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs font-bold text-gray-400 dark:border-[#3C3C3C]">لا توجد نتائج مطابقة للبحث.</div>
+          )}
+          <div className="custom-scrollbar max-h-72 space-y-1 overflow-y-auto pl-1 lg:max-h-[calc(100vh-13rem)]">
+            {filteredClients.map(client => (
               <button key={client.id} type="button" onClick={() => {
                 setIsCreatingClient(false);
                 setDomainInput('');
                 setSelectedClientId(client.id);
-                setSelectedTab('profile');
                 setMessage('');
                 setError('');
-              }} className={`w-full rounded-md px-3 py-2 text-start transition-colors ${selectedClientId === client.id && !isCreatingClient ? 'bg-[#d4af37] text-white' : 'bg-gray-50 text-gray-700 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-200'}`}>
-                <div className="truncate text-sm font-black">{client.name}</div>
-                <div className={`mt-1 truncate text-[11px] font-bold ${selectedClientId === client.id && !isCreatingClient ? 'text-white/75' : 'text-gray-400'}`}>{client.industry || client.country || 'بدون تصنيف'}{!client.isActive ? ' • غير نشط' : ''}</div>
+              }} className={`group w-full rounded-lg border px-3 py-2.5 text-start transition-all ${selectedClientId === client.id && !isCreatingClient ? 'border-[#d4af37] bg-[#d4af37] text-white shadow-sm' : 'border-transparent bg-gray-50 text-gray-700 hover:border-[#d4af37]/30 hover:bg-[#d4af37]/10 dark:bg-[#1F1F1F] dark:text-gray-200'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="truncate text-sm font-black">{client.name}</div>
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${client.isActive ? selectedClientId === client.id && !isCreatingClient ? 'bg-white' : 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`} aria-label={client.isActive ? 'نشط' : 'غير نشط'} />
+                </div>
+                <div className={`mt-1 truncate text-[11px] font-bold ${selectedClientId === client.id && !isCreatingClient ? 'text-white/80' : 'text-gray-400'}`}>{client.industry || client.country || 'بدون تصنيف'}</div>
               </button>
             ))}
           </div>
         </aside>
 
-        <main className="min-w-0 rounded-lg border border-gray-200 bg-white p-4 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+        <main className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A] sm:p-5">
           {isCreatingClient && isAdmin ? (
             <div>
               <h3 className="mb-4 text-lg font-black text-gray-900 dark:text-gray-100">إنشاء عميل جديد</h3>
@@ -1744,36 +1819,84 @@ const ClientCenterSettings: React.FC = () => {
             </div>
           ) : (
             <>
-              <div className="mb-4 flex flex-col gap-3 border-b border-gray-100 pb-4 dark:border-[#3C3C3C] sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h3 className="text-xl font-black text-gray-900 dark:text-gray-100">{selectedClient.name}</h3>
-                  <div className="mt-1 text-xs font-semibold text-gray-400">{primaryClientDomain?.hostname || 'لم يحدد دومين رئيسي'}</div>
+              <div className="mb-5 flex flex-col gap-4 border-b border-gray-100 pb-5 dark:border-[#3C3C3C] sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate text-xl font-black text-gray-900 dark:text-gray-100">{selectedClient.name}</h3>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-black ${selectedClient.isActive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-[#1F1F1F] dark:text-gray-400'}`}>
+                      {selectedClient.isActive ? 'نشط' : 'غير نشط'}
+                    </span>
+                    <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                      {isAdmin ? 'مسؤول' : canEditPages ? 'صلاحية تعديل' : 'عرض فقط'}
+                    </span>
+                  </div>
+                  <div dir="ltr" className="mt-2 truncate text-left text-xs font-semibold text-gray-400">{primaryClientDomain?.hostname || 'لم يحدد دومين رئيسي'}</div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black text-gray-500 dark:text-gray-400">
+                    <span className="rounded-full bg-gray-100 px-2 py-1 dark:bg-[#1F1F1F]">{details.pages.length.toLocaleString('ar')} رابط</span>
+                    <span className="rounded-full bg-gray-100 px-2 py-1 dark:bg-[#1F1F1F]">{details.assignments.length.toLocaleString('ar')} موظف</span>
+                    <span className="rounded-full bg-gray-100 px-2 py-1 dark:bg-[#1F1F1F]">{details.dictionaries.length.toLocaleString('ar')} قاموس</span>
+                  </div>
                 </div>
-                <button type="button" className={secondaryButtonClass} onClick={() => void refreshDetails(selectedClient.id)}>
+                <button type="button" className={secondaryButtonClass} onClick={() => void Promise.all([
+                  refreshDetails(selectedClient.id),
+                  refreshSiteCrawlState(selectedClient.id),
+                ])}>
                   <RefreshCw className={isDetailsLoading ? 'animate-spin' : ''} size={15} /> تحديث
                 </button>
               </div>
-              <div className="mb-5 grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5" role="tablist" aria-label="أقسام إعدادات العميل">
                 {([
-                  ['profile', 'البيانات والدومين', <Globe2 size={16} />],
-                  ['pages', 'روابط الموقع', <Link2 size={16} />],
-                  ['index', 'الفهرس والقواميس', <Network size={16} />],
-                  ['access', 'الموظفون والصلاحيات', <ShieldCheck size={16} />],
-                ] as const).map(([key, label, icon]) => (
-                  <button key={key} type="button" onClick={() => setSelectedTab(key)} className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-2 text-xs font-black transition-colors ${selectedTab === key ? 'bg-[#d4af37] text-white' : 'bg-gray-100 text-gray-600 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F] dark:text-gray-300'}`}>
-                    {icon}<span>{label}</span>
+                  ['profile', 'البيانات والدومين', 'هوية العميل ودومينه', <Globe2 size={17} />],
+                  ['pages', 'روابط الموقع', 'الزحف وإدارة الصفحات', <Link2 size={17} />],
+                  ['index', 'الفهرس والقواميس', 'الدلالة وقواعد الربط', <Network size={17} />],
+                  ['access', 'الموظفون والصلاحيات', 'الفريق ومستوى الوصول', <ShieldCheck size={17} />],
+                  ['goal', 'سياق هدف الصفحة الحالي', 'أهداف المحتوى والجمهور', <Target size={17} />],
+                ] as const).map(([key, label, description, icon]) => (
+                  <button
+                    key={key}
+                    id={`client-tab-${key}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selectedTab === key}
+                    aria-controls="client-tab-panel"
+                    tabIndex={selectedTab === key ? 0 : -1}
+                    ref={element => {
+                      tabButtonRefs.current[key] = element;
+                    }}
+                    onClick={() => setSelectedTab(key)}
+                    onKeyDown={event => handleTabKeyDown(event, key)}
+                    className={`flex min-h-16 items-center gap-2 rounded-lg border px-3 py-2 text-start transition-all ${selectedTab === key ? 'border-[#d4af37] bg-[#d4af37] text-white shadow-sm' : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-[#d4af37]/30 hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300'}`}
+                  >
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${selectedTab === key ? 'bg-white/15' : 'bg-white text-[#9b7d20] shadow-sm dark:bg-[#2A2A2A] dark:text-[#f2d675]'}`}>{icon}</span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-black leading-5">{label}</span>
+                      <span className={`hidden truncate text-[9px] font-bold xl:block ${selectedTab === key ? 'text-white/75' : 'text-gray-400'}`}>{description}</span>
+                    </span>
                   </button>
                 ))}
               </div>
-              {isDetailsLoading ? (
-                <div className="flex items-center justify-center gap-2 py-12 text-sm font-bold text-gray-400"><LoaderCircle className="animate-spin" size={20} /> جارٍ تحميل بيانات العميل</div>
-              ) : selectedTab === 'pages'
-                ? renderPagesTab()
-                : selectedTab === 'index'
-                  ? renderIndexTab()
-                  : selectedTab === 'access'
-                    ? renderAccessTab()
-                    : renderProfileTab()}
+              <div
+                id="client-tab-panel"
+                role="tabpanel"
+                aria-labelledby={`client-tab-${selectedTab}`}
+                tabIndex={0}
+                className="outline-none focus-visible:ring-2 focus-visible:ring-[#d4af37]/60"
+              >
+                {selectedTab !== 'goal' && (
+                  isDetailsLoading ? (
+                    <div className="flex items-center justify-center gap-2 py-12 text-sm font-bold text-gray-400"><LoaderCircle className="animate-spin" size={20} /> جارٍ تحميل بيانات العميل</div>
+                  ) : selectedTab === 'pages'
+                    ? renderPagesTab()
+                    : selectedTab === 'index'
+                      ? renderIndexTab()
+                      : selectedTab === 'access'
+                        ? renderAccessTab()
+                        : renderProfileTab()
+                )}
+                <div className={selectedTab === 'goal' ? 'block' : 'hidden'} aria-hidden={selectedTab !== 'goal'}>
+                  <ClientGoalSettings clients={clients} selectedClientId={selectedClient.id} />
+                </div>
+              </div>
             </>
           )}
         </main>

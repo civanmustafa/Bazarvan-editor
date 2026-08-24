@@ -21,7 +21,6 @@ import {
   Workflow,
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
-import ClientGoalSettings from './ClientGoalSettings';
 import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import ContentWritingPromptSettings from './ContentWritingPromptSettings';
 import AdminAiProviderSecretsSettings from './AdminAiProviderSecretsSettings';
@@ -649,18 +648,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     </SettingsSection>
   );
 
-  const renderClientSettings = () => (
-    <div className="space-y-6">
-      <ClientCenterSettings />
-      <SettingsSection title="سياق هدف الصفحة الحالي">
-        <p className="mb-4 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-          اسم العميل في مركز العملاء هو نفسه اسم الشركة داخل الكلمات والأهداف. اختر
-          العميل المسجل ثم احفظ سياق أهدافه؛ وسيبقى الربط صحيحًا حتى عند تغيير اسم العميل.
-        </p>
-        <ClientGoalSettings />
-      </SettingsSection>
-    </div>
-  );
+  const renderClientSettings = () => <ClientCenterSettings />;
 
   const renderPromptSettings = () => (
     <SettingsSection title="الأوامر الهندسية">
@@ -714,7 +702,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
 
   return (
     <div className={`min-h-screen ${isDarkMode ? 'dark' : ''} bg-gray-50 dark:bg-[#181818]`}>
-      <div className="mx-auto max-w-screen-lg p-4 sm:p-6 md:p-8">
+      <div className={`mx-auto p-4 sm:p-6 md:p-8 ${selectedSection === 'clients' ? 'max-w-screen-2xl' : 'max-w-screen-lg'}`}>
         <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="text-xs font-black text-[#d4af37]">Bazarvan Settings</div>
@@ -741,24 +729,28 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
                   <Shield size={16} />
                   <span>مركز المتابعة</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={loadSettings}
-                  disabled={isLoading}
-                  className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-200"
-                >
-                  <RefreshCw size={16} />
-                  <span>تحديث</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="inline-flex items-center gap-2 rounded-md bg-[#d4af37] px-3 py-2 text-sm font-bold text-white hover:bg-[#b8922e] disabled:opacity-60"
-                >
-                  <Save size={16} />
-                  <span>حفظ</span>
-                </button>
+                {selectedSection !== 'clients' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={loadSettings}
+                      disabled={isLoading}
+                      className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-200"
+                    >
+                      <RefreshCw size={16} />
+                      <span>تحديث</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="inline-flex items-center gap-2 rounded-md bg-[#d4af37] px-3 py-2 text-sm font-bold text-white hover:bg-[#b8922e] disabled:opacity-60"
+                    >
+                      <Save size={16} />
+                      <span>حفظ</span>
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>

@@ -46,6 +46,7 @@ test('Client Center phase 2 UI manages scoped clients without excluded fields', 
     'مركز العملاء',
     'بيانات والدومين',
     'روابط الموقع',
+    'سياق هدف الصفحة الحالي',
     'الموظفون والصلاحيات',
     'إدخال الروابط يدويًا',
     'لا تُستخدم مقالات المحرر',
@@ -71,7 +72,15 @@ test('Client Center phase 2 UI manages scoped clients without excluded fields', 
   assert.doesNotMatch(component, /دومينات العميل/);
   assert.doesNotMatch(component, /domainPrimary|domainSubdomains|handleAddDomain/);
   assert.match(settings, /<ClientCenterSettings \/>/);
-  assert.match(settings, /<ClientGoalSettings \/>/);
+  assert.doesNotMatch(settings, /<ClientGoalSettings/);
+  assert.match(
+    component,
+    /<ClientGoalSettings clients=\{clients\} selectedClientId=\{selectedClient\.id\} \/>/,
+  );
+  assert.match(component, /role="tablist"/);
+  assert.match(component, /tabIndex=\{selectedTab === key \? 0 : -1\}/);
+  assert.match(component, /handleTabKeyDown\(event, key\)/);
+  assert.match(component, /className=\{selectedTab === 'goal' \? 'block' : 'hidden'\}/);
   assert.match(utility, /\.from\('clients'\)/);
   assert.match(utility, /\.from\('client_pages'\)/);
   assert.match(utility, /\.from\('client_page_crawl_jobs'\)/);
