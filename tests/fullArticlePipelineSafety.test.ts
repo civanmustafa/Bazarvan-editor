@@ -167,6 +167,23 @@ test('latest pipeline migration keeps company and manual goal choices optional o
   assert.match(executor, /allowMissingGoalContext: true/);
 });
 
+test('full workflow competitor discovery stays optional-company and pipeline-owned', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260824030000_full_article_pipeline_optional_discovery.sql',
+  );
+  assertBalancedSql(migration);
+  assert.match(migration, /create or replace function public\.enqueue_full_article_pipeline_competitor_discovery/);
+  assert.match(migration, /'companyName', coalesce\(v_article\.keywords->>'company', ''\)/);
+  assert.match(migration, /'companyIsOptional', true/);
+  assert.match(migration, /pipeline_parent_job_id = v_pipeline\.id/);
+  assert.match(migration, /now\(\), v_pipeline\.id, 6/);
+  assert.doesNotMatch(migration, /enqueue_competitor_discovery_job/);
+  assert.doesNotMatch(migration, /competitor_discovery_ready/);
+  assert.match(migration, /full_article_pipeline_schema_version/);
+  assert.match(migration, /select 4/);
+  assert.match(migration, /notify pgrst, 'reload schema'/);
+});
+
 test('background saves preserve generated semantic and brief fields under one row lock', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260824010000_full_article_pipeline_safety.sql',

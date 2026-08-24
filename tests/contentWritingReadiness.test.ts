@@ -42,7 +42,7 @@ const createProbeClient = (options: {
   rpc: async (name: string) => {
     options.rpcCalls?.push(name);
     return {
-      data: name === 'full_article_pipeline_schema_version' ? 3 : [] as unknown[],
+      data: name === 'full_article_pipeline_schema_version' ? 4 : [] as unknown[],
       error: name === options.failedRpc
         ? { code: 'PGRST202', message: 'Internal RPC schema detail that must stay private.' }
         : null,
@@ -62,7 +62,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 18);
+  assert.equal(result.requiredMigrationCount, 19);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
@@ -161,6 +161,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260728030000_full_article_pipeline\.sql/);
   assert.match(releaseRegistry, /20260824010000_full_article_pipeline_safety\.sql/);
   assert.match(releaseRegistry, /20260824020000_full_article_pipeline_optional_prerequisites\.sql/);
+  assert.match(releaseRegistry, /20260824030000_full_article_pipeline_optional_discovery\.sql/);
   assert.match(
     await readWorkspaceFile('server/contentWritingReadiness.ts'),
     /resume_preference_version/,
