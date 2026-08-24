@@ -123,6 +123,16 @@ test('generated draft is audited before the final reviewed application', async (
   assert.match(engineering, /pipelineDraft\?\.plainText/);
 });
 
+test('pipeline completes both semantic keyword lists before content writing', async () => {
+  const executor = await readWorkspaceFile('server/fullArticlePipelineExecutor.ts');
+  assert.match(executor, /getSemanticKeywordReadiness/);
+  assert.match(executor, /pass < 2 && !semanticReadiness\.ready/);
+  assert.match(executor, /semanticJobIds\.includes\(semanticJobId\)/);
+  assert.match(executor, /full_pipeline_semantic_keywords_incomplete/);
+  assert.match(executor, /missingFields: semanticReadiness\.missingFields/);
+  assert.doesNotMatch(executor, /text\(savedProgress\.semanticJobId\) \|\| await enqueueSemantic/);
+});
+
 test('coordinator waits and competitor inputs have bounded professional gates', async () => {
   const [executor, api, migration] = await Promise.all([
     readWorkspaceFile('server/fullArticlePipelineExecutor.ts'),

@@ -124,6 +124,22 @@ const readArticle = async (articleId: string): Promise<ArticleRow> => {
   return data as ArticleRow;
 };
 
+const getSemanticKeywordReadiness = (article: ArticleRow): {
+  ready: boolean;
+  missingFields: string[];
+} => {
+  const keywords = isRecord(article.keywords) ? article.keywords : {};
+  const hasSecondaries = Array.isArray(keywords.secondaries)
+    && keywords.secondaries.some(item => Boolean(text(item)));
+  const hasLsi = Array.isArray(keywords.lsi)
+    && keywords.lsi.some(item => Boolean(text(item)));
+  const missingFields = [
+    hasSecondaries ? '' : 'alternative_keywords',
+    hasLsi ? '' : 'lsi_keywords',
+  ].filter(Boolean);
+  return { ready: missingFields.length === 0, missingFields };
+};
+
 const readExternalJob = async (
   jobId: string,
   includeResult = false,
@@ -700,8 +716,12 @@ const executeFullArticlePipeline = async (
 
   try {
     await reportStage(context, 'semantic_keywords_lsi', 1);
-    const semanticJobId = text(savedProgress.semanticJobId) || await enqueueSemantic(context.job.article_id) || '';
-    if (semanticJobId) {
+    let semanticReadiness = getSemanticKeywordReadiness(await readArticle(context.job.article_id));
+    const semanticJobIds: string[] = [];
+    for (let pass = 0; pass < 2 && !semanticReadiness.ready; pass += 1) {
+      const semanticJobId = await enqueueSemantic(context.job.article_id) || '';
+      if (!semanticJobId || semanticJobIds.includes(semanticJobId)) break;
+      semanticJobIds.push(semanticJobId);
       activeExternalChildId = semanticJobId;
       await attachExternalChild({
         context,
@@ -709,7 +729,11 @@ const executeFullArticlePipeline = async (
         kind: 'semantic',
         leaseGeneration,
       });
-      await reportStage(context, 'semantic_keywords_lsi', 1, { semanticJobId });
+      await reportStage(context, 'semantic_keywords_lsi', 1, {
+        semanticJobId,
+        semanticJobIds,
+        semanticCompletionPass: pass + 1,
+      });
       await waitForExternalJob({
         context,
         jobId: semanticJobId,
@@ -717,7 +741,21 @@ const executeFullArticlePipeline = async (
         stageIndex: 1,
       });
       activeExternalChildId = '';
-    } else {
+      semanticReadiness = getSemanticKeywordReadiness(await readArticle(context.job.article_id));
+    }
+    if (!semanticReadiness.ready) {
+      retryError({
+        code: 'full_pipeline_semantic_keywords_incomplete',
+        message: 'Semantic keyword generation completed without filling every required keyword list.',
+        stage: 'semantic_keywords_lsi',
+        stageIndex: 1,
+        details: {
+          semanticJobIds,
+          missingFields: semanticReadiness.missingFields,
+        },
+      });
+    }
+    if (semanticJobIds.length === 0) {
       await reportStage(context, 'semantic_keywords_lsi', 1, { skipped: true, reason: 'already_populated' });
     }
 
