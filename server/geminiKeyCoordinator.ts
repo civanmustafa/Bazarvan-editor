@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 export type GeminiKeyProvider = 'gemini' | 'geminiPaid';
-export type GeminiKeyFailureReason = 'quota' | 'auth' | 'server' | 'blocked' | 'unknown';
+export type GeminiKeyFailureReason = 'quota' | 'auth' | 'server' | 'blocked' | 'incompatible' | 'unknown';
 export type GeminiKeyOutcome = 'success' | 'failed' | 'cancelled';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
@@ -54,6 +54,11 @@ type LocalKeyState = {
 
 const localKeyStates = new Map<string, LocalKeyState>();
 const localModelCooldowns = new Map<string, number>();
+const localModelIncompatibilities = new Set<string>();
+const persistedIncompatibilityCache = new Map<string, {
+  fingerprints: Set<string>;
+  refreshedAt: number;
+}>();
 const syncedProviderSignatures = new Map<GeminiKeyProvider, string>();
 let supabaseAdmin: SupabaseAdmin | null | undefined;
 let lastCoordinatorWarning = '';
@@ -69,12 +74,21 @@ export const getGeminiKeyFailureCooldownSeconds = (
   reason: GeminiKeyFailureReason,
   status?: number,
 ): number => {
+  // The database function currently caps cooldowns at one day. A 404 is also
+  // remembered independently below, so the model/key pair stays excluded even
+  // after this defensive cooldown expires.
+  if (reason === 'incompatible' || status === 404) return 24 * 60 * 60;
   if (reason === 'quota' || status === 429) return 30 * 60;
   if (reason === 'auth' || status === 401 || status === 403) return 24 * 60 * 60;
   if (reason === 'blocked') return 5 * 60;
   if (reason === 'server' || (status !== undefined && status >= 500)) return 60;
   return 30;
 };
+
+export const isGeminiModelKeyPermanentlyIncompatibleFailure = (
+  reason: GeminiKeyFailureReason | 'cancelled' | undefined,
+  status?: number,
+): boolean => reason === 'incompatible' || status === 404;
 
 const warnCoordinator = (message: string, error?: unknown): void => {
   const detail = error instanceof Error ? error.message : error ? String(error) : '';
@@ -142,6 +156,58 @@ const localModelKey = (
   model: string,
   fingerprint: string,
 ): string => `${provider}:${model}:${fingerprint}`;
+
+const compatibilityCacheKey = (
+  provider: GeminiKeyProvider,
+  model: string,
+): string => `${provider}:${model}`;
+
+const rememberModelKeyIncompatibility = (
+  provider: GeminiKeyProvider,
+  model: string,
+  fingerprint: string,
+): void => {
+  localModelIncompatibilities.add(localModelKey(provider, model, fingerprint));
+  const cacheKey = compatibilityCacheKey(provider, model);
+  const cached = persistedIncompatibilityCache.get(cacheKey);
+  if (cached) cached.fingerprints.add(fingerprint);
+};
+
+const readPersistedIncompatibleFingerprints = async (
+  supabase: SupabaseAdmin,
+  provider: GeminiKeyProvider,
+  model: string,
+  fingerprints: string[],
+): Promise<Set<string>> => {
+  const cacheKey = compatibilityCacheKey(provider, model);
+  const cached = persistedIncompatibilityCache.get(cacheKey);
+  if (cached && Date.now() - cached.refreshedAt < 5 * 60 * 1_000) {
+    return new Set(cached.fingerprints);
+  }
+  const { data, error } = await supabase
+    .from('ai_gemini_key_model_state')
+    .select('key_fingerprint')
+    .eq('provider', provider)
+    .eq('model', model)
+    .eq('last_status', 404)
+    .in('key_fingerprint', fingerprints);
+  if (error) throw error;
+  const incompatible = new Set(
+    (data || [])
+      .map(row => String(row.key_fingerprint || '').trim())
+      .filter(Boolean),
+  );
+  fingerprints.forEach(fingerprint => {
+    if (localModelIncompatibilities.has(localModelKey(provider, model, fingerprint))) {
+      incompatible.add(fingerprint);
+    }
+  });
+  persistedIncompatibilityCache.set(cacheKey, {
+    fingerprints: incompatible,
+    refreshedAt: Date.now(),
+  });
+  return new Set(incompatible);
+};
 
 const emptyAvailability = (
   source: GeminiKeyAvailability['source'],
@@ -285,6 +351,9 @@ const claimLocalKey = (options: {
           Date.now() + (result.cooldownSeconds || 0) * 1_000,
         );
       }
+      if (isGeminiModelKeyPermanentlyIncompatibleFailure(result.reason, result.status)) {
+        rememberModelKeyIncompatibility(options.provider, options.model, selected.fingerprint);
+      }
       if (result.outcome === 'success') {
         localModelCooldowns.delete(
           localModelKey(options.provider, options.model, selected.fingerprint),
@@ -310,6 +379,26 @@ export const claimGeminiApiKeyDetailed = async (options: {
   const leaseOwner = (options.leaseOwner || `gemini-${randomUUID()}`).slice(0, 200);
   const leaseSeconds = Math.max(30, Math.min(options.leaseSeconds || 180, 600));
   const supabase = getSupabaseAdmin();
+
+  keys.forEach(key => {
+    if (localModelIncompatibilities.has(localModelKey(options.provider, options.model, key.fingerprint))) {
+      excludedFingerprints.add(key.fingerprint);
+    }
+  });
+
+  if (supabase) {
+    try {
+      const persistedIncompatible = await readPersistedIncompatibleFingerprints(
+        supabase,
+        options.provider,
+        options.model,
+        keys.map(key => key.fingerprint),
+      );
+      persistedIncompatible.forEach(fingerprint => excludedFingerprints.add(fingerprint));
+    } catch (error) {
+      warnCoordinator('Could not read persisted Gemini model/key compatibility; using process memory', error);
+    }
+  }
 
   if (supabase) {
     try {
@@ -364,6 +453,9 @@ export const claimGeminiApiKeyDetailed = async (options: {
           complete: async result => {
             if (completed) return;
             completed = true;
+            if (isGeminiModelKeyPermanentlyIncompatibleFailure(result.reason, result.status)) {
+              rememberModelKeyIncompatibility(options.provider, options.model, selected.fingerprint);
+            }
             try {
               const { error: reportError } = await supabase.rpc('report_gemini_api_key_result', {
                 p_provider: options.provider,

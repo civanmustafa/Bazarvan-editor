@@ -14,10 +14,16 @@ import {
 } from './contentWritingKnowledge';
 import { getUsableCompetitorText } from './competitorContent';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
-import { parseContentWritingTargetWordRange } from './contentWritingTargets';
+import {
+  countContentWritingTargetWords,
+  parseContentWritingTargetWordRange,
+} from './contentWritingTargets';
 
-export const CONTENT_WRITING_MIN_COMPETITOR_COUNT = 1;
+export const CONTENT_WRITING_MIN_COMPETITOR_COUNT = 3;
 export const CONTENT_WRITING_MAX_COMPETITOR_COUNT = MAX_ARTICLE_COMPETITORS;
+export const CONTENT_WRITING_MIN_COMPETITOR_WORDS = 250;
+export const CONTENT_WRITING_MIN_COMPETITOR_UNIQUE_TOKENS = 35;
+export const CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS = 2;
 
 export type ContentWritingCompetitorInput = {
   id?: string;
@@ -32,6 +38,8 @@ export type ContentWritingArticleInput = {
   title: string;
   language: 'ar' | 'en' | string;
   articleText: string;
+  articleContentJson?: unknown;
+  articleContentHtml?: string;
   keywords: Partial<Keywords>;
   goalContext: Partial<GoalContext>;
   competitors: readonly ContentWritingCompetitorInput[];
@@ -53,6 +61,7 @@ export type ContentWritingPromptBundle = {
   messages: ContentWritingPromptMessage[];
   variables: Record<string, string>;
   competitors: ContentWritingCompetitorInput[];
+  competitorQualityAudit: ContentWritingCompetitorQualityAudit;
   competitorChunks: ContentWritingSourceChunk[];
   readinessIssues: ContentWritingReadinessIssue[];
   templateIssues: Array<{
@@ -64,6 +73,35 @@ export type ContentWritingPromptBundle = {
   estimatedInputTokens: number;
   maxInputTokens: number;
   exceedsInputBudget: boolean;
+};
+
+export type ContentWritingCompetitorQualityReason =
+  | 'content_too_short'
+  | 'low_information_density'
+  | 'duplicate_content';
+
+export type ContentWritingCompetitorQualityItem = {
+  position: number;
+  title: string;
+  url: string;
+  hostname: string;
+  wordCount: number;
+  uniqueTokenCount: number;
+  accepted: boolean;
+  reasons: ContentWritingCompetitorQualityReason[];
+};
+
+export type ContentWritingCompetitorQualityAudit = {
+  version: number;
+  minimumCompetitors: number;
+  minimumWordsPerCompetitor: number;
+  minimumDistinctDomains: number;
+  inputCount: number;
+  acceptedCount: number;
+  rejectedCount: number;
+  distinctDomainCount: number;
+  replacementNeededCount: number;
+  items: ContentWritingCompetitorQualityItem[];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -83,6 +121,96 @@ const normalizeList = (value: unknown): string[] => (
 );
 
 const hasText = (value: unknown): boolean => typeof value === 'string' && Boolean(value.trim());
+
+const competitorHostname = (value: unknown): string => {
+  const url = toText(value).trim();
+  if (!url) return '';
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
+    return parsed.hostname.toLocaleLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+};
+
+const competitorContentTokens = (value: string): string[] => String(value || '')
+  .toLocaleLowerCase()
+  .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+  .split(/\s+/u)
+  .filter(token => token.length >= 3);
+
+const competitorContentFingerprint = (value: string): string => competitorContentTokens(value)
+  .slice(0, 2_000)
+  .join(' ');
+
+export const selectQualityContentWritingCompetitors = (
+  values: readonly ContentWritingCompetitorInput[],
+  maximum = CONTENT_WRITING_MAX_COMPETITOR_COUNT,
+): {
+  competitors: ContentWritingCompetitorInput[];
+  audit: ContentWritingCompetitorQualityAudit;
+} => {
+  const normalized = normalizeContentWritingCompetitors(values);
+  const seenFingerprints = new Set<string>();
+  const items = normalized.map((competitor, index): ContentWritingCompetitorQualityItem => {
+    const tokens = competitorContentTokens(competitor.content);
+    const wordCount = countContentWritingTargetWords(competitor.content);
+    const uniqueTokenCount = new Set(tokens).size;
+    const fingerprint = competitorContentFingerprint(competitor.content);
+    const reasons: ContentWritingCompetitorQualityReason[] = [];
+    if (wordCount < CONTENT_WRITING_MIN_COMPETITOR_WORDS) reasons.push('content_too_short');
+    if (uniqueTokenCount < CONTENT_WRITING_MIN_COMPETITOR_UNIQUE_TOKENS) {
+      reasons.push('low_information_density');
+    }
+    if (fingerprint && seenFingerprints.has(fingerprint)) reasons.push('duplicate_content');
+    if (fingerprint) seenFingerprints.add(fingerprint);
+    return {
+      position: Math.max(1, Math.round(Number(competitor.position) || index + 1)),
+      title: toText(competitor.title).trim(),
+      url: toText(competitor.url).trim(),
+      hostname: competitorHostname(competitor.url),
+      wordCount,
+      uniqueTokenCount,
+      accepted: reasons.length === 0,
+      reasons,
+    };
+  });
+  const eligible = normalized.filter((_competitor, index) => items[index]?.accepted === true);
+  const selected: ContentWritingCompetitorInput[] = [];
+  const selectedIndexes = new Set<number>();
+  const selectedHosts = new Set<string>();
+  eligible.forEach((competitor, index) => {
+    const hostname = competitorHostname(competitor.url);
+    if (!hostname || selectedHosts.has(hostname) || selected.length >= maximum) return;
+    selected.push(competitor);
+    selectedIndexes.add(index);
+    selectedHosts.add(hostname);
+  });
+  eligible.forEach((competitor, index) => {
+    if (selected.length >= maximum || selectedIndexes.has(index)) return;
+    selected.push(competitor);
+    selectedIndexes.add(index);
+  });
+  selected.sort((left, right) => (left.position || 0) - (right.position || 0));
+  const distinctDomainCount = new Set(
+    selected.map(competitor => competitorHostname(competitor.url)).filter(Boolean),
+  ).size;
+  return {
+    competitors: selected,
+    audit: {
+      version: 1,
+      minimumCompetitors: CONTENT_WRITING_MIN_COMPETITOR_COUNT,
+      minimumWordsPerCompetitor: CONTENT_WRITING_MIN_COMPETITOR_WORDS,
+      minimumDistinctDomains: CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS,
+      inputCount: normalized.length,
+      acceptedCount: selected.length,
+      rejectedCount: Math.max(0, normalized.length - selected.length),
+      distinctDomainCount,
+      replacementNeededCount: Math.max(0, CONTENT_WRITING_MIN_COMPETITOR_COUNT - selected.length),
+      items,
+    },
+  };
+};
 
 export const normalizeContentWritingCompetitor = (
   value: unknown,
@@ -163,12 +291,19 @@ const getGoalContextIssues = (goalContext: Partial<GoalContext>): ContentWriting
 
 export const validateContentWritingReadiness = (
   input: ContentWritingArticleInput,
-): { issues: ContentWritingReadinessIssue[]; competitors: ContentWritingCompetitorInput[] } => {
+): {
+  issues: ContentWritingReadinessIssue[];
+  competitors: ContentWritingCompetitorInput[];
+  competitorQualityAudit: ContentWritingCompetitorQualityAudit;
+} => {
   const issues: ContentWritingReadinessIssue[] = [];
   const secondaryKeywords = normalizeList(input.keywords.secondaries);
   const lsiKeywords = normalizeList(input.keywords.lsi);
-  const competitors = normalizeContentWritingCompetitors(input.competitors)
-    .slice(0, CONTENT_WRITING_MAX_COMPETITOR_COUNT);
+  const qualitySelection = selectQualityContentWritingCompetitors(
+    input.competitors,
+    CONTENT_WRITING_MAX_COMPETITOR_COUNT,
+  );
+  const competitors = qualitySelection.competitors;
 
   if (!hasText(input.title)) issues.push({ code: 'article_title', label: 'عنوان المقالة' });
   if (!hasText(input.keywords.primary)) issues.push({ code: 'primary_keyword', label: 'الكلمة المفتاحية الأساسية' });
@@ -179,11 +314,17 @@ export const validateContentWritingReadiness = (
   if (competitors.length < CONTENT_WRITING_MIN_COMPETITOR_COUNT) {
     issues.push({
       code: 'competitors',
-      label: `محتوى منافس واحد على الأقل (${competitors.length}/${CONTENT_WRITING_MIN_COMPETITOR_COUNT})`,
+      label: `ثلاثة نصوص منافسة مؤهلة على الأقل (${competitors.length}/${CONTENT_WRITING_MIN_COMPETITOR_COUNT})`,
+    });
+  }
+  if (qualitySelection.audit.distinctDomainCount < CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS) {
+    issues.push({
+      code: 'competitors.source_diversity',
+      label: `مصدران مستقلان على الأقل (${qualitySelection.audit.distinctDomainCount}/${CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS})`,
     });
   }
 
-  return { issues, competitors };
+  return { issues, competitors, competitorQualityAudit: qualitySelection.audit };
 };
 
 export const estimateContentWritingInputTokens = (value: string): number => {
@@ -260,7 +401,7 @@ export const buildContentWritingPromptBundle = (
     ...DEFAULT_CONTENT_WRITING_TEMPLATES,
     ...(options.templates || {}),
   };
-  const { issues: readinessIssues, competitors } = validateContentWritingReadiness(input);
+  const { issues: readinessIssues, competitors, competitorQualityAudit } = validateContentWritingReadiness(input);
   const competitorChunks = createCompetitorChunks(competitors);
   const variables: Record<string, string> = {
     article_id: toText(input.articleId).trim() || 'غير متوفر',
@@ -315,6 +456,7 @@ export const buildContentWritingPromptBundle = (
     messages,
     variables,
     competitors,
+    competitorQualityAudit,
     competitorChunks,
     readinessIssues,
     templateIssues,

@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
+import {
+  backgroundSaveNeedsGeneratedFieldGuard,
+  mergeServerGeneratedFieldsForBackgroundSave,
+} from '../utils/articleBackgroundSaveMerge';
 import { deliverApiResult, isRecord, readRequestBody, type ApiResult } from './http.ts';
 import {
   ApiSecurityError,
@@ -102,12 +106,22 @@ const sanitizeSnapshot = (value: unknown): ArticleStorageSnapshot => {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9:_-]{16,160}$/;
+const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const normalizeArticleId = (value: unknown): string | null => {
   if (value === null || value === undefined || value === '') return null;
   const articleId = typeof value === 'string' ? value.trim() : '';
   if (!UUID_PATTERN.test(articleId)) throw new ArticleSaveError('articleId must be a valid UUID.', 400);
   return articleId;
+};
+
+const normalizeExpectedLastSavedAt = (value: unknown): string | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const timestamp = typeof value === 'string' ? value.trim() : '';
+  if (!RFC3339_TIMESTAMP_PATTERN.test(timestamp) || !Number.isFinite(Date.parse(timestamp))) {
+    throw new ArticleSaveError('expectedLastSavedAt must be a valid RFC 3339 timestamp.', 400);
+  }
+  return timestamp;
 };
 
 const resolveIdempotencyKey = (
@@ -212,27 +226,52 @@ const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
   }
   if (!isRecord(body)) throw new ArticleSaveError('JSON body must be an object.', 400);
 
-  const snapshot = sanitizeSnapshot(body.snapshot);
+  let snapshot = sanitizeSnapshot(body.snapshot);
   const articleId = normalizeArticleId(body.articleId);
   const saveReason = normalizeSaveReason(body.saveReason);
   const clearContent = body.clearContent === true;
+  const expectedLastSavedAt = normalizeExpectedLastSavedAt(body.expectedLastSavedAt);
   const idempotencyKey = resolveIdempotencyKey(body.idempotencyKey, {
     userId: principal.userId,
     articleId,
     saveReason,
     clearContent,
+    expectedLastSavedAt,
     snapshot: body.snapshot,
   });
   const supabase = getSupabaseUserClient(req);
+  if (articleId && backgroundSaveNeedsGeneratedFieldGuard(snapshot, saveReason)) {
+    const { data: persistedArticle, error: persistedArticleError } = await supabase
+      .from('articles')
+      .select('keywords,goal_context')
+      .eq('id', articleId)
+      .maybeSingle();
+    if (persistedArticleError) throwRpcError(persistedArticleError as Record<string, any>);
+    if (persistedArticle) {
+      snapshot = mergeServerGeneratedFieldsForBackgroundSave({
+        snapshot,
+        reason: saveReason,
+        persistedKeywords: persistedArticle.keywords,
+        persistedGoalContext: persistedArticle.goal_context,
+      });
+    }
+  }
   const { data, error } = await supabase.rpc('save_article_snapshot_with_content_policy', {
     p_article_id: articleId,
     p_idempotency_key: idempotencyKey,
     p_snapshot: snapshot,
     p_save_reason: saveReason,
     p_allow_empty_body: clearContent,
+    p_expected_last_saved_at: expectedLastSavedAt,
   });
 
   if (error) throwRpcError(error as Record<string, any>);
+  if (isRecord(data) && data.staleBackgroundSave === true) {
+    throw new ArticleSaveError(
+      'A newer reviewed article revision exists. The stale background save was skipped.',
+      409,
+    );
+  }
   if (!isRecord(data) || !isRecord(data.article)) {
     throw new ArticleSaveError('Article save transaction returned an invalid result.', 503);
   }

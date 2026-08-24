@@ -50,9 +50,10 @@ test('smart brief prompt preserves manual choices as read-only context', () => {
   assert.match(prompt, /الموجز السابق/);
 });
 
-test('full workflow is durable, ordered, cancellable, and inserts regardless of quality gate', async () => {
+test('full workflow is durable, ordered, cancellable, and applies only a reviewed quality draft', async () => {
   const [
     migration,
+    safetyMigration,
     executor,
     briefExecutor,
     worker,
@@ -64,6 +65,7 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
     supabaseArticles,
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260728030000_full_article_pipeline.sql'),
+    readWorkspaceFile('supabase/migrations/20260824010000_full_article_pipeline_safety.sql'),
     readWorkspaceFile('server/fullArticlePipelineExecutor.ts'),
     readWorkspaceFile('server/contentBriefGenerationExecutor.ts'),
     readWorkspaceFile('server/externalAnalysisWorker.ts'),
@@ -78,11 +80,11 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
   for (const jobType of ['content_brief_generation', 'full_article_pipeline']) {
     assert.match(migration, new RegExp(`'${jobType}'`));
   }
-  assert.match(migration, /apply_full_article_pipeline_content/);
-  assert.match(migration, /article_versions/);
-  assert.match(migration, /insertedRegardlessOfQualityGate/);
-  assert.match(migration, /revoke all on function public\.apply_full_article_pipeline_content/);
-  assert.match(migration, /grant execute on function public\.apply_full_article_pipeline_content[\s\S]*to service_role/);
+  assert.match(safetyMigration, /apply_full_article_pipeline_content/);
+  assert.match(safetyMigration, /article_versions/);
+  assert.match(safetyMigration, /qualityGatePolicy', 'review_required'/);
+  assert.match(safetyMigration, /drop function if exists public\.apply_full_article_pipeline_content\(uuid, uuid, text, text\)/);
+  assert.match(safetyMigration, /grant execute on function public\.apply_full_article_pipeline_content[\s\S]*to service_role/);
 
   const orderedMarkers = [
     "'semantic_keywords_lsi', 1",
@@ -90,8 +92,8 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
     "'competitor_discovery', 3",
     "'competitor_extraction', 4",
     "'content_writing', 5",
-    "'article_application', 6",
-    "'comprehensive_competitor_analysis', 7",
+    "'comprehensive_competitor_analysis', 6",
+    "'article_application', 7",
   ];
   const executeBlock = executor.slice(executor.indexOf('const executeFullArticlePipeline'));
   let previousIndex = -1;
@@ -100,15 +102,15 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
     assert.ok(index > previousIndex, `Missing or out-of-order pipeline marker: ${marker}`);
     previousIndex = index;
   }
-  assert.match(executor, /qualityGatePolicy: 'insert_regardless'/);
+  assert.match(executor, /qualityGatePolicy: 'review_required'/);
   assert.match(executor, /apply_full_article_pipeline_content/);
-  assert.match(executor, /recordContentWritingApplication/);
-  assert.match(executor, /إدراج تلقائي صريح من مسار الزر الشامل/);
+  assert.match(executor, /reevaluateContentWritingQualityAfterExternalReview/);
+  assert.match(executor, /full_pipeline_quality_review_required/);
   assert.match(executor, /COMPREHENSIVE_COMMAND_ID/);
   assert.match(executor, /cancelContentWritingSession/);
   assert.match(executor, /request_external_analysis_job_cancel/);
   assert.match(executor, /contentBriefSavedAt/);
-  assert.match(executor, /generatedBrief,[\s\S]*last_saved_at/);
+  assert.doesNotMatch(executor, /generatedBrief,[\s\S]*last_saved_at/);
 
   assert.match(briefExecutor, /readPromptRegistrySettings/);
   assert.match(briefExecutor, /generatedBrief: briefText/);
@@ -123,11 +125,11 @@ test('full workflow is durable, ordered, cancellable, and inserts regardless of 
   assert.match(api, /action === 'full_pipeline'/);
   assert.match(api, /action === 'list'/);
   assert.match(api, /enqueue_full_article_pipeline/);
-  assert.match(api, /request_content_writing_session_cancel/);
+  assert.match(api, /request_full_article_pipeline_cancel/);
   assert.match(component, /بدء الإنشاء الشامل/);
-  assert.match(component, /يُدرج المقالة حتى عند عدم اجتياز بوابة الجودة/);
+  assert.match(component, /تتوقف مخالفات الجودة المانعة للمراجعة/);
   assert.match(component, /استئناف الآن/);
-  assert.match(component, /listExternalAnalysisJobsViaApi/);
+  assert.match(component, /loadLatestFullArticlePipeline/);
   assert.match(component, /onReloadGoalContext/);
   assert.match(component, /contentBriefSavedAt/);
   assert.match(contentWritingPanel, /onReloadGoalContext=\{reloadActiveGoalContextFromRemote\}/);

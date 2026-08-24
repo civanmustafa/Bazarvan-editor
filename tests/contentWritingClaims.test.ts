@@ -152,9 +152,32 @@ test('claim selection and usage summaries accept only persisted claim IDs', asyn
     }),
     {
       usedClaimIds: ['CL001'],
-      allowedClaimIds: ['CL001'],
-      qualifiedClaimIds: [],
+      allowedClaimIds: [],
+      qualifiedClaimIds: ['CL001'],
       blockedClaimIds: [],
     },
   );
+});
+
+test('high-impact claims are blocked without a current validated primary source', async () => {
+  const { normalizeContentWritingSourceClaims } = await importClaims();
+  const normalized = normalizeContentWritingSourceClaims({
+    value: {
+      sourceAssessments: [{ competitorNumber: 1, category: 'official', freshness: 'current' }],
+      claims: [{
+        id: 'CL-HIGH',
+        statement: 'A high-impact financial claim.',
+        claimType: 'financial',
+        riskLevel: 'high',
+        knowledgeItemIds: ['K001'],
+        supportingSourceChunkIds: ['C1-S001'],
+      }],
+    },
+    items,
+    chunks: [{ ...chunks[0], url: 'not-a-valid-source' }],
+  });
+
+  assert.equal(normalized.sourceRegistry.sources[0].validUrl, false);
+  assert.deepEqual(normalized.sourceRegistry.sources[0].validationIssues, ['malformed_source_url']);
+  assert.deepEqual(normalized.claimLedger.blockedClaimIds, ['CL-HIGH']);
 });

@@ -3,7 +3,7 @@ import type {
   ContentWritingSourceChunk,
 } from './contentWritingKnowledge';
 
-export const CONTENT_WRITING_SOURCE_CLAIMS_VERSION = 1;
+export const CONTENT_WRITING_SOURCE_CLAIMS_VERSION = 2;
 
 export type ContentWritingSourceCategory =
   | 'official'
@@ -26,6 +26,9 @@ export type ContentWritingSourceRecord = {
   competitorNumber: number;
   title: string;
   url: string;
+  hostname: string;
+  validUrl: boolean;
+  validationIssues: string[];
   chunkIds: string[];
   category: ContentWritingSourceCategory;
   freshness: ContentWritingSourceFreshness;
@@ -141,7 +144,9 @@ const normalizeSourceFreshness = (value: unknown): ContentWritingSourceFreshness
 const deriveSourceUsePolicy = (
   category: ContentWritingSourceCategory,
   freshness: ContentWritingSourceFreshness,
+  validUrl: boolean,
 ): ContentWritingSourceUsePolicy => {
+  if (!validUrl) return 'reference_only';
   if (
     ['official', 'government', 'academic'].includes(category)
     && freshness !== 'dated'
@@ -154,6 +159,27 @@ const deriveSourceUsePolicy = (
     return 'contextual_support';
   }
   return 'reference_only';
+};
+
+const inspectSourceUrl = (value: unknown): {
+  url: string;
+  hostname: string;
+  valid: boolean;
+  issues: string[];
+} => {
+  const url = toText(value, 4_000);
+  if (!url) return { url: '', hostname: '', valid: false, issues: ['missing_source_url'] };
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLocaleLowerCase().replace(/^www\./, '');
+    const issues: string[] = [];
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') issues.push('unsupported_source_protocol');
+    if (!hostname || hostname === 'localhost' || !hostname.includes('.')) issues.push('invalid_source_hostname');
+    if (parsed.username || parsed.password) issues.push('source_url_contains_credentials');
+    return { url, hostname, valid: issues.length === 0, issues };
+  } catch {
+    return { url, hostname: '', valid: false, issues: ['malformed_source_url'] };
+  }
 };
 
 const normalizeSourceAssessments = (
@@ -203,15 +229,19 @@ const buildSourceRegistry = (
     );
     const category = assessment.category;
     const freshness = assessment.freshness;
+    const inspectedUrl = inspectSourceUrl(sourceChunks.find(chunk => chunk.url)?.url || '');
     return {
       id: `SRC${assessment.competitorNumber}`,
       competitorNumber: assessment.competitorNumber,
       title: sourceChunks.find(chunk => chunk.title)?.title || '',
-      url: sourceChunks.find(chunk => chunk.url)?.url || '',
+      url: inspectedUrl.url,
+      hostname: inspectedUrl.hostname,
+      validUrl: inspectedUrl.valid,
+      validationIssues: inspectedUrl.issues,
       chunkIds: sourceChunks.map(chunk => chunk.id),
       category,
       freshness,
-      usePolicy: deriveSourceUsePolicy(category, freshness),
+      usePolicy: deriveSourceUsePolicy(category, freshness, inspectedUrl.valid),
       assessmentNotes: assessment.assessmentNotes,
       supportedClaimIds: claims
         .filter(claim => claim.competitorNumbers.includes(assessment.competitorNumber))
@@ -275,30 +305,35 @@ const deriveClaimPolicy = (options: {
   ContentWritingClaimLedgerItem,
   'verificationStatus' | 'usagePolicy'
 > => {
-  if (options.conflicting) {
-    return { verificationStatus: 'conflicting', usagePolicy: 'qualify' };
-  }
   const sensitive = ['medical', 'legal', 'financial'].includes(options.claimType);
   const freshnessSensitive = ['statistic', 'time_sensitive'].includes(options.claimType);
-  const hasPrimarySource = options.supportingSources.some(
-    source => source.usePolicy === 'primary_support',
+  if (options.conflicting) {
+    return {
+      verificationStatus: 'conflicting',
+      usagePolicy: sensitive || options.riskLevel === 'high' ? 'blocked' : 'qualify',
+    };
+  }
+  const hasCurrentPrimarySource = options.supportingSources.some(
+    source => source.usePolicy === 'primary_support' && source.freshness === 'current',
   );
-  if (freshnessSensitive && !hasPrimarySource) {
+  const independentSupportingHosts = new Set(
+    options.supportingSources
+      .filter(source => source.validUrl && source.usePolicy !== 'reference_only')
+      .map(source => source.hostname),
+  );
+  if ((freshnessSensitive || sensitive || options.riskLevel === 'high') && !hasCurrentPrimarySource) {
     return {
       verificationStatus: 'requires_external_verification',
       usagePolicy: 'blocked',
     };
   }
-  if (
-    options.riskLevel === 'high'
-    || sensitive
-  ) {
+  if (options.riskLevel === 'high' || sensitive || freshnessSensitive) {
     return {
       verificationStatus: 'requires_external_verification',
       usagePolicy: 'qualify',
     };
   }
-  if (options.competitorCount > 1) {
+  if (options.competitorCount > 1 && independentSupportingHosts.size > 0) {
     return {
       verificationStatus: 'corroborated_by_competitors',
       usagePolicy: options.riskLevel === 'medium' ? 'qualify' : 'allowed',

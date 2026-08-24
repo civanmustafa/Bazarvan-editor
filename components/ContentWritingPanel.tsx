@@ -609,6 +609,19 @@ const ContentWritingPanel: React.FC = () => {
     }
   }, [isArabic, mergeSession]);
 
+  const handleFullPipelineReviewRequested = useCallback((sessionId: string) => {
+    if (sessionId) {
+      setSelectedSessionId(sessionId);
+      void loadDetail(sessionId, { includeStepOutput: true });
+    }
+    window.setTimeout(() => {
+      document.getElementById('content-writing-session-review')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 0);
+  }, [loadDetail]);
+
   const refreshSessions = useCallback(async (options: { silent?: boolean; selectNewest?: boolean } = {}) => {
     const targetArticleId = articleId;
     if (!targetArticleId) return;
@@ -1201,6 +1214,30 @@ const ContentWritingPanel: React.FC = () => {
   const displayedWorkflowStepLabel = currentWorkflowStep
     ? getStepLabel(currentWorkflowStep, isArabic)
     : workflowStepLabel;
+  const fullWorkflowStartDisabled = Boolean(
+    !selectedProviderConfig?.available
+    || hasActiveSession
+    || hasActiveAutomaticWriting
+    || actionState !== 'idle'
+    || saveStatus === 'saving'
+    || isApplying,
+  );
+  const fullWorkflowResumeDisabled = Boolean(
+    hasActiveSession
+    || hasActiveAutomaticWriting
+    || actionState !== 'idle'
+    || saveStatus === 'saving'
+    || isApplying,
+  );
+  const fullWorkflowStartDisabledReason = !selectedProviderConfig?.available
+    ? (isArabic ? 'مزود الكتابة المختار غير مهيأ للإنشاء الشامل.' : 'The selected writing provider is not configured for the full workflow.')
+    : hasActiveSession
+      ? (isArabic ? 'توجد جلسة كتابة يدوية نشطة لهذه المقالة.' : 'A manual writing session is active for this article.')
+      : hasActiveAutomaticWriting
+        ? (isArabic ? 'توجد جلسة كتابة تلقائية نشطة لهذه المقالة.' : 'An automatic writing session is active for this article.')
+        : actionState !== 'idle' || saveStatus === 'saving' || isApplying
+          ? (isArabic ? 'انتظر اكتمال العملية الحالية قبل بدء الإنشاء الشامل.' : 'Wait for the current editor operation before starting the full workflow.')
+          : '';
 
   if (!articleId) {
     return (
@@ -1318,18 +1355,14 @@ const ContentWritingPanel: React.FC = () => {
             provider={provider}
             model={selectedModel}
             isArabic={isArabic}
-            disabled={
-              !selectedProviderConfig?.available
-              || hasActiveSession
-              || hasActiveAutomaticWriting
-              || actionState !== 'idle'
-              || saveStatus === 'saving'
-              || isApplying
-            }
+            startDisabled={fullWorkflowStartDisabled}
+            resumeDisabled={fullWorkflowResumeDisabled}
+            startDisabledReason={fullWorkflowStartDisabledReason}
             onBeforeStart={() => handleSaveDraft({ reason: 'manual', force: true })}
             onReloadArticle={reloadActiveArticleFromRemote}
             onReloadGoalContext={reloadActiveGoalContextFromRemote}
             onActivityChange={setHasActiveFullPipeline}
+            onReviewRequested={handleFullPipelineReviewRequested}
           />
 
           <button
@@ -1394,7 +1427,7 @@ const ContentWritingPanel: React.FC = () => {
         </section>
 
         {selectedSession && (
-          <section className="border-b border-gray-200 p-3 dark:border-[#3C3C3C]">
+          <section id="content-writing-session-review" className="scroll-mt-2 border-b border-gray-200 p-3 dark:border-[#3C3C3C]">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">

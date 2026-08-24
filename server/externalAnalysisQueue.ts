@@ -47,6 +47,11 @@ export interface ExternalAnalysisJob {
   locked_by: string | null;
   locked_at: string | null;
   lease_expires_at: string | null;
+  lease_generation?: number;
+  max_attempts?: number;
+  pipeline_parent_job_id?: string | null;
+  dead_lettered_at?: string | null;
+  dead_letter_reason?: string | null;
   cancel_requested_at: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -186,6 +191,44 @@ export const finalizeExternalAnalysisJobCancel = async (options: {
   });
   const job = firstJob(data);
   if (!job) throw new Error('Cancellation RPC returned no external analysis job.');
+  return job;
+};
+
+export const blockExternalAnalysisJob = async (options: {
+  jobId: string;
+  workerId: string;
+  errorCode: string;
+  errorMessage: string;
+  progress?: ExternalAnalysisJson;
+}): Promise<ExternalAnalysisJob> => {
+  const data = await callQueueRpc<unknown>('block_external_analysis_job', {
+    p_job_id: options.jobId,
+    p_worker_id: options.workerId,
+    p_error_code: options.errorCode,
+    p_error_message: options.errorMessage,
+    p_progress: options.progress ?? {},
+  });
+  const job = firstJob(data);
+  if (!job) throw new Error('Blocked-job RPC returned no external analysis job.');
+  return job;
+};
+
+export const deadLetterExternalAnalysisJob = async (options: {
+  jobId: string;
+  workerId: string;
+  errorCode: string;
+  errorMessage: string;
+  progress?: ExternalAnalysisJson;
+}): Promise<ExternalAnalysisJob> => {
+  const data = await callQueueRpc<unknown>('dead_letter_external_analysis_job', {
+    p_job_id: options.jobId,
+    p_worker_id: options.workerId,
+    p_error_code: options.errorCode,
+    p_error_message: options.errorMessage,
+    p_progress: options.progress ?? {},
+  });
+  const job = firstJob(data);
+  if (!job) throw new Error('Dead-letter RPC returned no external analysis job.');
   return job;
 };
 

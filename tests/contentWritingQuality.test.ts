@@ -355,7 +355,7 @@ test('quality analysis treats consecutive visible Markdown lines as separate int
   assert.equal(secondParagraphCriterion?.status, 'pass');
 });
 
-test('minimum score is the authoritative quality gate for new and persisted reports', async () => {
+test('a blocking failure vetoes a high score for new and persisted reports', async () => {
   const { normalizeContentWritingQualityReport } = await importQuality();
   const normalized = normalizeContentWritingQualityReport({
     policyVersion: 1,
@@ -382,7 +382,227 @@ test('minimum score is the authoritative quality gate for new and persisted repo
     generatedAt: new Date(0).toISOString(),
   });
 
-  assert.equal(normalized?.passed, true);
+  assert.equal(normalized?.passed, false);
+  assert.equal(normalized?.score, 0);
+  assert.equal(normalized?.blockingFailureCount, 1);
+});
+
+test('external review patches require unique literal targets and anchors', async () => {
+  const { applyExternalReviewPatchesToContentWritingMarkdown } = await importQuality();
+  const result = applyExternalReviewPatchesToContentWritingMarkdown({
+    markdown: [
+      '# العنوان',
+      '',
+      'فقرة فريدة قابلة للاستبدال.',
+      '',
+      '## قسم مكرر',
+      '',
+      'نص.',
+      '',
+      '## قسم مكرر',
+      '',
+      'نص.',
+    ].join('\n'),
+    patches: [
+      {
+        marker: 'replace_unique',
+        operation: 'replace_block',
+        targetText: 'فقرة فريدة قابلة للاستبدال.',
+        contentMarkdown: 'فقرة بديلة موثقة وآمنة.',
+      },
+      {
+        marker: 'insert_ambiguous',
+        operation: 'insert_after_heading',
+        anchorText: '## قسم مكرر',
+        contentMarkdown: 'إضافة غير آمنة.',
+      },
+      {
+        marker: 'append_without_anchor',
+        operation: 'append_to_article',
+        contentMarkdown: 'إضافة بلا مرساة.',
+      },
+    ],
+  });
+
+  assert.deepEqual(result.applied.map((item: any) => item.marker), ['replace_unique']);
+  assert.deepEqual(result.rejected.map((item: any) => item.reason), [
+    'anchor_not_unique',
+    'missing_anchor_text',
+  ]);
+  assert.match(result.markdown, /فقرة بديلة موثقة وآمنة/);
+  assert.doesNotMatch(result.markdown, /إضافة غير آمنة|إضافة بلا مرساة/);
+});
+
+test('external review patch application is atomic when merge-delete preflight fails', async () => {
+  const { applyExternalReviewPatchesToContentWritingMarkdown } = await importQuality();
+  const markdown = 'فقرة الهدف.\n\nفقرة الدمج.\n\nفقرة الدمج.';
+  const result = applyExternalReviewPatchesToContentWritingMarkdown({
+    markdown,
+    patches: [{
+      operation: 'replace_block',
+      targetText: 'فقرة الهدف.',
+      contentMarkdown: 'بديل يجب ألا يطبق جزئيًا.',
+      mergeDeleteTargetText: 'فقرة الدمج.',
+    }],
+  });
+
+  assert.equal(result.changed, false);
+  assert.equal(result.markdown, markdown);
+  assert.equal(result.rejected[0]?.reason, 'merge_target_not_unique');
+});
+
+test('quality is re-evaluated from the safely patched Markdown', async () => {
+  const { reevaluateContentWritingQualityAfterExternalReview } = await importQuality();
+  const result = reevaluateContentWritingQualityAfterExternalReview({
+    ...articleInput,
+    markdown: '# عنوان\n\nنص قصير.',
+    patches: [{
+      operation: 'append_to_article',
+      anchorText: '# عنوان',
+      contentMarkdown: '## قسم إضافي\n\n' + Array.from({ length: 120 }, (_, index) => `كلمة${index}`).join(' '),
+    }],
+  });
+
+  assert.equal(result.patchApplication.applied.length, 1);
+  assert.ok(result.evaluation.report.wordCount > 100);
+});
+
+test('external review reuses the frozen session quality configuration', async () => {
+  const { reevaluateContentWritingQualityAfterExternalReview } = await importQuality();
+  const markdown = Array.from({ length: 150 }, () => 'كلمة').join(' ');
+  const result = reevaluateContentWritingQualityAfterExternalReview({
+    ...articleInput,
+    markdown,
+    patches: [],
+    configuration: {
+      minimumScore: 55,
+      policy: {
+        targetWords: { min: 120, max: 180 },
+        outlineSections: { min: 1, max: 3 },
+      },
+    },
+  });
+  const targetWords = result.evaluation.report.criteria.find(
+    (criterion: any) => criterion.id === 'quality.targetWordRange',
+  );
+
+  assert.equal(result.evaluation.report.minimumScore, 55);
+  assert.equal(targetWords?.required, '120-180');
+  assert.equal(targetWords?.status, 'pass');
+});
+
+test('each exact value must match its own used, current-primary claim', async () => {
+  const {
+    auditContentWritingSourceAccuracy,
+    reevaluateContentWritingQualityAfterExternalReview,
+  } = await importQuality();
+  const knowledge = {
+    sourceRegistry: {
+      primarySourceIds: ['SRC1'],
+      sources: [{ id: 'SRC1', freshness: 'current' }],
+    },
+    claimLedger: {
+      claims: [
+        {
+          id: 'CL-RATE',
+          statement: 'بلغ المعدل الموثق 42%.',
+          claimType: 'statistic',
+          usagePolicy: 'allowed',
+          supportingSourceIds: ['SRC1'],
+        },
+        {
+          id: 'CL-PRICE',
+          statement: 'السعر الرسمي هو 750 USD.',
+          claimType: 'financial',
+          usagePolicy: 'allowed',
+          supportingSourceIds: ['SRC1'],
+        },
+      ],
+    },
+  };
+  const sourceAccuracy = {
+    knowledge,
+    usedClaimIds: ['CL-RATE', 'CL-PRICE'],
+  };
+  const audit = auditContentWritingSourceAccuracy({
+    markdown: 'القيمة الموثقة ٤٢٪، لكن الإضافة تزعم 73% وسعرًا قدره 900 USD في 2025. أفضل 5 أجهزة تشمل GPX 5000.',
+    sourceAccuracy,
+  });
+
+  assert.deepEqual(audit.supportedNumericValues.sort(), ['percent:42', 'price:750:USD']);
+  assert.deepEqual(audit.unsupportedNumericValues.sort(), ['percent:73', 'price:900:USD', 'year:2025']);
+  assert.deepEqual(audit.unsupportedPriceValues, ['price:900:USD']);
+  assert.ok(!audit.numericValues.some((value: string) => /(?:^|:)5(?:$|:)|5000/.test(value)));
+
+  const categoryMismatch = auditContentWritingSourceAccuracy({
+    markdown: 'النتيجة غير الموثقة 20%.',
+    sourceAccuracy: {
+      knowledge: {
+        ...knowledge,
+        claimLedger: {
+          claims: [{
+            id: 'CL-DURATION',
+            statement: 'تستمر الخدمة 20 سنة.',
+            claimType: 'statistic',
+            usagePolicy: 'allowed',
+            supportingSourceIds: ['SRC1'],
+          }],
+        },
+      },
+      usedClaimIds: ['CL-DURATION'],
+    },
+  });
+  assert.deepEqual(categoryMismatch.supportedNumericValues, ['duration:20:year']);
+  assert.deepEqual(categoryMismatch.unsupportedNumericValues, ['percent:20']);
+
+  const reviewed = reevaluateContentWritingQualityAfterExternalReview({
+    ...articleInput,
+    markdown: '# عنوان\n\nبلغ المعدل الموثق 42%.',
+    patches: [{
+      marker: 'unsupported-exact-values',
+      operation: 'insert_after_heading',
+      anchorText: '# عنوان',
+      contentMarkdown: 'أضافت المراجعة نسبة 73% وسعرًا قدره 900 USD.',
+    }],
+    sourceAccuracy: {
+      ...sourceAccuracy,
+      baselineMarkdown: '# عنوان\n\nبلغ المعدل الموثق 42%.',
+    },
+  });
+  const numericCriterion = reviewed.evaluation.report.criteria.find(
+    (criterion: any) => criterion.id === 'source.numericClaims',
+  );
+  const priceCriterion = reviewed.evaluation.report.criteria.find(
+    (criterion: any) => criterion.id === 'source.exactPrices',
+  );
+
+  assert.equal(reviewed.patchApplication.applied.length, 1);
+  assert.equal(numericCriterion?.status, 'fail');
+  assert.equal(numericCriterion?.violationCount, 2);
+  assert.equal(priceCriterion?.status, 'fail');
+  assert.equal(priceCriterion?.violationCount, 1);
+  assert.equal(reviewed.evaluation.report.passed, false);
+});
+
+test('an older review session blocks only numeric values newly introduced by patches', async () => {
+  const { reevaluateContentWritingQualityAfterExternalReview } = await importQuality();
+  const baselineMarkdown = '# عنوان\n\nالقيمة القديمة 42%.';
+  const reviewed = reevaluateContentWritingQualityAfterExternalReview({
+    ...articleInput,
+    markdown: baselineMarkdown,
+    patches: [{
+      operation: 'insert_after_heading',
+      anchorText: '# عنوان',
+      contentMarkdown: 'قيمة جديدة غير موثقة 73%.',
+    }],
+    sourceAccuracy: { baselineMarkdown },
+  });
+  const criterion = reviewed.evaluation.report.criteria.find(
+    (item: any) => item.id === 'source.numericClaims',
+  );
+
+  assert.equal(criterion?.status, 'fail');
+  assert.equal(criterion?.current, '73%');
 });
 
 test('repair planning prompt classifies failures and reads the full draft without rewriting it', async () => {

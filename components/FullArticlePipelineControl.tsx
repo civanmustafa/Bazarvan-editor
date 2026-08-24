@@ -6,44 +6,46 @@ import {
   Circle,
   CircleStop,
   Clock3,
+  Eye,
   Loader2,
   Play,
   RefreshCw,
   RotateCcw,
+  ShieldAlert,
   XCircle,
 } from 'lucide-react';
 import {
   cancelExternalAnalysisJob,
   enqueueFullArticlePipeline,
   EXTERNAL_ANALYSIS_ACTIVE_STATUSES,
-  listExternalAnalysisJobsViaApi,
+  loadLatestFullArticlePipeline,
   retryExternalAnalysisJob,
   type ExternalAnalysisJobRow,
 } from '../utils/externalAnalysis';
 import type { ContentWritingProvider } from '../utils/contentWritingSessions';
+import {
+  formatPipelineDuration,
+  FULL_ARTICLE_PIPELINE_STAGES,
+  getFullArticlePipelineProgressView,
+} from '../utils/fullArticlePipelineProgress';
 
 type Props = {
   articleId: string;
   articleTitle: string;
   provider: ContentWritingProvider;
   model: string;
+  /** @deprecated Prefer the start/resume-specific blockers below. */
   disabled?: boolean;
+  startDisabled?: boolean;
+  resumeDisabled?: boolean;
+  startDisabledReason?: string;
   isArabic: boolean;
   onBeforeStart: () => Promise<boolean>;
   onReloadArticle: (articleId: string) => Promise<boolean>;
   onReloadGoalContext: (articleId: string) => Promise<boolean>;
   onActivityChange?: (active: boolean) => void;
+  onReviewRequested?: (contentWritingSessionId: string) => void;
 };
-
-const STAGES = [
-  ['الصيغ البديلة وكلمات LSI', 'Alternative forms and LSI terms'],
-  ['موجز المقالة الذكي', 'Smart article brief'],
-  ['البحث والاختيار التلقائي للمنافسين', 'Competitor discovery and automatic selection'],
-  ['سحب محتوى المنافسين', 'Competitor content extraction'],
-  ['كتابة المقالة', 'Article writing'],
-  ['إدراج المقالة تلقائيًا', 'Automatic article insertion'],
-  ['تحليل المنافسين الشامل', 'Comprehensive competitor analysis'],
-] as const;
 
 const isActive = (job: ExternalAnalysisJobRow | null): boolean => (
   Boolean(job && EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status))
@@ -89,11 +91,15 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   provider,
   model,
   disabled = false,
+  startDisabled = false,
+  resumeDisabled = false,
+  startDisabledReason,
   isArabic,
   onBeforeStart,
   onReloadArticle,
   onReloadGoalContext,
   onActivityChange,
+  onReviewRequested,
 }) => {
   const [competitorCount, setCompetitorCount] = useState(5);
   const [job, setJob] = useState<ExternalAnalysisJobRow | null>(null);
@@ -103,20 +109,19 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   const [expanded, setExpanded] = useState(true);
   const reloadedJobsRef = useRef(new Set<string>());
   const syncedBriefJobsRef = useRef(new Set<string>());
+  const refreshInFlightRef = useRef(false);
+  const fullWorkflowStartDisabled = disabled || startDisabled;
+  const fullWorkflowResumeDisabled = disabled || resumeDisabled;
 
   useEffect(() => {
     onActivityChange?.(isActive(job) || busy === 'start' || busy === 'retry');
   }, [busy, job, onActivityChange]);
 
   const refresh = useCallback(async () => {
-    if (!articleId) return;
+    if (!articleId || refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
     try {
-      const rows = await listExternalAnalysisJobsViaApi(articleId, 50);
-      const pipeline = rows
-        .filter(row => row.job_type === 'full_article_pipeline')
-        .sort((left, right) => (
-          new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
-        ))[0] || null;
+      const pipeline = await loadLatestFullArticlePipeline(articleId);
       setJob(pipeline);
       setLoadError('');
       const briefJobId = String(pipeline?.progress?.briefJobId || '').trim();
@@ -148,6 +153,8 @@ const FullArticlePipelineControl: React.FC<Props> = ({
         refreshError,
         isArabic ? 'تعذر تحميل حالة الإنشاء الشامل.' : 'Could not load the full workflow status.',
       ));
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, [articleId, isArabic, onReloadArticle, onReloadGoalContext]);
 
@@ -160,23 +167,42 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   useEffect(() => {
     if (!job || !isActive(job)) return;
     const timer = window.setInterval(() => {
-      void refresh();
-    }, 4_000);
-    return () => window.clearInterval(timer);
+      if (!document.hidden) void refresh();
+    }, 5_000);
+    const onVisibilityChange = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [job, refresh]);
 
-  const stageIndex = Math.max(0, Math.min(7, Number(job?.progress?.stageIndex) || 0));
-  const qualityGatePassed = job?.result?.qualityGatePassed === true
-    || job?.progress?.qualityGatePassed === true;
-  const qualityScore = Number(job?.result?.qualityScore ?? job?.progress?.qualityScore);
-  const selectedCompetitorCount = Number(
-    job?.result?.selectedCompetitorCount
-    ?? job?.progress?.selectedCompetitorCount,
+  const progressView = useMemo(
+    () => getFullArticlePipelineProgressView(job),
+    [job],
   );
-  const canRetry = Boolean(job && ['failed', 'blocked', 'cancelled', 'retry_scheduled'].includes(job.status));
+  const canRetry = Boolean(
+    job
+    && !progressView.reviewRequired
+    && ['failed', 'cancelled', 'retry_scheduled'].includes(job.status),
+  );
+  const showFailure = Boolean(
+    job
+    && ['failed', 'blocked', 'retry_scheduled'].includes(job.status)
+    && job.last_error,
+  );
+  const effectiveModel = progressView.actualModel || progressView.requestedModel;
+  const displayedModel = effectiveModel && progressView.requestedModel && effectiveModel !== progressView.requestedModel
+    ? `${progressView.requestedModel} → ${effectiveModel}`
+    : effectiveModel || progressView.requestedModel;
+  const effectiveProvider = progressView.actualProvider || progressView.requestedProvider;
+  const completedWritingSteps = progressView.completedWorkflowSteps ?? progressView.workflowStepIndex;
+  const elapsed = formatPipelineDuration(progressView.elapsedMs, isArabic);
 
   const start = async () => {
-    if (busy || disabled || isActive(job)) return;
+    if (busy || fullWorkflowStartDisabled || isActive(job)) return;
     setBusy('start');
     setError('');
     try {
@@ -220,7 +246,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   };
 
   const retry = async () => {
-    if (!job || busy || disabled || !canRetry) return;
+    if (!job || busy || fullWorkflowResumeDisabled || !canRetry) return;
     setBusy('retry');
     setError('');
     try {
@@ -234,13 +260,22 @@ const FullArticlePipelineControl: React.FC<Props> = ({
     }
   };
 
-  const stageRows = useMemo(() => STAGES.map((labels, index) => {
+  const stageRows = useMemo(() => FULL_ARTICLE_PIPELINE_STAGES
+    .slice(0, progressView.stageCount)
+    .map((stageDefinition, index) => {
     const number = index + 1;
-    const complete = job?.status === 'completed' || stageIndex > number;
-    const current = Boolean(job && stageIndex === number && job.status !== 'completed');
+    const complete = job?.status === 'completed' || progressView.stageIndex > number;
+    const current = Boolean(job && progressView.stageIndex === number && job.status !== 'completed');
     const failed = current && ['failed', 'blocked', 'cancelled'].includes(job.status);
-    return { number, label: labels[isArabic ? 0 : 1], complete, current, failed };
-  }), [isArabic, job, stageIndex]);
+    return {
+      number,
+      key: stageDefinition.key,
+      label: isArabic ? stageDefinition.labelAr : stageDefinition.labelEn,
+      complete,
+      current,
+      failed,
+    };
+  }), [isArabic, job, progressView.stageCount, progressView.stageIndex]);
 
   return (
     <section className="rounded-xl border border-[#d4af37]/35 bg-[#d4af37]/5 p-3 dark:bg-[#d4af37]/10">
@@ -251,8 +286,8 @@ const FullArticlePipelineControl: React.FC<Props> = ({
           </div>
           <div className="mt-1 text-[10px] font-bold leading-5 text-gray-500 dark:text-gray-400">
             {isArabic
-              ? 'ينفذ المراحل السبع بالترتيب، ويُدرج المقالة حتى عند عدم اجتياز بوابة الجودة. أي فشل يُعاد حسب المدة المضبوطة لدى المسؤول.'
-              : 'Runs all seven stages in order and inserts the article even if the quality gate fails. Failures retry using the administrator interval.'}
+              ? 'ينفذ المراحل السبع بالترتيب، ويراجع النتيجة ويصلحها قبل الإدراج الآمن. تتوقف مخالفات الجودة المانعة للمراجعة بدل استبدال المقالة.'
+              : 'Runs all seven stages in order, reviews and repairs the draft, then inserts it safely. Blocking quality issues pause for review instead of replacing the article.'}
           </div>
         </div>
         {job && (
@@ -286,9 +321,9 @@ const FullArticlePipelineControl: React.FC<Props> = ({
         <button
           type="button"
           onClick={start}
-          disabled={disabled || busy !== '' || isActive(job) || !model}
+          disabled={fullWorkflowStartDisabled || busy !== '' || isActive(job) || !model}
           className="inline-flex h-9 flex-[1.7] items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 text-xs font-black text-[#171717] hover:bg-[#e0bd47] disabled:cursor-not-allowed disabled:opacity-50"
-          title={articleTitle}
+          title={fullWorkflowStartDisabled && startDisabledReason ? startDisabledReason : articleTitle}
         >
           {busy === 'start' ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
           {isArabic ? 'بدء الإنشاء الشامل' : 'Start full workflow'}
@@ -300,6 +335,12 @@ const FullArticlePipelineControl: React.FC<Props> = ({
           ? 'هذا العدد خاص بزر «بدء الإنشاء الشامل»؛ زر «كتابة المقالة» يستخدم المنافسين المحفوظين حاليًا في المقالة.'
           : 'This count only applies to “Start full workflow”; “Write article” uses the competitors already saved on the article.'}
       </p>
+
+      {fullWorkflowStartDisabled && startDisabledReason && !isActive(job) && (
+        <p className="mt-1.5 rounded bg-amber-50 px-2 py-1 text-[9px] font-bold leading-4 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+          {startDisabledReason}
+        </p>
+      )}
 
       {loadError && (
         <div className="mt-2 flex items-start justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-bold leading-5 text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
@@ -319,7 +360,13 @@ const FullArticlePipelineControl: React.FC<Props> = ({
         <div className="mt-3 rounded-lg border border-gray-200 bg-white/80 p-2.5 dark:border-[#414141] dark:bg-[#202020]/80">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1.5 text-[11px] font-black text-gray-700 dark:text-gray-200">
-              {isActive(job) ? <Loader2 size={13} className="animate-spin text-blue-500" /> : job.status === 'completed' ? <CheckCircle2 size={13} className="text-emerald-500" /> : <Clock3 size={13} className="text-amber-500" />}
+              {isActive(job)
+                ? <Loader2 size={13} className="animate-spin text-blue-500" />
+                : job.status === 'completed'
+                  ? <CheckCircle2 size={13} className="text-emerald-500" />
+                  : progressView.reviewRequired
+                    ? <ShieldAlert size={13} className="text-amber-500" />
+                    : <Clock3 size={13} className="text-amber-500" />}
               {getStatusLabel(job, isArabic)}
             </span>
             <div className="flex items-center gap-1.5">
@@ -346,8 +393,8 @@ const FullArticlePipelineControl: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={retry}
-                  disabled={disabled || busy !== ''}
-                  title={disabled
+                  disabled={fullWorkflowResumeDisabled || busy !== ''}
+                  title={fullWorkflowResumeDisabled
                     ? (isArabic ? 'يوجد مسار كتابة آخر نشط لهذه المقالة.' : 'Another writing workflow is active for this article.')
                     : undefined}
                   className="inline-flex items-center gap-1 rounded-md border border-amber-300 px-2 py-1 text-[10px] font-black text-amber-700 disabled:opacity-50 dark:border-amber-800 dark:text-amber-300"
@@ -356,19 +403,31 @@ const FullArticlePipelineControl: React.FC<Props> = ({
                   {isArabic ? 'استئناف الآن' : 'Resume now'}
                 </button>
               )}
+              {progressView.reviewRequired && (
+                <button
+                  type="button"
+                  onClick={() => onReviewRequested?.(progressView.contentWritingSessionId)}
+                  className="inline-flex items-center gap-1 rounded-md border border-amber-400 bg-amber-50 px-2 py-1 text-[10px] font-black text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200"
+                >
+                  <Eye size={12} />
+                  {isArabic ? 'مراجعة النواقص' : 'Review issues'}
+                </button>
+              )}
             </div>
           </div>
 
           <div className="mt-2 space-y-1.5">
             {stageRows.map(stage => (
               <div
-                key={stage.number}
+                key={stage.key}
                 className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[10px] font-bold ${
                   stage.current ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300' : 'text-gray-500 dark:text-gray-400'
                 }`}
               >
                 {stage.failed
-                  ? <XCircle size={13} className="shrink-0 text-red-500" />
+                  ? progressView.reviewRequired
+                    ? <ShieldAlert size={13} className="shrink-0 text-amber-500" />
+                    : <XCircle size={13} className="shrink-0 text-red-500" />
                   : stage.complete
                     ? <CheckCircle2 size={13} className="shrink-0 text-emerald-500" />
                     : stage.current
@@ -379,7 +438,22 @@ const FullArticlePipelineControl: React.FC<Props> = ({
             ))}
           </div>
 
+          {progressView.substage && job.status !== 'completed' && (
+            <div className="mt-2 rounded-md border border-blue-100 bg-blue-50/70 px-2 py-1.5 text-[10px] font-bold leading-5 text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/10 dark:text-blue-200">
+              <span className="me-1 text-blue-500">{isArabic ? 'المرحلة الفرعية:' : 'Substage:'}</span>
+              {progressView.substage}
+            </div>
+          )}
+
           <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-bold text-gray-500 dark:text-gray-400">
+            <span className="rounded bg-gray-100 px-2 py-1 dark:bg-[#303030]">
+              {isArabic ? 'المرحلة' : 'Stage'}: {progressView.stageIndex}/{progressView.stageCount}
+            </span>
+            {elapsed && (
+              <span className="rounded bg-gray-100 px-2 py-1 dark:bg-[#303030]">
+                {isArabic ? 'الزمن' : 'Elapsed'}: {elapsed}
+              </span>
+            )}
             {(job.attempt_count > 0 || job.retry_count > 0) && (
               <span className="rounded bg-gray-100 px-2 py-1 dark:bg-[#303030]">
                 {isArabic
@@ -387,14 +461,49 @@ const FullArticlePipelineControl: React.FC<Props> = ({
                   : `Attempts: ${job.attempt_count} · Retries: ${job.retry_count}`}
               </span>
             )}
-            {Number.isFinite(selectedCompetitorCount) && selectedCompetitorCount > 0 && (
+            {effectiveProvider && (
               <span className="rounded bg-gray-100 px-2 py-1 dark:bg-[#303030]">
-                {isArabic ? `المنافسون: ${selectedCompetitorCount}` : `Competitors: ${selectedCompetitorCount}`}
+                {isArabic ? 'المزود' : 'Provider'}: <span dir="ltr">{effectiveProvider}</span>
               </span>
             )}
-            {Number.isFinite(qualityScore) && (
-              <span className={`rounded px-2 py-1 ${qualityGatePassed ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'}`}>
-                {isArabic ? `الجودة: ${qualityScore}/100` : `Quality: ${qualityScore}/100`}
+            {displayedModel && (
+              <span className="max-w-full truncate rounded bg-gray-100 px-2 py-1 font-mono dark:bg-[#303030]" dir="ltr" title={displayedModel}>
+                {displayedModel}
+              </span>
+            )}
+            {progressView.workflowStepCount !== null && progressView.workflowStepCount > 0 && (
+              <span className="rounded bg-blue-50 px-2 py-1 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+                {isArabic ? 'خطوات الكتابة' : 'Writing steps'}: {Math.min(
+                  progressView.workflowStepCount,
+                  Math.max(0, completedWritingSteps || 0),
+                )}/{progressView.workflowStepCount}
+              </span>
+            )}
+            {progressView.candidateCount !== null && progressView.candidateCount > 0 && (
+              <span className="rounded bg-violet-50 px-2 py-1 text-violet-700 dark:bg-violet-900/20 dark:text-violet-300">
+                {isArabic ? 'المرشحون' : 'Candidates'}: {progressView.candidateCount}
+                {progressView.selectedCandidateIndex !== null
+                  ? ` · ${isArabic ? 'المعتمد' : 'selected'} ${progressView.selectedCandidateIndex}`
+                  : ''}
+                {progressView.rejectedCandidateCount !== null
+                  ? ` · ${isArabic ? 'المرفوض' : 'rejected'} ${progressView.rejectedCandidateCount}`
+                  : ''}
+              </span>
+            )}
+            {progressView.selectedCompetitorCount !== null && progressView.selectedCompetitorCount > 0 && (
+              <span className="rounded bg-gray-100 px-2 py-1 dark:bg-[#303030]">
+                {isArabic ? `المنافسون: ${progressView.selectedCompetitorCount}` : `Competitors: ${progressView.selectedCompetitorCount}`}
+              </span>
+            )}
+            {progressView.qualityScore !== null && (
+              <span className={`rounded px-2 py-1 ${progressView.qualityGatePassed === true ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'}`}>
+                {isArabic ? `الجودة: ${progressView.qualityScore}/100` : `Quality: ${progressView.qualityScore}/100`}
+                {progressView.qualityMinimumScore !== null
+                  ? ` · ${isArabic ? 'الحد' : 'min'} ${progressView.qualityMinimumScore}`
+                  : ''}
+                {progressView.qualityBlockingFailureCount !== null
+                  ? ` · ${isArabic ? 'مانع' : 'blocking'} ${progressView.qualityBlockingFailureCount}`
+                  : ''}
               </span>
             )}
             {job.next_attempt_at && job.status === 'retry_scheduled' && (
@@ -404,7 +513,29 @@ const FullArticlePipelineControl: React.FC<Props> = ({
             )}
           </div>
 
-          {job.last_error && (
+          {progressView.retryReason && (
+            <div className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-[10px] font-bold leading-5 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+              {isArabic ? 'سبب إعادة المحاولة:' : 'Retry reason:'} <span dir="ltr">{progressView.retryReason}</span>
+            </div>
+          )}
+
+          {progressView.reviewRequired && (
+            <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-[10px] font-bold leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+              <div className="flex items-center gap-1.5 font-black">
+                <ShieldAlert size={13} />
+                {isArabic
+                  ? 'توقفت العملية للمراجعة؛ لن تُدرج المسودة قبل معالجة النواقص.'
+                  : 'The workflow paused for review; the draft will not be inserted until issues are resolved.'}
+              </div>
+              {progressView.reviewReasons.length > 0 && (
+                <ul className="mt-1.5 list-disc space-y-1 ps-4">
+                  {progressView.reviewReasons.map(reason => <li key={reason}>{reason}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {showFailure && !progressView.reviewRequired && (
             <div className="mt-2 rounded-md bg-red-50 px-2 py-1.5 text-[10px] font-bold leading-5 text-red-700 dark:bg-red-900/20 dark:text-red-300">
               {job.last_error_code && <span className="me-1 font-mono" dir="ltr">[{job.last_error_code}]</span>}
               {job.last_error}

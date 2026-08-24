@@ -503,6 +503,7 @@ const saveRemoteArticleSnapshotViaServer = async (
     idempotencyKey: string;
     saveReason?: 'manual' | 'auto' | 'lifecycle' | 'recovery';
     clearContent?: boolean;
+    expectedLastSavedAt?: string | null;
   },
 ): Promise<RemoteArticleActivity> => {
   const supabase = getSupabaseClient();
@@ -517,6 +518,7 @@ const saveRemoteArticleSnapshotViaServer = async (
     idempotencyKey: options.idempotencyKey,
     saveReason: options.saveReason || 'manual',
     clearContent: options.clearContent === true,
+    expectedLastSavedAt: options.expectedLastSavedAt || null,
     snapshot,
   });
   let response: Response | null = null;
@@ -1086,6 +1088,7 @@ export const saveRemoteArticleSnapshot = async (
     idempotencyKey: string;
     saveReason?: 'manual' | 'auto' | 'lifecycle' | 'recovery';
     clearContent?: boolean;
+    expectedLastSavedAt?: string | null;
   },
 ): Promise<RemoteArticleActivity> => saveRemoteArticleSnapshotViaServer(snapshot, options);
 

@@ -6,6 +6,8 @@ import { build } from 'esbuild';
 import {
   buildContentWritingEditorSourceLedger,
   evaluateContentWritingEditorSourceCoverage,
+  evaluateContentWritingEditorStructureCoverage,
+  restoreContentWritingEditorLinks,
 } from '../utils/contentWritingEditorSource.ts';
 
 const importWorkflow = async (): Promise<any> => {
@@ -137,6 +139,124 @@ test('section prompt attaches only assigned editor items and requires coverage i
   assert.match(prompt, /E001/);
 });
 
+test('a 2000+ word TipTap snapshot records and audits headings, hrefs, lists, and tables', () => {
+  const longParagraph = Array.from({ length: 2_100 }, (_, index) => `معلومة${index + 1}`).join(' ');
+  const contentJson = {
+    type: 'doc',
+    content: [
+      { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'دليل البنية المحمية' }] },
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'راجع ' },
+          {
+            type: 'text',
+            text: 'الدليل الداخلي',
+            marks: [{ type: 'link', attrs: { href: '/gold-detectors/guide' } }],
+          },
+          { type: 'text', text: ' قبل اتخاذ القرار.' },
+        ],
+      },
+      {
+        type: 'bulletList',
+        content: Array.from({ length: 3 }, (_, index) => ({
+          type: 'listItem',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: `عنصر ${index + 1}` }] }],
+        })),
+      },
+      {
+        type: 'table',
+        content: Array.from({ length: 2 }, (_, rowIndex) => ({
+          type: 'tableRow',
+          content: Array.from({ length: 2 }, (_, cellIndex) => ({
+            type: rowIndex === 0 ? 'tableHeader' : 'tableCell',
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: `خلية ${rowIndex}-${cellIndex}` }] }],
+          })),
+        })),
+      },
+      { type: 'paragraph', content: [{ type: 'text', text: longParagraph }] },
+    ],
+  };
+  const plainText = [
+    'دليل البنية المحمية',
+    'راجع الدليل الداخلي قبل اتخاذ القرار.',
+    '- عنصر 1',
+    '- عنصر 2',
+    '- عنصر 3',
+    longParagraph,
+  ].join('\n');
+  const ledger = buildContentWritingEditorSourceLedger({
+    plainText,
+    contentJson,
+    contentHtml: '<h2>دليل البنية المحمية</h2><p>راجع <a href="/gold-detectors/guide">الدليل الداخلي</a>.</p>',
+  });
+  const preservedMarkdown = [
+    '## دليل البنية المحمية',
+    '',
+    'راجع [الدليل الداخلي](/gold-detectors/guide) قبل اتخاذ القرار.',
+    '',
+    '- عنصر 1',
+    '- عنصر 2',
+    '- عنصر 3',
+    '',
+    '| العمود الأول | العمود الثاني |',
+    '| --- | --- |',
+    '| خلية 1 | خلية 2 |',
+    '',
+    longParagraph,
+  ].join('\n');
+
+  assert.ok(ledger.sourceWordCount > 2_000);
+  assert.equal(ledger.structure.source, 'content_json');
+  assert.equal(ledger.structure.headingCount, 1);
+  assert.equal(ledger.structure.linkCount, 1);
+  assert.equal(ledger.structure.listCount, 1);
+  assert.equal(ledger.structure.listItemCount, 3);
+  assert.equal(ledger.structure.tableCount, 1);
+  assert.equal(ledger.structure.tableRowCount, 2);
+  assert.equal(evaluateContentWritingEditorStructureCoverage({
+    outputMarkdown: preservedMarkdown,
+    structure: ledger.structure,
+  }).passed, true);
+  const flattenedAudit = evaluateContentWritingEditorStructureCoverage({
+    outputMarkdown: plainText.replace(/\n/g, ' '),
+    structure: ledger.structure,
+  });
+  assert.equal(flattenedAudit.passed, false);
+  assert.deepEqual(flattenedAudit.missingLinkIds, ['A001']);
+  assert.deepEqual(flattenedAudit.missingTableIds, ['T001']);
+});
+
+test('protected href restoration uses one exact anchor and leaves ambiguous anchors unresolved', () => {
+  const uniqueLedger = buildContentWritingEditorSourceLedger({
+    plainText: 'اقرأ الدليل الداخلي الآن.',
+    contentJson: {
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [{
+          type: 'text',
+          text: 'الدليل الداخلي',
+          marks: [{ type: 'link', attrs: { href: '/internal/guide' } }],
+        }],
+      }],
+    },
+  });
+  const restored = restoreContentWritingEditorLinks({
+    markdown: 'اقرأ الدليل الداخلي الآن.',
+    structure: uniqueLedger.structure,
+  });
+  assert.equal(restored.markdown, 'اقرأ [الدليل الداخلي](/internal/guide) الآن.');
+  assert.deepEqual(restored.restoredLinkIds, ['A001']);
+
+  const ambiguous = restoreContentWritingEditorLinks({
+    markdown: 'الدليل الداخلي مفيد، وهذا الدليل الداخلي محدث.',
+    structure: uniqueLedger.structure,
+  });
+  assert.equal(ambiguous.changed, false);
+  assert.deepEqual(ambiguous.unresolvedLinkIds, ['A001']);
+});
+
 test('both article-writing buttons save first and converge on the same mandatory session snapshot', async () => {
   const [panel, fullControl, engine, workflow] = await Promise.all([
     readFile(new URL('../components/ContentWritingPanel.tsx', import.meta.url), 'utf8'),
@@ -146,8 +266,11 @@ test('both article-writing buttons save first and converge on the same mandatory
   ]);
   assert.match(panel, /handleSaveDraft\(\{ reason: 'manual', force: true \}\)/);
   assert.match(fullControl, /onBeforeStart/);
-  assert.match(engine, /buildContentWritingEditorSourceLedger\(articleSource\.input\.articleText\)/);
+  assert.match(engine, /buildContentWritingEditorSourceLedger\(\{[\s\S]*contentJson:[\s\S]*contentHtml:/);
+  assert.match(engine, /editorDocumentSnapshot/);
   assert.match(engine, /editorSourcePolicy/);
   assert.match(workflow, /content_writing_editor_source_coverage_incomplete/);
   assert.match(workflow, /editor_source_coverage_decreased/);
+  assert.match(workflow, /restoreContentWritingEditorLinks/);
+  assert.match(workflow, /content_writing_editor_structure_coverage_incomplete/);
 });

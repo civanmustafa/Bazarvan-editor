@@ -55,6 +55,12 @@ type ExternalEngineeringStateRow = {
   external_analysis_readiness_signature: string;
 };
 
+type PipelineDraftSnapshot = {
+  pipelineJobId: string;
+  pipelineLeaseGeneration: number;
+  plainText: string;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -123,8 +129,47 @@ const isCurrentEngineeringJob = (
   && state.external_analysis_readiness_signature === context.job.readiness_signature
 );
 
+const getPipelineDraftSnapshot = (
+  context: ExternalAnalysisExecutionContext,
+): PipelineDraftSnapshot | null => {
+  const snapshot = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
+  const draft = isRecord(snapshot.pipelineDraft) ? snapshot.pipelineDraft : {};
+  const pipelineJobId = toTrimmedString(snapshot.pipelineJobId);
+  const pipelineLeaseGeneration = Number(snapshot.pipelineLeaseGeneration);
+  const plainText = toTrimmedString(draft.plainText ?? snapshot.plainText);
+  if (!pipelineJobId || !Number.isSafeInteger(pipelineLeaseGeneration) || pipelineLeaseGeneration < 1 || !plainText) {
+    return null;
+  }
+  return { pipelineJobId, pipelineLeaseGeneration, plainText };
+};
+
+const isCurrentEngineeringExecution = async (
+  context: ExternalAnalysisExecutionContext,
+  state: ExternalEngineeringStateRow,
+  pipelineDraft: PipelineDraftSnapshot | null,
+): Promise<boolean> => {
+  if (!pipelineDraft) return isCurrentEngineeringJob(context, state);
+  if (context.job.depends_on_job_id !== pipelineDraft.pipelineJobId) return false;
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('ai_external_analysis_jobs')
+    .select('id,job_type,status,lease_generation,lease_expires_at,cancel_requested_at')
+    .eq('id', pipelineDraft.pipelineJobId)
+    .maybeSingle();
+  if (error) throw error;
+  const parent = data as unknown as Record<string, unknown> | null;
+  return Boolean(
+    parent
+    && parent.job_type === 'full_article_pipeline'
+    && parent.status === 'running'
+    && parent.cancel_requested_at == null
+    && Number(parent.lease_generation) === pipelineDraft.pipelineLeaseGeneration
+    && new Date(toTrimmedString(parent.lease_expires_at)).getTime() > Date.now()
+  );
+};
+
 const toEngineeringPromptInput = (
   article: ExternalEngineeringArticleRow,
+  pipelineDraft: PipelineDraftSnapshot | null = null,
 ): ExternalEngineeringPromptInput => {
   const keywords = isRecord(article.keywords) ? article.keywords : {};
   const metadata = isRecord(article.metadata) ? article.metadata : {};
@@ -145,7 +190,7 @@ const toEngineeringPromptInput = (
   // cannot accidentally re-introduce a competitor whose extraction failed twice.
   return {
     title: toTrimmedString(article.title),
-    plainText: toTrimmedString(article.plain_text),
+    plainText: pipelineDraft?.plainText || toTrimmedString(article.plain_text),
     articleLanguage: article.article_language === 'en' ? 'en' : 'ar',
     keywords: {
       primary: toTrimmedString(keywords.primary),
@@ -236,7 +281,8 @@ const executeExternalEngineeringAnalysis = async (
   });
 
   const initial = await readArticleAndState(context.job.article_id);
-  if (!isCurrentEngineeringJob(context, initial.state)) {
+  const pipelineDraft = getPipelineDraftSnapshot(context);
+  if (!await isCurrentEngineeringExecution(context, initial.state, pipelineDraft)) {
     return {
       result: {
         status: 'superseded',
@@ -253,7 +299,7 @@ const executeExternalEngineeringAnalysis = async (
     };
   }
 
-  const input = toEngineeringPromptInput(initial.article);
+  const input = toEngineeringPromptInput(initial.article, pipelineDraft);
   const inputFingerprint = JSON.stringify(input);
   assertEngineeringInputs(input, command);
   const aiSettings = await readExternalGeminiSettings();
@@ -274,7 +320,7 @@ const executeExternalEngineeringAnalysis = async (
       aiSettings,
     });
     const latest = await readArticleAndState(context.job.article_id);
-    if (!isCurrentEngineeringJob(context, latest.state)) {
+    if (!await isCurrentEngineeringExecution(context, latest.state, pipelineDraft)) {
       return {
         result: {
           status: 'superseded',
@@ -292,7 +338,7 @@ const executeExternalEngineeringAnalysis = async (
         },
       };
     }
-    if (JSON.stringify(toEngineeringPromptInput(latest.article)) !== inputFingerprint) {
+    if (JSON.stringify(toEngineeringPromptInput(latest.article, pipelineDraft)) !== inputFingerprint) {
       throw createRetryError({
         code: 'engineering_input_changed_during_analysis',
         message: 'The article or competitor input changed while the independent competitor analysis was running.',
@@ -432,7 +478,7 @@ const executeExternalEngineeringAnalysis = async (
   }
 
   const latest = await readArticleAndState(context.job.article_id);
-  if (!isCurrentEngineeringJob(context, latest.state)) {
+  if (!await isCurrentEngineeringExecution(context, latest.state, pipelineDraft)) {
     return {
       result: {
         status: 'superseded',
@@ -449,7 +495,7 @@ const executeExternalEngineeringAnalysis = async (
       },
     };
   }
-  if (JSON.stringify(toEngineeringPromptInput(latest.article)) !== inputFingerprint) {
+  if (JSON.stringify(toEngineeringPromptInput(latest.article, pipelineDraft)) !== inputFingerprint) {
     throw createRetryError({
       code: 'engineering_input_changed_during_analysis',
       message: 'The article or competitor input changed while the engineering command was running.',

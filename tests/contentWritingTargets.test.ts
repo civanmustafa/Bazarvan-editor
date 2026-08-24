@@ -65,6 +65,31 @@ test('automatic target uses the largest actual competitor text times 1.20 with t
   assert.equal(target.centerWords, 1_200);
   assert.deepEqual(target.targetWords, { min: 1_080, max: 1_320 });
   assert.equal(target.automaticTolerancePercent, 10);
+  assert.equal(target.excludedOutlierCount, 0);
+});
+
+test('automatic target excludes extreme competitor-length outliers', async () => {
+  const { resolveContentWritingLengthTarget } = await importWorkspaceModule(
+    '../utils/contentWritingTargets.ts',
+  );
+  const words = (count: number, prefix: string): string => Array.from(
+    { length: count },
+    (_, index) => `${prefix}${index}`,
+  ).join(' ');
+  const target = resolveContentWritingLengthTarget({
+    competitors: [
+      { position: 1, title: 'Normal 1', url: 'https://one.example', content: words(800, 'a') },
+      { position: 2, title: 'Normal 2', url: 'https://two.example', content: words(900, 'b') },
+      { position: 3, title: 'Normal 3', url: 'https://three.example', content: words(1_000, 'c') },
+      { position: 4, title: 'Outlier', url: 'https://outlier.example', content: words(12_000, 'd') },
+    ],
+  });
+
+  assert.equal(target.baselineCompetitor.position, 3);
+  assert.equal(target.baselineCompetitor.wordCount, 1_000);
+  assert.equal(target.excludedOutlierCount, 1);
+  assert.equal(target.centerWords, 1_200);
+  assert.deepEqual(target.targetWords, { min: 1_080, max: 1_320 });
 });
 
 test('manual range remains authoritative while section limits grow dynamically', async () => {
@@ -84,6 +109,25 @@ test('manual range remains authoritative while section limits grow dynamically',
   assert.deepEqual(manual.outlineSections, { min: 5, max: 8, preferred: 6 });
   assert.ok(longer.preferred > shorter.preferred);
   assert.ok(longer.max > 5);
+});
+
+test('the maximum supported range fits the per-section writing capacity', async () => {
+  const {
+    CONTENT_WRITING_MAX_DYNAMIC_SECTIONS,
+    CONTENT_WRITING_MAX_TARGET_WORDS,
+    deriveContentWritingOutlineSections,
+    getContentWritingBodyWordBudget,
+    parseContentWritingTargetWordRange,
+  } = await importWorkspaceModule('../utils/contentWritingTargets.ts');
+  const range = { min: 7_800, max: CONTENT_WRITING_MAX_TARGET_WORDS };
+  const sections = deriveContentWritingOutlineSections(range);
+  const bodyBudget = getContentWritingBodyWordBudget(range);
+
+  assert.ok(sections.min <= CONTENT_WRITING_MAX_DYNAMIC_SECTIONS);
+  assert.equal(sections.max, CONTENT_WRITING_MAX_DYNAMIC_SECTIONS);
+  assert.ok(sections.min * 300 >= bodyBudget.min);
+  assert.ok(sections.max * 80 <= bodyBudget.max);
+  assert.equal(parseContentWritingTargetWordRange('7800-9000'), null);
 });
 
 test('runtime quality configuration and body section budgets use the resolved target', async () => {

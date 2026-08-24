@@ -22,10 +22,33 @@ const stripWrappingCodeFence = (value: string): string => {
     return match ? match[1].trim() : value;
 };
 
-const processInlineFormatting = (text: string): string => {
+const renderBasicInlineFormatting = (text: string): string => {
     return escapeHtml(text)
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.*?)\*/g, '<em>$1</em>');
+};
+
+const isSafeMarkdownHref = (href: string): boolean => (
+    /^(?:https?:\/\/|\/|#|mailto:|tel:)/i.test(href)
+    && !/[\u0000-\u001f\u007f]/.test(href)
+);
+
+const processInlineFormatting = (text: string): string => {
+    const renderedLinks: string[] = [];
+    const tokenized = text.replace(
+        /\[([^\]\n]+)\]\(\s*(<?[^\s)>]+>?)(?:\s+["'][^"']*["'])?\s*\)/g,
+        (_match, label: string, rawHref: string) => {
+            const href = rawHref.replace(/^<|>$/g, '').trim();
+            if (!isSafeMarkdownHref(href)) return label;
+            const index = renderedLinks.push(
+                `<a href="${escapeHtml(href)}" rel="noopener" target="_self">${renderBasicInlineFormatting(label)}</a>`,
+            ) - 1;
+            return `\u0000ARTICLE_LINK_${index}\u0000`;
+        },
+    );
+
+    return renderBasicInlineFormatting(tokenized)
+        .replace(/\u0000ARTICLE_LINK_(\d+)\u0000/g, (_match, index: string) => renderedLinks[Number(index)] || '');
 };
 
 const sanitizeTableAttributeValue = (value: string | null): string | null => {

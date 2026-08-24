@@ -1,4 +1,6 @@
 import {
+  ExternalAnalysisBlockedError,
+  ExternalAnalysisOwnershipLostError,
   ExternalAnalysisRetryError,
   registerExternalAnalysisJobExecutor,
   type ExternalAnalysisExecutionContext,
@@ -12,7 +14,7 @@ import { queueContentWritingSession } from './contentWritingEngine';
 import {
   cancelContentWritingSession,
   getContentWritingSession,
-  recordContentWritingApplication,
+  getContentWritingSteps,
   resumeContentWritingSession,
   type ContentWritingProvider,
   type ContentWritingSession,
@@ -22,6 +24,26 @@ import {
   prepareContentWritingResultForEditor,
 } from '../utils/contentWritingWorkflow';
 import { parseMarkdownToArticleHtml } from '../utils/editorUtils';
+import {
+  reevaluateContentWritingQualityAfterExternalReview,
+  type ContentWritingSourceAccuracyInput,
+} from '../utils/contentWritingQuality';
+import {
+  normalizeContentWritingKnowledgeBase,
+  normalizeContentWritingSourceChunks,
+} from '../utils/contentWritingKnowledge';
+import { htmlToTipTapJson, preserveExistingArticleLinks } from '../utils/editorHtmlContent';
+import {
+  CONTENT_WRITING_MIN_COMPETITOR_COUNT,
+  CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS,
+  selectQualityContentWritingCompetitors,
+  type ContentWritingCompetitorInput,
+} from '../utils/contentWritingContext';
+import {
+  evaluateContentWritingEditorSourceCoverage,
+  evaluateContentWritingEditorStructureCoverage,
+  normalizeContentWritingEditorSourceLedger,
+} from '../utils/contentWritingEditorSource';
 
 const COMPREHENSIVE_COMMAND_ID = 'smartAnalysis.competitorContentComparison';
 const TERMINAL_EXTERNAL_STATUSES = new Set(['completed', 'failed', 'blocked', 'cancelled']);
@@ -33,6 +55,13 @@ const ACTIVE_EXTERNAL_STATUSES = new Set([
   'paused',
 ]);
 const POLL_INTERVAL_MS = 10_000;
+const PIPELINE_STAGE_TIMEOUT_MS = Math.max(
+  5 * 60_000,
+  Math.min(
+    Number(process.env.FULL_ARTICLE_PIPELINE_STAGE_TIMEOUT_MS) || 2 * 60 * 60_000,
+    6 * 60 * 60_000,
+  ),
+);
 
 type ArticleRow = {
   id: string;
@@ -41,6 +70,10 @@ type ArticleRow = {
   goal_context: unknown;
   article_language: string | null;
   metadata: unknown;
+  content_json: unknown;
+  content_html: string | null;
+  plain_text: string | null;
+  save_count: number;
   updated_at: string;
 };
 
@@ -83,7 +116,7 @@ const delay = (milliseconds: number, signal: AbortSignal): Promise<void> => (
 const readArticle = async (articleId: string): Promise<ArticleRow> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('articles')
-    .select('id,title,keywords,goal_context,article_language,metadata,updated_at')
+    .select('id,title,keywords,goal_context,article_language,metadata,content_json,content_html,plain_text,save_count,updated_at')
     .eq('id', articleId)
     .maybeSingle();
   if (error) throw error;
@@ -144,12 +177,12 @@ const reportStage = async (
   details: ExternalAnalysisJson = {},
 ): Promise<void> => {
   const childProgress = isRecord(details.childProgress) ? details.childProgress : {};
-  await context.reportProgress({
+  const owned = await context.reportProgress({
     progress: {
       stage,
       stageIndex,
       stageCount: 7,
-      qualityGatePolicy: 'insert_regardless',
+      qualityGatePolicy: 'review_required',
       ...details,
       updatedAt: new Date().toISOString(),
     },
@@ -159,6 +192,63 @@ const reportStage = async (
       ? childProgress.keyAttempts.filter(isRecord)
       : undefined,
   });
+  if (!owned) {
+    throw new ExternalAnalysisOwnershipLostError(
+      `Progress ownership was lost while reporting full pipeline stage ${stage}.`,
+    );
+  }
+};
+
+const getPipelineLeaseGeneration = (context: ExternalAnalysisExecutionContext): number => {
+  const generation = Number((context.job as unknown as Record<string, unknown>).lease_generation);
+  if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new ExternalAnalysisOwnershipLostError('The full pipeline claim has no valid fencing generation.');
+  }
+  return generation;
+};
+
+const assertLeaseOwned = async (context: ExternalAnalysisExecutionContext): Promise<void> => {
+  if (context.signal.aborted || !await context.renewLease()) {
+    throw new ExternalAnalysisOwnershipLostError('The full pipeline lease could not be renewed.');
+  }
+};
+
+const attachExternalChild = async (options: {
+  context: ExternalAnalysisExecutionContext;
+  jobId: string;
+  kind: 'semantic' | 'brief' | 'discovery' | 'extraction' | 'analysis';
+  leaseGeneration: number;
+}): Promise<void> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'attach_full_article_pipeline_external_child',
+    {
+      p_pipeline_job_id: options.context.job.id,
+      p_child_job_id: options.jobId,
+      p_child_kind: options.kind,
+      p_worker_id: options.context.workerId,
+      p_lease_generation: options.leaseGeneration,
+    },
+  );
+  if (error) throw error;
+  if (data !== true) throw new ExternalAnalysisOwnershipLostError();
+};
+
+const attachWritingSession = async (options: {
+  context: ExternalAnalysisExecutionContext;
+  sessionId: string;
+  leaseGeneration: number;
+}): Promise<void> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'attach_full_article_pipeline_writing_session',
+    {
+      p_pipeline_job_id: options.context.job.id,
+      p_session_id: options.sessionId,
+      p_worker_id: options.context.workerId,
+      p_lease_generation: options.leaseGeneration,
+    },
+  );
+  if (error) throw error;
+  if (data !== true) throw new ExternalAnalysisOwnershipLostError();
 };
 
 const waitForExternalJob = async (options: {
@@ -167,9 +257,21 @@ const waitForExternalJob = async (options: {
   stage: string;
   stageIndex: number;
 }): Promise<ChildJobSnapshot> => {
+  let childRetryAttempted = false;
+  const waitStartedAt = Date.now();
+  const parentProgress = isRecord(options.context.job.progress) ? options.context.job.progress : {};
   while (true) {
     if (options.context.signal.aborted) {
       throw options.context.signal.reason ?? new Error('The full article pipeline was cancelled.');
+    }
+    if (Date.now() - waitStartedAt >= PIPELINE_STAGE_TIMEOUT_MS) {
+      retryError({
+        code: `full_pipeline_${options.stage}_timeout`,
+        message: `The ${options.stage} child did not reach a terminal state before the bounded wait deadline.`,
+        stage: options.stage,
+        stageIndex: options.stageIndex,
+        details: { childJobId: options.jobId, waitTimeoutMs: PIPELINE_STAGE_TIMEOUT_MS },
+      });
     }
     const snapshot = await readExternalJob(options.jobId, false);
     await reportStage(options.context, options.stage, options.stageIndex, {
@@ -199,7 +301,14 @@ const waitForExternalJob = async (options: {
     }
     if (TERMINAL_EXTERNAL_STATUSES.has(snapshot.status)) {
       const retryCode = `full_pipeline_${options.stage}_failed`;
-      if (options.context.job.last_error_code === retryCode) {
+      const resumeTargetId = text(parentProgress.resumeTargetId);
+      const resumeReason = text(parentProgress.resumeReason);
+      const retryReason = text(parentProgress.retryReason);
+      const mayRetryChild = resumeTargetId === options.jobId
+        || resumeReason === retryCode
+        || retryReason === retryCode;
+      if (mayRetryChild && !childRetryAttempted) {
+        childRetryAttempted = true;
         const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
           'retry_external_analysis_job',
           {
@@ -278,15 +387,19 @@ const enqueueBrief = async (
 };
 
 const enqueueDiscovery = async (
-  articleId: string,
+  context: ExternalAnalysisExecutionContext,
   requestedBy: string,
+  leaseGeneration: number,
+  forceRefresh: boolean,
 ): Promise<string> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'enqueue_competitor_discovery_job',
+    'enqueue_full_article_pipeline_competitor_discovery',
     {
-      p_article_id: articleId,
+      p_pipeline_job_id: context.job.id,
       p_requested_by: requestedBy,
-      p_origin: 'manual',
+      p_worker_id: context.workerId,
+      p_lease_generation: leaseGeneration,
+      p_force_refresh: forceRefresh,
     },
   );
   if (error) throw error;
@@ -347,13 +460,51 @@ const enqueueExtraction = async (options: {
   return id;
 };
 
+const readQualityCompetitors = async (articleId: string): Promise<{
+  competitors: ContentWritingCompetitorInput[];
+  audit: ReturnType<typeof selectQualityContentWritingCompetitors>['audit'];
+}> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('article_competitors')
+    .select('id,position,title,canonical_url,source_url,content_text,status')
+    .eq('article_id', articleId)
+    .eq('status', 'completed')
+    .order('position', { ascending: true });
+  if (error) throw error;
+  const candidates: ContentWritingCompetitorInput[] = (data || []).map(row => ({
+    id: text(row.id),
+    position: numberValue(row.position, 0),
+    title: text(row.title),
+    url: text(row.canonical_url) || text(row.source_url),
+    content: text(row.content_text),
+  }));
+  return selectQualityContentWritingCompetitors(candidates);
+};
+
 const waitForContentWriting = async (options: {
   context: ExternalAnalysisExecutionContext;
   sessionId: string;
+  requestedBy: string;
+  resumeAlreadyAttempted?: boolean;
 }): Promise<ContentWritingSession> => {
+  const waitStartedAt = Date.now();
+  const resumeTargetId = text(options.context.job.progress?.resumeTargetId);
+  let resumeAttempted = options.resumeAlreadyAttempted === true;
   while (true) {
     if (options.context.signal.aborted) {
       throw options.context.signal.reason ?? new Error('The full article pipeline was cancelled.');
+    }
+    if (Date.now() - waitStartedAt >= PIPELINE_STAGE_TIMEOUT_MS) {
+      retryError({
+        code: 'full_pipeline_content_writing_timeout',
+        message: 'The content-writing session did not reach a terminal state before the bounded wait deadline.',
+        stage: 'content_writing',
+        stageIndex: 5,
+        details: {
+          contentWritingSessionId: options.sessionId,
+          waitTimeoutMs: PIPELINE_STAGE_TIMEOUT_MS,
+        },
+      });
     }
     const session = await getContentWritingSession(options.sessionId);
     if (!session) throw new Error(`Content writing session ${options.sessionId} was not found.`);
@@ -367,6 +518,19 @@ const waitForContentWriting = async (options: {
     });
     if (session.status === 'completed') return session;
     if (session.status === 'failed' || session.status === 'cancelled') {
+      if (!resumeAttempted && resumeTargetId === session.id) {
+        resumeAttempted = true;
+        const resumed = await resumeContentWritingAfterScheduledRetry(
+          session,
+          options.requestedBy,
+        );
+        await reportStage(options.context, 'content_writing', 5, {
+          contentWritingSessionId: resumed.id,
+          contentWritingStatus: resumed.status,
+          resumedAfterParentCancellation: true,
+        });
+        continue;
+      }
       retryError({
         code: 'full_pipeline_content_writing_failed',
         message: session.last_error || 'Content writing failed.',
@@ -400,22 +564,112 @@ const resumeContentWritingAfterScheduledRetry = async (
   return resumed;
 };
 
-const enqueueComprehensiveAnalysis = async (
-  pipelineJobId: string,
-  requestedBy: string,
-): Promise<string> => {
+const getContentWritingSourceAccuracyInput = async (
+  session: ContentWritingSession,
+  baselineMarkdown: string,
+): Promise<ContentWritingSourceAccuracyInput> => {
+  const chunks = normalizeContentWritingSourceChunks(session.context_snapshot?.competitorChunks);
+  const steps = await getContentWritingSteps(session.id, { includeMetadata: true });
+  const knowledgeStep = steps.find(step => (
+    step.step_key === 'competitor-index'
+    && isRecord(step.metadata?.knowledge)
+  ));
+  const normalizedKnowledge = knowledgeStep && chunks.length > 0
+    ? normalizeContentWritingKnowledgeBase(knowledgeStep.metadata.knowledge, chunks)
+    : null;
+  const knowledge = normalizedKnowledge?.items.length
+    ? normalizedKnowledge
+    : null;
+  const knowledgeCoverage = isRecord(session.response_metadata?.knowledgeCoverage)
+    ? session.response_metadata.knowledgeCoverage
+    : {};
+  const persistedUsedClaimIds = Array.isArray(knowledgeCoverage.usedClaimIds)
+    ? knowledgeCoverage.usedClaimIds.map(text).filter(Boolean)
+    : [];
+  const fallbackUsedClaimIds = steps.flatMap(step => {
+    const sectionCoverage = isRecord(step.metadata?.sectionCoverage)
+      ? step.metadata.sectionCoverage
+      : {};
+    const direct = Array.isArray(sectionCoverage.usedClaimIds)
+      ? sectionCoverage.usedClaimIds.map(text).filter(Boolean)
+      : [];
+    const revised = Array.isArray(step.metadata?.sectionCoveragesAfter)
+      ? step.metadata.sectionCoveragesAfter.flatMap(candidate => {
+          if (!isRecord(candidate) || !isRecord(candidate.coverage)) return [];
+          return Array.isArray(candidate.coverage.usedClaimIds)
+            ? candidate.coverage.usedClaimIds.map(text).filter(Boolean)
+            : [];
+        })
+      : [];
+    return [...direct, ...revised];
+  });
+  return {
+    knowledge,
+    usedClaimIds: Array.from(new Set(
+      persistedUsedClaimIds.length > 0 ? persistedUsedClaimIds : fallbackUsedClaimIds,
+    )),
+    baselineMarkdown,
+  };
+};
+
+const enqueueComprehensiveAnalysis = async (options: {
+  context: ExternalAnalysisExecutionContext;
+  requestedBy: string;
+  leaseGeneration: number;
+  plainText: string;
+  contentHtml: string;
+}): Promise<string> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'enqueue_full_article_pipeline_competitor_analysis',
+    'enqueue_full_article_pipeline_draft_analysis',
     {
-      p_pipeline_job_id: pipelineJobId,
-      p_requested_by: requestedBy,
+      p_pipeline_job_id: options.context.job.id,
+      p_requested_by: options.requestedBy,
+      p_worker_id: options.context.workerId,
+      p_lease_generation: options.leaseGeneration,
+      p_plain_text: options.plainText,
+      p_content_html: options.contentHtml,
+    },
+  );
+  if (error) {
+    if (error.code === '55000') throw new ExternalAnalysisOwnershipLostError();
+    throw error;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  const id = text(row?.id);
+  if (!id) throw new Error('The comprehensive draft analysis did not return a job.');
+  return id;
+};
+
+const persistDraftReview = async (options: {
+  context: ExternalAnalysisExecutionContext;
+  sessionId: string;
+  analysisJobId: string;
+  leaseGeneration: number;
+  markdown: string;
+  qualityReport: ExternalAnalysisJson;
+  reviewMetadata: ExternalAnalysisJson;
+  contentJson?: ExternalAnalysisJson;
+  contentHtml?: string;
+  plainText?: string;
+}): Promise<void> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'persist_full_article_pipeline_draft_review',
+    {
+      p_pipeline_job_id: options.context.job.id,
+      p_session_id: options.sessionId,
+      p_analysis_job_id: options.analysisJobId,
+      p_worker_id: options.context.workerId,
+      p_lease_generation: options.leaseGeneration,
+      p_markdown: options.markdown,
+      p_quality_report: options.qualityReport,
+      p_review_metadata: options.reviewMetadata,
+      ...(options.contentJson ? { p_content_json: options.contentJson } : {}),
+      ...(options.contentHtml !== undefined ? { p_content_html: options.contentHtml } : {}),
+      ...(options.plainText !== undefined ? { p_plain_text: options.plainText } : {}),
     },
   );
   if (error) throw error;
-  const row = Array.isArray(data) ? data[0] : data;
-  const id = text(row?.id);
-  if (!id) throw new Error('The comprehensive competitor analysis did not return a job.');
-  return id;
+  if (data !== true) throw new ExternalAnalysisOwnershipLostError();
 };
 
 const executeFullArticlePipeline = async (
@@ -426,7 +680,20 @@ const executeFullArticlePipeline = async (
   const input = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
   const provider = text(input.provider) as ContentWritingProvider;
   const model = text(input.model);
-  const competitorCount = Math.max(1, Math.min(5, Math.round(numberValue(input.competitorCount, 5))));
+  const competitorCount = Math.max(
+    CONTENT_WRITING_MIN_COMPETITOR_COUNT,
+    Math.min(5, Math.round(numberValue(input.competitorCount, 5))),
+  );
+  const leaseGeneration = getPipelineLeaseGeneration(context);
+  const baselineSaveCount = Math.round(numberValue(input.baselineSaveCount, -1));
+  const baselineContentHash = text(input.baselineContentHash);
+  if (baselineSaveCount < 0 || !baselineContentHash) {
+    throw new ExternalAnalysisBlockedError({
+      code: 'full_pipeline_baseline_missing',
+      message: 'The pipeline has no trusted article baseline and cannot apply content safely.',
+      progress: { stage: 'blocked', reviewRequired: true },
+    });
+  }
   const savedProgress = isRecord(context.job.progress) ? context.job.progress : {};
   let activeExternalChildId = '';
   let contentWritingSessionId = text(savedProgress.contentWritingSessionId);
@@ -436,6 +703,12 @@ const executeFullArticlePipeline = async (
     const semanticJobId = text(savedProgress.semanticJobId) || await enqueueSemantic(context.job.article_id) || '';
     if (semanticJobId) {
       activeExternalChildId = semanticJobId;
+      await attachExternalChild({
+        context,
+        jobId: semanticJobId,
+        kind: 'semantic',
+        leaseGeneration,
+      });
       await reportStage(context, 'semantic_keywords_lsi', 1, { semanticJobId });
       await waitForExternalJob({
         context,
@@ -451,6 +724,7 @@ const executeFullArticlePipeline = async (
     await reportStage(context, 'content_brief_generation', 2);
     const briefJobId = text(savedProgress.briefJobId) || await enqueueBrief(context.job.id, requestedBy);
     activeExternalChildId = briefJobId;
+    await attachExternalChild({ context, jobId: briefJobId, kind: 'brief', leaseGeneration });
     await reportStage(context, 'content_brief_generation', 2, { briefJobId });
     const brief = await waitForExternalJob({
       context,
@@ -474,10 +748,27 @@ const executeFullArticlePipeline = async (
     });
     activeExternalChildId = '';
 
-    await reportStage(context, 'competitor_discovery', 3);
-    const discoveryJobId = text(savedProgress.discoveryJobId)
-      || await enqueueDiscovery(context.job.article_id, requestedBy);
+    const competitorInputsMustBeReplaced = [
+      text(savedProgress.retryReason),
+      text(savedProgress.resumeReason),
+    ].some(reason => (
+      reason === 'full_pipeline_no_competitor_content'
+      || reason === 'full_pipeline_insufficient_competitor_content'
+      || reason === 'full_pipeline_no_competitors_found'
+    ));
+    await reportStage(context, 'competitor_discovery', 3, {
+      forceRefresh: competitorInputsMustBeReplaced,
+    });
+    const discoveryJobId = (!competitorInputsMustBeReplaced
+      ? text(savedProgress.discoveryJobId)
+      : '') || await enqueueDiscovery(
+      context,
+      requestedBy,
+      leaseGeneration,
+      competitorInputsMustBeReplaced,
+    );
     activeExternalChildId = discoveryJobId;
+    await attachExternalChild({ context, jobId: discoveryJobId, kind: 'discovery', leaseGeneration });
     await reportStage(context, 'competitor_discovery', 3, { discoveryJobId });
     const discovery = await waitForExternalJob({
       context,
@@ -503,7 +794,8 @@ const executeFullArticlePipeline = async (
     await reportStage(context, 'competitor_extraction', 4, {
       selectedCompetitorCount: sources.length,
     });
-    let extractionJobId = context.job.last_error_code === 'full_pipeline_no_competitor_content'
+    const extractionMustBeReplaced = competitorInputsMustBeReplaced;
+    let extractionJobId = extractionMustBeReplaced
       ? ''
       : text(savedProgress.extractionJobId);
     if (!extractionJobId) {
@@ -516,6 +808,7 @@ const executeFullArticlePipeline = async (
       });
     }
     activeExternalChildId = extractionJobId;
+    await attachExternalChild({ context, jobId: extractionJobId, kind: 'extraction', leaseGeneration });
     await reportStage(context, 'competitor_extraction', 4, {
       extractionJobId,
       selectedCompetitorCount: sources.length,
@@ -536,6 +829,35 @@ const executeFullArticlePipeline = async (
         details: { extractionJobId },
       });
     }
+    const competitorQuality = await readQualityCompetitors(context.job.article_id);
+    await reportStage(context, 'competitor_extraction', 4, {
+      extractionJobId,
+      selectedCompetitorCount: sources.length,
+      competitorQualityAudit: competitorQuality.audit as unknown as ExternalAnalysisJson,
+      acceptedCompetitorCount: competitorQuality.audit.acceptedCount,
+      distinctCompetitorDomainCount: competitorQuality.audit.distinctDomainCount,
+      rejectedCompetitorCount: competitorQuality.audit.rejectedCount,
+      replacementNeededCount: competitorQuality.audit.replacementNeededCount,
+    });
+    if (
+      competitorQuality.audit.acceptedCount < CONTENT_WRITING_MIN_COMPETITOR_COUNT
+      || competitorQuality.audit.distinctDomainCount < CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS
+    ) {
+      retryError({
+        code: 'full_pipeline_insufficient_competitor_content',
+        message: `Only ${competitorQuality.audit.acceptedCount} quality competitors across ${competitorQuality.audit.distinctDomainCount} domains were available; at least ${CONTENT_WRITING_MIN_COMPETITOR_COUNT} competitors across ${CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS} domains are required.`,
+        stage: 'competitor_extraction',
+        stageIndex: 4,
+        details: {
+          extractionJobId,
+          competitorQualityAudit: competitorQuality.audit as unknown as ExternalAnalysisJson,
+          replacementNeededCount: Math.max(
+            competitorQuality.audit.replacementNeededCount,
+            competitorQuality.audit.distinctDomainCount < CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS ? 1 : 0,
+          ),
+        },
+      });
+    }
 
     await reportStage(context, 'content_writing', 5, {
       provider,
@@ -544,9 +866,14 @@ const executeFullArticlePipeline = async (
     let writingSession = contentWritingSessionId
       ? await getContentWritingSession(contentWritingSessionId)
       : null;
+    let writingResumeAttempted = false;
     if (writingSession && (writingSession.status === 'failed' || writingSession.status === 'cancelled')) {
-      if (context.job.last_error_code === 'full_pipeline_content_writing_failed') {
+      const writingResumeRequested = text(savedProgress.resumeTargetId) === writingSession.id
+        || text(savedProgress.retryReason) === 'full_pipeline_content_writing_failed'
+        || text(savedProgress.resumeReason) === 'full_pipeline_content_writing_failed';
+      if (writingResumeRequested) {
         writingSession = await resumeContentWritingAfterScheduledRetry(writingSession, requestedBy);
+        writingResumeAttempted = true;
       } else {
         retryError({
           code: 'full_pipeline_content_writing_failed',
@@ -572,6 +899,7 @@ const executeFullArticlePipeline = async (
       writingSession = queued.session;
     }
     contentWritingSessionId = writingSession.id;
+    await attachWritingSession({ context, sessionId: contentWritingSessionId, leaseGeneration });
     await reportStage(context, 'content_writing', 5, {
       contentWritingSessionId,
       contentWritingStatus: writingSession.status,
@@ -581,29 +909,12 @@ const executeFullArticlePipeline = async (
     writingSession = await waitForContentWriting({
       context,
       sessionId: contentWritingSessionId,
+      requestedBy,
+      resumeAlreadyAttempted: writingResumeAttempted,
     });
 
-    await reportStage(context, 'article_application', 6, {
-      contentWritingSessionId,
-      qualityGatePolicy: 'insert_regardless',
-      qualityScore: writingSession.quality_score,
-      qualityGatePassed: writingSession.quality_report?.passed === true,
-    });
     const article = await readArticle(context.job.article_id);
     const latestGoalContext = isRecord(article.goal_context) ? article.goal_context : {};
-    if (text(latestGoalContext.generatedBrief) !== generatedBrief) {
-      const { error: briefPersistenceError } = await getExternalAnalysisSupabaseAdmin()
-        .from('articles')
-        .update({
-          goal_context: {
-            ...latestGoalContext,
-            generatedBrief,
-          },
-          last_saved_at: new Date().toISOString(),
-        })
-        .eq('id', article.id);
-      if (briefPersistenceError) throw briefPersistenceError;
-    }
     const prepared = prepareContentWritingResultForEditor(
       writingSession.result_text || '',
       text(article.title),
@@ -612,59 +923,259 @@ const executeFullArticlePipeline = async (
       retryError({
         code: 'full_pipeline_generated_article_empty',
         message: 'The completed content-writing session did not contain an insertable article.',
-        stage: 'article_application',
-        stageIndex: 6,
+        stage: 'content_writing',
+        stageIndex: 5,
         details: { contentWritingSessionId },
       });
     }
     const articleLanguage = article.article_language === 'en' ? 'en' : 'ar';
-    const plainText = contentWritingMarkdownToPlainText(prepared.markdown);
-    const contentHtml = parseMarkdownToArticleHtml(prepared.markdown, articleLanguage);
-    const { data: application, error: applicationError } = await getExternalAnalysisSupabaseAdmin()
-      .rpc('apply_full_article_pipeline_content', {
-        p_pipeline_job_id: context.job.id,
-        p_session_id: writingSession.id,
-        p_content_html: contentHtml,
-        p_plain_text: plainText,
-      });
-    if (applicationError) throw applicationError;
+    const draftContentHtml = parseMarkdownToArticleHtml(prepared.markdown, articleLanguage);
 
-    const qualityPassed = writingSession.quality_report?.passed === true;
-    if (!writingSession.applied_at) {
-      await recordContentWritingApplication({
-        sessionId: writingSession.id,
-        appliedBy: requestedBy,
-        qualityOverrideReason: qualityPassed
-          ? undefined
-          : 'إدراج تلقائي صريح من مسار الزر الشامل رغم عدم اجتياز بوابة الجودة.',
-      });
-    }
-    await reportStage(context, 'article_application', 6, {
-      contentWritingSessionId,
-      articleAppliedAt: new Date().toISOString(),
-      application: isRecord(application) ? application : {},
-      qualityGatePolicy: 'insert_regardless',
-      qualityScore: writingSession.quality_score,
-      qualityGatePassed: qualityPassed,
-    });
-
-    await reportStage(context, 'comprehensive_competitor_analysis', 7, {
+    await reportStage(context, 'comprehensive_competitor_analysis', 6, {
       commandId: COMPREHENSIVE_COMMAND_ID,
+      contentWritingSessionId,
+      auditTarget: 'generated_draft',
     });
-    const analysisJobId = text(savedProgress.analysisJobId)
-      || await enqueueComprehensiveAnalysis(context.job.id, requestedBy);
+    await assertLeaseOwned(context);
+    const analysisJobId = await enqueueComprehensiveAnalysis({
+      context,
+      requestedBy,
+      leaseGeneration,
+      // The review emits exact literal Markdown patches, so its source draft
+      // must retain the same headings, tables, links, and anchors that the
+      // patch applier will inspect later.
+      plainText: prepared.markdown,
+      contentHtml: draftContentHtml,
+    });
     activeExternalChildId = analysisJobId;
-    await reportStage(context, 'comprehensive_competitor_analysis', 7, {
+    await attachExternalChild({ context, jobId: analysisJobId, kind: 'analysis', leaseGeneration });
+    await reportStage(context, 'comprehensive_competitor_analysis', 6, {
       analysisJobId,
       commandId: COMPREHENSIVE_COMMAND_ID,
+      auditTarget: 'generated_draft',
     });
     const analysis = await waitForExternalJob({
       context,
       jobId: analysisJobId,
       stage: 'comprehensive_competitor_analysis',
-      stageIndex: 7,
+      stageIndex: 6,
     });
     activeExternalChildId = '';
+
+    const analysisResult = isRecord(analysis.result) ? analysis.result : {};
+    const analysisPatches = Array.isArray(analysisResult.patches) ? analysisResult.patches : [];
+    const analysisUsable = analysisResult.status === 'completed'
+      && (Boolean(text(analysisResult.analysisMarkdown)) || analysisPatches.length > 0);
+    if (!analysisUsable) {
+      throw new ExternalAnalysisBlockedError({
+        code: 'full_pipeline_external_review_blocked',
+        message: 'The draft audit completed without a usable, non-superseded review result.',
+        progress: {
+          stage: 'comprehensive_competitor_analysis',
+          stageIndex: 6,
+          stageCount: 7,
+          contentWritingSessionId,
+          analysisJobId,
+          reviewRequired: true,
+          analysisResultStatus: text(analysisResult.status) || 'empty',
+        },
+      });
+    }
+
+    const sourceAccuracy = await getContentWritingSourceAccuracyInput(
+      writingSession,
+      prepared.markdown,
+    );
+    const frozenQualityConfiguration = isRecord(
+      writingSession.context_snapshot?.qualityConfiguration,
+    )
+      ? writingSession.context_snapshot.qualityConfiguration
+      : undefined;
+    const externalReview = reevaluateContentWritingQualityAfterExternalReview({
+      markdown: prepared.markdown,
+      patches: analysisPatches,
+      articleTitle: text(article.title),
+      keywords: (isRecord(article.keywords) ? article.keywords : {}) as any,
+      goalContext: latestGoalContext as any,
+      articleLanguage,
+      configuration: frozenQualityConfiguration,
+      repairPasses: writingSession.quality_repair_count,
+      sourceAccuracy,
+    });
+    const reviewedMarkdown = externalReview.patchApplication.markdown;
+    const reviewedQuality = externalReview.evaluation.report;
+    const editorSourceLedger = normalizeContentWritingEditorSourceLedger(
+      writingSession.context_snapshot?.editorSourceLedger,
+    );
+    const editorSourceItemIds = editorSourceLedger.items.map(item => item.id);
+    const editorSourceCoverage = evaluateContentWritingEditorSourceCoverage({
+      outputText: contentWritingMarkdownToPlainText(reviewedMarkdown),
+      items: editorSourceLedger.items,
+      requiredItemIds: editorSourceItemIds,
+      declaredItemIds: editorSourceItemIds,
+    });
+    const editorStructureCoverage = evaluateContentWritingEditorStructureCoverage({
+      outputMarkdown: reviewedMarkdown,
+      structure: editorSourceLedger.structure,
+    });
+    const reviewMetadata: ExternalAnalysisJson = {
+      auditTarget: 'generated_draft',
+      appliedPatches: externalReview.patchApplication.applied,
+      rejectedPatches: externalReview.patchApplication.rejected,
+      patchChangedDraft: externalReview.patchApplication.changed,
+      analysisMarkdown: text(analysisResult.analysisMarkdown).slice(0, 20_000),
+      editorSourceCoverage: editorSourceCoverage as unknown as ExternalAnalysisJson,
+      editorStructureCoverage: editorStructureCoverage as unknown as ExternalAnalysisJson,
+    };
+    await assertLeaseOwned(context);
+    await persistDraftReview({
+      context,
+      sessionId: writingSession.id,
+      analysisJobId,
+      leaseGeneration,
+      markdown: reviewedMarkdown,
+      qualityReport: reviewedQuality as unknown as ExternalAnalysisJson,
+      reviewMetadata,
+    });
+
+    const externalReviewBlocked = externalReview.patchApplication.rejected.length > 0
+      || editorSourceCoverage.missingItemIds.length > 0
+      || editorStructureCoverage.passed !== true;
+    const reviewBlocked = externalReviewBlocked
+      || reviewedQuality.passed !== true
+      || reviewedQuality.blockingFailureCount > 0;
+    if (reviewBlocked) {
+      throw new ExternalAnalysisBlockedError({
+        code: externalReviewBlocked
+          ? 'full_pipeline_external_review_blocked'
+          : 'full_pipeline_quality_review_required',
+        message: externalReviewBlocked
+          ? 'The external review could not preserve every required source or structure item deterministically; the draft was saved for review.'
+          : 'The reviewed draft did not pass the mandatory quality gate and was saved for review.',
+        progress: {
+          stage: 'comprehensive_competitor_analysis',
+          stageIndex: 6,
+          stageCount: 7,
+          contentWritingSessionId,
+          analysisJobId,
+          reviewRequired: true,
+          qualityReport: reviewedQuality as unknown as ExternalAnalysisJson,
+          appliedPatchCount: externalReview.patchApplication.applied.length,
+          rejectedPatches: externalReview.patchApplication.rejected,
+          editorSourceCoverage: editorSourceCoverage as unknown as ExternalAnalysisJson,
+          editorStructureCoverage: editorStructureCoverage as unknown as ExternalAnalysisJson,
+        },
+      });
+    }
+
+    const reviewedPlainText = contentWritingMarkdownToPlainText(reviewedMarkdown);
+    const generatedHtml = parseMarkdownToArticleHtml(reviewedMarkdown, articleLanguage);
+    const preservedLinks = preserveExistingArticleLinks({
+      sourceHtml: article.content_html || '',
+      targetHtml: generatedHtml,
+    });
+    const unresolvedSafeLinks = preservedLinks.missingSafeLinks.filter(issue => (
+      issue.reason === 'anchor_missing' || issue.reason === 'anchor_ambiguous'
+    ));
+    if (unresolvedSafeLinks.length > 0) {
+      await persistDraftReview({
+        context,
+        sessionId: writingSession.id,
+        analysisJobId,
+        leaseGeneration,
+        markdown: reviewedMarkdown,
+        qualityReport: reviewedQuality as unknown as ExternalAnalysisJson,
+        reviewMetadata: {
+          ...reviewMetadata,
+          preservedLinkCount: preservedLinks.preservedCount,
+          unresolvedSafeLinks,
+        },
+      });
+      throw new ExternalAnalysisBlockedError({
+        code: 'full_pipeline_link_preservation_review_required',
+        message: 'Existing safe links could not all be preserved unambiguously; the draft was saved for review.',
+        progress: {
+          stage: 'article_application',
+          stageIndex: 7,
+          stageCount: 7,
+          contentWritingSessionId,
+          analysisJobId,
+          reviewRequired: true,
+          unresolvedSafeLinks,
+        },
+      });
+    }
+    const contentHtml = preservedLinks.html;
+    const contentJson = htmlToTipTapJson(contentHtml, articleLanguage);
+    await persistDraftReview({
+      context,
+      sessionId: writingSession.id,
+      analysisJobId,
+      leaseGeneration,
+      markdown: reviewedMarkdown,
+      qualityReport: reviewedQuality as unknown as ExternalAnalysisJson,
+      reviewMetadata: {
+        ...reviewMetadata,
+        preservedLinkCount: preservedLinks.preservedCount,
+      },
+      contentJson,
+      contentHtml,
+      plainText: reviewedPlainText,
+    });
+
+    await reportStage(context, 'article_application', 7, {
+      contentWritingSessionId,
+      analysisJobId,
+      qualityGatePolicy: 'review_required',
+      qualityScore: reviewedQuality.score,
+      qualityGatePassed: true,
+      preservedLinkCount: preservedLinks.preservedCount,
+    });
+    await assertLeaseOwned(context);
+    const { data: application, error: applicationError } = await getExternalAnalysisSupabaseAdmin()
+      .rpc('apply_full_article_pipeline_content', {
+        p_pipeline_job_id: context.job.id,
+        p_session_id: writingSession.id,
+        p_analysis_job_id: analysisJobId,
+        p_worker_id: context.workerId,
+        p_lease_generation: leaseGeneration,
+        p_baseline_save_count: baselineSaveCount,
+        p_baseline_content_hash: baselineContentHash,
+        p_reviewed_markdown: reviewedMarkdown,
+        p_content_json: contentJson,
+        p_content_html: contentHtml,
+        p_plain_text: reviewedPlainText,
+        p_quality_report: reviewedQuality,
+      });
+    if (applicationError) {
+      if (applicationError.code === '55000') throw new ExternalAnalysisOwnershipLostError();
+      if (applicationError.code === '40001') {
+        throw new ExternalAnalysisBlockedError({
+          code: 'full_pipeline_article_changed',
+          message: 'The article changed after the pipeline started; the reviewed draft was not applied.',
+          progress: {
+            stage: 'article_application',
+            stageIndex: 7,
+            stageCount: 7,
+            contentWritingSessionId,
+            analysisJobId,
+            reviewRequired: true,
+          },
+        });
+      }
+      throw applicationError;
+    }
+
+    await reportStage(context, 'article_application', 7, {
+      contentWritingSessionId,
+      analysisJobId,
+      articleAppliedAt: new Date().toISOString(),
+      application: isRecord(application) ? application : {},
+      qualityGatePolicy: 'review_required',
+      qualityScore: reviewedQuality.score,
+      qualityGatePassed: true,
+      preservedLinkCount: preservedLinks.preservedCount,
+    });
 
     return {
       result: {
@@ -672,12 +1183,14 @@ const executeFullArticlePipeline = async (
         articleId: context.job.article_id,
         contentWritingSessionId,
         articleApplied: true,
-        qualityGatePolicy: 'insert_regardless',
-        qualityGatePassed: qualityPassed,
-        qualityScore: writingSession.quality_score,
+        qualityGatePolicy: 'review_required',
+        qualityGatePassed: true,
+        qualityScore: reviewedQuality.score,
         selectedCompetitorCount: sources.length,
         analysisJobId,
-        analysisCompleted: analysis.status === 'completed',
+        analysisCompleted: true,
+        appliedPatchCount: externalReview.patchApplication.applied.length,
+        preservedLinkCount: preservedLinks.preservedCount,
         completedAt: new Date().toISOString(),
       },
       progress: {
@@ -687,9 +1200,9 @@ const executeFullArticlePipeline = async (
         contentWritingSessionId,
         articleAppliedAt: new Date().toISOString(),
         analysisJobId,
-        qualityGatePolicy: 'insert_regardless',
-        qualityGatePassed: qualityPassed,
-        qualityScore: writingSession.quality_score,
+        qualityGatePolicy: 'review_required',
+        qualityGatePassed: true,
+        qualityScore: reviewedQuality.score,
       },
     };
   } finally {

@@ -26,6 +26,7 @@ import {
   evaluateContentWritingFaqDraftIndependence,
   type ContentWritingFaqDraftIndependence,
 } from './contentWritingFaq';
+import type { ContentWritingKnowledgeBase } from './contentWritingKnowledge';
 
 export type ContentWritingQualityCriterionResult = {
   id: string;
@@ -376,7 +377,9 @@ export const addContentWritingQualityCriteria = (
   return {
     ...report,
     ...summary,
-    passed: summary.score >= report.minimumScore,
+    passed: criteria.length > 0
+      && summary.score >= report.minimumScore
+      && summary.blockingFailureCount === 0,
     criteria,
     generatedAt: new Date().toISOString(),
   };
@@ -416,11 +419,10 @@ export const evaluateContentWritingQuality = (options: {
       policyVersion: configuration.policyVersion,
       minimumScore: configuration.minimumScore,
       score: summary.score,
-      // The administrator-configured minimum score is the quality gate.
-      // Blocking failures remain visible, weighted, and repair-prioritized, but
-      // must not silently add a second threshold that the settings UI does not
-      // expose.
-      passed: summary.score >= configuration.minimumScore,
+      // A high weighted score must never hide a blocking editorial or safety
+      // failure. Both conditions are required before a draft can be published.
+      passed: summary.score >= configuration.minimumScore
+        && summary.blockingFailureCount === 0,
       blockingFailureCount: summary.blockingFailureCount,
       failedCount: summary.failedCount,
       warningCount: summary.warningCount,
@@ -431,6 +433,249 @@ export const evaluateContentWritingQuality = (options: {
       generatedAt: new Date().toISOString(),
     },
   };
+};
+
+export type ContentWritingSourceAccuracyInput = {
+  knowledge?: ContentWritingKnowledgeBase | null;
+  usedClaimIds?: readonly string[];
+  /**
+   * Used only as a conservative fallback when an older session has no
+   * persisted knowledge ledger. Existing values remain reviewable, while any
+   * value introduced by the external patch is blocked.
+   */
+  baselineMarkdown?: string;
+};
+
+export type ContentWritingSourceAccuracyAudit = {
+  numericValues: string[];
+  priceValues: string[];
+  supportedNumericValues: string[];
+  unsupportedNumericValues: string[];
+  unsupportedPriceValues: string[];
+  blockedClaimIds: string[];
+  eligibleClaimIds: string[];
+};
+
+const EXACT_NUMBER_SOURCE = String.raw`\d+(?:[.,]\d+)*`;
+const EXACT_PERCENT_PATTERN = new RegExp(
+  String.raw`(${EXACT_NUMBER_SOURCE})\s*(?:%|٪|percent|بالمئة|في\s+المئة)`,
+  'giu',
+);
+const EXACT_YEAR_PATTERN = /(?<![\p{L}\p{N}])((?:19|20)\d{2})(?![\p{L}\p{N}])/gu;
+const EXACT_DURATION_PATTERN = new RegExp(
+  String.raw`(${EXACT_NUMBER_SOURCE})\s*(hours?|days?|months?|years?|ساعة|ساعات|يوم(?:اً|ا)?|أيام|شهر|أشهر|سنة|سنوات|عام|أعوام)`,
+  'giu',
+);
+const EXACT_PRICE_PATTERN = new RegExp(
+  String.raw`(?:([$€£¥])\s*(${EXACT_NUMBER_SOURCE})|(${EXACT_NUMBER_SOURCE})\s*(USD|EUR|GBP|JPY|SAR|AED|QAR|KWD|TRY|دولار(?:اً|ا)?|ريال(?:اً|ا)?|درهم(?:اً|ا)?|دينار(?:اً|ا)?|جنيه(?:اً|ا)?|ليرة|ر\.?\s?س))`,
+  'giu',
+);
+
+const normalizeExactNumber = (value: string): string => {
+  const asciiDigits = value
+    .replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+    .replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+    .replace(/\u066B/g, '.')
+    .replace(/\u066C/g, ',');
+  const compact = asciiDigits.replace(/[^\d.,]/g, '');
+  if (!compact) return '';
+  const withoutThousands = /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(compact)
+    ? compact.replace(/,/g, '')
+    : compact.includes('.')
+      ? compact.replace(/,/g, '')
+      : /^\d+,\d{1,2}$/.test(compact)
+        ? compact.replace(',', '.')
+        : compact.replace(/,/g, '');
+  const [integerPart = '0', decimalPart = ''] = withoutThousands.split('.');
+  const integer = integerPart.replace(/^0+(?=\d)/, '') || '0';
+  const decimal = decimalPart.replace(/0+$/, '');
+  return decimal ? `${integer}.${decimal}` : integer;
+};
+
+const normalizeDigitsInText = (value: string): string => value
+  .replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+  .replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+  .replace(/\u066B/g, '.')
+  .replace(/\u066C/g, ',');
+
+const normalizeDurationUnit = (value: string): string => {
+  const unit = value.toLocaleLowerCase();
+  if (/^(?:hours?|ساعة|ساعات)$/.test(unit)) return 'hour';
+  if (/^(?:days?|يوم(?:اً|ا)?|أيام)$/.test(unit)) return 'day';
+  if (/^(?:months?|شهر|أشهر)$/.test(unit)) return 'month';
+  return 'year';
+};
+
+const normalizeCurrency = (value: string): string => {
+  const currency = value.trim().toLocaleUpperCase();
+  if (currency === '$' || currency.startsWith('دولار')) return 'USD';
+  if (currency === '€') return 'EUR';
+  if (currency === '£' || currency.startsWith('جنيه')) return 'GBP';
+  if (currency === '¥') return 'JPY';
+  if (currency.startsWith('ريال') || /^ر\.?\s?س$/u.test(value.trim())) return 'SAR';
+  if (currency.startsWith('درهم')) return 'AED';
+  if (currency.startsWith('دينار')) return 'KWD';
+  if (currency.startsWith('ليرة')) return 'TRY';
+  return currency;
+};
+
+const collectExactClaimValueKeys = (value: string): string[] => {
+  const textContent = normalizeDigitsInText(contentWritingMarkdownToPlainText(value));
+  const percentMatches = Array.from(textContent.matchAll(EXACT_PERCENT_PATTERN));
+  const durationMatches = Array.from(textContent.matchAll(EXACT_DURATION_PATTERN));
+  const priceMatches = Array.from(textContent.matchAll(EXACT_PRICE_PATTERN));
+  const occupiedRanges = [...percentMatches, ...durationMatches, ...priceMatches]
+    .map(match => ({
+      start: match.index,
+      end: match.index + match[0].length,
+    }));
+  const yearMatches = Array.from(textContent.matchAll(EXACT_YEAR_PATTERN)).filter(match => (
+    !occupiedRanges.some(range => match.index >= range.start && match.index < range.end)
+  ));
+  const keys = [
+    ...percentMatches.map(match => (
+      `percent:${normalizeExactNumber(match[1])}`
+    )),
+    ...yearMatches.map(match => (
+      `year:${normalizeExactNumber(match[1])}`
+    )),
+    ...durationMatches.map(match => (
+      `duration:${normalizeExactNumber(match[1])}:${normalizeDurationUnit(match[2])}`
+    )),
+    ...priceMatches.map(match => {
+      const currency = normalizeCurrency(match[1] || match[4]);
+      const amount = normalizeExactNumber(match[2] || match[3]);
+      return `price:${amount}:${currency}`;
+    }),
+  ];
+  return Array.from(new Set(keys.filter(key => !key.includes('::'))));
+};
+
+const collectExactPriceValueKeys = (value: string): string[] => (
+  collectExactClaimValueKeys(value).filter(key => key.startsWith('price:'))
+);
+
+const formatExactClaimValueKey = (key: string): string => {
+  const [kind, value, qualifier] = key.split(':');
+  if (kind === 'percent') return `${value}%`;
+  if (kind === 'year') return value;
+  if (kind === 'duration') return `${value} ${qualifier}`;
+  if (kind === 'price') return `${value} ${qualifier}`;
+  return key;
+};
+
+export const auditContentWritingSourceAccuracy = (options: {
+  markdown: string;
+  sourceAccuracy?: ContentWritingSourceAccuracyInput;
+}): ContentWritingSourceAccuracyAudit => {
+  const numericValues = collectExactClaimValueKeys(options.markdown);
+  const priceValues = collectExactPriceValueKeys(options.markdown);
+  const knowledge = options.sourceAccuracy?.knowledge || null;
+  const usedClaimIds = new Set(options.sourceAccuracy?.usedClaimIds || []);
+  const primarySourceIds = new Set(knowledge?.sourceRegistry.primarySourceIds || []);
+  const currentPrimarySourceIds = new Set(
+    (knowledge?.sourceRegistry.sources || [])
+      .filter(source => source.freshness === 'current' && primarySourceIds.has(source.id))
+      .map(source => source.id),
+  );
+  const eligibleClaims = (knowledge?.claimLedger.claims || []).filter(claim => (
+    usedClaimIds.has(claim.id)
+    && claim.usagePolicy !== 'blocked'
+    && claim.supportingSourceIds.some(sourceId => currentPrimarySourceIds.has(sourceId))
+  ));
+  const supportedNumericValues = new Set(
+    eligibleClaims.flatMap(claim => collectExactClaimValueKeys(claim.statement)),
+  );
+  // Older sessions may not have a recoverable knowledge ledger. In that case
+  // only values already present in the reviewed baseline are grandfathered;
+  // a patch can never smuggle a different value through a global "some claim"
+  // boolean.
+  if (!knowledge && options.sourceAccuracy?.baselineMarkdown) {
+    collectExactClaimValueKeys(options.sourceAccuracy.baselineMarkdown)
+      .forEach(value => supportedNumericValues.add(value));
+  }
+  const financialClaimValues = new Set(
+    eligibleClaims
+      .filter(claim => ['statistic', 'time_sensitive', 'financial'].includes(claim.claimType))
+      .flatMap(claim => collectExactPriceValueKeys(claim.statement)),
+  );
+  if (!knowledge && options.sourceAccuracy?.baselineMarkdown) {
+    collectExactPriceValueKeys(options.sourceAccuracy.baselineMarkdown)
+      .forEach(value => financialClaimValues.add(value));
+  }
+  const blockedClaimIds = (knowledge?.claimLedger.claims || [])
+    .filter(claim => usedClaimIds.has(claim.id) && claim.usagePolicy === 'blocked')
+    .map(claim => claim.id);
+  return {
+    numericValues,
+    priceValues,
+    supportedNumericValues: Array.from(supportedNumericValues),
+    unsupportedNumericValues: numericValues.filter(value => !supportedNumericValues.has(value)),
+    unsupportedPriceValues: priceValues.filter(value => !financialClaimValues.has(value)),
+    blockedClaimIds,
+    eligibleClaimIds: eligibleClaims.map(claim => claim.id),
+  };
+};
+
+export const applyContentWritingSourceAccuracyGuard = (options: {
+  report: ContentWritingQualityReport;
+  markdown: string;
+  sourceAccuracy?: ContentWritingSourceAccuracyInput;
+}): ContentWritingQualityReport => {
+  const audit = auditContentWritingSourceAccuracy(options);
+  const criteria: ContentWritingQualityCriterionResult[] = [];
+  if (audit.blockedClaimIds.length > 0) {
+    criteria.push({
+      id: 'source.blockedClaimUsage',
+      title: 'سلامة الادعاءات المستخدمة',
+      status: 'fail',
+      severity: 'blocking',
+      weight: 3,
+      current: audit.blockedClaimIds.join(', '),
+      required: 'صفر ادعاءات محظورة',
+      violationCount: audit.blockedClaimIds.length,
+      messages: audit.blockedClaimIds.map(
+        id => `الادعاء ${id} محظور حتى يكتمل التحقق الخارجي.`,
+      ),
+    });
+  }
+  if (audit.priceValues.length > 0) {
+    criteria.push({
+      id: 'source.exactPrices',
+      title: 'دقة الأسعار والقيم المالية',
+      status: audit.unsupportedPriceValues.length === 0 ? 'pass' : 'fail',
+      severity: 'blocking',
+      weight: 3,
+      current: audit.unsupportedPriceValues.length === 0
+        ? 'كل قيمة مالية دقيقة مرتبطة بادعاء مناسب ومصدر أولي حالي'
+        : audit.unsupportedPriceValues.map(formatExactClaimValueKey).join(', '),
+      required: 'كل سعر يطابق قيمة الادعاء المستخدم الذي تدعمه مادة رسمية أو أولية حالية',
+      violationCount: audit.unsupportedPriceValues.length,
+      messages: audit.unsupportedPriceValues.slice(0, 12).map(
+        value => `القيمة المالية ${formatExactClaimValueKey(value)} لا تطابق ادعاءً ماليًا مستخدمًا وموثقًا من مصدر أولي حالي.`,
+      ),
+    });
+  }
+  if (audit.numericValues.length > 0) {
+    criteria.push({
+      id: 'source.numericClaims',
+      title: 'توثيق القيم الرقمية الدقيقة',
+      status: audit.unsupportedNumericValues.length === 0 ? 'pass' : 'fail',
+      severity: 'blocking',
+      weight: 3,
+      current: audit.unsupportedNumericValues.length === 0
+        ? 'كل قيمة رقمية تطابق ادعاءً مستخدمًا وموثقًا'
+        : audit.unsupportedNumericValues.map(formatExactClaimValueKey).join(', '),
+      required: 'كل رقم أو نسبة أو تاريخ أو مدة يطابق قيمة في ادعاء مسموح مرتبط بمصدر أولي حالي',
+      violationCount: audit.unsupportedNumericValues.length,
+      messages: audit.unsupportedNumericValues.slice(0, 12).map(
+        value => `القيمة الرقمية ${formatExactClaimValueKey(value)} لا تطابق أي ادعاء مستخدم ومسموح وموثق من مصدر أولي حالي.`,
+      ),
+    });
+  }
+  return criteria.length > 0
+    ? addContentWritingQualityCriteria(options.report, criteria)
+    : options.report;
 };
 
 export const buildContentWritingRepairPrompt = (options: {
@@ -536,20 +781,280 @@ export const normalizeContentWritingQualityReport = (value: unknown): ContentWri
       messages: Array.isArray(item.messages) ? item.messages.map(toText).filter(Boolean).slice(0, 8) : [],
     }];
   });
+  const summary = summarizeQualityCriteria(criteria);
+  const normalizedMinimumScore = Math.max(0, Math.min(100, Math.round(minimumScore)));
   return {
     policyVersion: Math.max(1, Math.round(policyVersion)),
-    minimumScore: Math.max(0, Math.min(100, Math.round(minimumScore))),
-    score: Math.max(0, Math.min(100, Math.round(score))),
-    // Recompute the gate for persisted reports created before the minimum score
-    // became the single authoritative pass condition.
-    passed: score >= minimumScore,
-    blockingFailureCount: Math.max(0, Number(value.blockingFailureCount) || 0),
-    failedCount: Math.max(0, Number(value.failedCount) || 0),
-    warningCount: Math.max(0, Number(value.warningCount) || 0),
-    passedCount: Math.max(0, Number(value.passedCount) || 0),
+    minimumScore: normalizedMinimumScore,
+    score: summary.score,
+    // Persisted counters and `passed` are derived data. Recompute them from the
+    // normalized criteria so an old or inconsistent report cannot bypass the
+    // blocking-quality gate.
+    passed: criteria.length > 0
+      && summary.score >= normalizedMinimumScore
+      && summary.blockingFailureCount === 0,
+    blockingFailureCount: summary.blockingFailureCount,
+    failedCount: summary.failedCount,
+    warningCount: summary.warningCount,
+    passedCount: summary.passedCount,
     wordCount: Math.max(0, Number(value.wordCount) || 0),
     repairPasses: Math.max(0, Number(value.repairPasses) || 0),
     criteria,
     generatedAt: toText(value.generatedAt) || new Date(0).toISOString(),
+  };
+};
+
+export type ExternalReviewPatchApplicationReason =
+  | 'patch_not_object'
+  | 'unsupported_operation'
+  | 'missing_target_text'
+  | 'target_not_found'
+  | 'target_not_unique'
+  | 'missing_anchor_text'
+  | 'anchor_not_found'
+  | 'anchor_not_unique'
+  | 'missing_content_markdown'
+  | 'content_already_present'
+  | 'merge_target_not_found'
+  | 'merge_target_not_unique'
+  | 'no_change';
+
+export type ExternalReviewPatchApplicationItem = {
+  index: number;
+  operation: string;
+  marker: string;
+};
+
+export type ExternalReviewPatchRejection = ExternalReviewPatchApplicationItem & {
+  reason: ExternalReviewPatchApplicationReason;
+};
+
+export type ExternalReviewPatchApplication = {
+  markdown: string;
+  changed: boolean;
+  applied: ExternalReviewPatchApplicationItem[];
+  rejected: ExternalReviewPatchRejection[];
+};
+
+const EXTERNAL_REVIEW_REPLACE_OPERATIONS = new Set([
+  'replace_block',
+  'replace_text',
+  'delete_block',
+]);
+
+const EXTERNAL_REVIEW_INSERT_OPERATIONS = new Set([
+  'insert_after_heading',
+  'insert_before_heading',
+  'append_to_section',
+  'insert_before_faq',
+  'insert_before_conclusion',
+  'append_to_article',
+]);
+
+const countLiteralOccurrences = (value: string, search: string): number => {
+  if (!search) return 0;
+  let count = 0;
+  let cursor = 0;
+  while (cursor <= value.length - search.length) {
+    const index = value.indexOf(search, cursor);
+    if (index < 0) break;
+    count += 1;
+    cursor = index + Math.max(1, search.length);
+  }
+  return count;
+};
+
+const joinMarkdownBlocks = (...values: string[]): string => values
+  .map(value => value.trim())
+  .filter(Boolean)
+  .join('\n\n');
+
+/**
+ * Applies external-review patches without fuzzy matching. Every destructive
+ * target and every insertion anchor must occur exactly once in the current
+ * draft. A patch is preflighted in full (including its optional merge-delete)
+ * before any part of that patch is committed.
+ */
+export const applyExternalReviewPatchesToContentWritingMarkdown = (options: {
+  markdown: string;
+  patches: readonly unknown[];
+}): ExternalReviewPatchApplication => {
+  const originalMarkdown = String(options.markdown || '').replace(/\r\n?/g, '\n');
+  let markdown = originalMarkdown;
+  const applied: ExternalReviewPatchApplicationItem[] = [];
+  const rejected: ExternalReviewPatchRejection[] = [];
+
+  const reject = (
+    item: ExternalReviewPatchApplicationItem,
+    reason: ExternalReviewPatchApplicationReason,
+  ): void => {
+    rejected.push({ ...item, reason });
+  };
+
+  (Array.isArray(options.patches) ? options.patches : []).forEach((candidate, index) => {
+    if (!isRecord(candidate)) {
+      reject({ index, operation: '', marker: '' }, 'patch_not_object');
+      return;
+    }
+    const operation = toText(candidate.operation);
+    const item = {
+      index,
+      operation,
+      marker: toText(candidate.marker ?? candidate.id) || `patch_${index + 1}`,
+    };
+    if (
+      !EXTERNAL_REVIEW_REPLACE_OPERATIONS.has(operation)
+      && !EXTERNAL_REVIEW_INSERT_OPERATIONS.has(operation)
+    ) {
+      reject(item, 'unsupported_operation');
+      return;
+    }
+
+    const contentMarkdown = toText(
+      candidate.contentMarkdown ?? candidate.content ?? candidate.text,
+    ).replace(/\r\n?/g, '\n');
+    const targetText = toText(candidate.targetText).replace(/\r\n?/g, '\n');
+    const anchorText = toText(candidate.anchorText).replace(/\r\n?/g, '\n');
+    const mergeDeleteTargetText = toText(candidate.mergeDeleteTargetText)
+      .replace(/\r\n?/g, '\n');
+
+    if (operation !== 'delete_block' && !contentMarkdown) {
+      reject(item, 'missing_content_markdown');
+      return;
+    }
+    if (contentMarkdown && countLiteralOccurrences(markdown, contentMarkdown) > 0) {
+      reject(item, 'content_already_present');
+      return;
+    }
+
+    if (EXTERNAL_REVIEW_REPLACE_OPERATIONS.has(operation)) {
+      if (!targetText) {
+        reject(item, 'missing_target_text');
+        return;
+      }
+      const targetCount = countLiteralOccurrences(markdown, targetText);
+      if (targetCount === 0) {
+        reject(item, 'target_not_found');
+        return;
+      }
+      if (targetCount !== 1) {
+        reject(item, 'target_not_unique');
+        return;
+      }
+    } else {
+      if (!anchorText) {
+        reject(item, 'missing_anchor_text');
+        return;
+      }
+      const anchorCount = countLiteralOccurrences(markdown, anchorText);
+      if (anchorCount === 0) {
+        reject(item, 'anchor_not_found');
+        return;
+      }
+      if (anchorCount !== 1) {
+        reject(item, 'anchor_not_unique');
+        return;
+      }
+    }
+
+    if (mergeDeleteTargetText) {
+      const mergeTargetCount = countLiteralOccurrences(markdown, mergeDeleteTargetText);
+      if (mergeTargetCount === 0) {
+        reject(item, 'merge_target_not_found');
+        return;
+      }
+      if (mergeTargetCount !== 1 || mergeDeleteTargetText === targetText) {
+        reject(item, 'merge_target_not_unique');
+        return;
+      }
+    }
+
+    let candidateMarkdown = markdown;
+    if (EXTERNAL_REVIEW_REPLACE_OPERATIONS.has(operation)) {
+      candidateMarkdown = operation === 'delete_block'
+        ? candidateMarkdown.replace(targetText, '')
+        : candidateMarkdown.replace(targetText, contentMarkdown);
+    } else if (operation === 'append_to_article') {
+      candidateMarkdown = joinMarkdownBlocks(candidateMarkdown, contentMarkdown);
+    } else if (
+      operation === 'insert_before_heading'
+      || operation === 'insert_before_faq'
+      || operation === 'insert_before_conclusion'
+    ) {
+      candidateMarkdown = candidateMarkdown.replace(
+        anchorText,
+        joinMarkdownBlocks(contentMarkdown, anchorText),
+      );
+    } else {
+      candidateMarkdown = candidateMarkdown.replace(
+        anchorText,
+        joinMarkdownBlocks(anchorText, contentMarkdown),
+      );
+    }
+    if (mergeDeleteTargetText) {
+      candidateMarkdown = candidateMarkdown.replace(mergeDeleteTargetText, '');
+    }
+    candidateMarkdown = candidateMarkdown
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (candidateMarkdown === markdown) {
+      reject(item, 'no_change');
+      return;
+    }
+    markdown = candidateMarkdown;
+    applied.push(item);
+  });
+
+  return {
+    markdown,
+    changed: markdown !== originalMarkdown,
+    applied,
+    rejected,
+  };
+};
+
+export const reevaluateContentWritingQualityAfterExternalReview = (options: {
+  markdown: string;
+  patches: readonly unknown[];
+  articleTitle: string;
+  keywords: Keywords;
+  goalContext: GoalContext;
+  articleLanguage: 'ar' | 'en';
+  configuration?: {
+    policyVersion?: number;
+    minimumScore?: number;
+    maxRepairPasses?: number;
+    policy?: unknown;
+  };
+  repairPasses?: number;
+  sourceAccuracy?: ContentWritingSourceAccuracyInput;
+}): {
+  patchApplication: ExternalReviewPatchApplication;
+  evaluation: ContentWritingQualityEvaluation;
+} => {
+  const patchApplication = applyExternalReviewPatchesToContentWritingMarkdown(options);
+  const evaluation = evaluateContentWritingQuality({
+    markdown: patchApplication.markdown,
+    articleTitle: options.articleTitle,
+    keywords: options.keywords,
+    goalContext: options.goalContext,
+    articleLanguage: options.articleLanguage,
+    configuration: options.configuration,
+    repairPasses: options.repairPasses,
+  });
+  return {
+    patchApplication,
+    evaluation: {
+      ...evaluation,
+      // External patches are evaluated against the same deterministic
+      // source/claim guard as the original writing workflow. Re-running only
+      // the generic score would silently drop every `source.*` blocker.
+      report: applyContentWritingSourceAccuracyGuard({
+        report: evaluation.report,
+        markdown: patchApplication.markdown,
+        sourceAccuracy: options.sourceAccuracy,
+      }),
+    },
   };
 };

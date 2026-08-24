@@ -452,6 +452,27 @@ export const listExternalAnalysisJobs = async (
   );
 };
 
+/**
+ * Lightweight status read for the editor's full-workflow monitor. It avoids
+ * downloading input snapshots, generated article bodies, and unrelated jobs
+ * on every poll.
+ */
+export const loadLatestFullArticlePipeline = async (
+  articleId: string,
+): Promise<ExternalAnalysisJobRow | null> => {
+  if (!articleId.trim()) return null;
+  const { data, error } = await getSupabaseClient()
+    .from('ai_external_analysis_jobs')
+    .select([SUMMARY_JOB_SELECT, 'input_snapshot'].join(','))
+    .eq('article_id', articleId)
+    .eq('job_type', 'full_article_pipeline')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toJobRow(data as Record<string, any>) : null;
+};
+
 export const listExternalAnalysisReportJobs = async (options: {
   from: string;
   to: string;

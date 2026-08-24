@@ -69,7 +69,7 @@ type GeminiErrorDetails = {
   message: string;
 };
 
-type GeminiAttemptFailureReason = "quota" | "auth" | "server" | "timeout" | "blocked" | "unknown";
+type GeminiAttemptFailureReason = "quota" | "auth" | "server" | "timeout" | "blocked" | "incompatible" | "unknown";
 type GeminiRotatableKeyFailureReason = Exclude<GeminiAttemptFailureReason, "timeout">;
 
 type GeminiAttemptDetail = {
@@ -662,6 +662,12 @@ export const getGeminiKeyAvailabilityWaitMs = (
 
 const getGeminiFailureReason = (details: GeminiErrorDetails): GeminiRotatableKeyFailureReason => {
   if (
+    details.status === 404
+    || /model[^\n]{0,80}(?:not found|unsupported|not available)|NOT_FOUND/i.test(details.message)
+  ) {
+    return "incompatible";
+  }
+  if (
     details.status === 429 ||
     /quota|RESOURCE_EXHAUSTED|rate.?limit|too many requests|exceeded/i.test(details.message)
   ) {
@@ -691,6 +697,8 @@ const getGeminiFailureReasonLabel = (reason: GeminiAttemptFailureReason): string
       return "انتهاء مهلة النموذج";
     case "blocked":
       return "حظر أمان من Gemini";
+    case "incompatible":
+      return "المفتاح غير متوافق مع الموديل (404)";
     default:
       return "سبب غير معروف";
   }
@@ -720,6 +728,7 @@ const summarizeAttemptReasons = (attempts: GeminiAttemptDetail[]): Record<Gemini
     server: new Set<string>(),
     timeout: new Set<string>(),
     blocked: new Set<string>(),
+    incompatible: new Set<string>(),
     unknown: new Set<string>(),
   });
 
@@ -729,6 +738,7 @@ const summarizeAttemptReasons = (attempts: GeminiAttemptDetail[]): Record<Gemini
     server: grouped.server.size,
     timeout: grouped.timeout.size,
     blocked: grouped.blocked.size,
+    incompatible: grouped.incompatible.size,
     unknown: grouped.unknown.size,
   };
 };
@@ -756,6 +766,7 @@ const buildGeminiFailureMessage = (
     summary.server ? `${summary.server} خطأ خادم` : '',
     summary.timeout ? `${summary.timeout} انتهاء مهلة` : '',
     summary.blocked ? `${summary.blocked} حظر أمان` : '',
+    summary.incompatible ? `${summary.incompatible} عدم توافق موديل/مفتاح (404)` : '',
     summary.unknown ? `${summary.unknown} غير معروف` : '',
   ].filter(Boolean);
 

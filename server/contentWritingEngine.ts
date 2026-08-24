@@ -72,6 +72,8 @@ type ArticleRow = {
   id: string;
   title: string | null;
   plain_text: string | null;
+  content_json: unknown;
+  content_html: string | null;
   keywords: unknown;
   goal_context: unknown;
   metadata: unknown;
@@ -212,7 +214,7 @@ const readArticleInput = async (articleId: string): Promise<{
   const [articleResult, competitorResult] = await Promise.all([
     supabase
       .from('articles')
-      .select('id,title,plain_text,keywords,goal_context,metadata,article_language,updated_at')
+      .select('id,title,plain_text,content_json,content_html,keywords,goal_context,metadata,article_language,updated_at')
       .eq('id', articleId)
       .maybeSingle(),
     supabase
@@ -269,6 +271,8 @@ const readArticleInput = async (articleId: string): Promise<{
       title: toText(article.title),
       language: article.article_language === 'en' ? 'en' : 'ar',
       articleText: typeof article.plain_text === 'string' ? article.plain_text : '',
+      articleContentJson: article.content_json,
+      articleContentHtml: typeof article.content_html === 'string' ? article.content_html : '',
       keywords: normalizeInputRecord(article.keywords),
       goalContext: normalizeInputRecord(article.goal_context),
       competitors: Array.from(competitorsByPosition.values())
@@ -417,8 +421,8 @@ export const prepareContentWritingConversation = async (
       )
     : (
         articleSource.input.language === 'en'
-          ? `- Automatic length: the largest actual competitor text has ${lengthTarget.baselineCompetitor?.wordCount || 0} words; the center is ×1.20 (${lengthTarget.centerWords}) and the passing range uses ±10%.`
-          : `- الطول التلقائي: أكبر نص منافس فعلي يحتوي ${lengthTarget.baselineCompetitor?.wordCount || 0} كلمة؛ حُسب المركز بضربه ×1.20 (${lengthTarget.centerWords}) وهامش النجاح ±10%.`
+          ? `- Automatic length: the robust largest non-outlier competitor baseline has ${lengthTarget.baselineCompetitor?.wordCount || 0} words (${lengthTarget.excludedOutlierCount} outliers excluded); the center is ×1.20 (${lengthTarget.centerWords}) and the passing range uses ±10%.`
+          : `- الطول التلقائي: خط الأساس المتين لأكبر منافس غير شاذ يحتوي ${lengthTarget.baselineCompetitor?.wordCount || 0} كلمة (استُبعد ${lengthTarget.excludedOutlierCount} شاذ)؛ حُسب المركز بضربه ×1.20 (${lengthTarget.centerWords}) وهامش النجاح ±10%.`
       );
   const qualityContract = `${baseQualityContract}\n${lengthDecisionLine}`;
   const competitorPhraseIntelligence = createCompetitorPhraseIntelligence({
@@ -430,7 +434,11 @@ export const prepareContentWritingConversation = async (
     articleLanguage: articleSource.input.language === 'en' ? 'en' : 'ar',
     enabled: settings.competitorPhraseIntelligenceEnabled,
   });
-  const editorSourceLedger = buildContentWritingEditorSourceLedger(articleSource.input.articleText);
+  const editorSourceLedger = buildContentWritingEditorSourceLedger({
+    plainText: articleSource.input.articleText,
+    contentJson: articleSource.input.articleContentJson,
+    contentHtml: articleSource.input.articleContentHtml,
+  });
   const qualityContractHeading = articleSource.input.language === 'en'
     ? 'Mandatory quality criteria for this session:'
     : 'معايير الجودة الملزمة لهذه الجلسة:';
@@ -498,10 +506,15 @@ ${JSON.stringify(editorSourceLedger.items.map(item => ({
 })), null, 2)}
 </mandatory_editor_source_manifest>
 
+<protected_editor_structure_manifest>
+${JSON.stringify(editorSourceLedger.structure, null, 2)}
+</protected_editor_structure_manifest>
+
 قواعد إلزامية لنص المحرر:
 - كل عنصر E في السجل مطلب دلالي واجب التغطية داخل المقالة الجديدة.
 - يجوز إعادة الصياغة والدمج ومنع التكرار، لكن لا يجوز إسقاط المعلومة أو الفكرة أو التوصية.
 - لا تنشر معلومة خطرة أو متعارضة بوصفها حقيقة؛ عالجها بصياغة آمنة ومتحفظة وأبقها ظاهرة في سجل التدقيق.
+- حافظ على كل href حرفيًا، وعلى العناوين بمستوياتها، وعلى القوائم والجداول بأعدادها وأبعادها الدنيا الواردة في سجل البنية. لا تحوّلها إلى فقرات عادية.
 - عند إنتاج JSON لقسم، صرّح بمعرّفات عناصر المحرر التي غطاها فعليًا.
 `
     : compactArticleContextWithoutRepeatedEditorText;
@@ -514,7 +527,10 @@ ${JSON.stringify(editorSourceLedger.items.map(item => ({
       updatedAt: articleSource.article.updated_at,
     },
     messages,
-    inputHash: createInputHash(messages.map(message => message.content)),
+    inputHash: createInputHash([
+      ...messages.map(message => message.content),
+      JSON.stringify(editorSourceLedger.structure),
+    ]),
     templateRegistryVersion: SETTINGS_REGISTRY_VERSION,
     estimatedInputTokens,
     maxInputTokens: bundle.maxInputTokens,
@@ -536,12 +552,21 @@ ${JSON.stringify(editorSourceLedger.items.map(item => ({
         contentLength: competitor.content.length,
         wordCount: countContentWritingTargetWords(competitor.content),
       })),
+      competitorQualityAudit: bundle.competitorQualityAudit,
       competitorChunks: bundle.competitorChunks,
       competitorPhraseIntelligenceEnabled: settings.competitorPhraseIntelligenceEnabled,
       competitorPhraseIntelligence,
       editorSourceLedger,
+      editorDocumentSnapshot: {
+        version: 1,
+        capturedUpdatedAt: articleSource.article.updated_at,
+        plainText: articleSource.input.articleText,
+        contentJson: articleSource.input.articleContentJson ?? null,
+        contentHtml: articleSource.input.articleContentHtml || '',
+        structure: editorSourceLedger.structure,
+      },
       editorSourcePolicy: editorSourceLedger.enabled
-        ? 'mandatory_semantic_coverage_with_targeted_repair'
+        ? 'mandatory_semantic_and_structural_coverage_with_targeted_repair'
         : 'inactive_empty_editor',
       dualKnowledgeExtractionEnabled: settings.dualKnowledgeExtractionEnabled,
       multiCandidateGenerationEnabled: settings.multiCandidateGenerationEnabled,

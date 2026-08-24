@@ -59,11 +59,10 @@ import {
   PROMPT_TEMPLATE_IDS,
 } from '../constants/promptRegistry';
 import {
-  addContentWritingQualityCriteria,
+  applyContentWritingSourceAccuracyGuard,
   buildContentWritingRepairPrompt,
   evaluateContentWritingQuality,
   normalizeContentWritingQualityReport,
-  type ContentWritingQualityCriterionResult,
   type ContentWritingQualityReport,
 } from '../utils/contentWritingQuality';
 import {
@@ -125,9 +124,12 @@ import { sumAiUsage } from './aiUsage';
 import {
   buildContentWritingEditorSourceLedger,
   evaluateContentWritingEditorSourceCoverage,
+  evaluateContentWritingEditorStructureCoverage,
   normalizeContentWritingEditorSourceLedger,
+  restoreContentWritingEditorLinks,
   type ContentWritingEditorSourceCoverageAudit,
   type ContentWritingEditorSourceItem,
+  type ContentWritingEditorStructureCoverageAudit,
 } from '../utils/contentWritingEditorSource';
 
 type JsonObject = Record<string, unknown>;
@@ -217,48 +219,6 @@ const getQualityRuntime = (
     keywords,
     goalContext,
   };
-};
-
-const EXACT_PRICE_PATTERN = /(?:[$€£¥]\s*\d[\d.,]*|\d[\d.,]*\s*(?:USD|EUR|GBP|SAR|AED|QAR|KWD|دولار(?:اً|ا)?|ريال(?:اً|ا)?|درهم(?:اً|ا)?|دينار(?:اً|ا)?|جنيه(?:اً|ا)?|ليرة|ر\.?\s?س))/iu;
-
-const applySourceAccuracyGuard = (options: {
-  report: ContentWritingQualityReport;
-  markdown: string;
-  knowledge: ContentWritingKnowledgeBase;
-  usedClaimIds: readonly string[];
-}): ContentWritingQualityReport => {
-  if (!EXACT_PRICE_PATTERN.test(options.markdown)) return options.report;
-  const usedClaimIds = new Set(options.usedClaimIds);
-  const primarySourceIds = new Set(options.knowledge.sourceRegistry.primarySourceIds);
-  const currentPrimarySourceIds = new Set(
-    options.knowledge.sourceRegistry.sources
-      .filter(source => source.freshness === 'current' && primarySourceIds.has(source.id))
-      .map(source => source.id),
-  );
-  const hasSupportedPriceClaim = options.knowledge.claimLedger.claims.some(claim => (
-    usedClaimIds.has(claim.id)
-    && claim.usagePolicy !== 'blocked'
-    && ['statistic', 'time_sensitive', 'financial'].includes(claim.claimType)
-    && claim.supportingSourceIds.some(sourceId => currentPrimarySourceIds.has(sourceId))
-  ));
-  const existingWeight = Math.max(
-    1,
-    options.report.criteria.reduce((sum, criterion) => sum + Math.max(1, criterion.weight), 0),
-  );
-  const criterion: ContentWritingQualityCriterionResult = {
-    id: 'source.exactPrices',
-    title: 'دقة الأسعار والقيم المالية',
-    status: hasSupportedPriceClaim ? 'pass' : 'fail',
-    severity: 'blocking',
-    weight: existingWeight,
-    current: hasSupportedPriceClaim ? 'مصدر أولي حالي مرتبط' : 'سعر بلا مصدر أولي حالي مرتبط',
-    required: 'ادعاء مستخدم ومسموح تدعمه مادة رسمية أو أولية حالية',
-    violationCount: hasSupportedPriceClaim ? 0 : 1,
-    messages: hasSupportedPriceClaim
-      ? []
-      : ['يُحظر اعتماد سعر دقيق من صفحات المنافسين وحدها. أضف مصدرًا رسميًا حاليًا أو احذف القيمة الرقمية.'],
-  };
-  return addContentWritingQualityCriteria(options.report, [criterion]);
 };
 
 const getArticleSnapshot = (session: ContentWritingSession): { title: string; language: string } => {
@@ -410,6 +370,12 @@ export const executeStructuredContentWritingWorkflow = async (
     items: editorSourceLedger.items,
     requiredItemIds,
     declaredItemIds,
+  });
+  const verifyEditorStructureCoverage = (
+    outputMarkdown: string,
+  ): ContentWritingEditorStructureCoverageAudit => evaluateContentWritingEditorStructureCoverage({
+    outputMarkdown,
+    structure: editorSourceLedger.structure,
   });
   const promptTemplates = isRecord(options.session.context_snapshot?.promptTemplates)
     ? options.session.context_snapshot.promptTemplates as Record<string, string>
@@ -1735,7 +1701,7 @@ export const executeStructuredContentWritingWorkflow = async (
     usedClaimIds: Array.from(sectionCoverageByKey.values())
       .flatMap(coverage => coverage.usedClaimIds),
   });
-  const assembledDraft = assembleContentWritingDraft({
+  let assembledDraft = assembleContentWritingDraft({
     articleTitle: article.title,
     language: article.language,
     outline,
@@ -1743,6 +1709,11 @@ export const executeStructuredContentWritingWorkflow = async (
     goalContext,
     primaryKeyword,
   });
+  const assembledLinkRestoration = restoreContentWritingEditorLinks({
+    markdown: assembledDraft,
+    structure: editorSourceLedger.structure,
+  });
+  assembledDraft = assembledLinkRestoration.markdown;
   const editorSourceCoverageAfterRepairs = verifyEditorSourceCoverage(
     assembledDraft,
     editorSourceItemIds,
@@ -1756,6 +1727,17 @@ export const executeStructuredContentWritingWorkflow = async (
       message: `Mandatory editor-source coverage is incomplete: ${editorSourceCoverageAfterRepairs.missingItemIds.join(', ')}.`,
       step: coverageAuditDefinition,
       metadata: { editorSourceCoverage: editorSourceCoverageAfterRepairs },
+    });
+  }
+  const editorStructureCoverageAfterRepairs = verifyEditorStructureCoverage(assembledDraft);
+  if (!editorStructureCoverageAfterRepairs.passed) {
+    return createWorkflowFailure({
+      session: options.session,
+      status: 422,
+      code: 'content_writing_editor_structure_coverage_incomplete',
+      message: 'The generated draft did not preserve all protected editor headings, links, lists, and tables.',
+      step: coverageAuditDefinition,
+      metadata: { editorStructureCoverage: editorStructureCoverageAfterRepairs },
     });
   }
   const baseFinalDefinition = definitions.find(definition => definition.type === 'final_review')!;
@@ -1777,7 +1759,7 @@ export const executeStructuredContentWritingWorkflow = async (
   const getUsedClaimIds = (): string[] => Array.from(activeSectionCoverageByKey.values())
     .flatMap(coverage => coverage.usedClaimIds);
   let qualityReport: ContentWritingQualityReport | null = qualityRuntime
-    ? applySourceAccuracyGuard({
+    ? applyContentWritingSourceAccuracyGuard({
         report: evaluateContentWritingQuality({
         markdown: finalOutput,
         articleTitle: article.title,
@@ -1788,8 +1770,10 @@ export const executeStructuredContentWritingWorkflow = async (
         repairPasses,
         }).report,
         markdown: finalOutput,
-        knowledge,
-        usedClaimIds: getUsedClaimIds(),
+        sourceAccuracy: {
+          knowledge,
+          usedClaimIds: getUsedClaimIds(),
+        },
       })
     : null;
   let nextRevisionOrdinal = finalDefinition.ordinal + 1;
@@ -1902,8 +1886,22 @@ export const executeStructuredContentWritingWorkflow = async (
             ? ['editor_source_coverage_decreased']
             : [],
         };
+        const editorStructureCoverageBeforeRevision = verifyEditorStructureCoverage(
+          draftBeforeRevision,
+        );
+        const editorStructureCoverageAfterRevision = verifyEditorStructureCoverage(
+          application.candidateMarkdown,
+        );
+        const editorStructureGuard = {
+          accepted: editorStructureCoverageAfterRevision.passed,
+          before: editorStructureCoverageBeforeRevision,
+          after: editorStructureCoverageAfterRevision,
+          reasons: editorStructureCoverageAfterRevision.passed
+            ? []
+            : ['editor_structure_coverage_decreased'],
+        };
         const qualityAfterRevision = qualityRuntime && qualityBeforeRevision
-          ? applySourceAccuracyGuard({
+          ? applyContentWritingSourceAccuracyGuard({
               report: evaluateContentWritingQuality({
               markdown: application.candidateMarkdown,
               articleTitle: article.title,
@@ -1914,9 +1912,11 @@ export const executeStructuredContentWritingWorkflow = async (
               repairPasses,
               }).report,
               markdown: application.candidateMarkdown,
-              knowledge,
-              usedClaimIds: Array.from(coverageBeforeRevision.values())
-                .flatMap(coverage => coverage.usedClaimIds),
+              sourceAccuracy: {
+                knowledge,
+                usedClaimIds: Array.from(coverageBeforeRevision.values())
+                  .flatMap(coverage => coverage.usedClaimIds),
+              },
             })
           : null;
         const qualityGuard = qualityBeforeRevision && qualityAfterRevision
@@ -1930,6 +1930,7 @@ export const executeStructuredContentWritingWorkflow = async (
           ...faqIndependenceGuard.reasons,
           ...finalSectionStructureGuard.reasons,
           ...editorSourceGuard.reasons,
+          ...editorStructureGuard.reasons,
           ...(qualityGuard?.reasons || ['quality_guard_unavailable']),
         ]));
         const accepted = reasons.length === 0
@@ -1937,6 +1938,7 @@ export const executeStructuredContentWritingWorkflow = async (
           && faqIndependenceGuard.accepted
           && finalSectionStructureGuard.accepted
           && editorSourceGuard.accepted
+          && editorStructureGuard.accepted
           && qualityGuard?.accepted === true;
         return {
           output: JSON.stringify({
@@ -1964,6 +1966,7 @@ export const executeStructuredContentWritingWorkflow = async (
             faqIndependenceGuard,
             finalSectionStructureGuard,
             editorSourceGuard,
+            editorStructureGuard,
             acceptedDraft: accepted ? application.candidateMarkdown : null,
             sectionCoveragesAfter: knowledgeGuard.sectionCoverages,
           },
@@ -2156,6 +2159,11 @@ export const executeStructuredContentWritingWorkflow = async (
     knowledge,
     sectionCoverages: Array.from(activeSectionCoverageByKey.values()),
   });
+  const finalLinkRestoration = restoreContentWritingEditorLinks({
+    markdown: finalOutput,
+    structure: editorSourceLedger.structure,
+  });
+  finalOutput = finalLinkRestoration.markdown;
   const finalEditorSourceCoverage = verifyEditorSourceCoverage(
     finalOutput,
     editorSourceItemIds,
@@ -2169,6 +2177,17 @@ export const executeStructuredContentWritingWorkflow = async (
       message: `A later revision lost mandatory editor-source items: ${finalEditorSourceCoverage.missingItemIds.join(', ')}.`,
       step: finalDefinition,
       metadata: { editorSourceCoverage: finalEditorSourceCoverage },
+    });
+  }
+  const finalEditorStructureCoverage = verifyEditorStructureCoverage(finalOutput);
+  if (!finalEditorStructureCoverage.passed) {
+    return createWorkflowFailure({
+      session: options.session,
+      status: 422,
+      code: 'content_writing_editor_structure_coverage_lost',
+      message: 'A later revision lost protected editor headings, links, lists, or tables.',
+      step: finalDefinition,
+      metadata: { editorStructureCoverage: finalEditorStructureCoverage },
     });
   }
   const finalClaimUsage = summarizeContentWritingClaimUsage({
@@ -2228,6 +2247,7 @@ export const executeStructuredContentWritingWorkflow = async (
         blockedClaimRollback: true,
         faqIndependenceRollback: true,
         editorSourceCoverageRollback: true,
+        editorStructureCoverageRollback: true,
       },
       faqIndependence: faqAudit ? {
         version: faqAudit.version,
@@ -2250,6 +2270,11 @@ export const executeStructuredContentWritingWorkflow = async (
         coveredItemIds: finalEditorSourceCoverage.coveredItemIds,
         missingItemIds: finalEditorSourceCoverage.missingItemIds,
       },
+      editorStructureCoverage: finalEditorStructureCoverage,
+      editorLinkRestoration: {
+        assembled: assembledLinkRestoration,
+        final: finalLinkRestoration,
+      },
       usage,
       knowledgeCoverage: {
         sourceChunkCount: competitorChunks.length,
@@ -2270,6 +2295,7 @@ export const executeStructuredContentWritingWorkflow = async (
         qualifiedClaimCount: knowledge.claimLedger.qualifiedClaimIds.length,
         blockedClaimCount: knowledge.claimLedger.blockedClaimIds.length,
         usedClaimCount: finalClaimUsage.usedClaimIds.length,
+        usedClaimIds: finalClaimUsage.usedClaimIds,
         declaredBlockedClaimIdsBeforeFinalReview: claimUsageAfterRepairs.blockedClaimIds,
         declaredBlockedClaimIdsAfterRevisions: finalClaimUsage.blockedClaimIds,
         coverageByCompetitor: knowledge.competitorCoverageMatrix.coverageByCompetitor.map(item => ({

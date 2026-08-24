@@ -63,6 +63,36 @@ export class ExternalAnalysisTerminalError extends Error {
   }
 }
 
+export class ExternalAnalysisBlockedError extends Error {
+  readonly code: string;
+  readonly progress: ExternalAnalysisJson;
+
+  constructor(options: {
+    message: string;
+    code: string;
+    progress?: ExternalAnalysisJson;
+  }) {
+    super(options.message);
+    this.name = 'ExternalAnalysisBlockedError';
+    this.code = options.code;
+    this.progress = options.progress ?? {};
+  }
+}
+
+/**
+ * Signals that a stale executor no longer owns the database lease. The worker
+ * must stop silently: retrying or finalizing from that executor could mutate a
+ * job that has already been reclaimed by a newer worker generation.
+ */
+export class ExternalAnalysisOwnershipLostError extends Error {
+  readonly code = 'external_analysis_execution_fenced';
+
+  constructor(message = 'The worker no longer owns this external analysis execution.') {
+    super(message);
+    this.name = 'ExternalAnalysisOwnershipLostError';
+  }
+}
+
 const executors = new Map<ExternalAnalysisJobType, ExternalAnalysisJobExecutor>();
 
 export const registerExternalAnalysisJobExecutor = (

@@ -10,9 +10,11 @@ import './competitorExtractionExecutor';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
+  blockExternalAnalysisJob,
   cancelExternalEngineeringBundle,
   claimNextExternalAnalysisJob,
   completeExternalAnalysisJob,
+  deadLetterExternalAnalysisJob,
   finalizeExternalAnalysisJobCancel,
   heartbeatExternalAnalysisJob,
   getExternalAnalysisSupabaseAdmin,
@@ -24,6 +26,8 @@ import {
   type ExternalAnalysisJobType,
 } from './externalAnalysisQueue';
 import {
+  ExternalAnalysisBlockedError,
+  ExternalAnalysisOwnershipLostError,
   ExternalAnalysisRetryError,
   ExternalAnalysisTerminalError,
   getExternalAnalysisJobExecutor,
@@ -168,14 +172,14 @@ const startLeaseHeartbeat = (
         return;
       }
       if (!heartbeatState.owned) {
-        controller.abort(new Error('The worker no longer owns this job lease.'));
+        controller.abort(new ExternalAnalysisOwnershipLostError('The worker no longer owns this job lease.'));
         return;
       }
       leaseDeadline = Date.now() + (leaseSeconds * 1_000);
     } catch (error) {
       logThrottledError(`Could not renew lease for job ${job.id}`, error);
       if (Date.now() >= leaseDeadline) {
-        controller.abort(new Error('The job lease expired while renewal was unavailable.'));
+        controller.abort(new ExternalAnalysisOwnershipLostError('The job lease expired while renewal was unavailable.'));
         return;
       }
     }
@@ -264,7 +268,7 @@ const executeClaimedJob = async (
       );
     }
     if (!heartbeatState.owned) {
-      throw new Error('The worker no longer owns this job lease.');
+      throw new ExternalAnalysisOwnershipLostError('The worker no longer owns this job lease.');
     }
 
     const completed = await completeExternalAnalysisJob({
@@ -279,6 +283,13 @@ const executeClaimedJob = async (
       console.log(`[external-analysis-worker] Completed job ${job.id} (${job.job_type}).`);
     }
   } catch (error) {
+    if (error instanceof ExternalAnalysisOwnershipLostError) {
+      console.warn(
+        `[external-analysis-worker] Fenced stale execution for job ${job.id} (${job.job_type}); no terminal mutation was attempted.`,
+      );
+      return;
+    }
+
     const cancellation = error instanceof ExternalAnalysisCancellationError
       ? error
       : controller.signal.reason instanceof ExternalAnalysisCancellationError
@@ -295,6 +306,24 @@ const executeClaimedJob = async (
         console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
       } catch (cancelError) {
         logThrottledError(`Could not finalize cancellation for job ${job.id}`, cancelError);
+      }
+      return;
+    }
+
+    if (error instanceof ExternalAnalysisBlockedError) {
+      try {
+        await blockExternalAnalysisJob({
+          jobId: job.id,
+          workerId: slotWorkerId,
+          errorCode: error.code,
+          errorMessage: error.message,
+          progress: error.progress,
+        });
+        console.warn(
+          `[external-analysis-worker] Blocked job ${job.id} (${job.job_type}) for explicit review; reason=${error.code}.`,
+        );
+      } catch (blockedError) {
+        logThrottledError(`Could not block job ${job.id}`, blockedError);
       }
       return;
     }
@@ -325,11 +354,12 @@ const executeClaimedJob = async (
     const retry = retryDetails(error);
     try {
       if (job.retry_count >= maximumRetryCount) {
-        await finalizeExternalAnalysisJobCancel({
+        await deadLetterExternalAnalysisJob({
           jobId: job.id,
           workerId: slotWorkerId,
           errorCode: 'external_analysis_retry_limit_reached',
           errorMessage: `Automatic retry limit (${maximumRetryCount}) reached. Last error: ${retry.message}`.slice(0, 2_000),
+          progress: retry.progress,
         });
         console.error(
           `[external-analysis-worker] Stopped job ${job.id} (${job.job_type}) after ${job.retry_count} automatic retries; reason=${retry.code}.`,

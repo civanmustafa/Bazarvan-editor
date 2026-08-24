@@ -28,6 +28,16 @@ const importGoalContext = async (): Promise<any> => {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 };
 
+const makeQualifiedCompetitorContent = (content: string, index: number): string => {
+  if (content === COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT) return content;
+  const tokens = content.trim().split(/\s+/u).filter(Boolean);
+  if (tokens.length >= 250 && new Set(tokens).size >= 35) return content;
+  return `${content} ${Array.from(
+    { length: 280 },
+    (_, wordIndex) => `مصدر${index + 1}معلومة${wordIndex + 1}`,
+  ).join(' ')}`;
+};
+
 const createReadyArticle = (competitorContents: string[]) => ({
   articleId: 'article-1',
   title: 'عنوان المقالة',
@@ -62,14 +72,14 @@ const createReadyArticle = (competitorContents: string[]) => ({
   competitors: competitorContents.map((content, index) => ({
     position: index + 1,
     title: `المنافس ${index + 1}`,
-    url: `https://example.com/${index + 1}`,
-    content,
+    url: `https://competitor-${index + 1}.example/article`,
+    content: makeQualifiedCompetitorContent(content, index),
   })),
 });
 
 test('content-writing context preserves every available competitor up to five without truncation', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
-  const longContent = `${'محتوى كامل '.repeat(12_000)}END-OF-COMPETITOR`;
+  const longContent = `${Array.from({ length: 12_000 }, (_, index) => `محتوى${index + 1}`).join(' ')} END-OF-COMPETITOR`;
   const input = createReadyArticle([
     longContent,
     'المنافس الثاني',
@@ -122,15 +132,32 @@ test('content-writing competitor instructions stay escaped inside one untrusted-
   assert.match(bundle.messages[0].content, /قواعد نظام ثابتة مرفقة تلقائيًا/);
 });
 
-test('content-writing readiness accepts any available competitor count from one to five', async () => {
+test('content-writing readiness requires three substantial competitors and reports replacement demand', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const oneCompetitor = buildContentWritingPromptBundle(createReadyArticle(['واحد']));
   const noCompetitors = buildContentWritingPromptBundle(createReadyArticle([]));
 
-  assert.equal(oneCompetitor.ready, true);
+  assert.equal(oneCompetitor.ready, false);
   assert.equal(oneCompetitor.competitors.length, 1);
+  assert.equal(oneCompetitor.competitorQualityAudit.replacementNeededCount, 2);
   assert.equal(noCompetitors.ready, false);
   assert.ok(noCompetitors.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
+});
+
+test('content-writing rejects thin or repetitive competitor text and requires source diversity', async () => {
+  const { buildContentWritingPromptBundle } = await importContentWriting();
+  const input = createReadyArticle(['صالح 1', 'صالح 2', 'صالح 3']);
+  input.competitors[1].content = 'حشو '.repeat(400);
+  input.competitors[2].url = input.competitors[0].url;
+  const bundle = buildContentWritingPromptBundle(input);
+
+  assert.equal(bundle.ready, false);
+  assert.equal(bundle.competitorQualityAudit.acceptedCount, 2);
+  assert.ok(bundle.competitorQualityAudit.items[1].reasons.includes('low_information_density'));
+  assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
+  assert.ok(bundle.readinessIssues.some(
+    (issue: { code: string }) => issue.code === 'competitors.source_diversity',
+  ));
 });
 
 test('content writing excludes a competitor carrying the dual extraction failure marker', async () => {
@@ -151,9 +178,10 @@ test('content writing excludes a competitor carrying the dual extraction failure
     'Usable competitor one',
     COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
     'Usable competitor three',
+    'Usable competitor four',
   ]));
   assert.equal(bundle.ready, true);
-  assert.equal(bundle.competitors.length, 2);
+  assert.equal(bundle.competitors.length, 3);
   assert.doesNotMatch(bundle.messages.map((message: { content: string }) => message.content).join('\n'), /\[تعذر استخراج محتوى المنافس\]/);
 });
 
@@ -209,7 +237,7 @@ test('content-writing still requires the four core brief fields and company name
 
 test('content-writing accepts a supported manual word range and rejects malformed input', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
-  const validInput = createReadyArticle(['واحد']);
+  const validInput = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
   validInput.goalContext.targetWordRange = '1200*1800';
   const validBundle = buildContentWritingPromptBundle(validInput);
   const storedGoalContext = JSON.parse(validBundle.variables.goal_context);
@@ -217,7 +245,7 @@ test('content-writing accepts a supported manual word range and rejects malforme
   assert.equal(validBundle.ready, true);
   assert.equal(storedGoalContext.targetWordRange, '1200*1800');
 
-  const invalidInput = createReadyArticle(['واحد']);
+  const invalidInput = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
   invalidInput.goalContext.targetWordRange = 'حوالي 1500 كلمة';
   const invalidBundle = buildContentWritingPromptBundle(invalidInput);
   assert.equal(invalidBundle.ready, false);

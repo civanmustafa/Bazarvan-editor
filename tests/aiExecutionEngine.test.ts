@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import {
+  getGeminiKeyFailureCooldownSeconds,
+  isGeminiModelKeyPermanentlyIncompatibleFailure,
+} from '../server/geminiKeyCoordinator.ts';
 
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
@@ -155,4 +159,19 @@ test('Gemini coordination waits for temporary key states and publishes safe per-
   assert.match(auditPanel, /تقرير الموديلات والمفاتيح/);
   assert.match(auditPanel, /collectAiModelKeyReports/);
   assertBalancedSqlParentheses(migration);
+});
+
+test('Gemini remembers model/key 404 incompatibility while keeping 429 temporary', async () => {
+  const [engine, coordinator] = await Promise.all([
+    readWorkspaceFile('server/aiExecutionEngine.ts'),
+    readWorkspaceFile('server/geminiKeyCoordinator.ts'),
+  ]);
+
+  assert.equal(isGeminiModelKeyPermanentlyIncompatibleFailure('incompatible', 404), true);
+  assert.equal(isGeminiModelKeyPermanentlyIncompatibleFailure('quota', 429), false);
+  assert.equal(getGeminiKeyFailureCooldownSeconds('quota', 429), 30 * 60);
+  assert.equal(getGeminiKeyFailureCooldownSeconds('incompatible', 404), 24 * 60 * 60);
+  assert.match(engine, /details\.status === 404[\s\S]*return "incompatible"/);
+  assert.match(coordinator, /\.from\('ai_gemini_key_model_state'\)[\s\S]*\.eq\('last_status', 404\)/);
+  assert.match(coordinator, /localModelIncompatibilities/);
 });

@@ -6,6 +6,7 @@ import { reserveArticleForExplicitContentWriting } from '../server/contentWritin
 import type { ContentWritingProvider } from '../server/contentWritingSessionService';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import { sanitizeCompetitorSlots } from '../utils/competitorContent';
+import { CONTENT_WRITING_MIN_COMPETITOR_COUNT } from '../utils/contentWritingContext';
 import {
   EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS,
   countExternalEngineeringArticleWords,
@@ -75,6 +76,11 @@ const ENQUEUED_JOB_SELECT = [
   'attempt_count',
   'retry_count',
   'next_attempt_at',
+  'lease_generation',
+  'max_attempts',
+  'pipeline_parent_job_id',
+  'dead_lettered_at',
+  'dead_letter_reason',
   'completed_at',
   'created_at',
   'updated_at',
@@ -487,44 +493,22 @@ const cancelExternalAnalysisJob = async (
     return { job: existingJob, alreadyTerminal: true };
   }
 
+  if (existingJob.job_type === 'full_article_pipeline') {
+    const { data, error } = await supabase.rpc('request_full_article_pipeline_cancel', {
+      p_job_id: jobId,
+      p_requested_by: requestedBy,
+    });
+    if (error) throw error;
+    const job = Array.isArray(data) ? data[0] : data;
+    return { job: job || existingJob, alreadyTerminal: false };
+  }
+
   const { data, error } = await supabase.rpc('request_external_analysis_job_cancel', {
     p_job_id: jobId,
     p_requested_by: requestedBy,
   });
   if (error) throw error;
   const job = Array.isArray(data) ? data[0] : data;
-  if (existingJob.job_type === 'full_article_pipeline') {
-    const progress = isRecord(existingJob.progress) ? existingJob.progress : {};
-    const childJobIds = uniqueStrings([
-      toTrimmedString(progress.childJobId),
-      toTrimmedString(progress.semanticJobId),
-      toTrimmedString(progress.briefJobId),
-      toTrimmedString(progress.discoveryJobId),
-      toTrimmedString(progress.extractionJobId),
-      toTrimmedString(progress.analysisJobId),
-    ]);
-    for (const childJobId of childJobIds) {
-      const { error: childCancelError } = await supabase.rpc(
-        'request_external_analysis_job_cancel',
-        {
-          p_job_id: childJobId,
-          p_requested_by: requestedBy,
-        },
-      );
-      if (childCancelError && childCancelError.code !== 'P0002') throw childCancelError;
-    }
-    const contentWritingSessionId = toTrimmedString(progress.contentWritingSessionId);
-    if (contentWritingSessionId) {
-      const { error: sessionCancelError } = await supabase.rpc(
-        'request_content_writing_session_cancel',
-        {
-          p_session_id: contentWritingSessionId,
-          p_requested_by: requestedBy,
-        },
-      );
-      if (sessionCancelError && sessionCancelError.code !== 'P0002') throw sessionCancelError;
-    }
-  }
   return { job: job || existingJob, alreadyTerminal: false };
 };
 
@@ -535,7 +519,7 @@ const cancelAllExternalAnalysisJobs = async (
 ) => {
   const { data: activeJobs, error: readError } = await supabase
     .from('ai_external_analysis_jobs')
-    .select('id,depends_on_job_id,status')
+    .select('id,job_type,depends_on_job_id,status')
     .eq('article_id', articleId)
     .in('status', ACTIVE_JOB_STATUSES);
   if (readError) throw readError;
@@ -554,7 +538,11 @@ const cancelAllExternalAnalysisJobs = async (
     : rows.map(job => String(job.id));
 
   for (const rootJobId of rootJobIds) {
-    const { error } = await supabase.rpc('request_external_analysis_job_cancel', {
+    const root = rows.find(job => String(job.id) === rootJobId);
+    const cancelRpc = root?.job_type === 'full_article_pipeline'
+      ? 'request_full_article_pipeline_cancel'
+      : 'request_external_analysis_job_cancel';
+    const { error } = await supabase.rpc(cancelRpc, {
       p_job_id: rootJobId,
       p_requested_by: requestedBy,
     });
@@ -583,7 +571,7 @@ const retryExternalAnalysisJob = async (
 
   const { data: existingJob, error: readError } = await supabase
     .from('ai_external_analysis_jobs')
-    .select('id,article_id,job_type,status,last_error_code,input_snapshot')
+    .select('id,article_id,job_type,status,last_error_code,input_snapshot,progress')
     .eq('id', jobId)
     .maybeSingle();
   if (readError) throw readError;
@@ -596,6 +584,23 @@ const retryExternalAnalysisJob = async (
   }
 
   if (existingJob.job_type === 'full_article_pipeline') {
+    if ([
+      'full_pipeline_quality_review_required',
+      'full_pipeline_external_review_blocked',
+      'full_pipeline_link_preservation_review_required',
+      'full_pipeline_article_changed',
+    ].includes(toTrimmedString(existingJob.last_error_code))) {
+      throw new ExternalAnalysisApiError({
+        message: 'This generated draft requires explicit review and cannot be resumed automatically.',
+        status: 409,
+        code: 'full_pipeline_review_required',
+        details: {
+          jobId: existingJob.id,
+          contentWritingSessionId: toTrimmedString(existingJob.progress?.contentWritingSessionId) || null,
+          analysisJobId: toTrimmedString(existingJob.progress?.analysisJobId) || null,
+        },
+      });
+    }
     const snapshot = isRecord(existingJob.input_snapshot) ? existingJob.input_snapshot : {};
     const snapshotProvider = toTrimmedString(snapshot.provider);
     const provider: ContentWritingProvider = snapshotProvider === 'geminiPaid' || snapshotProvider === 'openai'
@@ -611,9 +616,11 @@ const retryExternalAnalysisJob = async (
     });
   }
 
-  const retryRpc = existingJob.status === 'retry_scheduled'
-    ? 'resume_external_analysis_job_now'
-    : 'retry_external_analysis_job';
+  const retryRpc = existingJob.job_type === 'full_article_pipeline'
+    ? 'resume_full_article_pipeline_job'
+    : existingJob.status === 'retry_scheduled'
+      ? 'resume_external_analysis_job_now'
+      : 'retry_external_analysis_job';
   const { data, error } = await supabase.rpc(retryRpc, {
     p_job_id: jobId,
     p_requested_by: requestedBy,
@@ -700,7 +707,10 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
   if (action === 'full_pipeline') {
     const provider = toTrimmedString(body.provider);
     const model = toTrimmedString(body.model);
-    const competitorCount = Math.max(1, Math.min(5, Math.round(Number(body.competitorCount) || 5)));
+    const competitorCount = Math.max(
+      CONTENT_WRITING_MIN_COMPETITOR_COUNT,
+      Math.min(5, Math.round(Number(body.competitorCount) || 5)),
+    );
     if (!['gemini', 'geminiPaid', 'openai'].includes(provider) || !model) {
       throw new ExternalAnalysisApiError({
         message: 'A valid content-writing provider and model are required.',
@@ -751,7 +761,7 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
         action,
         job,
         competitorCount,
-        qualityGatePolicy: 'insert_regardless',
+        qualityGatePolicy: 'review_required',
       },
     };
   }

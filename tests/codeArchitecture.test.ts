@@ -506,7 +506,9 @@ test('content writing has one template registry and one context builder', async 
   assert.match(registry, /DEFAULT_CONTENT_WRITING_TEMPLATES/);
   assert.match(registry, /CONTENT_WRITING_TEMPLATE_FIELDS/);
   assert.match(builder, /buildContentWritingPromptBundle/);
-  assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_COUNT = 1/);
+  assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_COUNT = 3/);
+  assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_WORDS = 250/);
+  assert.match(builder, /CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS = 2/);
   assert.match(builder, /CONTENT_WRITING_MAX_COMPETITOR_COUNT = MAX_ARTICLE_COMPETITORS/);
   assert.doesNotMatch(builder, /content\.slice\(/);
   assert.match(settingsRegistry, /CONTENT_WRITING_TEMPLATE_FIELDS/);
@@ -558,7 +560,7 @@ test('content writing and editor standards share manual or competitor-derived dy
 
   assert.match(targets, /CONTENT_WRITING_AUTOMATIC_WORD_MULTIPLIER = 1\.2/);
   assert.match(targets, /CONTENT_WRITING_AUTOMATIC_WORD_TOLERANCE = 0\.1/);
-  assert.match(targets, /findLargestCompetitor/);
+  assert.match(targets, /resolveRobustBaselineCompetitor/);
   assert.match(targets, /deriveContentWritingOutlineSections/);
   assert.match(engine, /resolveContentWritingLengthTarget/);
   assert.match(engine, /lengthTarget,/);
