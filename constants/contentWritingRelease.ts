@@ -21,6 +21,7 @@ export const FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS = [
   '20260824010000_full_article_pipeline_safety.sql',
   '20260824020000_full_article_pipeline_optional_prerequisites.sql',
   '20260824030000_full_article_pipeline_optional_discovery.sql',
+  '20260825000000_full_article_pipeline_optional_semantic.sql',
 ] as const;
 
 export const CONTENT_WRITING_RUNTIME_REQUIRED_MIGRATIONS = [

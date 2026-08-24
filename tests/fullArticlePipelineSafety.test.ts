@@ -128,6 +128,8 @@ test('pipeline completes both semantic keyword lists before content writing', as
   assert.match(executor, /getSemanticKeywordReadiness/);
   assert.match(executor, /pass < 2 && !semanticReadiness\.ready/);
   assert.match(executor, /semanticJobIds\.includes\(semanticJobId\)/);
+  assert.match(executor, /enqueue_full_article_pipeline_semantic/);
+  assert.match(executor, /completionPass: pass \+ 1/);
   assert.match(executor, /full_pipeline_semantic_keywords_incomplete/);
   assert.match(executor, /missingFields: semanticReadiness\.missingFields/);
   assert.doesNotMatch(executor, /text\(savedProgress\.semanticJobId\) \|\| await enqueueSemantic/);
@@ -192,6 +194,27 @@ test('full workflow competitor discovery stays optional-company and pipeline-own
   assert.match(migration, /full_article_pipeline_schema_version/);
   assert.match(migration, /select 4/);
   assert.match(migration, /notify pgrst, 'reload schema'/);
+});
+
+test('full workflow semantic generation is optional-context, fenced, and independently repeatable', async () => {
+  const [migration, semanticExecutor] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260825000000_full_article_pipeline_optional_semantic.sql'),
+    readWorkspaceFile('server/externalSemanticAnalysisExecutor.ts'),
+  ]);
+  assertBalancedSql(migration);
+  assert.match(migration, /create or replace function public\.enqueue_full_article_pipeline_semantic/);
+  assert.match(migration, /v_pipeline\.lease_generation <> p_lease_generation/);
+  assert.match(migration, /'sourceReadinessSignature', v_source_signature/);
+  assert.match(migration, /'pipelineSemanticGeneration', true/);
+  assert.match(migration, /'companyIsOptional', true/);
+  assert.match(migration, /'goalContextIsOptional', true/);
+  assert.match(migration, /pipeline_parent_job_id = v_pipeline\.id/);
+  assert.match(migration, /':pass:' \|\| v_pass::text/);
+  assert.match(migration, /full_article_pipeline_schema_version/);
+  assert.match(migration, /select 5/);
+  assert.match(migration, /notify pgrst, 'reload schema'/);
+  assert.match(semanticExecutor, /input\.pipelineSemanticGeneration === true/);
+  assert.match(semanticExecutor, /input\.sourceReadinessSignature/);
 });
 
 test('background saves preserve generated semantic and brief fields under one row lock', async () => {

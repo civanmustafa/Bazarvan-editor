@@ -375,10 +375,21 @@ const cancelExternalChild = async (
   });
 };
 
-const enqueueSemantic = async (articleId: string): Promise<string | null> => {
+const enqueueSemantic = async (options: {
+  context: ExternalAnalysisExecutionContext;
+  requestedBy: string;
+  leaseGeneration: number;
+  completionPass: number;
+}): Promise<string | null> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'enqueue_external_semantic_analysis_job',
-    { p_article_id: articleId },
+    'enqueue_full_article_pipeline_semantic',
+    {
+      p_pipeline_job_id: options.context.job.id,
+      p_requested_by: options.requestedBy,
+      p_worker_id: options.context.workerId,
+      p_lease_generation: options.leaseGeneration,
+      p_completion_pass: options.completionPass,
+    },
   );
   if (error) throw error;
   return typeof data === 'string' ? data : null;
@@ -719,7 +730,12 @@ const executeFullArticlePipeline = async (
     let semanticReadiness = getSemanticKeywordReadiness(await readArticle(context.job.article_id));
     const semanticJobIds: string[] = [];
     for (let pass = 0; pass < 2 && !semanticReadiness.ready; pass += 1) {
-      const semanticJobId = await enqueueSemantic(context.job.article_id) || '';
+      const semanticJobId = await enqueueSemantic({
+        context,
+        requestedBy,
+        leaseGeneration,
+        completionPass: pass + 1,
+      }) || '';
       if (!semanticJobId || semanticJobIds.includes(semanticJobId)) break;
       semanticJobIds.push(semanticJobId);
       activeExternalChildId = semanticJobId;

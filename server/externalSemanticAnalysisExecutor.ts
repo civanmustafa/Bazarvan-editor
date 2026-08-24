@@ -83,11 +83,20 @@ const getTargetState = (keywords: ExternalSemanticKeywords): SemanticTargetState
 const isCurrentSemanticJob = (
   context: ExternalAnalysisExecutionContext,
   state: ExternalSemanticStateRow,
-): boolean => (
-  state.semantic_ready === true
-  && Boolean(state.semantic_readiness_signature)
-  && state.semantic_readiness_signature === context.job.readiness_signature
-);
+): boolean => {
+  const input = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
+  const pipelineOwned = Boolean(context.job.pipeline_parent_job_id)
+    && input.pipelineSemanticGeneration === true
+    && input.companyIsOptional === true
+    && input.goalContextIsOptional === true;
+  if (pipelineOwned) {
+    return Boolean(state.semantic_readiness_signature)
+      && state.semantic_readiness_signature === toTrimmedString(input.sourceReadinessSignature);
+  }
+  return state.semantic_ready === true
+    && Boolean(state.semantic_readiness_signature)
+    && state.semantic_readiness_signature === context.job.readiness_signature;
+};
 
 const readArticleAndState = async (articleId: string): Promise<{
   article: ExternalSemanticArticleRow;
