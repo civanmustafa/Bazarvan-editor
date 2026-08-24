@@ -389,6 +389,10 @@ const assertContentWritingBundleReady = (bundle: ContentWritingPromptBundle): vo
 
 export const prepareContentWritingConversation = async (
   articleId: string,
+  options: {
+    allowMissingCompany?: boolean;
+    allowMissingGoalContext?: boolean;
+  } = {},
 ): Promise<PreparedContentWritingConversation> => {
   const [articleSource, settings] = await Promise.all([
     readArticleInput(articleId),
@@ -397,6 +401,8 @@ export const prepareContentWritingConversation = async (
   const bundle = buildContentWritingPromptBundle(articleSource.input, {
     templates: settings.templates,
     maxInputTokens: settings.maxInputTokens,
+    requireCompany: options.allowMissingCompany !== true,
+    requireGoalContext: options.allowMissingGoalContext !== true,
   });
   assertContentWritingBundleReady(bundle);
   const normalizedGoalContext = normalizeGoalContext(articleSource.input.goalContext);
@@ -655,9 +661,14 @@ export const queueContentWritingSession = async (input: {
   model?: string;
   idempotencyKey: string;
   contextSnapshotPatch?: JsonObject;
+  allowMissingCompany?: boolean;
+  allowMissingGoalContext?: boolean;
 }): Promise<QueuedContentWritingSession> => {
   const [conversation, model] = await Promise.all([
-    prepareContentWritingConversation(input.articleId),
+    prepareContentWritingConversation(input.articleId, {
+      allowMissingCompany: input.allowMissingCompany,
+      allowMissingGoalContext: input.allowMissingGoalContext,
+    }),
     selectProviderModel(input.provider, input.model, input.createdBy),
   ]);
 

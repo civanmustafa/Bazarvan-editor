@@ -18,6 +18,8 @@ import {
   cancelExternalAnalysisJob,
   enqueueFullArticlePipeline,
   EXTERNAL_ANALYSIS_ACTIVE_STATUSES,
+  ExternalAnalysisRequestError,
+  loadFullArticlePipelineReadiness,
   loadLatestFullArticlePipeline,
   retryExternalAnalysisJob,
   type ExternalAnalysisJobRow,
@@ -28,6 +30,7 @@ import {
   FULL_ARTICLE_PIPELINE_STAGES,
   getFullArticlePipelineProgressView,
 } from '../utils/fullArticlePipelineProgress';
+import { CONTENT_WRITING_MIN_COMPETITOR_COUNT } from '../utils/contentWritingContext';
 
 type Props = {
   articleId: string;
@@ -85,6 +88,24 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const getStartErrorMessage = (error: unknown, isArabic: boolean): string => {
+  if (error instanceof ExternalAnalysisRequestError) {
+    const reference = error.requestId
+      ? (isArabic ? ` رقم التتبع: ${error.requestId}` : ` Reference: ${error.requestId}`)
+      : '';
+    if (error.code === 'full_pipeline_schema_unavailable') {
+      return isArabic
+        ? `مخطط قاعدة البيانات لا يطابق إصدار الإنشاء الشامل. طبّق ترحيلات Pipeline المطلوبة ثم أعد فحص الجاهزية.${reference}`
+        : `The database schema does not match this full-workflow release. Apply the required pipeline migrations, then recheck readiness.${reference}`;
+    }
+    return `${error.message}${reference}`;
+  }
+  return getErrorMessage(
+    error,
+    isArabic ? 'تعذر بدء الإنشاء الشامل.' : 'Could not start the full workflow.',
+  );
+};
+
 const FullArticlePipelineControl: React.FC<Props> = ({
   articleId,
   articleTitle,
@@ -106,12 +127,42 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   const [busy, setBusy] = useState<'start' | 'cancel' | 'retry' | ''>('');
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [runtimeReadiness, setRuntimeReadiness] = useState<'checking' | 'ready' | 'unavailable'>('checking');
+  const [runtimeReadinessError, setRuntimeReadinessError] = useState('');
   const [expanded, setExpanded] = useState(true);
   const reloadedJobsRef = useRef(new Set<string>());
   const syncedBriefJobsRef = useRef(new Set<string>());
   const refreshInFlightRef = useRef(false);
-  const fullWorkflowStartDisabled = disabled || startDisabled;
-  const fullWorkflowResumeDisabled = disabled || resumeDisabled;
+  const runtimeUnavailable = runtimeReadiness !== 'ready';
+  const fullWorkflowStartDisabled = disabled || startDisabled || runtimeUnavailable;
+  const fullWorkflowResumeDisabled = disabled || resumeDisabled || runtimeUnavailable;
+  const effectiveStartDisabledReason = runtimeUnavailable
+    ? runtimeReadiness === 'checking'
+      ? (isArabic ? 'جار التحقق من توافق خدمة الإنشاء الشامل.' : 'Checking full-workflow compatibility.')
+      : (isArabic
+        ? 'خدمة الإنشاء الشامل غير جاهزة. طبّق ترحيلات Pipeline وتحقق من /readyz.'
+        : 'The full-workflow service is not ready. Apply the pipeline migrations and verify /readyz.')
+    : startDisabledReason;
+
+  const refreshRuntimeReadiness = useCallback(async () => {
+    setRuntimeReadiness('checking');
+    setRuntimeReadinessError('');
+    try {
+      const readiness = await loadFullArticlePipelineReadiness();
+      setRuntimeReadiness(readiness.ok ? 'ready' : 'unavailable');
+      if (!readiness.ok) setRuntimeReadinessError(readiness.code);
+    } catch (readinessError) {
+      setRuntimeReadiness('unavailable');
+      setRuntimeReadinessError(getErrorMessage(
+        readinessError,
+        isArabic ? 'تعذر الاتصال بفحص الجاهزية.' : 'Could not reach the readiness check.',
+      ));
+    }
+  }, [isArabic]);
+
+  useEffect(() => {
+    void refreshRuntimeReadiness();
+  }, [articleId, refreshRuntimeReadiness]);
 
   useEffect(() => {
     onActivityChange?.(isActive(job) || busy === 'start' || busy === 'retry');
@@ -225,7 +276,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
       setExpanded(true);
       await refresh();
     } catch (startError) {
-      setError(startError instanceof Error ? startError.message : String(startError));
+      setError(getStartErrorMessage(startError, isArabic));
     } finally {
       setBusy('');
     }
@@ -313,7 +364,10 @@ const FullArticlePipelineControl: React.FC<Props> = ({
             disabled={isActive(job) || busy !== ''}
             className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-800 outline-none dark:border-[#444] dark:bg-[#242424] dark:text-gray-100"
           >
-            {[1, 2, 3, 4, 5].map(value => (
+            {Array.from(
+              { length: 6 - CONTENT_WRITING_MIN_COMPETITOR_COUNT },
+              (_, index) => CONTENT_WRITING_MIN_COMPETITOR_COUNT + index,
+            ).map(value => (
               <option key={value} value={value}>{value}</option>
             ))}
           </select>
@@ -323,7 +377,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
           onClick={start}
           disabled={fullWorkflowStartDisabled || busy !== '' || isActive(job) || !model}
           className="inline-flex h-9 flex-[1.7] items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 text-xs font-black text-[#171717] hover:bg-[#e0bd47] disabled:cursor-not-allowed disabled:opacity-50"
-          title={fullWorkflowStartDisabled && startDisabledReason ? startDisabledReason : articleTitle}
+          title={fullWorkflowStartDisabled && effectiveStartDisabledReason ? effectiveStartDisabledReason : articleTitle}
         >
           {busy === 'start' ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
           {isArabic ? 'بدء الإنشاء الشامل' : 'Start full workflow'}
@@ -336,10 +390,24 @@ const FullArticlePipelineControl: React.FC<Props> = ({
           : 'This count only applies to “Start full workflow”; “Write article” uses the competitors already saved on the article.'}
       </p>
 
-      {fullWorkflowStartDisabled && startDisabledReason && !isActive(job) && (
+      {fullWorkflowStartDisabled && effectiveStartDisabledReason && !isActive(job) && (
         <p className="mt-1.5 rounded bg-amber-50 px-2 py-1 text-[9px] font-bold leading-4 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-          {startDisabledReason}
+          {effectiveStartDisabledReason}
         </p>
+      )}
+
+      {runtimeReadiness === 'unavailable' && !isActive(job) && (
+        <div className="mt-1.5 flex items-center justify-between gap-2 rounded bg-red-50 px-2 py-1 text-[9px] font-bold leading-4 text-red-700 dark:bg-red-900/20 dark:text-red-300">
+          <span>{isArabic ? `فشل توافق الخدمة${runtimeReadinessError ? ` · ${runtimeReadinessError}` : ''}` : `Service compatibility failed${runtimeReadinessError ? ` · ${runtimeReadinessError}` : ''}`}</span>
+          <button
+            type="button"
+            onClick={() => void refreshRuntimeReadiness()}
+            className="shrink-0 rounded p-1 hover:bg-red-100 dark:hover:bg-red-900/30"
+            title={isArabic ? 'إعادة فحص الجاهزية' : 'Recheck readiness'}
+          >
+            <RefreshCw size={12} />
+          </button>
+        </div>
       )}
 
       {loadError && (

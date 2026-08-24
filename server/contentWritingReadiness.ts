@@ -1,11 +1,11 @@
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
-import { CONTENT_WRITING_REQUIRED_MIGRATIONS } from '../constants/contentWritingRelease';
+import { CONTENT_WRITING_RUNTIME_REQUIRED_MIGRATIONS } from '../constants/contentWritingRelease';
 
 export const CONTENT_WRITING_SCHEMA_PROBES = [
   {
     id: 'sessions',
     table: 'content_writing_sessions',
-    columns: 'id,execution_mode,applied_at,application_count,quality_guard_version,quality_policy_version,quality_score,quality_report,quality_repair_count,knowledge_workflow_version,resume_preference_version,dynamic_final_section_version,parallel_substeps_version',
+    columns: 'id,execution_mode,applied_at,application_count,quality_guard_version,quality_policy_version,quality_score,quality_report,quality_repair_count,knowledge_workflow_version,resume_preference_version,dynamic_final_section_version,parallel_substeps_version,pipeline_parent_job_id',
   },
   {
     id: 'messages',
@@ -22,9 +22,15 @@ export const CONTENT_WRITING_SCHEMA_PROBES = [
     table: 'content_writing_automation_items',
     columns: 'id,article_id,status,run_generation,attempt_count,max_attempts,eligible_at,content_writing_session_id',
   },
+  {
+    id: 'fullPipelineJobs',
+    table: 'ai_external_analysis_jobs',
+    columns: 'id,article_id,job_type,status,pipeline_parent_job_id,lease_generation,max_attempts,dead_lettered_at,dead_letter_reason',
+  },
 ] as const;
 
 type ProbeResult = {
+  data?: unknown;
   error?: {
     code?: string;
     message?: string;
@@ -48,7 +54,9 @@ export type ContentWritingReadinessResult = {
     (typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id']
       | 'keyCoordinator'
       | 'automationEvaluator'
-      | 'competitorPreparationCoordinator',
+      | 'competitorPreparationCoordinator'
+      | 'fullPipelineCoordinator'
+      | 'fullPipelineVersion',
     boolean
   >;
   code?: 'content_writing_schema_unavailable';
@@ -99,6 +107,8 @@ export const checkContentWritingReadiness = async (options: {
       ['keyCoordinator', false] as const,
       ['automationEvaluator', false] as const,
       ['competitorPreparationCoordinator', false] as const,
+      ['fullPipelineCoordinator', false] as const,
+      ['fullPipelineVersion', false] as const,
     ],
   ) as ContentWritingReadinessResult['checks'];
   const failures: string[] = [];
@@ -110,7 +120,7 @@ export const checkContentWritingReadiness = async (options: {
     const result: ContentWritingReadinessResult = {
       ok: false,
       checkedAt: new Date().toISOString(),
-      requiredMigrationCount: CONTENT_WRITING_REQUIRED_MIGRATIONS.length,
+      requiredMigrationCount: CONTENT_WRITING_RUNTIME_REQUIRED_MIGRATIONS.length,
       checks,
       code: 'content_writing_schema_unavailable',
       detail: failures[0],
@@ -176,13 +186,49 @@ export const checkContentWritingReadiness = async (options: {
     } catch (error) {
       failures.push(`competitorPreparationCoordinator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
     }
+  })(), (async () => {
+    try {
+      const result = await withTimeout(client.rpc('enqueue_full_article_pipeline', {
+        p_article_id: null,
+        p_requested_by: null,
+        p_provider: 'gemini',
+        p_model: 'readiness-probe',
+        p_competitor_count: 3,
+        p_idempotency_key: 'readiness-probe',
+      }), timeoutMs);
+      // P0002 proves that the coordinator is callable while keeping this probe
+      // non-mutating: the deliberately missing article is rejected first.
+      if (result.error && result.error.code !== 'P0002') {
+        failures.push(describeProbeFailure('fullPipelineCoordinator', result.error));
+        return;
+      }
+      checks.fullPipelineCoordinator = true;
+    } catch (error) {
+      failures.push(`fullPipelineCoordinator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
+    }
+  })(), (async () => {
+    try {
+      const result = await withTimeout(client.rpc('full_article_pipeline_schema_version', {}), timeoutMs);
+      if (result.error) {
+        failures.push(describeProbeFailure('fullPipelineVersion', result.error));
+        return;
+      }
+      const version = Number(result.data);
+      if (!Number.isFinite(version) || version < 3) {
+        failures.push(`fullPipelineVersion: expected at least 3, received ${String(version)}.`);
+        return;
+      }
+      checks.fullPipelineVersion = true;
+    } catch (error) {
+      failures.push(`fullPipelineVersion: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
+    }
   })()]);
 
   const ok = failures.length === 0;
   const result: ContentWritingReadinessResult = {
     ok,
     checkedAt: new Date().toISOString(),
-    requiredMigrationCount: CONTENT_WRITING_REQUIRED_MIGRATIONS.length,
+    requiredMigrationCount: CONTENT_WRITING_RUNTIME_REQUIRED_MIGRATIONS.length,
     checks,
     ...(!ok ? {
       code: 'content_writing_schema_unavailable' as const,

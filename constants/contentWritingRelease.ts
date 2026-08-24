@@ -16,6 +16,17 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20260823020000_content_writing_competitor_preparation.sql',
 ] as const;
 
+export const FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS = [
+  '20260728030000_full_article_pipeline.sql',
+  '20260824010000_full_article_pipeline_safety.sql',
+  '20260824020000_full_article_pipeline_optional_prerequisites.sql',
+] as const;
+
+export const CONTENT_WRITING_RUNTIME_REQUIRED_MIGRATIONS = [
+  ...CONTENT_WRITING_REQUIRED_MIGRATIONS,
+  ...FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS,
+] as const;
+
 export const CONTENT_WRITING_RELEASE_ARTIFACTS = [
   'dist/index.html',
   'server-dist/server.mjs',

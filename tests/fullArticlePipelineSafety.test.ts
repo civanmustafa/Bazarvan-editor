@@ -148,6 +148,25 @@ test('coordinator waits and competitor inputs have bounded professional gates', 
   assert.match(migration, /pipelineCompetitorRefresh', true/);
 });
 
+test('latest pipeline migration keeps company and manual goal choices optional only for the full workflow', async () => {
+  const [migration, engine, executor] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260824020000_full_article_pipeline_optional_prerequisites.sql'),
+    readWorkspaceFile('server/contentWritingEngine.ts'),
+    readWorkspaceFile('server/fullArticlePipelineExecutor.ts'),
+  ]);
+  assertBalancedSql(migration);
+  assert.match(migration, /create or replace function public\.enqueue_full_article_pipeline/);
+  assert.doesNotMatch(migration, /company\/client name is required/i);
+  assert.match(migration, /primary keyword is required/i);
+  assert.match(migration, /notify pgrst, 'reload schema'/);
+  assert.match(migration, /full_article_pipeline_schema_version/);
+  assert.match(migration, /select 3/);
+  assert.match(engine, /allowMissingCompany/);
+  assert.match(engine, /allowMissingGoalContext/);
+  assert.match(executor, /allowMissingCompany: true/);
+  assert.match(executor, /allowMissingGoalContext: true/);
+});
+
 test('background saves preserve generated semantic and brief fields under one row lock', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260824010000_full_article_pipeline_safety.sql',

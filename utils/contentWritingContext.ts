@@ -291,6 +291,10 @@ const getGoalContextIssues = (goalContext: Partial<GoalContext>): ContentWriting
 
 export const validateContentWritingReadiness = (
   input: ContentWritingArticleInput,
+  options: {
+    requireCompany?: boolean;
+    requireGoalContext?: boolean;
+  } = {},
 ): {
   issues: ContentWritingReadinessIssue[];
   competitors: ContentWritingCompetitorInput[];
@@ -309,8 +313,10 @@ export const validateContentWritingReadiness = (
   if (!hasText(input.keywords.primary)) issues.push({ code: 'primary_keyword', label: 'الكلمة المفتاحية الأساسية' });
   if (secondaryKeywords.length === 0) issues.push({ code: 'alternative_keywords', label: 'الصيغ البديلة' });
   if (lsiKeywords.length === 0) issues.push({ code: 'lsi_keywords', label: 'كلمات LSI' });
-  if (!hasText(input.keywords.company)) issues.push({ code: 'company_name', label: 'اسم الشركة' });
-  issues.push(...getGoalContextIssues(input.goalContext));
+  if (options.requireCompany !== false && !hasText(input.keywords.company)) {
+    issues.push({ code: 'company_name', label: 'اسم الشركة' });
+  }
+  if (options.requireGoalContext !== false) issues.push(...getGoalContextIssues(input.goalContext));
   if (competitors.length < CONTENT_WRITING_MIN_COMPETITOR_COUNT) {
     issues.push({
       code: 'competitors',
@@ -395,13 +401,21 @@ export const buildContentWritingPromptBundle = (
   options: {
     templates?: Partial<ContentWritingTemplateSet>;
     maxInputTokens?: number;
+    requireCompany?: boolean;
+    requireGoalContext?: boolean;
   } = {},
 ): ContentWritingPromptBundle => {
   const templates: ContentWritingTemplateSet = {
     ...DEFAULT_CONTENT_WRITING_TEMPLATES,
     ...(options.templates || {}),
   };
-  const { issues: readinessIssues, competitors, competitorQualityAudit } = validateContentWritingReadiness(input);
+  const { issues: readinessIssues, competitors, competitorQualityAudit } = validateContentWritingReadiness(
+    input,
+    {
+      requireCompany: options.requireCompany,
+      requireGoalContext: options.requireGoalContext,
+    },
+  );
   const competitorChunks = createCompetitorChunks(competitors);
   const variables: Record<string, string> = {
     article_id: toText(input.articleId).trim() || 'غير متوفر',
@@ -411,7 +425,11 @@ export const buildContentWritingPromptBundle = (
     primary_keyword: toText(input.keywords.primary),
     alternative_keywords: normalizeList(input.keywords.secondaries).join('، '),
     lsi_keywords: normalizeList(input.keywords.lsi).join('، '),
-    company_name: toText(input.keywords.company),
+    company_name: toText(input.keywords.company) || (options.requireCompany === false
+      ? (input.language === 'en'
+        ? 'Not specified — do not invent a company or brand.'
+        : 'غير محدد — لا تخترع اسم شركة أو علامة تجارية.')
+      : ''),
     goal_context: createGoalContextValue(input.goalContext),
     competitors_json: createCompetitorsValue(competitors, competitorChunks),
   };

@@ -133,6 +133,8 @@ test('pipeline UI uses a lightweight one-row status read and explicit review act
     readFile(new URL('../utils/externalAnalysis.ts', import.meta.url), 'utf8'),
   ]);
   assert.match(component, /loadLatestFullArticlePipeline/);
+  assert.match(component, /loadFullArticlePipelineReadiness/);
+  assert.match(component, /إعادة فحص الجاهزية/);
   assert.match(component, /مراجعة النواقص/);
   assert.match(component, /!progressView\.reviewRequired/);
   assert.doesNotMatch(component, /listExternalAnalysisJobsViaApi\(articleId, 50\)/);

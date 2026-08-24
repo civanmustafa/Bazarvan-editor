@@ -63,6 +63,7 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
     contentWritingPanel,
     editorContext,
     supabaseArticles,
+    externalAnalysisErrors,
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260728030000_full_article_pipeline.sql'),
     readWorkspaceFile('supabase/migrations/20260824010000_full_article_pipeline_safety.sql'),
@@ -75,6 +76,7 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
     readWorkspaceFile('components/ContentWritingPanel.tsx'),
     readWorkspaceFile('contexts/EditorContext.tsx'),
     readWorkspaceFile('utils/supabaseArticles.ts'),
+    readWorkspaceFile('utils/externalAnalysisErrors.ts'),
   ]);
 
   for (const jobType of ['content_brief_generation', 'full_article_pipeline']) {
@@ -110,6 +112,8 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
   assert.match(executor, /cancelContentWritingSession/);
   assert.match(executor, /request_external_analysis_job_cancel/);
   assert.match(executor, /contentBriefSavedAt/);
+  assert.match(executor, /allowMissingCompany: true/);
+  assert.match(executor, /allowMissingGoalContext: true/);
   assert.doesNotMatch(executor, /generatedBrief,[\s\S]*last_saved_at/);
 
   assert.match(briefExecutor, /readPromptRegistrySettings/);
@@ -125,8 +129,13 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
   assert.match(api, /action === 'full_pipeline'/);
   assert.match(api, /action === 'list'/);
   assert.match(api, /enqueue_full_article_pipeline/);
+  assert.match(api, /normalizeExternalAnalysisFailure/);
+  assert.match(externalAnalysisErrors, /full_pipeline_schema_unavailable/);
+  assert.match(api, /X-Request-ID/);
   assert.match(api, /request_full_article_pipeline_cancel/);
   assert.match(component, /بدء الإنشاء الشامل/);
+  assert.match(component, /loadFullArticlePipelineReadiness/);
+  assert.match(component, /CONTENT_WRITING_MIN_COMPETITOR_COUNT/);
   assert.match(component, /تتوقف مخالفات الجودة المانعة للمراجعة/);
   assert.match(component, /استئناف الآن/);
   assert.match(component, /loadLatestFullArticlePipeline/);

@@ -235,6 +235,27 @@ test('content-writing still requires the four core brief fields and company name
   assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'company_name'));
 });
 
+test('full workflow can use its generated brief without fabricating company or manual goal choices', async () => {
+  const { buildContentWritingPromptBundle } = await importContentWriting();
+  const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
+  input.keywords.company = '';
+  input.goalContext.pageType = '';
+  input.goalContext.objective = '';
+  input.goalContext.audienceScope = '';
+  input.goalContext.searchIntent = '';
+
+  const bundle = buildContentWritingPromptBundle(input, {
+    requireCompany: false,
+    requireGoalContext: false,
+  });
+
+  assert.equal(bundle.ready, true);
+  assert.equal(bundle.variables.company_name, 'غير محدد — لا تخترع اسم شركة أو علامة تجارية.');
+  assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'company_name'));
+  assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code.startsWith('goal_context.')));
+  assert.match(bundle.messages.map((message: { content: string }) => message.content).join('\n'), /لا تخترع اسم شركة/);
+});
+
 test('content-writing accepts a supported manual word range and rejects malformed input', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const validInput = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);

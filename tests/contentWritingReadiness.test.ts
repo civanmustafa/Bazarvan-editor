@@ -22,6 +22,7 @@ const readWorkspaceFile = (relativePath: string): Promise<string> => (
 
 const createProbeClient = (options: {
   failedTable?: string;
+  failedRpc?: string;
   calls?: Array<{ table: string; columns: string; limit: number }>;
   rpcCalls?: string[];
 } = {}) => ({
@@ -40,7 +41,12 @@ const createProbeClient = (options: {
   }),
   rpc: async (name: string) => {
     options.rpcCalls?.push(name);
-    return { data: [] as unknown[], error: null as null };
+    return {
+      data: name === 'full_article_pipeline_schema_version' ? 3 : [] as unknown[],
+      error: name === options.failedRpc
+        ? { code: 'PGRST202', message: 'Internal RPC schema detail that must stay private.' }
+        : null,
+    };
   },
 });
 
@@ -56,22 +62,28 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 15);
+  assert.equal(result.requiredMigrationCount, 18);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
     steps: true,
     automationQueue: true,
+    fullPipelineJobs: true,
     keyCoordinator: true,
     automationEvaluator: true,
     competitorPreparationCoordinator: true,
+    fullPipelineCoordinator: true,
+    fullPipelineVersion: true,
   });
   assert.deepEqual(rpcCalls.sort(), [
     'enqueue_content_writing_competitor_preparation',
+    'enqueue_full_article_pipeline',
     'evaluate_content_writing_automation_readiness',
+    'full_article_pipeline_schema_version',
     'inspect_gemini_api_key_availability',
   ]);
   assert.deepEqual(calls.map(call => call.table).sort(), [
+    'ai_external_analysis_jobs',
     'content_writing_automation_items',
     'content_writing_messages',
     'content_writing_sessions',
@@ -87,6 +99,9 @@ test('content-writing readiness checks every required schema surface', async () 
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /knowledge_workflow_version/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /dynamic_final_section_version/);
   assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /parallel_substeps_version/);
+  assert.match(calls.find(call => call.table === 'content_writing_sessions')?.columns || '', /pipeline_parent_job_id/);
+  assert.match(calls.find(call => call.table === 'ai_external_analysis_jobs')?.columns || '', /lease_generation/);
+  assert.match(calls.find(call => call.table === 'ai_external_analysis_jobs')?.columns || '', /dead_lettered_at/);
 });
 
 test('public readiness reports a safe 503 reason without exposing Supabase details', async () => {
@@ -105,6 +120,22 @@ test('public readiness reports a safe 503 reason without exposing Supabase detai
   assert.equal(publicResult.code, 'content_writing_schema_unavailable');
   assert.equal('detail' in publicResult, false);
   assert.doesNotMatch(JSON.stringify(publicResult), /Internal schema detail|PGRST204/);
+});
+
+test('full-pipeline coordinator is a mandatory non-mutating readiness surface', async () => {
+  const readiness = await importReadiness();
+  readiness.__resetContentWritingReadinessForTests();
+  const result = await readiness.checkContentWritingReadiness({
+    client: createProbeClient({ failedRpc: 'enqueue_full_article_pipeline' }),
+    force: true,
+    timeoutMs: 1_000,
+  });
+  const publicResult = readiness.toPublicContentWritingReadiness(result);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.checks.fullPipelineCoordinator, false);
+  assert.match(result.detail, /fullPipelineCoordinator/);
+  assert.doesNotMatch(JSON.stringify(publicResult), /Internal RPC schema detail|PGRST202/);
 });
 
 test('production release gate verifies ordered migrations, bundles, and readiness endpoints', async () => {
@@ -127,6 +158,9 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260812010000_gemini_key_availability_waiting\.sql/);
   assert.match(releaseRegistry, /20260823010000_automatic_content_writing_queue\.sql/);
   assert.match(releaseRegistry, /20260823020000_content_writing_competitor_preparation\.sql/);
+  assert.match(releaseRegistry, /20260728030000_full_article_pipeline\.sql/);
+  assert.match(releaseRegistry, /20260824010000_full_article_pipeline_safety\.sql/);
+  assert.match(releaseRegistry, /20260824020000_full_article_pipeline_optional_prerequisites\.sql/);
   assert.match(
     await readWorkspaceFile('server/contentWritingReadiness.ts'),
     /resume_preference_version/,

@@ -891,9 +891,15 @@ const executeFullArticlePipeline = async (
         provider,
         model,
         idempotencyKey: `full-pipeline:${context.job.id}:content-writing`,
+        allowMissingCompany: true,
+        allowMissingGoalContext: true,
         contextSnapshotPatch: {
           triggerSource: 'full_pipeline',
           fullArticlePipelineJobId: context.job.id,
+          fullPipelineOptionalPrerequisites: {
+            company: true,
+            goalContext: true,
+          },
         },
       });
       writingSession = queued.session;

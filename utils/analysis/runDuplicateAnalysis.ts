@@ -36,8 +36,10 @@ const ENGLISH_WARNING_ADVICE_WORDS = ['warning', 'caution', 'be careful', 'note'
 
 /*
  * Duplicate analysis scans repeated 2-8 word phrases.
- * It excludes repeated phrases that are already covered by target keywords,
- * alternate forms, LSI terms, the company name, and protected editorial signals.
+ * It classifies repeated phrases that overlap target keywords, alternate
+ * forms, LSI terms, the company name, and protected editorial signals. They
+ * remain visible because hiding them masks keyword stuffing in the dedicated
+ * repetition report.
  */
 export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, totalWordCount: number, articleLanguage: 'ar' | 'en'): { duplicateAnalysis: DuplicateAnalysis; duplicateStats: DuplicateStats } => {
     const duplicateAnalysis: DuplicateAnalysis = { 2:[], 3:[], 4:[], 5:[], 6:[], 7:[], 8:[] };
@@ -173,7 +175,6 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
         nGrams[n].forEach((value, key) => {
           if (value.locations.length > 1) {
             const isKeywordPhrase = isProtectedTargetPhrase(key);
-            if (isKeywordPhrase) return;
             const repeatedInstances = value.locations.length - 1;
             duplicateAnalysis[n as keyof DuplicateAnalysis].push({
               text: value.text,
@@ -182,7 +183,11 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
               containsKeyword: isKeywordPhrase,
             });
             duplicateStats.totalDuplicates += repeatedInstances;
-            duplicateStats.commonDuplicatesCount += repeatedInstances;
+            if (isKeywordPhrase) {
+              duplicateStats.keywordDuplicatesCount += repeatedInstances;
+            } else {
+              duplicateStats.commonDuplicatesCount += repeatedInstances;
+            }
           }
         });
       }

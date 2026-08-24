@@ -1,15 +1,14 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS } from '../constants/contentWritingRelease.ts';
 
 const root = process.cwd();
-const migrations = [
-  '20260728030000_full_article_pipeline.sql',
-  '20260824010000_full_article_pipeline_safety.sql',
-];
+const migrations = [...FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS];
 for (const migration of migrations) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
-  if (!migrationInfo.isFile() || migrationInfo.size < 8_000) {
+  const minimumSize = migration.includes('optional_prerequisites') ? 4_000 : 8_000;
+  if (!migrationInfo.isFile() || migrationInfo.size < minimumSize) {
     throw new Error(`Full article pipeline migration is missing or incomplete: ${migration}`);
   }
 }

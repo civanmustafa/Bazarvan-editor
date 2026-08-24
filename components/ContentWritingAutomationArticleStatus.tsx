@@ -304,6 +304,9 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
         <div className="flex min-w-0 items-start gap-2">
           {loading && !status ? <Loader2 size={15} className="mt-0.5 shrink-0 animate-spin" /> : <Bot size={15} className="mt-0.5 shrink-0" />}
           <div className="min-w-0">
+            <div className="mb-0.5 text-[9px] font-black uppercase tracking-wide opacity-60">
+              {isArabic ? 'مسار منفصل: الطابور التلقائي' : 'Separate path: automatic queue'}
+            </div>
             <div className="text-[11px] font-black">{presentation.label}</div>
             <div className="mt-0.5 text-[10px] font-semibold leading-5 opacity-80">{presentation.detail}</div>
             {item && (

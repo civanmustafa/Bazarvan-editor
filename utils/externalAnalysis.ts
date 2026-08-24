@@ -594,6 +594,7 @@ export class ExternalAnalysisRequestError extends Error {
   code: string;
   missingFields: string[];
   commandIds: string[];
+  requestId: string;
 
   constructor(response: Response, body: Record<string, any>) {
     super(toTrimmedString(body.error) || `External analysis request failed with status ${response.status}.`);
@@ -602,8 +603,39 @@ export class ExternalAnalysisRequestError extends Error {
     this.code = toTrimmedString(body.code) || 'external_analysis_request_failed';
     this.missingFields = toStringList(body.missingFields);
     this.commandIds = toStringList(body.commandIds);
+    this.requestId = toTrimmedString(body.requestId) || response.headers.get('x-request-id') || '';
   }
 }
+
+export type FullArticlePipelineReadiness = {
+  ok: boolean;
+  checkedAt: string;
+  code: string;
+};
+
+export const loadFullArticlePipelineReadiness = async (): Promise<FullArticlePipelineReadiness> => {
+  const response = await fetch('/api/readyz', {
+    method: 'GET',
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  });
+  const payload = await response.json().catch(() => ({}));
+  const normalized = isRecord(payload) ? payload : {};
+  const checks = isRecord(normalized.checks) ? normalized.checks : {};
+  const contentWriting = isRecord(checks.contentWriting) ? checks.contentWriting : {};
+  const pipelineChecks = isRecord(contentWriting.checks) ? contentWriting.checks : {};
+  const ok = contentWriting.ok === true
+    && pipelineChecks.fullPipelineJobs === true
+    && pipelineChecks.fullPipelineCoordinator === true
+    && pipelineChecks.fullPipelineVersion === true;
+  return {
+    ok,
+    checkedAt: toTrimmedString(contentWriting.checkedAt),
+    code: ok
+      ? ''
+      : toTrimmedString(contentWriting.code) || `readyz_${response.status}`,
+  };
+};
 
 const requestExternalAnalysis = async (
   articleId: string,

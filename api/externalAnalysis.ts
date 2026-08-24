@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
+import { requireArticleWriteAccess } from './articleAccessPolicy';
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 import { reserveArticleForExplicitContentWriting } from '../server/contentWritingAutomation';
@@ -11,6 +12,7 @@ import {
   EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS,
   countExternalEngineeringArticleWords,
 } from '../utils/externalAnalysisArticleText';
+import { normalizeExternalAnalysisFailure } from '../utils/externalAnalysisErrors';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
@@ -113,6 +115,24 @@ class ExternalAnalysisApiError extends Error {
     this.details = options.details;
   }
 }
+
+const throwFullPipelineStorageError = (
+  error: unknown,
+  requestId: string,
+  phase: string,
+): never => {
+  const failure = normalizeExternalAnalysisFailure(error, requestId, phase);
+  throw new ExternalAnalysisApiError(failure);
+};
+
+const logFullPipelinePhase = (
+  requestId: string,
+  articleId: string,
+  phase: string,
+  status: 'start' | 'completed',
+): void => {
+  console.info('[external-analysis]', { requestId, articleId, action: 'full_pipeline', phase, status });
+};
 
 const toTrimmedString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
@@ -642,7 +662,7 @@ const retryExternalAnalysisJob = async (
   };
 };
 
-const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
+const handleExternalAnalysisRequest = async (req: any, requestId: string): Promise<ApiResult> => {
   if (req.method === 'OPTIONS') {
     return {
       status: 204,
@@ -719,6 +739,7 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
     }
     const idempotencyKey = toTrimmedString(body.idempotencyKey)
       || `full-article-pipeline:${article.id}:${Date.now()}`;
+    logFullPipelinePhase(requestId, article.id, 'idempotency_query', 'start');
     const { data: idempotentPipeline, error: idempotentPipelineError } = await supabase
       .from('ai_external_analysis_jobs')
       .select('id')
@@ -728,15 +749,26 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (idempotentPipelineError) throw idempotentPipelineError;
-    await reserveFullPipelineOrThrow({
-      articleId: article.id,
-      requestedBy: profile.id,
-      provider: provider as ContentWritingProvider,
-      model,
-      resume: false,
-      allowedFullPipelineJobId: idempotentPipeline?.id ? String(idempotentPipeline.id) : null,
-    });
+    if (idempotentPipelineError) {
+      throwFullPipelineStorageError(idempotentPipelineError, requestId, 'idempotency_query');
+    }
+    logFullPipelinePhase(requestId, article.id, 'idempotency_query', 'completed');
+    logFullPipelinePhase(requestId, article.id, 'reservation', 'start');
+    try {
+      await reserveFullPipelineOrThrow({
+        articleId: article.id,
+        requestedBy: profile.id,
+        provider: provider as ContentWritingProvider,
+        model,
+        resume: false,
+        allowedFullPipelineJobId: idempotentPipeline?.id ? String(idempotentPipeline.id) : null,
+      });
+    } catch (reservationError) {
+      if (reservationError instanceof ExternalAnalysisApiError) throw reservationError;
+      throwFullPipelineStorageError(reservationError, requestId, 'reservation');
+    }
+    logFullPipelinePhase(requestId, article.id, 'reservation', 'completed');
+    logFullPipelinePhase(requestId, article.id, 'enqueue_rpc', 'start');
     const { data, error } = await supabase.rpc('enqueue_full_article_pipeline', {
       p_article_id: article.id,
       p_requested_by: profile.id,
@@ -745,7 +777,8 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
       p_competitor_count: competitorCount,
       p_idempotency_key: idempotencyKey,
     });
-    if (error) throw error;
+    if (error) throwFullPipelineStorageError(error, requestId, 'enqueue_rpc');
+    logFullPipelinePhase(requestId, article.id, 'enqueue_rpc', 'completed');
     const job = Array.isArray(data) ? data[0] : data;
     if (!job) {
       throw new ExternalAnalysisApiError({
@@ -813,20 +846,30 @@ const handleExternalAnalysisRequest = async (req: any): Promise<ApiResult> => {
 };
 
 export default async function handler(req: any, res?: any): Promise<Response | void> {
+  const requestId = getHeaderValue(req, 'x-request-id').trim().slice(0, 120) || randomUUID();
   try {
-    const result = await handleExternalAnalysisRequest(req);
-    return deliverApiResult(result, res);
+    const result = await handleExternalAnalysisRequest(req, requestId);
+    return deliverApiResult({
+      ...result,
+      headers: { ...(result.headers || {}), 'X-Request-ID': requestId },
+    }, res);
   } catch (error) {
-    const status = error instanceof ExternalAnalysisApiError || error instanceof ArticleAccessPolicyError
-      ? error.status
-      : 500;
-    const code = error instanceof ExternalAnalysisApiError ? error.code : 'external_analysis_request_failed';
-    const details = error instanceof ExternalAnalysisApiError ? error.details : undefined;
-    const message = error instanceof Error ? error.message : 'Unknown external analysis error.';
-    console.error('External analysis request failed:', error);
+    const failure = normalizeExternalAnalysisFailure(error, requestId);
+    console.error('External analysis request failed:', {
+      requestId,
+      code: failure.code,
+      phase: failure.details.phase,
+      error,
+    });
     const result: ApiResult = {
-      status,
-      body: { ok: false, code, error: message, ...(details || {}) },
+      status: failure.status,
+      headers: { 'X-Request-ID': requestId },
+      body: {
+        ok: false,
+        code: failure.code,
+        error: failure.message,
+        ...failure.details,
+      },
     };
     return deliverApiResult(result, res);
   }
