@@ -237,7 +237,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
   const canRetry = Boolean(
     job
     && !progressView.reviewRequired
-    && ['failed', 'cancelled', 'retry_scheduled'].includes(job.status),
+    && ['failed', 'blocked', 'cancelled', 'retry_scheduled'].includes(job.status),
   );
   const showFailure = Boolean(
     job

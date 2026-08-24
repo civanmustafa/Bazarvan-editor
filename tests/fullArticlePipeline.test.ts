@@ -138,6 +138,7 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
   assert.match(component, /CONTENT_WRITING_MIN_COMPETITOR_COUNT/);
   assert.match(component, /تتوقف مخالفات الجودة المانعة للمراجعة/);
   assert.match(component, /استئناف الآن/);
+  assert.match(component, /\['failed', 'blocked', 'cancelled', 'retry_scheduled'\]/);
   assert.match(component, /loadLatestFullArticlePipeline/);
   assert.match(component, /onReloadGoalContext/);
   assert.match(component, /contentBriefSavedAt/);
