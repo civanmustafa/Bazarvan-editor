@@ -55,6 +55,11 @@ import { canPersistArticleDraft, shouldClearPersistedArticleBody } from '../util
 import { hasMeaningfulArticleContent } from '../utils/articleContent.ts';
 import { handleEditorLinkClick } from '../utils/editorLinkInteraction';
 import { saveArticleClientSelection } from '../utils/articleClientContext';
+import {
+    createEditorContentFromPlainText,
+    getSafeEditorContent,
+    normalizeStoredEditorContent,
+} from '../utils/editorStoredContent';
 
 /*
  * EditorContext is the owner of article editing state:
@@ -247,158 +252,9 @@ const getActiveArticleSettings = (article?: ArticleActivity | RemoteArticleActiv
     };
 };
 
-const ALLOWED_EDITOR_NODE_TYPES = new Set([
-    'doc',
-    'paragraph',
-    'text',
-    'heading',
-    'blockquote',
-    'bulletList',
-    'orderedList',
-    'listItem',
-    'codeBlock',
-    'hardBreak',
-    'horizontalRule',
-    'table',
-    'tableRow',
-    'tableHeader',
-    'tableCell',
-]);
-
-const ALLOWED_EDITOR_MARK_TYPES = new Set([
-    'bold',
-    'italic',
-    'strike',
-    'code',
-    'highlight',
-]);
-
-const INLINE_EDITOR_NODE_TYPES = new Set(['text', 'hardBreak']);
-const BLOCK_EDITOR_NODE_TYPES = new Set([
-    'paragraph',
-    'heading',
-    'blockquote',
-    'bulletList',
-    'orderedList',
-    'codeBlock',
-    'horizontalRule',
-    'table',
-]);
-
-const isValidEditorMark = (value: unknown): boolean => {
-    if (!isRecord(value) || typeof value.type !== 'string') return false;
-    if (!ALLOWED_EDITOR_MARK_TYPES.has(value.type)) return false;
-    return value.attrs === undefined || isRecord(value.attrs);
-};
-
-const hasValidEditorChildren = (type: string, children: Record<string, any>[]): boolean => {
-    const childTypes = children.map(child => child.type);
-
-    switch (type) {
-        case 'doc':
-            return childTypes.every(childType => BLOCK_EDITOR_NODE_TYPES.has(childType));
-        case 'paragraph':
-        case 'heading':
-            return childTypes.every(childType => INLINE_EDITOR_NODE_TYPES.has(childType));
-        case 'blockquote':
-            return childTypes.every(childType => BLOCK_EDITOR_NODE_TYPES.has(childType));
-        case 'bulletList':
-        case 'orderedList':
-            return childTypes.every(childType => childType === 'listItem');
-        case 'listItem':
-            return childTypes.every(childType => BLOCK_EDITOR_NODE_TYPES.has(childType));
-        case 'codeBlock':
-            return childTypes.every(childType => childType === 'text');
-        case 'table':
-            return childTypes.every(childType => childType === 'tableRow');
-        case 'tableRow':
-            return childTypes.every(childType => childType === 'tableCell' || childType === 'tableHeader');
-        case 'tableCell':
-        case 'tableHeader':
-            return childTypes.every(childType => BLOCK_EDITOR_NODE_TYPES.has(childType));
-        case 'text':
-        case 'hardBreak':
-        case 'horizontalRule':
-            return children.length === 0;
-        default:
-            return false;
-    }
-};
-
-const isValidEditorNode = (value: unknown): boolean => {
-    if (!isRecord(value) || typeof value.type !== 'string') return false;
-    if (!ALLOWED_EDITOR_NODE_TYPES.has(value.type)) return false;
-    if (value.attrs !== undefined && !isRecord(value.attrs)) return false;
-    if (value.marks !== undefined && (!Array.isArray(value.marks) || !value.marks.every(isValidEditorMark))) return false;
-
-    if (value.type === 'text') {
-        return typeof value.text === 'string' && value.content === undefined;
-    }
-
-    if (value.type === 'heading') {
-        const level = value.attrs?.level;
-        const normalizedLevel = typeof level === 'string' ? Number(level) : level;
-        if (normalizedLevel !== undefined && ![1, 2, 3, 4].includes(Number(normalizedLevel))) return false;
-    }
-
-    if (value.type === 'hardBreak' || value.type === 'horizontalRule') {
-        return value.content === undefined;
-    }
-
-    if (value.content === undefined) {
-        if (value.type === 'doc' || value.type === 'table' || value.type === 'tableRow' || value.type === 'bulletList' || value.type === 'orderedList') {
-            return false;
-        }
-        return true;
-    }
-
-    if (!Array.isArray(value.content) || !value.content.every(isValidEditorNode)) return false;
-    return hasValidEditorChildren(value.type, value.content);
-};
-
-const normalizeStoredEditorContent = (value: unknown): any | null => {
-    if (typeof value === 'string') return value;
-
-    if (Array.isArray(value)) {
-        return value.every(isValidEditorNode) ? { type: 'doc', content: value } : null;
-    }
-
-    if (!isRecord(value)) return null;
-
-    const content = Array.isArray(value.content) ? value.content : undefined;
-    const normalizedValue = typeof value.type === 'string'
-        ? value
-        : content
-          ? { ...value, type: 'doc' }
-          : value;
-
-    return isValidEditorNode(normalizedValue) ? normalizedValue : null;
-};
-
-const extractTextFromStoredEditorContent = (value: unknown): string => {
-    if (typeof value === 'string') return value;
-    if (Array.isArray(value)) {
-        return value.map(extractTextFromStoredEditorContent).filter(Boolean).join('\n');
-    }
-    if (!isRecord(value)) return '';
-    if (typeof value.text === 'string') return value.text;
-    if (Array.isArray(value.content)) {
-        return value.content.map(extractTextFromStoredEditorContent).filter(Boolean).join('\n');
-    }
-    return '';
-};
-
 const countWordsInText = (value: string): number => (
     value.trim().split(/\s+/).filter(Boolean).length
 );
-
-const getSafeEditorContent = (value: unknown, fallback: any = createEmptyEditorContent()): any => {
-    const normalized = normalizeStoredEditorContent(value);
-    if (normalized !== null) return normalized;
-
-    const recoveredText = extractTextFromStoredEditorContent(value).trim();
-    return recoveredText || fallback;
-};
 
 const isUsableEditorContent = (value: unknown): boolean => hasMeaningfulArticleContent(value);
 
@@ -1100,11 +956,22 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const latestArticle = options.article || null;
         const resolvedTitle = snapshot?.title || options.titleToUse;
         const snapshotContent = snapshot?.content;
+        const snapshotContentHtml = snapshot?.contentHtml;
         const snapshotPlainText = snapshot?.plainText?.trim();
-        let resolvedContent = isUsableEditorContent(snapshotContent) ? snapshotContent : null;
+        const snapshotPlainTextContent = snapshotPlainText
+            ? createEditorContentFromPlainText(snapshotPlainText)
+            : null;
+        const snapshotContentIsPlainText = typeof snapshotContent === 'string'
+            && Boolean(snapshotPlainText)
+            && snapshotContent.trim() === snapshotPlainText;
+        let resolvedContent = isUsableEditorContent(snapshotContent)
+            ? snapshotContentIsPlainText
+                ? snapshotPlainTextContent
+                : snapshotContent
+            : null;
 
-        if (!resolvedContent && snapshotPlainText) {
-            resolvedContent = snapshotPlainText;
+        if (!resolvedContent && snapshotPlainTextContent) {
+            resolvedContent = snapshotPlainTextContent;
         }
         if (!resolvedContent && currentUser) {
             resolvedContent = await resolveArticleContentByTitle(currentUser, resolvedTitle);
@@ -1139,10 +1006,13 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setImportOrigin(snapshot?.attachments?.importOrigin || null);
 
             if (hasResolvedContent || options.clearWhenEmpty !== false) {
+                const storedContentFallback = isUsableEditorContent(snapshotContentHtml)
+                    ? snapshotContentHtml
+                    : createEmptyEditorContent();
                 setEditorContentSafely(
                     targetEditor,
                     hasResolvedContent ? resolvedContent : createEmptyEditorContent(),
-                    createEmptyEditorContent(),
+                    storedContentFallback,
                 );
                 captureEditorSnapshot(targetEditor, false);
                 applyArticleLanguageFormatting(targetEditor, lang);
