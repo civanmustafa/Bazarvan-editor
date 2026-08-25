@@ -199,6 +199,7 @@ const reportStage = async (
       stageIndex,
       stageCount: 7,
       qualityGatePolicy: 'review_required',
+      ...(stageIndex < 6 ? { qualityGatePassed: null } : {}),
       ...details,
       updatedAt: new Date().toISOString(),
     },
@@ -541,7 +542,10 @@ const waitForContentWriting = async (options: {
       childProgress: session.progress || {},
       nextAttemptAt: session.next_attempt_at,
       qualityScore: session.quality_score,
-      qualityGatePassed: isRecord(session.quality_report) && session.quality_report.passed === true,
+      qualityGatePassed: isRecord(session.quality_report)
+        && typeof session.quality_report.passed === 'boolean'
+        ? session.quality_report.passed
+        : null,
     });
     if (session.status === 'completed') return session;
     if (session.status === 'failed' || session.status === 'cancelled') {

@@ -160,7 +160,7 @@ export const getFullArticlePipelineProgressView = (
       FULL_ARTICLE_PIPELINE_REVIEW_CODES.has(job.last_error_code || '')
       || progress.reviewRequired === true
       || progress.blockedForReview === true
-      || rawQualityPassed === false
+      || (stageIndex >= 6 && rawQualityPassed === false)
     )
   );
   const startedAtMs = Date.parse(job?.started_at || job?.created_at || '');

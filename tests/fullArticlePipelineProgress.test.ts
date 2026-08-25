@@ -127,6 +127,30 @@ test('quality block becomes review-required and clears stale retry reason', () =
   assert.ok(!view.reviewReasons.some(reason => reason.includes('Passing blocking check')));
 });
 
+test('a stage-five provider quota failure remains resumable instead of becoming a quality review', () => {
+  const view = getFullArticlePipelineProgressView(job({
+    status: 'blocked',
+    last_error_code: 'external_analysis_retry_limit_reached',
+    last_error: 'Gemini quota exhausted.',
+    progress: {
+      stage: 'dead_lettered',
+      stageIndex: 5,
+      stageCount: 7,
+      contentWritingSessionId: 'failed-session-id',
+      qualityGatePassed: false,
+      childProgress: {
+        stage: 'attempting',
+        workflowStepIndex: 16,
+        workflowStepCount: 19,
+      },
+    },
+  }));
+
+  assert.equal(view.reviewRequired, false);
+  assert.equal(view.stageIndex, 5);
+  assert.equal(view.contentWritingSessionId, 'failed-session-id');
+});
+
 test('pipeline UI uses a lightweight one-row status read and explicit review action', async () => {
   const [component, externalAnalysis] = await Promise.all([
     readFile(new URL('../components/FullArticlePipelineControl.tsx', import.meta.url), 'utf8'),

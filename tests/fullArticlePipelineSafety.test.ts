@@ -132,6 +132,8 @@ test('pipeline completes both semantic keyword lists before content writing', as
   assert.match(executor, /completionPass: pass \+ 1/);
   assert.match(executor, /full_pipeline_semantic_keywords_incomplete/);
   assert.match(executor, /missingFields: semanticReadiness\.missingFields/);
+  assert.match(executor, /stageIndex < 6 \? \{ qualityGatePassed: null \}/);
+  assert.match(executor, /typeof session\.quality_report\.passed === 'boolean'/);
   assert.doesNotMatch(executor, /text\(savedProgress\.semanticJobId\) \|\| await enqueueSemantic/);
 });
 
