@@ -4,14 +4,12 @@ import {
   MAX_ARTICLE_COMPETITORS,
 } from '../constants/competitors.ts';
 import {
-  analyzeAndSelectCompetitors,
   extractCompetitorOwnDomains,
   resolveCompetitorCountryCode,
+  type CompetitorSelectionResult,
 } from './competitorSelectionEngine.ts';
-import {
-  FirecrawlCompetitorError,
-  searchCompetitorWeb,
-} from './firecrawlCompetitorService.ts';
+import { FirecrawlCompetitorError } from './firecrawlCompetitorService.ts';
+import { discoverAndSelectCompetitors } from './competitorDiscoveryService.ts';
 import {
   ExternalAnalysisRetryError,
   registerExternalAnalysisJobExecutor,
@@ -33,6 +31,25 @@ const textValue = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
 
+const textList = (value: unknown): string[] => (
+  Array.isArray(value)
+    ? value.map(textValue).filter(Boolean).slice(0, 12)
+    : []
+);
+
+const readArticleAlternativeKeywords = async (articleId: string): Promise<string[]> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('articles')
+    .select('keywords')
+    .eq('id', articleId)
+    .single();
+  if (error) throw error;
+  const keywords = data?.keywords && typeof data.keywords === 'object' && !Array.isArray(data.keywords)
+    ? data.keywords as Record<string, unknown>
+    : {};
+  return textList(keywords.secondaries);
+};
+
 const executeCompetitorDiscovery = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
@@ -42,14 +59,19 @@ const executeCompetitorDiscovery = async (
   const articleLanguage = input.articleLanguage === 'en' ? 'en' : 'ar';
   const companyName = textValue(input.companyName);
   const targetCountry = textValue(input.targetCountry);
+  const alternativeKeywords = textList(input.alternativeKeywords);
+  const persistedAlternativeKeywords = await readArticleAlternativeKeywords(context.job.article_id);
+  const resolvedAlternativeKeywords = alternativeKeywords.length > 0
+    ? alternativeKeywords
+    : persistedAlternativeKeywords;
 
   if (!query) {
     return {
       result: {
         status: 'needs_input',
         reviewStatus: 'unavailable',
-        results: [] as ReturnType<typeof analyzeAndSelectCompetitors>['results'],
-        selection: null as ReturnType<typeof analyzeAndSelectCompetitors>['summary'] | null,
+        results: [] as CompetitorSelectionResult['results'],
+        selection: null as CompetitorSelectionResult['summary'] | null,
         query,
         queryType,
       },
@@ -78,21 +100,13 @@ const executeCompetitorDiscovery = async (
   });
 
   try {
-    const candidates = await searchCompetitorWeb({
-      query,
-      limit: COMPETITOR_SEARCH_CANDIDATE_LIMIT,
-      country: resolveCompetitorCountryCode(targetCountry),
-      location: targetCountry,
-      excludeDomains: ownDomains,
-      signal: context.signal,
-      userId: context.job.requested_by,
-    });
-    const selection = analyzeAndSelectCompetitors({
+    const selection = await discoverAndSelectCompetitors({
       context: {
         query,
         queryType,
         articleTitle: textValue(input.articleTitle),
         primaryKeyword: textValue(input.primaryKeyword),
+        alternativeKeywords: resolvedAlternativeKeywords,
         language: articleLanguage,
         pageType: textValue(input.pageType),
         searchIntent: textValue(input.searchIntent),
@@ -101,9 +115,26 @@ const executeCompetitorDiscovery = async (
         companyName,
         ownDomains,
       },
-      candidates,
+      country: resolveCompetitorCountryCode(targetCountry),
+      location: targetCountry,
+      excludeDomains: ownDomains,
+      signal: context.signal,
+      userId: context.job.requested_by,
       maxResults: COMPETITOR_SEARCH_RESULT_LIMIT,
       maxSelected: MAX_ARTICLE_COMPETITORS,
+      onProgress: async progress => {
+        await context.reportProgress({
+          progress: {
+            ...progress,
+            queryType,
+            alternativeKeywordCount: resolvedAlternativeKeywords.length,
+          },
+          provider: progress.stage === 'qualifying_competitor_content' ? 'programmatic' : 'firecrawl',
+          model: progress.stage === 'qualifying_competitor_content'
+            ? 'deterministic-keyword-targeting'
+            : FIRECRAWL_SEARCH_MODEL,
+        });
+      },
     });
     const reviewStatus = selection.results.length > 0 ? 'awaiting_review' : 'no_results';
 
@@ -111,7 +142,7 @@ const executeCompetitorDiscovery = async (
       progress: {
         stage: reviewStatus,
         current: selection.results.length,
-        total: candidates.length,
+        total: selection.summary.candidateCount,
         autoSelectedCount: selection.summary.autoSelectedCount,
       },
       provider: 'firecrawl',
@@ -131,7 +162,7 @@ const executeCompetitorDiscovery = async (
       progress: {
         stage: reviewStatus,
         current: selection.results.length,
-        total: candidates.length,
+        total: selection.summary.candidateCount,
         autoSelectedCount: selection.summary.autoSelectedCount,
       },
     };
@@ -152,8 +183,8 @@ const executeCompetitorDiscovery = async (
           reviewStatus: 'unavailable',
           query,
           queryType,
-          results: [] as ReturnType<typeof analyzeAndSelectCompetitors>['results'],
-          selection: null as ReturnType<typeof analyzeAndSelectCompetitors>['summary'] | null,
+          results: [] as CompetitorSelectionResult['results'],
+          selection: null as CompetitorSelectionResult['summary'] | null,
           errorCode: normalized.code,
           errorMessage: normalized.message,
         },

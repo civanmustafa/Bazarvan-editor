@@ -982,6 +982,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         articleId={articleId}
                         articleTitle={remoteActivity.title || title || ''}
                         primaryKeyword={remoteActivity.keywords?.primary || ''}
+                        alternativeKeywords={remoteActivity.keywords?.secondaries || []}
                         companyName={remoteActivity.keywords?.company || ''}
                         articleLanguage={remoteActivity.articleLanguage === 'en' ? 'en' : 'ar'}
                         goalContext={remoteActivity.goalContext}

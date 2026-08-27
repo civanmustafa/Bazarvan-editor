@@ -258,6 +258,8 @@ const selectCompetitorSources = (
       domain: text(row.domain),
       title: text(row.title),
       description: text(row.description),
+      autoSelected: row.autoSelected === true,
+      contentQualification: isRecord(row.contentQualification) ? row.contentQualification : {},
     }];
   }).slice(0, boundedCount(desiredCount, 5));
 };
@@ -284,6 +286,27 @@ const enqueueExtraction = async (options: {
   const job = isRecord(source.job) ? source.job : {};
   const jobId = text(job.id);
   if (!jobId) throw new Error('Competitor extraction did not return a job.');
+  const selectedQualifications = Object.fromEntries(options.sources.map(sourceRow => {
+    const url = text(sourceRow.canonicalUrl) || text(sourceRow.url);
+    const qualification = isRecord(sourceRow.contentQualification) ? sourceRow.contentQualification : {};
+    return [url, {
+      autoSelected: sourceRow.autoSelected === true,
+      qualificationRequired: text(qualification.status) === 'qualified',
+      status: text(qualification.status),
+      matchedKeyword: text(qualification.matchedKeyword),
+      matchKind: text(qualification.matchKind),
+    }];
+  }));
+  const { error: metadataError } = await getExternalAnalysisSupabaseAdmin()
+    .from('ai_external_analysis_jobs')
+    .update({
+      input_snapshot: {
+        ...(isRecord(job.input_snapshot) ? job.input_snapshot : {}),
+        selectedQualifications,
+      },
+    })
+    .eq('id', jobId);
+  if (metadataError) throw metadataError;
   return jobId;
 };
 

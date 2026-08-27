@@ -2278,6 +2278,7 @@ ${readyCommandCompetitorBlocks}`;
                     articleId={activeArticleId}
                     articleTitle={articleTitle}
                     primaryKeyword={articleKeywords.primary}
+                    alternativeKeywords={articleKeywords.secondaries}
                     articleLanguage={articleLanguage}
                     goalContext={articleGoalContext}
                     companyName={articleKeywords.company}

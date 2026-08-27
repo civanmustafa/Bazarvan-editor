@@ -318,10 +318,13 @@ test('expanded intent lexicon recognizes Arabic support and transactional search
   assert.equal(transactional.summary.targetIntent, 'transactional');
 });
 
-test('automatic competitor discovery is durable, idempotent, and uses the central engine', async () => {
-  const [migration, executor, worker, ecosystem, panel, card, modal, reports] = await Promise.all([
+test('automatic competitor discovery is durable, idempotent, and uses content qualification', async () => {
+  const [migration, qualificationMigration, executor, discoveryService, qualifier, worker, ecosystem, panel, card, modal, reports] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260714030000_automatic_competitor_discovery.sql'),
+    readWorkspaceFile('supabase/migrations/20260827020000_competitor_content_qualification.sql'),
     readWorkspaceFile('server/competitorDiscoveryExecutor.ts'),
+    readWorkspaceFile('server/competitorDiscoveryService.ts'),
+    readWorkspaceFile('server/competitorContentQualification.ts'),
     readWorkspaceFile('server/externalAnalysisWorker.ts'),
     readWorkspaceFile('ecosystem.config.cjs'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
@@ -338,8 +341,15 @@ test('automatic competitor discovery is durable, idempotent, and uses the centra
   assert.match(migration, /trigger enqueue_competitor_discovery_from_state/);
   assert.match(migration, /trigger assign_competitor_discovery_signature/);
   assert.match(migration, /job\.job_type in \('competitor_discovery', 'competitor_extraction'\)/);
-  assert.match(executor, /searchCompetitorWeb\(/);
-  assert.match(executor, /analyzeAndSelectCompetitors\(/);
+  assert.match(executor, /discoverAndSelectCompetitors\(/);
+  assert.match(executor, /readArticleAlternativeKeywords/);
+  assert.match(discoveryService, /searchCompetitorWeb\(/);
+  assert.match(discoveryService, /qualifyCompetitorCandidates\(/);
+  assert.match(discoveryService, /analyzeAndSelectCompetitors\(/);
+  assert.match(qualifier, /getProgrammaticCompetitorContent/);
+  assert.doesNotMatch(qualifier, /getCompetitorPreview|scrapeCompetitorWeb/);
+  assert.match(qualificationMigration, /alternativeKeywords/);
+  assert.match(qualificationMigration, /hydrate_competitor_discovery_keywords/);
   assert.match(executor, /registerExternalAnalysisJobExecutor\('competitor_discovery'/);
   assert.match(worker, /import '\.\/competitorDiscoveryExecutor'/);
   assert.match(worker, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES/);
@@ -423,7 +433,9 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.match(executor, /programmatic_after_firecrawl/);
   assert.match(executor, /isCompetitorLanguageCompatible\('ar', content\.text\)/);
   assert.match(executor, /competitor_language_mismatch/);
-  assert.match(executor, /\.select\('article_language'\)/);
+  assert.match(executor, /\.select\('article_language,keywords'\)/);
+  assert.match(executor, /analyzeCompetitorKeywordTargeting/);
+  assert.match(executor, /competitor_keyword_not_targeted/);
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
   assert.match(panel, /سحب \$\{selectedResults\.length\} موقع/);
   assert.match(panel, /البحث وسحب المنافسين/);

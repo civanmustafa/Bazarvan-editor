@@ -84,6 +84,7 @@ interface ExternalAnalysisCardControlsProps {
   articleId: string;
   articleTitle: string;
   primaryKeyword: string;
+  alternativeKeywords?: string[];
   companyName: string;
   articleLanguage: 'ar' | 'en';
   goalContext?: GoalContext;
@@ -97,6 +98,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   articleId,
   articleTitle,
   primaryKeyword,
+  alternativeKeywords = [],
   companyName,
   articleLanguage,
   goalContext,
@@ -779,6 +781,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             articleId={articleId}
             articleTitle={articleTitle}
             primaryKeyword={primaryKeyword}
+            alternativeKeywords={alternativeKeywords}
             companyName={companyName}
             articleLanguage={articleLanguage}
             goalContext={resolvedGoalContext}

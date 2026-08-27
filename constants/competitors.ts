@@ -1,6 +1,10 @@
 export const MAX_ARTICLE_COMPETITORS = 5;
 export const COMPETITOR_SEARCH_RESULT_LIMIT = 15;
 export const COMPETITOR_SEARCH_CANDIDATE_LIMIT = 20;
+export const COMPETITOR_CONTENT_QUALIFICATION_CANDIDATE_LIMIT = 12;
+export const COMPETITOR_CONTENT_QUALIFICATION_CONCURRENCY = 3;
+export const COMPETITOR_CONTENT_QUALIFICATION_TIMEOUT_MS = 12_000;
+export const COMPETITOR_ALTERNATIVE_SEARCH_LIMIT = 3;
 export const COMPETITOR_CONTENT_MAX_CHARS = 120_000;
 // Firecrawl is attempted once. A deterministic programmatic extractor takes over
 // immediately on provider failure, so repeating the same Firecrawl request wastes time.

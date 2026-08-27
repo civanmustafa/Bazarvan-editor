@@ -21,6 +21,7 @@ import {
   type ExternalAnalysisJson,
 } from './externalAnalysisQueue';
 import { isCompetitorLanguageCompatible } from './competitorSelectionEngine.ts';
+import { analyzeCompetitorKeywordTargeting } from './competitorContentQualification.ts';
 
 /**
  * Architecture boundary:
@@ -71,14 +72,48 @@ const readCompetitors = async (articleId: string): Promise<CompetitorRow[]> => {
   return (data || []) as CompetitorRow[];
 };
 
-const readArticleLanguage = async (articleId: string): Promise<'ar' | 'en'> => {
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const textList = (value: unknown): string[] => (
+  Array.isArray(value) ? value.map(text).filter(Boolean).slice(0, 12) : []
+);
+
+const readArticleTargetingContext = async (articleId: string): Promise<{
+  language: 'ar' | 'en';
+  primaryKeyword: string;
+  alternativeKeywords: string[];
+}> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('articles')
-    .select('article_language')
+    .select('article_language,keywords')
     .eq('id', articleId)
     .single();
   if (error) throw error;
-  return data?.article_language === 'en' ? 'en' : 'ar';
+  const keywords = isRecord(data?.keywords) ? data.keywords : {};
+  return {
+    language: data?.article_language === 'en' ? 'en' : 'ar',
+    primaryKeyword: text(keywords.primary),
+    alternativeKeywords: textList(keywords.secondaries),
+  };
+};
+
+const requiresKeywordTargeting = (
+  snapshot: Record<string, unknown>,
+  row: CompetitorRow,
+): boolean => {
+  const selected = isRecord(snapshot.selectedQualifications) ? snapshot.selectedQualifications : {};
+  const canonicalMetadata = selected[row.canonical_url];
+  const sourceMetadata = selected[row.source_url];
+  const metadata = isRecord(canonicalMetadata)
+    ? canonicalMetadata
+    : isRecord(sourceMetadata)
+      ? sourceMetadata
+      : {};
+  return metadata.qualificationRequired === true;
 };
 
 const updateCompetitor = async (
@@ -106,10 +141,12 @@ const syncArticleCompetitors = async (articleId: string): Promise<void> => {
 const executeCompetitorExtraction = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
-  const [rows, articleLanguage] = await Promise.all([
+  const [rows, articleTargeting] = await Promise.all([
     readCompetitors(context.job.article_id),
-    readArticleLanguage(context.job.article_id),
+    readArticleTargetingContext(context.job.article_id),
   ]);
+  const articleLanguage = articleTargeting.language;
+  const inputSnapshot = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
   if (rows.length === 0) {
     return {
       result: {
@@ -159,6 +196,25 @@ const executeCompetitorExtraction = async (
         signal: context.signal,
         userId: context.job.requested_by,
       });
+      if (requiresKeywordTargeting(inputSnapshot, row)) {
+        const targeting = analyzeCompetitorKeywordTargeting({
+          content: {
+            ...content,
+            qualityScore: 100,
+            cacheHit: content.cacheHit,
+          },
+          primaryKeyword: articleTargeting.primaryKeyword,
+          alternativeKeywords: articleTargeting.alternativeKeywords,
+        });
+        if (targeting.status !== 'qualified') {
+          throw new FirecrawlCompetitorError({
+            message: 'The final Firecrawl content did not contain the primary keyword or an approved alternative.',
+            status: 422,
+            code: 'competitor_keyword_not_targeted',
+            retryable: false,
+          });
+        }
+      }
       if (articleLanguage === 'ar' && !isCompetitorLanguageCompatible('ar', content.text)) {
         const message = 'The extracted competitor page is Latin-language content and was excluded from the Arabic article.';
         attempts.push({
@@ -263,6 +319,21 @@ const executeCompetitorExtraction = async (
           url: row.canonical_url || row.source_url,
           signal: context.signal,
         });
+        if (requiresKeywordTargeting(inputSnapshot, row)) {
+          const targeting = analyzeCompetitorKeywordTargeting({
+            content,
+            primaryKeyword: articleTargeting.primaryKeyword,
+            alternativeKeywords: articleTargeting.alternativeKeywords,
+          });
+          if (targeting.status !== 'qualified') {
+            throw new ProgrammaticCompetitorExtractionError({
+              message: 'The final page content did not contain the primary keyword or an approved alternative.',
+              status: 422,
+              code: 'competitor_keyword_not_targeted',
+              retryable: false,
+            });
+          }
+        }
         if (articleLanguage === 'ar' && !isCompetitorLanguageCompatible('ar', content.text)) {
           const message = 'The extracted competitor page is Latin-language content and was excluded from the Arabic article.';
           attempts.push({
@@ -335,13 +406,20 @@ const executeCompetitorExtraction = async (
               code: 'programmatic_extraction_failed',
               retryable: false,
             });
-        const failureMessage = [
-          `Firecrawl failed (${firecrawlError.code}): ${firecrawlError.message}`,
-          `Programmatic extraction failed (${normalizedProgrammaticError.code}): ${normalizedProgrammaticError.message}`,
-        ].join(' ');
+        const keywordTargetingFailed = firecrawlError.code === 'competitor_keyword_not_targeted'
+          && normalizedProgrammaticError.code === 'competitor_keyword_not_targeted';
+        const failureCode = keywordTargetingFailed
+          ? 'competitor_keyword_not_targeted'
+          : COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE;
+        const failureMessage = keywordTargetingFailed
+          ? 'The competitor page no longer targets the primary keyword or an approved alternative in its final content.'
+          : [
+              `Firecrawl failed (${firecrawlError.code}): ${firecrawlError.message}`,
+              `Programmatic extraction failed (${normalizedProgrammaticError.code}): ${normalizedProgrammaticError.message}`,
+            ].join(' ');
         failures.push({
           position: row.position,
-          code: COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE,
+          code: failureCode,
           message: failureMessage,
           retryable: false,
           attempt: currentAttempt,
@@ -360,7 +438,7 @@ const executeCompetitorExtraction = async (
           word_count: 0,
           status: 'failed',
           extraction_provider: 'firecrawl_programmatic_failed',
-          error_code: COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE,
+          error_code: failureCode,
           error_message: failureMessage.slice(0, 2_000),
           fetched_at: new Date().toISOString(),
         }, ['extracting']);

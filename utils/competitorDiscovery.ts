@@ -33,6 +33,20 @@ export type CompetitorDiscoveryRow = {
   discoverySignature: string;
 };
 
+export type CompetitorContentQualification = {
+  status: 'qualified' | 'not_qualified' | 'unavailable';
+  score: number;
+  matchedKeyword: string;
+  matchKind: 'primary' | 'alternative' | 'ordered_primary' | 'ordered_alternative' | 'none';
+  locations: Array<'title' | 'h1' | 'headings' | 'introduction' | 'body'>;
+  occurrences: number;
+  wordCount: number;
+  qualityScore: number;
+  cacheHit: boolean;
+  errorCode: string;
+  version: string;
+};
+
 export type CompetitorSearchResult = {
   url: string;
   canonicalUrl: string;
@@ -49,7 +63,9 @@ export type CompetitorSearchResult = {
   inferredPageType: 'article' | 'guide' | 'comparison' | 'service' | 'product' | 'category' | 'landing' | 'news' | 'forum' | 'video' | 'homepage' | 'unknown';
   reasonCodes: string[];
   warningCodes: string[];
+  contentQualification?: CompetitorContentQualification;
   signals: {
+    contentTargeting: number;
     intentMatch: number;
     relevance: number;
     searchStrength: number;
@@ -70,6 +86,9 @@ export type CompetitorSelectionSummary = {
   reviewedCount: number;
   filteredCount: number;
   languageFilteredCount: number;
+  contentQualificationAttempted: boolean;
+  contentQualifiedCount: number;
+  contentUnavailableCount: number;
   autoSelectedCount: number;
   autoSelectedUrls: string[];
 };
@@ -282,6 +301,7 @@ const parseCompetitorSearchResults = (value: unknown): CompetitorSearchResult[] 
         const canonicalUrl = toText(entry.canonicalUrl);
         if (!canonicalUrl) return [];
         const signals = isRecord(entry.signals) ? entry.signals : {};
+        const qualification = isRecord(entry.contentQualification) ? entry.contentQualification : null;
         return [{
           url: toText(entry.url) || canonicalUrl,
           canonicalUrl,
@@ -298,7 +318,23 @@ const parseCompetitorSearchResults = (value: unknown): CompetitorSearchResult[] 
           inferredPageType: (toText(entry.inferredPageType) || 'unknown') as CompetitorSearchResult['inferredPageType'],
           reasonCodes: toStringList(entry.reasonCodes),
           warningCodes: toStringList(entry.warningCodes),
+          contentQualification: qualification ? {
+            status: ['qualified', 'not_qualified', 'unavailable'].includes(toText(qualification.status))
+              ? toText(qualification.status) as CompetitorContentQualification['status']
+              : 'unavailable',
+            score: Math.max(0, Math.min(100, Number(qualification.score) || 0)),
+            matchedKeyword: toText(qualification.matchedKeyword),
+            matchKind: (toText(qualification.matchKind) || 'none') as CompetitorContentQualification['matchKind'],
+            locations: toStringList(qualification.locations) as CompetitorContentQualification['locations'],
+            occurrences: Math.max(0, Number(qualification.occurrences) || 0),
+            wordCount: Math.max(0, Number(qualification.wordCount) || 0),
+            qualityScore: Math.max(0, Math.min(100, Number(qualification.qualityScore) || 0)),
+            cacheHit: qualification.cacheHit === true,
+            errorCode: toText(qualification.errorCode),
+            version: toText(qualification.version),
+          } : undefined,
           signals: {
+            contentTargeting: Math.max(0, Math.min(100, Number(signals.contentTargeting) || 0)),
             intentMatch: Math.max(0, Math.min(100, Number(signals.intentMatch) || 0)),
             relevance: Math.max(0, Math.min(100, Number(signals.relevance) || 0)),
             searchStrength: Math.max(0, Math.min(100, Number(signals.searchStrength) || 0)),
@@ -327,6 +363,9 @@ const parseCompetitorSelectionSummary = (
     reviewedCount: Math.max(0, Number(selection.reviewedCount) || results.length),
     filteredCount: Math.max(0, Number(selection.filteredCount) || 0),
     languageFilteredCount: Math.max(0, Number(selection.languageFilteredCount) || 0),
+    contentQualificationAttempted: selection.contentQualificationAttempted === true,
+    contentQualifiedCount: Math.max(0, Number(selection.contentQualifiedCount) || 0),
+    contentUnavailableCount: Math.max(0, Number(selection.contentUnavailableCount) || 0),
     autoSelectedCount: Math.max(0, Number(selection.autoSelectedCount) || 0),
     autoSelectedUrls: toStringList(selection.autoSelectedUrls),
   };
@@ -375,6 +414,7 @@ export const searchArticleCompetitors = async (options: {
   language: 'ar' | 'en';
   articleTitle: string;
   primaryKeyword: string;
+  alternativeKeywords: string[];
   pageType: string;
   searchIntent: string;
   audienceScope: string;

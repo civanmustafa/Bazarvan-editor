@@ -203,8 +203,9 @@ test('API handlers share the same HTTP request and response adapters', async () 
 });
 
 test('competitor intent, scoring, and automatic selection use one server engine', async () => {
-  const [engine, apiHandler, firecrawlService, browserClient, discoveryPanel] = await Promise.all([
+  const [engine, discoveryService, apiHandler, firecrawlService, browserClient, discoveryPanel] = await Promise.all([
     readWorkspaceFile('server/competitorSelectionEngine.ts'),
+    readWorkspaceFile('server/competitorDiscoveryService.ts'),
     readWorkspaceFile('api/competitors.ts'),
     readWorkspaceFile('server/firecrawlCompetitorService.ts'),
     readWorkspaceFile('utils/competitorDiscovery.ts'),
@@ -214,8 +215,9 @@ test('competitor intent, scoring, and automatic selection use one server engine'
   assert.match(engine, /const INTENT_LEXICONS/);
   assert.match(engine, /const PAGE_TYPE_LEXICONS/);
   assert.match(engine, /export const analyzeAndSelectCompetitors/);
-  assert.match(apiHandler, /analyzeAndSelectCompetitors\(/);
-  [apiHandler, firecrawlService, browserClient, discoveryPanel].forEach(source => {
+  assert.match(discoveryService, /analyzeAndSelectCompetitors\(/);
+  assert.match(apiHandler, /discoverAndSelectCompetitors\(/);
+  [discoveryService, apiHandler, firecrawlService, browserClient, discoveryPanel].forEach(source => {
     assert.doesNotMatch(source, /const INTENT_LEXICONS|const PAGE_TYPE_LEXICONS/);
     assert.doesNotMatch(source, /selectionScore\s*=\s*\(/);
   });

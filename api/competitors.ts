@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   COMPETITOR_CONTENT_MAX_CHARS,
-  COMPETITOR_SEARCH_CANDIDATE_LIMIT,
   COMPETITOR_SEARCH_RESULT_LIMIT,
   MAX_ARTICLE_COMPETITORS,
   type CompetitorSearchMode,
@@ -14,16 +13,15 @@ import {
   canonicalizeCompetitorUrl,
   FirecrawlCompetitorError,
   isFirecrawlConfigured,
-  searchCompetitorWeb,
   type CompetitorSearchResult,
 } from '../server/firecrawlCompetitorService';
 import {
-  analyzeAndSelectCompetitors,
   extractCompetitorOwnDomains,
   isCompetitorOwnDomain,
   isCompetitorLanguageCompatible,
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
+import { discoverAndSelectCompetitors } from '../server/competitorDiscoveryService.ts';
 import { loadArticleClientOwnDomains } from '../server/clientCompetitorExclusions.ts';
 import { getCompetitorPreview } from '../server/competitorPreviewCache';
 import {
@@ -201,6 +199,25 @@ const readArticleLanguage = async (
   return data?.article_language === 'en' ? 'en' : 'ar';
 };
 
+const readArticleKeywordContext = async (
+  supabase: SupabaseAdmin,
+  articleId: string,
+): Promise<{ primaryKeyword: string; alternativeKeywords: string[] }> => {
+  const { data, error } = await supabase
+    .from('articles')
+    .select('keywords')
+    .eq('id', articleId)
+    .single();
+  if (error) throw error;
+  const keywords = isRecord(data?.keywords) ? data.keywords : {};
+  return {
+    primaryKeyword: toText(keywords.primary).slice(0, 500),
+    alternativeKeywords: Array.isArray(keywords.secondaries)
+      ? keywords.secondaries.map(toText).filter(Boolean).slice(0, 12)
+      : [],
+  };
+};
+
 const persistCompetitorDiscoveryResult = async (
   supabase: SupabaseAdmin,
   options: {
@@ -311,6 +328,31 @@ const normalizeSelectedResults = (value: unknown): CompetitorSearchResult[] => {
     });
   }
   return normalized;
+};
+
+const normalizeSelectedQualifications = (value: unknown): Record<string, unknown> => {
+  if (!Array.isArray(value)) return {};
+  return Object.fromEntries(value.flatMap(entry => {
+    if (!isRecord(entry)) return [];
+    const sourceUrl = toText(entry.canonicalUrl) || toText(entry.url);
+    if (!sourceUrl) return [];
+    let canonicalUrl = '';
+    try {
+      canonicalUrl = canonicalizeCompetitorUrl(sourceUrl);
+    } catch {
+      return [];
+    }
+    const qualification = isRecord(entry.contentQualification) ? entry.contentQualification : {};
+    const status = toText(qualification.status);
+    return [[canonicalUrl, {
+      autoSelected: entry.autoSelected === true,
+      qualificationRequired: status === 'qualified',
+      status: ['qualified', 'not_qualified', 'unavailable'].includes(status) ? status : 'unavailable',
+      score: Math.max(0, Math.min(100, Number(qualification.score) || 0)),
+      matchedKeyword: toText(qualification.matchedKeyword).slice(0, 300),
+      matchKind: toText(qualification.matchKind).slice(0, 40),
+    }]];
+  }));
 };
 
 const enqueueExtraction = async (
@@ -579,8 +621,18 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     const query = toText(body.query);
     const queryType = normalizeSearchMode(body.queryType);
     const articleTitle = toText(body.articleTitle).slice(0, 500);
-    const primaryKeyword = toText(body.primaryKeyword).slice(0, 500);
-    const language = await readArticleLanguage(supabase, articleId);
+    const [language, articleKeywordContext] = await Promise.all([
+      readArticleLanguage(supabase, articleId),
+      readArticleKeywordContext(supabase, articleId),
+    ]);
+    const primaryKeyword = toText(body.primaryKeyword).slice(0, 500)
+      || articleKeywordContext.primaryKeyword;
+    const requestedAlternativeKeywords = Array.isArray(body.alternativeKeywords)
+      ? body.alternativeKeywords.map(toText).filter(Boolean).slice(0, 12)
+      : [];
+    const alternativeKeywords = requestedAlternativeKeywords.length > 0
+      ? requestedAlternativeKeywords
+      : articleKeywordContext.alternativeKeywords;
     const pageType = toText(body.pageType).slice(0, 100);
     const searchIntent = toText(body.searchIntent).slice(0, 100);
     const audienceScope = toText(body.audienceScope).slice(0, 100);
@@ -590,20 +642,13 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       companyName,
       ...(await loadArticleClientOwnDomains(supabase, articleId, companyName)),
     );
-    const candidates = await searchCompetitorWeb({
-      query,
-      limit: COMPETITOR_SEARCH_CANDIDATE_LIMIT,
-      country: resolveCompetitorCountryCode(targetCountry),
-      location: targetCountry,
-      excludeDomains: ownDomains,
-      userId: principal.userId,
-    });
-    const selection = analyzeAndSelectCompetitors({
+    const selection = await discoverAndSelectCompetitors({
       context: {
         query,
         queryType,
         articleTitle,
         primaryKeyword,
+        alternativeKeywords,
         language,
         pageType,
         searchIntent,
@@ -612,7 +657,10 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
         companyName,
         ownDomains,
       },
-      candidates,
+      country: resolveCompetitorCountryCode(targetCountry),
+      location: targetCountry,
+      excludeDomains: ownDomains,
+      userId: principal.userId,
       maxResults: COMPETITOR_SEARCH_RESULT_LIMIT,
       maxSelected: MAX_ARTICLE_COMPETITORS,
     });
@@ -621,6 +669,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       queryText: query,
       articleTitle,
       primaryKeyword,
+      alternativeKeywords,
       companyName,
       articleLanguage: language,
       pageType,
@@ -702,6 +751,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     );
     const articleLanguage = await readArticleLanguage(supabase, articleId);
     const normalizedResults = normalizeSelectedResults(body.results);
+    const selectedQualifications = normalizeSelectedQualifications(body.results);
     const languageFilteredCount = articleLanguage === 'ar'
       ? normalizedResults.filter(result => !isCompetitorLanguageCompatible(
           'ar',
@@ -736,22 +786,23 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       queryText,
       results,
     });
+    const queuedJob = isRecord(queued) && isRecord(queued.job) ? queued.job : {};
+    const extractionJobId = toText(queuedJob.id);
+    if (extractionJobId) {
+      const { error: jobMetadataError } = await supabase
+        .from('ai_external_analysis_jobs')
+        .update({
+          readiness_signature: discoverySignature || queuedJob.readiness_signature || null,
+          input_snapshot: {
+            ...(isRecord(queuedJob.input_snapshot) ? queuedJob.input_snapshot : {}),
+            ...(discoverySignature ? { discoverySignature } : {}),
+            selectedQualifications,
+          },
+        })
+        .eq('id', extractionJobId);
+      if (jobMetadataError) throw jobMetadataError;
+    }
     if (discoverySignature) {
-      const queuedJob = isRecord(queued) && isRecord(queued.job) ? queued.job : {};
-      const extractionJobId = toText(queuedJob.id);
-      if (extractionJobId) {
-        const { error: jobSignatureError } = await supabase
-          .from('ai_external_analysis_jobs')
-          .update({
-            readiness_signature: discoverySignature,
-            input_snapshot: {
-              ...(isRecord(queuedJob.input_snapshot) ? queuedJob.input_snapshot : {}),
-              discoverySignature,
-            },
-          })
-          .eq('id', extractionJobId);
-        if (jobSignatureError) throw jobSignatureError;
-      }
       const { error: signatureError } = await supabase
         .from('article_competitors')
         .update({ discovery_signature: discoverySignature })

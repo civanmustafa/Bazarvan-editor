@@ -25,6 +25,11 @@ export type CompetitorPageType =
 
 export type CompetitorSelectionReasonCode =
   | 'auto-selected'
+  | 'content-keyword-qualified'
+  | 'primary-keyword-in-content'
+  | 'alternative-keyword-in-content'
+  | 'keyword-in-heading'
+  | 'keyword-in-introduction'
   | 'direct-intent-match'
   | 'page-type-match'
   | 'high-query-relevance'
@@ -40,10 +45,31 @@ export type CompetitorSelectionWarningCode =
   | 'low-query-relevance'
   | 'homepage-result'
   | 'forum-or-video-result'
+  | 'keyword-not-found-in-content'
+  | 'content-qualification-unavailable'
   | 'utility-page'
   | 'own-domain';
 
+export type CompetitorContentQualification = {
+  status: 'qualified' | 'not_qualified' | 'unavailable';
+  score: number;
+  matchedKeyword: string;
+  matchKind: 'primary' | 'alternative' | 'ordered_primary' | 'ordered_alternative' | 'none';
+  locations: Array<'title' | 'h1' | 'headings' | 'introduction' | 'body'>;
+  occurrences: number;
+  wordCount: number;
+  qualityScore: number;
+  cacheHit: boolean;
+  errorCode: string;
+  version: string;
+};
+
+export type ContentQualifiedCompetitorCandidate = CompetitorSearchResult & {
+  contentQualification?: CompetitorContentQualification;
+};
+
 export type CompetitorSelectionSignals = {
+  contentTargeting: number;
   intentMatch: number;
   relevance: number;
   searchStrength: number;
@@ -63,6 +89,7 @@ export type ScoredCompetitorSearchResult = CompetitorSearchResult & {
   inferredPageType: CompetitorPageType;
   reasonCodes: CompetitorSelectionReasonCode[];
   warningCodes: CompetitorSelectionWarningCode[];
+  contentQualification?: CompetitorContentQualification;
   signals: CompetitorSelectionSignals;
 };
 
@@ -76,6 +103,9 @@ export type CompetitorSelectionSummary = {
   reviewedCount: number;
   filteredCount: number;
   languageFilteredCount: number;
+  contentQualificationAttempted: boolean;
+  contentQualifiedCount: number;
+  contentUnavailableCount: number;
   autoSelectedCount: number;
   autoSelectedUrls: string[];
 };
@@ -90,6 +120,7 @@ export type CompetitorSelectionContext = {
   queryType?: 'title' | 'primary_keyword';
   articleTitle?: string;
   primaryKeyword?: string;
+  alternativeKeywords?: string[];
   language?: 'ar' | 'en';
   pageType?: string;
   searchIntent?: string;
@@ -99,7 +130,7 @@ export type CompetitorSelectionContext = {
   ownDomains?: string[];
 };
 
-const ENGINE_VERSION = 'competitor-selection-v2-arabic-language-guard';
+const ENGINE_VERSION = 'competitor-selection-v3-content-keyword-gate';
 const INTENTS = ['informational', 'commercial', 'transactional', 'navigational', 'local', 'support'] as const;
 type RankedIntent = typeof INTENTS[number];
 type IntentVector = Record<RankedIntent, number>;
@@ -465,20 +496,23 @@ const coverage = (queryTokens: string[], value: unknown): number => {
 };
 
 const queryRelevanceScore = (context: CompetitorSelectionContext, result: CompetitorSearchResult): number => {
-  const queryText = `${context.query} ${context.primaryKeyword || ''}`;
-  const queryTokens = Array.from(new Set(tokenize(queryText)));
-  const titleCoverage = coverage(queryTokens, result.title);
-  const descriptionCoverage = coverage(queryTokens, result.description);
-  const urlCoverage = coverage(queryTokens, result.canonicalUrl || result.url);
-  let score = titleCoverage * 55 + descriptionCoverage * 30 + urlCoverage * 15;
-
+  const phrases = [
+    context.query,
+    context.primaryKeyword || '',
+    ...(context.alternativeKeywords || []),
+  ].map(value => value.trim()).filter(Boolean);
   const normalizedTitle = normalizeCompetitorText(result.title);
-  const normalizedQuery = normalizeCompetitorText(context.query);
-  const normalizedPrimary = normalizeCompetitorText(context.primaryKeyword);
-  if (normalizedQuery.length >= 5 && normalizedTitle.includes(normalizedQuery)) score += 18;
-  if (normalizedPrimary.length >= 3 && normalizedTitle.includes(normalizedPrimary)) score += 16;
-  if (queryTokens.length > 0 && titleCoverage === 1) score += 8;
-  return roundScore(score);
+  return Math.max(0, ...phrases.map(phrase => {
+    const phraseTokens = Array.from(new Set(tokenize(phrase)));
+    const titleCoverage = coverage(phraseTokens, result.title);
+    const descriptionCoverage = coverage(phraseTokens, result.description);
+    const urlCoverage = coverage(phraseTokens, result.canonicalUrl || result.url);
+    let score = titleCoverage * 55 + descriptionCoverage * 30 + urlCoverage * 15;
+    const normalizedPhrase = normalizeCompetitorText(phrase);
+    if (normalizedPhrase.length >= 3 && normalizedTitle.includes(normalizedPhrase)) score += 18;
+    if (phraseTokens.length > 0 && titleCoverage === 1) score += 8;
+    return roundScore(score);
+  }));
 };
 
 export type CompetitorLanguageAssessment = {
@@ -604,11 +638,14 @@ const selectDiverseCandidates = (
 ): Set<string> => {
   const selected: ScoredCompetitorSearchResult[] = [];
   const preferred = results.filter(result => result.eligible);
-  const fallback = results.filter(result => (
-    !result.warningCodes.includes('language-mismatch')
-    && !result.warningCodes.includes('forum-or-video-result')
-    && result.selectionScore >= 45
-  ));
+  const contentQualificationAttempted = results.some(result => Boolean(result.contentQualification));
+  const fallback = contentQualificationAttempted
+    ? []
+    : results.filter(result => (
+        !result.warningCodes.includes('language-mismatch')
+        && !result.warningCodes.includes('forum-or-video-result')
+        && result.selectionScore >= 45
+      ));
   const pool = Array.from(
     new Map([...preferred, ...fallback].map(result => [result.canonicalUrl, result])).values(),
   );
@@ -637,7 +674,7 @@ const selectDiverseCandidates = (
 
 export const analyzeAndSelectCompetitors = (options: {
   context: CompetitorSelectionContext;
-  candidates: CompetitorSearchResult[];
+  candidates: ContentQualifiedCompetitorCandidate[];
   maxResults: number;
   maxSelected: number;
 }): CompetitorSelectionResult => {
@@ -652,7 +689,11 @@ export const analyzeAndSelectCompetitors = (options: {
   });
 
   const targetVector = emptyIntentVector();
-  addIntentLexiconSignals(targetVector, `${context.query} ${context.articleTitle || ''} ${context.primaryKeyword || ''}`, 1.35);
+  addIntentLexiconSignals(
+    targetVector,
+    `${context.query} ${context.articleTitle || ''} ${context.primaryKeyword || ''} ${(context.alternativeKeywords || []).join(' ')}`,
+    1.35,
+  );
   addPageTypeIntentPrior(targetVector, targetPageType, 0.9);
   const explicitIntentProvided = addExplicitIntent(targetVector, context.searchIntent);
   if (normalizeCompetitorText(context.audienceScope) === 'local') targetVector.local += 5;
@@ -674,6 +715,7 @@ export const analyzeAndSelectCompetitors = (options: {
 
   let filteredCount = 0;
   let languageFilteredCount = 0;
+  const contentQualificationAttempted = options.candidates.some(candidate => Boolean(candidate.contentQualification));
   const scored = candidateClassifications.flatMap(({ candidate, pageType, intentVector }) => {
     const ownDomain = domainMatches(candidate.domain, ownDomains);
     const utilityPage = hasUtilityPath(candidate);
@@ -699,24 +741,52 @@ export const analyzeAndSelectCompetitors = (options: {
     const languageMatch = languageAssessment.score;
     const metadataQuality = metadataQualityScore(candidate);
     const locationMatch = locationMatchScore(context.targetCountry, candidate);
+    const contentTargeting = candidate.contentQualification?.score || 0;
     const socialOrVideo = pageType.type === 'forum' || pageType.type === 'video' || SOCIAL_DOMAINS.has(candidate.domain);
     const homepage = pageType.type === 'homepage';
 
-    let selectionScore = (
-      intentMatch * 0.30
-      + relevance * 0.25
-      + searchStrength * 0.15
-      + pageMatch * 0.12
-      + languageMatch * 0.08
-      + metadataQuality * 0.05
-      + locationMatch * 0.05
-    );
+    let selectionScore = candidate.contentQualification
+      ? (
+          contentTargeting * 0.45
+          + intentMatch * 0.20
+          + pageMatch * 0.12
+          + searchStrength * 0.10
+          + languageMatch * 0.08
+          + locationMatch * 0.05
+        )
+      : (
+          intentMatch * 0.30
+          + relevance * 0.25
+          + searchStrength * 0.15
+          + pageMatch * 0.12
+          + languageMatch * 0.08
+          + metadataQuality * 0.05
+          + locationMatch * 0.05
+        );
     if (socialOrVideo) selectionScore -= 16;
     if (homepage && targetPageType !== 'service' && targetPageType !== 'landing') selectionScore -= 10;
     selectionScore = roundScore(selectionScore);
 
     const reasonCodes: CompetitorSelectionReasonCode[] = [];
     const warningCodes: CompetitorSelectionWarningCode[] = [];
+    if (candidate.contentQualification?.status === 'qualified') {
+      reasonCodes.push('content-keyword-qualified');
+      if (candidate.contentQualification.matchKind.includes('primary')) {
+        reasonCodes.push('primary-keyword-in-content');
+      } else {
+        reasonCodes.push('alternative-keyword-in-content');
+      }
+      if (candidate.contentQualification.locations.some(location => (
+        location === 'title' || location === 'h1' || location === 'headings'
+      ))) reasonCodes.push('keyword-in-heading');
+      if (candidate.contentQualification.locations.includes('introduction')) {
+        reasonCodes.push('keyword-in-introduction');
+      }
+    } else if (candidate.contentQualification?.status === 'not_qualified') {
+      warningCodes.push('keyword-not-found-in-content');
+    } else if (candidate.contentQualification?.status === 'unavailable') {
+      warningCodes.push('content-qualification-unavailable');
+    }
     if (intentMatch >= 76) reasonCodes.push('direct-intent-match');
     else if (intentMatch < 52) warningCodes.push('intent-mismatch');
     if (pageMatch >= 80) reasonCodes.push('page-type-match');
@@ -736,6 +806,7 @@ export const analyzeAndSelectCompetitors = (options: {
       && relevance >= 25
       && languageMatch >= 50
       && !socialOrVideo
+      && (!contentQualificationAttempted || candidate.contentQualification?.status === 'qualified')
     );
     const confidence = roundScore(
       pageType.confidence * 0.35
@@ -754,7 +825,9 @@ export const analyzeAndSelectCompetitors = (options: {
       inferredPageType: pageType.type,
       reasonCodes,
       warningCodes,
+      contentQualification: candidate.contentQualification,
       signals: {
+        contentTargeting,
         intentMatch,
         relevance,
         searchStrength,
@@ -791,6 +864,9 @@ export const analyzeAndSelectCompetitors = (options: {
       reviewedCount: results.length,
       filteredCount,
       languageFilteredCount,
+      contentQualificationAttempted,
+      contentQualifiedCount: results.filter(result => result.contentQualification?.status === 'qualified').length,
+      contentUnavailableCount: results.filter(result => result.contentQualification?.status === 'unavailable').length,
       autoSelectedCount: autoSelectedUrls.size,
       autoSelectedUrls: Array.from(autoSelectedUrls),
     },

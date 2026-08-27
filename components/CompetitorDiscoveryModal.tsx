@@ -8,6 +8,7 @@ type CompetitorDiscoveryModalProps = {
   articleId: string;
   articleTitle: string;
   primaryKeyword: string;
+  alternativeKeywords?: string[];
   articleLanguage: 'ar' | 'en';
   goalContext: GoalContext;
   companyName: string;
@@ -21,6 +22,7 @@ const CompetitorDiscoveryModal: React.FC<CompetitorDiscoveryModalProps> = ({
   articleId,
   articleTitle,
   primaryKeyword,
+  alternativeKeywords = [],
   articleLanguage,
   goalContext,
   companyName,
@@ -83,6 +85,7 @@ const CompetitorDiscoveryModal: React.FC<CompetitorDiscoveryModalProps> = ({
             articleId={articleId}
             articleTitle={articleTitle}
             primaryKeyword={primaryKeyword}
+            alternativeKeywords={alternativeKeywords}
             articleLanguage={articleLanguage}
             goalContext={goalContext}
             companyName={companyName}

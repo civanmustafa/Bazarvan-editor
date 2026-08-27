@@ -46,6 +46,7 @@ type CompetitorDiscoveryPanelProps = {
   articleId: string | null;
   articleTitle: string;
   primaryKeyword: string;
+  alternativeKeywords?: string[];
   articleLanguage: 'ar' | 'en';
   goalContext: GoalContext;
   companyName: string;
@@ -91,6 +92,11 @@ const pageTypeLabels: Record<CompetitorSearchResult['inferredPageType'], { ar: s
 
 const selectionReasonLabels: Record<string, { ar: string; en: string }> = {
   'auto-selected': { ar: 'مختار تلقائيًا', en: 'Auto-selected' },
+  'content-keyword-qualified': { ar: 'مؤهل من نص الصفحة', en: 'Content-qualified' },
+  'primary-keyword-in-content': { ar: 'استهدف الكلمة الأساسية', en: 'Primary keyword targeted' },
+  'alternative-keyword-in-content': { ar: 'استهدف صيغة بديلة', en: 'Alternative keyword targeted' },
+  'keyword-in-heading': { ar: 'الكلمة في العناوين', en: 'Keyword in headings' },
+  'keyword-in-introduction': { ar: 'الكلمة في المقدمة', en: 'Keyword in introduction' },
   'direct-intent-match': { ar: 'مطابق لنية البحث', en: 'Intent match' },
   'page-type-match': { ar: 'نوع صفحة مناسب', en: 'Page type match' },
   'high-query-relevance': { ar: 'صلة قوية بالموضوع', en: 'Highly relevant' },
@@ -107,6 +113,8 @@ const selectionWarningLabels: Record<string, { ar: string; en: string }> = {
   'low-query-relevance': { ar: 'صلة محدودة', en: 'Limited relevance' },
   'homepage-result': { ar: 'صفحة رئيسية', en: 'Homepage result' },
   'forum-or-video-result': { ar: 'ليس صفحة منافس مباشرة', en: 'Not a direct page competitor' },
+  'keyword-not-found-in-content': { ar: 'الكلمة غير موجودة في النص', en: 'Keyword not found in content' },
+  'content-qualification-unavailable': { ar: 'تعذر فحص النص برمجيًا', en: 'Content check unavailable' },
 };
 
 type PreviewLocation = {
@@ -195,6 +203,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   articleId,
   articleTitle,
   primaryKeyword,
+  alternativeKeywords = [],
   articleLanguage,
   goalContext,
   companyName,
@@ -239,6 +248,11 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const discoveryQueueStalled = activeDiscoveryJob?.status === 'queued'
     && activeDiscoveryJobAgeMs >= COMPETITOR_DISCOVERY_QUEUE_STALL_MS;
   const discoveryWaitingForWorker = activeDiscoveryJob?.status === 'queued';
+  const discoveryProgressStage = typeof activeDiscoveryJob?.progress?.stage === 'string'
+    ? activeDiscoveryJob.progress.stage
+    : '';
+  const discoveryProgressCurrent = progressNumber(activeDiscoveryJob?.progress?.current);
+  const discoveryProgressTotal = progressNumber(activeDiscoveryJob?.progress?.total);
   const selectedResults = useMemo(() => (
     searchResults.filter(result => selectedUrls.has(result.canonicalUrl))
   ), [searchResults, selectedUrls]);
@@ -403,6 +417,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         language: articleLanguage,
         articleTitle,
         primaryKeyword,
+        alternativeKeywords,
         pageType: goalContext.pageType,
         searchIntent: goalContext.searchIntent,
         audienceScope: goalContext.audienceScope,
@@ -724,7 +739,13 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                   : 'Waiting for the competitor discovery worker; external search has not started yet.')
               : activeDiscoveryJob.status === 'retry_scheduled'
                 ? (isArabic ? 'تعذر البحث مؤقتًا، وستعاد محاولة المهمة نفسها تلقائيًا.' : 'Search is temporarily unavailable; the same task will retry automatically.')
-                : (isArabic ? 'جاري البحث عن المنافسين وترتيبهم في الخلفية.' : 'Searching and ranking competitors in the background.')}
+                : discoveryProgressStage === 'qualifying_competitor_content'
+                  ? (isArabic
+                    ? `جاري فحص استهداف الكلمات داخل نصوص المرشحين ${discoveryProgressCurrent}/${discoveryProgressTotal || 1}.`
+                    : `Checking keyword targeting in candidate content ${discoveryProgressCurrent}/${discoveryProgressTotal || 1}.`)
+                  : discoveryProgressStage === 'expanding_competitor_search'
+                    ? (isArabic ? 'لم يكتمل العدد؛ جارٍ توسيع البحث بالصيغ البديلة.' : 'Expanding search with alternative keywords.')
+                    : (isArabic ? 'جاري البحث عن المنافسين وترتيبهم في الخلفية.' : 'Searching and ranking competitors in the background.')}
             {discoveryErrorMessage && (
               <span className="mt-1 block break-words text-red-700 dark:text-red-300">
                 {discoveryErrorMessage}
@@ -780,6 +801,16 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 <span>{isArabic ? 'نوع الصفحة' : 'Page type'}: {pageTypeLabels[selectionSummary.targetPageType]?.[locale] || pageTypeLabels.unknown[locale]}</span>
                 <span>{isArabic ? 'الثقة' : 'Confidence'}: {selectionSummary.confidence}%</span>
                 <span>{isArabic ? 'فُحص' : 'Reviewed'}: {selectionSummary.reviewedCount}/{selectionSummary.candidateCount}</span>
+                {selectionSummary.contentQualificationAttempted && (
+                  <span className="text-emerald-700 dark:text-emerald-300">
+                    {isArabic ? 'مؤهل بالنص' : 'Content-qualified'}: {selectionSummary.contentQualifiedCount}
+                  </span>
+                )}
+                {selectionSummary.contentUnavailableCount > 0 && (
+                  <span className="text-amber-700 dark:text-amber-300">
+                    {isArabic ? 'تعذر فحصه' : 'Unavailable'}: {selectionSummary.contentUnavailableCount}
+                  </span>
+                )}
                 {articleLanguage === 'ar' && selectionSummary.languageFilteredCount > 0 && (
                   <span className="text-amber-700 dark:text-amber-300">
                     {isArabic ? 'لاتيني مستبعد' : 'Latin excluded'}: {selectionSummary.languageFilteredCount}
@@ -800,6 +831,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 .filter(code => code !== 'auto-selected' && code !== 'diverse-source')
                 .slice(0, 2);
               const visibleWarning = result.warningCodes[0] || '';
+              const qualification = result.contentQualification;
               return (
                 <div
                   key={result.canonicalUrl}
@@ -840,6 +872,27 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                         <span className="text-gray-500 dark:text-gray-400">{intentLabels[result.inferredIntent]?.[locale] || intentLabels.unknown[locale]}</span>
                         <span className="text-gray-500 dark:text-gray-400">{pageTypeLabels[result.inferredPageType]?.[locale] || pageTypeLabels.unknown[locale]}</span>
                       </span>
+                      {qualification && (
+                        <span className={`mt-1 inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-black ${
+                          qualification.status === 'qualified'
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                            : qualification.status === 'not_qualified'
+                              ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                        }`}>
+                          {qualification.status === 'qualified'
+                            ? <>
+                                <span>{qualification.matchKind.includes('primary')
+                                  ? (isArabic ? 'الأساسية' : 'Primary')
+                                  : (isArabic ? 'صيغة بديلة' : 'Alternative')}:</span>
+                                <span className="max-w-52 truncate" dir="auto">{qualification.matchedKeyword}</span>
+                                <span>{qualification.score}/100</span>
+                              </>
+                            : qualification.status === 'not_qualified'
+                              ? (isArabic ? 'غير مستهدف في نص الصفحة' : 'Not targeted in page content')
+                              : (isArabic ? 'تعذر التحقق من نص الصفحة' : 'Page content could not be verified')}
+                        </span>
+                      )}
                       {result.description && <span className="mt-1 line-clamp-2 block text-[10px] leading-4 text-gray-500 dark:text-gray-400">{result.description}</span>}
                       {(visibleReasons.length > 0 || visibleWarning) && (
                         <span className="mt-1 flex flex-wrap gap-1">
