@@ -86,9 +86,12 @@ test('all editor AI execution paths publish to one inline live activity monitor'
     activityEngine,
     geminiEngine,
     aiContext,
+    userContext,
     writingPanel,
     writingMonitor,
     externalControls,
+    externalAnalysisUtils,
+    automaticQueue,
     leftSidebar,
     rightSidebar,
     selectionToolbar,
@@ -102,9 +105,12 @@ test('all editor AI execution paths publish to one inline live activity monitor'
     readWorkspaceFile('utils/aiExecutionActivity.ts'),
     readWorkspaceFile('utils/geminiAnalysisEngine.ts'),
     readWorkspaceFile('contexts/AIContext.tsx'),
+    readWorkspaceFile('contexts/UserContext.tsx'),
     readWorkspaceFile('components/ContentWritingPanel.tsx'),
     readWorkspaceFile('utils/contentWritingActivityMonitor.ts'),
     readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+    readWorkspaceFile('utils/externalAnalysis.ts'),
+    readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx'),
     readWorkspaceFile('components/LeftSidebar.tsx'),
     readWorkspaceFile('components/RightSidebar.tsx'),
     readWorkspaceFile('components/SelectionToolbar.tsx'),
@@ -120,8 +126,20 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   assert.match(editorApp, /import AiExecutionMonitor from '\.\/AiKeyUsageToast'/);
   assert.match(monitor, /getAiExecutionActivitiesForArticle\(activities, articleId, articleKey\)/);
   assert.match(dashboard, /<DashboardAiExecutionMonitor\s*\/>/);
+  assert.match(
+    dashboard,
+    /<AutomaticContentWritingQueuePanel[\s\S]*?<DashboardAiExecutionMonitor\s*\/>/,
+  );
   assert.match(monitor, /data-ai-execution-monitor="dashboard"/);
+  assert.match(monitor, /rounded-xl border border-blue-200 bg-white p-4/);
+  assert.match(monitor, /ستظهر هنا أي مهمة جارية فور تشغيلها/);
   assert.match(monitor, /runningActivities\.map\(activity =>/);
+  assert.match(monitor, /MAX_TERMINAL_FEED_ACTIVITIES/);
+  assert.match(
+    monitor,
+    /getRunningAiExecutionActivities\(getAiExecutionActivities\(\)\)\.filter/,
+  );
+  assert.doesNotMatch(monitor, /\.slice\(0, 24\)/);
   assert.match(monitor, /data-ai-execution-article-id=\{activity\.articleId \|\| undefined\}/);
   assert.match(monitor, /data-ai-execution-monitor="inline"/);
   assert.doesNotMatch(monitor, /fixed bottom-4 left-4/);
@@ -139,9 +157,14 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   assert.match(monitor, /'إيقاف'/);
   assert.match(monitor, /requestAiExecutionActivityCancel/);
   assert.match(monitor, /formatLastUpdateAge/);
+  assert.match(monitor, /loadExternalAnalysisJobsByIds/);
+  assert.match(monitor, /projectExternalAnalysisActivity/);
   assert.match(activityEngine, /export const beginAiExecutionActivity/);
   assert.match(activityEngine, /export const updateAiExecutionActivity/);
   assert.match(activityEngine, /export const finishAiExecutionActivity/);
+  assert.match(activityEngine, /export const removeAiExecutionActivity/);
+  assert.match(activityEngine, /export const clearAiExecutionActivities/);
+  assert.match(activityEngine, /retiredActivityStore/);
   assert.match(activityEngine, /export const requestAiExecutionActivityCancel/);
   assert.match(geminiEngine, /beginAiExecutionActivity/);
   assert.match(geminiEngine, /updateAiExecutionActivity/);
@@ -150,6 +173,7 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   assert.match(aiContext, /openai:\$\{requestId\}/);
   assert.match(aiContext, /beginAiExecutionActivity/);
   assert.match(aiContext, /manualCancellationRequested = true/);
+  assert.match(userContext, /clearAiExecutionActivities\(\)/);
   assert.match(writingPanel, /content-writing:/);
   assert.match(writingPanel, /monitorContentWritingSessionActivity/);
   assert.match(writingMonitor, /syncContentWritingSessionActivity/);
@@ -158,7 +182,31 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   assert.match(externalControls, /external-analysis:/);
   assert.match(externalControls, /updateAiExecutionActivity/);
   assert.match(externalControls, /activeEngineeringRootJob/);
+  assert.match(externalControls, /syncJob\(\s*'competitor-discovery'/);
+  assert.match(externalControls, /syncJob\(\s*'competitor-extraction'/);
+  assert.match(externalControls, /getAiExecutionActivities/);
+  assert.match(externalControls, /`external-analysis:\$\{job\.id\}`/);
+  assert.match(
+    externalAnalysisUtils,
+    /loadExternalAnalysisJobsByIds[\s\S]*?\.select\(SUMMARY_JOB_SELECT\)/,
+  );
+  assert.match(externalControls, /data-analysis-control-group="semantic"/);
+  assert.match(externalControls, /data-analysis-control-group="engineering"/);
+  assert.match(externalControls, /data-analysis-control-group="competitor"/);
   assert.match(externalControls, /cancelExternalAnalysisJob\(articleId, job\.id\)/);
+  assert.match(dashboard, /runAssignedArticleAutomationWithActivity/);
+  assert.match(dashboard, /beginAiExecutionActivity/);
+  assert.match(dashboard, /finishAiExecutionActivity/);
+  assert.match(dashboard, /surface: 'assigned_article_automation'/);
+  assert.match(automaticQueue, /automatic-writing:/);
+  assert.match(automaticQueue, /surface: 'automatic_content_writing'/);
+  assert.match(automaticQueue, /beginAiExecutionActivity/);
+  assert.match(automaticQueue, /finishAiExecutionActivity/);
+  assert.match(automaticQueue, /getAiExecutionActivities/);
+  assert.match(automaticQueue, /removeAiExecutionActivity/);
+  assert.match(automaticQueue, /refreshRequestRef/);
+  assert.match(automaticQueue, /refreshRequestRef\.current !== requestId/);
+  assert.doesNotMatch(automaticQueue, /trackedAiActivityRef/);
   assert.doesNotMatch(leftSidebar, /GeminiProgressStatus/);
   assert.doesNotMatch(leftSidebar, /aiRequestProgress\?\.source === 'semantic_keywords_lsi'/);
   await assertFileMissing('components/GeminiProgressStatus.tsx');

@@ -452,6 +452,22 @@ export const listExternalAnalysisJobs = async (
   );
 };
 
+export const loadExternalAnalysisJobsByIds = async (
+  jobIds: readonly string[],
+): Promise<ExternalAnalysisJobRow[]> => {
+  const ids = Array.from(new Set(jobIds.map(item => item.trim()).filter(Boolean))).slice(0, 250);
+  if (ids.length === 0) return [];
+  const { data, error } = await getSupabaseClient()
+    .from('ai_external_analysis_jobs')
+    .select(SUMMARY_JOB_SELECT)
+    .in('id', ids)
+    .limit(ids.length);
+  if (error) throw error;
+  return deduplicateExternalAnalysisTasks(
+    (data || []).map(row => toJobRow(row as Record<string, any>)),
+  );
+};
+
 /**
  * Lightweight status read for the editor's full-workflow monitor. It avoids
  * downloading input snapshots, generated article bodies, and unrelated jobs

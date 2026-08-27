@@ -112,3 +112,34 @@ test('terminal external jobs close the same unified activity with the correct ou
   assert.equal(failed.outcome, 'failed');
   assert.equal(failed.message, 'تعذر تنفيذ المهمة.');
 });
+
+test('competitor discovery and content import use distinct unified activity surfaces', () => {
+  const discovery = projectExternalAnalysisActivity(createJob({
+    id: 'job-discovery',
+    job_type: 'competitor_discovery',
+    command_id: null,
+    progress: {
+      stage: 'searching_competitors',
+      provider: 'firecrawl',
+      current: 2,
+      total: 10,
+    },
+  }), 'عنوان المقالة');
+  const extraction = projectExternalAnalysisActivity(createJob({
+    id: 'job-extraction',
+    job_type: 'competitor_extraction',
+    command_id: null,
+    progress: {
+      stage: 'extracting_competitor',
+      current: 1,
+      total: 5,
+    },
+  }), 'عنوان المقالة');
+
+  assert.equal(discovery.surface, 'competitor_discovery');
+  assert.equal(discovery.provider, 'firecrawl');
+  assert.equal(discovery.stage, 'searching_competitors');
+  assert.equal(extraction.surface, 'competitor_extraction');
+  assert.equal(extraction.provider, 'crawler');
+  assert.equal(extraction.stage, 'extracting_competitor');
+});

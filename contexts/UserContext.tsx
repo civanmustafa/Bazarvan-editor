@@ -37,6 +37,7 @@ import {
     loadPromptRegistry,
     PROMPT_REGISTRY_CHANGED_EVENT,
 } from '../utils/promptRegistry';
+import { clearAiExecutionActivities } from '../utils/aiExecutionActivity';
 
 const AI_PROVIDER_CAPABILITIES_REFRESH_MS = 60_000;
 const PROMPT_REGISTRY_REFRESH_MS = 5 * 60_000;
@@ -250,6 +251,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isIdleRef = useRef(false);
     const currentViewRef = useRef<AppView>('login');
     const sessionUserIdRef = useRef<string | null>(null);
+    const aiActivityUserIdRef = useRef<string | null>(null);
     const aiCapabilitiesRequestRef = useRef(0);
 
     const t = translations[uiLanguage] || translations.ar;
@@ -258,6 +260,11 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user: SupabaseUser | null,
         options: { recordLoginActivity?: boolean } = {},
     ): Promise<string | null> => {
+        const nextAiActivityUserId = user?.id || null;
+        if (aiActivityUserIdRef.current !== nextAiActivityUserId) {
+            clearAiExecutionActivities();
+            aiActivityUserIdRef.current = nextAiActivityUserId;
+        }
         if (!user) {
             aiCapabilitiesRequestRef.current += 1;
             setPreferencesReadyUserId(null);

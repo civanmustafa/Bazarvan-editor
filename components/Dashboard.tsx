@@ -48,6 +48,10 @@ import {
 } from '../constants/articleStatuses';
 import AutomaticContentWritingQueuePanel from './AutomaticContentWritingQueuePanel';
 import { DashboardAiExecutionMonitor } from './AiKeyUsageToast';
+import {
+    beginAiExecutionActivity,
+    finishAiExecutionActivity,
+} from '../utils/aiExecutionActivity';
 
 const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
 
@@ -1339,6 +1343,51 @@ const Dashboard: React.FC = () => {
       }
   };
 
+  const runAssignedArticleAutomationWithActivity = (
+    articleId: string,
+    articleTitle: string,
+  ) => {
+    const activityId = `assigned-article-automation:${articleId}:${Date.now()}`;
+    beginAiExecutionActivity({
+      id: activityId,
+      articleId,
+      articleTitle,
+      provider: 'AI',
+      requestedProvider: 'AI',
+      surface: 'assigned_article_automation',
+      stage: 'running',
+      message: 'جار تشغيل أتمتة المقالة المسندة في الخلفية.',
+    });
+
+    return triggerAssignedArticleAutomation(articleId)
+      .then(result => {
+        const hasFailure = result.semantic === 'failed' || result.geminiPaid === 'failed';
+        finishAiExecutionActivity(activityId, {
+          articleId,
+          articleTitle,
+          provider: result.geminiPaid === 'analyzed' ? 'geminiPaid' : 'gemini',
+          surface: 'assigned_article_automation',
+          stage: hasFailure ? 'failed' : 'completed',
+          outcome: hasFailure ? 'failed' : 'success',
+          message: result.reasons.join(' · '),
+          payload: result,
+        });
+        return result;
+      })
+      .catch(error => {
+        finishAiExecutionActivity(activityId, {
+          articleId,
+          articleTitle,
+          provider: 'AI',
+          surface: 'assigned_article_automation',
+          stage: 'failed',
+          outcome: 'failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      });
+  };
+
   const handleUpdateArticleSettings = async (
     articleId: string,
     patch: RemoteArticleSettingsPatch,
@@ -1358,7 +1407,7 @@ const Dashboard: React.FC = () => {
         await refreshData();
       }
       if (patch.visibleToEmailsCsv !== undefined && patch.visibleToEmailsCsv.trim()) {
-        void triggerAssignedArticleAutomation(articleId)
+        void runAssignedArticleAutomationWithActivity(articleId, updatedArticle.title)
           .then(() => {
             window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
             return refreshData();
@@ -1385,7 +1434,7 @@ const Dashboard: React.FC = () => {
       window.dispatchEvent(new CustomEvent('bazarvan:article-claimed', {
         detail: { articleId: claimedArticle.id, status: claimedArticle.status },
       }));
-      void triggerAssignedArticleAutomation(claimedArticle.id)
+      void runAssignedArticleAutomationWithActivity(claimedArticle.id, claimedArticle.title)
         .then(() => {
           window.dispatchEvent(new CustomEvent('smart-editor-activity-updated'));
           return refreshData();
@@ -1813,8 +1862,6 @@ const Dashboard: React.FC = () => {
           </div>
         </header>
 
-        <DashboardAiExecutionMonitor />
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2">
                 <div className="flex justify-between items-center mb-4">
@@ -2199,10 +2246,13 @@ const Dashboard: React.FC = () => {
                     </div>
                 </div>
 
-                <AutomaticContentWritingQueuePanel
-                  isArabic={uiLanguage !== 'en'}
-                  isAdmin={isAdmin}
-                />
+                <div className="space-y-3">
+                  <AutomaticContentWritingQueuePanel
+                    isArabic={uiLanguage !== 'en'}
+                    isAdmin={isAdmin}
+                  />
+                  <DashboardAiExecutionMonitor />
+                </div>
 
             </div>
         </div>

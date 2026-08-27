@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Bot, Clock3, ExternalLink, Loader2, PauseCircle, RefreshCw } from 'lucide-react';
 import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
 import {
@@ -7,6 +7,12 @@ import {
   loadContentWritingAutomationStatus,
   type ContentWritingAutomationOverview,
 } from '../utils/contentWritingAutomation';
+import {
+  beginAiExecutionActivity,
+  finishAiExecutionActivity,
+  getAiExecutionActivities,
+  removeAiExecutionActivity,
+} from '../utils/aiExecutionActivity';
 
 type Props = {
   isArabic: boolean;
@@ -30,17 +36,22 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({ isArabic, isAdmin 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
+  const refreshRequestRef = useRef(0);
 
   const refresh = useCallback(async (silent = false) => {
+    const requestId = refreshRequestRef.current + 1;
+    refreshRequestRef.current = requestId;
     if (!silent) setLoading(true);
     try {
       const result = await loadContentWritingAutomationStatus();
+      if (refreshRequestRef.current !== requestId) return;
       setOverview(result.overview);
       setError('');
     } catch (requestError) {
+      if (refreshRequestRef.current !== requestId) return;
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
-      if (!silent) setLoading(false);
+      if (refreshRequestRef.current === requestId) setLoading(false);
     }
   }, []);
 
@@ -55,6 +66,67 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({ isArabic, isAdmin 
       window.clearInterval(clock);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    const active = overview?.active || null;
+    const activeActivityId = active ? `automatic-writing:${active.id}` : '';
+    const lastItemId = overview?.state?.lastItemId || '';
+    const lastOutcome = String(overview?.state?.lastOutcome || '').trim().toLowerCase();
+    const storedActivities = getAiExecutionActivities().filter(activity => (
+      activity.state === 'running'
+      && activity.id.startsWith('automatic-writing:')
+    ));
+
+    storedActivities.forEach(storedActivity => {
+      if (storedActivity.id === activeActivityId) return;
+      const itemId = storedActivity.id.slice('automatic-writing:'.length);
+      if (itemId !== lastItemId || !lastOutcome) {
+        removeAiExecutionActivity(storedActivity.id);
+        return;
+      }
+
+      const outcome = lastOutcome.includes('cancel')
+        ? 'cancelled'
+        : lastOutcome.includes('complete') || lastOutcome.includes('success')
+          ? 'success'
+          : lastOutcome.includes('fail') || lastOutcome.includes('block') || lastOutcome.includes('error')
+            ? 'failed'
+            : null;
+      if (!outcome) {
+        removeAiExecutionActivity(storedActivity.id);
+        return;
+      }
+      finishAiExecutionActivity(storedActivity.id, {
+        articleId: storedActivity.articleId,
+        articleTitle: storedActivity.articleTitle,
+        provider: storedActivity.provider,
+        requestedProvider: storedActivity.requestedProvider,
+        model: storedActivity.model,
+        requestedModel: storedActivity.requestedModel,
+        surface: 'automatic_content_writing',
+        stage: lastOutcome,
+        outcome,
+        payload: { lastOutcome },
+      });
+    });
+
+    if (!active) return;
+    beginAiExecutionActivity({
+      id: activeActivityId,
+      articleId: active.articleId,
+      articleTitle: active.articleTitle,
+      provider: active.provider,
+      requestedProvider: active.provider,
+      model: active.model,
+      requestedModel: active.model,
+      surface: 'automatic_content_writing',
+      stage: active.sessionStatus || active.status,
+      message: isArabic ? 'تعمل الكتابة التلقائية في الخلفية.' : 'Automatic writing is running in the background.',
+      startedAt: active.startedAt || active.readyAt,
+      completed: false,
+      payload: active,
+    });
+  }, [isArabic, overview]);
 
   const cooldownMs = useMemo(() => {
     const value = overview?.state?.nextAllowedAt;

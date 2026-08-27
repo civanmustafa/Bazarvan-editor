@@ -32,6 +32,7 @@ import {
   type ExternalAnalysisJobStatus,
 } from '../utils/externalAnalysis';
 import {
+  beginAiExecutionActivity,
   finishAiExecutionActivity,
   updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
@@ -304,15 +305,19 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
         return;
       }
 
-      updateAiExecutionActivity(activityId, {
+      const activityInput = {
         ...activity,
-        state: 'running',
         completed: false,
         cancel: async () => {
           await cancelExternalAnalysisJob(job.article_id, job.id);
           await refreshJobs(false);
         },
-      });
+      };
+      if (previousFingerprint) {
+        updateAiExecutionActivity(activityId, activityInput);
+      } else {
+        beginAiExecutionActivity({ id: activityId, ...activityInput });
+      }
     });
   }, [articleTitle, jobs, refreshJobs]);
 

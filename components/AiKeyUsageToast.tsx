@@ -16,18 +16,25 @@ import {
 import { useUser } from '../contexts/UserContext';
 import {
   AI_EXECUTION_ACTIVITY_EVENT,
+  AI_EXECUTION_ACTIVITY_REMOVED_EVENT,
+  finishAiExecutionActivity,
   formatAiProviderName,
   getAiExecutionActivities,
   getAiExecutionActivitiesForArticle,
   getRunningAiExecutionActivities,
+  removeAiExecutionActivity,
   requestAiExecutionActivityCancel,
   summarizeAiExecutionModelAttempts,
+  updateAiExecutionActivity,
   type AiExecutionActivity,
   type AiExecutionState,
 } from '../utils/aiExecutionActivity';
 import { formatAiKeySuffix } from '../utils/aiKeyUsageFeedback';
+import { loadExternalAnalysisJobsByIds } from '../utils/externalAnalysis';
+import { projectExternalAnalysisActivity } from '../utils/externalAnalysisActivityBridge';
 
 const TERMINAL_NOTICE_TTL_MS = 60_000;
+const MAX_TERMINAL_FEED_ACTIVITIES = 24;
 
 const SURFACE_LABELS: Record<string, [string, string]> = {
   semantic_keywords_lsi: ['توليد الصيغ وLSI', 'Alternatives and LSI'],
@@ -45,6 +52,10 @@ const SURFACE_LABELS: Record<string, [string, string]> = {
   goal_context_generation: ['توليد سياق هدف الصفحة', 'Page goal context'],
   draft_title_generation: ['اقتراح عنوان المقالة', 'Draft title'],
   ready_commands_batch: ['حزمة الأوامر الجاهزة', 'Ready commands bundle'],
+  assigned_article_automation: ['أتمتة المقالة المسندة', 'Assigned article automation'],
+  automatic_content_writing: ['الكتابة التلقائية', 'Automatic content writing'],
+  competitor_discovery: ['بحث المنافسين', 'Competitor discovery'],
+  competitor_extraction: ['سحب محتوى المنافسين', 'Competitor content import'],
   floating_toolbar: ['شريط المحرر العائم', 'Floating editor toolbar'],
   heading_analysis: ['تحليل العناوين', 'Heading analysis'],
   plain_ai_analysis: ['أمر ذكاء اصطناعي مباشر', 'Direct AI command'],
@@ -67,6 +78,8 @@ const ATTEMPT_REASON_LABELS: Record<string, [string, string]> = {
 
 const STAGE_LABELS: Record<string, [string, string]> = {
   queued: ['في قائمة التنفيذ', 'Queued'],
+  claiming: ['جار حجز المقالة', 'Claiming article'],
+  writing: ['جار كتابة المقالة', 'Writing article'],
   preparing: ['جار التجهيز', 'Preparing'],
   connecting: ['جار الاتصال', 'Connecting'],
   running: ['جار التنفيذ', 'Running'],
@@ -75,6 +88,16 @@ const STAGE_LABELS: Record<string, [string, string]> = {
   retry_scheduled: ['إعادة المحاولة مجدولة', 'Retry scheduled'],
   waiting_for_prerequisites: ['بانتظار المتطلبات', 'Waiting for prerequisites'],
   paused: ['متوقف مؤقتًا', 'Paused'],
+  searching_competitors: ['جار البحث عن المنافسين', 'Searching for competitors'],
+  qualifying_competitor_content: ['جار التحقق من محتوى المنافسين', 'Qualifying competitor content'],
+  expanding_competitor_search: ['جار توسيع نطاق بحث المنافسين', 'Expanding competitor search'],
+  extracting_competitor: ['جار سحب محتوى منافس', 'Importing competitor content'],
+  programmatic_fallback: ['جار السحب بالطريقة الاحتياطية', 'Using fallback extraction'],
+  competitor_processed: ['اكتملت معالجة منافس', 'Competitor processed'],
+  completed_with_failures: ['اكتمل مع تعذر بعض العناصر', 'Completed with some failures'],
+  awaiting_review: ['بانتظار مراجعة المنافسين', 'Awaiting competitor review'],
+  needs_input: ['بانتظار بيانات المقالة', 'Waiting for article data'],
+  unavailable: ['الخدمة الخارجية غير متاحة', 'External service unavailable'],
   loading_engineering_context: ['جار تجهيز سياق التحليل', 'Preparing analysis context'],
   analyzing_competitor_independently: ['جار تحليل المنافس بصورة مستقلة', 'Analyzing competitor independently'],
   competitor_map_cache_hit: ['تم تحميل تحليل منافس محفوظ', 'Loaded cached competitor analysis'],
@@ -155,10 +178,18 @@ const useAiExecutionActivityFeed = () => {
     const handleActivity = (event: Event) => {
       const incoming = (event as CustomEvent<AiExecutionActivity>).detail;
       if (!incoming?.id) return;
-      setActivities(current => [
-        incoming,
-        ...current.filter(activity => activity.id !== incoming.id),
-      ].slice(0, 24));
+      setActivities(current => {
+        const merged = [
+          incoming,
+          ...current.filter(activity => activity.id !== incoming.id),
+        ];
+        let terminalCount = 0;
+        return merged.filter(activity => {
+          if (activity.state === 'running') return true;
+          terminalCount += 1;
+          return terminalCount <= MAX_TERMINAL_FEED_ACTIVITIES;
+        });
+      });
 
       if (incoming.state !== 'running') {
         const terminalUpdatedAt = incoming.updatedAt;
@@ -171,8 +202,22 @@ const useAiExecutionActivityFeed = () => {
         }, TERMINAL_NOTICE_TTL_MS);
       }
     };
+    const handleActivityRemoval = (event: Event) => {
+      const removedId = (event as CustomEvent<string>).detail;
+      if (!removedId) return;
+      setActivities(current => current.filter(activity => activity.id !== removedId));
+    };
     window.addEventListener(AI_EXECUTION_ACTIVITY_EVENT, handleActivity);
-    return () => window.removeEventListener(AI_EXECUTION_ACTIVITY_EVENT, handleActivity);
+    window.addEventListener(AI_EXECUTION_ACTIVITY_REMOVED_EVENT, handleActivityRemoval);
+    // A dashboard card can publish its persisted background job before this
+    // monitor's effect subscribes, especially now that the monitor is rendered
+    // below the article list. Re-read the shared store after subscribing so no
+    // already-running task is missed.
+    setActivities(getAiExecutionActivities());
+    return () => {
+      window.removeEventListener(AI_EXECUTION_ACTIVITY_EVENT, handleActivity);
+      window.removeEventListener(AI_EXECUTION_ACTIVITY_REMOVED_EVENT, handleActivityRemoval);
+    };
   }, []);
 
   useEffect(() => {
@@ -189,91 +234,185 @@ export const DashboardAiExecutionMonitor: React.FC = () => {
   const isArabic = uiLanguage !== 'en';
   const { activities, now } = useAiExecutionActivityFeed();
   const runningActivities = getRunningAiExecutionActivities(activities);
-
-  if (runningActivities.length === 0) return null;
-
   const runningArticleCount = new Set(runningActivities.map(activity => (
     activity.articleId || activity.articleKey || activity.id
   ))).size;
+  const externalJobActivities = getRunningAiExecutionActivities(getAiExecutionActivities()).filter(activity => (
+    /^external-analysis:[^:]+$/.test(activity.id)
+  ));
+  const externalJobIdsKey = externalJobActivities
+    .map(activity => activity.id.slice('external-analysis:'.length))
+    .sort()
+    .join('|');
+
+  useEffect(() => {
+    if (!externalJobIdsKey) return;
+    let disposed = false;
+    let requestInFlight = false;
+
+    const reconcileExternalJobs = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const requestedJobIds = externalJobIdsKey.split('|');
+        const jobs = await loadExternalAnalysisJobsByIds(requestedJobIds);
+        if (disposed) return;
+        const returnedJobIds = new Set(jobs.map(job => job.id));
+        requestedJobIds.forEach(jobId => {
+          if (!returnedJobIds.has(jobId)) {
+            removeAiExecutionActivity(`external-analysis:${jobId}`);
+          }
+        });
+        jobs.forEach(job => {
+          const activityId = `external-analysis:${job.id}`;
+          const currentActivity = getAiExecutionActivities().find(activity => activity.id === activityId);
+          if (!currentActivity || currentActivity.state !== 'running') return;
+          const projection = projectExternalAnalysisActivity(job, currentActivity.articleTitle);
+          const {
+            activityId: projectedActivityId,
+            fingerprint: _fingerprint,
+            outcome,
+            ...projectedActivity
+          } = projection;
+          if (outcome) {
+            finishAiExecutionActivity(projectedActivityId, {
+              ...projectedActivity,
+              outcome,
+              completed: true,
+              cancel: null,
+            });
+            return;
+          }
+          updateAiExecutionActivity(projectedActivityId, {
+            ...projectedActivity,
+            state: 'running',
+            completed: false,
+          });
+        });
+      } catch (error) {
+        if (!disposed) console.error('Failed to reconcile dashboard external AI tasks:', error);
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    void reconcileExternalJobs();
+    const intervalId = window.setInterval(() => {
+      void reconcileExternalJobs();
+    }, 6_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [externalJobIdsKey]);
 
   return (
     <section
       data-ai-execution-monitor="dashboard"
-      className="mb-6 overflow-hidden rounded-xl border border-blue-200 bg-white shadow-sm dark:border-blue-500/30 dark:bg-[#242424]"
+      className="rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900/50 dark:bg-[#2A2A2A]"
       dir={isArabic ? 'rtl' : 'ltr'}
       role="status"
       aria-live="polite"
     >
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-100 bg-blue-50 px-4 py-3 dark:border-blue-500/20 dark:bg-blue-500/10">
-        <div className="flex items-center gap-2 font-black text-gray-800 dark:text-gray-100">
-          <Activity size={17} className="text-blue-600 dark:text-blue-300" />
-          <span>{isArabic ? 'حالة الذكاء الاصطناعي لجميع المقالات' : 'AI status across all articles'}</span>
+      <header className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-2">
+          <Activity size={19} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" />
+          <div>
+            <h3 className="text-sm font-black text-gray-800 dark:text-gray-100">
+              {isArabic ? 'حالة الذكاء الاصطناعي' : 'AI task status'}
+            </h3>
+            <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+              {isArabic
+                ? 'يعرض مهام اللوحة، بما فيها الأوامر الجاهزة وبحث وسحب المنافسين.'
+                : 'Shows dashboard tasks, including ready commands and competitor discovery/import.'}
+            </p>
+          </div>
         </div>
-        <span className="rounded-full bg-blue-600 px-2.5 py-1 text-xs font-black text-white">
-          {isArabic
-            ? `${runningArticleCount} مقالة · ${runningActivities.length} عملية جارية`
-            : `${runningArticleCount} articles · ${runningActivities.length} running tasks`}
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${
+          runningActivities.length > 0
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-100 text-gray-500 dark:bg-[#222] dark:text-gray-400'
+        }`}>
+          {runningActivities.length > 0
+            ? (isArabic ? `${runningActivities.length} جارية` : `${runningActivities.length} running`)
+            : (isArabic ? 'لا توجد مهام' : 'Idle')}
         </span>
       </header>
 
-      <div className="divide-y divide-gray-100 dark:divide-[#3C3C3C]">
-        {runningActivities.map(activity => {
-          const articleLabel = activity.articleTitle
-            || activity.articleKey
-            || (isArabic ? 'مقالة بلا عنوان' : 'Untitled article');
-          const sourceLabel = activity.surface
-            ? getLabel(SURFACE_LABELS, activity.surface, isArabic)
-            : (isArabic ? 'مهمة ذكاء اصطناعي' : 'AI task');
-          const actionLabel = activity.action
-            ? getLabel(ACTION_LABELS, activity.action, isArabic)
-            : sourceLabel;
-          const stageLabel = getLabel(STAGE_LABELS, activity.stage, isArabic);
-          const lastUpdateTime = new Date(activity.updatedAt).getTime();
-          const isStale = Number.isFinite(lastUpdateTime) && now - lastUpdateTime >= 60_000;
+      {runningActivities.length === 0 ? (
+        <div className="mt-3 rounded-md border border-dashed border-gray-200 bg-gray-50/70 p-3 text-center text-[11px] font-bold text-gray-400 dark:border-[#444] dark:bg-[#222]">
+          {isArabic ? 'ستظهر هنا أي مهمة جارية فور تشغيلها.' : 'Any running task will appear here as soon as it starts.'}
+        </div>
+      ) : (
+        <div className="mt-3 max-h-[28rem] space-y-2 overflow-y-auto pe-0.5 custom-scrollbar">
+          {runningActivities.map(activity => {
+            const articleLabel = activity.articleTitle
+              || activity.articleKey
+              || (isArabic ? 'مقالة بلا عنوان' : 'Untitled article');
+            const sourceLabel = activity.surface
+              ? getLabel(SURFACE_LABELS, activity.surface, isArabic)
+              : (isArabic ? 'مهمة ذكاء اصطناعي' : 'AI task');
+            const actionLabel = activity.action
+              ? getLabel(ACTION_LABELS, activity.action, isArabic)
+              : sourceLabel;
+            const stageLabel = getLabel(STAGE_LABELS, activity.stage, isArabic);
+            const lastUpdateTime = new Date(activity.updatedAt).getTime();
+            const isStale = Number.isFinite(lastUpdateTime) && now - lastUpdateTime >= 60_000;
 
-          return (
-            <div
-              key={activity.id}
-              data-ai-execution-article-id={activity.articleId || undefined}
-              className="grid gap-2 px-4 py-3 text-xs text-gray-600 dark:text-gray-300 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto] md:items-center"
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <Loader2 size={14} className="shrink-0 animate-spin text-blue-600 dark:text-blue-300" />
-                <FileText size={14} className="shrink-0 text-[#b8922e]" />
-                <span className="truncate font-black text-gray-800 dark:text-gray-100" title={articleLabel}>
-                  {articleLabel}
-                </span>
-              </div>
+            return (
+              <div
+                key={activity.id}
+                data-ai-execution-article-id={activity.articleId || undefined}
+                className="rounded-lg border border-blue-100 bg-blue-50/70 p-2.5 text-[11px] text-gray-600 dark:border-blue-900/50 dark:bg-blue-900/15 dark:text-gray-300"
+              >
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <Loader2 size={14} className="shrink-0 animate-spin text-blue-600 dark:text-blue-300" />
+                  <FileText size={13} className="shrink-0 text-[#b8922e]" />
+                  <span className="truncate font-black text-gray-800 dark:text-gray-100" title={articleLabel}>
+                    {articleLabel}
+                  </span>
+                  <span className="ms-auto shrink-0 rounded-md border border-blue-200 bg-white/80 px-1.5 py-0.5 text-[9px] font-black text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
+                    {stageLabel}
+                  </span>
+                </div>
 
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1 font-black text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
-                  {stageLabel}
-                </span>
-                <span className="max-w-60 truncate font-bold" title={`${actionLabel} · ${sourceLabel}`}>
-                  {actionLabel}{actionLabel !== sourceLabel ? ` · ${sourceLabel}` : ''}
-                </span>
-              </div>
+                <div className="mt-1.5 min-w-0">
+                  <div className="truncate font-bold text-gray-700 dark:text-gray-200" title={`${actionLabel} · ${sourceLabel}`}>
+                    {actionLabel}{actionLabel !== sourceLabel ? ` · ${sourceLabel}` : ''}
+                  </div>
+                </div>
 
-              <div className="flex flex-wrap items-center gap-3 md:justify-end">
-                <span className="inline-flex items-center gap-1 font-black">
-                  {formatAiProviderName(activity.provider)}
-                </span>
-                <span className="inline-flex max-w-48 items-center gap-1 truncate font-mono" dir="ltr">
-                  <Cpu size={12} />
-                  {activity.model || activity.requestedModel || (isArabic ? 'بانتظار الموديل' : 'Model pending')}
-                </span>
-                <span className="inline-flex items-center gap-1 font-mono" dir="ltr">
-                  <Clock3 size={12} />
-                  {formatDuration(activity.startedAt, activity.completedAt, now)}
-                </span>
-                <span className={isStale ? 'font-black text-amber-600 dark:text-amber-300' : ''}>
-                  {formatLastUpdateAge(activity.updatedAt, now, isArabic)}
-                </span>
+                <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] text-gray-500 dark:text-gray-400">
+                  <span className="inline-flex items-center gap-1 font-black">
+                    {formatAiProviderName(activity.provider)}
+                  </span>
+                  {(activity.model || activity.requestedModel) && (
+                    <span className="inline-flex max-w-full items-center gap-1 truncate font-mono" dir="ltr">
+                      <Cpu size={12} />
+                      {activity.model || activity.requestedModel}
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1 font-mono" dir="ltr">
+                    <Clock3 size={12} />
+                    {formatDuration(activity.startedAt, activity.completedAt, now)}
+                  </span>
+                  <span className={isStale ? 'font-black text-amber-600 dark:text-amber-300' : ''}>
+                    {formatLastUpdateAge(activity.updatedAt, now, isArabic)}
+                  </span>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
+
+      {runningActivities.length > 0 && (
+        <div className="mt-2 text-[10px] font-bold text-gray-400 dark:text-gray-500">
+          {isArabic
+            ? `${runningArticleCount} ${runningArticleCount === 1 ? 'مقالة' : 'مقالات'} قيد المعالجة`
+            : `${runningArticleCount} ${runningArticleCount === 1 ? 'article' : 'articles'} in progress`}
+        </div>
+      )}
     </section>
   );
 };

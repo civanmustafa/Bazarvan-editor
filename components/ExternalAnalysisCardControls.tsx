@@ -35,6 +35,7 @@ import { normalizeGoalContext } from '../utils/goalContext';
 import {
   beginAiExecutionActivity,
   finishAiExecutionActivity,
+  getAiExecutionActivities,
   updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
 
@@ -116,7 +117,6 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const [competitorModalOpen, setCompetitorModalOpen] = useState(false);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const trackedExternalAiActivitiesRef = useRef<Set<string>>(new Set());
 
   const resolvedGoalContext: GoalContext = normalizeGoalContext(goalContext);
 
@@ -136,33 +136,65 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
 
   useEffect(() => {
     const syncJob = (
-      kind: 'semantic' | 'engineering',
+      kind: 'semantic' | 'engineering' | 'competitor-discovery' | 'competitor-extraction',
       active: boolean,
       job: ExternalAnalysisDashboardSummary['latestSemanticJob'],
     ) => {
-      const activityId = `external-analysis:${articleId}:${kind}`;
-      const action = kind === 'engineering' && (summary?.activeEngineeringCount || 0) > 1
-        ? `حزمة الأوامر الهندسية (${summary?.activeEngineeringCount})`
-        : job?.command_label || (kind === 'semantic' ? 'توليد الصيغ وLSI' : 'الأوامر اليدوية الجاهزة');
+      if (!job) return;
+      const activityId = `external-analysis:${job.id}`;
+      const existingActivity = getAiExecutionActivities().find(activity => activity.id === activityId);
+      const jobUpdatedAt = new Date(job.updated_at).getTime();
+      const activityCompletedAt = existingActivity?.completedAt
+        ? new Date(existingActivity.completedAt).getTime()
+        : Number.NaN;
+      const serverRevisionIsNewer = Boolean(
+        existingActivity
+        && existingActivity.state !== 'running'
+        && Number.isFinite(jobUpdatedAt)
+        && (!Number.isFinite(activityCompletedAt) || jobUpdatedAt > activityCompletedAt)
+      );
+      const action = kind === 'engineering'
+        ? ((summary?.activeEngineeringCount || 0) > 1
+            ? `حزمة الأوامر الهندسية (${summary?.activeEngineeringCount})`
+            : job.command_label || 'الأوامر اليدوية الجاهزة')
+        : kind === 'semantic'
+          ? 'توليد الصيغ وLSI'
+          : kind === 'competitor-discovery'
+            ? 'بحث المنافسين'
+            : 'سحب محتوى المنافسين';
+      const requestedProvider = kind === 'semantic' || kind === 'engineering'
+        ? 'gemini'
+        : 'crawler';
+      const fallbackMessage = kind === 'semantic'
+        ? 'جار توليد الصيغ البديلة وكلمات LSI...'
+        : kind === 'engineering'
+          ? 'جار تنفيذ الأمر الهندسي...'
+          : kind === 'competitor-discovery'
+            ? 'جار البحث الخارجي عن المنافسين...'
+            : 'جار سحب محتوى المنافسين...';
       const activityContext = {
         articleId,
         articleTitle,
-        commandId: job?.command_id || undefined,
-        surface: job?.job_type || (kind === 'semantic' ? 'semantic_keywords_lsi' : 'engineering_command'),
+        commandId: job.command_id || undefined,
+        surface: job.job_type || (kind === 'semantic'
+          ? 'semantic_keywords_lsi'
+          : kind === 'engineering'
+            ? 'engineering_command'
+            : kind === 'competitor-discovery'
+              ? 'competitor_discovery'
+              : 'competitor_extraction'),
         action,
       };
-      if (active && job) {
-        if (!trackedExternalAiActivitiesRef.current.has(activityId)) {
-          trackedExternalAiActivitiesRef.current.add(activityId);
+      if (active) {
+        if (existingActivity && existingActivity.state !== 'running' && !serverRevisionIsNewer) return;
+        if (!existingActivity || serverRevisionIsNewer) {
           beginAiExecutionActivity({
             id: activityId,
             ...activityContext,
-            provider: 'gemini',
-            requestedProvider: 'gemini',
+            provider: requestedProvider,
+            requestedProvider,
             stage: job.status,
-            message: kind === 'semantic'
-              ? 'مهمة توليد الصيغ وLSI تعمل في الخلفية.'
-              : 'مهمة الأوامر الهندسية تعمل في الخلفية.',
+            message: fallbackMessage,
             cancel: async () => {
               await cancelExternalAnalysisJob(articleId, job.id);
             },
@@ -170,22 +202,20 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
         }
         updateAiExecutionActivity(activityId, {
           ...activityContext,
-          requestedProvider: 'gemini',
+          requestedProvider,
           stage: job.status,
           progress: job.progress,
           completed: false,
           message: typeof job.progress.message === 'string'
             ? job.progress.message
-            : kind === 'semantic'
-              ? 'جار توليد الصيغ البديلة وكلمات LSI...'
-              : 'جار تنفيذ الأمر الهندسي...',
+            : fallbackMessage,
           cancel: async () => {
             await cancelExternalAnalysisJob(articleId, job.id);
           },
         });
         return;
       }
-      if (!job || !trackedExternalAiActivitiesRef.current.has(activityId)) return;
+      if (existingActivity?.state !== 'running') return;
       const outcome = job.status === 'completed'
         ? 'success'
         : job.status === 'cancelled'
@@ -193,14 +223,13 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           : 'failed';
       finishAiExecutionActivity(activityId, {
         ...activityContext,
-        requestedProvider: 'gemini',
+        requestedProvider,
         stage: job.status,
         progress: job.progress,
         payload: job.result,
         outcome,
         message: job.last_error || undefined,
       });
-      trackedExternalAiActivitiesRef.current.delete(activityId);
     };
 
     syncJob('semantic', semanticJobActive, summary?.latestSemanticJob || null);
@@ -211,16 +240,31 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
         ? summary?.activeEngineeringRootJob || summary?.latestEngineeringJob || null
         : summary?.latestEngineeringJob || null,
     );
+    syncJob(
+      'competitor-discovery',
+      competitorDiscoveryActive,
+      summary?.latestCompetitorDiscoveryJob || null,
+    );
+    syncJob(
+      'competitor-extraction',
+      competitorExtractionActive,
+      summary?.latestCompetitorExtractionJob || null,
+    );
   }, [
     articleId,
     articleTitle,
+    competitorDiscoveryActive,
+    competitorExtractionActive,
     engineeringActive,
     semanticJobActive,
     summary?.activeEngineeringCount,
     summary?.activeEngineeringRootJob,
+    summary?.latestCompetitorDiscoveryJob,
+    summary?.latestCompetitorExtractionJob,
     summary?.latestEngineeringJob,
     summary?.latestSemanticJob,
   ]);
+
   const readinessState = summary?.state || null;
   const semanticMissingFields = new Set(readinessState?.semantic_missing_fields || []);
   const engineeringMissingFields = new Set(readinessState?.external_analysis_missing_fields || []);
@@ -507,7 +551,12 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
       onKeyDown={event => event.stopPropagation()}
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <div className="inline-flex items-center gap-1">
+        <div
+          data-analysis-control-group="semantic"
+          role="group"
+          aria-label={locale === 'ar' ? 'توليد الصيغ وشروطه' : 'Term generation and its requirements'}
+          className="inline-flex items-center gap-1 rounded-lg border border-[#d4af37]/45 bg-[#d4af37]/5 p-0.5 shadow-sm dark:bg-[#d4af37]/10"
+        >
           <button
             type="button"
             onClick={handleSemantic}
@@ -538,7 +587,12 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           </button>
         </div>
 
-        <div className="inline-flex items-center gap-1">
+        <div
+          data-analysis-control-group="engineering"
+          role="group"
+          aria-label={locale === 'ar' ? 'الأوامر اليدوية الجاهزة وشروطها' : 'Ready manual commands and their requirements'}
+          className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-gray-50/80 p-0.5 shadow-sm dark:border-[#4A4A4A] dark:bg-[#242424]"
+        >
           <div ref={menuRef} className="relative">
             <button
             type="button"
@@ -626,7 +680,12 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           </button>
         </div>
 
-        <div className="inline-flex items-center gap-1">
+        <div
+          data-analysis-control-group="competitor"
+          role="group"
+          aria-label={locale === 'ar' ? 'المنافسون وشروطهم' : 'Competitors and their requirements'}
+          className="inline-flex items-center gap-1 rounded-lg border border-blue-300 bg-blue-50/60 p-0.5 shadow-sm dark:border-blue-800/70 dark:bg-blue-500/10"
+        >
           <button
             type="button"
             onClick={() => void handleCompetitors()}

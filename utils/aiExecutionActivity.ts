@@ -6,6 +6,7 @@ import {
 } from './aiKeyUsageFeedback.ts';
 
 export const AI_EXECUTION_ACTIVITY_EVENT = 'bazarvan:ai-execution-activity';
+export const AI_EXECUTION_ACTIVITY_REMOVED_EVENT = 'bazarvan:ai-execution-activity-removed';
 
 export type AiExecutionState = 'running' | 'success' | 'failed' | 'cancelled';
 export type AiCredentialTier = 'free' | 'paid' | 'unknown';
@@ -83,10 +84,16 @@ type AiExecutionActivityInput = {
 };
 
 const activityStore = new Map<string, AiExecutionActivity>();
+const retiredActivityStore = new Map<string, AiExecutionActivity>();
 const activityCancelHandlers = new Map<string, AiExecutionCancelHandler>();
 const cancellationRequests = new Set<string>();
 const manuallyCancelledActivities = new Set<string>();
 const MAX_STORED_ACTIVITIES = 24;
+
+const rememberRetiredActivity = (activity: AiExecutionActivity): void => {
+  retiredActivityStore.delete(activity.id);
+  retiredActivityStore.set(activity.id, activity);
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -181,6 +188,9 @@ export const formatAiProviderName = (provider: unknown): string => {
   if (token === 'geminipaid' || token === 'geminipro') return 'Gemini Pro';
   if (token === 'gemini' || token === 'geminifree') return 'Gemini';
   if (token === 'openai' || token === 'chatgpt') return 'OpenAI';
+  if (token === 'crawler') return 'Crawler';
+  if (token === 'firecrawl') return 'Firecrawl';
+  if (token === 'programmatic') return 'Programmatic';
   return value || 'AI';
 };
 
@@ -416,6 +426,7 @@ export const beginAiExecutionActivity = (
   input: AiExecutionActivityInput,
 ): AiExecutionActivity => {
   const id = toText(input.id) || createActivityId();
+  retiredActivityStore.delete(id);
   manuallyCancelledActivities.delete(id);
   cancellationRequests.delete(id);
   const current = activityStore.get(id);
@@ -439,6 +450,8 @@ export const updateAiExecutionActivity = (
   input: AiExecutionActivityInput,
 ): AiExecutionActivity => {
   const normalizedId = toText(id) || createActivityId();
+  const retiredActivity = retiredActivityStore.get(normalizedId);
+  if (!activityStore.has(normalizedId) && retiredActivity) return retiredActivity;
   const progressInput = readProgressInput(input.progress);
   const payloadInput = readProgressInput(input.payload);
   const mergedInput: AiExecutionActivityInput = {
@@ -527,6 +540,30 @@ export const getAiExecutionActivities = (): AiExecutionActivity[] => (
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 );
 
+export const removeAiExecutionActivity = (id: string): boolean => {
+  const normalizedId = toText(id);
+  if (!normalizedId) return false;
+
+  const currentActivity = activityStore.get(normalizedId);
+  const removed = activityStore.delete(normalizedId);
+  if (currentActivity) rememberRetiredActivity(currentActivity);
+  activityCancelHandlers.delete(normalizedId);
+  cancellationRequests.delete(normalizedId);
+  manuallyCancelledActivities.delete(normalizedId);
+  if (removed && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<string>(AI_EXECUTION_ACTIVITY_REMOVED_EVENT, {
+      detail: normalizedId,
+    }));
+  }
+  return removed;
+};
+
+export const clearAiExecutionActivities = (): number => {
+  const activityIds = Array.from(activityStore.keys());
+  activityIds.forEach(activityId => removeAiExecutionActivity(activityId));
+  return activityIds.length;
+};
+
 export const getAiExecutionActivitiesForArticle = (
   activities: readonly AiExecutionActivity[],
   articleId: string | null,
@@ -592,6 +629,7 @@ export const requestAiExecutionActivityCancel = async (
 
 export const resetAiExecutionActivitiesForTests = (): void => {
   activityStore.clear();
+  retiredActivityStore.clear();
   activityCancelHandlers.clear();
   cancellationRequests.clear();
   manuallyCancelledActivities.clear();

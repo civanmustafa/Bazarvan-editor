@@ -8,11 +8,13 @@ import {
 } from '../utils/aiKeyUsageFeedback.ts';
 import {
   beginAiExecutionActivity,
+  clearAiExecutionActivities,
   finishAiExecutionActivity,
   getAiExecutionActivities,
   getAiExecutionActivitiesForArticle,
   getRunningAiExecutionActivities,
   getVisibleAiExecutionMessage,
+  removeAiExecutionActivity,
   requestAiExecutionActivityCancel,
   resetAiExecutionActivitiesForTests,
   summarizeAiExecutionModelAttempts,
@@ -309,6 +311,52 @@ test('AI activity selectors isolate the open article while keeping every dashboa
     getRunningAiExecutionActivities(activities).map(activity => activity.id).sort(),
     [draftArticle.id, secondArticle.id].sort(),
   );
+});
+
+test('AI activity store keeps every running task beyond the terminal history limit', () => {
+  resetAiExecutionActivitiesForTests();
+  for (let index = 0; index < 30; index += 1) {
+    beginAiExecutionActivity({
+      id: `parallel-dashboard-task-${index}`,
+      articleId: `article-${index}`,
+      surface: 'engineering_command',
+    });
+  }
+  assert.equal(getRunningAiExecutionActivities(getAiExecutionActivities()).length, 30);
+});
+
+test('AI activity removal clears stale background tasks and their cancel handler', async () => {
+  resetAiExecutionActivitiesForTests();
+  beginAiExecutionActivity({
+    id: 'stale-dashboard-task',
+    articleId: 'article-stale',
+    surface: 'automatic_content_writing',
+    cancel: async () => undefined,
+  });
+
+  assert.equal(removeAiExecutionActivity('stale-dashboard-task'), true);
+  assert.deepEqual(getAiExecutionActivities(), []);
+  const ignoredLateUpdate = updateAiExecutionActivity('stale-dashboard-task', {
+    stage: 'reconnecting',
+    completed: false,
+  });
+  assert.equal(ignoredLateUpdate.id, 'stale-dashboard-task');
+  assert.deepEqual(getAiExecutionActivities(), []);
+  await assert.rejects(
+    requestAiExecutionActivityCancel('stale-dashboard-task'),
+    /ليست نشطة/,
+  );
+  assert.equal(removeAiExecutionActivity('stale-dashboard-task'), false);
+
+  beginAiExecutionActivity({ id: 'old-session-one', surface: 'quick_provider' });
+  beginAiExecutionActivity({ id: 'old-session-two', surface: 'content_writing' });
+  assert.equal(clearAiExecutionActivities(), 2);
+  assert.deepEqual(getAiExecutionActivities(), []);
+  updateAiExecutionActivity('old-session-one', { completed: false, stage: 'reconnecting' });
+  assert.deepEqual(getAiExecutionActivities(), []);
+
+  beginAiExecutionActivity({ id: 'old-session-one', surface: 'quick_provider' });
+  assert.deepEqual(getAiExecutionActivities().map(activity => activity.id), ['old-session-one']);
 });
 
 test('unified AI activity identifies its article and stops the original operation', async () => {
