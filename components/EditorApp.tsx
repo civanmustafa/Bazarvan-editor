@@ -64,6 +64,8 @@ const loadEditorWorkspacePreferences = (userId: string | null): EditorWorkspaceP
 const EditorView: React.FC = () => {
   const { currentUserId, isDarkMode, t } = useUser();
   const editor = useEditorSelector(context => context.editor);
+  const activeArticleId = useEditorSelector(context => context.activeArticleId);
+  const articleKey = useEditorSelector(context => context.articleKey);
   const scrollContainerRef = useEditorSelector(context => context.scrollContainerRef);
   const handleScrollToTop = useInteractionSelector(context => context.handleScrollToTop);
   const tooltip = useInteractionSelector(context => context.tooltip);
@@ -149,7 +151,7 @@ const EditorView: React.FC = () => {
         />
         <div className="relative flex h-full min-w-0 flex-1 basis-[60.73%] flex-col transition-[flex-basis] duration-150">
           <TipsCarousel />
-          <AiExecutionMonitor />
+          <AiExecutionMonitor articleId={activeArticleId} articleKey={articleKey} />
           <EditorToolbar
             isFocusMode={isFocusMode}
             onToggleFocusMode={toggleFocusMode}

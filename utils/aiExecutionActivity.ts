@@ -527,6 +527,27 @@ export const getAiExecutionActivities = (): AiExecutionActivity[] => (
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 );
 
+export const getAiExecutionActivitiesForArticle = (
+  activities: readonly AiExecutionActivity[],
+  articleId: string | null,
+  articleKey = '',
+): AiExecutionActivity[] => {
+  const normalizedArticleId = toText(articleId);
+  if (normalizedArticleId) {
+    return activities.filter(activity => activity.articleId === normalizedArticleId);
+  }
+
+  const normalizedArticleKey = toText(articleKey);
+  return activities.filter(activity => (
+    !activity.articleId
+    && (!normalizedArticleKey || activity.articleKey === normalizedArticleKey)
+  ));
+};
+
+export const getRunningAiExecutionActivities = (
+  activities: readonly AiExecutionActivity[],
+): AiExecutionActivity[] => activities.filter(activity => activity.state === 'running');
+
 export const requestAiExecutionActivityCancel = async (
   id: string,
 ): Promise<AiExecutionActivity> => {

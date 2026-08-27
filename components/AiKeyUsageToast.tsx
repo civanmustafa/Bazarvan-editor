@@ -18,6 +18,8 @@ import {
   AI_EXECUTION_ACTIVITY_EVENT,
   formatAiProviderName,
   getAiExecutionActivities,
+  getAiExecutionActivitiesForArticle,
+  getRunningAiExecutionActivities,
   requestAiExecutionActivityCancel,
   summarizeAiExecutionModelAttempts,
   type AiExecutionActivity,
@@ -145,14 +147,9 @@ const StatusIcon: React.FC<{ state: AiExecutionState }> = ({ state }) => {
   return <XCircle size={13} />;
 };
 
-const AiExecutionMonitor: React.FC = () => {
-  const { uiLanguage } = useUser();
-  const isArabic = uiLanguage !== 'en';
+const useAiExecutionActivityFeed = () => {
   const [activities, setActivities] = useState<AiExecutionActivity[]>(() => getAiExecutionActivities());
   const [now, setNow] = useState(Date.now());
-  const [cancellingId, setCancellingId] = useState('');
-  const [cancelError, setCancelError] = useState('');
-  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     const handleActivity = (event: Event) => {
@@ -161,8 +158,7 @@ const AiExecutionMonitor: React.FC = () => {
       setActivities(current => [
         incoming,
         ...current.filter(activity => activity.id !== incoming.id),
-      ].slice(0, 8));
-      setCancelError('');
+      ].slice(0, 24));
 
       if (incoming.state !== 'running') {
         const terminalUpdatedAt = incoming.updatedAt;
@@ -185,12 +181,133 @@ const AiExecutionMonitor: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [activities]);
 
-  // The first activity is always the one with the latest live update. Keeping the
-  // monitor in one row prevents a detached popup from covering editor controls.
-  const selected = activities[0];
+  return { activities, setActivities, now };
+};
+
+export const DashboardAiExecutionMonitor: React.FC = () => {
+  const { uiLanguage } = useUser();
+  const isArabic = uiLanguage !== 'en';
+  const { activities, now } = useAiExecutionActivityFeed();
+  const runningActivities = getRunningAiExecutionActivities(activities);
+
+  if (runningActivities.length === 0) return null;
+
+  const runningArticleCount = new Set(runningActivities.map(activity => (
+    activity.articleId || activity.articleKey || activity.id
+  ))).size;
+
+  return (
+    <section
+      data-ai-execution-monitor="dashboard"
+      className="mb-6 overflow-hidden rounded-xl border border-blue-200 bg-white shadow-sm dark:border-blue-500/30 dark:bg-[#242424]"
+      dir={isArabic ? 'rtl' : 'ltr'}
+      role="status"
+      aria-live="polite"
+    >
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-100 bg-blue-50 px-4 py-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+        <div className="flex items-center gap-2 font-black text-gray-800 dark:text-gray-100">
+          <Activity size={17} className="text-blue-600 dark:text-blue-300" />
+          <span>{isArabic ? 'حالة الذكاء الاصطناعي لجميع المقالات' : 'AI status across all articles'}</span>
+        </div>
+        <span className="rounded-full bg-blue-600 px-2.5 py-1 text-xs font-black text-white">
+          {isArabic
+            ? `${runningArticleCount} مقالة · ${runningActivities.length} عملية جارية`
+            : `${runningArticleCount} articles · ${runningActivities.length} running tasks`}
+        </span>
+      </header>
+
+      <div className="divide-y divide-gray-100 dark:divide-[#3C3C3C]">
+        {runningActivities.map(activity => {
+          const articleLabel = activity.articleTitle
+            || activity.articleKey
+            || (isArabic ? 'مقالة بلا عنوان' : 'Untitled article');
+          const sourceLabel = activity.surface
+            ? getLabel(SURFACE_LABELS, activity.surface, isArabic)
+            : (isArabic ? 'مهمة ذكاء اصطناعي' : 'AI task');
+          const actionLabel = activity.action
+            ? getLabel(ACTION_LABELS, activity.action, isArabic)
+            : sourceLabel;
+          const stageLabel = getLabel(STAGE_LABELS, activity.stage, isArabic);
+          const lastUpdateTime = new Date(activity.updatedAt).getTime();
+          const isStale = Number.isFinite(lastUpdateTime) && now - lastUpdateTime >= 60_000;
+
+          return (
+            <div
+              key={activity.id}
+              data-ai-execution-article-id={activity.articleId || undefined}
+              className="grid gap-2 px-4 py-3 text-xs text-gray-600 dark:text-gray-300 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto] md:items-center"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <Loader2 size={14} className="shrink-0 animate-spin text-blue-600 dark:text-blue-300" />
+                <FileText size={14} className="shrink-0 text-[#b8922e]" />
+                <span className="truncate font-black text-gray-800 dark:text-gray-100" title={articleLabel}>
+                  {articleLabel}
+                </span>
+              </div>
+
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1 font-black text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
+                  {stageLabel}
+                </span>
+                <span className="max-w-60 truncate font-bold" title={`${actionLabel} · ${sourceLabel}`}>
+                  {actionLabel}{actionLabel !== sourceLabel ? ` · ${sourceLabel}` : ''}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 md:justify-end">
+                <span className="inline-flex items-center gap-1 font-black">
+                  {formatAiProviderName(activity.provider)}
+                </span>
+                <span className="inline-flex max-w-48 items-center gap-1 truncate font-mono" dir="ltr">
+                  <Cpu size={12} />
+                  {activity.model || activity.requestedModel || (isArabic ? 'بانتظار الموديل' : 'Model pending')}
+                </span>
+                <span className="inline-flex items-center gap-1 font-mono" dir="ltr">
+                  <Clock3 size={12} />
+                  {formatDuration(activity.startedAt, activity.completedAt, now)}
+                </span>
+                <span className={isStale ? 'font-black text-amber-600 dark:text-amber-300' : ''}>
+                  {formatLastUpdateAge(activity.updatedAt, now, isArabic)}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
+
+type AiExecutionMonitorProps = {
+  articleId: string | null;
+  articleKey?: string;
+};
+
+const AiExecutionMonitor: React.FC<AiExecutionMonitorProps> = ({ articleId, articleKey = '' }) => {
+  const { uiLanguage } = useUser();
+  const isArabic = uiLanguage !== 'en';
+  const { activities, setActivities, now } = useAiExecutionActivityFeed();
+  const [cancellingId, setCancellingId] = useState('');
+  const [cancelError, setCancelError] = useState('');
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const handleActivity = (event: Event) => {
+      const incoming = (event as CustomEvent<AiExecutionActivity>).detail;
+      if (!incoming?.id) return;
+      setCancelError('');
+    };
+    window.addEventListener(AI_EXECUTION_ACTIVITY_EVENT, handleActivity);
+    return () => window.removeEventListener(AI_EXECUTION_ACTIVITY_EVENT, handleActivity);
+  }, []);
+
+  const scopedActivities = getAiExecutionActivitiesForArticle(activities, articleId, articleKey);
+  // The first scoped activity is the latest update for the open article. Keeping
+  // it in one row prevents the monitor from covering editor controls.
+  const selected = scopedActivities.find(activity => activity.state === 'running') || scopedActivities[0];
   if (!selected) return null;
 
-  const activeCount = activities.filter(activity => activity.state === 'running').length;
+  const activeCount = scopedActivities.filter(activity => activity.state === 'running').length;
   const succeededKeys = selected.entries.filter(entry => entry.outcome === 'success').length;
   const failedKeys = selected.entries.filter(entry => entry.outcome === 'failed').length;
   const tierLabel = selected.credentialTier === 'free'

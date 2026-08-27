@@ -47,6 +47,7 @@ import {
     type ArticleStatusFilter,
 } from '../constants/articleStatuses';
 import AutomaticContentWritingQueuePanel from './AutomaticContentWritingQueuePanel';
+import { DashboardAiExecutionMonitor } from './AiKeyUsageToast';
 
 const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
 
@@ -1810,6 +1811,8 @@ const Dashboard: React.FC = () => {
             </button>
           </div>
         </header>
+
+        <DashboardAiExecutionMonitor />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2">

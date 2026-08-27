@@ -81,6 +81,7 @@ test('development and production use one API route registry', async () => {
 test('all editor AI execution paths publish to one inline live activity monitor', async () => {
   const [
     editorApp,
+    dashboard,
     monitor,
     activityEngine,
     geminiEngine,
@@ -96,6 +97,7 @@ test('all editor AI execution paths publish to one inline live activity monitor'
     internalLinkingPanel,
   ] = await Promise.all([
     readWorkspaceFile('components/EditorApp.tsx'),
+    readWorkspaceFile('components/Dashboard.tsx'),
     readWorkspaceFile('components/AiKeyUsageToast.tsx'),
     readWorkspaceFile('utils/aiExecutionActivity.ts'),
     readWorkspaceFile('utils/geminiAnalysisEngine.ts'),
@@ -113,9 +115,14 @@ test('all editor AI execution paths publish to one inline live activity monitor'
 
   assert.match(
     editorApp,
-    /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s*\/>\s*<EditorToolbar\s+isFocusMode=\{isFocusMode\}\s+onToggleFocusMode=\{toggleFocusMode\}\s*\/>/,
+    /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s+articleId=\{activeArticleId\}\s+articleKey=\{articleKey\}\s*\/>\s*<EditorToolbar\s+isFocusMode=\{isFocusMode\}\s+onToggleFocusMode=\{toggleFocusMode\}\s*\/>/,
   );
   assert.match(editorApp, /import AiExecutionMonitor from '\.\/AiKeyUsageToast'/);
+  assert.match(monitor, /getAiExecutionActivitiesForArticle\(activities, articleId, articleKey\)/);
+  assert.match(dashboard, /<DashboardAiExecutionMonitor\s*\/>/);
+  assert.match(monitor, /data-ai-execution-monitor="dashboard"/);
+  assert.match(monitor, /runningActivities\.map\(activity =>/);
+  assert.match(monitor, /data-ai-execution-article-id=\{activity\.articleId \|\| undefined\}/);
   assert.match(monitor, /data-ai-execution-monitor="inline"/);
   assert.doesNotMatch(monitor, /fixed bottom-4 left-4/);
   assert.match(monitor, /AI_EXECUTION_ACTIVITY_EVENT/);

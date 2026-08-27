@@ -10,6 +10,8 @@ import {
   beginAiExecutionActivity,
   finishAiExecutionActivity,
   getAiExecutionActivities,
+  getAiExecutionActivitiesForArticle,
+  getRunningAiExecutionActivities,
   getVisibleAiExecutionMessage,
   requestAiExecutionActivityCancel,
   resetAiExecutionActivitiesForTests,
@@ -271,6 +273,42 @@ test('expanded AI activity summarizes successful and failed attempts by model', 
       isCurrent: true,
     },
   ]);
+});
+
+test('AI activity selectors isolate the open article while keeping every dashboard task', () => {
+  resetAiExecutionActivitiesForTests();
+  const firstArticle = beginAiExecutionActivity({
+    id: 'article-one-task',
+    articleId: 'article-one',
+    articleTitle: 'المقالة الأولى',
+    surface: 'content_writing',
+  });
+  const secondArticle = beginAiExecutionActivity({
+    id: 'article-two-task',
+    articleId: 'article-two',
+    articleTitle: 'المقالة الثانية',
+    surface: 'smart_analysis',
+  });
+  const draftArticle = beginAiExecutionActivity({
+    id: 'draft-task',
+    articleKey: 'مسودة محلية',
+    surface: 'draft_title_generation',
+  });
+  finishAiExecutionActivity(firstArticle.id, { outcome: 'success' });
+
+  const activities = getAiExecutionActivities();
+  assert.deepEqual(
+    getAiExecutionActivitiesForArticle(activities, 'article-two').map(activity => activity.id),
+    [secondArticle.id],
+  );
+  assert.deepEqual(
+    getAiExecutionActivitiesForArticle(activities, null, 'مسودة محلية').map(activity => activity.id),
+    [draftArticle.id],
+  );
+  assert.deepEqual(
+    getRunningAiExecutionActivities(activities).map(activity => activity.id).sort(),
+    [draftArticle.id, secondArticle.id].sort(),
+  );
 });
 
 test('unified AI activity identifies its article and stops the original operation', async () => {
