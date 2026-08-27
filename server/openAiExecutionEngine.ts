@@ -24,6 +24,12 @@ import {
   shouldAttemptAiFallback,
 } from './aiProviderFallbackPolicy';
 import { normalizeOpenAiUsage, type NormalizedAiUsage } from './aiUsage';
+import {
+  ProviderAccessError,
+  assertProviderModelAllowed,
+  reserveProviderRequest,
+  resolveEffectiveProviderPolicy,
+} from './providerAccessControl.ts';
 
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || OPENAI_ANALYSIS_MODEL;
 const DEFAULT_OPENAI_INSTRUCTIONS = 'You are an expert SEO, AEO, GEO, and LLM SEO content assistant. Follow the user instructions precisely.';
@@ -275,6 +281,11 @@ const executeOpenAiProviderFallback = async (options: {
   credentialPurpose?: 'standard' | 'content_writing_resume';
 }): Promise<ApiResult> => {
   if (!shouldAttemptAiFallback(options.primaryResult)) return options.primaryResult;
+  const accessPolicy = await resolveEffectiveProviderPolicy(
+    options.telemetry.actorUserId,
+    'openai',
+  );
+  if (!accessPolicy.allowProviderFallback) return options.primaryResult;
   const fallbackProvider = getAvailableAiProviderFallbacks(options.capabilities, 'openai')[0];
   if (fallbackProvider !== 'geminiPaid' && fallbackProvider !== 'gemini') {
     return options.primaryResult;
@@ -357,13 +368,17 @@ export const executeOpenAiRequest = async (
         body: { error: 'OpenAI is disabled by the system administrator.', code: 'AI_PROVIDER_DISABLED', provider: 'openai', model: selectedModel },
       });
     }
+    const providerPolicy = await resolveEffectiveProviderPolicy(telemetry.actorUserId, 'openai');
+    if (!request.model && providerPolicy.defaultModel) selectedModel = providerPolicy.defaultModel;
     const allowedModels = new Set([
       DEFAULT_OPENAI_MODEL,
       selectedModel,
+      ...(providerPolicy.defaultModel ? [providerPolicy.defaultModel] : []),
       ...String(process.env.OPENAI_ALLOWED_MODELS || '').split(/[\n,;]+/).map(value => value.trim()).filter(Boolean),
     ]);
     const requestedModel = String(request.model || '').trim();
     selectedModel = requestedModel && allowedModels.has(requestedModel) ? requestedModel : selectedModel;
+    await assertProviderModelAllowed(telemetry.actorUserId, 'openai', selectedModel);
     const input = normalizeInput(request);
     if ((typeof input === 'string' && !input) || (Array.isArray(input) && input.length === 0)) {
       return finalize({ status: 400, body: { error: 'An OpenAI prompt or message list is required.', code: 'AI_PROMPT_REQUIRED' } });
@@ -417,6 +432,12 @@ export const executeOpenAiRequest = async (
         credentialPurpose: options.credentialPurpose,
       }));
     }
+
+    await reserveProviderRequest({
+      userId: telemetry.actorUserId,
+      provider: 'openai',
+      operation: telemetry.source || 'openai_request',
+    });
 
     const timeoutMs = boundedInteger(process.env.OPENAI_TIMEOUT_MS, 300_000, 10_000, 900_000);
     const maxOutputTokens = boundedInteger(request.maxOutputTokens, 8_000, 256, 32_000);
@@ -528,6 +549,18 @@ export const executeOpenAiRequest = async (
       credentialPurpose: options.credentialPurpose,
     }));
   } catch (error) {
+    if (error instanceof ProviderAccessError) {
+      return finalize({
+        status: error.status,
+        body: {
+          error: error.message,
+          code: error.code,
+          provider: 'openai',
+          model: selectedModel,
+          attempts,
+        },
+      });
+    }
     return finalize({
       status: 500,
       body: {

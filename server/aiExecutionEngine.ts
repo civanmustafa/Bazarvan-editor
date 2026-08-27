@@ -38,6 +38,13 @@ import {
   toApiSecurityResult,
 } from "../api/apiSecurity";
 import {
+  ProviderAccessError,
+  assertProviderModelAllowed,
+  reserveProviderRequest,
+  resolveEffectiveProviderPolicy,
+  type EffectiveProviderPolicy,
+} from './providerAccessControl.ts';
+import {
   AiJobConflictError,
   createAiJob,
   getAiJobForOwner,
@@ -809,6 +816,7 @@ type GeminiInternalExecutionContext = {
   capabilities?: AiProviderCapabilities;
   credentials?: ResolvedAiCredentialSet;
   userId?: string;
+  accessPolicy?: EffectiveProviderPolicy;
 };
 
 const executeGeminiCredentialTierInternal = async (
@@ -855,12 +863,27 @@ const executeGeminiCredentialTierInternal = async (
       });
       return capabilityFailure;
     }
-    const modelOrder = getGeminiModelOrder(
+    const unfilteredModelOrder = getGeminiModelOrder(
       selectedProvider,
       selectedModel,
       allowModelFallback === true,
       fallbackModels,
     );
+    const allowedModels = internal.accessPolicy?.allowedModels || [];
+    const modelOrder = allowedModels.length > 0
+      ? unfilteredModelOrder.filter(candidate => allowedModels.includes(candidate))
+      : unfilteredModelOrder;
+    if (modelOrder.length === 0) {
+      return {
+        status: 403,
+        body: {
+          error: 'لا يوجد موديل Gemini مسموح لهذا المستخدم.',
+          code: 'PROVIDER_MODEL_DENIED',
+          provider: selectedProvider,
+          model: selectedModel,
+        },
+      };
+    }
     const credentials = internal.credentials || await resolveGeminiApiKeys(
       selectedProvider,
       internal.userId || normalizeAiExecutionTelemetryContext(options.telemetry).actorUserId,
@@ -1462,21 +1485,67 @@ const executeGeminiProviderRequestInternal = async (
   const capabilityFailure = getProviderCapabilityFailure(provider, capabilities);
   if (capabilityFailure) return capabilityFailure;
 
+  const accessProvider = provider === 'geminiPaid' ? 'gemini_paid' : 'gemini_free';
+  let accessPolicy: EffectiveProviderPolicy;
+  try {
+    accessPolicy = await resolveEffectiveProviderPolicy(userId, accessProvider);
+    const requestedModel = requestBody?.model || accessPolicy.defaultModel;
+    await assertProviderModelAllowed(userId, accessProvider, requestedModel);
+  } catch (error) {
+    if (error instanceof ProviderAccessError) {
+      return {
+        status: error.status,
+        body: {
+          error: error.message,
+          code: error.code,
+          provider,
+          model: requestBody?.model,
+        },
+      };
+    }
+    throw error;
+  }
+  const effectiveRequestBody = !requestBody?.model && accessPolicy.defaultModel
+    ? { ...requestBody, model: accessPolicy.defaultModel }
+    : requestBody;
   const credentials = await resolveGeminiApiKeys(provider, userId, options.credentialPurpose);
   const credentialTiers = credentials.tiers.filter(tier => tier.keys.length > 0);
   if (credentialTiers.length === 0) {
-    return executeGeminiCredentialTierInternal(requestBody, options, {
+    return executeGeminiCredentialTierInternal(effectiveRequestBody, options, {
       capabilities,
       credentials,
       userId,
+      accessPolicy,
     });
+  }
+
+  try {
+    await reserveProviderRequest({
+      userId,
+      provider: accessProvider,
+      operation: normalizeAiExecutionTelemetryContext(options.telemetry).source || 'gemini_request',
+    });
+  } catch (error) {
+    if (error instanceof ProviderAccessError) {
+      return {
+        status: error.status,
+        body: {
+          error: error.message,
+          code: error.code,
+          provider,
+          model: effectiveRequestBody?.model,
+        },
+      };
+    }
+    throw error;
   }
 
   let result: ApiResult | null = null;
   for (const tier of credentialTiers) {
-    const tierResult = await executeGeminiCredentialTierInternal(requestBody, options, {
+    const tierResult = await executeGeminiCredentialTierInternal(effectiveRequestBody, options, {
       capabilities,
       userId,
+      accessPolicy,
       credentials: {
         keys: tier.keys,
         source: tier.source,
@@ -1520,10 +1589,15 @@ const executeGeminiRequestInternal = async (
     capabilities,
     userId,
   );
+  const requestedAccessPolicy = await resolveEffectiveProviderPolicy(
+    userId,
+    requestedProvider === 'geminiPaid' ? 'gemini_paid' : 'gemini_free',
+  );
   if (
     requestedProvider !== 'geminiPaid'
     || !shouldAttemptAiFallback(primaryResult)
     || !capabilities.providers.gemini.available
+    || !requestedAccessPolicy.allowProviderFallback
   ) {
     return primaryResult;
   }

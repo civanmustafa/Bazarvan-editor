@@ -32,6 +32,7 @@ import { useUser } from '../contexts/UserContext';
 import ExternalAnalysisReportsTable from './ExternalAnalysisReportsTable';
 import ContentWritingReportsTable from './ContentWritingReportsTable';
 import CrawlerProviderUsageReportsTable from './CrawlerProviderUsageReportsTable';
+import AdminProviderAccessSettings from './AdminProviderAccessSettings';
 import {
   getArticleTrashInfo,
   getRemoteAppSessionById,
@@ -2127,6 +2128,15 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
             <AdminStat icon={<Clock size={18} />} label="الوقت" value={formatSeconds(profileTime, t)} />
             <AdminStat icon={<Calendar size={18} />} label="آخر نشاط" value={currentProfile?.lastSeenAt ? formatIstanbulDateTime(currentProfile.lastSeenAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'} />
           </div>
+          {currentProfile && (
+            <section>
+              <SectionTitle>الدور وصلاحيات المزودات والمفاتيح</SectionTitle>
+              <AdminProviderAccessSettings
+                userId={currentProfile.id}
+                onProfileUpdated={refreshData}
+              />
+            </section>
+          )}
           <section>
             <SectionTitle>مقالاته</SectionTitle>
             <ArticleList articles={profileArticles} profiles={profiles} t={t} />

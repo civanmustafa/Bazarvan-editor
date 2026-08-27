@@ -317,6 +317,10 @@ export const toApiSecurityResult = (error: unknown): {
   };
 };
 
+export const invalidateApiAuthenticationCache = (): void => {
+  authenticationCache.clear();
+};
+
 export const __resetApiSecurityStateForTests = (): void => {
   rateLimitBuckets.clear();
   authenticationCache.clear();

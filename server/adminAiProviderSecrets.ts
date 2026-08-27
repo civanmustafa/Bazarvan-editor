@@ -14,10 +14,20 @@ import {
   type UserAiSecretProvider,
 } from './userAiProviderSecrets.ts';
 import { getContentWritingResumeSecretProvider } from '../constants/contentWritingResume.ts';
+import {
+  resolveProviderCredentialPlan,
+  type ProviderCredentialTier,
+} from './providerAccessControl.ts';
 
 export { ADMIN_AI_SECRET_PROVIDERS } from '../constants/adminAiProviderSecrets.ts';
 export type { AdminAiSecretProvider } from '../constants/adminAiProviderSecrets.ts';
-export type AiCredentialSource = 'resume' | 'user' | 'admin' | 'hostinger';
+export type AiCredentialSource =
+  | 'resume'
+  | 'user'
+  | 'assigned_user'
+  | 'assigned_all'
+  | 'admin'
+  | 'hostinger';
 export type AiCredentialPurpose = 'standard' | 'content_writing_resume';
 
 export type ResolvedAiCredentialTier = {
@@ -351,13 +361,39 @@ const resolveCredentialSet = async (
   ]);
   const adminKey = row?.enabled ? normalizeApiKey(decryptSecret(row)) : null;
   const resumeKey = resumeRow?.enabled ? normalizeApiKey(decryptSecret(resumeRow)) : null;
-  return buildResolvedCredentialSet(
-    adminKey,
-    row?.enabled === true,
-    fallbackKeys,
-    userKeys,
-    resumeKey,
-  );
+  const globalTiers: ProviderCredentialTier[] = [
+    ...(resumeKey ? [{ source: 'resume' as const, keys: [resumeKey] }] : []),
+    ...(row?.enabled && adminKey ? [{ source: 'admin' as const, keys: [adminKey] }] : []),
+    ...(fallbackKeys.length > 0 ? [{ source: 'hostinger' as const, keys: fallbackKeys }] : []),
+  ];
+  const accessProvider = runtimeProvider === 'openai'
+    ? 'openai'
+    : runtimeProvider === 'geminiPaid'
+      ? 'gemini_paid'
+      : 'gemini_free';
+  const plan = await resolveProviderCredentialPlan({
+    userId,
+    provider: accessProvider,
+    personalKeys: userKeys,
+    globalTiers,
+  });
+  // A purpose-specific resume key is an explicit administrator override for a
+  // resumable workflow, so retain its precedence when server keys are allowed.
+  const orderedTiers = purpose === 'content_writing_resume'
+    ? [
+        ...plan.tiers.filter(tier => tier.source === 'resume'),
+        ...plan.tiers.filter(tier => tier.source !== 'resume'),
+      ]
+    : plan.tiers;
+  const tiers = orderedTiers.map(tier => ({
+    source: tier.source as AiCredentialSource,
+    keys: tier.keys,
+  }));
+  return {
+    keys: tiers.flatMap(tier => tier.keys),
+    source: tiers[0]?.source || 'hostinger',
+    tiers,
+  };
 };
 
 export const resolveOpenAiApiKeys = async (
@@ -388,7 +424,30 @@ export const resolveGeminiApiKeys = async (
         : Promise.resolve(null),
     ]);
     const resumeKey = resumeRow?.enabled ? normalizeApiKey(decryptSecret(resumeRow)) : null;
-    return buildResolvedCredentialSet(null, false, fallbackKeys, userKeys, resumeKey);
+    const plan = await resolveProviderCredentialPlan({
+      userId,
+      provider: 'gemini_free',
+      personalKeys: userKeys,
+      globalTiers: [
+        ...(resumeKey ? [{ source: 'resume' as const, keys: [resumeKey] }] : []),
+        ...(fallbackKeys.length > 0 ? [{ source: 'hostinger' as const, keys: fallbackKeys }] : []),
+      ],
+    });
+    const orderedTiers = purpose === 'content_writing_resume'
+      ? [
+          ...plan.tiers.filter(tier => tier.source === 'resume'),
+          ...plan.tiers.filter(tier => tier.source !== 'resume'),
+        ]
+      : plan.tiers;
+    const tiers = orderedTiers.map(tier => ({
+      source: tier.source as AiCredentialSource,
+      keys: tier.keys,
+    }));
+    return {
+      keys: tiers.flatMap(tier => tier.keys),
+      source: tiers[0]?.source || 'hostinger',
+      tiers,
+    };
   }
   return resolveCredentialSet(
     'gemini_latest',
@@ -405,52 +464,20 @@ export const readAiProviderCredentialAvailability = async (userId?: string): Pro
   openai: AiProviderCredentialAvailability;
   geminiPaid: AiProviderCredentialAvailability;
 }> => {
-  const [adminOverview, userOverview] = await Promise.all([
-    readAdminAiProviderSecretsOverview(),
-    userId ? readUserAiProviderSecretsOverview(userId) : Promise.resolve(null),
+  const [gemini, openai, geminiPaid] = await Promise.all([
+    resolveGeminiApiKeys('gemini', userId),
+    resolveOpenAiApiKeys(userId),
+    resolveGeminiApiKeys('geminiPaid', userId),
   ]);
-  const toAvailability = (options: {
-    userProvider: UserAiSecretProvider;
-    adminProvider?: AdminAiSecretProvider;
-    fallbackKeys: string[];
-  }): AiProviderCredentialAvailability => {
-    const userStatus = userOverview?.providers[options.userProvider];
-    const userKeyCount = userOverview?.encryptionConfigured
-      && userStatus?.enabled
-      && userStatus.configured
-      ? userStatus.keyCount
-      : 0;
-    const adminStatus = options.adminProvider
-      ? adminOverview.providers[options.adminProvider]
-      : null;
-    const adminKeyCount = adminOverview.encryptionConfigured
-      && adminStatus?.enabled
-      && adminStatus.configured
-      ? 1
-      : 0;
-    const fallbackKeyCount = options.fallbackKeys.length;
-    return {
-      configured: userKeyCount + adminKeyCount + fallbackKeyCount > 0,
-      keyCount: userKeyCount + adminKeyCount + fallbackKeyCount,
-      source: userKeyCount > 0 ? 'user' : adminKeyCount > 0 ? 'admin' : 'hostinger',
-    };
-  };
-
+  const toAvailability = (credentials: ResolvedAiCredentialSet): AiProviderCredentialAvailability => ({
+    configured: credentials.keys.length > 0,
+    keyCount: credentials.keys.length,
+    source: credentials.source,
+  });
   return {
-    gemini: toAvailability({
-      userProvider: 'gemini_free',
-      fallbackKeys: getEnvironmentGeminiApiKeys('gemini'),
-    }),
-    openai: toAvailability({
-      userProvider: 'openai_paid',
-      adminProvider: 'openai_latest',
-      fallbackKeys: getEnvironmentOpenAiApiKeys(),
-    }),
-    geminiPaid: toAvailability({
-      userProvider: 'gemini_paid',
-      adminProvider: 'gemini_latest',
-      fallbackKeys: getEnvironmentGeminiApiKeys('geminiPaid'),
-    }),
+    gemini: toAvailability(gemini),
+    openai: toAvailability(openai),
+    geminiPaid: toAvailability(geminiPaid),
   };
 };
 

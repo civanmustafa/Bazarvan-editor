@@ -157,6 +157,7 @@ const executeCompetitorExtraction = async (
       const content = await getCompetitorPreview({
         url: row.canonical_url || row.source_url,
         signal: context.signal,
+        userId: context.job.requested_by,
       });
       if (articleLanguage === 'ar' && !isCompetitorLanguageCompatible('ar', content.text)) {
         const message = 'The extracted competitor page is Latin-language content and was excluded from the Arabic article.';

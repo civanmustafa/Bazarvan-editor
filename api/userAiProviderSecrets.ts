@@ -20,6 +20,11 @@ import {
   readUserAiProviderSecretsOverview,
   saveUserAiProviderKeys,
 } from '../server/userAiProviderSecrets';
+import {
+  ProviderAccessError,
+  resolveEffectiveProviderPolicy,
+} from '../server/providerAccessControl.ts';
+import type { ProviderAccessProvider } from '../constants/providerAccessControl.ts';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -77,6 +82,19 @@ const handleUserAiProviderSecretsRequest = async (req: any): Promise<ApiResult> 
     await deleteUserAiProviderKeys(principal.userId, provider);
     return readOverviewResult(principal.userId);
   }
+  const accessProvider: ProviderAccessProvider = provider === 'openai_paid'
+    ? 'openai'
+    : provider;
+  const policy = await resolveEffectiveProviderPolicy(principal.userId, accessProvider);
+  if (!policy.enabled
+      || !policy.allowPersonalKeys
+      || ['assigned_only', 'global_only', 'disabled'].includes(policy.credentialMode)) {
+    throw new ProviderAccessError(
+      'Personal keys are disabled for this provider by the administrator.',
+      403,
+      'PERSONAL_PROVIDER_KEYS_DENIED',
+    );
+  }
   if (body.apiKeys === undefined || (
     typeof body.apiKeys !== 'string'
     && (!Array.isArray(body.apiKeys) || body.apiKeys.some(item => typeof item !== 'string'))
@@ -102,8 +120,10 @@ export default async function handler(req: any, res?: any): Promise<Response | v
     if (securityResult) {
       return deliverApiResult(withCorsResponseHeaders(req, securityResult), res);
     }
-    const status = error instanceof UserAiProviderSecretError ? error.status : 500;
-    const code = error instanceof UserAiProviderSecretError
+    const status = error instanceof UserAiProviderSecretError || error instanceof ProviderAccessError
+      ? error.status
+      : 500;
+    const code = error instanceof UserAiProviderSecretError || error instanceof ProviderAccessError
       ? error.code
       : 'USER_AI_SECRET_REQUEST_FAILED';
     const message = error instanceof Error

@@ -85,6 +85,7 @@ const executeCompetitorDiscovery = async (
       location: targetCountry,
       excludeDomains: ownDomains,
       signal: context.signal,
+      userId: context.job.requested_by,
     });
     const selection = analyzeAndSelectCompetitors({
       context: {

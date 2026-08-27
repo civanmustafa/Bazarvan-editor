@@ -81,6 +81,7 @@ interface UserContextType {
     t: typeof translations.ar;
     isIdle: boolean;
     handleLogin: (username: string, password: string) => Promise<boolean>;
+    handleGoogleLogin: () => Promise<boolean>;
     handleLogout: () => Promise<void>;
     setCurrentView: React.Dispatch<React.SetStateAction<AppView>>;
     handleHighlightStyleChange: (style: 'background' | 'underline') => void;
@@ -729,6 +730,28 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return true;
     }, [applyAuthenticatedUser]);
 
+    const handleGoogleLogin = useCallback(async (): Promise<boolean> => {
+        if (!isSupabaseConfigured) {
+            console.error('Supabase is not configured for Google sign-in.');
+            return false;
+        }
+        const { error } = await getSupabaseClient().auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: `${window.location.origin}/dashboard`,
+                queryParams: {
+                    access_type: 'offline',
+                    prompt: 'select_account',
+                },
+            },
+        });
+        if (error) {
+            console.error('Supabase Google login failed:', error);
+            return false;
+        }
+        return true;
+    }, []);
+
     const handleLogout = useCallback(async () => {
         const userIdForActivity = currentUserId;
         if (userIdForActivity) {
@@ -866,6 +889,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         t,
         isIdle,
         handleLogin,
+        handleGoogleLogin,
         handleLogout,
         setCurrentView,
         handleHighlightStyleChange,
@@ -900,6 +924,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         t,
         isIdle,
         handleLogin,
+        handleGoogleLogin,
         handleLogout,
         setCurrentView,
         handleHighlightStyleChange,

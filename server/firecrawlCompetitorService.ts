@@ -9,6 +9,10 @@ import {
   resolveCrawlerProviderCredential,
   type CrawlerCredentialSource,
 } from './crawlerProviderSecrets.ts';
+import {
+  ProviderAccessError,
+  reserveProviderRequest,
+} from './providerAccessControl.ts';
 
 export type CompetitorSearchResult = {
   url: string;
@@ -248,8 +252,10 @@ export type FirecrawlCredentialSummary = {
   source: CrawlerCredentialSource | null;
 };
 
-export const getFirecrawlCredentialSummary = async (): Promise<FirecrawlCredentialSummary> => {
-  const credential = await resolveCrawlerProviderCredential('firecrawl');
+export const getFirecrawlCredentialSummary = async (
+  userId?: string | null,
+): Promise<FirecrawlCredentialSummary> => {
+  const credential = await resolveCrawlerProviderCredential('firecrawl', userId);
   return credential
     ? {
         configured: true,
@@ -263,8 +269,10 @@ export const getFirecrawlCredentialSummary = async (): Promise<FirecrawlCredenti
       };
 };
 
-const getFirecrawlConfiguration = async (): Promise<FirecrawlConfiguration> => {
-  const credential = await resolveCrawlerProviderCredential('firecrawl');
+const getFirecrawlConfiguration = async (
+  userId?: string | null,
+): Promise<FirecrawlConfiguration> => {
+  const credential = await resolveCrawlerProviderCredential('firecrawl', userId);
   if (!credential) {
     throw new FirecrawlCompetitorError({
       message: 'Firecrawl API key is not configured in administrator crawler settings or the server environment.',
@@ -284,17 +292,17 @@ const getFirecrawlConfiguration = async (): Promise<FirecrawlConfiguration> => {
   };
 };
 
-export const isFirecrawlConfigured = async (): Promise<boolean> => {
-  const summary = await getFirecrawlCredentialSummary();
+export const isFirecrawlConfigured = async (userId?: string | null): Promise<boolean> => {
+  const summary = await getFirecrawlCredentialSummary(userId);
   return summary.configured;
 };
 
 const firecrawlRequest = async (
   path: string,
   body: Record<string, unknown>,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; userId?: string | null; operation?: string } = {},
 ): Promise<Record<string, unknown>> => {
-  const { apiKey, baseUrl, keySuffix, source } = await getFirecrawlConfiguration();
+  const { apiKey, baseUrl, keySuffix, source } = await getFirecrawlConfiguration(options.userId);
   const controller = new AbortController();
   const timeoutMs = Math.max(5_000, Math.min(options.timeoutMs ?? 70_000, 120_000));
   const timeout = setTimeout(() => controller.abort(new Error('Firecrawl request timed out.')), timeoutMs);
@@ -302,6 +310,11 @@ const firecrawlRequest = async (
   options.signal?.addEventListener('abort', abortFromParent, { once: true });
 
   try {
+    await reserveProviderRequest({
+      userId: options.userId,
+      provider: 'firecrawl',
+      operation: options.operation || 'competitor_request',
+    });
     const response = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: {
@@ -331,6 +344,16 @@ const firecrawlRequest = async (
     return normalized;
   } catch (error) {
     if (error instanceof FirecrawlCompetitorError) throw error;
+    if (error instanceof ProviderAccessError) {
+      throw new FirecrawlCompetitorError({
+        message: error.message,
+        status: error.status,
+        code: error.code.toLowerCase(),
+        retryable: false,
+        keySuffix,
+        credentialSource: source,
+      });
+    }
     if (controller.signal.aborted) {
       throw new FirecrawlCompetitorError({
         message: options.signal?.aborted ? 'Competitor extraction was cancelled.' : 'Firecrawl request timed out.',
@@ -371,6 +394,7 @@ export const searchCompetitorWeb = async (options: {
   location?: string;
   excludeDomains?: string[];
   signal?: AbortSignal;
+  userId?: string | null;
 }): Promise<CompetitorSearchResult[]> => {
   const query = options.query.trim();
   if (query.length < 2 || query.length > 300) {
@@ -402,7 +426,12 @@ export const searchCompetitorWeb = async (options: {
     ...(country ? { country } : {}),
     ...(location ? { location } : {}),
     ...(excludeDomains.length > 0 ? { excludeDomains } : {}),
-  }, { signal: options.signal, timeoutMs: 45_000 });
+  }, {
+    signal: options.signal,
+    timeoutMs: 45_000,
+    userId: options.userId,
+    operation: 'competitor_search',
+  });
 
   const seenUrls = new Set<string>();
   const seenDomains = new Set<string>();
@@ -457,6 +486,7 @@ export const markdownToCompetitorText = (markdown: string): string => markdown
 export const scrapeCompetitorWeb = async (options: {
   url: string;
   signal?: AbortSignal;
+  userId?: string | null;
 }): Promise<ScrapedCompetitorContent> => {
   const canonicalUrl = canonicalizeCompetitorUrl(options.url);
   const payload = await firecrawlRequest('/v2/scrape', {
@@ -466,7 +496,12 @@ export const scrapeCompetitorWeb = async (options: {
     maxAge: 172_800_000,
     timeout: 60_000,
     parsers: [],
-  }, { signal: options.signal, timeoutMs: 75_000 });
+  }, {
+    signal: options.signal,
+    timeoutMs: 75_000,
+    userId: options.userId,
+    operation: 'competitor_scrape',
+  });
   const data = toRecord(payload.data);
   const metadata = toRecord(data.metadata);
   const markdown = toText(data.markdown) || toText(data.content);

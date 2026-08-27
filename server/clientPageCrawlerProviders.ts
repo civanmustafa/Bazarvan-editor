@@ -20,6 +20,10 @@ import {
 import type {
   CrawlerProviderAttemptTelemetry,
 } from './crawlerProviderUsage.ts';
+import {
+  ProviderAccessError,
+  reserveProviderRequest,
+} from './providerAccessControl.ts';
 
 export type ClientPageProviderCrawlResult = {
   page: ClientPageCrawlResult;
@@ -372,6 +376,7 @@ const crawlExternalProvider = async (options: {
   fallbackReason: string | null;
   onAttempt?: ProviderAttemptReporter;
   beforeExternalAttempt?: ExternalProviderAttemptGuard;
+  requestedBy?: string | null;
 }): Promise<ClientPageProviderCrawlResult> => {
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
@@ -380,7 +385,7 @@ const crawlExternalProvider = async (options: {
   let requestReserved = false;
   try {
     await validatePublicClientUrl(options.url, options.domains);
-    const credential = await resolveCrawlerProviderCredential(options.provider);
+    const credential = await resolveCrawlerProviderCredential(options.provider, options.requestedBy);
     if (!credential) {
       throw new ClientPageCrawlerError({
         code: `${options.provider}_not_configured`,
@@ -391,6 +396,21 @@ const crawlExternalProvider = async (options: {
     }
     credentialSource = credential.source;
     keySuffix = credential.keySuffix;
+    try {
+      await reserveProviderRequest({
+        userId: options.requestedBy,
+        provider: options.provider,
+        operation: 'client_page_crawl',
+      });
+    } catch (error) {
+      if (!(error instanceof ProviderAccessError)) throw error;
+      throw new ClientPageCrawlerError({
+        code: error.code.toLowerCase(),
+        message: error.message,
+        status: error.status,
+        retryable: false,
+      });
+    }
     await options.beforeExternalAttempt?.(options.provider);
     requestReserved = true;
     const page = options.provider === 'firecrawl'
@@ -591,6 +611,7 @@ export const crawlClientPageWithProvider = async (options: {
   maximumBytes?: number;
   onAttempt?: ProviderAttemptReporter;
   beforeExternalAttempt?: ExternalProviderAttemptGuard;
+  requestedBy?: string | null;
 }): Promise<ClientPageProviderCrawlResult> => {
   const provider = normalizeClientSiteCrawlProvider(options.provider);
   const timeoutMs = Math.max(5_000, Math.min(options.timeoutMs ?? 45_000, 120_000));
@@ -607,6 +628,7 @@ export const crawlClientPageWithProvider = async (options: {
     requestedProvider: provider,
     onAttempt: options.onAttempt,
     beforeExternalAttempt: options.beforeExternalAttempt,
+    requestedBy: options.requestedBy,
   };
 
   if (provider === 'firecrawl' || provider === 'browserless') {

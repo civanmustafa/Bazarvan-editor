@@ -271,7 +271,7 @@ test('manual and queued competitor discovery load the linked client domain exclu
   assert.match(exclusionSource, /\.eq\('is_active', true\)/);
 });
 
-test('competitor Firecrawl operations use the admin crawler key before Hostinger fallback', async () => {
+test('competitor Firecrawl operations resolve user-aware credentials before Hostinger fallback', async () => {
   const [service, apiSource, settings, panel] = await Promise.all([
     readWorkspaceFile('server/firecrawlCompetitorService.ts'),
     readWorkspaceFile('api/competitors.ts'),
@@ -279,10 +279,11 @@ test('competitor Firecrawl operations use the admin crawler key before Hostinger
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
   ]);
 
-  assert.match(service, /resolveCrawlerProviderCredential\('firecrawl'\)/);
+  assert.match(service, /resolveCrawlerProviderCredential\('firecrawl', userId\)/);
+  assert.match(service, /reserveProviderRequest\(\{/);
   assert.match(service, /export const isFirecrawlConfigured = async/);
-  assert.match(apiSource, /providerConfigured: await isFirecrawlConfigured\(\)/);
-  assert.match(apiSource, /!\(await isFirecrawlConfigured\(\)\)/);
+  assert.match(apiSource, /providerConfigured: await isFirecrawlConfigured\(principal\.userId\)/);
+  assert.match(apiSource, /!\(await isFirecrawlConfigured\(principal\.userId\)\)/);
   assert.match(settings, /بحث المنافسين وسحب محتواهم/);
   assert.match(panel, /إعدادات المسؤول ← خدمات الزحف/);
 });

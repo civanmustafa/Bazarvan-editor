@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
   canonicalizeCompetitorUrl,
+  FirecrawlCompetitorError,
   getFirecrawlCredentialSummary,
   scrapeCompetitorWeb,
   type ScrapedCompetitorContent,
 } from './firecrawlCompetitorService';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
+import { resolveEffectiveProviderPolicy } from './providerAccessControl.ts';
 
 type CompetitorCacheRow = {
   cache_key: string;
@@ -66,8 +68,8 @@ const createCacheKey = (canonicalUrl: string): string => (
   createHash('sha256').update(canonicalUrl).digest('hex')
 );
 
-const getProviderKeySuffix = async (): Promise<string> => {
-  const summary = await getFirecrawlCredentialSummary();
+const getProviderKeySuffix = async (userId?: string | null): Promise<string> => {
+  const summary = await getFirecrawlCredentialSummary(userId);
   return summary.keySuffix;
 };
 
@@ -165,7 +167,19 @@ export const getCompetitorPreview = async (options: {
   url: string;
   signal?: AbortSignal;
   forceRefresh?: boolean;
+  userId?: string | null;
 }): Promise<CompetitorPreview> => {
+  if (options.userId) {
+    const policy = await resolveEffectiveProviderPolicy(options.userId, 'firecrawl');
+    if (!policy.enabled || policy.credentialMode === 'disabled') {
+      throw new FirecrawlCompetitorError({
+        message: 'Firecrawl is disabled for this user by the administrator.',
+        status: 403,
+        code: 'provider_access_denied',
+        retryable: false,
+      });
+    }
+  }
   const canonicalUrl = canonicalizeCompetitorUrl(options.url);
   if (!options.forceRefresh) {
     const cached = await readCachedPreview(canonicalUrl);
@@ -175,10 +189,11 @@ export const getCompetitorPreview = async (options: {
   const scraped = await scrapeCompetitorWeb({
     url: canonicalUrl,
     signal: options.signal,
+    userId: options.userId,
   });
   const fetchedAt = new Date().toISOString();
   const expiresAt = new Date(Date.now() + (getCacheHours() * 60 * 60 * 1000)).toISOString();
-  const providerKeySuffix = await getProviderKeySuffix();
+  const providerKeySuffix = await getProviderKeySuffix(options.userId);
   await savePreview(scraped, fetchedAt, expiresAt, providerKeySuffix);
   return {
     ...scraped,

@@ -178,6 +178,7 @@ const executeClaimedJob = async (
       signal: controller.signal,
       timeoutMs: crawlTimeoutMs,
       maximumBytes,
+      requestedBy: job.requested_by,
       beforeExternalAttempt: provider => reserveCrawlerExternalRequest({
         crawlRunId: job.crawl_run_id,
         provider,

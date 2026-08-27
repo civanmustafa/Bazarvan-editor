@@ -2,6 +2,8 @@ export const USER_AI_SECRET_PROVIDERS = [
   'gemini_free',
   'gemini_paid',
   'openai_paid',
+  'firecrawl',
+  'browserless',
 ] as const;
 
 export type UserAiSecretProvider = (typeof USER_AI_SECRET_PROVIDERS)[number];

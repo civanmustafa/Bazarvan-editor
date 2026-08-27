@@ -26,6 +26,8 @@ import ContentWritingPromptSettings from './ContentWritingPromptSettings';
 import AdminAiProviderSecretsSettings from './AdminAiProviderSecretsSettings';
 import AdminCrawlerProviderSecretsSettings from './AdminCrawlerProviderSecretsSettings';
 import UserAiProviderSecretsSettings from './UserAiProviderSecretsSettings';
+import AdminProviderAccessSettings from './AdminProviderAccessSettings';
+import UserProviderAccessSummary from './UserProviderAccessSummary';
 import AdminPromptRegistrySettings from './AdminPromptRegistrySettings';
 import ClientCenterSettings from './ClientCenterSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
@@ -417,6 +419,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       <SettingsSection title="مفاتيح الذكاء الاصطناعي الخاصة بحسابي">
         <UserAiProviderSecretsSettings />
       </SettingsSection>
+      <SettingsSection title="صلاحيات المزودات والحصص لحسابي">
+        <UserProviderAccessSummary />
+      </SettingsSection>
     </div>
   );
 
@@ -512,6 +517,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </FieldLabel>
         </div>
       </SettingsSection>
+
+      {isAdmin && (
+        <SettingsSection title="السياسة العامة ومفاتيح المزودات المعيّنة">
+          <AdminProviderAccessSettings />
+        </SettingsSection>
+      )}
 
       {isAdmin && (
         <SettingsSection title="مفاتيح المزودات الإدارية المشفّرة">

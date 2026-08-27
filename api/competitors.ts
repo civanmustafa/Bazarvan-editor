@@ -517,7 +517,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     const state = await listCompetitors(supabase, articleId, body.includeContent !== false);
     return {
       status: 200,
-      body: { ok: true, action, providerConfigured: await isFirecrawlConfigured(), ...state },
+      body: { ok: true, action, providerConfigured: await isFirecrawlConfigured(principal.userId), ...state },
       headers: getCorsResponseHeaders(req),
     };
   }
@@ -596,6 +596,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       country: resolveCompetitorCountryCode(targetCountry),
       location: targetCountry,
       excludeDomains: ownDomains,
+      userId: principal.userId,
     });
     const selection = analyzeAndSelectCompetitors({
       context: {
@@ -656,7 +657,10 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
   if (action === 'preview') {
     consumeApiRateLimit('competitors-preview', principal.userId, 15);
-    const preview = await getCompetitorPreview({ url: toText(body.url) });
+    const preview = await getCompetitorPreview({
+      url: toText(body.url),
+      userId: principal.userId,
+    });
     return {
       status: 200,
       body: {
@@ -683,7 +687,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
   if (action === 'extract') {
     consumeApiRateLimit('competitors-extract', principal.userId, 10);
-    if (!(await isFirecrawlConfigured())) {
+    if (!(await isFirecrawlConfigured(principal.userId))) {
       throw new CompetitorApiError({
         message: 'Firecrawl API key is not configured in administrator crawler settings or the server environment.',
         status: 503,

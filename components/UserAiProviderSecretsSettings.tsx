@@ -37,6 +37,16 @@ const PROVIDERS: Array<{
     title: 'مفاتيح OpenAI (ChatGPT API) المدفوعة',
     description: 'تُستخدم أولًا عند اختيار OpenAI، ثم ينتقل النظام إلى مفاتيح الإدارة وهوستينجر عند فشلها.',
   },
+  {
+    id: 'firecrawl',
+    title: 'مفاتيح Firecrawl',
+    description: 'تُستخدم لسحب محتوى المواقع باسم حسابك عندما يسمح المسؤول بالمزوّد والمفاتيح الشخصية.',
+  },
+  {
+    id: 'browserless',
+    title: 'مفاتيح Browserless',
+    description: 'تُستخدم للصفحات التي تحتاج متصفحًا فعليًا، وتبقى مشفّرة ومقصورة على حسابك.',
+  },
 ];
 
 const emptyStatus = (provider: UserAiSecretProvider): UserAiProviderSecretStatus => ({
@@ -54,11 +64,15 @@ const UserAiProviderSecretsSettings: React.FC = () => {
     gemini_free: '',
     gemini_paid: '',
     openai_paid: '',
+    firecrawl: '',
+    browserless: '',
   });
   const [visible, setVisible] = useState<Record<UserAiSecretProvider, boolean>>({
     gemini_free: false,
     gemini_paid: false,
     openai_paid: false,
+    firecrawl: false,
+    browserless: false,
   });
   const [busyProvider, setBusyProvider] = useState<UserAiSecretProvider | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -141,9 +155,9 @@ const UserAiProviderSecretsSettings: React.FC = () => {
   return (
     <div className="space-y-4">
       <p className="text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-        هذه المفاتيح خاصة بحسابك ولا يراها المستخدمون الآخرون. يبدأ النظام بها أولًا،
+        هذه المفاتيح خاصة بحسابك ولا يراها المستخدمون الآخرون. يطبّق النظام ترتيب المصادر الذي حدده المسؤول،
         ويعرض بعد الحفظ عدد المفاتيح وآخر أربعة أحرف فقط. حفظ مجموعة جديدة يستبدل المجموعة القديمة من النوع نفسه.
-        يبقى السماح باستخدام كل مزوّد خاضعًا لإعدادات المسؤول العامة.
+        يبقى السماح بالمزوّد وبالمفاتيح الشخصية خاضعًا لسياسة حسابك التي يديرها المسؤول.
       </p>
 
       {(!overview?.schemaAvailable || !overview?.encryptionConfigured) && (

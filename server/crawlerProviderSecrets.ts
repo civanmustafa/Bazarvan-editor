@@ -11,6 +11,8 @@ import {
   type CrawlerExternalProvider,
 } from '../constants/crawlerProviders.ts';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
+import { resolveUserAiProviderKeys } from './userAiProviderSecrets.ts';
+import { resolveProviderCredentialPlan } from './providerAccessControl.ts';
 
 type CrawlerProviderSecretRow = {
   provider: CrawlerExternalProvider;
@@ -25,7 +27,12 @@ type CrawlerProviderSecretRow = {
   updated_at: string;
 };
 
-export type CrawlerCredentialSource = 'admin' | 'hostinger';
+export type CrawlerCredentialSource =
+  | 'user'
+  | 'assigned_user'
+  | 'assigned_all'
+  | 'admin'
+  | 'hostinger';
 
 export type CrawlerProviderSecretStatus = {
   provider: CrawlerExternalProvider;
@@ -300,19 +307,31 @@ async (): Promise<CrawlerProviderSecretsOverview> => {
 
 export const resolveCrawlerProviderCredential = async (
   providerValue: unknown,
+  userId?: string | null,
 ): Promise<ResolvedCrawlerProviderCredential | null> => {
   const provider = normalizeCrawlerExternalProvider(providerValue);
-  const row = await readSecretRow(provider);
-  if (row?.enabled) {
-    return {
-      apiKey: normalizeApiKey(decryptSecret(row)),
-      source: 'admin',
-      keySuffix: row.key_suffix,
-    };
-  }
+  const [row, personalKeys] = await Promise.all([
+    readSecretRow(provider),
+    resolveUserAiProviderKeys(userId, provider),
+  ]);
   const fallback = getEnvironmentCrawlerApiKey(provider);
-  return fallback
-    ? { apiKey: fallback, source: 'hostinger', keySuffix: fallback.slice(-4) }
+  const plan = await resolveProviderCredentialPlan({
+    userId,
+    provider,
+    personalKeys,
+    globalTiers: [
+      ...(row?.enabled ? [{ source: 'admin' as const, keys: [normalizeApiKey(decryptSecret(row))] }] : []),
+      ...(fallback ? [{ source: 'hostinger' as const, keys: [fallback] }] : []),
+    ],
+  });
+  const firstTier = plan.tiers[0];
+  const apiKey = firstTier?.keys[0] || '';
+  return apiKey
+    ? {
+        apiKey,
+        source: firstTier.source as CrawlerCredentialSource,
+        keySuffix: apiKey.slice(-4),
+      }
     : null;
 };
 
