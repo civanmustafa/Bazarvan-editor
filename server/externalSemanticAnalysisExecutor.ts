@@ -8,7 +8,11 @@ import {
   getExternalAnalysisSupabaseAdmin,
   type ExternalAnalysisJson,
 } from './externalAnalysisQueue';
-import { readExternalGeminiSettings } from './externalAnalysisSettings';
+import {
+  readContentResearchAutomationSettings,
+  readExternalGeminiSettings,
+  type ContentResearchAutomationSettings,
+} from './externalAnalysisSettings';
 import {
   reportExternalGeminiCall,
   runExternalGeminiCall,
@@ -80,6 +84,38 @@ const getTargetState = (keywords: ExternalSemanticKeywords): SemanticTargetState
   needsLsi: keywords.lsi.length === 0,
 });
 
+const getRequestedTargetState = (
+  context: ExternalAnalysisExecutionContext,
+  keywords: ExternalSemanticKeywords,
+  automationSettings: ContentResearchAutomationSettings | null,
+): SemanticTargetState => {
+  const missing = getTargetState(keywords);
+  const snapshot = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
+  const requestedSecondaries = typeof snapshot.needsSecondaries === 'boolean'
+    ? snapshot.needsSecondaries
+    : true;
+  const requestedLsi = typeof snapshot.needsLsi === 'boolean'
+    ? snapshot.needsLsi
+    : true;
+  return {
+    needsSecondaries: missing.needsSecondaries
+      && requestedSecondaries
+      && (automationSettings?.autoGenerateAlternativeKeywords !== false),
+    needsLsi: missing.needsLsi
+      && requestedLsi
+      && (automationSettings?.autoGenerateLsiKeywords !== false),
+  };
+};
+
+const keepRequestedTerms = (
+  terms: ExternalSemanticTerms,
+  targets: SemanticTargetState,
+): ExternalSemanticTerms => ({
+  ...terms,
+  secondaries: targets.needsSecondaries ? terms.secondaries : [],
+  lsi: targets.needsLsi ? terms.lsi : [],
+});
+
 const isCurrentSemanticJob = (
   context: ExternalAnalysisExecutionContext,
   state: ExternalSemanticStateRow,
@@ -149,7 +185,7 @@ const applySemanticTerms = async (options: {
   context: ExternalAnalysisExecutionContext;
   terms: ExternalSemanticTerms;
 }): Promise<{
-  status: 'applied' | 'already_populated' | 'superseded';
+  status: 'applied' | 'already_populated' | 'automation_disabled' | 'superseded';
   appliedFields: string[];
   articleUpdatedAt: string;
 }> => {
@@ -163,10 +199,20 @@ const applySemanticTerms = async (options: {
   }
 
   const latestKeywords = normalizeKeywords(latest.article.keywords);
-  const targets = getTargetState(latestKeywords);
+  const latestAutomationSettings = options.context.job.origin === 'auto'
+    ? await readContentResearchAutomationSettings()
+    : null;
+  const targets = getRequestedTargetState(
+    options.context,
+    latestKeywords,
+    latestAutomationSettings,
+  );
   if (!targets.needsSecondaries && !targets.needsLsi) {
+    const missing = getTargetState(latestKeywords);
     return {
-      status: 'already_populated',
+      status: missing.needsSecondaries || missing.needsLsi
+        ? 'automation_disabled'
+        : 'already_populated',
       appliedFields: [],
       articleUpdatedAt: latest.article.updated_at,
     };
@@ -252,15 +298,22 @@ const executeExternalSemanticAnalysis = async (
   }
 
   const articleInput = toArticleInput(initial.article);
-  const initialTargets = getTargetState(articleInput.keywords);
+  const automationSettings = context.job.origin === 'auto'
+    ? await readContentResearchAutomationSettings()
+    : null;
+  const initialTargets = getRequestedTargetState(context, articleInput.keywords, automationSettings);
   if (!initialTargets.needsSecondaries && !initialTargets.needsLsi) {
+    const missing = getTargetState(articleInput.keywords);
+    const status = missing.needsSecondaries || missing.needsLsi
+      ? 'automation_disabled'
+      : 'already_populated';
     return {
       result: {
-        status: 'already_populated',
+        status,
         appliedFields: [],
         articleUpdatedAt: initial.article.updated_at,
       },
-      progress: { stage: 'already_populated' },
+      progress: { stage: status },
     };
   }
 
@@ -281,7 +334,12 @@ const executeExternalSemanticAnalysis = async (
   const attempts: ExternalAnalysisJson[] = [];
   let finalCall = await runExternalGeminiCall({
     context,
-    prompt: buildExternalSemanticPrompt(articleInput, semanticPromptTemplate),
+    prompt: buildExternalSemanticPrompt(
+      articleInput,
+      semanticPromptTemplate,
+      initialTargets.needsSecondaries,
+      initialTargets.needsLsi,
+    ),
     model: aiSettings.model,
     allowModelFallback: aiSettings.allowModelFallback,
     requestIndex: 1,
@@ -302,7 +360,10 @@ const executeExternalSemanticAnalysis = async (
     });
   }
 
-  let terms = parseExternalSemanticTerms(finalCall.text, articleInput);
+  let terms = keepRequestedTerms(
+    parseExternalSemanticTerms(finalCall.text, articleInput),
+    initialTargets,
+  );
 
   if (!hasUsableExternalSemanticTerms(
     terms,
@@ -321,6 +382,8 @@ const executeExternalSemanticAnalysis = async (
         articleInput,
         finalCall.text,
         semanticPromptTemplate,
+        initialTargets.needsSecondaries,
+        initialTargets.needsLsi,
       ),
       model: aiSettings.model,
       allowModelFallback: aiSettings.allowModelFallback,
@@ -342,7 +405,10 @@ const executeExternalSemanticAnalysis = async (
       });
     }
 
-    terms = parseExternalSemanticTerms(finalCall.text, articleInput);
+    terms = keepRequestedTerms(
+      parseExternalSemanticTerms(finalCall.text, articleInput),
+      initialTargets,
+    );
   }
 
   if (!hasUsableExternalSemanticTerms(

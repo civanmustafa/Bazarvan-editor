@@ -318,10 +318,11 @@ test('expanded intent lexicon recognizes Arabic support and transactional search
   assert.equal(transactional.summary.targetIntent, 'transactional');
 });
 
-test('automatic competitor discovery is durable, idempotent, and uses content qualification', async () => {
-  const [migration, qualificationMigration, executor, discoveryService, qualifier, worker, ecosystem, panel, card, modal, reports] = await Promise.all([
+test('automatic competitor discovery is durable, ordered after enabled semantic stages, and uses content qualification', async () => {
+  const [migration, qualificationMigration, automationMigration, executor, discoveryService, qualifier, worker, ecosystem, panel, card, modal, reports] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260714030000_automatic_competitor_discovery.sql'),
     readWorkspaceFile('supabase/migrations/20260827020000_competitor_content_qualification.sql'),
+    readWorkspaceFile('supabase/migrations/20260827030000_content_research_automation_settings.sql'),
     readWorkspaceFile('server/competitorDiscoveryExecutor.ts'),
     readWorkspaceFile('server/competitorDiscoveryService.ts'),
     readWorkspaceFile('server/competitorContentQualification.ts'),
@@ -350,6 +351,16 @@ test('automatic competitor discovery is durable, idempotent, and uses content qu
   assert.doesNotMatch(qualifier, /getCompetitorPreview|scrapeCompetitorWeb/);
   assert.match(qualificationMigration, /alternativeKeywords/);
   assert.match(qualificationMigration, /hydrate_competitor_discovery_keywords/);
+  assert.match(automationMigration, /autoGenerateAlternativeKeywords/);
+  assert.match(automationMigration, /autoGenerateLsiKeywords/);
+  assert.match(automationMigration, /autoDiscoverCompetitors/);
+  assert.match(automationMigration, /enqueue_external_semantic_analysis_job_controlled/);
+  assert.match(automationMigration, /enqueue_competitor_discovery_job_controlled/);
+  assert.match(automationMigration, /semantic_job\.status in \(/);
+  assert.match(automationMigration, /v_auto_secondaries[\s\S]*v_auto_lsi[\s\S]*v_auto_competitors/);
+  assert.match(automationMigration, /trigger enqueue_semantic_followup_after_completion/);
+  assert.match(automationMigration, /trigger reconcile_content_research_automation_from_settings/);
+  assert.equal((automationMigration.match(/\$\$/g) || []).length % 2, 0);
   assert.match(executor, /registerExternalAnalysisJobExecutor\('competitor_discovery'/);
   assert.match(worker, /import '\.\/competitorDiscoveryExecutor'/);
   assert.match(worker, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES/);
@@ -360,9 +371,15 @@ test('automatic competitor discovery is durable, idempotent, and uses content qu
   assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'competitor_discovery,competitor_extraction'/);
   assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,engineering_command'/);
   assert.match(panel, /getPersistedCompetitorDiscovery/);
-  assert.match(panel, /ensureArticleCompetitorDiscovery/);
+  assert.doesNotMatch(panel, /ensureArticleCompetitorDiscovery/);
   assert.match(card, /بحث المنافسين/);
   assert.match(card, /COMPETITOR_REQUIREMENT_FIELDS/);
+  assert.equal((card.match(/ensureArticleCompetitorDiscovery/g) || []).length, 2);
+  const manualCompetitorHandler = card.slice(
+    card.indexOf('const handleCompetitors'),
+    card.indexOf('const handleSemantic'),
+  );
+  assert.match(manualCompetitorHandler, /ensureArticleCompetitorDiscovery\(articleId\)/);
   assert.match(modal, /createPortal\(/);
   assert.match(modal, /CompetitorDiscoveryPanel/);
   assert.match(reports, /job\.job_type === 'competitor_discovery'/);

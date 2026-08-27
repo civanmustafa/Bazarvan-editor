@@ -10,6 +10,7 @@ import {
 } from './externalAnalysisQueue';
 import { queueContentWritingSession } from './contentWritingEngine';
 import type { ContentWritingProvider } from './contentWritingSessionService';
+import { readContentResearchAutomationSettings } from './externalAnalysisSettings';
 
 const TERMINAL_JOB_STATUSES = new Set(['completed', 'failed', 'blocked', 'cancelled']);
 const ACTIVE_JOB_STATUSES = new Set([
@@ -221,8 +222,11 @@ const enqueueDiscovery = async (
   requestedBy: string,
   origin: 'auto' | 'manual',
 ): Promise<string> => {
+  const rpcName = origin === 'auto'
+    ? 'enqueue_competitor_discovery_job_controlled'
+    : 'enqueue_competitor_discovery_job';
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'enqueue_competitor_discovery_job',
+    rpcName,
     {
       p_article_id: articleId,
       p_requested_by: requestedBy,
@@ -267,18 +271,23 @@ const selectCompetitorSources = (
 const enqueueExtraction = async (options: {
   articleId: string;
   requestedBy: string;
+  origin: 'auto' | 'manual';
   queryType: string;
   queryText: string;
   sources: ExternalAnalysisJson[];
 }): Promise<string> => {
+  const rpcName = options.origin === 'auto'
+    ? 'enqueue_competitor_extraction_job_controlled'
+    : 'enqueue_competitor_extraction_job';
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'enqueue_competitor_extraction_job',
+    rpcName,
     {
       p_article_id: options.articleId,
       p_requested_by: options.requestedBy,
       p_query_type: options.queryType,
       p_query_text: options.queryText,
       p_sources: options.sources,
+      ...(options.origin === 'auto' ? { p_origin: 'auto' } : {}),
     },
   );
   if (error) throw error;
@@ -349,6 +358,15 @@ const executeContentWritingCompetitorPreparation = async (
   const initialInput = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
   const requestedBy = text(context.job.requested_by) || text(initialInput.requestedBy);
   if (!requestedBy) throw new Error('Competitor preparation requires a requesting user.');
+  if (context.job.origin === 'auto') {
+    const automation = await readContentResearchAutomationSettings();
+    if (!automation.autoDiscoverCompetitors) {
+      return {
+        result: { status: 'automation_disabled', writingQueued: false },
+        progress: { stage: 'automation_disabled' },
+      };
+    }
+  }
   const minimumCount = boundedCount(initialInput.minimumCompetitorCount, 1);
   const desiredCount = boundedCount(initialInput.desiredCompetitorCount, 5);
   let activeChildJobId = '';
@@ -406,6 +424,7 @@ const executeContentWritingCompetitorPreparation = async (
       const extractionJobId = await enqueueExtraction({
         articleId: context.job.article_id,
         requestedBy,
+        origin: context.job.origin === 'auto' ? 'auto' : 'manual',
         queryType: text(discoveryResult.queryType) || 'primary_keyword',
         queryText: text(discoveryResult.query),
         sources,

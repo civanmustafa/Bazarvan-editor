@@ -192,6 +192,12 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       defaultLanguage: 'invalid',
       defaultStatus: 'content_preparation',
     },
+    system: {
+      autoGenerateAlternativeKeywords: false,
+      autoGenerateLsiKeywords: false,
+      autoDiscoverCompetitors: false,
+      unknownAutomationSwitch: true,
+    },
   });
 
   assert.equal(normalized.ai.defaultGeminiModel, GEMINI_ANALYSIS_MODEL);
@@ -219,6 +225,25 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');
   assert.equal(normalized.articles.defaultStatus, 'content_preparation');
+  assert.equal(normalized.system.autoGenerateAlternativeKeywords, false);
+  assert.equal(normalized.system.autoGenerateLsiKeywords, false);
+  assert.equal(normalized.system.autoDiscoverCompetitors, false);
+  assert.equal(normalized.system.unknownAutomationSwitch, undefined);
+
+  const defaults = registry.getDefaultSystemSettings();
+  assert.equal(defaults.system.autoGenerateAlternativeKeywords, true);
+  assert.equal(defaults.system.autoGenerateLsiKeywords, true);
+  assert.equal(defaults.system.autoDiscoverCompetitors, true);
+  const invalidAutomation = registry.normalizeSystemSettingsMap({
+    system: {
+      autoGenerateAlternativeKeywords: 'yes',
+      autoGenerateLsiKeywords: 1,
+      autoDiscoverCompetitors: null,
+    },
+  });
+  assert.equal(invalidAutomation.system.autoGenerateAlternativeKeywords, true);
+  assert.equal(invalidAutomation.system.autoGenerateLsiKeywords, true);
+  assert.equal(invalidAutomation.system.autoDiscoverCompetitors, true);
 });
 
 test('AI capabilities expose an optional normalized content-writing resume model', async () => {
@@ -653,7 +678,14 @@ test('browser, API, and worker consume the shared registries', async () => {
   assert.match(settingsApi, /constants\/settingsRegistry/);
   assert.match(assignedAutomation, /constants\/modelRegistry/);
   assert.match(externalSettings, /constants\/settingsRegistry/);
+  assert.match(externalSettings, /readContentResearchAutomationSettings/);
   assert.match(settingsPage, /constants\/settingsRegistry/);
+  assert.match(settingsPage, /جلب الصيغ البديلة تلقائيًا/);
+  assert.match(settingsPage, /جلب كلمات LSI تلقائيًا/);
+  assert.match(settingsPage, /جلب المنافسين تلقائيًا/);
+  assert.match(settingsPage, /updateSetting\('system', 'autoGenerateAlternativeKeywords'/);
+  assert.match(settingsPage, /updateSetting\('system', 'autoGenerateLsiKeywords'/);
+  assert.match(settingsPage, /updateSetting\('system', 'autoDiscoverCompetitors'/);
   assert.match(settingsPage, /options=\{GEMINI_PAID_MODEL_OPTIONS\}/);
   assert.doesNotMatch(
     settingsPage,

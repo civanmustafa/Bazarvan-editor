@@ -582,7 +582,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   if (action === 'ensure_discovery') {
     consumeApiRateLimit('competitors-ensure-discovery', principal.userId, 30);
     const { data: jobId, error: enqueueError } = await supabase.rpc(
-      'enqueue_competitor_discovery_job',
+      'enqueue_competitor_discovery_job_controlled',
       {
         p_article_id: articleId,
         p_requested_by: principal.userId,

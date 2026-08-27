@@ -103,6 +103,9 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     publicEditorUrl: '',
     dailyReportEnabled: true,
     activityTrackingEnabled: true,
+    autoGenerateAlternativeKeywords: true,
+    autoGenerateLsiKeywords: true,
+    autoDiscoverCompetitors: true,
   },
 };
 
@@ -330,6 +333,18 @@ const normalizeSystemSection = (
   setWhenPresent('publicEditorUrl', field => normalizeString(field, defaults.publicEditorUrl, 2_048));
   setWhenPresent('dailyReportEnabled', field => normalizeBoolean(field, defaults.dailyReportEnabled));
   setWhenPresent('activityTrackingEnabled', field => normalizeBoolean(field, defaults.activityTrackingEnabled));
+  setWhenPresent('autoGenerateAlternativeKeywords', field => normalizeBoolean(
+    field,
+    defaults.autoGenerateAlternativeKeywords,
+  ));
+  setWhenPresent('autoGenerateLsiKeywords', field => normalizeBoolean(
+    field,
+    defaults.autoGenerateLsiKeywords,
+  ));
+  setWhenPresent('autoDiscoverCompetitors', field => normalizeBoolean(
+    field,
+    defaults.autoDiscoverCompetitors,
+  ));
   return normalized;
 };
 

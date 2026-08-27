@@ -19,6 +19,7 @@ import {
   getExternalAnalysisSupabaseAdmin,
 } from './externalAnalysisQueue.ts';
 import { loadArticleClientOwnDomains } from './clientCompetitorExclusions.ts';
+import { assertAutomaticCompetitorResearchAllowed } from './contentResearchAutomationGuard.ts';
 
 /**
  * Architecture boundary:
@@ -53,6 +54,7 @@ const readArticleAlternativeKeywords = async (articleId: string): Promise<string
 const executeCompetitorDiscovery = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
+  await assertAutomaticCompetitorResearchAllowed(context.job);
   const input = context.job.input_snapshot || {};
   const query = textValue(input.queryText);
   const queryType = input.queryType === 'primary_keyword' ? 'primary_keyword' : 'title';

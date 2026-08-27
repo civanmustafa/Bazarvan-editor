@@ -94,7 +94,7 @@ test('Write article durably discovers and extracts competitor prose before queui
   assert.match(migration, /enqueue_content_writing_competitor_preparation/);
   assert.match(migration, /enqueue_next_automatic_writing_competitor_preparation/);
   assert.match(migration, /missingFields[\s\S]*competitors/);
-  assert.match(executor, /enqueue_competitor_discovery_job/);
+  assert.match(executor, /origin === 'auto'[\s\S]*enqueue_competitor_discovery_job_controlled[\s\S]*enqueue_competitor_discovery_job/);
   assert.match(executor, /enqueue_competitor_extraction_job/);
   assert.match(executor, /queueContentWritingSession/);
   assert.match(executor, /readCurrentPreparationIntent/);

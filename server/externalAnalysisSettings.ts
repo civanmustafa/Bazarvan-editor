@@ -12,6 +12,12 @@ export type ExternalGeminiSettings = {
   allowModelFallback: boolean;
 };
 
+export type ContentResearchAutomationSettings = {
+  autoGenerateAlternativeKeywords: boolean;
+  autoGenerateLsiKeywords: boolean;
+  autoDiscoverCompetitors: boolean;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -40,5 +46,22 @@ export const readExternalGeminiSettings = async (): Promise<ExternalGeminiSettin
     enabled: normalizedAi.geminiFreeEnabled !== false,
     model: normalizedAi.defaultGeminiModel,
     allowModelFallback: normalizedAi.geminiFreeModelFallbackEnabled !== false,
+  };
+};
+
+export const readContentResearchAutomationSettings = async (): Promise<ContentResearchAutomationSettings> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'system')
+    .maybeSingle();
+
+  if (error && error.code !== '42P01') throw error;
+  const storedSystem = isRecord(data?.value) ? data.value : {};
+  const system = normalizeSystemSettingsMap({ system: storedSystem }).system;
+  return {
+    autoGenerateAlternativeKeywords: system.autoGenerateAlternativeKeywords !== false,
+    autoGenerateLsiKeywords: system.autoGenerateLsiKeywords !== false,
+    autoDiscoverCompetitors: system.autoDiscoverCompetitors !== false,
   };
 };

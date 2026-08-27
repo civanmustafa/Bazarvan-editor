@@ -314,8 +314,11 @@ const enqueueSemanticJob = async (
   }
 
   const { data: jobId, error: enqueueError } = await supabase.rpc(
-    'enqueue_external_semantic_analysis_job',
-    { p_article_id: article.id },
+    'enqueue_external_semantic_analysis_job_controlled',
+    {
+      p_article_id: article.id,
+      p_origin: 'manual',
+    },
   );
   if (enqueueError) throw enqueueError;
   const normalizedJobId = toTrimmedString(Array.isArray(jobId) ? jobId[0] : jobId);
@@ -397,11 +400,22 @@ const enqueueEngineeringJobs = async (
   });
   if (preferenceError) throw preferenceError;
 
-  const needsSemanticPrerequisite = activeCommands.some(command => command.options.targetKeywords)
-    && (
-      toStringList(keywords.secondaries).length === 0
-      || toStringList(keywords.lsi).length === 0
+  // The legacy engineering coordinator always links a semantic prerequisite,
+  // even when the selected command does not consume keyword output directly.
+  // Queueing it explicitly as manual keeps an intentional user request
+  // independent from the administrator's automatic-generation switches.
+  const needsSemanticPrerequisite = toStringList(keywords.secondaries).length === 0
+    || toStringList(keywords.lsi).length === 0;
+  if (needsSemanticPrerequisite) {
+    const { error: semanticError } = await supabase.rpc(
+      'enqueue_external_semantic_analysis_job_controlled',
+      {
+        p_article_id: article.id,
+        p_origin: 'manual',
+      },
     );
+    if (semanticError) throw semanticError;
+  }
   const { data: enqueuedIds, error: enqueueError } = await supabase.rpc(
     'enqueue_external_engineering_jobs',
     { p_article_id: article.id },
@@ -471,6 +485,14 @@ const useDefaultEngineeringCommands = async (
   articleId: string,
   requestedBy: string,
 ) => {
+  const { error: semanticError } = await supabase.rpc(
+    'enqueue_external_semantic_analysis_job_controlled',
+    {
+      p_article_id: articleId,
+      p_origin: 'manual',
+    },
+  );
+  if (semanticError) throw semanticError;
   const { data, error } = await supabase.rpc('reset_external_analysis_command_preferences', {
     p_article_id: articleId,
     p_requested_by: requestedBy,
@@ -636,13 +658,35 @@ const retryExternalAnalysisJob = async (
     });
   }
 
+  let retryJobId = jobId;
+  let retryJobStatus = existingJob.status;
+  if (existingJob.job_type !== 'full_article_pipeline') {
+    const { data: promotedData, error: promoteError } = await supabase.rpc(
+      'promote_external_analysis_job_manual',
+      {
+        p_job_id: jobId,
+        p_requested_by: requestedBy,
+      },
+    );
+    if (promoteError) throw promoteError;
+    const promotedJob = Array.isArray(promotedData) ? promotedData[0] : promotedData;
+    if (!promotedJob) {
+      throw new ExternalAnalysisApiError({
+        message: 'The canonical external analysis task could not be resolved.',
+        status: 409,
+        code: 'external_analysis_retry_unavailable',
+      });
+    }
+    retryJobId = String(promotedJob.id || jobId);
+    retryJobStatus = String(promotedJob.status || existingJob.status);
+  }
   const retryRpc = existingJob.job_type === 'full_article_pipeline'
     ? 'resume_full_article_pipeline_job'
-    : existingJob.status === 'retry_scheduled'
+    : retryJobStatus === 'retry_scheduled'
       ? 'resume_external_analysis_job_now'
       : 'retry_external_analysis_job';
   const { data, error } = await supabase.rpc(retryRpc, {
-    p_job_id: jobId,
+    p_job_id: retryJobId,
     p_requested_by: requestedBy,
   });
   if (error) throw error;
@@ -656,7 +700,7 @@ const retryExternalAnalysisJob = async (
   }
   return {
     job,
-    reusedJobId: String(job.id || jobId),
+    reusedJobId: String(job.id || retryJobId),
     alreadyCompleted: job.status === 'completed',
     alreadyActive: ACTIVE_JOB_STATUSES.includes(String(job.status)),
   };

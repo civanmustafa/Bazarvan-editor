@@ -28,3 +28,15 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.match(script, /smarteditor\.bazarvan\.com\/healthz/);
   assert.match(script, /smarteditor\.bazarvan\.com\/readyz/);
 });
+
+test('Hostinger schema scripts and guide track all content-research automation migrations', async () => {
+  const [applyScript, verifyScript, guide] = await Promise.all([
+    readFile(path.join(root, 'deploy', 'hostinger-supabase', 'apply-project-migrations.sh'), 'utf8'),
+    readFile(path.join(root, 'deploy', 'hostinger-supabase', 'verify-project-schema.sh'), 'utf8'),
+    readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
+  ]);
+
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-88/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-88/);
+  assert.match(guide, /20260827030000_content_research_automation_settings\.sql/);
+});

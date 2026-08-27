@@ -22,6 +22,7 @@ import {
 } from './externalAnalysisQueue';
 import { isCompetitorLanguageCompatible } from './competitorSelectionEngine.ts';
 import { analyzeCompetitorKeywordTargeting } from './competitorContentQualification.ts';
+import { assertAutomaticCompetitorResearchAllowed } from './contentResearchAutomationGuard.ts';
 
 /**
  * Architecture boundary:
@@ -141,6 +142,7 @@ const syncArticleCompetitors = async (articleId: string): Promise<void> => {
 const executeCompetitorExtraction = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
+  await assertAutomaticCompetitorResearchAllowed(context.job);
   const [rows, articleTargeting] = await Promise.all([
     readCompetitors(context.job.article_id),
     readArticleTargetingContext(context.job.article_id),
@@ -167,6 +169,7 @@ const executeCompetitorExtraction = async (
   for (const row of rows) {
     if (context.signal.aborted) throw context.signal.reason ?? new Error('Competitor extraction was cancelled.');
     if (row.status === 'completed' || row.status === 'failed' || row.status === 'cancelled') continue;
+    await assertAutomaticCompetitorResearchAllowed(context.job);
 
     await context.reportProgress({
       progress: {

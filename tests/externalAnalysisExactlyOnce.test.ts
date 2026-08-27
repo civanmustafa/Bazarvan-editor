@@ -80,6 +80,9 @@ test('external analysis queue enforces one canonical job and retries by job id',
   assert.match(migration, /v_job_status in \('failed', 'blocked', 'cancelled'\)/);
   assert.match(migration, /v_job\.status = 'completed'/);
   assert.match(api, /rpc\(\s*'enqueue_external_engineering_jobs'/);
+  assert.match(api, /rpc\(\s*'enqueue_external_semantic_analysis_job_controlled'/);
+  assert.match(api, /p_origin:\s*'manual'/);
+  assert.doesNotMatch(api, /rpc\(\s*'enqueue_external_semantic_analysis_job'\s*,/);
   assert.match(api, /'retry_external_analysis_job'/);
   assert.match(api, /'resume_external_analysis_job_now'/);
   assert.doesNotMatch(api, /\.from\('ai_external_analysis_jobs'\)\s*\.insert\(/);

@@ -116,7 +116,6 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const [competitorModalOpen, setCompetitorModalOpen] = useState(false);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const ensuredCompetitorSignatureRef = useRef('');
   const trackedExternalAiActivitiesRef = useRef<Set<string>>(new Set());
 
   const resolvedGoalContext: GoalContext = normalizeGoalContext(goalContext);
@@ -301,25 +300,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     setRequirementsOpen(null);
     setCompetitorModalOpen(false);
     setNotice(null);
-    ensuredCompetitorSignatureRef.current = '';
   }, [articleId]);
-
-  useEffect(() => {
-    const signature = readinessState?.competitor_discovery_signature || '';
-    if (
-      !readinessState?.competitor_discovery_ready
-      || !signature
-      || summary?.latestCompetitorDiscoveryJob
-      || ensuredCompetitorSignatureRef.current === signature
-    ) return;
-
-    ensuredCompetitorSignatureRef.current = signature;
-    void ensureArticleCompetitorDiscovery(articleId)
-      .then(() => onRefresh())
-      .catch(error => {
-        console.error(`Could not ensure competitor discovery for article "${articleId}":`, error);
-      });
-  }, [articleId, onRefresh, readinessState, summary?.latestCompetitorDiscoveryJob]);
 
   useEffect(() => {
     if (

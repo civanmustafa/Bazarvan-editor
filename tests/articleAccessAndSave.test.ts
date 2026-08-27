@@ -123,6 +123,7 @@ test('dashboard, access/save, and performance migrations have balanced SQL delim
     readWorkspaceFile('supabase/migrations/20260714030000_automatic_competitor_discovery.sql'),
     readWorkspaceFile('supabase/migrations/20260820010000_allow_intentional_article_content_clear.sql'),
     readWorkspaceFile('supabase/migrations/20260820020000_atomic_article_time_tracking.sql'),
+    readWorkspaceFile('supabase/migrations/20260827030000_content_research_automation_settings.sql'),
   ]);
 
   migrations.forEach((migration) => {

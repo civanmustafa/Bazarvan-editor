@@ -11,6 +11,7 @@ import type {
   ContentWritingProvider,
   ContentWritingSession,
 } from './contentWritingSessionService';
+import { readContentResearchAutomationSettings } from './externalAnalysisSettings';
 
 export type ContentWritingAutomationSettings = {
   enabled: boolean;
@@ -305,12 +306,17 @@ const releaseClaim = async (
 export const scheduleNextAutomaticContentWritingSession = async (
   workerId: string,
 ): Promise<QueuedContentWritingSession | null> => {
-  const settings = await readContentWritingAutomationSettings();
+  const [settings, researchAutomation] = await Promise.all([
+    readContentWritingAutomationSettings(),
+    readContentResearchAutomationSettings(),
+  ]);
   if (!settings.enabled) return null;
 
   const item = await claimNextItem(workerId, settings);
   if (!item) {
-    await enqueueNextAutomaticCompetitorPreparation(settings);
+    if (researchAutomation.autoDiscoverCompetitors) {
+      await enqueueNextAutomaticCompetitorPreparation(settings);
+    }
     return null;
   }
 

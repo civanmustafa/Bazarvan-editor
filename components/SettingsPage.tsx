@@ -617,6 +617,29 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="أتمتة الكلمات والمنافسين">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <ToggleField
+            label="جلب الصيغ البديلة تلقائيًا"
+            description="عند تفعيله يبدأ توليد الصيغ البديلة تلقائيًا بعد اكتمال بيانات المقالة. عند تعطيله يبقى التوليد اليدوي متاحًا."
+            checked={settings.system.autoGenerateAlternativeKeywords !== false}
+            onChange={value => updateSetting('system', 'autoGenerateAlternativeKeywords', value)}
+          />
+          <ToggleField
+            label="جلب كلمات LSI تلقائيًا"
+            description="عند تفعيله يبدأ توليد كلمات LSI تلقائيًا بعد اكتمال بيانات المقالة. عند تعطيله يبقى التوليد اليدوي متاحًا."
+            checked={settings.system.autoGenerateLsiKeywords !== false}
+            onChange={value => updateSetting('system', 'autoGenerateLsiKeywords', value)}
+          />
+          <ToggleField
+            label="جلب المنافسين تلقائيًا"
+            description="يبدأ اكتشاف المنافسين بعد اكتمال الصيغ البديلة وLSI المفعّلة أعلاه. الخطوة المعطّلة تُتخطى، ولا يتأثر البحث اليدوي."
+            checked={settings.system.autoDiscoverCompetitors !== false}
+            onChange={value => updateSetting('system', 'autoDiscoverCompetitors', value)}
+          />
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="القيم الافتراضية للمقالات">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <FieldLabel label="الحالة الافتراضية">

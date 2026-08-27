@@ -27,7 +27,6 @@ import {
   cancelArticleCompetitorExtraction,
   CompetitorDiscoveryRequestError,
   enqueueArticleCompetitorExtraction,
-  ensureArticleCompetitorDiscovery,
   getPersistedCompetitorDiscovery,
   listArticleCompetitors,
   loadArticleCompetitorPreview,
@@ -228,7 +227,6 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const [previewLoadingUrl, setPreviewLoadingUrl] = useState('');
   const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
   const hydratedDiscoveryJobRef = React.useRef('');
-  const ensuredDiscoverySignatureRef = React.useRef('');
   const hydratedCompetitorsRef = React.useRef<Map<string, CompetitorDiscoveryRow>>(new Map());
 
   const activeJob = state.activeJob && ACTIVE_JOB_STATUSES.has(state.activeJob.status)
@@ -330,7 +328,6 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
 
   useEffect(() => {
     hydratedDiscoveryJobRef.current = '';
-    ensuredDiscoverySignatureRef.current = '';
     hydratedCompetitorsRef.current = new Map();
     setSearchResults([]);
     setSelectionSummary(null);
@@ -370,23 +367,6 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         : persisted.results.filter(result => result.autoSelected).map(result => result.canonicalUrl),
     ));
   }, [state]);
-
-  useEffect(() => {
-    const signature = state.discoveryReadiness?.signature || '';
-    if (
-      !articleId
-      || !state.discoveryReadiness?.ready
-      || state.discoveryJob
-      || !signature
-      || ensuredDiscoverySignatureRef.current === signature
-    ) return;
-    ensuredDiscoverySignatureRef.current = signature;
-    void ensureArticleCompetitorDiscovery(articleId)
-      .then(() => refresh(false, true))
-      .catch(() => {
-        ensuredDiscoverySignatureRef.current = '';
-      });
-  }, [articleId, refresh, state.discoveryJob, state.discoveryReadiness]);
 
   useEffect(() => {
     if (previewLocation && !previewSourceItem) setPreviewLocation(null);
