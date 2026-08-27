@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { __userAiProviderSecretsTestUtils } from '../server/userAiProviderSecrets.ts';
+import {
+  __userAiProviderSecretsTestUtils,
+  assertPersonalCredentialOwner,
+  deleteUserAiProviderKeys,
+  readUserAiProviderSecretsOverview,
+  resolveUserAiProviderKeys,
+  saveUserAiProviderKeys,
+} from '../server/userAiProviderSecrets.ts';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -67,4 +75,68 @@ test('personal AI key lists use authenticated encryption bound to owner and prov
       /could not be decrypted/i,
     );
   });
+});
+
+test('personal AI key storage and execution reject every actor other than the key owner', async () => {
+  const otherUserId = '22222222-2222-4222-8222-222222222222';
+  assert.equal(assertPersonalCredentialOwner(USER_ID, USER_ID), USER_ID);
+  assert.throws(
+    () => assertPersonalCredentialOwner(otherUserId, USER_ID),
+    (error: unknown) => {
+      assert.equal((error as { status?: number }).status, 403);
+      assert.equal((error as { code?: string }).code, 'USER_AI_SECRET_OWNER_MISMATCH');
+      return true;
+    },
+  );
+
+  const assertOwnerMismatch = (operation: Promise<unknown>) => assert.rejects(
+    operation,
+    (error: unknown) => {
+      assert.equal((error as { status?: number }).status, 403);
+      assert.equal((error as { code?: string }).code, 'USER_AI_SECRET_OWNER_MISMATCH');
+      return true;
+    },
+  );
+  await assertOwnerMismatch(readUserAiProviderSecretsOverview({
+    actorUserId: otherUserId,
+    ownerUserId: USER_ID,
+  }));
+  await assertOwnerMismatch(resolveUserAiProviderKeys({
+    actorUserId: otherUserId,
+    ownerUserId: USER_ID,
+    provider: 'gemini_free',
+  }));
+  await assertOwnerMismatch(saveUserAiProviderKeys({
+    actorUserId: otherUserId,
+    ownerUserId: USER_ID,
+    provider: 'gemini_free',
+    apiKeys: ['personal-gemini-key-1234567890'],
+  }));
+  await assertOwnerMismatch(deleteUserAiProviderKeys({
+    actorUserId: otherUserId,
+    ownerUserId: USER_ID,
+    provider: 'gemini_free',
+  }));
+});
+
+test('personal secret APIs never let an administrator select another owner', async () => {
+  const [userApi, adminAiApi, adminCrawlerApi, service, aiResolver, crawlerResolver] = await Promise.all([
+    readFile(new URL('../api/userAiProviderSecrets.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../api/adminAiProviderSecrets.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../api/adminCrawlerProviderSecrets.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../server/userAiProviderSecrets.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../server/adminAiProviderSecrets.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../server/crawlerProviderSecrets.ts', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(userApi, /readOverviewResult\(principal\.userId\)/);
+  assert.match(userApi, /actorUserId: principal\.userId,\s+ownerUserId: principal\.userId/g);
+  assert.doesNotMatch(userApi, /body\.userId|queryUserId/);
+  assert.doesNotMatch(adminAiApi, /userAiProviderSecrets|resolveUserAiProviderKeys/);
+  assert.doesNotMatch(adminCrawlerApi, /userAiProviderSecrets|resolveUserAiProviderKeys/);
+  assert.match(service, /USER_AI_SECRET_OWNER_MISMATCH/);
+  assert.match(service, /actorUserId: string \| null \| undefined/);
+  assert.match(service, /ownerUserId: string \| null \| undefined/);
+  assert.match(aiResolver, /actorUserId: userId,\s+ownerUserId: userId/g);
+  assert.match(crawlerResolver, /actorUserId: userId,\s+ownerUserId: userId/);
 });

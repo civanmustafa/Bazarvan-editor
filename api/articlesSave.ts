@@ -25,11 +25,13 @@ type ArticleSaveReason = 'manual' | 'auto' | 'lifecycle' | 'recovery';
 
 class ArticleSaveError extends Error {
   status: number;
+  code: string;
 
-  constructor(message: string, status = 400) {
+  constructor(message: string, status = 400, code = 'ARTICLE_SAVE_ERROR') {
     super(message);
     this.name = 'ArticleSaveError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -175,6 +177,13 @@ const throwRpcError = (error: Record<string, any>): never => {
     ? error.message.trim()
     : 'Article save transaction failed.';
 
+  if (code === 'P0001' && message.includes('ARTICLE_MONTHLY_QUOTA_EXCEEDED')) {
+    throw new ArticleSaveError(
+      'تم استهلاك الحصة الشهرية المسموحة لإنشاء المقالات. يمكنك تعديل المقالات الحالية أو التواصل مع المسؤول لزيادة الحصة.',
+      429,
+      'ARTICLE_MONTHLY_QUOTA_EXCEEDED',
+    );
+  }
   if (code === '42501') throw new ArticleSaveError(message, 403);
   if (code === 'P0002') throw new ArticleSaveError(message, 404);
   if (code === '22023' || code === '23514') throw new ArticleSaveError(message, 400);
@@ -304,7 +313,11 @@ export default async function handler(req: any, res?: any): Promise<Response | v
     }
     const result: ApiResult = {
       status,
-      body: { ok: false, error: message },
+      body: {
+        ok: false,
+        error: message,
+        ...(error instanceof ArticleSaveError ? { code: error.code } : {}),
+      },
       headers: securityResult?.headers || (() => {
         try {
           return getCorsResponseHeaders(req);

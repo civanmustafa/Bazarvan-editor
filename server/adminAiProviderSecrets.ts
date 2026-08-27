@@ -354,7 +354,11 @@ const resolveCredentialSet = async (
 ): Promise<ResolvedAiCredentialSet> => {
   const [row, userKeys, resumeRow] = await Promise.all([
     readSecretRow(provider),
-    userProvider ? resolveUserAiProviderKeys(userId, userProvider) : Promise.resolve([]),
+    userProvider ? resolveUserAiProviderKeys({
+      actorUserId: userId,
+      ownerUserId: userId,
+      provider: userProvider,
+    }) : Promise.resolve([]),
     purpose === 'content_writing_resume' && runtimeProvider
       ? readSecretRow(getContentWritingResumeSecretProvider(runtimeProvider))
       : Promise.resolve(null),
@@ -418,7 +422,11 @@ export const resolveGeminiApiKeys = async (
   const fallbackKeys = getEnvironmentGeminiApiKeys(provider);
   if (provider === 'gemini') {
     const [userKeys, resumeRow] = await Promise.all([
-      resolveUserAiProviderKeys(userId, 'gemini_free'),
+      resolveUserAiProviderKeys({
+        actorUserId: userId,
+        ownerUserId: userId,
+        provider: 'gemini_free',
+      }),
       purpose === 'content_writing_resume'
         ? readSecretRow(getContentWritingResumeSecretProvider(provider))
         : Promise.resolve(null),

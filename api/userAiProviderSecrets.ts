@@ -49,7 +49,10 @@ const readOverviewResult = async (userId: string): Promise<ApiResult> => ({
   status: 200,
   body: {
     ok: true,
-    ...await readUserAiProviderSecretsOverview(userId),
+    ...await readUserAiProviderSecretsOverview({
+      actorUserId: userId,
+      ownerUserId: userId,
+    }),
   },
 });
 
@@ -79,7 +82,11 @@ const handleUserAiProviderSecretsRequest = async (req: any): Promise<ApiResult> 
   const provider = normalizeUserAiSecretProvider(body.provider);
 
   if (req.method === 'DELETE') {
-    await deleteUserAiProviderKeys(principal.userId, provider);
+    await deleteUserAiProviderKeys({
+      actorUserId: principal.userId,
+      ownerUserId: principal.userId,
+      provider,
+    });
     return readOverviewResult(principal.userId);
   }
   const accessProvider: ProviderAccessProvider = provider === 'openai_paid'
@@ -102,7 +109,8 @@ const handleUserAiProviderSecretsRequest = async (req: any): Promise<ApiResult> 
     return { status: 400, body: { error: 'apiKeys must be a string or a string array.' } };
   }
   await saveUserAiProviderKeys({
-    userId: principal.userId,
+    actorUserId: principal.userId,
+    ownerUserId: principal.userId,
     provider,
     apiKeys: body.apiKeys,
   });

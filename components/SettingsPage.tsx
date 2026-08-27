@@ -28,6 +28,8 @@ import AdminCrawlerProviderSecretsSettings from './AdminCrawlerProviderSecretsSe
 import UserAiProviderSecretsSettings from './UserAiProviderSecretsSettings';
 import AdminProviderAccessSettings from './AdminProviderAccessSettings';
 import UserProviderAccessSummary from './UserProviderAccessSummary';
+import AdminArticleQuotaSettings from './AdminArticleQuotaSettings';
+import UserArticleQuotaSummary from './UserArticleQuotaSummary';
 import AdminPromptRegistrySettings from './AdminPromptRegistrySettings';
 import ClientCenterSettings from './ClientCenterSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
@@ -422,6 +424,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       <SettingsSection title="صلاحيات المزودات والحصص لحسابي">
         <UserProviderAccessSummary />
       </SettingsSection>
+      <SettingsSection title="حصة المقالات الشهرية لحسابي">
+        <UserArticleQuotaSummary />
+      </SettingsSection>
     </div>
   );
 
@@ -673,6 +678,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const renderUsersSettings = () => (
     <div className="space-y-6">
       {renderPersonalPreferences()}
+      {isAdmin && (
+        <SettingsSection title="الحصة الشهرية الافتراضية للمستخدمين">
+          <AdminArticleQuotaSettings />
+        </SettingsSection>
+      )}
       <SettingsSection title="إدارة المستخدمين">
         <div className="flex flex-wrap gap-2">
           <button

@@ -85,6 +85,22 @@ const normalizeUserId = (value: unknown): string => {
   return userId;
 };
 
+export const assertPersonalCredentialOwner = (
+  actorUserIdValue: unknown,
+  ownerUserIdValue: unknown,
+): string => {
+  const actorUserId = normalizeUserId(actorUserIdValue);
+  const ownerUserId = normalizeUserId(ownerUserIdValue);
+  if (actorUserId !== ownerUserId) {
+    throw new UserAiProviderSecretError(
+      'Personal API keys may only be used by their owner.',
+      403,
+      'USER_AI_SECRET_OWNER_MISMATCH',
+    );
+  }
+  return ownerUserId;
+};
+
 const parseEncryptionKey = (): Buffer | null => {
   const rawValue = String(process.env.AI_SETTINGS_ENCRYPTION_KEY || '').trim();
   if (!rawValue) return null;
@@ -269,9 +285,12 @@ const readSecretRow = async (
 };
 
 export const readUserAiProviderSecretsOverview = async (
-  userIdValue: unknown,
+  options: {
+    actorUserId: unknown;
+    ownerUserId: unknown;
+  },
 ): Promise<UserAiProviderSecretsOverview> => {
-  const userId = normalizeUserId(userIdValue);
+  const userId = assertPersonalCredentialOwner(options.actorUserId, options.ownerUserId);
   const providers = Object.fromEntries(
     USER_AI_SECRET_PROVIDERS.map(provider => [provider, emptyStatus(provider)]),
   ) as Record<UserAiSecretProvider, UserAiProviderSecretStatus>;
@@ -302,21 +321,29 @@ export const readUserAiProviderSecretsOverview = async (
 };
 
 export const resolveUserAiProviderKeys = async (
-  userId: string | null | undefined,
-  provider: UserAiSecretProvider,
+  options: {
+    actorUserId: string | null | undefined;
+    ownerUserId: string | null | undefined;
+    provider: UserAiSecretProvider;
+  },
 ): Promise<string[]> => {
-  if (!userId) return [];
-  const row = await readSecretRow(userId, provider);
+  if (!options.actorUserId && !options.ownerUserId) return [];
+  const ownerUserId = assertPersonalCredentialOwner(
+    options.actorUserId,
+    options.ownerUserId,
+  );
+  const row = await readSecretRow(ownerUserId, options.provider);
   if (!row?.enabled) return [];
   return decryptKeyList(row);
 };
 
 export const saveUserAiProviderKeys = async (options: {
-  userId: string;
+  actorUserId: string;
+  ownerUserId: string;
   provider: UserAiSecretProvider;
   apiKeys: unknown;
 }): Promise<void> => {
-  const userId = normalizeUserId(options.userId);
+  const userId = assertPersonalCredentialOwner(options.actorUserId, options.ownerUserId);
   const provider = normalizeUserAiSecretProvider(options.provider);
   const apiKeys = normalizeApiKeyList(options.apiKeys);
   const encrypted = encryptKeyList(userId, provider, apiKeys);
@@ -336,11 +363,14 @@ export const saveUserAiProviderKeys = async (options: {
 };
 
 export const deleteUserAiProviderKeys = async (
-  userIdValue: unknown,
-  providerValue: unknown,
+  options: {
+    actorUserId: unknown;
+    ownerUserId: unknown;
+    provider: unknown;
+  },
 ): Promise<void> => {
-  const userId = normalizeUserId(userIdValue);
-  const provider = normalizeUserAiSecretProvider(providerValue);
+  const userId = assertPersonalCredentialOwner(options.actorUserId, options.ownerUserId);
+  const provider = normalizeUserAiSecretProvider(options.provider);
   const { error } = await getExternalAnalysisSupabaseAdmin()
     .from(TABLE_NAME)
     .delete()

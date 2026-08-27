@@ -28,9 +28,9 @@ test('assigned provider key lists use authenticated encryption bound to credenti
       enabled: true,
       key_count: keys.length,
       key_suffixes: keys.map(key => key.slice(-4)),
-      expires_at: null,
-      created_by: null,
-      updated_by: null,
+      expires_at: null as string | null,
+      created_by: null as string | null,
+      updated_by: null as string | null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       ...encrypted,
@@ -110,4 +110,3 @@ test('provider access migration and APIs keep raw credentials server-only', asyn
   assert.match(login, /الدخول أو إنشاء حساب بواسطة Google/);
   assert.match(context, /signInWithOAuth\(\{\s*provider: 'google'/);
 });
-

@@ -546,7 +546,9 @@ const saveRemoteArticleSnapshotViaServer = async (
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(typeof payload.error === 'string' ? payload.error : `Article save failed (${response.status}).`);
+    const error = new Error(typeof payload.error === 'string' ? payload.error : `Article save failed (${response.status}).`) as Error & { code?: string };
+    if (typeof payload.code === 'string') error.code = payload.code;
+    throw error;
   }
   if (!isRecord(payload.article)) {
     throw new Error('Article save API did not return an article.');

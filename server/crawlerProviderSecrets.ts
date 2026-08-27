@@ -312,7 +312,11 @@ export const resolveCrawlerProviderCredential = async (
   const provider = normalizeCrawlerExternalProvider(providerValue);
   const [row, personalKeys] = await Promise.all([
     readSecretRow(provider),
-    resolveUserAiProviderKeys(userId, provider),
+    resolveUserAiProviderKeys({
+      actorUserId: userId,
+      ownerUserId: userId,
+      provider,
+    }),
   ]);
   const fallback = getEnvironmentCrawlerApiKey(provider);
   const plan = await resolveProviderCredentialPlan({

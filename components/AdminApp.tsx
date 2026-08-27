@@ -33,6 +33,7 @@ import ExternalAnalysisReportsTable from './ExternalAnalysisReportsTable';
 import ContentWritingReportsTable from './ContentWritingReportsTable';
 import CrawlerProviderUsageReportsTable from './CrawlerProviderUsageReportsTable';
 import AdminProviderAccessSettings from './AdminProviderAccessSettings';
+import AdminArticleQuotaSettings from './AdminArticleQuotaSettings';
 import {
   getArticleTrashInfo,
   getRemoteAppSessionById,
@@ -2135,6 +2136,12 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
                 userId={currentProfile.id}
                 onProfileUpdated={refreshData}
               />
+            </section>
+          )}
+          {currentProfile && (
+            <section>
+              <SectionTitle>حصة المقالات الشهرية</SectionTitle>
+              <AdminArticleQuotaSettings userId={currentProfile.id} />
             </section>
           )}
           <section>
