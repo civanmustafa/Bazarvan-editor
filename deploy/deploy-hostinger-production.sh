@@ -86,7 +86,12 @@ npm ci --include=dev
 npm run build
 
 for app_name in "${PM2_APPS[@]}"; do
-  pm2 restart "${app_name}" --update-env
+  if [[ "${app_name}" == "bazarvan-staging-ai-worker" ]]; then
+    EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command \
+      pm2 restart "${app_name}" --update-env
+  else
+    pm2 restart "${app_name}" --update-env
+  fi
 done
 
 if pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null 2>&1; then

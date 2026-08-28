@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-88}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-89}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-57}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -51,6 +51,9 @@ readonly PUBLIC_FUNCTIONS="$(sql_scalar "select count(*) from pg_proc p join pg_
 readonly RLS_POLICIES="$(sql_scalar "select count(*) from pg_policies where schemaname = 'public'")"
 readonly PUBLIC_TRIGGERS="$(sql_scalar "select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and not t.tgisinternal")"
 readonly REALTIME_TABLES="$(sql_scalar "select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public'")"
+readonly META_DESCRIPTION_COLUMNS="$(sql_scalar "select count(*) from information_schema.columns where table_schema = 'public' and ((table_name = 'articles' and column_name in ('meta_description','meta_description_source','meta_description_generated_at','meta_description_signature','meta_description_job_id')) or (table_name = 'article_versions' and column_name = 'meta_description'))")"
+readonly CONCURRENT_SAVE_FUNCTION="$(sql_scalar "select to_regprocedure('public.save_article_snapshot_with_content_policy(uuid,text,jsonb,text,boolean,timestamptz,boolean)') is not null")"
+readonly META_APPLY_FUNCTION="$(sql_scalar "select to_regprocedure('public.apply_generated_article_meta_description(uuid,text,bigint,uuid,timestamptz,text,text)') is not null")"
 
 (( PUBLIC_TABLES == EXPECTED_PUBLIC_TABLES )) \
   || fail "Public table count is ${PUBLIC_TABLES}; expected ${EXPECTED_PUBLIC_TABLES}."
@@ -58,6 +61,9 @@ readonly REALTIME_TABLES="$(sql_scalar "select count(*) from pg_publication_tabl
 (( RLS_POLICIES > 0 )) || fail "No RLS policies were created."
 (( PUBLIC_TRIGGERS > 0 )) || fail "No project triggers were created."
 (( REALTIME_TABLES > 0 )) || fail "No project tables were added to supabase_realtime."
+(( META_DESCRIPTION_COLUMNS == 6 )) || fail "Meta-description schema is incomplete (${META_DESCRIPTION_COLUMNS}/6 columns)."
+[[ "${CONCURRENT_SAVE_FUNCTION}" == "t" ]] || fail "Concurrent article-save fencing function is missing."
+[[ "${META_APPLY_FUNCTION}" == "t" ]] || fail "Fenced meta-description apply function is missing."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"

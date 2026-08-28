@@ -196,6 +196,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       autoGenerateAlternativeKeywords: false,
       autoGenerateLsiKeywords: false,
       autoDiscoverCompetitors: false,
+      autoGenerateMetaDescription: false,
       unknownAutomationSwitch: true,
     },
   });
@@ -228,22 +229,26 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.system.autoGenerateAlternativeKeywords, false);
   assert.equal(normalized.system.autoGenerateLsiKeywords, false);
   assert.equal(normalized.system.autoDiscoverCompetitors, false);
+  assert.equal(normalized.system.autoGenerateMetaDescription, false);
   assert.equal(normalized.system.unknownAutomationSwitch, undefined);
 
   const defaults = registry.getDefaultSystemSettings();
   assert.equal(defaults.system.autoGenerateAlternativeKeywords, true);
   assert.equal(defaults.system.autoGenerateLsiKeywords, true);
   assert.equal(defaults.system.autoDiscoverCompetitors, true);
+  assert.equal(defaults.system.autoGenerateMetaDescription, true);
   const invalidAutomation = registry.normalizeSystemSettingsMap({
     system: {
       autoGenerateAlternativeKeywords: 'yes',
       autoGenerateLsiKeywords: 1,
       autoDiscoverCompetitors: null,
+      autoGenerateMetaDescription: 'yes',
     },
   });
   assert.equal(invalidAutomation.system.autoGenerateAlternativeKeywords, true);
   assert.equal(invalidAutomation.system.autoGenerateLsiKeywords, true);
   assert.equal(invalidAutomation.system.autoDiscoverCompetitors, true);
+  assert.equal(invalidAutomation.system.autoGenerateMetaDescription, true);
 });
 
 test('AI capabilities expose an optional normalized content-writing resume model', async () => {

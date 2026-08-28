@@ -42,9 +42,11 @@ import {
     recordRemoteArticleTime,
     saveRemoteArticleSnapshot,
     updateRemoteArticleSettings,
+    ArticleSaveRequestError,
     type RemoteArticleActivity,
     type RemoteArticleStatus,
 } from '../utils/supabaseArticles';
+import { getSupabaseClient } from '../utils/supabaseClient';
 import { buildEditorArticlePath, navigateToAppPath, peekNewEditorArticleRequest } from '../utils/appRoutes';
 import { recordAppActivity } from '../utils/appActivity';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
@@ -457,6 +459,7 @@ const sortForSignature = (value: unknown): unknown => {
 
 const createArticleSaveSignature = (input: {
     title: string;
+    metaDescription?: string;
     content: unknown;
     plainText: string;
     keywords: Keywords;
@@ -465,6 +468,7 @@ const createArticleSaveSignature = (input: {
     attachments?: ArticleStorageSnapshot['attachments'];
 }): string => JSON.stringify(sortForSignature({
     title: input.title.trim() || '(untitled)',
+    metaDescription: input.metaDescription?.trim() || '',
     content: input.content,
     plainText: input.plainText,
     keywords: input.keywords,
@@ -498,6 +502,13 @@ type SaveDraftReason = 'manual' | 'auto' | 'lifecycle';
 type SaveDraftOptions = {
     reason?: SaveDraftReason;
     force?: boolean;
+    overwriteConflict?: boolean;
+};
+
+export type ConcurrentEditConflict = {
+    articleId: string;
+    serverLastSavedAt: string;
+    detectedAt: string;
 };
 
 export type GeneratedContentApplicationResult = {
@@ -672,6 +683,8 @@ interface EditorContextType {
     editor: Editor | null;
     title: string;
     setTitle: React.Dispatch<React.SetStateAction<string>>;
+    metaDescription: string;
+    setMetaDescription: React.Dispatch<React.SetStateAction<string>>;
     articleKey: string;
     text: string;
     keywords: Keywords;
@@ -687,6 +700,7 @@ interface EditorContextType {
     setIsStructureTabActive: React.Dispatch<React.SetStateAction<boolean>>;
     saveStatus: 'idle' | 'saving' | 'saved' | 'error';
     saveError: string;
+    concurrentEditConflict: ConcurrentEditConflict | null;
     restoreStatus: 'idle' | 'restored';
     draftExists: boolean;
     scrollContainerRef: React.RefObject<HTMLDivElement>;
@@ -746,6 +760,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ? readStorageValue(AUTO_DRAFT_TITLE_KEY) || ''
         : '';
     const [title, setTitle] = useState<string>(() => initialActiveArticleTitleRef.current || initialAutoDraftTitle);
+    const [metaDescription, setMetaDescription] = useState('');
     const [articleKey, setArticleKey] = useState<string>(() => initialActiveArticleTitleRef.current || initialAutoDraftTitle);
     const [activeArticleId, setActiveArticleId] = useState<string | null>(() => initialActiveArticleIdRef.current);
     const [activeArticleSettings, setActiveArticleSettings] = useState<ActiveArticleSettings>(EMPTY_ACTIVE_ARTICLE_SETTINGS);
@@ -766,6 +781,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ));
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
     const [saveError, setSaveError] = useState('');
+    const [concurrentEditConflict, setConcurrentEditConflict] = useState<ConcurrentEditConflict | null>(null);
     const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restored'>('idle');
     const [draftExists, setDraftExists] = useState(false);
     const [activeAnalysisPanels, setActiveAnalysisPanels] = useState<ContentAnalysisRefreshScope>({
@@ -781,6 +797,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const isArticleContentLoadingRef = useRef(false);
     const hasEditorChangedAfterArticleLoadRef = useRef(false);
     const loadedArticleExpectedLastSavedAtRef = useRef('');
+    const loadedArticleSaveCountRef = useRef(0);
+    const loadedMetaDescriptionGeneratedAtRef = useRef('');
     const saveInFlightRef = useRef<Promise<boolean> | null>(null);
     const queuedForcedSaveRef = useRef<SaveDraftOptions | null>(null);
     const lastSavedArticleSignatureRef = useRef('');
@@ -794,6 +812,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         !initialActiveArticleTitleRef.current &&
         Boolean(readStoredContentReference(AUTO_DRAFT_KEY))
     );
+
+    const updateMetaDescription = useCallback<React.Dispatch<React.SetStateAction<string>>>((value) => {
+        hasEditorChangedAfterArticleLoadRef.current = true;
+        setMetaDescription(previous => typeof value === 'function' ? value(previous) : value);
+    }, []);
     
     // Debounce editor state and text content before analysis to keep typing responsive.
     const debouncedEditorState = useDebounce(editorState, ANALYSIS_DEBOUNCE_MS);
@@ -832,6 +855,76 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             draftPersistTimerRef.current = null;
         }
     }, []);
+
+    useEffect(() => {
+        if (!activeArticleId || !currentUser) return;
+        let channel: any = null;
+        try {
+            const supabase = getSupabaseClient();
+            channel = supabase
+                .channel(`editor-article-revision-${activeArticleId}`)
+                .on(
+                    'postgres_changes',
+                    {
+                        event: 'UPDATE',
+                        schema: 'public',
+                        table: 'articles',
+                        filter: `id=eq.${activeArticleId}`,
+                    },
+                    payload => {
+                        const row = payload.new as Record<string, unknown>;
+                        const serverLastSavedAt = typeof row.last_saved_at === 'string'
+                            ? row.last_saved_at
+                            : '';
+                        if (
+                            !serverLastSavedAt
+                            || serverLastSavedAt === loadedArticleExpectedLastSavedAtRef.current
+                        ) {
+                            return;
+                        }
+
+                        const generatedAt = typeof row.meta_description_generated_at === 'string'
+                            ? row.meta_description_generated_at
+                            : '';
+                        const serverSaveCount = Number(row.save_count || 0);
+                        const isMetaDescriptionOnlyUpdate = Boolean(
+                            generatedAt
+                            && generatedAt !== loadedMetaDescriptionGeneratedAtRef.current
+                            && serverSaveCount === loadedArticleSaveCountRef.current
+                        );
+                        if (isMetaDescriptionOnlyUpdate) {
+                            setMetaDescription(typeof row.meta_description === 'string' ? row.meta_description : '');
+                            loadedMetaDescriptionGeneratedAtRef.current = generatedAt;
+                            loadedArticleExpectedLastSavedAtRef.current = serverLastSavedAt;
+                            return;
+                        }
+
+                        // A row-level event may arrive just before this tab receives
+                        // its own successful save response. The response updates the
+                        // authoritative token; only idle saves become visible conflicts.
+                        if (saveInFlightRef.current) return;
+                        setConcurrentEditConflict({
+                            articleId: activeArticleId,
+                            serverLastSavedAt,
+                            detectedAt: new Date().toISOString(),
+                        });
+                    },
+                )
+                .subscribe();
+        } catch (error) {
+            console.warn('Could not subscribe to article revision updates.', error);
+            return;
+        }
+
+        return () => {
+            if (!channel) return;
+            try {
+                void getSupabaseClient().removeChannel(channel);
+            } catch (error) {
+                console.warn('Could not remove the article revision subscription.', error);
+            }
+        };
+    }, [activeArticleId, currentUser]);
 
     useEffect(() => {
         latestDraftMetaRef.current = { title, keywords, articleLanguage, goalContext };
@@ -983,6 +1076,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const lang = snapshot?.articleLanguage || latestArticle?.articleLanguage || 'ar';
         const nextKeywords = normalizeKeywords(snapshot?.keywords || latestArticle?.keywords || INITIAL_KEYWORDS);
         const nextGoalContext = normalizeGoalContext(snapshot?.goalContext || latestArticle?.goalContext);
+        const nextMetaDescription = snapshot?.metaDescription
+            ?? (latestArticle as RemoteArticleActivity | undefined)?.metaDescription
+            ?? '';
         const hasResolvedContent = isUsableEditorContent(resolvedContent);
 
         if (!hasResolvedContent && (latestArticle?.stats?.wordCount || 0) > 0) {
@@ -994,6 +1090,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         try {
             setTitle(resolvedTitle);
             setArticleKey(resolvedTitle);
+            setMetaDescription(nextMetaDescription);
             setActiveArticleId(options.remoteArticleId || null);
             setActiveArticleSettings(getActiveArticleSettings(latestArticle));
             setKeywords(nextKeywords);
@@ -1020,10 +1117,16 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // not concurrency tokens. Only a freshly fetched server snapshot may
             // authorize a later background save of an existing article.
             loadedArticleExpectedLastSavedAtRef.current = options.authoritativeRemoteSavedAt?.trim() || '';
+            loadedArticleSaveCountRef.current = options.authoritativeRemoteSavedAt
+                ? Number(snapshot?.serverSaveCount || (latestArticle as RemoteArticleActivity | undefined)?.saveCount || 0)
+                : 0;
+            loadedMetaDescriptionGeneratedAtRef.current = snapshot?.metaDescriptionGeneratedAt || '';
+            if (options.authoritativeRemoteSavedAt) setConcurrentEditConflict(null);
             hasEditorChangedAfterArticleLoadRef.current = false;
             if (hasResolvedContent) {
                 lastSavedArticleSignatureRef.current = createArticleSaveSignature({
                     title: resolvedTitle,
+                    metaDescription: nextMetaDescription,
                     content: targetEditor.getJSON(),
                     plainText: targetEditor.getText(),
                     keywords: nextKeywords,
@@ -1364,6 +1467,13 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const showStatus = reason === 'manual';
         if (!editor || !currentUser || !currentUserId) return false;
         if (isArticleContentLoadingRef.current) return false;
+        if (activeArticleId && concurrentEditConflict && !options.overwriteConflict) {
+            if (showStatus) {
+                setSaveError('توجد نسخة أحدث محفوظة بواسطة محرر آخر. اختر تحميلها أو اعتماد نسختك الحالية أولًا.');
+                setSaveStatus('error');
+            }
+            return false;
+        }
         const contentJSON = editor.getJSON();
         const contentHTML = editor.getHTML();
         const currentText = editor.getText();
@@ -1415,6 +1525,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             const saveSignature = createArticleSaveSignature({
                 title: finalTitleToSave,
+                metaDescription,
                 content: contentJSON,
                 plainText: currentText,
                 keywords,
@@ -1441,6 +1552,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 version: 1,
                 username: currentUser,
                 title: finalTitleToSave,
+                metaDescription,
                 content: contentJSON,
                 contentHtml: contentHTML,
                 plainText: currentText,
@@ -1485,6 +1597,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 expectedLastSavedAt: activeArticleId
                     ? loadedArticleExpectedLastSavedAtRef.current || null
                     : null,
+                forceOverwrite: options.overwriteConflict === true,
             });
             if (keywords.clientId?.trim()) {
                 await saveArticleClientSelection(savedArticle.id, keywords.clientId).catch(error => {
@@ -1494,6 +1607,10 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             pendingRemoteSaveRequestRef.current = null;
             setActiveArticleId(savedArticle.id);
             loadedArticleExpectedLastSavedAtRef.current = savedArticle.lastSaved || '';
+            loadedArticleSaveCountRef.current = Number(savedArticle.saveCount || 0);
+            loadedMetaDescriptionGeneratedAtRef.current = savedArticle.metaDescriptionGeneratedAt || '';
+            setMetaDescription(savedArticle.metaDescription || metaDescription);
+            setConcurrentEditConflict(null);
             setActiveArticleSettings(getActiveArticleSettings(savedArticle));
             setArticleKey(savedArticle.title || finalTitleToSave);
             writeSessionValue(ACTIVE_ARTICLE_ID_KEY, savedArticle.id);
@@ -1538,13 +1655,27 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     ? error.message
                     : 'تعذر حفظ المقالة.';
             console.error('Failed to save article draft:', error);
+            if (
+                error instanceof ArticleSaveRequestError
+                && (
+                    error.code === 'ARTICLE_CONCURRENT_EDIT_CONFLICT'
+                    || error.code === 'ARTICLE_STALE_BACKGROUND_SAVE'
+                )
+                && activeArticleId
+            ) {
+                setConcurrentEditConflict({
+                    articleId: activeArticleId,
+                    serverLastSavedAt: error.serverLastSavedAt,
+                    detectedAt: new Date().toISOString(),
+                });
+            }
             if (showStatus) {
                 setSaveError(message);
                 setSaveStatus('error');
             }
             return false;
         }
-    }, [editor, currentUser, currentUserId, title, articleKey, activeArticleId, keywords, articleLanguage, goalContext, analysisResults, importOrigin, clearEditorSnapshotTimer, clearDraftPersistTimer]);
+    }, [editor, currentUser, currentUserId, title, metaDescription, articleKey, activeArticleId, keywords, articleLanguage, goalContext, analysisResults, importOrigin, concurrentEditConflict, clearEditorSnapshotTimer, clearDraftPersistTimer]);
 
     const handleSaveDraft = useCallback(async (options: SaveDraftOptions = {}): Promise<boolean> => {
         const reason = options.reason || 'manual';
@@ -1552,7 +1683,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         if (saveInFlightRef.current) {
             if (forceSave) {
-                queuedForcedSaveRef.current = { reason: 'manual', force: true };
+                queuedForcedSaveRef.current = {
+                    reason: 'manual',
+                    force: true,
+                    overwriteConflict: options.overwriteConflict,
+                };
                 await saveInFlightRef.current.catch(() => false);
                 const queuedSave = queuedForcedSaveRef.current;
                 if (queuedSave) {
@@ -1564,7 +1699,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return followUpSave || true;
         }
 
-        const savePromise = performSaveDraft({ reason, force: forceSave }).finally(() => {
+        const savePromise = performSaveDraft({
+            reason,
+            force: forceSave,
+            overwriteConflict: options.overwriteConflict,
+        }).finally(() => {
             saveInFlightRef.current = null;
         });
         saveInFlightRef.current = savePromise;
@@ -1668,6 +1807,31 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return false;
         }
 
+        try {
+            const localText = editor.getText();
+            await saveArticleSnapshotDurably({
+                kind: 'articleSnapshot',
+                version: 1,
+                username: currentUser,
+                title: title.trim() || articleKey || '(untitled)',
+                metaDescription,
+                content: editor.getJSON(),
+                contentHtml: editor.getHTML(),
+                plainText: localText,
+                keywords,
+                goalContext,
+                articleLanguage,
+                analysisSummary: { wordCount: countWordsInText(localText) },
+                attachments: readCurrentArticleAttachments(importOrigin),
+                savedAt: new Date().toISOString(),
+            });
+        } catch (error) {
+            console.error('Failed to preserve the local conflicting revision before reload.', error);
+            setSaveError('تعذر إنشاء النسخة المحلية الاحتياطية؛ لم يتم تحميل نسخة الخادم حفاظًا على عملك.');
+            setSaveStatus('error');
+            return false;
+        }
+
         const requestId = articleLoadRequestIdRef.current + 1;
         articleLoadRequestIdRef.current = requestId;
         isArticleContentLoadingRef.current = true;
@@ -1700,8 +1864,14 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [
         activeArticleId,
         applyArticleSnapshotToEditor,
+        articleKey,
+        articleLanguage,
         currentUser,
         editor,
+        goalContext,
+        importOrigin,
+        keywords,
+        metaDescription,
         title,
     ]);
 
@@ -1858,6 +2028,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             isArticleContentLoadingRef.current = false;
             hasEditorChangedAfterArticleLoadRef.current = false;
             loadedArticleExpectedLastSavedAtRef.current = '';
+            loadedArticleSaveCountRef.current = 0;
+            loadedMetaDescriptionGeneratedAtRef.current = '';
             lastSavedArticleSignatureRef.current = '';
             clearEditorSnapshotTimer();
             clearDraftPersistTimer();
@@ -1872,6 +2044,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             removeStorageValue(CONTENT_SUMMARY_STORAGE_KEY);
             window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT));
             setTitle('');
+            setMetaDescription('');
             setArticleKey('');
             setActiveArticleId(null);
             setActiveArticleSettings(EMPTY_ACTIVE_ARTICLE_SETTINGS);
@@ -1881,6 +2054,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setArticleLanguage(lang);
             setSaveStatus('idle');
             setSaveError('');
+            setConcurrentEditConflict(null);
 
             // React state updates apply after this handler. Update the synchronous
             // snapshot source first so the empty article cannot inherit the previous
@@ -2001,6 +2175,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setTitle(titleStr);
             setArticleKey(titleStr);
             setActiveArticleId(remoteArticleId);
+            setMetaDescription((article as RemoteArticleActivity).metaDescription || '');
+            setConcurrentEditConflict(null);
+            loadedArticleExpectedLastSavedAtRef.current = '';
+            loadedArticleSaveCountRef.current = 0;
+            loadedMetaDescriptionGeneratedAtRef.current = '';
             setActiveArticleSettings(getActiveArticleSettings(article));
             navigateToAppPath(buildEditorArticlePath(remoteArticleId));
             if (remoteArticleId && currentUserId) {
@@ -2083,6 +2262,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         editor,
         title,
         setTitle,
+        metaDescription,
+        setMetaDescription: updateMetaDescription,
         articleKey,
         text,
         keywords,
@@ -2098,6 +2279,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsStructureTabActive,
         saveStatus,
         saveError,
+        concurrentEditConflict,
         restoreStatus,
         draftExists,
         scrollContainerRef,
@@ -2115,6 +2297,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }), [
         editor,
         title,
+        metaDescription,
+        updateMetaDescription,
         articleKey,
         text,
         keywords,
@@ -2126,6 +2310,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isDuplicatesTabActive,
         saveStatus,
         saveError,
+        concurrentEditConflict,
         restoreStatus,
         draftExists,
         handleLanguageChange,

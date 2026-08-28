@@ -18,6 +18,8 @@ import {
   getExpandedSidebarFlexBasis,
 } from '../utils/editorWorkspaceLayout';
 import EditorToolbar from './EditorToolbar';
+import ConcurrentEditConflictBanner from './ConcurrentEditConflictBanner';
+import MetaDescriptionField from './MetaDescriptionField';
 import AiExecutionMonitor from './AiKeyUsageToast';
 import LeftSidebar from './LeftSidebar';
 import ModalManager from './ModalManager';
@@ -156,6 +158,8 @@ const EditorView: React.FC = () => {
             isFocusMode={isFocusMode}
             onToggleFocusMode={toggleFocusMode}
           />
+          <ConcurrentEditConflictBanner />
+          <MetaDescriptionField />
           <div
             ref={scrollContainerRef}
             data-bazarvan-editor-panel="true"

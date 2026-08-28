@@ -31,6 +31,14 @@ Supabase Cloud، وحُفظت قائمة PM2 الجديدة عبر `pm2 save`. �
 
 يضيف الترحيل مفاتيح النظام الخاصة بالصيغ البديلة وLSI والمنافسين، ويجعل اكتشاف المنافسين التلقائي ينتظر اكتمال كل مرحلة كلمات مفعّلة. يظل التوليد والبحث اليدويان متاحين عند تعطيل الأتمتة.
 
+### حماية التحرير المتزامن ووصف الميتا
+
+قبل نشر واجهة وصف الميتا وحماية المحررين، نفّذ مرة واحدة وقبل إعادة تحميل عمليات PM2:
+
+`supabase/migrations/20260828010000_concurrent_editing_and_meta_description.sql`
+
+يمنع الترحيل أي حفظ مبني على نسخة قديمة إلا بعد اختيار المستخدم صراحة اعتماد نسخته، ويضيف وصف الميتا إلى المقالة وإصداراتها. عند تحويل الحالة إلى **جاهز**، يضيف مهمة ذكاء اصطناعي دائمة تكتب وصفًا من 140–150 حرفًا يتضمن الكلمة المفتاحية ويراعي هدف الصفحة وجدول المحتويات. يمكن تعطيل هذا التشغيل من **الإعدادات ← أتمتة الكلمات والمنافسين**، وتظهر المهمة في شريط حالة الذكاء الاصطناعي.
+
 قبل أول نشر لعامل التحليل الخارجي، نفّذ الترحيلات التالية بالترتيب داخل **Supabase SQL Editor**:
 
 1. `supabase/migrations/20260710000000_external_analysis_foundation.sql`
@@ -304,7 +312,7 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - إذا لم تكن حالة النشر واضحة، اعرض جميع العمليات بالأمر `pm2 status`.
 - لفحص خادم الويب استخدم `pm2 describe bazarvan-editor-staging`.
 - لفحص عامل البحث وسحب المنافسين المستقل عبر Firecrawl استخدم `pm2 describe bazarvan-staging-competitor-worker`، ولسجله استخدم `pm2 logs bazarvan-staging-competitor-worker --lines 100`.
-- يستخدم `bazarvan-staging-ai-worker` فقط للتحليل الدلالي والأوامر الهندسية، لذلك لا تمنع أخطاء Gemini عامل Firecrawl من استلام مهام المنافسين.
+- يستخدم `bazarvan-staging-ai-worker` للتحليل الدلالي والأوامر الهندسية وكتابة وصف الميتا، لذلك لا تمنع أخطاء Gemini عامل Firecrawl من استلام مهام المنافسين.
 - إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات البحث والسحب متدهورة ويجب فحص `bazarvan-staging-competitor-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
 - لفحص عامل كتابة المقالة استخدم `pm2 describe bazarvan-staging-content-writing-worker`.
 - لفحص عامل تجهيز المنافسين قبل كتابة المقالة استخدم `pm2 describe bazarvan-staging-content-writing-preparation-worker`.

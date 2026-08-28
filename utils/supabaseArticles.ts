@@ -15,6 +15,25 @@ import {
 
 type ArticleStats = NonNullable<ArticleActivity['stats']>;
 
+export class ArticleSaveRequestError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly serverLastSavedAt: string;
+
+  constructor(options: {
+    message: string;
+    code: string;
+    status: number;
+    serverLastSavedAt?: string;
+  }) {
+    super(options.message);
+    this.name = 'ArticleSaveRequestError';
+    this.code = options.code;
+    this.status = options.status;
+    this.serverLastSavedAt = options.serverLastSavedAt || '';
+  }
+}
+
 type ArticleRow = {
   id: string;
   owner_id: string | null;
@@ -24,6 +43,10 @@ type ArticleRow = {
   visibility: 'private' | 'public';
   status: ArticleStatus;
   title: string;
+  meta_description: string | null;
+  meta_description_source: 'manual' | 'automatic' | null;
+  meta_description_generated_at: string | null;
+  meta_description_signature: string | null;
   content_json: any;
   content_html: string | null;
   plain_text: string | null;
@@ -59,6 +82,7 @@ type ArticleVersionRow = {
   version_number: number;
   created_by: string | null;
   title: string;
+  meta_description: string | null;
   content_json: any;
   content_html: string | null;
   plain_text: string;
@@ -119,6 +143,10 @@ const ARTICLE_LIST_SELECT = [
   'visibility',
   'status',
   'title',
+  'meta_description',
+  'meta_description_source',
+  'meta_description_generated_at',
+  'meta_description_signature',
   'keywords',
   'goal_context',
   'article_language',
@@ -176,6 +204,7 @@ export type RemoteArticleVersion = {
   versionNumber: number;
   createdBy: string | null;
   title: string;
+  metaDescription: string;
   plainText: string;
   keywords: any;
   goalContext: any;
@@ -230,6 +259,9 @@ export type RemoteProfile = {
 export type RemoteArticleActivity = ArticleActivity & {
   id: string;
   title: string;
+  metaDescription: string;
+  metaDescriptionSource: 'manual' | 'automatic' | null;
+  metaDescriptionGeneratedAt: string | null;
   ownerId: string | null;
   createdBy: string | null;
   assignedTo: string | null;
@@ -396,6 +428,9 @@ const toRemoteArticleActivity = (
   source: row.source,
   visibility: row.visibility,
   status: row.status,
+  metaDescription: row.meta_description || '',
+  metaDescriptionSource: row.meta_description_source || null,
+  metaDescriptionGeneratedAt: row.meta_description_generated_at || null,
   plainText: row.plain_text || '',
   analysis: row.analysis || null,
   metadata: options.lightweightMetadata ? lightweightArticleMetadata(row.metadata) : row.metadata || {},
@@ -438,6 +473,10 @@ const toArticleStorageSnapshot = (
     version: 1,
     username,
     title: row.title,
+    metaDescription: row.meta_description || '',
+    metaDescriptionSource: row.meta_description_source || null,
+    metaDescriptionGeneratedAt: row.meta_description_generated_at || null,
+    serverSaveCount: Number(row.save_count || 0),
     content: normalizeArticleSnapshotContent(row),
     contentHtml: row.content_html || undefined,
     plainText: row.plain_text || '',
@@ -469,6 +508,9 @@ const remoteActivityFromCachedSnapshot = (
 ): RemoteArticleActivity => ({
   id: articleId,
   title: snapshot.title,
+  metaDescription: snapshot.metaDescription || '',
+  metaDescriptionSource: snapshot.metaDescriptionSource || null,
+  metaDescriptionGeneratedAt: snapshot.metaDescriptionGeneratedAt || null,
   ownerId: null,
   createdBy: null,
   assignedTo: null,
@@ -484,7 +526,7 @@ const remoteActivityFromCachedSnapshot = (
   createdAt: snapshot.savedAt,
   updatedAt: snapshot.savedAt,
   timeSpentSeconds: 0,
-  saveCount: 0,
+  saveCount: Number(snapshot.serverSaveCount || 0),
   lastSaved: snapshot.savedAt,
   content: {
     storage: 'supabase',
@@ -504,6 +546,7 @@ const saveRemoteArticleSnapshotViaServer = async (
     saveReason?: 'manual' | 'auto' | 'lifecycle' | 'recovery';
     clearContent?: boolean;
     expectedLastSavedAt?: string | null;
+    forceOverwrite?: boolean;
   },
 ): Promise<RemoteArticleActivity> => {
   const supabase = getSupabaseClient();
@@ -519,6 +562,7 @@ const saveRemoteArticleSnapshotViaServer = async (
     saveReason: options.saveReason || 'manual',
     clearContent: options.clearContent === true,
     expectedLastSavedAt: options.expectedLastSavedAt || null,
+    forceOverwrite: options.forceOverwrite === true,
     snapshot,
   });
   let response: Response | null = null;
@@ -546,9 +590,14 @@ const saveRemoteArticleSnapshotViaServer = async (
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(typeof payload.error === 'string' ? payload.error : `Article save failed (${response.status}).`) as Error & { code?: string };
-    if (typeof payload.code === 'string') error.code = payload.code;
-    throw error;
+    throw new ArticleSaveRequestError({
+      message: typeof payload.error === 'string' ? payload.error : `Article save failed (${response.status}).`,
+      code: typeof payload.code === 'string' ? payload.code : 'ARTICLE_SAVE_ERROR',
+      status: response.status,
+      serverLastSavedAt: typeof payload.serverLastSavedAt === 'string'
+        ? payload.serverLastSavedAt
+        : '',
+    });
   }
   if (!isRecord(payload.article)) {
     throw new Error('Article save API did not return an article.');
@@ -559,6 +608,12 @@ const saveRemoteArticleSnapshotViaServer = async (
     ...snapshot,
     title: savedArticle.title || snapshot.title,
     savedAt: savedArticle.lastSaved || snapshot.savedAt,
+    metaDescription: savedArticle.metaDescription || snapshot.metaDescription || '',
+    metaDescriptionSource: savedArticle.metaDescriptionSource || snapshot.metaDescriptionSource || null,
+    metaDescriptionGeneratedAt: savedArticle.metaDescriptionGeneratedAt
+      || snapshot.metaDescriptionGeneratedAt
+      || null,
+    serverSaveCount: savedArticle.saveCount,
   });
   return savedArticle;
 };
@@ -592,6 +647,7 @@ const toRemoteArticleVersion = (row: ArticleVersionRow): RemoteArticleVersion =>
   versionNumber: row.version_number,
   createdBy: row.created_by,
   title: row.title,
+  metaDescription: row.meta_description || '',
   plainText: row.plain_text || '',
   keywords: row.keywords || {},
   goalContext: row.goal_context || {},
@@ -1091,6 +1147,7 @@ export const saveRemoteArticleSnapshot = async (
     saveReason?: 'manual' | 'auto' | 'lifecycle' | 'recovery';
     clearContent?: boolean;
     expectedLastSavedAt?: string | null;
+    forceOverwrite?: boolean;
   },
 ): Promise<RemoteArticleActivity> => saveRemoteArticleSnapshotViaServer(snapshot, options);
 

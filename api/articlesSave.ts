@@ -26,12 +26,19 @@ type ArticleSaveReason = 'manual' | 'auto' | 'lifecycle' | 'recovery';
 class ArticleSaveError extends Error {
   status: number;
   code: string;
+  details: Record<string, unknown>;
 
-  constructor(message: string, status = 400, code = 'ARTICLE_SAVE_ERROR') {
+  constructor(
+    message: string,
+    status = 400,
+    code = 'ARTICLE_SAVE_ERROR',
+    details: Record<string, unknown> = {},
+  ) {
     super(message);
     this.name = 'ArticleSaveError';
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -92,6 +99,9 @@ const sanitizeSnapshot = (value: unknown): ArticleStorageSnapshot => {
     version: 1,
     username: typeof value.username === 'string' ? value.username : '',
     title: normalizeTitle(value.title),
+    metaDescription: typeof value.metaDescription === 'string'
+      ? value.metaDescription.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
+      : '',
     content: value.content || {},
     contentHtml: typeof value.contentHtml === 'string' ? value.contentHtml : null,
     plainText: typeof value.plainText === 'string' ? value.plainText : '',
@@ -153,6 +163,9 @@ const toRemoteArticleActivity = (row: Record<string, any>) => ({
   source: row.source,
   visibility: row.visibility,
   status: row.status,
+  metaDescription: row.meta_description || '',
+  metaDescriptionSource: row.meta_description_source || null,
+  metaDescriptionGeneratedAt: row.meta_description_generated_at || null,
   plainText: row.plain_text || '',
   analysis: row.analysis || null,
   metadata: row.metadata || {},
@@ -239,6 +252,8 @@ const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
   const articleId = normalizeArticleId(body.articleId);
   const saveReason = normalizeSaveReason(body.saveReason);
   const clearContent = body.clearContent === true;
+  const forceOverwrite = body.forceOverwrite === true
+    && (saveReason === 'manual' || saveReason === 'recovery');
   const expectedLastSavedAt = normalizeExpectedLastSavedAt(body.expectedLastSavedAt);
   const idempotencyKey = resolveIdempotencyKey(body.idempotencyKey, {
     userId: principal.userId,
@@ -246,6 +261,7 @@ const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
     saveReason,
     clearContent,
     expectedLastSavedAt,
+    forceOverwrite,
     snapshot: body.snapshot,
   });
   const supabase = getSupabaseUserClient(req);
@@ -272,6 +288,7 @@ const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
     p_save_reason: saveReason,
     p_allow_empty_body: clearContent,
     p_expected_last_saved_at: expectedLastSavedAt,
+    p_force_overwrite: forceOverwrite,
   });
 
   if (error) throwRpcError(error as Record<string, any>);
@@ -279,6 +296,24 @@ const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
     throw new ArticleSaveError(
       'A newer reviewed article revision exists. The stale background save was skipped.',
       409,
+      'ARTICLE_STALE_BACKGROUND_SAVE',
+      {
+        serverLastSavedAt: typeof data.serverLastSavedAt === 'string'
+          ? data.serverLastSavedAt
+          : '',
+      },
+    );
+  }
+  if (isRecord(data) && data.concurrentEditConflict === true) {
+    throw new ArticleSaveError(
+      'قام محرر آخر بحفظ نسخة أحدث من هذه المقالة. راجع التعارض قبل استبدال عمله.',
+      409,
+      'ARTICLE_CONCURRENT_EDIT_CONFLICT',
+      {
+        serverLastSavedAt: typeof data.serverLastSavedAt === 'string'
+          ? data.serverLastSavedAt
+          : '',
+      },
     );
   }
   if (!isRecord(data) || !isRecord(data.article)) {
@@ -317,6 +352,7 @@ export default async function handler(req: any, res?: any): Promise<Response | v
         ok: false,
         error: message,
         ...(error instanceof ArticleSaveError ? { code: error.code } : {}),
+        ...(error instanceof ArticleSaveError ? error.details : {}),
       },
       headers: securityResult?.headers || (() => {
         try {

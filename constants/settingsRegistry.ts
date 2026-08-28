@@ -106,6 +106,7 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     autoGenerateAlternativeKeywords: true,
     autoGenerateLsiKeywords: true,
     autoDiscoverCompetitors: true,
+    autoGenerateMetaDescription: true,
   },
 };
 
@@ -344,6 +345,10 @@ const normalizeSystemSection = (
   setWhenPresent('autoDiscoverCompetitors', field => normalizeBoolean(
     field,
     defaults.autoDiscoverCompetitors,
+  ));
+  setWhenPresent('autoGenerateMetaDescription', field => normalizeBoolean(
+    field,
+    defaults.autoGenerateMetaDescription,
   ));
   return normalized;
 };

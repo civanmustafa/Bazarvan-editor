@@ -9,6 +9,7 @@ import { getSupabaseClient } from './supabaseClient';
 export type ExternalAnalysisJobType =
   | 'semantic_keywords_lsi'
   | 'content_brief_generation'
+  | 'meta_description_generation'
   | 'full_article_pipeline'
   | 'content_writing_preparation'
   | 'engineering_command'
@@ -76,6 +77,7 @@ export type ExternalAnalysisDashboardSummary = {
   articleId: string;
   state: ExternalAnalysisArticleState | null;
   latestSemanticJob: ExternalAnalysisJobRow | null;
+  latestMetaDescriptionJob: ExternalAnalysisJobRow | null;
   latestCompetitorDiscoveryJob: ExternalAnalysisJobRow | null;
   latestCompetitorExtractionJob: ExternalAnalysisJobRow | null;
   competitorReadyCount: number;
@@ -386,6 +388,7 @@ export const listExternalAnalysisDashboardSummaries = async (
       )
       && effectiveCommandIds.has(job.command_id || '')
     ));
+    const metaDescriptionJobs = jobs.filter(job => job.job_type === 'meta_description_generation');
     const competitorDiscoveryJobs = jobs.filter(job => (
       job.job_type === 'competitor_discovery'
       && (
@@ -412,7 +415,8 @@ export const listExternalAnalysisDashboardSummaries = async (
     )) || activeEngineeringJobs[activeEngineeringJobs.length - 1] || null;
     const completedEngineeringCount = engineeringJobs.filter(job => job.status === 'completed').length;
     const completedTaskCount = completedEngineeringCount
-      + (latestSemanticJob?.status === 'completed' ? 1 : 0);
+      + (latestSemanticJob?.status === 'completed' ? 1 : 0)
+      + (metaDescriptionJobs[0]?.status === 'completed' ? 1 : 0);
     const latestUpdatedAt = [stateByArticle.get(articleId)?.updated_at, ...jobs.map(job => job.updated_at)]
       .filter(Boolean)
       .sort((left, right) => new Date(right!).getTime() - new Date(left!).getTime())[0] || null;
@@ -420,6 +424,7 @@ export const listExternalAnalysisDashboardSummaries = async (
       articleId,
       state,
       latestSemanticJob,
+      latestMetaDescriptionJob: metaDescriptionJobs[0] || null,
       latestCompetitorDiscoveryJob: competitorDiscoveryJobs[0] || null,
       latestCompetitorExtractionJob: competitorExtractionJobs[0] || null,
       competitorReadyCount: currentCompetitorRows.filter(row => row.status === 'completed').length,
@@ -462,6 +467,23 @@ export const loadExternalAnalysisJobsByIds = async (
     .select(SUMMARY_JOB_SELECT)
     .in('id', ids)
     .limit(ids.length);
+  if (error) throw error;
+  return deduplicateExternalAnalysisTasks(
+    (data || []).map(row => toJobRow(row as Record<string, any>)),
+  );
+};
+
+export const loadRecentExternalAnalysisJobs = async (
+  articleId: string,
+  limit = 20,
+): Promise<ExternalAnalysisJobRow[]> => {
+  if (!articleId.trim()) return [];
+  const { data, error } = await getSupabaseClient()
+    .from('ai_external_analysis_jobs')
+    .select(SUMMARY_JOB_SELECT)
+    .eq('article_id', articleId)
+    .order('updated_at', { ascending: false })
+    .limit(Math.max(1, Math.min(limit, 50)));
   if (error) throw error;
   return deduplicateExternalAnalysisTasks(
     (data || []).map(row => toJobRow(row as Record<string, any>)),

@@ -89,7 +89,7 @@ test('manual, automatic, and lifecycle saves still route through the same save g
   );
 
   assert.match(editorContext, /canPersistArticleDraft\(\{/);
-  assert.match(editorContext, /performSaveDraft\(\{ reason, force: forceSave \}\)/);
+  assert.match(editorContext, /performSaveDraft\(\{[\s\S]*?reason,[\s\S]*?force: forceSave,[\s\S]*?overwriteConflict: options\.overwriteConflict,[\s\S]*?\}\)/);
   assert.match(editorContext, /handleSaveDraftRef\.current\(\{ reason: 'auto', force: false \}\)/);
   assert.match(editorContext, /handleSaveDraftRef\.current\(\{ reason: 'lifecycle', force: false \}\)/);
 });

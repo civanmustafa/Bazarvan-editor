@@ -23,20 +23,27 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.match(script, /bazarvan-staging-content-writing-worker/);
   assert.match(script, /bazarvan-staging-content-writing-preparation-worker/);
   assert.match(script, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=content_writing_preparation/);
+  assert.match(
+    script,
+    /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command/,
+  );
   assert.match(script, /pm2 start server-dist\/external-analysis-worker\.mjs/);
   assert.match(script, /bazarvan-staging-client-page-crawler/);
   assert.match(script, /smarteditor\.bazarvan\.com\/healthz/);
   assert.match(script, /smarteditor\.bazarvan\.com\/readyz/);
 });
 
-test('Hostinger schema scripts and guide track all content-research automation migrations', async () => {
+test('Hostinger schema scripts and guide track concurrent editing and meta-description migrations', async () => {
   const [applyScript, verifyScript, guide] = await Promise.all([
     readFile(path.join(root, 'deploy', 'hostinger-supabase', 'apply-project-migrations.sh'), 'utf8'),
     readFile(path.join(root, 'deploy', 'hostinger-supabase', 'verify-project-schema.sh'), 'utf8'),
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-88/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-88/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-89/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-89/);
   assert.match(guide, /20260827030000_content_research_automation_settings\.sql/);
+  assert.match(guide, /20260828010000_concurrent_editing_and_meta_description\.sql/);
+  assert.match(verifyScript, /META_DESCRIPTION_COLUMNS/);
+  assert.match(verifyScript, /CONCURRENT_SAVE_FUNCTION/);
 });

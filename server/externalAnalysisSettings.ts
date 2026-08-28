@@ -16,6 +16,7 @@ export type ContentResearchAutomationSettings = {
   autoGenerateAlternativeKeywords: boolean;
   autoGenerateLsiKeywords: boolean;
   autoDiscoverCompetitors: boolean;
+  autoGenerateMetaDescription: boolean;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -63,5 +64,6 @@ export const readContentResearchAutomationSettings = async (): Promise<ContentRe
     autoGenerateAlternativeKeywords: system.autoGenerateAlternativeKeywords !== false,
     autoGenerateLsiKeywords: system.autoGenerateLsiKeywords !== false,
     autoDiscoverCompetitors: system.autoDiscoverCompetitors !== false,
+    autoGenerateMetaDescription: system.autoGenerateMetaDescription !== false,
   };
 };

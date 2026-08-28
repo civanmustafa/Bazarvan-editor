@@ -127,6 +127,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   })), [locale, t.rightSidebar]);
 
   const semanticJobActive = externalJobHasActiveStatus(summary?.latestSemanticJob);
+  const metaDescriptionJobActive = externalJobHasActiveStatus(summary?.latestMetaDescriptionJob);
   const engineeringActive = (summary?.activeEngineeringCount || 0) > 0;
   const competitorDiscoveryActive = externalJobHasActiveStatus(summary?.latestCompetitorDiscoveryJob);
   const competitorExtractionActive = externalJobHasActiveStatus(summary?.latestCompetitorExtractionJob);
@@ -136,7 +137,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
 
   useEffect(() => {
     const syncJob = (
-      kind: 'semantic' | 'engineering' | 'competitor-discovery' | 'competitor-extraction',
+      kind: 'semantic' | 'meta-description' | 'engineering' | 'competitor-discovery' | 'competitor-extraction',
       active: boolean,
       job: ExternalAnalysisDashboardSummary['latestSemanticJob'],
     ) => {
@@ -159,14 +160,18 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             : job.command_label || 'الأوامر اليدوية الجاهزة')
         : kind === 'semantic'
           ? 'توليد الصيغ وLSI'
+          : kind === 'meta-description'
+            ? 'كتابة وصف الميتا'
           : kind === 'competitor-discovery'
             ? 'بحث المنافسين'
             : 'سحب محتوى المنافسين';
-      const requestedProvider = kind === 'semantic' || kind === 'engineering'
+      const requestedProvider = kind === 'semantic' || kind === 'meta-description' || kind === 'engineering'
         ? 'gemini'
         : 'crawler';
       const fallbackMessage = kind === 'semantic'
         ? 'جار توليد الصيغ البديلة وكلمات LSI...'
+        : kind === 'meta-description'
+          ? 'جار كتابة وصف الميتا تلقائيًا...'
         : kind === 'engineering'
           ? 'جار تنفيذ الأمر الهندسي...'
           : kind === 'competitor-discovery'
@@ -233,6 +238,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     };
 
     syncJob('semantic', semanticJobActive, summary?.latestSemanticJob || null);
+    syncJob('meta-description', metaDescriptionJobActive, summary?.latestMetaDescriptionJob || null);
     syncJob(
       'engineering',
       engineeringActive,
@@ -256,12 +262,14 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     competitorDiscoveryActive,
     competitorExtractionActive,
     engineeringActive,
+    metaDescriptionJobActive,
     semanticJobActive,
     summary?.activeEngineeringCount,
     summary?.activeEngineeringRootJob,
     summary?.latestCompetitorDiscoveryJob,
     summary?.latestCompetitorExtractionJob,
     summary?.latestEngineeringJob,
+    summary?.latestMetaDescriptionJob,
     summary?.latestSemanticJob,
   ]);
 

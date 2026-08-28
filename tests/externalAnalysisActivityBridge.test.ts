@@ -143,3 +143,16 @@ test('competitor discovery and content import use distinct unified activity surf
   assert.equal(extraction.provider, 'crawler');
   assert.equal(extraction.stage, 'extracting_competitor');
 });
+
+test('automatic meta description generation uses its own unified activity surface', () => {
+  const metaDescription = projectExternalAnalysisActivity(createJob({
+    id: 'job-meta-description',
+    job_type: 'meta_description_generation',
+    command_id: null,
+    progress: { stage: 'generating_meta_description' },
+  }), 'عنوان المقالة');
+
+  assert.equal(metaDescription.surface, 'meta_description_generation');
+  assert.equal(metaDescription.provider, 'gemini');
+  assert.equal(metaDescription.stage, 'generating_meta_description');
+});

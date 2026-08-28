@@ -30,8 +30,14 @@ import {
   type AiExecutionState,
 } from '../utils/aiExecutionActivity';
 import { formatAiKeySuffix } from '../utils/aiKeyUsageFeedback';
-import { loadExternalAnalysisJobsByIds } from '../utils/externalAnalysis';
+import {
+  cancelExternalAnalysisJob,
+  EXTERNAL_ANALYSIS_ACTIVE_STATUSES,
+  loadExternalAnalysisJobsByIds,
+  loadRecentExternalAnalysisJobs,
+} from '../utils/externalAnalysis';
 import { projectExternalAnalysisActivity } from '../utils/externalAnalysisActivityBridge';
+import { getSupabaseClient } from '../utils/supabaseClient';
 
 const TERMINAL_NOTICE_TTL_MS = 60_000;
 const MAX_TERMINAL_FEED_ACTIVITIES = 24;
@@ -50,6 +56,7 @@ const SURFACE_LABELS: Record<string, [string, string]> = {
   internal_linking_ai_review: ['مراجعة الربط الداخلي', 'Internal-link review'],
   internal_link_review: ['مراجعة الربط الداخلي', 'Internal-link review'],
   goal_context_generation: ['توليد سياق هدف الصفحة', 'Page goal context'],
+  meta_description_generation: ['كتابة وصف الميتا', 'Meta description'],
   draft_title_generation: ['اقتراح عنوان المقالة', 'Draft title'],
   ready_commands_batch: ['حزمة الأوامر الجاهزة', 'Ready commands bundle'],
   assigned_article_automation: ['أتمتة المقالة المسندة', 'Assigned article automation'],
@@ -105,6 +112,11 @@ const STAGE_LABELS: Record<string, [string, string]> = {
   synthesizing_competitor_results: ['جار دمج نتائج المنافسين', 'Synthesizing competitor results'],
   repairing_competitor_synthesis: ['جار إصلاح دمج المنافسين', 'Repairing competitor synthesis'],
   response_received: ['تم استلام استجابة الموديل', 'Model response received'],
+  loading_article: ['جار تحميل المقالة', 'Loading article'],
+  generating_meta_description: ['جار كتابة وصف الميتا', 'Writing meta description'],
+  repairing_meta_description: ['جار ضبط طول وصف الميتا', 'Adjusting meta description length'],
+  applying_meta_description: ['جار حفظ وصف الميتا', 'Saving meta description'],
+  applied: ['تم الحفظ', 'Saved'],
   engineering_completed: ['اكتمل التحليل الهندسي', 'Engineering analysis completed'],
   resuming: ['جار الاستئناف', 'Resuming'],
   reconnecting: ['إعادة الاتصال بالحالة', 'Reconnecting'],
@@ -170,7 +182,10 @@ const StatusIcon: React.FC<{ state: AiExecutionState }> = ({ state }) => {
   return <XCircle size={13} />;
 };
 
-const useAiExecutionActivityFeed = () => {
+const useAiExecutionActivityFeed = (
+  articleId: string | null = null,
+  articleKey = '',
+) => {
   const [activities, setActivities] = useState<AiExecutionActivity[]>(() => getAiExecutionActivities());
   const [now, setNow] = useState(Date.now());
 
@@ -219,6 +234,100 @@ const useAiExecutionActivityFeed = () => {
       window.removeEventListener(AI_EXECUTION_ACTIVITY_REMOVED_EVENT, handleActivityRemoval);
     };
   }, []);
+
+  useEffect(() => {
+    if (!articleId) return;
+    let disposed = false;
+    let requestInFlight = false;
+    let refreshTimer: number | null = null;
+
+    const reconcileDurableJobs = async () => {
+      if (disposed || requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const jobs = await loadRecentExternalAnalysisJobs(articleId, 20);
+        if (disposed) return;
+        const recentThreshold = Date.now() - TERMINAL_NOTICE_TTL_MS;
+        jobs.forEach(job => {
+          const isActive = EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status);
+          const updatedAt = new Date(job.updated_at).getTime();
+          if (!isActive && (!Number.isFinite(updatedAt) || updatedAt < recentThreshold)) return;
+          const projection = projectExternalAnalysisActivity(job, articleKey);
+          const {
+            activityId,
+            fingerprint: _fingerprint,
+            outcome,
+            ...activity
+          } = projection;
+          const cancel = async () => {
+            await cancelExternalAnalysisJob(job.article_id, job.id);
+          };
+          if (outcome) {
+            finishAiExecutionActivity(activityId, {
+              ...activity,
+              outcome,
+              completed: true,
+              cancel: null,
+            });
+            return;
+          }
+          updateAiExecutionActivity(activityId, {
+            ...activity,
+            state: 'running',
+            completed: false,
+            cancel,
+          });
+        });
+      } catch (error) {
+        if (!disposed) console.error('Failed to discover durable AI tasks for the open article:', error);
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void reconcileDurableJobs();
+      }, 250);
+    };
+
+    void reconcileDurableJobs();
+    const intervalId = window.setInterval(() => { void reconcileDurableJobs(); }, 5_000);
+    let channel: any = null;
+    try {
+      const supabase = getSupabaseClient();
+      channel = supabase
+        .channel(`editor-ai-tasks-${articleId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'ai_external_analysis_jobs',
+            filter: `article_id=eq.${articleId}`,
+          },
+          scheduleRefresh,
+        )
+        .subscribe();
+    } catch (error) {
+      console.warn('Could not subscribe to durable AI tasks for the open article.', error);
+    }
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      if (channel) {
+        try {
+          void getSupabaseClient().removeChannel(channel);
+        } catch (error) {
+          console.warn('Could not remove the durable AI task subscription.', error);
+        }
+      }
+    };
+  }, [articleId, articleKey]);
 
   useEffect(() => {
     if (!activities.some(activity => activity.state === 'running')) return;
@@ -425,7 +534,7 @@ type AiExecutionMonitorProps = {
 const AiExecutionMonitor: React.FC<AiExecutionMonitorProps> = ({ articleId, articleKey = '' }) => {
   const { uiLanguage } = useUser();
   const isArabic = uiLanguage !== 'en';
-  const { activities, setActivities, now } = useAiExecutionActivityFeed();
+  const { activities, setActivities, now } = useAiExecutionActivityFeed(articleId, articleKey);
   const [cancellingId, setCancellingId] = useState('');
   const [cancelError, setCancelError] = useState('');
   const [expanded, setExpanded] = useState(false);

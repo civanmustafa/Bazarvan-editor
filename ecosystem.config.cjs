@@ -46,7 +46,7 @@ module.exports = {
       kill_timeout: 10000,
       env: {
         NODE_ENV: 'production',
-        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,engineering_command',
+        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command',
         EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.EXTERNAL_ANALYSIS_WORKER_POLL_MS || '5000',
         EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS || '30000',
         EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS || '300',

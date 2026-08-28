@@ -1,6 +1,7 @@
 import './loadEnv';
 import './externalSemanticAnalysisExecutor';
 import './contentBriefGenerationExecutor';
+import './metaDescriptionGenerationExecutor';
 import './fullArticlePipelineExecutor';
 import './contentWritingCompetitorPreparationExecutor';
 import './externalEngineeringAnalysisExecutor';

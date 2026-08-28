@@ -74,6 +74,10 @@ export type ArticleStorageSnapshot = {
   version: 1;
   username: string;
   title: string;
+  metaDescription?: string;
+  metaDescriptionSource?: 'manual' | 'automatic' | null;
+  metaDescriptionGeneratedAt?: string | null;
+  serverSaveCount?: number;
   content: any;
   contentHtml?: string;
   plainText: string;

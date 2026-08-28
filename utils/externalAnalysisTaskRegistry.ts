@@ -32,6 +32,7 @@ export const getExternalAnalysisTaskIdentity = (
   if (![
     'semantic_keywords_lsi',
     'content_brief_generation',
+    'meta_description_generation',
     'full_article_pipeline',
     'content_writing_preparation',
     'engineering_command',
@@ -48,6 +49,9 @@ export const getExternalAnalysisTaskIdentity = (
   }
   if (task.job_type === 'content_brief_generation') {
     return `${task.article_id}:content_brief_generation:${task.id}`;
+  }
+  if (task.job_type === 'meta_description_generation') {
+    return `${task.article_id}:meta_description_generation:${signature || task.id}`;
   }
   if (task.job_type === 'full_article_pipeline') {
     return `${task.article_id}:full_article_pipeline:${task.id}`;

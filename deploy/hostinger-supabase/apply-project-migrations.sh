@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-88}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-89}"
 readonly MIN_AVAILABLE_MEMORY_MB="${MIN_AVAILABLE_MEMORY_MB:-1536}"
 readonly BACKUP_DIR="${STACK_DIR}/backups"
 

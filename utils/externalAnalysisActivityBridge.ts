@@ -71,6 +71,7 @@ const resolveState = (
 const resolveSurface = (job: ExternalAnalysisJobRow, stage: string): string => {
   if (job.job_type === 'semantic_keywords_lsi') return 'semantic_keywords_lsi';
   if (job.job_type === 'content_brief_generation') return 'goal_context_generation';
+  if (job.job_type === 'meta_description_generation') return 'meta_description_generation';
   if (job.job_type === 'full_article_pipeline') return 'full_article_pipeline';
   if (job.job_type === 'content_writing_preparation') return 'content_writing_preparation';
   if (job.job_type === 'competitor_discovery') return 'competitor_discovery';
