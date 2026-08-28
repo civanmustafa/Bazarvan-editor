@@ -28,6 +28,51 @@ const stopAutomaticCompetitorResearch = (code: string, message: string): never =
   throw new ExternalAnalysisTerminalError({ code, message });
 };
 
+const readCurrentEngineeringJobOrigin = async (
+  jobId: string,
+): Promise<ExternalAnalysisJob['origin'] | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('ai_external_analysis_jobs')
+    .select('origin')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (error) throw error;
+
+  const origin = data?.origin;
+  return origin === 'manual' || origin === 'auto' ? origin : null;
+};
+
+/**
+ * Rechecks the ready-command switch at execution time. The database trigger is
+ * the primary coordinator; this closes the small race where a worker claimed
+ * an automatic task immediately before the administrator disabled it.
+ */
+export const assertAutomaticReadyEngineeringCommandsAllowed = async (
+  job: Pick<ExternalAnalysisJob, 'id' | 'origin'>,
+): Promise<void> => {
+  if (job.origin !== 'auto') return;
+
+  const currentOrigin = await readCurrentEngineeringJobOrigin(job.id);
+  if (currentOrigin === 'manual') {
+    job.origin = 'manual';
+    return;
+  }
+
+  const settings = await readContentResearchAutomationSettings();
+  if (settings.autoRunReadyEngineeringCommands) return;
+
+  const latestOrigin = await readCurrentEngineeringJobOrigin(job.id);
+  if (latestOrigin === 'manual') {
+    job.origin = 'manual';
+    return;
+  }
+
+  throw new ExternalAnalysisTerminalError({
+    code: 'ready_engineering_commands_automation_disabled',
+    message: 'Automatic ready engineering commands are disabled in system settings.',
+  });
+};
+
 /**
  * Rechecks automatic competitor policy in the worker immediately before an
  * external search or scrape. Database coordination owns ordering; this guard

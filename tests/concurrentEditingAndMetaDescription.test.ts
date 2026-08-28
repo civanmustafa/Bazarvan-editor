@@ -109,3 +109,21 @@ test('ready status queues a fenced AI meta-description task and exposes it in th
   assert.match(field, /الكلمة المفتاحية/);
   assert.match(settings, /autoGenerateMetaDescription/);
 });
+
+test('meta-description field follows the full-height article inside the editor scroll panel', async () => {
+  const [editorApp, field] = await Promise.all([
+    readWorkspaceFile('components/EditorApp.tsx'),
+    readWorkspaceFile('components/MetaDescriptionField.tsx'),
+  ]);
+
+  assert.match(
+    editorApp,
+    /data-bazarvan-editor-panel="true"[\s\S]*?<EditorContent\s+editor=\{editor\}\s+className="min-h-full"\s*\/>\s*<MetaDescriptionField\s*\/>/,
+  );
+  assert.doesNotMatch(
+    editorApp,
+    /<ConcurrentEditConflictBanner\s*\/>\s*<MetaDescriptionField\s*\/>/,
+  );
+  assert.match(field, /data-bazarvan-meta-description-field="true"/);
+  assert.match(field, /className="border-t\s/);
+});

@@ -393,13 +393,6 @@ const enqueueEngineeringJobs = async (
     });
   }
 
-  const { error: preferenceError } = await supabase.rpc('set_external_analysis_custom_commands', {
-    p_article_id: article.id,
-    p_requested_by: requestedBy,
-    p_command_ids: normalizedIds,
-  });
-  if (preferenceError) throw preferenceError;
-
   // The legacy engineering coordinator always links a semantic prerequisite,
   // even when the selected command does not consume keyword output directly.
   // Queueing it explicitly as manual keeps an intentional user request
@@ -417,8 +410,13 @@ const enqueueEngineeringJobs = async (
     if (semanticError) throw semanticError;
   }
   const { data: enqueuedIds, error: enqueueError } = await supabase.rpc(
-    'enqueue_external_engineering_jobs',
-    { p_article_id: article.id },
+    'set_external_analysis_custom_commands_controlled',
+    {
+      p_article_id: article.id,
+      p_requested_by: requestedBy,
+      p_command_ids: normalizedIds,
+      p_origin: 'manual',
+    },
   );
   if (enqueueError) throw enqueueError;
   const jobIds = uniqueStrings(Array.isArray(enqueuedIds) ? enqueuedIds.map(String) : []);
@@ -493,9 +491,10 @@ const useDefaultEngineeringCommands = async (
     },
   );
   if (semanticError) throw semanticError;
-  const { data, error } = await supabase.rpc('reset_external_analysis_command_preferences', {
+  const { data, error } = await supabase.rpc('reset_external_analysis_command_preferences_controlled', {
     p_article_id: articleId,
     p_requested_by: requestedBy,
+    p_origin: 'manual',
   });
   if (error) throw error;
   return {

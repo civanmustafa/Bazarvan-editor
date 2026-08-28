@@ -40,10 +40,14 @@ test('Hostinger schema scripts and guide track concurrent editing and meta-descr
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-89/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-89/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-90/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-90/);
   assert.match(guide, /20260827030000_content_research_automation_settings\.sql/);
   assert.match(guide, /20260828010000_concurrent_editing_and_meta_description\.sql/);
+  assert.match(guide, /20260828020000_automatic_ready_engineering_commands\.sql/);
   assert.match(verifyScript, /META_DESCRIPTION_COLUMNS/);
   assert.match(verifyScript, /CONCURRENT_SAVE_FUNCTION/);
+  assert.match(verifyScript, /READY_ENGINEERING_CONTROLLED_FUNCTION/);
+  assert.match(verifyScript, /READY_ENGINEERING_TRIGGER/);
+  assert.match(verifyScript, /READY_ENGINEERING_SETTING/);
 });

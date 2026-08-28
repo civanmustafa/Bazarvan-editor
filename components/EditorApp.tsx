@@ -159,13 +159,13 @@ const EditorView: React.FC = () => {
             onToggleFocusMode={toggleFocusMode}
           />
           <ConcurrentEditConflictBanner />
-          <MetaDescriptionField />
           <div
             ref={scrollContainerRef}
             data-bazarvan-editor-panel="true"
             className="relative flex-grow overflow-y-auto custom-scrollbar border-t border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F]"
           >
-            <EditorContent editor={editor} />
+            <EditorContent editor={editor} className="min-h-full" />
+            <MetaDescriptionField />
             {editor && <SelectionToolbar />}
           </div>
           <button

@@ -79,7 +79,7 @@ test('external analysis queue enforces one canonical job and retries by job id',
   assert.match(migration, /where job\.id = v_job\.id\s+returning job\.\* into v_job/);
   assert.match(migration, /v_job_status in \('failed', 'blocked', 'cancelled'\)/);
   assert.match(migration, /v_job\.status = 'completed'/);
-  assert.match(api, /rpc\(\s*'enqueue_external_engineering_jobs'/);
+  assert.match(api, /rpc\(\s*'set_external_analysis_custom_commands_controlled'/);
   assert.match(api, /rpc\(\s*'enqueue_external_semantic_analysis_job_controlled'/);
   assert.match(api, /p_origin:\s*'manual'/);
   assert.doesNotMatch(api, /rpc\(\s*'enqueue_external_semantic_analysis_job'\s*,/);
@@ -130,7 +130,7 @@ test('engineering commands require 101 words while semantic generation remains t
 
   assert.ok(
     api.indexOf("articleWordCount < EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS ? 'editor_text' : ''")
-      < api.indexOf("'enqueue_external_engineering_jobs'"),
+      < api.indexOf("'set_external_analysis_custom_commands_controlled'"),
   );
   assert.match(controls, /const engineeringCanQueue = Boolean\(/);
   assert.doesNotMatch(

@@ -36,7 +36,11 @@ const MetaDescriptionField: React.FC = () => {
       : 'text-amber-700 dark:text-amber-300';
 
   return (
-    <section className="border-b border-gray-200 bg-slate-50 px-3 py-2.5 dark:border-[#3C3C3C] dark:bg-[#202020]" dir="rtl">
+    <section
+      data-bazarvan-meta-description-field="true"
+      className="border-t border-gray-200 bg-slate-50 px-3 py-2.5 dark:border-[#3C3C3C] dark:bg-[#202020]"
+      dir="rtl"
+    >
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex min-w-[170px] items-center gap-2 pt-2">
           <Search size={17} className="text-[#b8922e] dark:text-[#f2d675]" />

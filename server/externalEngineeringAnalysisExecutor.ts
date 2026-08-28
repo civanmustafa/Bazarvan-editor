@@ -36,6 +36,7 @@ import {
   EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS,
   countExternalEngineeringArticleWords,
 } from '../utils/externalAnalysisArticleText';
+import { assertAutomaticReadyEngineeringCommandsAllowed } from './contentResearchAutomationGuard';
 
 type ExternalEngineeringArticleRow = {
   id: string;
@@ -257,6 +258,8 @@ const getJobCommandPosition = (
 const executeExternalEngineeringAnalysis = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
+  await assertAutomaticReadyEngineeringCommandsAllowed(context.job);
+
   // Resolve the template at execution time from the administrator's persisted
   // prompt registry. Never freeze a stale built-in prompt inside a queued job.
   const promptRegistry = await readPromptRegistrySettings();

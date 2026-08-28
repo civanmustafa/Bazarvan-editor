@@ -196,6 +196,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       autoGenerateAlternativeKeywords: false,
       autoGenerateLsiKeywords: false,
       autoDiscoverCompetitors: false,
+      autoRunReadyEngineeringCommands: false,
       autoGenerateMetaDescription: false,
       unknownAutomationSwitch: true,
     },
@@ -229,6 +230,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.system.autoGenerateAlternativeKeywords, false);
   assert.equal(normalized.system.autoGenerateLsiKeywords, false);
   assert.equal(normalized.system.autoDiscoverCompetitors, false);
+  assert.equal(normalized.system.autoRunReadyEngineeringCommands, false);
   assert.equal(normalized.system.autoGenerateMetaDescription, false);
   assert.equal(normalized.system.unknownAutomationSwitch, undefined);
 
@@ -236,18 +238,21 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(defaults.system.autoGenerateAlternativeKeywords, true);
   assert.equal(defaults.system.autoGenerateLsiKeywords, true);
   assert.equal(defaults.system.autoDiscoverCompetitors, true);
+  assert.equal(defaults.system.autoRunReadyEngineeringCommands, true);
   assert.equal(defaults.system.autoGenerateMetaDescription, true);
   const invalidAutomation = registry.normalizeSystemSettingsMap({
     system: {
       autoGenerateAlternativeKeywords: 'yes',
       autoGenerateLsiKeywords: 1,
       autoDiscoverCompetitors: null,
+      autoRunReadyEngineeringCommands: 'yes',
       autoGenerateMetaDescription: 'yes',
     },
   });
   assert.equal(invalidAutomation.system.autoGenerateAlternativeKeywords, true);
   assert.equal(invalidAutomation.system.autoGenerateLsiKeywords, true);
   assert.equal(invalidAutomation.system.autoDiscoverCompetitors, true);
+  assert.equal(invalidAutomation.system.autoRunReadyEngineeringCommands, true);
   assert.equal(invalidAutomation.system.autoGenerateMetaDescription, true);
 });
 
@@ -691,6 +696,7 @@ test('browser, API, and worker consume the shared registries', async () => {
   assert.match(settingsPage, /updateSetting\('system', 'autoGenerateAlternativeKeywords'/);
   assert.match(settingsPage, /updateSetting\('system', 'autoGenerateLsiKeywords'/);
   assert.match(settingsPage, /updateSetting\('system', 'autoDiscoverCompetitors'/);
+  assert.match(settingsPage, /updateSetting\('system', 'autoRunReadyEngineeringCommands'/);
   assert.match(settingsPage, /options=\{GEMINI_PAID_MODEL_OPTIONS\}/);
   assert.doesNotMatch(
     settingsPage,

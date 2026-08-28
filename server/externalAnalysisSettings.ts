@@ -16,6 +16,7 @@ export type ContentResearchAutomationSettings = {
   autoGenerateAlternativeKeywords: boolean;
   autoGenerateLsiKeywords: boolean;
   autoDiscoverCompetitors: boolean;
+  autoRunReadyEngineeringCommands: boolean;
   autoGenerateMetaDescription: boolean;
 };
 
@@ -64,6 +65,7 @@ export const readContentResearchAutomationSettings = async (): Promise<ContentRe
     autoGenerateAlternativeKeywords: system.autoGenerateAlternativeKeywords !== false,
     autoGenerateLsiKeywords: system.autoGenerateLsiKeywords !== false,
     autoDiscoverCompetitors: system.autoDiscoverCompetitors !== false,
+    autoRunReadyEngineeringCommands: system.autoRunReadyEngineeringCommands !== false,
     autoGenerateMetaDescription: system.autoGenerateMetaDescription !== false,
   };
 };
