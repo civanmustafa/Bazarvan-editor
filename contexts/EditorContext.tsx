@@ -899,6 +899,40 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                             return;
                         }
 
+                        // Semantic generation is a background-only update: it writes the
+                        // alternatives, LSI terms, and Google suggestions without raising
+                        // save_count. Apply it to the open article instead of showing a
+                        // false editing conflict, so the suggestions appear as soon as the
+                        // worker has completed them.
+                        const remoteKeywords = normalizeKeywords(row.keywords);
+                        const localKeywords = latestDraftMetaRef.current.keywords;
+                        const hasCompleteGoogleMetadata = (
+                            remoteKeywords.googleTitles.length === 2
+                            && (remoteKeywords.googleDescriptions?.length || 0) === 2
+                        );
+                        const googleMetadataChanged = (
+                            JSON.stringify(remoteKeywords.googleTitles) !== JSON.stringify(localKeywords.googleTitles || [])
+                            || JSON.stringify(remoteKeywords.googleDescriptions) !== JSON.stringify(localKeywords.googleDescriptions || [])
+                        );
+                        const isSemanticTermsOnlyUpdate = Boolean(
+                            hasCompleteGoogleMetadata
+                            && googleMetadataChanged
+                            && serverSaveCount === loadedArticleSaveCountRef.current
+                            && !saveInFlightRef.current
+                        );
+                        if (isSemanticTermsOnlyUpdate) {
+                            setKeywords(current => ({
+                                ...current,
+                                secondaries: remoteKeywords.secondaries,
+                                lsi: remoteKeywords.lsi,
+                                googleTitles: remoteKeywords.googleTitles,
+                                googleDescriptions: remoteKeywords.googleDescriptions,
+                            }));
+                            loadedArticleExpectedLastSavedAtRef.current = serverLastSavedAt;
+                            setConcurrentEditConflict(null);
+                            return;
+                        }
+
                         // A row-level event may arrive just before this tab receives
                         // its own successful save response. The response updates the
                         // authoritative token; only idle saves become visible conflicts.

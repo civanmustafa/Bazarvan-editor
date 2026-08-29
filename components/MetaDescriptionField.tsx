@@ -65,7 +65,7 @@ const MetaDescriptionField: React.FC = () => {
               setSaveMessage('');
               setMetaDescription(event.target.value);
             }}
-            placeholder="سيُكتب تلقائيًا عند تحويل حالة المقالة إلى جاهز، ويمكنك تعديله يدويًا هنا."
+            placeholder="اختر أحد أوصاف Google المقترحة أو اكتب وصف الميتا يدويًا هنا."
             className="block w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900 outline-none transition focus:border-[#d4af37] focus:ring-2 focus:ring-[#d4af37]/20 dark:border-[#4A4A4A] dark:bg-[#181818] dark:text-gray-100"
           />
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-bold">

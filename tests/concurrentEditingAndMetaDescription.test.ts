@@ -162,6 +162,21 @@ test('database save fencing protects every existing-article save and requires an
   assert.match(banner, /اعتماد نسختي الحالية/);
 });
 
+test('background semantic Google suggestions update the open article without a false edit conflict', async () => {
+  const [editor, sidebar, translations] = await Promise.all([
+    readWorkspaceFile('contexts/EditorContext.tsx'),
+    readWorkspaceFile('components/LeftSidebar.tsx'),
+    readWorkspaceFile('components/translations.ts'),
+  ]);
+
+  assert.match(editor, /const remoteKeywords = normalizeKeywords\(row\.keywords\)/);
+  assert.match(editor, /hasCompleteGoogleMetadata/);
+  assert.match(editor, /setKeywords\(current => \(\{[\s\S]*googleTitles: remoteKeywords\.googleTitles,[\s\S]*googleDescriptions: remoteKeywords\.googleDescriptions,/);
+  assert.match(editor, /setConcurrentEditConflict\(null\)/);
+  assert.match(sidebar, /googleMetadataSuggestionsPending/);
+  assert.match(translations, /ستظهر هنا عنوانان ووصفان بعد اكتمال التوليد التلقائي/);
+});
+
 test('manual meta-description tooling remains available while ready-status automation is retired', async () => {
   const [migration, retirement, executor, worker, monitor, bridge, field, settings, ecosystem] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260828010000_concurrent_editing_and_meta_description.sql'),
