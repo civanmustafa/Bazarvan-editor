@@ -38,6 +38,7 @@ import {
   getArticleTrashInfo,
   getRemoteAppSessionById,
   getRemoteArticleById,
+  loadDashboardActivitySummary,
   listRemoteAppActivityEvents,
   listRemoteAppSessions,
   listRemoteArticleVersions,
@@ -45,6 +46,8 @@ import {
   listRemoteN8nIngestLogs,
   listRemoteProfiles,
   loadRemoteArticleSnapshot,
+  type DashboardActivitySummary as DashboardActivitySummaryData,
+  type DashboardActivityUserSummary,
   type RemoteAppActivityEvent,
   type RemoteAppSession,
   type RemoteArticleActivity,
@@ -208,13 +211,6 @@ const getArticleSearchText = (article: RemoteArticleActivity, ownerLabel: string
   ].map(value => String(value || '').toLowerCase()).join(' ');
 };
 
-const getLatestSavedAt = (articles: RemoteArticleActivity[]): string => (
-  articles
-    .map(article => article.lastSaved)
-    .filter(Boolean)
-    .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] || ''
-);
-
 const getArticleCompany = (article: RemoteArticleActivity): string => (
   article.keywords?.company?.trim() || ''
 );
@@ -377,12 +373,11 @@ const ArticleRow: React.FC<{
 
 const UserRow: React.FC<{
   profile: RemoteProfile;
-  articles: RemoteArticleActivity[];
+  summary?: DashboardActivityUserSummary;
   t: typeof translations.ar;
-}> = ({ profile, articles, t }) => {
-  const profileArticles = articles.filter(article => articleBelongsToProfile(article, profile.id));
-  const lastSaved = getLatestSavedAt(profileArticles) || profile.lastSeenAt || '';
-  const totalTime = profileArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
+}> = ({ profile, summary, t }) => {
+  const lastActivityAt = summary?.lastActivityAt || profile.lastSeenAt || '';
+  const lastSeenAt = summary?.lastSeenAt || profile.lastSeenAt || '';
   return (
     <tr
       className="cursor-pointer border-b border-gray-100 hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:hover:bg-[#d4af37]/15"
@@ -397,10 +392,10 @@ const UserRow: React.FC<{
           {profile.role}
         </span>
       </td>
-      <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{profileArticles.length}</td>
-      <td className="px-3 py-3 text-gray-500">{formatSeconds(totalTime, t)}</td>
-      <td className="px-3 py-3 text-gray-500">{lastSaved ? formatIstanbulDateTime(lastSaved, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
-      <td className="px-3 py-3 text-gray-500">{profile.lastSeenAt ? formatIstanbulDateTime(profile.lastSeenAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+      <td className="px-3 py-3 font-bold text-gray-700 dark:text-gray-200">{summary?.articleCount || 0}</td>
+      <td className="px-3 py-3 text-gray-500">{formatSeconds(summary?.totalTimeSeconds || 0, t)}</td>
+      <td className="px-3 py-3 text-gray-500">{lastActivityAt ? formatIstanbulDateTime(lastActivityAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
+      <td className="px-3 py-3 text-gray-500">{lastSeenAt ? formatIstanbulDateTime(lastSeenAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
     </tr>
   );
 };
@@ -1523,6 +1518,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   } = useUser();
   const [articles, setArticles] = useState<RemoteArticleActivity[]>([]);
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
+  const [activitySummary, setActivitySummary] = useState<DashboardActivitySummaryData | null>(null);
   const [logs, setLogs] = useState<RemoteN8nIngestLog[]>([]);
   const [sessions, setSessions] = useState<RemoteAppSession[]>([]);
   const [activityEvents, setActivityEvents] = useState<RemoteAppActivityEvent[]>([]);
@@ -1622,9 +1618,11 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
             };
           })
         : Promise.resolve(null);
-      const [articleRows, profileRows, logRows, sessionRows, activityRows, externalReportRows, contentWritingRows, crawlerProviderRows] = await Promise.all([
+      // Keep one authoritative aggregate engine for both DashboardActivitySummary and مركز المتابعة.
+      const [articleRows, profileRows, dashboardSummary, logRows, sessionRows, activityRows, externalReportRows, contentWritingRows, crawlerProviderRows] = await Promise.all([
         listRemoteArticles(),
         listRemoteProfiles(),
+        loadDashboardActivitySummary(),
         listRemoteN8nIngestLogs(80),
         listRemoteAppSessions(120),
         listRemoteAppActivityEvents({ limit: 1000 }),
@@ -1634,6 +1632,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       ]);
       setArticles(sortArticles(articleRows));
       setProfiles(profileRows);
+      setActivitySummary(dashboardSummary);
       setLogs(logRows);
       setSessions(sessionRows);
       setActivityEvents(activityRows);
@@ -1752,6 +1751,9 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
   const currentProfile = section === 'userDetail' && id
     ? profiles.find(profile => profile.id === id) || null
     : null;
+  const activitySummaryByUserId = useMemo(() => new Map(
+    (activitySummary?.users || []).map(userSummary => [userSummary.id, userSummary]),
+  ), [activitySummary]);
 
   const getOwnerLabel = (article: RemoteArticleActivity): string => {
     const ownerId = getArticleOwnerId(article);
@@ -1889,7 +1891,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
     }
   };
 
-  const totalTime = activeArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
+  const totalTime = activitySummary?.totalTimeSeconds || 0;
   const navActions: AdminAction[] = [
     { label: 'نظرة عامة', icon: <BarChart3 size={16} />, path: '/admin', active: section === 'overview' },
     { label: 'المستخدمون', icon: <Users size={16} />, path: '/admin/users', active: section === 'users' || section === 'userDetail' },
@@ -2096,7 +2098,7 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
               </thead>
               <tbody>
                 {filteredProfiles.map(profile => (
-                  <UserRow key={profile.id} profile={profile} articles={articles} t={t} />
+                  <UserRow key={profile.id} profile={profile} summary={activitySummaryByUserId.get(profile.id)} t={t} />
                 ))}
               </tbody>
             </table>
@@ -2114,7 +2116,8 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       const profileArticles = currentProfile ? filteredArticles.filter(article => articleBelongsToProfile(article, currentProfile.id)) : [];
       const reservedArticles = currentProfile ? allProfileArticles.filter(article => article.assignedTo === currentProfile.id) : [];
       const profileN8nArticles = allProfileArticles.filter(article => article.source === 'n8n');
-      const profileTime = allProfileArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
+      const profileSummary = currentProfile ? activitySummaryByUserId.get(currentProfile.id) : undefined;
+      const profileLastActivityAt = profileSummary?.lastActivityAt || currentProfile?.lastSeenAt || '';
       return (
         <div className="space-y-6">
           <div className="border-b border-gray-200 pb-5 dark:border-[#3C3C3C]">
@@ -2123,11 +2126,11 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
             <p className="mt-1 text-sm font-semibold text-gray-500 dark:text-gray-400">{currentProfile?.email || '-'}</p>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
-            <AdminStat icon={<BookOpen size={18} />} label="كل المقالات" value={profileArticles.length} />
+            <AdminStat icon={<BookOpen size={18} />} label="كل المقالات" value={profileSummary?.articleCount || 0} />
             <AdminStat icon={<Shield size={18} />} label="محجوزة له" value={reservedArticles.length} />
             <AdminStat icon={<Workflow size={18} />} label="مرتبطة بـ n8n" value={profileN8nArticles.length} />
-            <AdminStat icon={<Clock size={18} />} label="الوقت" value={formatSeconds(profileTime, t)} />
-            <AdminStat icon={<Calendar size={18} />} label="آخر نشاط" value={currentProfile?.lastSeenAt ? formatIstanbulDateTime(currentProfile.lastSeenAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'} />
+            <AdminStat icon={<Clock size={18} />} label="الوقت" value={formatSeconds(profileSummary?.totalTimeSeconds || 0, t)} />
+            <AdminStat icon={<Calendar size={18} />} label="آخر نشاط" value={profileLastActivityAt ? formatIstanbulDateTime(profileLastActivityAt, t.locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-'} />
           </div>
           {currentProfile && (
             <section>
@@ -2220,9 +2223,9 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
       return (
         <div className="space-y-6">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
-            <AdminStat icon={<BookOpen size={18} />} label="المقالات النشطة" value={activeArticles.length} />
+            <AdminStat icon={<BookOpen size={18} />} label="المقالات النشطة" value={activitySummary?.totalArticles || 0} />
             <AdminStat icon={<Trash2 size={18} />} label="في السلة" value={trashedArticles.length} />
-            <AdminStat icon={<Users size={18} />} label="المستخدمون" value={profiles.length} />
+            <AdminStat icon={<Users size={18} />} label="المستخدمون" value={activitySummary?.totalUsers || 0} />
             <AdminStat icon={<Workflow size={18} />} label="n8n" value={n8nArticles.length} />
             <AdminStat icon={<Clock size={18} />} label="وقت التحرير" value={formatSeconds(totalTime, t)} />
           </div>

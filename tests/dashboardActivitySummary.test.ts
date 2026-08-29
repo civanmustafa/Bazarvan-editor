@@ -50,6 +50,24 @@ test('activity summary exposes global status and per-user article/time metrics',
   assert.match(migration, /'users'/);
 });
 
+test('dashboard and monitoring center use the same activity summary engine', async () => {
+  const [dashboard, admin, client] = await Promise.all([
+    readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('components/AdminApp.tsx'),
+    readWorkspaceFile('utils/supabaseArticles.ts'),
+  ]);
+
+  assert.match(dashboard, /loadDashboardActivitySummary\(\)/);
+  assert.match(admin, /loadDashboardActivitySummary\(\)/);
+  assert.match(admin, /activitySummaryByUserId\.get\(profile\.id\)/);
+  assert.match(admin, /summary\?\.articleCount/);
+  assert.match(admin, /summary\?\.totalTimeSeconds/);
+  assert.match(admin, /summary\?\.lastSeenAt/);
+  assert.doesNotMatch(admin, /<UserRow[^>]+articles=/);
+  assert.doesNotMatch(admin, /profileArticles\.reduce\(\(sum, article\) => sum \+ article\.timeSpentSeconds/);
+  assert.equal((client.match(/rpc\('get_dashboard_activity_summary'\)/g) || []).length, 1);
+});
+
 test('HTML export and recoverable data clearing live in settings', async () => {
   const [settings, tools] = await Promise.all([
     readWorkspaceFile('components/SettingsPage.tsx'),
