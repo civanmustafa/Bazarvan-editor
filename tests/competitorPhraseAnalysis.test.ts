@@ -396,7 +396,8 @@ test('competitor phrase sections stay inside each card and the shared section st
   assert.match(intelligencePanel, /#d4af37/);
   assert.doesNotMatch(intelligencePanel, /violet|sky-/);
   assert.match(source, /articleLanguage=\{articleLanguage\}/);
-  assert.match(source, /locale=\{articleLanguage === 'ar' \? 'ar' : t\.locale\}/);
+  assert.match(source, /locale=\{competitorLocale\}/);
+  assert.match(source, /const competitorIsArabic = true/);
   assert.match(intelligencePanel, /item\.containedPhrases/);
   assert.match(contentWritingEngine, /wordCount: countContentWritingTargetWords\(competitor\.content\)/);
   assert.match(contentWritingEngine, /manualRange: normalizedGoalContext\.targetWordRange/);

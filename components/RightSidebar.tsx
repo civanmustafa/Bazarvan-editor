@@ -830,6 +830,47 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
     const tRs = t.rightSidebar;
+    // The competitors tab is intentionally Arabic regardless of the article
+    // or shell locale. Competitor-page content remains in its original language.
+    const competitorIsArabic = true;
+    const competitorLocale = 'ar';
+    const competitorText = {
+        ...tRs,
+        ...(competitorIsArabic ? {
+            programmaticExtractionPreview: 'معاينة الاستخراج البرمجي',
+            htmlExtractionPreview: 'معاينة استخراج الصفحة',
+            competitorLabel: 'المنافس',
+            competitorUrlPlaceholder: 'أدخل رابط صفحة المنافس',
+            competitorUrlField: 'رابط صفحة المنافس',
+            extractCompetitorWithAiHint: 'استخرج النص الرئيسي من الرابط تلقائيًا',
+            extractingCompetitor: 'جارٍ استخراج المحتوى…',
+            extractCompetitorWithAi: 'استخراج تلقائي',
+            stopProgrammaticExtraction: 'إيقاف الاستخراج',
+            extractCompetitorProgrammaticallyHint: 'استخراج النص من الصفحة برمجيًا',
+            extractCompetitorProgrammatically: 'استخراج برمجي',
+            competitorPlainTextPlaceholder: 'الصق نص المنافس هنا أو اترك الحقل ليُملأ تلقائيًا بعد السحب',
+            programmaticExtractionSource: 'استخراج برمجي',
+            htmlExtractionSource: 'استخراج من الصفحة',
+            cachedExtraction: 'نتيجة محفوظة مؤقتًا',
+            extractionQuality: 'جودة الاستخراج',
+            extractionPreviewUsageHint: 'هذه معاينة للمراجعة فقط؛ النص المعتمد يظهر في حقل المنافس أعلاه.',
+            pageTableOfContents: 'عناوين الصفحة',
+            noTableOfContents: 'لم تُستخرج عناوين من هذه الصفحة.',
+            manualCompetitorTextSaved: 'تم حفظ نص المنافس.',
+            manualCompetitorTextSaveFailed: 'تعذر حفظ نص المنافس.',
+            competitorApiUnavailable: 'خدمة استخراج محتوى المنافس غير متاحة حاليًا.',
+            competitorExtractionFailed: 'تعذر استخراج محتوى المنافس.',
+            competitorUrlRequired: 'أدخل رابط المنافس أولًا.',
+            programmaticExtractionRunning: 'جارٍ استخراج المحتوى برمجيًا…',
+            programmaticExtractionCacheHit: 'تم استخدام محتوى محفوظ مؤقتًا.',
+            programmaticExtractionSucceeded: 'اكتمل الاستخراج البرمجي.',
+            programmaticExtractionCancelled: 'تم إيقاف الاستخراج البرمجي.',
+            programmaticExtractionUnsafeUrl: 'رابط المنافس غير مسموح أو غير آمن.',
+            programmaticExtractionFallback: 'تعذر الاستخراج البرمجي؛ جارٍ استخدام الاستخراج التلقائي كبديل.',
+            competitorHtmlRequired: 'ألصق محتوى HTML أولًا.',
+        } : {}),
+    };
+    const competitorActionText = competitorText;
     useEffect(() => {
         const currentProviderAvailable = competitorGeminiProvider === 'geminiPaid'
             ? isGeminiPaidAvailable
@@ -1407,7 +1448,7 @@ ${readyCommandCompetitorBlocks}`;
                     status: 'success',
                     source: 'text',
                     error: '',
-                    notice: tRs.manualCompetitorTextSaved,
+                    notice: competitorActionText.manualCompetitorTextSaved,
                 }
                 : item
             ));
@@ -1419,7 +1460,7 @@ ${readyCommandCompetitorBlocks}`;
                     source: 'text',
                     error: error instanceof Error
                         ? error.message
-                        : tRs.manualCompetitorTextSaveFailed,
+                        : competitorActionText.manualCompetitorTextSaveFailed,
                     notice: '',
                 }
                 : item
@@ -1496,7 +1537,7 @@ ${readyCommandCompetitorBlocks}`;
             });
             const { status, data } = engineResult;
             if (status === 404) {
-                throw new Error(tRs.competitorApiUnavailable);
+                throw new Error(competitorActionText.competitorApiUnavailable);
             }
             if (status === 499 || data.cancelled === true) {
                 setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
@@ -1509,12 +1550,12 @@ ${readyCommandCompetitorBlocks}`;
                 return;
             }
             if (status < 200 || status >= 300) {
-                throw new Error(data.error || `${tRs.competitorExtractionFailed} (${status})`);
+                throw new Error(data.error || `${competitorActionText.competitorExtractionFailed} (${status})`);
             }
 
             const parsed = extractJsonFromGeminiText(typeof data.text === 'string' ? data.text : '');
             if (!parsed || typeof parsed !== 'object') {
-                throw new Error(tRs.competitorExtractionFailed);
+                throw new Error(competitorActionText.competitorExtractionFailed);
             }
             if (typeof parsed.error === 'string' && parsed.error.trim()) {
                 throw new Error(parsed.error.trim());
@@ -1538,7 +1579,7 @@ ${readyCommandCompetitorBlocks}`;
                 status: 'error',
                 source,
                 content: null,
-                error: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
+                error: error instanceof Error ? error.message : competitorActionText.competitorExtractionFailed,
                 notice,
             } : item));
         }
@@ -1551,7 +1592,7 @@ ${readyCommandCompetitorBlocks}`;
                 status: 'error',
                 source: 'url',
                 content: null,
-                error: tRs.competitorUrlRequired,
+                error: competitorActionText.competitorUrlRequired,
             } : item));
             return;
         }
@@ -1566,7 +1607,7 @@ ${readyCommandCompetitorBlocks}`;
                 status: 'error',
                 source: 'programmatic',
                 content: null,
-                error: tRs.competitorUrlRequired,
+                error: competitorActionText.competitorUrlRequired,
                 notice: '',
             } : item));
             return;
@@ -1580,7 +1621,7 @@ ${readyCommandCompetitorBlocks}`;
             status: 'loading',
             source: 'programmatic',
             error: '',
-            notice: tRs.programmaticExtractionRunning,
+            notice: competitorActionText.programmaticExtractionRunning,
         } : item));
 
         try {
@@ -1596,8 +1637,8 @@ ${readyCommandCompetitorBlocks}`;
                 content,
                 error: '',
                 notice: extracted.cacheHit
-                    ? tRs.programmaticExtractionCacheHit
-                    : tRs.programmaticExtractionSucceeded,
+                    ? competitorActionText.programmaticExtractionCacheHit
+                    : competitorActionText.programmaticExtractionSucceeded,
             } : item));
         } catch (error) {
             if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
@@ -1606,7 +1647,7 @@ ${readyCommandCompetitorBlocks}`;
                     status: 'idle',
                     source: 'programmatic',
                     error: '',
-                    notice: tRs.programmaticExtractionCancelled,
+                    notice: competitorActionText.programmaticExtractionCancelled,
                 } : item));
                 return;
             }
@@ -1619,13 +1660,13 @@ ${readyCommandCompetitorBlocks}`;
                     status: 'error',
                     source: 'programmatic',
                     content: null,
-                    error: tRs.programmaticExtractionUnsafeUrl,
+                    error: competitorActionText.programmaticExtractionUnsafeUrl,
                     notice: '',
                 } : item));
                 return;
             }
 
-            const fallbackNotice = tRs.programmaticExtractionFallback;
+            const fallbackNotice = competitorActionText.programmaticExtractionFallback;
             setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index ? {
                 status: 'loading',
                 source: 'url',
@@ -1660,7 +1701,7 @@ ${readyCommandCompetitorBlocks}`;
                 status: 'error',
                 source: 'html',
                 content: null,
-                error: tRs.competitorHtmlRequired,
+                error: competitorActionText.competitorHtmlRequired,
             } : item));
             return;
         }
@@ -1688,7 +1729,7 @@ ${readyCommandCompetitorBlocks}`;
                     status: 'error',
                     source: 'html',
                     content: null,
-                    error: error instanceof Error ? error.message : tRs.competitorExtractionFailed,
+                    error: error instanceof Error ? error.message : competitorActionText.competitorExtractionFailed,
                 } : item));
             }
         }, 0);
@@ -2271,7 +2312,15 @@ ${readyCommandCompetitorBlocks}`;
         </div>
     );
 
-    const renderCompetitorsTab = () => (
+    const renderCompetitorsTab = () => {
+        // Shadow the app-wide translation object only inside this tab so all
+        // existing competitor labels follow the article language consistently.
+        const t = {
+            locale: competitorLocale,
+            common: { words: competitorIsArabic ? 'كلمة' : 'words' },
+        };
+        const tRs = competitorText;
+        return (
         <div className="flex h-full flex-col">
             <div className="flex-grow overflow-y-auto custom-scrollbar p-[0.25rem] space-y-[0.25rem]">
                 <CompetitorDiscoveryPanel
@@ -2282,7 +2331,7 @@ ${readyCommandCompetitorBlocks}`;
                     articleLanguage={articleLanguage}
                     goalContext={articleGoalContext}
                     companyName={articleKeywords.company}
-                    locale={t.locale === 'en' ? 'en' : 'ar'}
+                    locale={competitorLocale}
                     onCompetitorsChange={handleDiscoveredCompetitors}
                 />
 
@@ -2373,7 +2422,7 @@ ${readyCommandCompetitorBlocks}`;
                     const isUrlLoading = isLoading && extraction.source === 'url';
                     const isProgrammaticLoading = isLoading && extraction.source === 'programmatic';
                     const isFirecrawlLoading = isLoading && extraction.source === 'firecrawl';
-                    const firecrawlPendingHint = isArabicLocale
+                    const firecrawlPendingHint = competitorIsArabic
                         ? 'هذا الرابط ينتظر عامل سحب المنافسين؛ لم تبدأ خدمة السحب بعد.'
                         : 'This URL is waiting for the competitor extraction worker; the Firecrawl request has not started yet.';
                     const extractionPreviewTitle = extraction.source === 'programmatic'
@@ -2653,12 +2702,12 @@ ${readyCommandCompetitorBlocks}`;
                     <React.Suspense
                         fallback={(
                             <div className="rounded-xl border border-[#d4af37]/30 bg-[#d4af37]/10 p-3 text-xs font-bold text-[#8a6f1d] dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10 dark:text-[#f2d675]">
-                                {articleLanguage === 'ar' || t.locale === 'ar' ? 'جارٍ تجهيز تحليل عبارات المنافسين…' : 'Preparing competitor phrase analysis…'}
+                                {competitorIsArabic ? 'جارٍ تجهيز تحليل عبارات المنافسين…' : 'Preparing competitor phrase analysis…'}
                             </div>
                         )}
                     >
                         <CompetitorPhraseIntelligencePanel
-                            locale={articleLanguage === 'ar' ? 'ar' : t.locale}
+                            locale={competitorLocale}
                             articleLanguage={articleLanguage}
                             sources={competitorStatSources}
                             keywords={articleKeywords}
@@ -2785,7 +2834,8 @@ ${readyCommandCompetitorBlocks}`;
                 </div>
             </div>
         </div>
-    );
+        );
+    };
 
     const sidebarTabs = ([
         {
@@ -2795,7 +2845,7 @@ ${readyCommandCompetitorBlocks}`;
         },
         {
             id: 'competitors',
-            label: t.locale === 'ar' ? 'المنافسون' : 'Competitors',
+            label: competitorIsArabic ? 'المنافسون' : 'Competitors',
             icon: <Users size={18} />,
         },
         {

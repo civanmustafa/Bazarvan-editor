@@ -504,7 +504,8 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.match(sidebar, /extraction\.source === 'firecrawl'/);
   assert.match(sidebar, /source: 'firecrawl'/);
   assert.match(sidebar, /isFirecrawlLoading/);
-  assert.match(sidebar, /const firecrawlPendingHint = isArabicLocale/);
+  assert.match(sidebar, /const firecrawlPendingHint = competitorIsArabic/);
+  assert.match(sidebar, /const competitorLocale = 'ar'/);
   assert.match(sidebar, /لم تبدأ خدمة السحب بعد/);
   assert.doesNotMatch(sidebar, /لم يبدأ استخراج Gemini|Gemini extraction has not started/);
 });
