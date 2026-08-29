@@ -1,7 +1,9 @@
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 import { isAiSettingsEncryptionConfigured } from './adminAiProviderSecrets.ts';
-import { ADMIN_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/adminAiProviderSecrets.ts';
-import { USER_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/userAiProviderSecrets.ts';
+import {
+  PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+  PROVIDER_CREDENTIAL_VAULT_TABLE,
+} from './providerCredentialVault.ts';
 
 type ReadinessProbeResult = {
   error?: {
@@ -24,8 +26,7 @@ export type AdminAiProviderSecretsReadinessResult = {
   requiredMigration: string;
   requiredMigrations: string[];
   checks: {
-    schema: boolean;
-    userSchema: boolean;
+    vaultSchema: boolean;
     encryptionKey: boolean;
   };
   code?: 'admin_ai_provider_secrets_unavailable';
@@ -49,8 +50,7 @@ export const checkAdminAiProviderSecretsReadiness = async (options: {
   }
 
   const checks = {
-    schema: false,
-    userSchema: false,
+    vaultSchema: false,
     encryptionKey: isAiSettingsEncryptionConfigured(),
   };
   const failures: string[] = [];
@@ -58,39 +58,27 @@ export const checkAdminAiProviderSecretsReadiness = async (options: {
     const client = options.client
       || getExternalAnalysisSupabaseAdmin() as unknown as AdminAiProviderSecretsReadinessClient;
     const { error } = await client
-      .from('ai_provider_secrets')
-      .select('provider,enabled,key_suffix,encryption_version')
+      .from(PROVIDER_CREDENTIAL_VAULT_TABLE)
+      .select('id,vault_key,credential_type,provider,owner_user_id,enabled,key_count,key_suffixes,encryption_version')
       .limit(1);
     if (error) {
-      failures.push(`schema: ${error.code || 'unknown'}: ${error.message || 'Unknown Supabase error.'}`);
+      failures.push(`vaultSchema: ${error.code || 'unknown'}: ${error.message || 'Unknown Supabase error.'}`);
     } else {
-      checks.schema = true;
-    }
-    const { error: userSchemaError } = await client
-      .from('user_ai_provider_secrets')
-      .select('user_id,provider,enabled,key_count,key_suffixes,encryption_version')
-      .limit(1);
-    if (userSchemaError) {
-      failures.push(`userSchema: ${userSchemaError.code || 'unknown'}: ${userSchemaError.message || 'Unknown Supabase error.'}`);
-    } else {
-      checks.userSchema = true;
+      checks.vaultSchema = true;
     }
   } catch (error) {
-    failures.push(`schema: ${error instanceof Error ? error.message : String(error)}`);
+    failures.push(`vaultSchema: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (!checks.encryptionKey) {
-    failures.push('encryptionKey: AI_SETTINGS_ENCRYPTION_KEY is missing or invalid.');
+    failures.push('encryptionKey: the provider credential vault master key is missing or invalid.');
   }
 
-  const ok = checks.schema && checks.userSchema && checks.encryptionKey;
+  const ok = checks.vaultSchema && checks.encryptionKey;
   const result: AdminAiProviderSecretsReadinessResult = {
     ok,
     checkedAt: new Date().toISOString(),
-    requiredMigration: USER_AI_PROVIDER_SECRETS_MIGRATION,
-    requiredMigrations: [
-      ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
-      USER_AI_PROVIDER_SECRETS_MIGRATION,
-    ],
+    requiredMigration: PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+    requiredMigrations: [PROVIDER_CREDENTIAL_VAULT_MIGRATION],
     checks,
     ...(!ok ? {
       code: 'admin_ai_provider_secrets_unavailable' as const,

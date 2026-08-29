@@ -24,6 +24,7 @@ import {
   type AiJobJson,
 } from './aiJobService';
 import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
+import { LeaseHeartbeatController } from './leaseHeartbeatController';
 import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 
 const boundedInteger = (
@@ -94,49 +95,6 @@ const asRecord = (value: unknown): AiJobJson => (
     : {}
 );
 
-const startHeartbeat = (
-  job: AiJob,
-  slotWorkerId: string,
-  controller: AbortController,
-): (() => void) => {
-  const intervalMs = Math.min(3_000, Math.max(1_000, Math.floor((leaseSeconds * 1_000) / 4)));
-  let leaseDeadline = Date.now() + (leaseSeconds * 1_000);
-  let stopped = false;
-  let timer: NodeJS.Timeout | null = null;
-
-  const heartbeat = async (): Promise<void> => {
-    if (stopped || controller.signal.aborted) return;
-    try {
-      const state = await heartbeatAiJob(job.id, slotWorkerId, leaseSeconds);
-      if (state.cancelRequested) {
-        controller.abort(new UserCancellationError());
-        return;
-      }
-      if (!state.owned) {
-        controller.abort(new LostLeaseError());
-        return;
-      }
-      leaseDeadline = Date.now() + (leaseSeconds * 1_000);
-    } catch (error) {
-      logThrottledError(`Heartbeat failed for ${job.public_id}`, error);
-      if (Date.now() >= leaseDeadline) {
-        controller.abort(new LostLeaseError());
-        return;
-      }
-    }
-
-    if (!stopped && !controller.signal.aborted) {
-      timer = setTimeout(() => void heartbeat(), intervalMs);
-    }
-  };
-
-  timer = setTimeout(() => void heartbeat(), intervalMs);
-  return () => {
-    stopped = true;
-    if (timer) clearTimeout(timer);
-  };
-};
-
 const recoverStaleJobsIfDue = async (): Promise<void> => {
   const now = Date.now();
   if (now - lastRecoveryAt < recoveryIntervalMs) return;
@@ -158,7 +116,19 @@ const resultError = (body: AiJobJson, status: number): string => (
 const executeClaimedJob = async (job: AiJob, slotWorkerId: string): Promise<void> => {
   const controller = new AbortController();
   activeControllers.set(slotWorkerId, controller);
-  const stopHeartbeat = startHeartbeat(job, slotWorkerId, controller);
+  const stopHeartbeat = new LeaseHeartbeatController({
+    controller,
+    leaseDurationMs: leaseSeconds * 1_000,
+    intervalMs: Math.min(3_000, Math.max(1_000, Math.floor((leaseSeconds * 1_000) / 4))),
+    renewLease: () => heartbeatAiJob(job.id, slotWorkerId, leaseSeconds),
+    resolveAbortReason: state => {
+      if (state.cancelRequested) return new UserCancellationError();
+      if (!state.owned) return new LostLeaseError();
+      return null;
+    },
+    resolveExpiredLeaseReason: () => new LostLeaseError(),
+    onRenewalError: error => logThrottledError(`Heartbeat failed for ${job.public_id}`, error),
+  }).start();
   let latestProgress: AiExecutionProgress | AiJobJson = job.progress || {};
   let progressWrites = Promise.resolve();
   let attemptSequence = 0;

@@ -22,6 +22,7 @@ import { indexCompletedClientPage } from './clientSemanticIndexStore';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import { reserveCrawlerExternalRequest } from './crawlerUsagePolicy';
 import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
+import { LeaseHeartbeatController } from './leaseHeartbeatController';
 import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 
 const boundedInteger = (
@@ -81,49 +82,24 @@ const logThrottledError = (scope: string, error: unknown): void => {
   console.error(`[client-page-crawler] ${message}`);
 };
 
-const startHeartbeat = (
-  job: ClientPageCrawlJob,
-  slotWorkerId: string,
-  controller: AbortController,
-): (() => void) => {
-  let stopped = false;
-  let timer: NodeJS.Timeout | null = null;
-  const intervalMs = Math.max(5_000, Math.min(30_000, Math.floor((leaseSeconds * 1_000) / 3)));
-
-  const heartbeat = async (): Promise<void> => {
-    if (stopped || controller.signal.aborted) return;
-    try {
-      const owned = await heartbeatClientPageCrawlJob({
-        jobId: job.id,
-        workerId: slotWorkerId,
-        leaseSeconds,
-      });
-      if (!owned) {
-        controller.abort(new ClientPageCrawlLostLeaseError());
-        return;
-      }
-    } catch (error) {
-      logThrottledError(`Heartbeat failed for ${job.id}`, error);
-    }
-    if (!stopped && !controller.signal.aborted) {
-      timer = setTimeout(() => void heartbeat(), intervalMs);
-    }
-  };
-
-  timer = setTimeout(() => void heartbeat(), intervalMs);
-  return () => {
-    stopped = true;
-    if (timer) clearTimeout(timer);
-  };
-};
-
 const executeClaimedJob = async (
   job: ClientPageCrawlJob,
   slotWorkerId: string,
 ): Promise<void> => {
   const controller = new AbortController();
   activeControllers.set(slotWorkerId, controller);
-  const stopHeartbeat = startHeartbeat(job, slotWorkerId, controller);
+  const stopHeartbeat = new LeaseHeartbeatController({
+    controller,
+    leaseDurationMs: leaseSeconds * 1_000,
+    intervalMs: Math.max(5_000, Math.min(30_000, Math.floor((leaseSeconds * 1_000) / 3))),
+    renewLease: () => heartbeatClientPageCrawlJob({
+      jobId: job.id,
+      workerId: slotWorkerId,
+      leaseSeconds,
+    }),
+    resolveAbortReason: owned => owned ? null : new ClientPageCrawlLostLeaseError(),
+    onRenewalError: error => logThrottledError(`Heartbeat failed for ${job.id}`, error),
+  }).start();
 
   try {
     const input = await getClientPageCrawlInput(job);

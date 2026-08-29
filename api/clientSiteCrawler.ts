@@ -18,7 +18,7 @@ import {
 import {
   normalizeClientSiteCrawlProvider,
 } from '../constants/crawlerProviders';
-import { readCrawlerProviderSecretsOverview } from '../server/crawlerProviderSecrets';
+import { resolveCrawlerProviderCredential } from '../server/crawlerProviderSecrets';
 import {
   readCrawlerProviderMonthlyUsage,
   readCrawlerUsagePolicy,
@@ -123,8 +123,15 @@ const listCrawlState = async (
   supabase: SupabaseAdmin,
   clientId: string,
   includeLinks: boolean,
+  userId: string,
 ): Promise<ApiResult> => {
-  const [runsResult, linksCountResult, providerOverview, usagePolicy] = await Promise.all([
+  const [
+    runsResult,
+    linksCountResult,
+    firecrawlCredential,
+    browserlessCredential,
+    usagePolicy,
+  ] = await Promise.all([
     supabase
       .from('client_site_crawl_runs')
       .select('id,client_id,started_by,start_url,status,provider,max_pages,max_depth,follow_nofollow,pages_discovered,pages_queued,pages_completed,pages_failed,pages_reused,external_requests_used,max_external_requests,external_reuse_days,force_external_refresh,limit_reached,started_at,finished_at,created_at,updated_at')
@@ -136,7 +143,8 @@ const listCrawlState = async (
       .select('id', { count: 'exact', head: true })
       .eq('client_id', clientId)
       .eq('is_active', true),
-    readCrawlerProviderSecretsOverview(),
+    resolveCrawlerProviderCredential('firecrawl', userId),
+    resolveCrawlerProviderCredential('browserless', userId),
     readCrawlerUsagePolicy(),
   ]);
   if (runsResult.error) throw runsResult.error;
@@ -164,8 +172,8 @@ const listCrawlState = async (
       providerAvailability: {
         auto: true,
         local: true,
-        firecrawl: providerOverview.providers.firecrawl.effectiveConfigured,
-        browserless: providerOverview.providers.browserless.effectiveConfigured,
+        firecrawl: Boolean(firecrawlCredential),
+        browserless: Boolean(browserlessCredential),
       },
       usagePolicy,
       monthlyUsage: await readCrawlerProviderMonthlyUsage(usagePolicy),
@@ -386,10 +394,10 @@ const startCrawl = async (
   }
   const usagePolicy = await readCrawlerUsagePolicy();
   if (provider === 'firecrawl' || provider === 'browserless') {
-    const overview = await readCrawlerProviderSecretsOverview();
-    if (!overview.providers[provider].effectiveConfigured) {
+    const credential = await resolveCrawlerProviderCredential(provider, userId);
+    if (!credential) {
       throw new ClientSiteCrawlerApiError(
-        `${provider} is not configured by an administrator.`,
+        `${provider} has no credential available for this user.`,
         409,
         'crawler_provider_not_configured',
       );
@@ -497,6 +505,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
       supabase,
       clientId,
       url.searchParams.get('includeLinks') === 'true',
+      principal.userId,
     );
     return { ...result, headers: getCorsResponseHeaders(req) };
   }

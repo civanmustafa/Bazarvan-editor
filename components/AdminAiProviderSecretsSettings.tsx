@@ -22,21 +22,18 @@ const PROVIDERS: Array<{
   id: AdminAiSecretProvider;
   title: string;
   description: string;
-  fallbackLabel: string;
   providerFallbackLabel: string;
 }> = [
   {
     id: 'openai_latest',
     title: 'مفتاح OpenAI (ChatGPT API) لأحدث الموديلات',
-    description: 'عند تفعيله يبدأ كل طلب OpenAI بهذا المفتاح. إذا فشل بسبب المفتاح أو الحصة أو الفوترة أو المهلة، يجرب النظام مفاتيح OpenAI في Hostinger تلقائيًا.',
-    fallbackLabel: 'مفاتيح OpenAI في Hostinger',
+    description: 'يُحفظ هذا المفتاح داخل خزنة المزودات المشفّرة. عند إنشائه أول مرة يُعيّن للجميع، ويمكن للمسؤول تغيير التعيين والصلاحيات من قسم السياسة العامة ومفاتيح المزودات المعيّنة.',
     providerFallbackLabel: 'بعد نفاد مفاتيح OpenAI: Gemini Pro ثم Gemini المجاني، إذا كانا مسموحين ومهيأين.',
   },
   {
     id: 'gemini_latest',
     title: 'مفتاح Gemini لأحدث الموديلات',
-    description: 'عند تفعيله يبدأ كل طلب Gemini Pro بهذا المفتاح. إذا فشل بسبب المفتاح أو الحصة أو الفوترة أو المهلة، يجرب النظام مفاتيح Gemini المدفوعة في Hostinger تلقائيًا.',
-    fallbackLabel: 'مفاتيح Gemini المدفوعة في Hostinger',
+    description: 'يُحفظ هذا المفتاح داخل خزنة المزودات المشفّرة. عند إنشائه أول مرة يُعيّن للجميع، ويمكن للمسؤول تغيير التعيين والصلاحيات من قسم السياسة العامة ومفاتيح المزودات المعيّنة.',
     providerFallbackLabel: 'بعد نفاد مفاتيح Gemini Pro: ينتقل إلى Gemini المجاني، إذا كان مسموحًا ومهيأً.',
   },
 ];
@@ -47,10 +44,6 @@ const EMPTY_STATUS = (provider: AdminAiSecretProvider): AdminAiProviderSecretSta
   enabled: false,
   keySuffix: null,
   updatedAt: null,
-  fallbackConfigured: false,
-  fallbackKeyCount: 0,
-  effectiveConfigured: false,
-  activeSource: 'hostinger',
 });
 
 const AdminAiProviderSecretsSettings: React.FC = () => {
@@ -131,16 +124,16 @@ const AdminAiProviderSecretsSettings: React.FC = () => {
       () => setAdminAiProviderSecretEnabled(provider, enabled),
       enabled
         ? 'تم تفعيل المفتاح الإداري.'
-        : 'تم تعطيل المفتاح الإداري والعودة إلى مفاتيح Hostinger.',
+        : 'تم تعطيل المفتاح الإداري، ولن يُستخدم إلا بعد تفعيله مجددًا.',
     );
   };
 
   const handleClear = (provider: AdminAiSecretProvider) => {
-    if (!window.confirm('هل تريد حذف المفتاح الإداري والعودة إلى مفاتيح Hostinger؟')) return;
+    if (!window.confirm('هل تريد حذف المفتاح الإداري المشفّر وتعييناته؟')) return;
     void runMutation(
       provider,
       () => clearAdminAiProviderSecret(provider),
-      'تم حذف المفتاح الإداري والعودة إلى مفاتيح Hostinger.',
+      'تم حذف المفتاح الإداري المشفّر وتعييناته.',
     );
   };
 
@@ -158,8 +151,8 @@ const AdminAiProviderSecretsSettings: React.FC = () => {
       {(!overview?.schemaAvailable || !overview?.encryptionConfigured) && (
         <div className="border-r-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
           {!overview?.schemaAvailable
-            ? 'طبّق migration الخاص بمفاتيح الأدمن قبل الحفظ.'
-            : 'أضف AI_SETTINGS_ENCRYPTION_KEY إلى بيئة Hostinger ثم أعد تشغيل PM2.'}
+            ? 'طبّق ترحيل خزنة مفاتيح المزودات قبل الحفظ.'
+            : 'مفتاح التشفير الرئيسي لخزنة المزودات غير مهيأ على الخادم.'}
         </div>
       )}
       {error && <div className="text-sm font-bold text-red-700 dark:text-red-300">{error}</div>}
@@ -187,12 +180,9 @@ const AdminAiProviderSecretsSettings: React.FC = () => {
                   {definition.providerFallbackLabel}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-gray-500 dark:text-gray-300">
-                  <span>{status.configured ? `محفوظ: ••••${status.keySuffix}` : 'لا يوجد مفتاح إداري محفوظ'}</span>
-                  <span>{definition.fallbackLabel}: {status.fallbackKeyCount || 0}</span>
-                  <span className={status.effectiveConfigured ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}>
-                    ترتيب المفاتيح: {status.enabled
-                      ? `المفتاح الإداري${status.fallbackKeyCount > 0 ? ' ← Hostinger عند الفشل' : ''}`
-                      : 'Hostinger'}
+                  <span>{status.configured ? `محفوظ في الخزنة: ••••${status.keySuffix}` : 'لا يوجد مفتاح إداري محفوظ في الخزنة'}</span>
+                  <span className={status.enabled ? 'text-green-700 dark:text-green-300' : 'text-gray-500 dark:text-gray-400'}>
+                    الحالة: {status.enabled ? 'مفعّل' : 'معطّل'}
                   </span>
                 </div>
               </div>

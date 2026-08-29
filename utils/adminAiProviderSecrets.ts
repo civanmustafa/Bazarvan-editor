@@ -9,10 +9,6 @@ export type AdminAiProviderSecretStatus = {
   enabled: boolean;
   keySuffix: string | null;
   updatedAt: string | null;
-  fallbackConfigured: boolean;
-  fallbackKeyCount: number;
-  effectiveConfigured: boolean;
-  activeSource: 'admin' | 'hostinger';
 };
 
 export type AdminAiProviderSecretsResponse = {

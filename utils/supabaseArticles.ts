@@ -1322,45 +1322,11 @@ const updateRemoteArticleStatus = async (
 ): Promise<RemoteArticleActivity> => {
   const supabase = getSupabaseClient();
 
-  try {
-    const { error: rpcError } = await supabase.rpc('update_article_dashboard_status', {
-      target_article_id: articleId,
-      next_status: status,
-    });
-
-    if (rpcError) throw rpcError;
-  } catch (error: any) {
-    if (error?.code !== 'PGRST202') throw error;
-
-    const { data: currentRow, error: readError } = await supabase
-      .from('articles')
-      .select('metadata')
-      .eq('id', articleId)
-      .single();
-
-    if (readError) throw readError;
-
-    const currentMetadata = isRecord((currentRow as any)?.metadata) ? (currentRow as any).metadata : {};
-    const currentSettings = isRecord(currentMetadata.n8nSettings) ? currentMetadata.n8nSettings : {};
-    const nextMetadataBase = shouldClearArticleAiResults(status)
-      ? withoutAiResultsMetadata(currentMetadata)
-      : currentMetadata;
-    const { error: updateError } = await supabase
-      .from('articles')
-      .update({
-        status,
-        metadata: {
-          ...nextMetadataBase,
-          n8nSettings: {
-            ...currentSettings,
-            status,
-          },
-        },
-      })
-      .eq('id', articleId);
-
-    if (updateError) throw updateError;
-  }
+  const { error: rpcError } = await supabase.rpc('update_article_dashboard_status', {
+    target_article_id: articleId,
+    next_status: status,
+  });
+  if (rpcError) throw rpcError;
 
   if (shouldClearArticleAiResults(status)) {
     await clearRemoteArticleAiResults(articleId).catch(error => {
@@ -1512,7 +1478,7 @@ const getCurrentArticleMetadata = async (articleId: string): Promise<Record<stri
   return isRecord((data as any)?.metadata) ? (data as any).metadata : {};
 };
 
-const updateArticleMetadataFallback = async (
+const updateArticleMetadata = async (
   articleId: string,
   metadata: Record<string, any>,
 ): Promise<void> => {
@@ -1528,7 +1494,7 @@ const updateArticleMetadataFallback = async (
 export const clearRemoteArticleAiResults = async (articleId: string): Promise<void> => {
   const metadata = await getCurrentArticleMetadata(articleId);
   if (!isRecord(metadata.aiResults)) return;
-  await updateArticleMetadataFallback(articleId, withoutAiResultsMetadata(metadata));
+  await updateArticleMetadata(articleId, withoutAiResultsMetadata(metadata));
 };
 
 export type AssignedArticleAutomationResult = {
@@ -1567,119 +1533,33 @@ export const triggerAssignedArticleAutomation = async (
   return payload as AssignedArticleAutomationResult;
 };
 
-const getCurrentUserTrashContext = async (): Promise<{ userId: string; isAdmin: boolean }> => {
-  const supabase = getSupabaseClient();
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user?.id) {
-    throw userError || new Error('Authentication is required.');
-  }
-
-  const { data: isAdminData } = await supabase.rpc('is_admin');
-  return {
-    userId: userData.user.id,
-    isAdmin: isAdminData === true,
-  };
-};
-
 export const moveRemoteArticleToTrash = async (articleId: string): Promise<RemoteArticleActivity> => {
   const supabase = getSupabaseClient();
-
-  try {
-    const { error } = await supabase.rpc('move_article_to_dashboard_trash', {
-      target_article_id: articleId,
-    });
-    if (error) throw error;
-  } catch (error: any) {
-    if (error?.code !== 'PGRST202') throw error;
-
-    const { userId, isAdmin } = await getCurrentUserTrashContext();
-    const metadata = await getCurrentArticleMetadata(articleId);
-    const trash = isRecord(metadata.trash) ? metadata.trash : {};
-    const deletedAt = new Date().toISOString();
-    const deletedFor = isRecord(trash.deletedFor) ? trash.deletedFor : {};
-
-    await updateArticleMetadataFallback(articleId, {
-      ...metadata,
-      trash: isAdmin
-        ? {
-            ...trash,
-            deletedAt,
-            deletedBy: userId,
-            deletedScope: 'global',
-          }
-        : {
-            ...trash,
-            deletedFor: {
-              ...deletedFor,
-              [userId]: {
-                deletedAt,
-                deletedBy: userId,
-                deletedScope: 'user',
-              },
-            },
-          },
-    });
-  }
+  const { error } = await supabase.rpc('move_article_to_dashboard_trash', {
+    target_article_id: articleId,
+  });
+  if (error) throw error;
 
   return getRemoteArticleById(articleId);
 };
 
 export const restoreRemoteArticleFromTrash = async (articleId: string): Promise<RemoteArticleActivity> => {
   const supabase = getSupabaseClient();
-
-  try {
-    const { error } = await supabase.rpc('restore_article_from_dashboard_trash', {
-      target_article_id: articleId,
-    });
-    if (error) throw error;
-  } catch (error: any) {
-    if (error?.code !== 'PGRST202') throw error;
-
-    const { userId, isAdmin } = await getCurrentUserTrashContext();
-    const metadata = await getCurrentArticleMetadata(articleId);
-    const trash = isRecord(metadata.trash) ? metadata.trash : {};
-
-    if (isAdmin) {
-      const {
-        deletedAt: _deletedAt,
-        deletedBy: _deletedBy,
-        deletedScope: _deletedScope,
-        ...restTrash
-      } = trash;
-      const nextMetadata = Object.keys(restTrash).length > 0
-        ? { ...metadata, trash: restTrash }
-        : Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'trash'));
-      await updateArticleMetadataFallback(articleId, nextMetadata);
-    } else {
-      const deletedFor = isRecord(trash.deletedFor) ? trash.deletedFor : {};
-      const nextDeletedFor = Object.fromEntries(
-        Object.entries(deletedFor).filter(([deletedUserId]) => deletedUserId !== userId),
-      );
-      const nextTrash = Object.keys(nextDeletedFor).length > 0
-        ? { ...trash, deletedFor: nextDeletedFor }
-        : Object.fromEntries(Object.entries(trash).filter(([key]) => key !== 'deletedFor'));
-      const nextMetadata = Object.keys(nextTrash).length > 0
-        ? { ...metadata, trash: nextTrash }
-        : Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'trash'));
-      await updateArticleMetadataFallback(articleId, nextMetadata);
-    }
-  }
+  const { error } = await supabase.rpc('restore_article_from_dashboard_trash', {
+    target_article_id: articleId,
+  });
+  if (error) throw error;
 
   return getRemoteArticleById(articleId);
 };
 
 export const purgeExpiredRemoteArticleTrash = async (retentionDays = 30): Promise<number> => {
   const supabase = getSupabaseClient();
-  try {
-    const { data, error } = await supabase.rpc('purge_expired_dashboard_trash', {
-      retention_days: retentionDays,
-    });
-    if (error) throw error;
-    return typeof data === 'number' ? data : 0;
-  } catch (error: any) {
-    if (error?.code === 'PGRST202') return 0;
-    throw error;
-  }
+  const { data, error } = await supabase.rpc('purge_expired_dashboard_trash', {
+    retention_days: retentionDays,
+  });
+  if (error) throw error;
+  return typeof data === 'number' ? data : 0;
 };
 
 export const saveRemoteArticleAiResult = async (
@@ -1699,7 +1579,7 @@ export const saveRemoteArticleAiResult = async (
     savedAt,
   };
 
-  await updateArticleMetadataFallback(articleId, {
+  await updateArticleMetadata(articleId, {
     ...metadata,
     aiResults: {
       ...aiResults,
@@ -1733,25 +1613,5 @@ export const recordRemoteArticleTime = async (articleId: string, seconds: number
     p_article_id: articleId,
     p_seconds: timeDelta,
   });
-
-  if (!rpcError) return;
-  if (!['PGRST202', '42883'].includes(String(rpcError.code || ''))) throw rpcError;
-
-  // Compatibility fallback while a deployment is between the application update
-  // and its migration. It is removed from the normal path as soon as the RPC exists.
-  const { data, error: readError } = await supabase
-    .from('articles')
-    .select('time_spent_seconds')
-    .eq('id', articleId)
-    .single();
-
-  if (readError) throw readError;
-
-  const nextSeconds = (toNumber((data as any)?.time_spent_seconds) || 0) + timeDelta;
-  const { error } = await supabase
-    .from('articles')
-    .update({ time_spent_seconds: nextSeconds })
-    .eq('id', articleId);
-
-  if (error) throw error;
+  if (rpcError) throw rpcError;
 };

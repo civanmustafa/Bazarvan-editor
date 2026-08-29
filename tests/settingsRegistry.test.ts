@@ -19,6 +19,10 @@ import {
   isExternalAnalysisArticleStatus,
   normalizeArticleStatus,
 } from '../constants/articleStatuses.ts';
+import {
+  hasPromptTemplateVariable,
+  renderPromptTemplateVariables,
+} from '../constants/promptTemplateRenderer.ts';
 
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
@@ -344,6 +348,43 @@ test('PromptRegistry keeps Arabic defaults, required attachments, and valid admi
     /المفرد في بعض الصيغ والجمع في صيغ أخرى/,
   );
   assert.match(registry.DEFAULT_PROMPT_TEMPLATES[semanticDefinition.id], /«أفضل» و«أحسن»/);
+});
+
+test('one prompt renderer supports current and saved legacy placeholder syntax', async () => {
+  const registry = await importPromptRegistry();
+  const mixedTemplate = 'العنوان: {{ title }}\nالنص القديم: ${title}\nالقيمة: {{value}}';
+  const variables = { title: 'اختبار', value: 0 };
+
+  assert.equal(
+    renderPromptTemplateVariables(mixedTemplate, variables),
+    'العنوان: اختبار\nالنص القديم: اختبار\nالقيمة: 0',
+  );
+  assert.equal(registry.renderPromptTemplate(mixedTemplate, variables), (
+    renderPromptTemplateVariables(mixedTemplate, variables)
+  ));
+  assert.equal(hasPromptTemplateVariable(mixedTemplate, 'title'), true);
+  assert.equal(
+    renderPromptTemplateVariables('{{article}} / {{keyword}}', {
+      article: 'نص يتضمن {{keyword}} كما كتبه المستخدم',
+      keyword: 'قيمة مستقلة',
+    }),
+    'نص يتضمن {{keyword}} كما كتبه المستخدم / قيمة مستقلة',
+  );
+
+  const outlineDefinition = registry.PROMPT_REGISTRY_DEFINITIONS.find(
+    (item: { id: string }) => item.id === registry.PROMPT_TEMPLATE_IDS.outline,
+  );
+  assert.ok(outlineDefinition);
+  const savedLegacyTemplate = outlineDefinition.requiredVariables
+    .map((variable: string) => `\${${variable}}`)
+    .join('\n');
+  assert.equal(registry.inspectPromptTemplate(outlineDefinition, savedLegacyTemplate).valid, true);
+  assert.equal(
+    registry.normalizePromptRegistrySettings({
+      templates: { [outlineDefinition.id]: savedLegacyTemplate },
+    }).templates[outlineDefinition.id],
+    savedLegacyTemplate,
+  );
 });
 
 test('semantic keyword policy preserves numbers, places, and nationalities deterministically', async () => {

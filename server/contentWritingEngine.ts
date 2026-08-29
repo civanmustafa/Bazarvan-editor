@@ -28,10 +28,7 @@ import {
 import {
   buildContentWritingPromptBundle,
   estimateContentWritingInputTokens,
-  getContentWritingCompetitorsFromMetadata,
-  normalizeContentWritingCompetitors,
   type ContentWritingArticleInput,
-  type ContentWritingCompetitorInput,
   type ContentWritingPromptBundle,
   type ContentWritingPromptMessage,
 } from '../utils/contentWritingContext';
@@ -65,6 +62,10 @@ import {
   type ContentWritingProvider,
   type ContentWritingSession,
 } from './contentWritingSessionService';
+import {
+  readManagedArticleCompetitorRows,
+  resolveArticleCompetitorRepositorySnapshot,
+} from './articleCompetitorRepository';
 
 type JsonObject = Record<string, unknown>;
 
@@ -79,16 +80,6 @@ type ArticleRow = {
   metadata: unknown;
   article_language: string | null;
   updated_at: string;
-};
-
-type CompetitorRow = {
-  id: string;
-  position: number;
-  source_url: string | null;
-  canonical_url: string | null;
-  title: string | null;
-  content_text: string | null;
-  status: string;
 };
 
 export class ContentWritingEngineError extends Error {
@@ -217,14 +208,9 @@ const readArticleInput = async (articleId: string): Promise<{
       .select('id,title,plain_text,content_json,content_html,keywords,goal_context,metadata,article_language,updated_at')
       .eq('id', articleId)
       .maybeSingle(),
-    supabase
-      .from('article_competitors')
-      .select('id,position,source_url,canonical_url,title,content_text,status')
-      .eq('article_id', articleId)
-      .order('position', { ascending: true }),
+    readManagedArticleCompetitorRows(articleId),
   ]);
   if (articleResult.error) throw articleResult.error;
-  if (competitorResult.error) throw competitorResult.error;
   if (!articleResult.data) {
     throw new ContentWritingEngineError({
       message: 'Article was not found.',
@@ -234,34 +220,9 @@ const readArticleInput = async (articleId: string): Promise<{
   }
 
   const article = articleResult.data as ArticleRow;
-  const metadataCompetitors = getContentWritingCompetitorsFromMetadata(article.metadata);
-  const databaseCompetitors = normalizeContentWritingCompetitors(
-    ((competitorResult.data || []) as CompetitorRow[])
-      .filter(row => row.status === 'completed' && Boolean(toText(row.content_text)))
-      .map(row => ({
-        id: row.id,
-        position: row.position,
-        title: row.title || '',
-        url: row.canonical_url || row.source_url || '',
-        content: row.content_text || '',
-      })),
-  );
-  const competitorsByPosition = new Map<number, ContentWritingCompetitorInput>();
-  databaseCompetitors.forEach((competitor, index) => {
-    competitorsByPosition.set(competitor.position || index + 1, competitor);
-  });
-  metadataCompetitors.forEach((competitor, index) => {
-    const position = competitor.position || index + 1;
-    const databaseCompetitor = competitorsByPosition.get(position);
-    competitorsByPosition.set(position, {
-      ...databaseCompetitor,
-      ...competitor,
-      id: competitor.id || databaseCompetitor?.id,
-      title: competitor.title || databaseCompetitor?.title,
-      url: competitor.url || databaseCompetitor?.url,
-      content: competitor.content || databaseCompetitor?.content || '',
-      position,
-    });
+  const competitorSnapshot = resolveArticleCompetitorRepositorySnapshot({
+    rows: competitorResult,
+    metadata: article.metadata,
   });
 
   return {
@@ -275,8 +236,7 @@ const readArticleInput = async (articleId: string): Promise<{
       articleContentHtml: typeof article.content_html === 'string' ? article.content_html : '',
       keywords: normalizeInputRecord(article.keywords),
       goalContext: normalizeInputRecord(article.goal_context),
-      competitors: Array.from(competitorsByPosition.values())
-        .sort((left, right) => (left.position || 0) - (right.position || 0)),
+      competitors: competitorSnapshot.competitors,
     },
   };
 };
@@ -305,7 +265,7 @@ const selectProviderModel = async (
   }
   if (!capability.configured) {
     throw new ContentWritingEngineError({
-      message: `${provider} is enabled but no server API key is configured.`,
+      message: `${provider} is enabled but no permitted credential exists in the dashboard vault.`,
       status: 503,
       code: 'AI_PROVIDER_NOT_CONFIGURED',
       details: { provider },

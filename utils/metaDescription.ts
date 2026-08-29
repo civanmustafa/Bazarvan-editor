@@ -1,3 +1,5 @@
+import { renderPromptTemplateVariables } from '../constants/promptTemplateRenderer.ts';
+
 export const META_DESCRIPTION_MIN_LENGTH = 140;
 export const META_DESCRIPTION_MAX_LENGTH = 150;
 
@@ -10,6 +12,35 @@ export type MetaDescriptionValidation = {
 };
 
 export type MetaDescriptionSuggestionPair = [string, string];
+
+export const META_DESCRIPTION_GENERATION_MAX_ATTEMPTS = 2;
+
+export type MetaDescriptionGenerationMode = 'automatic_apply' | 'writing_suggestions';
+
+export type MetaDescriptionGenerationPromptInput =
+  | {
+      mode: 'automatic_apply';
+      title: string;
+      primaryKeyword: string;
+      articleLanguage: 'ar' | 'en';
+      tableOfContents: string[];
+      goalContext: Record<string, unknown>;
+      previousInvalidResponse?: string;
+    }
+  | {
+      mode: 'writing_suggestions';
+      title: string;
+      primaryKeyword: string;
+      articleLanguage: 'ar' | 'en';
+      finalArticle: string;
+      goalContext: Record<string, unknown>;
+      template?: string;
+      previousInvalidResponse?: string;
+    };
+
+export type ValidMetaDescriptionGeneration =
+  | { mode: 'automatic_apply'; description: string; descriptions: [string] }
+  | { mode: 'writing_suggestions'; descriptions: MetaDescriptionSuggestionPair };
 
 const normalizeForComparison = (value: string): string => value
   .normalize('NFKC')
@@ -206,9 +237,9 @@ export const buildMetaDescriptionSuggestionsPrompt = (input: {
     '{{final_article}}',
     '</final_article>',
   ].join('\n');
-  const rendered = Object.entries(variables).reduce(
-    (result, [key, replacement]) => result.replaceAll(`{{${key}}}`, replacement),
+  const rendered = renderPromptTemplateVariables(
     input.template?.trim() || defaultTemplate,
+    variables,
   );
   const repair = input.previousInvalidResponse?.trim()
     ? [
@@ -221,3 +252,75 @@ export const buildMetaDescriptionSuggestionsPrompt = (input: {
     : '';
   return `${rendered}${repair}`;
 };
+
+/**
+ * One public prompt contract for both product modes. The automatic ready-state
+ * job asks for one directly applicable description, while content writing asks
+ * for two reviewable suggestions. Both retain the same length, keyword, page
+ * goal, grounding, and JSON-only rules.
+ */
+export const buildMetaDescriptionGenerationPrompt = (
+  input: MetaDescriptionGenerationPromptInput,
+): string => input.mode === 'automatic_apply'
+  ? buildMetaDescriptionPrompt({
+      title: input.title,
+      primaryKeyword: input.primaryKeyword,
+      articleLanguage: input.articleLanguage,
+      tableOfContents: input.tableOfContents,
+      goalContext: input.goalContext,
+      previousInvalidDescription: input.previousInvalidResponse,
+    })
+  : buildMetaDescriptionSuggestionsPrompt({
+      title: input.title,
+      primaryKeyword: input.primaryKeyword,
+      articleLanguage: input.articleLanguage,
+      finalArticle: input.finalArticle,
+      goalContext: input.goalContext,
+      template: input.template,
+      previousInvalidResponse: input.previousInvalidResponse,
+    });
+
+/** Validates and normalizes either generation mode through the same policy. */
+export const parseValidMetaDescriptionGeneration = (options: {
+  mode: MetaDescriptionGenerationMode;
+  response: unknown;
+  primaryKeyword: unknown;
+}): ValidMetaDescriptionGeneration | null => {
+  if (options.mode === 'writing_suggestions') {
+    const descriptions = getValidMetaDescriptionSuggestionPair(
+      options.response,
+      options.primaryKeyword,
+    );
+    return descriptions
+      ? { mode: 'writing_suggestions', descriptions }
+      : null;
+  }
+
+  const responseRecord = options.response
+    && typeof options.response === 'object'
+    && !Array.isArray(options.response)
+    ? options.response as Record<string, unknown>
+    : null;
+  const candidate = typeof options.response === 'string'
+    ? parseGeneratedMetaDescription(options.response)
+    : normalizeMetaDescription(
+        responseRecord?.metaDescription
+        ?? responseRecord?.meta_description
+        ?? responseRecord?.description,
+      );
+  const validation = validateMetaDescription(candidate, options.primaryKeyword);
+  return validation.valid
+    ? {
+        mode: 'automatic_apply',
+        description: validation.normalized,
+        descriptions: [validation.normalized],
+      }
+    : null;
+};
+
+export const shouldRetryMetaDescriptionGeneration = (
+  attemptNumber: number,
+): boolean => (
+  Number.isFinite(attemptNumber)
+  && Math.max(0, Math.round(attemptNumber)) < META_DESCRIPTION_GENERATION_MAX_ATTEMPTS
+);

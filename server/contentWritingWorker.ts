@@ -17,6 +17,7 @@ import {
 } from './contentWritingSessionService';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
+import { LeaseHeartbeatController } from './leaseHeartbeatController';
 import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 import { scheduleNextAutomaticContentWritingSession } from './contentWritingAutomation';
 
@@ -80,52 +81,6 @@ const logThrottledError = (scope: string, error: unknown): void => {
   console.error(`[content-writing-worker] ${message}`);
 };
 
-const startHeartbeat = (
-  session: ContentWritingSession,
-  slotWorkerId: string,
-  controller: AbortController,
-): (() => void) => {
-  const intervalMs = Math.min(10_000, Math.max(2_000, Math.floor((leaseSeconds * 1_000) / 4)));
-  let leaseDeadline = Date.now() + (leaseSeconds * 1_000);
-  let stopped = false;
-  let timer: NodeJS.Timeout | null = null;
-
-  const heartbeat = async (): Promise<void> => {
-    if (stopped || controller.signal.aborted) return;
-    try {
-      const state = await heartbeatContentWritingSession({
-        sessionId: session.id,
-        workerId: slotWorkerId,
-        leaseSeconds,
-      });
-      if (state.cancelRequested) {
-        controller.abort(new ContentWritingCancellationError());
-        return;
-      }
-      if (!state.owned) {
-        controller.abort(new ContentWritingLostLeaseError());
-        return;
-      }
-      leaseDeadline = Date.now() + (leaseSeconds * 1_000);
-    } catch (error) {
-      logThrottledError(`Heartbeat failed for ${session.id}`, error);
-      if (Date.now() >= leaseDeadline) {
-        controller.abort(new ContentWritingLostLeaseError());
-        return;
-      }
-    }
-    if (!stopped && !controller.signal.aborted) {
-      timer = setTimeout(() => void heartbeat(), intervalMs);
-    }
-  };
-
-  timer = setTimeout(() => void heartbeat(), intervalMs);
-  return () => {
-    stopped = true;
-    if (timer) clearTimeout(timer);
-  };
-};
-
 const getFailureProgress = (result: ContentWritingExecutionResult): Record<string, unknown> => ({
   stage: 'failed',
   provider: result.metadata.provider,
@@ -141,7 +96,23 @@ const executeClaimedSession = async (
 ): Promise<void> => {
   const controller = new AbortController();
   activeControllers.set(slotWorkerId, controller);
-  const stopHeartbeat = startHeartbeat(session, slotWorkerId, controller);
+  const stopHeartbeat = new LeaseHeartbeatController({
+    controller,
+    leaseDurationMs: leaseSeconds * 1_000,
+    intervalMs: Math.min(10_000, Math.max(2_000, Math.floor((leaseSeconds * 1_000) / 4))),
+    renewLease: () => heartbeatContentWritingSession({
+      sessionId: session.id,
+      workerId: slotWorkerId,
+      leaseSeconds,
+    }),
+    resolveAbortReason: state => {
+      if (state.cancelRequested) return new ContentWritingCancellationError();
+      if (!state.owned) return new ContentWritingLostLeaseError();
+      return null;
+    },
+    resolveExpiredLeaseReason: () => new ContentWritingLostLeaseError(),
+    onRenewalError: error => logThrottledError(`Heartbeat failed for ${session.id}`, error),
+  }).start();
   let latestProgress: Record<string, unknown> = session.progress || {};
   let progressWrites = Promise.resolve();
 

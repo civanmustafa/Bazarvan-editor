@@ -39,15 +39,17 @@ N8N_INGEST_TOKEN=YOUR_PRIVATE_N8N_TOKEN
 EDITOR_PUBLIC_URL=https://editor.example.com
 ```
 
-اختياري حسب استخدامك:
+إعدادات الموديلات وعناوين المزودين غير السرية اختيارية حسب استخدامك:
 
 ```bash
-GEMINI_API_KEYS=...
-GEMINI_PAID_API_KEYS=...
-OPENAI_API_KEY=...
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_PAID_MODEL=gemini-2.5-pro
+OPENAI_MODEL=gpt-5.4
+FIRECRAWL_API_URL=https://api.firecrawl.dev
+BROWSERLESS_API_URL=https://production-sfo.browserless.io
 ```
 
-لا تضع مفاتيح `SERVICE_ROLE` أو مفاتيح AI داخل المتصفح أو داخل `.env` العام للواجهة.
+أضف أيضًا `AI_SETTINGS_ENCRYPTION_KEY` بقيمة 32 بايت مشفرة Base64، ثم طبّق `supabase/migrations/20260829030000_provider_credential_vault.sql`. لا تحفظ مفاتيح Gemini أو OpenAI أو Firecrawl أو Browserless في بيئة Hostinger ولا داخل `VITE_`؛ لا يوجد fallback من البيئة. يدخل المسؤول المفاتيح المشتركة من اللوحة ويمنح استخدامها للجميع أو لمستخدمين محددين، ويدخل كل مستخدم مفاتيح Gemini/OpenAI الخاصة به ولا يستخدمها سواه. تبقى `SUPABASE_SERVICE_ROLE_KEY` و`AI_SETTINGS_ENCRYPTION_KEY` أسرار بنية خادمية ولا تُنقل إلى اللوحة.
 
 ## 3. تحديث إعدادات Online بعد الدخول كأدمن
 

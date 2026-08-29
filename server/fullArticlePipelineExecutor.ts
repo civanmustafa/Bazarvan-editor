@@ -40,6 +40,12 @@ import {
   type ContentWritingCompetitorInput,
 } from '../utils/contentWritingContext';
 import {
+  enqueueCompetitorPreparationDiscovery,
+  enqueueCompetitorPreparationExtraction,
+  selectCompetitorPreparationSources,
+} from './competitorPreparationCoordinator';
+import { readManagedArticleCompetitors } from './articleCompetitorRepository';
+import {
   evaluateContentWritingEditorSourceCoverage,
   evaluateContentWritingEditorStructureCoverage,
   normalizeContentWritingEditorSourceLedger,
@@ -414,122 +420,12 @@ const enqueueBrief = async (
   return id;
 };
 
-const enqueueDiscovery = async (
-  context: ExternalAnalysisExecutionContext,
-  requestedBy: string,
-  leaseGeneration: number,
-  forceRefresh: boolean,
-): Promise<string> => {
-  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'enqueue_full_article_pipeline_competitor_discovery',
-    {
-      p_pipeline_job_id: context.job.id,
-      p_requested_by: requestedBy,
-      p_worker_id: context.workerId,
-      p_lease_generation: leaseGeneration,
-      p_force_refresh: forceRefresh,
-    },
-  );
-  if (error) throw error;
-  const id = text(data);
-  if (!id) throw new Error('Competitor discovery prerequisites are incomplete.');
-  return id;
-};
-
-const selectCompetitorSources = (
-  result: ExternalAnalysisJson | null,
-  desiredCount: number,
-): ExternalAnalysisJson[] => {
-  const rows = Array.isArray(result?.results) ? result?.results : [];
-  const valid = rows
-    .filter(isRecord)
-    .filter(row => row.eligible !== false && Boolean(text(row.url) || text(row.canonicalUrl)));
-  const preferred = [
-    ...valid.filter(row => row.autoSelected === true),
-    ...valid.filter(row => row.autoSelected !== true),
-  ];
-  const seen = new Set<string>();
-  return preferred.flatMap(row => {
-    const url = text(row.canonicalUrl) || text(row.url);
-    if (!url || seen.has(url)) return [];
-    seen.add(url);
-    return [{
-      url,
-      canonicalUrl: url,
-      domain: text(row.domain),
-      title: text(row.title),
-      description: text(row.description),
-      autoSelected: row.autoSelected === true,
-      contentQualification: isRecord(row.contentQualification) ? row.contentQualification : {},
-    }];
-  }).slice(0, Math.max(1, Math.min(desiredCount, 5)));
-};
-
-const enqueueExtraction = async (options: {
-  articleId: string;
-  requestedBy: string;
-  queryType: string;
-  queryText: string;
-  sources: ExternalAnalysisJson[];
-}): Promise<string> => {
-  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'enqueue_competitor_extraction_job',
-    {
-      p_article_id: options.articleId,
-      p_requested_by: options.requestedBy,
-      p_query_type: options.queryType,
-      p_query_text: options.queryText,
-      p_sources: options.sources,
-    },
-  );
-  if (error) throw error;
-  const source = isRecord(data) ? data : {};
-  const job = isRecord(source.job) ? source.job : {};
-  const id = text(job.id);
-  if (!id) throw new Error('Competitor extraction did not return a job.');
-  const selectedQualifications = Object.fromEntries(options.sources.map(sourceRow => {
-    const url = text(sourceRow.canonicalUrl) || text(sourceRow.url);
-    const qualification = isRecord(sourceRow.contentQualification) ? sourceRow.contentQualification : {};
-    return [url, {
-      autoSelected: sourceRow.autoSelected === true,
-      qualificationRequired: text(qualification.status) === 'qualified',
-      status: text(qualification.status),
-      matchedKeyword: text(qualification.matchedKeyword),
-      matchKind: text(qualification.matchKind),
-    }];
-  }));
-  const { error: metadataError } = await getExternalAnalysisSupabaseAdmin()
-    .from('ai_external_analysis_jobs')
-    .update({
-      input_snapshot: {
-        ...(isRecord(job.input_snapshot) ? job.input_snapshot : {}),
-        selectedQualifications,
-      },
-    })
-    .eq('id', id);
-  if (metadataError) throw metadataError;
-  return id;
-};
-
 const readQualityCompetitors = async (articleId: string): Promise<{
   competitors: ContentWritingCompetitorInput[];
   audit: ReturnType<typeof selectQualityContentWritingCompetitors>['audit'];
 }> => {
-  const { data, error } = await getExternalAnalysisSupabaseAdmin()
-    .from('article_competitors')
-    .select('id,position,title,canonical_url,source_url,content_text,status')
-    .eq('article_id', articleId)
-    .eq('status', 'completed')
-    .order('position', { ascending: true });
-  if (error) throw error;
-  const candidates: ContentWritingCompetitorInput[] = (data || []).map(row => ({
-    id: text(row.id),
-    position: numberValue(row.position, 0),
-    title: text(row.title),
-    url: text(row.canonical_url) || text(row.source_url),
-    content: text(row.content_text),
-  }));
-  return selectQualityContentWritingCompetitors(candidates);
+  const snapshot = await readManagedArticleCompetitors(articleId);
+  return selectQualityContentWritingCompetitors(snapshot.competitors);
 };
 
 const waitForContentWriting = async (options: {
@@ -842,12 +738,14 @@ const executeFullArticlePipeline = async (
     });
     const discoveryJobId = (!competitorInputsMustBeReplaced
       ? text(savedProgress.discoveryJobId)
-      : '') || await enqueueDiscovery(
-      context,
+      : '') || await enqueueCompetitorPreparationDiscovery({
+      mode: 'full_article_pipeline',
+      pipelineJobId: context.job.id,
       requestedBy,
+      workerId: context.workerId,
       leaseGeneration,
-      competitorInputsMustBeReplaced,
-    );
+      forceRefresh: competitorInputsMustBeReplaced,
+    });
     activeExternalChildId = discoveryJobId;
     await attachExternalChild({ context, jobId: discoveryJobId, kind: 'discovery', leaseGeneration });
     await reportStage(context, 'competitor_discovery', 3, { discoveryJobId });
@@ -858,7 +756,7 @@ const executeFullArticlePipeline = async (
       stageIndex: 3,
     });
     activeExternalChildId = '';
-    const sources = selectCompetitorSources(discovery.result, competitorCount);
+    const sources = selectCompetitorPreparationSources(discovery.result, competitorCount);
     if (sources.length === 0) {
       retryError({
         code: 'full_pipeline_no_competitors_found',
@@ -880,9 +778,10 @@ const executeFullArticlePipeline = async (
       ? ''
       : text(savedProgress.extractionJobId);
     if (!extractionJobId) {
-      extractionJobId = await enqueueExtraction({
+      extractionJobId = await enqueueCompetitorPreparationExtraction({
         articleId: context.job.article_id,
         requestedBy,
+        origin: 'full_article_pipeline',
         queryType,
         queryText,
         sources,

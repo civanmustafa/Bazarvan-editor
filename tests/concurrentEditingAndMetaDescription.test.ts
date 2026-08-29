@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  buildMetaDescriptionGenerationPrompt,
   buildMetaDescriptionPrompt,
   buildMetaDescriptionSuggestionsPrompt,
   extractArticleTableOfContents,
   getValidMetaDescriptionSuggestionPair,
   parseGeneratedMetaDescription,
   parseGeneratedMetaDescriptionSuggestions,
+  parseValidMetaDescriptionGeneration,
+  shouldRetryMetaDescriptionGeneration,
   validateMetaDescription,
 } from '../utils/metaDescription.ts';
 
@@ -76,6 +79,58 @@ test('two-description contract parses exactly two distinct valid suggestions', (
   assert.match(prompt, /جهاز كشف الذهب/);
 });
 
+test('one shared meta-description service preserves automatic-apply and writing-suggestion modes', () => {
+  const keyword = 'جهاز كشف الذهب';
+  const automatic = `${keyword} دليل عملي يوضح خطوات الاختيار والاستخدام وأهم المعايير والنصائح المرتبطة بهدف الصفحة ومحتواها`.padEnd(140, 'ا');
+  const first = `${keyword} دليل عملي يشرح الاختيار والاستخدام والمعايير المهمة للوصول إلى قرار يناسب احتياجات القارئ بوضوح`.padEnd(140, 'ا');
+  const second = `${keyword} تعرف على المزايا وخطوات المقارنة والنصائح العملية التي تساعدك على تقييم الخيارات واختيار الجهاز الأنسب`.padEnd(140, 'ب');
+
+  const automaticPrompt = buildMetaDescriptionGenerationPrompt({
+    mode: 'automatic_apply',
+    title: 'دليل الاختيار',
+    primaryKeyword: keyword,
+    articleLanguage: 'ar',
+    tableOfContents: ['كيفية الاختيار'],
+    goalContext: { objective: 'مساعدة القارئ' },
+  });
+  const suggestionsPrompt = buildMetaDescriptionGenerationPrompt({
+    mode: 'writing_suggestions',
+    title: 'دليل الاختيار',
+    primaryKeyword: keyword,
+    articleLanguage: 'ar',
+    finalArticle: '# كيفية الاختيار\n\nمقالة نهائية',
+    goalContext: { objective: 'مساعدة القارئ' },
+  });
+  assert.match(automaticPrompt, /"metaDescription"/);
+  assert.match(suggestionsPrompt, /"metaDescriptionSuggestions"/);
+  assert.deepEqual(
+    parseValidMetaDescriptionGeneration({
+      mode: 'automatic_apply',
+      response: JSON.stringify({ metaDescription: automatic }),
+      primaryKeyword: keyword,
+    }),
+    { mode: 'automatic_apply', description: automatic, descriptions: [automatic] },
+  );
+  assert.deepEqual(
+    parseValidMetaDescriptionGeneration({
+      mode: 'automatic_apply',
+      response: { metaDescription: automatic },
+      primaryKeyword: keyword,
+    }),
+    { mode: 'automatic_apply', description: automatic, descriptions: [automatic] },
+  );
+  assert.deepEqual(
+    parseValidMetaDescriptionGeneration({
+      mode: 'writing_suggestions',
+      response: JSON.stringify({ metaDescriptionSuggestions: [first, second] }),
+      primaryKeyword: keyword,
+    }),
+    { mode: 'writing_suggestions', descriptions: [first, second] },
+  );
+  assert.equal(shouldRetryMetaDescriptionGeneration(1), true);
+  assert.equal(shouldRetryMetaDescriptionGeneration(2), false);
+});
+
 test('database save fencing protects every existing-article save and requires an explicit overwrite decision', async () => {
   const [migration, api, client, editor, banner] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260828010000_concurrent_editing_and_meta_description.sql'),
@@ -127,7 +182,8 @@ test('ready status queues a fenced AI meta-description task and exposes it in th
   assert.match(migration, /char_length\(v_description\) < 140/);
   assert.match(executor, /registerExternalAnalysisJobExecutor\(\s*'meta_description_generation'/);
   assert.match(executor, /extractArticleTableOfContents/);
-  assert.match(executor, /validateMetaDescription/);
+  assert.match(executor, /parseValidMetaDescriptionGeneration/);
+  assert.match(executor, /mode: 'automatic_apply'/);
   assert.match(worker, /import '\.\/metaDescriptionGenerationExecutor'/);
   assert.match(ecosystem, /meta_description_generation/);
   assert.match(bridge, /meta_description_generation.*meta_description_generation/);
@@ -179,6 +235,8 @@ test('manual, write-article, full-pipeline, and automatic writing share the stri
   assert.match(contentWorkflow, /PROMPT_TEMPLATE_IDS\.metaDescriptionSuggestions/);
   assert.match(contentWorkflow, /metaDescriptionSuggestions/);
   assert.match(contentWorkflow, /previousInvalidMetaDescriptionResponse/);
+  assert.match(contentWorkflow, /parseValidMetaDescriptionGeneration/);
+  assert.match(contentWorkflow, /mode: 'writing_suggestions'/);
   assert.match(panel, /اقتراحا وصف الميتا/);
   assert.match(panel, /استخدام الوصف/);
   assert.match(promptRegistry, /contentWriting\.metaDescriptionSuggestions/);

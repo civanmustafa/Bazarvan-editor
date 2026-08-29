@@ -19,6 +19,29 @@ export const getUsableCompetitorText = (value: unknown): string => (
   isCompetitorExtractionFailureText(value) ? '' : toText(value)
 );
 
+export type CompetitorCanonicalSource = 'managed_rows' | 'manual_metadata' | 'none';
+
+/**
+ * Central provenance rule shared by repositories and tested without database
+ * access. Unmarked metadata is a legacy manual input; metadata marked as a
+ * competitor-discovery projection must never become authoritative on its own.
+ */
+export const resolveCompetitorCanonicalSource = (options: {
+  managedRowCount: number;
+  metadataManagedBy: unknown;
+  metadataTextCount: number;
+}): CompetitorCanonicalSource => {
+  if (Math.max(0, Math.round(Number(options.managedRowCount) || 0)) > 0) {
+    return 'managed_rows';
+  }
+  if (toText(options.metadataManagedBy).toLocaleLowerCase() === 'competitor_discovery') {
+    return 'none';
+  }
+  return Math.max(0, Math.round(Number(options.metadataTextCount) || 0)) > 0
+    ? 'manual_metadata'
+    : 'none';
+};
+
 export const sanitizeCompetitorSlots = (
   texts: readonly unknown[],
   urls: readonly unknown[],

@@ -908,7 +908,11 @@ const ReportsPage: React.FC<{
   const externalCrawlerCalls = crawlerProviderEvents.filter(event => event.provider !== 'local');
   const successfulCrawlerCalls = externalCrawlerCalls.filter(event => event.status === 'completed').length;
   const failedCrawlerCalls = externalCrawlerCalls.filter(event => event.status === 'failed').length;
-  const adminCrawlerKeyCalls = externalCrawlerCalls.filter(event => event.credentialSource === 'admin').length;
+  const sharedCrawlerKeyCalls = externalCrawlerCalls.filter(event => (
+    event.credentialSource === 'admin'
+    || event.credentialSource === 'assigned_user'
+    || event.credentialSource === 'assigned_all'
+  )).length;
   const completedWritingSessions = contentWritingSessions.filter(session => session.status === 'completed').length;
   const failedWritingSessions = contentWritingSessions.filter(session => session.status === 'failed').length;
   const externalWritingSessions = contentWritingSessions.filter(session => session.executionMode === 'external').length;
@@ -951,7 +955,7 @@ const ReportsPage: React.FC<{
         <AdminStat icon={<Key size={18} />} label="استدعاءات خدمات الزحف" value={externalCrawlerCalls.length} />
         <AdminStat icon={<CheckCircle2 size={18} />} label="زحف خارجي ناجح" value={successfulCrawlerCalls} />
         <AdminStat icon={<XCircle size={18} />} label="زحف خارجي فاشل" value={failedCrawlerCalls} />
-        <AdminStat icon={<Shield size={18} />} label="استخدام مفاتيح المسؤول" value={adminCrawlerKeyCalls} />
+        <AdminStat icon={<Shield size={18} />} label="استخدام المفاتيح المشتركة" value={sharedCrawlerKeyCalls} />
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">

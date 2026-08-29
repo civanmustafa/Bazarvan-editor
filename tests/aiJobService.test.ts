@@ -73,7 +73,9 @@ test('durable worker uses the unified engine, heartbeat cancellation, and config
 
   assert.match(worker, /aiExecutionEngine\.executeGemini/);
   assert.match(worker, /heartbeatAiJob/);
-  assert.match(worker, /controller\.abort\(new UserCancellationError/);
+  assert.match(worker, /new LeaseHeartbeatController/);
+  assert.match(worker, /state\.cancelRequested\) return new UserCancellationError/);
+  assert.match(worker, /!state\.owned\) return new LostLeaseError/);
   assert.match(worker, /readAiJobRetryMinutes/);
   assert.match(worker, /scheduleAiJobRetry/);
   assert.match(worker, /recoverStaleAiJobs/);

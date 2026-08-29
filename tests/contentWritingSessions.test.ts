@@ -274,8 +274,9 @@ test('final structure migration upgrades unfinished sessions without rewriting c
 });
 
 test('content-writing engine owns server-side context assembly and structured provider execution', async () => {
-  const [engine, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
+  const [engine, competitorRepository, workflow, workflowBuilder, service, geminiEngine, openAiEngine] = await Promise.all([
     readWorkspaceFile('server/contentWritingEngine.ts'),
+    readWorkspaceFile('server/articleCompetitorRepository.ts'),
     readWorkspaceFile('server/contentWritingWorkflow.ts'),
     readWorkspaceFile('utils/contentWritingWorkflow.ts'),
     readWorkspaceFile('server/contentWritingSessionService.ts'),
@@ -284,8 +285,13 @@ test('content-writing engine owns server-side context assembly and structured pr
   ]);
 
   assert.match(engine, /from\('articles'\)/);
-  assert.match(engine, /from\('article_competitors'\)/);
-  assert.match(engine, /getContentWritingCompetitorsFromMetadata/);
+  assert.match(engine, /readManagedArticleCompetitorRows/);
+  assert.match(engine, /resolveArticleCompetitorRepositorySnapshot/);
+  assert.match(competitorRepository, /from\('article_competitors'\)/);
+  assert.match(competitorRepository, /getContentWritingCompetitorsFromMetadata/);
+  assert.match(competitorRepository, /resolveCompetitorCanonicalSource/);
+  assert.match(competitorRepository, /source === 'managed_rows'/);
+  assert.match(competitorRepository, /source === 'manual_metadata'/);
   assert.match(engine, /buildContentWritingPromptBundle/);
   assert.match(engine, /prepareContentWritingConversation/);
   assert.match(engine, /createContentWritingSessionInputHash/);
@@ -485,7 +491,9 @@ test('content-writing worker keeps leases alive and is built and managed by PM2'
   assert.match(worker, /heartbeatContentWritingSession/);
   assert.match(worker, /executeStructuredContentWritingWorkflow/);
   assert.match(worker, /completeContentWritingSession/);
-  assert.match(worker, /controller\.abort\(new ContentWritingCancellationError/);
+  assert.match(worker, /new LeaseHeartbeatController/);
+  assert.match(worker, /state\.cancelRequested\) return new ContentWritingCancellationError/);
+  assert.match(worker, /!state\.owned\) return new ContentWritingLostLeaseError/);
   assert.match(worker, /ContentWritingWorkerShutdownError/);
   assert.match(buildScript, /server\/contentWritingWorker\.ts/);
   assert.match(ecosystem, /bazarvan-content-writing-worker/);

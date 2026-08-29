@@ -20,7 +20,7 @@ export type CrawlerProviderReportEvent = {
   jobAttempt: number;
   requestedProvider: ClientSiteCrawlProvider;
   provider: 'local' | CrawlerExternalProvider;
-  credentialSource: 'admin' | 'hostinger' | null;
+  credentialSource: 'user' | 'assigned_user' | 'assigned_all' | 'resume' | 'admin' | 'hostinger' | null;
   keySuffix: string | null;
   status: 'completed' | 'failed';
   targetUrl: string;

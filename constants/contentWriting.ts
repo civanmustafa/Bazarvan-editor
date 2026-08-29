@@ -1,3 +1,5 @@
+import { renderPromptTemplateVariables } from './promptTemplateRenderer.ts';
+
 export const CONTENT_WRITING_TEMPLATE_FIELDS = {
   instructions: 'contentWritingInstructionsTemplate',
   articleContext: 'contentWritingArticleContextTemplate',
@@ -136,11 +138,14 @@ export const renderContentWritingTemplate = (
   variables: Record<string, string>,
 ): { text: string; missingValues: string[] } => {
   const missingValues = new Set<string>();
-  const text = String(template || '').replace(PLACEHOLDER_PATTERN, (_match, rawKey: string) => {
+  const renderVariables: Record<string, string> = {};
+  for (const match of String(template || '').matchAll(PLACEHOLDER_PATTERN)) {
+    const rawKey = match[1];
     const key = rawKey.toLowerCase();
     const value = variables[key];
     if (typeof value !== 'string' || !value.trim()) missingValues.add(key);
-    return typeof value === 'string' ? value : `{{${key}}}`;
-  });
+    renderVariables[rawKey.trim()] = typeof value === 'string' ? value : `{{${key}}}`;
+  }
+  const text = renderPromptTemplateVariables(String(template || ''), renderVariables);
   return { text, missingValues: Array.from(missingValues) };
 };

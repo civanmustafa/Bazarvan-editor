@@ -40,14 +40,15 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-93/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-93/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-94/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-94/);
   assert.match(guide, /20260827030000_content_research_automation_settings\.sql/);
   assert.match(guide, /20260828010000_concurrent_editing_and_meta_description\.sql/);
   assert.match(guide, /20260828020000_automatic_ready_engineering_commands\.sql/);
   assert.match(guide, /20260829000000_external_analysis_auto_once_per_article\.sql/);
   assert.match(guide, /20260829010000_content_writing_two_meta_descriptions\.sql/);
   assert.match(guide, /20260829020000_dashboard_activity_summary\.sql/);
+  assert.match(guide, /20260829030000_provider_credential_vault\.sql/);
   assert.match(verifyScript, /META_DESCRIPTION_COLUMNS/);
   assert.match(verifyScript, /CONCURRENT_SAVE_FUNCTION/);
   assert.match(verifyScript, /READY_ENGINEERING_CONTROLLED_FUNCTION/);
@@ -57,4 +58,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(verifyScript, /AUTOMATIC_ONCE_STAGE_FUNCTION/);
   assert.match(verifyScript, /AUTOMATIC_ONCE_RUN_TRIGGER/);
   assert.match(verifyScript, /DASHBOARD_ACTIVITY_SUMMARY_FUNCTION/);
+  assert.match(verifyScript, /PROVIDER_CREDENTIAL_VAULT_TABLE/);
+  assert.match(verifyScript, /PROVIDER_CREDENTIAL_VAULT_RLS/);
+  assert.match(verifyScript, /PROVIDER_CREDENTIAL_VAULT_CLIENT_PRIVILEGES/);
 });

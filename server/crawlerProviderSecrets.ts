@@ -1,38 +1,32 @@
 import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-} from 'node:crypto';
-import {
   CRAWLER_EXTERNAL_PROVIDERS,
-  CRAWLER_PROVIDER_SECRETS_MIGRATION,
   isCrawlerExternalProvider,
   type CrawlerExternalProvider,
 } from '../constants/crawlerProviders.ts';
-import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
+import {
+  decryptProviderCredentialKeys,
+  deleteProviderCredentialVaultRow,
+  encryptProviderCredentialKeys,
+  getProviderCredentialVaultAad,
+  isProviderCredentialVaultEncryptionConfigured,
+  normalizeProviderCredentialKeys,
+  readProviderCredentialVaultRow,
+  saveProviderCredentialVaultRow,
+  ProviderCredentialVaultError,
+  type ProviderCredentialVaultRow,
+} from './providerCredentialVault.ts';
+import {
+  resolveProviderCredentialPlan,
+  saveCredentialGrant,
+  type ProviderCredentialSource,
+} from './providerAccessControl.ts';
 import { resolveUserAiProviderKeys } from './userAiProviderSecrets.ts';
-import { resolveProviderCredentialPlan } from './providerAccessControl.ts';
 
-type CrawlerProviderSecretRow = {
-  provider: CrawlerExternalProvider;
-  ciphertext: string;
-  initialization_vector: string;
-  authentication_tag: string;
-  encryption_version: number;
-  enabled: boolean;
-  key_suffix: string;
-  updated_by: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type CrawlerCredentialSource =
-  | 'user'
-  | 'assigned_user'
-  | 'assigned_all'
-  | 'admin'
-  | 'hostinger';
+/**
+ * Compatibility facade for the crawler product surfaces. Storage and
+ * resolution are both delegated to the canonical provider credential vault.
+ */
+export type CrawlerCredentialSource = ProviderCredentialSource;
 
 export type CrawlerProviderSecretStatus = {
   provider: CrawlerExternalProvider;
@@ -40,9 +34,8 @@ export type CrawlerProviderSecretStatus = {
   enabled: boolean;
   keySuffix: string | null;
   updatedAt: string | null;
-  fallbackConfigured: boolean;
   effectiveConfigured: boolean;
-  activeSource: CrawlerCredentialSource;
+  activeSource: CrawlerCredentialSource | 'none';
 };
 
 export type CrawlerProviderSecretsOverview = {
@@ -69,12 +62,6 @@ export class CrawlerProviderSecretError extends Error {
   }
 }
 
-const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
-const ENCRYPTION_VERSION = 1;
-const ENCRYPTION_KEY_BYTES = 32;
-const INITIALIZATION_VECTOR_BYTES = 12;
-const TABLE_NAME = 'crawler_provider_secrets';
-
 export const normalizeCrawlerExternalProvider = (
   value: unknown,
 ): CrawlerExternalProvider => {
@@ -88,221 +75,94 @@ export const normalizeCrawlerExternalProvider = (
   return value;
 };
 
-export const getEnvironmentCrawlerApiKey = (
-  provider: CrawlerExternalProvider,
-): string => {
-  const value = provider === 'firecrawl'
-    ? process.env.FIRECRAWL_API_KEY
-    : process.env.BROWSERLESS_API_KEY || process.env.BROWSERLESS_TOKEN;
-  return String(value || '').trim();
-};
-
-const parseEncryptionKey = (): Buffer | null => {
-  const rawValue = String(
-    process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY
-    || process.env.AI_SETTINGS_ENCRYPTION_KEY
-    || '',
-  ).trim();
-  if (rawValue) {
-    if (/^[a-f0-9]{64}$/i.test(rawValue)) return Buffer.from(rawValue, 'hex');
-
-    const base64Value = rawValue.startsWith('base64:')
-      ? rawValue.slice('base64:'.length)
-      : rawValue;
-    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64Value)) return null;
-    const decoded = Buffer.from(base64Value, 'base64');
-    return decoded.length === ENCRYPTION_KEY_BYTES ? decoded : null;
-  }
-
-  const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-  if (!serviceRoleKey) return null;
-  return createHash('sha256')
-    .update('bazarvan:crawler-provider-secrets:service-role-derived:v1\0', 'utf8')
-    .update(serviceRoleKey, 'utf8')
-    .digest();
-};
-
-export const isCrawlerSettingsEncryptionConfigured = (): boolean => (
-  parseEncryptionKey() !== null
-);
-
-const requireEncryptionKey = (): Buffer => {
-  const key = parseEncryptionKey();
-  if (!key) {
-    throw new CrawlerProviderSecretError(
-      'Crawler secret encryption is unavailable because the server credential is not configured.',
-      503,
-      'CRAWLER_SECRET_ENCRYPTION_KEY_MISSING',
-    );
-  }
-  return key;
-};
-
-const additionalAuthenticatedData = (provider: CrawlerExternalProvider): Buffer => (
-  Buffer.from(`bazarvan:${TABLE_NAME}:${provider}:v${ENCRYPTION_VERSION}`, 'utf8')
+const getAdminCrawlerVaultKey = (provider: CrawlerExternalProvider): string => (
+  `legacy-admin-crawler:${provider}`
 );
 
 const normalizeApiKey = (value: unknown): string => {
-  const key = typeof value === 'string' ? value.trim() : '';
-  if (key.length < 8 || key.length > 512 || /[\s,;]/.test(key)) {
+  try {
+    return normalizeProviderCredentialKeys(value, {
+      minimumLength: 8,
+      maximumKeys: 1,
+    })[0];
+  } catch {
     throw new CrawlerProviderSecretError(
       'The crawler API key must be one non-whitespace value between 8 and 512 characters.',
       400,
       'CRAWLER_SECRET_VALUE_INVALID',
     );
   }
-  return key;
 };
-
-const encryptSecret = (
-  provider: CrawlerExternalProvider,
-  plaintext: string,
-): Pick<
-  CrawlerProviderSecretRow,
-  'ciphertext' | 'initialization_vector' | 'authentication_tag' | 'encryption_version'
-> => {
-  const initializationVector = randomBytes(INITIALIZATION_VECTOR_BYTES);
-  const cipher = createCipheriv(
-    ENCRYPTION_ALGORITHM,
-    requireEncryptionKey(),
-    initializationVector,
-  );
-  cipher.setAAD(additionalAuthenticatedData(provider));
-  const ciphertext = Buffer.concat([
-    cipher.update(plaintext, 'utf8'),
-    cipher.final(),
-  ]);
-  return {
-    ciphertext: ciphertext.toString('base64'),
-    initialization_vector: initializationVector.toString('base64'),
-    authentication_tag: cipher.getAuthTag().toString('base64'),
-    encryption_version: ENCRYPTION_VERSION,
-  };
-};
-
-const decryptSecret = (row: CrawlerProviderSecretRow): string => {
-  if (row.encryption_version !== ENCRYPTION_VERSION) {
-    throw new CrawlerProviderSecretError(
-      'The stored crawler key uses an unsupported encryption version.',
-      503,
-      'CRAWLER_SECRET_ENCRYPTION_VERSION_UNSUPPORTED',
-    );
-  }
-  try {
-    const decipher = createDecipheriv(
-      ENCRYPTION_ALGORITHM,
-      requireEncryptionKey(),
-      Buffer.from(row.initialization_vector, 'base64'),
-    );
-    decipher.setAAD(additionalAuthenticatedData(row.provider));
-    decipher.setAuthTag(Buffer.from(row.authentication_tag, 'base64'));
-    return Buffer.concat([
-      decipher.update(Buffer.from(row.ciphertext, 'base64')),
-      decipher.final(),
-    ]).toString('utf8');
-  } catch (error) {
-    if (error instanceof CrawlerProviderSecretError) throw error;
-    throw new CrawlerProviderSecretError(
-      'The stored crawler key could not be decrypted. Verify the crawler encryption key.',
-      503,
-      'CRAWLER_SECRET_DECRYPTION_FAILED',
-    );
-  }
-};
-
-const isMissingTableError = (
-  error: { code?: string } | null | undefined,
-): boolean => error?.code === '42P01';
-
-const storageError = (
-  error: { code?: string; message?: string },
-): CrawlerProviderSecretError => (
-  isMissingTableError(error)
-    ? new CrawlerProviderSecretError(
-        `Apply migration ${CRAWLER_PROVIDER_SECRETS_MIGRATION} before saving crawler API keys.`,
-        503,
-        'CRAWLER_SECRET_SCHEMA_MISSING',
-      )
-    : new CrawlerProviderSecretError(
-        `Could not access encrypted crawler settings (${error.code || 'unknown'}).`,
-        503,
-        'CRAWLER_SECRET_STORAGE_UNAVAILABLE',
-      )
-);
 
 const readSecretRow = async (
   provider: CrawlerExternalProvider,
-): Promise<CrawlerProviderSecretRow | null> => {
-  const { data, error } = await getExternalAnalysisSupabaseAdmin()
-    .from(TABLE_NAME)
-    .select('provider,ciphertext,initialization_vector,authentication_tag,encryption_version,enabled,key_suffix,updated_by,created_at,updated_at')
-    .eq('provider', provider)
-    .maybeSingle();
-  if (error) {
-    if (isMissingTableError(error)) return null;
-    throw storageError(error);
-  }
-  return data ? data as CrawlerProviderSecretRow : null;
+): Promise<ProviderCredentialVaultRow | null> => {
+  const row = await readProviderCredentialVaultRow(getAdminCrawlerVaultKey(provider));
+  return row?.credential_type === 'shared' && row.provider === provider ? row : null;
 };
+
+export const isCrawlerSettingsEncryptionConfigured = (): boolean => (
+  isProviderCredentialVaultEncryptionConfigured()
+);
 
 const emptyStatus = (
   provider: CrawlerExternalProvider,
-): CrawlerProviderSecretStatus => {
-  const fallbackConfigured = Boolean(getEnvironmentCrawlerApiKey(provider));
-  return {
-    provider,
-    configured: false,
-    enabled: false,
-    keySuffix: null,
-    updatedAt: null,
-    fallbackConfigured,
-    effectiveConfigured: fallbackConfigured,
-    activeSource: 'hostinger',
-  };
-};
+): CrawlerProviderSecretStatus => ({
+  provider,
+  configured: false,
+  enabled: false,
+  keySuffix: null,
+  updatedAt: null,
+  effectiveConfigured: false,
+  activeSource: 'none',
+});
 
-export const readCrawlerProviderSecretsOverview =
-async (): Promise<CrawlerProviderSecretsOverview> => {
-  const providers = Object.fromEntries(
-    CRAWLER_EXTERNAL_PROVIDERS.map(provider => [provider, emptyStatus(provider)]),
-  ) as Record<CrawlerExternalProvider, CrawlerProviderSecretStatus>;
-  const { data, error } = await getExternalAnalysisSupabaseAdmin()
-    .from(TABLE_NAME)
-    .select('provider,enabled,key_suffix,updated_at');
-  if (error) {
-    if (isMissingTableError(error)) {
+export const readCrawlerProviderSecretsOverview = async (
+): Promise<CrawlerProviderSecretsOverview> => {
+  try {
+    const entries = await Promise.all(CRAWLER_EXTERNAL_PROVIDERS.map(async provider => {
+      const [row, plan] = await Promise.all([
+        readSecretRow(provider),
+        resolveProviderCredentialPlan({ provider, purpose: 'default' }),
+      ]);
+      const keySuffixes = Array.isArray(row?.key_suffixes)
+        ? row.key_suffixes.map(value => String(value || '').slice(-4)).filter(Boolean)
+        : [];
+      const firstTier = plan.tiers[0];
+      const status: CrawlerProviderSecretStatus = {
+        ...emptyStatus(provider),
+        configured: Boolean(row && row.key_count > 0 && keySuffixes.length > 0),
+        enabled: row?.enabled === true,
+        keySuffix: keySuffixes[0] || null,
+        updatedAt: row?.updated_at || null,
+        effectiveConfigured: Boolean(firstTier?.keys.length),
+        activeSource: firstTier?.source || 'none',
+      };
+      return [provider, status] as const;
+    }));
+    return {
+      schemaAvailable: true,
+      encryptionConfigured: isCrawlerSettingsEncryptionConfigured(),
+      providers: Object.fromEntries(entries) as Record<
+        CrawlerExternalProvider,
+        CrawlerProviderSecretStatus
+      >,
+    };
+  } catch (error) {
+    if (
+      error instanceof ProviderCredentialVaultError
+      && error.code === 'PROVIDER_CREDENTIAL_VAULT_SCHEMA_MISSING'
+    ) {
       return {
         schemaAvailable: false,
         encryptionConfigured: isCrawlerSettingsEncryptionConfigured(),
-        providers,
+        providers: Object.fromEntries(
+          CRAWLER_EXTERNAL_PROVIDERS.map(provider => [provider, emptyStatus(provider)]),
+        ) as Record<CrawlerExternalProvider, CrawlerProviderSecretStatus>,
       };
     }
-    throw storageError(error);
+    throw error;
   }
-
-  (data || []).forEach(row => {
-    if (!isCrawlerExternalProvider(row.provider)) return;
-    const fallbackConfigured = Boolean(getEnvironmentCrawlerApiKey(row.provider));
-    const customUsable = row.enabled === true
-      && Boolean(row.key_suffix)
-      && isCrawlerSettingsEncryptionConfigured();
-    providers[row.provider] = {
-      provider: row.provider,
-      configured: Boolean(row.key_suffix),
-      enabled: row.enabled === true,
-      keySuffix: typeof row.key_suffix === 'string' ? row.key_suffix : null,
-      updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
-      fallbackConfigured,
-      effectiveConfigured: customUsable || fallbackConfigured,
-      activeSource: customUsable ? 'admin' : 'hostinger',
-    };
-  });
-
-  return {
-    schemaAvailable: true,
-    encryptionConfigured: isCrawlerSettingsEncryptionConfigured(),
-    providers,
-  };
 };
 
 export const resolveCrawlerProviderCredential = async (
@@ -310,30 +170,23 @@ export const resolveCrawlerProviderCredential = async (
   userId?: string | null,
 ): Promise<ResolvedCrawlerProviderCredential | null> => {
   const provider = normalizeCrawlerExternalProvider(providerValue);
-  const [row, personalKeys] = await Promise.all([
-    readSecretRow(provider),
-    resolveUserAiProviderKeys({
-      actorUserId: userId,
-      ownerUserId: userId,
-      provider,
-    }),
-  ]);
-  const fallback = getEnvironmentCrawlerApiKey(provider);
+  const personalKeys = await resolveUserAiProviderKeys({
+    actorUserId: userId,
+    ownerUserId: userId,
+    provider,
+  });
   const plan = await resolveProviderCredentialPlan({
     userId,
     provider,
     personalKeys,
-    globalTiers: [
-      ...(row?.enabled ? [{ source: 'admin' as const, keys: [normalizeApiKey(decryptSecret(row))] }] : []),
-      ...(fallback ? [{ source: 'hostinger' as const, keys: [fallback] }] : []),
-    ],
+    purpose: 'default',
   });
   const firstTier = plan.tiers[0];
-  const apiKey = firstTier?.keys[0] || '';
+  const apiKey = firstTier?.keys[0]?.trim() || '';
   return apiKey
     ? {
         apiKey,
-        source: firstTier.source as CrawlerCredentialSource,
+        source: firstTier.source,
         keySuffix: apiKey.slice(-4),
       }
     : null;
@@ -346,65 +199,85 @@ export const saveCrawlerProviderSecret = async (options: {
   updatedBy: string;
 }): Promise<void> => {
   const provider = normalizeCrawlerExternalProvider(options.provider);
+  const vaultKey = getAdminCrawlerVaultKey(provider);
   const existing = await readSecretRow(provider);
-  const hasNewKey = options.apiKey !== undefined
-    && String(options.apiKey || '').trim() !== '';
-  const newApiKey = hasNewKey ? normalizeApiKey(options.apiKey) : null;
-  if (!existing && !newApiKey) {
+  const hasNewKey = options.apiKey !== undefined && String(options.apiKey || '').trim() !== '';
+  if (!existing && !hasNewKey) {
     throw new CrawlerProviderSecretError(
       'Save an API key before enabling this crawler provider.',
       400,
       'CRAWLER_SECRET_VALUE_REQUIRED',
     );
   }
-
-  const encrypted = newApiKey ? encryptSecret(provider, newApiKey) : existing;
-  if (!encrypted) {
-    throw new CrawlerProviderSecretError(
-      'A crawler API key is required.',
-      400,
-      'CRAWLER_SECRET_VALUE_REQUIRED',
-    );
+  const row = await saveProviderCredentialVaultRow({
+    id: existing?.id,
+    vaultKey,
+    credentialType: 'shared',
+    provider,
+    purpose: 'default',
+    label: existing?.label || `Administrator ${provider}`,
+    ...(hasNewKey ? { apiKeys: [normalizeApiKey(options.apiKey)] } : {}),
+    enabled: typeof options.enabled === 'boolean' ? options.enabled : existing?.enabled ?? true,
+    updatedBy: options.updatedBy,
+  });
+  if (!existing) {
+    await saveCredentialGrant({
+      credentialId: row.id,
+      scope: 'all',
+      priority: 100,
+      enabled: true,
+      actorId: options.updatedBy,
+    });
   }
-  const enabled = typeof options.enabled === 'boolean'
-    ? options.enabled
-    : existing?.enabled ?? true;
-  if (enabled) {
-    requireEncryptionKey();
-    if (!newApiKey && existing) normalizeApiKey(decryptSecret(existing));
-  }
-
-  const now = new Date().toISOString();
-  const { error } = await getExternalAnalysisSupabaseAdmin()
-    .from(TABLE_NAME)
-    .upsert({
-      provider,
-      ciphertext: encrypted.ciphertext,
-      initialization_vector: encrypted.initialization_vector,
-      authentication_tag: encrypted.authentication_tag,
-      encryption_version: encrypted.encryption_version,
-      enabled,
-      key_suffix: newApiKey ? newApiKey.slice(-4) : existing?.key_suffix,
-      updated_by: options.updatedBy,
-      updated_at: now,
-      ...(!existing ? { created_at: now } : {}),
-    }, { onConflict: 'provider' });
-  if (error) throw storageError(error);
 };
 
 export const deleteCrawlerProviderSecret = async (
   providerValue: unknown,
 ): Promise<void> => {
   const provider = normalizeCrawlerExternalProvider(providerValue);
-  const { error } = await getExternalAnalysisSupabaseAdmin()
-    .from(TABLE_NAME)
-    .delete()
-    .eq('provider', provider);
-  if (error) throw storageError(error);
+  await deleteProviderCredentialVaultRow(getAdminCrawlerVaultKey(provider));
+};
+
+const encryptSecret = (
+  providerValue: unknown,
+  plaintext: string,
+) => {
+  const provider = normalizeCrawlerExternalProvider(providerValue);
+  return encryptProviderCredentialKeys(
+    getAdminCrawlerVaultKey(provider),
+    [normalizeApiKey(plaintext)],
+  );
+};
+
+const decryptSecret = (
+  row: { provider: CrawlerExternalProvider } & Record<string, any>,
+): string => {
+  const provider = normalizeCrawlerExternalProvider(row.provider);
+  const vaultKey = getAdminCrawlerVaultKey(provider);
+  if (row.encryption_context !== getProviderCredentialVaultAad(vaultKey)) {
+    throw new CrawlerProviderSecretError(
+      'The stored crawler key could not be decrypted. Verify the provider credential vault key.',
+      503,
+      'CRAWLER_SECRET_DECRYPTION_FAILED',
+    );
+  }
+  try {
+    return decryptProviderCredentialKeys({
+      ...row,
+      vault_key: vaultKey,
+    } as ProviderCredentialVaultRow)[0];
+  } catch {
+    throw new CrawlerProviderSecretError(
+      'The stored crawler key could not be decrypted. Verify the provider credential vault key.',
+      503,
+      'CRAWLER_SECRET_DECRYPTION_FAILED',
+    );
+  }
 };
 
 export const __crawlerProviderSecretsTestUtils = {
   encryptSecret,
   decryptSecret,
   normalizeApiKey,
+  getAdminCrawlerVaultKey,
 };

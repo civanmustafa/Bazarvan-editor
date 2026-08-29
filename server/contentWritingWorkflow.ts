@@ -134,7 +134,8 @@ import {
 } from '../utils/contentWritingEditorSource';
 import {
   countMetaDescriptionCharacters,
-  getValidMetaDescriptionSuggestionPair,
+  parseValidMetaDescriptionGeneration,
+  shouldRetryMetaDescriptionGeneration,
   type MetaDescriptionSuggestionPair,
 } from '../utils/metaDescription';
 
@@ -2235,12 +2236,17 @@ export const executeStructuredContentWritingWorkflow = async (
     articleContextOverride: compactArticleContext,
     processOutput: output => {
       previousInvalidMetaDescriptionResponse = output;
-      const suggestions = getValidMetaDescriptionSuggestionPair(output, primaryKeyword);
-      if (!suggestions) {
+      const validated = parseValidMetaDescriptionGeneration({
+        mode: 'writing_suggestions',
+        response: output,
+        primaryKeyword,
+      });
+      if (validated?.mode !== 'writing_suggestions') {
         throw new Error(
           'The meta-description stage must return exactly two distinct 140–150 character suggestions containing the primary keyword.',
         );
       }
+      const suggestions = validated.descriptions;
       return {
         output: JSON.stringify({ metaDescriptionSuggestions: suggestions }, null, 2),
         metadata: {
@@ -2251,22 +2257,33 @@ export const executeStructuredContentWritingWorkflow = async (
       };
     },
   });
+  let metaDescriptionAttempt = 1;
   let metaDescriptionResult = await runMetaDescriptionSuggestions();
-  if (
+  while (
     !metaDescriptionResult.ok
     && metaDescriptionResult.execution.errorCode === 'content_writing_step_output_invalid'
     && previousInvalidMetaDescriptionResponse
+    && shouldRetryMetaDescriptionGeneration(metaDescriptionAttempt)
   ) {
+    metaDescriptionAttempt += 1;
     metaDescriptionResult = await runMetaDescriptionSuggestions(previousInvalidMetaDescriptionResponse);
   }
   if (!metaDescriptionResult.ok) return metaDescriptionResult.execution;
-  const metaDescriptionSuggestions = (
-    getValidMetaDescriptionSuggestionPair(
-      metaDescriptionResult.step.metadata?.metaDescriptionSuggestions,
+  const persistedMetaDescriptionGeneration = (
+    parseValidMetaDescriptionGeneration({
+      mode: 'writing_suggestions',
+      response: metaDescriptionResult.step.metadata?.metaDescriptionSuggestions,
       primaryKeyword,
-    )
-    || getValidMetaDescriptionSuggestionPair(metaDescriptionResult.output, primaryKeyword)
-  ) as MetaDescriptionSuggestionPair | null;
+    })
+    || parseValidMetaDescriptionGeneration({
+      mode: 'writing_suggestions',
+      response: metaDescriptionResult.output,
+      primaryKeyword,
+    })
+  );
+  const metaDescriptionSuggestions = persistedMetaDescriptionGeneration?.mode === 'writing_suggestions'
+    ? persistedMetaDescriptionGeneration.descriptions as MetaDescriptionSuggestionPair
+    : null;
   if (!metaDescriptionSuggestions) {
     return createWorkflowFailure({
       session: options.session,

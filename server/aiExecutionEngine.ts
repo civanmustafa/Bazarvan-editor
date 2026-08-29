@@ -38,6 +38,12 @@ import {
   toApiSecurityResult,
 } from "../api/apiSecurity";
 import {
+  deliverApiResult,
+  getHeaderValue,
+  readRequestBody,
+  type ApiResult,
+} from '../api/http.ts';
+import {
   ProviderAccessError,
   assertProviderModelAllowed,
   reserveProviderRequest,
@@ -64,12 +70,6 @@ const ALLOWED_GEMINI_MODELS = new Set([
     .map(model => model.trim())
     .filter(Boolean)),
 ]);
-
-type ApiResult = {
-  status: number;
-  body?: unknown;
-  headers?: Record<string, string>;
-};
 
 type GeminiErrorDetails = {
   status: number;
@@ -292,49 +292,7 @@ const getProgressIdFromRequest = (req: any): string => {
   }
 };
 
-const readNodeBody = async (req: any): Promise<unknown> => {
-  if (req.body !== undefined) {
-    if (typeof req.body === "string") return req.body ? JSON.parse(req.body) : {};
-    if (Buffer.isBuffer(req.body)) return req.body.length ? JSON.parse(req.body.toString("utf8")) : {};
-    return req.body;
-  }
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
-};
-
-const readRequestBody = async (req: any): Promise<unknown> => {
-  if (typeof req.json === "function" && typeof req.headers?.get === "function") {
-    return req.json();
-  }
-  return readNodeBody(req);
-};
-
-const getContentType = (req: any): string => {
-  if (typeof req.headers?.get === "function") {
-    return req.headers.get("content-type") || "";
-  }
-  return String(req.headers?.["content-type"] || req.headers?.["Content-Type"] || "");
-};
-
-const toWebResponse = (result: ApiResult): Response => new Response(result.status === 204 ? null : JSON.stringify(result.body), {
-  status: result.status,
-  headers: {
-    "Content-Type": "application/json; charset=utf-8",
-    ...(result.headers || {}),
-  },
-});
-
-const sendNodeResponse = (res: any, result: ApiResult) => {
-  res.statusCode = result.status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  Object.entries(result.headers || {}).forEach(([key, value]) => res.setHeader(key, value));
-  res.end(result.status === 204 ? undefined : JSON.stringify(result.body));
-};
+const getContentType = (req: any): string => getHeaderValue(req, 'content-type');
 
 const withCorsResponseHeaders = (req: any, result: ApiResult): ApiResult => {
   try {
@@ -350,10 +308,10 @@ const withCorsResponseHeaders = (req: any, result: ApiResult): ApiResult => {
   }
 };
 
-const getProviderEnvHint = (provider: GeminiProvider): string => (
+const getProviderCredentialHint = (provider: GeminiProvider): string => (
   provider === "geminiPaid"
-    ? "مفتاح الأدمن المشفّر أو GEMINI_PAID_API_KEYS"
-    : "GEMINI_API_KEYS أو GEMINI_API_KEY"
+    ? "مفتاح Gemini مدفوع في خزنة اللوحة، خاص بالمستخدم أو معيّن من المسؤول"
+    : "مفتاح Gemini مجاني في خزنة اللوحة، خاص بالمستخدم أو معيّن من المسؤول"
 );
 
 const normalizeGeminiProvider = (value: unknown): GeminiProvider => (
@@ -904,7 +862,7 @@ const executeGeminiCredentialTierInternal = async (
       return {
         status: 503,
         body: {
-          error: `لم يتم تكوين مفاتيح ${getGeminiProviderLabel(selectedProvider)} على السيرفر. أضف ${getProviderEnvHint(selectedProvider)} ثم أعد تشغيل PM2.`,
+          error: `لا يوجد مفتاح مسموح لـ ${getGeminiProviderLabel(selectedProvider)}. أضف ${getProviderCredentialHint(selectedProvider)}.`,
           provider: selectedProvider,
           model: selectedModel,
           progressId,
@@ -1973,18 +1931,10 @@ export async function aiExecutionProgressHandler(req: any, res?: any): Promise<R
     if (!securityResult) console.error("Gemini progress route failed:", error);
   }
   result = withCorsResponseHeaders(req, result);
-  if (res) {
-    sendNodeResponse(res, result);
-    return;
-  }
-  return toWebResponse(result);
+  return deliverApiResult(result, res);
 }
 
 export default async function handler(req: any, res?: any): Promise<Response | void> {
   const result = withCorsResponseHeaders(req, await handleGeminiRequest(req));
-  if (res) {
-    sendNodeResponse(res, result);
-    return;
-  }
-  return toWebResponse(result);
+  return deliverApiResult(result, res);
 }

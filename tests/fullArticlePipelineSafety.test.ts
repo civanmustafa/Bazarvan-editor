@@ -138,8 +138,9 @@ test('pipeline completes both semantic keyword lists before content writing', as
 });
 
 test('coordinator waits and competitor inputs have bounded professional gates', async () => {
-  const [executor, api, migration] = await Promise.all([
+  const [executor, competitorCoordinator, api, migration] = await Promise.all([
     readWorkspaceFile('server/fullArticlePipelineExecutor.ts'),
+    readWorkspaceFile('server/competitorPreparationCoordinator.ts'),
     readWorkspaceFile('api/externalAnalysis.ts'),
     readWorkspaceFile('supabase/migrations/20260824010000_full_article_pipeline_safety.sql'),
   ]);
@@ -153,7 +154,12 @@ test('coordinator waits and competitor inputs have bounded professional gates', 
   assert.match(executor, /competitorQualityAudit/);
   assert.match(executor, /replacementNeededCount/);
   assert.match(executor, /competitorInputsMustBeReplaced/);
-  assert.match(executor, /enqueue_full_article_pipeline_competitor_discovery/);
+  assert.match(executor, /enqueueCompetitorPreparationDiscovery/);
+  assert.match(executor, /enqueueCompetitorPreparationExtraction/);
+  assert.match(executor, /selectCompetitorPreparationSources/);
+  assert.match(competitorCoordinator, /enqueue_full_article_pipeline_competitor_discovery/);
+  assert.match(competitorCoordinator, /p_worker_id: request\.workerId/);
+  assert.match(competitorCoordinator, /p_lease_generation: request\.leaseGeneration/);
   assert.match(executor, /forceRefresh: competitorInputsMustBeReplaced/);
   assert.match(executor, /Math\.max\(\s*CONTENT_WRITING_MIN_COMPETITOR_COUNT/);
   assert.match(api, /Math\.max\(\s*CONTENT_WRITING_MIN_COMPETITOR_COUNT/);

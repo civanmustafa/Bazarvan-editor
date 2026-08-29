@@ -388,7 +388,7 @@ export const executeOpenAiRequest = async (
       const primaryResult: ApiResult = {
         status: 503,
         body: {
-          error: 'OpenAI is enabled but no server API key is configured.',
+          error: 'OpenAI is enabled but no permitted credential exists in the dashboard vault.',
           code: 'AI_PROVIDER_NOT_CONFIGURED',
           provider: 'openai',
           model: selectedModel,

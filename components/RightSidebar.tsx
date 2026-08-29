@@ -2110,7 +2110,7 @@ ${readyCommandCompetitorBlocks}`;
                                     <button
                                         onClick={handleRunGeminiAnalysis}
                                         disabled={isAiLoading.gemini || !isGeminiFreeAvailable}
-                                        title={!isGeminiFreeAvailable ? 'Gemini مفعّل دون مفتاح API مهيأ على الخادم' : 'تشغيل التحليل باستخدام Gemini'}
+                                        title={!isGeminiFreeAvailable ? 'Gemini مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'تشغيل التحليل باستخدام Gemini'}
                                         className="flex min-h-9 items-center justify-center gap-1.5 px-1.5 py-1.5 hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
@@ -2134,7 +2134,7 @@ ${readyCommandCompetitorBlocks}`;
                                     <button
                                         onClick={handleRunGeminiPaidAnalysis}
                                         disabled={isAiLoading.geminiPaid || !isGeminiPaidAvailable}
-                                        title={!isGeminiPaidAvailable ? 'Gemini Pro مفعّل دون مفتاح API مهيأ على الخادم' : 'تشغيل التحليل باستخدام Gemini Pro'}
+                                        title={!isGeminiPaidAvailable ? 'Gemini Pro مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'تشغيل التحليل باستخدام Gemini Pro'}
                                         className="flex items-center justify-center gap-2 rounded-lg bg-[#d4af37] py-2 text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isAiLoading.geminiPaid ? <Wand2 size={16} className="animate-spin" /> : <BadgeDollarSign size={16} />}
@@ -2145,7 +2145,7 @@ ${readyCommandCompetitorBlocks}`;
                                     <button
                                         onClick={handleRunChatGptAnalysis}
                                         disabled={isAiLoading.chatgpt || !isOpenAiAvailable}
-                                        title={!isOpenAiAvailable ? 'OpenAI مفعّل دون مفتاح API مهيأ على الخادم' : 'تشغيل التحليل باستخدام OpenAI'}
+                                        title={!isOpenAiAvailable ? 'OpenAI مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'تشغيل التحليل باستخدام OpenAI'}
                                         className="flex items-center justify-center gap-2 rounded-lg bg-[#d4af37] py-2 text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
@@ -2298,7 +2298,7 @@ ${readyCommandCompetitorBlocks}`;
                             onClick={() => setCompetitorGeminiProvider('gemini')}
                             disabled={!isGeminiFreeAvailable}
                             title={!isGeminiFreeAvailable
-                                ? (t.locale === 'ar' ? 'النموذج المجاني مفعّل دون مفتاح مهيأ على الخادم' : 'Gemini is enabled without a configured server API key')
+                                ? (t.locale === 'ar' ? 'النموذج المجاني مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'Gemini is enabled without a permitted dashboard credential')
                                 : (t.locale === 'ar' ? 'النموذج المجاني' : 'Gemini')}
                             className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors ${
                                 competitorGeminiProvider === 'gemini'
@@ -2315,7 +2315,7 @@ ${readyCommandCompetitorBlocks}`;
                                 onClick={() => setCompetitorGeminiProvider('geminiPaid')}
                                 disabled={!isGeminiPaidAvailable}
                                 title={!isGeminiPaidAvailable
-                                    ? (t.locale === 'ar' ? 'النموذج المتقدم مفعّل دون مفتاح مهيأ على الخادم' : 'Gemini Pro is enabled without a configured server API key')
+                                    ? (t.locale === 'ar' ? 'النموذج المتقدم مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'Gemini Pro is enabled without a permitted dashboard credential')
                                     : (t.locale === 'ar' ? 'النموذج المتقدم' : 'Gemini Pro')}
                                 className={`flex items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                                     competitorGeminiProvider === 'geminiPaid'

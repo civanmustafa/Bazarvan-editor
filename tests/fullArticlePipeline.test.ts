@@ -36,8 +36,8 @@ test('smart brief prompt preserves manual choices as read-only context', () => {
       generatedBrief: 'الموجز السابق',
     },
   }, [
-    '{{article_title}}',
-    '{{primary_keyword}}',
+    '{{ article_title }}',
+    '${primary_keyword}',
     '{{alternative_keywords}}',
     '{{manual_choices_json}}',
     '{{existing_generated_brief}}',

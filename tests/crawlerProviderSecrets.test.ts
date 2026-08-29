@@ -62,14 +62,18 @@ test('crawler provider keys are encrypted with provider-bound authenticated data
   }
 });
 
-test('crawler provider encryption can reuse the existing server-side Supabase credential', () => {
+test('crawler provider encryption requires a dedicated vault-compatible master key', () => {
+  const previousVaultKey = process.env.PROVIDER_CREDENTIAL_VAULT_KEY;
   const previousDedicatedKey = process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY;
   const previousAiKey = process.env.AI_SETTINGS_ENCRYPTION_KEY;
   const previousServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.PROVIDER_CREDENTIAL_VAULT_KEY;
   delete process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY;
   delete process.env.AI_SETTINGS_ENCRYPTION_KEY;
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'server-only-service-role-test-secret';
   try {
+    assert.equal(isCrawlerSettingsEncryptionConfigured(), false);
+    process.env.PROVIDER_CREDENTIAL_VAULT_KEY = Buffer.alloc(32, 31).toString('base64');
     assert.equal(isCrawlerSettingsEncryptionConfigured(), true);
     const plaintext = 'browserless-admin-settings-key';
     const encrypted = __crawlerProviderSecretsTestUtils.encryptSecret(
@@ -89,6 +93,11 @@ test('crawler provider encryption can reuse the existing server-side Supabase cr
       plaintext,
     );
   } finally {
+    if (previousVaultKey === undefined) {
+      delete process.env.PROVIDER_CREDENTIAL_VAULT_KEY;
+    } else {
+      process.env.PROVIDER_CREDENTIAL_VAULT_KEY = previousVaultKey;
+    }
     if (previousDedicatedKey === undefined) {
       delete process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY;
     } else {

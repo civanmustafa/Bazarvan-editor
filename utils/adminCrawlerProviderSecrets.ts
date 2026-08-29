@@ -10,9 +10,8 @@ export type CrawlerProviderSecretStatus = {
   enabled: boolean;
   keySuffix: string | null;
   updatedAt: string | null;
-  fallbackConfigured: boolean;
   effectiveConfigured: boolean;
-  activeSource: 'admin' | 'hostinger';
+  activeSource: 'user' | 'assigned_user' | 'assigned_all' | 'resume' | 'admin' | 'none';
 };
 
 export type CrawlerProviderSecretsResponse = {

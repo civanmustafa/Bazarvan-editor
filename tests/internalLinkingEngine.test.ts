@@ -6,10 +6,12 @@ import {
   createInternalLinkArticleSignature,
   createInternalLinkInventorySignature,
   generateInternalLinkSuggestions,
+  normalizeInternalLinkText,
   normalizeInternalLinkUrl,
   type InternalLinkTargetPage,
 } from '../utils/internalLinkingEngine.ts';
 import { buildClientPageSemanticProfile } from '../utils/clientSemanticIndex.ts';
+import { normalizeSemanticText } from '../utils/clientSemanticIndex.ts';
 import {
   parseGeneratedClientLinkPhraseProfile,
   type ClientPageAiLinkProfile,
@@ -58,6 +60,12 @@ const readyPage = (overrides: Partial<InternalLinkTargetPage> = {}): InternalLin
   extractedPhrases: ['خدمات التحول الرقمي', 'تحسين تجربة العملاء'],
   isEnabled: true,
   ...overrides,
+});
+
+test('semantic indexing and internal linking share canonical Arabic/English normalization', () => {
+  const sample = 'إدارةُ العَمَلِيَّات — DIGITAL  Services';
+  assert.equal(normalizeInternalLinkText(sample), 'اداره العمليات digital services');
+  assert.equal(normalizeInternalLinkText(sample), normalizeSemanticText(sample));
 });
 
 const aiLinkProfile = (

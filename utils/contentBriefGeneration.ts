@@ -1,4 +1,5 @@
 import type { GoalContext } from '../types.ts';
+import { renderPromptTemplateVariables } from '../constants/promptTemplateRenderer.ts';
 
 type ContentBriefInput = {
   title: string;
@@ -14,17 +15,6 @@ const toText = (value: unknown): string => (
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-);
-
-const renderBriefTemplate = (
-  template: string,
-  variables: Record<string, string>,
-): string => Object.entries(variables).reduce(
-  (result, [key, value]) => result.replace(
-    new RegExp(`{{\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*}}`, 'g'),
-    value,
-  ),
-  template,
 );
 
 const parseJsonValue = (value: string): unknown => {
@@ -58,7 +48,7 @@ export const buildContentBriefPrompt = (
     generatedBrief: existingGeneratedBrief,
     ...manualChoices
   } = normalizedGoalContext;
-  return renderBriefTemplate(template, {
+  return renderPromptTemplateVariables(template, {
     article_title: toText(input.title) || 'غير محدد',
     primary_keyword: toText(input.primaryKeyword) || 'غير محددة',
     alternative_keywords: input.alternativeKeywords.map(toText).filter(Boolean).join(', ') || 'غير محددة',

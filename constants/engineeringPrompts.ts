@@ -1,4 +1,5 @@
 import { AI_PROMPTS } from './aiPrompts';
+import { renderPromptTemplateVariables } from './promptTemplateRenderer';
 import type { AiAnalysisOptions, EngineeringPromptDefinition, EngineeringPromptId, EngineeringPrompts } from '../types';
 
 export const CONTENT_SUMMARY_STORAGE_KEY = 'bazarvan-current-content-summary';
@@ -1557,7 +1558,5 @@ export const getEngineeringPrompt = (prompts: EngineeringPrompts, id: Engineerin
 };
 
 export const renderEngineeringPrompt = (template: string, variables: Record<string, string>): string => {
-  return Object.entries(variables).reduce((prompt, [key, value]) => {
-    return prompt.replaceAll(`\${${key}}`, value);
-  }, template);
+  return renderPromptTemplateVariables(template, variables);
 };

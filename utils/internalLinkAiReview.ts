@@ -2,6 +2,7 @@ import type {
   InternalLinkSuggestion,
   InternalLinkTargetPage,
 } from './internalLinkingEngine.ts';
+import { renderPromptTemplateVariables } from '../constants/promptTemplateRenderer.ts';
 import {
   INTERNAL_LINK_ANCHOR_MAX_WORDS,
   INTERNAL_LINK_ANCHOR_MIN_WORDS,
@@ -198,9 +199,7 @@ export const buildInternalLinkAiReviewPrompt = (input: {
   };
   return {
     candidates,
-    prompt: Object.entries(variables).reduce((result, [key, value]) => (
-      result.replaceAll(`{{${key}}}`, value)
-    ), template),
+    prompt: renderPromptTemplateVariables(template, variables),
   };
 };
 

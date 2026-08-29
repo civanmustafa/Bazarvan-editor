@@ -1,16 +1,18 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
   ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
   CONTENT_WRITING_RESUME_SECRET_MIGRATION,
 } from '../constants/adminAiProviderSecrets.ts';
 import { USER_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/userAiProviderSecrets.ts';
+import { PROVIDER_CREDENTIAL_VAULT_MIGRATION } from '../server/providerCredentialVault.ts';
 
 const root = process.cwd();
 for (const migration of [
   ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
   USER_AI_PROVIDER_SECRETS_MIGRATION,
   CONTENT_WRITING_RESUME_SECRET_MIGRATION,
+  PROVIDER_CREDENTIAL_VAULT_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
@@ -24,10 +26,29 @@ for (const marker of [
   ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
   USER_AI_PROVIDER_SECRETS_MIGRATION,
   CONTENT_WRITING_RESUME_SECRET_MIGRATION,
+  PROVIDER_CREDENTIAL_VAULT_MIGRATION,
   'AI_SETTINGS_ENCRYPTION_KEY',
+  'provider_credentials_vault',
+  'لا يوجد أي fallback لمفاتيح المزوّدين من بيئة Hostinger',
 ]) {
   if (!deploymentGuide.includes(marker)) {
     throw new Error(`Deployment guide is missing administrator AI secret marker: ${marker}`);
+  }
+}
+
+const providerApiEnvironmentAccess = /process\.env(?:\.|\[['"])(?:GEMINI(?:_PAID|_PRO)?_API_KEYS?|OPENAI_API_KEYS?|FIRECRAWL_API_KEY|BROWSERLESS_API_KEY)/;
+for (const entry of await readdir(path.join(root, 'server'), { withFileTypes: true })) {
+  if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+  const source = await readFile(path.join(root, 'server', entry.name), 'utf8');
+  if (providerApiEnvironmentAccess.test(source)) {
+    throw new Error(`Provider API environment fallback is forbidden: server/${entry.name}`);
+  }
+}
+
+for (const example of ['.env.example', '.env.production.example', 'deploy/env.server.example']) {
+  const source = await readFile(path.join(root, example), 'utf8');
+  if (/^(?:GEMINI(?:_PAID|_PRO)?_API_KEYS?|OPENAI_API_KEYS?|FIRECRAWL_API_KEY|BROWSERLESS_API_KEY)=/m.test(source)) {
+    throw new Error(`Provider API keys must not be declared in environment example: ${example}`);
   }
 }
 
@@ -35,8 +56,8 @@ const serverBundle = await readFile(path.join(root, 'server-dist', 'server.mjs')
 for (const marker of [
   '/api/admin/ai-provider-secrets',
   '/api/user/ai-provider-secrets',
-  'user_ai_provider_secrets',
-  'AI_SETTINGS_ENCRYPTION_KEY',
+  'provider_credentials_vault',
+  'PROVIDER_CREDENTIAL_VAULT_KEY',
 ]) {
   if (!serverBundle.includes(marker)) {
     throw new Error(`Production server bundle is missing administrator AI secret marker: ${marker}`);
@@ -49,6 +70,7 @@ console.log(JSON.stringify({
     ADMIN_AI_PROVIDER_SECRETS_MIGRATION,
     USER_AI_PROVIDER_SECRETS_MIGRATION,
     CONTENT_WRITING_RESUME_SECRET_MIGRATION,
+    PROVIDER_CREDENTIAL_VAULT_MIGRATION,
   ],
   readinessEndpoint: '/readyz',
 }, null, 2));

@@ -29,8 +29,27 @@ import {
   COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
   getUsableCompetitorText,
   isCompetitorExtractionFailureText,
+  resolveCompetitorCanonicalSource,
   sanitizeCompetitorSlots,
 } from '../utils/competitorContent.ts';
+
+test('managed competitor rows are canonical while unmarked legacy metadata remains a manual fallback', () => {
+  assert.equal(resolveCompetitorCanonicalSource({
+    managedRowCount: 1,
+    metadataManagedBy: '',
+    metadataTextCount: 3,
+  }), 'managed_rows');
+  assert.equal(resolveCompetitorCanonicalSource({
+    managedRowCount: 0,
+    metadataManagedBy: '',
+    metadataTextCount: 2,
+  }), 'manual_metadata');
+  assert.equal(resolveCompetitorCanonicalSource({
+    managedRowCount: 0,
+    metadataManagedBy: 'competitor_discovery',
+    metadataTextCount: 2,
+  }), 'none');
+});
 
 const readWorkspaceFile = async (relativePath: string): Promise<string> => (
   readFile(fileURLToPath(new URL(`../${relativePath}`, import.meta.url)), 'utf8')
@@ -271,7 +290,7 @@ test('manual and queued competitor discovery load the linked client domain exclu
   assert.match(exclusionSource, /\.eq\('is_active', true\)/);
 });
 
-test('competitor Firecrawl operations resolve user-aware credentials before Hostinger fallback', async () => {
+test('competitor Firecrawl operations resolve only user-owned or assigned vault credentials', async () => {
   const [service, apiSource, settings, panel] = await Promise.all([
     readWorkspaceFile('server/firecrawlCompetitorService.ts'),
     readWorkspaceFile('api/competitors.ts'),
@@ -285,6 +304,7 @@ test('competitor Firecrawl operations resolve user-aware credentials before Host
   assert.match(apiSource, /providerConfigured: await isFirecrawlConfigured\(principal\.userId\)/);
   assert.match(apiSource, /!\(await isFirecrawlConfigured\(principal\.userId\)\)/);
   assert.match(settings, /بحث المنافسين وسحب محتواهم/);
+  assert.doesNotMatch(settings, /FIRECRAWL_API_KEY|BROWSERLESS_API_KEY|Hostinger/);
   assert.match(panel, /إعدادات المسؤول ← خدمات الزحف/);
 });
 

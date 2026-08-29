@@ -282,6 +282,46 @@ test('API handlers share the same HTTP request and response adapters', async () 
     assert.doesNotMatch(source, /const toWebResponse\s*=/);
     assert.doesNotMatch(source, /const sendNodeResponse\s*=/);
   });
+
+  const geminiEngine = await readWorkspaceFile('server/aiExecutionEngine.ts');
+  assert.match(geminiEngine, /from ['"]\.\.\/api\/http\.ts['"]/);
+  assert.match(geminiEngine, /deliverApiResult\(result, res\)/);
+  assert.doesNotMatch(geminiEngine, /const readNodeBody\s*=/);
+  assert.doesNotMatch(geminiEngine, /const readRequestBody\s*=/);
+  assert.doesNotMatch(geminiEngine, /const toWebResponse\s*=/);
+  assert.doesNotMatch(geminiEngine, /const sendNodeResponse\s*=/);
+});
+
+test('semantic indexing and internal links share one normalization module', async () => {
+  const [semanticIndex, linkingEngine, sharedText] = await Promise.all([
+    readWorkspaceFile('utils/clientSemanticIndex.ts'),
+    readWorkspaceFile('utils/internalLinkingEngine.ts'),
+    readWorkspaceFile('utils/arabicEnglishText.ts'),
+  ]);
+
+  assert.match(semanticIndex, /from ['"]\.\/arabicEnglishText\.ts['"]/);
+  assert.match(linkingEngine, /from ['"]\.\/arabicEnglishText\.ts['"]/);
+  assert.match(sharedText, /export const normalizeArabicEnglishText/);
+  assert.match(sharedText, /CORE_ARABIC_ENGLISH_STOP_WORDS/);
+  assert.doesNotMatch(semanticIndex, /const ARABIC_DIACRITICS/);
+  assert.doesNotMatch(linkingEngine, /const ARABIC_DIACRITICS/);
+});
+
+test('administrator prompts use one renderer for legacy and current placeholders', async () => {
+  const [engineeringPrompts, promptRegistry, internalLinkReview, renderer] = await Promise.all([
+    readWorkspaceFile('constants/engineeringPrompts.ts'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+    readWorkspaceFile('utils/internalLinkAiReview.ts'),
+    readWorkspaceFile('constants/promptTemplateRenderer.ts'),
+  ]);
+
+  assert.match(engineeringPrompts, /renderPromptTemplateVariables\(template, variables\)/);
+  assert.match(promptRegistry, /renderPromptTemplateVariables\(template, variables\)/);
+  assert.match(internalLinkReview, /renderPromptTemplateVariables\(template, variables\)/);
+  assert.doesNotMatch(internalLinkReview, /replaceAll\(`\{\{/);
+  assert.match(renderer, /`\{\{\$\{key\}\}\}`/);
+  assert.match(renderer, /`\\\$\{\$\{key\}\}`/);
+  assert.equal((renderer.match(/export const renderPromptTemplateVariables/g) || []).length, 1);
 });
 
 test('competitor intent, scoring, and automatic selection use one server engine', async () => {
@@ -340,6 +380,8 @@ test('legacy browser API key and unreachable settings paths stay removed', async
   assert.doesNotMatch(userContext, /\bapiKeys\b|handleSaveApiKeys|saveUserApiKeys/);
   assert.doesNotMatch(aiContext, /\bapiKeys\b|normalizeGeminiKeys|normalizeChatGptKeys/);
   assert.doesNotMatch(userActivity, /geminiKeyUsage|recordGeminiKeyUsage/);
+  assert.doesNotMatch(userActivity, /recordLogin|recordTimeSpentOnArticle|recordArticleSave/);
+  assert.doesNotMatch(userContext, /recordLoginActivity|recordLogin\(/);
   assert.doesNotMatch(adminApp, /AdminSettingsPage|AdminSettingsSection/);
 
   await Promise.all([
@@ -510,6 +552,8 @@ test('administrator prompt registry is the shared source for editor and writing 
 test('administrator AI overrides are encrypted, admin-only, and resolved by shared provider engines', async () => {
   const [
     migration,
+    vaultMigration,
+    vaultService,
     secretService,
     secretApi,
     secretClient,
@@ -520,6 +564,8 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
     aiExecutionEngine,
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260722050000_admin_ai_provider_secrets.sql'),
+    readWorkspaceFile('supabase/migrations/20260829030000_provider_credential_vault.sql'),
+    readWorkspaceFile('server/providerCredentialVault.ts'),
     readWorkspaceFile('server/adminAiProviderSecrets.ts'),
     readWorkspaceFile('api/adminAiProviderSecrets.ts'),
     readWorkspaceFile('utils/adminAiProviderSecrets.ts'),
@@ -533,9 +579,12 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
   assert.match(migration, /alter table public\.ai_provider_secrets enable row level security/);
   assert.match(migration, /revoke all on table public\.ai_provider_secrets from authenticated/);
   assert.match(migration, /grant select, insert, update, delete on table public\.ai_provider_secrets to service_role/);
-  assert.match(secretService, /aes-256-gcm/);
-  assert.match(secretService, /setAAD\(getAdditionalAuthenticatedData\(provider\)\)/);
-  assert.match(secretService, /AI_SETTINGS_ENCRYPTION_KEY/);
+  assert.match(vaultMigration, /create table if not exists public\.provider_credentials_vault/);
+  assert.match(vaultMigration, /revoke all on table public\.provider_credentials_vault from public, anon, authenticated/);
+  assert.match(vaultService, /aes-256-gcm/);
+  assert.match(vaultService, /cipher\.setAAD\(Buffer\.from\(encryptionContext, 'utf8'\)\)/);
+  assert.match(vaultService, /AI_SETTINGS_ENCRYPTION_KEY/);
+  assert.match(secretService, /saveProviderCredentialVaultRow/);
   assert.match(secretApi, /principal\.role !== 'admin'/);
   assert.match(secretApi, /Cache-Control': 'no-store'/);
   assert.doesNotMatch(secretApi, /ciphertext|authentication_tag|initialization_vector/);
@@ -553,6 +602,8 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
 test('each user can manage encrypted personal AI key groups without exposing raw keys', async () => {
   const [
     migration,
+    vaultMigration,
+    vaultService,
     secretService,
     secretApi,
     secretClient,
@@ -561,6 +612,8 @@ test('each user can manage encrypted personal AI key groups without exposing raw
     adminSecretService,
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260726000000_user_ai_provider_secrets.sql'),
+    readWorkspaceFile('supabase/migrations/20260829030000_provider_credential_vault.sql'),
+    readWorkspaceFile('server/providerCredentialVault.ts'),
     readWorkspaceFile('server/userAiProviderSecrets.ts'),
     readWorkspaceFile('api/userAiProviderSecrets.ts'),
     readWorkspaceFile('utils/userAiProviderSecrets.ts'),
@@ -572,8 +625,12 @@ test('each user can manage encrypted personal AI key groups without exposing raw
   assert.match(migration, /alter table public\.user_ai_provider_secrets enable row level security/);
   assert.match(migration, /revoke all on table public\.user_ai_provider_secrets from authenticated/);
   assert.match(migration, /primary key \(user_id, provider\)/);
-  assert.match(secretService, /aes-256-gcm/);
-  assert.match(secretService, /getAdditionalAuthenticatedData\(userId, provider\)/);
+  assert.match(vaultMigration, /credential_type text not null/);
+  assert.match(vaultMigration, /owner_user_id uuid references public\.profiles\(id\) on delete cascade/);
+  assert.match(vaultService, /aes-256-gcm/);
+  assert.match(vaultService, /getProviderCredentialVaultAad/);
+  assert.match(secretService, /getPersonalVaultKey/);
+  assert.match(secretService, /saveProviderCredentialVaultRow/);
   assert.match(secretApi, /principal\.userId/);
   assert.doesNotMatch(secretApi, /body\.userId|body\.user_id/);
   assert.doesNotMatch(secretApi, /ciphertext|authentication_tag|initialization_vector/);

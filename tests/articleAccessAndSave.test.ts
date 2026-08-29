@@ -109,7 +109,18 @@ test('article time tracking uses an authenticated atomic increment', async () =>
   assert.match(migration, /time_spent_seconds = coalesce\(article\.time_spent_seconds, 0\) \+ p_seconds/);
   assert.match(migration, /grant execute on function public\.record_article_time\(uuid, integer\) to authenticated, service_role/);
   assert.match(articleClient, /rpc\('record_article_time'/);
-  assert.match(articleClient, /\['PGRST202', '42883'\]/);
+  assert.doesNotMatch(articleClient, /time_spent_seconds =|\.update\(\{ time_spent_seconds/);
+});
+
+test('dashboard lifecycle mutations require the deployed canonical RPCs without client-side compatibility writes', async () => {
+  const articleClient = await readWorkspaceFile('utils/supabaseArticles.ts');
+
+  assert.match(articleClient, /rpc\('update_article_dashboard_status'/);
+  assert.match(articleClient, /rpc\('move_article_to_dashboard_trash'/);
+  assert.match(articleClient, /rpc\('restore_article_from_dashboard_trash'/);
+  assert.match(articleClient, /rpc\('purge_expired_dashboard_trash'/);
+  assert.doesNotMatch(articleClient, /error\?\.code !== 'PGRST202'/);
+  assert.doesNotMatch(articleClient, /error\?\.code === 'PGRST202'/);
 });
 
 test('dashboard, access/save, and performance migrations have balanced SQL delimiters', async () => {

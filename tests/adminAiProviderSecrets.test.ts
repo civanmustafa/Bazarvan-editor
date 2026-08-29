@@ -79,7 +79,6 @@ test('content-writing resume key is isolated by provider and precedes ordinary r
     const credentials = __adminAiProviderSecretsTestUtils.buildResolvedCredentialSet(
       'admin-key-12345678901234567890',
       true,
-      ['hostinger-key-123456789012345'],
       ['user-key-123456789012345678901'],
       plaintext,
     );
@@ -87,7 +86,6 @@ test('content-writing resume key is isolated by provider and precedes ordinary r
       'resume',
       'user',
       'admin',
-      'hostinger',
     ]);
     assert.equal(credentials.keys[0], plaintext);
   });
@@ -116,7 +114,8 @@ test('administrator AI secret readiness checks schema and encryption independent
     });
     assert.equal(isAiSettingsEncryptionConfigured(), true);
     assert.equal(ready.ok, true);
-    assert.deepEqual(ready.checks, { schema: true, userSchema: true, encryptionKey: true });
+    assert.deepEqual(ready.checks, { vaultSchema: true, encryptionKey: true });
+    assert.equal(ready.requiredMigration, '20260829030000_provider_credential_vault.sql');
   });
 
   const previous = process.env.AI_SETTINGS_ENCRYPTION_KEY;

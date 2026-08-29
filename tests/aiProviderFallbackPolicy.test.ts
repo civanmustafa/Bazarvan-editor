@@ -87,7 +87,7 @@ test('provider fallback metadata preserves suffixes and removes key fingerprints
       body: {
         provider: 'geminiPaid',
         model: 'gemini-paid-test',
-        credentialSource: 'hostinger',
+        credentialSource: 'assigned_all',
         keySuffix: 'GM01',
         text: 'ok',
       },
@@ -111,39 +111,35 @@ test('provider fallback metadata preserves suffixes and removes key fingerprints
   assert.doesNotMatch(JSON.stringify(body.providerFallbackAttempts), /secret-fingerprint/);
 });
 
-test('administrator credentials stay ahead of Hostinger keys and duplicate keys are removed', () => {
+test('administrator vault credentials are used without an environment key tier', () => {
   const enabled = __adminAiProviderSecretsTestUtils.buildResolvedCredentialSet(
     'admin-key',
     true,
-    ['hostinger-1', 'admin-key', 'hostinger-2', 'hostinger-1'],
   );
   assert.deepEqual(enabled.tiers, [
     { source: 'admin', keys: ['admin-key'] },
-    { source: 'hostinger', keys: ['hostinger-1', 'hostinger-2'] },
   ]);
-  assert.deepEqual(enabled.keys, ['admin-key', 'hostinger-1', 'hostinger-2']);
+  assert.deepEqual(enabled.keys, ['admin-key']);
   assert.equal(enabled.source, 'admin');
 
   const disabled = __adminAiProviderSecretsTestUtils.buildResolvedCredentialSet(
     'admin-key',
     false,
-    ['hostinger-1'],
   );
-  assert.deepEqual(disabled.tiers, [{ source: 'hostinger', keys: ['hostinger-1'] }]);
-  assert.equal(disabled.source, 'hostinger');
+  assert.deepEqual(disabled.tiers, []);
+  assert.equal(disabled.source, 'none');
 });
 
-test('personal credentials stay ahead of administrator and Hostinger keys', () => {
+test('personal credentials stay ahead of administrator vault credentials', () => {
   const resolved = __adminAiProviderSecretsTestUtils.buildResolvedCredentialSet(
     'admin-key',
     true,
-    ['hostinger-key', 'personal-key', 'admin-key'],
-    ['personal-key', 'personal-key-2'],
+    ['personal-key', 'personal-key-2', 'personal-key'],
   );
   assert.deepEqual(resolved.tiers, [
     { source: 'user', keys: ['personal-key', 'personal-key-2'] },
     { source: 'admin', keys: ['admin-key'] },
-    { source: 'hostinger', keys: ['hostinger-key'] },
   ]);
+  assert.deepEqual(resolved.keys, ['personal-key', 'personal-key-2', 'admin-key']);
   assert.equal(resolved.source, 'user');
 });

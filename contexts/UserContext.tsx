@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useEffect, createContext, useContext, useMemo, useRef } from 'react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-import { recordLogin, getActivityData, saveUserPreference, saveUserClientGoalContexts } from '../hooks/useUserActivity';
+import { getActivityData, saveUserPreference, saveUserClientGoalContexts } from '../hooks/useUserActivity';
 import { translations } from '../components/translations';
 import { DEFAULT_ENGINEERING_PROMPTS, normalizeEngineeringPrompts } from '../constants/engineeringPrompts';
 import { DEFAULT_PROMPT_TEMPLATES } from '../constants/promptRegistry';
@@ -258,7 +258,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const applyAuthenticatedUser = useCallback(async (
         user: SupabaseUser | null,
-        options: { recordLoginActivity?: boolean } = {},
     ): Promise<string | null> => {
         const nextAiActivityUserId = user?.id || null;
         if (aiActivityUserIdRef.current !== nextAiActivityUserId) {
@@ -298,9 +297,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             sessionStorage.setItem('currentView', getRouteView(parseAppRoute()));
         } catch (error) {
             console.error("Could not mirror Supabase session to sessionStorage:", error);
-        }
-        if (options.recordLoginActivity) {
-            recordLogin(label);
         }
         setCurrentViewState(getRouteView(parseAppRoute()));
         return label;
@@ -733,7 +729,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return false;
         }
 
-        await applyAuthenticatedUser(data.user, { recordLoginActivity: true });
+        await applyAuthenticatedUser(data.user);
         return true;
     }, [applyAuthenticatedUser]);
 

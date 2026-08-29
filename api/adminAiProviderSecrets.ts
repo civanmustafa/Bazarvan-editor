@@ -16,13 +16,9 @@ import {
 import {
   AdminAiProviderSecretError,
   deleteAdminAiProviderSecret,
-  getEnvironmentGeminiApiKeys,
-  getEnvironmentOpenAiApiKeys,
   normalizeAdminAiSecretProvider,
   readAdminAiProviderSecretsOverview,
   saveAdminAiProviderSecret,
-  type AdminAiProviderSecretsOverview,
-  type AdminAiSecretProvider,
 } from '../server/adminAiProviderSecrets';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -44,39 +40,11 @@ const withCorsResponseHeaders = (req: any, result: ApiResult): ApiResult => {
   }
 };
 
-const getPublicOverview = (overview: AdminAiProviderSecretsOverview) => {
-  const openAiFallbackCount = getEnvironmentOpenAiApiKeys().length;
-  const geminiFallbackCount = getEnvironmentGeminiApiKeys('geminiPaid').length;
-  const enrich = (provider: AdminAiSecretProvider, fallbackKeyCount: number) => {
-    const status = overview.providers[provider];
-    const customUsable = status.enabled && status.configured && overview.encryptionConfigured;
-    return {
-      ...status,
-      fallbackConfigured: fallbackKeyCount > 0,
-      fallbackKeyCount,
-      effectiveConfigured: customUsable || fallbackKeyCount > 0,
-      activeSource: status.enabled ? 'admin' : 'hostinger',
-    };
-  };
-
-  return {
-    schemaAvailable: overview.schemaAvailable,
-    encryptionConfigured: overview.encryptionConfigured,
-    providers: {
-      openai_latest: enrich('openai_latest', openAiFallbackCount),
-      gemini_latest: enrich('gemini_latest', geminiFallbackCount),
-      content_writing_resume_gemini: enrich('content_writing_resume_gemini', 0),
-      content_writing_resume_gemini_paid: enrich('content_writing_resume_gemini_paid', 0),
-      content_writing_resume_openai: enrich('content_writing_resume_openai', 0),
-    },
-  };
-};
-
 const readOverviewResult = async (): Promise<ApiResult> => ({
   status: 200,
   body: {
     ok: true,
-    ...getPublicOverview(await readAdminAiProviderSecretsOverview()),
+    ...await readAdminAiProviderSecretsOverview(),
   },
 });
 

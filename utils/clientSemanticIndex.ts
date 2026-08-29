@@ -1,3 +1,8 @@
+import {
+  CLIENT_SEMANTIC_STOP_WORDS,
+  normalizeArabicEnglishText,
+} from './arabicEnglishText.ts';
+
 export const CLIENT_SEMANTIC_PROFILE_VERSION = 1;
 
 export type ClientLinkDictionaryType = 'synonym' | 'topic' | 'excluded_term';
@@ -95,35 +100,11 @@ type SourceText = {
   weight: number;
 };
 
-const ARABIC_DIACRITICS = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g;
 const TOKEN_PATTERN = /[A-Za-z0-9\u0600-\u06FF]+/g;
 
-const BASE_STOP_WORDS = new Set([
-  'في', 'من', 'الى', 'إلى', 'عن', 'على', 'علي', 'مع', 'حتى', 'ثم', 'او', 'أو',
-  'ام', 'أم', 'بل', 'لا', 'نعم', 'و', 'ف', 'ب', 'ك', 'ل', 'لل', 'هو', 'هي',
-  'هم', 'هن', 'هذا', 'هذه', 'ذلك', 'تلك', 'الذي', 'التي', 'الذين', 'كان', 'كانت',
-  'يكون', 'تكون', 'يتم', 'تم', 'قد', 'لقد', 'ان', 'إن', 'أن', 'كما', 'كل', 'اي',
-  'أي', 'غير', 'ما', 'ماذا', 'كيف', 'عند', 'بعد', 'قبل', 'بين', 'ضمن', 'حول',
-  'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with', 'from',
-  'by', 'at', 'as', 'is', 'are', 'was', 'were', 'be', 'this', 'that', 'these',
-  'those', 'it', 'its', 'you', 'your', 'we', 'our',
-].map(value => normalizeSemanticText(value)));
+const BASE_STOP_WORDS = CLIENT_SEMANTIC_STOP_WORDS;
 
-export function normalizeSemanticText(value: string): string {
-  return value
-    .normalize('NFKC')
-    .toLocaleLowerCase()
-    .replace(ARABIC_DIACRITICS, '')
-    .replace(/\u0640/g, '')
-    .replace(/[أإآٱ]/g, 'ا')
-    .replace(/ى/g, 'ي')
-    .replace(/ؤ/g, 'و')
-    .replace(/ئ/g, 'ي')
-    .replace(/ة/g, 'ه')
-    .replace(/[^a-z0-9\u0600-\u06FF]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+export const normalizeSemanticText = normalizeArabicEnglishText;
 
 const GENERIC_CLIENT_PAGE_TITLES = new Set([
   'الرئيسية',

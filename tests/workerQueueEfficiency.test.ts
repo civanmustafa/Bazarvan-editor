@@ -6,6 +6,10 @@ import {
   calculateAdaptiveIdleDelay,
   estimateMaximumIdleClaimsPerHour,
 } from '../server/adaptiveQueueWorker.ts';
+import {
+  LeaseHeartbeatController,
+  type LeaseHeartbeatScheduler,
+} from '../server/leaseHeartbeatController.ts';
 
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
@@ -85,6 +89,103 @@ test('the coordinator still fills every execution slot when work exists', async 
   assert.equal(maximumActiveExecutions, 2);
 });
 
+test('shared lease heartbeat renews serially and fences lost ownership', async () => {
+  let now = 1_000;
+  let renewalCount = 0;
+  let scheduled: { callback: () => void; cancelled: boolean } | null = null;
+  const scheduler: LeaseHeartbeatScheduler = {
+    now: () => now,
+    schedule: callback => {
+      scheduled = { callback, cancelled: false };
+      return scheduled;
+    },
+    cancel: handle => {
+      (handle as { cancelled: boolean }).cancelled = true;
+    },
+  };
+  const controller = new AbortController();
+  const stop = new LeaseHeartbeatController({
+    controller,
+    leaseDurationMs: 300,
+    intervalMs: 100,
+    renewLease: async () => ({ owned: ++renewalCount < 2 }),
+    resolveAbortReason: state => state.owned ? null : new Error('lost-lease'),
+    resolveExpiredLeaseReason: () => new Error('expired-lease'),
+    scheduler,
+  }).start();
+
+  assert.ok(scheduled);
+  scheduled.callback();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(renewalCount, 1);
+  assert.equal(controller.signal.aborted, false);
+  assert.ok(scheduled);
+
+  scheduled.callback();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(renewalCount, 2);
+  assert.equal(controller.signal.aborted, true);
+  assert.equal((controller.signal.reason as Error).message, 'lost-lease');
+  stop();
+  now += 1;
+});
+
+test('shared lease heartbeat stop clears the pending renewal timer', () => {
+  let scheduled: { cancelled: boolean } | null = null;
+  const stop = new LeaseHeartbeatController({
+    controller: new AbortController(),
+    leaseDurationMs: 300,
+    intervalMs: 100,
+    renewLease: async () => true,
+    resolveAbortReason: () => null,
+    scheduler: {
+      now: () => 0,
+      schedule: () => {
+        scheduled = { cancelled: false };
+        return scheduled;
+      },
+      cancel: handle => {
+        (handle as { cancelled: boolean }).cancelled = true;
+      },
+    },
+  }).start();
+
+  assert.ok(scheduled);
+  stop();
+  assert.equal(scheduled.cancelled, true);
+});
+
+test('shared lease heartbeat applies the queue-specific lease-expiry fallback', async () => {
+  let now = 0;
+  let scheduled: { callback: () => void } | null = null;
+  const controller = new AbortController();
+  new LeaseHeartbeatController({
+    controller,
+    leaseDurationMs: 100,
+    intervalMs: 50,
+    renewLease: async () => {
+      throw new Error('database unavailable');
+    },
+    resolveAbortReason: () => null,
+    resolveExpiredLeaseReason: () => new Error('expired-lease'),
+    scheduler: {
+      now: () => now,
+      schedule: callback => {
+        scheduled = { callback };
+        return scheduled;
+      },
+      cancel: () => undefined,
+    },
+  }).start();
+
+  now = 100;
+  assert.ok(scheduled);
+  scheduled.callback();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(controller.signal.aborted, true);
+  assert.equal((controller.signal.reason as Error).message, 'expired-lease');
+});
+
 test('all durable workers use adaptive polling and lightweight Realtime wake signals', async () => {
   const [
     externalWorker,
@@ -106,8 +207,10 @@ test('all durable workers use adaptive polling and lightweight Realtime wake sig
 
   for (const workerSource of [externalWorker, aiWorker, writingWorker, crawlerWorker]) {
     assert.match(workerSource, /new AdaptiveQueueWorker/);
+    assert.match(workerSource, /new LeaseHeartbeatController/);
     assert.match(workerSource, /subscribeToWorkerQueueWakeSignal/);
     assert.doesNotMatch(workerSource, /runWorkerSlot/);
+    assert.doesNotMatch(workerSource, /const start(?:Lease)?Heartbeat\s*=/);
   }
 
   assert.match(externalWorker, /queueName: 'external_analysis'/);

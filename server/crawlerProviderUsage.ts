@@ -5,6 +5,8 @@ import type {
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 import type { CrawlerCredentialSource } from './crawlerProviderSecrets.ts';
 
+export type RecordedCrawlerCredentialSource = CrawlerCredentialSource | 'hostinger';
+
 export type CrawlerAttemptProvider = 'local' | CrawlerExternalProvider;
 export type CrawlerProviderAttemptStatus = 'completed' | 'failed';
 
@@ -39,7 +41,7 @@ type CrawlerProviderUsageEventRow = {
   job_attempt: number;
   requested_provider: ClientSiteCrawlProvider;
   provider: CrawlerAttemptProvider;
-  credential_source: CrawlerCredentialSource | null;
+  credential_source: RecordedCrawlerCredentialSource | null;
   key_suffix: string | null;
   status: CrawlerProviderAttemptStatus;
   target_url: string;
@@ -71,7 +73,7 @@ export type CrawlerProviderUsageReportEvent = {
   jobAttempt: number;
   requestedProvider: ClientSiteCrawlProvider;
   provider: CrawlerAttemptProvider;
-  credentialSource: CrawlerCredentialSource | null;
+  credentialSource: RecordedCrawlerCredentialSource | null;
   keySuffix: string | null;
   status: CrawlerProviderAttemptStatus;
   targetUrl: string;

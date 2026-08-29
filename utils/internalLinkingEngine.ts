@@ -14,6 +14,10 @@ import {
   normalizeInternalLinkQualityPolicy,
   type InternalLinkQualityPolicyValues,
 } from './internalLinkQualityPolicy.ts';
+import {
+  CORE_ARABIC_ENGLISH_STOP_WORDS,
+  normalizeArabicEnglishText,
+} from './arabicEnglishText.ts';
 
 export type InternalLinkTargetPage = {
   id: string;
@@ -107,34 +111,13 @@ type TargetSignal = {
     | 'ai_entity';
 };
 
-const ARABIC_DIACRITICS = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g;
 const WORD_PATTERN = /[A-Za-z0-9\u0600-\u06FF]+/g;
 const MAX_ANCHOR_WORDS = INTERNAL_LINK_ANCHOR_MAX_WORDS;
 const MIN_ANCHOR_WORDS = INTERNAL_LINK_ANCHOR_MIN_WORDS;
 
-export const normalizeInternalLinkText = (value: string): string => value
-  .normalize('NFKC')
-  .toLocaleLowerCase()
-  .replace(ARABIC_DIACRITICS, '')
-  .replace(/\u0640/g, '')
-  .replace(/[أإآٱ]/g, 'ا')
-  .replace(/ى/g, 'ي')
-  .replace(/ؤ/g, 'و')
-  .replace(/ئ/g, 'ي')
-  .replace(/ة/g, 'ه')
-  .replace(/[^a-z0-9\u0600-\u06FF]+/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
+export const normalizeInternalLinkText = normalizeArabicEnglishText;
 
-const STOP_WORDS = new Set([
-  'في', 'من', 'الى', 'إلى', 'عن', 'على', 'علي', 'مع', 'حتى', 'ثم', 'او', 'أو', 'ام', 'أم',
-  'بل', 'لا', 'نعم', 'و', 'ف', 'ب', 'ك', 'ل', 'لل', 'هو', 'هي', 'هم', 'هن', 'هذا', 'هذه',
-  'ذلك', 'تلك', 'الذي', 'التي', 'الذين', 'كان', 'كانت', 'يكون', 'تكون', 'يتم', 'تم', 'قد',
-  'لقد', 'ان', 'إن', 'أن', 'كما', 'كل', 'اي', 'أي', 'غير', 'ما', 'ماذا', 'كيف', 'عند',
-  'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with', 'from', 'by',
-  'at', 'as', 'is', 'are', 'was', 'were', 'be', 'this', 'that', 'these', 'those', 'it',
-  'its', 'you', 'your', 'we', 'our',
-].map(value => normalizeInternalLinkText(value)));
+const STOP_WORDS = CORE_ARABIC_ENGLISH_STOP_WORDS;
 
 export const isGenericInternalLinkPageTitle = (value: string | undefined): boolean => (
   isGenericClientPageTitle(value)

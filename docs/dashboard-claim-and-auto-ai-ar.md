@@ -36,28 +36,33 @@
 - لا توجد صيغ بديلة أو LSI حتى بعد محاولة التوليد.
 - سياق الصفحة ناقص.
 - حالة المقالة ليست `draft`.
-- مفاتيح Gemini Pro غير مضافة على السيرفر.
+- لا يوجد مفتاح شخصي صالح للمستخدم ولا اعتماد مشترك منحه المسؤول لهذا المستخدم.
 
 ## مهم جدا
 
 فتح المقالة لا يشغل أي أتمتة تلقائية الآن.
 إذا أردت إعادة تشغيل الأتمتة، قم بإعادة تعيين المستخدم أو اجعل مستخدما يحجز المسودة المتاحة.
 
-## متغيرات السيرفر المطلوبة على Hostinger
+## إعداد الخزنة وبيئة Hostinger
 
-تأكد أن ملف البيئة الذي يستخدمه PM2 يحتوي على:
+طبّق ترحيل الخزنة الموحدة، ثم تأكد أن ملف البيئة الذي يستخدمه PM2 يحتوي على أسرار البنية ومفتاح التشفير فقط:
 
 ```bash
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
-GEMINI_API_KEYS=free_key_1,free_key_2
-GEMINI_PAID_API_KEYS=paid_or_pro_key_1,paid_or_pro_key_2
+AI_SETTINGS_ENCRYPTION_KEY=YOUR_32_BYTE_BASE64_KEY
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_PAID_MODEL=gemini-2.5-pro
 ASSIGNED_ARTICLE_AI_PAUSE_MS=5000
 ```
 
-لا تضع `SUPABASE_SERVICE_ROLE_KEY` أو مفاتيح Gemini المدفوعة داخل المتصفح أو داخل `VITE_`.
+لا تحفظ `GEMINI_API_KEY(S)` أو `GEMINI_PAID_API_KEY(S)` في Hostinger ولا يوجد fallback منها. يحفظ المسؤول الاعتمادات المشتركة ويمنحها للجميع أو لمستخدمين محددين، ويحفظ كل مستخدم مفاتيحه المجانية أو المدفوعة في إعداداته ولا يستخدمها سواه. لا تضع `SUPABASE_SERVICE_ROLE_KEY` أو `AI_SETTINGS_ENCRYPTION_KEY` داخل المتصفح أو داخل `VITE_`.
+
+الترحيل المطلوب للمصدر الموحد:
+
+```text
+supabase/migrations/20260829030000_provider_credential_vault.sql
+```
 
 ## خطوات تحديث Hostinger بعد وصول التعديل إلى GitHub
 

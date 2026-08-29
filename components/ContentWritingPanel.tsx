@@ -225,7 +225,7 @@ const getErrorPresentation = (error: unknown, isArabic: boolean): ErrorPresentat
     content_writing_editor_source_coverage_incomplete: ['لم تكتمل تغطية جميع المعلومات والأفكار والتوصيات الموجودة في نص المحرر. راجع سجل نص المحرر والإصلاحات المستهدفة.', 'Not every information item, idea, or recommendation from the editor text was covered. Review the editor-source ledger and targeted repairs.'],
     content_writing_editor_source_coverage_lost: ['أوقفت الحماية اعتماد مراجعة لاحقة لأنها أسقطت عنصرًا إلزاميًا من نص المحرر.', 'A later revision was blocked because it dropped a mandatory editor-source item.'],
     AI_PROVIDER_DISABLED: ['قام الأدمن بتعطيل هذا المزود.', 'This provider is disabled by the administrator.'],
-    AI_PROVIDER_NOT_CONFIGURED: ['المزود مفعّل ولكن مفتاحه غير مهيأ على الخادم.', 'The provider is enabled but not configured on the server.'],
+    AI_PROVIDER_NOT_CONFIGURED: ['المزود مفعّل ولكن لا يوجد له مفتاح مسموح في خزنة اللوحة.', 'The provider is enabled but no permitted credential exists in the dashboard vault.'],
     article_access_denied: ['لا تملك صلاحية كتابة هذه المقالة.', 'You cannot write this article.'],
     content_writing_external_context_changed: ['تغيرت بيانات المقالة بعد تجهيز المحادثة. افتح المزود من جديد وأعد إرسال الرسائل الثلاث.', 'The article changed after the conversation was prepared. Reopen the provider and resend the three messages.'],
     content_writing_external_result_empty: ['نتيجة الكتابة الخارجية فارغة.', 'The external writing result is empty.'],

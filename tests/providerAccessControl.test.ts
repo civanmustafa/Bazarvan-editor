@@ -16,13 +16,14 @@ const withEncryptionKey = async (callback: () => Promise<void> | void): Promise<
   }
 };
 
-test('assigned provider key lists use authenticated encryption bound to credential and provider', async () => {
+test('assigned provider key lists use authenticated encryption bound to the vault credential identity', async () => {
   await withEncryptionKey(() => {
     const keys = ['assigned-openai-key-1234567890', 'assigned-openai-key-abcdefghij'];
     const encrypted = __providerAccessControlTestUtils.encryptKeys(CREDENTIAL_ID, 'openai', keys);
     assert.notEqual(encrypted.ciphertext, JSON.stringify(keys));
     const baseRow = {
       id: CREDENTIAL_ID,
+      vault_key: `shared:${CREDENTIAL_ID}`,
       provider: 'openai',
       label: 'Editorial team',
       enabled: true,
@@ -37,7 +38,10 @@ test('assigned provider key lists use authenticated encryption bound to credenti
     };
     assert.deepEqual(__providerAccessControlTestUtils.decryptKeys(baseRow as any), keys);
     assert.throws(
-      () => __providerAccessControlTestUtils.decryptKeys({ ...baseRow, provider: 'firecrawl' } as any),
+      () => __providerAccessControlTestUtils.decryptKeys({
+        ...baseRow,
+        vault_key: 'shared:22222222-2222-4222-8222-222222222222',
+      } as any),
       /could not be decrypted/i,
     );
   });
@@ -76,18 +80,18 @@ test('credential tiers remove duplicate keys without changing source precedence'
   const tiers = __providerAccessControlTestUtils.uniqueTiers([
     { source: 'user', keys: ['personal-key', 'duplicate-key'] },
     { source: 'assigned_user', keys: ['duplicate-key', 'assigned-key'] },
-    { source: 'hostinger', keys: ['assigned-key', 'server-key'] },
+    { source: 'assigned_all', keys: ['assigned-key', 'shared-key'] },
   ] as any);
   assert.deepEqual(tiers.map((tier: { source: string }) => tier.source), [
     'user',
     'assigned_user',
-    'hostinger',
+    'assigned_all',
   ]);
   assert.deepEqual(tiers.flatMap((tier: { keys: string[] }) => tier.keys), [
     'personal-key',
     'duplicate-key',
     'assigned-key',
-    'server-key',
+    'shared-key',
   ]);
 });
 

@@ -15,7 +15,6 @@ import {
 } from '../constants/settingsRegistry';
 import { deliverApiResult, getHeaderValue, readRequestBody, type ApiResult } from './http.ts';
 import {
-  getEnvironmentGeminiApiKeys,
   readAiProviderCredentialAvailability,
 } from '../server/adminAiProviderSecrets';
 
@@ -107,16 +106,15 @@ const getPublicBaseUrl = (req: any): string => {
   return host ? `${protocol.split(',')[0].trim()}://${host.split(',')[0].trim()}` : '';
 };
 
-const getSecretStatus = async (req: any) => {
-  const geminiKeys = getEnvironmentGeminiApiKeys('gemini');
-  const credentialAvailability = await readAiProviderCredentialAvailability();
+const getSecretStatus = async (req: any, userId: string) => {
+  const credentialAvailability = await readAiProviderCredentialAvailability(userId);
   const publicBaseUrl = getPublicBaseUrl(req);
 
   return {
     ai: {
       gemini: {
-        configured: geminiKeys.length > 0,
-        keyCount: geminiKeys.length,
+        configured: credentialAvailability.gemini.configured,
+        keyCount: credentialAvailability.gemini.keyCount,
         model: process.env.GEMINI_MODEL || GEMINI_ANALYSIS_MODEL,
         allowedModels: getAllowedGeminiFreeModels(),
       },
@@ -248,7 +246,7 @@ const handleSettingsRequest = async (req: any): Promise<ApiResult> => {
     body: {
       ok: true,
       settings,
-      secretStatus: await getSecretStatus(req),
+      secretStatus: await getSecretStatus(req, userId),
     },
   };
 };

@@ -11,6 +11,11 @@ import {
   type ClientLinkDictionaryEntry,
   type ClientSemanticPageInput,
 } from '../utils/clientSemanticIndex.ts';
+import {
+  CLIENT_SEMANTIC_STOP_WORDS,
+  CORE_ARABIC_ENGLISH_STOP_WORDS,
+  normalizeArabicEnglishText,
+} from '../utils/arabicEnglishText.ts';
 
 const root = process.cwd();
 const readWorkspaceFile = (relativePath: string) => readFile(path.join(root, relativePath), 'utf8');
@@ -49,6 +54,10 @@ const dictionary = (
 
 test('phase 6 normalizes Arabic and creates light stems deterministically', () => {
   assert.equal(normalizeSemanticText('إدارةُ العَمَلِيَّات'), 'اداره العمليات');
+  assert.equal(normalizeSemanticText, normalizeArabicEnglishText);
+  assert.equal(CORE_ARABIC_ENGLISH_STOP_WORDS.has(normalizeSemanticText('في')), true);
+  assert.equal(CLIENT_SEMANTIC_STOP_WORDS.has(normalizeSemanticText('بعد')), true);
+  assert.equal(CORE_ARABIC_ENGLISH_STOP_WORDS.has(normalizeSemanticText('بعد')), false);
   assert.equal(lightStemArabicToken('والعمليات'), lightStemArabicToken('العمليات'));
   assert.equal(
     createClientDictionarySignature([dictionary()]),

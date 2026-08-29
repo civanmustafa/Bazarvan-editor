@@ -76,6 +76,7 @@ test('content research automation is server-owned, settings-aware, and preserves
     extractionExecutor,
     panel,
     card,
+    competitorCoordinator,
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260827030000_content_research_automation_settings.sql'),
     readWorkspaceFile('server/externalSemanticAnalysisExecutor.ts'),
@@ -88,6 +89,7 @@ test('content research automation is server-owned, settings-aware, and preserves
     readWorkspaceFile('server/competitorExtractionExecutor.ts'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
     readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+    readWorkspaceFile('server/competitorPreparationCoordinator.ts'),
   ]);
 
   for (const key of [
@@ -171,7 +173,8 @@ test('content research automation is server-owned, settings-aware, and preserves
     /const needsSemanticPrerequisite = toStringList\(keywords\.secondaries\)[\s\S]*toStringList\(keywords\.lsi\)/,
   );
   assert.doesNotMatch(engineeringHandler, /activeCommands\.some\(command => command\.options\.targetKeywords\)/);
-  assert.match(preparationExecutor, /enqueue_competitor_extraction_job_controlled/);
+  assert.match(preparationExecutor, /enqueueCompetitorPreparationExtraction/);
+  assert.match(competitorCoordinator, /enqueue_competitor_extraction_job_controlled/);
   assert.match(writingAutomation, /researchAutomation\.autoDiscoverCompetitors/);
   assert.match(workerGuard, /readContentResearchAutomationSettings/);
   assert.match(workerGuard, /semantic_keywords_lsi/);

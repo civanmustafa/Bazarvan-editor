@@ -79,6 +79,7 @@ test('Write article durably discovers and extracts competitor prose before queui
     browserClient,
     scheduler,
     guide,
+    competitorCoordinator,
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260823020000_content_writing_competitor_preparation.sql'),
     readWorkspaceFile('server/contentWritingCompetitorPreparationExecutor.ts'),
@@ -88,14 +89,20 @@ test('Write article durably discovers and extracts competitor prose before queui
     readWorkspaceFile('utils/contentWritingSessions.ts'),
     readWorkspaceFile('server/contentWritingAutomation.ts'),
     readWorkspaceFile('constants/userGuide.ts'),
+    readWorkspaceFile('server/competitorPreparationCoordinator.ts'),
   ]);
 
   assert.match(migration, /content_writing_preparation/);
   assert.match(migration, /enqueue_content_writing_competitor_preparation/);
   assert.match(migration, /enqueue_next_automatic_writing_competitor_preparation/);
   assert.match(migration, /missingFields[\s\S]*competitors/);
-  assert.match(executor, /origin === 'auto'[\s\S]*enqueue_competitor_discovery_job_controlled[\s\S]*enqueue_competitor_discovery_job/);
-  assert.match(executor, /enqueue_competitor_extraction_job/);
+  assert.match(executor, /enqueueCompetitorPreparationDiscovery/);
+  assert.match(executor, /enqueueCompetitorPreparationExtraction/);
+  assert.match(executor, /selectCompetitorPreparationSources/);
+  assert.match(competitorCoordinator, /origin === 'auto'[\s\S]*enqueue_competitor_discovery_job_controlled[\s\S]*enqueue_competitor_discovery_job/);
+  assert.match(competitorCoordinator, /enqueue_competitor_extraction_job_controlled/);
+  assert.match(competitorCoordinator, /enqueue_competitor_extraction_job/);
+  assert.match(competitorCoordinator, /selectedQualifications/);
   assert.match(executor, /queueContentWritingSession/);
   assert.match(executor, /readCurrentPreparationIntent/);
   assert.match(worker, /contentWritingCompetitorPreparationExecutor/);

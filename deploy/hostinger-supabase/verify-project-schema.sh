@@ -6,8 +6,8 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-93}"
-readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-57}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-94}"
+readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-58}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
 
@@ -63,6 +63,9 @@ readonly AUTOMATIC_ONCE_ENGINEERING_FUNCTION="$(sql_scalar "select to_regprocedu
 readonly AUTOMATIC_ONCE_STAGE_FUNCTION="$(sql_scalar "select to_regprocedure('public.find_external_analysis_stage_job(uuid,text,text)') is not null")"
 readonly AUTOMATIC_ONCE_RUN_TRIGGER="$(sql_scalar "select exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'ai_external_analysis_runs' and t.tgname = 'stamp_external_semantic_run_targets' and not t.tgisinternal)")"
 readonly DASHBOARD_ACTIVITY_SUMMARY_FUNCTION="$(sql_scalar "select to_regprocedure('public.get_dashboard_activity_summary()') is not null")"
+readonly PROVIDER_CREDENTIAL_VAULT_TABLE="$(sql_scalar "select to_regclass('public.provider_credentials_vault') is not null")"
+readonly PROVIDER_CREDENTIAL_VAULT_RLS="$(sql_scalar "select coalesce((select relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'provider_credentials_vault'), false)")"
+readonly PROVIDER_CREDENTIAL_VAULT_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.provider_credentials_vault', 'select') or has_table_privilege('authenticated', 'public.provider_credentials_vault', 'select')")"
 
 (( PUBLIC_TABLES == EXPECTED_PUBLIC_TABLES )) \
   || fail "Public table count is ${PUBLIC_TABLES}; expected ${EXPECTED_PUBLIC_TABLES}."
@@ -82,6 +85,9 @@ readonly DASHBOARD_ACTIVITY_SUMMARY_FUNCTION="$(sql_scalar "select to_regprocedu
 [[ "${AUTOMATIC_ONCE_STAGE_FUNCTION}" == "t" ]] || fail "Automatic external-analysis once guard is missing."
 [[ "${AUTOMATIC_ONCE_RUN_TRIGGER}" == "t" ]] || fail "Semantic target-attempt trigger is missing."
 [[ "${DASHBOARD_ACTIVITY_SUMMARY_FUNCTION}" == "t" ]] || fail "Dashboard activity summary function is missing."
+[[ "${PROVIDER_CREDENTIAL_VAULT_TABLE}" == "t" ]] || fail "Canonical provider credential vault table is missing."
+[[ "${PROVIDER_CREDENTIAL_VAULT_RLS}" == "t" ]] || fail "Canonical provider credential vault RLS is not enabled."
+[[ "${PROVIDER_CREDENTIAL_VAULT_CLIENT_PRIVILEGES}" == "f" ]] || fail "Browser roles can read the provider credential vault."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"

@@ -33,11 +33,16 @@ const sourceLabel = (
   locale: 'ar' | 'en',
 ): string => {
   if (event.provider === 'local') return locale === 'ar' ? 'بدون مفتاح' : 'No key';
-  const source = event.credentialSource === 'admin'
-    ? locale === 'ar' ? 'إعدادات المسؤول' : 'Admin settings'
-    : event.credentialSource === 'hostinger'
-      ? locale === 'ar' ? 'احتياطي الخادم' : 'Server fallback'
-      : locale === 'ar' ? 'لم يُحسم' : 'Unresolved';
+  const sourceLabels: Record<string, string> = {
+    user: locale === 'ar' ? 'مفتاح المستخدم' : 'Personal key',
+    assigned_user: locale === 'ar' ? 'مشترك لهذا المستخدم' : 'Shared for user',
+    assigned_all: locale === 'ar' ? 'مشترك للجميع' : 'Shared for all',
+    resume: locale === 'ar' ? 'مفتاح مهمة خاص' : 'Task credential',
+    admin: locale === 'ar' ? 'مفتاح إداري' : 'Admin credential',
+    hostinger: locale === 'ar' ? 'سجل خادم قديم' : 'Legacy server record',
+  };
+  const source = sourceLabels[event.credentialSource || '']
+    || (locale === 'ar' ? 'لم يُحسم' : 'Unresolved');
   return event.keySuffix ? `${source} · ••••${event.keySuffix}` : source;
 };
 

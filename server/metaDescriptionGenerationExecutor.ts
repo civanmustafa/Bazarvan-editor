@@ -10,10 +10,12 @@ import {
 import { readExternalGeminiSettings } from './externalAnalysisSettings';
 import { reportExternalGeminiCall, runExternalGeminiCall } from './externalGeminiRunner';
 import {
-  buildMetaDescriptionPrompt,
+  buildMetaDescriptionGenerationPrompt,
   extractArticleTableOfContents,
+  META_DESCRIPTION_GENERATION_MAX_ATTEMPTS,
   parseGeneratedMetaDescription,
-  validateMetaDescription,
+  parseValidMetaDescriptionGeneration,
+  shouldRetryMetaDescriptionGeneration,
 } from '../utils/metaDescription';
 
 type ArticleRow = {
@@ -94,7 +96,11 @@ const executeMetaDescriptionGeneration = async (
   let model = aiSettings.model;
   let keySuffix = '';
 
-  for (let requestIndex = 1; requestIndex <= 2; requestIndex += 1) {
+  for (
+    let requestIndex = 1;
+    requestIndex <= META_DESCRIPTION_GENERATION_MAX_ATTEMPTS;
+    requestIndex += 1
+  ) {
     await context.reportProgress({
       progress: {
         stage: requestIndex === 1 ? 'generating_meta_description' : 'repairing_meta_description',
@@ -103,13 +109,14 @@ const executeMetaDescriptionGeneration = async (
     });
     const call = await runExternalGeminiCall({
       context,
-      prompt: buildMetaDescriptionPrompt({
+      prompt: buildMetaDescriptionGenerationPrompt({
+        mode: 'automatic_apply',
         title,
         primaryKeyword,
         articleLanguage: article.article_language === 'en' ? 'en' : 'ar',
         tableOfContents,
         goalContext,
-        previousInvalidDescription,
+        previousInvalidResponse: previousInvalidDescription,
       }),
       model: aiSettings.model,
       allowModelFallback: aiSettings.allowModelFallback,
@@ -121,7 +128,7 @@ const executeMetaDescriptionGeneration = async (
     model = call.model;
     keySuffix = call.keySuffix;
     if (!call.ok) {
-      if (requestIndex === 2) {
+      if (!shouldRetryMetaDescriptionGeneration(requestIndex)) {
         retry(
           `meta_description_http_${call.status}`,
           call.error,
@@ -131,9 +138,13 @@ const executeMetaDescriptionGeneration = async (
       continue;
     }
     const candidate = parseGeneratedMetaDescription(call.text);
-    const validation = validateMetaDescription(candidate, primaryKeyword);
-    if (validation.valid) {
-      description = validation.normalized;
+    const validated = parseValidMetaDescriptionGeneration({
+      mode: 'automatic_apply',
+      response: call.text,
+      primaryKeyword,
+    });
+    if (validated?.mode === 'automatic_apply') {
+      description = validated.description;
       break;
     }
     previousInvalidDescription = candidate;

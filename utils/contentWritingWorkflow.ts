@@ -37,7 +37,7 @@ import {
   type ContentWritingEditorSourceItem,
   type ContentWritingEditorSourceLedger,
 } from './contentWritingEditorSource';
-import { buildMetaDescriptionSuggestionsPrompt } from './metaDescription';
+import { buildMetaDescriptionGenerationPrompt } from './metaDescription';
 
 export const CONTENT_WRITING_WORKFLOW_VERSION = 13;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
@@ -1059,7 +1059,8 @@ export const buildContentWritingMetaDescriptionSuggestionsPrompt = (options: {
   goalContext: Record<string, unknown>;
   template?: string;
   previousInvalidResponse?: string;
-}): string => buildMetaDescriptionSuggestionsPrompt({
+}): string => buildMetaDescriptionGenerationPrompt({
+  mode: 'writing_suggestions',
   title: options.articleTitle,
   primaryKeyword: options.primaryKeyword,
   articleLanguage: options.articleLanguage,

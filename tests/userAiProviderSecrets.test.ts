@@ -120,13 +120,14 @@ test('personal AI key storage and execution reject every actor other than the ke
 });
 
 test('personal secret APIs never let an administrator select another owner', async () => {
-  const [userApi, adminAiApi, adminCrawlerApi, service, aiResolver, crawlerResolver] = await Promise.all([
+  const [userApi, adminAiApi, adminCrawlerApi, service, aiResolver, crawlerResolver, vaultMigration] = await Promise.all([
     readFile(new URL('../api/userAiProviderSecrets.ts', import.meta.url), 'utf8'),
     readFile(new URL('../api/adminAiProviderSecrets.ts', import.meta.url), 'utf8'),
     readFile(new URL('../api/adminCrawlerProviderSecrets.ts', import.meta.url), 'utf8'),
     readFile(new URL('../server/userAiProviderSecrets.ts', import.meta.url), 'utf8'),
     readFile(new URL('../server/adminAiProviderSecrets.ts', import.meta.url), 'utf8'),
     readFile(new URL('../server/crawlerProviderSecrets.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260829030000_provider_credential_vault.sql', import.meta.url), 'utf8'),
   ]);
 
   assert.match(userApi, /readOverviewResult\(principal\.userId\)/);
@@ -139,4 +140,9 @@ test('personal secret APIs never let an administrator select another owner', asy
   assert.match(service, /ownerUserId: string \| null \| undefined/);
   assert.match(aiResolver, /actorUserId: userId,\s+ownerUserId: userId/g);
   assert.match(crawlerResolver, /actorUserId: userId,\s+ownerUserId: userId/);
+  assert.doesNotMatch(aiResolver, /process\.env\.(?:OPENAI|GEMINI).*API_KEY/);
+  assert.doesNotMatch(crawlerResolver, /process\.env\.(?:FIRECRAWL|BROWSERLESS).*KEY/);
+  assert.match(vaultMigration, /create table if not exists public\.provider_credentials_vault/);
+  assert.match(vaultMigration, /alter table public\.provider_credentials_vault enable row level security/);
+  assert.match(vaultMigration, /revoke all on table public\.provider_credentials_vault from public, anon, authenticated/);
 });

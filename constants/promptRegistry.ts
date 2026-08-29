@@ -5,6 +5,10 @@ import {
 } from './engineeringPrompts';
 import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
+import {
+  hasPromptTemplateVariable,
+  renderPromptTemplateVariables,
+} from './promptTemplateRenderer';
 import type { EngineeringPromptId } from '../types';
 
 export const PROMPT_REGISTRY_VERSION = 21;
@@ -1103,7 +1107,7 @@ const hasRequiredVariables = (
   template: string,
   requiredVariables: string[] | undefined,
 ): boolean => (requiredVariables || []).every(variable => (
-  template.includes(`{{${variable}}}`)
+  hasPromptTemplateVariable(template, variable)
 ));
 
 export const inspectPromptTemplate = (
@@ -1117,7 +1121,7 @@ export const inspectPromptTemplate = (
 } => {
   const template = typeof value === 'string' ? value : '';
   const missingVariables = (definition.requiredVariables || []).filter(variable => (
-    !template.includes(`{{${variable}}}`)
+    !hasPromptTemplateVariable(template, variable)
   ));
   return {
     valid: Boolean(template.trim())
@@ -1172,6 +1176,4 @@ export const getPromptTemplate = (
 export const renderPromptTemplate = (
   template: string,
   variables: Record<string, unknown>,
-): string => Object.entries(variables).reduce((result, [key, value]) => (
-  result.replaceAll(`{{${key}}}`, String(value ?? ''))
-), template);
+): string => renderPromptTemplateVariables(template, variables);

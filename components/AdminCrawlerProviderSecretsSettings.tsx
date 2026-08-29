@@ -23,21 +23,18 @@ const PROVIDERS: Array<{
   id: CrawlerExternalProvider;
   title: string;
   description: string;
-  environmentVariable: string;
 }> = [
   {
     id: 'firecrawl',
     title: 'Firecrawl API',
     description:
       'يُستخدم لبحث المنافسين وسحب محتواهم، وكذلك لاستخراج HTML بعد تنفيذ JavaScript في زحف مواقع العملاء. في الوضع التلقائي لا يُستهلك لزحف العملاء إلا عندما تكون نتيجة الزاحف المحلي ناقصة أو يفشل الاتصال المباشر.',
-    environmentVariable: 'FIRECRAWL_API_KEY',
   },
   {
     id: 'browserless',
     title: 'Browserless API',
     description:
       'متصفح سحابي فعلي للمواقع الديناميكية والصعبة. يُستخدم بعد Firecrawl في الوضع التلقائي، أو مباشرة عند اختياره لعملية الزحف.',
-    environmentVariable: 'BROWSERLESS_API_KEY',
   },
 ];
 
@@ -49,10 +46,18 @@ const emptyStatus = (
   enabled: false,
   keySuffix: null,
   updatedAt: null,
-  fallbackConfigured: false,
   effectiveConfigured: false,
-  activeSource: 'hostinger',
+  activeSource: 'none',
 });
+
+const sourceLabel = (source: CrawlerProviderSecretStatus['activeSource']): string => ({
+  user: 'مفتاح المستخدم الخاص',
+  assigned_user: 'مفتاح مشترك معيّن للمستخدم',
+  assigned_all: 'مفتاح مشترك معيّن للجميع',
+  resume: 'مفتاح مهمة خاص',
+  admin: 'مفتاح إداري',
+  none: 'لا يوجد مفتاح مسموح',
+})[source];
 
 const DEFAULT_USAGE_POLICY: CrawlerUsagePolicy = {
   externalReuseDays: 14,
@@ -149,7 +154,7 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
       () => setCrawlerProviderSecretEnabled(provider, enabled),
       enabled
         ? 'تم تفعيل المفتاح الإداري.'
-        : 'تم تعطيل المفتاح الإداري، وسيُستخدم مفتاح الخادم الاحتياطي إن وُجد.',
+        : 'تم تعطيل المفتاح الإداري، ولن يُستخدم إلا بعد تفعيله مجددًا.',
     );
   };
 
@@ -195,14 +200,14 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
     <div className="space-y-4">
       <div className="rounded-md border-r-4 border-[#d4af37] bg-[#d4af37]/10 px-3 py-3 text-xs font-semibold leading-6 text-gray-700 dark:text-gray-200">
         المفاتيح لا تُعاد إلى المتصفح بعد حفظها؛ يظهر آخر أربعة أحرف فقط.
-        مفتاح Firecrawl هنا يفعّل بحث المنافسين وسحب محتواهم لكل المستخدمين، والزاحف المحلي يبقى متاحًا دائمًا لمواقع العملاء.
+        المفتاح الذي يُنشأ هنا يُحفظ في الخزنة ويُعيّن للجميع افتراضيًا؛ ويمكن تغيير تعيينه وصلاحيات استخدامه من لوحة صلاحيات المزودات. الزاحف المحلي يبقى متاحًا دائمًا لمواقع العملاء.
       </div>
 
       {(!overview?.schemaAvailable || !overview?.encryptionConfigured) && (
         <div className="border-r-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
           {!overview?.schemaAvailable
-            ? 'طبّق ترحيل مفاتيح خدمات الزحف قبل الحفظ.'
-            : 'تعذر تهيئة التشفير الخادمي. تأكد من أن اتصال Supabase الخادمي يعمل ثم أعد تشغيل التطبيق.'}
+            ? 'طبّق ترحيل خزنة مفاتيح المزودات قبل الحفظ.'
+            : 'مفتاح التشفير الرئيسي لخزنة المزودات غير مهيأ على الخادم.'}
         </div>
       )}
       {error && (
@@ -247,10 +252,6 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
                       ? `المفتاح الإداري: ••••${status.keySuffix}`
                       : 'لا يوجد مفتاح إداري محفوظ'}
                   </span>
-                  <span>
-                    {definition.environmentVariable}:{' '}
-                    {status.fallbackConfigured ? 'موجود' : 'غير موجود'}
-                  </span>
                   <span
                     className={
                       status.effectiveConfigured
@@ -259,7 +260,7 @@ const AdminCrawlerProviderSecretsSettings: React.FC = () => {
                     }
                   >
                     المصدر النشط:{' '}
-                    {status.activeSource === 'admin' ? 'إعدادات المسؤول' : 'الخادم'}
+                    {sourceLabel(status.activeSource)}
                   </span>
                 </div>
               </div>

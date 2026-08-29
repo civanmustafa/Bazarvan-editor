@@ -35,6 +35,7 @@ import {
   getSupportedExternalAnalysisJobTypes,
 } from './externalAnalysisExecutor';
 import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
+import { LeaseHeartbeatController } from './leaseHeartbeatController';
 import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 import { readAiJobRetryMinutes } from './aiJobService';
 
@@ -143,60 +144,6 @@ const recoverStaleJobsIfDue = async (): Promise<void> => {
   }
 };
 
-const startLeaseHeartbeat = (
-  job: ExternalAnalysisJob,
-  controller: AbortController,
-  slotWorkerId: string,
-): (() => void) => {
-  const heartbeatIntervalMs = Math.min(
-    10_000,
-    Math.max(3_000, Math.floor((leaseSeconds * 1_000) / 3)),
-  );
-  let leaseDeadline = Date.now() + (leaseSeconds * 1_000);
-  let stopped = false;
-  let timer: NodeJS.Timeout | null = null;
-
-  const heartbeat = async (): Promise<void> => {
-    if (stopped || controller.signal.aborted) return;
-
-    try {
-      const heartbeatState = await heartbeatExternalAnalysisJob({
-        jobId: job.id,
-        workerId: slotWorkerId,
-        leaseSeconds,
-      });
-      if (heartbeatState.cancelRequested) {
-        controller.abort(new ExternalAnalysisCancellationError(
-          heartbeatState.errorCode || 'cancelled_by_user',
-          heartbeatState.errorMessage || 'The external analysis task was cancelled.',
-        ));
-        return;
-      }
-      if (!heartbeatState.owned) {
-        controller.abort(new ExternalAnalysisOwnershipLostError('The worker no longer owns this job lease.'));
-        return;
-      }
-      leaseDeadline = Date.now() + (leaseSeconds * 1_000);
-    } catch (error) {
-      logThrottledError(`Could not renew lease for job ${job.id}`, error);
-      if (Date.now() >= leaseDeadline) {
-        controller.abort(new ExternalAnalysisOwnershipLostError('The job lease expired while renewal was unavailable.'));
-        return;
-      }
-    }
-
-    if (!stopped && !controller.signal.aborted) {
-      timer = setTimeout(() => void heartbeat(), heartbeatIntervalMs);
-    }
-  };
-
-  timer = setTimeout(() => void heartbeat(), heartbeatIntervalMs);
-  return () => {
-    stopped = true;
-    if (timer) clearTimeout(timer);
-  };
-};
-
 const retryDetails = (error: unknown): {
   code: string;
   message: string;
@@ -227,7 +174,32 @@ const executeClaimedJob = async (
   const executor = getExternalAnalysisJobExecutor(job.job_type);
   const controller = new AbortController();
   activeControllers.set(slotWorkerId, controller);
-  const stopHeartbeat = startLeaseHeartbeat(job, controller, slotWorkerId);
+  const stopHeartbeat = new LeaseHeartbeatController({
+    controller,
+    leaseDurationMs: leaseSeconds * 1_000,
+    intervalMs: Math.min(10_000, Math.max(3_000, Math.floor((leaseSeconds * 1_000) / 3))),
+    renewLease: () => heartbeatExternalAnalysisJob({
+      jobId: job.id,
+      workerId: slotWorkerId,
+      leaseSeconds,
+    }),
+    resolveAbortReason: heartbeatState => {
+      if (heartbeatState.cancelRequested) {
+        return new ExternalAnalysisCancellationError(
+          heartbeatState.errorCode || 'cancelled_by_user',
+          heartbeatState.errorMessage || 'The external analysis task was cancelled.',
+        );
+      }
+      if (!heartbeatState.owned) {
+        return new ExternalAnalysisOwnershipLostError('The worker no longer owns this job lease.');
+      }
+      return null;
+    },
+    resolveExpiredLeaseReason: () => new ExternalAnalysisOwnershipLostError(
+      'The job lease expired while renewal was unavailable.',
+    ),
+    onRenewalError: error => logThrottledError(`Could not renew lease for job ${job.id}`, error),
+  }).start();
 
   try {
     if (!executor) {

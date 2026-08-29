@@ -1,9 +1,4 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-  randomUUID,
-} from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_PROVIDER_CREDENTIAL_MODE,
   PROVIDER_ACCESS_MIGRATION,
@@ -14,19 +9,29 @@ import {
   type ProviderCredentialMode,
 } from '../constants/providerAccessControl.ts';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
+import {
+  decryptProviderCredentialKeys,
+  deleteProviderCredentialVaultRow,
+  encryptProviderCredentialKeys,
+  isProviderCredentialVaultEncryptionConfigured,
+  listProviderCredentialVaultRows,
+  readProviderCredentialVaultRowById,
+  saveProviderCredentialVaultRow,
+  type ProviderCredentialVaultRow,
+} from './providerCredentialVault.ts';
 
 export type ProviderCredentialSource =
   | 'user'
   | 'assigned_user'
   | 'assigned_all'
   | 'resume'
-  | 'admin'
-  | 'hostinger';
+  | 'admin';
 
 export type ProviderCredentialTier = {
   source: ProviderCredentialSource;
   keys: string[];
   credentialId?: string;
+  purpose?: 'default' | 'content_writing_resume';
 };
 
 export type EffectiveProviderPolicy = {
@@ -134,23 +139,7 @@ type UserPolicyRow = {
   monthly_request_limit_override: number | null;
 };
 
-type SharedCredentialRow = {
-  id: string;
-  provider: string;
-  label: string;
-  ciphertext: string;
-  initialization_vector: string;
-  authentication_tag: string;
-  encryption_version: number;
-  enabled: boolean;
-  key_count: number;
-  key_suffixes: unknown;
-  expires_at: string | null;
-  created_by: string | null;
-  updated_by: string | null;
-  created_at: string;
-  updated_at: string;
-};
+type SharedCredentialRow = ProviderCredentialVaultRow;
 
 type GrantRow = {
   id: string;
@@ -166,14 +155,9 @@ type GrantRow = {
 
 const GLOBAL_POLICY_TABLE = 'provider_global_policies';
 const USER_POLICY_TABLE = 'user_provider_policies';
-const CREDENTIAL_TABLE = 'provider_shared_credentials';
 const GRANT_TABLE = 'provider_credential_grants';
 const USAGE_TABLE = 'provider_request_usage';
 const AUDIT_TABLE = 'provider_security_audit_events';
-const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
-const ENCRYPTION_VERSION = 1;
-const ENCRYPTION_KEY_BYTES = 32;
-const IV_BYTES = 12;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class ProviderAccessError extends Error {
@@ -294,75 +278,14 @@ const toStringArray = (value: unknown): string[] => (
     : []
 );
 
-const parseEncryptionKey = (): Buffer | null => {
-  const raw = String(
-    process.env.PROVIDER_ACCESS_ENCRYPTION_KEY
-    || process.env.AI_SETTINGS_ENCRYPTION_KEY
-    || process.env.CRAWLER_SETTINGS_ENCRYPTION_KEY
-    || '',
-  ).trim();
-  if (!raw) return null;
-  if (/^[a-f0-9]{64}$/i.test(raw)) return Buffer.from(raw, 'hex');
-  const base64 = raw.startsWith('base64:') ? raw.slice('base64:'.length) : raw;
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) return null;
-  const decoded = Buffer.from(base64, 'base64');
-  return decoded.length === ENCRYPTION_KEY_BYTES ? decoded : null;
-};
-
-const requireEncryptionKey = (): Buffer => {
-  const key = parseEncryptionKey();
-  if (!key) {
-    throw new ProviderAccessError(
-      'PROVIDER_ACCESS_ENCRYPTION_KEY or AI_SETTINGS_ENCRYPTION_KEY must contain a 32-byte encryption key.',
-      503,
-      'PROVIDER_ACCESS_ENCRYPTION_KEY_MISSING',
-    );
-  }
-  return key;
-};
-
-const credentialAad = (id: string, provider: ProviderAccessProvider): Buffer => (
-  Buffer.from(`bazarvan:${CREDENTIAL_TABLE}:${id}:${provider}:v${ENCRYPTION_VERSION}`, 'utf8')
-);
-
 const encryptKeys = (id: string, provider: ProviderAccessProvider, keys: string[]) => {
-  const initializationVector = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, requireEncryptionKey(), initializationVector);
-  cipher.setAAD(credentialAad(id, provider));
-  const ciphertext = Buffer.concat([
-    cipher.update(JSON.stringify(keys), 'utf8'),
-    cipher.final(),
-  ]);
-  return {
-    ciphertext: ciphertext.toString('base64'),
-    initialization_vector: initializationVector.toString('base64'),
-    authentication_tag: cipher.getAuthTag().toString('base64'),
-    encryption_version: ENCRYPTION_VERSION,
-  };
+  normalizeProvider(provider);
+  return encryptProviderCredentialKeys(`shared:${normalizeUuid(id, 'credentialId')}`, keys);
 };
 
 const decryptKeys = (row: SharedCredentialRow): string[] => {
-  const provider = normalizeProvider(row.provider);
-  if (row.encryption_version !== ENCRYPTION_VERSION) {
-    throw new ProviderAccessError(
-      'The assigned credential uses an unsupported encryption version.',
-      503,
-      'CREDENTIAL_ENCRYPTION_VERSION_UNSUPPORTED',
-    );
-  }
   try {
-    const decipher = createDecipheriv(
-      ENCRYPTION_ALGORITHM,
-      requireEncryptionKey(),
-      Buffer.from(row.initialization_vector, 'base64'),
-    );
-    decipher.setAAD(credentialAad(row.id, provider));
-    decipher.setAuthTag(Buffer.from(row.authentication_tag, 'base64'));
-    const plaintext = Buffer.concat([
-      decipher.update(Buffer.from(row.ciphertext, 'base64')),
-      decipher.final(),
-    ]).toString('utf8');
-    return normalizeKeyList(JSON.parse(plaintext));
+    return decryptProviderCredentialKeys(row);
   } catch (error) {
     if (error instanceof ProviderAccessError) throw error;
     throw new ProviderAccessError(
@@ -522,14 +445,7 @@ const readUserPolicyRows = async (userId?: string): Promise<UserPolicyRow[]> => 
 };
 
 const readCredentialRows = async (): Promise<SharedCredentialRow[]> => {
-  const { data, error } = await getExternalAnalysisSupabaseAdmin()
-    .from(CREDENTIAL_TABLE)
-    .select('id,provider,label,ciphertext,initialization_vector,authentication_tag,encryption_version,enabled,key_count,key_suffixes,expires_at,created_by,updated_by,created_at,updated_at');
-  if (error) {
-    if (isMissingSchemaError(error)) return [];
-    throw storageError(error);
-  }
-  return (data || []) as SharedCredentialRow[];
+  return listProviderCredentialVaultRows({ credentialType: 'shared' });
 };
 
 const readGrantRows = async (): Promise<GrantRow[]> => {
@@ -613,7 +529,7 @@ export const readAdminProviderAccessOverview = async (
   const maps = buildPolicyMaps(globalResult.rows, userRows);
   return {
     schemaAvailable: globalResult.schemaAvailable,
-    encryptionConfigured: parseEncryptionKey() !== null,
+    encryptionConfigured: isProviderCredentialVaultEncryptionConfigured(),
     ...maps,
     credentials: credentialRows.map(toCredentialMetadata),
     grants: grantRows.map(toGrantMetadata),
@@ -778,14 +694,8 @@ export const saveProviderAccessPolicy = async (options: {
 };
 
 const readCredentialById = async (idValue: unknown): Promise<SharedCredentialRow | null> => {
-  const id = normalizeUuid(idValue, 'credentialId');
-  const { data, error } = await getExternalAnalysisSupabaseAdmin()
-    .from(CREDENTIAL_TABLE)
-    .select('id,provider,label,ciphertext,initialization_vector,authentication_tag,encryption_version,enabled,key_count,key_suffixes,expires_at,created_by,updated_by,created_at,updated_at')
-    .eq('id', id)
-    .maybeSingle();
-  if (error) throw storageError(error);
-  return data ? data as SharedCredentialRow : null;
+  const row = await readProviderCredentialVaultRowById(normalizeUuid(idValue, 'credentialId'));
+  return row?.credential_type === 'shared' ? row : null;
 };
 
 export const saveSharedProviderCredential = async (options: {
@@ -812,10 +722,6 @@ export const saveSharedProviderCredential = async (options: {
     throw new ProviderAccessError('API keys are required for a new credential.', 400, 'CREDENTIAL_KEYS_REQUIRED');
   }
   const keys = hasNewKeys ? normalizeKeyList(options.apiKeys) : null;
-  const encrypted = keys ? encryptKeys(id, provider, keys) : existing;
-  if (!encrypted) {
-    throw new ProviderAccessError('API keys are required.', 400, 'CREDENTIAL_KEYS_REQUIRED');
-  }
   let expiresAt: string | null = existing?.expires_at || null;
   if (options.expiresAt !== undefined) {
     if (options.expiresAt === null || options.expiresAt === '') {
@@ -828,43 +734,31 @@ export const saveSharedProviderCredential = async (options: {
       expiresAt = parsed.toISOString();
     }
   }
-  const now = new Date().toISOString();
-  const payload = {
+  const data = await saveProviderCredentialVaultRow({
     id,
+    vaultKey: existing?.vault_key || `shared:${id}`,
+    credentialType: 'shared',
     provider,
+    purpose: existing?.purpose || 'default',
     label: normalizeLabel(options.label || existing?.label),
-    ciphertext: encrypted.ciphertext,
-    initialization_vector: encrypted.initialization_vector,
-    authentication_tag: encrypted.authentication_tag,
-    encryption_version: encrypted.encryption_version,
+    ...(keys ? { apiKeys: keys } : {}),
     enabled: options.enabled ?? existing?.enabled ?? true,
-    key_count: keys?.length ?? existing?.key_count,
-    key_suffixes: keys?.map(key => key.slice(-4)) ?? existing?.key_suffixes,
-    expires_at: expiresAt,
-    created_by: existing?.created_by || actorId,
-    updated_by: actorId,
-    created_at: existing?.created_at || now,
-    updated_at: now,
-  };
-  const { data, error } = await getExternalAnalysisSupabaseAdmin()
-    .from(CREDENTIAL_TABLE)
-    .upsert(payload, { onConflict: 'id' })
-    .select('id,provider,label,ciphertext,initialization_vector,authentication_tag,encryption_version,enabled,key_count,key_suffixes,expires_at,created_by,updated_by,created_at,updated_at')
-    .single();
-  if (error) throw storageError(error);
+    expiresAt,
+    updatedBy: actorId,
+  });
   await recordAudit({
     actorUserId: actorId,
     provider,
     action: existing ? 'shared_credential_updated' : 'shared_credential_created',
     subjectId: id,
     metadata: {
-      label: payload.label,
-      keyCount: payload.key_count,
-      keySuffixes: payload.key_suffixes,
-      enabled: payload.enabled,
+      label: data.label,
+      keyCount: data.key_count,
+      keySuffixes: data.key_suffixes,
+      enabled: data.enabled,
     },
   });
-  return toCredentialMetadata(data as SharedCredentialRow);
+  return toCredentialMetadata(data);
 };
 
 export const deleteSharedProviderCredential = async (
@@ -875,11 +769,7 @@ export const deleteSharedProviderCredential = async (
   const actorId = normalizeUuid(actorIdValue, 'actorUserId');
   const existing = await readCredentialById(id);
   if (!existing) return;
-  const { error } = await getExternalAnalysisSupabaseAdmin()
-    .from(CREDENTIAL_TABLE)
-    .delete()
-    .eq('id', id);
-  if (error) throw storageError(error);
+  await deleteProviderCredentialVaultRow(existing.vault_key);
   await recordAudit({
     actorUserId: actorId,
     provider: normalizeProvider(existing.provider),
@@ -993,6 +883,7 @@ export const deleteCredentialGrant = async (
 export const resolveAssignedProviderKeys = async (
   userIdValue: string | null | undefined,
   providerValue: unknown,
+  purpose: 'default' | 'content_writing_resume' = 'default',
 ): Promise<{ user: ProviderCredentialTier[]; all: ProviderCredentialTier[] }> => {
   const provider = normalizeProvider(providerValue);
   const userId = userIdValue ? normalizeUuid(userIdValue, 'userId') : null;
@@ -1008,11 +899,13 @@ export const resolveAssignedProviderKeys = async (
     .forEach(grant => {
       const credential = credentialById.get(grant.credential_id);
       if (!credential || credential.provider !== provider || !credential.enabled) return;
+      if (credential.purpose !== 'default' && credential.purpose !== purpose) return;
       if (credential.expires_at && new Date(credential.expires_at).getTime() <= now) return;
       const tier: ProviderCredentialTier = {
         source: grant.scope === 'user' ? 'assigned_user' : 'assigned_all',
         keys: decryptKeys(credential),
         credentialId: credential.id,
+        purpose: credential.purpose,
       };
       result[grant.scope === 'user' ? 'user' : 'all'].push(tier);
     });
@@ -1036,6 +929,7 @@ export const resolveProviderCredentialPlan = async (options: {
   provider: ProviderAccessProvider;
   personalKeys?: string[];
   globalTiers?: ProviderCredentialTier[];
+  purpose?: 'default' | 'content_writing_resume';
 }): Promise<{
   policy: EffectiveProviderPolicy;
   tiers: ProviderCredentialTier[];
@@ -1043,7 +937,7 @@ export const resolveProviderCredentialPlan = async (options: {
   const provider = normalizeProvider(options.provider);
   const [policy, assigned] = await Promise.all([
     resolveEffectiveProviderPolicy(options.userId, provider),
-    resolveAssignedProviderKeys(options.userId, provider),
+    resolveAssignedProviderKeys(options.userId, provider, options.purpose || 'default'),
   ]);
   if (!policy.enabled || policy.credentialMode === 'disabled') {
     return { policy, tiers: [] };
@@ -1074,7 +968,13 @@ export const resolveProviderCredentialPlan = async (options: {
       tiers = [...personal, ...assignedUser, ...sharedAndServer];
       break;
   }
-  return { policy, tiers: uniqueTiers(tiers) };
+  const purposeOrdered = options.purpose === 'content_writing_resume'
+    ? [
+        ...tiers.filter(tier => tier.purpose === 'content_writing_resume'),
+        ...tiers.filter(tier => tier.purpose !== 'content_writing_resume'),
+      ]
+    : tiers;
+  return { policy, tiers: uniqueTiers(purposeOrdered) };
 };
 
 export const assertProviderModelAllowed = async (
