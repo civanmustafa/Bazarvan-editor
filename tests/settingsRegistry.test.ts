@@ -241,7 +241,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.system.autoDiscoverCompetitors, false);
   assert.equal(normalized.system.autoExtractCompetitorContent, false);
   assert.equal(normalized.system.autoRunReadyEngineeringCommands, false);
-  assert.equal(normalized.system.autoGenerateMetaDescription, false);
+  assert.equal(normalized.system.autoGenerateMetaDescription, undefined);
   assert.equal(normalized.system.unknownAutomationSwitch, undefined);
 
   const defaults = registry.getDefaultSystemSettings();
@@ -250,7 +250,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(defaults.system.autoDiscoverCompetitors, true);
   assert.equal(defaults.system.autoExtractCompetitorContent, true);
   assert.equal(defaults.system.autoRunReadyEngineeringCommands, true);
-  assert.equal(defaults.system.autoGenerateMetaDescription, true);
+  assert.equal(defaults.system.autoGenerateMetaDescription, undefined);
   const invalidAutomation = registry.normalizeSystemSettingsMap({
     system: {
       autoGenerateAlternativeKeywords: 'yes',
@@ -266,7 +266,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(invalidAutomation.system.autoDiscoverCompetitors, true);
   assert.equal(invalidAutomation.system.autoExtractCompetitorContent, true);
   assert.equal(invalidAutomation.system.autoRunReadyEngineeringCommands, true);
-  assert.equal(invalidAutomation.system.autoGenerateMetaDescription, true);
+  assert.equal(invalidAutomation.system.autoGenerateMetaDescription, undefined);
   assert.equal(registry.normalizeSystemSettingsMap({
     roles: { publisherUserId: 'not-a-user-id' },
   }).roles.publisherUserId, '');
@@ -353,6 +353,8 @@ test('PromptRegistry keeps Arabic defaults, required attachments, and valid admi
     'primary_keyword',
     'article_language',
     'goal_context',
+    'existing_google_titles',
+    'existing_google_descriptions',
     'protected_constraints',
   ]);
   assert.match(
@@ -418,6 +420,10 @@ test('semantic keyword policy preserves numbers, places, and nationalities deter
       targetCountry: 'دبي',
     },
   };
+  const googleDescription = (callToAction: string, filler: string) => (
+    `${'أفضل ١٠ مطاعم في دبي دليل عملي يطابق هدف المقارنة، ويعرض الأجواء والأسعار وخيارات العائلة لاتخاذ قرار مناسب بثقة.'
+      .padEnd(140 - callToAction.length - 1, filler)} ${callToAction}`
+  );
   const response = JSON.stringify({
     protectedQualifiers: ['دبي'],
     secondaries: [
@@ -441,6 +447,14 @@ test('semantic keyword policy preserves numbers, places, and nationalities deter
       'قوائم الطعام',
       'تجربة الضيوف',
     ],
+    googleTitles: [
+      'أفضل ١٠ مطاعم في دبي للعائلات',
+      'أفضل ١٠ مطاعم في دبي للحجز اليوم',
+    ],
+    googleDescriptions: [
+      { text: googleDescription('احجز طاولتك الآن', 'ا'), callToAction: 'احجز طاولتك الآن' },
+      { text: googleDescription('استكشف الخيارات المناسبة', 'ب'), callToAction: 'استكشف الخيارات المناسبة' },
+    ],
   });
 
   const terms = policy.parseSemanticKeywordTerms(response, input);
@@ -451,6 +465,8 @@ test('semantic keyword policy preserves numbers, places, and nationalities deter
     'قائمة 10 مطاعم مميزة في دبي',
   ]);
   assert.equal(policy.hasUsableSemanticKeywordTerms(terms, true, true), true);
+  assert.equal(terms.googleTitles.length, 2);
+  assert.equal(terms.googleDescriptions.length, 2);
 
   const prompt = policy.renderSemanticKeywordPrompt(
     input,
@@ -525,7 +541,7 @@ test('semantic keyword constraints activate independently from the primary keywo
       'اتجاهات 2026',
     ],
   }), noConstraintInput);
-  assert.equal(policy.hasUsableSemanticKeywordTerms(unconstrainedTerms, true, true), true);
+  assert.equal(policy.hasUsableSemanticKeywordTerms(unconstrainedTerms, true, true, false), true);
 
   const partialTerms = {
     secondaries: [
@@ -542,22 +558,22 @@ test('semantic keyword constraints activate independently from the primary keywo
     ],
   };
   assert.equal(
-    policy.hasUsableSemanticKeywordTerms(partialTerms, true, true),
+    policy.hasUsableSemanticKeywordTerms(partialTerms, true, true, false),
     true,
     'valid partial results must be accepted below the 4/10 generation targets',
   );
   assert.equal(
-    policy.hasUsableSemanticKeywordTerms({ secondaries: partialTerms.secondaries, lsi: [] }, true, true),
+    policy.hasUsableSemanticKeywordTerms({ secondaries: partialTerms.secondaries, lsi: [] }, true, true, false),
     true,
     'alternative forms must be accepted even when LSI is empty',
   );
   assert.equal(
-    policy.hasUsableSemanticKeywordTerms({ secondaries: [], lsi: partialTerms.lsi }, true, true),
+    policy.hasUsableSemanticKeywordTerms({ secondaries: [], lsi: partialTerms.lsi }, true, true, false),
     true,
     'LSI terms must be accepted even when alternative forms are empty',
   );
   assert.equal(
-    policy.hasUsableSemanticKeywordTerms({ secondaries: [], lsi: [] }, true, true),
+    policy.hasUsableSemanticKeywordTerms({ secondaries: [], lsi: [] }, true, true, false),
     false,
     'a retry is still required when no requested list contains a valid item',
   );

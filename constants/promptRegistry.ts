@@ -11,7 +11,7 @@ import {
 } from './promptTemplateRenderer';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 21;
+export const PROMPT_REGISTRY_VERSION = 22;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -156,18 +156,18 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
   {
     id: PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration,
     group: PROMPT_GROUP_IDS.semanticKeywords,
-    label: 'توليد الصيغ البديلة وكلمات LSI',
-    description: 'ينشئ صيغ بحث طبيعية، ويطبق قيد الرقم أو الموقع أو القومية بصورة مستقلة فقط عندما يوجد ذلك القيد في الكلمة الأساسية، مع كلمات LSI دلالية غير ملزمة بتكرار هذه القيود.',
-    usage: 'يستخدمه زر توليد الصيغ داخل المحرر ومهمة التوليد الخلفية نفسها. يستخرج النظام القيود الموجودة فعلًا في الكلمة الأساسية؛ قد ينشط قيد واحد أو قيدان أو الثلاثة، ثم يفحص الصيغ البديلة فقط وفق القيود النشطة.',
-    variables: ['{{primary_keyword}}', '{{company_name}}', '{{article_title}}', '{{article_language}}', '{{goal_context}}', '{{existing_alternative_keywords}}', '{{existing_lsi_keywords}}', '{{protected_constraints}}', '{{article_excerpt}}'],
-    requiredVariables: ['primary_keyword', 'article_language', 'goal_context', 'protected_constraints'],
+    label: 'توليد الصيغ وLSI وعناوين وأوصاف Google',
+    description: 'أمر هندسي موحّد ينشئ الصيغ البديلة وكلمات LSI وعنواني Google ووصفي Google متوافقين مع هدف الصفحة وسياقها.',
+    usage: 'يستخدمه زر التوليد داخل المحرر ومهمة التحليل الخارجي نفسها. يتحقق النظام من القيود الدلالية، ومن وجود الكلمة الأساسية في العنوانين والوصفين، ومن اختلاف دعوة اتخاذ الإجراء بين الوصفين عندما يتطلب هدف الصفحة ذلك.',
+    variables: ['{{primary_keyword}}', '{{company_name}}', '{{article_title}}', '{{article_language}}', '{{goal_context}}', '{{existing_alternative_keywords}}', '{{existing_lsi_keywords}}', '{{existing_google_titles}}', '{{existing_google_descriptions}}', '{{protected_constraints}}', '{{article_excerpt}}'],
+    requiredVariables: ['primary_keyword', 'article_language', 'goal_context', 'existing_google_titles', 'existing_google_descriptions', 'protected_constraints'],
     attachments: [
       attachment('primaryKeyword', 'الكلمة المفتاحية الأساسية', 'المصدر الإلزامي لنفس نية البحث ولكل الأرقام والمؤهلات المحمية.'),
       attachment('protectedConstraints', 'القيود الشرطية المحمية', 'يفصل النظام بين الرقم والموقع والقومية، ولا يفعّل أي قيد منها إلا عند وجوده فعلًا في الكلمة الأساسية. لا تُفرض هذه القيود على كلمات LSI.'),
       attachment('goalAndIntent', 'هدف الصفحة ونية البحث', 'نوع الصفحة والهدف والجمهور والسوق ونية البحث لمنع تغيير المقصود.'),
-      attachment('existingTerms', 'الكلمات الحالية', 'الصيغ البديلة وLSI الموجودة لتجنب التكرار.'),
+      attachment('existingTerms', 'المخرجات الحالية', 'الصيغ البديلة وLSI وعناوين وأوصاف Google الموجودة لتجنب التكرار.'),
       attachment('articleIdentity', 'هوية المقالة', 'العنوان واللغة ومقتطف من النص عند توفره.'),
-      attachment('outputValidation', 'عقد النتيجة', 'عدد الصيغ وشكل JSON وقواعد الرفض البرمجية بعد استلام الرد.'),
+      attachment('outputValidation', 'عقد النتيجة', 'عدد الصيغ والعناوين والأوصاف وشكل JSON وقواعد الرفض البرمجية بعد استلام الرد.'),
     ],
   },
   {
@@ -537,7 +537,7 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
   [PROMPT_TEMPLATE_IDS.contentWritingInstructions]: DEFAULT_CONTENT_WRITING_TEMPLATES.instructions,
   [PROMPT_TEMPLATE_IDS.contentWritingArticleContext]: DEFAULT_CONTENT_WRITING_TEMPLATES.articleContext,
   [PROMPT_TEMPLATE_IDS.contentWritingGenerationRequest]: DEFAULT_CONTENT_WRITING_TEMPLATES.generationRequest,
-  [PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration]: `أنت خبير SEO دلالي ومتخصص في فهم طريقة بحث المستخدمين. ولّد صيغًا بديلة للكلمة المفتاحية الأساسية تعبّر عن نية البحث نفسها بصياغات حقيقية مختلفة، ثم ولّد كلمات LSI مفيدة للسياق.
+  [PROMPT_TEMPLATE_IDS.semanticKeywordsGeneration]: `أنت خبير SEO دلالي ومتخصص في نتائج Google. نفّذ أمرًا هندسيًا واحدًا يولّد الصيغ البديلة وكلمات LSI وعنواني Google ووصفي Google معًا، وفق هدف الصفحة وسياقها ونية البحث.
 
 بيانات المهمة:
 - الكلمة المفتاحية الأساسية: {{primary_keyword}}
@@ -547,6 +547,8 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 - سياق هدف الصفحة والجمهور ونية البحث: {{goal_context}}
 - الصيغ البديلة الموجودة: {{existing_alternative_keywords}}
 - كلمات LSI الموجودة: {{existing_lsi_keywords}}
+- عناوين Google الموجودة: {{existing_google_titles}}
+- أوصاف Google الموجودة: {{existing_google_descriptions}}
 
 القيود التي اكتشفها النظام برمجيًا ويجب تطبيقها حرفيًا:
 {{protected_constraints}}
@@ -574,10 +576,21 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 - لا يُشترط أن تتضمن كلمات LSI الرقم أو الموقع أو القومية المحمية؛ يكفي ارتباطها الدلالي الصحيح بالموضوع.
 - لا تضع الكلمة الأساسية أو صيغة بديلة كاملة أو اسم الشركة داخل LSI.
 - تجنب الكلمات العامة مثل «معلومات» و«نصائح» و«خدمات» إذا لم تضف دلالة خاصة بالموضوع.
-- إذا كان عنوان المقالة فارغًا أو عامًا جدًا، ضع في title عنوان SEO واحدًا طبيعيًا؛ وإلا أرجع title فارغًا.
+
+قواعد عناوين Google:
+- أنشئ عنوانين مختلفين بالضبط، طبيعيين ومناسبين للظهور في Google ولهدف الصفحة وسياقها ونية البحث.
+- يجب أن يتضمن كل عنوان الكلمة المفتاحية الأساسية نفسها بوضوح، دون تغييرها إلى صيغة بديلة.
+- اجعل كل عنوان موجزًا، ويفضل أن يكون بين 30 و60 حرفًا، ولا تستخدم عنوان المقالة حرفيًا إذا أمكن تقديم صياغة أفضل.
+
+قواعد أوصاف Google:
+- أنشئ وصفين مختلفين بالضبط، طول كل منهما من 140 إلى 150 حرفًا شاملًا المسافات.
+- يجب أن يتضمن كل وصف الكلمة المفتاحية الأساسية نفسها، وأن يعكس هدف الصفحة وسياقها والفائدة الفعلية للقارئ دون ادعاءات غير متاحة.
+- إذا كان هدف الصفحة تجاريًا أو شرائيًا أو خدميًا أو يحدد إجراءً مطلوبًا، اختم كل وصف بدعوة اتخاذ إجراء طبيعية ومختلفة عن الوصف الآخر.
+- أرجع نص دعوة الإجراء نفسها في callToAction، ويجب أن تكون موجودة حرفيًا داخل text. في الصفحة المعلوماتية التي لا تحتاج دعوة إجراء، أرجع callToAction فارغًا في الوصفين.
+- لا تكرر دعوة الإجراء نفسها أو إعادة صياغة طفيفة لها بين الوصفين.
 
 أرجع JSON صالحًا فقط دون Markdown أو شرح. protectedQualifiers يجب أن يحتوي فقط على المواقع والقوميات الموجودة فعلًا داخل الكلمة الأساسية:
-{"title":"","protectedQualifiers":["الموقع أو القومية المحمية"],"secondaries":["صيغة بديلة 1","صيغة بديلة 2","صيغة بديلة 3","صيغة بديلة 4"],"lsi":["مصطلح دلالي 1","مصطلح دلالي 2"]}`,
+{"protectedQualifiers":["الموقع أو القومية المحمية"],"secondaries":["صيغة بديلة 1","صيغة بديلة 2","صيغة بديلة 3","صيغة بديلة 4"],"lsi":["مصطلح دلالي 1","مصطلح دلالي 2"],"googleTitles":["عنوان Google 1","عنوان Google 2"],"googleDescriptions":[{"text":"وصف Google 1 بطول 140–150 حرفًا","callToAction":"دعوة الإجراء 1"},{"text":"وصف Google 2 بطول 140–150 حرفًا","callToAction":"دعوة الإجراء 2"}]}`,
   [PROMPT_TEMPLATE_IDS.repairSingleViolation]: `أصلح النص المحدد بناءً على بطاقة المعيار والمخالفة التالية.
 
 {{read_only_context}}

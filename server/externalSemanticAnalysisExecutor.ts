@@ -32,6 +32,7 @@ import {
   type ExternalSemanticKeywords,
   type ExternalSemanticTerms,
 } from './externalSemanticTerms';
+import type { GoogleDescriptionSuggestion } from '../types';
 
 type ExternalSemanticArticleRow = {
   id: string;
@@ -53,6 +54,7 @@ type ExternalSemanticStateRow = {
 type SemanticTargetState = {
   needsSecondaries: boolean;
   needsLsi: boolean;
+  needsGoogleMetadata: boolean;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -69,6 +71,21 @@ const toStringList = (value: unknown): string[] => (
     : []
 );
 
+const toGoogleDescriptionList = (value: unknown): GoogleDescriptionSuggestion[] => (
+  Array.isArray(value)
+    ? value.flatMap((item) => {
+        if (typeof item === 'string') {
+          const text = item.trim();
+          return text ? [{ text, callToAction: '' }] : [];
+        }
+        if (!isRecord(item)) return [];
+        const text = toTrimmedString(item.text);
+        const callToAction = toTrimmedString(item.callToAction ?? item.cta);
+        return text ? [{ text, callToAction }] : [];
+      }).slice(0, 2)
+    : []
+);
+
 const normalizeKeywords = (value: unknown): ExternalSemanticKeywords => {
   const source = isRecord(value) ? value : {};
   return {
@@ -76,12 +93,16 @@ const normalizeKeywords = (value: unknown): ExternalSemanticKeywords => {
     secondaries: toStringList(source.secondaries),
     company: toTrimmedString(source.company),
     lsi: toStringList(source.lsi),
+    googleTitles: toStringList(source.googleTitles).slice(0, 2),
+    googleDescriptions: toGoogleDescriptionList(source.googleDescriptions),
   };
 };
 
 const getTargetState = (keywords: ExternalSemanticKeywords): SemanticTargetState => ({
   needsSecondaries: keywords.secondaries.length === 0,
   needsLsi: keywords.lsi.length === 0,
+  needsGoogleMetadata: keywords.googleTitles.length !== 2
+    || keywords.googleDescriptions.length !== 2,
 });
 
 const getRequestedTargetState = (
@@ -97,24 +118,32 @@ const getRequestedTargetState = (
   const requestedLsi = typeof snapshot.needsLsi === 'boolean'
     ? snapshot.needsLsi
     : true;
+  const requestedGoogleMetadata = typeof snapshot.needsGoogleMetadata === 'boolean'
+    ? snapshot.needsGoogleMetadata
+    : true;
+  const manual = context.job.origin === 'manual';
+  const regenerateAll = manual && snapshot.forceRegenerateSemantic === true;
+  const automaticSemanticEnabled = (
+    automationSettings?.autoGenerateAlternativeKeywords !== false
+    || automationSettings?.autoGenerateLsiKeywords !== false
+  );
   return {
-    needsSecondaries: missing.needsSecondaries
+    needsSecondaries: (regenerateAll || missing.needsSecondaries)
       && requestedSecondaries
-      && (automationSettings?.autoGenerateAlternativeKeywords !== false),
-    needsLsi: missing.needsLsi
+      && (manual || automationSettings?.autoGenerateAlternativeKeywords !== false),
+    needsLsi: (regenerateAll || missing.needsLsi)
       && requestedLsi
-      && (automationSettings?.autoGenerateLsiKeywords !== false),
+      && (manual || automationSettings?.autoGenerateLsiKeywords !== false),
+    needsGoogleMetadata: (regenerateAll || missing.needsGoogleMetadata)
+      && requestedGoogleMetadata
+      && (manual || automaticSemanticEnabled),
   };
 };
 
 const keepRequestedTerms = (
   terms: ExternalSemanticTerms,
-  targets: SemanticTargetState,
-): ExternalSemanticTerms => ({
-  ...terms,
-  secondaries: targets.needsSecondaries ? terms.secondaries : [],
-  lsi: targets.needsLsi ? terms.lsi : [],
-});
+  _targets: SemanticTargetState,
+): ExternalSemanticTerms => terms;
 
 const isCurrentSemanticJob = (
   context: ExternalAnalysisExecutionContext,
@@ -207,10 +236,10 @@ const applySemanticTerms = async (options: {
     latestKeywords,
     latestAutomationSettings,
   );
-  if (!targets.needsSecondaries && !targets.needsLsi) {
+  if (!targets.needsSecondaries && !targets.needsLsi && !targets.needsGoogleMetadata) {
     const missing = getTargetState(latestKeywords);
     return {
-      status: missing.needsSecondaries || missing.needsLsi
+      status: missing.needsSecondaries || missing.needsLsi || missing.needsGoogleMetadata
         ? 'automation_disabled'
         : 'already_populated',
       appliedFields: [],
@@ -222,6 +251,7 @@ const applySemanticTerms = async (options: {
     options.terms,
     targets.needsSecondaries,
     targets.needsLsi,
+    targets.needsGoogleMetadata,
   )) {
     throw createRetryError({
       code: 'semantic_response_missing_current_target',
@@ -231,16 +261,16 @@ const applySemanticTerms = async (options: {
   }
 
   const rawKeywords = isRecord(latest.article.keywords) ? latest.article.keywords : {};
-  /*
-   * A partial valid response is still useful. Update each empty list only when
-   * Gemini returned valid items for that specific list, so a successful
-   * alternatives result is never discarded because LSI is empty (or vice versa).
-   */
   const shouldApplySecondaries = targets.needsSecondaries && options.terms.secondaries.length > 0;
   const shouldApplyLsi = targets.needsLsi && options.terms.lsi.length > 0;
+  const shouldApplyGoogleMetadata = targets.needsGoogleMetadata
+    && options.terms.googleTitles.length === 2
+    && options.terms.googleDescriptions.length === 2;
   const appliedFields = [
     shouldApplySecondaries ? 'secondaries' : '',
     shouldApplyLsi ? 'lsi' : '',
+    shouldApplyGoogleMetadata ? 'googleTitles' : '',
+    shouldApplyGoogleMetadata ? 'googleDescriptions' : '',
   ].filter(Boolean);
   const now = new Date().toISOString();
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
@@ -254,6 +284,12 @@ const applySemanticTerms = async (options: {
         lsi: shouldApplyLsi
           ? options.terms.lsi
           : latestKeywords.lsi,
+        googleTitles: shouldApplyGoogleMetadata
+          ? options.terms.googleTitles
+          : latestKeywords.googleTitles,
+        googleDescriptions: shouldApplyGoogleMetadata
+          ? options.terms.googleDescriptions
+          : latestKeywords.googleDescriptions,
       },
       last_saved_at: now,
     })
@@ -302,9 +338,9 @@ const executeExternalSemanticAnalysis = async (
     ? await readContentResearchAutomationSettings()
     : null;
   const initialTargets = getRequestedTargetState(context, articleInput.keywords, automationSettings);
-  if (!initialTargets.needsSecondaries && !initialTargets.needsLsi) {
+  if (!initialTargets.needsSecondaries && !initialTargets.needsLsi && !initialTargets.needsGoogleMetadata) {
     const missing = getTargetState(articleInput.keywords);
-    const status = missing.needsSecondaries || missing.needsLsi
+    const status = missing.needsSecondaries || missing.needsLsi || missing.needsGoogleMetadata
       ? 'automation_disabled'
       : 'already_populated';
     return {
@@ -369,6 +405,7 @@ const executeExternalSemanticAnalysis = async (
     terms,
     initialTargets.needsSecondaries,
     initialTargets.needsLsi,
+    initialTargets.needsGoogleMetadata,
   )) {
     await context.reportProgress({
       progress: { stage: 'repairing_semantic_response' },
@@ -415,6 +452,7 @@ const executeExternalSemanticAnalysis = async (
     terms,
     initialTargets.needsSecondaries,
     initialTargets.needsLsi,
+    initialTargets.needsGoogleMetadata,
   )) {
     throw createRetryError({
       code: 'semantic_response_invalid',
@@ -423,6 +461,7 @@ const executeExternalSemanticAnalysis = async (
         articleInput,
         initialTargets.needsSecondaries,
         initialTargets.needsLsi,
+        initialTargets.needsGoogleMetadata,
       ),
       progress: {
         stage: 'retry_scheduled',

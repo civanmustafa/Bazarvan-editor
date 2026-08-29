@@ -434,6 +434,8 @@ export const INITIAL_KEYWORDS: Keywords = {
   secondaries: ['', '', '', ''],
   company: '',
   lsi: [],
+  googleTitles: [],
+  googleDescriptions: [],
 };
 
 export const INITIAL_GOAL_CONTEXT = {

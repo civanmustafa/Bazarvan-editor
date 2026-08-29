@@ -151,6 +151,36 @@ test('migration stamps actual semantic runs and treats retries as explicit manua
   assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
 });
 
+test('unified semantic migration tracks Google metadata and gates engineering work', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260829080000_unified_semantic_google_metadata.sql',
+  );
+
+  const semantic = sliceFunction(
+    migration,
+    'enqueue_external_semantic_analysis_job_controlled',
+    'alter function public.enqueue_external_engineering_jobs_sequential_base',
+  );
+  assert.match(semantic, /manual_regenerate/);
+  assert.match(semantic, /forceRegenerateSemantic/);
+  assert.match(semantic, /needsGoogleMetadata/);
+  assert.match(semantic, /semanticTargetAttempt,googleMetadata/);
+  assert.match(semantic, /automaticOnceTargets/);
+  assert.match(semantic, /googleMetadata/);
+
+  const engineering = sliceFunction(
+    migration,
+    'enqueue_external_engineering_jobs_sequential_base',
+    'revoke all on function public.semantic_keywords_have_google_metadata',
+  );
+  assert.match(engineering, /semantic_keywords_have_google_metadata/);
+  assert.match(engineering, /unified_semantic_google_metadata_required/);
+  assert.match(engineering, /depends_on_job_id = v_semantic_job_id/);
+  assert.match(migration, /drop trigger if exists enqueue_article_meta_description_from_article/);
+  assert.match(migration, /ready_status_meta_description_retired/);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
+});
+
 test('only a started prior attempt blocks the same automatic command, regardless of outcome or origin', () => {
   const previous: Array<{
     commandId: string;
@@ -186,25 +216,26 @@ test('only a started prior attempt blocks the same automatic command, regardless
 
 test('semantic automation attempts newly enabled targets without rerunning an attempted target', () => {
   const selectTargets = (
-    needs: { secondaries: boolean; lsi: boolean },
-    attempted: { secondaries: boolean; lsi: boolean },
+    needs: { secondaries: boolean; lsi: boolean; googleMetadata: boolean },
+    attempted: { secondaries: boolean; lsi: boolean; googleMetadata: boolean },
   ) => ({
     secondaries: needs.secondaries && !attempted.secondaries,
     lsi: needs.lsi && !attempted.lsi,
+    googleMetadata: needs.googleMetadata && !attempted.googleMetadata,
   });
 
   assert.deepEqual(
     selectTargets(
-      { secondaries: true, lsi: true },
-      { secondaries: true, lsi: false },
+      { secondaries: true, lsi: true, googleMetadata: true },
+      { secondaries: true, lsi: false, googleMetadata: false },
     ),
-    { secondaries: false, lsi: true },
+    { secondaries: false, lsi: true, googleMetadata: true },
   );
   assert.deepEqual(
     selectTargets(
-      { secondaries: true, lsi: true },
-      { secondaries: true, lsi: true },
+      { secondaries: true, lsi: true, googleMetadata: true },
+      { secondaries: true, lsi: true, googleMetadata: true },
     ),
-    { secondaries: false, lsi: false },
+    { secondaries: false, lsi: false, googleMetadata: false },
   );
 });

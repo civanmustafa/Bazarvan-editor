@@ -1,4 +1,5 @@
 import { renderPromptTemplate } from '../constants/promptRegistry';
+import type { GoogleDescriptionSuggestion } from '../types';
 
 export type SemanticKeywordInput = {
   title: string;
@@ -8,6 +9,8 @@ export type SemanticKeywordInput = {
   companyName: string;
   existingSecondaries: string[];
   existingLsi: string[];
+  existingGoogleTitles?: string[];
+  existingGoogleDescriptions?: GoogleDescriptionSuggestion[];
   goalContext: Record<string, unknown>;
 };
 
@@ -15,6 +18,8 @@ export type SemanticKeywordTerms = {
   title: string;
   secondaries: string[];
   lsi: string[];
+  googleTitles: string[];
+  googleDescriptions: GoogleDescriptionSuggestion[];
 };
 
 export type SemanticKeywordConstraints = {
@@ -87,6 +92,12 @@ const SEMANTIC_STOP_WORDS = new Set([
   'في', 'من', 'عن', 'علي', 'الى', 'مع', 'و', 'او', 'ال', 'ل', 'ب',
   'the', 'a', 'an', 'and', 'or', 'of', 'for', 'to', 'in', 'on', 'with',
 ].map(value => normalizeSemanticKeywordText(value)));
+
+const CTA_INTENT_MARKERS = [
+  'commercial', 'transactional', 'purchase', 'buy', 'book', 'booking', 'lead', 'sales',
+  'product', 'service', 'landing', 'conversion', 'contact', 'request', 'subscribe',
+  'تجاري', 'شرائي', 'شراء', 'حجز', 'طلب', 'تواصل', 'منتج', 'خدمة', 'بيع', 'اشتراك',
+];
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -302,6 +313,10 @@ export const renderSemanticKeywordPrompt = (
     goal_context: JSON.stringify(input.goalContext || {}, null, 2),
     existing_alternative_keywords: input.existingSecondaries.join('، ') || '-',
     existing_lsi_keywords: input.existingLsi.join('، ') || '-',
+    existing_google_titles: (input.existingGoogleTitles || []).join('، ') || '-',
+    existing_google_descriptions: (input.existingGoogleDescriptions || [])
+      .map(item => item.text)
+      .join(' | ') || '-',
     protected_constraints: formatProtectedConstraints(constraints),
     article_excerpt: truncateText(input.plainText, 12_000) || '-',
   });
@@ -314,8 +329,8 @@ export const buildSemanticKeywordRepairPrompt = (
 ): string => [
   renderSemanticKeywordPrompt(input, template),
   '',
-  'الرد السابق لم يحقق عدد النتائج أو خالف قيدًا نشطًا من القيود المذكورة أعلاه.',
-  'صححه مرة واحدة، وطبّق فقط ما اكتشفه النظام فعلًا من رقم أو موقع أو قومية داخل الكلمة الأساسية.',
+  'الرد السابق لم يحقق العدد المطلوب، أو خالف قيدًا دلاليًا، أو لم يُرجع عنواني Google ووصفي Google صالحين.',
+  'صححه مرة واحدة، وطبّق القيود المكتشفة، وضع الكلمة الأساسية في العنوانين والوصفين، وميّز دعوتي الإجراء عند الحاجة.',
   '<previous_response>',
   truncateText(previousResponse, 4_000),
   '</previous_response>',
@@ -345,6 +360,32 @@ const firstList = (source: unknown, keys: string[]): string[] => {
   if (!isRecord(source)) return [];
   for (const key of keys) {
     const values = toStringList(source[key]);
+    if (values.length > 0) return values;
+  }
+  return [];
+};
+
+const toGoogleDescriptionList = (value: unknown): GoogleDescriptionSuggestion[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item === 'string') {
+      const text = item.trim();
+      return text ? [{ text, callToAction: '' }] : [];
+    }
+    if (!isRecord(item)) return [];
+    const text = toTrimmedString(item.text ?? item.description ?? item.metaDescription);
+    const callToAction = toTrimmedString(item.callToAction ?? item.call_to_action ?? item.cta);
+    return text ? [{ text, callToAction }] : [];
+  });
+};
+
+const firstGoogleDescriptionList = (
+  source: unknown,
+  keys: string[],
+): GoogleDescriptionSuggestion[] => {
+  if (!isRecord(source)) return [];
+  for (const key of keys) {
+    const values = toGoogleDescriptionList(source[key]);
     if (values.length > 0) return values;
   }
   return [];
@@ -405,6 +446,51 @@ const uniqueTerms = (values: string[]): string[] => {
     });
 };
 
+const requiresGoogleDescriptionCta = (goalContext: Record<string, unknown>): boolean => {
+  const desiredAction = toTrimmedString(goalContext.desiredAction);
+  if (desiredAction && !/^(?:-|none|n\/a|غير محدد|لا يوجد)$/iu.test(desiredAction)) return true;
+  const intentText = [
+    goalContext.pageType,
+    goalContext.objective,
+    goalContext.searchIntent,
+    goalContext.marketingStage,
+  ].map(toTrimmedString).join(' ').toLowerCase();
+  return CTA_INTENT_MARKERS.some(marker => intentText.includes(marker));
+};
+
+const normalizeGoogleDescriptions = (
+  values: GoogleDescriptionSuggestion[],
+  input: SemanticKeywordInput,
+): GoogleDescriptionSuggestion[] => {
+  const ctaRequired = requiresGoogleDescriptionCta(input.goalContext);
+  const seenDescriptions = new Set<string>();
+  const seenCtas = new Set<string>();
+  return values
+    .map(item => ({
+      text: item.text.replace(/\s+/g, ' ').trim(),
+      callToAction: item.callToAction.replace(/\s+/g, ' ').trim(),
+    }))
+    .filter(item => {
+      const descriptionKey = normalizeSemanticKeywordText(item.text);
+      const ctaKey = normalizeSemanticKeywordText(item.callToAction);
+      if (
+        !descriptionKey
+        || seenDescriptions.has(descriptionKey)
+        || item.text.length < 140
+        || item.text.length > 150
+        || !containsPhrase(item.text, input.primaryKeyword)
+      ) {
+        return false;
+      }
+      if (ctaRequired && (!ctaKey || !containsPhrase(item.text, item.callToAction))) return false;
+      if (ctaKey && (seenCtas.has(ctaKey) || !containsPhrase(item.text, item.callToAction))) return false;
+      seenDescriptions.add(descriptionKey);
+      if (ctaKey) seenCtas.add(ctaKey);
+      return true;
+    })
+    .slice(0, 2);
+};
+
 const respectsProtectedConstraints = (
   term: string,
   constraints: SemanticKeywordConstraints,
@@ -441,6 +527,8 @@ export const parseSemanticKeywordTerms = (
   const constraints = getSemanticKeywordConstraints(input, modelQualifiers);
   const secondaryKeys = ['secondaries', 'alternativeForms', 'alternative_forms', 'alternatives', 'synonyms'];
   const lsiKeys = ['lsi', 'lsiKeywords', 'lsi_keywords', 'semanticTerms', 'semantic_terms', 'relatedTerms'];
+  const googleTitleKeys = ['googleTitles', 'google_titles', 'seoTitles', 'seo_titles', 'metaTitles', 'meta_titles'];
+  const googleDescriptionKeys = ['googleDescriptions', 'google_descriptions', 'seoDescriptions', 'seo_descriptions', 'metaDescriptions', 'meta_descriptions'];
 
   const secondaries = uniqueTerms([
     ...firstList(source, secondaryKeys),
@@ -464,19 +552,40 @@ export const parseSemanticKeywordTerms = (
     .filter(term => !GENERIC_SEMANTIC_TERMS.has(normalizeSemanticKeywordText(term)))
     .slice(0, 16);
 
+  const maximumTitleLength = Math.max(60, input.primaryKeyword.trim().length + 12);
+  const googleTitles = uniqueTerms([
+    ...firstList(source, googleTitleKeys),
+    ...firstList(nestedKeywords, googleTitleKeys),
+    ...firstList(semantic, googleTitleKeys),
+    ...firstList(seo, googleTitleKeys),
+  ])
+    .filter(title => title.length >= 20 && title.length <= maximumTitleLength)
+    .filter(title => containsPhrase(title, input.primaryKeyword))
+    .slice(0, 2);
+
+  const googleDescriptions = normalizeGoogleDescriptions([
+    ...firstGoogleDescriptionList(source, googleDescriptionKeys),
+    ...firstGoogleDescriptionList(nestedKeywords, googleDescriptionKeys),
+    ...firstGoogleDescriptionList(semantic, googleDescriptionKeys),
+    ...firstGoogleDescriptionList(seo, googleDescriptionKeys),
+  ], input);
+
   return {
     title: toTrimmedString(source.title),
     secondaries,
     lsi,
+    googleTitles,
+    googleDescriptions,
   };
 };
 
 export const hasUsableSemanticKeywordTerms = (
-  terms: Pick<SemanticKeywordTerms, 'secondaries' | 'lsi'>,
+  terms: Pick<SemanticKeywordTerms, 'secondaries' | 'lsi'> & Partial<Pick<SemanticKeywordTerms, 'googleTitles' | 'googleDescriptions'>>,
   needsSecondaries: boolean,
   needsLsi: boolean,
+  needsGoogleMetadata = true,
 ): boolean => {
-  if (!needsSecondaries && !needsLsi) return true;
+  if (!needsSecondaries && !needsLsi && !needsGoogleMetadata) return true;
 
   /*
    * The requested 4 alternatives and 10 LSI terms are generation targets, not
@@ -484,17 +593,24 @@ export const hasUsableSemanticKeywordTerms = (
    * item returned by the model; only retry when none of the requested lists
    * contains a usable item.
    */
-  return (
+  const hasRequestedKeywordTerms = (
     (needsSecondaries && terms.secondaries.length > 0)
     || (needsLsi && terms.lsi.length > 0)
+    || (!needsSecondaries && !needsLsi)
   );
+  const hasGoogleMetadata = !needsGoogleMetadata || (
+    (terms.googleTitles?.length || 0) === 2
+    && (terms.googleDescriptions?.length || 0) === 2
+  );
+  return hasRequestedKeywordTerms && hasGoogleMetadata;
 };
 
 export const describeSemanticKeywordValidationFailure = (
-  terms: Pick<SemanticKeywordTerms, 'secondaries' | 'lsi'>,
+  terms: Pick<SemanticKeywordTerms, 'secondaries' | 'lsi'> & Partial<Pick<SemanticKeywordTerms, 'googleTitles' | 'googleDescriptions'>>,
   input: SemanticKeywordInput,
   needsSecondaries = true,
   needsLsi = true,
+  needsGoogleMetadata = true,
 ): string => {
   const constraints = getSemanticKeywordConstraints(input);
   const missingLists = [
@@ -503,6 +619,12 @@ export const describeSemanticKeywordValidationFailure = (
       : '',
     needsLsi && terms.lsi.length === 0
       ? 'لم تُرجع أي كلمة LSI صالحة'
+      : '',
+    needsGoogleMetadata && (terms.googleTitles?.length || 0) !== 2
+      ? 'لم تُرجع عنواني Google صالحين ومتضمنين للكلمة الأساسية'
+      : '',
+    needsGoogleMetadata && (terms.googleDescriptions?.length || 0) !== 2
+      ? 'لم تُرجع وصفي Google صالحين بطول 140–150 حرفًا ودعوتين مختلفتين عند الحاجة'
       : '',
   ].filter(Boolean);
   const activeConstraints = [

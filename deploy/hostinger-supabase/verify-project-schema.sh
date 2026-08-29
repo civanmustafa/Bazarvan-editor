@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-98}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-99}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-59}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -73,6 +73,10 @@ readonly PUBLISHER_USER_SETTING="$(sql_scalar "select jsonb_typeof(value->'publi
 readonly PUBLISHER_ACCESS_POLICY="$(sql_scalar "select position('publisherUserId' in pg_get_functiondef('public.article_access_level_for_user(uuid,uuid)'::regprocedure)) > 0 and position('content_preparation' in pg_get_functiondef('public.article_access_level_for_user(uuid,uuid)'::regprocedure)) > 0 and position('in_review' in pg_get_functiondef('public.article_access_level_for_user(uuid,uuid)'::regprocedure)) > 0")"
 readonly AUTO_COMPETITOR_EXTRACTION_SETTING="$(sql_scalar "select value->'autoExtractCompetitorContent' = 'true'::jsonb from public.app_settings where key = 'system' and not is_secret limit 1")"
 readonly AUTO_COMPETITOR_EXTRACTION_TRIGGER="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'enqueue_automatic_competitor_extraction_after_discovery' and not tgisinternal)")"
+readonly UNIFIED_SEMANTIC_GOOGLE_METADATA_FUNCTION="$(sql_scalar "select to_regprocedure('public.semantic_keywords_have_google_metadata(jsonb)') is not null")"
+readonly UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP="$(sql_scalar "select position('googleMetadata' in pg_get_functiondef('public.stamp_external_semantic_run_targets()'::regprocedure)) > 0")"
+readonly READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED="$(sql_scalar "select not exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'articles' and t.tgname = 'enqueue_article_meta_description_from_article' and not t.tgisinternal)")"
+readonly READY_STATUS_META_DESCRIPTION_SETTING_RETIRED="$(sql_scalar "select coalesce(not (value ? 'autoGenerateMetaDescription'), true) from public.app_settings where key = 'system' and not is_secret limit 1")"
 
 (( PUBLIC_TABLES == EXPECTED_PUBLIC_TABLES )) \
   || fail "Public table count is ${PUBLIC_TABLES}; expected ${EXPECTED_PUBLIC_TABLES}."
@@ -102,6 +106,10 @@ readonly AUTO_COMPETITOR_EXTRACTION_TRIGGER="$(sql_scalar "select exists(select 
 [[ "${PUBLISHER_ACCESS_POLICY}" == "t" ]] || fail "Publisher article visibility is missing from the canonical access policy."
 [[ "${AUTO_COMPETITOR_EXTRACTION_SETTING}" == "t" ]] || fail "Automatic competitor content extraction is not enabled by default."
 [[ "${AUTO_COMPETITOR_EXTRACTION_TRIGGER}" == "t" ]] || fail "Automatic competitor content extraction trigger is missing."
+[[ "${UNIFIED_SEMANTIC_GOOGLE_METADATA_FUNCTION}" == "t" ]] || fail "Unified semantic Google metadata function is missing."
+[[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
+[[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
+[[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"

@@ -4875,7 +4875,14 @@ interface AIContextType {
         provider: AiPatchProvider,
         options?: { namespace?: string; titlePrefix?: string; commandId?: string }
     ) => SmartAnalysisParsedResult;
-    generateSemanticKeywords: () => Promise<{ secondaries: string[]; lsi: string[]; error?: string; cancelled?: boolean }>;
+    generateSemanticKeywords: () => Promise<{
+      secondaries: string[];
+      lsi: string[];
+      googleTitles: string[];
+      googleDescriptions: import('../types').GoogleDescriptionSuggestion[];
+      error?: string;
+      cancelled?: boolean;
+    }>;
     generateGoalContext: () => Promise<{ briefText?: string; error?: string; cancelled?: boolean }>;
     handleAiFix: (rule: CheckResult, item: NonNullable<CheckResult['violatingItems']>[0]) => Promise<void>;
     handleFixAllViolations: (rulesToFix: string[], options?: { includeRelatedRules?: boolean; geminiModel?: string; maxViolationsPerRule?: number }) => Promise<void>;
@@ -5384,10 +5391,17 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return parts.join('\n\n');
     }, [editor, title, keywords, text, goalContext, articleLanguage, analysisResults, t]);
 
-    const generateSemanticKeywords = useCallback(async (): Promise<{ secondaries: string[]; lsi: string[]; error?: string; cancelled?: boolean }> => {
+    const generateSemanticKeywords = useCallback(async (): Promise<{
+        secondaries: string[];
+        lsi: string[];
+        googleTitles: string[];
+        googleDescriptions: import('../types').GoogleDescriptionSuggestion[];
+        error?: string;
+        cancelled?: boolean;
+    }> => {
         const primary = keywords.primary.trim();
         if (!primary) {
-            return { secondaries: [], lsi: [], error: 'أدخل الكلمة المفتاحية الأساسية أولًا.' };
+            return { secondaries: [], lsi: [], googleTitles: [], googleDescriptions: [], error: 'أدخل الكلمة المفتاحية الأساسية أولًا.' };
         }
 
         const semanticInput: SemanticKeywordInput = {
@@ -5398,6 +5412,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             companyName: keywords.company,
             existingSecondaries: keywords.secondaries,
             existingLsi: keywords.lsi,
+            existingGoogleTitles: keywords.googleTitles || [],
+            existingGoogleDescriptions: keywords.googleDescriptions || [],
             goalContext: normalizeGoalContext(goalContext) as unknown as Record<string, unknown>,
         };
         const promptTemplate = getPromptTemplate(
@@ -5416,12 +5432,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             );
         } catch (error) {
             if (isGeminiAnalysisCancelledError(error)) {
-                return { secondaries: [], lsi: [], cancelled: true };
+                return { secondaries: [], lsi: [], googleTitles: [], googleDescriptions: [], cancelled: true };
             }
             throw error;
         }
         if (/^حدث خطأ أثناء الاتصال بـ Gemini/.test(result)) {
-            return { secondaries: [], lsi: [], error: result };
+            return { secondaries: [], lsi: [], googleTitles: [], googleDescriptions: [], error: result };
         }
 
         let terms = parseSemanticKeywordTerms(result, semanticInput);
@@ -5440,12 +5456,12 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 );
             } catch (error) {
                 if (isGeminiAnalysisCancelledError(error)) {
-                    return { secondaries: [], lsi: [], cancelled: true };
+                    return { secondaries: [], lsi: [], googleTitles: [], googleDescriptions: [], cancelled: true };
                 }
                 throw error;
             }
             if (/^حدث خطأ أثناء الاتصال بـ Gemini/.test(result)) {
-                return { secondaries: [], lsi: [], error: result };
+                return { secondaries: [], lsi: [], googleTitles: [], googleDescriptions: [], error: result };
             }
             terms = parseSemanticKeywordTerms(result, semanticInput);
         }
@@ -5454,6 +5470,8 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             return {
                 secondaries: terms.secondaries,
                 lsi: terms.lsi,
+                googleTitles: terms.googleTitles,
+                googleDescriptions: terms.googleDescriptions,
                 error: describeSemanticKeywordValidationFailure(terms, semanticInput),
             };
         }
@@ -5461,8 +5479,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return {
             secondaries: terms.secondaries,
             lsi: terms.lsi,
+            googleTitles: terms.googleTitles,
+            googleDescriptions: terms.googleDescriptions,
         };
-    }, [articleLanguage, buildApiUsageContext, engineeringPrompts, goalContext, keywords.company, keywords.lsi, keywords.primary, keywords.secondaries, text, title, trackGeminiProgress]);
+    }, [articleLanguage, buildApiUsageContext, engineeringPrompts, goalContext, keywords.company, keywords.googleDescriptions, keywords.googleTitles, keywords.lsi, keywords.primary, keywords.secondaries, text, title, trackGeminiProgress]);
 
     const generateGoalContext = useCallback(async (): Promise<{ briefText?: string; error?: string; cancelled?: boolean }> => {
         const primary = keywords.primary.trim();

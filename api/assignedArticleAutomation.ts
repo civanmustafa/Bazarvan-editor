@@ -21,6 +21,7 @@ import {
 } from '../utils/semanticKeywordPolicy';
 import { sanitizeCompetitorSlots } from '../utils/competitorContent';
 import { deliverApiResult, getHeaderValue, isRecord, readRequestBody, type ApiResult } from './http.ts';
+import type { GoogleDescriptionSuggestion } from '../types';
 
 type AutomationStatus = 'generated' | 'analyzed' | 'skipped' | 'failed';
 type GeminiProvider = 'gemini' | 'geminiPaid';
@@ -40,6 +41,8 @@ type KeywordsPayload = {
   secondaries: string[];
   company: string;
   lsi: string[];
+  googleTitles: string[];
+  googleDescriptions: GoogleDescriptionSuggestion[];
 };
 
 class AssignedAutomationError extends Error {
@@ -136,11 +139,27 @@ const toStringList = (value: unknown): string[] => {
 
 const normalizeKeywordsPayload = (value: unknown): KeywordsPayload => {
   const source = isRecord(value) ? value : {};
+  const googleDescriptions = Array.isArray(source.googleDescriptions)
+    ? source.googleDescriptions.flatMap((item): GoogleDescriptionSuggestion[] => {
+        if (typeof item === 'string') {
+          const text = item.trim();
+          return text ? [{ text, callToAction: '' }] : [];
+        }
+        if (!isRecord(item)) return [];
+        const text = toTrimmedString(item.text);
+        return text ? [{
+          text,
+          callToAction: toTrimmedString(item.callToAction ?? item.cta),
+        }] : [];
+      }).slice(0, 2)
+    : [];
   return {
     primary: toTrimmedString(source.primary),
     secondaries: Array.isArray(source.secondaries) ? source.secondaries.map(toTrimmedString).filter(Boolean) : toStringList(source.secondaries),
     company: toTrimmedString(source.company),
     lsi: Array.isArray(source.lsi) ? source.lsi.map(toTrimmedString).filter(Boolean) : toStringList(source.lsi),
+    googleTitles: toStringList(source.googleTitles).slice(0, 2),
+    googleDescriptions,
   };
 };
 
@@ -419,6 +438,8 @@ const runSemanticGeneration = async (
       companyName: keywords.company,
       existingSecondaries: keywords.secondaries,
       existingLsi: keywords.lsi,
+      existingGoogleTitles: keywords.googleTitles,
+      existingGoogleDescriptions: keywords.googleDescriptions,
       goalContext: goalContext as unknown as Record<string, unknown>,
     };
     const promptRegistry = await readPromptRegistrySettings();
@@ -471,6 +492,8 @@ const runSemanticGeneration = async (
       ...keywords,
       secondaries: mergeUniqueTerms(keywords.secondaries, incomingSecondaries, 12),
       lsi: mergeUniqueTerms(keywords.lsi, incomingLsi, 30),
+      googleTitles: semanticTerms.googleTitles,
+      googleDescriptions: semanticTerms.googleDescriptions,
     };
     const generatedTitle = semanticTerms.title;
     const nextTitle = isPlaceholderTitle(toTrimmedString(article.title)) && generatedTitle
@@ -487,6 +510,8 @@ const runSemanticGeneration = async (
         keySuffix: gemini.keySuffix,
         addedSecondaries: nextKeywords.secondaries.length - keywords.secondaries.length,
         addedLsi: nextKeywords.lsi.length - keywords.lsi.length,
+        generatedGoogleTitles: nextKeywords.googleTitles.length,
+        generatedGoogleDescriptions: nextKeywords.googleDescriptions.length,
       },
     });
 

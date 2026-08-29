@@ -7,12 +7,15 @@ import {
   type SemanticKeywordInput,
   type SemanticKeywordTerms,
 } from '../utils/semanticKeywordPolicy';
+import type { GoogleDescriptionSuggestion } from '../types';
 
 export type ExternalSemanticKeywords = {
   primary: string;
   secondaries: string[];
   company: string;
   lsi: string[];
+  googleTitles: string[];
+  googleDescriptions: GoogleDescriptionSuggestion[];
 };
 
 export type ExternalSemanticArticleInput = {
@@ -23,7 +26,7 @@ export type ExternalSemanticArticleInput = {
   goalContext: Record<string, unknown>;
 };
 
-export type ExternalSemanticTerms = Pick<SemanticKeywordTerms, 'secondaries' | 'lsi'>;
+export type ExternalSemanticTerms = Pick<SemanticKeywordTerms, 'secondaries' | 'lsi' | 'googleTitles' | 'googleDescriptions'>;
 
 const toSemanticInput = (article: ExternalSemanticArticleInput): SemanticKeywordInput => ({
   title: article.title,
@@ -33,13 +36,15 @@ const toSemanticInput = (article: ExternalSemanticArticleInput): SemanticKeyword
   companyName: article.keywords.company,
   existingSecondaries: article.keywords.secondaries,
   existingLsi: article.keywords.lsi,
+  existingGoogleTitles: article.keywords.googleTitles,
+  existingGoogleDescriptions: article.keywords.googleDescriptions,
   goalContext: article.goalContext,
 });
 
 /*
  * Firecrawl and competitor extraction do not participate in this flow.
- * This module only generates keyword alternatives and LSI terms, and delegates
- * both prompt rendering and deterministic constraint checks to one shared policy.
+ * This module runs one unified command for alternatives, LSI terms, and two
+ * Google title/description suggestions. Every surface shares this policy.
  */
 export const parseExternalSemanticTerms = (
   responseText: string,
@@ -49,6 +54,8 @@ export const parseExternalSemanticTerms = (
   return {
     secondaries: parsed.secondaries,
     lsi: parsed.lsi,
+    googleTitles: parsed.googleTitles,
+    googleDescriptions: parsed.googleDescriptions,
   };
 };
 
@@ -56,18 +63,26 @@ export const hasUsableExternalSemanticTerms = (
   terms: ExternalSemanticTerms,
   needsSecondaries: boolean,
   needsLsi: boolean,
-): boolean => hasUsableSemanticKeywordTerms(terms, needsSecondaries, needsLsi);
+  needsGoogleMetadata = true,
+): boolean => hasUsableSemanticKeywordTerms(
+  terms,
+  needsSecondaries,
+  needsLsi,
+  needsGoogleMetadata,
+);
 
 export const describeExternalSemanticValidationFailure = (
   terms: ExternalSemanticTerms,
   article: ExternalSemanticArticleInput,
   needsSecondaries: boolean,
   needsLsi: boolean,
+  needsGoogleMetadata = true,
 ): string => describeSemanticKeywordValidationFailure(
   terms,
   toSemanticInput(article),
   needsSecondaries,
   needsLsi,
+  needsGoogleMetadata,
 );
 
 const buildRequestedSemanticListsPrompt = (
@@ -77,11 +92,11 @@ const buildRequestedSemanticListsPrompt = (
   '<requested_semantic_lists>',
   needsSecondaries
     ? '- أنشئ الصيغ البديلة المطلوبة في secondaries.'
-    : '- لا تنشئ صيغًا بديلة؛ أرجع secondaries كمصفوفة فارغة.',
+    : '- أنشئ صيغًا بديلة جديدة ضمن الأمر الموحد، لكن النظام لن يستبدل القائمة الحالية تلقائيًا.',
   needsLsi
     ? '- أنشئ كلمات LSI المطلوبة في lsi.'
-    : '- لا تنشئ كلمات LSI؛ أرجع lsi كمصفوفة فارغة.',
-  '- لا تُرجع محتوى لقائمة لم يطلبها النظام في هذه المهمة.',
+    : '- أنشئ كلمات LSI جديدة ضمن الأمر الموحد، لكن النظام لن يستبدل القائمة الحالية تلقائيًا.',
+  '- أنشئ دائمًا googleTitles وgoogleDescriptions كاملتين حتى تكون استجابة الأمر الهندسي موحدة.',
   '</requested_semantic_lists>',
 ].join('\n');
 

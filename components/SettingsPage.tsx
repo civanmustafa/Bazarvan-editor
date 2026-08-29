@@ -707,12 +707,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             checked={settings.system.autoRunReadyEngineeringCommands !== false}
             onChange={value => updateSetting('system', 'autoRunReadyEngineeringCommands', value)}
           />
-          <ToggleField
-            label="كتابة وصف الميتا تلقائيًا"
-            description="عند تحويل المقالة إلى جاهز، يُنشئ وصفًا من 140–150 حرفًا يتضمن الكلمة المفتاحية ويراعي هدف الصفحة وجدول المحتويات."
-            checked={settings.system.autoGenerateMetaDescription !== false}
-            onChange={value => updateSetting('system', 'autoGenerateMetaDescription', value)}
-          />
         </div>
       </SettingsSection>
 

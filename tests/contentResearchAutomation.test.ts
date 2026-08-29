@@ -21,7 +21,7 @@ const importExternalSemanticTerms = async (): Promise<any> => {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 };
 
-test('semantic prompts request only the enabled missing list, including the repair pass', async () => {
+test('semantic prompts always request unified Google metadata while preserving enabled keyword targets', async () => {
   const semantic = await importExternalSemanticTerms();
   const article = {
     title: 'دليل التسويق بالمحتوى',
@@ -32,6 +32,8 @@ test('semantic prompts request only the enabled missing list, including the repa
       secondaries: [] as string[],
       company: 'بازارفان',
       lsi: [] as string[],
+      googleTitles: [] as string[],
+      googleDescriptions: [] as Array<{ text: string; callToAction: string }>,
     },
     goalContext: { pageType: 'guide', objective: 'educate' },
   };
@@ -45,11 +47,13 @@ test('semantic prompts request only the enabled missing list, including the repa
 
   const alternativesOnly = semantic.buildExternalSemanticPrompt(article, template, true, false);
   assert.match(alternativesOnly, /أنشئ الصيغ البديلة المطلوبة/);
-  assert.match(alternativesOnly, /لا تنشئ كلمات LSI/);
+  assert.match(alternativesOnly, /أنشئ كلمات LSI جديدة ضمن الأمر الموحد، لكن النظام لن يستبدل القائمة الحالية تلقائيًا/);
+  assert.match(alternativesOnly, /أنشئ دائمًا googleTitles وgoogleDescriptions كاملتين/);
 
   const lsiOnly = semantic.buildExternalSemanticPrompt(article, template, false, true);
-  assert.match(lsiOnly, /لا تنشئ صيغًا بديلة/);
+  assert.match(lsiOnly, /أنشئ صيغًا بديلة جديدة ضمن الأمر الموحد، لكن النظام لن يستبدل القائمة الحالية تلقائيًا/);
   assert.match(lsiOnly, /أنشئ كلمات LSI المطلوبة/);
+  assert.match(lsiOnly, /أنشئ دائمًا googleTitles وgoogleDescriptions كاملتين/);
 
   const repair = semantic.buildExternalSemanticRepairPrompt(
     article,
@@ -59,8 +63,9 @@ test('semantic prompts request only the enabled missing list, including the repa
     true,
   );
   assert.equal((repair.match(/<requested_semantic_lists>/g) || []).length, 1);
-  assert.match(repair, /لا تنشئ صيغًا بديلة/);
+  assert.match(repair, /أنشئ صيغًا بديلة جديدة ضمن الأمر الموحد، لكن النظام لن يستبدل القائمة الحالية تلقائيًا/);
   assert.match(repair, /أنشئ كلمات LSI المطلوبة/);
+  assert.match(repair, /أنشئ دائمًا googleTitles وgoogleDescriptions كاملتين/);
 });
 
 test('content research automation is server-owned, settings-aware, and preserves manual actions', async () => {

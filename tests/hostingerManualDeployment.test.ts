@@ -40,8 +40,8 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-98/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-98/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-99/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-99/);
   assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-59/);
   assert.match(guide, /20260827030000_content_research_automation_settings\.sql/);
   assert.match(guide, /20260828010000_concurrent_editing_and_meta_description\.sql/);
@@ -54,6 +54,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20260829050000_article_writing_sources\.sql/);
   assert.match(guide, /20260829060000_publisher_user_article_visibility\.sql/);
   assert.match(guide, /20260829070000_automatic_competitor_content_extraction\.sql/);
+  assert.match(guide, /20260829080000_unified_semantic_google_metadata\.sql/);
   assert.match(verifyScript, /META_DESCRIPTION_COLUMNS/);
   assert.match(verifyScript, /CONCURRENT_SAVE_FUNCTION/);
   assert.match(verifyScript, /READY_ENGINEERING_CONTROLLED_FUNCTION/);
@@ -73,4 +74,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(verifyScript, /PUBLISHER_ACCESS_POLICY/);
   assert.match(verifyScript, /AUTO_COMPETITOR_EXTRACTION_SETTING/);
   assert.match(verifyScript, /AUTO_COMPETITOR_EXTRACTION_TRIGGER/);
+  assert.match(verifyScript, /UNIFIED_SEMANTIC_GOOGLE_METADATA_FUNCTION/);
+  assert.match(verifyScript, /UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP/);
+  assert.match(verifyScript, /READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED/);
 });

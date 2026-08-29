@@ -9,12 +9,19 @@
  */
 export type AnalysisStatus = 'pass' | 'warn' | 'fail' | 'info';
 
+export interface GoogleDescriptionSuggestion {
+  text: string;
+  callToAction: string;
+}
+
 export interface Keywords {
   primary: string;
   secondaries: string[];
   company: string;
   clientId?: string;
   lsi: string[];
+  googleTitles?: string[];
+  googleDescriptions?: GoogleDescriptionSuggestion[];
 }
 
 export interface GoalContext {

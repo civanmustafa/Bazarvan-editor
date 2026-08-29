@@ -352,6 +352,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const { keywordViewMode, uiLanguage, t, clientGoalContexts } = useUser();
   const keywords = useEditorSelector(context => context.keywords);
   const setKeywords = useEditorSelector(context => context.setKeywords);
+  const setTitle = useEditorSelector(context => context.setTitle);
+  const setMetaDescription = useEditorSelector(context => context.setMetaDescription);
   const activeArticleId = useEditorSelector(context => context.activeArticleId);
   const setGoalContext = useEditorSelector(context => context.setGoalContext);
   const analysisResults = useEditorSelector(context => context.analysisResults);
@@ -878,6 +880,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         lsi: result.lsi.length > 0
           ? mergeUniqueKeywordTerms(prev.lsi, result.lsi, 24)
           : prev.lsi,
+        googleTitles: result.googleTitles,
+        googleDescriptions: result.googleDescriptions,
       }));
       setLsiInputValue('');
       setSemanticGenerationStatus(tLk.semanticKeywordsGenerated);
@@ -907,6 +911,52 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       )}
     </div>
   );
+
+  const googleMetadataSuggestions = (
+    (keywords.googleTitles?.length || 0) > 0 || (keywords.googleDescriptions?.length || 0) > 0
+  ) ? (
+    <div className="space-y-3 rounded-xl border border-[#d4af37]/35 bg-white p-3 dark:border-[#d4af37]/30 dark:bg-[#2A2A2A]">
+      <div>
+        <h4 className="text-sm font-black text-[#333333] dark:text-[#e0e0e0]">{tLk.googleTitleSuggestions}</h4>
+        <div className="mt-2 space-y-2">
+          {(keywords.googleTitles || []).map((suggestion, index) => (
+            <div key={`${suggestion}-${index}`} className="rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+              <p className="text-xs font-bold leading-5 text-gray-800 dark:text-gray-200">{suggestion}</p>
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={() => setTitle(suggestion)} className="rounded-md bg-[#d4af37]/15 px-2 py-1 text-[11px] font-black text-[#8a6f1d] hover:bg-[#d4af37]/25 dark:text-[#f2d675]">
+                  {tLk.useGoogleTitle}
+                </button>
+                <button type="button" onClick={() => navigator.clipboard.writeText(suggestion)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold text-gray-500 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-white/5">
+                  <Copy size={12} /> {tLk.copy}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="border-t border-gray-200 pt-3 dark:border-[#3C3C3C]">
+        <h4 className="text-sm font-black text-[#333333] dark:text-[#e0e0e0]">{tLk.googleDescriptionSuggestions}</h4>
+        <div className="mt-2 space-y-2">
+          {(keywords.googleDescriptions || []).map((suggestion, index) => (
+            <div key={`${suggestion.text}-${index}`} className="rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+              <p className="text-xs font-medium leading-5 text-gray-700 dark:text-gray-300">{suggestion.text}</p>
+              {suggestion.callToAction && (
+                <p className="mt-1 text-[10px] font-black text-[#8a6f1d] dark:text-[#f2d675]">{tLk.callToAction}: {suggestion.callToAction}</p>
+              )}
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={() => setMetaDescription(suggestion.text)} className="rounded-md bg-[#d4af37]/15 px-2 py-1 text-[11px] font-black text-[#8a6f1d] hover:bg-[#d4af37]/25 dark:text-[#f2d675]">
+                  {tLk.useGoogleDescription}
+                </button>
+                <button type="button" onClick={() => navigator.clipboard.writeText(suggestion.text)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold text-gray-500 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-white/5">
+                  <Copy size={12} /> {tLk.copy}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  ) : null;
     
     const handleAutoDistribute = (text: string) => {
         if (!text.trim()) return;
@@ -1027,6 +1077,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 </div>
             </ModernSection>
             {semanticGeneratorControl}
+            {googleMetadataSuggestions}
             <ModernSection 
                 icon={<ListChecks size={20} />} 
                 title={tLk.synonyms}
@@ -1192,6 +1243,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </AdvancedKeywordCard>
 
             {semanticGeneratorControl}
+            {googleMetadataSuggestions}
             <AdvancedKeywordCard
                 title={tLk.synonyms}
                 icon={<ListChecks size={20} />}

@@ -162,9 +162,10 @@ test('database save fencing protects every existing-article save and requires an
   assert.match(banner, /اعتماد نسختي الحالية/);
 });
 
-test('ready status queues a fenced AI meta-description task and exposes it in the editor monitor', async () => {
-  const [migration, executor, worker, monitor, bridge, field, settings, ecosystem] = await Promise.all([
+test('manual meta-description tooling remains available while ready-status automation is retired', async () => {
+  const [migration, retirement, executor, worker, monitor, bridge, field, settings, ecosystem] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260828010000_concurrent_editing_and_meta_description.sql'),
+    readWorkspaceFile('supabase/migrations/20260829080000_unified_semantic_google_metadata.sql'),
     readWorkspaceFile('server/metaDescriptionGenerationExecutor.ts'),
     readWorkspaceFile('server/externalAnalysisWorker.ts'),
     readWorkspaceFile('components/AiKeyUsageToast.tsx'),
@@ -190,7 +191,10 @@ test('ready status queues a fenced AI meta-description task and exposes it in th
   assert.match(monitor, /كتابة وصف الميتا/);
   assert.match(field, /المطلوب.*META_DESCRIPTION_MIN_LENGTH/);
   assert.match(field, /الكلمة المفتاحية/);
-  assert.match(settings, /autoGenerateMetaDescription/);
+  assert.match(retirement, /drop trigger if exists enqueue_article_meta_description_from_article/);
+  assert.match(retirement, /ready_status_meta_description_retired/);
+  assert.match(retirement, /select false/);
+  assert.doesNotMatch(settings, /autoGenerateMetaDescription/);
 });
 
 test('meta-description field follows the full-height article inside the editor scroll panel', async () => {

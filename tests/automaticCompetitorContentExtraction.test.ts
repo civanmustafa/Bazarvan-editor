@@ -51,15 +51,16 @@ test('automatic extraction setting is rechecked by the worker and writing coordi
   );
 });
 
-test('ready status continues to queue automatic meta-description generation by default', async () => {
+test('ready-status meta-description automation is retired in favor of unified semantic Google metadata', async () => {
   const [migration, registry, settings] = await Promise.all([
-    readWorkspaceFile('supabase/migrations/20260828010000_concurrent_editing_and_meta_description.sql'),
+    readWorkspaceFile('supabase/migrations/20260829080000_unified_semantic_google_metadata.sql'),
     readWorkspaceFile('constants/settingsRegistry.ts'),
     readWorkspaceFile('components/SettingsPage.tsx'),
   ]);
 
-  assert.match(migration, /new\.status = 'in_review'/);
-  assert.match(migration, /enqueue_article_meta_description_generation/);
-  assert.match(registry, /autoGenerateMetaDescription: true/);
-  assert.match(settings, /عند تحويل المقالة إلى جاهز/);
+  assert.match(migration, /drop trigger if exists enqueue_article_meta_description_from_article/);
+  assert.match(migration, /ready_status_meta_description_retired/);
+  assert.match(migration, /semantic_keywords_have_google_metadata/);
+  assert.doesNotMatch(registry, /autoGenerateMetaDescription/);
+  assert.doesNotMatch(settings, /عند تحويل المقالة إلى جاهز/);
 });

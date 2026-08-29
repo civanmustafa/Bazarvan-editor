@@ -109,7 +109,6 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     autoDiscoverCompetitors: true,
     autoExtractCompetitorContent: true,
     autoRunReadyEngineeringCommands: true,
-    autoGenerateMetaDescription: true,
   },
 };
 
@@ -365,10 +364,6 @@ const normalizeSystemSection = (
   setWhenPresent('autoRunReadyEngineeringCommands', field => normalizeBoolean(
     field,
     defaults.autoRunReadyEngineeringCommands,
-  ));
-  setWhenPresent('autoGenerateMetaDescription', field => normalizeBoolean(
-    field,
-    defaults.autoGenerateMetaDescription,
   ));
   return normalized;
 };

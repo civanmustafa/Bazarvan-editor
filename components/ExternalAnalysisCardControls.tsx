@@ -167,7 +167,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             ? `حزمة الأوامر الهندسية (${summary?.activeEngineeringCount})`
             : job.command_label || 'الأوامر اليدوية الجاهزة')
         : kind === 'semantic'
-          ? 'توليد الصيغ وLSI'
+          ? 'توليد الصيغ وLSI ومقترحات Google'
           : kind === 'meta-description'
             ? 'كتابة وصف الميتا'
           : kind === 'competitor-discovery'
@@ -473,16 +473,16 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   };
 
   const handleSemantic = async () => {
-    if (busyAction || semanticTermsReady || semanticJobActive || !semanticCanStart) return;
+    if (busyAction || semanticJobActive || !semanticCanStart) return;
     setBusyAction('semantic');
     setNotice(null);
     try {
       const result = await enqueueExternalSemanticAnalysis(articleId);
       const message = result.alreadyReady
-        ? (locale === 'ar' ? 'الصيغ البديلة وLSI جاهزة بالفعل.' : 'Alternative forms and LSI are already ready.')
+        ? (locale === 'ar' ? 'الصيغ وLSI ومقترحات Google جاهزة بالفعل.' : 'Alternatives, LSI, and Google metadata are already ready.')
         : result.alreadyActive
           ? (locale === 'ar' ? 'مهمة التوليد موجودة وتعمل في الخلفية.' : 'The generation task is already running in the background.')
-          : (locale === 'ar' ? 'تم تعيين مهمة الصيغ البديلة وLSI.' : 'Alternative forms and LSI task queued.');
+          : (locale === 'ar' ? 'تم تعيين مهمة توليد الصيغ وLSI ومقترحات Google.' : 'Alternatives, LSI, and Google metadata task queued.');
       setNotice({ tone: 'success', message });
       await refreshAfterRequest();
     } catch (error) {
@@ -511,8 +511,8 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
         tone: 'success',
         message: result.semanticPrerequisiteQueued
           ? (locale === 'ar'
-              ? `تم تعيين توليد الصيغ وLSI أولاً، ثم ${orderedCommandIds.length} أمر بالتتابع.`
-              : `Alternatives and LSI were queued first, followed by ${orderedCommandIds.length} command(s).`)
+              ? `تم تعيين توليد الصيغ وLSI ومقترحات Google أولاً، ثم ${orderedCommandIds.length} أمر بالتتابع.`
+              : `Alternatives, LSI, and Google metadata were queued first, followed by ${orderedCommandIds.length} command(s).`)
           : (locale === 'ar'
               ? `تم تعيين ${orderedCommandIds.length} أمر بالتتابع في الخلفية.`
               : `${orderedCommandIds.length} command(s) queued sequentially in the background.`),
@@ -602,15 +602,15 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           <div
             data-analysis-control-group="semantic"
             role="group"
-            aria-label={locale === 'ar' ? 'توليد الصيغ وشروطه' : 'Term generation and its requirements'}
+            aria-label={locale === 'ar' ? 'توليد الصيغ وLSI ومقترحات Google وشروطه' : 'Semantic and Google metadata generation requirements'}
             className={ANALYSIS_CONTROL_GROUP_CLASS}
           >
             <button
               type="button"
               onClick={handleSemantic}
-              disabled={Boolean(busyAction || semanticTermsReady || semanticJobActive || !semanticCanStart)}
+              disabled={Boolean(busyAction || semanticJobActive || !semanticCanStart)}
               className={ANALYSIS_ACTION_BUTTON_CLASS}
-              title={locale === 'ar' ? 'توليد الصيغ البديلة وكلمات LSI في الخلفية' : 'Generate alternatives and LSI in the background'}
+              title={locale === 'ar' ? 'توليد الصيغ وLSI وعنواني Google ووصفي Google في أمر خلفي واحد' : 'Generate alternatives, LSI, and two Google titles/descriptions in one background command'}
             >
             {busyAction === 'semantic' || semanticJobActive
               ? <LoaderCircle size={12} className="animate-spin" />
@@ -618,10 +618,10 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
                 ? <CheckCircle2 size={12} />
                 : <Tags size={12} />}
             <span>{semanticTermsReady
-              ? (locale === 'ar' ? 'الصيغ جاهزة' : 'Terms ready')
+              ? (locale === 'ar' ? 'إعادة توليد الكل' : 'Regenerate all')
               : semanticJobActive
-                ? (locale === 'ar' ? 'جاري توليد الصيغ' : 'Generating terms')
-                : (locale === 'ar' ? 'توليد الصيغ وLSI' : 'Generate alternatives + LSI')}</span>
+                ? (locale === 'ar' ? 'جاري توليد الكل' : 'Generating all')
+                : (locale === 'ar' ? 'توليد الصيغ وLSI ومقترحات Google' : 'Generate terms + Google metadata')}</span>
             </button>
             <button
               type="button"

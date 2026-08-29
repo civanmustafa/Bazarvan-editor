@@ -193,6 +193,15 @@ const toStringList = (value: unknown): string[] => (
     : []
 );
 
+const hasGoogleMetadataSuggestions = (keywords: Record<string, unknown>): boolean => (
+  toStringList(keywords.googleTitles).length === 2
+  && Array.isArray(keywords.googleDescriptions)
+  && keywords.googleDescriptions
+    .map(item => (isRecord(item) ? toTrimmedString(item.text) : toTrimmedString(item)))
+    .filter(Boolean)
+    .length === 2
+);
+
 const uniqueStrings = (items: string[]): string[] => (
   Array.from(new Set(items.map(item => item.trim()).filter(Boolean)))
 );
@@ -297,13 +306,6 @@ const enqueueSemanticJob = async (
   article: ArticleRow,
   state: AnalysisStateRow,
 ): Promise<EnqueueSemanticJobResult> => {
-  const keywords = isRecord(article.keywords) ? article.keywords : {};
-  const needsSecondaries = toStringList(keywords.secondaries).length === 0;
-  const needsLsi = toStringList(keywords.lsi).length === 0;
-  if (!needsSecondaries && !needsLsi) {
-    return { alreadyReady: true, alreadyActive: false, job: null };
-  }
-
   if (!state.semantic_ready || !state.semantic_readiness_signature) {
     throw new ExternalAnalysisApiError({
       message: 'Semantic analysis prerequisites are incomplete.',
@@ -317,7 +319,7 @@ const enqueueSemanticJob = async (
     'enqueue_external_semantic_analysis_job_controlled',
     {
       p_article_id: article.id,
-      p_origin: 'manual',
+      p_origin: 'manual_regenerate',
     },
   );
   if (enqueueError) throw enqueueError;
@@ -398,7 +400,8 @@ const enqueueEngineeringJobs = async (
   // Queueing it explicitly as manual keeps an intentional user request
   // independent from the administrator's automatic-generation switches.
   const needsSemanticPrerequisite = toStringList(keywords.secondaries).length === 0
-    || toStringList(keywords.lsi).length === 0;
+    || toStringList(keywords.lsi).length === 0
+    || !hasGoogleMetadataSuggestions(keywords);
   if (needsSemanticPrerequisite) {
     const { error: semanticError } = await supabase.rpc(
       'enqueue_external_semantic_analysis_job_controlled',

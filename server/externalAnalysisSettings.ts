@@ -18,7 +18,6 @@ export type ContentResearchAutomationSettings = {
   autoDiscoverCompetitors: boolean;
   autoExtractCompetitorContent: boolean;
   autoRunReadyEngineeringCommands: boolean;
-  autoGenerateMetaDescription: boolean;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -68,6 +67,5 @@ export const readContentResearchAutomationSettings = async (): Promise<ContentRe
     autoDiscoverCompetitors: system.autoDiscoverCompetitors !== false,
     autoExtractCompetitorContent: system.autoExtractCompetitorContent !== false,
     autoRunReadyEngineeringCommands: system.autoRunReadyEngineeringCommands !== false,
-    autoGenerateMetaDescription: system.autoGenerateMetaDescription !== false,
   };
 };

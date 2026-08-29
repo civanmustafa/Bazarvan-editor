@@ -1,5 +1,5 @@
 
-import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext, Keywords } from '../types';
+import type { ChatGptOpenMode, ClientGoalContexts, EngineeringPrompts, GoalContext, GoogleDescriptionSuggestion, Keywords } from '../types';
 import { INITIAL_GOAL_CONTEXT } from '../constants';
 import { DEFAULT_ENGINEERING_PROMPTS } from '../constants/engineeringPrompts';
 
@@ -63,6 +63,24 @@ const toStringArray = (value: unknown, fallback: string[] = []): string[] => (
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : fallback
 );
 
+const toGoogleDescriptionSuggestions = (value: unknown): GoogleDescriptionSuggestion[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item === 'string') {
+      const text = item.trim();
+      return text ? [{ text, callToAction: '' }] : [];
+    }
+    if (!isRecord(item)) return [];
+    const text = typeof item.text === 'string' ? item.text.trim() : '';
+    const callToAction = typeof item.callToAction === 'string'
+      ? item.callToAction.trim()
+      : typeof item.cta === 'string'
+        ? item.cta.trim()
+        : '';
+    return text ? [{ text, callToAction }] : [];
+  }).slice(0, 2);
+};
+
 export const normalizeKeywords = (value: unknown): Keywords => {
   const source = isRecord(value) ? value : {};
   const clientId = typeof source.clientId === 'string' ? source.clientId.trim() : '';
@@ -72,6 +90,8 @@ export const normalizeKeywords = (value: unknown): Keywords => {
     company: typeof source.company === 'string' ? source.company : '',
     ...(clientId ? { clientId } : {}),
     lsi: toStringArray(source.lsi),
+    googleTitles: toStringArray(source.googleTitles).map(item => item.trim()).filter(Boolean).slice(0, 2),
+    googleDescriptions: toGoogleDescriptionSuggestions(source.googleDescriptions),
   };
 };
 
@@ -99,6 +119,8 @@ const getDefaultArticleActivity = (): ArticleActivity => ({
     secondaries: ['', '', '', ''],
     company: '',
     lsi: [],
+    googleTitles: [],
+    googleDescriptions: [],
   },
   goalContext: INITIAL_GOAL_CONTEXT,
   stats: {
