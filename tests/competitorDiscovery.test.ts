@@ -290,6 +290,20 @@ test('manual and queued competitor discovery load the linked client domain exclu
   assert.match(exclusionSource, /\.eq\('is_active', true\)/);
 });
 
+test('manual competitor search remains available before automation prerequisites are complete', async () => {
+  const [apiSource, browserClient, panel] = await Promise.all([
+    readWorkspaceFile('api/competitors.ts'),
+    readWorkspaceFile('utils/competitorDiscovery.ts'),
+    readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
+  ]);
+
+  assert.ok(apiSource.includes("const canPersistDiscovery = discoveryState?.competitor_discovery_ready === true"));
+  assert.ok(apiSource.includes('persistenceDeferred: !canPersistDiscovery'));
+  assert.ok(apiSource.includes('const discoveryJob = canPersistDiscovery'));
+  assert.ok(browserClient.includes('persistenceDeferred: payload.persistenceDeferred === true'));
+  assert.ok(panel.includes('يمكنك مراجعتها وسحب محتواها يدويًا'));
+});
+
 test('competitor Firecrawl operations resolve only user-owned or assigned vault credentials', async () => {
   const [service, apiSource, settings, panel] = await Promise.all([
     readWorkspaceFile('server/firecrawlCompetitorService.ts'),

@@ -98,6 +98,7 @@ export type CompetitorSearchResponse = {
   selection: CompetitorSelectionSummary;
   automaticExtractionQueued: boolean;
   automaticExtractionJobId: string;
+  persistenceDeferred: boolean;
 };
 
 export type CompetitorPreview = {
@@ -433,6 +434,7 @@ export const searchArticleCompetitors = async (options: {
     selection: parseCompetitorSelectionSummary(payload.selection, results),
     automaticExtractionQueued: Boolean(automaticExtractionJobId),
     automaticExtractionJobId,
+    persistenceDeferred: payload.persistenceDeferred === true,
   };
 };
 
@@ -448,6 +450,7 @@ export const getPersistedCompetitorDiscovery = (
     selection: parseCompetitorSelectionSummary(result.selection, results),
     automaticExtractionQueued: Boolean(toText(result.autoExtractionJobId)),
     automaticExtractionJobId: toText(result.autoExtractionJobId),
+    persistenceDeferred: false,
   };
 };
 

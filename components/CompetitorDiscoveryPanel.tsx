@@ -413,6 +413,10 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         setNotice(isArabic
           ? `لم يعثر محرك البحث على نتائج عربية مناسبة.${response.selection.languageFilteredCount > 0 ? ` استُبعدت ${response.selection.languageFilteredCount} نتيجة لاتينية لأنها لا تطابق لغة المقالة.` : ''}`
           : 'No suitable search results were found.');
+      } else if (response.persistenceDeferred) {
+        setNotice(isArabic
+          ? 'ظهرت النتائج الآن ويمكنك مراجعتها وسحب محتواها يدويًا. سيُحفظ البحث ضمن دورة التشغيل التلقائي بعد اكتمال بيانات المقالة المطلوبة.'
+          : 'Results are ready to review and import manually. The search will be saved into the automatic workflow after the article prerequisites are complete.');
       } else if (response.automaticExtractionQueued) {
         setNotice(isArabic
           ? `تم اعتماد أفضل ${response.selection.autoSelectedCount} نتائج وبدأ سحب محتواها تلقائيًا. ستستمر المهمة حتى عند مغادرة المقالة.`
