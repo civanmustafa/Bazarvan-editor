@@ -120,6 +120,17 @@ test('migration stamps actual semantic runs and treats retries as explicit manua
     /update public\.ai_external_analysis_runs as run[\s\S]*'secondaries', true,[\s\S]*'lsi', true/,
   );
 
+  const followup = sliceFunction(
+    migration,
+    'enqueue_semantic_followup_after_completion',
+    'create or replace function public.enqueue_external_engineering_jobs_sequential_base',
+  );
+  assert.match(
+    followup,
+    /enqueue_external_semantic_analysis_job_controlled\([\s\S]*new\.article_id,[\s\S]*'auto'/,
+  );
+  assert.doesNotMatch(followup, /new\.origin = 'manual'/);
+
   const retry = sliceFunction(
     migration,
     'retry_external_analysis_job',

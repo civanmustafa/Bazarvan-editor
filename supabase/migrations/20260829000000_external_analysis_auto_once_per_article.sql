@@ -337,10 +337,7 @@ begin
     and new.pipeline_parent_job_id is null then
     perform public.enqueue_external_semantic_analysis_job_controlled(
       new.article_id,
-      case
-        when new.status = 'completed' and new.origin = 'manual' then 'manual'
-        else 'auto'
-      end
+      'auto'
     );
 
     if new.status = 'completed' then
