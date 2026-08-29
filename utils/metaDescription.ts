@@ -9,6 +9,8 @@ export type MetaDescriptionValidation = {
   valid: boolean;
 };
 
+export type MetaDescriptionSuggestionPair = [string, string];
+
 const normalizeForComparison = (value: string): string => value
   .normalize('NFKC')
   .replace(/\s+/g, ' ')
@@ -96,6 +98,48 @@ const jsonObjectFromText = (value: string): Record<string, unknown> | null => {
   return null;
 };
 
+export const normalizeMetaDescriptionSuggestions = (value: unknown): string[] => {
+  const source = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object'
+      ? (
+          (value as Record<string, unknown>).metaDescriptionSuggestions
+          ?? (value as Record<string, unknown>).metaDescriptions
+          ?? (value as Record<string, unknown>).suggestions
+        )
+      : [];
+  if (!Array.isArray(source)) return [];
+
+  const seen = new Set<string>();
+  return source
+    .map(normalizeMetaDescription)
+    .filter(candidate => {
+      const comparisonKey = normalizeForComparison(candidate);
+      if (!comparisonKey || seen.has(comparisonKey)) return false;
+      seen.add(comparisonKey);
+      return true;
+    });
+};
+
+export const parseGeneratedMetaDescriptionSuggestions = (value: string): string[] => {
+  const parsed = jsonObjectFromText(value);
+  if (!parsed) return [];
+  return normalizeMetaDescriptionSuggestions(parsed);
+};
+
+export const getValidMetaDescriptionSuggestionPair = (
+  value: unknown,
+  primaryKeyword: unknown,
+): MetaDescriptionSuggestionPair | null => {
+  const candidates = typeof value === 'string'
+    ? parseGeneratedMetaDescriptionSuggestions(value)
+    : normalizeMetaDescriptionSuggestions(value);
+  if (candidates.length !== 2) return null;
+  const validated = candidates.map(candidate => validateMetaDescription(candidate, primaryKeyword));
+  if (!validated.every(result => result.valid)) return null;
+  return [validated[0].normalized, validated[1].normalized];
+};
+
 export const parseGeneratedMetaDescription = (value: string): string => {
   const parsed = jsonObjectFromText(value);
   const candidate = parsed?.metaDescription ?? parsed?.meta_description ?? parsed?.description;
@@ -129,4 +173,51 @@ export const buildMetaDescriptionPrompt = (input: {
     `Table of contents: ${JSON.stringify(input.tableOfContents)}`,
     repair,
   ].join('\n');
+};
+
+export const buildMetaDescriptionSuggestionsPrompt = (input: {
+  title: string;
+  primaryKeyword: string;
+  articleLanguage: 'ar' | 'en';
+  finalArticle: string;
+  goalContext: Record<string, unknown>;
+  template?: string;
+  previousInvalidResponse?: string;
+}): string => {
+  const language = input.articleLanguage === 'en' ? 'English' : 'Arabic';
+  const variables: Record<string, string> = {
+    article_title: input.title,
+    primary_keyword: input.primaryKeyword,
+    output_language: language,
+    goal_context_json: JSON.stringify(input.goalContext),
+    final_article: input.finalArticle,
+  };
+  const defaultTemplate = [
+    'Generate exactly two distinct SEO meta-description suggestions for the final article.',
+    'Output language: {{output_language}}.',
+    'Each description must contain exactly 140 to 150 Unicode characters, including spaces and punctuation.',
+    'Each description must include the primary keyword exactly as supplied: {{primary_keyword}}',
+    'Ground both descriptions in the final article and page goal. Do not invent facts, prices, guarantees, or claims.',
+    'Make the two descriptions genuinely different in phrasing while preserving the same search intent.',
+    'Return JSON only in this exact shape: {"metaDescriptionSuggestions":["...","..."]}',
+    'Article title: {{article_title}}',
+    'Page goal context: {{goal_context_json}}',
+    '<final_article>',
+    '{{final_article}}',
+    '</final_article>',
+  ].join('\n');
+  const rendered = Object.entries(variables).reduce(
+    (result, [key, replacement]) => result.replaceAll(`{{${key}}}`, replacement),
+    input.template?.trim() || defaultTemplate,
+  );
+  const repair = input.previousInvalidResponse?.trim()
+    ? [
+        '',
+        'The previous response was invalid. Rewrite both descriptions and return the required JSON only.',
+        '<invalid_previous_response>',
+        input.previousInvalidResponse.slice(0, 4_000),
+        '</invalid_previous_response>',
+      ].join('\n')
+    : '';
+  return `${rendered}${repair}`;
 };

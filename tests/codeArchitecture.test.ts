@@ -224,6 +224,40 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   assert.match(monitor, /timeout: \['انتهت مهلة الموديل', 'Model timed out'\]/);
 });
 
+test('dashboard article headers distinguish statuses and share one external-analysis identity', async () => {
+  const [dashboard, externalControls] = await Promise.all([
+    readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+  ]);
+
+  assert.match(
+    dashboard,
+    /const ARTICLE_STATUS_TONES[\s\S]*?draft:[\s\S]*?amber[\s\S]*?in_review:[\s\S]*?emerald[\s\S]*?published:[\s\S]*?sky[\s\S]*?archived:[\s\S]*?slate/,
+  );
+  assert.match(dashboard, /data-article-status=\{status\}/);
+  assert.match(dashboard, /const articleStatus = normalizeArticleStatus\(remoteActivity\.status \|\| n8nSettings\.status\)/);
+  assert.match(dashboard, /<ArticleStatusControl[\s\S]*?value=\{articleStatus\}/);
+  assert.match(dashboard, /articleStatus=\{articleStatus\}/);
+
+  assert.equal(
+    (externalControls.match(/className=\{ANALYSIS_CONTROL_GROUP_CLASS\}/g) || []).length,
+    3,
+  );
+  assert.equal(
+    (externalControls.match(/className=\{ANALYSIS_ACTION_BUTTON_CLASS\}/g) || []).length,
+    3,
+  );
+  assert.match(
+    externalControls,
+    /const requirementsEnabled = articleStatus === 'draft'/,
+  );
+  assert.match(externalControls, /const readinessState = requirementsEnabled \? summary\?\.state \|\| null : null/);
+  assert.match(externalControls, /const semanticRequirements:[\s\S]*?requirementsEnabled[\s\S]*?: \[\]/);
+  assert.match(externalControls, /const engineeringRequirements:[\s\S]*?requirementsEnabled[\s\S]*?: \[\]/);
+  assert.match(externalControls, /const competitorRequirements:[\s\S]*?requirementsEnabled[\s\S]*?: \[\]/);
+  assert.match(externalControls, /\{requirementsEnabled && requirementsOpen && \(/);
+});
+
 test('API handlers share the same HTTP request and response adapters', async () => {
   const handlerFiles = [
     'api/adminUsers.ts',
@@ -643,7 +677,7 @@ test('content writing enforces one goal-aware final section after FAQ across ass
     readWorkspaceFile('server/contentWritingEngine.ts'),
   ]);
 
-  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 12/);
+  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 13/);
   assert.match(workflow, /auditContentWritingFinalSectionStructure/);
   assert.match(workflow, /final_structure_faq_not_penultimate/);
   assert.match(workflow, /final_structure_duplicate_final_heading/);
@@ -677,7 +711,7 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
   assert.match(workflow, /competitor_phrase_intelligence_json/);
   assert.match(serverWorkflow, /deterministic_competitor_phrase_intelligence/);
   assert.match(serverWorkflow, /competitorPhraseIntelligence/);
-  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 20/);
+  assert.match(promptRegistry, /PROMPT_REGISTRY_VERSION = 21/);
   assert.match(promptRegistry, /بناء مصفوفة تغطية المنافسين/);
   assert.match(promptRegistry, /competitor_phrase_intelligence_json/);
   assert.match(promptRegistry, /originalityOpportunity/);

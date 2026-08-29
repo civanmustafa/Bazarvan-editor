@@ -152,7 +152,14 @@ test('migration stamps actual semantic runs and treats retries as explicit manua
 });
 
 test('only a started prior attempt blocks the same automatic command, regardless of outcome or origin', () => {
-  const previous = [
+  const previous: Array<{
+    commandId: string;
+    status: string;
+    origin: string;
+    attemptCount: number;
+    startedAt: string | null;
+    result: unknown;
+  }> = [
     {
       commandId: 'competitorContentComparison', status: 'cancelled', origin: 'auto',
       attemptCount: 0, startedAt: null, result: null,

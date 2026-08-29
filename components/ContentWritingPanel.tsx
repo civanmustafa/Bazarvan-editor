@@ -48,6 +48,10 @@ import {
 import { recoverContentWritingDraft } from '../utils/contentWritingWorkflow';
 import { normalizeContentWritingQualityConfiguration } from '../constants/contentWritingQuality';
 import type { ExternalAiBridgeProvider } from '../types';
+import {
+  countMetaDescriptionCharacters,
+  normalizeMetaDescriptionSuggestions,
+} from '../utils/metaDescription';
 import ContentWritingExternalBridgePanel from './ContentWritingExternalBridgePanel';
 import ContentWritingReviewModal from './ContentWritingReviewModal';
 import ContentWritingStepResult, {
@@ -283,6 +287,7 @@ const getStepLabel = (step: ContentWritingStep, isArabic: boolean): string => {
     faq: isArabic ? 'الأسئلة الشائعة' : 'FAQ',
     final_review: isArabic ? 'المراجعة النهائية' : 'Final review',
     quality_repair: isArabic ? 'إصلاح معايير الجودة' : 'Quality repair',
+    meta_description: isArabic ? 'اقتراحا وصف الميتا' : 'Meta-description suggestions',
   };
   const revisionPhase = String(step.metadata.revisionPhase || '');
   if (step.stepType === 'final_review' && revisionPhase) {
@@ -332,6 +337,7 @@ const ContentWritingPanel: React.FC = () => {
   const goalContext = useEditorSelector(context => context.goalContext);
   const editor = useEditorSelector(context => context.editor);
   const handleSaveDraft = useEditorSelector(context => context.handleSaveDraft);
+  const setMetaDescription = useEditorSelector(context => context.setMetaDescription);
   const applyGeneratedArticleContent = useEditorSelector(context => context.applyGeneratedArticleContent);
   const reloadActiveArticleFromRemote = useEditorSelector(context => context.reloadActiveArticleFromRemote);
   const reloadActiveGoalContextFromRemote = useEditorSelector(context => context.reloadActiveGoalContextFromRemote);
@@ -356,6 +362,7 @@ const ContentWritingPanel: React.FC = () => {
   const [hasActiveAutomaticWriting, setHasActiveAutomaticWriting] = useState(false);
   const [hasActiveFullPipeline, setHasActiveFullPipeline] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedMetaDescriptionIndex, setCopiedMetaDescriptionIndex] = useState<number | null>(null);
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
   const [isApplying, setIsApplying] = useState(false);
   const [applicationNotice, setApplicationNotice] = useState<ApplicationNotice | null>(null);
@@ -446,6 +453,9 @@ const ContentWritingPanel: React.FC = () => {
   const hasActiveSession = sessions.some(isContentWritingSessionActive);
   const activeDetail = selectedDetail?.session.id === selectedSessionId ? selectedDetail : null;
   const selectedSession = activeDetail?.session || sessions.find(session => session.id === selectedSessionId) || null;
+  const metaDescriptionSuggestions = useMemo(() => normalizeMetaDescriptionSuggestions(
+    selectedSession?.responseMetadata.metaDescriptionSuggestions,
+  ).slice(0, 2), [selectedSession?.responseMetadata.metaDescriptionSuggestions]);
   const selectedLengthTarget = useMemo(() => {
     if (!selectedSession) return null;
     const source = isRecordValue(selectedSession.contextSnapshot.lengthTarget)
@@ -677,6 +687,7 @@ const ContentWritingPanel: React.FC = () => {
     setErrorPresentation(null);
     setListLoadError('');
     setCopied(false);
+    setCopiedMetaDescriptionIndex(null);
     setReviewSnapshot(null);
     setApplicationNotice(null);
     setCompetitorPreparationStage('');
@@ -973,6 +984,29 @@ const ContentWritingPanel: React.FC = () => {
     } catch (error) {
       setErrorPresentation(getErrorPresentation(error, isArabic));
     }
+  };
+
+  const copyMetaDescription = async (description: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(description);
+      setCopiedMetaDescriptionIndex(index);
+      window.setTimeout(() => setCopiedMetaDescriptionIndex(current => current === index ? null : current), 2_000);
+    } catch (error) {
+      setErrorPresentation(getErrorPresentation(error, isArabic));
+    }
+  };
+
+  const useMetaDescription = (description: string) => {
+    setMetaDescription(description);
+    setApplicationNotice({
+      tone: 'success',
+      message: isArabic
+        ? 'تم وضع الوصف المختار في حقل وصف الميتا. راجعه ثم احفظ المقالة.'
+        : 'The selected description was placed in the meta-description field. Review it, then save the article.',
+    });
+    window.setTimeout(() => {
+      document.getElementById('article-meta-description')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 0);
   };
 
   const openReview = () => {
@@ -1685,6 +1719,52 @@ const ContentWritingPanel: React.FC = () => {
                   })}
                 </div>
               </div>
+            )}
+
+            {metaDescriptionSuggestions.length === 2 && !isContentWritingSessionActive(selectedSession) && (
+              <section className="mt-3 rounded-md border border-[#d4af37]/35 bg-[#d4af37]/5 p-2.5" dir={isArabic ? 'rtl' : 'ltr'}>
+                <div className="flex items-center gap-2 text-xs font-black text-[#8a6f1d] dark:text-[#f2d675]">
+                  <Sparkles size={14} />
+                  <span>{isArabic ? 'اقتراحا وصف الميتا' : 'Two meta-description suggestions'}</span>
+                </div>
+                <p className="mt-1 text-[10px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+                  {isArabic
+                    ? 'أُنشئا مع المقالة نفسها، ويحتوي كل وصف على الكلمة المفتاحية ويلتزم بطول 140–150 حرفًا.'
+                    : 'Generated with the same article; each includes the primary keyword and stays within 140–150 characters.'}
+                </p>
+                <div className="mt-2 space-y-2">
+                  {metaDescriptionSuggestions.map((description, index) => (
+                    <article key={description} className="rounded-md border border-gray-200 bg-white p-2.5 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-black text-gray-500 dark:text-gray-300">
+                          {isArabic ? `الوصف ${index + 1}` : `Description ${index + 1}`}
+                          {' · '}
+                          {countMetaDescriptionCharacters(description).toLocaleString(isArabic ? 'ar' : 'en')}
+                          {' '}{isArabic ? 'حرفًا' : 'characters'}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void copyMetaDescription(description, index)}
+                            className="inline-flex h-7 items-center gap-1 rounded border border-gray-200 px-2 text-[10px] font-bold text-gray-600 hover:border-[#d4af37]/50 dark:border-[#3C3C3C] dark:text-gray-300"
+                          >
+                            {copiedMetaDescriptionIndex === index ? <Check size={12} /> : <Copy size={12} />}
+                            {isArabic ? 'نسخ' : 'Copy'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => useMetaDescription(description)}
+                            className="inline-flex h-7 items-center rounded bg-[#d4af37] px-2 text-[10px] font-black text-white hover:bg-[#b8922e]"
+                          >
+                            {isArabic ? 'استخدام الوصف' : 'Use description'}
+                          </button>
+                        </div>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-xs font-semibold leading-6 text-gray-800 dark:text-gray-100">{description}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
             )}
 
             {['failed', 'cancelled'].includes(selectedSession.status) && (

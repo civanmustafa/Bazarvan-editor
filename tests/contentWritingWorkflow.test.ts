@@ -45,8 +45,9 @@ test('structured writing parses a bounded outline and creates deterministic sequ
     'conclusion',
     'coverage-audit',
     'final-review',
+    'meta-description-suggestions',
   ]);
-  assert.deepEqual(steps.map((step: { ordinal: number }) => step.ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.deepEqual(steps.map((step: { ordinal: number }) => step.ordinal), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 });
 
 test('service writing replaces the conclusion stage with a goal-aware call-to-action stage', async () => {

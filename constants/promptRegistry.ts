@@ -7,7 +7,7 @@ import { isRetiredEngineeringCommandId } from './externalAnalysisCommands';
 import { DEFAULT_CONTENT_WRITING_TEMPLATES } from './contentWriting';
 import type { EngineeringPromptId } from '../types';
 
-export const PROMPT_REGISTRY_VERSION = 20;
+export const PROMPT_REGISTRY_VERSION = 21;
 export const PROMPT_TEMPLATE_MAX_CHARS = 50_000;
 
 export const PROMPT_GROUP_IDS = {
@@ -46,6 +46,7 @@ export const PROMPT_TEMPLATE_IDS = {
   finalReview: 'contentWriting.finalReview',
   qualityRepair: 'contentWriting.qualityRepair',
   revisionApply: 'contentWriting.revisionApply',
+  metaDescriptionSuggestions: 'contentWriting.metaDescriptionSuggestions',
   internalLinkReview: 'internalLinking.reviewSuggestions',
 } as const;
 
@@ -491,6 +492,21 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
       attachment('qualityContract', 'عقد الجودة', 'القواعد التي يجب ألا يكسرها النص البديل.'),
       attachment('knowledgeItems', 'مصفوفة المعرفة', 'الأفكار المرتبطة بالتعديلات للمحافظة على التغطية.'),
       attachment('claimLedger', 'سجل الادعاءات', 'الادعاءات المسموحة والمؤهلة والمحظورة.'),
+    ],
+  },
+  {
+    id: PROMPT_TEMPLATE_IDS.metaDescriptionSuggestions,
+    group: PROMPT_GROUP_IDS.writing,
+    label: 'اقتراح وصفي ميتا',
+    description: 'ينشئ وصفين مختلفين للمقالة النهائية، ويُلزم كل وصف بالطول والكلمة المفتاحية.',
+    usage: 'يعمل مرة واحدة في نهاية مسار كتابة المقالة المشترك، لذلك يشمل زر كتابة المقالة والإنشاء الشامل والجلسات التلقائية.',
+    variables: ['{{article_title}}', '{{primary_keyword}}', '{{output_language}}', '{{goal_context_json}}', '{{final_article}}'],
+    requiredVariables: ['article_title', 'primary_keyword', 'output_language', 'goal_context_json', 'final_article'],
+    attachments: [
+      attachment('finalArticle', 'المقالة النهائية', 'آخر نسخة اجتازت المراجعة وإصلاحات الجودة.'),
+      attachment('primaryKeyword', 'الكلمة المفتاحية الأساسية', 'يجب أن تظهر حرفيًا في كل اقتراح.'),
+      attachment('pageGoal', 'هدف الصفحة', 'نوع الصفحة والجمهور ونية البحث والنتيجة المطلوبة.'),
+      attachment('outputContract', 'عقد الوصفين', 'وصفان مختلفان فقط، وكل وصف من 140 إلى 150 حرفًا.'),
     ],
   },
   {
@@ -1032,6 +1048,27 @@ export const DEFAULT_WORKFLOW_PROMPT_TEMPLATES: Record<string, string> = {
 
 أرجع JSON صالحًا فقط:
 {"edits":[{"operationId":"R001","replacementMarkdown":"النص البديل للجزء المحدد فقط","coveredIdeaIds":["K001"],"usedSourceChunkIds":["C1-S001"],"usedClaimIds":["CL001"]}]}`,
+
+  [PROMPT_TEMPLATE_IDS.metaDescriptionSuggestions]: `أنشئ وصفي ميتا مختلفين فقط للمقالة النهائية بعنوان "{{article_title}}".
+
+لغة الإخراج: {{output_language}}.
+الكلمة المفتاحية الأساسية: {{primary_keyword}}
+هدف الصفحة وسياق الجمهور:
+{{goal_context_json}}
+
+<final_article>
+{{final_article}}
+</final_article>
+
+قواعد إلزامية:
+- يجب أن يحتوي كل وصف على الكلمة المفتاحية الأساسية حرفيًا كما زُودت.
+- يجب أن يتراوح طول كل وصف بين 140 و150 حرف Unicode شاملًا المسافات وعلامات الترقيم.
+- اجعل الوصفين مختلفين بوضوح في الصياغة مع الحفاظ على نية البحث نفسها.
+- استند إلى المقالة وهدف الصفحة فقط، ولا تخترع سعرًا أو ضمانًا أو حقيقة أو ادعاءً.
+- لا تكتب شرحًا أو تسمية أو Markdown.
+
+أرجع JSON صالحًا فقط بهذا الشكل الدقيق:
+{"metaDescriptionSuggestions":["الوصف الأول","الوصف الثاني"]}`,
 
   [PROMPT_TEMPLATE_IDS.internalLinkReview]: `أنت مراجع ثانوي لاقتراحات الربط الداخلي، ولست محرك إنشاء روابط.
 

@@ -78,7 +78,8 @@ export type ContentWritingStepType =
   | 'coverage_audit'
   | 'section_repair'
   | 'final_review'
-  | 'quality_repair';
+  | 'quality_repair'
+  | 'meta_description';
 
 export type ContentWritingStepStatus = 'pending' | 'running' | 'completed' | 'failed';
 

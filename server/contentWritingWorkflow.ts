@@ -12,6 +12,7 @@ import {
   buildContentWritingFinalReviewPrompt,
   buildContentWritingIntroductionPrompt,
   buildContentWritingKnowledgeReconciliationPrompt,
+  buildContentWritingMetaDescriptionSuggestionsPrompt,
   buildContentWritingOutlinePrompt,
   buildContentWritingRevisionApplyPrompt,
   buildContentWritingSectionRepairPrompt,
@@ -131,6 +132,11 @@ import {
   type ContentWritingEditorSourceItem,
   type ContentWritingEditorStructureCoverageAudit,
 } from '../utils/contentWritingEditorSource';
+import {
+  countMetaDescriptionCharacters,
+  getValidMetaDescriptionSuggestionPair,
+  type MetaDescriptionSuggestionPair,
+} from '../utils/metaDescription';
 
 type JsonObject = Record<string, unknown>;
 
@@ -2190,6 +2196,88 @@ export const executeStructuredContentWritingWorkflow = async (
       metadata: { editorStructureCoverage: finalEditorStructureCoverage },
     });
   }
+  const baseMetaDescriptionDefinition = definitions.find(
+    definition => definition.type === 'meta_description',
+  );
+  if (!baseMetaDescriptionDefinition) {
+    return createWorkflowFailure({
+      session: options.session,
+      status: 500,
+      code: 'content_writing_meta_description_step_missing',
+      message: 'The two-description workflow stage is unavailable.',
+      step: finalDefinition,
+    });
+  }
+  const metaDescriptionDefinition: ContentWritingWorkflowStepDefinition = {
+    ...baseMetaDescriptionDefinition,
+    ordinal: nextRevisionOrdinal,
+    metadata: {
+      ...baseMetaDescriptionDefinition.metadata,
+      suggestionCount: 2,
+    },
+  };
+  await ensureStep(metaDescriptionDefinition);
+  let previousInvalidMetaDescriptionResponse = '';
+  const runMetaDescriptionSuggestions = (previousInvalidResponse?: string) => runStep({
+    definition: metaDescriptionDefinition,
+    prompt: buildContentWritingMetaDescriptionSuggestionsPrompt({
+      articleTitle: article.title,
+      primaryKeyword,
+      articleLanguage: article.language === 'en' ? 'en' : 'ar',
+      finalArticle: finalOutput,
+      goalContext: goalContext as unknown as Record<string, unknown>,
+      template: promptTemplate(PROMPT_TEMPLATE_IDS.metaDescriptionSuggestions),
+      previousInvalidResponse,
+    }),
+    stepIndex: metaDescriptionDefinition.ordinal,
+    stepCount: metaDescriptionDefinition.ordinal,
+    maxOutputTokens: 1_200,
+    articleContextOverride: compactArticleContext,
+    processOutput: output => {
+      previousInvalidMetaDescriptionResponse = output;
+      const suggestions = getValidMetaDescriptionSuggestionPair(output, primaryKeyword);
+      if (!suggestions) {
+        throw new Error(
+          'The meta-description stage must return exactly two distinct 140–150 character suggestions containing the primary keyword.',
+        );
+      }
+      return {
+        output: JSON.stringify({ metaDescriptionSuggestions: suggestions }, null, 2),
+        metadata: {
+          metaDescriptionSuggestions: suggestions,
+          metaDescriptionCharacterCounts: suggestions.map(countMetaDescriptionCharacters),
+          suggestionCount: 2,
+        },
+      };
+    },
+  });
+  let metaDescriptionResult = await runMetaDescriptionSuggestions();
+  if (
+    !metaDescriptionResult.ok
+    && metaDescriptionResult.execution.errorCode === 'content_writing_step_output_invalid'
+    && previousInvalidMetaDescriptionResponse
+  ) {
+    metaDescriptionResult = await runMetaDescriptionSuggestions(previousInvalidMetaDescriptionResponse);
+  }
+  if (!metaDescriptionResult.ok) return metaDescriptionResult.execution;
+  const metaDescriptionSuggestions = (
+    getValidMetaDescriptionSuggestionPair(
+      metaDescriptionResult.step.metadata?.metaDescriptionSuggestions,
+      primaryKeyword,
+    )
+    || getValidMetaDescriptionSuggestionPair(metaDescriptionResult.output, primaryKeyword)
+  ) as MetaDescriptionSuggestionPair | null;
+  if (!metaDescriptionSuggestions) {
+    return createWorkflowFailure({
+      session: options.session,
+      status: 422,
+      code: 'content_writing_meta_description_suggestions_invalid',
+      message: 'The persisted content-writing result does not contain two valid meta-description suggestions.',
+      step: metaDescriptionDefinition,
+    });
+  }
+  finalStep = metaDescriptionResult.step;
+  execution = metaDescriptionResult.execution || execution;
   const finalClaimUsage = summarizeContentWritingClaimUsage({
     claimLedger: knowledge.claimLedger,
     usedClaimIds: Array.from(activeSectionCoverageByKey.values())
@@ -2258,6 +2346,8 @@ export const executeStructuredContentWritingWorkflow = async (
         needsInformationQuestionCount: faqAudit.needsInformationCount,
       } : null,
       finalSectionStructure,
+      metaDescriptionSuggestions,
+      metaDescriptionCharacterCounts: metaDescriptionSuggestions.map(countMetaDescriptionCharacters),
       editorSourceCoverage: {
         version: finalEditorSourceCoverage.version,
         enabled: editorSourceLedger.enabled,

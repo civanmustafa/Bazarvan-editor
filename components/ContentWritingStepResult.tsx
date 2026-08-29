@@ -26,6 +26,10 @@ import { reconstructContentWritingEvidenceTrace } from '../utils/contentWritingE
 import { buildContentWritingStageKnowledgeUsage } from '../utils/contentWritingStageKnowledge';
 import ContentWritingFaqAudit from './ContentWritingFaqAudit';
 import ContentWritingCandidateComparison from './ContentWritingCandidateComparison';
+import {
+  countMetaDescriptionCharacters,
+  normalizeMetaDescriptionSuggestions,
+} from '../utils/metaDescription';
 
 type ContentWritingStepResultProps = {
   step: ContentWritingStep;
@@ -80,6 +84,10 @@ export const getContentWritingStepDescription = (
       'يجمع النظام مرشحي People Also Ask والأسئلة المرتبطة بهدف الصفحة، ثم يقارن معنى كل جواب بالمتن والأسئلة الأخرى. لا يُدرج إلا السؤال الذي يضيف معلومة موثقة جديدة، مع حفظ المقبول والمرفوض وسبب القرار.',
       'Collects People Also Ask and page-goal candidates, then compares each answer with the body and other FAQs. Only evidence-backed questions with new information are inserted, while every acceptance and rejection remains reviewable.',
     ],
+    meta_description: [
+      'ينشئ النظام وصفين مختلفين للمقالة النهائية في طلب واحد، ثم يتحقق برمجيًا من الطول والكلمة المفتاحية والتفرّد قبل حفظهما.',
+      'Generates two distinct descriptions for the final article in one request, then validates length, keyword inclusion, and uniqueness before saving them.',
+    ],
   };
   const description = descriptions[step.stepType];
   return description ? description[isArabic ? 0 : 1] : '';
@@ -92,6 +100,36 @@ const StructuredResultUnavailable: React.FC<{ isArabic: boolean }> = ({ isArabic
       : 'The step completed and its result was saved, but the details could not be converted to the simplified view. Raw technical data is hidden.'}
   </div>
 );
+
+const MetaDescriptionResult: React.FC<{
+  outputText: string;
+  metadata: Record<string, unknown>;
+  isArabic: boolean;
+}> = ({ outputText, metadata, isArabic }) => {
+  const suggestions = normalizeMetaDescriptionSuggestions(metadata.metaDescriptionSuggestions).length === 2
+    ? normalizeMetaDescriptionSuggestions(metadata.metaDescriptionSuggestions)
+    : normalizeMetaDescriptionSuggestions((() => {
+        try { return JSON.parse(outputText); } catch { return null; }
+      })());
+  if (suggestions.length !== 2) return <StructuredResultUnavailable isArabic={isArabic} />;
+  return (
+    <div className="space-y-2" dir={isArabic ? 'rtl' : 'ltr'}>
+      {suggestions.map((suggestion, index) => (
+        <article key={suggestion} className="rounded-md border border-[#d4af37]/30 bg-[#d4af37]/10 p-2.5">
+          <div className="text-[10px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
+            {isArabic ? `وصف الميتا ${index + 1}` : `Meta description ${index + 1}`}
+            {' · '}
+            {countMetaDescriptionCharacters(suggestion).toLocaleString(isArabic ? 'ar' : 'en')}
+            {' '}{isArabic ? 'حرفًا' : 'characters'}
+          </div>
+          <p className="mt-1.5 whitespace-pre-wrap text-xs font-semibold leading-6 text-gray-800 dark:text-gray-100">
+            {suggestion}
+          </p>
+        </article>
+      ))}
+    </div>
+  );
+};
 
 const OutlineResult: React.FC<{
   outputText: string;
@@ -669,6 +707,8 @@ const ContentWritingStepResult: React.FC<ContentWritingStepResultProps> = ({
           transparency={transparency}
           isArabic={isArabic}
         />
+      ) : step.stepType === 'meta_description' ? (
+        <MetaDescriptionResult outputText={outputText} metadata={step.metadata} isArabic={isArabic} />
       ) : step.metadata.revisionPhase ? (
         <RevisionResult step={step} isArabic={isArabic} />
       ) : (

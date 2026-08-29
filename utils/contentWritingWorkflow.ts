@@ -37,8 +37,9 @@ import {
   type ContentWritingEditorSourceItem,
   type ContentWritingEditorSourceLedger,
 } from './contentWritingEditorSource';
+import { buildMetaDescriptionSuggestionsPrompt } from './metaDescription';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 12;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 13;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = CONTENT_WRITING_MAX_OUTLINE_SECTIONS;
@@ -113,7 +114,8 @@ export type ContentWritingWorkflowStepType =
   | 'coverage_audit'
   | 'section_repair'
   | 'final_review'
-  | 'quality_repair';
+  | 'quality_repair'
+  | 'meta_description';
 
 export type ContentWritingOutlineSection = {
   title: string;
@@ -578,6 +580,13 @@ export const createContentWritingWorkflowSteps = (
       title: 'Final review',
       metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION },
     },
+    {
+      key: 'meta-description-suggestions',
+      type: 'meta_description',
+      ordinal: nextOrdinal + 5,
+      title: 'Meta-description suggestions',
+      metadata: { workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION, suggestionCount: 2 },
+    },
   ];
 };
 
@@ -1041,6 +1050,24 @@ export const buildContentWritingRevisionApplyPrompt = (options: {
     },
   );
 };
+
+export const buildContentWritingMetaDescriptionSuggestionsPrompt = (options: {
+  articleTitle: string;
+  primaryKeyword: string;
+  articleLanguage: 'ar' | 'en';
+  finalArticle: string;
+  goalContext: Record<string, unknown>;
+  template?: string;
+  previousInvalidResponse?: string;
+}): string => buildMetaDescriptionSuggestionsPrompt({
+  title: options.articleTitle,
+  primaryKeyword: options.primaryKeyword,
+  articleLanguage: options.articleLanguage,
+  finalArticle: options.finalArticle,
+  goalContext: options.goalContext,
+  template: options.template,
+  previousInvalidResponse: options.previousInvalidResponse,
+});
 
 const GENERATED_LIST_DIGIT_MAP: Record<string, string> = {
   '٠': '0',

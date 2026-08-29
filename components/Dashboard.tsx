@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy } from 'lucide-react';
+import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy, ChevronDown } from 'lucide-react';
 import { ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -42,8 +42,10 @@ import {
     DASHBOARD_ARTICLE_STATUS_TABS,
     DASHBOARD_PREFETCH_ARTICLE_STATUSES,
     getArticleStatusLabel,
+    normalizeArticleStatus,
     normalizeArticleStatusFilter,
     shouldClearArticleAiResults,
+    type ArticleStatus,
     type ArticleStatusFilter,
 } from '../constants/articleStatuses';
 import AutomaticContentWritingQueuePanel from './AutomaticContentWritingQueuePanel';
@@ -260,6 +262,75 @@ const N8N_SETTING_OPTIONS: Record<N8nSettingFieldKey, { value: string; label: st
 const getN8nOptionLabel = (field: N8nSettingFieldKey, value: string): string => (
   N8N_SETTING_OPTIONS[field].find(option => option.value === value)?.label || value
 );
+
+type ArticleStatusTone = {
+  container: string;
+  dot: string;
+};
+
+const ARTICLE_STATUS_TONES: Record<ArticleStatus, ArticleStatusTone> = {
+  content_preparation: {
+    container: 'border-violet-300 bg-violet-50 text-violet-700 ring-violet-200/70 dark:border-violet-700/70 dark:bg-violet-500/15 dark:text-violet-200 dark:ring-violet-500/20',
+    dot: 'bg-violet-500 shadow-[0_0_0_3px_rgba(139,92,246,0.16)]',
+  },
+  draft: {
+    container: 'border-amber-300 bg-amber-50 text-amber-800 ring-amber-200/80 dark:border-amber-700/70 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/20',
+    dot: 'bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.18)]',
+  },
+  in_review: {
+    container: 'border-emerald-300 bg-emerald-50 text-emerald-800 ring-emerald-200/80 dark:border-emerald-700/70 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-500/20',
+    dot: 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]',
+  },
+  published: {
+    container: 'border-sky-300 bg-sky-50 text-sky-800 ring-sky-200/80 dark:border-sky-700/70 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/20',
+    dot: 'bg-sky-500 shadow-[0_0_0_3px_rgba(14,165,233,0.18)]',
+  },
+  archived: {
+    container: 'border-slate-300 bg-slate-100 text-slate-700 ring-slate-200/80 dark:border-slate-600 dark:bg-slate-500/15 dark:text-slate-200 dark:ring-slate-500/20',
+    dot: 'bg-slate-500 shadow-[0_0_0_3px_rgba(100,116,139,0.18)]',
+  },
+};
+
+const ArticleStatusControl: React.FC<{
+  value: string;
+  editable: boolean;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}> = ({ value, editable, disabled, onChange }) => {
+  const status = normalizeArticleStatus(value);
+  const tone = ARTICLE_STATUS_TONES[status];
+  const label = getArticleStatusLabel(status, 'ar');
+
+  return (
+    <label
+      data-article-status={status}
+      className={`inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-black shadow-sm ring-1 ring-inset ${tone.container}`}
+      title={`حالة المقالة: ${label}`}
+      onClick={event => event.stopPropagation()}
+    >
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
+      {editable ? (
+        <>
+          <select
+            value={status}
+            disabled={disabled}
+            aria-label={`حالة المقالة: ${label}`}
+            onClick={event => event.stopPropagation()}
+            onChange={event => onChange(event.target.value)}
+            className="min-w-0 cursor-pointer appearance-none bg-transparent text-[10px] font-black text-current outline-none disabled:cursor-wait disabled:opacity-60"
+          >
+            {N8N_SETTING_OPTIONS.status.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <ChevronDown size={10} className="shrink-0 opacity-70" aria-hidden="true" />
+        </>
+      ) : (
+        <span>{label}</span>
+      )}
+    </label>
+  );
+};
 
 const getArticleCompetitors = (
   article: RemoteArticleActivity,
@@ -755,6 +826,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const untranslatedTitle = title || t.untitled;
     const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
     const remoteActivity = activity as RemoteArticleActivity;
+    const articleStatus = normalizeArticleStatus(remoteActivity.status || n8nSettings.status);
     const articleId = typeof remoteActivity.id === 'string' ? remoteActivity.id : '';
     const articlePath = articleId ? buildEditorArticlePath(articleId) : '';
     const absoluteArticleUrl = articlePath ? `${window.location.origin}${articlePath}` : '';
@@ -771,13 +843,10 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         : showAdminMetadata
           ? (['status', 'visibility', 'accessRole', 'articleLanguage'] as N8nSettingFieldKey[])
           : [];
-    const shouldShowN8nSettings = fieldsToShow.length > 0 && (
-        Boolean(n8nSettings.visibility) ||
-        Boolean(n8nSettings.accessRole) ||
-        Boolean(n8nSettings.visibleToEmailsCsv) ||
-        Boolean(n8nSettings.articleLanguage) ||
-        Boolean(n8nSettings.status)
-    );
+    const showArticleStatus = fieldsToShow.includes('status');
+    const canEditArticleStatus = Boolean(onUpdateSettings && editableSettingFields.includes('status'));
+    const secondaryFieldsToShow = fieldsToShow.filter(field => field !== 'status');
+    const shouldShowN8nSettings = secondaryFieldsToShow.some(field => Boolean(n8nSettings[field]));
     const handleCopyArticleLink = async (event: React.MouseEvent) => {
         event.stopPropagation();
         if (!absoluteArticleUrl) return;
@@ -816,9 +885,19 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
             )}
             <div className="min-w-0 flex-grow space-y-0.5">
                 <div className="flex items-start justify-between gap-2">
-                    <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#333333] dark:text-gray-200" title={untranslatedTitle}>
-                        {untranslatedTitle}
-                    </h4>
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#333333] dark:text-gray-200" title={untranslatedTitle}>
+                            {untranslatedTitle}
+                        </h4>
+                        {showArticleStatus && (
+                            <ArticleStatusControl
+                                value={articleStatus}
+                                editable={canEditArticleStatus}
+                                disabled={savingSettingField !== null}
+                                onChange={value => handleSettingChange('status', value)}
+                            />
+                        )}
+                    </div>
                     <div className="flex flex-shrink-0 items-center gap-0.5 opacity-80 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                         {isTrashView && onRestore && (
                             <button
@@ -932,7 +1011,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                 </div>
                 {shouldShowN8nSettings && (
                     <div className="relative flex flex-wrap items-center gap-1 overflow-visible border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
-                        {fieldsToShow.map(field => {
+                        {secondaryFieldsToShow.map(field => {
                             const isEditable = Boolean(onUpdateSettings && editableSettingFields.includes(field));
                             if (field === 'visibleToEmailsCsv' && canClaimArticle) {
                                 return (
@@ -985,6 +1064,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     <ExternalAnalysisCardControls
                         articleId={articleId}
                         articleTitle={remoteActivity.title || title || ''}
+                        articleStatus={articleStatus}
                         primaryKeyword={remoteActivity.keywords?.primary || ''}
                         alternativeKeywords={remoteActivity.keywords?.secondaries || []}
                         companyName={remoteActivity.keywords?.company || ''}

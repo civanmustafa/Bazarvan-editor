@@ -69,6 +69,7 @@ import {
     validateCompetitorComparisonSynthesisResponse,
     type CompetitorComparisonMapResult,
 } from '../utils/competitorComparisonWorkflow';
+import { getValidMetaDescriptionSuggestionPair } from '../utils/metaDescription';
 
 /*
  * AIContext owns all AI workflows:
@@ -1867,6 +1868,7 @@ type AiApiUsageContext = {
     commandId?: string;
     commandLabel?: string;
     action?: string;
+    requestIndex?: number;
     batchIndex?: number;
     batchTotal?: number;
     ruleTitle?: string;
@@ -6235,16 +6237,39 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 ].filter(Boolean).join('\n\n')
                 : prompt;
             const finalPrompt = `${buildComprehensivePrompt(boundedPrompt, localContext?.sectionHeading, { includeArticleTitle: !usesSelectedTextContext, includeArticleToc: !usesSelectedTextContext })}\n\nأرجع النتيجة بتنسيق JSON حصراً وباقتراحين مختلفين بالضبط، حتى إذا طلب نص الأمر اقتراحًا واحدًا. كل عنصر داخل suggestions يجب أن يكون النص المقترح النهائي فقط بلغة المقال دون شرح أو تسمية. الشكل: { "suggestions": ["...", "..."] }`;
-            const resultJson = await callQuickProviderAnalysis(finalPrompt, provider, buildApiUsageContext('floating_toolbar', {
-                action,
-            }));
-            if (isAiErrorResponseText(resultJson)) return;
-            const parsed = extractJson(resultJson);
-            if (parsed?.suggestions) {
-                const suggestions = parsed.suggestions
-                    .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0 && !isAiErrorResponseText(s))
-                    .slice(0, 2);
-                if (suggestions.length > 0) {
+            let suggestions: string[] = [];
+            let previousInvalidResponse = '';
+            const maximumRequests = action === 'copy-meta' ? 2 : 1;
+            for (let requestIndex = 1; requestIndex <= maximumRequests; requestIndex += 1) {
+                const requestPrompt = requestIndex === 1
+                    ? finalPrompt
+                    : `${finalPrompt}\n\nالاستجابة السابقة غير صالحة:\n${previousInvalidResponse.slice(0, 4000)}\n\nأعد المحاولة الآن. يجب إرجاع وصفين مختلفين بالضبط، طول كل منهما 140–150 حرفًا، ويتضمن كل وصف الكلمة المفتاحية الأساسية حرفيًا.`;
+                const resultJson = await callQuickProviderAnalysis(requestPrompt, provider, buildApiUsageContext('floating_toolbar', {
+                    action,
+                    requestIndex,
+                }));
+                if (isAiErrorResponseText(resultJson)) return;
+                if (action === 'copy-meta') {
+                    const pair = getValidMetaDescriptionSuggestionPair(resultJson, keywords.primary);
+                    if (pair) {
+                        suggestions = pair;
+                        break;
+                    }
+                    previousInvalidResponse = resultJson;
+                    continue;
+                }
+                const parsed = extractJson(resultJson);
+                suggestions = Array.isArray(parsed?.suggestions)
+                    ? parsed.suggestions
+                        .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0 && !isAiErrorResponseText(s))
+                        .slice(0, 2)
+                    : [];
+                break;
+            }
+            if (action === 'copy-meta' && suggestions.length !== 2) {
+                throw new Error('تعذر إنشاء وصفين مختلفين صالحين بطول 140–150 حرفًا. أعد المحاولة.');
+            }
+            if (suggestions.length > 0) {
                     let historyItemId: string | undefined;
                     if (action === 'replace-text' && from != null && to != null) {
                         historyItemId = logToAiHistory({
@@ -6256,7 +6281,6 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         });
                     }
                     presentSuggestion({ original: originalText, suggestions, action, from, to, historyItemId });
-                }
             }
         } catch (e) {
             if (!isGeminiAnalysisCancelledError(e)) console.error(e);
@@ -6264,7 +6288,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setIsAiLoading(prev => ({ ...prev, [provider]: false }));
             setIsAiCommandLoading(false);
         }
-    }, [editor, title, text, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, presentSuggestion, stopAiRequestIfArticleContextMissing]);
+    }, [editor, title, text, keywords.primary, analysisResults, buildComprehensivePrompt, logToAiHistory, isAiCommandLoading, isAiLoading, quickAiProvider, callQuickProviderAnalysis, buildApiUsageContext, presentSuggestion, stopAiRequestIfArticleContextMissing]);
 
     const handleAnalyzeHeadings = useCallback(async () => {
         const provider = quickAiProvider;

@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   buildMetaDescriptionPrompt,
+  buildMetaDescriptionSuggestionsPrompt,
   extractArticleTableOfContents,
+  getValidMetaDescriptionSuggestionPair,
   parseGeneratedMetaDescription,
+  parseGeneratedMetaDescriptionSuggestions,
   validateMetaDescription,
 } from '../utils/metaDescription.ts';
 
@@ -47,6 +50,30 @@ test('meta description generation is grounded in the table of contents and page 
     parseGeneratedMetaDescription('{"metaDescription":"  وصف   منظم  "}'),
     'وصف منظم',
   );
+});
+
+test('two-description contract parses exactly two distinct valid suggestions', () => {
+  const keyword = 'جهاز كشف الذهب';
+  const first = `${keyword} دليل عملي يشرح الاختيار والاستخدام والمعايير المهمة للوصول إلى قرار يناسب احتياجات القارئ بوضوح`.padEnd(140, 'ا');
+  const second = `${keyword} تعرف على المزايا وخطوات المقارنة والنصائح العملية التي تساعدك على تقييم الخيارات واختيار الجهاز الأنسب`.padEnd(140, 'ب');
+  const response = JSON.stringify({ metaDescriptionSuggestions: [first, second] });
+
+  assert.deepEqual(parseGeneratedMetaDescriptionSuggestions(response), [first, second]);
+  assert.deepEqual(getValidMetaDescriptionSuggestionPair(response, keyword), [first, second]);
+  assert.equal(getValidMetaDescriptionSuggestionPair(JSON.stringify({ suggestions: [first] }), keyword), null);
+  assert.equal(getValidMetaDescriptionSuggestionPair(JSON.stringify({ suggestions: [first, first] }), keyword), null);
+
+  const prompt = buildMetaDescriptionSuggestionsPrompt({
+    title: 'دليل أجهزة الكشف',
+    primaryKeyword: keyword,
+    articleLanguage: 'ar',
+    finalArticle: '# دليل أجهزة الكشف\n\nمقالة نهائية.',
+    goalContext: { objective: 'مساعدة القارئ على الاختيار' },
+  });
+  assert.match(prompt, /exactly two distinct/);
+  assert.match(prompt, /140 to 150 Unicode characters/);
+  assert.match(prompt, /metaDescriptionSuggestions/);
+  assert.match(prompt, /جهاز كشف الذهب/);
 });
 
 test('database save fencing protects every existing-article save and requires an explicit overwrite decision', async () => {
@@ -126,4 +153,35 @@ test('meta-description field follows the full-height article inside the editor s
   );
   assert.match(field, /data-bazarvan-meta-description-field="true"/);
   assert.match(field, /className="border-t\s/);
+});
+
+test('manual, write-article, full-pipeline, and automatic writing share the strict two-description contract', async () => {
+  const [
+    aiContext,
+    contentWorkflow,
+    workflowUtilities,
+    panel,
+    promptRegistry,
+    migration,
+  ] = await Promise.all([
+    readWorkspaceFile('contexts/AIContext.tsx'),
+    readWorkspaceFile('server/contentWritingWorkflow.ts'),
+    readWorkspaceFile('utils/contentWritingWorkflow.ts'),
+    readWorkspaceFile('components/ContentWritingPanel.tsx'),
+    readWorkspaceFile('constants/promptRegistry.ts'),
+    readWorkspaceFile('supabase/migrations/20260829010000_content_writing_two_meta_descriptions.sql'),
+  ]);
+
+  assert.match(aiContext, /getValidMetaDescriptionSuggestionPair/);
+  assert.match(aiContext, /action === 'copy-meta' && suggestions\.length !== 2/);
+  assert.match(aiContext, /maximumRequests = action === 'copy-meta' \? 2 : 1/);
+  assert.match(workflowUtilities, /type: 'meta_description'/);
+  assert.match(contentWorkflow, /PROMPT_TEMPLATE_IDS\.metaDescriptionSuggestions/);
+  assert.match(contentWorkflow, /metaDescriptionSuggestions/);
+  assert.match(contentWorkflow, /previousInvalidMetaDescriptionResponse/);
+  assert.match(panel, /اقتراحا وصف الميتا/);
+  assert.match(panel, /استخدام الوصف/);
+  assert.match(promptRegistry, /contentWriting\.metaDescriptionSuggestions/);
+  assert.match(migration, /'meta_description'/);
+  assert.match(migration, /manual, full-pipeline, and automatic content-writing sessions/);
 });
