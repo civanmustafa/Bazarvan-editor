@@ -2653,12 +2653,12 @@ ${readyCommandCompetitorBlocks}`;
                     <React.Suspense
                         fallback={(
                             <div className="rounded-xl border border-[#d4af37]/30 bg-[#d4af37]/10 p-3 text-xs font-bold text-[#8a6f1d] dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10 dark:text-[#f2d675]">
-                                {t.locale === 'ar' ? 'جارٍ تجهيز تحليل أهمية العبارات…' : 'Preparing phrase importance analysis…'}
+                                {articleLanguage === 'ar' || t.locale === 'ar' ? 'جارٍ تجهيز تحليل عبارات المنافسين…' : 'Preparing competitor phrase analysis…'}
                             </div>
                         )}
                     >
                         <CompetitorPhraseIntelligencePanel
-                            locale={t.locale}
+                            locale={articleLanguage === 'ar' ? 'ar' : t.locale}
                             articleLanguage={articleLanguage}
                             sources={competitorStatSources}
                             keywords={articleKeywords}

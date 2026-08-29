@@ -391,10 +391,12 @@ test('competitor phrase sections stay inside each card and the shared section st
     /aiProviderCapabilities\.contentWriting\.competitorPhraseIntelligenceEnabled/,
   );
   assert.match(intelligencePanel, /createCompetitorPhraseIntelligence/);
-  assert.match(intelligencePanel, /تحليل أهمية العبارات/);
+  assert.match(intelligencePanel, /تحليل عبارات المنافسين/);
+  assert.match(intelligencePanel, /articleLanguage === 'ar'/);
   assert.match(intelligencePanel, /#d4af37/);
   assert.doesNotMatch(intelligencePanel, /violet|sky-/);
   assert.match(source, /articleLanguage=\{articleLanguage\}/);
+  assert.match(source, /locale=\{articleLanguage === 'ar' \? 'ar' : t\.locale\}/);
   assert.match(intelligencePanel, /item\.containedPhrases/);
   assert.match(contentWritingEngine, /wordCount: countContentWritingTargetWords\(competitor\.content\)/);
   assert.match(contentWritingEngine, /manualRange: normalizedGoalContext\.targetWordRange/);

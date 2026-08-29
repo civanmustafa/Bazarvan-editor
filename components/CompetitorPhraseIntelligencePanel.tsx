@@ -54,7 +54,10 @@ const CompetitorPhraseIntelligencePanel: React.FC<CompetitorPhraseIntelligencePa
   keywords,
   competitorUrls,
 }) => {
-  const isArabic = locale === 'ar';
+  // Phrase guidance belongs to the article itself. An Arabic article must not
+  // show an English competitor-analysis card merely because the shell locale
+  // was retained from a previous session.
+  const isArabic = locale === 'ar' || articleLanguage === 'ar';
   const intelligence = useMemo(
     () => createCompetitorPhraseIntelligence({
       sources,
@@ -81,17 +84,17 @@ const CompetitorPhraseIntelligencePanel: React.FC<CompetitorPhraseIntelligencePa
       <div className="mb-1 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-xs font-bold text-gray-800 dark:text-gray-100">
           <BrainCircuit size={14} className="shrink-0 text-[#d4af37]" />
-          <span>{isArabic ? 'تحليل أهمية العبارات' : 'Phrase importance analysis'}</span>
+          <span>{isArabic ? 'تحليل عبارات المنافسين' : 'Competitor phrase analysis'}</span>
         </div>
         <span className="shrink-0 rounded bg-white px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-500 dark:bg-[#2A2A2A] dark:text-gray-400">
           {isArabic
-            ? `${intelligence.items.length.toLocaleString('ar')} عبارات رئيسية`
+            ? `${intelligence.items.length.toLocaleString('ar')} عبارة مستخرجة`
             : `${intelligence.items.length.toLocaleString('en')} canonical`}
         </span>
       </div>
       <p className="mb-3 text-[10px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
         {isArabic
-          ? 'تصنيف برمجي يربط العبارات المتكررة والمشتركة بالكلمة الأساسية والصيغ البديلة والكلمات الدلالية. الغرض هو تحويلها إلى أفكار تغطية، لا نسخها حرفيًا أو حشوها.'
+          ? 'تحليل برمجي منضبط يربط العبارات المتكررة والمشتركة بالكلمة الأساسية وصيغها البديلة وكلمات LSI. استخدمه لتحديد ما ينبغي تغطيته، لا لنسخ العبارات أو حشوها.'
           : 'A deterministic classification that connects repeated and shared phrases to the primary, alternative, and LSI keywords. It guides topic coverage rather than copying or stuffing phrases.'}
       </p>
 
