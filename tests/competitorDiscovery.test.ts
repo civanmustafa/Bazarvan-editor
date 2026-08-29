@@ -480,6 +480,8 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
   assert.match(panel, /سحب \$\{selectedResults\.length\} موقع/);
   assert.match(panel, /البحث وسحب المنافسين/);
+  assert.match(panel, /حالة استخراج المحتوى/);
+  assert.match(panel, /مصادر المنافسين في المقالة/);
   assert.match(panel, /بانتظار عامل السحب 0\//);
   assert.match(panel, /لم يبدأ عامل السحب 0\//);
   assert.match(panel, /COMPETITOR_EXTRACTION_QUEUE_STALL_MS/);

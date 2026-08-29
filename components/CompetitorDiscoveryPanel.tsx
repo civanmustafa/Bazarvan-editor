@@ -637,22 +637,52 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           ? 'خدمة السحب تعمل الآن. قد يستغرق الرابط الواحد حتى 75 ثانية قبل نجاحه أو ظهور خطئه.'
           : 'Firecrawl is running. One URL can take up to 75 seconds before it succeeds or reports an error.'
         : '';
+  const completedSourceCount = state.competitors.filter(row => row.status === 'completed').length;
+  const inProgressSourceCount = state.competitors.filter(row => (
+    row.status === 'queued' || row.status === 'extracting' || row.status === 'retry_scheduled'
+  )).length;
+  const attentionSourceCount = state.competitors.filter(row => (
+    row.status === 'failed' || row.status === 'cancelled'
+  )).length;
+  const sourceStatusLabel = (status: CompetitorDiscoveryRow['status']): string => {
+    if (status === 'completed') return isArabic ? 'تم الاستخراج' : 'Imported';
+    if (status === 'failed') return isArabic ? 'تعذر الاستخراج' : 'Import failed';
+    if (status === 'cancelled') return isArabic ? 'أُلغي الاستخراج' : 'Import cancelled';
+    if (status === 'retry_scheduled') return isArabic ? 'إعادة المحاولة مجدولة' : 'Retry scheduled';
+    if (status === 'extracting') return isArabic ? 'جارٍ استخراج المحتوى' : 'Extracting content';
+    return isArabic ? 'بانتظار الاستخراج' : 'Waiting to import';
+  };
 
   return (
     <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
       <div className="flex items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-black text-gray-800 dark:text-gray-100">
-            {isArabic ? 'البحث وسحب المنافسين' : 'Find and import competitors'}
+            {isArabic ? 'المنافسون' : 'Competitors'}
           </h3>
           <p className="mt-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400">
             {isArabic
-              ? 'ابحث واختر حتى 5 مواقع. يحاول الخادم خدمة السحب مرة واحدة، ثم ينتقل تلقائيًا إلى الاستخراج البرمجي عند فشلها، دون استخدام نموذج ذكي.'
-              : 'Search and select up to 5 sites. The server tries Firecrawl once, then automatically falls back to programmatic extraction without using Gemini.'}
+              ? 'ابحث عن الصفحات المنافسة، راجعها، ثم استخرج محتواها تلقائيًا لإدراجه في تحليل المقالة.'
+              : 'Find competitor pages, review them, then import their content automatically for article analysis.'}
           </p>
         </div>
         {isLoadingState && <LoaderCircle size={16} className="shrink-0 animate-spin text-[#d4af37]" />}
       </div>
+
+      <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/70 p-2.5 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/50">
+        <div className="flex items-start gap-2">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-[#d4af37] text-[10px] font-black text-white">1</span>
+          <div className="min-w-0">
+            <h4 className="text-xs font-black text-gray-800 dark:text-gray-100">
+              {isArabic ? 'البحث وسحب المنافسين' : 'Find and select competitors'}
+            </h4>
+            <p className="mt-0.5 text-[10px] leading-4 text-gray-500 dark:text-gray-400">
+              {isArabic
+                ? `اختر حتى ${MAX_ARTICLE_COMPETITORS} مواقع. بعد اعتمادها يبدأ السحب تلقائيًا، ثم ينتقل النظام إلى الاستخراج البرمجي إذا لم تنجح خدمة السحب.`
+                : `Select up to ${MAX_ARTICLE_COMPETITORS} sites. Import starts after confirmation and automatically falls back to programmatic extraction if Firecrawl fails.`}
+            </p>
+          </div>
+        </div>
 
       {!state.providerConfigured && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] font-bold text-amber-800 dark:border-amber-900/40 dark:bg-amber-500/10 dark:text-amber-300">
@@ -936,10 +966,25 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         </div>
       )}
 
+      </div>
+
       {activeJob && (
-        <div
-          data-testid="competitor-extraction-status"
-          className={`rounded-md border px-2.5 py-2.5 text-xs ${
+        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50/70 p-2.5 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/50">
+          <div className="flex items-start gap-2">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-[#d4af37] text-[10px] font-black text-white">2</span>
+            <div>
+              <h4 className="text-xs font-black text-gray-800 dark:text-gray-100">
+                {isArabic ? 'حالة استخراج المحتوى' : 'Content import status'}
+              </h4>
+              <p className="mt-0.5 text-[10px] leading-4 text-gray-500 dark:text-gray-400">
+                {isArabic ? 'تُحدّث هذه الحالة تلقائيًا أثناء معالجة المواقع التي اعتمدتها.' : 'This status updates automatically while your selected sites are processed.'}
+              </p>
+            </div>
+          </div>
+          <div
+            data-testid="competitor-extraction-status"
+            aria-live="polite"
+            className={`rounded-md border px-2.5 py-2.5 text-xs ${
             extractionQueueStalled || extractionRetryScheduled
               ? 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-500/10'
               : 'border-[#d4af37]/30 bg-[#d4af37]/10 dark:border-[#d4af37]/25 dark:bg-[#d4af37]/10'
@@ -996,13 +1041,37 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               {isArabic ? 'إعادة المحاولة' : 'Retry'}: {new Date(activeJob.next_attempt_at).toLocaleString(isArabic ? 'ar' : 'en')}
             </div>
           )}
+          </div>
         </div>
       )}
 
       {state.competitors.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="text-[11px] font-black text-gray-600 dark:text-gray-300">
-            {isArabic ? 'المصادر المحفوظة في المقالة' : 'Saved article sources'}
+        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50/70 p-2.5 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]/50">
+          <div className="flex items-start gap-2">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-[#d4af37] text-[10px] font-black text-white">3</span>
+            <div className="min-w-0 flex-1">
+              <h4 className="text-xs font-black text-gray-800 dark:text-gray-100">
+                {isArabic ? 'مصادر المنافسين في المقالة' : 'Competitor sources in this article'}
+              </h4>
+              <p className="mt-0.5 text-[10px] leading-4 text-gray-500 dark:text-gray-400">
+                {isArabic ? 'هذه المصادر المحفوظة التي سيُستخدم محتواها في التحليل والكتابة.' : 'These saved sources are used in analysis and writing.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5 text-[10px] font-bold">
+            <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+              {isArabic ? `مكتمل: ${completedSourceCount}` : `Completed: ${completedSourceCount}`}
+            </span>
+            {inProgressSourceCount > 0 && (
+              <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                {isArabic ? `قيد المعالجة: ${inProgressSourceCount}` : `In progress: ${inProgressSourceCount}`}
+              </span>
+            )}
+            {attentionSourceCount > 0 && (
+              <span className="rounded bg-red-50 px-1.5 py-0.5 text-red-700 dark:bg-red-500/10 dark:text-red-300">
+                {isArabic ? `يحتاج متابعة: ${attentionSourceCount}` : `Needs attention: ${attentionSourceCount}`}
+              </span>
+            )}
           </div>
           {state.competitors.map((row, index) => {
             const savedSourceUrl = resolveExternalSourceUrl(row.canonicalUrl, row.sourceUrl);
@@ -1014,6 +1083,15 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="line-clamp-1 text-[11px] font-black text-gray-800 dark:text-gray-100">{row.position}. {row.title || row.domain}</div>
                   <div className="mt-0.5 truncate text-[10px] text-gray-500" dir="ltr">{row.domain}</div>
+                  <div className={`mt-1 text-[9px] font-black ${
+                    row.status === 'completed'
+                      ? 'text-emerald-700 dark:text-emerald-300'
+                      : row.status === 'failed' || row.status === 'cancelled'
+                        ? 'text-red-700 dark:text-red-300'
+                        : 'text-amber-700 dark:text-amber-300'
+                  }`}>
+                    {sourceStatusLabel(row.status)}
+                  </div>
                   {row.status === 'completed' && (
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
                       <span>{row.wordCount} {isArabic ? 'كلمة' : 'words'}</span>
