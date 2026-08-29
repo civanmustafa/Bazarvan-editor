@@ -38,6 +38,7 @@ import {
   type CompetitorSearchResult,
   type CompetitorSelectionSummary,
 } from '../utils/competitorDiscovery';
+import { isCompetitorKeywordTargetingWarning } from '../utils/competitorContent';
 
 const CompetitorPreviewModal = React.lazy(() => import('./CompetitorPreviewModal'));
 
@@ -1025,7 +1026,19 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                       </span>
                     </div>
                   )}
-                  {row.errorMessage && <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-red-600 dark:text-red-300">{row.errorMessage}</div>}
+                  {row.errorMessage && (
+                    <div className={`mt-1 line-clamp-2 text-[10px] leading-4 ${
+                      isCompetitorKeywordTargetingWarning(row.errorCode)
+                        ? 'text-amber-700 dark:text-amber-300'
+                        : 'text-red-600 dark:text-red-300'
+                    }`}>
+                      {isCompetitorKeywordTargetingWarning(row.errorCode)
+                        ? (isArabic
+                          ? 'تم حفظ المحتوى تلقائيًا؛ تعذر فقط تأكيد مطابقة الكلمة بعد السحب النهائي.'
+                          : 'Content was saved automatically; keyword targeting could not be re-confirmed after the final fetch.')
+                        : row.errorMessage}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"

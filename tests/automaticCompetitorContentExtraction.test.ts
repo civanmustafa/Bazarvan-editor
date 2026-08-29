@@ -51,6 +51,21 @@ test('automatic extraction setting is rechecked by the worker and writing coordi
   );
 });
 
+test('final keyword rechecks are advisory so approved automatic sources continue into writing', async () => {
+  const [executor, content, panel] = await Promise.all([
+    readWorkspaceFile('server/competitorExtractionExecutor.ts'),
+    readWorkspaceFile('utils/competitorContent.ts'),
+    readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
+  ]);
+
+  assert.match(executor, /Deterministic qualification is the hard selection gate/);
+  assert.match(executor, /COMPETITOR_KEYWORD_TARGETING_WARNING_CODE/);
+  assert.match(executor, /status: 'completed'[\s\S]*error_code: keywordTargeting\.warningCode \|\| null/);
+  assert.doesNotMatch(executor, /The final page content did not contain the primary keyword/);
+  assert.match(content, /competitor_keyword_targeting_unconfirmed/);
+  assert.match(panel, /isCompetitorKeywordTargetingWarning/);
+});
+
 test('ready-status meta-description automation is retired in favor of unified semantic Google metadata', async () => {
   const [migration, registry, settings] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260829080000_unified_semantic_google_metadata.sql'),

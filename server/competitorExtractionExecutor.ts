@@ -11,6 +11,8 @@ import {
 import {
   COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE,
   COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT,
+  COMPETITOR_KEYWORD_TARGETING_WARNING_CODE,
+  COMPETITOR_KEYWORD_TARGETING_WARNING_TEXT,
 } from '../utils/competitorContent';
 import {
   registerExternalAnalysisJobExecutor,
@@ -29,6 +31,8 @@ import { assertAutomaticCompetitorResearchAllowed } from './contentResearchAutom
  * - Firecrawl gets exactly one attempt per URL.
  * - A failed Firecrawl request falls back immediately to the deterministic programmatic
  *   extractor. This fallback never invokes Gemini/OpenAI and never schedules Firecrawl again.
+ * - Deterministic qualification is the hard selection gate. A final keyword recheck is only
+ *   advisory, so an approved source with readable content never breaks the automatic pipeline.
  * - It must persist the full text in article_competitors.content_text, then synchronize that
  *   text into the article competitor attachment consumed by analysis and content writing.
  * - If both methods fail, the canonical editor field receives the shared failure marker.
@@ -53,6 +57,18 @@ type CompetitorFailure = {
   message: string;
   retryable: boolean;
   attempt: number;
+};
+
+type ArticleTargetingContext = {
+  language: 'ar' | 'en';
+  primaryKeyword: string;
+  alternativeKeywords: string[];
+};
+
+type FinalKeywordTargetingOutcome = {
+  warningCode: string;
+  warningMessage: string;
+  contentTooShort: boolean;
 };
 
 const FIRECRAWL_MODEL = 'v2/scrape';
@@ -83,11 +99,7 @@ const textList = (value: unknown): string[] => (
   Array.isArray(value) ? value.map(text).filter(Boolean).slice(0, 12) : []
 );
 
-const readArticleTargetingContext = async (articleId: string): Promise<{
-  language: 'ar' | 'en';
-  primaryKeyword: string;
-  alternativeKeywords: string[];
-}> => {
+const readArticleTargetingContext = async (articleId: string): Promise<ArticleTargetingContext> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('articles')
     .select('article_language,keywords')
@@ -115,6 +127,39 @@ const requiresKeywordTargeting = (
       ? sourceMetadata
       : {};
   return metadata.qualificationRequired === true;
+};
+
+/**
+ * Deterministic qualification is the hard gate for choosing a competitor.
+ * The final provider fetch is allowed to have a different main-content shape:
+ * a missing phrase is advisory, whereas unusably short content remains a
+ * genuine extraction failure that can use the programmatic fallback.
+ */
+const evaluateFinalKeywordTargeting = (options: {
+  snapshot: Record<string, unknown>;
+  row: CompetitorRow;
+  articleTargeting: ArticleTargetingContext;
+  content: Parameters<typeof analyzeCompetitorKeywordTargeting>[0]['content'];
+}): FinalKeywordTargetingOutcome => {
+  if (!requiresKeywordTargeting(options.snapshot, options.row)) {
+    return { warningCode: '', warningMessage: '', contentTooShort: false };
+  }
+  const targeting = analyzeCompetitorKeywordTargeting({
+    content: options.content,
+    primaryKeyword: options.articleTargeting.primaryKeyword,
+    alternativeKeywords: options.articleTargeting.alternativeKeywords,
+  });
+  if (targeting.status === 'unavailable') {
+    return { warningCode: '', warningMessage: '', contentTooShort: true };
+  }
+  if (targeting.status === 'qualified') {
+    return { warningCode: '', warningMessage: '', contentTooShort: false };
+  }
+  return {
+    warningCode: COMPETITOR_KEYWORD_TARGETING_WARNING_CODE,
+    warningMessage: COMPETITOR_KEYWORD_TARGETING_WARNING_TEXT,
+    contentTooShort: false,
+  };
 };
 
 const updateCompetitor = async (
@@ -199,24 +244,23 @@ const executeCompetitorExtraction = async (
         signal: context.signal,
         userId: context.job.requested_by,
       });
-      if (requiresKeywordTargeting(inputSnapshot, row)) {
-        const targeting = analyzeCompetitorKeywordTargeting({
-          content: {
-            ...content,
-            qualityScore: 100,
-            cacheHit: content.cacheHit,
-          },
-          primaryKeyword: articleTargeting.primaryKeyword,
-          alternativeKeywords: articleTargeting.alternativeKeywords,
+      const keywordTargeting = evaluateFinalKeywordTargeting({
+        snapshot: inputSnapshot,
+        row,
+        articleTargeting,
+        content: {
+          ...content,
+          qualityScore: 100,
+          cacheHit: content.cacheHit,
+        },
+      });
+      if (keywordTargeting.contentTooShort) {
+        throw new FirecrawlCompetitorError({
+          message: 'The final Firecrawl content is too short to preserve the approved competitor source.',
+          status: 422,
+          code: 'competitor_content_too_short',
+          retryable: false,
         });
-        if (targeting.status !== 'qualified') {
-          throw new FirecrawlCompetitorError({
-            message: 'The final Firecrawl content did not contain the primary keyword or an approved alternative.',
-            status: 422,
-            code: 'competitor_keyword_not_targeted',
-            retryable: false,
-          });
-        }
       }
       if (articleLanguage === 'ar' && !isCompetitorLanguageCompatible('ar', content.text)) {
         const message = 'The extracted competitor page is Latin-language content and was excluded from the Arabic article.';
@@ -268,8 +312,8 @@ const executeCompetitorExtraction = async (
           word_count: content.wordCount,
           status: 'completed',
           extraction_provider: content.cacheHit ? 'firecrawl_cache' : 'firecrawl',
-          error_code: null,
-          error_message: null,
+          error_code: keywordTargeting.warningCode || null,
+          error_message: keywordTargeting.warningMessage || null,
           fetched_at: new Date().toISOString(),
         }, ['queued', 'extracting', 'retry_scheduled']);
         successfulCount += 1;
@@ -322,20 +366,19 @@ const executeCompetitorExtraction = async (
           url: row.canonical_url || row.source_url,
           signal: context.signal,
         });
-        if (requiresKeywordTargeting(inputSnapshot, row)) {
-          const targeting = analyzeCompetitorKeywordTargeting({
-            content,
-            primaryKeyword: articleTargeting.primaryKeyword,
-            alternativeKeywords: articleTargeting.alternativeKeywords,
+        const keywordTargeting = evaluateFinalKeywordTargeting({
+          snapshot: inputSnapshot,
+          row,
+          articleTargeting,
+          content,
+        });
+        if (keywordTargeting.contentTooShort) {
+          throw new ProgrammaticCompetitorExtractionError({
+            message: 'The final programmatic content is too short to preserve the approved competitor source.',
+            status: 422,
+            code: 'competitor_content_too_short',
+            retryable: false,
           });
-          if (targeting.status !== 'qualified') {
-            throw new ProgrammaticCompetitorExtractionError({
-              message: 'The final page content did not contain the primary keyword or an approved alternative.',
-              status: 422,
-              code: 'competitor_keyword_not_targeted',
-              retryable: false,
-            });
-          }
         }
         if (articleLanguage === 'ar' && !isCompetitorLanguageCompatible('ar', content.text)) {
           const message = 'The extracted competitor page is Latin-language content and was excluded from the Arabic article.';
@@ -391,8 +434,8 @@ const executeCompetitorExtraction = async (
             extraction_provider: content.cacheHit
               ? 'programmatic_after_firecrawl_cache'
               : 'programmatic_after_firecrawl',
-            error_code: null,
-            error_message: null,
+            error_code: keywordTargeting.warningCode || null,
+            error_message: keywordTargeting.warningMessage || null,
             fetched_at: new Date().toISOString(),
           }, ['extracting']);
           successfulCount += 1;
@@ -409,17 +452,11 @@ const executeCompetitorExtraction = async (
               code: 'programmatic_extraction_failed',
               retryable: false,
             });
-        const keywordTargetingFailed = firecrawlError.code === 'competitor_keyword_not_targeted'
-          && normalizedProgrammaticError.code === 'competitor_keyword_not_targeted';
-        const failureCode = keywordTargetingFailed
-          ? 'competitor_keyword_not_targeted'
-          : COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE;
-        const failureMessage = keywordTargetingFailed
-          ? 'The competitor page no longer targets the primary keyword or an approved alternative in its final content.'
-          : [
-              `Firecrawl failed (${firecrawlError.code}): ${firecrawlError.message}`,
-              `Programmatic extraction failed (${normalizedProgrammaticError.code}): ${normalizedProgrammaticError.message}`,
-            ].join(' ');
+        const failureCode = COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE;
+        const failureMessage = [
+          `Firecrawl failed (${firecrawlError.code}): ${firecrawlError.message}`,
+          `Programmatic extraction failed (${normalizedProgrammaticError.code}): ${normalizedProgrammaticError.message}`,
+        ].join(' ');
         failures.push({
           position: row.position,
           code: failureCode,

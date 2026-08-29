@@ -474,7 +474,9 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.match(executor, /competitor_language_mismatch/);
   assert.match(executor, /\.select\('article_language,keywords'\)/);
   assert.match(executor, /analyzeCompetitorKeywordTargeting/);
-  assert.match(executor, /competitor_keyword_not_targeted/);
+  assert.match(executor, /COMPETITOR_KEYWORD_TARGETING_WARNING_CODE/);
+  assert.match(executor, /evaluateFinalKeywordTargeting/);
+  assert.doesNotMatch(executor, /The final Firecrawl content did not contain the primary keyword/);
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
   assert.match(panel, /سحب \$\{selectedResults\.length\} موقع/);
   assert.match(panel, /البحث وسحب المنافسين/);

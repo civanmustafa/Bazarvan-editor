@@ -7,12 +7,26 @@ export const COMPETITOR_DUAL_EXTRACTION_FAILURE_PREFIX =
 export const COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT =
   `${COMPETITOR_DUAL_EXTRACTION_FAILURE_PREFIX} فشل سحب المحتوى عبر Firecrawl والاستخراج البرمجي. افتح الرابط والصق نص المقالة يدويًا بدل هذه الرسالة لاعتماده في التحليل والكتابة.`;
 
+// A source can pass the deterministic qualification used for selection, then
+// expose a slightly different main-content representation when it is fetched
+// again for writing. Keep that discrepancy visible without discarding a real,
+// already-approved source or interrupting the automatic writing cycle.
+export const COMPETITOR_KEYWORD_TARGETING_WARNING_CODE =
+  'competitor_keyword_targeting_unconfirmed';
+
+export const COMPETITOR_KEYWORD_TARGETING_WARNING_TEXT =
+  'Final content was saved automatically, but keyword targeting could not be re-confirmed after extraction. The source remains approved from the selection stage and will be used for analysis and writing.';
+
 const toText = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
 
 export const isCompetitorExtractionFailureText = (value: unknown): boolean => (
   toText(value).startsWith(COMPETITOR_DUAL_EXTRACTION_FAILURE_PREFIX)
+);
+
+export const isCompetitorKeywordTargetingWarning = (value: unknown): boolean => (
+  toText(value) === COMPETITOR_KEYWORD_TARGETING_WARNING_CODE
 );
 
 export const getUsableCompetitorText = (value: unknown): string => (
