@@ -412,6 +412,11 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         setNotice(isArabic
           ? `لم يعثر محرك البحث على نتائج عربية مناسبة.${response.selection.languageFilteredCount > 0 ? ` استُبعدت ${response.selection.languageFilteredCount} نتيجة لاتينية لأنها لا تطابق لغة المقالة.` : ''}`
           : 'No suitable search results were found.');
+      } else if (response.automaticExtractionQueued) {
+        setNotice(isArabic
+          ? `تم اعتماد أفضل ${response.selection.autoSelectedCount} نتائج وبدأ سحب محتواها تلقائيًا. ستستمر المهمة حتى عند مغادرة المقالة.`
+          : `The best ${response.selection.autoSelectedCount} results were accepted and content extraction started automatically.`);
+        await refresh(false);
       } else if (response.selection.autoSelectedCount > 0) {
         setNotice(isArabic
           ? `تم تحديد أفضل ${response.selection.autoSelectedCount} نتائج عربية تلقائيًا.${response.selection.languageFilteredCount > 0 ? ` استُبعدت ${response.selection.languageFilteredCount} نتيجة لاتينية.` : ''} راجعها وعدّل الاختيار قبل السحب.`

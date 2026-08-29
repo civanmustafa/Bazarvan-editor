@@ -96,6 +96,8 @@ export type CompetitorSelectionSummary = {
 export type CompetitorSearchResponse = {
   results: CompetitorSearchResult[];
   selection: CompetitorSelectionSummary;
+  automaticExtractionQueued: boolean;
+  automaticExtractionJobId: string;
 };
 
 export type CompetitorPreview = {
@@ -423,9 +425,14 @@ export const searchArticleCompetitors = async (options: {
 }): Promise<CompetitorSearchResponse> => {
   const payload = await requestCompetitors({ action: 'search', ...options });
   const results = parseCompetitorSearchResults(payload.results);
+  const discoveryJob = isRecord(payload.discoveryJob) ? payload.discoveryJob : {};
+  const discoveryResult = isRecord(discoveryJob.result) ? discoveryJob.result : {};
+  const automaticExtractionJobId = toText(discoveryResult.autoExtractionJobId);
   return {
     results,
     selection: parseCompetitorSelectionSummary(payload.selection, results),
+    automaticExtractionQueued: Boolean(automaticExtractionJobId),
+    automaticExtractionJobId,
   };
 };
 
@@ -439,6 +446,8 @@ export const getPersistedCompetitorDiscovery = (
   return {
     results,
     selection: parseCompetitorSelectionSummary(result.selection, results),
+    automaticExtractionQueued: Boolean(toText(result.autoExtractionJobId)),
+    automaticExtractionJobId: toText(result.autoExtractionJobId),
   };
 };
 

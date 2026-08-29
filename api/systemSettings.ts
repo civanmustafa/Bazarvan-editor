@@ -161,6 +161,22 @@ const readSettings = async (supabase: SupabaseAdmin) => {
   }
 };
 
+const readSettingsUsers = async (supabase: SupabaseAdmin) => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id,email,full_name,role,is_active,created_at')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(profile => ({
+    id: String(profile.id),
+    email: typeof profile.email === 'string' ? profile.email : null,
+    fullName: typeof profile.full_name === 'string' ? profile.full_name : null,
+    role: profile.role === 'admin' ? 'admin' : 'user',
+    isActive: profile.is_active !== false,
+  }));
+};
+
 const sanitizeSettingsPatch = (value: unknown): Partial<Record<SystemSettingKey, Record<string, unknown>>> => {
   if (!isRecord(value)) throw new SettingsError('settings must be an object.', 400);
   Object.entries(value).forEach(([key, settingValue]) => {
@@ -239,13 +255,17 @@ const handleSettingsRequest = async (req: any): Promise<ApiResult> => {
     await saveSettings(supabase, userId, sanitizeSettingsPatch(body.settings));
   }
 
-  const settings = await readSettings(supabase);
+  const [settings, users] = await Promise.all([
+    readSettings(supabase),
+    readSettingsUsers(supabase),
+  ]);
 
   return {
     status: 200,
     body: {
       ok: true,
       settings,
+      users,
       secretStatus: await getSecretStatus(req, userId),
     },
   };

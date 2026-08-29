@@ -37,6 +37,15 @@ export type SecretStatus = {
 export type SystemSettingsResponse = {
   settings: SystemSettingsMap;
   secretStatus: SecretStatus;
+  users: SystemSettingsUser[];
+};
+
+export type SystemSettingsUser = {
+  id: string;
+  email: string | null;
+  fullName: string | null;
+  role: 'admin' | 'user';
+  isActive: boolean;
 };
 
 const getAccessToken = async (): Promise<string> => {
@@ -76,6 +85,18 @@ const requestSystemSettings = async (
       allowedGeminiModels: payload.secretStatus?.ai?.gemini?.allowedModels,
     }),
     secretStatus: payload.secretStatus,
+    users: Array.isArray(payload.users)
+      ? payload.users
+        .filter((user: unknown) => Boolean(user) && typeof user === 'object' && !Array.isArray(user))
+        .map((user: any) => ({
+          id: typeof user.id === 'string' ? user.id : '',
+          email: typeof user.email === 'string' ? user.email : null,
+          fullName: typeof user.fullName === 'string' ? user.fullName : null,
+          role: user.role === 'admin' ? 'admin' : 'user',
+          isActive: user.isActive !== false,
+        }))
+        .filter((user: SystemSettingsUser) => Boolean(user.id))
+      : [],
   } as SystemSettingsResponse;
 };
 

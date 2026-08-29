@@ -234,7 +234,20 @@ const persistCompetitorDiscoveryResult = async (
     p_result: options.result,
   });
   if (error) throw error;
-  return Array.isArray(data) ? data[0] || null : data || null;
+  const persisted = Array.isArray(data) ? data[0] || null : data || null;
+  const persistedId = isRecord(persisted) ? toText(persisted.id) : '';
+  if (!persistedId) return persisted;
+
+  // Automatic extraction is queued by the database completion trigger. Read
+  // the row again so the synchronous search response reflects that accepted
+  // selection instead of briefly presenting it as awaiting manual review.
+  const { data: refreshed, error: refreshError } = await supabase
+    .from('ai_external_analysis_jobs')
+    .select('id,article_id,job_type,origin,status,readiness_signature,input_snapshot,result,progress,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,completed_at,created_at,updated_at')
+    .eq('id', persistedId)
+    .single();
+  if (refreshError) throw refreshError;
+  return refreshed || persisted;
 };
 
 const markCompetitorSelectionAccepted = async (

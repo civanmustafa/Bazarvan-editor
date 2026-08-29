@@ -40,6 +40,7 @@ import {
   type SecretStatus,
   type SystemSettingKey,
   type SystemSettingsMap,
+  type SystemSettingsUser,
 } from '../utils/systemSettings';
 import {
   buildGeminiFreeModelOptions,
@@ -246,6 +247,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const isAdmin = currentUserRole === 'admin';
   const [settings, setSettings] = useState<SystemSettingsMap>(() => mergeSettings());
   const [secretStatus, setSecretStatus] = useState<SecretStatus>(EMPTY_SECRET_STATUS);
+  const [systemUsers, setSystemUsers] = useState<SystemSettingsUser[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -312,6 +314,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       );
       setSettings(mergedSettings);
       setSecretStatus(response.secretStatus || EMPTY_SECRET_STATUS);
+      setSystemUsers(response.users || []);
     } catch (loadError) {
       console.error('Failed to load system settings:', loadError);
       setError('تعذر تحميل إعدادات النظام من السيرفر.');
@@ -347,6 +350,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
         response.secretStatus?.ai?.gemini?.allowedModels,
       ));
       setSecretStatus(response.secretStatus || EMPTY_SECRET_STATUS);
+      setSystemUsers(response.users || []);
       notifyAiProviderCapabilitiesChanged();
       notifyPromptRegistryChanged();
       setSavedMessage('تم حفظ الإعدادات.');
@@ -692,6 +696,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             onChange={value => updateSetting('system', 'autoDiscoverCompetitors', value)}
           />
           <ToggleField
+            label="سحب محتوى المنافسين تلقائيًا"
+            description="يعتمد أفضل النتائج المحددة آليًا ويبدأ سحب نصوصها فور انتهاء الاكتشاف، لكي تستمر الأوامر الجاهزة دون انتظار اعتماد يدوي."
+            checked={settings.system.autoExtractCompetitorContent !== false}
+            onChange={value => updateSetting('system', 'autoExtractCompetitorContent', value)}
+          />
+          <ToggleField
             label="تشغيل الأوامر اليدوية الجاهزة تلقائيًا"
             description="يجدولها الخادم فور تحقق شروط التحليل الخارجي، حتى دون فتح المقالة. تعطيلها يوقف التشغيل التلقائي فقط وتبقى الطلبات اليدوية متاحة."
             checked={settings.system.autoRunReadyEngineeringCommands !== false}
@@ -747,6 +757,32 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const renderRoleSettings = () => (
     <SettingsSection title="الصلاحيات">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <FieldLabel
+            label="المستخدم الناشر"
+            description="يرى تلقائيًا مقالات بقية المستخدمين التي حالتها «جاهز» أو «تجهيز محتوى»، إضافة إلى المقالات التي يعيّنها له المسؤول يدويًا وفق صلاحيتها الحالية."
+          >
+            <SelectInput
+              value={String(settings.roles.publisherUserId || '')}
+              onChange={value => updateSetting('roles', 'publisherUserId', value)}
+              options={[
+                { value: '', label: 'بدون مستخدم ناشر' },
+                ...systemUsers
+                  .slice()
+                  .sort((left, right) => (
+                    (left.fullName || left.email || left.id).localeCompare(
+                      right.fullName || right.email || right.id,
+                      'ar',
+                    )
+                  ))
+                  .map(user => ({
+                    value: user.id,
+                    label: `${user.fullName?.trim() || user.email?.trim() || user.id}${user.role === 'admin' ? ' (مسؤول)' : ''}${user.isActive ? '' : ' (غير فعال)'}`,
+                  })),
+              ]}
+            />
+          </FieldLabel>
+        </div>
         <ToggleField label="الأدمن يرى كل السجلات" checked={Boolean(settings.roles.adminCanSeeAll)} onChange={value => updateSetting('roles', 'adminCanSeeAll', value)} />
         <ToggleField label="المستخدم يستطيع حجز المقالات العامة" checked={Boolean(settings.roles.usersCanClaimPublicArticles)} onChange={value => updateSetting('roles', 'usersCanClaimPublicArticles', value)} />
         <ToggleField label="المقالات المحجوزة تختفي من باقي المستخدمين" checked={Boolean(settings.roles.usersCanSeeOnlyAssignedAfterClaim)} onChange={value => updateSetting('roles', 'usersCanSeeOnlyAssignedAfterClaim', value)} />

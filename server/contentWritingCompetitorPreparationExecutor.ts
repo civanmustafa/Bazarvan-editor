@@ -321,27 +321,32 @@ const executeContentWritingCompetitorPreparation = async (
       }
 
       const discoveryResult = isRecord(discovery.result) ? discovery.result : {};
+      readiness = await readCompetitorReadiness(context.job.article_id);
       await reportStage(context, 'competitor_extraction', 2, {
         selectedCompetitorCount: sources.length,
         discoveryJobId,
+        usableCompetitorCount: readiness.usableCount,
       });
-      const extractionJobId = await enqueueCompetitorPreparationExtraction({
-        articleId: context.job.article_id,
-        requestedBy,
-        origin: context.job.origin === 'auto' ? 'auto' : 'manual',
-        queryType: text(discoveryResult.queryType) || 'primary_keyword',
-        queryText: text(discoveryResult.query),
-        sources,
-      });
-      activeChildJobId = extractionJobId;
-      await waitForChildJob({
-        context,
-        jobId: extractionJobId,
-        stage: 'competitor_extraction',
-        stageIndex: 2,
-      });
-      activeChildJobId = '';
-      readiness = await readCompetitorReadiness(context.job.article_id);
+      if (readiness.usableCount < minimumCount) {
+        const extractionJobId = await findActiveExtractionJob(context.job.article_id)
+          || await enqueueCompetitorPreparationExtraction({
+            articleId: context.job.article_id,
+            requestedBy,
+            origin: context.job.origin === 'auto' ? 'auto' : 'manual',
+            queryType: text(discoveryResult.queryType) || 'primary_keyword',
+            queryText: text(discoveryResult.query),
+            sources,
+          });
+        activeChildJobId = extractionJobId;
+        await waitForChildJob({
+          context,
+          jobId: extractionJobId,
+          stage: 'competitor_extraction',
+          stageIndex: 2,
+        });
+        activeChildJobId = '';
+        readiness = await readCompetitorReadiness(context.job.article_id);
+      }
     }
 
     if (readiness.usableCount < minimumCount) {

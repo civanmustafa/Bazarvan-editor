@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-96}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-98}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-59}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -69,6 +69,10 @@ readonly PROVIDER_CREDENTIAL_VAULT_CLIENT_PRIVILEGES="$(sql_scalar "select has_t
 readonly ARTICLE_WRITING_SOURCES_TABLE="$(sql_scalar "select to_regclass('public.article_writing_sources') is not null")"
 readonly ARTICLE_WRITING_SOURCES_RLS="$(sql_scalar "select coalesce((select relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'article_writing_sources'), false)")"
 readonly ARTICLE_WRITING_SOURCES_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.article_writing_sources', 'select') or has_table_privilege('authenticated', 'public.article_writing_sources', 'select')")"
+readonly PUBLISHER_USER_SETTING="$(sql_scalar "select jsonb_typeof(value->'publisherUserId') = 'string' from public.app_settings where key = 'roles' and not is_secret limit 1")"
+readonly PUBLISHER_ACCESS_POLICY="$(sql_scalar "select position('publisherUserId' in pg_get_functiondef('public.article_access_level_for_user(uuid,uuid)'::regprocedure)) > 0 and position('content_preparation' in pg_get_functiondef('public.article_access_level_for_user(uuid,uuid)'::regprocedure)) > 0 and position('in_review' in pg_get_functiondef('public.article_access_level_for_user(uuid,uuid)'::regprocedure)) > 0")"
+readonly AUTO_COMPETITOR_EXTRACTION_SETTING="$(sql_scalar "select value->'autoExtractCompetitorContent' = 'true'::jsonb from public.app_settings where key = 'system' and not is_secret limit 1")"
+readonly AUTO_COMPETITOR_EXTRACTION_TRIGGER="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'enqueue_automatic_competitor_extraction_after_discovery' and not tgisinternal)")"
 
 (( PUBLIC_TABLES == EXPECTED_PUBLIC_TABLES )) \
   || fail "Public table count is ${PUBLIC_TABLES}; expected ${EXPECTED_PUBLIC_TABLES}."
@@ -94,6 +98,10 @@ readonly ARTICLE_WRITING_SOURCES_CLIENT_PRIVILEGES="$(sql_scalar "select has_tab
 [[ "${ARTICLE_WRITING_SOURCES_TABLE}" == "t" ]] || fail "Article writing sources table is missing."
 [[ "${ARTICLE_WRITING_SOURCES_RLS}" == "t" ]] || fail "Article writing sources RLS is not enabled."
 [[ "${ARTICLE_WRITING_SOURCES_CLIENT_PRIVILEGES}" == "f" ]] || fail "Browser roles can read article writing sources directly."
+[[ "${PUBLISHER_USER_SETTING}" == "t" ]] || fail "Publisher-user setting is missing or invalid."
+[[ "${PUBLISHER_ACCESS_POLICY}" == "t" ]] || fail "Publisher article visibility is missing from the canonical access policy."
+[[ "${AUTO_COMPETITOR_EXTRACTION_SETTING}" == "t" ]] || fail "Automatic competitor content extraction is not enabled by default."
+[[ "${AUTO_COMPETITOR_EXTRACTION_TRIGGER}" == "t" ]] || fail "Automatic competitor content extraction trigger is missing."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"

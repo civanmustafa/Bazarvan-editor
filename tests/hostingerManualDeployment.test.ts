@@ -40,8 +40,8 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-96/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-96/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-98/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-98/);
   assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-59/);
   assert.match(guide, /20260827030000_content_research_automation_settings\.sql/);
   assert.match(guide, /20260828010000_concurrent_editing_and_meta_description\.sql/);
@@ -52,6 +52,8 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20260829030000_provider_credential_vault\.sql/);
   assert.match(guide, /20260829040000_provider_credentials_explicit_grants\.sql/);
   assert.match(guide, /20260829050000_article_writing_sources\.sql/);
+  assert.match(guide, /20260829060000_publisher_user_article_visibility\.sql/);
+  assert.match(guide, /20260829070000_automatic_competitor_content_extraction\.sql/);
   assert.match(verifyScript, /META_DESCRIPTION_COLUMNS/);
   assert.match(verifyScript, /CONCURRENT_SAVE_FUNCTION/);
   assert.match(verifyScript, /READY_ENGINEERING_CONTROLLED_FUNCTION/);
@@ -67,4 +69,8 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(verifyScript, /ARTICLE_WRITING_SOURCES_TABLE/);
   assert.match(verifyScript, /ARTICLE_WRITING_SOURCES_RLS/);
   assert.match(verifyScript, /ARTICLE_WRITING_SOURCES_CLIENT_PRIVILEGES/);
+  assert.match(verifyScript, /PUBLISHER_USER_SETTING/);
+  assert.match(verifyScript, /PUBLISHER_ACCESS_POLICY/);
+  assert.match(verifyScript, /AUTO_COMPETITOR_EXTRACTION_SETTING/);
+  assert.match(verifyScript, /AUTO_COMPETITOR_EXTRACTION_TRIGGER/);
 });

@@ -97,6 +97,7 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     adminCanSeeAll: true,
     usersCanClaimPublicArticles: true,
     usersCanSeeOnlyAssignedAfterClaim: true,
+    publisherUserId: '',
   },
   system: {
     timezone: 'Europe/Istanbul',
@@ -106,6 +107,7 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     autoGenerateAlternativeKeywords: true,
     autoGenerateLsiKeywords: true,
     autoDiscoverCompetitors: true,
+    autoExtractCompetitorContent: true,
     autoRunReadyEngineeringCommands: true,
     autoGenerateMetaDescription: true,
   },
@@ -132,6 +134,14 @@ const normalizeInteger = (value: unknown, fallback: number, min: number, max: nu
   const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(Math.round(parsed), max));
+};
+
+const normalizeOptionalUuid = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const normalized = value.trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalized)
+    ? normalized
+    : '';
 };
 
 const normalizeEnum = <T extends string>(
@@ -328,6 +338,7 @@ const normalizeSystemSection = (
     setWhenPresent('adminCanSeeAll', field => normalizeBoolean(field, defaults.adminCanSeeAll));
     setWhenPresent('usersCanClaimPublicArticles', field => normalizeBoolean(field, defaults.usersCanClaimPublicArticles));
     setWhenPresent('usersCanSeeOnlyAssignedAfterClaim', field => normalizeBoolean(field, defaults.usersCanSeeOnlyAssignedAfterClaim));
+    setWhenPresent('publisherUserId', normalizeOptionalUuid);
     return normalized;
   }
 
@@ -346,6 +357,10 @@ const normalizeSystemSection = (
   setWhenPresent('autoDiscoverCompetitors', field => normalizeBoolean(
     field,
     defaults.autoDiscoverCompetitors,
+  ));
+  setWhenPresent('autoExtractCompetitorContent', field => normalizeBoolean(
+    field,
+    defaults.autoExtractCompetitorContent,
   ));
   setWhenPresent('autoRunReadyEngineeringCommands', field => normalizeBoolean(
     field,

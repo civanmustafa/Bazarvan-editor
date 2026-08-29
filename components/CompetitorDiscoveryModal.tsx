@@ -63,7 +63,7 @@ const CompetitorDiscoveryModal: React.FC<CompetitorDiscoveryModalProps> = ({
             <Search size={17} className="shrink-0 text-[#d4af37]" />
             <div className="min-w-0">
               <h2 className="truncate text-sm font-black text-gray-800 dark:text-gray-100">
-                {isArabic ? 'اكتشاف المنافسين ومراجعتهم' : 'Discover and review competitors'}
+                {isArabic ? 'اكتشاف المنافسين وسحب محتواهم' : 'Discover and import competitors'}
               </h2>
               <p className="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400" dir="auto">
                 {articleTitle || primaryKeyword}

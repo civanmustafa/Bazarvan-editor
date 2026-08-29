@@ -196,10 +196,14 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       defaultLanguage: 'invalid',
       defaultStatus: 'content_preparation',
     },
+    roles: {
+      publisherUserId: ' 550E8400-E29B-41D4-A716-446655440000 ',
+    },
     system: {
       autoGenerateAlternativeKeywords: false,
       autoGenerateLsiKeywords: false,
       autoDiscoverCompetitors: false,
+      autoExtractCompetitorContent: false,
       autoRunReadyEngineeringCommands: false,
       autoGenerateMetaDescription: false,
       unknownAutomationSwitch: true,
@@ -231,9 +235,11 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');
   assert.equal(normalized.articles.defaultStatus, 'content_preparation');
+  assert.equal(normalized.roles.publisherUserId, '550e8400-e29b-41d4-a716-446655440000');
   assert.equal(normalized.system.autoGenerateAlternativeKeywords, false);
   assert.equal(normalized.system.autoGenerateLsiKeywords, false);
   assert.equal(normalized.system.autoDiscoverCompetitors, false);
+  assert.equal(normalized.system.autoExtractCompetitorContent, false);
   assert.equal(normalized.system.autoRunReadyEngineeringCommands, false);
   assert.equal(normalized.system.autoGenerateMetaDescription, false);
   assert.equal(normalized.system.unknownAutomationSwitch, undefined);
@@ -242,6 +248,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(defaults.system.autoGenerateAlternativeKeywords, true);
   assert.equal(defaults.system.autoGenerateLsiKeywords, true);
   assert.equal(defaults.system.autoDiscoverCompetitors, true);
+  assert.equal(defaults.system.autoExtractCompetitorContent, true);
   assert.equal(defaults.system.autoRunReadyEngineeringCommands, true);
   assert.equal(defaults.system.autoGenerateMetaDescription, true);
   const invalidAutomation = registry.normalizeSystemSettingsMap({
@@ -249,6 +256,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       autoGenerateAlternativeKeywords: 'yes',
       autoGenerateLsiKeywords: 1,
       autoDiscoverCompetitors: null,
+      autoExtractCompetitorContent: 'yes',
       autoRunReadyEngineeringCommands: 'yes',
       autoGenerateMetaDescription: 'yes',
     },
@@ -256,8 +264,12 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(invalidAutomation.system.autoGenerateAlternativeKeywords, true);
   assert.equal(invalidAutomation.system.autoGenerateLsiKeywords, true);
   assert.equal(invalidAutomation.system.autoDiscoverCompetitors, true);
+  assert.equal(invalidAutomation.system.autoExtractCompetitorContent, true);
   assert.equal(invalidAutomation.system.autoRunReadyEngineeringCommands, true);
   assert.equal(invalidAutomation.system.autoGenerateMetaDescription, true);
+  assert.equal(registry.normalizeSystemSettingsMap({
+    roles: { publisherUserId: 'not-a-user-id' },
+  }).roles.publisherUserId, '');
 });
 
 test('AI capabilities expose an optional normalized content-writing resume model', async () => {

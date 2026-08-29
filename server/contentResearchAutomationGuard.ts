@@ -79,7 +79,7 @@ export const assertAutomaticReadyEngineeringCommandsAllowed = async (
  * closes the small commit race between a settings update and a queued worker.
  */
 export const assertAutomaticCompetitorResearchAllowed = async (
-  job: Pick<ExternalAnalysisJob, 'article_id' | 'origin'>,
+  job: Pick<ExternalAnalysisJob, 'article_id' | 'job_type' | 'origin'>,
 ): Promise<void> => {
   if (job.origin !== 'auto') return;
 
@@ -88,6 +88,12 @@ export const assertAutomaticCompetitorResearchAllowed = async (
     stopAutomaticCompetitorResearch(
       'competitor_automation_disabled',
       'Automatic competitor discovery is disabled in system settings.',
+    );
+  }
+  if (job.job_type === 'competitor_extraction' && !settings.autoExtractCompetitorContent) {
+    stopAutomaticCompetitorResearch(
+      'competitor_content_extraction_automation_disabled',
+      'Automatic competitor content extraction is disabled in system settings.',
     );
   }
 

@@ -54,6 +54,24 @@ test('article access is owned by one canonical Supabase policy', async () => {
   assert.doesNotMatch(externalAnalysis, /article\.owner_id ===|article\.assigned_to ===/);
 });
 
+test('configured publisher sees ready and content-preparation articles without replacing manual access', async () => {
+  const [migration, settingsPage, settingsApi] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260829060000_publisher_user_article_visibility.sql'),
+    readWorkspaceFile('components/SettingsPage.tsx'),
+    readWorkspaceFile('api/systemSettings.ts'),
+  ]);
+
+  assert.match(migration, /publisherUserId/);
+  assert.match(migration, /v_article_status in \('in_review', 'content_preparation'\)/);
+  assert.match(migration, /target_user_id = v_owner_id or target_user_id = v_assigned_to/);
+  assert.match(migration, /v_access_role = 'editor'/);
+  assert.match(migration, /v_access_role = 'viewer'/);
+  assert.match(settingsPage, /label="المستخدم الناشر"/);
+  assert.match(settingsPage, /response\.users/);
+  assert.match(settingsApi, /readSettingsUsers/);
+  assert.match(settingsApi, /\.from\('profiles'\)/);
+});
+
 test('article save transaction is atomic and idempotent', async () => {
   const [migration, articleApi, articleClient] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260713010000_phase_2_3_access_and_atomic_article_save.sql'),
@@ -136,6 +154,7 @@ test('dashboard, access/save, and performance migrations have balanced SQL delim
     readWorkspaceFile('supabase/migrations/20260820020000_atomic_article_time_tracking.sql'),
     readWorkspaceFile('supabase/migrations/20260827030000_content_research_automation_settings.sql'),
     readWorkspaceFile('supabase/migrations/20260828010000_concurrent_editing_and_meta_description.sql'),
+    readWorkspaceFile('supabase/migrations/20260829060000_publisher_user_article_visibility.sql'),
   ]);
 
   migrations.forEach((migration) => {
