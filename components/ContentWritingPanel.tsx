@@ -60,6 +60,7 @@ import ContentWritingStepResult, {
 import ContentWritingStageAuditPanel from './ContentWritingStageAuditPanel';
 import FullArticlePipelineControl from './FullArticlePipelineControl';
 import ContentWritingAutomationArticleStatus from './ContentWritingAutomationArticleStatus';
+import ContentWritingSourcesPanel from './ContentWritingSourcesPanel';
 import {
   ContentWritingRequestError,
   cancelContentWritingSession,
@@ -222,8 +223,6 @@ const getErrorPresentation = (error: unknown, isArabic: boolean): ErrorPresentat
     content_writing_prerequisites_missing: ['بيانات المقالة المطلوبة غير مكتملة.', 'Required article data is incomplete.'],
     content_writing_templates_invalid: ['قوالب كتابة المحتوى غير صالحة.', 'Content writing templates are invalid.'],
     content_writing_input_too_large: ['حجم سياق المقالة يتجاوز الحد المحدد.', 'The article context exceeds the configured limit.'],
-    content_writing_editor_source_coverage_incomplete: ['لم تكتمل تغطية جميع المعلومات والأفكار والتوصيات الموجودة في نص المحرر. راجع سجل نص المحرر والإصلاحات المستهدفة.', 'Not every information item, idea, or recommendation from the editor text was covered. Review the editor-source ledger and targeted repairs.'],
-    content_writing_editor_source_coverage_lost: ['أوقفت الحماية اعتماد مراجعة لاحقة لأنها أسقطت عنصرًا إلزاميًا من نص المحرر.', 'A later revision was blocked because it dropped a mandatory editor-source item.'],
     AI_PROVIDER_DISABLED: ['قام الأدمن بتعطيل هذا المزود.', 'This provider is disabled by the administrator.'],
     AI_PROVIDER_NOT_CONFIGURED: ['المزود مفعّل ولكن لا يوجد له مفتاح مسموح في خزنة اللوحة.', 'The provider is enabled but no permitted credential exists in the dashboard vault.'],
     article_access_denied: ['لا تملك صلاحية كتابة هذه المقالة.', 'You cannot write this article.'],
@@ -361,6 +360,8 @@ const ContentWritingPanel: React.FC = () => {
   const [hasRunningWritingActivity, setHasRunningWritingActivity] = useState(false);
   const [hasActiveAutomaticWriting, setHasActiveAutomaticWriting] = useState(false);
   const [hasActiveFullPipeline, setHasActiveFullPipeline] = useState(false);
+  const [writingSourcesReady, setWritingSourcesReady] = useState(false);
+  const [blockingWritingSourceCount, setBlockingWritingSourceCount] = useState(0);
   const [copied, setCopied] = useState(false);
   const [copiedMetaDescriptionIndex, setCopiedMetaDescriptionIndex] = useState<number | null>(null);
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null);
@@ -691,6 +692,8 @@ const ContentWritingPanel: React.FC = () => {
     setReviewSnapshot(null);
     setApplicationNotice(null);
     setCompetitorPreparationStage('');
+    setWritingSourcesReady(false);
+    setBlockingWritingSourceCount(0);
     setExpandedWorkflowStepKey('');
     trackedKeyFeedbackSessionsRef.current.clear();
     contentWritingActivityIdsRef.current.clear();
@@ -727,6 +730,7 @@ const ContentWritingPanel: React.FC = () => {
       || hasActiveSession
       || hasActiveAutomaticWriting
       || hasActiveFullPipeline
+      || !writingSourcesReady
       || startInFlightRef.current
     ) return;
     const requestSignature = `${articleId}:${provider}:${selectedModel || 'default'}`;
@@ -843,6 +847,11 @@ const ContentWritingPanel: React.FC = () => {
 
   const prepareExternalConversation = useCallback(async () => {
     if (!articleId) throw new Error(isArabic ? 'احفظ المقالة أولًا.' : 'Save the article first.');
+    if (!writingSourcesReady) {
+      throw new Error(isArabic
+        ? 'انتظر تجهيز المصادر الأساسية أو عطّل المصدر المتعذر قبل بدء الكتابة.'
+        : 'Wait for primary sources to be ready, or disable failed sources before writing.');
+    }
     const targetArticleId = articleId;
     const saved = await handleSaveDraft({ reason: 'manual', force: true });
     if (!saved) {
@@ -854,7 +863,7 @@ const ContentWritingPanel: React.FC = () => {
       throw new Error(isArabic ? 'تغيرت المقالة النشطة.' : 'The active article changed.');
     }
     return prepareExternalContentWritingConversation(targetArticleId);
-  }, [articleId, handleSaveDraft, isArabic]);
+  }, [articleId, handleSaveDraft, isArabic, writingSourcesReady]);
 
   const importExternalResult = useCallback(async (
     externalProvider: ExternalAiBridgeProvider,
@@ -1254,7 +1263,8 @@ const ContentWritingPanel: React.FC = () => {
     || hasActiveAutomaticWriting
     || actionState !== 'idle'
     || saveStatus === 'saving'
-    || isApplying,
+    || isApplying
+    || !writingSourcesReady
   );
   const fullWorkflowResumeDisabled = Boolean(
     hasActiveSession
@@ -1269,6 +1279,10 @@ const ContentWritingPanel: React.FC = () => {
       ? (isArabic ? 'توجد جلسة كتابة يدوية نشطة لهذه المقالة.' : 'A manual writing session is active for this article.')
       : hasActiveAutomaticWriting
         ? (isArabic ? 'توجد جلسة كتابة تلقائية نشطة لهذه المقالة.' : 'An automatic writing session is active for this article.')
+        : !writingSourcesReady
+          ? (isArabic
+              ? `انتظر تجهيز المصادر الأساسية أو عطّل المتعذر منها${blockingWritingSourceCount ? ` (${blockingWritingSourceCount})` : ''}.`
+              : `Wait for primary writing sources to be ready or disable failed ones${blockingWritingSourceCount ? ` (${blockingWritingSourceCount})` : ''}.`)
         : actionState !== 'idle' || saveStatus === 'saving' || isApplying
           ? (isArabic ? 'انتظر اكتمال العملية الحالية قبل بدء الإنشاء الشامل.' : 'Wait for the current editor operation before starting the full workflow.')
           : '';
@@ -1319,7 +1333,7 @@ const ContentWritingPanel: React.FC = () => {
                     }}
                     disabled={!item.available}
                     title={!item.available
-                      ? (isArabic ? `${item.label} غير مهيأ على الخادم` : `${item.label} is not configured`)
+                      ? (isArabic ? `${item.label} غير متاح بمفتاح مسموح من خزنة اللوحة` : `${item.label} has no authorized dashboard-vault key`)
                       : item.label}
                     className={`flex h-9 min-w-0 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                       selected
@@ -1375,6 +1389,16 @@ const ContentWritingPanel: React.FC = () => {
             </div>
           ) : null}
 
+          <ContentWritingSourcesPanel
+            articleId={articleId}
+            isArabic={isArabic}
+            disabled={hasActiveSession || hasActiveAutomaticWriting || hasActiveFullPipeline}
+            onReadinessChange={(ready, blockingCount) => {
+              setWritingSourcesReady(ready);
+              setBlockingWritingSourceCount(blockingCount);
+            }}
+          />
+
           <ContentWritingAutomationArticleStatus
             articleId={articleId}
             isArabic={isArabic}
@@ -1407,6 +1431,7 @@ const ContentWritingPanel: React.FC = () => {
               || hasActiveSession
               || hasActiveAutomaticWriting
               || hasActiveFullPipeline
+              || !writingSourcesReady
               || actionState !== 'idle'
               || saveStatus === 'saving'
             }
@@ -1434,6 +1459,7 @@ const ContentWritingPanel: React.FC = () => {
               hasActiveSession
               || hasActiveAutomaticWriting
               || hasActiveFullPipeline
+              || !writingSourcesReady
               || actionState !== 'idle'
               || saveStatus === 'saving'
               || isApplying

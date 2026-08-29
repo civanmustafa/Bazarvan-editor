@@ -808,7 +808,7 @@ const ServerSecretsStatusPanel: React.FC<{
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <SectionTitle>مفاتيح API المحفوظة على السيرفر فقط</SectionTitle>
+        <SectionTitle>حالة مفاتيح المزودات وأسرار البنية</SectionTitle>
         <button
           type="button"
           onClick={onRefresh}

@@ -10,6 +10,7 @@ import {
 import type { GoalContext, Keywords } from '../types';
 import {
   chunkContentWritingCompetitor,
+  chunkContentWritingReference,
   type ContentWritingSourceChunk,
 } from './contentWritingKnowledge';
 import { getUsableCompetitorText } from './competitorContent';
@@ -37,12 +38,21 @@ export type ContentWritingArticleInput = {
   articleId?: string;
   title: string;
   language: 'ar' | 'en' | string;
-  articleText: string;
-  articleContentJson?: unknown;
-  articleContentHtml?: string;
   keywords: Partial<Keywords>;
   goalContext: Partial<GoalContext>;
   competitors: readonly ContentWritingCompetitorInput[];
+  writingSources?: readonly ContentWritingReferenceInput[];
+};
+
+export type ContentWritingReferenceInput = {
+  id: string;
+  title?: string;
+  url?: string;
+  content: string;
+  sourceRole: 'primary' | 'supporting';
+  focusInstructions?: string;
+  enabled: boolean;
+  status: 'pending' | 'extracting' | 'ready' | 'failed';
 };
 
 export type ContentWritingReadinessIssue = {
@@ -63,6 +73,8 @@ export type ContentWritingPromptBundle = {
   competitors: ContentWritingCompetitorInput[];
   competitorQualityAudit: ContentWritingCompetitorQualityAudit;
   competitorChunks: ContentWritingSourceChunk[];
+  writingSourceChunks: ContentWritingSourceChunk[];
+  sourceChunks: ContentWritingSourceChunk[];
   readinessIssues: ContentWritingReadinessIssue[];
   templateIssues: Array<{
     stage: ContentWritingTemplateStage;
@@ -329,6 +341,15 @@ export const validateContentWritingReadiness = (
       label: `مصدران مستقلان على الأقل (${qualitySelection.audit.distinctDomainCount}/${CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS})`,
     });
   }
+  const blockedPrimarySources = (input.writingSources || []).filter(source => (
+    source.enabled && source.sourceRole === 'primary' && source.status !== 'ready'
+  ));
+  if (blockedPrimarySources.length > 0) {
+    issues.push({
+      code: 'writing_sources.primary_not_ready',
+      label: `مصادر الكتابة الأساسية غير الجاهزة (${blockedPrimarySources.length})`,
+    });
+  }
 
   return { issues, competitors, competitorQualityAudit: qualitySelection.audit };
 };
@@ -396,6 +417,43 @@ const createCompetitorsValue = (
   .replace(/>/g, '\\u003e')
   .replace(/&/g, '\\u0026');
 
+const createWritingSourceChunks = (
+  sources: readonly ContentWritingReferenceInput[],
+): ContentWritingSourceChunk[] => sources
+  .filter(source => source.enabled && source.status === 'ready' && Boolean(source.content.trim()))
+  .flatMap((source, index) => chunkContentWritingReference({
+    sourceNumber: index + 1,
+    sourceId: source.id,
+    title: source.title,
+    url: source.url,
+    content: source.content,
+    sourceRole: source.sourceRole,
+    focusInstructions: source.focusInstructions,
+  }));
+
+const createWritingSourcesValue = (
+  sources: readonly ContentWritingReferenceInput[],
+  chunks: readonly ContentWritingSourceChunk[],
+): string => JSON.stringify(
+  sources
+    .filter(source => source.enabled && source.status === 'ready' && Boolean(source.content.trim()))
+    .map(source => ({
+      id: source.id,
+      title: source.title || '',
+      url: source.url || '',
+      role: source.sourceRole,
+      focusInstructions: source.focusInstructions || '',
+      chunks: chunks
+        .filter(chunk => chunk.sourceId === source.id)
+        .map(chunk => ({ sourceId: chunk.id, text: chunk.text })),
+    })),
+  null,
+  2,
+)
+  .replace(/</g, '\\u003c')
+  .replace(/>/g, '\\u003e')
+  .replace(/&/g, '\\u0026');
+
 export const buildContentWritingPromptBundle = (
   input: ContentWritingArticleInput,
   options: {
@@ -417,11 +475,13 @@ export const buildContentWritingPromptBundle = (
     },
   );
   const competitorChunks = createCompetitorChunks(competitors);
+  const writingSourceChunks = createWritingSourceChunks(input.writingSources || []);
+  const sourceChunks = [...writingSourceChunks, ...competitorChunks];
   const variables: Record<string, string> = {
     article_id: toText(input.articleId).trim() || 'غير متوفر',
     article_title: toText(input.title),
     article_language: toText(input.language) || 'ar',
-    article_text: toText(input.articleText) || 'لا يوجد نص حالي؛ اكتب المقالة من البداية.',
+    writing_sources_json: createWritingSourcesValue(input.writingSources || [], writingSourceChunks),
     primary_keyword: toText(input.keywords.primary),
     alternative_keywords: normalizeList(input.keywords.secondaries).join('، '),
     lsi_keywords: normalizeList(input.keywords.lsi).join('، '),
@@ -476,6 +536,8 @@ export const buildContentWritingPromptBundle = (
     competitors,
     competitorQualityAudit,
     competitorChunks,
+    writingSourceChunks,
+    sourceChunks,
     readinessIssues,
     templateIssues,
     estimatedInputTokens,

@@ -2,6 +2,7 @@ import {
   PROVIDER_ACCESS_PROVIDERS,
   type ProviderAccessProvider,
   type ProviderCredentialMode,
+  type ProviderCredentialPurpose,
 } from '../constants/providerAccessControl.ts';
 import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from './authenticatedApi.ts';
 
@@ -34,6 +35,7 @@ export type ProviderPolicyPatch = {
 export type SharedProviderCredentialMetadata = {
   id: string;
   provider: ProviderAccessProvider;
+  purpose: ProviderCredentialPurpose;
   label: string;
   enabled: boolean;
   keyCount: number;
@@ -137,6 +139,7 @@ export const saveAdminSharedCredential = (options: {
   id?: string;
   userId?: string;
   provider: ProviderAccessProvider;
+  purpose?: ProviderCredentialPurpose;
   label: string;
   apiKeys?: string;
   enabled?: boolean;

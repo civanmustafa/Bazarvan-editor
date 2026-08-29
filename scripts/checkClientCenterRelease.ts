@@ -23,6 +23,7 @@ import {
   CLIENT_CENTER_ACCEPTANCE_VERSION,
 } from '../constants/clientCenterAcceptance.ts';
 import { PROVIDER_CREDENTIAL_VAULT_MIGRATION } from '../server/providerCredentialVault.ts';
+import { PROVIDER_EXPLICIT_GRANTS_MIGRATION } from '../constants/providerAccessControl.ts';
 
 const root = process.cwd();
 if (CLIENT_CENTER_ACCEPTANCE_VERSION !== 10) {
@@ -53,6 +54,7 @@ for (const migration of [
   CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION,
   CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+  PROVIDER_EXPLICIT_GRANTS_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
@@ -109,6 +111,7 @@ for (const marker of [
   CLIENT_CENTER_CRAWL_SOURCE_MIGRATION,
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+  PROVIDER_EXPLICIT_GRANTS_MIGRATION,
   'مركز العملاء',
   'bazarvan-client-page-crawler',
   '/readyz',
@@ -177,6 +180,7 @@ console.log(JSON.stringify({
     CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION,
     CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION,
     PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+    PROVIDER_EXPLICIT_GRANTS_MIGRATION,
   ],
   crawler: 'server-dist/client-page-crawl-worker.mjs',
   readinessEndpoint: '/readyz',

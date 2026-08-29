@@ -3,10 +3,12 @@ import {
   DEFAULT_PROVIDER_CREDENTIAL_MODE,
   PROVIDER_ACCESS_MIGRATION,
   PROVIDER_ACCESS_PROVIDERS,
+  PROVIDER_CREDENTIAL_PURPOSES,
   isProviderAccessProvider,
   isProviderCredentialMode,
   type ProviderAccessProvider,
   type ProviderCredentialMode,
+  type ProviderCredentialPurpose,
 } from '../constants/providerAccessControl.ts';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 import {
@@ -31,7 +33,7 @@ export type ProviderCredentialTier = {
   source: ProviderCredentialSource;
   keys: string[];
   credentialId?: string;
-  purpose?: 'default' | 'content_writing_resume';
+  purpose?: ProviderCredentialPurpose;
 };
 
 export type EffectiveProviderPolicy = {
@@ -63,6 +65,7 @@ export type ProviderPolicyPatch = {
 export type SharedProviderCredentialMetadata = {
   id: string;
   provider: ProviderAccessProvider;
+  purpose: ProviderCredentialPurpose;
   label: string;
   enabled: boolean;
   keyCount: number;
@@ -389,6 +392,7 @@ const mergePolicy = (
 const toCredentialMetadata = (row: SharedCredentialRow): SharedProviderCredentialMetadata => ({
   id: row.id,
   provider: normalizeProvider(row.provider),
+  purpose: row.purpose,
   label: row.label,
   enabled: row.enabled === true,
   keyCount: Number(row.key_count) || 0,
@@ -701,6 +705,7 @@ const readCredentialById = async (idValue: unknown): Promise<SharedCredentialRow
 export const saveSharedProviderCredential = async (options: {
   id?: string | null;
   provider: ProviderAccessProvider;
+  purpose?: ProviderCredentialPurpose;
   label: string;
   apiKeys?: unknown;
   enabled?: boolean;
@@ -708,6 +713,18 @@ export const saveSharedProviderCredential = async (options: {
   updatedBy: string;
 }): Promise<SharedProviderCredentialMetadata> => {
   const provider = normalizeProvider(options.provider);
+  const purpose = options.purpose || 'default';
+  if (!PROVIDER_CREDENTIAL_PURPOSES.includes(purpose)) {
+    throw new ProviderAccessError('Unsupported credential purpose.', 400, 'CREDENTIAL_PURPOSE_INVALID');
+  }
+  if (purpose === 'content_writing_resume'
+      && (provider === 'firecrawl' || provider === 'browserless')) {
+    throw new ProviderAccessError(
+      'Content-writing resume credentials require an AI provider.',
+      400,
+      'CREDENTIAL_PURPOSE_PROVIDER_INVALID',
+    );
+  }
   const actorId = normalizeUuid(options.updatedBy, 'updatedBy');
   const id = options.id ? normalizeUuid(options.id, 'credentialId') : randomUUID();
   const existing = options.id ? await readCredentialById(id) : null;
@@ -716,6 +733,9 @@ export const saveSharedProviderCredential = async (options: {
   }
   if (existing && existing.provider !== provider) {
     throw new ProviderAccessError('A credential provider cannot be changed.', 409, 'CREDENTIAL_PROVIDER_IMMUTABLE');
+  }
+  if (existing && existing.purpose !== purpose) {
+    throw new ProviderAccessError('A credential purpose cannot be changed.', 409, 'CREDENTIAL_PURPOSE_IMMUTABLE');
   }
   const hasNewKeys = options.apiKeys !== undefined && String(options.apiKeys || '').trim() !== '';
   if (!existing && !hasNewKeys) {
@@ -739,7 +759,7 @@ export const saveSharedProviderCredential = async (options: {
     vaultKey: existing?.vault_key || `shared:${id}`,
     credentialType: 'shared',
     provider,
-    purpose: existing?.purpose || 'default',
+    purpose,
     label: normalizeLabel(options.label || existing?.label),
     ...(keys ? { apiKeys: keys } : {}),
     enabled: options.enabled ?? existing?.enabled ?? true,
@@ -753,6 +773,7 @@ export const saveSharedProviderCredential = async (options: {
     subjectId: id,
     metadata: {
       label: data.label,
+      purpose: data.purpose,
       keyCount: data.key_count,
       keySuffixes: data.key_suffixes,
       enabled: data.enabled,

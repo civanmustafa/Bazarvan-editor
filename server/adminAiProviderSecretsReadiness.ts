@@ -1,6 +1,9 @@
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 import { isAiSettingsEncryptionConfigured } from './adminAiProviderSecrets.ts';
 import {
+  PROVIDER_EXPLICIT_GRANTS_MIGRATION,
+} from '../constants/providerAccessControl.ts';
+import {
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_TABLE,
 } from './providerCredentialVault.ts';
@@ -78,7 +81,10 @@ export const checkAdminAiProviderSecretsReadiness = async (options: {
     ok,
     checkedAt: new Date().toISOString(),
     requiredMigration: PROVIDER_CREDENTIAL_VAULT_MIGRATION,
-    requiredMigrations: [PROVIDER_CREDENTIAL_VAULT_MIGRATION],
+    requiredMigrations: [
+      PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+      PROVIDER_EXPLICIT_GRANTS_MIGRATION,
+    ],
     checks,
     ...(!ok ? {
       code: 'admin_ai_provider_secrets_unavailable' as const,

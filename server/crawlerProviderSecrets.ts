@@ -17,7 +17,6 @@ import {
 } from './providerCredentialVault.ts';
 import {
   resolveProviderCredentialPlan,
-  saveCredentialGrant,
   type ProviderCredentialSource,
 } from './providerAccessControl.ts';
 import { resolveUserAiProviderKeys } from './userAiProviderSecrets.ts';
@@ -209,7 +208,7 @@ export const saveCrawlerProviderSecret = async (options: {
       'CRAWLER_SECRET_VALUE_REQUIRED',
     );
   }
-  const row = await saveProviderCredentialVaultRow({
+  await saveProviderCredentialVaultRow({
     id: existing?.id,
     vaultKey,
     credentialType: 'shared',
@@ -220,15 +219,6 @@ export const saveCrawlerProviderSecret = async (options: {
     enabled: typeof options.enabled === 'boolean' ? options.enabled : existing?.enabled ?? true,
     updatedBy: options.updatedBy,
   });
-  if (!existing) {
-    await saveCredentialGrant({
-      credentialId: row.id,
-      scope: 'all',
-      priority: 100,
-      enabled: true,
-      actorId: options.updatedBy,
-    });
-  }
 };
 
 export const deleteCrawlerProviderSecret = async (

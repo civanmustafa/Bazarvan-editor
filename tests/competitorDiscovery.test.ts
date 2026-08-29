@@ -294,7 +294,7 @@ test('competitor Firecrawl operations resolve only user-owned or assigned vault 
   const [service, apiSource, settings, panel] = await Promise.all([
     readWorkspaceFile('server/firecrawlCompetitorService.ts'),
     readWorkspaceFile('api/competitors.ts'),
-    readWorkspaceFile('components/AdminCrawlerProviderSecretsSettings.tsx'),
+    readWorkspaceFile('components/AdminProviderAccessSettings.tsx'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
   ]);
 
@@ -303,9 +303,11 @@ test('competitor Firecrawl operations resolve only user-owned or assigned vault 
   assert.match(service, /export const isFirecrawlConfigured = async/);
   assert.match(apiSource, /providerConfigured: await isFirecrawlConfigured\(principal\.userId\)/);
   assert.match(apiSource, /!\(await isFirecrawlConfigured\(principal\.userId\)\)/);
-  assert.match(settings, /بحث المنافسين وسحب محتواهم/);
+  assert.match(settings, /Firecrawl/);
+  assert.match(settings, /Browserless/);
+  assert.match(settings, /حفظ دون تعيين/);
   assert.doesNotMatch(settings, /FIRECRAWL_API_KEY|BROWSERLESS_API_KEY|Hostinger/);
-  assert.match(panel, /إعدادات المسؤول ← خدمات الزحف/);
+  assert.match(panel, /مركز المزودات/);
 });
 
 test('expanded intent lexicon recognizes Arabic support and transactional searches', () => {

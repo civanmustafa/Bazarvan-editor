@@ -55,14 +55,15 @@ const isUserAiSecretProvider = (value: unknown): value is UserAiSecretProvider =
 );
 
 export const normalizeUserAiSecretProvider = (value: unknown): UserAiSecretProvider => {
-  if (!isUserAiSecretProvider(value)) {
+  const normalizedValue = value === 'openai_paid' ? 'openai' : value;
+  if (!isUserAiSecretProvider(normalizedValue)) {
     throw new UserAiProviderSecretError(
       'Unsupported personal provider.',
       400,
       'USER_AI_SECRET_PROVIDER_INVALID',
     );
   }
-  return value;
+  return normalizedValue;
 };
 
 const normalizeUserId = (value: unknown): string => {
@@ -90,7 +91,7 @@ export const assertPersonalCredentialOwner = (
 };
 
 const toVaultProvider = (provider: UserAiSecretProvider): ProviderAccessProvider => (
-  provider === 'openai_paid' ? 'openai' : provider
+  provider
 );
 
 const getPersonalVaultKey = (

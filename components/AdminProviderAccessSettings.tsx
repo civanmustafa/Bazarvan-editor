@@ -18,6 +18,7 @@ import {
   PROVIDER_CREDENTIAL_MODES,
   type ProviderAccessProvider,
   type ProviderCredentialMode,
+  type ProviderCredentialPurpose,
 } from '../constants/providerAccessControl.ts';
 import {
   deleteAdminCredentialGrant,
@@ -55,6 +56,11 @@ const MODE_LABELS: Record<ProviderCredentialMode, string> = {
   personal_only: 'المفاتيح الشخصية فقط',
   global_only: 'المفاتيح العامة فقط',
   disabled: 'معطّل بالكامل',
+};
+
+const PURPOSE_LABELS: Record<ProviderCredentialPurpose, string> = {
+  default: 'الاستخدام العام للمزود',
+  content_writing_resume: 'استئناف جلسات كتابة المحتوى',
 };
 
 const toDraft = (policy: EffectiveProviderPolicy): PolicyDraft => ({
@@ -106,9 +112,12 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
   const [role, setRole] = useState<'admin' | 'user'>('user');
   const [isActive, setIsActive] = useState(true);
   const [credentialProvider, setCredentialProvider] = useState<ProviderAccessProvider>('gemini_free');
+  const [credentialPurpose, setCredentialPurpose] = useState<ProviderCredentialPurpose>('default');
   const [credentialLabel, setCredentialLabel] = useState('');
   const [credentialKeys, setCredentialKeys] = useState('');
-  const [credentialScope, setCredentialScope] = useState<'all' | 'user'>(isUserScope ? 'user' : 'all');
+  const [credentialScope, setCredentialScope] = useState<'unassigned' | 'all' | 'user'>(
+    isUserScope ? 'user' : 'unassigned',
+  );
   const [credentialExpiry, setCredentialExpiry] = useState('');
   const [showCredentialKeys, setShowCredentialKeys] = useState(false);
 
@@ -134,7 +143,7 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
   }, [applyOverview, userId]);
 
   useEffect(() => {
-    setCredentialScope(isUserScope ? 'user' : 'all');
+    setCredentialScope(isUserScope ? 'user' : 'unassigned');
     void load();
   }, [isUserScope, load]);
 
@@ -202,11 +211,14 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
     void run('credential:new', () => saveAdminSharedCredential({
       userId,
       provider: credentialProvider,
+      purpose: credentialPurpose,
       label: credentialLabel.trim(),
       apiKeys: credentialKeys,
-      scope: credentialScope,
+      ...(credentialScope === 'unassigned' ? {} : { scope: credentialScope }),
       expiresAt: credentialExpiry ? new Date(`${credentialExpiry}T23:59:59`).toISOString() : null,
-    }), 'تم تشفير مجموعة المفاتيح وتعيينها بنجاح.').then(() => {
+    }), credentialScope === 'unassigned'
+      ? 'تم تشفير مجموعة المفاتيح وحفظها دون تعيين. لن تستخدم حتى يعيّنها المسؤول.'
+      : 'تم تشفير مجموعة المفاتيح وحفظها وتعيينها بنجاح.').then(() => {
       setCredentialLabel('');
       setCredentialKeys('');
       setCredentialExpiry('');
@@ -239,7 +251,7 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
               {isUserScope ? 'سياسة المستخدم الفعلية' : 'السياسة العامة لجميع المستخدمين'}
             </div>
             <p className="mt-1 text-xs font-semibold leading-6 text-gray-600 dark:text-gray-300">
-              المنع العام يتغلّب دائمًا على تخصيص المستخدم. لا تُعرض قيمة أي مفتاح بعد الحفظ؛ تظهر النهايات فقط.
+              هذه الشاشة هي المكان الإداري الوحيد لحفظ مفاتيح Gemini وOpenAI وFirecrawl وBrowserless وتعيينها. المنع العام يتغلّب دائمًا على تخصيص المستخدم، ولا تُعرض قيمة أي مفتاح بعد الحفظ.
             </p>
           </div>
         </div>
@@ -260,7 +272,7 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
       )}
       {!overview.encryptionConfigured && (
         <div className="border-r-4 border-red-500 bg-red-50 p-3 text-sm font-bold text-red-800 dark:bg-red-950/30 dark:text-red-200">
-          مفتاح تشفير إعدادات المزودات غير مهيأ على الخادم.
+          مفتاح تشفير البنية الخاص بخزنة المزودات غير مهيأ في بيئة الخادم.
         </div>
       )}
       {error && <div className="rounded-md bg-red-50 p-3 text-sm font-bold text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</div>}
@@ -361,15 +373,29 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
           <KeyRound size={19} className="text-[#b8922e]" />
           <div>
             <h3 className="text-base font-black text-gray-800 dark:text-gray-100">إضافة مجموعة مفاتيح مشفّرة</h3>
-            <p className="mt-1 text-xs font-semibold text-gray-500 dark:text-gray-400">يمكن تعيين المجموعة لهذا المستخدم أو لجميع المستخدمين دون نسخ السر في عدة سجلات.</p>
+            <p className="mt-1 text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">احفظ المفتاح أولًا ثم اختر من يمكنه استخدامه. الحفظ دون تعيين هو الخيار الآمن الافتراضي، ويمكن لاحقًا تعيينه لمستخدم محدد أو للجميع دون نسخ السر.</p>
           </div>
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <select value={credentialProvider} onChange={event => setCredentialProvider(event.target.value as ProviderAccessProvider)} className={inputClass}>
+          <select value={credentialProvider} onChange={event => {
+            const provider = event.target.value as ProviderAccessProvider;
+            setCredentialProvider(provider);
+            if (provider === 'firecrawl' || provider === 'browserless') setCredentialPurpose('default');
+          }} className={inputClass}>
             {PROVIDER_ACCESS_PROVIDERS.map(provider => <option key={provider} value={provider}>{PROVIDER_ACCESS_LABELS[provider]}</option>)}
           </select>
           <input value={credentialLabel} onChange={event => setCredentialLabel(event.target.value)} placeholder="اسم داخلي، مثل: فريق المحتوى" className={inputClass} />
-          <select value={credentialScope} onChange={event => setCredentialScope(event.target.value === 'user' ? 'user' : 'all')} className={inputClass}>
+          <select value={credentialPurpose} onChange={event => setCredentialPurpose(event.target.value === 'content_writing_resume' ? 'content_writing_resume' : 'default')} className={inputClass}>
+            <option value="default">{PURPOSE_LABELS.default}</option>
+            {credentialProvider !== 'firecrawl' && credentialProvider !== 'browserless' && (
+              <option value="content_writing_resume">{PURPOSE_LABELS.content_writing_resume}</option>
+            )}
+          </select>
+          <select value={credentialScope} onChange={event => {
+            const scope = event.target.value;
+            setCredentialScope(scope === 'user' ? 'user' : scope === 'all' ? 'all' : 'unassigned');
+          }} className={inputClass}>
+            <option value="unassigned">حفظ دون تعيين — غير قابل للاستخدام</option>
             {isUserScope && <option value="user">تعيين لهذا المستخدم</option>}
             <option value="all">تعيين لجميع المستخدمين</option>
           </select>
@@ -397,7 +423,7 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
         <div className="mt-3 flex justify-end">
           <button type="button" onClick={createCredential} disabled={busyKey === 'credential:new' || !overview.encryptionConfigured || !overview.schemaAvailable} className="inline-flex items-center gap-2 rounded-md bg-[#d4af37] px-4 py-2 text-sm font-black text-white disabled:opacity-50">
             {busyKey === 'credential:new' ? <LoaderCircle size={16} className="animate-spin" /> : <KeyRound size={16} />}
-            تشفير وحفظ وتعيين
+            {credentialScope === 'unassigned' ? 'تشفير وحفظ' : 'تشفير وحفظ وتعيين'}
           </button>
         </div>
       </section>
@@ -418,11 +444,12 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
                     <div>
                       <div className="font-black text-gray-800 dark:text-gray-100">{credential.label}</div>
                       <div className="mt-1 text-xs font-bold text-gray-500 dark:text-gray-400">
-                        {PROVIDER_ACCESS_LABELS[credential.provider]} · {credential.keyCount} مفاتيح · {credential.keySuffixes.map(value => `••••${value}`).join('، ')}
+                        {PROVIDER_ACCESS_LABELS[credential.provider]} · {PURPOSE_LABELS[credential.purpose]} · {credential.keyCount} مفاتيح · {credential.keySuffixes.map(value => `••••${value}`).join('، ')}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2 text-xs font-black">
                         {allGrant && <span className="rounded-full bg-blue-100 px-2 py-1 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"><Users size={12} className="me-1 inline" />الجميع</span>}
                         {userGrant && <span className="rounded-full bg-purple-100 px-2 py-1 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300"><UserCog size={12} className="me-1 inline" />هذا المستخدم</span>}
+                        {grants.length === 0 && <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">غير معيّن — لن يُستخدم</span>}
                         <span className={`rounded-full px-2 py-1 ${credential.enabled ? 'bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}`}>{credential.enabled ? 'مفعّل' : 'متوقف'}</span>
                         {credential.expiresAt && <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">ينتهي {new Date(credential.expiresAt).toLocaleDateString('ar')}</span>}
                       </div>
@@ -440,7 +467,7 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
                       {allGrant && (
                         <button type="button" onClick={() => void run(`grant-delete:${allGrant.id}`, () => deleteAdminCredentialGrant(allGrant.id, userId), 'تم إلغاء التعيين العام.')} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs font-black text-gray-600 dark:border-[#3C3C3C] dark:text-gray-300">إلغاء الجميع</button>
                       )}
-                      <button type="button" onClick={() => void run(`credential-toggle:${credential.id}`, () => saveAdminSharedCredential({ id: credential.id, userId, provider: credential.provider, label: credential.label, enabled: !credential.enabled }), credential.enabled ? 'تم إيقاف المجموعة.' : 'تم تفعيل المجموعة.')} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs font-black text-gray-600 dark:border-[#3C3C3C] dark:text-gray-300">{credential.enabled ? 'إيقاف' : 'تفعيل'}</button>
+                      <button type="button" onClick={() => void run(`credential-toggle:${credential.id}`, () => saveAdminSharedCredential({ id: credential.id, userId, provider: credential.provider, purpose: credential.purpose, label: credential.label, enabled: !credential.enabled }), credential.enabled ? 'تم إيقاف المجموعة.' : 'تم تفعيل المجموعة.')} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs font-black text-gray-600 dark:border-[#3C3C3C] dark:text-gray-300">{credential.enabled ? 'إيقاف' : 'تفعيل'}</button>
                       <button
                         type="button"
                         onClick={() => {

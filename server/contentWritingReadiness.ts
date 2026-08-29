@@ -23,6 +23,11 @@ export const CONTENT_WRITING_SCHEMA_PROBES = [
     columns: 'id,article_id,status,run_generation,attempt_count,max_attempts,eligible_at,content_writing_session_id',
   },
   {
+    id: 'writingSources',
+    table: 'article_writing_sources',
+    columns: 'id,article_id,source_type,source_role,status,enabled,content_hash,word_count',
+  },
+  {
     id: 'fullPipelineJobs',
     table: 'ai_external_analysis_jobs',
     columns: 'id,article_id,job_type,status,pipeline_parent_job_id,lease_generation,max_attempts,dead_lettered_at,dead_letter_reason',

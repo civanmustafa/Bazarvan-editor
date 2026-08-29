@@ -329,7 +329,6 @@ test('section results and coverage audits accept only known persisted IDs', asyn
     coveredIdeaIds: ['K001'],
     usedSourceChunkIds: ['C1-S001'],
     usedClaimIds: ['CL001'],
-    coveredEditorItemIds: [],
   });
 
   const audit = parseContentWritingCoverageAudit(JSON.stringify({

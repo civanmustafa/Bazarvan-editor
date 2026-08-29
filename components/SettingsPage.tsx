@@ -4,6 +4,7 @@ import {
   Baseline,
   BookOpen,
   Copy,
+  Database,
   Key,
   Languages,
   LayoutGrid,
@@ -23,10 +24,9 @@ import {
 import { useUser } from '../contexts/UserContext';
 import ExternalAnalysisDefaultCommandsSettings from './ExternalAnalysisDefaultCommandsSettings';
 import ContentWritingPromptSettings from './ContentWritingPromptSettings';
-import AdminAiProviderSecretsSettings from './AdminAiProviderSecretsSettings';
-import AdminCrawlerProviderSecretsSettings from './AdminCrawlerProviderSecretsSettings';
 import UserAiProviderSecretsSettings from './UserAiProviderSecretsSettings';
 import AdminProviderAccessSettings from './AdminProviderAccessSettings';
+import AdminCrawlerUsagePolicySettings from './AdminCrawlerUsagePolicySettings';
 import UserProviderAccessSummary from './UserProviderAccessSummary';
 import AdminArticleQuotaSettings from './AdminArticleQuotaSettings';
 import UserArticleQuotaSummary from './UserArticleQuotaSummary';
@@ -61,7 +61,13 @@ type SettingsPageProps = {
   section: string | null;
 };
 
-type SettingsSectionKey = SystemSettingKey | 'clients' | 'users' | 'crawler';
+type SettingsSectionKey = SystemSettingKey
+  | 'clients'
+  | 'users'
+  | 'crawler'
+  | 'preferences'
+  | 'account'
+  | 'data';
 
 type SettingsTab = {
   key: SettingsSectionKey;
@@ -238,7 +244,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   } = useUser();
 
   const isAdmin = currentUserRole === 'admin';
-  const selectedSection = (section || 'system') as SettingsSectionKey;
   const [settings, setSettings] = useState<SystemSettingsMap>(() => mergeSettings());
   const [secretStatus, setSecretStatus] = useState<SecretStatus>(EMPTY_SECRET_STATUS);
   const [isLoading, setIsLoading] = useState(false);
@@ -246,7 +251,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   const [error, setError] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
 
-  const tabs: SettingsTab[] = useMemo(() => [
+  const tabs: SettingsTab[] = useMemo(() => (isAdmin ? [
     { key: 'system', label: 'النظام', path: '/settings/system', icon: <Shield size={16} /> },
     { key: 'ai', label: 'الذكاء الاصطناعي', path: '/settings/ai', icon: <Key size={16} /> },
     { key: 'crawler', label: 'خدمات الزحف', path: '/settings/crawler', icon: <Radar size={16} /> },
@@ -255,8 +260,32 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     { key: 'clients', label: 'العملاء', path: '/settings/clients', icon: <Users size={16} /> },
     { key: 'users', label: 'المستخدمون', path: '/settings/users', icon: <Users size={16} /> },
     { key: 'roles', label: 'الصلاحيات', path: '/settings/roles', icon: <SlidersHorizontal size={16} /> },
-  ], []);
-  const selectedTabLabel = tabs.find(item => item.key === selectedSection)?.label || 'النظام';
+  ] : [
+    { key: 'preferences', label: 'التفضيلات', path: '/settings/preferences', icon: <SlidersHorizontal size={16} /> },
+    { key: 'account', label: 'مفاتيحي وحدودي', path: '/settings/account', icon: <Key size={16} /> },
+    { key: 'clients', label: 'عملائي', path: '/settings/clients', icon: <Users size={16} /> },
+    { key: 'data', label: 'بياناتي', path: '/settings/data', icon: <Database size={16} /> },
+  ]), [isAdmin]);
+  const requestedSection = (section || '') as SettingsSectionKey | '';
+  const selectedSection = useMemo<SettingsSectionKey>(() => {
+    if (isAdmin) {
+      return tabs.some(item => item.key === requestedSection)
+        ? requestedSection as SettingsSectionKey
+        : 'system';
+    }
+    if (requestedSection === 'ai') return 'account';
+    if (requestedSection === 'system') return 'preferences';
+    return tabs.some(item => item.key === requestedSection)
+      ? requestedSection as SettingsSectionKey
+      : 'preferences';
+  }, [isAdmin, requestedSection, tabs]);
+  const selectedTab = tabs.find(item => item.key === selectedSection) || tabs[0];
+  const selectedTabLabel = selectedTab?.label || (isAdmin ? 'النظام' : 'التفضيلات');
+
+  useEffect(() => {
+    if (!selectedTab || section === selectedTab.key) return;
+    navigateToAppPath(selectedTab.path, { replace: true });
+  }, [section, selectedTab]);
   const geminiFreeModelOptions = useMemo(() => (
     buildGeminiFreeModelOptions(secretStatus.ai.gemini.allowedModels || [])
   ), [secretStatus.ai.gemini.allowedModels]);
@@ -331,7 +360,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
 
   const renderPersonalPreferences = () => (
     <div className="space-y-6">
-      <SettingsSection title="تفضيلات المستخدم">
+      <SettingsSection title="المظهر وطريقة العمل">
+        <p className="mb-4 text-xs font-semibold leading-5 text-gray-500 dark:text-gray-400">
+          هذه الخيارات خاصة بحسابك وطريقة عرض المحرر، ولا تغيّر إعدادات بقية المستخدمين.
+        </p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div>
           <div className="mb-2 text-sm font-bold text-gray-600 dark:text-gray-300">{t.highlightStyle}</div>
@@ -419,6 +451,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
 
         </div>
       </SettingsSection>
+    </div>
+  );
+
+  const renderUserAccountSettings = () => (
+    <div className="space-y-6">
       <SettingsSection title="مفاتيح الذكاء الاصطناعي الخاصة بحسابي">
         <UserAiProviderSecretsSettings />
       </SettingsSection>
@@ -428,6 +465,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       <SettingsSection title="حصة المقالات الشهرية لحسابي">
         <UserArticleQuotaSummary />
       </SettingsSection>
+    </div>
+  );
+
+  const renderUserDataSettings = () => (
+    <div className="space-y-6">
       <DashboardDataTools />
     </div>
   );
@@ -463,7 +505,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             onChange={value => updateSetting('ai', 'geminiProEnabled', value)}
           />
           <ToggleField
-            label="السماح للمستخدمين باستخدام OpenAI المدفوع"
+            label="السماح للمستخدمين باستخدام OpenAI"
             description="يسمح ببدء الطلب عبر OpenAI. عند فشل مفاتيحه ينتقل تلقائيًا إلى Gemini Pro ثم Gemini المجاني بحسب السماح والتوفر."
             checked={Boolean(settings.ai.openAiEnabled)}
             onChange={value => updateSetting('ai', 'openAiEnabled', value)}
@@ -527,14 +569,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       </SettingsSection>
 
       {isAdmin && (
-        <SettingsSection title="السياسة العامة ومفاتيح المزودات المعيّنة">
+        <SettingsSection title="مركز المزودات والمفاتيح والصلاحيات">
           <AdminProviderAccessSettings />
-        </SettingsSection>
-      )}
-
-      {isAdmin && (
-        <SettingsSection title="مفاتيح المزودات الإدارية المشفّرة">
-          <AdminAiProviderSecretsSettings />
         </SettingsSection>
       )}
 
@@ -599,8 +635,23 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
 
   const renderCrawlerSettings = () => (
     <div className="space-y-6">
-      <SettingsSection title="مفاتيح خدمات الزحف الخارجية">
-        <AdminCrawlerProviderSecretsSettings />
+      <SettingsSection title="خدمات الزحف الخارجية">
+        <div className="rounded-md border-r-4 border-[#d4af37] bg-[#d4af37]/10 p-4 text-sm font-semibold leading-7 text-gray-700 dark:text-gray-200">
+          <div className="font-black">إدارة موحدة لمفاتيح Firecrawl وBrowserless</div>
+          <p className="mt-1 text-xs font-semibold leading-6 text-gray-600 dark:text-gray-300">
+            تُحفظ مفاتيح الزحف وتُعيّن صلاحياتها من مركز المزودات نفسه المستخدم لـ Gemini وOpenAI. لا توجد شاشة ثانية أو خزنة منفصلة لخدمات الزحف.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigateToAppPath('/settings/ai')}
+            className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md bg-[#d4af37] px-4 py-2 text-xs font-black text-white"
+          >
+            فتح مركز المزودات والمفاتيح
+          </button>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="سياسة استخدام خدمات الزحف">
+        <AdminCrawlerUsagePolicySettings />
       </SettingsSection>
     </div>
   );
@@ -746,7 +797,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   );
 
   const renderSelectedSection = () => {
-    if (!isAdmin && selectedSection !== 'users' && selectedSection !== 'clients') {
+    if (!isAdmin) {
+      if (selectedSection === 'account') return renderUserAccountSettings();
+      if (selectedSection === 'clients') return renderClientSettings();
+      if (selectedSection === 'data') return renderUserDataSettings();
       return renderPersonalPreferences();
     }
 

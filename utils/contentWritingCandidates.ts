@@ -74,9 +74,6 @@ export type ContentWritingCandidateEvaluation = {
     requiredClaimCount: number;
     usedRequiredClaimCount: number;
     claimCoveragePercent: number;
-    requiredEditorItemCount: number;
-    coveredRequiredEditorItemCount: number;
-    editorSourceCoveragePercent: number;
     blockedClaimCount: number;
     maximumPriorSimilarity: number;
     acceptedFaqCount: number | null;
@@ -241,7 +238,6 @@ export const evaluateContentWritingCandidate = (options: {
   metadata?: Record<string, unknown>;
   requiredIdeaIds?: readonly string[];
   requiredClaimIds?: readonly string[];
-  requiredEditorItemIds?: readonly string[];
   blockedClaimIds?: readonly string[];
   targetWordRange?: ContentWritingWordRange | null;
   comparisonTexts?: readonly string[];
@@ -254,24 +250,17 @@ export const evaluateContentWritingCandidate = (options: {
   );
   const requiredIdeaIds = Array.from(new Set(options.requiredIdeaIds || []));
   const requiredClaimIds = Array.from(new Set(options.requiredClaimIds || []));
-  const requiredEditorItemIds = Array.from(new Set(options.requiredEditorItemIds || []));
   const blockedClaimIds = new Set(options.blockedClaimIds || []);
   const coveredIdeaIds = new Set(coverage.coveredIdeaIds);
   const usedClaimIds = new Set(coverage.usedClaimIds);
-  const coveredEditorItemIds = new Set(coverage.coveredEditorItemIds);
   const coveredRequiredIdeaCount = requiredIdeaIds.filter(id => coveredIdeaIds.has(id)).length;
   const usedRequiredClaimCount = requiredClaimIds.filter(id => usedClaimIds.has(id)).length;
   const blockedClaimCount = coverage.usedClaimIds.filter(id => blockedClaimIds.has(id)).length;
-  const coveredRequiredEditorItemCount = requiredEditorItemIds
-    .filter(id => coveredEditorItemIds.has(id)).length;
   const ideaCoveragePercent = requiredIdeaIds.length > 0
     ? Math.round((coveredRequiredIdeaCount / requiredIdeaIds.length) * 100)
     : 100;
   const claimCoveragePercent = requiredClaimIds.length > 0
     ? Math.round((usedRequiredClaimCount / requiredClaimIds.length) * 100)
-    : 100;
-  const editorSourceCoveragePercent = requiredEditorItemIds.length > 0
-    ? Math.round((coveredRequiredEditorItemCount / requiredEditorItemIds.length) * 100)
     : 100;
   const outputText = toText(options.outputText);
   const wordCount = countContentWritingTargetWords(outputText);
@@ -290,12 +279,6 @@ export const evaluateContentWritingCandidate = (options: {
     hardFailures.push('candidate_missing_required_ideas');
   }
   if (blockedClaimCount > 0) hardFailures.push('candidate_uses_blocked_claim');
-  if (
-    requiredEditorItemIds.length > 0
-    && coveredRequiredEditorItemCount < requiredEditorItemIds.length
-  ) {
-    hardFailures.push('candidate_missing_required_editor_source');
-  }
   if (options.requireFaqCandidates && (!acceptedFaqCount || acceptedFaqCount < 1)) {
     hardFailures.push('candidate_has_no_independent_faq');
   }
@@ -318,7 +301,6 @@ export const evaluateContentWritingCandidate = (options: {
   score -= hardFailures.length * 35;
   score -= Math.round((100 - ideaCoveragePercent) * 0.35);
   score -= Math.round((100 - claimCoveragePercent) * 0.08);
-  score -= Math.round((100 - editorSourceCoveragePercent) * 0.45);
   score -= wordRangeResult.penalty;
   score -= maximumPriorSimilarity >= 0.72
     ? Math.round((maximumPriorSimilarity - 0.7) * 55)
@@ -350,9 +332,6 @@ export const evaluateContentWritingCandidate = (options: {
       requiredClaimCount: requiredClaimIds.length,
       usedRequiredClaimCount,
       claimCoveragePercent,
-      requiredEditorItemCount: requiredEditorItemIds.length,
-      coveredRequiredEditorItemCount,
-      editorSourceCoveragePercent,
       blockedClaimCount,
       maximumPriorSimilarity: Number(maximumPriorSimilarity.toFixed(3)),
       acceptedFaqCount,
@@ -369,7 +348,6 @@ export const selectBestContentWritingCandidate = <
   Number(right.evaluation.passedHardGates) - Number(left.evaluation.passedHardGates)
   || right.evaluation.score - left.evaluation.score
   || right.evaluation.metrics.ideaCoveragePercent - left.evaluation.metrics.ideaCoveragePercent
-  || right.evaluation.metrics.editorSourceCoveragePercent - left.evaluation.metrics.editorSourceCoveragePercent
   || right.evaluation.metrics.claimCoveragePercent - left.evaluation.metrics.claimCoveragePercent
   || left.evaluation.hardFailures.length - right.evaluation.hardFailures.length
   || left.evaluation.warnings.length - right.evaluation.warnings.length

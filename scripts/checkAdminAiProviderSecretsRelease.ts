@@ -6,6 +6,7 @@ import {
 } from '../constants/adminAiProviderSecrets.ts';
 import { USER_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/userAiProviderSecrets.ts';
 import { PROVIDER_CREDENTIAL_VAULT_MIGRATION } from '../server/providerCredentialVault.ts';
+import { PROVIDER_EXPLICIT_GRANTS_MIGRATION } from '../constants/providerAccessControl.ts';
 
 const root = process.cwd();
 for (const migration of [
@@ -13,6 +14,7 @@ for (const migration of [
   USER_AI_PROVIDER_SECRETS_MIGRATION,
   CONTENT_WRITING_RESUME_SECRET_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+  PROVIDER_EXPLICIT_GRANTS_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
@@ -27,6 +29,7 @@ for (const marker of [
   USER_AI_PROVIDER_SECRETS_MIGRATION,
   CONTENT_WRITING_RESUME_SECRET_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+  PROVIDER_EXPLICIT_GRANTS_MIGRATION,
   'AI_SETTINGS_ENCRYPTION_KEY',
   'provider_credentials_vault',
   'لا يوجد أي fallback لمفاتيح المزوّدين من بيئة Hostinger',
@@ -52,6 +55,53 @@ for (const example of ['.env.example', '.env.production.example', 'deploy/env.se
   }
 }
 
+const providerAccessSettings = await readFile(
+  path.join(root, 'components', 'AdminProviderAccessSettings.tsx'),
+  'utf8',
+);
+for (const marker of [
+  'حفظ دون تعيين',
+  'content_writing_resume',
+  'saveAdminSharedCredential',
+  'غير معيّن — لن يُستخدم',
+]) {
+  if (!providerAccessSettings.includes(marker)) {
+    throw new Error(`Unified provider settings are missing the explicit-grant marker: ${marker}`);
+  }
+}
+
+const settingsPage = await readFile(path.join(root, 'components', 'SettingsPage.tsx'), 'utf8');
+if (!settingsPage.includes('مركز المزودات والمفاتيح والصلاحيات')) {
+  throw new Error('The unified provider center is missing from the settings page.');
+}
+if (/AdminAiProviderSecretsSettings|AdminCrawlerProviderSecretsSettings/.test(settingsPage)) {
+  throw new Error('A retired administrator provider-key screen is still mounted.');
+}
+
+const componentNames = new Set(await readdir(path.join(root, 'components')));
+const utilityNames = new Set(await readdir(path.join(root, 'utils')));
+for (const legacyComponent of [
+  'AdminAiProviderSecretsSettings.tsx',
+  'AdminCrawlerProviderSecretsSettings.tsx',
+]) {
+  if (componentNames.has(legacyComponent)) {
+    throw new Error(`Retired administrator provider-key screen still exists: ${legacyComponent}`);
+  }
+}
+for (const legacyUtility of ['adminAiProviderSecrets.ts', 'adminCrawlerProviderSecrets.ts']) {
+  if (utilityNames.has(legacyUtility)) {
+    throw new Error(`Retired administrator provider-key client still exists: ${legacyUtility}`);
+  }
+}
+
+const userProviderSettings = await readFile(
+  path.join(root, 'components', 'UserAiProviderSecretsSettings.tsx'),
+  'utf8',
+);
+if (/مفاتيح الإدارة وهوستينجر|OpenAI \(ChatGPT API\) المدفوعة/.test(userProviderSettings)) {
+  throw new Error('Personal provider settings still describe the retired Hostinger fallback or paid-only OpenAI keys.');
+}
+
 const serverBundle = await readFile(path.join(root, 'server-dist', 'server.mjs'), 'utf8');
 for (const marker of [
   '/api/admin/ai-provider-secrets',
@@ -71,6 +121,7 @@ console.log(JSON.stringify({
     USER_AI_PROVIDER_SECRETS_MIGRATION,
     CONTENT_WRITING_RESUME_SECRET_MIGRATION,
     PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+    PROVIDER_EXPLICIT_GRANTS_MIGRATION,
   ],
   readinessEndpoint: '/readyz',
 }, null, 2));

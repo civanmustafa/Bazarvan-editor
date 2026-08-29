@@ -30,12 +30,12 @@ const PROVIDERS: Array<{
   {
     id: 'gemini_paid',
     title: 'مفاتيح Gemini المدفوعة',
-    description: 'تُستخدم أولًا عند اختيار Gemini Pro، ثم ينتقل النظام إلى مفاتيح الإدارة وهوستينجر عند فشلها.',
+    description: 'تُستخدم أولًا عند اختيار Gemini Pro، ثم يطبّق النظام سياسة المسؤول على المفاتيح المشتركة المعيّنة والمزودات البديلة.',
   },
   {
-    id: 'openai_paid',
-    title: 'مفاتيح OpenAI (ChatGPT API) المدفوعة',
-    description: 'تُستخدم أولًا عند اختيار OpenAI، ثم ينتقل النظام إلى مفاتيح الإدارة وهوستينجر عند فشلها.',
+    id: 'openai',
+    title: 'مفاتيح OpenAI (مجانية أو مدفوعة)',
+    description: 'يمكنك حفظ أي مفتاح OpenAI API صالح لحسابك، سواء كان ضمن رصيد مجاني أو خطة مدفوعة. عند فشله يطبّق النظام سياسة المسؤول على المفاتيح المشتركة والمزودات البديلة.',
   },
   {
     id: 'firecrawl',
@@ -63,14 +63,14 @@ const UserAiProviderSecretsSettings: React.FC = () => {
   const [inputs, setInputs] = useState<Record<UserAiSecretProvider, string>>({
     gemini_free: '',
     gemini_paid: '',
-    openai_paid: '',
+    openai: '',
     firecrawl: '',
     browserless: '',
   });
   const [visible, setVisible] = useState<Record<UserAiSecretProvider, boolean>>({
     gemini_free: false,
     gemini_paid: false,
-    openai_paid: false,
+    openai: false,
     firecrawl: false,
     browserless: false,
   });
@@ -164,7 +164,7 @@ const UserAiProviderSecretsSettings: React.FC = () => {
         <div className="border-r-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
           {!overview?.schemaAvailable
             ? 'يجب تطبيق ترحيل مفاتيح المستخدمين الجديد على قاعدة البيانات قبل الحفظ.'
-            : 'يجب إعداد AI_SETTINGS_ENCRYPTION_KEY في هوستينجر قبل حفظ المفاتيح.'}
+            : 'يجب أن يهيئ المسؤول مفتاح تشفير البنية AI_SETTINGS_ENCRYPTION_KEY في بيئة الخادم قبل حفظ مفاتيح المزودات.'}
         </div>
       )}
       {error && <div className="text-sm font-bold text-red-700 dark:text-red-300">{error}</div>}

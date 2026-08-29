@@ -172,7 +172,7 @@ const statusTone = (status: CompetitorDiscoveryRow['status']): string => {
 const requestErrorMessage = (error: unknown, isArabic: boolean, fallback: string): string => {
   if (isArabic && error instanceof CompetitorDiscoveryRequestError) {
     const labels: Record<string, string> = {
-      firecrawl_not_configured: 'أضف مفتاح Firecrawl من إعدادات المسؤول ← خدمات الزحف، أو من بيئة الخادم.',
+      firecrawl_not_configured: 'أضف مفتاح Firecrawl من الإعدادات ← الذكاء الاصطناعي ← مركز المزودات، ثم عيّنه للمستخدم أو للجميع.',
       firecrawl_quota_exceeded: 'تم استنفاد حصة خدمة السحب الحالية. راجع الرصيد أو أعد المحاولة لاحقًا.',
       competitor_extraction_already_active: 'توجد مهمة سحب منافسين نشطة لهذه المقالة بالفعل.',
       competitor_selection_limit: `يمكن اختيار ${MAX_ARTICLE_COMPETITORS} مواقع كحد أقصى.`,
@@ -651,7 +651,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
       {!state.providerConfigured && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] font-bold text-amber-800 dark:border-amber-900/40 dark:bg-amber-500/10 dark:text-amber-300">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          <span>{isArabic ? 'يجب إعداد مفتاح Firecrawl من إعدادات المسؤول أو بيئة الخادم أولًا.' : 'Firecrawl must be configured in admin crawler settings or the server environment.'}</span>
+          <span>{isArabic ? 'يجب حفظ مفتاح Firecrawl في مركز المزودات وتعيينه للمستخدم أو للجميع أولًا.' : 'Firecrawl must be saved in the provider center and explicitly assigned to this user or everyone.'}</span>
         </div>
       )}
 

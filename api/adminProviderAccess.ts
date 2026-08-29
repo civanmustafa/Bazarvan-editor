@@ -217,6 +217,7 @@ const handlePut = async (
     const credential = await saveSharedProviderCredential({
       id: normalizeOptionalUuid(body.id, 'credentialId'),
       provider: body.provider,
+      purpose: body.purpose,
       label: body.label,
       apiKeys: body.apiKeys,
       enabled: body.enabled,

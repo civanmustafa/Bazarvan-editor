@@ -5,6 +5,7 @@ import {
   __userAiProviderSecretsTestUtils,
   assertPersonalCredentialOwner,
   deleteUserAiProviderKeys,
+  normalizeUserAiSecretProvider,
   readUserAiProviderSecretsOverview,
   resolveUserAiProviderKeys,
   saveUserAiProviderKeys,
@@ -34,6 +35,11 @@ test('personal AI keys normalize lists, remove duplicates, and reject invalid va
     () => __userAiProviderSecretsTestUtils.normalizeApiKeyList('too-short'),
     /between 20 and 512 characters/i,
   );
+});
+
+test('OpenAI personal credentials use the canonical provider while accepting the legacy identifier', () => {
+  assert.equal(normalizeUserAiSecretProvider('openai'), 'openai');
+  assert.equal(normalizeUserAiSecretProvider('openai_paid'), 'openai');
 });
 
 test('personal AI key lists use authenticated encryption bound to owner and provider', async () => {

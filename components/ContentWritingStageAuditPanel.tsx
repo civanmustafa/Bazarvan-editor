@@ -26,10 +26,6 @@ import {
   formatAiKeySuffix,
 } from '../utils/aiKeyUsageFeedback';
 import type { ContentWritingStep } from '../utils/contentWritingSessions';
-import {
-  evaluateContentWritingEditorSourceCoverage,
-  normalizeContentWritingEditorSourceLedger,
-} from '../utils/contentWritingEditorSource';
 
 type ContentWritingStageAuditPanelProps = {
   step: ContentWritingStep;
@@ -119,7 +115,6 @@ const stageInputExplanation = (
               : []),
           'تستقبل المرحلة السياق المختصر للجلسة، وفيه مصفوفة المعرفة وسجل المصادر والادعاءات وسجل ذكاء العبارات.',
           'تُرفق معها النصوص الأصلية للمقتطفات المرتبطة بهذا القسم فقط، إضافة إلى الأفكار والادعاءات المستهدفة.',
-          'تُرفق عناصر نص المحرر المخصصة لهذا القسم بوصفها متطلبات دلالية إلزامية، ويُرفض المرشح الذي يهمل أحدها.',
           'تطابق العبارة في الناتج يحدد موضع ظهورها، أما مجرد إرسالها فلا يعني أنها استُخدمت.',
         ]
       : [
@@ -130,7 +125,6 @@ const stageInputExplanation = (
               : []),
           'The stage receives compact session context containing the knowledge, source, claim, and phrase-intelligence registries.',
           'Only original excerpts related to this section are attached, together with its targeted ideas and claims.',
-          'Editor-source items assigned to this section are mandatory semantic requirements; candidates that miss one are rejected.',
           'An output match shows where a phrase appeared; attachment alone does not prove use.',
         ];
   }
@@ -159,12 +153,10 @@ const stageInputExplanation = (
     return isArabic
       ? [
           'تقرأ المرحلة المسودة المكتملة وتقارنها بالمخطط وبجميع سجلات المعرفة والعبارات.',
-          'تفحص سجل نص المحرر مستقلًا وتحوّل كل عنصر غير مغطى إلى إصلاح موجّه للقسم المسؤول عنه.',
           'لا تعيد كتابة المقالة؛ بل تُخرج قائمة بالنواقص والإصلاحات المحددة.',
         ]
       : [
           'The stage reads the completed draft and compares it with the outline and all knowledge and phrase registries.',
-          'It audits the editor-source ledger separately and turns every missing item into a targeted section repair.',
           'It does not rewrite the article; it returns specific gaps and repairs.',
         ];
   }
@@ -335,59 +327,6 @@ const ContentWritingStageAuditPanel: React.FC<ContentWritingStageAuditPanelProps
     'ignore',
   ];
   const locale = isArabic ? 'ar' : 'en';
-  const editorSourceLedger = useMemo(
-    () => normalizeContentWritingEditorSourceLedger(contextSnapshot.editorSourceLedger),
-    [contextSnapshot.editorSourceLedger],
-  );
-  const sectionMetadata = isRecord(step.metadata.section) ? step.metadata.section : {};
-  const repairMetadata = isRecord(step.metadata.repair) ? step.metadata.repair : {};
-  const requiredEditorItemIds = useMemo(() => {
-    const values = step.stepType === 'section'
-      ? sectionMetadata.requiredEditorItemIds
-      : step.stepType === 'section_repair'
-        ? repairMetadata.editorItemIds
-        : [];
-    return Array.isArray(values)
-      ? Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)))
-      : [];
-  }, [repairMetadata.editorItemIds, sectionMetadata.requiredEditorItemIds, step.stepType]);
-  const editorCoverageMetadata = isRecord(step.metadata.editorSourceCoverageAudit)
-    ? step.metadata.editorSourceCoverageAudit
-    : {};
-  const sectionCoverageMetadata = isRecord(step.metadata.sectionCoverage)
-    ? step.metadata.sectionCoverage
-    : {};
-  const declaredEditorItemIds = Array.isArray(sectionCoverageMetadata.coveredEditorItemIds)
-    ? sectionCoverageMetadata.coveredEditorItemIds.map(value => String(value || '').trim()).filter(Boolean)
-    : [];
-  const editorSourceCoverage = useMemo(() => evaluateContentWritingEditorSourceCoverage({
-    outputText: step.outputText,
-    items: editorSourceLedger.items,
-    requiredItemIds: requiredEditorItemIds,
-    declaredItemIds: declaredEditorItemIds,
-  }), [declaredEditorItemIds, editorSourceLedger.items, requiredEditorItemIds, step.outputText]);
-  const persistedCoveredEditorItemIds = Array.isArray(editorCoverageMetadata.coveredItemIds)
-    ? editorCoverageMetadata.coveredItemIds.map(value => String(value || '').trim()).filter(Boolean)
-    : editorSourceCoverage.coveredItemIds;
-  const persistedMissingEditorItemIds = Array.isArray(editorCoverageMetadata.missingItemIds)
-    ? editorCoverageMetadata.missingItemIds.map(value => String(value || '').trim()).filter(Boolean)
-    : editorSourceCoverage.missingItemIds;
-  const editorSourceCoveragePercent = Number.isFinite(Number(editorCoverageMetadata.coveragePercent))
-    ? Math.max(0, Math.min(100, Math.round(Number(editorCoverageMetadata.coveragePercent))))
-    : editorSourceCoverage.coveragePercent;
-  const proseEditorCoverageStep = step.stepType === 'section' || step.stepType === 'section_repair';
-  const outlineMetadata = isRecord(step.metadata.outline) ? step.metadata.outline : {};
-  const outlineSections = Array.isArray(outlineMetadata.sections)
-    ? outlineMetadata.sections.filter(isRecord)
-    : [];
-  const getMappedEditorSectionTitle = (itemId: string): string => {
-    const section = outlineSections.find(candidate => (
-      Array.isArray(candidate.requiredEditorItemIds)
-      && candidate.requiredEditorItemIds.some(value => String(value || '').trim() === itemId)
-    ));
-    return section ? String(section.title || '').trim() : '';
-  };
-
   const copyAudit = async () => {
     const lines = [
       `${isArabic ? 'المرحلة' : 'Stage'}: ${step.title} (#${step.ordinal})`,
@@ -407,11 +346,6 @@ const ContentWritingStageAuditPanel: React.FC<ContentWritingStageAuditPanelProps
         )),
         '',
       ]),
-      ...(editorSourceLedger.enabled ? [
-        isArabic ? 'سجل نص المحرر الإلزامي:' : 'Mandatory editor-source ledger:',
-        ...editorSourceLedger.items.map(item => `${item.id} | ${item.kind} | ${item.text}`),
-        '',
-      ] : []),
     ];
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
@@ -476,112 +410,6 @@ const ContentWritingStageAuditPanel: React.FC<ContentWritingStageAuditPanelProps
             );
           })}
         </div>
-
-        {editorSourceLedger.enabled && (
-          <details
-            open={proseEditorCoverageStep && requiredEditorItemIds.length <= 8}
-            className="overflow-hidden rounded-md border border-blue-200 bg-white dark:border-blue-900/50 dark:bg-[#252525]"
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2.5 py-2 font-black text-blue-800 dark:text-blue-200">
-              <span className="flex items-center gap-2">
-                <FileInput size={14} />
-                {isArabic ? 'سجل الاعتماد الإلزامي على نص المحرر' : 'Mandatory editor-source ledger'}
-              </span>
-              <span className="rounded bg-blue-100 px-2 py-1 text-[9px] dark:bg-blue-900/30">
-                {editorSourceLedger.itemCount.toLocaleString(locale)} {isArabic ? 'عنصرًا' : 'items'}
-              </span>
-            </summary>
-            <div className="space-y-2 border-t border-blue-100 p-2.5 dark:border-blue-900/40">
-              <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4">
-                {[
-                  [editorSourceLedger.sourceWordCount, isArabic ? 'كلمات النص المثبّت' : 'Snapshot words'],
-                  [editorSourceLedger.itemCount, isArabic ? 'العناصر الإلزامية' : 'Mandatory items'],
-                  [requiredEditorItemIds.length, isArabic ? 'مخصصة لهذه المرحلة' : 'Assigned here'],
-                  [proseEditorCoverageStep ? editorSourceCoveragePercent : 100, isArabic ? 'تغطية المرحلة %' : 'Stage coverage %'],
-                ].map(([value, label]) => (
-                  <div key={String(label)} className="rounded bg-blue-50 p-2 text-center dark:bg-blue-900/15">
-                    <div className="font-black text-blue-900 dark:text-blue-100">{Number(value).toLocaleString(locale)}</div>
-                    <div className="mt-0.5 text-[9px] font-bold text-blue-700 dark:text-blue-300">{String(label)}</div>
-                  </div>
-                ))}
-              </div>
-              <p className="rounded bg-gray-50 p-2 text-[10px] font-bold leading-5 text-gray-700 dark:bg-[#1F1F1F] dark:text-gray-200">
-                {isArabic
-                  ? `ثُبتت هذه النسخة عند بدء الجلسة (${editorSourceLedger.fingerprint}). تُحفظ جميع العناصر، ويجوز إعادة صياغتها أو دمج المتشابه منها، لكن لا يجوز إسقاط معناها.`
-                  : `This snapshot was frozen when the session started (${editorSourceLedger.fingerprint}). Every item is retained; wording may change and duplicates may merge, but meaning may not be dropped.`}
-              </p>
-              {proseEditorCoverageStep && requiredEditorItemIds.length > 0 ? (
-                <div className="space-y-1.5">
-                  {editorSourceLedger.items
-                    .filter(item => requiredEditorItemIds.includes(item.id))
-                    .map(item => {
-                      const covered = persistedCoveredEditorItemIds.includes(item.id);
-                      return (
-                        <article key={item.id} className={`rounded border p-2.5 ${covered
-                          ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-900/15'
-                          : 'border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-900/15'}`}>
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[9px] font-black text-gray-600 dark:bg-[#333] dark:text-gray-200">{item.id}</span>
-                              <span className="text-[9px] font-black text-gray-500">{item.kind}</span>
-                            </div>
-                            <span className={`text-[9px] font-black ${covered ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
-                              {covered
-                                ? (isArabic ? 'غُطي معناه' : 'Meaning covered')
-                                : (isArabic ? 'غير مغطى' : 'Missing')}
-                            </span>
-                          </div>
-                          {item.heading && <div className="mt-1 font-black text-gray-800 dark:text-gray-100">{item.heading}</div>}
-                          <p className="mt-1 text-[10px] font-bold leading-5 text-gray-700 dark:text-gray-200">{item.text}</p>
-                        </article>
-                      );
-                    })}
-                </div>
-              ) : (
-                <div className="rounded bg-blue-50 p-2 text-[10px] font-bold leading-5 text-blue-900 dark:bg-blue-900/15 dark:text-blue-100">
-                  {isArabic
-                    ? 'هذه المرحلة ترى سجل نص المحرر ضمن سياق الجلسة، لكن التغطية التنفيذية موزعة على أقسام المتن وتُراجع في مرحلة تدقيق اكتمال التغطية.'
-                    : 'This stage can read the editor ledger in session context; execution coverage is assigned to body sections and verified by the coverage audit.'}
-                </div>
-              )}
-              {proseEditorCoverageStep && persistedMissingEditorItemIds.length > 0 && (
-                <div className="rounded bg-red-50 p-2 text-[10px] font-black text-red-800 dark:bg-red-900/15 dark:text-red-200">
-                  {isArabic ? 'عناصر مفقودة' : 'Missing items'}: {persistedMissingEditorItemIds.join('، ')}
-                </div>
-              )}
-              <details className="overflow-hidden rounded border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
-                <summary className="cursor-pointer list-none px-2.5 py-2 text-[10px] font-black text-gray-700 dark:text-gray-200">
-                  {isArabic ? 'قراءة السجل الكامل المثبّت من المحرر' : 'Review the complete frozen editor ledger'}
-                </summary>
-                <div className="max-h-96 space-y-1.5 overflow-y-auto border-t border-gray-100 p-2 dark:border-[#3C3C3C]">
-                  {editorSourceLedger.items.map(item => {
-                    const mappedSection = getMappedEditorSectionTitle(item.id);
-                    const assignedHere = requiredEditorItemIds.includes(item.id);
-                    return (
-                      <article key={`all-${item.id}`} className="rounded bg-gray-50 p-2 text-[10px] dark:bg-[#252525]">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="rounded bg-white px-1.5 py-0.5 font-mono text-[9px] font-black text-gray-600 dark:bg-[#333] dark:text-gray-200">{item.id}</span>
-                          <span className="font-black text-gray-500">{item.kind}</span>
-                          {assignedHere && (
-                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-black text-blue-700 dark:bg-blue-900/30 dark:text-blue-200">
-                              {isArabic ? 'مخصص لهذه المرحلة' : 'Assigned here'}
-                            </span>
-                          )}
-                          {mappedSection && (
-                            <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[9px] font-black text-violet-700 dark:bg-violet-900/30 dark:text-violet-200">
-                              {isArabic ? 'القسم' : 'Section'}: {mappedSection}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-1 font-bold leading-5 text-gray-700 dark:text-gray-200">{item.text}</div>
-                      </article>
-                    );
-                  })}
-                </div>
-              </details>
-            </div>
-          </details>
-        )}
 
         <details className="overflow-hidden rounded-md border border-gray-200 bg-white dark:border-[#3C3C3C] dark:bg-[#252525]">
           <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-2 font-black text-gray-700 dark:text-gray-200">

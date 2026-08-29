@@ -89,9 +89,7 @@ const handleUserAiProviderSecretsRequest = async (req: any): Promise<ApiResult> 
     });
     return readOverviewResult(principal.userId);
   }
-  const accessProvider: ProviderAccessProvider = provider === 'openai_paid'
-    ? 'openai'
-    : provider;
+  const accessProvider: ProviderAccessProvider = provider;
   const policy = await resolveEffectiveProviderPolicy(principal.userId, accessProvider);
   if (!policy.enabled
       || !policy.allowPersonalKeys

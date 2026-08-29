@@ -275,7 +275,7 @@ const getFirecrawlConfiguration = async (
   const credential = await resolveCrawlerProviderCredential('firecrawl', userId);
   if (!credential) {
     throw new FirecrawlCompetitorError({
-      message: 'Firecrawl API key is not configured in administrator crawler settings or the server environment.',
+      message: 'No Firecrawl key is authorized for this user in the encrypted dashboard vault.',
       status: 503,
       code: 'firecrawl_not_configured',
       retryable: true,

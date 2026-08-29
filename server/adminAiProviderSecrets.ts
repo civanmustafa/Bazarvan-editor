@@ -19,7 +19,6 @@ import {
 } from './providerCredentialVault.ts';
 import {
   resolveProviderCredentialPlan,
-  saveCredentialGrant,
 } from './providerAccessControl.ts';
 import { resolveUserAiProviderKeys } from './userAiProviderSecrets.ts';
 
@@ -141,7 +140,7 @@ const getAdminSecretVaultIdentity = (
 };
 
 const toUserProvider = (provider: ProviderAccessProvider): UserAiSecretProvider => (
-  provider === 'openai' ? 'openai_paid' : provider
+  provider
 );
 
 const normalizeApiKey = (value: unknown): string => {
@@ -304,7 +303,7 @@ export const saveAdminAiProviderSecret = async (options: {
       'AI_SECRET_VALUE_REQUIRED',
     );
   }
-  const row = await saveProviderCredentialVaultRow({
+  await saveProviderCredentialVaultRow({
     id: existing?.id,
     vaultKey: identity.vaultKey,
     credentialType: 'shared',
@@ -315,15 +314,6 @@ export const saveAdminAiProviderSecret = async (options: {
     enabled: typeof options.enabled === 'boolean' ? options.enabled : existing?.enabled ?? true,
     updatedBy: options.updatedBy,
   });
-  if (!existing) {
-    await saveCredentialGrant({
-      credentialId: row.id,
-      scope: 'all',
-      actorId: options.updatedBy,
-      priority: identity.purpose === 'content_writing_resume' ? 50 : 100,
-      enabled: true,
-    });
-  }
 };
 
 export const deleteAdminAiProviderSecret = async (

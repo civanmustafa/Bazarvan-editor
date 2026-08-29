@@ -1,7 +1,7 @@
 export const USER_AI_SECRET_PROVIDERS = [
   'gemini_free',
   'gemini_paid',
-  'openai_paid',
+  'openai',
   'firecrawl',
   'browserless',
 ] as const;

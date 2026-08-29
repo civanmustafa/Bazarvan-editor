@@ -8,6 +8,13 @@ export const PROVIDER_ACCESS_PROVIDERS = [
 
 export type ProviderAccessProvider = (typeof PROVIDER_ACCESS_PROVIDERS)[number];
 
+export const PROVIDER_CREDENTIAL_PURPOSES = [
+  'default',
+  'content_writing_resume',
+] as const;
+
+export type ProviderCredentialPurpose = (typeof PROVIDER_CREDENTIAL_PURPOSES)[number];
+
 export const PROVIDER_CREDENTIAL_MODES = [
   'personal_first',
   'assigned_first',
@@ -20,6 +27,8 @@ export const PROVIDER_CREDENTIAL_MODES = [
 export type ProviderCredentialMode = (typeof PROVIDER_CREDENTIAL_MODES)[number];
 
 export const PROVIDER_ACCESS_MIGRATION = '20260827000000_provider_access_control.sql';
+export const PROVIDER_EXPLICIT_GRANTS_MIGRATION =
+  '20260829040000_provider_credentials_explicit_grants.sql';
 
 export const PROVIDER_ACCESS_LABELS: Record<ProviderAccessProvider, string> = {
   gemini_free: 'Gemini المجاني',
@@ -40,4 +49,3 @@ export const isProviderCredentialMode = (value: unknown): value is ProviderCrede
   typeof value === 'string'
   && PROVIDER_CREDENTIAL_MODES.includes(value as ProviderCredentialMode)
 );
-

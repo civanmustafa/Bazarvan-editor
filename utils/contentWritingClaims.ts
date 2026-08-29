@@ -230,19 +230,31 @@ const buildSourceRegistry = (
     const category = assessment.category;
     const freshness = assessment.freshness;
     const inspectedUrl = inspectSourceUrl(sourceChunks.find(chunk => chunk.url)?.url || '');
+    const explicitWritingRole = sourceChunks.find(chunk => chunk.sourceKind === 'writing_source')?.sourceRole;
+    const usePolicy = explicitWritingRole === 'primary'
+      ? 'primary_support'
+      : explicitWritingRole === 'supporting'
+        ? 'contextual_support'
+        : deriveSourceUsePolicy(category, freshness, inspectedUrl.valid);
+    const isRawWritingSource = sourceChunks.some(chunk => (
+      chunk.sourceKind === 'writing_source' && !chunk.url
+    ));
     return {
       id: `SRC${assessment.competitorNumber}`,
       competitorNumber: assessment.competitorNumber,
       title: sourceChunks.find(chunk => chunk.title)?.title || '',
       url: inspectedUrl.url,
       hostname: inspectedUrl.hostname,
-      validUrl: inspectedUrl.valid,
-      validationIssues: inspectedUrl.issues,
+      validUrl: inspectedUrl.valid || isRawWritingSource,
+      validationIssues: isRawWritingSource ? [] : inspectedUrl.issues,
       chunkIds: sourceChunks.map(chunk => chunk.id),
       category,
       freshness,
-      usePolicy: deriveSourceUsePolicy(category, freshness, inspectedUrl.valid),
-      assessmentNotes: assessment.assessmentNotes,
+      usePolicy,
+      assessmentNotes: [
+        assessment.assessmentNotes,
+        ...sourceChunks.map(chunk => chunk.focusInstructions || '').filter(Boolean),
+      ].filter(Boolean).join(' | ').slice(0, 800),
       supportedClaimIds: claims
         .filter(claim => claim.competitorNumbers.includes(assessment.competitorNumber))
         .map(claim => claim.id),

@@ -5,7 +5,10 @@ import {
   randomBytes,
   randomUUID,
 } from 'node:crypto';
-import type { ProviderAccessProvider } from '../constants/providerAccessControl.ts';
+import type {
+  ProviderAccessProvider,
+  ProviderCredentialPurpose,
+} from '../constants/providerAccessControl.ts';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 
 export const PROVIDER_CREDENTIAL_VAULT_TABLE = 'provider_credentials_vault';
@@ -13,7 +16,7 @@ export const PROVIDER_CREDENTIAL_VAULT_MIGRATION =
   '20260829030000_provider_credential_vault.sql';
 
 export type ProviderCredentialVaultType = 'personal' | 'shared';
-export type ProviderCredentialVaultPurpose = 'default' | 'content_writing_resume';
+export type ProviderCredentialVaultPurpose = ProviderCredentialPurpose;
 export type ProviderCredentialVaultPayloadFormat = 'json_list' | 'single';
 export type ProviderCredentialVaultKeySource =
   | 'vault'

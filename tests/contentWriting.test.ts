@@ -42,7 +42,6 @@ const createReadyArticle = (competitorContents: string[]) => ({
   articleId: 'article-1',
   title: 'عنوان المقالة',
   language: 'ar',
-  articleText: 'نص المقالة الحالي.',
   keywords: {
     primary: 'الكلمة الأساسية',
     secondaries: ['صيغة بديلة'],
@@ -185,14 +184,57 @@ test('content writing excludes a competitor carrying the dual extraction failure
   assert.doesNotMatch(bundle.messages.map((message: { content: string }) => message.content).join('\n'), /\[تعذر استخراج محتوى المنافس\]/);
 });
 
-test('content writing can start from an empty article body', async () => {
+test('content writing never requires or includes current editor body text', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
-  input.articleText = '';
 
   const bundle = buildContentWritingPromptBundle(input);
   assert.equal(bundle.ready, true);
-  assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'article_text'));
+  assert.equal(Object.prototype.hasOwnProperty.call(bundle.variables, 'article_text'), false);
+  assert.doesNotMatch(bundle.messages.map((message: { content: string }) => message.content).join('\n'), /current_article_text|نص المقالة الحالي/);
+});
+
+test('content writing indexes URL/raw references with primary as the default role', async () => {
+  const { buildContentWritingPromptBundle } = await importContentWriting();
+  const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
+  Object.assign(input, {
+    writingSources: [{
+      id: 'reference-1',
+      title: 'مصدر خام أساسي',
+      content: 'معلومة مرجعية مهمة '.repeat(120),
+      sourceRole: 'primary',
+      focusInstructions: 'ركز على الخطوات العملية.',
+      enabled: true,
+      status: 'ready',
+    }],
+  });
+
+  const bundle = buildContentWritingPromptBundle(input);
+  const sources = JSON.parse(bundle.variables.writing_sources_json);
+  assert.equal(bundle.ready, true);
+  assert.equal(sources[0].role, 'primary');
+  assert.equal(bundle.writingSourceChunks[0].sourceKind, 'writing_source');
+  assert.equal(bundle.writingSourceChunks[0].sourceRole, 'primary');
+  assert.match(bundle.messages[1].content, /مصدر خام أساسي/);
+  assert.match(bundle.messages[1].content, /ركز على الخطوات العملية/);
+});
+
+test('content writing blocks an enabled primary source until extraction is ready', async () => {
+  const { buildContentWritingPromptBundle } = await importContentWriting();
+  const input = createReadyArticle(['واحد', 'اثنان', 'ثلاثة']);
+  Object.assign(input, {
+    writingSources: [{
+      id: 'reference-1',
+      title: 'مصدر قيد الاستخراج',
+      content: '',
+      sourceRole: 'primary',
+      enabled: true,
+      status: 'extracting',
+    }],
+  });
+  const bundle = buildContentWritingPromptBundle(input);
+  assert.equal(bundle.ready, false);
+  assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'writing_sources.primary_not_ready'));
 });
 
 test('content-writing uses only filled optional brief fields and does not require them', async () => {

@@ -738,7 +738,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     consumeApiRateLimit('competitors-extract', principal.userId, 10);
     if (!(await isFirecrawlConfigured(principal.userId))) {
       throw new CompetitorApiError({
-        message: 'Firecrawl API key is not configured in administrator crawler settings or the server environment.',
+        message: 'No Firecrawl key is authorized for this user in the encrypted dashboard vault.',
         status: 503,
         code: 'firecrawl_not_configured',
       });

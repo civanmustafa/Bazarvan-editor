@@ -150,7 +150,7 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
   }
 
   if (!firecrawlConfigured) {
-    detail = detail || 'Firecrawl API key is not configured in administrator crawler settings or the server environment.';
+    detail = detail || 'No Firecrawl key is authorized in the encrypted dashboard vault for the external-analysis worker.';
   }
   const ok = Object.values(checks).every(Boolean);
   const result: ExternalAnalysisQueueReadinessResult = {

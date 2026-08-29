@@ -111,8 +111,9 @@ test('generated draft is audited before the final reviewed application', async (
   assert.match(executor, /plainText: prepared\.markdown/);
   assert.match(executor, /getContentWritingSourceAccuracyInput/);
   assert.match(executor, /patchApplication\.rejected\.length > 0/);
-  assert.match(executor, /evaluateContentWritingEditorSourceCoverage/);
-  assert.match(executor, /evaluateContentWritingEditorStructureCoverage/);
+  assert.doesNotMatch(executor, /evaluateContentWritingEditorSourceCoverage/);
+  assert.doesNotMatch(executor, /evaluateContentWritingEditorStructureCoverage/);
+  assert.doesNotMatch(executor, /contentWritingEditorSource/);
   assert.match(executor, /preserveExistingArticleLinks/);
   assert.match(executor, /htmlToTipTapJson/);
   assert.match(executor, /full_pipeline_quality_review_required/);

@@ -34,9 +34,6 @@ import {
 } from '../utils/contentWritingContext';
 import { normalizeGoalContext } from '../utils/goalContext';
 import {
-  buildContentWritingEditorSourceLedger,
-} from '../utils/contentWritingEditorSource';
-import {
   applyContentWritingLengthTargetToQualityConfiguration,
   countContentWritingTargetWords,
   resolveContentWritingLengthTarget,
@@ -66,15 +63,13 @@ import {
   readManagedArticleCompetitorRows,
   resolveArticleCompetitorRepositorySnapshot,
 } from './articleCompetitorRepository';
+import { listArticleWritingSources } from './contentWritingSources';
 
 type JsonObject = Record<string, unknown>;
 
 type ArticleRow = {
   id: string;
   title: string | null;
-  plain_text: string | null;
-  content_json: unknown;
-  content_html: string | null;
   keywords: unknown;
   goal_context: unknown;
   metadata: unknown;
@@ -202,13 +197,14 @@ const readArticleInput = async (articleId: string): Promise<{
   input: ContentWritingArticleInput;
 }> => {
   const supabase = getExternalAnalysisSupabaseAdmin();
-  const [articleResult, competitorResult] = await Promise.all([
+  const [articleResult, competitorResult, writingSources] = await Promise.all([
     supabase
       .from('articles')
-      .select('id,title,plain_text,content_json,content_html,keywords,goal_context,metadata,article_language,updated_at')
+      .select('id,title,keywords,goal_context,metadata,article_language,updated_at')
       .eq('id', articleId)
       .maybeSingle(),
     readManagedArticleCompetitorRows(articleId),
+    listArticleWritingSources(articleId),
   ]);
   if (articleResult.error) throw articleResult.error;
   if (!articleResult.data) {
@@ -231,12 +227,19 @@ const readArticleInput = async (articleId: string): Promise<{
       articleId: article.id,
       title: toText(article.title),
       language: article.article_language === 'en' ? 'en' : 'ar',
-      articleText: typeof article.plain_text === 'string' ? article.plain_text : '',
-      articleContentJson: article.content_json,
-      articleContentHtml: typeof article.content_html === 'string' ? article.content_html : '',
       keywords: normalizeInputRecord(article.keywords),
       goalContext: normalizeInputRecord(article.goal_context),
       competitors: competitorSnapshot.competitors,
+      writingSources: writingSources.map(source => ({
+        id: source.id,
+        title: source.title,
+        url: source.sourceUrl || undefined,
+        content: source.contentText,
+        sourceRole: source.sourceRole,
+        focusInstructions: source.focusInstructions,
+        enabled: source.enabled,
+        status: source.status,
+      })),
     },
   };
 };
@@ -400,11 +403,6 @@ export const prepareContentWritingConversation = async (
     articleLanguage: articleSource.input.language === 'en' ? 'en' : 'ar',
     enabled: settings.competitorPhraseIntelligenceEnabled,
   });
-  const editorSourceLedger = buildContentWritingEditorSourceLedger({
-    plainText: articleSource.input.articleText,
-    contentJson: articleSource.input.articleContentJson,
-    contentHtml: articleSource.input.articleContentHtml,
-  });
   const qualityContractHeading = articleSource.input.language === 'en'
     ? 'Mandatory quality criteria for this session:'
     : 'معايير الجودة الملزمة لهذه الجلسة:';
@@ -452,38 +450,12 @@ export const prepareContentWritingConversation = async (
         status: 'indexed_separately',
         note: 'Use the persisted competitor coverage matrix, source registry, claim ledger, and the source excerpts supplied for the current step.',
       }, null, 2),
+      writing_sources_json: JSON.stringify({
+        status: 'indexed_separately',
+        note: 'Use the frozen writing-source records and source excerpts supplied for each step. Primary writing sources have priority over supporting sources.',
+      }, null, 2),
     },
   ).text;
-  const compactArticleContextWithoutRepeatedEditorText = editorSourceLedger.enabled
-    ? compactArticleContextBase.replace(
-        /<current_article_text>[\s\S]*?<\/current_article_text>/gi,
-        `<current_article_text indexed="mandatory-editor-source-ledger" fingerprint="${editorSourceLedger.fingerprint}">The complete frozen editor text is persisted as structured items in the session ledger. Exact relevant items are attached to each writing step.</current_article_text>`,
-      )
-    : compactArticleContextBase;
-  const compactArticleContextWithEditorContract = editorSourceLedger.enabled
-    ? `${compactArticleContextWithoutRepeatedEditorText}
-
-<mandatory_editor_source_manifest>
-${JSON.stringify(editorSourceLedger.items.map(item => ({
-  id: item.id,
-  kind: item.kind,
-  heading: item.heading,
-  label: item.label,
-})), null, 2)}
-</mandatory_editor_source_manifest>
-
-<protected_editor_structure_manifest>
-${JSON.stringify(editorSourceLedger.structure, null, 2)}
-</protected_editor_structure_manifest>
-
-قواعد إلزامية لنص المحرر:
-- كل عنصر E في السجل مطلب دلالي واجب التغطية داخل المقالة الجديدة.
-- يجوز إعادة الصياغة والدمج ومنع التكرار، لكن لا يجوز إسقاط المعلومة أو الفكرة أو التوصية.
-- لا تنشر معلومة خطرة أو متعارضة بوصفها حقيقة؛ عالجها بصياغة آمنة ومتحفظة وأبقها ظاهرة في سجل التدقيق.
-- حافظ على كل href حرفيًا، وعلى العناوين بمستوياتها، وعلى القوائم والجداول بأعدادها وأبعادها الدنيا الواردة في سجل البنية. لا تحوّلها إلى فقرات عادية.
-- عند إنتاج JSON لقسم، صرّح بمعرّفات عناصر المحرر التي غطاها فعليًا.
-`
-    : compactArticleContextWithoutRepeatedEditorText;
 
   return {
     article: {
@@ -493,10 +465,7 @@ ${JSON.stringify(editorSourceLedger.structure, null, 2)}
       updatedAt: articleSource.article.updated_at,
     },
     messages,
-    inputHash: createInputHash([
-      ...messages.map(message => message.content),
-      JSON.stringify(editorSourceLedger.structure),
-    ]),
+    inputHash: createInputHash(messages.map(message => message.content)),
     templateRegistryVersion: SETTINGS_REGISTRY_VERSION,
     estimatedInputTokens,
     maxInputTokens: bundle.maxInputTokens,
@@ -520,23 +489,23 @@ ${JSON.stringify(editorSourceLedger.structure, null, 2)}
       })),
       competitorQualityAudit: bundle.competitorQualityAudit,
       competitorChunks: bundle.competitorChunks,
+      writingSourceChunks: bundle.writingSourceChunks,
+      sourceChunks: bundle.sourceChunks,
+      writingSources: (articleSource.input.writingSources || [])
+        .filter(source => source.enabled && source.status === 'ready')
+        .map(source => ({
+          id: source.id,
+          title: source.title || '',
+          url: source.url || null,
+          role: source.sourceRole,
+          focusInstructions: source.focusInstructions || '',
+          contentHash: createHash('sha256').update(source.content, 'utf8').digest('hex'),
+        })),
       competitorPhraseIntelligenceEnabled: settings.competitorPhraseIntelligenceEnabled,
       competitorPhraseIntelligence,
-      editorSourceLedger,
-      editorDocumentSnapshot: {
-        version: 1,
-        capturedUpdatedAt: articleSource.article.updated_at,
-        plainText: articleSource.input.articleText,
-        contentJson: articleSource.input.articleContentJson ?? null,
-        contentHtml: articleSource.input.articleContentHtml || '',
-        structure: editorSourceLedger.structure,
-      },
-      editorSourcePolicy: editorSourceLedger.enabled
-        ? 'mandatory_semantic_and_structural_coverage_with_targeted_repair'
-        : 'inactive_empty_editor',
       dualKnowledgeExtractionEnabled: settings.dualKnowledgeExtractionEnabled,
       multiCandidateGenerationEnabled: settings.multiCandidateGenerationEnabled,
-      compactArticleContextBase: compactArticleContextWithEditorContract,
+      compactArticleContextBase,
       lengthTarget,
       qualityPolicyVersion: qualityConfiguration.policyVersion,
       qualityConfiguration,

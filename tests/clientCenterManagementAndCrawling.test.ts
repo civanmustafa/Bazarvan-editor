@@ -302,7 +302,8 @@ test('hybrid crawler keeps provider keys server-only and records the requested s
   assert.match(providerAdapter, /validatePublicClientUrl/);
   assert.match(worker, /crawlClientPageWithProvider/);
   assert.match(worker, /credentialSource/);
-  assert.match(settingsPage, /AdminCrawlerProviderSecretsSettings/);
+  assert.match(settingsPage, /مركز المزودات نفسه المستخدم لـ Gemini وOpenAI/);
+  assert.doesNotMatch(settingsPage, /AdminCrawlerProviderSecretsSettings/);
   assertBalancedSqlParentheses(secretMigration);
   assertBalancedSqlParentheses(hybridMigration);
 });
@@ -353,7 +354,7 @@ test('economic external crawling reuses fresh graphs and enforces atomic budgets
     readWorkspaceFile('server/clientPageCrawlerProviders.ts'),
     readWorkspaceFile('server/crawlerUsagePolicy.ts'),
     readWorkspaceFile('api/clientSiteCrawler.ts'),
-    readWorkspaceFile('components/AdminCrawlerProviderSecretsSettings.tsx'),
+    readWorkspaceFile('components/AdminCrawlerUsagePolicySettings.tsx'),
     readWorkspaceFile('components/ClientCenterSettings.tsx'),
   ]);
 

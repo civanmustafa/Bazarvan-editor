@@ -45,11 +45,6 @@ import {
   selectCompetitorPreparationSources,
 } from './competitorPreparationCoordinator';
 import { readManagedArticleCompetitors } from './articleCompetitorRepository';
-import {
-  evaluateContentWritingEditorSourceCoverage,
-  evaluateContentWritingEditorStructureCoverage,
-  normalizeContentWritingEditorSourceLedger,
-} from '../utils/contentWritingEditorSource';
 
 const COMPREHENSIVE_COMMAND_ID = 'smartAnalysis.competitorContentComparison';
 const TERMINAL_EXTERNAL_STATUSES = new Set(['completed', 'failed', 'blocked', 'cancelled']);
@@ -990,28 +985,12 @@ const executeFullArticlePipeline = async (
     });
     const reviewedMarkdown = externalReview.patchApplication.markdown;
     const reviewedQuality = externalReview.evaluation.report;
-    const editorSourceLedger = normalizeContentWritingEditorSourceLedger(
-      writingSession.context_snapshot?.editorSourceLedger,
-    );
-    const editorSourceItemIds = editorSourceLedger.items.map(item => item.id);
-    const editorSourceCoverage = evaluateContentWritingEditorSourceCoverage({
-      outputText: contentWritingMarkdownToPlainText(reviewedMarkdown),
-      items: editorSourceLedger.items,
-      requiredItemIds: editorSourceItemIds,
-      declaredItemIds: editorSourceItemIds,
-    });
-    const editorStructureCoverage = evaluateContentWritingEditorStructureCoverage({
-      outputMarkdown: reviewedMarkdown,
-      structure: editorSourceLedger.structure,
-    });
     const reviewMetadata: ExternalAnalysisJson = {
       auditTarget: 'generated_draft',
       appliedPatches: externalReview.patchApplication.applied,
       rejectedPatches: externalReview.patchApplication.rejected,
       patchChangedDraft: externalReview.patchApplication.changed,
       analysisMarkdown: text(analysisResult.analysisMarkdown).slice(0, 20_000),
-      editorSourceCoverage: editorSourceCoverage as unknown as ExternalAnalysisJson,
-      editorStructureCoverage: editorStructureCoverage as unknown as ExternalAnalysisJson,
     };
     await assertLeaseOwned(context);
     await persistDraftReview({
@@ -1024,9 +1003,7 @@ const executeFullArticlePipeline = async (
       reviewMetadata,
     });
 
-    const externalReviewBlocked = externalReview.patchApplication.rejected.length > 0
-      || editorSourceCoverage.missingItemIds.length > 0
-      || editorStructureCoverage.passed !== true;
+    const externalReviewBlocked = externalReview.patchApplication.rejected.length > 0;
     const reviewBlocked = externalReviewBlocked
       || reviewedQuality.passed !== true
       || reviewedQuality.blockingFailureCount > 0;
@@ -1048,8 +1025,6 @@ const executeFullArticlePipeline = async (
           qualityReport: reviewedQuality as unknown as ExternalAnalysisJson,
           appliedPatchCount: externalReview.patchApplication.applied.length,
           rejectedPatches: externalReview.patchApplication.rejected,
-          editorSourceCoverage: editorSourceCoverage as unknown as ExternalAnalysisJson,
-          editorStructureCoverage: editorStructureCoverage as unknown as ExternalAnalysisJson,
         },
       });
     }

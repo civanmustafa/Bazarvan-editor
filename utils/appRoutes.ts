@@ -23,7 +23,19 @@ export type AdminRouteSection =
 
 export const APP_NAVIGATION_EVENT = 'bazarvan:navigation';
 const NEW_ARTICLE_REQUEST_KEY = 'bazarvan:new-article-request';
-const SETTINGS_ROUTE_SECTIONS = new Set(['system', 'ai', 'crawler', 'prompts', 'n8n', 'clients', 'users', 'roles']);
+const SETTINGS_ROUTE_SECTIONS = new Set([
+  'system',
+  'ai',
+  'crawler',
+  'prompts',
+  'n8n',
+  'clients',
+  'users',
+  'roles',
+  'preferences',
+  'account',
+  'data',
+]);
 
 const cleanPath = (path: string): string => {
   const normalized = path.split('?')[0].split('#')[0].replace(/\/{2,}/g, '/');

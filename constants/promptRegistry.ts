@@ -233,10 +233,11 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     label: 'قالب سياق المقالة',
     description: 'يرتب بيانات المقالة والكلمات وموجز المقالة الذكي والمنافسين داخل رسالة سياق واحدة.',
     usage: 'تُستبدل المتغيرات بقيم المقالة عند إنشاء الجلسة، ثم يُحفظ السياق مع الجلسة.',
-    variables: ['{{article_id}}', '{{article_title}}', '{{article_language}}', '{{article_text}}', '{{primary_keyword}}', '{{alternative_keywords}}', '{{lsi_keywords}}', '{{company_name}}', '{{goal_context}}', '{{competitors_json}}'],
-    requiredVariables: ['article_title', 'article_language', 'article_text', 'primary_keyword', 'alternative_keywords', 'lsi_keywords', 'company_name', 'goal_context', 'competitors_json'],
+    variables: ['{{article_id}}', '{{article_title}}', '{{article_language}}', '{{writing_sources_json}}', '{{primary_keyword}}', '{{alternative_keywords}}', '{{lsi_keywords}}', '{{company_name}}', '{{goal_context}}', '{{competitors_json}}'],
+    requiredVariables: ['article_title', 'article_language', 'writing_sources_json', 'primary_keyword', 'alternative_keywords', 'lsi_keywords', 'company_name', 'goal_context', 'competitors_json'],
     attachments: [
-      attachment('articleIdentity', 'بيانات المقالة', 'المعرّف والعنوان واللغة والنص الحالي.'),
+      attachment('articleIdentity', 'بيانات المقالة', 'المعرّف والعنوان واللغة فقط؛ نص المحرر الحالي مستبعد من محرك الكتابة.'),
+      attachment('writingSources', 'مصادر الكتابة', 'روابط أو نصوص خام أضافها المستخدم، مع أولوية المصدر وتعليمات التركيز.'),
       attachment('keywords', 'الكلمات المستهدفة', 'الأساسية والبدائل وLSI واسم الشركة.'),
       attachment('goalContext', 'موجز المقالة الذكي', 'يتضمن دائمًا نوع الصفحة وهدفها ونطاق الجمهور ونية البحث، ولا تُرفق بقية حقول الجمهور والمرحلة والزاوية والأدلة والنبرة والحساسية إلا إذا عبّأها المستخدم.'),
       attachment('competitors', 'مصادر المنافسين', 'المصادر الكاملة عند إنشاء الجلسة، ثم مصفوفة التغطية وسجل المصادر والادعاءات والمقتطفات اللازمة لكل خطوة.'),
@@ -313,7 +314,6 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
       attachment('coverageMatrix', 'مصفوفة تغطية المنافسين', 'الأفكار والكيانات مع المنافسين الذين غطوها ومستوى انتشارها وأولويتها وفرصة التميز.'),
       attachment('sourceRegistry', 'سجل المصادر', 'تصنيف المصادر ودورها المسموح في دعم المحتوى.'),
       attachment('claimLedger', 'سجل الادعاءات', 'الادعاءات المسموحة والمؤهلة والمحظورة مع مصادرها.'),
-      attachment('editorSourceLedger', 'سجل نص المحرر الإلزامي', 'كل المعلومات والأفكار والتوصيات الموجودة في المحرر مع توزيعها الإلزامي على الأقسام.'),
       attachment('qualityContract', 'عقد الجودة', 'الشروط الكمية والبنيوية الملزمة للجلسة.'),
     ],
   },
@@ -332,7 +332,6 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
       attachment('sourceExcerpts', 'مقتطفات المصادر', 'مقاطع المنافسين الداعمة للقسم فقط.'),
       attachment('coverageLedger', 'سجل التغطية', 'الأفكار التي غطتها الأقسام السابقة.'),
       attachment('previousSection', 'القسم السابق', 'القسم السابق كاملًا للترابط ومنع التكرار.'),
-      attachment('editorSourceItems', 'عناصر المحرر المخصصة', 'العناصر الأصلية التي يجب على هذا القسم تغطية معناها، مع معرّفات قابلة للتدقيق.'),
     ],
   },
   {
@@ -427,7 +426,6 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
       attachment('deterministicMissing', 'النواقص البرمجية', 'معرّفات لم يؤكد السجل تغطيتها.'),
       attachment('blockedClaims', 'الادعاءات المحظورة المستخدمة', 'معرّفات ادعاءات أعلن أحد الأقسام استخدامها رغم أن سياستها تتطلب المنع حتى التحقق.'),
       attachment('completedDraft', 'المقالة الكاملة', 'المسودة الكاملة قبل إصلاح التغطية.'),
-      attachment('editorSourceCoverage', 'تغطية نص المحرر', 'سجل مستقل يقارن كل معلومة وفكرة وتوصية في النسخة المثبتة مع المسودة ويحدد النواقص.'),
     ],
   },
   {
@@ -445,7 +443,6 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
       attachment('claimLedger', 'الادعاءات ذات الصلة', 'حالة دعم الادعاءات وسياسة استخدامها أو حذفها.'),
       attachment('sourceExcerpts', 'مقتطفات المصادر', 'المقاطع الداعمة للإصلاح فقط.'),
       attachment('originalSection', 'القسم الأصلي', 'النص الكامل للقسم قبل الإصلاح.'),
-      attachment('editorSourceItems', 'عناصر المحرر الناقصة', 'العناصر الإلزامية التي يجب أن يحافظ الإصلاح على معناها أو يضيفه إلى القسم.'),
     ],
   },
   {

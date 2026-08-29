@@ -116,6 +116,10 @@ test('administrator AI secret readiness checks schema and encryption independent
     assert.equal(ready.ok, true);
     assert.deepEqual(ready.checks, { vaultSchema: true, encryptionKey: true });
     assert.equal(ready.requiredMigration, '20260829030000_provider_credential_vault.sql');
+    assert.deepEqual(ready.requiredMigrations, [
+      '20260829030000_provider_credential_vault.sql',
+      '20260829040000_provider_credentials_explicit_grants.sql',
+    ]);
   });
 
   const previous = process.env.AI_SETTINGS_ENCRYPTION_KEY;

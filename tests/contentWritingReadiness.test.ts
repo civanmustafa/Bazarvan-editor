@@ -62,12 +62,13 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 20);
+  assert.equal(result.requiredMigrationCount, 21);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
     steps: true,
     automationQueue: true,
+    writingSources: true,
     fullPipelineJobs: true,
     keyCoordinator: true,
     automationEvaluator: true,
@@ -84,6 +85,7 @@ test('content-writing readiness checks every required schema surface', async () 
   ]);
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'ai_external_analysis_jobs',
+    'article_writing_sources',
     'content_writing_automation_items',
     'content_writing_messages',
     'content_writing_sessions',

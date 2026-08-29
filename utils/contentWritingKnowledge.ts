@@ -13,6 +13,10 @@ export type ContentWritingSourceChunk = {
   title: string;
   url: string;
   text: string;
+  sourceKind?: 'competitor' | 'writing_source';
+  sourceRole?: 'primary' | 'supporting';
+  sourceId?: string;
+  focusInstructions?: string;
 };
 
 export type ContentWritingKnowledgeItem = {
@@ -97,7 +101,6 @@ export type ContentWritingSectionCoverage = {
   coveredIdeaIds: string[];
   usedSourceChunkIds: string[];
   usedClaimIds: string[];
-  coveredEditorItemIds: string[];
 };
 
 export type ContentWritingCoverageRepair = {
@@ -106,7 +109,6 @@ export type ContentWritingCoverageRepair = {
   ideaIds: string[];
   sourceChunkIds: string[];
   claimIds: string[];
-  editorItemIds: string[];
 };
 
 export type ContentWritingCoverageAudit = {
@@ -115,7 +117,6 @@ export type ContentWritingCoverageAudit = {
   unsupportedClaimIds: string[];
   blockedClaimIds: string[];
   duplicateTopics: string[];
-  missingEditorItemIds: string[];
   repairs: ContentWritingCoverageRepair[];
 };
 
@@ -197,6 +198,44 @@ export const chunkContentWritingCompetitor = (options: {
       title: toText(options.title, 500),
       url: toText(options.url, 2_000),
       text: content.slice(start, end),
+      sourceKind: 'competitor',
+    });
+    start = end;
+  }
+  return chunks;
+};
+
+export const chunkContentWritingReference = (options: {
+  sourceNumber: number;
+  sourceId: string;
+  title?: string;
+  url?: string;
+  content: string;
+  sourceRole?: 'primary' | 'supporting';
+  focusInstructions?: string;
+  maximumCharacters?: number;
+}): ContentWritingSourceChunk[] => {
+  const content = String(options.content || '');
+  const maximum = Math.max(
+    400,
+    Math.min(Math.round(options.maximumCharacters || CONTENT_WRITING_COMPETITOR_CHUNK_SIZE), 4_000),
+  );
+  const sourceNumber = Math.max(1, Math.round(options.sourceNumber));
+  const safeSourceId = toText(options.sourceId, 80).replace(/[^A-Za-z0-9_-]/g, '') || String(sourceNumber);
+  const chunks: ContentWritingSourceChunk[] = [];
+  let start = 0;
+  while (start < content.length) {
+    const end = chooseChunkEnd(content, start, maximum);
+    chunks.push({
+      id: `R${safeSourceId}-S${String(chunks.length + 1).padStart(3, '0')}`,
+      competitorNumber: 10_000 + sourceNumber,
+      title: toText(options.title, 500),
+      url: toText(options.url, 2_000),
+      text: content.slice(start, end),
+      sourceKind: 'writing_source',
+      sourceRole: options.sourceRole === 'supporting' ? 'supporting' : 'primary',
+      sourceId: toText(options.sourceId, 120),
+      focusInstructions: toText(options.focusInstructions, 2_000),
     });
     start = end;
   }
@@ -225,6 +264,10 @@ export const normalizeContentWritingSourceChunks = (
       title: toText(item.title, 500),
       url: toText(item.url, 2_000),
       text,
+      sourceKind: item.sourceKind === 'writing_source' ? 'writing_source' : 'competitor',
+      sourceRole: item.sourceRole === 'supporting' ? 'supporting' : item.sourceRole === 'primary' ? 'primary' : undefined,
+      sourceId: toText(item.sourceId, 120) || undefined,
+      focusInstructions: toText(item.focusInstructions, 2_000) || undefined,
     }];
   }).slice(0, 5_000);
 };
@@ -559,7 +602,6 @@ export const parseContentWritingSectionResult = (
   validIdeaIds: readonly string[],
   validChunkIds: readonly string[],
   validClaimIds: readonly string[] = [],
-  validEditorItemIds: readonly string[] = [],
 ): { markdown: string; coverage: ContentWritingSectionCoverage } => {
   const source = parseJsonObject(value);
   if (!source) throw new Error('The section must be valid JSON.');
@@ -568,15 +610,12 @@ export const parseContentWritingSectionResult = (
   const ideaSet = new Set(validIdeaIds);
   const chunkSet = new Set(validChunkIds);
   const claimSet = new Set(validClaimIds);
-  const editorItemSet = new Set(validEditorItemIds);
   return {
     markdown,
     coverage: {
       coveredIdeaIds: toUniqueTextList(source.coveredIdeaIds).filter(id => ideaSet.has(id)),
       usedSourceChunkIds: toUniqueTextList(source.usedSourceChunkIds).filter(id => chunkSet.has(id)),
       usedClaimIds: toUniqueTextList(source.usedClaimIds).filter(id => claimSet.has(id)),
-      coveredEditorItemIds: toUniqueTextList(source.coveredEditorItemIds)
-        .filter(id => editorItemSet.has(id)),
     },
   };
 };
@@ -589,7 +628,6 @@ export const normalizeContentWritingSectionCoverage = (
     coveredIdeaIds: toUniqueTextList(source.coveredIdeaIds),
     usedSourceChunkIds: toUniqueTextList(source.usedSourceChunkIds),
     usedClaimIds: toUniqueTextList(source.usedClaimIds),
-    coveredEditorItemIds: toUniqueTextList(source.coveredEditorItemIds),
   };
 };
 
@@ -599,7 +637,6 @@ export const parseContentWritingCoverageAudit = (
     validIdeaIds: readonly string[];
     validChunkIds: readonly string[];
     validClaimIds?: readonly string[];
-    validEditorItemIds?: readonly string[];
     validSectionKeys: readonly string[];
   },
 ): ContentWritingCoverageAudit => {
@@ -608,7 +645,6 @@ export const parseContentWritingCoverageAudit = (
   const ideaIds = new Set(options.validIdeaIds);
   const chunkIds = new Set(options.validChunkIds);
   const claimIds = new Set(options.validClaimIds || []);
-  const editorItemIds = new Set(options.validEditorItemIds || []);
   const sectionKeys = new Set(options.validSectionKeys);
   const repairs = Array.isArray(source.repairs)
     ? source.repairs.flatMap((item): ContentWritingCoverageRepair[] => {
@@ -622,8 +658,6 @@ export const parseContentWritingCoverageAudit = (
         ideaIds: toUniqueTextList(item.ideaIds).filter(id => ideaIds.has(id)),
         sourceChunkIds: toUniqueTextList(item.sourceChunkIds).filter(id => chunkIds.has(id)),
         claimIds: toUniqueTextList(item.claimIds).filter(id => claimIds.has(id)),
-        editorItemIds: toUniqueTextList(item.editorItemIds)
-          .filter(id => editorItemIds.has(id)),
       }];
     }).slice(0, 3)
     : [];
@@ -635,8 +669,6 @@ export const parseContentWritingCoverageAudit = (
     blockedClaimIds: toUniqueTextList(source.blockedClaimIds)
       .filter(id => claimIds.has(id)),
     duplicateTopics: toUniqueTextList(source.duplicateTopics, 50, 500),
-    missingEditorItemIds: toUniqueTextList(source.missingEditorItemIds)
-      .filter(id => editorItemIds.has(id)),
     repairs,
   };
 };

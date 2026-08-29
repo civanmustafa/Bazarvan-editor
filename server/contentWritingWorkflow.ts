@@ -18,7 +18,6 @@ import {
   buildContentWritingSectionRepairPrompt,
   buildContentWritingSectionPrompt,
   createContentWritingWorkflowSteps,
-  ensureContentWritingOutlineEditorSourceCoverage,
   ensureContentWritingOutlineKnowledgeCoverage,
   fitContentWritingOutlineSectionRange,
   getContentWritingCompetitorIndexStep,
@@ -122,16 +121,6 @@ import {
   type ContentWritingStep,
 } from './contentWritingSessionService';
 import { sumAiUsage } from './aiUsage';
-import {
-  buildContentWritingEditorSourceLedger,
-  evaluateContentWritingEditorSourceCoverage,
-  evaluateContentWritingEditorStructureCoverage,
-  normalizeContentWritingEditorSourceLedger,
-  restoreContentWritingEditorLinks,
-  type ContentWritingEditorSourceCoverageAudit,
-  type ContentWritingEditorSourceItem,
-  type ContentWritingEditorStructureCoverageAudit,
-} from '../utils/contentWritingEditorSource';
 import {
   countMetaDescriptionCharacters,
   parseValidMetaDescriptionGeneration,
@@ -237,7 +226,17 @@ const getArticleSnapshot = (session: ContentWritingSession): { title: string; la
 };
 
 const getCompetitorChunks = (session: ContentWritingSession): ContentWritingSourceChunk[] => (
-  normalizeContentWritingSourceChunks(session.context_snapshot?.competitorChunks)
+  normalizeContentWritingSourceChunks(
+    session.context_snapshot?.sourceChunks
+    || [
+      ...(Array.isArray(session.context_snapshot?.writingSourceChunks)
+        ? session.context_snapshot.writingSourceChunks
+        : []),
+      ...(Array.isArray(session.context_snapshot?.competitorChunks)
+        ? session.context_snapshot.competitorChunks
+        : []),
+    ],
+  )
 );
 
 const getCompetitorPhraseIntelligence = (
@@ -270,10 +269,7 @@ ${contentWritingKnowledgeToPromptJson(knowledge)}
 
 const buildTargetedRevisionArticleContext = (
   compactArticleContext: string,
-): string => compactArticleContext.replace(
-  /<current_article_text>[\s\S]*?<\/current_article_text>/gi,
-  '<current_article_text withheld="targeted-revision">Only the explicitly targeted segments are attached to this revision step.</current_article_text>',
-);
+): string => compactArticleContext;
 
 const getStepUsage = (step: ContentWritingStep): unknown => {
   const execution = isRecord(step.metadata?.execution) ? step.metadata.execution : {};
@@ -360,30 +356,6 @@ export const executeStructuredContentWritingWorkflow = async (
   const goalContext = qualityRuntime?.goalContext || getSessionGoalContext(options.session);
   const primaryKeyword = qualityRuntime?.keywords.primary || '';
   const companyName = qualityRuntime?.keywords.company || '';
-  const editorSourceLedger = options.session.context_snapshot?.editorSourceLedger
-    ? normalizeContentWritingEditorSourceLedger(options.session.context_snapshot.editorSourceLedger)
-    : buildContentWritingEditorSourceLedger('');
-  const editorSourceItemIds = editorSourceLedger.items.map(item => item.id);
-  const getEditorSourceItems = (ids: readonly string[]): ContentWritingEditorSourceItem[] => {
-    const idSet = new Set(ids);
-    return editorSourceLedger.items.filter(item => idSet.has(item.id));
-  };
-  const verifyEditorSourceCoverage = (
-    outputText: string,
-    requiredItemIds: readonly string[],
-    declaredItemIds: readonly string[],
-  ): ContentWritingEditorSourceCoverageAudit => evaluateContentWritingEditorSourceCoverage({
-    outputText,
-    items: editorSourceLedger.items,
-    requiredItemIds,
-    declaredItemIds,
-  });
-  const verifyEditorStructureCoverage = (
-    outputMarkdown: string,
-  ): ContentWritingEditorStructureCoverageAudit => evaluateContentWritingEditorStructureCoverage({
-    outputMarkdown,
-    structure: editorSourceLedger.structure,
-  });
   const promptTemplates = isRecord(options.session.context_snapshot?.promptTemplates)
     ? options.session.context_snapshot.promptTemplates as Record<string, string>
     : {};
@@ -1039,7 +1011,6 @@ export const executeStructuredContentWritingWorkflow = async (
       articleTitle: article.title,
       language: article.language,
       knowledge,
-      editorSourceLedger,
       qualityContract: qualityRuntime?.contract,
       targetWords: qualityRuntime?.configuration.policy.targetWords,
       minimumSections: qualityRuntime?.configuration.policy.outlineSections.min,
@@ -1069,16 +1040,12 @@ export const executeStructuredContentWritingWorkflow = async (
         );
       }
       const coveredOutline = ensureContentWritingOutlineKnowledgeCoverage(policyOutline, knowledge);
-      const editorCoveredOutline = ensureContentWritingOutlineEditorSourceCoverage(
-        coveredOutline,
-        editorSourceLedger,
-      );
       const balancedOutline = qualityRuntime
         ? balanceContentWritingOutlineWordTargets(
-            editorCoveredOutline,
+            coveredOutline,
             qualityRuntime.configuration.policy.targetWords,
           )
-        : editorCoveredOutline;
+        : coveredOutline;
       return {
         output: JSON.stringify(balancedOutline, null, 2),
         metadata: {
@@ -1096,15 +1063,12 @@ export const executeStructuredContentWritingWorkflow = async (
   const outlineWithCoverage = normalizedOutline
     ? ensureContentWritingOutlineKnowledgeCoverage(normalizedOutline, knowledge)
     : null;
-  const outlineWithEditorCoverage = outlineWithCoverage
-    ? ensureContentWritingOutlineEditorSourceCoverage(outlineWithCoverage, editorSourceLedger)
-    : null;
-  const outline = outlineWithEditorCoverage && qualityRuntime
+  const outline = outlineWithCoverage && qualityRuntime
     ? balanceContentWritingOutlineWordTargets(
-        outlineWithEditorCoverage,
+        outlineWithCoverage,
         qualityRuntime.configuration.policy.targetWords,
       )
-    : outlineWithEditorCoverage;
+    : outlineWithCoverage;
   if (!outline) {
     return createWorkflowFailure({
       session: options.session,
@@ -1136,8 +1100,6 @@ export const executeStructuredContentWritingWorkflow = async (
     const definition = sectionDefinitions[index];
     const section = outline.sections[index];
     const requiredIdeaIds = section.requiredIdeaIds || [];
-    const requiredEditorItemIds = section.requiredEditorItemIds || [];
-    const editorSourceItems = getEditorSourceItems(requiredEditorItemIds);
     const relevantChunks = selectRelevantContentWritingChunks({
       title: section.title,
       brief: section.brief,
@@ -1170,7 +1132,6 @@ export const executeStructuredContentWritingWorkflow = async (
         knowledgeItems: assignedKnowledgeItems,
         claims: relevantClaims,
         sourceChunks: relevantChunks,
-        editorSourceItems,
         coverageLedger: {
           coveredIdeaIds: Array.from(sectionCoverageByKey.values())
             .flatMap(coverage => coverage.coveredIdeaIds),
@@ -1197,21 +1158,11 @@ export const executeStructuredContentWritingWorkflow = async (
           knowledge.items.map(item => item.id),
           competitorChunks.map(chunk => chunk.id),
           knowledge.claimLedger.claims.map(claim => claim.id),
-          editorSourceItemIds,
-        );
-        const editorSourceCoverageAudit = verifyEditorSourceCoverage(
-          parsed.markdown,
-          requiredEditorItemIds,
-          parsed.coverage.coveredEditorItemIds,
         );
         return {
           output: parsed.markdown,
           metadata: {
-            sectionCoverage: {
-              ...parsed.coverage,
-              coveredEditorItemIds: editorSourceCoverageAudit.coveredItemIds,
-            },
-            editorSourceCoverageAudit,
+            sectionCoverage: parsed.coverage,
             evidenceTrace,
           },
         };
@@ -1222,7 +1173,6 @@ export const executeStructuredContentWritingWorkflow = async (
         metadata: candidate.step.metadata,
         requiredIdeaIds,
         requiredClaimIds: section.requiredClaimIds || [],
-        requiredEditorItemIds,
         blockedClaimIds: knowledge.claimLedger.blockedClaimIds,
         targetWordRange: {
           min: Math.max(60, Math.round(sectionTargetWords * 0.85)),
@@ -1453,11 +1403,6 @@ export const executeStructuredContentWritingWorkflow = async (
     goalContext,
     primaryKeyword,
   });
-  const editorSourceCoverageBeforeAudit = verifyEditorSourceCoverage(
-    draftBeforeAudit,
-    editorSourceItemIds,
-    Array.from(sectionCoverageByKey.values()).flatMap(coverage => coverage.coveredEditorItemIds),
-  );
   const coverageAuditDefinition = definitions.find(definition => definition.type === 'coverage_audit')!;
   const coverageAuditResult = await runStep({
     definition: coverageAuditDefinition,
@@ -1472,13 +1417,10 @@ export const executeStructuredContentWritingWorkflow = async (
           coveredIdeaIds: [],
           usedSourceChunkIds: [],
           usedClaimIds: [],
-          coveredEditorItemIds: [],
         },
       })),
       deterministicMissingIdeaIds: coverageBeforeAudit.missingIdeaIds,
       deterministicBlockedClaimIds: claimUsageBeforeAudit.blockedClaimIds,
-      editorSourceLedger,
-      deterministicMissingEditorItemIds: editorSourceCoverageBeforeAudit.missingItemIds,
       template: promptTemplate(PROMPT_TEMPLATE_IDS.coverageAudit),
     }),
     stepIndex: coverageAuditDefinition.ordinal,
@@ -1490,7 +1432,6 @@ export const executeStructuredContentWritingWorkflow = async (
         validIdeaIds: knowledge.items.map(item => item.id),
         validChunkIds: competitorChunks.map(chunk => chunk.id),
         validClaimIds: knowledge.claimLedger.claims.map(claim => claim.id),
-        validEditorItemIds: editorSourceItemIds,
         validSectionKeys: sectionDefinitions.map(definition => definition.key),
       });
       return {
@@ -1498,7 +1439,6 @@ export const executeStructuredContentWritingWorkflow = async (
         metadata: {
           coverageAudit: audit,
           deterministicCoverage: coverageBeforeAudit,
-          editorSourceCoverageAudit: editorSourceCoverageBeforeAudit,
         },
       };
     },
@@ -1510,46 +1450,9 @@ export const executeStructuredContentWritingWorkflow = async (
       validIdeaIds: knowledge.items.map(item => item.id),
       validChunkIds: competitorChunks.map(chunk => chunk.id),
       validClaimIds: knowledge.claimLedger.claims.map(claim => claim.id),
-      validEditorItemIds: editorSourceItemIds,
       validSectionKeys: sectionDefinitions.map(definition => definition.key),
     },
   );
-  if (editorSourceCoverageBeforeAudit.missingItemIds.length > 0) {
-    const repairs = coverageAudit.repairs.map(repair => ({ ...repair }));
-    const alreadyScheduled = new Set(repairs.flatMap(repair => repair.editorItemIds));
-    sectionDefinitions.forEach((definition, sectionIndex) => {
-      const missingForSection = (outline.sections[sectionIndex].requiredEditorItemIds || [])
-        .filter(id => editorSourceCoverageBeforeAudit.missingItemIds.includes(id))
-        .filter(id => !alreadyScheduled.has(id));
-      if (missingForSection.length === 0) return;
-      const existingRepair = repairs.find(repair => repair.sectionKey === definition.key);
-      if (existingRepair) {
-        existingRepair.editorItemIds = Array.from(new Set([
-          ...existingRepair.editorItemIds,
-          ...missingForSection,
-        ]));
-        existingRepair.instructions = `${existingRepair.instructions}\nغطِّ عناصر نص المحرر الإلزامية التالية دلاليًا: ${missingForSection.join(', ')}.`;
-      } else {
-        repairs.push({
-          sectionKey: definition.key,
-          instructions: `غطِّ عناصر نص المحرر الإلزامية التالية دلاليًا مع الحفاظ على المادة الصحيحة في القسم: ${missingForSection.join(', ')}.`,
-          ideaIds: [],
-          sourceChunkIds: [],
-          claimIds: [],
-          editorItemIds: missingForSection,
-        });
-      }
-      missingForSection.forEach(id => alreadyScheduled.add(id));
-    });
-    coverageAudit = {
-      ...coverageAudit,
-      missingEditorItemIds: Array.from(new Set([
-        ...coverageAudit.missingEditorItemIds,
-        ...editorSourceCoverageBeforeAudit.missingItemIds,
-      ])),
-      repairs: repairs.slice(0, CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS),
-    };
-  }
 
   for (let repairIndex = 0; repairIndex < coverageAudit.repairs.length; repairIndex += 1) {
     const repair = coverageAudit.repairs[repairIndex];
@@ -1581,11 +1484,6 @@ export const executeStructuredContentWritingWorkflow = async (
       ? knowledge.claimLedger.claims.filter(claim => repairClaimIds.has(claim.id))
       : selectedRepairClaims;
     const repairKnowledgeItems = knowledge.items.filter(item => repair.ideaIds.includes(item.id));
-    const repairRequiredEditorItemIds = Array.from(new Set([
-      ...(outline.sections[sectionIndex].requiredEditorItemIds || []),
-      ...repair.editorItemIds,
-    ]));
-    const repairEditorSourceItems = getEditorSourceItems(repairRequiredEditorItemIds);
     const repairEvidenceTrace: ContentWritingEvidenceTrace = {
       version: CONTENT_WRITING_EVIDENCE_TRACE_VERSION,
       sectionKey: repair.sectionKey,
@@ -1621,7 +1519,6 @@ export const executeStructuredContentWritingWorkflow = async (
         knowledgeItems: repairKnowledgeItems,
         claims: repairClaims,
         sourceChunks: repairChunks,
-        editorSourceItems: repairEditorSourceItems,
         template: promptTemplate(PROMPT_TEMPLATE_IDS.sectionRepair),
       }),
       stepIndex: repairDefinition.ordinal,
@@ -1634,21 +1531,11 @@ export const executeStructuredContentWritingWorkflow = async (
           knowledge.items.map(item => item.id),
           competitorChunks.map(chunk => chunk.id),
           knowledge.claimLedger.claims.map(claim => claim.id),
-          editorSourceItemIds,
-        );
-        const editorSourceCoverageAudit = verifyEditorSourceCoverage(
-          parsed.markdown,
-          repairRequiredEditorItemIds,
-          parsed.coverage.coveredEditorItemIds,
         );
         return {
           output: parsed.markdown,
           metadata: {
-            sectionCoverage: {
-              ...parsed.coverage,
-              coveredEditorItemIds: editorSourceCoverageAudit.coveredItemIds,
-            },
-            editorSourceCoverageAudit,
+            sectionCoverage: parsed.coverage,
             repairedSectionKey: repair.sectionKey,
             evidenceTrace: repairEvidenceTrace,
           },
@@ -1660,7 +1547,6 @@ export const executeStructuredContentWritingWorkflow = async (
         metadata: candidate.step.metadata,
         requiredIdeaIds: repair.ideaIds,
         requiredClaimIds: repair.claimIds,
-        requiredEditorItemIds: repairRequiredEditorItemIds,
         blockedClaimIds: knowledge.claimLedger.blockedClaimIds,
         targetWordRange: {
           min: Math.max(60, Math.round(repairTargetWords * 0.85)),
@@ -1678,7 +1564,6 @@ export const executeStructuredContentWritingWorkflow = async (
       coveredIdeaIds: [],
       usedSourceChunkIds: [],
       usedClaimIds: [],
-      coveredEditorItemIds: [],
     };
     const repairedCoverage = normalizeContentWritingSectionCoverage(
       repairResult.step.metadata?.sectionCoverage,
@@ -1695,7 +1580,6 @@ export const executeStructuredContentWritingWorkflow = async (
       // A targeted repair replaces the complete section, so removed blocked claims
       // must not survive in the declared claim usage ledger.
       usedClaimIds: repairedCoverage.usedClaimIds,
-      coveredEditorItemIds: repairedCoverage.coveredEditorItemIds,
     });
   }
 
@@ -1708,7 +1592,7 @@ export const executeStructuredContentWritingWorkflow = async (
     usedClaimIds: Array.from(sectionCoverageByKey.values())
       .flatMap(coverage => coverage.usedClaimIds),
   });
-  let assembledDraft = assembleContentWritingDraft({
+  const assembledDraft = assembleContentWritingDraft({
     articleTitle: article.title,
     language: article.language,
     outline,
@@ -1716,37 +1600,6 @@ export const executeStructuredContentWritingWorkflow = async (
     goalContext,
     primaryKeyword,
   });
-  const assembledLinkRestoration = restoreContentWritingEditorLinks({
-    markdown: assembledDraft,
-    structure: editorSourceLedger.structure,
-  });
-  assembledDraft = assembledLinkRestoration.markdown;
-  const editorSourceCoverageAfterRepairs = verifyEditorSourceCoverage(
-    assembledDraft,
-    editorSourceItemIds,
-    Array.from(sectionCoverageByKey.values()).flatMap(coverage => coverage.coveredEditorItemIds),
-  );
-  if (editorSourceCoverageAfterRepairs.missingItemIds.length > 0) {
-    return createWorkflowFailure({
-      session: options.session,
-      status: 422,
-      code: 'content_writing_editor_source_coverage_incomplete',
-      message: `Mandatory editor-source coverage is incomplete: ${editorSourceCoverageAfterRepairs.missingItemIds.join(', ')}.`,
-      step: coverageAuditDefinition,
-      metadata: { editorSourceCoverage: editorSourceCoverageAfterRepairs },
-    });
-  }
-  const editorStructureCoverageAfterRepairs = verifyEditorStructureCoverage(assembledDraft);
-  if (!editorStructureCoverageAfterRepairs.passed) {
-    return createWorkflowFailure({
-      session: options.session,
-      status: 422,
-      code: 'content_writing_editor_structure_coverage_incomplete',
-      message: 'The generated draft did not preserve all protected editor headings, links, lists, and tables.',
-      step: coverageAuditDefinition,
-      metadata: { editorStructureCoverage: editorStructureCoverageAfterRepairs },
-    });
-  }
   const baseFinalDefinition = definitions.find(definition => definition.type === 'final_review')!;
   const finalDefinition: ContentWritingWorkflowStepDefinition = {
     ...baseFinalDefinition,
@@ -1869,44 +1722,6 @@ export const executeStructuredContentWritingWorkflow = async (
           markdown: application.candidateMarkdown,
           goalContext,
         });
-        const editorSourceCoverageBeforeRevision = verifyEditorSourceCoverage(
-          draftBeforeRevision,
-          editorSourceItemIds,
-          editorSourceItemIds,
-        );
-        const editorSourceCoverageAfterRevision = verifyEditorSourceCoverage(
-          application.candidateMarkdown,
-          editorSourceItemIds,
-          editorSourceItemIds,
-        );
-        const lostEditorSourceItemIds = editorSourceCoverageBeforeRevision.coveredItemIds
-          .filter(id => !editorSourceCoverageAfterRevision.coveredItemIds.includes(id));
-        const editorSourceGuard = {
-          accepted: lostEditorSourceItemIds.length === 0
-            && editorSourceCoverageAfterRevision.missingItemIds.length === 0,
-          coverageBeforePercent: editorSourceCoverageBeforeRevision.coveragePercent,
-          coverageAfterPercent: editorSourceCoverageAfterRevision.coveragePercent,
-          lostItemIds: lostEditorSourceItemIds,
-          missingItemIds: editorSourceCoverageAfterRevision.missingItemIds,
-          reasons: lostEditorSourceItemIds.length > 0
-            || editorSourceCoverageAfterRevision.missingItemIds.length > 0
-            ? ['editor_source_coverage_decreased']
-            : [],
-        };
-        const editorStructureCoverageBeforeRevision = verifyEditorStructureCoverage(
-          draftBeforeRevision,
-        );
-        const editorStructureCoverageAfterRevision = verifyEditorStructureCoverage(
-          application.candidateMarkdown,
-        );
-        const editorStructureGuard = {
-          accepted: editorStructureCoverageAfterRevision.passed,
-          before: editorStructureCoverageBeforeRevision,
-          after: editorStructureCoverageAfterRevision,
-          reasons: editorStructureCoverageAfterRevision.passed
-            ? []
-            : ['editor_structure_coverage_decreased'],
-        };
         const qualityAfterRevision = qualityRuntime && qualityBeforeRevision
           ? applyContentWritingSourceAccuracyGuard({
               report: evaluateContentWritingQuality({
@@ -1936,16 +1751,12 @@ export const executeStructuredContentWritingWorkflow = async (
           ...knowledgeGuard.reasons,
           ...faqIndependenceGuard.reasons,
           ...finalSectionStructureGuard.reasons,
-          ...editorSourceGuard.reasons,
-          ...editorStructureGuard.reasons,
           ...(qualityGuard?.reasons || ['quality_guard_unavailable']),
         ]));
         const accepted = reasons.length === 0
           && knowledgeGuard.accepted
           && faqIndependenceGuard.accepted
           && finalSectionStructureGuard.accepted
-          && editorSourceGuard.accepted
-          && editorStructureGuard.accepted
           && qualityGuard?.accepted === true;
         return {
           output: JSON.stringify({
@@ -1972,8 +1783,6 @@ export const executeStructuredContentWritingWorkflow = async (
             knowledgeGuard,
             faqIndependenceGuard,
             finalSectionStructureGuard,
-            editorSourceGuard,
-            editorStructureGuard,
             acceptedDraft: accepted ? application.candidateMarkdown : null,
             sectionCoveragesAfter: knowledgeGuard.sectionCoverages,
           },
@@ -2166,37 +1975,6 @@ export const executeStructuredContentWritingWorkflow = async (
     knowledge,
     sectionCoverages: Array.from(activeSectionCoverageByKey.values()),
   });
-  const finalLinkRestoration = restoreContentWritingEditorLinks({
-    markdown: finalOutput,
-    structure: editorSourceLedger.structure,
-  });
-  finalOutput = finalLinkRestoration.markdown;
-  const finalEditorSourceCoverage = verifyEditorSourceCoverage(
-    finalOutput,
-    editorSourceItemIds,
-    editorSourceItemIds,
-  );
-  if (finalEditorSourceCoverage.missingItemIds.length > 0) {
-    return createWorkflowFailure({
-      session: options.session,
-      status: 422,
-      code: 'content_writing_editor_source_coverage_lost',
-      message: `A later revision lost mandatory editor-source items: ${finalEditorSourceCoverage.missingItemIds.join(', ')}.`,
-      step: finalDefinition,
-      metadata: { editorSourceCoverage: finalEditorSourceCoverage },
-    });
-  }
-  const finalEditorStructureCoverage = verifyEditorStructureCoverage(finalOutput);
-  if (!finalEditorStructureCoverage.passed) {
-    return createWorkflowFailure({
-      session: options.session,
-      status: 422,
-      code: 'content_writing_editor_structure_coverage_lost',
-      message: 'A later revision lost protected editor headings, links, lists, or tables.',
-      step: finalDefinition,
-      metadata: { editorStructureCoverage: finalEditorStructureCoverage },
-    });
-  }
   const baseMetaDescriptionDefinition = definitions.find(
     definition => definition.type === 'meta_description',
   );
@@ -2351,8 +2129,6 @@ export const executeStructuredContentWritingWorkflow = async (
         knowledgeCoverageRollback: true,
         blockedClaimRollback: true,
         faqIndependenceRollback: true,
-        editorSourceCoverageRollback: true,
-        editorStructureCoverageRollback: true,
       },
       faqIndependence: faqAudit ? {
         version: faqAudit.version,
@@ -2365,23 +2141,6 @@ export const executeStructuredContentWritingWorkflow = async (
       finalSectionStructure,
       metaDescriptionSuggestions,
       metaDescriptionCharacterCounts: metaDescriptionSuggestions.map(countMetaDescriptionCharacters),
-      editorSourceCoverage: {
-        version: finalEditorSourceCoverage.version,
-        enabled: editorSourceLedger.enabled,
-        fingerprint: editorSourceLedger.fingerprint,
-        sourceWordCount: editorSourceLedger.sourceWordCount,
-        itemCount: editorSourceLedger.itemCount,
-        beforeAuditPercent: editorSourceCoverageBeforeAudit.coveragePercent,
-        afterRepairPercent: editorSourceCoverageAfterRepairs.coveragePercent,
-        finalCoveragePercent: finalEditorSourceCoverage.coveragePercent,
-        coveredItemIds: finalEditorSourceCoverage.coveredItemIds,
-        missingItemIds: finalEditorSourceCoverage.missingItemIds,
-      },
-      editorStructureCoverage: finalEditorStructureCoverage,
-      editorLinkRestoration: {
-        assembled: assembledLinkRestoration,
-        final: finalLinkRestoration,
-      },
       usage,
       knowledgeCoverage: {
         sourceChunkCount: competitorChunks.length,

@@ -32,14 +32,9 @@ import {
 import {
   FAQ_KEYWORDS,
 } from '../constants';
-import {
-  contentWritingEditorSourceLedgerToPromptJson,
-  type ContentWritingEditorSourceItem,
-  type ContentWritingEditorSourceLedger,
-} from './contentWritingEditorSource';
 import { buildMetaDescriptionGenerationPrompt } from './metaDescription';
 
-export const CONTENT_WRITING_WORKFLOW_VERSION = 13;
+export const CONTENT_WRITING_WORKFLOW_VERSION = 14;
 export const CONTENT_WRITING_MIN_OUTLINE_SECTIONS = 4;
 export const CONTENT_WRITING_MAX_OUTLINE_SECTIONS = 12;
 export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = CONTENT_WRITING_MAX_OUTLINE_SECTIONS;
@@ -124,7 +119,6 @@ export type ContentWritingOutlineSection = {
   subheadings?: string[];
   requiredIdeaIds?: string[];
   requiredClaimIds?: string[];
-  requiredEditorItemIds?: string[];
   sourceChunkIds?: string[];
 };
 
@@ -200,9 +194,6 @@ export const normalizeContentWritingOutline = (value: unknown): ContentWritingOu
     const requiredClaimIds = isRecord(item) && Array.isArray(item.requiredClaimIds)
       ? Array.from(new Set(item.requiredClaimIds.map(value => toText(value, 120)).filter(Boolean))).slice(0, 100)
       : [];
-    const requiredEditorItemIds = isRecord(item) && Array.isArray(item.requiredEditorItemIds)
-      ? Array.from(new Set(item.requiredEditorItemIds.map(value => toText(value, 120)).filter(Boolean))).slice(0, 500)
-      : [];
     const sourceChunkIds = isRecord(item) && Array.isArray(item.sourceChunkIds)
       ? Array.from(new Set(item.sourceChunkIds.map(value => toText(value, 120)).filter(Boolean))).slice(0, 100)
       : [];
@@ -213,7 +204,6 @@ export const normalizeContentWritingOutline = (value: unknown): ContentWritingOu
       ...(subheadings.length > 0 ? { subheadings } : {}),
       ...(requiredIdeaIds.length > 0 ? { requiredIdeaIds } : {}),
       ...(requiredClaimIds.length > 0 ? { requiredClaimIds } : {}),
-      ...(requiredEditorItemIds.length > 0 ? { requiredEditorItemIds } : {}),
       ...(sourceChunkIds.length > 0 ? { sourceChunkIds } : {}),
     }];
   }).slice(0, CONTENT_WRITING_MAX_OUTLINE_SECTIONS);
@@ -343,40 +333,6 @@ export const ensureContentWritingOutlineKnowledgeCoverage = (
   return { sections };
 };
 
-export const ensureContentWritingOutlineEditorSourceCoverage = (
-  outline: ContentWritingOutline,
-  ledger: ContentWritingEditorSourceLedger,
-): ContentWritingOutline => {
-  if (!ledger.enabled || ledger.items.length === 0 || outline.sections.length === 0) return outline;
-  const validIds = new Set(ledger.items.map(item => item.id));
-  const assigned = new Set<string>();
-  const sections = outline.sections.map(section => {
-    const requiredEditorItemIds = (section.requiredEditorItemIds || [])
-      .filter(id => validIds.has(id) && !assigned.has(id));
-    requiredEditorItemIds.forEach(id => assigned.add(id));
-    return { ...section, requiredEditorItemIds };
-  });
-  ledger.items.forEach(item => {
-    if (assigned.has(item.id)) return;
-    const bestIndex = sections
-      .map((section, index) => ({
-        index,
-        score: similarityScore(
-          `${item.heading}\n${item.label}\n${item.text}`,
-          `${section.title}\n${section.brief}\n${(section.subheadings || []).join('\n')}`,
-        ),
-        load: section.requiredEditorItemIds?.length || 0,
-      }))
-      .sort((left, right) => right.score - left.score || left.load - right.load || left.index - right.index)[0]?.index || 0;
-    sections[bestIndex].requiredEditorItemIds = [
-      ...(sections[bestIndex].requiredEditorItemIds || []),
-      item.id,
-    ];
-    assigned.add(item.id);
-  });
-  return { sections };
-};
-
 export const fitContentWritingOutlineSectionRange = (
   outline: ContentWritingOutline,
   knowledge: ContentWritingKnowledgeBase,
@@ -405,10 +361,6 @@ export const fitContentWritingOutlineSectionRange = (
       mergeTarget.requiredClaimIds = Array.from(new Set([
         ...(mergeTarget.requiredClaimIds || []),
         ...(overflow.requiredClaimIds || []),
-      ]));
-      mergeTarget.requiredEditorItemIds = Array.from(new Set([
-        ...(mergeTarget.requiredEditorItemIds || []),
-        ...(overflow.requiredEditorItemIds || []),
       ]));
       mergeTarget.sourceChunkIds = Array.from(new Set([
         ...(mergeTarget.sourceChunkIds || []),
@@ -666,7 +618,6 @@ export const buildContentWritingOutlinePrompt = (options: {
   articleTitle: string;
   language: string;
   knowledge: ContentWritingKnowledgeBase;
-  editorSourceLedger?: ContentWritingEditorSourceLedger;
   qualityContract?: string;
   targetWords?: ContentWritingWordRange;
   minimumSections?: number;
@@ -695,17 +646,8 @@ export const buildContentWritingOutlinePrompt = (options: {
     maximum_sections: options.maximumSections || CONTENT_WRITING_MAX_OUTLINE_SECTIONS,
     },
   );
-  const editorSourceBlock = options.editorSourceLedger?.enabled
-    ? `
-
-<mandatory_editor_source_ledger>
-${contentWritingEditorSourceLedgerToPromptJson(options.editorSourceLedger)}
-</mandatory_editor_source_ledger>
-
-كل عنصر E أعلاه إلزامي. وزّع جميع معرّفات E مرة واحدة على الأقسام داخل requiredEditorItemIds. لا تترك أي عنصر دون قسم، ولا تنشئ قسمًا منفصلًا لكل جملة إذا أمكن دمج الأفكار المتقاربة طبيعيًا.`
-    : '';
   return appendProtectedWritingProtocol(
-    `${rendered}${editorSourceBlock}`,
+    rendered,
     { keywords: options.keywords, qualityContract: options.qualityContract, phase: 'outline' },
   );
 };
@@ -718,7 +660,6 @@ export const buildContentWritingSectionPrompt = (options: {
   knowledgeItems: ContentWritingKnowledgeBase['items'];
   claims: ContentWritingClaimLedgerItem[];
   sourceChunks: readonly ContentWritingSourceChunk[];
-  editorSourceItems?: readonly ContentWritingEditorSourceItem[];
   coverageLedger: {
     coveredIdeaIds: string[];
     usedClaimIds: string[];
@@ -754,6 +695,9 @@ export const buildContentWritingSectionPrompt = (options: {
       competitorNumber: chunk.competitorNumber,
       title: chunk.title,
       url: chunk.url,
+      sourceKind: chunk.sourceKind || 'competitor',
+      sourceRole: chunk.sourceRole || null,
+      focusInstructions: chunk.focusInstructions || '',
       text: chunk.text,
     })), null, 2),
     coverage_ledger_json: JSON.stringify(options.coverageLedger, null, 2),
@@ -762,18 +706,7 @@ export const buildContentWritingSectionPrompt = (options: {
       : '',
     },
   );
-  const editorItems = options.editorSourceItems || [];
-  const editorSourceBlock = editorItems.length > 0
-    ? `
-
-<mandatory_editor_source_items_json>
-${JSON.stringify(editorItems, null, 2)}
-</mandatory_editor_source_items_json>
-
-غطِّ المعنى المفيد لكل عنصر E في هذا القسم دون نسخه حرفيًا ودون حشو. لا تعتبر العنصر مغطى لمجرد ذكر كلمة منه. أضف إلى JSON الناتج الحقل coveredEditorItemIds واذكر فيه فقط عناصر E التي ظهرت مادتها فعلًا. عقد الإخراج الموسع:
-{"markdown":"متن القسم","coveredIdeaIds":["K001"],"usedSourceChunkIds":["C1-S001"],"usedClaimIds":["CL001"],"coveredEditorItemIds":["E001"]}`
-    : '';
-  return appendProtectedWritingProtocol(`${rendered}${editorSourceBlock}`, {
+  return appendProtectedWritingProtocol(rendered, {
     keywords: options.keywords,
     qualityContract: options.qualityContract,
     phase: 'section',
@@ -792,8 +725,6 @@ export const buildContentWritingCoverageAuditPrompt = (options: {
   }>;
   deterministicMissingIdeaIds: string[];
   deterministicBlockedClaimIds: string[];
-  editorSourceLedger?: ContentWritingEditorSourceLedger;
-  deterministicMissingEditorItemIds?: string[];
   template?: string;
 }): string => {
   const rendered = renderPromptTemplate(
@@ -808,19 +739,7 @@ export const buildContentWritingCoverageAuditPrompt = (options: {
     max_repairs: CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS,
     },
   );
-  const editorSourceBlock = options.editorSourceLedger?.enabled
-    ? `
-
-<mandatory_editor_source_ledger>
-${contentWritingEditorSourceLedgerToPromptJson(options.editorSourceLedger)}
-</mandatory_editor_source_ledger>
-
-المعرّفات التي لم يثبت التدقيق البرمجي تغطيتها:
-${JSON.stringify(options.deterministicMissingEditorItemIds || [])}
-
-افحص تغطية عناصر E دلاليًا في المسودة. أضف missingEditorItemIds إلى جذر JSON، وأضف editorItemIds إلى كل إصلاح. كل عنصر مفقود يجب أن يدخل إصلاحًا موجّهًا للقسم الأنسب. لا تعتبر إعادة الصياغة نقصًا إذا بقي المعنى كاملًا.`
-    : '';
-  return `${rendered}${editorSourceBlock}`;
+  return rendered;
 };
 
 export const buildContentWritingSectionRepairPrompt = (options: {
@@ -832,7 +751,6 @@ export const buildContentWritingSectionRepairPrompt = (options: {
   knowledgeItems: ContentWritingKnowledgeBase['items'];
   claims: ContentWritingClaimLedgerItem[];
   sourceChunks: readonly ContentWritingSourceChunk[];
-  editorSourceItems?: readonly ContentWritingEditorSourceItem[];
   template?: string;
 }): string => {
   const rendered = renderPromptTemplate(
@@ -844,23 +762,20 @@ export const buildContentWritingSectionRepairPrompt = (options: {
     knowledge_items_json: JSON.stringify(options.knowledgeItems, null, 2),
     claims_ledger_json: JSON.stringify(options.claims, null, 2),
     source_chunks_json: JSON.stringify(
-      options.sourceChunks.map(chunk => ({ sourceId: chunk.id, text: chunk.text })),
+      options.sourceChunks.map(chunk => ({
+        sourceId: chunk.id,
+        sourceKind: chunk.sourceKind || 'competitor',
+        sourceRole: chunk.sourceRole || null,
+        focusInstructions: chunk.focusInstructions || '',
+        text: chunk.text,
+      })),
       null,
       2,
     ),
     original_section_markdown: options.originalMarkdown,
     },
   );
-  const editorItems = options.editorSourceItems || [];
-  return editorItems.length > 0
-    ? `${rendered}
-
-<mandatory_editor_source_items_json>
-${JSON.stringify(editorItems, null, 2)}
-</mandatory_editor_source_items_json>
-
-يجب أن يحافظ القسم المصحح على معنى كل عنصر E مرفق. أضف coveredEditorItemIds إلى JSON الناتج، ولا تذكر إلا العناصر المغطاة فعلًا.`
-    : rendered;
+  return rendered;
 };
 
 export const buildContentWritingIntroductionPrompt = (options: {

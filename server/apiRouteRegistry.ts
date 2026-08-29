@@ -13,6 +13,7 @@ import clientSiteCrawlerHandler from '../api/clientSiteCrawler';
 import contentWritingHandler from '../api/contentWriting';
 import contentWritingAutomationHandler from '../api/contentWritingAutomation';
 import contentWritingExternalResultHandler from '../api/contentWritingExternalResult';
+import contentWritingSourcesHandler from '../api/contentWritingSources';
 import competitorsHandler from '../api/competitors';
 import externalAnalysisHandler from '../api/externalAnalysis';
 import geminiHandler, { geminiProgressHandler } from '../api/gemini';
@@ -42,6 +43,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'content-writing', method: 'ALL', path: '/api/content-writing', handler: contentWritingHandler },
   { id: 'content-writing-automation', method: 'ALL', path: '/api/content-writing/automation', handler: contentWritingAutomationHandler },
   { id: 'content-writing-external-result', method: 'ALL', path: '/api/content-writing/external-result', handler: contentWritingExternalResultHandler },
+  { id: 'content-writing-sources', method: 'ALL', path: '/api/content-writing/sources', handler: contentWritingSourcesHandler },
   { id: 'ai-capabilities', method: 'ALL', path: '/api/ai/capabilities', handler: aiCapabilitiesHandler },
   { id: 'prompt-registry', method: 'ALL', path: '/api/ai/prompt-registry', handler: promptRegistryHandler },
   { id: 'competitors', method: 'ALL', path: '/api/competitors', handler: competitorsHandler },

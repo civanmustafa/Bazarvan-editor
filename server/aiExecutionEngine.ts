@@ -319,7 +319,7 @@ const normalizeGeminiProvider = (value: unknown): GeminiProvider => (
 );
 
 // A model can have both free-tier and paid-tier access. The caller's selected
-// provider decides which server-side key pool is used, not the model name.
+// The provider decides which authorized vault credential pool is used, not the model name.
 const selectGeminiProvider = (requestedProvider: GeminiProvider): GeminiProvider => requestedProvider;
 
 const selectGeminiModel = (model: unknown, provider: GeminiProvider): string => {
@@ -410,7 +410,7 @@ const getProviderCapabilityFailure = (
     return {
       status: 503,
       body: {
-        error: `${getGeminiProviderLabel(provider)} مفعّل، لكن لا توجد مفاتيح API مهيأة له على الخادم.`,
+        error: `${getGeminiProviderLabel(provider)} مفعّل، لكن لا توجد مفاتيح مسموحة له في خزنة اللوحة.`,
         code: 'AI_PROVIDER_NOT_CONFIGURED',
         provider,
       },
@@ -1526,7 +1526,7 @@ const executeGeminiProviderRequestInternal = async (
   return result || {
     status: 503,
     body: {
-      error: `لم يتم تكوين مفاتيح ${getGeminiProviderLabel(provider)} على السيرفر.`,
+      error: `لا توجد مفاتيح ${getGeminiProviderLabel(provider)} مسموحة في خزنة اللوحة لهذا الطلب.`,
       code: 'AI_PROVIDER_NOT_CONFIGURED',
       provider,
     },

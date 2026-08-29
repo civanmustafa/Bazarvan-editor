@@ -24,7 +24,47 @@ test('settings route registry accepts every standalone settings tab', () => {
     name: 'settings',
     section: 'crawler',
   });
+  assert.deepEqual(parseAppRoute('/settings/preferences'), {
+    name: 'settings',
+    section: 'preferences',
+  });
+  assert.deepEqual(parseAppRoute('/settings/account'), {
+    name: 'settings',
+    section: 'account',
+  });
+  assert.deepEqual(parseAppRoute('/settings/data'), {
+    name: 'settings',
+    section: 'data',
+  });
   assert.equal(parseAppRoute('/settings/not-registered').name, 'notFound');
+});
+
+test('ordinary user settings expose only distinct account-owned sections', async () => {
+  const settingsPage = await readWorkspaceFile('components/SettingsPage.tsx');
+  const userTabsStart = settingsPage.indexOf("] : [\n    { key: 'preferences'");
+  const userTabsEnd = settingsPage.indexOf(']), [isAdmin]);', userTabsStart);
+  const userTabs = settingsPage.slice(userTabsStart, userTabsEnd);
+  const preferencesStart = settingsPage.indexOf('const renderPersonalPreferences');
+  const accountStart = settingsPage.indexOf('const renderUserAccountSettings');
+  const dataStart = settingsPage.indexOf('const renderUserDataSettings');
+  const aiSettingsStart = settingsPage.indexOf('const renderAiSettings');
+  const preferences = settingsPage.slice(preferencesStart, accountStart);
+  const account = settingsPage.slice(accountStart, dataStart);
+  const data = settingsPage.slice(dataStart, aiSettingsStart);
+
+  assert.ok(userTabsStart > 0 && userTabsEnd > userTabsStart);
+  assert.match(userTabs, /key: 'preferences'/);
+  assert.match(userTabs, /key: 'account'/);
+  assert.match(userTabs, /key: 'clients'/);
+  assert.match(userTabs, /key: 'data'/);
+  assert.doesNotMatch(userTabs, /key: '(?:system|crawler|prompts|n8n|users|roles)'/);
+  assert.doesNotMatch(preferences, /UserAiProviderSecretsSettings|UserProviderAccessSummary|UserArticleQuotaSummary|DashboardDataTools/);
+  assert.match(account, /UserAiProviderSecretsSettings/);
+  assert.match(account, /UserProviderAccessSummary/);
+  assert.match(account, /UserArticleQuotaSummary/);
+  assert.match(data, /DashboardDataTools/);
+  assert.match(settingsPage, /if \(!isAdmin\) \{[\s\S]*selectedSection === 'account'[\s\S]*selectedSection === 'clients'[\s\S]*selectedSection === 'data'/);
+  assert.doesNotMatch(settingsPage, /!isAdmin && selectedSection !== 'users'/);
 });
 
 test('the searchable user guide is globally routed and reachable from the app shell', async () => {
@@ -57,6 +97,7 @@ test('development and production use one API route registry', async () => {
     '/api/gemini',
     '/api/chatgpt',
     '/api/content-writing',
+    '/api/content-writing/sources',
     '/api/ai/capabilities',
     '/api/ai/prompt-registry',
     '/api/competitors',
@@ -553,6 +594,7 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
   const [
     migration,
     vaultMigration,
+    explicitGrantMigration,
     vaultService,
     secretService,
     secretApi,
@@ -565,11 +607,12 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260722050000_admin_ai_provider_secrets.sql'),
     readWorkspaceFile('supabase/migrations/20260829030000_provider_credential_vault.sql'),
+    readWorkspaceFile('supabase/migrations/20260829040000_provider_credentials_explicit_grants.sql'),
     readWorkspaceFile('server/providerCredentialVault.ts'),
     readWorkspaceFile('server/adminAiProviderSecrets.ts'),
     readWorkspaceFile('api/adminAiProviderSecrets.ts'),
-    readWorkspaceFile('utils/adminAiProviderSecrets.ts'),
-    readWorkspaceFile('components/AdminAiProviderSecretsSettings.tsx'),
+    readWorkspaceFile('utils/providerAccessControl.ts'),
+    readWorkspaceFile('components/AdminProviderAccessSettings.tsx'),
     readWorkspaceFile('components/SettingsPage.tsx'),
     readWorkspaceFile('server/aiProviderCapabilities.ts'),
     readWorkspaceFile('server/openAiExecutionEngine.ts'),
@@ -581,6 +624,8 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
   assert.match(migration, /grant select, insert, update, delete on table public\.ai_provider_secrets to service_role/);
   assert.match(vaultMigration, /create table if not exists public\.provider_credentials_vault/);
   assert.match(vaultMigration, /revoke all on table public\.provider_credentials_vault from public, anon, authenticated/);
+  assert.match(explicitGrantMigration, /delete from public\.provider_credential_grants/);
+  assert.match(explicitGrantMigration, /legacy_source_table in \('ai_provider_secrets', 'crawler_provider_secrets'\)/);
   assert.match(vaultService, /aes-256-gcm/);
   assert.match(vaultService, /cipher\.setAAD\(Buffer\.from\(encryptionContext, 'utf8'\)\)/);
   assert.match(vaultService, /AI_SETTINGS_ENCRYPTION_KEY/);
@@ -590,13 +635,21 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
   assert.doesNotMatch(secretApi, /ciphertext|authentication_tag|initialization_vector/);
   assert.doesNotMatch(secretClient, /localStorage|sessionStorage/);
   assert.match(secretSettings, /autoComplete="new-password"/);
-  assert.match(secretSettings, /saveAndEnableAdminAiProviderSecret/);
-  assert.match(settingsPage, /\{isAdmin && \(\s*<SettingsSection title="مفاتيح المزودات الإدارية المشفّرة">/);
+  assert.match(secretSettings, /saveAdminSharedCredential/);
+  assert.match(secretSettings, /حفظ دون تعيين/);
+  assert.match(secretSettings, /content_writing_resume/);
+  assert.match(settingsPage, /\{isAdmin && \(\s*<SettingsSection title="مركز المزودات والمفاتيح والصلاحيات">/);
+  assert.doesNotMatch(settingsPage, /AdminAiProviderSecretsSettings|AdminCrawlerProviderSecretsSettings/);
+  assert.doesNotMatch(secretService, /saveCredentialGrant/);
   assert.match(capabilityService, /readAiProviderCredentialAvailability\(userId\)/);
   assert.match(openAiExecutionEngine, /resolveOpenAiApiKeys\(\s*telemetry\.actorUserId,\s*options\.credentialPurpose/);
   assert.match(aiExecutionEngine, /resolveGeminiApiKeys\(provider, userId, options\.credentialPurpose\)/);
   assert.doesNotMatch(openAiExecutionEngine, /process\.env\.OPENAI_API_KEYS?/);
   assert.doesNotMatch(aiExecutionEngine, /process\.env\.GEMINI_(?:PAID|PRO)_API_KEYS?/);
+  await assertFileMissing('components/AdminAiProviderSecretsSettings.tsx');
+  await assertFileMissing('components/AdminCrawlerProviderSecretsSettings.tsx');
+  await assertFileMissing('utils/adminAiProviderSecrets.ts');
+  await assertFileMissing('utils/adminCrawlerProviderSecrets.ts');
 });
 
 test('each user can manage encrypted personal AI key groups without exposing raw keys', async () => {
@@ -637,7 +690,8 @@ test('each user can manage encrypted personal AI key groups without exposing raw
   assert.doesNotMatch(secretClient, /localStorage|sessionStorage/);
   assert.match(secretSettings, /gemini_free/);
   assert.match(secretSettings, /gemini_paid/);
-  assert.match(secretSettings, /openai_paid/);
+  assert.match(secretSettings, /id: 'openai'/);
+  assert.match(secretSettings, /مجانية أو مدفوعة/);
   assert.match(settingsPage, /<UserAiProviderSecretsSettings\s*\/>/);
   assert.match(adminSecretService, /source: 'user'/);
   assert.match(adminSecretService, /resolveUserAiProviderKeys/);
@@ -734,7 +788,7 @@ test('content writing enforces one goal-aware final section after FAQ across ass
     readWorkspaceFile('server/contentWritingEngine.ts'),
   ]);
 
-  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 13/);
+  assert.match(workflow, /CONTENT_WRITING_WORKFLOW_VERSION = 14/);
   assert.match(workflow, /auditContentWritingFinalSectionStructure/);
   assert.match(workflow, /final_structure_faq_not_penultimate/);
   assert.match(workflow, /final_structure_duplicate_final_heading/);
@@ -871,7 +925,7 @@ test('source registry and claim ledger constrain every content-writing repair su
   assert.match(serverWorkflow, /compareContentWritingQualityReports/);
   assert.match(serverWorkflow, /acceptedDraft: accepted \? application\.candidateMarkdown : null/);
   assert.match(serverWorkflow, /buildTargetedRevisionArticleContext\(compactArticleContext\)/);
-  assert.match(serverWorkflow, /withheld="targeted-revision"/);
+  assert.doesNotMatch(serverWorkflow, /current_article_text|editorSourceLedger/);
   assert.match(promptRegistry, /لا تُرجع المقالة كاملة/);
   assert.doesNotMatch(
     `${claims}\n${knowledge}\n${workflow}\n${serverWorkflow}\n${promptRegistry}\n${quality}`,
