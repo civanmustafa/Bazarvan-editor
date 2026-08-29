@@ -30,6 +30,7 @@ import AdminProviderAccessSettings from './AdminProviderAccessSettings';
 import UserProviderAccessSummary from './UserProviderAccessSummary';
 import AdminArticleQuotaSettings from './AdminArticleQuotaSettings';
 import UserArticleQuotaSummary from './UserArticleQuotaSummary';
+import DashboardDataTools from './DashboardDataTools';
 import AdminPromptRegistrySettings from './AdminPromptRegistrySettings';
 import ClientCenterSettings from './ClientCenterSettings';
 import { navigateToAppPath } from '../utils/appRoutes';
@@ -427,6 +428,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       <SettingsSection title="حصة المقالات الشهرية لحسابي">
         <UserArticleQuotaSummary />
       </SettingsSection>
+      <DashboardDataTools />
     </div>
   );
 
@@ -686,6 +688,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </FieldLabel>
         </div>
       </SettingsSection>
+      <DashboardDataTools />
     </div>
   );
 

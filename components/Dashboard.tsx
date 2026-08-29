@@ -1,17 +1,18 @@
 ﻿
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, FileDown, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy, ChevronDown } from 'lucide-react';
+import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy, ChevronDown } from 'lucide-react';
 import { ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
-import { formatIstanbulDateTime, getIstanbulDateKey } from '../utils/dateTime';
+import { formatIstanbulDateTime } from '../utils/dateTime';
 import {
     claimRemoteArticle,
     deleteRemoteArticle,
     getArticleTrashInfo,
     listRemoteArticlesPage,
     listRemoteProfiles,
+    loadDashboardActivitySummary,
     loadRemoteArticleSnapshot,
     moveRemoteArticleToTrash,
     purgeExpiredRemoteArticleTrash,
@@ -27,6 +28,7 @@ import {
     type RemoteArticlesPageOptions,
     type RemoteArticleTrashInfo,
     type RemoteArticleSettingsPatch,
+    type DashboardActivitySummary as DashboardActivitySummaryData,
 } from '../utils/supabaseArticles';
 import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
 import type { ArticleStorageSnapshot } from '../utils/editorContentStore';
@@ -50,6 +52,7 @@ import {
 } from '../constants/articleStatuses';
 import AutomaticContentWritingQueuePanel from './AutomaticContentWritingQueuePanel';
 import { DashboardAiExecutionMonitor } from './AiKeyUsageToast';
+import DashboardActivitySummary from './DashboardActivitySummary';
 import {
     beginAiExecutionActivity,
     finishAiExecutionActivity,
@@ -110,18 +113,6 @@ const formatSeconds = (seconds: number, t: typeof translations.ar): string => {
   ].filter(Boolean).join(' ').trim() || `0 ${t.secondsAbbr}`;
 };
 
-const SummaryStat: React.FC<{ icon: React.ReactNode; label: string; value: string | number }> = ({ icon, label, value }) => (
-  <div className="flex items-center gap-4 p-4 bg-white dark:bg-[#2A2A2A] rounded-lg border border-gray-200 dark:border-[#3C3C3C]">
-    <div className="p-3 bg-[#d4af37]/10 dark:bg-[#d4af37]/20 text-[#d4af37] rounded-lg">
-      {icon}
-    </div>
-    <div className="text-start">
-      <div className="text-xl font-bold text-[#333333] dark:text-[#b7b7b7]">{value}</div>
-      <div className="text-sm text-gray-500 dark:text-gray-400">{label}</div>
-    </div>
-  </div>
-);
-
 const ArticlePaginationControls: React.FC<{
   pageLabel: string;
   canGoPrevious: boolean;
@@ -158,10 +149,6 @@ const getProfileLabel = (profile?: RemoteProfile): string => (
 
 const getArticleOwnerId = (article: RemoteArticleActivity): string | null => (
   article.ownerId || article.createdBy || article.assignedTo || null
-);
-
-const articleBelongsToProfile = (article: RemoteArticleActivity, profileId: string): boolean => (
-  article.ownerId === profileId || article.createdBy === profileId || article.assignedTo === profileId
 );
 
 const getLatestSavedAt = (articles: RemoteArticleActivity[]): string => (
@@ -222,18 +209,6 @@ const isPublicClaimOpportunity = (article: RemoteArticleActivity): boolean => (
   !article.createdBy &&
   !article.assignedTo &&
   !getN8nSettings(article).visibleToEmailsCsv
-);
-
-const canProfileSeeArticle = (
-  article: RemoteArticleActivity,
-  profileId: string,
-  isAdmin: boolean,
-): boolean => (
-  isAdmin ||
-  Boolean(profileId && (
-    articleBelongsToProfile(article, profileId) ||
-    isPublicClaimOpportunity(article)
-  ))
 );
 
 type N8nSettingFieldKey = keyof Pick<RemoteArticleSettingsPatch, 'visibility' | 'accessRole' | 'articleLanguage' | 'status'>;
@@ -1100,6 +1075,9 @@ const Dashboard: React.FC = () => {
   
   const [remoteArticles, setRemoteArticles] = useState<RemoteArticleActivity[]>([]);
   const [profiles, setProfiles] = useState<RemoteProfile[]>([]);
+  const [activitySummary, setActivitySummary] = useState<DashboardActivitySummaryData | null>(null);
+  const [isActivitySummaryLoading, setIsActivitySummaryLoading] = useState(true);
+  const [activitySummaryError, setActivitySummaryError] = useState('');
   const [detailArticle, setDetailArticle] = useState<RemoteArticleActivity | null>(null);
   const [detailSnapshot, setDetailSnapshot] = useState<ArticleStorageSnapshot | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
@@ -1111,7 +1089,6 @@ const Dashboard: React.FC = () => {
   const [articlesTotalCount, setArticlesTotalCount] = useState(0);
   const [articlesHasNextPage, setArticlesHasNextPage] = useState(false);
   const [isArticlesPageFromCache, setIsArticlesPageFromCache] = useState(false);
-  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   const [externalAnalysisSummaries, setExternalAnalysisSummaries] = useState<Record<string, ExternalAnalysisDashboardSummary>>({});
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -1153,6 +1130,7 @@ const Dashboard: React.FC = () => {
   const isAdmin = currentUserRole === 'admin';
   const dashboardRefreshRequestRef = useRef(0);
   const externalAnalysisRefreshRequestRef = useRef(0);
+  const activitySummaryRequestRef = useRef(0);
   const prefetchedDashboardScopesRef = useRef(new Set<string>());
   const dashboardFiltersInitializedRef = useRef(false);
   const articlesPage = articlePagesByStatus[articleStatusTab] || 1;
@@ -1230,6 +1208,36 @@ const Dashboard: React.FC = () => {
     }
   }, [currentUser, dashboardArticleIdsKey]);
 
+  const refreshActivitySummary = useCallback(async (silent = false) => {
+    const requestId = activitySummaryRequestRef.current + 1;
+    activitySummaryRequestRef.current = requestId;
+    if (!currentUser || !isSupabaseConfigured) {
+      setActivitySummary(null);
+      setIsActivitySummaryLoading(false);
+      setActivitySummaryError('');
+      return;
+    }
+    if (!silent) setIsActivitySummaryLoading(true);
+    setActivitySummaryError('');
+    try {
+      const nextSummary = await loadDashboardActivitySummary();
+      if (activitySummaryRequestRef.current === requestId) {
+        setActivitySummary(nextSummary);
+      }
+    } catch (summaryError) {
+      console.error('Failed to load dashboard activity summary:', summaryError);
+      if (activitySummaryRequestRef.current === requestId) {
+        setActivitySummaryError(uiLanguage === 'en'
+          ? 'Could not refresh the activity summary.'
+          : 'تعذر تحديث ملخص النشاط.');
+      }
+    } finally {
+      if (activitySummaryRequestRef.current === requestId) {
+        setIsActivitySummaryLoading(false);
+      }
+    }
+  }, [currentUser, uiLanguage]);
+
   const refreshData = async () => {
     if (!currentUser) return;
     const requestId = dashboardRefreshRequestRef.current + 1;
@@ -1252,6 +1260,7 @@ const Dashboard: React.FC = () => {
     };
 
     setIsArticlesLoading(true);
+    void refreshActivitySummary(true);
 
     const cachedArticlesPage = await readCachedRemoteArticlesPage(articlesPageOptions).catch((error: unknown): null => {
       console.warn('Could not read cached dashboard articles before refresh:', error);
@@ -1289,6 +1298,14 @@ const Dashboard: React.FC = () => {
       }
     }
   };
+
+  useEffect(() => {
+    void refreshActivitySummary();
+    const intervalId = window.setInterval(() => {
+      void refreshActivitySummary(true);
+    }, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [refreshActivitySummary]);
 
   const getOwnerLabel = (article: RemoteArticleActivity): string => {
     const ownerId = getArticleOwnerId(article);
@@ -1673,120 +1690,6 @@ const Dashboard: React.FC = () => {
     setArticlePagesByStatus(createDashboardStatusPages());
   }, [isTrashVisible, searchQuery, filters]);
 
-  const handleExportHtml = () => {
-    if (!currentUser) return;
-    const exportArticles = activeRemoteArticles;
-
-    const formatSecondsDetailed = (seconds: number): string => {
-      if (!seconds || seconds < 60) return `${Math.floor(seconds || 0)} ${t.seconds}`;
-      const h = Math.floor(seconds / 3600);
-      const m = Math.floor((seconds % 3600) / 60);
-      const s = Math.floor(seconds % 60);
-      return [
-        h > 0 ? `${h} ${t.hours}` : '',
-        m > 0 ? `${m} ${t.minutes}` : '',
-        s > 0 ? `${s} ${t.seconds}` : '',
-      ].filter(Boolean).join(' ').trim() || `0 ${t.seconds}`;
-    };
-
-    const totalArticles = exportArticles.length;
-    const totalTimeSpent = exportArticles.reduce((sum, article) => sum + article.timeSpentSeconds, 0);
-
-    const articlesHtml = `
-      <table class="articles-table">
-          <thead>
-              <tr>
-                  <th>${t.articleTitle}</th>
-                  <th>${t.timeSpent}</th>
-                  <th>${t.words}</th>
-                  <th>${t.keywordViolations}</th>
-                  <th>${t.structureViolations}</th>
-                  <th>${t.structureErrors}</th>
-                  <th>${t.totalDuplicates}</th>
-                  <th>${t.keywordDuplicates}</th>
-                  <th>${t.commonDuplicates}</th>
-              </tr>
-          </thead>
-          <tbody>
-              ${[...exportArticles]
-              .sort((a, b) => getArticleSortTime(b) - getArticleSortTime(a))
-              .map((activity) => `
-                  <tr>
-                      <td>${activity.title || t.untitled}</td>
-                      <td>${formatSeconds(activity.timeSpentSeconds, t)}</td>
-                      <td>${activity.stats?.wordCount ?? 'N/A'}</td>
-                      <td>${activity.stats?.keywordViolations ?? 'N/A'}</td>
-                      <td>${activity.stats?.violatingCriteriaCount ?? 'N/A'}</td>
-                      <td>${activity.stats?.totalErrorsCount ?? 'N/A'}</td>
-                      <td>${activity.stats?.totalDuplicates ?? 'N/A'}</td>
-                      <td>${activity.stats?.keywordDuplicatesCount ?? 'N/A'}</td>
-                      <td>${activity.stats?.commonDuplicatesCount ?? 'N/A'}</td>
-                  </tr>
-              `).join('')}
-          </tbody>
-      </table>
-    `;
-
-    const htmlContent = `
-        <!DOCTYPE html>
-        <html lang="${uiLanguage}" dir="${uiLanguage === 'ar' ? 'rtl' : 'ltr'}">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>${t.userActivityReport}: ${currentUser}</title>
-            <style>
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f9f9f9; margin: 0; padding: 20px; }
-                .container { max-width: 1200px; margin: auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                h1, h2 { color: #b8922e; border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; }
-                h1 { font-size: 2em; }
-                h2 { font-size: 1.5em; margin-top: 30px; }
-                p { color: #666; }
-                .summary-table, .articles-table { width: 100%; border-collapse: collapse; margin-top: 15px; text-align: ${uiLanguage === 'ar' ? 'right' : 'left'}; }
-                .summary-table th, .summary-table td, .articles-table th, .articles-table td { padding: 12px; border: 1px solid #ddd; }
-                .summary-table th { background-color: #f2f2f2; font-weight: bold; color: #b8922e; }
-                .summary-table th { width: 30%; }
-                .summary-table tr:nth-child(even), .articles-table tr:nth-child(even) { background-color: #f9f9f9; }
-                .articles-table { font-size: 0.9em; table-layout: fixed; }
-                .articles-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                .articles-table tr:hover { background-color: #f1f1f1; }
-                .articles-table td:first-child { width: 30%; white-space: normal; word-break: break-word; font-weight: bold; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>${t.userActivityReport}: ${currentUser}</h1>
-                <p>${t.reportDate}: ${formatIstanbulDateTime(new Date(), t.locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p>
-                <h2>${t.activitySummary}</h2>
-                <table class="summary-table">
-                    <tr><th>${t.totalArticles}</th><td>${totalArticles}</td></tr>
-                    <tr><th>${t.totalTimeSpent}</th><td>${formatSecondsDetailed(totalTimeSpent)}</td></tr>
-                </table>
-                <h2>${t.articlesDetails}</h2>
-                ${articlesHtml}
-            </div>
-        </body>
-        </html>
-    `;
-
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `report-${currentUser}-${getIstanbulDateKey()}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleConfirmClearData = async () => {
-    if (!currentUserId) return;
-    const ownedArticles = remoteArticles.filter(article => article.ownerId === currentUserId || article.createdBy === currentUserId);
-    await Promise.all(ownedArticles.map(article => moveRemoteArticleToTrash(article.id)));
-    await refreshData();
-    setIsConfirmModalOpen(false);
-  };
-
   const handleChooseNewArticleLanguage = (lang: 'ar' | 'en') => {
     setIsNewArticleLanguageModalOpen(false);
     navigateToNewEditorArticle(lang);
@@ -1827,12 +1730,6 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  const activeRemoteArticles = useMemo(() => (
-    remoteArticles.filter(article => {
-      if (getArticleTrashInfo(article, currentUserId)) return false;
-      return canProfileSeeArticle(article, currentUserId, isAdmin);
-    })
-  ), [remoteArticles, currentUserId, isAdmin]);
   // Supabase applies visibility, trash, mode, search, and filters before pagination.
   const displayedRemoteArticles = remoteArticles;
   const scopedArticles = displayedRemoteArticles;
@@ -1873,6 +1770,8 @@ const Dashboard: React.FC = () => {
   };
   
   const inputClass = "w-full p-2 bg-gray-50 dark:bg-[#1F1F1F] rounded-md border border-gray-300 dark:border-[#3C3C3C] focus:ring-1 focus:ring-[#d4af37] focus:border-[#d4af37] text-sm text-[#333333] dark:text-[#e0e0e0]";
+  const dashboardHeaderButtonClass = "inline-flex h-11 min-w-[148px] items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-black text-[#333333] transition-colors hover:border-[#d4af37]/60 hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-[#C7C7C7] dark:hover:bg-[#d4af37]/20";
+  const dashboardHeaderPrimaryButtonClass = "inline-flex h-11 min-w-[148px] items-center justify-center gap-2 rounded-lg border border-[#d4af37] bg-[#d4af37] px-4 text-sm font-black text-white transition-colors hover:border-[#b8922e] hover:bg-[#b8922e]";
 
   if (!currentUser) {
     return null;
@@ -1880,17 +1779,17 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className={`min-h-screen ${isDarkMode ? 'dark' : ''} bg-gray-50 dark:bg-[#181818]`}>
-      <div className="max-w-screen-xl mx-auto p-4 sm:p-6 md:p-8">
+      <div className="max-w-screen-2xl mx-auto p-4 sm:p-6 md:p-8">
         <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-bold text-[#333333] dark:text-gray-100">{t.dashboardTitle}</h1>
             <p className="mt-1 text-gray-500 dark:text-gray-400">{t.welcomeBack}, <span className="font-bold text-[#d4af37]">{currentUser}</span>!</p>
           </div>
-           <div className="flex items-center gap-2">
+           <div className="flex flex-wrap items-center gap-2">
             {isAdmin && (
               <button
                 onClick={() => navigateToAppPath('/admin')}
-                className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
+                className={dashboardHeaderButtonClass}
               >
                 <Shield size={18} />
                 <span>مركز المتابعة</span>
@@ -1898,43 +1797,28 @@ const Dashboard: React.FC = () => {
             )}
             <button
               onClick={() => navigateToAppPath('/settings')}
-              className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
+              className={dashboardHeaderButtonClass}
             >
               <Settings size={18} />
               <span>{t.settings}</span>
             </button>
             <button
               onClick={() => setIsNewArticleLanguageModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
+              className={dashboardHeaderButtonClass}
             >
               <PlusSquare size={18} />
               <span>{t.newArticle}</span>
             </button>
             <button
               onClick={onGoToEditor}
-              className="flex items-center gap-2 px-4 py-2 font-bold text-white bg-[#d4af37] rounded-lg hover:bg-[#b8922e] transition-colors"
+              className={dashboardHeaderPrimaryButtonClass}
             >
               <Edit size={18} />
               <span>{t.goToEditor}</span>
             </button>
             <button
-              onClick={handleExportHtml}
-              className="flex items-center gap-2 px-4 py-2 font-semibold text-[#333333] dark:text-[#C7C7C7] bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20 transition-colors"
-            >
-              <FileDown size={18} />
-              <span>{t.exportHtml}</span>
-            </button>
-            <button
-              onClick={() => setIsConfirmModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 font-semibold text-red-600 dark:text-red-400 bg-white dark:bg-[#2A2A2A] border border-gray-300 dark:border-[#3C3C3C] rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-              title={t.clearUserData}
-            >
-              <Trash2 size={18} />
-              <span>{t.clearData}</span>
-            </button>
-            <button
               onClick={onLogout}
-              className="p-2.5 border rounded-lg transition-colors text-gray-500 dark:text-[#8d8d8d] border-gray-300 dark:border-[#3C3C3C] bg-white hover:bg-[#d4af37]/10 dark:bg-[#2A2A2A] dark:hover:bg-[#d4af37]/20"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-500 transition-colors hover:border-[#d4af37]/60 hover:bg-[#d4af37]/10 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-[#8d8d8d] dark:hover:bg-[#d4af37]/20"
               title={t.logout}
             >
               <LogOut size={18} />
@@ -2317,66 +2201,25 @@ const Dashboard: React.FC = () => {
                 </div>
             </div>
 
-            <div className="space-y-8">
-                <div>
-                     <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4">{t.activitySummary}</h2>
-                     <div className="space-y-3">
-                        <SummaryStat icon={<Book size={20} />} label={t.totalArticles} value={scopedArticles.length} />
-                        <SummaryStat icon={<Clock size={20} />} label={t.totalTime} value={formatSeconds(scopedTotalTime, t)} />
-                    </div>
-                </div>
-
-                <div className="space-y-3">
-                  <AutomaticContentWritingQueuePanel
-                    isArabic={uiLanguage !== 'en'}
-                    isAdmin={isAdmin}
-                  />
-                  <DashboardAiExecutionMonitor />
-                </div>
-
+            <div className="space-y-3">
+              <AutomaticContentWritingQueuePanel
+                isArabic={uiLanguage !== 'en'}
+                isAdmin={isAdmin}
+              />
+              <DashboardAiExecutionMonitor />
+              <DashboardActivitySummary
+                summary={activitySummary}
+                isLoading={isActivitySummaryLoading}
+                error={activitySummaryError}
+                isAdmin={isAdmin}
+                locale={t.locale}
+              />
             </div>
         </div>
         <footer className="mt-10 border-t border-gray-200 pt-4 text-center text-xs font-semibold text-gray-500 dark:border-[#3C3C3C] dark:text-gray-400">
           جميع الحقوق محفوظة - 2026-05-07 01:54:51
         </footer>
       </div>
-      {isConfirmModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-            <div className={`bg-white dark:bg-[#2A2A2A] rounded-lg shadow-xl w-full max-md p-6 border dark:border-[#3C3C3C] text-start`}>
-                <div className="flex sm:items-start gap-4">
-                    <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20 sm:mx-0 sm:h-10 sm:w-10">
-                        <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden="true" />
-                    </div>
-                    <div className="flex-grow">
-                        <h3 className="text-lg font-bold leading-6 text-[#333333] dark:text-gray-100" id="modal-title">
-                            {t.clearAllData}
-                        </h3>
-                        <div className="mt-2">
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                                {t.clearDataConfirmation}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-                <div className={`mt-5 sm:mt-4 flex ${uiLanguage === 'ar' ? 'flex-row-reverse' : 'flex-row'} gap-3`}>
-                    <button
-                        type="button"
-                        className="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:w-auto"
-                        onClick={handleConfirmClearData}
-                    >
-                        {t.yesClear}
-                    </button>
-                    <button
-                        type="button"
-                        className="mt-3 inline-flex w-full justify-center rounded-md bg-white dark:bg-[#3C3C3C] px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-200 shadow-sm ring-1 ring-inset ring-gray-300 dark:ring-[#4A4A4A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/25 sm:mt-0 sm:w-auto"
-                        onClick={() => setIsConfirmModalOpen(false)}
-                    >
-                        {t.cancel}
-                    </button>
-                </div>
-            </div>
-        </div>
-      )}
       {isNewArticleLanguageModalOpen && (
         <NewArticleLanguageModal
           t={t}

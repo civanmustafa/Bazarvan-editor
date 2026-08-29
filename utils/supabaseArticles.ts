@@ -256,6 +256,38 @@ export type RemoteProfile = {
   lastSeenAt: string | null;
 };
 
+export type DashboardActivityStatusCounts = Record<ArticleStatus, number>;
+
+export type DashboardActivityUserSummary = {
+  id: string;
+  email: string | null;
+  fullName: string | null;
+  role: 'admin' | 'user';
+  isActive: boolean;
+  lastSeenAt: string | null;
+  articleCount: number;
+  totalTimeSeconds: number;
+  totalWords: number;
+  lastActivityAt: string | null;
+  statusCounts: DashboardActivityStatusCounts;
+};
+
+export type DashboardActivitySummary = {
+  totalArticles: number;
+  totalTimeSeconds: number;
+  averageTimeSeconds: number;
+  totalWords: number;
+  totalSaves: number;
+  articlesUpdatedLast7Days: number;
+  unassignedArticles: number;
+  lastActivityAt: string | null;
+  statusCounts: DashboardActivityStatusCounts;
+  totalUsers: number;
+  enabledUsers: number;
+  contributorUsers: number;
+  users: DashboardActivityUserSummary[];
+};
+
 export type RemoteArticleActivity = ArticleActivity & {
   id: string;
   title: string;
@@ -385,6 +417,49 @@ const lightweightArticleMetadata = (metadata: unknown): Record<string, any> => {
 const toNumber = (value: unknown, fallback = 0): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
 );
+
+const normalizeDashboardActivityStatusCounts = (value: unknown): DashboardActivityStatusCounts => {
+  const source = isRecord(value) ? value : {};
+  return {
+    content_preparation: Math.max(0, Math.floor(toNumber(source.content_preparation))),
+    draft: Math.max(0, Math.floor(toNumber(source.draft))),
+    in_review: Math.max(0, Math.floor(toNumber(source.in_review))),
+    published: Math.max(0, Math.floor(toNumber(source.published))),
+    archived: Math.max(0, Math.floor(toNumber(source.archived))),
+  };
+};
+
+const normalizeDashboardActivitySummary = (value: unknown): DashboardActivitySummary => {
+  const source = isRecord(value) ? value : {};
+  const users = Array.isArray(source.users) ? source.users : [];
+  return {
+    totalArticles: Math.max(0, Math.floor(toNumber(source.totalArticles))),
+    totalTimeSeconds: Math.max(0, Math.floor(toNumber(source.totalTimeSeconds))),
+    averageTimeSeconds: Math.max(0, Math.floor(toNumber(source.averageTimeSeconds))),
+    totalWords: Math.max(0, Math.floor(toNumber(source.totalWords))),
+    totalSaves: Math.max(0, Math.floor(toNumber(source.totalSaves))),
+    articlesUpdatedLast7Days: Math.max(0, Math.floor(toNumber(source.articlesUpdatedLast7Days))),
+    unassignedArticles: Math.max(0, Math.floor(toNumber(source.unassignedArticles))),
+    lastActivityAt: typeof source.lastActivityAt === 'string' ? source.lastActivityAt : null,
+    statusCounts: normalizeDashboardActivityStatusCounts(source.statusCounts),
+    totalUsers: Math.max(0, Math.floor(toNumber(source.totalUsers))),
+    enabledUsers: Math.max(0, Math.floor(toNumber(source.enabledUsers))),
+    contributorUsers: Math.max(0, Math.floor(toNumber(source.contributorUsers))),
+    users: users.filter(isRecord).map(user => ({
+      id: String(user.id || ''),
+      email: typeof user.email === 'string' ? user.email : null,
+      fullName: typeof user.fullName === 'string' ? user.fullName : null,
+      role: user.role === 'admin' ? 'admin' : 'user',
+      isActive: user.isActive !== false,
+      lastSeenAt: typeof user.lastSeenAt === 'string' ? user.lastSeenAt : null,
+      articleCount: Math.max(0, Math.floor(toNumber(user.articleCount))),
+      totalTimeSeconds: Math.max(0, Math.floor(toNumber(user.totalTimeSeconds))),
+      totalWords: Math.max(0, Math.floor(toNumber(user.totalWords))),
+      lastActivityAt: typeof user.lastActivityAt === 'string' ? user.lastActivityAt : null,
+      statusCounts: normalizeDashboardActivityStatusCounts(user.statusCounts),
+    })),
+  };
+};
 
 const splitEmailCsv = (value: string): string[] => {
   const seen = new Set<string>();
@@ -971,6 +1046,13 @@ export const listRemoteProfiles = async (): Promise<RemoteProfile[]> => {
 
   if (error) throw error;
   return (data || []).map(toRemoteProfile);
+};
+
+export const loadDashboardActivitySummary = async (): Promise<DashboardActivitySummary> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc('get_dashboard_activity_summary');
+  if (error) throw error;
+  return normalizeDashboardActivitySummary(data);
 };
 
 export const listRemoteN8nIngestLogs = async (limit = 25): Promise<RemoteN8nIngestLog[]> => {
