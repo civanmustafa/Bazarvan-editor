@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-90}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-91}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-57}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -59,6 +59,9 @@ readonly READY_ENGINEERING_CUSTOM_FUNCTION="$(sql_scalar "select to_regprocedure
 readonly READY_ENGINEERING_RESET_FUNCTION="$(sql_scalar "select to_regprocedure('public.reset_external_analysis_command_preferences_controlled(uuid,uuid,text)') is not null")"
 readonly READY_ENGINEERING_TRIGGER="$(sql_scalar "select exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'ai_external_analysis_article_state' and t.tgname = 'enqueue_external_engineering_jobs' and not t.tgisinternal)")"
 readonly READY_ENGINEERING_SETTING="$(sql_scalar "select jsonb_typeof(value->'autoRunReadyEngineeringCommands') = 'boolean' from public.app_settings where key = 'system' and not is_secret limit 1")"
+readonly AUTOMATIC_ONCE_ENGINEERING_FUNCTION="$(sql_scalar "select to_regprocedure('public.enqueue_external_engineering_jobs(uuid,text)') is not null")"
+readonly AUTOMATIC_ONCE_STAGE_FUNCTION="$(sql_scalar "select to_regprocedure('public.find_external_analysis_stage_job(uuid,text,text)') is not null")"
+readonly AUTOMATIC_ONCE_RUN_TRIGGER="$(sql_scalar "select exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'ai_external_analysis_runs' and t.tgname = 'stamp_external_semantic_run_targets' and not t.tgisinternal)")"
 
 (( PUBLIC_TABLES == EXPECTED_PUBLIC_TABLES )) \
   || fail "Public table count is ${PUBLIC_TABLES}; expected ${EXPECTED_PUBLIC_TABLES}."
@@ -74,6 +77,9 @@ readonly READY_ENGINEERING_SETTING="$(sql_scalar "select jsonb_typeof(value->'au
 [[ "${READY_ENGINEERING_RESET_FUNCTION}" == "t" ]] || fail "Controlled default ready-engineering reset function is missing."
 [[ "${READY_ENGINEERING_TRIGGER}" == "t" ]] || fail "Database-owned ready-engineering trigger is missing."
 [[ "${READY_ENGINEERING_SETTING}" == "t" ]] || fail "Ready-engineering automation setting is missing or invalid."
+[[ "${AUTOMATIC_ONCE_ENGINEERING_FUNCTION}" == "t" ]] || fail "Origin-aware engineering enqueue function is missing."
+[[ "${AUTOMATIC_ONCE_STAGE_FUNCTION}" == "t" ]] || fail "Automatic external-analysis once guard is missing."
+[[ "${AUTOMATIC_ONCE_RUN_TRIGGER}" == "t" ]] || fail "Semantic target-attempt trigger is missing."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"

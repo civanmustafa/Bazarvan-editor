@@ -33,21 +33,25 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.match(script, /smarteditor\.bazarvan\.com\/readyz/);
 });
 
-test('Hostinger schema scripts and guide track concurrent editing and meta-description migrations', async () => {
+test('Hostinger schema scripts and guide track the current production migrations', async () => {
   const [applyScript, verifyScript, guide] = await Promise.all([
     readFile(path.join(root, 'deploy', 'hostinger-supabase', 'apply-project-migrations.sh'), 'utf8'),
     readFile(path.join(root, 'deploy', 'hostinger-supabase', 'verify-project-schema.sh'), 'utf8'),
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-90/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-90/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-91/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-91/);
   assert.match(guide, /20260827030000_content_research_automation_settings\.sql/);
   assert.match(guide, /20260828010000_concurrent_editing_and_meta_description\.sql/);
   assert.match(guide, /20260828020000_automatic_ready_engineering_commands\.sql/);
+  assert.match(guide, /20260829000000_external_analysis_auto_once_per_article\.sql/);
   assert.match(verifyScript, /META_DESCRIPTION_COLUMNS/);
   assert.match(verifyScript, /CONCURRENT_SAVE_FUNCTION/);
   assert.match(verifyScript, /READY_ENGINEERING_CONTROLLED_FUNCTION/);
   assert.match(verifyScript, /READY_ENGINEERING_TRIGGER/);
   assert.match(verifyScript, /READY_ENGINEERING_SETTING/);
+  assert.match(verifyScript, /AUTOMATIC_ONCE_ENGINEERING_FUNCTION/);
+  assert.match(verifyScript, /AUTOMATIC_ONCE_STAGE_FUNCTION/);
+  assert.match(verifyScript, /AUTOMATIC_ONCE_RUN_TRIGGER/);
 });

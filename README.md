@@ -24,17 +24,13 @@ View your app in AI Studio: https://ai.studio/apps/drive/1fFOcvdpfbinFoVmTjLpdhQ
 Canonical server path:
 
 ```bash
-cd /var/www/bazarvan-editor
+cd /var/www/bazarvan-editor-staging
 git pull --ff-only origin main
-set -a
-source .env.production
-set +a
-npm ci
-npm run build
-pm2 startOrReload ecosystem.config.cjs --update-env
-pm2 save
-curl -fsS https://smarteditor.bazarvan.com/healthz
-curl -fsS https://smarteditor.bazarvan.com/readyz
+BAZARVAN_APPROVE_MIGRATIONS=1 bash deploy/hostinger-supabase/apply-project-migrations.sh
+bash deploy/hostinger-supabase/verify-project-schema.sh
+DEPLOY_COMMIT=<FULL_40_CHARACTER_GIT_SHA> bash deploy/deploy-hostinger-production.sh
 ```
 
-PM2 runs the web server and all configured workers from `/var/www/bazarvan-editor`; do not use `/var/www/bazarvan-smarteditor` unless PM2 is intentionally reconfigured. Apply the ordered Supabase migrations in `deploy/HOSTINGER_CANONICAL_DEPLOY.md` before deploying a build that depends on them.
+PM2 runs the public self-hosted-Supabase release from `/var/www/bazarvan-editor-staging`.
+The older `/var/www/bazarvan-editor` checkout is archival and must not be restarted.
+See `deploy/HOSTINGER_CANONICAL_DEPLOY.md` for the protected deployment and verification procedure.
