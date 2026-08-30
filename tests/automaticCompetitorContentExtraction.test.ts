@@ -7,8 +7,9 @@ const readWorkspaceFile = (relativePath: string): Promise<string> => (
 );
 
 test('completed competitor discovery automatically queues selected content extraction', async () => {
-  const [migration, settings, registry, api, client, panel] = await Promise.all([
+  const [migration, reconciliation, settings, registry, api, client, panel] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260829070000_automatic_competitor_content_extraction.sql'),
+    readWorkspaceFile('supabase/migrations/20260830010000_reconcile_automatic_competitor_extraction.sql'),
     readWorkspaceFile('components/SettingsPage.tsx'),
     readWorkspaceFile('constants/settingsRegistry.ts'),
     readWorkspaceFile('api/competitors.ts'),
@@ -27,10 +28,19 @@ test('completed competitor discovery automatically queues selected content extra
   assert.match(migration, /competitor_content_extraction_automation_disabled/);
   assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
 
+  assert.match(reconciliation, /create or replace function public\.reconcile_automatic_competitor_extraction\(\)/);
+  assert.match(reconciliation, /select public\.reconcile_automatic_competitor_extraction\(\);/);
+  assert.match(reconciliation, /public\.enqueue_automatic_competitor_extraction_for_discovery/);
+  assert.match(reconciliation, /'manual:' \|\| md5/);
+  assert.match(reconciliation, /job\.status = 'completed'/);
+  assert.equal((reconciliation.match(/\$\$/g) || []).length % 2, 0);
+
   assert.match(settings, /label="سحب محتوى المنافسين تلقائيًا"/);
   assert.match(settings, /autoExtractCompetitorContent !== false/);
   assert.match(registry, /autoExtractCompetitorContent: true/);
   assert.match(api, /Automatic extraction is queued by the database completion trigger/);
+  assert.match(api, /Persist every manual search/);
+  assert.match(api, /persistenceDeferred: false/);
   assert.match(client, /automaticExtractionQueued/);
   assert.match(panel, /بدأ سحب محتواها تلقائيًا/);
 });

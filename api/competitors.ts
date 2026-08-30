@@ -634,10 +634,9 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     const query = toText(body.query);
     const queryType = normalizeSearchMode(body.queryType);
     const articleTitle = toText(body.articleTitle).slice(0, 500);
-    const [language, articleKeywordContext, discoveryState] = await Promise.all([
+    const [language, articleKeywordContext] = await Promise.all([
       readArticleLanguage(supabase, articleId),
       readArticleKeywordContext(supabase, articleId),
-      readCompetitorDiscoveryState(supabase, articleId),
     ]);
     const primaryKeyword = toText(body.primaryKeyword).slice(0, 500)
       || articleKeywordContext.primaryKeyword;
@@ -691,27 +690,24 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       audienceScope,
       targetCountry,
     };
-    // A user can search from the competitors tab as soon as an article has a
-    // title or primary keyword. Persistence is intentionally deferred until
-    // the stricter automation-readiness signature exists; otherwise the RPC
-    // rejects a valid manual search after its external work has already run.
-    const canPersistDiscovery = discoveryState?.competitor_discovery_ready === true
-      && Boolean(toText(discoveryState?.competitor_discovery_signature));
-    const discoveryJob = canPersistDiscovery
-      ? await persistCompetitorDiscoveryResult(supabase, {
-          articleId,
-          userId: principal.userId,
-          inputSnapshot,
-          result: {
-            status: selection.results.length > 0 ? 'awaiting_review' : 'no_results',
-            query,
-            queryType,
-            results: selection.results,
-            selection: selection.summary,
-            discoveredAt: new Date().toISOString(),
-          },
-        })
-      : null;
+    // Persist every manual search, including searches started before the
+    // stricter background-readiness signature exists. The database assigns a
+    // stable manual signature in that case, then the same completion trigger
+    // used by external discovery accepts the deterministic auto-selection and
+    // queues content extraction when the system setting is enabled.
+    const discoveryJob = await persistCompetitorDiscoveryResult(supabase, {
+      articleId,
+      userId: principal.userId,
+      inputSnapshot,
+      result: {
+        status: selection.results.length > 0 ? 'awaiting_review' : 'no_results',
+        query,
+        queryType,
+        results: selection.results,
+        selection: selection.summary,
+        discoveredAt: new Date().toISOString(),
+      },
+    });
     return {
       status: 200,
       body: {
@@ -722,7 +718,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
         results: selection.results,
         selection: selection.summary,
         discoveryJob,
-        persistenceDeferred: !canPersistDiscovery,
+        persistenceDeferred: false,
       },
       headers: getCorsResponseHeaders(req),
     };

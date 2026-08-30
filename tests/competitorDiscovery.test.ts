@@ -290,18 +290,18 @@ test('manual and queued competitor discovery load the linked client domain exclu
   assert.match(exclusionSource, /\.eq\('is_active', true\)/);
 });
 
-test('manual competitor search remains available before automation prerequisites are complete', async () => {
+test('manual competitor search persists and enters automatic extraction before background prerequisites are complete', async () => {
   const [apiSource, browserClient, panel] = await Promise.all([
     readWorkspaceFile('api/competitors.ts'),
     readWorkspaceFile('utils/competitorDiscovery.ts'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
   ]);
 
-  assert.ok(apiSource.includes("const canPersistDiscovery = discoveryState?.competitor_discovery_ready === true"));
-  assert.ok(apiSource.includes('persistenceDeferred: !canPersistDiscovery'));
-  assert.ok(apiSource.includes('const discoveryJob = canPersistDiscovery'));
+  assert.ok(apiSource.includes('Persist every manual search'));
+  assert.ok(apiSource.includes('const discoveryJob = await persistCompetitorDiscoveryResult'));
+  assert.ok(apiSource.includes('persistenceDeferred: false'));
   assert.ok(browserClient.includes('persistenceDeferred: payload.persistenceDeferred === true'));
-  assert.ok(panel.includes('يمكنك مراجعتها وسحب محتواها يدويًا'));
+  assert.ok(panel.includes('بدأ سحب محتواها تلقائيًا'));
 });
 
 test('competitor Firecrawl operations resolve only user-owned or assigned vault credentials', async () => {
@@ -505,7 +505,7 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.match(sidebar, /source: 'firecrawl'/);
   assert.match(sidebar, /isFirecrawlLoading/);
   assert.match(sidebar, /const firecrawlPendingHint = competitorIsArabic/);
-  assert.match(sidebar, /const competitorLocale = 'ar'/);
+  assert.match(sidebar, /const competitorLocale = competitorIsArabic \? 'ar' : 'en'/);
   assert.match(sidebar, /لم تبدأ خدمة السحب بعد/);
   assert.doesNotMatch(sidebar, /لم يبدأ استخراج Gemini|Gemini extraction has not started/);
 });
