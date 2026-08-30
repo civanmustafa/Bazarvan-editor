@@ -163,9 +163,9 @@ test('database save fencing protects every existing-article save and requires an
 });
 
 test('background semantic Google suggestions update the open article without a false edit conflict', async () => {
-  const [editor, sidebar, translations] = await Promise.all([
+  const [editor, suggestions, translations] = await Promise.all([
     readWorkspaceFile('contexts/EditorContext.tsx'),
-    readWorkspaceFile('components/LeftSidebar.tsx'),
+    readWorkspaceFile('components/GoogleMetadataSuggestions.tsx'),
     readWorkspaceFile('components/translations.ts'),
   ]);
 
@@ -173,19 +173,18 @@ test('background semantic Google suggestions update the open article without a f
   assert.match(editor, /hasCompleteGoogleMetadata/);
   assert.match(editor, /setKeywords\(current => \(\{[\s\S]*googleTitles: remoteKeywords\.googleTitles,[\s\S]*googleDescriptions: remoteKeywords\.googleDescriptions,/);
   assert.match(editor, /setConcurrentEditConflict\(null\)/);
-  assert.match(sidebar, /googleMetadataSuggestionsPending/);
+  assert.match(suggestions, /googleMetadataSuggestionsPending/);
   assert.match(translations, /ستظهر هنا عنوانان ووصفان بعد اكتمال التوليد التلقائي/);
 });
 
-test('manual meta-description tooling remains available while ready-status automation is retired', async () => {
-  const [migration, retirement, executor, worker, monitor, bridge, field, settings, ecosystem] = await Promise.all([
+test('meta-description automation remains available while ready-status automation is retired', async () => {
+  const [migration, retirement, executor, worker, monitor, bridge, settings, ecosystem] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260828010000_concurrent_editing_and_meta_description.sql'),
     readWorkspaceFile('supabase/migrations/20260829080000_unified_semantic_google_metadata.sql'),
     readWorkspaceFile('server/metaDescriptionGenerationExecutor.ts'),
     readWorkspaceFile('server/externalAnalysisWorker.ts'),
     readWorkspaceFile('components/AiKeyUsageToast.tsx'),
     readWorkspaceFile('utils/externalAnalysisActivityBridge.ts'),
-    readWorkspaceFile('components/MetaDescriptionField.tsx'),
     readWorkspaceFile('components/SettingsPage.tsx'),
     readWorkspaceFile('ecosystem.config.cjs'),
   ]);
@@ -204,30 +203,27 @@ test('manual meta-description tooling remains available while ready-status autom
   assert.match(ecosystem, /meta_description_generation/);
   assert.match(bridge, /meta_description_generation.*meta_description_generation/);
   assert.match(monitor, /كتابة وصف الميتا/);
-  assert.match(field, /المطلوب.*META_DESCRIPTION_MIN_LENGTH/);
-  assert.match(field, /الكلمة المفتاحية/);
   assert.match(retirement, /drop trigger if exists enqueue_article_meta_description_from_article/);
   assert.match(retirement, /ready_status_meta_description_retired/);
   assert.match(retirement, /select false/);
   assert.doesNotMatch(settings, /autoGenerateMetaDescription/);
 });
 
-test('meta-description field follows the full-height article inside the editor scroll panel', async () => {
-  const [editorApp, field] = await Promise.all([
+test('Google title and description suggestion sections follow the article inside the editor scroll panel', async () => {
+  const [editorApp, suggestions, sidebar] = await Promise.all([
     readWorkspaceFile('components/EditorApp.tsx'),
-    readWorkspaceFile('components/MetaDescriptionField.tsx'),
+    readWorkspaceFile('components/GoogleMetadataSuggestions.tsx'),
+    readWorkspaceFile('components/LeftSidebar.tsx'),
   ]);
 
   assert.match(
     editorApp,
-    /data-bazarvan-editor-panel="true"[\s\S]*?<EditorContent\s+editor=\{editor\}\s+className="min-h-full"\s*\/>\s*<MetaDescriptionField\s*\/>/,
+    /data-bazarvan-editor-panel="true"[\s\S]*?<EditorContent\s+editor=\{editor\}\s+className="min-h-full"\s*\/>\s*<GoogleMetadataSuggestions\s*\/>/,
   );
-  assert.doesNotMatch(
-    editorApp,
-    /<ConcurrentEditConflictBanner\s*\/>\s*<MetaDescriptionField\s*\/>/,
-  );
-  assert.match(field, /data-bazarvan-meta-description-field="true"/);
-  assert.match(field, /className="border-t\s/);
+  assert.match(suggestions, /googleTitleSuggestions/);
+  assert.match(suggestions, /googleDescriptionSuggestions/);
+  assert.doesNotMatch(sidebar, /googleTitleSuggestions|googleDescriptionSuggestions/);
+  assert.doesNotMatch(editorApp, /MetaDescriptionField/);
 });
 
 test('manual, write-article, full-pipeline, and automatic writing share the strict two-description contract', async () => {

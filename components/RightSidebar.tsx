@@ -830,10 +830,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
     const tRs = t.rightSidebar;
-    // The competitors tab is intentionally Arabic regardless of the article
-    // or shell locale. Competitor-page content remains in its original language.
-    const competitorIsArabic = true;
-    const competitorLocale = 'ar';
+    const competitorIsArabic = t.locale.toLowerCase().startsWith('ar');
+    const competitorLocale = competitorIsArabic ? 'ar' : 'en';
     const competitorText = {
         ...tRs,
         ...(competitorIsArabic ? {
@@ -1736,7 +1734,9 @@ ${readyCommandCompetitorBlocks}`;
     };
 
     const getPatchActionLabel = (operation: string) => (
-        operation === 'replace_block' || operation === 'replace_text' ? 'استبدال' : 'إضافة'
+        operation === 'replace_block' || operation === 'replace_text'
+            ? (isArabicLocale ? 'استبدال' : 'Replace')
+            : (isArabicLocale ? 'إضافة' : 'Add')
     );
 
     const normalizePatchMarkerForMatch = (value?: string): string => (
@@ -1756,18 +1756,20 @@ ${readyCommandCompetitorBlocks}`;
     ) => {
         const actionLabel = getPatchActionLabel(patch.operation);
         const isCopied = copiedPatchId === patch.id;
-        const cleanPatchTitle = (patch.title || 'نص مقترح')
-            .replace(/^(?:إضافة|اضافة|استبدال)\s*(?:-|:|\u2013)\s*/i, '')
-            .trim() || 'نص مقترح';
-        const patchLocationText = patch.placementLabel || patch.anchorText || patch.targetText || 'لم يتم تحديد موضع نصي دقيق.';
-        const patchReason = patch.reason || 'سبب الاقتراح غير محدد.';
-        const reasonLabel = actionLabel === 'استبدال' ? 'سبب الاستبدال' : 'سبب إضافة النص المقترح';
+        const cleanPatchTitle = (patch.title || (isArabicLocale ? 'نص مقترح' : 'Suggested text'))
+            .replace(/^(?:إضافة|اضافة|استبدال|add|replace)\s*(?:-|:|\u2013)\s*/i, '')
+            .trim() || (isArabicLocale ? 'نص مقترح' : 'Suggested text');
+        const patchLocationText = patch.placementLabel || patch.anchorText || patch.targetText || (isArabicLocale ? 'لم يتم تحديد موضع نصي دقيق.' : 'No exact editor location was provided.');
+        const patchReason = patch.reason || (isArabicLocale ? 'سبب الاقتراح غير محدد.' : 'No reason was provided.');
+        const reasonLabel = patch.operation === 'replace_block' || patch.operation === 'replace_text'
+            ? (isArabicLocale ? 'سبب الاستبدال' : 'Replacement reason')
+            : (isArabicLocale ? 'سبب إضافة النص المقترح' : 'Reason for adding');
         const hasMergeDeleteTarget = Boolean(
             patch.mergeDeleteTargetText?.trim() ||
             patch.mergeDeletePlacementLabel?.trim() ||
             patch.mergeDeleteAnchorText?.trim()
         );
-        const mergeDeleteLocationText = patch.mergeDeletePlacementLabel || patch.mergeDeleteAnchorText || patch.mergeDeleteTargetText || 'لم يتم تحديد موضع فقرة الحذف نصيًا.';
+        const mergeDeleteLocationText = patch.mergeDeletePlacementLabel || patch.mergeDeleteAnchorText || patch.mergeDeleteTargetText || (isArabicLocale ? 'لم يتم تحديد موضع فقرة الحذف نصيًا.' : 'No paragraph removal location was provided.');
         const mergeDeleteStatus = patch.mergeDeleteStatus || 'pending';
 
         return (
@@ -1782,34 +1784,34 @@ ${readyCommandCompetitorBlocks}`;
                             {patchReason}
                         </div>
                         <div className="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400 break-words">
-                            <span className="font-semibold">{'مكان النص في المحرر'}: </span>
+                            <span className="font-semibold">{isArabicLocale ? 'مكان النص في المحرر' : 'Editor location'}: </span>
                             {patchLocationText}
                         </div>
                     </div>
                     {patch.status === 'applied' && (
                         <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
                             <CheckCircle2 size={13} />
-                            تم
+                            {isArabicLocale ? 'تم' : 'Done'}
                         </span>
                     )}
                     {patch.status === 'failed' && (
                         <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-red-600 dark:text-red-400">
                             <AlertTriangle size={13} />
-                            تعذر
+                            {isArabicLocale ? 'تعذر' : 'Failed'}
                         </span>
                     )}
                 </div>
 
                 <div className="mt-2 rounded-md border border-gray-100 bg-gray-50/80 p-2 dark:border-[#3C3C3C] dark:bg-[#2A2A2A]/80">
-                    <div className="mb-1 text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">النص المقترح</div>
+                    <div className="mb-1 text-[10px] font-bold text-[#8a6f1d] dark:text-[#f2d675]">{isArabicLocale ? 'النص المقترح' : 'Suggested text'}</div>
                     <div className="text-xs text-gray-700 dark:text-gray-300 ai-output" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(patch.contentMarkdown) }} />
                 </div>
 
                 {hasMergeDeleteTarget && (
                     <div className="mt-2 rounded-md border border-red-100 bg-red-50/70 p-2 dark:border-red-900/30 dark:bg-red-900/10">
-                        <div className="text-[10px] font-bold text-red-700 dark:text-red-300">الفقرة المدمجة المطلوب حذفها</div>
+                        <div className="text-[10px] font-bold text-red-700 dark:text-red-300">{isArabicLocale ? 'الفقرة المدمجة المطلوب حذفها' : 'Merged paragraph to remove'}</div>
                         <div className="mt-1 text-[10px] leading-relaxed text-gray-600 dark:text-gray-300 break-words">
-                            <span className="font-semibold">مكان الفقرة في المحرر: </span>
+                            <span className="font-semibold">{isArabicLocale ? 'مكان الفقرة في المحرر' : 'Removal location'}: </span>
                             {mergeDeleteLocationText}
                         </div>
                         {patch.mergeDeleteTargetText && (
@@ -1827,7 +1829,7 @@ ${readyCommandCompetitorBlocks}`;
                                 className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-white dark:bg-[#2A2A2A] text-gray-700 dark:text-gray-200 hover:bg-red-100 dark:hover:bg-red-900/25"
                             >
                                 <LocateFixed size={13} />
-                                موضع الحذف
+                                {isArabicLocale ? 'موضع الحذف' : 'Locate removal'}
                             </button>
                             <button
                                 type="button"
@@ -1836,7 +1838,9 @@ ${readyCommandCompetitorBlocks}`;
                                 className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {mergeDeleteStatus === 'applied' ? <CheckCircle2 size={13} /> : <Trash2 size={13} />}
-                                {mergeDeleteStatus === 'applied' ? 'تم حذف الفقرة' : 'حذف الفقرة'}
+                                {mergeDeleteStatus === 'applied'
+                                    ? (isArabicLocale ? 'تم حذف الفقرة' : 'Paragraph removed')
+                                    : (isArabicLocale ? 'حذف الفقرة' : 'Remove paragraph')}
                             </button>
                         </div>
                     </div>
@@ -1853,7 +1857,7 @@ ${readyCommandCompetitorBlocks}`;
                         className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-gray-100 dark:bg-[#2A2A2A] text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
                     >
                         <LocateFixed size={13} />
-                        الموضع
+                        {isArabicLocale ? 'الموضع' : 'Locate'}
                     </button>
                     <button
                         type="button"
@@ -1861,7 +1865,7 @@ ${readyCommandCompetitorBlocks}`;
                         className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold bg-gray-100 dark:bg-[#2A2A2A] text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
                     >
                         <Copy size={13} />
-                        {isCopied ? 'تم النسخ' : 'نسخ'}
+                        {isCopied ? (isArabicLocale ? 'تم النسخ' : 'Copied') : (isArabicLocale ? 'نسخ' : 'Copy')}
                     </button>
                     <button
                         type="button"
@@ -2059,7 +2063,7 @@ ${readyCommandCompetitorBlocks}`;
             <div className="flex p-[0.125rem] mx-[0.125rem] mt-[0.125rem] mb-[0.0625rem] bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
                 <button onClick={() => setAiSubTab('new')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'new' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{tRs.newAnalysis}</button>
                 <button onClick={() => setAiSubTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'history' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.aiHistory.title}</button>
-                <button onClick={() => setAiSubTab('external')} className={`flex-1 px-1 py-1.5 text-[10px] font-bold leading-4 rounded-md transition-all ${aiSubTab === 'external' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>السجل الخارجي</button>
+                <button onClick={() => setAiSubTab('external')} className={`flex-1 px-1 py-1.5 text-[10px] font-bold leading-4 rounded-md transition-all ${aiSubTab === 'external' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{isArabicLocale ? 'السجل الخارجي' : 'External log'}</button>
             </div>
 
             <div className="flex-grow overflow-y-auto custom-scrollbar p-[0.25rem] space-y-[0.25rem]">
@@ -2151,7 +2155,9 @@ ${readyCommandCompetitorBlocks}`;
                                     <button
                                         onClick={handleRunGeminiAnalysis}
                                         disabled={isAiLoading.gemini || !isGeminiFreeAvailable}
-                                        title={!isGeminiFreeAvailable ? 'Gemini مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'تشغيل التحليل باستخدام Gemini'}
+                                        title={!isGeminiFreeAvailable
+                                            ? (isArabicLocale ? 'Gemini مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'Gemini is enabled without an allowed dashboard credential')
+                                            : (isArabicLocale ? 'تشغيل التحليل باستخدام Gemini' : 'Run analysis with Gemini')}
                                         className="flex min-h-9 items-center justify-center gap-1.5 px-1.5 py-1.5 hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
@@ -2175,7 +2181,9 @@ ${readyCommandCompetitorBlocks}`;
                                     <button
                                         onClick={handleRunGeminiPaidAnalysis}
                                         disabled={isAiLoading.geminiPaid || !isGeminiPaidAvailable}
-                                        title={!isGeminiPaidAvailable ? 'Gemini Pro مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'تشغيل التحليل باستخدام Gemini Pro'}
+                                        title={!isGeminiPaidAvailable
+                                            ? (isArabicLocale ? 'Gemini Pro مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'Gemini Pro is enabled without an allowed dashboard credential')
+                                            : (isArabicLocale ? 'تشغيل التحليل باستخدام Gemini Pro' : 'Run analysis with Gemini Pro')}
                                         className="flex items-center justify-center gap-2 rounded-lg bg-[#d4af37] py-2 text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isAiLoading.geminiPaid ? <Wand2 size={16} className="animate-spin" /> : <BadgeDollarSign size={16} />}
@@ -2186,7 +2194,9 @@ ${readyCommandCompetitorBlocks}`;
                                     <button
                                         onClick={handleRunChatGptAnalysis}
                                         disabled={isAiLoading.chatgpt || !isOpenAiAvailable}
-                                        title={!isOpenAiAvailable ? 'OpenAI مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'تشغيل التحليل باستخدام OpenAI'}
+                                        title={!isOpenAiAvailable
+                                            ? (isArabicLocale ? 'OpenAI مفعّل دون مفتاح مسموح في خزنة اللوحة' : 'OpenAI is enabled without an allowed dashboard credential')
+                                            : (isArabicLocale ? 'تشغيل التحليل باستخدام OpenAI' : 'Run analysis with OpenAI')}
                                         className="flex items-center justify-center gap-2 rounded-lg bg-[#d4af37] py-2 text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isAiLoading.chatgpt ? <Wand2 size={16} className="animate-spin" /> : <BrainCircuit size={16} />}
@@ -2208,7 +2218,7 @@ ${readyCommandCompetitorBlocks}`;
                             {/* Results Gemini */}
                             {isGeminiFreeEnabled && <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
                                 <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsGeminiExpanded(!isGeminiExpanded)}>
-                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج Gemini</span>
+                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">{isArabicLocale ? 'نتائج Gemini' : 'Gemini results'}</span>
                                     <ChevronDown size={14} className={isGeminiExpanded ? 'rotate-180' : ''} />
                                 </div>
                                 {isGeminiExpanded && (
@@ -2218,20 +2228,22 @@ ${readyCommandCompetitorBlocks}`;
                                             && !isAiLoading.gemini
                                             && (aiResults.gemini || aiInsertionPatches.gemini.length > 0) && (
                                                 <div className="mb-2 text-[11px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
-                                                    نتيجة الدمج النهائي لجميع المنافسين
+                                                    {isArabicLocale ? 'نتيجة الدمج النهائي لجميع المنافسين' : 'Final synthesis result for all competitors'}
                                                 </div>
                                             )}
                                         {aiResults.gemini || aiInsertionPatches.gemini.length > 0
                                             ? renderAnalysisResult('gemini', aiResults.gemini)
                                             : aiCompetitorComparisonResults.gemini.length === 0
-                                                ? <span className="text-gray-400 italic">لا توجد نتائج.</span>
+                                                ? <span className="text-gray-400 italic">{isArabicLocale ? 'لا توجد نتائج.' : 'No results.'}</span>
                                                 : null}
                                         {aiCompetitorComparisonResults.gemini.length > 0
                                             && !isAiLoading.gemini
                                             && !aiResults.gemini
                                             && aiInsertionPatches.gemini.length === 0 && (
                                                 <div className="rounded border border-gray-200 bg-white/60 p-2 text-[10px] text-gray-500 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-400">
-                                                    اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.
+                                                    {isArabicLocale
+                                                        ? 'اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.'
+                                                        : 'The final competitor synthesis completed with no safe editor change requiring application.'}
                                                 </div>
                                             )}
                                     </div>
@@ -2240,7 +2252,7 @@ ${readyCommandCompetitorBlocks}`;
                             {/* Results Gemini Pro */}
                             {isGeminiPaidEnabled && <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
                                 <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsGeminiPaidExpanded(!isGeminiPaidExpanded)}>
-                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج Gemini Pro</span>
+                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">{isArabicLocale ? 'نتائج Gemini Pro' : 'Gemini Pro results'}</span>
                                     <ChevronDown size={14} className={isGeminiPaidExpanded ? 'rotate-180' : ''} />
                                 </div>
                                 {isGeminiPaidExpanded && (
@@ -2250,20 +2262,22 @@ ${readyCommandCompetitorBlocks}`;
                                             && !isAiLoading.geminiPaid
                                             && (aiResults.geminiPaid || aiInsertionPatches.geminiPaid.length > 0) && (
                                                 <div className="mb-2 text-[11px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
-                                                    نتيجة الدمج النهائي لجميع المنافسين
+                                                    {isArabicLocale ? 'نتيجة الدمج النهائي لجميع المنافسين' : 'Final synthesis result for all competitors'}
                                                 </div>
                                             )}
                                         {aiResults.geminiPaid || aiInsertionPatches.geminiPaid.length > 0
                                             ? renderAnalysisResult('geminiPaid', aiResults.geminiPaid)
                                             : aiCompetitorComparisonResults.geminiPaid.length === 0
-                                                ? <span className="text-gray-400 italic">لا توجد نتائج.</span>
+                                                ? <span className="text-gray-400 italic">{isArabicLocale ? 'لا توجد نتائج.' : 'No results.'}</span>
                                                 : null}
                                         {aiCompetitorComparisonResults.geminiPaid.length > 0
                                             && !isAiLoading.geminiPaid
                                             && !aiResults.geminiPaid
                                             && aiInsertionPatches.geminiPaid.length === 0 && (
                                                 <div className="rounded border border-gray-200 bg-white/60 p-2 text-[10px] text-gray-500 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-400">
-                                                    اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.
+                                                    {isArabicLocale
+                                                        ? 'اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.'
+                                                        : 'The final competitor synthesis completed with no safe editor change requiring application.'}
                                                 </div>
                                             )}
                                     </div>
@@ -2272,7 +2286,7 @@ ${readyCommandCompetitorBlocks}`;
                             {/* Results ChatGPT */}
                             {isOpenAiEnabled && <div className="bg-[#d4af37]/10 dark:bg-[#d4af37]/10 rounded-md overflow-hidden border border-[#d4af37]/20 dark:border-[#d4af37]/25">
                                 <div className="p-2 bg-[#d4af37]/15 dark:bg-[#d4af37]/20 flex justify-between cursor-pointer" onClick={() => setIsChatGptExpanded(!isChatGptExpanded)}>
-                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">نتائج ChatGPT</span>
+                                    <span className="text-xs font-bold text-[#8a6f1d] dark:text-[#f2d675]">{isArabicLocale ? 'نتائج ChatGPT' : 'ChatGPT results'}</span>
                                     <ChevronDown size={14} className={isChatGptExpanded ? 'rotate-180' : ''} />
                                 </div>
                                 {isChatGptExpanded && (
@@ -2282,20 +2296,22 @@ ${readyCommandCompetitorBlocks}`;
                                             && !isAiLoading.chatgpt
                                             && (aiResults.chatgpt || aiInsertionPatches.chatgpt.length > 0) && (
                                                 <div className="mb-2 text-[11px] font-black text-[#8a6f1d] dark:text-[#f2d675]">
-                                                    نتيجة الدمج النهائي لجميع المنافسين
+                                                    {isArabicLocale ? 'نتيجة الدمج النهائي لجميع المنافسين' : 'Final synthesis result for all competitors'}
                                                 </div>
                                             )}
                                         {aiResults.chatgpt || aiInsertionPatches.chatgpt.length > 0
                                             ? renderAnalysisResult('chatgpt', aiResults.chatgpt)
                                             : aiCompetitorComparisonResults.chatgpt.length === 0
-                                                ? <span className="text-gray-400 italic">لا توجد نتائج.</span>
+                                                ? <span className="text-gray-400 italic">{isArabicLocale ? 'لا توجد نتائج.' : 'No results.'}</span>
                                                 : null}
                                         {aiCompetitorComparisonResults.chatgpt.length > 0
                                             && !isAiLoading.chatgpt
                                             && !aiResults.chatgpt
                                             && aiInsertionPatches.chatgpt.length === 0 && (
                                                 <div className="rounded border border-gray-200 bg-white/60 p-2 text-[10px] text-gray-500 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-400">
-                                                    اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.
+                                                    {isArabicLocale
+                                                        ? 'اكتمل الدمج النهائي لجميع المنافسين، ولم ينتج عنه تعديل آمن يحتاج إلى تطبيق في المحرر.'
+                                                        : 'The final competitor synthesis completed with no safe editor change requiring application.'}
                                                 </div>
                                             )}
                                     </div>
@@ -2304,7 +2320,7 @@ ${readyCommandCompetitorBlocks}`;
                         </div>
                     </>
                 ) : (
-                    <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">جار تحميل النتائج...</div>}>
+                    <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">{isArabicLocale ? 'جار تحميل النتائج...' : 'Loading results...'}</div>}>
                         {aiSubTab === 'history' ? <AIHistoryTab /> : <ExternalAnalysisResultsTab articleId={activeArticleId} articleTitle={articleTitle} />}
                     </React.Suspense>
                 )}

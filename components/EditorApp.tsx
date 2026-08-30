@@ -19,7 +19,7 @@ import {
 } from '../utils/editorWorkspaceLayout';
 import EditorToolbar from './EditorToolbar';
 import ConcurrentEditConflictBanner from './ConcurrentEditConflictBanner';
-import MetaDescriptionField from './MetaDescriptionField';
+import GoogleMetadataSuggestions from './GoogleMetadataSuggestions';
 import AiExecutionMonitor from './AiKeyUsageToast';
 import LeftSidebar from './LeftSidebar';
 import ModalManager from './ModalManager';
@@ -165,7 +165,7 @@ const EditorView: React.FC = () => {
             className="relative flex-grow overflow-y-auto custom-scrollbar border-t border-gray-300 dark:border-[#3C3C3C] bg-white dark:bg-[#1F1F1F]"
           >
             <EditorContent editor={editor} className="min-h-full" />
-            <MetaDescriptionField />
+            <GoogleMetadataSuggestions />
             {editor && <SelectionToolbar />}
           </div>
           <button

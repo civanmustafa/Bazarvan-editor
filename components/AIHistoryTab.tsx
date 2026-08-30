@@ -124,9 +124,9 @@ const AIHistoryTab: React.FC = () => {
         return provider ? `Delete ${provider} record` : 'Delete record';
     };
     const getPatchTitle = (patch: AiContentPatch) => (
-        (patch.title || 'نص مقترح')
+        (patch.title || (isArabic ? 'نص مقترح' : 'Suggested text'))
             .replace(/^(?:إضافة|اضافة|استبدال|حذف|add|replace|delete)\s*(?:-|:|\u2013)\s*/i, '')
-            .trim() || 'نص مقترح'
+            .trim() || (isArabic ? 'نص مقترح' : 'Suggested text')
     );
     const normalizePatchMarkerForMatch = (value?: string): string => (
         (value || '')
