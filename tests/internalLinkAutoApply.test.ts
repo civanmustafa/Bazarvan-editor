@@ -358,7 +358,8 @@ test('administrator setting, narrow authenticated API, toolbar placement, and mi
     readWorkspaceFile('utils/internalLinkingEngine.ts'),
   ]);
   assert.match(settingsPage, /autoApplyStrongInternalLinkSuggestions/);
-  assert.match(settingsPage, /مفعّل افتراضيًا/);
+  assert.match(settingsPage, /تفضيلات المنشئ/);
+  assert.match(serverSettings, /readArticleAutomationPolicy\(input.articleId\)/);
   assert.match(utilityActions, /onToggleToc[\s\S]*openInternalLinking/);
   assert.match(api, /authenticateApiRequest/);
   assert.match(api, /articleId/);

@@ -88,7 +88,16 @@ export const describeExternalSemanticValidationFailure = (
 const buildRequestedSemanticListsPrompt = (
   needsSecondaries: boolean,
   needsLsi: boolean,
-): string => [
+  needsGoogleMetadata: boolean,
+  respectRequestedTargets: boolean,
+): string => respectRequestedTargets ? [
+  '<requested_semantic_lists>',
+  'تخصيص هذا الطلب: طبّق الاختيارات التالية على القالب العام. لا تولد حقولًا غير مطلوبة؛ أرجع [] في تلك الحقول.',
+  needsSecondaries ? '- أنشئ الصيغ البديلة المطلوبة في secondaries.' : '- secondaries غير مطلوبة: أرجع [] ولا تولد صيغًا بديلة.',
+  needsLsi ? '- أنشئ كلمات LSI المطلوبة في lsi.' : '- lsi غير مطلوبة: أرجع [] ولا تولد كلمات LSI.',
+  needsGoogleMetadata ? '- أنشئ googleTitles وgoogleDescriptions كاملتين.' : '- googleTitles وgoogleDescriptions غير مطلوبتين: أرجع [] ولا تولد عناوين أو أوصاف Google.',
+  '</requested_semantic_lists>',
+].join('\n') : [
   '<requested_semantic_lists>',
   needsSecondaries
     ? '- أنشئ الصيغ البديلة المطلوبة في secondaries.'
@@ -105,10 +114,12 @@ export const buildExternalSemanticPrompt = (
   template: string,
   needsSecondaries = true,
   needsLsi = true,
+  needsGoogleMetadata = true,
+  respectRequestedTargets = false,
 ): string => [
   renderSemanticKeywordPrompt(toSemanticInput(article), template),
   '',
-  buildRequestedSemanticListsPrompt(needsSecondaries, needsLsi),
+  buildRequestedSemanticListsPrompt(needsSecondaries, needsLsi, needsGoogleMetadata, respectRequestedTargets),
 ].join('\n');
 
 export const buildExternalSemanticRepairPrompt = (
@@ -117,6 +128,8 @@ export const buildExternalSemanticRepairPrompt = (
   template: string,
   needsSecondaries = true,
   needsLsi = true,
+  needsGoogleMetadata = true,
+  respectRequestedTargets = false,
 ): string => [
   buildSemanticKeywordRepairPrompt(
     toSemanticInput(article),
@@ -124,5 +137,5 @@ export const buildExternalSemanticRepairPrompt = (
     previousResponse,
   ),
   '',
-  buildRequestedSemanticListsPrompt(needsSecondaries, needsLsi),
+  buildRequestedSemanticListsPrompt(needsSecondaries, needsLsi, needsGoogleMetadata, respectRequestedTargets),
 ].join('\n');

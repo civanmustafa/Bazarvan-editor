@@ -64,6 +64,7 @@ import {
   resolveArticleCompetitorRepositorySnapshot,
 } from './articleCompetitorRepository';
 import { listArticleWritingSources } from './contentWritingSources';
+import { readArticleAutomationPolicy } from './articleAutomationPolicy';
 
 type JsonObject = Record<string, unknown>;
 
@@ -697,6 +698,24 @@ export const executeContentWritingTurn = async (options: {
   signal?: AbortSignal;
   onProgress?: (progress: AiExecutionProgress) => void;
 }): Promise<ContentWritingExecutionResult> => {
+  if (options.session.context_snapshot?.triggerSource === 'automatic_ready') {
+    // Each writing stage is a separate paid request. Let a response already in
+    // flight be persisted, but never start the next stage using a stale policy.
+    const policy = await readArticleAutomationPolicy(options.session.article_id);
+    if (!policy.enabled || !policy.contentWritingAutomationEnabled
+        || (policy.scope === 'creator'
+          && (!policy.creatorUserId || policy.creatorUserId !== options.session.created_by))) {
+      return {
+        ok: false,
+        status: 499,
+        text: '',
+        model: options.session.model,
+        metadata: { provider: options.session.provider, automationPolicyStopped: true },
+        errorCode: 'content_writing_cancelled',
+        errorMessage: 'Automatic writing stopped before the next request because the article creator policy no longer permits it.',
+      };
+    }
+  }
   const [instructions, articleContext, generationRequest] = assertContentWritingConversation(options.messages);
   const baseHistory: ContentWritingTurnHistory[] = [
     { role: 'user', content: options.articleContextOverride?.trim() || articleContext.content },

@@ -10,6 +10,7 @@ import {
   normalizeGeminiPaidModelId,
 } from './modelRegistry';
 import { ARTICLE_STATUS_VALUES } from './articleStatuses';
+import { normalizeUserAutomationPreferences, USER_AUTOMATION_DEFAULTS } from './userAutomation';
 import {
   CONTENT_WRITING_DEFAULT_INPUT_TOKEN_BUDGET,
   CONTENT_WRITING_MAX_INPUT_TOKEN_BUDGET,
@@ -106,10 +107,12 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     activityTrackingEnabled: true,
     autoGenerateAlternativeKeywords: true,
     autoGenerateLsiKeywords: true,
+    autoGenerateGoogleMetadata: true,
     autoDiscoverCompetitors: true,
     autoExtractCompetitorContent: true,
     autoRunReadyEngineeringCommands: true,
     autoApplyStrongInternalLinkSuggestions: true,
+    userAutomationDefaults: normalizeUserAutomationPreferences(USER_AUTOMATION_DEFAULTS),
   },
 };
 
@@ -354,6 +357,8 @@ const normalizeSystemSection = (
     field,
     defaults.autoGenerateLsiKeywords,
   ));
+  setWhenPresent('autoGenerateGoogleMetadata', field => normalizeBoolean(field, defaults.autoGenerateGoogleMetadata));
+  setWhenPresent('userAutomationDefaults', field => normalizeUserAutomationPreferences(field));
   setWhenPresent('autoDiscoverCompetitors', field => normalizeBoolean(
     field,
     defaults.autoDiscoverCompetitors,
@@ -380,6 +385,8 @@ export const getDefaultSystemSettings = (): SystemSettingsMap => (
       externalAnalysisDefaultCommandIds: [...SYSTEM_SETTINGS_DEFAULTS.ai.externalAnalysisDefaultCommandIds],
     } : key === 'prompts' ? {
       templates: { ...SYSTEM_SETTINGS_DEFAULTS.prompts.templates },
+    } : key === 'system' ? {
+      userAutomationDefaults: normalizeUserAutomationPreferences(SYSTEM_SETTINGS_DEFAULTS.system.userAutomationDefaults),
     } : {}),
   }])) as SystemSettingsMap
 );

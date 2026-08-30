@@ -19,7 +19,11 @@ import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import { AdaptiveQueueWorker } from './adaptiveQueueWorker';
 import { LeaseHeartbeatController } from './leaseHeartbeatController';
 import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
-import { scheduleNextAutomaticContentWritingSession } from './contentWritingAutomation';
+import {
+  AutomaticContentWritingPolicyError,
+  assertAutomaticContentWritingAllowed,
+  scheduleNextAutomaticContentWritingSession,
+} from './contentWritingAutomation';
 
 const boundedInteger = (
   value: string | undefined,
@@ -90,6 +94,16 @@ const getFailureProgress = (result: ContentWritingExecutionResult): Record<strin
   completed: true,
 });
 
+const requestOwnedSessionCancellation = async (sessionId: string, worker: string): Promise<void> => {
+  const { error } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_sessions')
+    .update({ cancel_requested_at: new Date().toISOString() })
+    .eq('id', sessionId)
+    .eq('status', 'running')
+    .eq('locked_by', worker);
+  if (error) throw error;
+};
+
 const executeClaimedSession = async (
   session: ContentWritingSession,
   slotWorkerId: string,
@@ -130,6 +144,31 @@ const executeClaimedSession = async (
   };
 
   try {
+    if (session.context_snapshot?.triggerSource === 'automatic_ready') {
+      try {
+        await assertAutomaticContentWritingAllowed(session.article_id, session.created_by);
+      } catch (error) {
+        if (!(error instanceof AutomaticContentWritingPolicyError)) throw error;
+        // Fence the cancellation by the current lease; retain any previously
+        // persisted writing steps/results rather than starting another AI call.
+        await requestOwnedSessionCancellation(session.id, slotWorkerId);
+        await failContentWritingSession({
+          sessionId: session.id,
+          workerId: slotWorkerId,
+          errorCode: 'content_writing_cancelled',
+          errorMessage: error.message,
+          responseMetadata: session.response_metadata || {},
+          progress: {
+            ...latestProgress,
+            stage: 'cancelled',
+            reason: error.code,
+            message: error.message,
+            completed: true,
+          },
+        });
+        return;
+      }
+    }
     queueProgressWrite({
       stage: 'preparing_workflow',
       provider: session.provider,
@@ -156,13 +195,19 @@ const executeClaimedSession = async (
     });
     if (!ownership.owned) return;
     if (ownership.cancelRequested || abortReason instanceof ContentWritingCancellationError || result.status === 499) {
+      if (!ownership.cancelRequested) {
+        await requestOwnedSessionCancellation(session.id, slotWorkerId);
+      }
+      const cancellationMessage = result.metadata.automationPolicyStopped === true
+        ? result.errorMessage || 'Automatic writing stopped because the article creator policy no longer permits it.'
+        : 'Content writing was cancelled by the user.';
       await failContentWritingSession({
         sessionId: session.id,
         workerId: slotWorkerId,
         errorCode: 'content_writing_cancelled',
-        errorMessage: 'Content writing was cancelled by the user.',
-        responseMetadata: result.metadata,
-        progress: { stage: 'cancelled', message: 'Content writing was cancelled.', completed: true },
+        errorMessage: cancellationMessage,
+        responseMetadata: { ...(session.response_metadata || {}), ...result.metadata },
+        progress: { stage: 'cancelled', message: cancellationMessage, completed: true },
       });
       return;
     }
@@ -234,6 +279,7 @@ const executeClaimedSession = async (
         errorMessage: abortReason instanceof ContentWritingCancellationError
           ? 'Content writing was cancelled by the user.'
           : errorMessage(error),
+        responseMetadata: session.response_metadata || {},
         progress: {
           ...latestProgress,
           stage: abortReason instanceof ContentWritingCancellationError ? 'cancelled' : 'failed',

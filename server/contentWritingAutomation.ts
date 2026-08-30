@@ -12,6 +12,36 @@ import type {
   ContentWritingSession,
 } from './contentWritingSessionService';
 import { readContentResearchAutomationSettings } from './externalAnalysisSettings';
+import { readArticleAutomationPolicy } from './articleAutomationPolicy';
+
+export class AutomaticContentWritingPolicyError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'AutomaticContentWritingPolicyError';
+    this.code = code;
+  }
+}
+
+export const assertAutomaticContentWritingAllowed = async (
+  articleId: string,
+  requestedBy: string,
+): Promise<void> => {
+  const policy = await readArticleAutomationPolicy(articleId);
+  if (!policy.enabled || !policy.contentWritingAutomationEnabled) {
+    throw new AutomaticContentWritingPolicyError(
+      'creator_writing_automation_disabled',
+      'Automatic writing is disabled by this article automation policy.',
+    );
+  }
+  if (policy.scope === 'creator' && (!policy.creatorUserId || policy.creatorUserId !== requestedBy)) {
+    throw new AutomaticContentWritingPolicyError(
+      'creator_writing_identity_mismatch',
+      'Automatic writing must use the original article creator.',
+    );
+  }
+};
 
 export type ContentWritingAutomationSettings = {
   enabled: boolean;
@@ -321,6 +351,34 @@ export const scheduleNextAutomaticContentWritingSession = async (
   }
 
   const idempotencyKey = createAutomationSessionIdempotencyKey(item);
+
+  try {
+    // Claiming and session creation are separate transactions. Recheck the
+    // creator policy before resolving provider credentials or preparing AI work.
+    await assertAutomaticContentWritingAllowed(item.article_id, item.requested_by);
+  } catch (error) {
+    if (error instanceof AutomaticContentWritingPolicyError) {
+      const { error: cancelError } = await getExternalAnalysisSupabaseAdmin()
+        .from('content_writing_automation_items')
+        .update({
+          status: 'cancelled',
+          completed_at: new Date().toISOString(),
+          locked_by: null,
+          locked_at: null,
+          lease_expires_at: null,
+          last_error_code: error.code,
+          last_error: error.message,
+        })
+        .eq('id', item.id)
+        .eq('status', 'claiming')
+        .eq('locked_by', workerId);
+      if (cancelError) throw cancelError;
+      return null;
+    }
+    // A policy read failure must never fall back to global/default permission.
+    await releaseClaim(item, workerId, settings, error);
+    throw error;
+  }
 
   try {
     const queued = await queueContentWritingSession({

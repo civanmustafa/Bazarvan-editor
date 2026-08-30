@@ -35,7 +35,7 @@ test('completed competitor discovery automatically queues selected content extra
   assert.match(reconciliation, /job\.status = 'completed'/);
   assert.equal((reconciliation.match(/\$\$/g) || []).length % 2, 0);
 
-  assert.match(settings, /label="سحب محتوى المنافسين تلقائيًا"/);
+  assert.match(settings, /label="السماح بسحب محتوى المنافسين تلقائيًا"/);
   assert.match(settings, /autoExtractCompetitorContent !== false/);
   assert.match(registry, /autoExtractCompetitorContent: true/);
   assert.match(api, /Automatic extraction is queued by the database completion trigger/);

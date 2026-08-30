@@ -764,8 +764,8 @@ test('browser, API, and worker consume the shared registries', async () => {
   assert.match(externalSettings, /constants\/settingsRegistry/);
   assert.match(externalSettings, /readContentResearchAutomationSettings/);
   assert.match(settingsPage, /constants\/settingsRegistry/);
-  assert.match(settingsPage, /جلب الصيغ البديلة تلقائيًا/);
-  assert.match(settingsPage, /جلب كلمات LSI تلقائيًا/);
+  assert.match(settingsPage, /السماح بتوليد الصيغ البديلة تلقائيًا/);
+  assert.match(settingsPage, /السماح بتوليد كلمات LSI تلقائيًا/);
   assert.match(settingsPage, /جلب المنافسين تلقائيًا/);
   assert.match(settingsPage, /updateSetting\('system', 'autoGenerateAlternativeKeywords'/);
   assert.match(settingsPage, /updateSetting\('system', 'autoGenerateLsiKeywords'/);

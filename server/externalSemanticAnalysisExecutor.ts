@@ -1,5 +1,6 @@
 import {
   ExternalAnalysisRetryError,
+  ExternalAnalysisTerminalError,
   registerExternalAnalysisJobExecutor,
   type ExternalAnalysisExecutionContext,
   type ExternalAnalysisExecutionResult,
@@ -9,10 +10,9 @@ import {
   type ExternalAnalysisJson,
 } from './externalAnalysisQueue';
 import {
-  readContentResearchAutomationSettings,
   readExternalGeminiSettings,
-  type ContentResearchAutomationSettings,
 } from './externalAnalysisSettings';
+import { readArticleAutomationPolicy, type ArticleAutomationPolicy } from './articleAutomationPolicy';
 import {
   reportExternalGeminiCall,
   runExternalGeminiCall,
@@ -108,7 +108,7 @@ const getTargetState = (keywords: ExternalSemanticKeywords): SemanticTargetState
 const getRequestedTargetState = (
   context: ExternalAnalysisExecutionContext,
   keywords: ExternalSemanticKeywords,
-  automationSettings: ContentResearchAutomationSettings | null,
+  automationSettings: ArticleAutomationPolicy | null,
 ): SemanticTargetState => {
   const missing = getTargetState(keywords);
   const snapshot = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
@@ -123,10 +123,6 @@ const getRequestedTargetState = (
     : true;
   const manual = context.job.origin === 'manual';
   const regenerateAll = manual && snapshot.forceRegenerateSemantic === true;
-  const automaticSemanticEnabled = (
-    automationSettings?.autoGenerateAlternativeKeywords !== false
-    || automationSettings?.autoGenerateLsiKeywords !== false
-  );
   return {
     needsSecondaries: (regenerateAll || missing.needsSecondaries)
       && requestedSecondaries
@@ -136,14 +132,20 @@ const getRequestedTargetState = (
       && (manual || automationSettings?.autoGenerateLsiKeywords !== false),
     needsGoogleMetadata: (regenerateAll || missing.needsGoogleMetadata)
       && requestedGoogleMetadata
-      && (manual || automaticSemanticEnabled),
+      && (manual || automationSettings?.autoGenerateGoogleMetadata !== false),
   };
 };
 
 const keepRequestedTerms = (
   terms: ExternalSemanticTerms,
-  _targets: SemanticTargetState,
-): ExternalSemanticTerms => terms;
+  targets: SemanticTargetState,
+  scoped = false,
+): ExternalSemanticTerms => scoped ? {
+  secondaries: targets.needsSecondaries ? terms.secondaries : [],
+  lsi: targets.needsLsi ? terms.lsi : [],
+  googleTitles: targets.needsGoogleMetadata ? terms.googleTitles : [],
+  googleDescriptions: targets.needsGoogleMetadata ? terms.googleDescriptions : [],
+} : terms;
 
 const isCurrentSemanticJob = (
   context: ExternalAnalysisExecutionContext,
@@ -229,7 +231,7 @@ const applySemanticTerms = async (options: {
 
   const latestKeywords = normalizeKeywords(latest.article.keywords);
   const latestAutomationSettings = options.context.job.origin === 'auto'
-    ? await readContentResearchAutomationSettings()
+    ? await readArticleAutomationPolicy(options.context.job.article_id)
     : null;
   const targets = getRequestedTargetState(
     options.context,
@@ -335,9 +337,10 @@ const executeExternalSemanticAnalysis = async (
 
   const articleInput = toArticleInput(initial.article);
   const automationSettings = context.job.origin === 'auto'
-    ? await readContentResearchAutomationSettings()
+    ? await readArticleAutomationPolicy(context.job.article_id)
     : null;
-  const initialTargets = getRequestedTargetState(context, articleInput.keywords, automationSettings);
+  let initialTargets = getRequestedTargetState(context, articleInput.keywords, automationSettings);
+  const scoped = automationSettings?.scope === 'creator';
   if (!initialTargets.needsSecondaries && !initialTargets.needsLsi && !initialTargets.needsGoogleMetadata) {
     const missing = getTargetState(articleInput.keywords);
     const status = missing.needsSecondaries || missing.needsLsi || missing.needsGoogleMetadata
@@ -375,6 +378,8 @@ const executeExternalSemanticAnalysis = async (
       semanticPromptTemplate,
       initialTargets.needsSecondaries,
       initialTargets.needsLsi,
+      initialTargets.needsGoogleMetadata,
+      scoped,
     ),
     model: aiSettings.model,
     allowModelFallback: aiSettings.allowModelFallback,
@@ -399,6 +404,7 @@ const executeExternalSemanticAnalysis = async (
   let terms = keepRequestedTerms(
     parseExternalSemanticTerms(finalCall.text, articleInput),
     initialTargets,
+    scoped,
   );
 
   if (!hasUsableExternalSemanticTerms(
@@ -407,6 +413,17 @@ const executeExternalSemanticAnalysis = async (
     initialTargets.needsLsi,
     initialTargets.needsGoogleMetadata,
   )) {
+    if (scoped) {
+      const current = getRequestedTargetState(context, articleInput.keywords, await readArticleAutomationPolicy(context.job.article_id));
+      initialTargets = {
+        needsSecondaries: initialTargets.needsSecondaries && current.needsSecondaries,
+        needsLsi: initialTargets.needsLsi && current.needsLsi,
+        needsGoogleMetadata: initialTargets.needsGoogleMetadata && current.needsGoogleMetadata,
+      };
+      if (!Object.values(initialTargets).some(Boolean)) {
+        throw new ExternalAnalysisTerminalError({ code: 'creator_automation_disabled', message: 'The creator disabled semantic automation before repair.' });
+      }
+    }
     await context.reportProgress({
       progress: { stage: 'repairing_semantic_response' },
       provider: finalCall.provider,
@@ -421,6 +438,8 @@ const executeExternalSemanticAnalysis = async (
         semanticPromptTemplate,
         initialTargets.needsSecondaries,
         initialTargets.needsLsi,
+        initialTargets.needsGoogleMetadata,
+        scoped,
       ),
       model: aiSettings.model,
       allowModelFallback: aiSettings.allowModelFallback,
@@ -445,6 +464,7 @@ const executeExternalSemanticAnalysis = async (
     terms = keepRequestedTerms(
       parseExternalSemanticTerms(finalCall.text, articleInput),
       initialTargets,
+      scoped,
     );
   }
 

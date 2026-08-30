@@ -1,5 +1,6 @@
 import {
   ExternalAnalysisRetryError,
+  ExternalAnalysisTerminalError,
   registerExternalAnalysisJobExecutor,
   type ExternalAnalysisExecutionContext,
 } from './externalAnalysisExecutor';
@@ -10,7 +11,7 @@ import {
 } from './externalAnalysisQueue';
 import { queueContentWritingSession } from './contentWritingEngine';
 import type { ContentWritingProvider } from './contentWritingSessionService';
-import { readContentResearchAutomationSettings } from './externalAnalysisSettings';
+import { readArticleAutomationPolicy } from './articleAutomationPolicy';
 import {
   enqueueCompetitorPreparationDiscovery,
   enqueueCompetitorPreparationExtraction,
@@ -223,6 +224,7 @@ const findActiveExtractionJob = async (articleId: string): Promise<string | null
 };
 
 const readCurrentPreparationIntent = async (jobId: string): Promise<{
+  origin: ExternalAnalysisJob['origin'] | null;
   requestedBy: string;
   startWriting: boolean;
   provider: ContentWritingProvider;
@@ -231,19 +233,51 @@ const readCurrentPreparationIntent = async (jobId: string): Promise<{
 }> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('ai_external_analysis_jobs')
-    .select('requested_by,input_snapshot')
+    .select('origin,requested_by,input_snapshot')
     .eq('id', jobId)
     .maybeSingle();
   if (error) throw error;
   const input = isRecord(data?.input_snapshot) ? data.input_snapshot : {};
   const provider = text(input.provider) as ContentWritingProvider;
   return {
+    origin: data?.origin === 'manual' || data?.origin === 'auto' ? data.origin : null,
     requestedBy: text(data?.requested_by) || text(input.requestedBy),
     startWriting: input.startWriting === true,
     provider: ['gemini', 'geminiPaid', 'openai'].includes(provider) ? provider : 'gemini',
     model: text(input.model),
     idempotencyKey: text(input.contentWritingIdempotencyKey),
   };
+};
+
+const assertAutomaticPreparationStageAllowed = async (
+  job: ExternalAnalysisJob,
+  stage?: 'discovery' | 'extraction',
+): Promise<void> => {
+  if (job.origin !== 'auto') return;
+  // An explicit writing request may adopt a preparation that was queued by
+  // automation. Respect that persisted manual intent and its requesting actor.
+  const currentIntent = await readCurrentPreparationIntent(job.id);
+  if (currentIntent.origin === 'manual') {
+    job.origin = 'manual';
+    job.requested_by = currentIntent.requestedBy || job.requested_by;
+    return;
+  }
+  const policy = await readArticleAutomationPolicy(job.article_id);
+  if (policy.scope === 'creator'
+      && (!policy.creatorUserId || policy.creatorUserId !== job.requested_by)) {
+    throw new ExternalAnalysisTerminalError({
+      code: 'creator_preparation_identity_mismatch',
+      message: 'Automatic competitor preparation must use the original article creator.',
+    });
+  }
+  if (!policy.enabled || !policy.contentWritingAutomationEnabled
+      || (stage === 'discovery' && !policy.autoDiscoverCompetitors)
+      || (stage === 'extraction' && !policy.autoExtractCompetitorContent)) {
+    throw new ExternalAnalysisTerminalError({
+      code: 'creator_preparation_automation_disabled',
+      message: 'This automatic preparation stage is disabled by the article automation policy.',
+    });
+  }
 };
 
 const cancelChildJob = async (jobId: string, requestedBy: string): Promise<void> => {
@@ -258,18 +292,10 @@ const cancelChildJob = async (jobId: string, requestedBy: string): Promise<void>
 const executeContentWritingCompetitorPreparation = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
+  await assertAutomaticPreparationStageAllowed(context.job);
   const initialInput = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
   const requestedBy = text(context.job.requested_by) || text(initialInput.requestedBy);
   if (!requestedBy) throw new Error('Competitor preparation requires a requesting user.');
-  if (context.job.origin === 'auto') {
-    const automation = await readContentResearchAutomationSettings();
-    if (!automation.autoDiscoverCompetitors) {
-      return {
-        result: { status: 'automation_disabled', writingQueued: false },
-        progress: { stage: 'automation_disabled' },
-      };
-    }
-  }
   const minimumCount = boundedCount(initialInput.minimumCompetitorCount, 1);
   const desiredCount = boundedCount(initialInput.desiredCompetitorCount, 5);
   let activeChildJobId = '';
@@ -291,6 +317,7 @@ const executeContentWritingCompetitorPreparation = async (
     }
 
     if (readiness.usableCount < minimumCount) {
+      await assertAutomaticPreparationStageAllowed(context.job, 'discovery');
       await reportStage(context, 'competitor_discovery', 1, {
         usableCompetitorCount: readiness.usableCount,
         requiredCompetitorCount: minimumCount,
@@ -298,7 +325,7 @@ const executeContentWritingCompetitorPreparation = async (
       const discoveryJobId = await enqueueCompetitorPreparationDiscovery({
         mode: 'content_writing',
         articleId: context.job.article_id,
-        requestedBy,
+        requestedBy: text(context.job.requested_by) || requestedBy,
         origin: context.job.origin === 'auto' ? 'auto' : 'manual',
       });
       activeChildJobId = discoveryJobId;
@@ -328,10 +355,11 @@ const executeContentWritingCompetitorPreparation = async (
         usableCompetitorCount: readiness.usableCount,
       });
       if (readiness.usableCount < minimumCount) {
+        await assertAutomaticPreparationStageAllowed(context.job, 'extraction');
         const extractionJobId = await findActiveExtractionJob(context.job.article_id)
           || await enqueueCompetitorPreparationExtraction({
             articleId: context.job.article_id,
-            requestedBy,
+            requestedBy: text(context.job.requested_by) || requestedBy,
             origin: context.job.origin === 'auto' ? 'auto' : 'manual',
             queryType: text(discoveryResult.queryType) || 'primary_keyword',
             queryText: text(discoveryResult.query),
@@ -363,7 +391,7 @@ const executeContentWritingCompetitorPreparation = async (
     }
 
     const currentIntent = await readCurrentPreparationIntent(context.job.id);
-    if (!currentIntent.startWriting) {
+    if (!currentIntent.startWriting || currentIntent.origin !== 'manual') {
       return {
         result: {
           status: 'competitors_ready',

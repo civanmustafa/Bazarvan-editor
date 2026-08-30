@@ -5,7 +5,7 @@ import {
   getExternalAnalysisSupabaseAdmin,
   type ExternalAnalysisJob,
 } from './externalAnalysisQueue';
-import { readContentResearchAutomationSettings } from './externalAnalysisSettings';
+import { readArticleAutomationPolicy } from './articleAutomationPolicy';
 
 const ACTIVE_SEMANTIC_STATUSES = [
   'waiting_for_prerequisites',
@@ -48,7 +48,7 @@ const readCurrentEngineeringJobOrigin = async (
  * an automatic task immediately before the administrator disabled it.
  */
 export const assertAutomaticReadyEngineeringCommandsAllowed = async (
-  job: Pick<ExternalAnalysisJob, 'id' | 'origin'>,
+  job: Pick<ExternalAnalysisJob, 'id' | 'origin' | 'article_id' | 'command_id'>,
 ): Promise<void> => {
   if (job.origin !== 'auto') return;
 
@@ -58,8 +58,9 @@ export const assertAutomaticReadyEngineeringCommandsAllowed = async (
     return;
   }
 
-  const settings = await readContentResearchAutomationSettings();
-  if (settings.autoRunReadyEngineeringCommands) return;
+  const settings = await readArticleAutomationPolicy(job.article_id);
+  if (settings.autoRunReadyEngineeringCommands && (settings.scope === 'legacy'
+    || settings.externalAnalysisCommandIds.includes(job.command_id || ''))) return;
 
   const latestOrigin = await readCurrentEngineeringJobOrigin(job.id);
   if (latestOrigin === 'manual') {
@@ -69,7 +70,7 @@ export const assertAutomaticReadyEngineeringCommandsAllowed = async (
 
   throw new ExternalAnalysisTerminalError({
     code: 'ready_engineering_commands_automation_disabled',
-    message: 'Automatic ready engineering commands are disabled in system settings.',
+    message: 'This automatic ready command is disabled by the article creator or administrator.',
   });
 };
 
@@ -83,8 +84,8 @@ export const assertAutomaticCompetitorResearchAllowed = async (
 ): Promise<void> => {
   if (job.origin !== 'auto') return;
 
-  const settings = await readContentResearchAutomationSettings();
-  if (!settings.autoDiscoverCompetitors) {
+  const settings = await readArticleAutomationPolicy(job.article_id);
+  if ((job.job_type === 'competitor_discovery' || settings.scope === 'legacy') && !settings.autoDiscoverCompetitors) {
     stopAutomaticCompetitorResearch(
       'competitor_automation_disabled',
       'Automatic competitor discovery is disabled in system settings.',
@@ -123,7 +124,7 @@ export const assertAutomaticCompetitorResearchAllowed = async (
   const lsiReady = hasTerms(keywords.lsi);
   const semanticActive = (semanticResult.data || []).length > 0;
   if (
-    semanticActive
+    (semanticActive && (settings.scope === 'legacy' || settings.autoGenerateAlternativeKeywords || settings.autoGenerateLsiKeywords))
     || (settings.autoGenerateAlternativeKeywords && !alternativesReady)
     || (settings.autoGenerateLsiKeywords && !lsiReady)
   ) {

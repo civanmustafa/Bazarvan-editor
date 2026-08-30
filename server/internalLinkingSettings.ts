@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { normalizeSystemSettingsMap } from '../constants/settingsRegistry';
+import { readArticleAutomationPolicy } from './articleAutomationPolicy';
 
 type SupabaseAdmin = SupabaseClient<any, 'public', any>;
 
@@ -35,27 +35,16 @@ export const readInternalLinkAutomationSettings = async (input: {
   userId: string;
 }): Promise<InternalLinkAutomationSettings> => {
   const admin = getSupabaseAdmin();
-  const [{ data, error }, accessResult] = await Promise.all([
-    admin
-    .from('app_settings')
-    .select('value')
-    .eq('key', 'system')
-    .eq('is_secret', false)
-    .maybeSingle(),
-    admin.rpc('article_access_level_for_user', {
+  const accessResult = await admin.rpc('article_access_level_for_user', {
       target_article_id: input.articleId,
       target_user_id: input.userId,
-    }),
-  ]);
-  if (error && error.code !== '42P01') throw error;
+    });
   if (accessResult.error) throw accessResult.error;
-
-  const normalized = normalizeSystemSettingsMap({
-    system: data?.value && typeof data.value === 'object' ? data.value : {},
-  });
+  const canApplyToArticle = accessResult.data === 'write' || accessResult.data === 'admin';
+  if (!canApplyToArticle) return { canApplyToArticle: false, autoApplyStrongInternalLinkSuggestions: false };
+  const policy = await readArticleAutomationPolicy(input.articleId);
   return {
-    autoApplyStrongInternalLinkSuggestions:
-      normalized.system.autoApplyStrongInternalLinkSuggestions !== false,
-    canApplyToArticle: accessResult.data === 'write' || accessResult.data === 'admin',
+    autoApplyStrongInternalLinkSuggestions: policy.autoApplyStrongInternalLinkSuggestions,
+    canApplyToArticle,
   };
 };

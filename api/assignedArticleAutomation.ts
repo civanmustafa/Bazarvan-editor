@@ -11,6 +11,7 @@ import {
 import { ArticleAccessPolicyError, requireArticleWriteAccess } from './articleAccessPolicy';
 import { aiExecutionEngine, type AiExecutionTelemetryContext } from '../server/aiExecutionEngine';
 import { readPromptRegistrySettings } from '../server/promptRegistrySettings';
+import { readArticleAutomationPolicy } from '../server/articleAutomationPolicy';
 import {
   buildSemanticKeywordRepairPrompt,
   describeSemanticKeywordValidationFailure,
@@ -668,6 +669,23 @@ const handleAssignedArticleAutomationRequest = async (req: any): Promise<ApiResu
     }
 
     await authorizeArticleAutomation(supabase, user.id, article as Record<string, any>);
+
+    const automationPolicy = await readArticleAutomationPolicy(articleId);
+    if (automationPolicy.scope === 'creator') {
+      // Sharing/claiming is not a new manual AI request. The durable database
+      // queue owns creator-scoped work and uses the original creator identity.
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          articleId,
+          semantic: 'skipped',
+          geminiPaid: 'skipped',
+          delegated: true,
+          reasons: ['تتولى قائمة الأتمتة تشغيل المراحل المسموحة وفق إعدادات منشئ المقالة؛ لا يؤدي الإسناد أو المشاركة إلى تشغيل إضافي.'],
+        },
+      };
+    }
 
     const reasons: string[] = [];
     const metadata = isRecord((article as Record<string, any>).metadata) ? (article as Record<string, any>).metadata : {};

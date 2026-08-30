@@ -7,6 +7,7 @@ import {
   type ExternalAnalysisExecutionContext,
 } from './externalAnalysisExecutor';
 import type { ExternalAnalysisJson } from './externalAnalysisQueue';
+import { assertAutomaticArticlePolicy } from './articleAutomationPolicy';
 
 export type ExternalGeminiCallResult = {
   ok: boolean;
@@ -140,6 +141,7 @@ export const runExternalGeminiCall = async (options: {
   requestIndex: number;
   useUrlContext?: boolean;
 }): Promise<ExternalGeminiCallResult> => {
+  await assertAutomaticArticlePolicy(options.context.job);
   const progressId = `external-${options.context.job.id}-${options.context.job.attempt_count}-${options.requestIndex}`;
   const progressForwarder = createProgressForwarder(options.context);
   const result = await aiExecutionEngine.executeGemini({

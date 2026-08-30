@@ -24,6 +24,7 @@ import systemSettingsHandler from '../api/systemSettings';
 import userAiProviderSecretsHandler from '../api/userAiProviderSecrets';
 import userArticleQuotaHandler from '../api/userArticleQuota';
 import userProviderAccessHandler from '../api/userProviderAccess';
+import userAutomationHandler from '../api/userAutomation';
 
 export type ApiHandler = (req: any, res?: any) => Promise<Response | void>;
 export type ApiRouteMethod = 'ALL' | 'POST';
@@ -58,6 +59,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'user-ai-provider-secrets', method: 'ALL', path: '/api/user/ai-provider-secrets', handler: userAiProviderSecretsHandler },
   { id: 'user-article-quota', method: 'ALL', path: '/api/user/article-quota', handler: userArticleQuotaHandler },
   { id: 'user-provider-access', method: 'ALL', path: '/api/user/provider-access', handler: userProviderAccessHandler },
+  { id: 'user-automation', method: 'ALL', path: '/api/user/automation', handler: userAutomationHandler },
   { id: 'admin-ai-provider-secrets', method: 'ALL', path: '/api/admin/ai-provider-secrets', handler: adminAiProviderSecretsHandler },
   { id: 'admin-crawler-provider-secrets', method: 'ALL', path: '/api/admin/crawler-provider-secrets', handler: adminCrawlerProviderSecretsHandler },
   { id: 'admin-crawler-provider-usage', method: 'ALL', path: '/api/admin/crawler-provider-usage', handler: adminCrawlerProviderUsageHandler },

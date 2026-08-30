@@ -153,10 +153,10 @@ test('content research automation is server-owned, settings-aware, and preserves
     assert.match(coordinator, /keywords->'lsi'/);
   }
 
-  assert.match(semanticExecutor, /readContentResearchAutomationSettings/);
+  assert.match(semanticExecutor, /readArticleAutomationPolicy/);
   assert.match(semanticExecutor, /automation_disabled/);
   assert.match(semanticExecutor, /const keepRequestedTerms/);
-  assert.ok((semanticExecutor.match(/readContentResearchAutomationSettings\(\)/g) || []).length >= 2);
+  assert.ok((semanticExecutor.match(/readArticleAutomationPolicy\(/g) || []).length >= 2);
   assert.match(
     competitorApi,
     /action === 'ensure_discovery'[\s\S]*enqueue_competitor_discovery_job_controlled[\s\S]*p_origin:\s*'manual'/,
@@ -181,7 +181,7 @@ test('content research automation is server-owned, settings-aware, and preserves
   assert.match(preparationExecutor, /enqueueCompetitorPreparationExtraction/);
   assert.match(competitorCoordinator, /enqueue_competitor_extraction_job_controlled/);
   assert.match(writingAutomation, /researchAutomation\.autoDiscoverCompetitors/);
-  assert.match(workerGuard, /readContentResearchAutomationSettings/);
+  assert.match(workerGuard, /readArticleAutomationPolicy/);
   assert.match(workerGuard, /semantic_keywords_lsi/);
   assert.match(workerGuard, /content_research_automation_changed/);
   assert.match(discoveryExecutor, /assertAutomaticCompetitorResearchAllowed\(context\.job\)/);

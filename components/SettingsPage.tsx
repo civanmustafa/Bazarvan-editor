@@ -34,6 +34,8 @@ import UserArticleQuotaSummary from './UserArticleQuotaSummary';
 import DashboardDataTools from './DashboardDataTools';
 import AdminPromptRegistrySettings from './AdminPromptRegistrySettings';
 import ClientCenterSettings from './ClientCenterSettings';
+import UserAutomationSettings, { UserAutomationPreferenceFields } from './UserAutomationSettings';
+import { normalizeUserAutomationPreferences } from '../constants/userAutomation';
 import { navigateToAppPath } from '../utils/appRoutes';
 import {
   loadSystemSettings,
@@ -69,6 +71,7 @@ type SettingsSectionKey = SystemSettingKey
   | 'users'
   | 'crawler'
   | 'preferences'
+  | 'automation'
   | 'account'
   | 'data';
 
@@ -257,6 +260,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
 
   const tabs: SettingsTab[] = useMemo(() => (isAdmin ? [
     { key: 'system', label: 'النظام', path: '/settings/system', icon: <Shield size={16} /> },
+    { key: 'automation', label: 'أتمتة مقالاتي', path: '/settings/automation', icon: <Workflow size={16} /> },
     { key: 'ai', label: 'الذكاء الاصطناعي', path: '/settings/ai', icon: <Key size={16} /> },
     { key: 'crawler', label: 'خدمات الزحف', path: '/settings/crawler', icon: <Radar size={16} /> },
     { key: 'prompts', label: 'الأوامر الهندسية', path: '/settings/prompts', icon: <TerminalSquare size={16} /> },
@@ -266,6 +270,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
     { key: 'roles', label: 'الصلاحيات', path: '/settings/roles', icon: <SlidersHorizontal size={16} /> },
   ] : [
     { key: 'preferences', label: 'التفضيلات', path: '/settings/preferences', icon: <SlidersHorizontal size={16} /> },
+    { key: 'automation', label: 'أتمتة مقالاتي', path: '/settings/automation', icon: <Workflow size={16} /> },
     { key: 'account', label: 'مفاتيحي وحدودي', path: '/settings/account', icon: <Key size={16} /> },
     { key: 'clients', label: 'عملائي', path: '/settings/clients', icon: <Users size={16} /> },
     { key: 'data', label: 'بياناتي', path: '/settings/data', icon: <Database size={16} /> },
@@ -588,7 +593,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
         />
       </SettingsSection>
 
-      <SettingsSection title="الأوامر الافتراضية للتحليل الخارجي">
+      <SettingsSection title="الأوامر الافتراضية للتحليل الخارجي للمقالات السابقة ومقالات النظام">
+        <p className="mb-4 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+          للمقالات الجديدة التي ينشئها المستخدم بنفسه، يعتمد التشغيل التلقائي أوامر منشئها المحددة في «أتمتة مقالاتي». تبقى هذه القائمة الافتراضية للمقالات غير المشمولة بالإعدادات الشخصية.
+        </p>
         <ExternalAnalysisDefaultCommandsSettings />
       </SettingsSection>
     </div>
@@ -614,7 +622,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
             </FieldLabel>
           </div>
           <ToggleField label="n8n مفعل" checked={Boolean(settings.n8n.enabled)} onChange={value => updateSetting('n8n', 'enabled', value)} />
-          <ToggleField label="تشغيل أتمتة المقالات المسندة" checked={Boolean(settings.n8n.autoRunAssignedAutomation)} onChange={value => updateSetting('n8n', 'autoRunAssignedAutomation', value)} />
+          <ToggleField label="تشغيل أتمتة المقالات المسندة" description="سياسة خاصة بمقالات n8n والنظام؛ إسنادها إلى مستخدم لا يجعلها مقالات أنشأها بنفسه ولا يغيّر منشئها الأصلي." checked={Boolean(settings.n8n.autoRunAssignedAutomation)} onChange={value => updateSetting('n8n', 'autoRunAssignedAutomation', value)} />
           <FieldLabel label="الظهور الافتراضي">
             <SelectInput
               value={String(settings.n8n.defaultVisibility || 'public')}
@@ -678,50 +686,74 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="الربط الداخلي">
+      <SettingsSection title="ضابط عام لأتمتة الربط الداخلي">
         <div className="grid grid-cols-1 gap-4">
           <ToggleField
-            label="إدراج روابط الربط الداخلي المؤكدة تلقائيًا"
-            description="مفعّل افتراضيًا. يطبق الرابط دون نقل مؤشر الكتابة فقط عندما تبلغ الصلة 90 من 100 على الأقل، ويكون التطابق صريحًا وفريدًا داخل الفقرة، ويفصل الهدف 12 نقطة على الأقل عن أي صفحة منافسة. يشترط تحديد رابط المقالة الحالية لمنع الربط بالصفحة نفسها؛ وتبقى النتائج الأقل يقينًا للمراجعة اليدوية."
+            label="السماح بإدراج روابط الربط الداخلي المؤكدة تلقائيًا"
+            description="تعطيله يمنع الإدراج التلقائي للجميع. السماح وحده لا يتجاوز رغبة منشئ المقالة. يطبق الرابط فقط عند صلة 90 من 100 وتطابق صريح وفريد وفارق 12 نقطة عن أي صفحة منافسة، مع منع الربط بالصفحة نفسها."
             checked={settings.system.autoApplyStrongInternalLinkSuggestions !== false}
             onChange={value => updateSetting('system', 'autoApplyStrongInternalLinkSuggestions', value)}
           />
         </div>
       </SettingsSection>
 
-      <SettingsSection title="أتمتة الكلمات والمنافسين">
+      <SettingsSection title="ضوابط السماح العامة للأتمتة">
+        <p className="mb-4 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+          هذه مفاتيح منع عامة للمسؤول: تعطيل أي مرحلة يمنع تشغيلها تلقائيًا للجميع، والسماح بها لا يفعّلها لمن عطّلها في تفضيلاته. لا تتغير اختيارات المستخدمين المحفوظة ولا صلاحيات التشغيل اليدوي.
+        </p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <ToggleField
-            label="جلب الصيغ البديلة تلقائيًا"
-            description="عند تفعيله يبدأ توليد الصيغ البديلة تلقائيًا بعد اكتمال بيانات المقالة. عند تعطيله يبقى التوليد اليدوي متاحًا."
+            label="السماح بتوليد الصيغ البديلة تلقائيًا"
+            description="يشترط تفعيلها في إعدادات منشئ المقالة المشمولة بالأتمتة الشخصية. عند تعطيله يبقى التوليد اليدوي متاحًا."
             checked={settings.system.autoGenerateAlternativeKeywords !== false}
             onChange={value => updateSetting('system', 'autoGenerateAlternativeKeywords', value)}
           />
           <ToggleField
-            label="جلب كلمات LSI تلقائيًا"
-            description="عند تفعيله يبدأ توليد كلمات LSI تلقائيًا بعد اكتمال بيانات المقالة. عند تعطيله يبقى التوليد اليدوي متاحًا."
+            label="السماح بتوليد كلمات LSI تلقائيًا"
+            description="يشترط تفعيلها في إعدادات منشئ المقالة المشمولة بالأتمتة الشخصية. عند تعطيله يبقى التوليد اليدوي متاحًا."
             checked={settings.system.autoGenerateLsiKeywords !== false}
             onChange={value => updateSetting('system', 'autoGenerateLsiKeywords', value)}
           />
           <ToggleField
-            label="جلب المنافسين تلقائيًا"
-            description="يبدأ اكتشاف المنافسين بعد اكتمال الصيغ البديلة وLSI المفعّلة أعلاه. الخطوة المعطّلة تُتخطى، ولا يتأثر البحث اليدوي."
+            label="السماح باقتراح عناوين وأوصاف Google تلقائيًا"
+            description="يخضع التشغيل التلقائي لتفضيلات منشئ المقالة وصلاحيات مزود الذكاء الاصطناعي."
+            checked={settings.system.autoGenerateGoogleMetadata !== false}
+            onChange={value => updateSetting('system', 'autoGenerateGoogleMetadata', value)}
+          />
+          <ToggleField
+            label="السماح بجلب المنافسين تلقائيًا"
+            description="يبدأ بعد توفر شروط البحث؛ لا تُشغّل مرحلة عطّلها المستخدم لتوفير متطلبات مرحلة أخرى. لا يتأثر البحث اليدوي."
             checked={settings.system.autoDiscoverCompetitors !== false}
             onChange={value => updateSetting('system', 'autoDiscoverCompetitors', value)}
           />
           <ToggleField
-            label="سحب محتوى المنافسين تلقائيًا"
-            description="يعتمد أفضل النتائج المحددة آليًا ويبدأ سحب نصوصها فور انتهاء الاكتشاف، لكي تستمر الأوامر الجاهزة دون انتظار اعتماد يدوي."
+            label="السماح بسحب محتوى المنافسين تلقائيًا"
+            description="يسمح بالسحب عند تفعيله في تفضيلات المنشئ وتوفر المنافسين، مع بقاء صلاحيات الزحف والحصص نافذة."
             checked={settings.system.autoExtractCompetitorContent !== false}
             onChange={value => updateSetting('system', 'autoExtractCompetitorContent', value)}
           />
           <ToggleField
-            label="تشغيل الأوامر اليدوية الجاهزة تلقائيًا"
-            description="يجدولها الخادم فور تحقق شروط التحليل الخارجي، حتى دون فتح المقالة. تعطيلها يوقف التشغيل التلقائي فقط وتبقى الطلبات اليدوية متاحة."
+            label="السماح بتشغيل الأوامر الجاهزة تلقائيًا"
+            description="يجدول الخادم الأوامر التي اختارها منشئ المقالة بعد تحقق شروطها. تعطيله يوقف التشغيل التلقائي فقط."
             checked={settings.system.autoRunReadyEngineeringCommands !== false}
             onChange={value => updateSetting('system', 'autoRunReadyEngineeringCommands', value)}
           />
         </div>
+        <p className="mt-4 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+          ضابط الكتابة التلقائية والموديل والفواصل وشروط الجودة موجودة في تبويب الذكاء الاصطناعي ضمن إعدادات كتابة المحتوى.
+        </p>
+      </SettingsSection>
+
+      <SettingsSection title="أتمتة المستخدمين الجدد: القيم الافتراضية">
+        <p className="mb-4 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+          تُنسخ هذه الاختيارات إلى إعدادات المستخدم الجديد مرة واحدة. تعديلها لا يغيّر رغبات المستخدمين الحاليين ولا يعيد تشغيل المقالات السابقة. هذه القيم مستقلة عن ضوابط السماح العامة أعلاه، ويمكن للمستخدم تغيير اختياراته من «أتمتة مقالاتي».
+        </p>
+        <UserAutomationPreferenceFields
+          value={normalizeUserAutomationPreferences(settings.system.userAutomationDefaults)}
+          onChange={value => updateSetting('system', 'userAutomationDefaults', value)}
+          disabled={isLoading || isSaving}
+          defaultsMode
+        />
       </SettingsSection>
 
       <SettingsSection title="القيم الافتراضية للمقالات">
@@ -841,6 +873,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
   );
 
   const renderSelectedSection = () => {
+    if (selectedSection === 'automation') return <UserAutomationSettings />;
     if (!isAdmin) {
       if (selectedSection === 'account') return renderUserAccountSettings();
       if (selectedSection === 'clients') return renderClientSettings();
@@ -887,7 +920,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
                   <Shield size={16} />
                   <span>مركز المتابعة</span>
                 </button>
-                {selectedSection !== 'clients' && (
+                {selectedSection !== 'clients' && selectedSection !== 'automation' && (
                   <>
                     <button
                       type="button"
@@ -932,17 +965,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           ))}
         </nav>
 
-        {error && (
+        {selectedSection !== 'automation' && error && (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-200">
             {error}
           </div>
         )}
-        {savedMessage && (
+        {selectedSection !== 'automation' && savedMessage && (
           <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm font-bold text-green-700 dark:border-green-900/50 dark:bg-green-900/20 dark:text-green-200">
             {savedMessage}
           </div>
         )}
-        {isLoading && (
+        {selectedSection !== 'automation' && isLoading && (
           <div className="mb-4 rounded-md border border-[#d4af37]/30 bg-[#d4af37]/10 p-3 text-sm font-bold text-[#8a6f1d] dark:text-[#f2d675]">
             جار تحميل الإعدادات...
           </div>

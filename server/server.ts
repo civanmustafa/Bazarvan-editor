@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { API_ROUTES, type ApiHandler } from './apiRouteRegistry';
+import { checkUserAutomationReadiness } from './userAutomationReadiness';
 import {
   checkContentWritingReadiness,
   toPublicContentWritingReadiness,
@@ -62,16 +63,18 @@ const healthzHandler: RequestHandler = (_req, res) => {
 
 const readyzHandler: RequestHandler = async (_req, res) => {
   const staticBuild = fs.existsSync(path.join(distDir, 'index.html'));
-  const [contentWriting, adminAiProviderSecrets, clientCenter, externalAnalysisWorker] = await Promise.all([
+  const [contentWriting, adminAiProviderSecrets, clientCenter, externalAnalysisWorker, userAutomation] = await Promise.all([
     checkContentWritingReadiness(),
     checkAdminAiProviderSecretsReadiness(),
     checkClientCenterReadiness(),
     checkExternalAnalysisQueueReadiness(),
+    checkUserAutomationReadiness(),
   ]);
   const ok = staticBuild
     && contentWriting.ok
     && adminAiProviderSecrets.ok
-    && clientCenter.ok;
+    && clientCenter.ok
+    && userAutomation.ok;
   const degraded = ok && !externalAnalysisWorker.ok;
   if (!ok && contentWriting.detail) {
     console.error(`[readyz] ${contentWriting.detail}`);
@@ -91,6 +94,7 @@ const readyzHandler: RequestHandler = async (_req, res) => {
     service: 'bazarvan-editor',
     checks: {
       staticBuild,
+      userAutomation,
       contentWriting: toPublicContentWritingReadiness(contentWriting),
       adminAiProviderSecrets: toPublicAdminAiProviderSecretsReadiness(adminAiProviderSecrets),
       clientCenter: toPublicClientCenterReadiness(clientCenter),

@@ -50,10 +50,10 @@ const ContentWritingAutomationSettings: React.FC<Props> = ({ values, onChange })
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h4 className="text-sm font-black text-gray-800 dark:text-gray-100">
-                الكتابة التلقائية للمقالات الجاهزة
+                السماح العام بالكتابة التلقائية للمقالات الجاهزة
               </h4>
               <p className="mt-1 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-                يكتشف الخادم المقالات المكتملة المدخلات، ويكتب مقالة واحدة فقط في كل مرة. الطلب اليدوي والإنشاء الشامل النشط لهما الأولوية، وتُحفظ النتيجة للمراجعة دون إدراج تلقائي.
+                تعطيل هذا المفتاح يمنع الكتابة التلقائية للجميع. عند السماح بها، تُراعى رغبة منشئ المقالة في «أتمتة مقالاتي» للمقالات الجديدة المشمولة. يكتب الخادم مقالة واحدة كل مرة؛ للطلب اليدوي والإنشاء الشامل النشط الأولوية، وتُحفظ النتيجة للمراجعة دون إدراج تلقائي.
               </p>
             </div>
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700 dark:border-blue-900/60 dark:bg-[#202020] dark:text-blue-200">

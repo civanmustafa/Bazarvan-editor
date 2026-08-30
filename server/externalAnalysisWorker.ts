@@ -1,4 +1,5 @@
 import './loadEnv';
+import { assertAutomaticArticlePolicy } from './articleAutomationPolicy';
 import './externalSemanticAnalysisExecutor';
 import './contentBriefGenerationExecutor';
 import './metaDescriptionGenerationExecutor';
@@ -209,6 +210,7 @@ const executeClaimedJob = async (
       });
     }
 
+    await assertAutomaticArticlePolicy(job);
     const execution = await executor({
       job,
       workerId: slotWorkerId,

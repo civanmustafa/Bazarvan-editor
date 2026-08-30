@@ -33,6 +33,7 @@ const SETTINGS_ROUTE_SECTIONS = new Set([
   'users',
   'roles',
   'preferences',
+  'automation',
   'account',
   'data',
 ]);
