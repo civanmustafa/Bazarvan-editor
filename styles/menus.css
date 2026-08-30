@@ -1,0 +1,113 @@
+/* The ready-command menu is the visual reference for every editor menu. */
+:root {
+  color-scheme: light;
+  --menu-surface: #fff;
+  --menu-field: #fff;
+  --menu-text: #374151;
+  --menu-muted: #6b7280;
+  --menu-border: #e5e7eb;
+  --menu-field-border: #d1d5db;
+  --menu-divider: #f9fafb;
+  --menu-highlight: rgb(212 175 55 / 10%);
+  --menu-selected: #8a6f1d;
+}
+
+:root.dark, .dark {
+  color-scheme: dark;
+  --menu-surface: #2a2a2a;
+  --menu-field: #1f1f1f;
+  --menu-text: #e5e7eb;
+  --menu-muted: #9ca3af;
+  --menu-border: #3c3c3c;
+  --menu-field-border: #3c3c3c;
+  --menu-divider: #333;
+  --menu-highlight: rgb(212 175 55 / 20%);
+  --menu-selected: #f2d675;
+}
+
+.editor-menu.editor-menu {
+  border: 1px solid var(--menu-border);
+  border-radius: 0.5rem;
+  background: var(--menu-surface);
+  color: var(--menu-text);
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 10%), 0 8px 10px -6px rgb(0 0 0 / 10%), 0 0 0 1px rgb(0 0 0 / 5%);
+}
+
+.editor-menu-item.editor-menu-item {
+  border-bottom: 1px solid var(--menu-divider);
+  background: transparent;
+  color: var(--menu-text);
+  text-align: start;
+  transition: background-color 150ms, color 150ms;
+}
+
+.editor-menu-item.editor-menu-item:last-child { border-bottom: 0; }
+.editor-menu-item.editor-menu-item:is(:hover, :focus-visible, [data-active="true"]):not([aria-disabled="true"]):not(:disabled) {
+  background: var(--menu-highlight);
+  outline: none;
+}
+.editor-menu-item.editor-menu-item:is([aria-selected="true"], [data-selected="true"]) {
+  background: var(--menu-highlight);
+  color: var(--menu-selected);
+}
+.editor-menu-item.editor-menu-item:is([aria-disabled="true"], :disabled) {
+  color: var(--menu-muted);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+.editor-menu-group {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--menu-divider);
+  color: var(--menu-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* Form submission/reset/validation remain native; only the visible UI is replaced. */
+.app-select-native {
+  display: none;
+}
+
+:where(.app-select-trigger) { min-width: 0; max-width: 100%; }
+.app-select-trigger.app-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-color: var(--menu-field-border);
+  border-radius: 0.5rem;
+  background-color: var(--menu-field);
+  color: var(--menu-text);
+  text-align: start;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.app-select-trigger.app-select-trigger:is(:focus-visible, [aria-expanded="true"]) {
+  border-color: #d4af37;
+  outline: 1px solid #d4af37;
+  outline-offset: 1px;
+}
+.app-select-trigger.app-select-trigger:disabled { cursor: not-allowed; opacity: 0.6; }
+.app-select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-select-chevron { flex-shrink: 0; color: var(--menu-muted); transition: transform 150ms; }
+.app-select-trigger[aria-expanded="true"] .app-select-chevron { transform: rotate(180deg); }
+.app-select-menu {
+  position: fixed;
+  z-index: 20000;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  font-family: Cairo, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  font-weight: 400;
+}
+.app-select-option { display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.75rem; cursor: pointer; }
+.app-select-option-label { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+
+/* Also keep any future native controls legible before they adopt AppSelect. */
+select option, select optgroup { background: var(--menu-surface); color: var(--menu-text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-menu-item.editor-menu-item, .app-select-chevron { transition: none; }
+}

@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Save } from 'lucide-react';
 import {
@@ -157,12 +158,12 @@ const AdminArticleQuotaSettings: React.FC<Props> = ({ userId }) => {
           <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
             <label className="space-y-1">
               <span className="text-xs font-black text-gray-600 dark:text-gray-300">سياسة المستخدم</span>
-              <select value={mode} onChange={event => setMode(event.target.value as ArticleQuotaMode)} className={inputClass} disabled={saving}>
+              <AppSelect value={mode} onChange={event => setMode(event.target.value as ArticleQuotaMode)} className={inputClass} disabled={saving}>
                 <option value="inherit">يرث الحصة الافتراضية</option>
                 <option value="custom">حد مخصص</option>
                 <option value="unlimited">غير محدود</option>
                 <option value="blocked">منع إنشاء مقالات جديدة</option>
-              </select>
+              </AppSelect>
             </label>
             <label className="space-y-1">
               <span className="text-xs font-black text-gray-600 dark:text-gray-300">الحد المخصص</span>

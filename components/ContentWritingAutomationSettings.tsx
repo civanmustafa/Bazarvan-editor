@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React from 'react';
 import { Bot, Clock3, ShieldCheck } from 'lucide-react';
 import {
@@ -80,7 +81,7 @@ const ContentWritingAutomationSettings: React.FC<Props> = ({ values, onChange })
             </label>
             <label className="block">
               <span className="mb-2 block text-xs font-black text-gray-600 dark:text-gray-300">مزود الكتابة التلقائية</span>
-              <select
+              <AppSelect
                 value={provider}
                 onChange={event => {
                   onChange('contentWritingAutomationProvider', event.target.value);
@@ -91,11 +92,11 @@ const ContentWritingAutomationSettings: React.FC<Props> = ({ values, onChange })
                 <option value="gemini">Gemini المجاني</option>
                 <option value="geminiPaid">Gemini Pro</option>
                 <option value="openai">OpenAI</option>
-              </select>
+              </AppSelect>
             </label>
             <label className="block">
               <span className="mb-2 block text-xs font-black text-gray-600 dark:text-gray-300">موديل الكتابة التلقائية</span>
-              <select
+              <AppSelect
                 value={model}
                 onChange={event => onChange('contentWritingAutomationModel', event.target.value)}
                 className={inputClass}
@@ -104,7 +105,7 @@ const ContentWritingAutomationSettings: React.FC<Props> = ({ values, onChange })
                 {modelOptions.map(option => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
+              </AppSelect>
             </label>
             <label className="block">
               <span className="mb-2 block text-xs font-black text-gray-600 dark:text-gray-300">الحد الأدنى للمنافسين الصالحين</span>

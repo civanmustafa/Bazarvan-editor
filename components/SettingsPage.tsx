@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AppWindow,
@@ -176,7 +177,7 @@ const SelectInput: React.FC<{
   options: { value: string; label: string }[];
   onChange: (value: string) => void;
 }> = ({ value, options, onChange }) => (
-  <select
+  <AppSelect
     value={value}
     onChange={event => onChange(event.target.value)}
     className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
@@ -184,7 +185,7 @@ const SelectInput: React.FC<{
     {options.map(option => (
       <option key={option.value} value={option.value}>{option.label}</option>
     ))}
-  </select>
+  </AppSelect>
 );
 
 const ToggleField: React.FC<{

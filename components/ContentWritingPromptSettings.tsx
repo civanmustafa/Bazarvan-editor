@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React from 'react';
 import { RotateCcw, TerminalSquare } from 'lucide-react';
 import {
@@ -115,7 +116,7 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
       <div className="grid gap-4 border-t border-gray-200 pt-5 dark:border-[#3C3C3C] md:grid-cols-3">
         <label className="block">
           <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">إصدار سياسة جودة المقالة</span>
-          <select
+          <AppSelect
             value={qualityPolicyVersion}
             onChange={event => onChange('contentWritingQualityPolicyVersion', Number(event.target.value))}
             className={inputClass}
@@ -123,7 +124,7 @@ const ContentWritingPromptSettings: React.FC<ContentWritingPromptSettingsProps> 
             {CONTENT_WRITING_QUALITY_POLICY_VERSIONS.map(version => (
               <option key={version} value={version}>الإصدار {version}</option>
             ))}
-          </select>
+          </AppSelect>
         </label>
         <label className="block">
           <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">الحد الأدنى لدرجة الجودة</span>

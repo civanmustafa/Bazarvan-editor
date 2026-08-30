@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2,
@@ -1043,10 +1044,10 @@ const ClientCenterSettings: React.FC = () => {
           <input className={inputClass} value={clientInput.industry || ''} onChange={event => setClientInput(prev => ({ ...prev, industry: event.target.value }))} maxLength={200} />
         </Field>
         <Field label="حالة العميل">
-          <select className={inputClass} value={clientInput.isActive === false ? 'inactive' : 'active'} onChange={event => setClientInput(prev => ({ ...prev, isActive: event.target.value === 'active' }))}>
+          <AppSelect className={inputClass} value={clientInput.isActive === false ? 'inactive' : 'active'} onChange={event => setClientInput(prev => ({ ...prev, isActive: event.target.value === 'active' }))}>
             <option value="active">نشط</option>
             <option value="inactive">غير نشط</option>
-          </select>
+          </AppSelect>
         </Field>
       </div>
       <Field label="نبذة الشركة">
@@ -1112,7 +1113,7 @@ const ClientCenterSettings: React.FC = () => {
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:w-[36rem]">
               <Field label="مزوّد جلب الصفحات">
-                <select
+                <AppSelect
                   className={inputClass}
                   value={siteCrawlProvider}
                   disabled={Boolean(activeSiteCrawl)}
@@ -1129,7 +1130,7 @@ const ClientCenterSettings: React.FC = () => {
                       {!siteCrawlState.providerAvailability[provider] ? ' — غير مهيأ' : ''}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
               </Field>
               <Field label="أقصى عدد صفحات">
                 <input
@@ -1573,11 +1574,11 @@ const ClientCenterSettings: React.FC = () => {
           {canEditPages && (
             <form onSubmit={handleSaveDictionary} className="grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-4 dark:bg-[#1F1F1F] lg:grid-cols-[13rem_minmax(0,1fr)_minmax(0,1.4fr)_auto] lg:items-end">
               <Field label="نوع القاموس">
-                <select className={inputClass} value={dictionaryType} onChange={event => setDictionaryType(event.target.value as ClientLinkDictionaryType)}>
+                <AppSelect className={inputClass} value={dictionaryType} onChange={event => setDictionaryType(event.target.value as ClientLinkDictionaryType)}>
                   <option value="synonym">مرادفات</option>
                   <option value="topic">موضوعات مرتبطة</option>
                   <option value="excluded_term">كلمات مستبعدة من المطابقة</option>
-                </select>
+                </AppSelect>
               </Field>
               <Field label="اسم المجموعة">
                 <input className={inputClass} value={dictionaryLabel} onChange={event => setDictionaryLabel(event.target.value)} maxLength={160} placeholder="مثال: إدارة علاقات العملاء" />
@@ -1658,18 +1659,18 @@ const ClientCenterSettings: React.FC = () => {
       {isAdmin && (
         <form onSubmit={handleSaveAssignment} className="grid grid-cols-1 gap-3 rounded-md bg-gray-50 p-3 dark:bg-[#1F1F1F] md:grid-cols-[minmax(0,1fr)_12rem_auto] md:items-end">
           <Field label="الموظف">
-            <select className={inputClass} value={assignmentUserId} onChange={event => setAssignmentUserId(event.target.value)}>
+            <AppSelect className={inputClass} value={assignmentUserId} onChange={event => setAssignmentUserId(event.target.value)}>
               <option value="">اختر موظفًا</option>
               {profiles.filter(profile => profile.isActive && profile.role !== 'admin').map(profile => (
                 <option key={profile.id} value={profile.id}>{getProfileLabel(profile)}</option>
               ))}
-            </select>
+            </AppSelect>
           </Field>
           <Field label="الصلاحية">
-            <select className={inputClass} value={assignmentAccess} onChange={event => setAssignmentAccess(event.target.value as ClientAssignmentAccess)}>
+            <AppSelect className={inputClass} value={assignmentAccess} onChange={event => setAssignmentAccess(event.target.value as ClientAssignmentAccess)}>
               <option value="viewer">عرض</option>
               <option value="editor">تعديل الروابط</option>
-            </select>
+            </AppSelect>
           </Field>
           <button type="submit" disabled={isSaving || !assignmentUserId} className={primaryButtonClass}><UserPlus size={16} /> حفظ</button>
         </form>
@@ -1687,7 +1688,7 @@ const ClientCenterSettings: React.FC = () => {
               </div>
               {isAdmin && (
                 <div className="flex items-center gap-2">
-                  <select className={`${inputClass} w-auto`} value={assignment.accessLevel} onChange={event => {
+                  <AppSelect className={`${inputClass} w-auto`} value={assignment.accessLevel} onChange={event => {
                     void runMutation(
                       () => saveClientCenterAssignment({
                         clientId: assignment.clientId,
@@ -1699,7 +1700,7 @@ const ClientCenterSettings: React.FC = () => {
                   }}>
                     <option value="viewer">عرض</option>
                     <option value="editor">تعديل</option>
-                  </select>
+                  </AppSelect>
                   <button type="button" className={dangerButtonClass} onClick={() => {
                     if (window.confirm('هل تريد إزالة الموظف من هذا العميل؟')) {
                       void runMutation(() => deleteClientCenterAssignment(assignment.id), 'تمت إزالة الموظف.');

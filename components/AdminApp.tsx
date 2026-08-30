@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
@@ -2019,14 +2020,14 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-black text-gray-500 dark:text-gray-400">الدور</span>
-                  <select
+                  <AppSelect
                     value={createUserForm.role}
                     onChange={event => updateCreateUserForm('role', event.target.value as CreateUserFormState['role'])}
                     className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-700 outline-none focus:border-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
                   >
                     <option value="user">user</option>
                     <option value="admin">admin</option>
-                  </select>
+                  </AppSelect>
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-black text-gray-500 dark:text-gray-400">كلمة مرور مؤقتة</span>
@@ -2332,42 +2333,42 @@ const AdminApp: React.FC<AdminAppProps> = ({ section, id, date }) => {
             <div className="mt-3 grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 text-xs dark:border-[#3C3C3C] sm:grid-cols-2 lg:grid-cols-7">
               <label className="space-y-1">
                 <span className="inline-flex items-center gap-1 font-black text-gray-500 dark:text-gray-400"><Users size={13} /> المستخدم</span>
-                <select name="profileId" value={articleFilters.profileId} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+                <AppSelect name="profileId" value={articleFilters.profileId} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
                   <option value="all">الكل</option>
                   {profiles.map(profile => (
                     <option key={profile.id} value={profile.id}>{getProfileLabel(profile)}</option>
                   ))}
-                </select>
+                </AppSelect>
               </label>
               <label className="space-y-1">
                 <span className="inline-flex items-center gap-1 font-black text-gray-500 dark:text-gray-400"><Shield size={13} /> الحالة</span>
-                <select name="status" value={articleFilters.status} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+                <AppSelect name="status" value={articleFilters.status} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
                   <option value="all">الكل</option>
                   {articleFilterOptions.statuses.map(value => (
                     <option key={value} value={value}>{getArticleStatusLabel(value, t.locale)}</option>
                   ))}
-                </select>
+                </AppSelect>
               </label>
               <label className="space-y-1">
                 <span className="inline-flex items-center gap-1 font-black text-gray-500 dark:text-gray-400"><FileText size={13} /> اللغة</span>
-                <select name="language" value={articleFilters.language} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+                <AppSelect name="language" value={articleFilters.language} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
                   <option value="all">الكل</option>
                   {articleFilterOptions.languages.map(value => <option key={value} value={value}>{value.toUpperCase()}</option>)}
-                </select>
+                </AppSelect>
               </label>
               <label className="space-y-1">
                 <span className="inline-flex items-center gap-1 font-black text-gray-500 dark:text-gray-400"><Workflow size={13} /> المصدر</span>
-                <select name="source" value={articleFilters.source} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+                <AppSelect name="source" value={articleFilters.source} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
                   <option value="all">الكل</option>
                   {articleFilterOptions.sources.map(value => <option key={value} value={value}>{value}</option>)}
-                </select>
+                </AppSelect>
               </label>
               <label className="space-y-1">
                 <span className="inline-flex items-center gap-1 font-black text-gray-500 dark:text-gray-400"><BookOpen size={13} /> الشركة</span>
-                <select name="company" value={articleFilters.company} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
+                <AppSelect name="company" value={articleFilters.company} onChange={handleArticleFilterChange} className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-2 font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100">
                   <option value="all">الكل</option>
                   {articleFilterOptions.companies.map(value => <option key={value} value={value}>{value}</option>)}
-                </select>
+                </AppSelect>
               </label>
               <label className="space-y-1">
                 <span className="inline-flex items-center gap-1 font-black text-gray-500 dark:text-gray-400"><Calendar size={13} /> من تاريخ</span>

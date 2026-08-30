@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -1359,7 +1360,7 @@ const ContentWritingPanel: React.FC = () => {
               <span className="mb-1 block text-[11px] font-bold text-gray-500 dark:text-gray-400">
                 {isArabic ? 'الموديل' : 'Model'}
               </span>
-              <select
+              <AppSelect
                 value={selectedModel}
                 title={modelPreferenceHint}
                 onChange={event => {
@@ -1369,7 +1370,7 @@ const ContentWritingPanel: React.FC = () => {
                 className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-700 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
               >
                 {modelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              </AppSelect>
               <span className="mt-1.5 block text-[10px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
                 {modelPreferenceHint}
               </span>

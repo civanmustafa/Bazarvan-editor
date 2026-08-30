@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useMemo } from 'react';
 import { KeyRound, Settings2 } from 'lucide-react';
 import {
@@ -59,7 +60,7 @@ const ContentWritingResumeSettings: React.FC<ContentWritingResumeSettingsProps> 
           <span className="mb-2 block text-sm font-bold text-gray-600 dark:text-gray-300">
             الموديل الخاص بالاستئناف
           </span>
-          <select
+          <AppSelect
             value={modelOptions.some(option => option.value === resumeModelValue) ? resumeModelValue : ''}
             onChange={event => onChange('contentWritingResumeModel', event.target.value)}
             className={inputClass}
@@ -67,7 +68,7 @@ const ContentWritingResumeSettings: React.FC<ContentWritingResumeSettingsProps> 
             {modelOptions.map(option => (
               <option key={option.value || 'user-selection'} value={option.value}>{option.label}</option>
             ))}
-          </select>
+          </AppSelect>
           <span className="mt-1.5 block text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
             احفظ إعدادات الصفحة بعد تغييره. إذا اختار المستخدم موديلًا آخر في تبويب الكتابة، فسيُستأنف بالموديل الذي اختاره المستخدم.
           </span>

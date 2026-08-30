@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 ﻿
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy, ChevronDown } from 'lucide-react';
@@ -286,7 +287,7 @@ const ArticleStatusControl: React.FC<{
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
       {editable ? (
         <>
-          <select
+          <AppSelect
             value={status}
             disabled={disabled}
             aria-label={`حالة المقالة: ${label}`}
@@ -297,8 +298,7 @@ const ArticleStatusControl: React.FC<{
             {N8N_SETTING_OPTIONS.status.map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
-          </select>
-          <ChevronDown size={10} className="shrink-0 opacity-70" aria-hidden="true" />
+          </AppSelect>
         </>
       ) : (
         <span>{label}</span>
@@ -344,7 +344,7 @@ const EditableN8nSettingField: React.FC<{
     onClick={event => event.stopPropagation()}
   >
     <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
-    <select
+    <AppSelect
       value={value || ''}
       disabled={disabled}
       onClick={event => event.stopPropagation()}
@@ -357,7 +357,7 @@ const EditableN8nSettingField: React.FC<{
           {option.label}
         </option>
       ))}
-    </select>
+    </AppSelect>
   </label>
 );
 
@@ -428,13 +428,13 @@ const EditableN8nUsersField: React.FC<{
         <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
         <span className="min-w-0 truncate">{selectedCount > 0 ? `${selectedCount} مستخدم` : 'اختيار المستخدمين'}</span>
       </summary>
-      <div className="absolute end-0 top-full z-40 mt-1 w-72 rounded-md border border-gray-200 bg-white p-2 shadow-xl dark:border-[#3C3C3C] dark:bg-[#242424]">
+      <div className="editor-menu absolute end-0 top-full z-40 mt-1 w-72 rounded-md border border-gray-200 bg-white p-2 shadow-xl dark:border-[#3C3C3C] dark:bg-[#242424]">
         <div className="mb-2 text-xs font-black text-gray-700 dark:text-gray-200">المستخدمون المسموح لهم</div>
         <div className="max-h-52 space-y-1 overflow-y-auto">
           {availableProfiles.length > 0 ? availableProfiles.map(profile => {
             const email = profile.email!.trim().toLowerCase();
             return (
-              <label key={profile.id} className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 hover:bg-[#d4af37]/10">
+              <label key={profile.id} data-selected={draftEmails.includes(email)} className="editor-menu-item flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 hover:bg-[#d4af37]/10">
                 <input
                   type="checkbox"
                   checked={draftEmails.includes(email)}
@@ -1951,7 +1951,7 @@ const Dashboard: React.FC = () => {
                                 </>
                             )}
                             <div className="flex items-center gap-2">
-                                <select
+                                <AppSelect
                                     value={bulkStatus}
                                     onChange={event => setBulkStatus(event.target.value as RemoteArticleSettingsPatch['status'])}
                                     className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200"
@@ -1959,7 +1959,7 @@ const Dashboard: React.FC = () => {
                                     {N8N_SETTING_OPTIONS.status.map(option => (
                                         <option key={option.value} value={option.value}>{option.label}</option>
                                     ))}
-                                </select>
+                                </AppSelect>
                                 <button
                                     type="button"
                                     onClick={handleBulkStatusChange}
@@ -2031,11 +2031,11 @@ const Dashboard: React.FC = () => {
                                     <Languages size={16} className="text-[#d4af37]" />
                                     <span>{t.language}</span>
                                 </label>
-                                <select name="language" value={filters.language} onChange={handleFilterChange} className={inputClass}>
+                                <AppSelect name="language" value={filters.language} onChange={handleFilterChange} className={inputClass}>
                                     <option value="all">{t.all}</option>
                                     <option value="ar">{t.arabic}</option>
                                     <option value="en">{t.english}</option>
-                                </select>
+                                </AppSelect>
                             </div>
                             {isAdmin && (
                                 <div>
@@ -2043,12 +2043,12 @@ const Dashboard: React.FC = () => {
                                         <Users size={16} className="text-[#d4af37]" />
                                         <span>المستخدم</span>
                                     </label>
-                                    <select name="profileId" value={filters.profileId} onChange={handleFilterChange} className={inputClass}>
+                                    <AppSelect name="profileId" value={filters.profileId} onChange={handleFilterChange} className={inputClass}>
                                         <option value="all">{t.all}</option>
                                         {profiles.map(profile => (
                                             <option key={profile.id} value={profile.id}>{getProfileLabel(profile)}</option>
                                         ))}
-                                    </select>
+                                    </AppSelect>
                                 </div>
                             )}
                             <div>
@@ -2056,60 +2056,60 @@ const Dashboard: React.FC = () => {
                                     <Eye size={16} className="text-[#d4af37]" />
                                     <span>الظهور</span>
                                 </label>
-                                <select name="visibility" value={filters.visibility} onChange={handleFilterChange} className={inputClass}>
+                                <AppSelect name="visibility" value={filters.visibility} onChange={handleFilterChange} className={inputClass}>
                                     <option value="all">{t.all}</option>
                                     {filterOptions.visibilities.map(value => (
                                         <option key={value} value={value}>{value}</option>
                                     ))}
-                                </select>
+                                </AppSelect>
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
                                     <ExternalLink size={16} className="text-[#d4af37]" />
                                     <span>المصدر</span>
                                 </label>
-                                <select name="source" value={filters.source} onChange={handleFilterChange} className={inputClass}>
+                                <AppSelect name="source" value={filters.source} onChange={handleFilterChange} className={inputClass}>
                                     <option value="all">{t.all}</option>
                                     {filterOptions.sources.map(value => (
                                         <option key={value} value={value}>{value}</option>
                                     ))}
-                                </select>
+                                </AppSelect>
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
                                     <Key size={16} className="text-[#d4af37]" />
                                     <span>الشركة</span>
                                 </label>
-                                <select name="company" value={filters.company} onChange={handleFilterChange} className={inputClass}>
+                                <AppSelect name="company" value={filters.company} onChange={handleFilterChange} className={inputClass}>
                                     <option value="all">{t.all}</option>
                                     {filterOptions.companies.map(value => (
                                         <option key={value} value={value}>{value}</option>
                                     ))}
-                                </select>
+                                </AppSelect>
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
                                     <NotebookTabs size={16} className="text-[#d4af37]" />
                                     <span>نوع الصفحة</span>
                                 </label>
-                                <select name="pageType" value={filters.pageType} onChange={handleFilterChange} className={inputClass}>
+                                <AppSelect name="pageType" value={filters.pageType} onChange={handleFilterChange} className={inputClass}>
                                     <option value="all">{t.all}</option>
                                     {filterOptions.pageTypes.map(value => (
                                         <option key={value} value={value}>{value}</option>
                                     ))}
-                                </select>
+                                </AppSelect>
                             </div>
                             <div>
                                 <label className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
                                     <AppWindow size={16} className="text-[#d4af37]" />
                                     <span>النطاق الجغرافي</span>
                                 </label>
-                                <select name="audienceScope" value={filters.audienceScope} onChange={handleFilterChange} className={inputClass}>
+                                <AppSelect name="audienceScope" value={filters.audienceScope} onChange={handleFilterChange} className={inputClass}>
                                     <option value="all">{t.all}</option>
                                     {filterOptions.audienceScopes.map(value => (
                                         <option key={value} value={value}>{value}</option>
                                     ))}
-                                </select>
+                                </AppSelect>
                             </div>
                         </div>
                     </div>

@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 ﻿
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, ChevronLeft, ChevronRight, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2, Code2, X, ExternalLink } from 'lucide-react';
@@ -2090,6 +2091,8 @@ ${readyCommandCompetitorBlocks}`;
                             <button
                                 type="button"
                                 onClick={handleReadyCommandsMenuToggle}
+                                aria-expanded={isCommandsMenuOpen}
+                                aria-controls="ready-command-options"
                                 className="w-full flex items-center justify-between p-2.5 bg-white dark:bg-[#1F1F1F] border border-gray-300 dark:border-[#3C3C3C] rounded-lg text-sm text-start focus:outline-none focus:ring-1 focus:ring-[#d4af37] shadow-sm transition-all"
                             >
                                 <span className="truncate text-gray-700 dark:text-gray-200 font-medium flex items-center gap-2">
@@ -2108,14 +2111,15 @@ ${readyCommandCompetitorBlocks}`;
                             </button>
 
                             {isCommandsMenuOpen && (
-                                <div className="absolute z-20 mt-2 w-full bg-white dark:bg-[#2A2A2A] border border-gray-200 dark:border-[#3C3C3C] rounded-lg shadow-xl max-h-60 overflow-y-auto custom-scrollbar ring-1 ring-black ring-opacity-5">
+                                <div id="ready-command-options" className="editor-menu absolute z-20 mt-2 w-full bg-white dark:bg-[#2A2A2A] border border-gray-200 dark:border-[#3C3C3C] rounded-lg shadow-xl max-h-60 overflow-y-auto custom-scrollbar ring-1 ring-black ring-opacity-5">
                                     {readyCommands.map((cmd) => {
                                         const isSelected = selectedReadyCommandIds.includes(cmd.id);
                                         return (
                                         <button
                                             key={cmd.id}
                                             onClick={() => handleCommandSelect(cmd)}
-                                            className={`w-full text-start px-3 py-2.5 text-sm transition-colors flex items-center gap-3 border-b border-gray-50 dark:border-[#333] last:border-0 ${
+                                            data-selected={isSelected}
+                                            className={`editor-menu-item w-full text-start px-3 py-2.5 text-sm transition-colors flex items-center gap-3 border-b border-gray-50 dark:border-[#333] last:border-0 ${
                                                 isSelected
                                                     ? 'bg-[#d4af37]/10 text-[#8a6f1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
                                                     : 'text-gray-700 dark:text-gray-200 hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'
@@ -2179,7 +2183,7 @@ ${readyCommandCompetitorBlocks}`;
                                         {isAiLoading.gemini ? <Wand2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                                         <span className="text-xs font-bold">Gemini</span>
                                     </button>
-                                    <select
+                                    <AppSelect
                                         value={selectedSmartGeminiModel}
                                         onChange={event => setSelectedSmartGeminiModel(normalizeGeminiFreeModel(event.target.value, geminiFreeModelValues))}
                                         onClick={event => event.stopPropagation()}
@@ -2191,7 +2195,7 @@ ${readyCommandCompetitorBlocks}`;
                                         {geminiFreeModelOptions.map(option => (
                                             <option key={option.value} value={option.value}>{option.label}</option>
                                         ))}
-                                    </select>
+                                    </AppSelect>
                                 </div>}
                                 {isGeminiPaidEnabled && (
                                     <button

@@ -610,7 +610,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             <div
               id="company-client-options"
               role="listbox"
-              className="absolute inset-x-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-xl dark:border-[#3C3C3C] dark:bg-[#2A2A2A]"
+              className="editor-menu custom-scrollbar absolute inset-x-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-xl dark:border-[#3C3C3C] dark:bg-[#2A2A2A]"
             >
               {filteredCompanyClients.map(client => (
                 <button
@@ -619,7 +619,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   role="option"
                   aria-selected={selectedCompanyClient?.id === client.id}
                   onClick={() => handleCompanyChange(client.id)}
-                  className="w-full rounded px-3 py-2 text-start text-sm font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
+                  className="editor-menu-item w-full rounded px-3 py-2.5 text-start text-sm font-bold text-gray-700 hover:bg-[#d4af37]/15 dark:text-gray-200 dark:hover:bg-[#d4af37]/20"
                 >
                   {client.name}
                 </button>

@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React from 'react';
 import { ChevronDown, Plus, Search, X } from 'lucide-react';
 import type { GoalContext } from '../types';
@@ -106,14 +107,15 @@ const GoalContextMultiChoice: React.FC<{
           </span>
           <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
         </summary>
-        <div className="space-y-2 border-t border-gray-200 p-2 dark:border-[#3C3C3C]">
+        <div className="editor-menu space-y-2 border-t border-gray-200 p-2 dark:border-[#3C3C3C]">
           <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             {field.options.map(option => {
               const checked = selectedSet.has(option.value.toLocaleLowerCase());
               return (
                 <label
                   key={option.value}
-                  className={`flex cursor-pointer items-start gap-2 rounded-md border px-2 py-2 text-xs font-semibold transition-colors ${
+                  data-selected={checked}
+                  className={`editor-menu-item flex cursor-pointer items-start gap-2 rounded-md border px-2 py-2 text-xs font-semibold transition-colors ${
                     checked
                       ? 'border-[#d4af37]/50 bg-[#d4af37]/10 text-[#8b6e1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]'
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-300 dark:hover:bg-[#2A2A2A]'
@@ -233,14 +235,14 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
           <ChevronDown size={14} className="pointer-events-none absolute end-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
         </div>
         {isPresetOpen && (
-          <div className="absolute z-30 mt-1 max-h-52 w-full min-w-full overflow-y-auto rounded-md border border-gray-200 bg-white py-1 text-sm leading-5 shadow-lg dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+          <div className="editor-menu custom-scrollbar absolute z-30 mt-1 max-h-52 w-full min-w-full overflow-y-auto rounded-md border border-gray-200 bg-white py-1 text-sm leading-5 shadow-lg dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
             {filteredPresetOptions.length > 0 ? filteredPresetOptions.map(option => (
               <button
                 key={option.value}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => handlePresetSelect(option)}
-                className="block w-full whitespace-normal break-words px-3 py-2 text-start text-[#333333] transition-colors hover:bg-[#d4af37]/10 focus:bg-[#d4af37]/10 focus:outline-none dark:text-[#e0e0e0] dark:hover:bg-[#d4af37]/20 dark:focus:bg-[#d4af37]/20"
+                className="editor-menu-item block w-full whitespace-normal break-words px-3 py-2.5 text-start text-[#333333] transition-colors hover:bg-[#d4af37]/10 focus:bg-[#d4af37]/10 focus:outline-none dark:text-[#e0e0e0] dark:hover:bg-[#d4af37]/20 dark:focus:bg-[#d4af37]/20"
               >
                 {option.label}
               </button>
@@ -272,7 +274,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
               )}
             </label>
             {field.kind === 'select' ? (
-              <select
+              <AppSelect
                 id={fieldId}
                 value={goalContext[field.key] || ''}
                 onChange={(event) => onChange(field.key, event.target.value)}
@@ -283,7 +285,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
                 {field.options.map(option => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
+              </AppSelect>
             ) : field.kind === 'multi-choice' ? (
               <GoalContextMultiChoice
                 field={field}

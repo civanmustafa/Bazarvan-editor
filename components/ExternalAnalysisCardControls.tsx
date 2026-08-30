@@ -665,7 +665,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             </button>
 
             {menuOpen && (
-              <div className="absolute end-0 top-full z-40 mt-1 w-[min(19rem,calc(100vw-2rem))] rounded-md border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+              <div className="editor-menu absolute end-0 top-full z-40 mt-1 w-[min(19rem,calc(100vw-2rem))] rounded-md border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                 <div className="max-h-56 overflow-y-auto custom-scrollbar">
                   {commands.map(command => {
                     const selected = selectedCommandIds.includes(command.id);
@@ -674,7 +674,8 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
                         key={command.id}
                         type="button"
                         onClick={() => toggleCommand(command.id)}
-                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-start text-[11px] font-semibold ${selected ? 'bg-[#d4af37]/15 text-[#8a6f1d] dark:text-[#f2d675]' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-[#333]'}`}
+                        data-selected={selected}
+                        className={`editor-menu-item flex w-full items-center gap-2 rounded px-2 py-2.5 text-start text-[11px] font-semibold ${selected ? 'bg-[#d4af37]/15 text-[#8a6f1d] dark:text-[#f2d675]' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-[#333]'}`}
                       >
                         <input type="checkbox" checked={selected} readOnly tabIndex={-1} className="rounded text-[#d4af37] focus:ring-[#d4af37]" />
                         <span className="min-w-0 flex-1 leading-5">{command.label}</span>

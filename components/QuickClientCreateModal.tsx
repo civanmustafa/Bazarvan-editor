@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { Building2, Loader2, Plus, X } from 'lucide-react';
@@ -137,7 +138,7 @@ const QuickClientCreateModal: React.FC<QuickClientCreateModalProps> = ({
 
           <label className="block space-y-1.5">
             <span className="text-xs font-black text-gray-700 dark:text-gray-200">اللغة الافتراضية</span>
-            <select
+            <AppSelect
               className={inputClass}
               value={defaultLanguage}
               onChange={event => setDefaultLanguage(event.target.value)}
@@ -146,7 +147,7 @@ const QuickClientCreateModal: React.FC<QuickClientCreateModalProps> = ({
               <option value="ar">العربية</option>
               <option value="en">الإنجليزية</option>
               <option value="tr">التركية</option>
-            </select>
+            </AppSelect>
             <span className="block text-[11px] font-semibold leading-5 text-gray-400">
               تُحدد تلقائيًا من الكلمة الأساسية؛ إذا كانت بالعربية فستكون العربية هي الاختيار الافتراضي.
             </span>

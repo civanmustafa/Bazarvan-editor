@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
@@ -207,14 +208,14 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
           className="w-full resize-y rounded-md border border-gray-200 bg-white p-2 text-[11px] leading-5 outline-none focus:border-[#d4af37] dark:border-[#444] dark:bg-[#1f1f1f]"
         />
         <div className="flex items-center gap-1">
-          <select
+          <AppSelect
             value={sourceRole}
             onChange={event => setSourceRole(event.target.value === 'supporting' ? 'supporting' : 'primary')}
             className="h-8 flex-1 rounded-md border border-gray-200 bg-white px-2 text-[11px] font-bold dark:border-[#444] dark:bg-[#1f1f1f]"
           >
             <option value="primary">{isArabic ? 'أساسي — افتراضي' : 'Primary — default'}</option>
             <option value="supporting">{isArabic ? 'مساند' : 'Supporting'}</option>
-          </select>
+          </AppSelect>
           <button
             type="button"
             onClick={() => void handleCreate()}
@@ -278,7 +279,7 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
             {source.lastError && <p className="mt-1 text-[9px] font-semibold text-red-600 dark:text-red-300">{source.lastError}</p>}
 
             <div className="mt-1.5 grid grid-cols-[1fr_auto] gap-1">
-              <select
+              <AppSelect
                 value={source.sourceRole}
                 disabled={disabled || busyId === source.id}
                 onChange={event => void updateSource(source, {
@@ -290,7 +291,7 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
               >
                 <option value="primary">{isArabic ? 'مصدر أساسي' : 'Primary source'}</option>
                 <option value="supporting">{isArabic ? 'مصدر مساند' : 'Supporting source'}</option>
-              </select>
+              </AppSelect>
               <div className="flex gap-1">
                 {source.sourceType === 'url' && (
                   <button

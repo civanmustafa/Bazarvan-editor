@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
@@ -286,10 +287,10 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
             <label className="text-xs font-bold text-gray-600 dark:text-gray-300">
               <span className="mb-2 block">الدور</span>
-              <select value={role} onChange={event => setRole(event.target.value === 'admin' ? 'admin' : 'user')} className={inputClass}>
+              <AppSelect value={role} onChange={event => setRole(event.target.value === 'admin' ? 'admin' : 'user')} className={inputClass}>
                 <option value="user">مستخدم</option>
                 <option value="admin">مسؤول شامل</option>
-              </select>
+              </AppSelect>
             </label>
             <Toggle label="الحساب نشط ويسمح له بالدخول" checked={isActive} onChange={setIsActive} />
             <button
@@ -332,9 +333,9 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
                 <Toggle label="السماح بالانتقال إلى مزود آخر عند الفشل" checked={draft.allowProviderFallback} onChange={value => updateDraft(provider, 'allowProviderFallback', value)} disabled={busy} />
                 <label className="text-xs font-bold text-gray-600 dark:text-gray-300 md:col-span-2">
                   <span className="mb-2 block">ترتيب مصادر المفاتيح</span>
-                  <select value={draft.credentialMode} onChange={event => updateDraft(provider, 'credentialMode', event.target.value as ProviderCredentialMode)} className={inputClass} disabled={busy}>
+                  <AppSelect value={draft.credentialMode} onChange={event => updateDraft(provider, 'credentialMode', event.target.value as ProviderCredentialMode)} className={inputClass} disabled={busy}>
                     {PROVIDER_CREDENTIAL_MODES.map(mode => <option key={mode} value={mode}>{MODE_LABELS[mode]}</option>)}
-                  </select>
+                  </AppSelect>
                 </label>
                 <label className="text-xs font-bold text-gray-600 dark:text-gray-300">
                   <span className="mb-2 block">الحد اليومي للطلبات (فارغ = بلا حد إضافي)</span>
@@ -377,28 +378,28 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
           </div>
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <select value={credentialProvider} onChange={event => {
+          <AppSelect value={credentialProvider} onChange={event => {
             const provider = event.target.value as ProviderAccessProvider;
             setCredentialProvider(provider);
             if (provider === 'firecrawl' || provider === 'browserless') setCredentialPurpose('default');
           }} className={inputClass}>
             {PROVIDER_ACCESS_PROVIDERS.map(provider => <option key={provider} value={provider}>{PROVIDER_ACCESS_LABELS[provider]}</option>)}
-          </select>
+          </AppSelect>
           <input value={credentialLabel} onChange={event => setCredentialLabel(event.target.value)} placeholder="اسم داخلي، مثل: فريق المحتوى" className={inputClass} />
-          <select value={credentialPurpose} onChange={event => setCredentialPurpose(event.target.value === 'content_writing_resume' ? 'content_writing_resume' : 'default')} className={inputClass}>
+          <AppSelect value={credentialPurpose} onChange={event => setCredentialPurpose(event.target.value === 'content_writing_resume' ? 'content_writing_resume' : 'default')} className={inputClass}>
             <option value="default">{PURPOSE_LABELS.default}</option>
             {credentialProvider !== 'firecrawl' && credentialProvider !== 'browserless' && (
               <option value="content_writing_resume">{PURPOSE_LABELS.content_writing_resume}</option>
             )}
-          </select>
-          <select value={credentialScope} onChange={event => {
+          </AppSelect>
+          <AppSelect value={credentialScope} onChange={event => {
             const scope = event.target.value;
             setCredentialScope(scope === 'user' ? 'user' : scope === 'all' ? 'all' : 'unassigned');
           }} className={inputClass}>
             <option value="unassigned">حفظ دون تعيين — غير قابل للاستخدام</option>
             {isUserScope && <option value="user">تعيين لهذا المستخدم</option>}
             <option value="all">تعيين لجميع المستخدمين</option>
-          </select>
+          </AppSelect>
           <label className="text-xs font-bold text-gray-600 dark:text-gray-300">
             <span className="mb-1 block">تاريخ الانتهاء (اختياري)</span>
             <input type="date" value={credentialExpiry} onChange={event => setCredentialExpiry(event.target.value)} className={inputClass} />

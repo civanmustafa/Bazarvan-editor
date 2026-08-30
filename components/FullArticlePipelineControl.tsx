@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
@@ -358,7 +359,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
           <span className="mb-1 block text-[10px] font-black text-gray-600 dark:text-gray-300">
             {isArabic ? 'عدد منافسي الإنشاء الشامل' : 'Full-workflow competitors'}
           </span>
-          <select
+          <AppSelect
             value={competitorCount}
             onChange={event => setCompetitorCount(Number(event.target.value))}
             disabled={isActive(job) || busy !== ''}
@@ -370,7 +371,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
             ).map(value => (
               <option key={value} value={value}>{value}</option>
             ))}
-          </select>
+          </AppSelect>
         </label>
         <button
           type="button"

@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Languages, Lightbulb } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
@@ -67,7 +68,7 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
         {activeArticleSettings.status && (
           <label className="inline-flex h-7 items-center gap-1 rounded-md bg-white/55 px-2 text-[11px] font-black text-[#806718] dark:bg-black/15 dark:text-[#f2d675]">
             <span>{uiLanguage === 'ar' ? 'الحالة:' : 'Status:'}</span>
-            <select
+            <AppSelect
               value={activeArticleSettings.status}
               disabled={isStatusSaving}
               onChange={(event) => { void handleStatusChange(event.target.value); }}
@@ -76,7 +77,7 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
               {ARTICLE_STATUS_DEFINITIONS.map(({ value, labelAr, labelEn }) => (
                 <option key={value} value={value}>{uiLanguage === 'ar' ? labelAr : labelEn}</option>
               ))}
-            </select>
+            </AppSelect>
           </label>
         )}
 

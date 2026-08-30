@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 ﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
 import type { BulkFixRelatedRule, BulkFixReviewItem, BulkFixReviewVariant, CheckResult } from '../types';
 import { AlertCircle as AlertCircleIcon, Star, LayoutTemplate, ListTree, SpellCheck, MousePointerClick, Flag, X, Wand2, Loader2, CheckSquare, Square, MapPin, Copy, Check, Trash2, ChevronDown, Hash, PackageCheck } from 'lucide-react';
@@ -1072,7 +1073,7 @@ const StructureTab: React.FC = () => {
                       </>
                   )}
               </button>
-              <select
+              <AppSelect
                   value={selectedBulkFixGeminiModel}
                   onChange={event => setSelectedBulkFixGeminiModel(normalizeGeminiFreeModel(event.target.value, geminiFreeModelValues))}
                   disabled={fixAllProgress.running}
@@ -1083,7 +1084,7 @@ const StructureTab: React.FC = () => {
                   {geminiFreeModelOptions.map(option => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
-               </select>
+               </AppSelect>
            </div>
            {fixAllProgress.failed > 0 && !fixAllProgress.running && (
                <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">

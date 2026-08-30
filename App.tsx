@@ -24,6 +24,7 @@ import {
 } from './utils/competitorStorage';
 import './styles/global.css';
 import './styles/components.css';
+import './styles/menus.css';
 
 const Login = lazy(() => import('./components/Login'));
 const Dashboard = lazy(() => import('./components/Dashboard'));

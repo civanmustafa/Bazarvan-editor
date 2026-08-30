@@ -1,3 +1,4 @@
+import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Ban,
@@ -729,7 +730,7 @@ const InternalLinkingPanel: React.FC = () => {
           <Database size={14} />
           العميل ومخزون روابط الموقع
         </span>
-        <select
+        <AppSelect
           value={selectedClientId}
           onChange={event => void handleClientChange(event.target.value)}
           disabled={isLoadingContext || isSavingClient}
@@ -739,7 +740,7 @@ const InternalLinkingPanel: React.FC = () => {
           {clients.map(client => (
             <option key={client.id} value={client.id}>{client.name}</option>
           ))}
-        </select>
+        </AppSelect>
         {isSavingClient && (
           <span className="flex items-center gap-1 text-[10px] font-bold text-gray-400">
             <Loader2 size={11} className="animate-spin" />
@@ -754,7 +755,7 @@ const InternalLinkingPanel: React.FC = () => {
             <Link2 size={14} />
             رابط المقالة الحالية
           </span>
-          <select
+          <AppSelect
             value={currentPageUrl}
             onChange={event => void handleCurrentPageChange(event.target.value)}
             disabled={isLoadingPages || isSavingCurrentPage}
@@ -767,7 +768,7 @@ const InternalLinkingPanel: React.FC = () => {
             {currentPageOptions.map(option => (
               <option key={option.url} value={option.url}>{option.label}</option>
             ))}
-          </select>
+          </AppSelect>
           <span className="block text-[10px] font-semibold leading-5 text-gray-400">
             اختياري للاقتراحات اليدوية، وإلزامي للإدراج التلقائي. تحديد الصفحة المنشورة يمنع ربط المقالة بنفسها.
           </span>
@@ -843,7 +844,7 @@ const InternalLinkingPanel: React.FC = () => {
                   <span className="text-[10px] font-black text-violet-700 dark:text-violet-200">
                     المزود المختار أولًا
                   </span>
-                  <select
+                  <AppSelect
                     value={quickAiProvider}
                     onChange={event => setQuickAiProvider(event.target.value as AiPatchProvider)}
                     disabled={isAiReviewing}
@@ -858,7 +859,7 @@ const InternalLinkingPanel: React.FC = () => {
                         {provider.label}{isAiProviderAvailable(provider.id) ? '' : ' — غير متاح'}
                       </option>
                     ))}
-                  </select>
+                  </AppSelect>
                   <span className="block text-[9px] font-semibold leading-4 text-violet-600/80 dark:text-violet-300/80">
                     يبدأ النظام بالمزود والموديل المختارين، وتبقى آلية تدوير المفاتيح والموديلات الحالية فعالة عند الفشل.
                   </span>
@@ -940,7 +941,7 @@ const InternalLinkingPanel: React.FC = () => {
                   {suggestion.alternativeAnchors.length > 1 && (
                     <label className="mt-3 block space-y-1">
                       <span className="text-[10px] font-black text-gray-500 dark:text-gray-300">اختيار نص ربط بديل من الفقرة</span>
-                      <select
+                      <AppSelect
                         value={selectedAnchor}
                         onChange={event => setSelectedAnchors(current => ({
                           ...current,
@@ -951,7 +952,7 @@ const InternalLinkingPanel: React.FC = () => {
                         {suggestion.alternativeAnchors.map(anchor => (
                           <option key={anchor} value={anchor}>{anchor}</option>
                         ))}
-                      </select>
+                      </AppSelect>
                     </label>
                   )}
 
