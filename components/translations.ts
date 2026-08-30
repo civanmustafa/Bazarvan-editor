@@ -532,7 +532,7 @@ export const translations = {
     },
     // AI History Tab
     aiHistory: {
-      title: 'السجل',
+      title: 'السجل الداخلي',
       noHistoryTitle: 'لا يوجد سجل',
       noHistoryDescription: 'ستظهر هنا الاقتراحات التي تم إنشاؤها بواسطة الذكاء الاصطناعي.',
       violationFix: 'إصلاح مخالفة',

@@ -324,12 +324,31 @@ export interface AiContentPatch {
   applyError?: string;
 }
 
+export interface AIExecutionHistorySnapshot {
+  activityId: string;
+  state: 'running' | 'success' | 'failed' | 'cancelled';
+  stage: string;
+  surface: string;
+  action: string;
+  message: string;
+  provider: string;
+  requestedProvider: string;
+  model: string;
+  requestedModel: string;
+  commandId: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
 export interface AIHistoryItem {
   id: string;
   articleScope?: string;
   articleId?: string | null;
   articleKey?: string;
-  type: 'fix-violation' | 'user-command' | 'manual-analysis';
+  type: 'fix-violation' | 'user-command' | 'manual-analysis' | 'ai-execution';
+  createdAt?: string;
+  updatedAt?: string;
   ruleTitle?: string; // For 'fix-violation'
   originalText: string;
   suggestions: string[];
@@ -342,6 +361,7 @@ export interface AIHistoryItem {
   analysisPatches?: AiContentPatch[];
   provider?: AiPatchProvider;
   commandId?: string;
+  execution?: AIExecutionHistorySnapshot;
 }
 
 export type BulkFixReviewStatus = 'pending' | 'applied' | 'failed' | 'skipped';

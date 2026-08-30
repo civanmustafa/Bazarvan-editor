@@ -181,6 +181,19 @@ test('unified semantic migration tracks Google metadata and gates engineering wo
   assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
 });
 
+test('unified semantic targets are reconciled for ready articles without opening the editor', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260830000000_reconcile_unified_semantic_automation.sql',
+  );
+
+  assert.match(migration, /^begin;/);
+  assert.match(migration, /select public\.reconcile_content_research_automation\(\);/);
+  assert.match(migration, /select public\.reconcile_ready_engineering_command_automation\(\);/);
+  assert.match(migration, /article UPDATE/);
+  assert.match(migration, /editor's first save after opening it/);
+  assert.match(migration, /commit;\s*$/);
+});
+
 test('only a started prior attempt blocks the same automatic command, regardless of outcome or origin', () => {
   const previous: Array<{
     commandId: string;

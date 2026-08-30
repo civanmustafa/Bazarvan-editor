@@ -14,7 +14,10 @@ export type ExternalAnalysisJobType =
   | 'content_writing_preparation'
   | 'engineering_command'
   | 'competitor_discovery'
-  | 'competitor_extraction';
+  | 'competitor_extraction'
+  // Keep job types introduced by newer workers visible instead of silently
+  // presenting them as engineering commands in an older editor bundle.
+  | (string & {});
 
 export type ExternalAnalysisJobStatus =
   | 'waiting_for_prerequisites'
@@ -176,23 +179,15 @@ const toNumber = (value: unknown, fallback = 0): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
 );
 
+export const normalizeExternalAnalysisJobType = (value: unknown): ExternalAnalysisJobType => (
+  toTrimmedString(value) || 'unknown'
+);
+
 const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   id: String(row.id),
   article_id: String(row.article_id),
   requested_by: row.requested_by || null,
-  job_type: row.job_type === 'semantic_keywords_lsi'
-    ? 'semantic_keywords_lsi'
-    : row.job_type === 'content_brief_generation'
-      ? 'content_brief_generation'
-      : row.job_type === 'full_article_pipeline'
-        ? 'full_article_pipeline'
-        : row.job_type === 'content_writing_preparation'
-          ? 'content_writing_preparation'
-          : row.job_type === 'competitor_discovery'
-            ? 'competitor_discovery'
-            : row.job_type === 'competitor_extraction'
-              ? 'competitor_extraction'
-              : 'engineering_command',
+  job_type: normalizeExternalAnalysisJobType(row.job_type),
   origin: row.origin === 'manual' ? 'manual' : 'auto',
   status: row.status as ExternalAnalysisJobStatus,
   batch_key: row.batch_key || null,

@@ -1,10 +1,12 @@
 ﻿import React from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAISelector } from '../contexts/AIContext';
 import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
-import { BookCopy, Trash2, Check, Copy, MapPin, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Activity, BookCopy, Trash2, Check, Copy, MapPin, ChevronDown, AlertTriangle, CheckCircle2, LoaderCircle, XCircle } from 'lucide-react';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
+import { formatAiProviderName } from '../utils/aiExecutionActivity';
+import { getEditorAiExecutionSurfaceLabel, sortAiHistoryItems } from '../utils/aiHistoryActivity';
 import type { AiContentPatch, AiPatchResolvedTarget, AIHistoryItem, BulkFixReviewStats, BulkFixReviewVariant } from '../types';
 
 const EMPTY_BULK_FIX_REVIEW_STATS: BulkFixReviewStats = {
@@ -51,6 +53,8 @@ const AIHistoryTab: React.FC = () => {
     const { t, uiLanguage } = useUser();
     const editor = useEditorSelector(context => context.editor);
     const isArabic = uiLanguage === 'ar';
+    const locale = isArabic ? 'ar' : 'en';
+    const orderedHistory = useMemo(() => sortAiHistoryItems(aiHistory), [aiHistory]);
     const [expandedCriteriaKeys, setExpandedCriteriaKeys] = useState<Record<string, boolean>>({});
     const [manualPatchUiState, setManualPatchUiState] = useState<Record<string, { status?: 'applied' | 'failed'; error?: string }>>({});
     const [manualPatchSelectedTargets, setManualPatchSelectedTargets] = useState<Record<string, AiPatchResolvedTarget>>({});
@@ -60,7 +64,7 @@ const AIHistoryTab: React.FC = () => {
     };
     const iconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-600 bg-white/80 border border-gray-100 hover:border-[#d4af37]/45 hover:bg-[#d4af37]/15 dark:bg-[#1F1F1F]/80 dark:text-gray-200 dark:border-[#3C3C3C] dark:hover:bg-[#d4af37]/20';
 
-    if (aiHistory.length === 0) {
+    if (orderedHistory.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-4 text-center">
                 <BookCopy size={48} className="text-gray-300 dark:text-gray-600 mb-4" />
@@ -97,6 +101,7 @@ const AIHistoryTab: React.FC = () => {
         return isArabic ? 'غير مؤكد' : 'Unknown';
     };
     const historyTypeLabel = (item: AIHistoryItem) => {
+        if (item.type === 'ai-execution') return isArabic ? 'سجل تشغيل ذكي' : 'Smart operation log';
         if (item.type === 'fix-violation') return t.aiHistory.violationFix;
         if (item.type === 'manual-analysis') return isArabic ? 'تحليل أمر يدوي جاهز' : 'Ready Command Analysis';
         return t.aiHistory.userCommand;
@@ -113,6 +118,7 @@ const AIHistoryTab: React.FC = () => {
         return isArabic ? 'إضافة' : 'Add';
     };
     const getHistoryDeleteLabel = (item: AIHistoryItem) => {
+        if (item.type === 'ai-execution') return isArabic ? 'حذف سجل التشغيل' : 'Delete operation log';
         const provider = providerLabel(item.provider);
         if (isArabic) return provider ? `حذف سجل ${provider}` : 'حذف السجل';
         return provider ? `Delete ${provider} record` : 'Delete record';
@@ -378,9 +384,121 @@ const AIHistoryTab: React.FC = () => {
         return <>{parts}</>;
     };
 
+    const formatHistoryDate = (value?: string) => {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return new Intl.DateTimeFormat(locale === 'ar' ? 'ar' : 'en', {
+            timeZone: 'Europe/Istanbul',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+        }).format(date);
+    };
+    const renderExecutionHistoryItem = (item: AIHistoryItem) => {
+        const execution = item.execution;
+        if (!execution) return null;
+        const sourceLabel = getEditorAiExecutionSurfaceLabel(execution.surface, locale);
+        const actionLabel = execution.action || sourceLabel;
+        const stateLabel = execution.state === 'running'
+            ? (isArabic ? 'قيد التشغيل' : 'Running')
+            : execution.state === 'success'
+                ? (isArabic ? 'مكتمل' : 'Completed')
+                : execution.state === 'cancelled'
+                    ? (isArabic ? 'متوقف' : 'Cancelled')
+                    : (isArabic ? 'فشل' : 'Failed');
+        const stateClass = execution.state === 'running'
+            ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+            : execution.state === 'success'
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                : execution.state === 'cancelled'
+                    ? 'bg-gray-100 text-gray-600 dark:bg-gray-500/15 dark:text-gray-300'
+                    : 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300';
+        const stateIcon = execution.state === 'running'
+            ? <LoaderCircle size={13} className="animate-spin" />
+            : execution.state === 'success'
+                ? <CheckCircle2 size={13} />
+                : <XCircle size={13} />;
+        const effectiveProvider = formatAiProviderName(execution.provider);
+        const requestedProvider = formatAiProviderName(execution.requestedProvider);
+        const providerChanged = requestedProvider && requestedProvider !== effectiveProvider;
+        const modelChanged = Boolean(
+            execution.requestedModel
+            && execution.model
+            && execution.requestedModel !== execution.model
+        );
+
+        return (
+            <div
+                key={item.id}
+                data-ai-history-kind="execution"
+                className="overflow-hidden rounded-lg border border-blue-100 bg-white dark:border-blue-900/40 dark:bg-[#2A2A2A]"
+            >
+                <div className="border-b border-gray-100 p-3 dark:border-[#3C3C3C]">
+                    <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                                <Activity size={14} className="shrink-0 text-blue-600 dark:text-blue-300" />
+                                <h4 className="text-xs font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">
+                                    {historyTypeLabel(item)}
+                                </h4>
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black ${stateClass}`}>
+                                    {stateIcon}
+                                    {stateLabel}
+                                </span>
+                            </div>
+                            <div className="mt-1.5 text-sm font-black leading-6 text-gray-800 dark:text-gray-100">
+                                {actionLabel}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400">
+                                <span className="rounded bg-gray-100 px-1.5 py-0.5 font-bold dark:bg-[#1F1F1F]">{sourceLabel}</span>
+                                <span className="rounded bg-[#d4af37]/10 px-1.5 py-0.5 font-black text-[#8a6f1d] dark:text-[#f2d675]">{effectiveProvider}</span>
+                                {execution.model && <span className="break-all font-mono">{execution.model}</span>}
+                                <span>{formatHistoryDate(execution.updatedAt || item.updatedAt)}</span>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => removeFromAiHistory(item.id)}
+                            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-100 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-600 hover:bg-red-100 dark:border-red-900/30 dark:bg-red-900/10 dark:text-red-300 dark:hover:bg-red-900/25"
+                            title={getHistoryDeleteLabel(item)}
+                            aria-label={getHistoryDeleteLabel(item)}
+                        >
+                            <Trash2 size={14} />
+                            <span>{getHistoryDeleteLabel(item)}</span>
+                        </button>
+                    </div>
+                </div>
+                <div className="space-y-2 bg-gray-50/60 p-3 text-[11px] leading-5 text-gray-600 dark:bg-[#1F1F1F]/45 dark:text-gray-300">
+                    {execution.message && (
+                        <div className={execution.state === 'failed'
+                            ? 'border-s-2 border-red-500 bg-red-50 px-2 py-1.5 text-red-700 dark:bg-red-900/15 dark:text-red-300'
+                            : 'border-s-2 border-blue-400 bg-white/80 px-2 py-1.5 dark:bg-[#2A2A2A]'}>
+                            {execution.message}
+                        </div>
+                    )}
+                    {(providerChanged || modelChanged) && (
+                        <div className="rounded border border-amber-100 bg-amber-50 px-2 py-1.5 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                            {isArabic ? 'تم التحويل أثناء التنفيذ' : 'Fallback used during execution'}:
+                            {providerChanged ? ` ${requestedProvider} → ${effectiveProvider}` : ''}
+                            {modelChanged ? ` ${execution.requestedModel} → ${execution.model}` : ''}
+                        </div>
+                    )}
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-400">
+                        <span>{isArabic ? 'بدأ' : 'Started'}: {formatHistoryDate(execution.startedAt)}</span>
+                        {execution.completedAt && <span>{isArabic ? 'انتهى' : 'Finished'}: {formatHistoryDate(execution.completedAt)}</span>}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="p-2 space-y-3">
-            {aiHistory.map((item) => (
+            {orderedHistory.map((item) => item.type === 'ai-execution' ? renderExecutionHistoryItem(item) : (
                 <div key={item.id} className="bg-white dark:bg-[#2A2A2A] rounded-lg border border-gray-200 dark:border-[#3C3C3C] overflow-hidden">
                     <div className="p-3 border-b border-gray-200 dark:border-[#3C3C3C]">
                         <div className="flex justify-between items-start gap-2">

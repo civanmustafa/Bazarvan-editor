@@ -2059,7 +2059,7 @@ ${readyCommandCompetitorBlocks}`;
             <div className="flex p-[0.125rem] mx-[0.125rem] mt-[0.125rem] mb-[0.0625rem] bg-gray-200 dark:bg-[#2A2A2A] rounded-lg">
                 <button onClick={() => setAiSubTab('new')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'new' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{tRs.newAnalysis}</button>
                 <button onClick={() => setAiSubTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${aiSubTab === 'history' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.aiHistory.title}</button>
-                <button onClick={() => setAiSubTab('external')} className={`flex-1 px-1 py-1.5 text-[10px] font-bold leading-4 rounded-md transition-all ${aiSubTab === 'external' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.locale === 'ar' ? 'التحليل الخارجي' : 'External analysis'}</button>
+                <button onClick={() => setAiSubTab('external')} className={`flex-1 px-1 py-1.5 text-[10px] font-bold leading-4 rounded-md transition-all ${aiSubTab === 'external' ? 'bg-white dark:bg-[#1F1F1F] text-[#d4af37] shadow-sm' : 'text-gray-500'}`}>{t.locale === 'ar' ? 'السجل الخارجي' : 'External log'}</button>
             </div>
 
             <div className="flex-grow overflow-y-auto custom-scrollbar p-[0.25rem] space-y-[0.25rem]">

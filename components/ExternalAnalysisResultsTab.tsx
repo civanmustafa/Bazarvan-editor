@@ -12,7 +12,6 @@ import {
   RefreshCw,
   RotateCcw,
   Square,
-  Tags,
   Trash2,
 } from 'lucide-react';
 import { useAISelector } from '../contexts/AIContext';
@@ -37,14 +36,18 @@ import {
   updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
 import { projectExternalAnalysisActivity } from '../utils/externalAnalysisActivityBridge';
+import {
+  filterExternalAnalysisJobs,
+  getExternalAnalysisJobTypeLabel,
+  groupExternalAnalysisJobs,
+  type ExternalAnalysisResultFilter,
+} from '../utils/externalAnalysisPresentation';
 import type { AiContentPatch } from '../types';
 
 interface ExternalAnalysisResultsTabProps {
   articleId: string | null;
   articleTitle?: string;
 }
-
-type ResultFilter = 'all' | 'active' | 'completed';
 
 const STATUS_LABELS: Record<ExternalAnalysisJobStatus, { ar: string; en: string }> = {
   waiting_for_prerequisites: { ar: 'بانتظار المتطلبات', en: 'Waiting for prerequisites' },
@@ -181,7 +184,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   const [jobs, setJobs] = useState<ExternalAnalysisJobRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<ResultFilter>('all');
+  const [filter, setFilter] = useState<ExternalAnalysisResultFilter>('all');
   const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(() => new Set());
   const [patchOverrides, setPatchOverrides] = useState<Record<string, Partial<AiContentPatch>>>({});
   const [copiedId, setCopiedId] = useState('');
@@ -202,8 +205,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     }
     if (showLoading) setLoading(true);
     try {
-      const rows = (await listExternalAnalysisJobs(articleId))
-        .filter(job => !['competitor_extraction', 'content_writing_preparation'].includes(job.job_type));
+      const rows = await listExternalAnalysisJobs(articleId);
       if (refreshRequestRef.current !== requestId) return;
       setJobs(rows);
       setError('');
@@ -212,7 +214,8 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
         const latestVisible = rows.find(job => (
           job.command_id === COMPETITOR_COMPARISON_COMMAND_ID
           && EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status)
-        )) || rows.find(job => job.job_type === 'engineering_command' && job.status === 'completed');
+        )) || rows.find(job => EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status))
+          || rows.find(job => job.status === 'completed');
         return latestVisible ? new Set([latestVisible.id]) : current;
       });
     } catch (loadError) {
@@ -321,32 +324,8 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     });
   }, [articleTitle, jobs, refreshJobs]);
 
-  const semanticJobs = jobs.filter(job => job.job_type === 'semantic_keywords_lsi');
-  const latestSemanticJob = semanticJobs[0] || null;
-  const latestSemanticGenerated = isRecord(latestSemanticJob?.result?.generated)
-    ? latestSemanticJob.result.generated
-    : null;
-  const engineeringJobs = useMemo(() => jobs.filter(job => {
-    if (job.job_type !== 'engineering_command') return false;
-    if (filter === 'active') return EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status);
-    if (filter === 'completed') return job.status === 'completed';
-    return true;
-  }), [filter, jobs]);
-
-  const batches = useMemo(() => {
-    const grouped = new Map<string, ExternalAnalysisJobRow[]>();
-    engineeringJobs.forEach(job => {
-      const key = job.batch_key || job.id;
-      grouped.set(key, [...(grouped.get(key) || []), job]);
-    });
-    return Array.from(grouped.entries())
-      .map(([key, batchJobs]) => ({
-        key,
-        jobs: batchJobs.sort((left, right) => left.sequence_number - right.sequence_number),
-        createdAt: batchJobs.map(job => job.created_at).sort().at(-1) || '',
-      }))
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-  }, [engineeringJobs]);
+  const filteredJobs = useMemo(() => filterExternalAnalysisJobs(jobs, filter), [filter, jobs]);
+  const batches = useMemo(() => groupExternalAnalysisJobs(filteredJobs), [filteredJobs]);
 
   const formatDate = (value?: string | null): string => {
     if (!value) return '-';
@@ -666,6 +645,171 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     );
   };
 
+  const getJobDisplayTitle = (job: ExternalAnalysisJobRow): string => {
+    if (job.job_type === 'engineering_command') {
+      return job.command_id
+        ? getExternalReadyCommandLabel(job.command_id, locale)
+        : job.command_label || getExternalAnalysisJobTypeLabel(job.job_type, locale);
+    }
+    return job.command_label?.trim() || getExternalAnalysisJobTypeLabel(job.job_type, locale);
+  };
+
+  const renderValueChips = (
+    label: string,
+    values: unknown,
+    tone: 'gold' | 'blue' | 'gray' = 'gray',
+  ) => {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const items = values.map(value => toTrimmedString(value)).filter(Boolean);
+    if (items.length === 0) return null;
+    const toneClass = tone === 'gold'
+      ? 'bg-[#d4af37]/10 text-[#8a6f1d] dark:text-[#f2d675]'
+      : tone === 'blue'
+        ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
+        : 'bg-gray-100 text-gray-700 dark:bg-[#333] dark:text-gray-200';
+    return (
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="font-black text-gray-600 dark:text-gray-300">{label}:</span>
+        {items.map((item, index) => (
+          <span key={`${label}-${index}`} className={`rounded px-1.5 py-0.5 font-bold ${toneClass}`}>{item}</span>
+        ))}
+      </div>
+    );
+  };
+
+  const renderJobSpecificResult = (job: ExternalAnalysisJobRow): React.ReactNode => {
+    const result = isRecord(job.result) ? job.result : null;
+    if (!result) return null;
+
+    if (job.job_type === 'semantic_keywords_lsi') {
+      const generated = isRecord(result.generated) ? result.generated : null;
+      if (!generated) return null;
+      return (
+        <div className="mb-2 space-y-1.5 rounded-md border border-[#d4af37]/20 bg-[#d4af37]/5 p-2 text-[10px]">
+          {renderValueChips(locale === 'ar' ? 'الصيغ البديلة' : 'Alternatives', generated.secondaries, 'gold')}
+          {renderValueChips('LSI', generated.lsi, 'blue')}
+          {renderValueChips(locale === 'ar' ? 'عناوين Google' : 'Google titles', generated.googleTitles, 'gray')}
+          {renderValueChips(locale === 'ar' ? 'أوصاف Google' : 'Google descriptions', generated.googleDescriptions, 'gray')}
+        </div>
+      );
+    }
+
+    if (job.job_type === 'content_brief_generation') {
+      const briefText = toTrimmedString(result.briefText);
+      return briefText ? (
+        <div className="ai-output mb-2 max-h-72 overflow-y-auto rounded-md border border-gray-200 bg-white p-2 text-xs leading-6 text-gray-800 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-100" dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(briefText) }} />
+      ) : null;
+    }
+
+    if (job.job_type === 'meta_description_generation') {
+      const description = toTrimmedString(result.metaDescription);
+      return description ? (
+        <div className="mb-2 rounded-md border border-emerald-100 bg-emerald-50/60 p-2 text-xs leading-6 text-emerald-900 dark:border-emerald-500/20 dark:bg-emerald-500/5 dark:text-emerald-200">
+          <div className="font-black">{locale === 'ar' ? 'وصف الميتا الناتج' : 'Generated meta description'}</div>
+          <div className="mt-1">{description}</div>
+          <div className="mt-1 text-[9px] text-emerald-700/70 dark:text-emerald-300/70">
+            {locale === 'ar' ? 'عدد المحارف' : 'Characters'}: {Number(result.characterCount) || Array.from(description).length}
+          </div>
+        </div>
+      ) : null;
+    }
+
+    if (job.job_type === 'competitor_discovery') {
+      const candidates = Array.isArray(result.results) ? result.results.filter(isRecord) : [];
+      const selection = isRecord(result.selection) ? result.selection : {};
+      const query = toTrimmedString(result.query) || toTrimmedString(job.input_snapshot?.queryText);
+      return (
+        <div className="mb-2 rounded-md border border-blue-100 bg-blue-50/40 p-2 text-[10px] dark:border-blue-500/20 dark:bg-blue-500/5">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 font-bold text-gray-600 dark:text-gray-300">
+            {query && <span>{locale === 'ar' ? 'الاستعلام' : 'Query'}: {query}</span>}
+            <span>{locale === 'ar' ? 'النتائج' : 'Results'}: {candidates.length}</span>
+            <span>{locale === 'ar' ? 'المحدد تلقائيًا' : 'Auto-selected'}: {Number(selection.autoSelectedCount) || 0}</span>
+          </div>
+          {candidates.length > 0 && (
+            <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+              {candidates.map((candidate, index) => {
+                const url = toSafeExternalUrl(candidate.url);
+                const title = toTrimmedString(candidate.title) || url || `${locale === 'ar' ? 'نتيجة' : 'Result'} ${index + 1}`;
+                return (
+                  <div key={`${job.id}-candidate-${index}`} className="flex items-start justify-between gap-2 rounded bg-white/80 px-2 py-1.5 dark:bg-[#242424]">
+                    <span className="min-w-0 break-words font-bold text-gray-700 dark:text-gray-200">{index + 1}. {title}</span>
+                    {url && <a href={url} target="_blank" rel="noreferrer" className="shrink-0 text-blue-600 hover:underline dark:text-blue-300"><ExternalLink size={11} /></a>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (job.job_type === 'competitor_extraction') {
+      const competitors = Array.isArray(result.competitors) ? result.competitors.filter(isRecord) : [];
+      return (
+        <div className="mb-2 rounded-md border border-blue-100 bg-blue-50/40 p-2 text-[10px] dark:border-blue-500/20 dark:bg-blue-500/5">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 font-bold text-gray-600 dark:text-gray-300">
+            <span className="text-emerald-700 dark:text-emerald-300">{locale === 'ar' ? 'نجح' : 'Succeeded'}: {Number(result.successfulCount) || 0}</span>
+            <span className="text-red-700 dark:text-red-300">{locale === 'ar' ? 'فشل' : 'Failed'}: {Number(result.failedCount) || 0}</span>
+          </div>
+          {competitors.length > 0 && (
+            <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+              {competitors.map((competitor, index) => {
+                const url = toSafeExternalUrl(competitor.url);
+                const title = toTrimmedString(competitor.title) || url || `${locale === 'ar' ? 'منافس' : 'Competitor'} ${index + 1}`;
+                return (
+                  <div key={`${job.id}-competitor-${index}`} className="flex items-start justify-between gap-2 rounded bg-white/80 px-2 py-1.5 dark:bg-[#242424]">
+                    <span className="min-w-0 break-words font-bold text-gray-700 dark:text-gray-200">{title}</span>
+                    <span className="ms-auto shrink-0 text-gray-400">{toTrimmedString(competitor.status)}</span>
+                    {url && <a href={url} target="_blank" rel="noreferrer" className="shrink-0 text-blue-600 hover:underline dark:text-blue-300"><ExternalLink size={11} /></a>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (job.job_type === 'content_writing_preparation') {
+      return (
+        <div className="mb-2 flex flex-wrap gap-2 rounded-md border border-violet-100 bg-violet-50/50 p-2 text-[10px] font-bold text-violet-800 dark:border-violet-500/20 dark:bg-violet-500/5 dark:text-violet-200">
+          <span>{locale === 'ar' ? 'نصوص المنافسين الصالحة' : 'Usable competitor texts'}: {Number(result.usableCompetitorCount) || 0}</span>
+          <span>{result.writingQueued === true ? (locale === 'ar' ? 'تمت إضافة الكتابة إلى الطابور' : 'Writing was queued') : (locale === 'ar' ? 'اكتمل التجهيز' : 'Preparation completed')}</span>
+        </div>
+      );
+    }
+
+    if (job.job_type === 'full_article_pipeline') {
+      const stageIndex = Number(job.progress.stageIndex) || 0;
+      const stageCount = Number(job.progress.stageCount) || 7;
+      return (
+        <div className="mb-2 grid grid-cols-2 gap-1.5 rounded-md border border-violet-100 bg-violet-50/50 p-2 text-[10px] text-violet-900 dark:border-violet-500/20 dark:bg-violet-500/5 dark:text-violet-200">
+          <span className="font-bold">{locale === 'ar' ? 'المرحلة' : 'Stage'}: {stageIndex}/{stageCount}</span>
+          <span className="font-bold">{locale === 'ar' ? 'نقاط الجودة' : 'Quality score'}: {Number(result.qualityScore) || '-'}</span>
+          <span>{locale === 'ar' ? 'المنافسون' : 'Competitors'}: {Number(result.selectedCompetitorCount) || 0}</span>
+          <span>{locale === 'ar' ? 'التعديلات المطبقة' : 'Applied patches'}: {Number(result.appliedPatchCount) || 0}</span>
+        </div>
+      );
+    }
+
+    if (job.job_type === 'engineering_command') return null;
+
+    const hiddenKeys = new Set(['analysisMarkdown', 'patches', 'keyAttempts', 'generated', 'results', 'competitors']);
+    const summaryEntries = Object.entries(result)
+      .filter(([key, value]) => !hiddenKeys.has(key) && ['string', 'number', 'boolean'].includes(typeof value))
+      .slice(0, 8);
+    return summaryEntries.length > 0 ? (
+      <dl className="mb-2 grid grid-cols-1 gap-1 rounded-md border border-gray-200 bg-gray-50 p-2 text-[10px] dark:border-[#3C3C3C] dark:bg-[#242424]">
+        {summaryEntries.map(([key, value]) => (
+          <div key={key} className="flex items-start justify-between gap-2">
+            <dt className="font-bold text-gray-500">{key.replace(/[_-]+/g, ' ')}</dt>
+            <dd className="break-words text-end text-gray-800 dark:text-gray-100">{String(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    ) : null;
+  };
+
   const progressText = (job: ExternalAnalysisJobRow): string => {
     if (job.status === 'running' && job.cancel_requested_at) {
       return locale === 'ar' ? 'جار إيقاف المهمة الخلفية...' : 'Stopping the background task...';
@@ -741,7 +885,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   return (
     <div className="space-y-4 text-gray-700 dark:text-gray-200" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
       <div className="flex items-center justify-between gap-2 border-b border-gray-200 pb-3 dark:border-[#3C3C3C]">
-        <div className="text-sm font-black text-gray-800 dark:text-gray-100">{locale === 'ar' ? 'التحليل الخارجي' : 'External analysis'}</div>
+        <div className="text-sm font-black text-gray-800 dark:text-gray-100">{locale === 'ar' ? 'السجل الخارجي' : 'External log'}</div>
         <button type="button" onClick={() => void refreshJobs(true)} disabled={loading} className="rounded p-1.5 text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] disabled:opacity-50" title={locale === 'ar' ? 'تحديث' : 'Refresh'}>
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
         </button>
@@ -753,43 +897,9 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
         </div>
       )}
 
-      {latestSemanticJob && (
-        <section className="border-b border-gray-200 pb-3 dark:border-[#3C3C3C]">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2 text-xs font-black text-gray-700 dark:text-gray-200"><Tags size={14} className="text-[#d4af37]" /> {locale === 'ar' ? 'الصيغ البديلة وكلمات LSI' : 'Alternative forms and LSI'}</div>
-            <div className="flex items-center gap-1">
-              <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${statusClassName(latestSemanticJob.status)}`}>{STATUS_LABELS[latestSemanticJob.status][locale]}</span>
-              {renderJobControls(latestSemanticJob)}
-            </div>
-          </div>
-          <div className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">{progressText(latestSemanticJob) || formatDate(latestSemanticJob.updated_at)}</div>
-          {latestSemanticGenerated && (
-            <div className="mt-2 space-y-1.5 text-[10px]">
-              {Array.isArray(latestSemanticGenerated.secondaries) && latestSemanticGenerated.secondaries.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1">
-                  <span className="font-black text-gray-600 dark:text-gray-300">{locale === 'ar' ? 'الصيغ:' : 'Alternatives:'}</span>
-                  {latestSemanticGenerated.secondaries.map((item: unknown, index: number) => (
-                    <span key={`secondary-${index}`} className="rounded bg-[#d4af37]/10 px-1.5 py-0.5 font-bold text-[#8a6f1d] dark:text-[#f2d675]">{String(item)}</span>
-                  ))}
-                </div>
-              )}
-              {Array.isArray(latestSemanticGenerated.lsi) && latestSemanticGenerated.lsi.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1">
-                  <span className="font-black text-gray-600 dark:text-gray-300">LSI:</span>
-                  {latestSemanticGenerated.lsi.map((item: unknown, index: number) => (
-                    <span key={`lsi-${index}`} className="rounded bg-blue-50 px-1.5 py-0.5 font-bold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">{String(item)}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {latestSemanticJob.last_error && <div className="mt-1 text-[10px] font-semibold text-red-600 dark:text-red-300">{latestSemanticJob.last_error}</div>}
-        </section>
-      )}
-
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs font-black text-gray-700 dark:text-gray-200">{locale === 'ar' ? `الأوامر الهندسية (${jobs.filter(job => job.job_type === 'engineering_command').length})` : `Engineering commands (${jobs.filter(job => job.job_type === 'engineering_command').length})`}</div>
-        <select value={filter} onChange={event => setFilter(event.target.value as ResultFilter)} className="rounded-md border border-gray-200 bg-white px-2 py-1 text-[10px] font-bold text-gray-600 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300">
+        <div className="text-xs font-black text-gray-700 dark:text-gray-200">{locale === 'ar' ? `جميع التحليلات الخارجية (${jobs.length})` : `All external analyses (${jobs.length})`}</div>
+        <select value={filter} onChange={event => setFilter(event.target.value as ExternalAnalysisResultFilter)} className="rounded-md border border-gray-200 bg-white px-2 py-1 text-[10px] font-bold text-gray-600 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300">
           <option value="all">{locale === 'ar' ? 'الكل' : 'All'}</option>
           <option value="active">{locale === 'ar' ? 'الجارية' : 'Active'}</option>
           <option value="completed">{locale === 'ar' ? 'المكتملة' : 'Completed'}</option>
@@ -805,10 +915,13 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
       ) : batches.map((batch, batchIndex) => {
         const completedCount = batch.jobs.filter(job => job.status === 'completed').length;
         const isManual = batch.jobs.some(job => job.origin === 'manual');
+        const isBatch = batch.jobs.length > 1 || Boolean(batch.jobs[0]?.batch_key);
         return (
           <section key={batch.key} className="border-t border-gray-200 pt-3 first:border-t-0 first:pt-0 dark:border-[#3C3C3C]">
             <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-gray-500 dark:text-gray-400">
-              <span className="font-bold">{locale === 'ar' ? `دفعة ${batches.length - batchIndex} | ${isManual ? 'يدوية' : 'تلقائية'}` : `Batch ${batches.length - batchIndex} | ${isManual ? 'Manual' : 'Automatic'}`}</span>
+              <span className="font-bold">{locale === 'ar'
+                ? `${isBatch ? `دفعة ${batches.length - batchIndex}` : 'تحليل مستقل'} | ${isManual ? 'يدوي' : 'تلقائي'}`
+                : `${isBatch ? `Batch ${batches.length - batchIndex}` : 'Standalone analysis'} | ${isManual ? 'Manual' : 'Automatic'}`}</span>
               <span>{completedCount}/{batch.jobs.length} | {formatDate(batch.createdAt)}</span>
             </div>
 
@@ -822,10 +935,10 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
               const independentCompetitorResults = job.command_id === COMPETITOR_COMPARISON_COMMAND_ID
                 ? toVisibleCompetitorComparisonResults(job)
                 : [];
-              const commandLabel = job.command_id
-                ? getExternalReadyCommandLabel(job.command_id, locale)
-                : job.command_label || '-';
-              const hasResult = Boolean(analysis || patches.length > 0);
+              const commandLabel = getJobDisplayTitle(job);
+              const jobTypeLabel = getExternalAnalysisJobTypeLabel(job.job_type, locale);
+              const specificResult = renderJobSpecificResult(job);
+              const hasResult = Boolean(analysis || patches.length > 0 || specificResult);
               return (
                 <div key={job.id} className="border-b border-gray-100 py-2 last:border-b-0 dark:border-[#333]">
                   <button
@@ -838,9 +951,12 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                     className="flex w-full items-start justify-between gap-2 text-start"
                   >
                     <div className="min-w-0">
-                      <div className="text-xs font-black leading-5 text-gray-800 dark:text-gray-100">{job.sequence_number}. {commandLabel}</div>
+                      <div className="text-xs font-black leading-5 text-gray-800 dark:text-gray-100">
+                        {batch.jobs.length > 1 && job.sequence_number > 0 ? `${job.sequence_number}. ` : ''}{commandLabel}
+                      </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
                         <span className={`rounded px-1.5 py-0.5 font-black ${statusClassName(job.status)}`}>{STATUS_LABELS[job.status][locale]}</span>
+                        {commandLabel !== jobTypeLabel && <span className="rounded bg-gray-100 px-1.5 py-0.5 font-bold dark:bg-[#333]">{jobTypeLabel}</span>}
                         <span>{formatDate(job.updated_at)}</span>
                         {job.retry_count > 0 && <span>{locale === 'ar' ? `إعادات: ${job.retry_count}` : `Retries: ${job.retry_count}`}</span>}
                       </div>
@@ -865,6 +981,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                       )}
                       {job.last_error && <div className="mb-2 border-s-2 border-red-500 bg-red-50 px-2 py-1.5 text-[10px] leading-5 text-red-700 dark:bg-red-900/10 dark:text-red-300">{job.last_error}</div>}
                       <div className="mb-2 flex justify-end">{renderJobControls(job)}</div>
+                      {specificResult}
                       {renderIndependentCompetitorResults(independentCompetitorResults)}
                       {competitorWorkflow && (
                         <div className="mb-2 flex flex-wrap gap-1.5 text-[9px] font-bold text-gray-500 dark:text-gray-400">
@@ -883,14 +1000,14 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                       )}
                       {hasResult ? (
                         <>
-                          {job.command_id !== COMPETITOR_COMPARISON_COMMAND_ID && (
+                          {analysis && job.command_id !== COMPETITOR_COMPARISON_COMMAND_ID && (
                             <div className="mb-1 flex justify-end">
-                              <button type="button" onClick={() => handleCopy(`report-${job.id}`, analysis)} disabled={!analysis} className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold text-gray-600 hover:bg-[#d4af37]/10 disabled:opacity-40 dark:text-gray-300">
+                              <button type="button" onClick={() => handleCopy(`report-${job.id}`, analysis)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold text-gray-600 hover:bg-[#d4af37]/10 dark:text-gray-300">
                                 <Copy size={12} /> {copiedId === `report-${job.id}` ? (locale === 'ar' ? 'تم النسخ' : 'Copied') : (locale === 'ar' ? 'نسخ التقرير' : 'Copy report')}
                               </button>
                             </div>
                           )}
-                          {renderAnalysis(job, patches)}
+                          {(analysis || patches.length > 0) && renderAnalysis(job, patches)}
                         </>
                       ) : job.command_id === COMPETITOR_COMPARISON_COMMAND_ID
                         && independentCompetitorResults.length > 0

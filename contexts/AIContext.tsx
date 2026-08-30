@@ -46,9 +46,13 @@ import {
     type GeminiProgressSnapshot,
 } from '../utils/geminiAnalysisEngine';
 import {
+    AI_EXECUTION_ACTIVITY_EVENT,
     beginAiExecutionActivity,
     finishAiExecutionActivity,
+    getAiExecutionActivities,
+    type AiExecutionActivity,
 } from '../utils/aiExecutionActivity';
+import { mergeEditorAiExecutionIntoHistory } from '../utils/aiHistoryActivity';
 import {
     buildSemanticKeywordRepairPrompt,
     describeSemanticKeywordValidationFailure,
@@ -5236,10 +5240,36 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, [bulkFixReviewItems]);
 
     const logToAiHistory = useCallback((item: Omit<AIHistoryItem, 'id'>) => {
-        const newItem: AIHistoryItem = { ...getCurrentArticleAiIdentity(), ...item, id: `${Date.now()}-${Math.random()}` };
+        const createdAt = new Date().toISOString();
+        const newItem: AIHistoryItem = {
+            ...getCurrentArticleAiIdentity(),
+            ...item,
+            id: `${Date.now()}-${Math.random()}`,
+            createdAt: item.createdAt || createdAt,
+            updatedAt: item.updatedAt || createdAt,
+        };
         setAiHistory(prev => [newItem, ...prev]);
         return newItem.id;
     }, [getCurrentArticleAiIdentity]);
+
+    useEffect(() => {
+        if (currentView !== 'editor') return undefined;
+        const identity = getCurrentArticleAiIdentity();
+        const syncActivity = (activity: AiExecutionActivity) => {
+            setAiHistory(history => mergeEditorAiExecutionIntoHistory(history, activity, identity));
+        };
+        const handleActivity = (event: Event) => {
+            const activity = (event as CustomEvent<AiExecutionActivity>).detail;
+            if (activity?.id) syncActivity(activity);
+        };
+
+        window.addEventListener(AI_EXECUTION_ACTIVITY_EVENT, handleActivity);
+        // Commands can begin while lazy editor panels are mounting. Reconcile
+        // the shared store after subscribing so the first lifecycle event is
+        // not lost from the durable per-article history.
+        getAiExecutionActivities().forEach(syncActivity);
+        return () => window.removeEventListener(AI_EXECUTION_ACTIVITY_EVENT, handleActivity);
+    }, [currentView, getCurrentArticleAiIdentity]);
 
     const normalizeRangeText = useCallback((value: string) => value.replace(/\s+/g, ' ').trim(), []);
 
