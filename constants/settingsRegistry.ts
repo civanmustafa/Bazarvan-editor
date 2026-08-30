@@ -109,6 +109,7 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     autoDiscoverCompetitors: true,
     autoExtractCompetitorContent: true,
     autoRunReadyEngineeringCommands: true,
+    autoApplyStrongInternalLinkSuggestions: true,
   },
 };
 
@@ -364,6 +365,10 @@ const normalizeSystemSection = (
   setWhenPresent('autoRunReadyEngineeringCommands', field => normalizeBoolean(
     field,
     defaults.autoRunReadyEngineeringCommands,
+  ));
+  setWhenPresent('autoApplyStrongInternalLinkSuggestions', field => normalizeBoolean(
+    field,
+    defaults.autoApplyStrongInternalLinkSuggestions,
   ));
   return normalized;
 };

@@ -691,6 +691,7 @@ interface EditorContextType {
     setKeywords: React.Dispatch<React.SetStateAction<Keywords>>;
     articleLanguage: 'ar' | 'en';
     activeArticleId: string | null;
+    isArticleContentSettledForAutomation: boolean;
     activeArticleSettings: ActiveArticleSettings;
     goalContext: GoalContext;
     setGoalContext: React.Dispatch<React.SetStateAction<GoalContext>>;
@@ -763,6 +764,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [metaDescription, setMetaDescription] = useState('');
     const [articleKey, setArticleKey] = useState<string>(() => initialActiveArticleTitleRef.current || initialAutoDraftTitle);
     const [activeArticleId, setActiveArticleId] = useState<string | null>(() => initialActiveArticleIdRef.current);
+    const [isArticleContentSettledForAutomation, setIsArticleContentSettledForAutomation] = useState(
+        () => !initialActiveArticleIdRef.current,
+    );
     const [activeArticleSettings, setActiveArticleSettings] = useState<ActiveArticleSettings>(EMPTY_ACTIVE_ARTICLE_SETTINGS);
     const [importOrigin, setImportOrigin] = useState<ArticleImportOrigin | null>(null);
     const pendingImportedSaveRef = useRef(false);
@@ -1194,7 +1198,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return hasResolvedContent;
     }, [captureEditorSnapshot, currentUser]);
 
-    const refreshArticleFromRemoteInBackground = useCallback((
+    const refreshArticleFromRemoteInBackground = useCallback(async (
         targetEditor: Editor,
         options: {
             requestId: number;
@@ -1203,24 +1207,26 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             article?: ArticleActivity | RemoteArticleActivity | null;
             fallbackTitle: string;
         },
-    ) => {
-        void loadRemoteArticleSnapshot(options.remoteArticleId, options.username)
-            .then(async remoteSnapshot => {
-                if (!remoteSnapshot) return;
-                if (articleLoadRequestIdRef.current !== options.requestId || targetEditor.isDestroyed) return;
-                if (hasEditorChangedAfterArticleLoadRef.current) return;
-                await applyArticleSnapshotToEditor(targetEditor, {
-                    requestId: options.requestId,
-                    titleToUse: remoteSnapshot.title || options.fallbackTitle,
-                    article: options.article,
-                    snapshot: remoteSnapshot,
-                    remoteArticleId: options.remoteArticleId,
-                    authoritativeRemoteSavedAt: remoteSnapshot.savedAt,
-                });
-            })
-            .catch(error => {
-                console.error(`Failed to refresh article "${options.remoteArticleId}" from Supabase in the background:`, error);
+    ): Promise<void> => {
+        try {
+            const remoteSnapshot = await loadRemoteArticleSnapshot(
+                options.remoteArticleId,
+                options.username,
+            );
+            if (!remoteSnapshot) return;
+            if (articleLoadRequestIdRef.current !== options.requestId || targetEditor.isDestroyed) return;
+            if (hasEditorChangedAfterArticleLoadRef.current) return;
+            await applyArticleSnapshotToEditor(targetEditor, {
+                requestId: options.requestId,
+                titleToUse: remoteSnapshot.title || options.fallbackTitle,
+                article: options.article,
+                snapshot: remoteSnapshot,
+                remoteArticleId: options.remoteArticleId,
+                authoritativeRemoteSavedAt: remoteSnapshot.savedAt,
             });
+        } catch (error) {
+            console.error(`Failed to refresh article "${options.remoteArticleId}" from Supabase in the background:`, error);
+        }
     }, [applyArticleSnapshotToEditor]);
 
     useEffect(() => {
@@ -1231,6 +1237,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const requestId = articleLoadRequestIdRef.current + 1;
         articleLoadRequestIdRef.current = requestId;
         isArticleContentLoadingRef.current = true;
+        setIsArticleContentSettledForAutomation(false);
         skipNextAutoDraftMetadataWriteRef.current = true;
 
         const restoreInitialArticle = async () => {
@@ -1257,7 +1264,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 if (remoteArticleId) {
                     if (hasLocalContent) {
                         isArticleContentLoadingRef.current = false;
-                        refreshArticleFromRemoteInBackground(editor, {
+                        await refreshArticleFromRemoteInBackground(editor, {
                             requestId,
                             remoteArticleId,
                             username: currentUser,
@@ -1296,6 +1303,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             } finally {
                 if (!cancelled && articleLoadRequestIdRef.current === requestId) {
                     isArticleContentLoadingRef.current = false;
+                    setIsArticleContentSettledForAutomation(true);
                     pendingInitialArticleRestoreRef.current = null;
                 }
             }
@@ -1782,41 +1790,49 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return fail('empty_result', 'The generated article body is empty.');
         }
 
-        // Preserve any unsaved human edits before replacing the whole article body.
-        if (editor.getText().trim()) {
-            const backupSaved = await handleSaveDraft({ reason: 'manual', force: true });
-            if (!backupSaved) {
-                return fail('backup_failed', 'The current article could not be saved before replacement.');
+        const automationGuardRequestId = articleLoadRequestIdRef.current;
+        setIsArticleContentSettledForAutomation(false);
+        try {
+            // Preserve any unsaved human edits before replacing the whole article body.
+            if (editor.getText().trim()) {
+                const backupSaved = await handleSaveDraft({ reason: 'manual', force: true });
+                if (!backupSaved) {
+                    return fail('backup_failed', 'The current article could not be saved before replacement.');
+                }
+            }
+            if (activeArticleId !== options.expectedArticleId || editor.isDestroyed) {
+                return fail('article_changed', 'The active article changed before the generated result was applied.');
+            }
+
+            const html = parseMarkdownToArticleHtml(prepared.markdown, articleLanguage);
+            isArticleContentLoadingRef.current = true;
+            try {
+                setEditorContentSafely(editor, html, createEmptyEditorContent());
+                applyArticleLanguageFormatting(editor, articleLanguage, false);
+            } finally {
+                isArticleContentLoadingRef.current = false;
+            }
+            hasEditorChangedAfterArticleLoadRef.current = true;
+            clearEditorSnapshotTimer();
+            clearDraftPersistTimer();
+            captureEditorSnapshot(editor);
+
+            const nextWordCount = countWordsInText(editor.getText());
+            const saved = await handleSaveDraft({ reason: 'manual', force: true });
+            if (!saved) {
+                return fail(
+                    'save_failed',
+                    'The generated article was inserted locally but could not be saved to the server.',
+                    nextWordCount,
+                );
+            }
+
+            return { ok: true, previousWordCount, nextWordCount };
+        } finally {
+            if (articleLoadRequestIdRef.current === automationGuardRequestId) {
+                setIsArticleContentSettledForAutomation(true);
             }
         }
-        if (activeArticleId !== options.expectedArticleId || editor.isDestroyed) {
-            return fail('article_changed', 'The active article changed before the generated result was applied.');
-        }
-
-        const html = parseMarkdownToArticleHtml(prepared.markdown, articleLanguage);
-        isArticleContentLoadingRef.current = true;
-        try {
-            setEditorContentSafely(editor, html, createEmptyEditorContent());
-            applyArticleLanguageFormatting(editor, articleLanguage, false);
-        } finally {
-            isArticleContentLoadingRef.current = false;
-        }
-        hasEditorChangedAfterArticleLoadRef.current = true;
-        clearEditorSnapshotTimer();
-        clearDraftPersistTimer();
-        captureEditorSnapshot(editor);
-
-        const nextWordCount = countWordsInText(editor.getText());
-        const saved = await handleSaveDraft({ reason: 'manual', force: true });
-        if (!saved) {
-            return fail(
-                'save_failed',
-                'The generated article was inserted locally but could not be saved to the server.',
-                nextWordCount,
-            );
-        }
-
-        return { ok: true, previousWordCount, nextWordCount };
     }, [
         activeArticleId,
         articleLanguage,
@@ -1869,6 +1885,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const requestId = articleLoadRequestIdRef.current + 1;
         articleLoadRequestIdRef.current = requestId;
         isArticleContentLoadingRef.current = true;
+        setIsArticleContentSettledForAutomation(false);
         try {
             const remoteSnapshot = await loadRemoteArticleSnapshot(expectedArticleId, currentUser);
             if (
@@ -1893,6 +1910,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         } finally {
             if (articleLoadRequestIdRef.current === requestId) {
                 isArticleContentLoadingRef.current = false;
+                setIsArticleContentSettledForAutomation(true);
             }
         }
     }, [
@@ -1995,12 +2013,15 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const handleRestoreDraft = useCallback(async () => {
         if (!editor) return;
-        const content = readStorageValue(MANUAL_DRAFT_KEY);
-        const titleStr = readStorageValue(MANUAL_DRAFT_TITLE_KEY);
-        const keywordsStr = readStorageValue(MANUAL_DRAFT_KEYWORDS_KEY);
-        const lang = getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
-        if (content) {
-            try {
+        const automationGuardRequestId = articleLoadRequestIdRef.current;
+        setIsArticleContentSettledForAutomation(false);
+        try {
+            const content = readStorageValue(MANUAL_DRAFT_KEY);
+            const titleStr = readStorageValue(MANUAL_DRAFT_TITLE_KEY);
+            const keywordsStr = readStorageValue(MANUAL_DRAFT_KEYWORDS_KEY);
+            const lang = getStoredLanguage(MANUAL_DRAFT_LANGUAGE_KEY);
+            if (content) {
+              try {
                 const parsedContent = JSON.parse(content);
                 const resolvedContent = await resolveStoredEditorContent(parsedContent);
                 if (isUsableEditorContent(resolvedContent)) {
@@ -2014,33 +2035,42 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 } else {
                     removeStorageValue(MANUAL_DRAFT_KEY);
                 }
-            } catch (error) {
+              } catch (error) {
                 console.error("Failed to restore saved draft content:", error);
                 removeStorageValue(MANUAL_DRAFT_KEY);
+              }
             }
-        }
-        if (titleStr) {
-            setTitle(titleStr);
-            setArticleKey(titleStr);
-        }
-        if (keywordsStr) {
-            try {
+            if (titleStr) {
+                setTitle(titleStr);
+                setArticleKey(titleStr);
+            }
+            if (keywordsStr) {
+              try {
                 setKeywords(normalizeKeywords(JSON.parse(keywordsStr)));
-            } catch (error) {
+              } catch (error) {
                 console.error("Failed to restore saved draft keywords:", error);
                 removeStorageValue(MANUAL_DRAFT_KEYWORDS_KEY);
+              }
+            }
+            setGoalContext(getStoredGoalContext(MANUAL_DRAFT_GOAL_CONTEXT_KEY));
+            if (lang) handleLanguageChange(lang);
+            setRestoreStatus('restored');
+            setTimeout(() => setRestoreStatus('idle'), 2000);
+        } finally {
+            if (articleLoadRequestIdRef.current === automationGuardRequestId) {
+                setIsArticleContentSettledForAutomation(true);
             }
         }
-        setGoalContext(getStoredGoalContext(MANUAL_DRAFT_GOAL_CONTEXT_KEY));
-        if (lang) handleLanguageChange(lang);
-        setRestoreStatus('restored');
-        setTimeout(() => setRestoreStatus('idle'), 2000);
     }, [editor, handleLanguageChange, captureEditorSnapshot]);
 
     const handleNewArticle = useCallback(async (
         lang: 'ar' | 'en',
         options: { saveCurrentArticle?: boolean } = {},
     ) => {
+        const requestId = articleLoadRequestIdRef.current + 1;
+        articleLoadRequestIdRef.current = requestId;
+        setIsArticleContentSettledForAutomation(false);
+        try {
         // The toolbar keeps the current article before clearing it. A new-article
         // request mounted from the dashboard has no current editor document to save;
         // saving there would recreate the last auto-draft as a duplicate article.
@@ -2051,7 +2081,6 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const emptyKeywords = normalizeKeywords(INITIAL_KEYWORDS);
             const emptyGoalContext = normalizeGoalContext();
 
-            articleLoadRequestIdRef.current += 1;
             pendingInitialArticleRestoreRef.current = null;
             pendingAutoDraftRestoreRef.current = false;
             pendingImportedSaveRef.current = false;
@@ -2104,6 +2133,11 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             handleLanguageChange(lang);
             setCurrentView('editor');
         }
+        } finally {
+            if (articleLoadRequestIdRef.current === requestId) {
+                setIsArticleContentSettledForAutomation(true);
+            }
+        }
     }, [
         editor,
         handleSaveDraft,
@@ -2125,63 +2159,73 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return { ok: false, error: 'لم تُرجع المعاينة محتوى صالحًا للإدخال.' };
         }
 
-        if (mode === 'replace' && editor.getText().trim()) {
-            const backupSaved = await handleSaveDraft({ reason: 'manual', force: true });
-            if (!backupSaved) {
-                return { ok: false, error: 'تعذر حفظ نسخة من المقالة الحالية قبل استبدالها.' };
-            }
-        }
-        if (mode === 'new') {
-            await handleNewArticle(preview.language);
-        }
-        if (editor.isDestroyed) {
-            return { ok: false, error: 'أُغلق المحرر قبل اكتمال الاستيراد.' };
-        }
-
-        isArticleContentLoadingRef.current = true;
+        let automationGuardRequestId = articleLoadRequestIdRef.current;
+        setIsArticleContentSettledForAutomation(false);
         try {
-            if (mode === 'insert') {
-                editor.chain().focus().insertContent(preview.contentHtml).run();
-            } else {
-                const importedTitle = preview.title.trim() || '(untitled)';
-                const origin: ArticleImportOrigin = {
-                    sourceUrl: preview.sourceUrl,
-                    canonicalUrl: preview.canonicalUrl,
-                    fetchedUrl: preview.fetchedUrl,
-                    importedAt: new Date().toISOString(),
-                    contentHash: preview.contentHash,
-                    extractionProvider: preview.extractionProvider,
-                    skippedImageCount: preview.skippedImageCount,
-                    mode,
-                };
-                setTitle(importedTitle);
-                setArticleKey(importedTitle);
-                setArticleLanguage(preview.language);
-                setImportOrigin(origin);
-                latestDraftMetaRef.current = {
-                    ...latestDraftMetaRef.current,
-                    title: importedTitle,
-                    articleLanguage: preview.language,
-                };
-                setEditorContentSafely(editor, preview.contentHtml, createEmptyEditorContent());
-                applyArticleLanguageFormatting(editor, preview.language, false);
+            if (mode === 'replace' && editor.getText().trim()) {
+                const backupSaved = await handleSaveDraft({ reason: 'manual', force: true });
+                if (!backupSaved) {
+                    return { ok: false, error: 'تعذر حفظ نسخة من المقالة الحالية قبل استبدالها.' };
+                }
             }
-        } finally {
-            isArticleContentLoadingRef.current = false;
-        }
+            if (mode === 'new') {
+                await handleNewArticle(preview.language);
+                automationGuardRequestId = articleLoadRequestIdRef.current;
+                setIsArticleContentSettledForAutomation(false);
+            }
+            if (editor.isDestroyed) {
+                return { ok: false, error: 'أُغلق المحرر قبل اكتمال الاستيراد.' };
+            }
 
-        hasEditorChangedAfterArticleLoadRef.current = true;
-        clearEditorSnapshotTimer();
-        clearDraftPersistTimer();
-        captureEditorSnapshot(editor);
-        if (mode === 'insert') {
-            window.setTimeout(() => {
-                void handleSaveDraftRef.current({ reason: 'manual', force: true });
-            }, 0);
-        } else {
-            pendingImportedSaveRef.current = true;
+            isArticleContentLoadingRef.current = true;
+            try {
+                if (mode === 'insert') {
+                    editor.chain().focus().insertContent(preview.contentHtml).run();
+                } else {
+                    const importedTitle = preview.title.trim() || '(untitled)';
+                    const origin: ArticleImportOrigin = {
+                        sourceUrl: preview.sourceUrl,
+                        canonicalUrl: preview.canonicalUrl,
+                        fetchedUrl: preview.fetchedUrl,
+                        importedAt: new Date().toISOString(),
+                        contentHash: preview.contentHash,
+                        extractionProvider: preview.extractionProvider,
+                        skippedImageCount: preview.skippedImageCount,
+                        mode,
+                    };
+                    setTitle(importedTitle);
+                    setArticleKey(importedTitle);
+                    setArticleLanguage(preview.language);
+                    setImportOrigin(origin);
+                    latestDraftMetaRef.current = {
+                        ...latestDraftMetaRef.current,
+                        title: importedTitle,
+                        articleLanguage: preview.language,
+                    };
+                    setEditorContentSafely(editor, preview.contentHtml, createEmptyEditorContent());
+                    applyArticleLanguageFormatting(editor, preview.language, false);
+                }
+            } finally {
+                isArticleContentLoadingRef.current = false;
+            }
+
+            hasEditorChangedAfterArticleLoadRef.current = true;
+            clearEditorSnapshotTimer();
+            clearDraftPersistTimer();
+            captureEditorSnapshot(editor);
+            if (mode === 'insert') {
+                window.setTimeout(() => {
+                    void handleSaveDraftRef.current({ reason: 'manual', force: true });
+                }, 0);
+            } else {
+                pendingImportedSaveRef.current = true;
+            }
+            return { ok: true };
+        } finally {
+            if (articleLoadRequestIdRef.current === automationGuardRequestId) {
+                setIsArticleContentSettledForAutomation(true);
+            }
         }
-        return { ok: true };
     }, [
         captureEditorSnapshot,
         clearDraftPersistTimer,
@@ -2196,6 +2240,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const requestId = articleLoadRequestIdRef.current + 1;
             articleLoadRequestIdRef.current = requestId;
             isArticleContentLoadingRef.current = true;
+            setIsArticleContentSettledForAutomation(false);
             skipNextAutoDraftMetadataWriteRef.current = true;
             const remoteArticleId = getRemoteArticleId(article);
             writeSessionValue(ACTIVE_ARTICLE_TITLE_KEY, titleStr);
@@ -2250,7 +2295,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 if (remoteArticleId && currentUser) {
                     if (hasLocalContent) {
                         isArticleContentLoadingRef.current = false;
-                        refreshArticleFromRemoteInBackground(editor, {
+                        await refreshArticleFromRemoteInBackground(editor, {
                             requestId,
                             remoteArticleId,
                             username: currentUser,
@@ -2287,6 +2332,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             } finally {
                 if (articleLoadRequestIdRef.current === requestId) {
                     isArticleContentLoadingRef.current = false;
+                    setIsArticleContentSettledForAutomation(true);
                 }
             }
         }
@@ -2304,6 +2350,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setKeywords,
         articleLanguage,
         activeArticleId,
+        isArticleContentSettledForAutomation,
         activeArticleSettings,
         goalContext,
         setGoalContext,
@@ -2338,6 +2385,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         keywords,
         articleLanguage,
         activeArticleId,
+        isArticleContentSettledForAutomation,
         activeArticleSettings,
         goalContext,
         analysisResults,

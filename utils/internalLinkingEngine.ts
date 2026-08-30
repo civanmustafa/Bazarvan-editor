@@ -49,18 +49,35 @@ export type InternalLinkTargetPage = {
 
 export type InternalLinkSuggestionConfidence = 'strong' | 'good' | 'review';
 
+export type InternalLinkAnchorMatchSource =
+  | 'title'
+  | 'heading'
+  | 'description'
+  | 'phrase'
+  | 'term'
+  | 'slug'
+  | 'synonym'
+  | 'topic'
+  | 'stem'
+  | 'ai_primary'
+  | 'ai_alternative'
+  | 'ai_long_tail'
+  | 'ai_entity';
+
 export type InternalLinkSuggestion = {
   pageId: string;
   targetUrl: string;
   targetTitle: string;
   anchorText: string;
   score: number;
+  scoreMargin: number;
   confidence: InternalLinkSuggestionConfidence;
   matchedTerms: string[];
   reasons: string[];
   sourceExcerpt: string;
   paragraphNumber: number;
   alternativeAnchors: string[];
+  anchorMatchSources: InternalLinkAnchorMatchSource[];
   bm25Score: number;
   completenessScore: number;
   algorithmVersion: 'bm25-ai-phrases-v4';
@@ -95,20 +112,7 @@ type TargetSignal = {
   tokens: string[];
   weight: number;
   frequency: number;
-  source:
-    | 'title'
-    | 'heading'
-    | 'description'
-    | 'phrase'
-    | 'term'
-    | 'slug'
-    | 'synonym'
-    | 'topic'
-    | 'stem'
-    | 'ai_primary'
-    | 'ai_alternative'
-    | 'ai_long_tail'
-    | 'ai_entity';
+  source: InternalLinkAnchorMatchSource;
 };
 
 const WORD_PATTERN = /[A-Za-z0-9\u0600-\u06FF]+/g;
@@ -445,11 +449,16 @@ const chooseAnchor = (
   paragraphNumber: number;
   paragraphText: string;
   alternativeAnchors: string[];
+  anchorMatchSources: InternalLinkAnchorMatchSource[];
 } | null => {
   const tokenWeights = new Map<string, number>();
-  const signalPhrases = new Set<string>();
+  const signalPhraseSources = new Map<string, Set<InternalLinkAnchorMatchSource>>();
   for (const signal of signals) {
-    if (signal.tokens.length >= MIN_ANCHOR_WORDS) signalPhrases.add(signal.normalized);
+    if (signal.tokens.length >= MIN_ANCHOR_WORDS) {
+      const sources = signalPhraseSources.get(signal.normalized) || new Set<InternalLinkAnchorMatchSource>();
+      sources.add(signal.source);
+      signalPhraseSources.set(signal.normalized, sources);
+    }
     for (const token of signal.tokens) {
       tokenWeights.set(token, Math.max(tokenWeights.get(token) || 0, signal.weight));
     }
@@ -465,6 +474,7 @@ const chooseAnchor = (
     score: number;
     excerpt: string;
     exactPhrase: boolean;
+    anchorMatchSources: InternalLinkAnchorMatchSource[];
     paragraphNumber: number;
     paragraphText: string;
   }>();
@@ -484,7 +494,8 @@ const chooseAnchor = (
         const weightedTokens = tokens.filter(token => anchorTokenWeight(token) > 0);
         if (weightedTokens.length < Math.min(2, tokens.length)) continue;
 
-        const exactPhrase = signalPhrases.has(normalized);
+        const anchorMatchSources = [...(signalPhraseSources.get(normalized) || [])];
+        const exactPhrase = anchorMatchSources.length > 0;
         const coverage = weightedTokens.length / tokens.length;
         const weight = weightedTokens.reduce((sum, token) => (
           sum + anchorTokenWeight(token) * tokenIdf(
@@ -502,6 +513,7 @@ const chooseAnchor = (
             ? span.paragraphText
             : `${span.paragraphText.slice(0, 217).trim()}...`,
           exactPhrase,
+          anchorMatchSources,
           paragraphNumber: span.paragraphNumber,
           paragraphText: span.paragraphText,
         };
@@ -716,12 +728,14 @@ const buildSuggestion = (
     ) || resolveInternalLinkTargetUrl(page),
     anchorText: anchor.text,
     score,
+    scoreMargin: 100,
     confidence: score >= 75 ? 'strong' : score >= 50 ? 'good' : 'review',
     matchedTerms,
     reasons,
     sourceExcerpt: anchor.excerpt,
     paragraphNumber: anchor.paragraphNumber,
     alternativeAnchors: anchor.alternativeAnchors,
+    anchorMatchSources: anchor.anchorMatchSources,
     bm25Score: Number(bm25Score.toFixed(2)),
     completenessScore,
     algorithmVersion: 'bm25-ai-phrases-v4',
@@ -810,18 +824,40 @@ export const generateInternalLinkSuggestions = (
       || a.pageId.localeCompare(b.pageId)
     ));
 
+  const anchorsConflict = (left: string, right: string): boolean => {
+    const normalizedLeft = normalizeInternalLinkText(left);
+    const normalizedRight = normalizeInternalLinkText(right);
+    if (!normalizedLeft || !normalizedRight) return false;
+    if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+      return true;
+    }
+    const leftTokens = new Set(meaningfulTokens(normalizedLeft));
+    const rightTokens = new Set(meaningfulTokens(normalizedRight));
+    const overlap = [...leftTokens].filter(token => rightTokens.has(token)).length;
+    return overlap >= 2 && overlap / Math.min(leftTokens.size, rightTokens.size) >= 0.5;
+  };
+
+  const rankedWithMargins = ranked.map(suggestion => {
+    const competingScore = ranked.reduce((highest, candidate) => (
+      candidate.pageId !== suggestion.pageId
+      && anchorsConflict(suggestion.anchorText, candidate.anchorText)
+        ? Math.max(highest, candidate.score)
+        : highest
+    ), -1);
+    return {
+      ...suggestion,
+      scoreMargin: competingScore < 0
+        ? 100
+        : Math.max(0, suggestion.score - competingScore),
+    };
+  });
+
   const accepted: InternalLinkSuggestion[] = [];
   const usedAnchors = new Set(existingAnchors);
-  for (const suggestion of ranked) {
+  for (const suggestion of rankedWithMargins) {
     const normalizedAnchor = normalizeInternalLinkText(suggestion.anchorText);
     if (!normalizedAnchor || usedAnchors.has(normalizedAnchor)) continue;
-    const candidateTokens = new Set(meaningfulTokens(normalizedAnchor));
-    if ([...usedAnchors].some(anchor => {
-      if (anchor.includes(normalizedAnchor) || normalizedAnchor.includes(anchor)) return true;
-      const usedTokens = new Set(meaningfulTokens(anchor));
-      const overlap = [...candidateTokens].filter(token => usedTokens.has(token)).length;
-      return overlap >= 2 && overlap / Math.min(candidateTokens.size, usedTokens.size) >= 0.5;
-    })) continue;
+    if ([...usedAnchors].some(anchor => anchorsConflict(anchor, normalizedAnchor))) continue;
     usedAnchors.add(normalizedAnchor);
     accepted.push(suggestion);
     if (accepted.length >= suggestionBudget) break;

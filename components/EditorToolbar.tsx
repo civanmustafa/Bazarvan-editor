@@ -26,11 +26,13 @@ import ArticleImportModal from './ArticleImportModal';
 type EditorToolbarProps = {
     isFocusMode?: boolean;
     onToggleFocusMode?: () => void;
+    onOpenInternalLinking?: () => void;
 };
 
 const EditorToolbar: React.FC<EditorToolbarProps> = ({
     isFocusMode = false,
     onToggleFocusMode,
+    onOpenInternalLinking,
 }) => {
     const {
         isDarkMode,
@@ -268,6 +270,7 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
                     onToggleAllKeywordsHighlight={onToggleAllKeywordsHighlight}
                     onSetIsTooltipAlwaysOn={setIsTooltipAlwaysOn}
                     onToggleToc={onToggleToc}
+                    onOpenInternalLinking={onOpenInternalLinking || (() => undefined)}
                     onFixParagraphs={onFixParagraphs}
                     onRemoveEmptyLines={onRemoveEmptyLines}
                     onToggleFindReplace={handleToggleFindReplace}

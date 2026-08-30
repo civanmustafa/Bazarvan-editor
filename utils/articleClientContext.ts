@@ -1,5 +1,7 @@
 import { getSupabaseClient } from './supabaseClient';
 
+export const ARTICLE_CLIENT_CONTEXT_CHANGED_EVENT = 'bazarvan:article-client-context-changed';
+
 export type ArticleClientContext = {
   articleId: string;
   clientId: string;
@@ -12,6 +14,13 @@ const asText = (value: unknown): string => typeof value === 'string' ? value : '
 
 const throwIfError = (error: any): void => {
   if (error) throw new Error(error.message || 'تعذر حفظ عميل المقالة.');
+};
+
+const notifyArticleClientContextChanged = (articleId: string): void => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(ARTICLE_CLIENT_CONTEXT_CHANGED_EVENT, {
+    detail: { articleId },
+  }));
 };
 
 export const loadArticleClientContext = async (
@@ -47,6 +56,7 @@ export const saveArticleClientContext = async (
       updated_at: new Date().toISOString(),
     }, { onConflict: 'article_id' });
   throwIfError(error);
+  notifyArticleClientContextChanged(articleId);
 };
 
 export const saveArticleClientSelection = async (
@@ -76,4 +86,5 @@ export const saveArticleCurrentPageUrl = async (
       updated_at: new Date().toISOString(),
     }, { onConflict: 'article_id' });
   throwIfError(error);
+  notifyArticleClientContextChanged(articleId);
 };

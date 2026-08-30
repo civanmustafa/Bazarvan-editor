@@ -1,7 +1,7 @@
 import React from 'react';
 import { translations } from '../translations';
 import { ToolbarButton } from './ToolbarItems';
-import { Eraser, KeyRound, MessageSquare, Bookmark, Split, Shrink, Search, ListRestart } from 'lucide-react';
+import { Eraser, KeyRound, MessageSquare, Bookmark, Link2, Split, Shrink, Search, ListRestart } from 'lucide-react';
 
 interface UtilityActionsProps {
     t: typeof translations.ar;
@@ -13,6 +13,7 @@ interface UtilityActionsProps {
     onToggleAllKeywordsHighlight: () => void;
     onSetIsTooltipAlwaysOn: React.Dispatch<React.SetStateAction<boolean>>;
     onToggleToc: () => void;
+    onOpenInternalLinking: () => void;
     onFixParagraphs: () => void;
     onRemoveEmptyLines: () => void;
     onToggleFindReplace: () => void;
@@ -29,6 +30,7 @@ const UtilityActions: React.FC<UtilityActionsProps> = ({
     onToggleAllKeywordsHighlight,
     onSetIsTooltipAlwaysOn,
     onToggleToc,
+    onOpenInternalLinking,
     onFixParagraphs,
     onRemoveEmptyLines,
     onToggleFindReplace,
@@ -40,6 +42,7 @@ const UtilityActions: React.FC<UtilityActionsProps> = ({
             <ToolbarButton onClick={onToggleAllKeywordsHighlight} title={t.highlightAllKeywords} isActive={isAllKeywordsHighlighted}><KeyRound size={16} /></ToolbarButton>
             <ToolbarButton onClick={() => onSetIsTooltipAlwaysOn(prev => !prev)} title={t.toggleTooltips} isActive={isTooltipAlwaysOn}><MessageSquare size={16} /></ToolbarButton>
             <ToolbarButton onClick={onToggleToc} title={isTocVisible ? t.hideToc : t.createToc} isActive={isTocVisible}><Bookmark size={16} /></ToolbarButton>
+            <ToolbarButton onClick={onOpenInternalLinking} title={t.openInternalLinking}><Link2 size={16} /></ToolbarButton>
             <ToolbarButton onClick={onFixParagraphs} title={t.fixParagraphs}><Split size={16} /></ToolbarButton>
             <ToolbarButton onClick={onRemoveEmptyLines} title={t.removeEmptyLines}><Shrink size={16} /></ToolbarButton>
             <ToolbarButton onClick={onToggleFindReplace} title={t.findAndReplace} isActive={isFindReplaceVisible}><Search size={16} /></ToolbarButton>

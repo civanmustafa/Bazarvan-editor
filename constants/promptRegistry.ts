@@ -515,7 +515,7 @@ const WORKFLOW_DEFINITIONS: PromptRegistryDefinition[] = [
     group: PROMPT_GROUP_IDS.internalLinking,
     label: 'مراجعة اقتراحات الربط الداخلي',
     description: 'يراجع عددًا محدودًا من أفضل نتائج المحرك الخوارزمي دون إنشاء روابط أو نصوص ربط جديدة.',
-    usage: 'يعمل يدويًا فقط بعد تفعيل المراجعة الاختيارية داخل تبويب الربط الداخلي. تبقى نتيجة الذكاء الاصطناعي رأيًا ثانويًا، ولا يطبق النظام أي رابط تلقائيًا.',
+    usage: 'يعمل يدويًا فقط بعد تفعيل المراجعة الاختيارية داخل تبويب الربط الداخلي. تبقى نتيجة الذكاء الاصطناعي رأيًا ثانويًا، ولا تنفذ المراجعة أي رابط بذاتها.',
     variables: ['{{article_title}}', '{{article_language}}', '{{candidate_suggestions_json}}', '{{quality_rules_json}}'],
     requiredVariables: ['article_title', 'article_language', 'candidate_suggestions_json', 'quality_rules_json'],
     attachments: [

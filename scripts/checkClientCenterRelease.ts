@@ -14,6 +14,7 @@ import {
   CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
   CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION,
   CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION,
+  CLIENT_CENTER_AUTOMATIC_LINK_INSERTION_MIGRATION,
   CRAWLER_PROVIDER_SECRETS_MIGRATION,
   CRAWLER_PROVIDER_USAGE_REPORTS_MIGRATION,
   CLIENT_CENTER_REQUIRED_MIGRATION,
@@ -53,6 +54,7 @@ for (const migration of [
   CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
   CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION,
   CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION,
+  CLIENT_CENTER_AUTOMATIC_LINK_INSERTION_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
   PROVIDER_EXPLICIT_GRANTS_MIGRATION,
 ]) {
@@ -94,6 +96,9 @@ for (const [sourcePath, marker] of [
   ['server/crawlerUsagePolicy.ts', 'reserveCrawlerExternalRequest'],
   ['utils/clientSemanticIndex.ts', 'isGenericClientPageTitle'],
   ['utils/internalLinkingEngine.ts', 'resolveInternalLinkTargetUrl'],
+  ['utils/internalLinkAutoApply.ts', 'planAutomaticInternalLinkInsertions'],
+  ['components/InternalLinkAutomation.tsx', 'applyAutomaticInternalLinkInsertions'],
+  ['api/internalLinkingSettings.ts', 'readInternalLinkAutomationSettings'],
   ['server/clientPageAiLinkProfile.ts', 'client_page_link_profile'],
 ] as const) {
   const source = await readFile(path.join(root, ...sourcePath.split('/')), 'utf8');
@@ -131,6 +136,7 @@ for (const marker of [
   'client_page_ai_link_profiles',
   'client_link_suggestion_runs',
   'internal_link_quality_policies',
+  'autoApplyStrongInternalLinkSuggestions',
   'client_draft_creation_schema_version',
   CLIENT_CENTER_REQUIRED_MIGRATION,
 ]) {
@@ -179,6 +185,7 @@ console.log(JSON.stringify({
     CLIENT_CENTER_AI_LINK_PROFILES_MIGRATION,
     CLIENT_CENTER_CRAWL_PGCRYPTO_FIX_MIGRATION,
     CLIENT_CENTER_ECONOMIC_CRAWLER_MIGRATION,
+    CLIENT_CENTER_AUTOMATIC_LINK_INSERTION_MIGRATION,
     PROVIDER_CREDENTIAL_VAULT_MIGRATION,
     PROVIDER_EXPLICIT_GRANTS_MIGRATION,
   ],

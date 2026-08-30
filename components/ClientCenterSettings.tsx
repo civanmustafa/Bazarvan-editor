@@ -1488,7 +1488,7 @@ const ClientCenterSettings: React.FC = () => {
 	          </div>
 
 	          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-[11px] font-semibold leading-5 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
-	            قواعد ثابتة لا يمكن تجاوزها: Anchor Text من كلمتين إلى خمس، منع الربط بالمقالة نفسها، ومنع الصفحة المعطلة أو غير الجاهزة أو Noindex، وعدم وضع رابطين على النص نفسه. لا تُضاف الروابط تلقائيًا.
+	            قواعد ثابتة لا يمكن تجاوزها: Anchor Text من كلمتين إلى خمس، منع الربط بالمقالة نفسها، ومنع الصفحة المعطلة أو غير الجاهزة أو Noindex، وعدم وضع رابطين على النص نفسه. الإدراج التلقائي العام لا يقبل إلا درجة 90 فأعلى وموضعًا وحيدًا وفارقًا واضحًا عن الهدف المنافس.
 	          </div>
 
 	          <div className="space-y-3 rounded-lg bg-gray-50 p-4 dark:bg-[#1F1F1F]">

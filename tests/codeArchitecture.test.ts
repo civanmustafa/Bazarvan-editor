@@ -162,7 +162,7 @@ test('all editor AI execution paths publish to one inline live activity monitor'
 
   assert.match(
     editorApp,
-    /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s+articleId=\{activeArticleId\}\s+articleKey=\{articleKey\}\s*\/>\s*<EditorToolbar\s+isFocusMode=\{isFocusMode\}\s+onToggleFocusMode=\{toggleFocusMode\}\s*\/>/,
+    /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s+articleId=\{activeArticleId\}\s+articleKey=\{articleKey\}\s*\/>\s*<EditorToolbar\s+isFocusMode=\{isFocusMode\}\s+onToggleFocusMode=\{toggleFocusMode\}\s+onOpenInternalLinking=\{openInternalLinking\}\s*\/>/,
   );
   assert.match(editorApp, /import AiExecutionMonitor from '\.\/AiKeyUsageToast'/);
   assert.match(monitor, /getAiExecutionActivitiesForArticle\(activities, articleId, articleKey\)/);

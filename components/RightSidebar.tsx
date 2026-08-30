@@ -749,6 +749,8 @@ type RightSidebarProps = {
     expandedFlexBasis?: string;
     isHidden?: boolean;
     onToggleCollapsed?: () => void;
+    requestedTab?: 'ai' | 'competitors' | 'writing' | 'links';
+    requestedTabNonce?: number;
 };
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
@@ -756,6 +758,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     expandedFlexBasis,
     isHidden = false,
     onToggleCollapsed,
+    requestedTab,
+    requestedTabNonce = 0,
 }) => {
     const {
         t,
@@ -826,6 +830,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     const smartAnalysisTabRef = useRef<HTMLDivElement>(null);
     const clearReadyCommandSelectionOnNextOpenRef = useRef(false);
     const manualBridgeHistoryMetaRef = useRef<Partial<Record<ExternalAiBridgeProvider, ReadyCommandAnalysisHistoryMeta>>>({});
+    const lastHandledRequestedTabNonceRef = useRef(0);
 
     const [aiOptions, setAiOptions] = useState<AiAnalysisOptions>(() => ({ ...DEFAULT_SMART_ANALYSIS_OPTIONS }));
 
@@ -877,6 +882,17 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             setCompetitorGeminiProvider(isGeminiPaidAvailable ? 'geminiPaid' : 'gemini');
         }
     }, [competitorGeminiProvider, isGeminiFreeAvailable, isGeminiPaidAvailable]);
+
+    useEffect(() => {
+        if (
+            !requestedTab
+            || requestedTabNonce <= 0
+            || requestedTabNonce <= lastHandledRequestedTabNonceRef.current
+        ) return;
+        lastHandledRequestedTabNonceRef.current = requestedTabNonce;
+        setActiveTab(requestedTab);
+        if (collapsed) onToggleCollapsed?.();
+    }, [collapsed, onToggleCollapsed, requestedTab, requestedTabNonce]);
 
     useEffect(() => {
         const tabOrder = ['ai', 'competitors', 'writing', 'links'] as const;

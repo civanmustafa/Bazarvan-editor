@@ -13,6 +13,14 @@ import {
 import { getSupabaseClient } from './supabaseClient';
 import type { InternalLinkTargetPage, InternalLinkSuggestion } from './internalLinkingEngine';
 import {
+  AUTOMATIC_INTERNAL_LINK_GUARD_VERSION,
+  AUTOMATIC_INTERNAL_LINK_MINIMUM_BM25_SCORE,
+  AUTOMATIC_INTERNAL_LINK_MINIMUM_COMPLETENESS,
+  AUTOMATIC_INTERNAL_LINK_MINIMUM_MATCHED_TERMS,
+  AUTOMATIC_INTERNAL_LINK_MINIMUM_SCORE,
+  AUTOMATIC_INTERNAL_LINK_MINIMUM_SCORE_MARGIN,
+} from './internalLinkAutoApply';
+import {
   DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
   type InternalLinkQualityPolicyValues,
 } from './internalLinkQualityPolicy';
@@ -26,6 +34,8 @@ export {
 } from './articleClientContext';
 
 export type InternalLinkActionType = 'applied' | 'dismissed' | 'blocked' | 'reported';
+
+export const INTERNAL_LINK_ACTIONS_CHANGED_EVENT = 'bazarvan:internal-link-actions-changed';
 
 export type InternalLinkAction = {
   id: string;
@@ -339,6 +349,7 @@ export const recordInternalLinkAction = async (input: {
   action: InternalLinkActionType;
   articleSignature: string;
   feedbackNote?: string;
+  applicationMode?: 'manual' | 'automatic';
 }): Promise<InternalLinkAction> => {
   const { data, error } = await getSupabaseClient()
     .from('internal_link_actions')
@@ -358,6 +369,17 @@ export const recordInternalLinkAction = async (input: {
         completenessScore: input.suggestion.completenessScore,
         algorithmVersion: input.suggestion.algorithmVersion,
         paragraphNumber: input.suggestion.paragraphNumber,
+        scoreMargin: input.suggestion.scoreMargin,
+        anchorMatchSources: input.suggestion.anchorMatchSources,
+        applicationMode: input.applicationMode || 'manual',
+        automaticGuard: input.applicationMode === 'automatic' ? {
+          version: AUTOMATIC_INTERNAL_LINK_GUARD_VERSION,
+          minimumScore: AUTOMATIC_INTERNAL_LINK_MINIMUM_SCORE,
+          minimumScoreMargin: AUTOMATIC_INTERNAL_LINK_MINIMUM_SCORE_MARGIN,
+          minimumMatchedTerms: AUTOMATIC_INTERNAL_LINK_MINIMUM_MATCHED_TERMS,
+          minimumCompleteness: AUTOMATIC_INTERNAL_LINK_MINIMUM_COMPLETENESS,
+          minimumBm25Score: AUTOMATIC_INTERNAL_LINK_MINIMUM_BM25_SCORE,
+        } : null,
         feedbackNote: input.feedbackNote?.trim().slice(0, 1000) || null,
       },
       article_signature: input.articleSignature,
@@ -365,7 +387,18 @@ export const recordInternalLinkAction = async (input: {
     .select(ACTION_COLUMNS)
     .single();
   throwIfError(error);
-  return mapAction(data);
+  const action = mapAction(data);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(INTERNAL_LINK_ACTIONS_CHANGED_EVENT, {
+      detail: {
+        articleId: input.articleId,
+        clientId: input.clientId,
+        action: input.action,
+        applicationMode: input.applicationMode || 'manual',
+      },
+    }));
+  }
+  return action;
 };
 
 export const recordInternalLinkSuggestionRun = async (input: {

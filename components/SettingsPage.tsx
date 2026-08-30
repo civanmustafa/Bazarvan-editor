@@ -57,6 +57,7 @@ import {
 import { ARTICLE_STATUS_OPTIONS } from '../constants/articleStatuses';
 import { notifyAiProviderCapabilitiesChanged } from '../utils/aiProviderCapabilities';
 import { notifyPromptRegistryChanged } from '../utils/promptRegistry';
+import { notifyInternalLinkAutomationSettingsChanged } from '../utils/internalLinkAutomationSettings';
 
 type SettingsPageProps = {
   section: string | null;
@@ -353,6 +354,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
       setSystemUsers(response.users || []);
       notifyAiProviderCapabilitiesChanged();
       notifyPromptRegistryChanged();
+      notifyInternalLinkAutomationSettingsChanged();
       setSavedMessage('تم حفظ الإعدادات.');
     } catch (saveError) {
       console.error('Failed to save system settings:', saveError);
@@ -672,6 +674,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           </FieldLabel>
           <ToggleField label="التقارير اليومية" checked={Boolean(settings.system.dailyReportEnabled)} onChange={value => updateSetting('system', 'dailyReportEnabled', value)} />
           <ToggleField label="تسجيل النشاط" checked={Boolean(settings.system.activityTrackingEnabled)} onChange={value => updateSetting('system', 'activityTrackingEnabled', value)} />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="الربط الداخلي">
+        <div className="grid grid-cols-1 gap-4">
+          <ToggleField
+            label="إدراج روابط الربط الداخلي المؤكدة تلقائيًا"
+            description="مفعّل افتراضيًا. يطبق الرابط دون نقل مؤشر الكتابة فقط عندما تبلغ الصلة 90 من 100 على الأقل، ويكون التطابق صريحًا وفريدًا داخل الفقرة، ويفصل الهدف 12 نقطة على الأقل عن أي صفحة منافسة. يشترط تحديد رابط المقالة الحالية لمنع الربط بالصفحة نفسها؛ وتبقى النتائج الأقل يقينًا للمراجعة اليدوية."
+            checked={settings.system.autoApplyStrongInternalLinkSuggestions !== false}
+            onChange={value => updateSetting('system', 'autoApplyStrongInternalLinkSuggestions', value)}
+          />
         </div>
       </SettingsSection>
 

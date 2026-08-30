@@ -205,6 +205,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       autoDiscoverCompetitors: false,
       autoExtractCompetitorContent: false,
       autoRunReadyEngineeringCommands: false,
+      autoApplyStrongInternalLinkSuggestions: false,
       autoGenerateMetaDescription: false,
       unknownAutomationSwitch: true,
     },
@@ -241,6 +242,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.system.autoDiscoverCompetitors, false);
   assert.equal(normalized.system.autoExtractCompetitorContent, false);
   assert.equal(normalized.system.autoRunReadyEngineeringCommands, false);
+  assert.equal(normalized.system.autoApplyStrongInternalLinkSuggestions, false);
   assert.equal(normalized.system.autoGenerateMetaDescription, undefined);
   assert.equal(normalized.system.unknownAutomationSwitch, undefined);
 
@@ -250,6 +252,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(defaults.system.autoDiscoverCompetitors, true);
   assert.equal(defaults.system.autoExtractCompetitorContent, true);
   assert.equal(defaults.system.autoRunReadyEngineeringCommands, true);
+  assert.equal(defaults.system.autoApplyStrongInternalLinkSuggestions, true);
   assert.equal(defaults.system.autoGenerateMetaDescription, undefined);
   const invalidAutomation = registry.normalizeSystemSettingsMap({
     system: {
@@ -258,6 +261,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       autoDiscoverCompetitors: null,
       autoExtractCompetitorContent: 'yes',
       autoRunReadyEngineeringCommands: 'yes',
+      autoApplyStrongInternalLinkSuggestions: 'yes',
       autoGenerateMetaDescription: 'yes',
     },
   });
@@ -266,6 +270,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(invalidAutomation.system.autoDiscoverCompetitors, true);
   assert.equal(invalidAutomation.system.autoExtractCompetitorContent, true);
   assert.equal(invalidAutomation.system.autoRunReadyEngineeringCommands, true);
+  assert.equal(invalidAutomation.system.autoApplyStrongInternalLinkSuggestions, true);
   assert.equal(invalidAutomation.system.autoGenerateMetaDescription, undefined);
   assert.equal(registry.normalizeSystemSettingsMap({
     roles: { publisherUserId: 'not-a-user-id' },

@@ -576,7 +576,9 @@ test('editor integration keeps native links primary and phase 9 AI review option
   assert.match(panel, /مراجعة الاقتراحات بالذكاء الاصطناعي/);
   assert.match(panel, /INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES/);
   assert.match(panel, /source: 'internal_link_review'/);
-  assert.match(panel, /النتائج استشارية ولم يُطبق أي رابط تلقائيًا/);
+  assert.match(panel, /المراجعة استشارية ولا تطبق رابطًا بذاتها/);
+  assert.match(panel, /درجة 90 فأعلى/);
+  assert.match(panel, /فارق 12 نقطة/);
   assert.match(aiReview, /input\.suggestions[\s\S]*\.slice\(0, INTERNAL_LINK_AI_REVIEW_MAX_CANDIDATES\)/);
   assert.match(aiReview, /candidatesById\.get\(pageId\)/);
   assert.match(aiReview, /candidate\.allowedAnchorTexts\.includes\(requestedAnchor\)/);
@@ -603,5 +605,5 @@ test('editor integration keeps native links primary and phase 9 AI review option
   assert.match(releaseScript, /CLIENT_CENTER_CRAWLING_MIGRATION/);
   assert.match(guide, /20260724030000_internal_linking_engine\.sql/);
   assert.match(guide, /20260725010000_client_draft_creation\.sql/);
-  assert.match(guide, /لا يحتاج هذا الترحيل إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
+  assert.match(guide, /لا يحتاج ترحيل الإدراج التلقائي إلى مفتاح ذكاء اصطناعي أو Search Console أو عملية PM2 جديدة/);
 });

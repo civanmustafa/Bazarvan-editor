@@ -17,6 +17,7 @@ import contentWritingSourcesHandler from '../api/contentWritingSources';
 import competitorsHandler from '../api/competitors';
 import externalAnalysisHandler from '../api/externalAnalysis';
 import geminiHandler, { geminiProgressHandler } from '../api/gemini';
+import internalLinkingSettingsHandler from '../api/internalLinkingSettings';
 import n8nArticlesHandler from '../api/n8nArticles';
 import promptRegistryHandler from '../api/promptRegistry';
 import systemSettingsHandler from '../api/systemSettings';
@@ -45,6 +46,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'content-writing-external-result', method: 'ALL', path: '/api/content-writing/external-result', handler: contentWritingExternalResultHandler },
   { id: 'content-writing-sources', method: 'ALL', path: '/api/content-writing/sources', handler: contentWritingSourcesHandler },
   { id: 'ai-capabilities', method: 'ALL', path: '/api/ai/capabilities', handler: aiCapabilitiesHandler },
+  { id: 'internal-linking-settings', method: 'ALL', path: '/api/internal-linking/settings', handler: internalLinkingSettingsHandler },
   { id: 'prompt-registry', method: 'ALL', path: '/api/ai/prompt-registry', handler: promptRegistryHandler },
   { id: 'competitors', method: 'ALL', path: '/api/competitors', handler: competitorsHandler },
   { id: 'article-import', method: 'ALL', path: '/api/articles/import-preview', handler: articleImportHandler },

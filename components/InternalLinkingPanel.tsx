@@ -21,6 +21,7 @@ import { useUser } from '../contexts/UserContext';
 import type { AiPatchProvider } from '../types';
 import {
   listInternalLinkingClients,
+  INTERNAL_LINK_ACTIONS_CHANGED_EVENT,
   loadArticleClientContext,
   loadInternalLinkActions,
   loadInternalLinkQualityPolicy,
@@ -52,13 +53,9 @@ import {
   parseInternalLinkAiReviewResponse,
   type InternalLinkAiReview,
 } from '../utils/internalLinkAiReview';
+import { readExistingInternalLinks } from '../utils/internalLinkAutoApply';
 import { buildUnifiedCompanyKeywords } from '../utils/clientCompanyIdentity';
 import { getPromptTemplate, PROMPT_TEMPLATE_IDS } from '../constants/promptRegistry';
-
-type ExistingLinkState = {
-  urls: string[];
-  anchors: string[];
-};
 
 type AnchorRange = {
   from: number;
@@ -69,16 +66,6 @@ const DEFAULT_EFFECTIVE_QUALITY_POLICY: EffectiveInternalLinkQualityPolicy = {
   values: DEFAULT_INTERNAL_LINK_QUALITY_POLICY,
   source: 'default',
   policyVersion: 1,
-};
-
-const readExistingLinks = (html: string): ExistingLinkState => {
-  if (!html || typeof DOMParser === 'undefined') return { urls: [], anchors: [] };
-  const document = new DOMParser().parseFromString(html, 'text/html');
-  const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'));
-  return {
-    urls: links.map(link => link.href || link.getAttribute('href') || '').filter(Boolean),
-    anchors: links.map(link => link.textContent?.trim() || '').filter(Boolean),
-  };
 };
 
 const findUnlinkedAnchorRange = (editor: Editor, anchorText: string): AnchorRange | null => {
@@ -197,7 +184,7 @@ const InternalLinkingPanel: React.FC = () => {
   ].filter(Boolean), [keywords]);
 
   const existingLinks = useMemo(
-    () => readExistingLinks(editor?.getHTML() || ''),
+    () => editor ? readExistingInternalLinks(editor) : { urls: [], anchors: [] },
     [articleText, editor, editorRevision],
   );
 
@@ -269,6 +256,23 @@ const InternalLinkingPanel: React.FC = () => {
     selectedClientId,
     suggestions,
   ]);
+
+  useEffect(() => {
+    if (!activeArticleId || !selectedClientId) return;
+    const handleActionsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        articleId?: string;
+        clientId?: string;
+      }>).detail;
+      if (detail?.articleId !== activeArticleId || detail?.clientId !== selectedClientId) return;
+      setEditorRevision(value => value + 1);
+      void loadInternalLinkActions(activeArticleId, selectedClientId)
+        .then(setActions)
+        .catch(loadError => console.warn('Could not refresh internal-link actions:', loadError));
+    };
+    window.addEventListener(INTERNAL_LINK_ACTIONS_CHANGED_EVENT, handleActionsChanged);
+    return () => window.removeEventListener(INTERNAL_LINK_ACTIONS_CHANGED_EVENT, handleActionsChanged);
+  }, [activeArticleId, selectedClientId]);
 
   useEffect(() => {
     setAiReviews({});
@@ -548,7 +552,7 @@ const InternalLinkingPanel: React.FC = () => {
       setAiReviews(Object.fromEntries(reviews.map(review => [review.pageId, review])));
       setAiReviewSignature(requestSignature);
       setNotice(
-        `اكتملت مراجعة ${reviews.length.toLocaleString('ar')} اقتراحات بالذكاء الاصطناعي. النتائج استشارية ولم يُطبق أي رابط تلقائيًا.`,
+        `اكتملت مراجعة ${reviews.length.toLocaleString('ar')} اقتراحات بالذكاء الاصطناعي. المراجعة استشارية ولا تطبق رابطًا بذاتها.`,
       );
     } catch (reviewError) {
       setError(
@@ -765,7 +769,7 @@ const InternalLinkingPanel: React.FC = () => {
             ))}
           </select>
           <span className="block text-[10px] font-semibold leading-5 text-gray-400">
-            اختياري. عند تحديد الصفحة المنشورة يستبعدها المحرك حتى لا يقترح ربط المقالة بنفسها.
+            اختياري للاقتراحات اليدوية، وإلزامي للإدراج التلقائي. تحديد الصفحة المنشورة يمنع ربط المقالة بنفسها.
           </span>
         </label>
       )}
@@ -974,6 +978,7 @@ const InternalLinkingPanel: React.FC = () => {
                   <div className="mt-2 flex flex-wrap gap-2 text-[9px] font-bold text-gray-400">
                     <span>BM25: {suggestion.bm25Score}</span>
                     <span>اكتمال بيانات الصفحة: {suggestion.completenessScore}%</span>
+                    <span>فارق أقرب هدف: {suggestion.scoreMargin}</span>
                   </div>
                   {suggestion.matchedTerms.length > 0 && (
                     <div className="mt-2 text-[10px] font-semibold leading-5 text-gray-400">
@@ -1008,7 +1013,7 @@ const InternalLinkingPanel: React.FC = () => {
                         </button>
                       )}
                       <div className="mt-1.5 text-[9px] opacity-75">
-                        هذه مراجعة استشارية فقط؛ تطبيق الرابط يبقى بقرار الموظف.
+                        هذه المراجعة استشارية فقط؛ لا تنفذ رابطًا بذاتها.
                       </div>
                     </div>
                   )}
@@ -1085,7 +1090,7 @@ const InternalLinkingPanel: React.FC = () => {
 
           <div className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white p-2.5 text-[10px] font-semibold leading-5 text-gray-500 dark:border-[#3C3C3C] dark:bg-[#272727] dark:text-gray-400">
             <ShieldCheck size={15} className="mt-0.5 shrink-0 text-emerald-500" />
-            لا يضيف المحرك أي رابط تلقائيًا. يحدد الموظف نص الربط ثم يوافق على التطبيق، مع استبعاد الصفحة الحالية والروابط الموجودة والمعطلة وNoindex وغير الجاهزة.
+            عند تفعيل المسؤول، يضيف المحرك تلقائيًا فقط الرابط المؤكد بدرجة 90 فأعلى، وبفارق 12 نقطة عن أقرب هدف منافس، وفي ظهور وحيد داخل الفقرة المقصودة، وبعد تحديد رابط المقالة الحالية. تبقى جميع النتائج الأخرى للتطبيق اليدوي، مع استبعاد الروابط الموجودة والمعطلة وNoindex وغير الجاهزة.
           </div>
         </>
       )}

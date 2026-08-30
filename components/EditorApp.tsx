@@ -18,6 +18,7 @@ import {
   getExpandedSidebarFlexBasis,
 } from '../utils/editorWorkspaceLayout';
 import EditorToolbar from './EditorToolbar';
+import InternalLinkAutomation from './InternalLinkAutomation';
 import ConcurrentEditConflictBanner from './ConcurrentEditConflictBanner';
 import GoogleMetadataSuggestions from './GoogleMetadataSuggestions';
 import AiExecutionMonitor from './AiKeyUsageToast';
@@ -81,6 +82,10 @@ const EditorView: React.FC = () => {
     () => loadEditorWorkspacePreferences(currentUserId),
   );
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [rightSidebarRequest, setRightSidebarRequest] = useState<{
+    tab: 'links';
+    nonce: number;
+  } | null>(null);
 
   const displayTooltip = pinnedTooltip || tooltip;
 
@@ -131,6 +136,18 @@ const EditorView: React.FC = () => {
     setIsFocusMode(currentValue => !currentValue);
   }, []);
 
+  const openInternalLinking = useCallback(() => {
+    setIsFocusMode(false);
+    setWorkspacePreferences(currentPreferences => ({
+      ...currentPreferences,
+      analysisPanelCollapsed: false,
+    }));
+    setRightSidebarRequest(currentRequest => ({
+      tab: 'links',
+      nonce: (currentRequest?.nonce || 0) + 1,
+    }));
+  }, []);
+
   const leftSidebarFlexBasis = getExpandedSidebarFlexBasis({
     basePercent: EDITOR_WORKSPACE_LAYOUT.leftSidebarExpandedPercent,
     peerExpandedPercent: EDITOR_WORKSPACE_LAYOUT.rightSidebarExpandedPercent,
@@ -157,7 +174,9 @@ const EditorView: React.FC = () => {
           <EditorToolbar
             isFocusMode={isFocusMode}
             onToggleFocusMode={toggleFocusMode}
+            onOpenInternalLinking={openInternalLinking}
           />
+          <InternalLinkAutomation />
           <ConcurrentEditConflictBanner />
           <div
             ref={scrollContainerRef}
@@ -191,6 +210,8 @@ const EditorView: React.FC = () => {
             expandedFlexBasis={rightSidebarFlexBasis}
             isHidden={isFocusMode}
             onToggleCollapsed={toggleAnalysisPanel}
+            requestedTab={rightSidebarRequest?.tab}
+            requestedTabNonce={rightSidebarRequest?.nonce}
           />
         </React.Suspense>
         {displayTooltip && (
