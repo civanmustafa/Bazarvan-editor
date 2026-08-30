@@ -885,7 +885,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   return (
     <div className="space-y-4 text-gray-700 dark:text-gray-200" dir={locale === 'ar' ? 'rtl' : 'ltr'}>
       <div className="flex items-center justify-between gap-2 border-b border-gray-200 pb-3 dark:border-[#3C3C3C]">
-        <div className="text-sm font-black text-gray-800 dark:text-gray-100">{locale === 'ar' ? 'السجل الخارجي' : 'External log'}</div>
+        <div className="text-sm font-black text-gray-800 dark:text-gray-100">السجل الخارجي</div>
         <button type="button" onClick={() => void refreshJobs(true)} disabled={loading} className="rounded p-1.5 text-gray-500 hover:bg-[#d4af37]/10 hover:text-[#d4af37] disabled:opacity-50" title={locale === 'ar' ? 'تحديث' : 'Refresh'}>
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
         </button>
