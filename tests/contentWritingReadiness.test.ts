@@ -42,7 +42,11 @@ const createProbeClient = (options: {
   rpc: async (name: string) => {
     options.rpcCalls?.push(name);
     return {
-      data: name === 'full_article_pipeline_schema_version' ? 5 : [] as unknown[],
+      data: name === 'full_article_pipeline_schema_version'
+        ? 5
+        : name === 'content_writing_automation_schema_version'
+          ? 2
+          : [] as unknown[],
       error: name === options.failedRpc
         ? { code: 'PGRST202', message: 'Internal RPC schema detail that must stay private.' }
         : null,
@@ -62,7 +66,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 21);
+  assert.equal(result.requiredMigrationCount, 22);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
@@ -72,11 +76,13 @@ test('content-writing readiness checks every required schema surface', async () 
     fullPipelineJobs: true,
     keyCoordinator: true,
     automationEvaluator: true,
+    automationVersion: true,
     competitorPreparationCoordinator: true,
     fullPipelineCoordinator: true,
     fullPipelineVersion: true,
   });
   assert.deepEqual(rpcCalls.sort(), [
+    'content_writing_automation_schema_version',
     'enqueue_content_writing_competitor_preparation',
     'enqueue_full_article_pipeline',
     'evaluate_content_writing_automation_readiness',
@@ -160,6 +166,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260812010000_gemini_key_availability_waiting\.sql/);
   assert.match(releaseRegistry, /20260823010000_automatic_content_writing_queue\.sql/);
   assert.match(releaseRegistry, /20260823020000_content_writing_competitor_preparation\.sql/);
+  assert.match(releaseRegistry, /20260830030000_automatic_content_writing_empty_editor_guard\.sql/);
   assert.match(releaseRegistry, /20260728030000_full_article_pipeline\.sql/);
   assert.match(releaseRegistry, /20260824010000_full_article_pipeline_safety\.sql/);
   assert.match(releaseRegistry, /20260824020000_full_article_pipeline_optional_prerequisites\.sql/);

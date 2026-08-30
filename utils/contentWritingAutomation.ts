@@ -294,6 +294,7 @@ export const cancelContentWritingAutomationItem = (
 
 const READINESS_LABELS: Record<string, [string, string]> = {
   draft_status: ['حالة المقالة تسمح بالكتابة', 'Article status allows writing'],
+  article_editor_empty: ['المحرر خالٍ من نص سابق', 'Article editor is empty'],
   article_title: ['عنوان المقالة', 'Article title'],
   primary_keyword: ['الكلمة المفتاحية الأساسية', 'Primary keyword'],
   alternative_keywords: ['الصيغ البديلة', 'Alternative keyword forms'],

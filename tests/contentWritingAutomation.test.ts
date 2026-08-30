@@ -10,6 +10,7 @@ test('automatic writing readiness exposes every administrator prerequisite in pl
   const client = await readWorkspaceFile('utils/contentWritingAutomation.ts');
   for (const code of [
     'draft_status',
+    'article_editor_empty',
     'article_title',
     'primary_keyword',
     'alternative_keywords',
@@ -54,6 +55,20 @@ test('automatic writing is a durable one-at-a-time server queue with cooldown an
   assert.match(routeRegistry, /\/api\/content-writing\/automation/);
   assert.match(API, /list_content_writing_automation_candidates/);
   assert.match(panel, /قائمة التحقق/);
+});
+
+test('automatic writing requires an empty saved editor and cancels invalid active work', async () => {
+  const [migration, client] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260830030000_automatic_content_writing_empty_editor_guard.sql'),
+    readWorkspaceFile('utils/contentWritingAutomation.ts'),
+  ]);
+
+  assert.match(migration, /article_editor_has_text\(v_article\.plain_text\)/);
+  assert.match(migration, /jsonb_build_array\('article_editor_empty'\)/);
+  assert.match(migration, /before insert on public\.content_writing_sessions/);
+  assert.match(migration, /Automatic content writing requires an empty article editor/);
+  assert.match(migration, /cancel_requested_at = coalesce\(session\.cancel_requested_at, now\(\)\)/);
+  assert.match(client, /article_editor_empty: \['المحرر خالٍ من نص سابق'/);
 });
 
 test('manual writing and the full workflow explicitly arbitrate with the automatic queue', async () => {

@@ -59,6 +59,7 @@ export type ContentWritingReadinessResult = {
     (typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id']
       | 'keyCoordinator'
       | 'automationEvaluator'
+      | 'automationVersion'
       | 'competitorPreparationCoordinator'
       | 'fullPipelineCoordinator'
       | 'fullPipelineVersion',
@@ -111,6 +112,7 @@ export const checkContentWritingReadiness = async (options: {
       ...CONTENT_WRITING_SCHEMA_PROBES.map(probe => [probe.id, false] as const),
       ['keyCoordinator', false] as const,
       ['automationEvaluator', false] as const,
+      ['automationVersion', false] as const,
       ['competitorPreparationCoordinator', false] as const,
       ['fullPipelineCoordinator', false] as const,
       ['fullPipelineVersion', false] as const,
@@ -176,6 +178,22 @@ export const checkContentWritingReadiness = async (options: {
       checks.automationEvaluator = true;
     } catch (error) {
       failures.push(`automationEvaluator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
+    }
+  })(), (async () => {
+    try {
+      const result = await withTimeout(client.rpc('content_writing_automation_schema_version', {}), timeoutMs);
+      if (result.error) {
+        failures.push(describeProbeFailure('automationVersion', result.error));
+        return;
+      }
+      const version = Number(result.data);
+      if (!Number.isFinite(version) || version < 2) {
+        failures.push(`automationVersion: expected at least 2, received ${String(version)}.`);
+        return;
+      }
+      checks.automationVersion = true;
+    } catch (error) {
+      failures.push(`automationVersion: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
     }
   })(), (async () => {
     try {

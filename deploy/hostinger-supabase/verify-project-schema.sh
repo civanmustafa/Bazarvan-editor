@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-101}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-103}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-59}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -78,6 +78,8 @@ readonly UNIFIED_SEMANTIC_GOOGLE_METADATA_FUNCTION="$(sql_scalar "select to_regp
 readonly UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP="$(sql_scalar "select position('googleMetadata' in pg_get_functiondef('public.stamp_external_semantic_run_targets()'::regprocedure)) > 0")"
 readonly READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED="$(sql_scalar "select not exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'articles' and t.tgname = 'enqueue_article_meta_description_from_article' and not t.tgisinternal)")"
 readonly READY_STATUS_META_DESCRIPTION_SETTING_RETIRED="$(sql_scalar "select coalesce(not (value ? 'autoGenerateMetaDescription'), true) from public.app_settings where key = 'system' and not is_secret limit 1")"
+readonly AUTOMATIC_WRITING_SCHEMA_VERSION="$(sql_scalar "select coalesce(public.content_writing_automation_schema_version(), 0)")"
+readonly AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER="$(sql_scalar "select exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'content_writing_sessions' and t.tgname = 'guard_automatic_content_writing_empty_editor' and not t.tgisinternal)")"
 
 (( PUBLIC_TABLES == EXPECTED_PUBLIC_TABLES )) \
   || fail "Public table count is ${PUBLIC_TABLES}; expected ${EXPECTED_PUBLIC_TABLES}."
@@ -112,6 +114,8 @@ readonly READY_STATUS_META_DESCRIPTION_SETTING_RETIRED="$(sql_scalar "select coa
 [[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
 [[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
+(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 2 )) || fail "Automatic content-writing empty-editor guard version is missing."
+[[ "${AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER}" == "t" ]] || fail "Automatic content-writing empty-editor trigger is missing."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"
