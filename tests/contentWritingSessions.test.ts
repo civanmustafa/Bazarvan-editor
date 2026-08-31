@@ -298,7 +298,9 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(engine, /resolveContentWritingResumePreference/);
   assert.match(engine, /messages: conversation\.messages\.map/);
   assert.match(engine, /assertContentWritingConversation/);
-  assert.match(engine, /systemInstruction: instructions\.content/);
+  assert.match(engine, /instructions\.content\.includes\(CONTENT_WRITING_PROTECTED_SYSTEM_GUARD\)/);
+  assert.match(engine, /instructions: currentSystemInstructions/);
+  assert.match(engine, /systemInstruction: currentSystemInstructions/);
   assert.match(engine, /executeContentWritingTurn/);
   assert.match(engine, /executeOpenAiRequest/);
   assert.match(engine, /credentialPurpose = options\.session\.progress\?\.resumed === true/);

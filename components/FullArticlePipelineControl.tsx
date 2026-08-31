@@ -360,6 +360,7 @@ const FullArticlePipelineControl: React.FC<Props> = ({
             {isArabic ? 'عدد منافسي الإنشاء الشامل' : 'Full-workflow competitors'}
           </span>
           <AppSelect
+            size="compact"
             value={competitorCount}
             onChange={event => setCompetitorCount(Number(event.target.value))}
             disabled={isActive(job) || busy !== ''}

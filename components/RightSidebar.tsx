@@ -2184,6 +2184,7 @@ ${readyCommandCompetitorBlocks}`;
                                         <span className="text-xs font-bold">Gemini</span>
                                     </button>
                                     <AppSelect
+                                        size="compact"
                                         value={selectedSmartGeminiModel}
                                         onChange={event => setSelectedSmartGeminiModel(normalizeGeminiFreeModel(event.target.value, geminiFreeModelValues))}
                                         onClick={event => event.stopPropagation()}

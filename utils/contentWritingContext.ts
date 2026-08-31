@@ -13,6 +13,7 @@ import {
   chunkContentWritingReference,
   type ContentWritingSourceChunk,
 } from './contentWritingKnowledge';
+import { buildContentWritingSourceInstructionsBlock } from './contentWritingSourceInstructions';
 import { getUsableCompetitorText } from './competitorContent';
 import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import {
@@ -442,7 +443,6 @@ const createWritingSourcesValue = (
       title: source.title || '',
       url: source.url || '',
       role: source.sourceRole,
-      focusInstructions: source.focusInstructions || '',
       chunks: chunks
         .filter(chunk => chunk.sourceId === source.id)
         .map(chunk => ({ sourceId: chunk.id, text: chunk.text })),
@@ -477,6 +477,15 @@ export const buildContentWritingPromptBundle = (
   const competitorChunks = createCompetitorChunks(competitors);
   const writingSourceChunks = createWritingSourceChunks(input.writingSources || []);
   const sourceChunks = [...writingSourceChunks, ...competitorChunks];
+  const writingSourceInstructionsBlock = buildContentWritingSourceInstructionsBlock(
+    (input.writingSources || [])
+      .filter(source => source.enabled && source.status === 'ready' && Boolean(source.content.trim()))
+      .map(source => ({
+        sourceId: source.id,
+        sourceRole: source.sourceRole,
+        instructions: source.focusInstructions,
+      })),
+  );
   const variables: Record<string, string> = {
     article_id: toText(input.articleId).trim() || 'غير متوفر',
     article_title: toText(input.title),
@@ -518,6 +527,8 @@ export const buildContentWritingPromptBundle = (
       role,
       content: stage === 'instructions'
         ? `${rendered.text}\n\n${CONTENT_WRITING_PROTECTED_SYSTEM_GUARD}`
+        : stage === 'articleContext' && writingSourceInstructionsBlock
+          ? `${rendered.text}\n\n${writingSourceInstructionsBlock}`
         : rendered.text,
     };
   });

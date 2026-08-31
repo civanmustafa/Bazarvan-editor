@@ -731,6 +731,7 @@ const InternalLinkingPanel: React.FC = () => {
           العميل ومخزون روابط الموقع
         </span>
         <AppSelect
+          size="compact"
           value={selectedClientId}
           onChange={event => void handleClientChange(event.target.value)}
           disabled={isLoadingContext || isSavingClient}
@@ -756,6 +757,7 @@ const InternalLinkingPanel: React.FC = () => {
             رابط المقالة الحالية
           </span>
           <AppSelect
+            size="compact"
             value={currentPageUrl}
             onChange={event => void handleCurrentPageChange(event.target.value)}
             disabled={isLoadingPages || isSavingCurrentPage}
@@ -845,6 +847,7 @@ const InternalLinkingPanel: React.FC = () => {
                     المزود المختار أولًا
                   </span>
                   <AppSelect
+                    size="compact"
                     value={quickAiProvider}
                     onChange={event => setQuickAiProvider(event.target.value as AiPatchProvider)}
                     disabled={isAiReviewing}
@@ -942,6 +945,7 @@ const InternalLinkingPanel: React.FC = () => {
                     <label className="mt-3 block space-y-1">
                       <span className="text-[10px] font-black text-gray-500 dark:text-gray-300">اختيار نص ربط بديل من الفقرة</span>
                       <AppSelect
+                        size="compact"
                         value={selectedAnchor}
                         onChange={event => setSelectedAnchors(current => ({
                           ...current,

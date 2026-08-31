@@ -900,7 +900,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
 
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs font-black text-gray-700 dark:text-gray-200">{locale === 'ar' ? `جميع التحليلات الخارجية (${jobs.length})` : `All external analyses (${jobs.length})`}</div>
-        <AppSelect value={filter} onChange={event => setFilter(event.target.value as ExternalAnalysisResultFilter)} className="rounded-md border border-gray-200 bg-white px-2 py-1 text-[10px] font-bold text-gray-600 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300">
+        <AppSelect size="compact" value={filter} onChange={event => setFilter(event.target.value as ExternalAnalysisResultFilter)} className="rounded-md border border-gray-200 bg-white px-2 py-1 text-[10px] font-bold text-gray-600 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300">
           <option value="all">{locale === 'ar' ? 'الكل' : 'All'}</option>
           <option value="active">{locale === 'ar' ? 'الجارية' : 'Active'}</option>
           <option value="completed">{locale === 'ar' ? 'المكتملة' : 'Completed'}</option>

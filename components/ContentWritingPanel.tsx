@@ -1361,6 +1361,7 @@ const ContentWritingPanel: React.FC = () => {
                 {isArabic ? 'الموديل' : 'Model'}
               </span>
               <AppSelect
+                size="compact"
                 value={selectedModel}
                 title={modelPreferenceHint}
                 onChange={event => {

@@ -1688,7 +1688,7 @@ const ClientCenterSettings: React.FC = () => {
               </div>
               {isAdmin && (
                 <div className="flex items-center gap-2">
-                  <AppSelect className={`${inputClass} w-auto`} value={assignment.accessLevel} onChange={event => {
+                  <AppSelect size="compact" className={`${inputClass} w-auto`} value={assignment.accessLevel} onChange={event => {
                     void runMutation(
                       () => saveClientCenterAssignment({
                         clientId: assignment.clientId,

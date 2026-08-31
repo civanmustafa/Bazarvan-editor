@@ -69,6 +69,7 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
           <label className="inline-flex h-7 items-center gap-1 rounded-md bg-white/55 px-2 text-[11px] font-black text-[#806718] dark:bg-black/15 dark:text-[#f2d675]">
             <span>{uiLanguage === 'ar' ? 'الحالة:' : 'Status:'}</span>
             <AppSelect
+              size="compact"
               value={activeArticleSettings.status}
               disabled={isStatusSaving}
               onChange={(event) => { void handleStatusChange(event.target.value); }}

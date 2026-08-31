@@ -159,6 +159,37 @@ test('claim selection and usage summaries accept only persisted claim IDs', asyn
   );
 });
 
+test('source assessments do not absorb or truncate user writing instructions', async () => {
+  const { normalizeContentWritingSourceClaims } = await importClaims();
+  const userInstruction = `USER-INSTRUCTION-${'x'.repeat(1_900)}`;
+  const normalized = normalizeContentWritingSourceClaims({
+    value: {
+      sourceAssessments: [{
+        competitorNumber: 10_001,
+        category: 'unknown',
+        freshness: 'unknown',
+        assessmentNotes: 'Model source assessment.',
+      }],
+      claims: [],
+    },
+    items: [],
+    chunks: [{
+      id: 'Rreference-1-S001',
+      competitorNumber: 10_001,
+      title: 'Raw writing source',
+      url: '',
+      text: 'Reference material.',
+      sourceKind: 'writing_source',
+      sourceRole: 'primary',
+      sourceId: 'reference-1',
+      focusInstructions: userInstruction,
+    }],
+  });
+
+  assert.equal(normalized.sourceRegistry.sources[0].assessmentNotes, 'Model source assessment.');
+  assert.doesNotMatch(normalized.sourceRegistry.sources[0].assessmentNotes, /USER-INSTRUCTION/);
+});
+
 test('high-impact claims are blocked without a current validated primary source', async () => {
   const { normalizeContentWritingSourceClaims } = await importClaims();
   const normalized = normalizeContentWritingSourceClaims({

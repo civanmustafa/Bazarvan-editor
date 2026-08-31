@@ -2,16 +2,26 @@ import React, { useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown } from 'lucide-react';
 
+export type AppSelectSize = 'compact' | 'medium' | 'large';
+
 type AppSelectProps = Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'multiple' | 'size' | 'onClick'> & {
+  /** Spacing and popup dimensions; the parent remains in control of field width. */
+  size?: AppSelectSize;
   onClick?: React.MouseEventHandler<HTMLButtonElement>;
 };
 
 type MenuOption = { value: string; label: string; disabled: boolean; hidden: boolean; group: string };
 type MenuPosition = { top: number; left: number; width: number; maxHeight: number; direction: 'rtl' | 'ltr' };
 
+const MENU_DIMENSIONS: Record<AppSelectSize, { minWidth: number; maxHeight: number; gap: number }> = {
+  compact: { minWidth: 136, maxHeight: 208, gap: 4 },
+  medium: { minWidth: 200, maxHeight: 240, gap: 8 },
+  large: { minWidth: 240, maxHeight: 320, gap: 8 },
+};
+
 /** Shared single-choice menu. The native control retains form values and real change events. */
 const AppSelect: React.FC<AppSelectProps> = ({
-  children, className = '', id, style, title, dir, disabled, required, autoFocus, tabIndex,
+  children, className = '', id, style, title, dir, disabled, required, autoFocus, tabIndex, size = 'medium',
   onClick, onChange, onInvalid, ...nativeProps
 }) => {
   const generatedId = useId();
@@ -95,13 +105,13 @@ const AppSelect: React.FC<AppSelectProps> = ({
       const viewportWidth = viewport?.width || document.documentElement.clientWidth;
       const viewportHeight = viewport?.height || window.innerHeight;
       const edge = 8;
-      const gap = 8;
+      const { gap, minWidth, maxHeight: sizeMaxHeight } = MENU_DIMENSIONS[size];
       const below = viewportTop + viewportHeight - rect.bottom - edge - gap;
       const above = rect.top - viewportTop - edge - gap;
-      const height = Math.min(menuRef.current?.scrollHeight || 240, 240);
+      const height = Math.min(menuRef.current?.scrollHeight || sizeMaxHeight, sizeMaxHeight);
       const upwards = below < height && above > below;
-      const maxHeight = Math.max(0, Math.min(240, upwards ? above : below));
-      const width = Math.min(Math.max(rect.width, 200), viewportWidth - edge * 2);
+      const maxHeight = Math.max(0, Math.min(sizeMaxHeight, upwards ? above : below));
+      const width = Math.max(0, Math.min(Math.max(rect.width, minWidth), viewportWidth - edge * 2));
       const direction = getComputedStyle(trigger).direction === 'rtl' ? 'rtl' : 'ltr';
       const left = Math.max(viewportLeft + edge, Math.min(direction === 'rtl' ? rect.right - width : rect.left, viewportLeft + viewportWidth - width - edge));
       setPosition({
@@ -135,7 +145,7 @@ const AppSelect: React.FC<AppSelectProps> = ({
       document.removeEventListener('pointerdown', dismissOutside, true);
       document.removeEventListener('focusin', dismissOutside);
     };
-  }, [open]);
+  }, [open, size, options]);
 
   useLayoutEffect(() => {
     if (open) menuRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
@@ -249,6 +259,7 @@ const AppSelect: React.FC<AppSelectProps> = ({
         tabIndex={tabIndex}
         title={title}
         dir={dir}
+        data-menu-size={size}
         style={style}
         className={`app-select-trigger ${className}`}
         onKeyDown={handleKeyDown}
@@ -270,6 +281,7 @@ const AppSelect: React.FC<AppSelectProps> = ({
           aria-label={nativeProps['aria-label'] || label}
           aria-labelledby={nativeProps['aria-labelledby'] || (!nativeProps['aria-label'] && !label ? triggerId : undefined)}
           dir={position?.direction || dir}
+          data-menu-size={size}
           className="editor-menu app-select-menu custom-scrollbar"
           style={position ? { ...position, visibility: 'visible' } : { visibility: 'hidden' }}
           onMouseDown={event => event.preventDefault()}
@@ -291,7 +303,7 @@ const AppSelect: React.FC<AppSelectProps> = ({
                 onClick={() => choose(index)}
               >
                 <span className="app-select-option-label">{option.label}</span>
-                <Check size={14} aria-hidden="true" className={index === selectedIndex ? 'shrink-0' : 'invisible shrink-0'} />
+                <Check size={size === 'compact' ? 12 : 14} aria-hidden="true" className={index === selectedIndex ? 'shrink-0' : 'invisible shrink-0'} />
               </div>
             </React.Fragment>
           ))}

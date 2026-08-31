@@ -288,6 +288,7 @@ const ArticleStatusControl: React.FC<{
       {editable ? (
         <>
           <AppSelect
+            size="compact"
             value={status}
             disabled={disabled}
             aria-label={`حالة المقالة: ${label}`}
@@ -345,6 +346,7 @@ const EditableN8nSettingField: React.FC<{
   >
     <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
     <AppSelect
+      size="compact"
       value={value || ''}
       disabled={disabled}
       onClick={event => event.stopPropagation()}
@@ -1952,6 +1954,7 @@ const Dashboard: React.FC = () => {
                             )}
                             <div className="flex items-center gap-2">
                                 <AppSelect
+                                    size="compact"
                                     value={bulkStatus}
                                     onChange={event => setBulkStatus(event.target.value as RemoteArticleSettingsPatch['status'])}
                                     className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1.5 text-xs font-bold text-gray-700 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-200"

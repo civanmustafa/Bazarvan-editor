@@ -1074,12 +1074,13 @@ const StructureTab: React.FC = () => {
                   )}
               </button>
               <AppSelect
+                  size="compact"
                   value={selectedBulkFixGeminiModel}
                   onChange={event => setSelectedBulkFixGeminiModel(normalizeGeminiFreeModel(event.target.value, geminiFreeModelValues))}
                   disabled={fixAllProgress.running}
                   title={uiLanguage === 'ar' ? 'اختيار موديل Gemini للإصلاح المتعدد' : 'Choose Gemini model for bulk fixes'}
                   dir="ltr"
-                  className="min-h-12 min-w-0 rounded-2xl border border-[#d4af37]/40 bg-white px-2 py-2 text-[10px] font-black text-gray-700 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-100"
+                  className="min-h-8 min-w-0 self-center rounded-lg border border-[#d4af37]/40 bg-white px-2 py-1 text-[10px] font-black text-gray-700 outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] disabled:opacity-60 dark:border-[#3C3C3C] dark:bg-[#2A2A2A] dark:text-gray-100"
               >
                   {geminiFreeModelOptions.map(option => (
                       <option key={option.value} value={option.value}>{option.label}</option>

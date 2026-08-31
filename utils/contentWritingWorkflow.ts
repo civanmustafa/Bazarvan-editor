@@ -41,6 +41,11 @@ export const CONTENT_WRITING_MAX_TARGETED_SECTION_REPAIRS = CONTENT_WRITING_MAX_
 
 type ContentWritingKeywordBrief = Pick<Keywords, 'primary' | 'secondaries' | 'lsi' | 'company'>;
 
+const stringifyUntrustedPromptJson = (value: unknown): string => JSON.stringify(value, null, 2)
+  .replace(/</g, '\\u003c')
+  .replace(/>/g, '\\u003e')
+  .replace(/&/g, '\\u0026');
+
 const appendProtectedWritingProtocol = (
   prompt: string,
   options: {
@@ -690,16 +695,16 @@ export const buildContentWritingSectionPrompt = (options: {
     required_claim_ids: (options.section.requiredClaimIds || []).join(', ') || 'لا يوجد',
     knowledge_items_json: JSON.stringify(options.knowledgeItems, null, 2),
     claims_ledger_json: JSON.stringify(options.claims, null, 2),
-    source_chunks_json: JSON.stringify(options.sourceChunks.map(chunk => ({
+    source_chunks_json: stringifyUntrustedPromptJson(options.sourceChunks.map(chunk => ({
       sourceId: chunk.id,
       competitorNumber: chunk.competitorNumber,
       title: chunk.title,
       url: chunk.url,
       sourceKind: chunk.sourceKind || 'competitor',
       sourceRole: chunk.sourceRole || null,
-      focusInstructions: chunk.focusInstructions || '',
+      writingSourceId: chunk.sourceId || null,
       text: chunk.text,
-    })), null, 2),
+    }))),
     coverage_ledger_json: JSON.stringify(options.coverageLedger, null, 2),
     previous_section_block: options.previousSection
       ? `القسم السابق كاملًا للترابط فقط:\n<previous_section>\n${options.previousSection}\n</previous_section>`
@@ -761,16 +766,14 @@ export const buildContentWritingSectionRepairPrompt = (options: {
     repair_instructions: options.repair.instructions,
     knowledge_items_json: JSON.stringify(options.knowledgeItems, null, 2),
     claims_ledger_json: JSON.stringify(options.claims, null, 2),
-    source_chunks_json: JSON.stringify(
+    source_chunks_json: stringifyUntrustedPromptJson(
       options.sourceChunks.map(chunk => ({
         sourceId: chunk.id,
         sourceKind: chunk.sourceKind || 'competitor',
         sourceRole: chunk.sourceRole || null,
-        focusInstructions: chunk.focusInstructions || '',
+        writingSourceId: chunk.sourceId || null,
         text: chunk.text,
       })),
-      null,
-      2,
     ),
     original_section_markdown: options.originalMarkdown,
     },

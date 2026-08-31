@@ -7,6 +7,7 @@ import {
   uniqueModelIds,
 } from '../constants/modelRegistry';
 import {
+  CONTENT_WRITING_PROTECTED_SYSTEM_GUARD,
   CONTENT_WRITING_TEMPLATE_FIELDS,
   renderContentWritingTemplate,
   type ContentWritingTemplateSet,
@@ -33,6 +34,7 @@ import {
   type ContentWritingPromptMessage,
 } from '../utils/contentWritingContext';
 import { normalizeGoalContext } from '../utils/goalContext';
+import { buildContentWritingSourceInstructionsBlock } from '../utils/contentWritingSourceInstructions';
 import {
   applyContentWritingLengthTargetToQualityConfiguration,
   countContentWritingTargetWords,
@@ -717,8 +719,29 @@ export const executeContentWritingTurn = async (options: {
     }
   }
   const [instructions, articleContext, generationRequest] = assertContentWritingConversation(options.messages);
+  const currentSystemInstructions = instructions.content.includes(CONTENT_WRITING_PROTECTED_SYSTEM_GUARD)
+    ? instructions.content
+    : `${instructions.content}\n\n${CONTENT_WRITING_PROTECTED_SYSTEM_GUARD}`;
+  const requestedArticleContext = options.articleContextOverride?.trim() || articleContext.content;
+  const writingSourceInstructionsBlock = buildContentWritingSourceInstructionsBlock(
+    (Array.isArray(options.session.context_snapshot?.writingSources)
+      ? options.session.context_snapshot.writingSources
+      : [])
+      .filter(isRecord)
+      .map(source => ({
+        sourceId: source.id,
+        sourceRole: source.role,
+        instructions: source.focusInstructions,
+      })),
+  );
+  // Queued sessions may retain the old reference-only context. Restore their
+  // frozen user instructions in memory, including before knowledge indexing.
+  const currentArticleContext = writingSourceInstructionsBlock
+    && !requestedArticleContext.includes(writingSourceInstructionsBlock)
+    ? `${requestedArticleContext}\n\n${writingSourceInstructionsBlock}`
+    : requestedArticleContext;
   const baseHistory: ContentWritingTurnHistory[] = [
-    { role: 'user', content: options.articleContextOverride?.trim() || articleContext.content },
+    { role: 'user', content: currentArticleContext },
     ...(options.includeGenerationRequestInHistory === false
       ? []
       : [{ role: 'user' as const, content: generationRequest.content }]),
@@ -744,7 +767,7 @@ export const executeContentWritingTurn = async (options: {
     : 'standard' as const;
   const rawResult = options.session.provider === 'openai'
     ? await executeOpenAiRequest({
-      instructions: instructions.content,
+      instructions: currentSystemInstructions,
       messages: [
         ...baseHistory,
         { role: 'user', content: options.prompt },
@@ -756,7 +779,7 @@ export const executeContentWritingTurn = async (options: {
       promptCacheKey: `content-writing:${options.session.id}`.slice(0, 200),
     }, { signal: options.signal, telemetry, credentialPurpose })
     : await aiExecutionEngine.executeGemini({
-      systemInstruction: instructions.content,
+      systemInstruction: currentSystemInstructions,
       history: baseHistory.map(message => ({
         role: message.role === 'assistant' ? 'model' : 'user',
         text: message.content,

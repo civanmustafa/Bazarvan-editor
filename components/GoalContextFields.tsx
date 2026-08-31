@@ -107,7 +107,7 @@ const GoalContextMultiChoice: React.FC<{
           </span>
           <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
         </summary>
-        <div className="editor-menu space-y-2 border-t border-gray-200 p-2 dark:border-[#3C3C3C]">
+        <div data-menu-size="compact" className="editor-menu space-y-2 border-t border-gray-200 p-2 dark:border-[#3C3C3C]">
           <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             {field.options.map(option => {
               const checked = selectedSet.has(option.value.toLocaleLowerCase());
@@ -235,7 +235,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
           <ChevronDown size={14} className="pointer-events-none absolute end-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
         </div>
         {isPresetOpen && (
-          <div className="editor-menu custom-scrollbar absolute z-30 mt-1 max-h-52 w-full min-w-full overflow-y-auto rounded-md border border-gray-200 bg-white py-1 text-sm leading-5 shadow-lg dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+          <div data-menu-size="compact" className="editor-menu custom-scrollbar absolute z-30 mt-1 max-h-52 w-full min-w-full overflow-y-auto rounded-md border border-gray-200 bg-white py-1 text-sm leading-5 shadow-lg dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
             {filteredPresetOptions.length > 0 ? filteredPresetOptions.map(option => (
               <button
                 key={option.value}
@@ -275,6 +275,7 @@ const GoalContextFields: React.FC<GoalContextFieldsProps> = ({
             </label>
             {field.kind === 'select' ? (
               <AppSelect
+                size="compact"
                 id={fieldId}
                 value={goalContext[field.key] || ''}
                 onChange={(event) => onChange(field.key, event.target.value)}

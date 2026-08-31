@@ -251,10 +251,7 @@ const buildSourceRegistry = (
       category,
       freshness,
       usePolicy,
-      assessmentNotes: [
-        assessment.assessmentNotes,
-        ...sourceChunks.map(chunk => chunk.focusInstructions || '').filter(Boolean),
-      ].filter(Boolean).join(' | ').slice(0, 800),
+      assessmentNotes: assessment.assessmentNotes.slice(0, 800),
       supportedClaimIds: claims
         .filter(claim => claim.competitorNumbers.includes(assessment.competitorNumber))
         .map(claim => claim.id),

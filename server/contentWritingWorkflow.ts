@@ -45,6 +45,7 @@ import {
   type ContentWritingSectionCoverage,
   type ContentWritingSourceChunk,
 } from '../utils/contentWritingKnowledge';
+import { buildContentWritingSourceInstructionsBlock } from '../utils/contentWritingSourceInstructions';
 import {
   selectContentWritingClaims,
   summarizeContentWritingClaimUsage,
@@ -252,6 +253,17 @@ const buildCompactArticleContext = (
   knowledge: ContentWritingKnowledgeBase,
 ): string => {
   const base = toText(session.context_snapshot?.compactArticleContextBase);
+  const writingSourceInstructionsBlock = buildContentWritingSourceInstructionsBlock(
+    (Array.isArray(session.context_snapshot?.writingSources)
+      ? session.context_snapshot.writingSources
+      : [])
+      .filter(isRecord)
+      .map(source => ({
+        sourceId: source.id,
+        sourceRole: source.role,
+        instructions: source.focusInstructions,
+      })),
+  );
   const competitorPhraseIntelligence = getCompetitorPhraseIntelligence(session);
   const phraseIntelligenceBlock = competitorPhraseIntelligence?.enabled
     ? `
@@ -260,7 +272,9 @@ const buildCompactArticleContext = (
 ${competitorPhraseIntelligenceToPromptJson(competitorPhraseIntelligence)}
 </deterministic_competitor_phrase_intelligence>`
     : '';
-  return `${base || 'Use the persisted article, keyword, goal, and audience context for this session.'}
+  return `${base || 'Use the persisted article, keyword, goal, and audience context for this session.'}${writingSourceInstructionsBlock
+    ? `\n\n${writingSourceInstructionsBlock}`
+    : ''}
 
 <persisted_competitor_coverage_matrix>
 ${contentWritingKnowledgeToPromptJson(knowledge)}
