@@ -125,7 +125,7 @@ const listCompetitors = async (
       .order('position', { ascending: true }),
     supabase
       .from('ai_external_analysis_jobs')
-      .select('id,article_id,job_type,status,progress,key_attempts,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,created_at,updated_at')
+      .select('id,article_id,job_type,status,progress,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,created_at,updated_at')
       .eq('article_id', articleId)
       .eq('job_type', 'competitor_extraction')
       .in('status', ACTIVE_JOB_STATUSES)
@@ -134,7 +134,7 @@ const listCompetitors = async (
       .maybeSingle(),
     supabase
       .from('ai_external_analysis_jobs')
-      .select('id,article_id,job_type,status,progress,result,key_attempts,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,completed_at,created_at,updated_at')
+      .select('id,article_id,job_type,status,progress,result,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,completed_at,created_at,updated_at')
       .eq('article_id', articleId)
       .eq('job_type', 'competitor_extraction')
       .order('created_at', { ascending: false })
@@ -158,6 +158,28 @@ const listCompetitors = async (
   if (latestJobResult.error) throw latestJobResult.error;
   if (discoveryStateResult.error) throw discoveryStateResult.error;
   if (discoveryJobsResult.error) throw discoveryJobsResult.error;
+  const extractionJobs = [activeJobResult.data, latestJobResult.data]
+    .filter((job): job is NonNullable<typeof job> => Boolean(job));
+  const extractionJobIds = Array.from(new Set(extractionJobs.map(job => job.id)));
+  const keyAttemptsByJobId = new Map<string, unknown[]>();
+  if (extractionJobIds.length > 0) {
+    const runAttemptsResult = await supabase
+      .from('ai_external_analysis_runs')
+      .select('job_id,run_number,key_attempts')
+      .in('job_id', extractionJobIds)
+      .order('run_number', { ascending: false });
+    if (runAttemptsResult.error) throw runAttemptsResult.error;
+    (runAttemptsResult.data || []).forEach(run => {
+      const jobId = toText(run.job_id);
+      if (!jobId || keyAttemptsByJobId.has(jobId)) return;
+      keyAttemptsByJobId.set(jobId, Array.isArray(run.key_attempts) ? run.key_attempts : []);
+    });
+  }
+  const withKeyAttempts = (job: Record<string, any> | null): Record<string, any> | null => (
+    job
+      ? { ...job, key_attempts: keyAttemptsByJobId.get(job.id) || [] }
+      : null
+  );
   const discoveryState = discoveryStateResult.data || null;
   const discoverySignature = toText(discoveryState?.competitor_discovery_signature);
   const discoveryJobs = discoveryJobsResult.data || [];
@@ -166,8 +188,8 @@ const listCompetitors = async (
   )) || discoveryJobs[0] || null;
   return {
     competitors: competitorsResult.data || [],
-    activeJob: activeJobResult.data || null,
-    latestJob: latestJobResult.data || null,
+    activeJob: withKeyAttempts(activeJobResult.data || null),
+    latestJob: withKeyAttempts(latestJobResult.data || null),
     discoveryState,
     discoveryJob,
   };
@@ -999,7 +1021,11 @@ export default async function handler(req: any, res?: any): Promise<Response | v
         ? 'article_access_denied'
         : 'competitor_request_failed';
     const details = error instanceof CompetitorApiError ? error.details : undefined;
-    const message = error instanceof Error ? error.message : 'Unknown competitor request error.';
+    const message = error instanceof Error
+      ? error.message
+      : isRecord(error) && toText(error.message)
+        ? toText(error.message)
+        : 'Unknown competitor request error.';
     if (status >= 500) console.error('Competitor request failed:', error);
     return deliverApiResult({
       status,

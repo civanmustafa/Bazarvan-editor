@@ -507,7 +507,9 @@ test('bulk competitor import uses Firecrawl, direct HTML, Browserless, and reser
   assert.match(executor, /promoteReserveSource/);
   assert.match(executor, /competitor_duplicate_canonical_url/);
   assert.match(executor, /competitor_duplicate_domain/);
-  assert.match(api, /result,key_attempts/);
+  assert.doesNotMatch(api, /ai_external_analysis_jobs'[\s\S]{0,400}key_attempts/);
+  assert.match(api, /from\('ai_external_analysis_runs'\)/);
+  assert.match(api, /select\('job_id,run_number,key_attempts'\)/);
   assert.match(api, /contentQualification: result\.contentQualification/);
   assert.match(discoveryClient, /keyAttempts: Array\.isArray\(value\.key_attempts\)/);
   assert.match(panel, /latestExtractionAttemptsByUrl/);
