@@ -200,6 +200,32 @@ test('automatic selection never backfills five slots with unqualified pages', ()
   )));
 });
 
+test('automatic selection safely falls back to unavailable prechecks when no candidate qualifies', () => {
+  const selection = analyzeAndSelectCompetitors({
+    context: {
+      query: 'إدارة المشاريع',
+      primaryKeyword: 'إدارة المشاريع',
+      language: 'ar',
+      pageType: 'guide',
+      searchIntent: 'informational',
+    },
+    candidates: [
+      candidate(1, 'blocked-one.example', 'دليل إدارة المشاريع للشركات', qualification('unavailable')),
+      candidate(2, 'blocked-two.example', 'شرح إدارة المشاريع للفرق', qualification('unavailable')),
+      candidate(3, 'unrelated.example', 'دليل عام للشركات', qualification('not_qualified')),
+    ],
+    maxResults: 10,
+    maxSelected: 5,
+  });
+
+  const selected = selection.results.filter(row => row.autoSelected);
+  assert.equal(selection.summary.contentQualifiedCount, 0);
+  assert.ok(selected.length > 0);
+  assert.ok(selected.every(row => row.contentQualification?.status === 'unavailable'));
+  assert.ok(selected.every(row => row.eligible));
+  assert.equal(selection.results.find(row => row.domain === 'unrelated.example')?.autoSelected, false);
+});
+
 test('one programmatic extraction failure does not fail or qualify the batch', async () => {
   const candidates: CompetitorSearchResult[] = [
     { url: 'https://good.example/guide', canonicalUrl: 'https://good.example/guide', domain: 'good.example', title: 'دليل', description: 'دليل عربي', position: 1 },

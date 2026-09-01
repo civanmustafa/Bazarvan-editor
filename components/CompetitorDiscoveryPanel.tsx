@@ -810,8 +810,10 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 <button
                   type="button"
                   onClick={restoreAutomaticSelection}
+                  disabled={selectionSummary.autoSelectedCount === 0}
                   title={isArabic ? 'استعادة أفضل النتائج المحددة تلقائيًا' : 'Restore automatic selection'}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-[#8a6f1d] hover:bg-[#d4af37]/15 dark:text-[#f2d675]"
+                  aria-label={isArabic ? 'استعادة أفضل النتائج المحددة تلقائيًا' : 'Restore automatic selection'}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-[#8a6f1d] hover:bg-[#d4af37]/15 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#f2d675]"
                 >
                   <RotateCcw size={13} />
                 </button>
@@ -837,6 +839,21 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                   </span>
                 )}
               </div>
+              {selectionSummary.contentQualificationAttempted
+                && selectionSummary.contentQualifiedCount === 0 && (
+                <div className="mt-2 flex items-start gap-1.5 border-t border-amber-200/80 pt-2 text-[10px] font-bold leading-4 text-amber-800 dark:border-amber-700/50 dark:text-amber-300">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                  <span>
+                    {selectionSummary.autoSelectedCount > 0
+                      ? (isArabic
+                          ? `لم تتوفر نتيجة مؤهلة نصيًا؛ اختيرت تلقائيًا ${selectionSummary.autoSelectedCount} نتيجة قوية تعذر فحص نصها، وسيُتحقق منها أثناء السحب.`
+                          : `No content-qualified result was available. ${selectionSummary.autoSelectedCount} strong result(s) whose text could not be prechecked were selected and will be verified during import.`)
+                      : (isArabic
+                          ? 'اكتمل البحث دون نتيجة مؤهلة أو بديل آمن للاختيار التلقائي. اختر نتيجة مناسبة يدويًا لبدء السحب.'
+                          : 'Search completed without a content-qualified result or a safe automatic fallback. Select a suitable result manually to start import.')}
+                  </span>
+                </div>
+              )}
             </div>
           )}
           <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 dark:text-gray-400">

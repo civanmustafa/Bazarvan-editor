@@ -4,6 +4,7 @@ import {
   ChevronDown,
   CircleHelp,
   Clock3,
+  AlertTriangle,
   ListChecks,
   LoaderCircle,
   Play,
@@ -350,9 +351,16 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const competitorReviewStatus = typeof competitorDiscoveryResult.reviewStatus === 'string'
     ? competitorDiscoveryResult.reviewStatus
     : '';
+  const competitorSelection = competitorDiscoveryResult.selection
+    && typeof competitorDiscoveryResult.selection === 'object'
+    ? competitorDiscoveryResult.selection as Record<string, unknown>
+    : {};
+  const competitorAutoSelectedCount = Math.max(0, Number(competitorSelection.autoSelectedCount) || 0);
   const competitorNeedsReview = summary?.latestCompetitorDiscoveryJob?.status === 'completed'
     && competitorCandidateCount > 0
     && competitorReviewStatus !== 'accepted';
+  const competitorHasNoAutomaticSelection = competitorNeedsReview
+    && competitorAutoSelectedCount === 0;
   const competitorReadyCount = summary?.competitorReadyCount || 0;
   const competitorTotalCount = summary?.competitorTotalCount || 0;
 
@@ -750,7 +758,9 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
               ? <LoaderCircle size={12} className="animate-spin" />
               : competitorReadyCount > 0
                 ? <CheckCircle2 size={12} />
-                : <Search size={12} />}
+                : competitorHasNoAutomaticSelection
+                  ? <AlertTriangle size={12} />
+                  : <Search size={12} />}
             <span>
               {competitorExtractionActive
                 ? (locale === 'ar'
@@ -758,6 +768,10 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
                     : `Importing competitors ${competitorReadyCount}/${competitorTotalCount || '…'}`)
                 : competitorDiscoveryActive
                   ? (locale === 'ar' ? 'جاري بحث المنافسين' : 'Finding competitors')
+                  : competitorHasNoAutomaticSelection
+                    ? (locale === 'ar'
+                        ? 'اكتمل البحث بلا اختيار تلقائي'
+                        : 'Search finished without an automatic selection')
                   : competitorNeedsReview
                     ? (locale === 'ar'
                         ? `مراجعة ${competitorCandidateCount} منافسين`
@@ -804,7 +818,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
         {!semanticJobActive && !engineeringActive && (summary?.completedTaskCount || 0) > 0 && (
           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
             <CheckCircle2 size={11} />
-            {summary?.completedTaskCount} {locale === 'ar' ? 'نتيجة' : 'results'}
+            {summary?.completedTaskCount} {locale === 'ar' ? 'مهمة مكتملة' : 'completed task(s)'}
           </span>
         )}
         {(summary?.retryingEngineeringCount || 0) > 0 && (

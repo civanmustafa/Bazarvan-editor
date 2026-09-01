@@ -639,13 +639,25 @@ const selectDiverseCandidates = (
   const selected: ScoredCompetitorSearchResult[] = [];
   const preferred = results.filter(result => result.eligible);
   const contentQualificationAttempted = results.some(result => Boolean(result.contentQualification));
+  const metadataFallback = (result: ScoredCompetitorSearchResult): boolean => (
+    !result.warningCodes.includes('language-mismatch')
+    && !result.warningCodes.includes('forum-or-video-result')
+    && result.selectionScore >= 45
+  );
+  const safeUnavailableFallback = (result: ScoredCompetitorSearchResult): boolean => (
+    metadataFallback(result)
+    && !result.warningCodes.includes('intent-mismatch')
+    && !result.warningCodes.includes('page-type-mismatch')
+    && !result.warningCodes.includes('low-query-relevance')
+  );
   const fallback = contentQualificationAttempted
-    ? []
-    : results.filter(result => (
-        !result.warningCodes.includes('language-mismatch')
-        && !result.warningCodes.includes('forum-or-video-result')
-        && result.selectionScore >= 45
-      ));
+    ? (preferred.length === 0
+        ? results.filter(result => (
+            result.contentQualification?.status === 'unavailable'
+            && safeUnavailableFallback(result)
+          ))
+        : [])
+    : results.filter(metadataFallback);
   const pool = Array.from(
     new Map([...preferred, ...fallback].map(result => [result.canonicalUrl, result])).values(),
   );
@@ -844,13 +856,22 @@ export const analyzeAndSelectCompetitors = (options: {
     .slice(0, Math.max(1, options.maxResults))
     .map((result, index) => ({ ...result, selectionRank: index + 1 }));
   const autoSelectedUrls = selectDiverseCandidates(reviewed, Math.max(1, options.maxSelected));
-  const results = reviewed.map(result => ({
-    ...result,
-    autoSelected: autoSelectedUrls.has(result.canonicalUrl),
-    reasonCodes: autoSelectedUrls.has(result.canonicalUrl)
-      ? [...result.reasonCodes, 'auto-selected' as const, 'diverse-source' as const]
-      : result.reasonCodes,
-  }));
+  const results = reviewed.map(result => {
+    const autoSelected = autoSelectedUrls.has(result.canonicalUrl);
+    const unavailableFallbackAccepted = autoSelected
+      && result.contentQualification?.status === 'unavailable';
+    return {
+      ...result,
+      autoSelected,
+      // `eligible` is also the durable extraction gate. An unavailable content
+      // precheck may be accepted only when no qualified candidate exists; pages
+      // proven not to target the keyword remain ineligible.
+      eligible: result.eligible || unavailableFallbackAccepted,
+      reasonCodes: autoSelected
+        ? [...result.reasonCodes, 'auto-selected' as const, 'diverse-source' as const]
+        : result.reasonCodes,
+    };
+  });
 
   return {
     results,
