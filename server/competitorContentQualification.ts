@@ -9,140 +9,56 @@ import {
   type ProgrammaticCompetitorContent,
 } from './programmaticCompetitorExtractor.ts';
 import {
-  normalizeCompetitorText,
+  buildCompetitorTargetTerms,
+  findCompetitorTargetingEvidence,
   type CompetitorContentQualification,
+  type CompetitorTargetingEvidence,
   type ContentQualifiedCompetitorCandidate,
 } from './competitorSelectionEngine.ts';
 import type { CompetitorSearchResult } from './firecrawlCompetitorService.ts';
 
-const QUALIFICATION_VERSION = 'competitor-keyword-targeting-v1';
+const QUALIFICATION_VERSION = 'competitor-multi-evidence-targeting-v2';
 const MINIMUM_CONTENT_WORDS = 40;
 const INTRODUCTION_WORDS = 300;
 
-type MatchLocation = CompetitorContentQualification['locations'][number];
+type SearchMetadata = Pick<CompetitorSearchResult, 'title' | 'description' | 'url' | 'canonicalUrl'>;
 
-const uniqueTerms = (values: unknown[], maximum = 12): string[] => {
-  const seen = new Set<string>();
-  const terms: string[] = [];
-  values.forEach(value => {
-    const term = typeof value === 'string' ? value.trim().slice(0, 300) : '';
-    const normalized = normalizeCompetitorText(term);
-    if (!normalized || seen.has(normalized) || terms.length >= maximum) return;
-    seen.add(normalized);
-    terms.push(term);
-  });
-  return terms;
-};
+const metadataSources = (searchResult?: SearchMetadata) => searchResult ? [
+  { source: 'serp_title' as const, value: searchResult.title },
+  { source: 'serp_description' as const, value: searchResult.description },
+  { source: 'url' as const, value: searchResult.canonicalUrl || searchResult.url },
+] : [];
 
-const normalizedTokens = (value: unknown): string[] => (
-  normalizeCompetitorText(value).split(' ').filter(Boolean)
-);
-
-const arabicTokenVariants = (value: string): Set<string> => {
-  const variants = new Set([value]);
-  const queue = [value];
-  while (queue.length > 0) {
-    const token = queue.shift() || '';
-    const additions: string[] = [];
-    if (/^[وف][\u0621-\u064a]/.test(token) && token.length >= 5) additions.push(token.slice(1));
-    if (/^[بكل][\u0621-\u064a]/.test(token) && token.length >= 5) additions.push(token.slice(1));
-    if (token.startsWith('لل') && token.length >= 5) additions.push(`ال${token.slice(2)}`);
-    additions.forEach(addition => {
-      if (addition.length < 3 || variants.has(addition)) return;
-      variants.add(addition);
-      queue.push(addition);
-    });
-  }
-  return variants;
-};
-
-const tokenMatches = (contentToken: string, keywordToken: string): boolean => (
-  contentToken === keywordToken
-  || arabicTokenVariants(contentToken).has(keywordToken)
-);
-
-const countContiguousMatches = (contentTokens: string[], keywordTokens: string[]): number => {
-  if (keywordTokens.length === 0 || contentTokens.length < keywordTokens.length) return 0;
-  let matches = 0;
-  for (let start = 0; start <= contentTokens.length - keywordTokens.length; start += 1) {
-    if (keywordTokens.every((token, offset) => tokenMatches(contentTokens[start + offset], token))) {
-      matches += 1;
-      start += Math.max(0, keywordTokens.length - 1);
-    }
-  }
-  return matches;
-};
-
-const hasOrderedNearMatch = (contentTokens: string[], keywordTokens: string[]): boolean => {
-  if (keywordTokens.length < 2 || contentTokens.length < keywordTokens.length) return false;
-  const maximumWindow = keywordTokens.length + 2;
-  for (let start = 0; start < contentTokens.length; start += 1) {
-    if (!tokenMatches(contentTokens[start], keywordTokens[0])) continue;
-    let keywordIndex = 1;
-    const end = Math.min(contentTokens.length, start + maximumWindow);
-    for (let index = start + 1; index < end && keywordIndex < keywordTokens.length; index += 1) {
-      if (tokenMatches(contentTokens[index], keywordTokens[keywordIndex])) keywordIndex += 1;
-    }
-    if (keywordIndex === keywordTokens.length) return true;
-  }
-  return false;
-};
-
-type TermEvidence = {
-  term: string;
-  primary: boolean;
-  exact: boolean;
-  ordered: boolean;
-  locations: MatchLocation[];
-  occurrences: number;
-  score: number;
-};
-
-const analyzeTerm = (
+const contentSources = (
   content: Pick<ProgrammaticCompetitorContent, 'title' | 'headings' | 'text'>,
-  term: string,
-  primary: boolean,
-): TermEvidence => {
-  const keywordTokens = normalizedTokens(term);
-  const titleTokens = normalizedTokens(content.title);
-  const h1Tokens = normalizedTokens(content.headings.h1.join(' '));
-  const headingTokens = normalizedTokens([...content.headings.h2, ...content.headings.h3].join(' '));
-  const bodyTokens = normalizedTokens(content.text);
-  const introductionTokens = bodyTokens.slice(0, INTRODUCTION_WORDS);
-  const titleMatches = countContiguousMatches(titleTokens, keywordTokens);
-  const h1Matches = countContiguousMatches(h1Tokens, keywordTokens);
-  const headingMatches = countContiguousMatches(headingTokens, keywordTokens);
-  const introductionMatches = countContiguousMatches(introductionTokens, keywordTokens);
-  const bodyMatches = countContiguousMatches(bodyTokens, keywordTokens);
-  const exact = titleMatches + h1Matches + headingMatches + bodyMatches > 0;
-  const ordered = !exact && (
-    hasOrderedNearMatch(titleTokens, keywordTokens)
-    || hasOrderedNearMatch(h1Tokens, keywordTokens)
-    || hasOrderedNearMatch(headingTokens, keywordTokens)
-    || hasOrderedNearMatch(bodyTokens, keywordTokens)
-  );
-  const locations: MatchLocation[] = [];
-  if (titleMatches > 0) locations.push('title');
-  if (h1Matches > 0) locations.push('h1');
-  if (headingMatches > 0) locations.push('headings');
-  if (introductionMatches > 0) locations.push('introduction');
-  if (bodyMatches > 0 || ordered) locations.push('body');
-  let score = 0;
-  if (titleMatches > 0 || h1Matches > 0) score += 30;
-  if (headingMatches > 0) score += 20;
-  if (introductionMatches > 0) score += 20;
-  if (bodyMatches > 0) score += Math.min(15, bodyMatches * 5);
-  if (exact) score += 15;
-  else if (ordered) score += 8;
-  score = Math.round(Math.min(100, score * (primary ? 1 : 0.86)));
+) => [
+  { source: 'page_title' as const, value: content.title },
+  { source: 'h1' as const, value: content.headings.h1.join(' ') },
+  { source: 'headings' as const, value: [...content.headings.h2, ...content.headings.h3].join(' ') },
+  { source: 'introduction' as const, value: content.text.split(/\s+/).slice(0, INTRODUCTION_WORDS).join(' ') },
+  { source: 'body' as const, value: content.text },
+];
+
+const matchKindForEvidence = (
+  evidence?: CompetitorTargetingEvidence,
+): CompetitorContentQualification['matchKind'] => {
+  if (!evidence) return 'none';
+  const ordered = evidence.matchType === 'ordered_near';
+  if (evidence.termKind === 'primary') return ordered ? 'ordered_primary' : 'primary';
+  if (evidence.termKind === 'alternative') return ordered ? 'ordered_alternative' : 'alternative';
+  return ordered ? 'ordered_article_title' : 'article_title';
+};
+
+const targetingFields = (evidence: CompetitorTargetingEvidence[]) => {
+  const best = evidence[0];
   return {
-    term,
-    primary,
-    exact,
-    ordered,
-    locations: Array.from(new Set(locations)),
-    occurrences: bodyMatches,
-    score,
+    score: best?.score || 0,
+    matchedKeyword: best?.term || '',
+    matchKind: matchKindForEvidence(best),
+    locations: Array.from(new Set(evidence.map(item => item.source))),
+    occurrences: evidence.length > 0 ? Math.max(...evidence.map(item => item.occurrences)) : 0,
+    targetingStatus: best ? 'confirmed' as const : 'not_confirmed' as const,
+    evidence,
   };
 };
 
@@ -150,92 +66,94 @@ export const analyzeCompetitorKeywordTargeting = (options: {
   content: Pick<ProgrammaticCompetitorContent, 'title' | 'headings' | 'text' | 'wordCount' | 'qualityScore' | 'cacheHit'>;
   primaryKeyword: string;
   alternativeKeywords?: string[];
+  articleTitle?: string;
+  searchResult?: SearchMetadata;
 }): CompetitorContentQualification => {
-  const primaryKeyword = options.primaryKeyword.trim().slice(0, 300);
-  const alternatives = uniqueTerms(options.alternativeKeywords || [])
-    .filter(term => normalizeCompetitorText(term) !== normalizeCompetitorText(primaryKeyword));
-  if (options.content.wordCount < MINIMUM_CONTENT_WORDS || !options.content.text.trim()) {
+  const terms = buildCompetitorTargetTerms({
+    primaryKeyword: options.primaryKeyword,
+    alternativeKeywords: options.alternativeKeywords,
+    articleTitle: options.articleTitle,
+  });
+  const evidence = findCompetitorTargetingEvidence({
+    terms,
+    sources: [...metadataSources(options.searchResult), ...contentSources(options.content)],
+  });
+  const targeting = targetingFields(evidence);
+  const contentUsable = options.content.wordCount >= MINIMUM_CONTENT_WORDS && Boolean(options.content.text.trim());
+  if (!contentUsable) {
     return {
       status: 'unavailable',
-      score: 0,
-      matchedKeyword: '',
-      matchKind: 'none',
-      locations: [],
-      occurrences: 0,
+      ...targeting,
       wordCount: options.content.wordCount,
       qualityScore: options.content.qualityScore,
       cacheHit: options.content.cacheHit,
       errorCode: 'qualification_content_too_short',
       version: QUALIFICATION_VERSION,
+      contentAvailability: 'available',
+      contentUsability: 'insufficient',
     };
   }
-  const terms = [
-    ...(primaryKeyword ? [{ term: primaryKeyword, primary: true }] : []),
-    ...alternatives.map(term => ({ term, primary: false })),
-  ];
-  const evidence = terms
-    .map(({ term, primary }) => analyzeTerm(options.content, term, primary))
-    .filter(item => item.exact || item.ordered)
-    .sort((left, right) => (
-      Number(right.primary) - Number(left.primary)
-      || Number(right.exact) - Number(left.exact)
-      || right.score - left.score
-    ));
-  const best = evidence[0];
-  if (!best) {
+  if (targeting.targetingStatus !== 'confirmed') {
     return {
       status: 'not_qualified',
-      score: 0,
-      matchedKeyword: '',
-      matchKind: 'none',
-      locations: [],
-      occurrences: 0,
+      ...targeting,
       wordCount: options.content.wordCount,
       qualityScore: options.content.qualityScore,
       cacheHit: options.content.cacheHit,
-      errorCode: 'keyword_not_found_in_content',
+      errorCode: terms.length === 0 ? 'target_terms_not_specific' : 'target_phrase_not_found_in_evidence',
       version: QUALIFICATION_VERSION,
+      contentAvailability: 'available',
+      contentUsability: 'usable',
     };
   }
   return {
     status: 'qualified',
-    score: best.score,
-    matchedKeyword: best.term,
-    matchKind: best.primary
-      ? best.exact ? 'primary' : 'ordered_primary'
-      : best.exact ? 'alternative' : 'ordered_alternative',
-    locations: best.locations,
-    occurrences: best.occurrences,
+    ...targeting,
     wordCount: options.content.wordCount,
     qualityScore: options.content.qualityScore,
     cacheHit: options.content.cacheHit,
     errorCode: '',
     version: QUALIFICATION_VERSION,
+    contentAvailability: 'available',
+    contentUsability: 'usable',
   };
 };
 
-const unavailableQualification = (
-  error: unknown,
-): CompetitorContentQualification => ({
-  status: 'unavailable',
-  score: 0,
-  matchedKeyword: '',
-  matchKind: 'none',
-  locations: [],
-  occurrences: 0,
-  wordCount: 0,
-  qualityScore: 0,
-  cacheHit: false,
-  errorCode: error instanceof ProgrammaticCompetitorExtractionError
-    ? error.code
-    : 'content_qualification_failed',
-  version: QUALIFICATION_VERSION,
-});
+const unavailableQualification = (options: {
+  error: unknown;
+  candidate: SearchMetadata;
+  primaryKeyword: string;
+  alternativeKeywords?: string[];
+  articleTitle?: string;
+}): CompetitorContentQualification => {
+  const evidence = findCompetitorTargetingEvidence({
+    terms: buildCompetitorTargetTerms(options),
+    sources: metadataSources(options.candidate),
+  });
+  const targeting = targetingFields(evidence);
+  return {
+    status: 'unavailable',
+    ...targeting,
+    // An extraction failure does not disprove targeting. The evidence status is
+    // deliberately unknown when Google metadata contains no complete phrase.
+    targetingStatus: evidence.length > 0 ? 'confirmed' : 'unknown',
+    wordCount: 0,
+    qualityScore: 0,
+    cacheHit: false,
+    errorCode: options.error instanceof ProgrammaticCompetitorExtractionError
+      ? options.error.code
+      : 'content_qualification_failed',
+    version: QUALIFICATION_VERSION,
+    contentAvailability: 'unavailable',
+    contentUsability: 'not_assessed',
+  };
+};
 
 export const qualifyCompetitorCandidates = async (options: {
   candidates: CompetitorSearchResult[];
   primaryKeyword: string;
   alternativeKeywords?: string[];
+  articleTitle?: string;
   signal?: AbortSignal;
   maximumCandidates?: number;
   concurrency?: number;
@@ -280,13 +198,21 @@ export const qualifyCompetitorCandidates = async (options: {
             content,
             primaryKeyword: options.primaryKeyword,
             alternativeKeywords: options.alternativeKeywords,
+            articleTitle: options.articleTitle,
+            searchResult: candidate,
           }),
         };
       } catch (error) {
         if (options.signal?.aborted) throw options.signal.reason ?? error;
         results[index] = {
           ...candidate,
-          contentQualification: unavailableQualification(error),
+          contentQualification: unavailableQualification({
+            error,
+            candidate,
+            primaryKeyword: options.primaryKeyword,
+            alternativeKeywords: options.alternativeKeywords,
+            articleTitle: options.articleTitle,
+          }),
         };
       }
       completed += 1;

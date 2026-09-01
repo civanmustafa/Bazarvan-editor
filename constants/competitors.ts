@@ -6,8 +6,11 @@ export const COMPETITOR_CONTENT_QUALIFICATION_CONCURRENCY = 3;
 export const COMPETITOR_CONTENT_QUALIFICATION_TIMEOUT_MS = 12_000;
 export const COMPETITOR_ALTERNATIVE_SEARCH_LIMIT = 3;
 export const COMPETITOR_CONTENT_MAX_CHARS = 120_000;
+export const COMPETITOR_REPLACEMENT_RESERVE_LIMIT = 10;
+export const COMPETITOR_RENDERED_EXTRACTION_TIMEOUT_MS = 70_000;
 // Firecrawl is attempted once. A deterministic programmatic extractor takes over
-// immediately on provider failure, so repeating the same Firecrawl request wastes time.
+// immediately on provider failure, followed by one rendered-browser attempt.
+// Repeating the same provider request wastes time and quota.
 export const COMPETITOR_EXTRACTION_MAX_ATTEMPTS = 1;
 export const COMPETITOR_QUEUE_STALL_MS = 90_000;
 export const COMPETITOR_EXTRACTION_QUEUE_STALL_MS = COMPETITOR_QUEUE_STALL_MS;

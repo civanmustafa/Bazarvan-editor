@@ -134,6 +134,7 @@ export const discoverAndSelectCompetitors = async (options: {
       candidates: pending,
       primaryKeyword,
       alternativeKeywords,
+      articleTitle: context.articleTitle,
       signal: options.signal,
       maximumCandidates: COMPETITOR_CONTENT_QUALIFICATION_CANDIDATE_LIMIT,
       onProgress: async progress => {

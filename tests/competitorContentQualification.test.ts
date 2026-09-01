@@ -102,6 +102,76 @@ test('an approved alternative qualifies content without a primary-keyword occurr
   assert.ok(result.locations.includes('headings'));
 });
 
+test('the article title is a first-class target term across page evidence', () => {
+  const result = analyzeCompetitorKeywordTargeting({
+    content: content({
+      title: 'أغلى جهاز كشف الذهب في العالم: المواصفات والسعر',
+      text: 'تتناول الصفحة مواصفات الجهاز وتجربة استخدامه بالتفصيل.',
+    }),
+    primaryKeyword: 'أسعار أجهزة التنقيب',
+    articleTitle: 'أغلى جهاز كشف الذهب في العالم',
+  });
+
+  assert.equal(result.status, 'qualified');
+  assert.equal(result.targetingStatus, 'confirmed');
+  assert.equal(result.matchKind, 'article_title');
+  assert.ok(result.evidence?.some(item => (
+    item.termKind === 'article_title' && item.source === 'page_title'
+  )));
+});
+
+test('targeting evidence remains independent from usable extracted content', () => {
+  const result = analyzeCompetitorKeywordTargeting({
+    content: content({ text: 'هذا نص تقني صالح للتحليل لكنه لا يكرر عبارة الاستهداف.' }),
+    primaryKeyword: 'أغلى جهاز كشف الذهب',
+    searchResult: {
+      url: 'https://example.com/report',
+      canonicalUrl: 'https://example.com/report',
+      title: 'أغلى جهاز كشف الذهب في العالم',
+      description: 'تقرير تقني مفصل.',
+    },
+  });
+
+  assert.equal(result.targetingStatus, 'confirmed');
+  assert.equal(result.contentAvailability, 'available');
+  assert.equal(result.contentUsability, 'usable');
+  assert.deepEqual(result.evidence?.map(item => item.source), ['serp_title']);
+});
+
+test('ordered-near matching requires the complete phrase in order', () => {
+  const near = analyzeCompetitorKeywordTargeting({
+    content: content({ text: 'يعرض التقرير أغلى جهاز متخصص في كشف الذهب مع تفاصيل السعر.' }),
+    primaryKeyword: 'أغلى جهاز كشف الذهب',
+  });
+  const scattered = analyzeCompetitorKeywordTargeting({
+    content: content({
+      text: `يعرض التقرير أغلى جهاز ثم ${filler.repeat(3)} ويناقش كشف الذهب في قسم مستقل.`,
+    }),
+    primaryKeyword: 'أغلى جهاز كشف الذهب',
+  });
+
+  assert.equal(near.status, 'qualified');
+  assert.equal(near.matchKind, 'ordered_primary');
+  assert.equal(near.evidence?.some(item => item.matchType === 'ordered_near'), true);
+  assert.equal(scattered.status, 'not_qualified');
+});
+
+test('a broad single word is not sufficient targeting evidence', () => {
+  const result = analyzeCompetitorKeywordTargeting({
+    content: content({
+      title: 'دليل الذهب',
+      h1: ['الذهب'],
+      text: 'ذهب ذهب ذهب وتفاصيل عامة عن الأسواق والمنتجات.',
+    }),
+    primaryKeyword: 'ذهب',
+  });
+
+  assert.equal(result.status, 'not_qualified');
+  assert.equal(result.targetingStatus, 'not_confirmed');
+  assert.equal(result.errorCode, 'target_terms_not_specific');
+  assert.deepEqual(result.evidence, []);
+});
+
 test('scattered topic words and unrelated semantic terms do not qualify a page', () => {
   const result = analyzeCompetitorKeywordTargeting({
     content: content({
@@ -139,7 +209,10 @@ test('content qualification is a hard automatic-selection gate', () => {
       searchIntent: 'informational',
     },
     candidates: [
-      candidate(1, 'first.example', 'أفضل دليل عام للشركات', qualification('not_qualified')),
+      {
+        ...candidate(1, 'first.example', 'أفضل دليل عام للشركات', qualification('not_qualified')),
+        description: 'شرح عام لتطوير فرق الشركات وتحسين إجراءات العمل.',
+      },
       candidate(5, 'targeted.example', 'دليل إدارة المشاريع للفرق', qualification('qualified', 82, 'إدارة المشاريع')),
     ],
     maxResults: 10,
@@ -181,13 +254,18 @@ test('an alternative keyword can satisfy metadata relevance for automatic select
   assert.equal(selection.results[0]?.autoSelected, true);
 });
 
-test('automatic selection never backfills five slots with unqualified pages', () => {
-  const candidates = Array.from({ length: 8 }, (_, index) => candidate(
-    index + 1,
-    `site-${index + 1}.example`,
-    `دليل إدارة المشاريع رقم ${index + 1}`,
-    index < 2 ? qualification('qualified', 78 - index, 'إدارة المشاريع') : qualification('not_qualified'),
-  ));
+test('automatic selection never backfills five slots with pages that have no targeting evidence', () => {
+  const candidates = Array.from({ length: 8 }, (_, index) => ({
+    ...candidate(
+      index + 1,
+      `site-${index + 1}.example`,
+      index < 2 ? `دليل إدارة المشاريع رقم ${index + 1}` : `دليل أعمال عام رقم ${index + 1}`,
+      index < 2 ? qualification('qualified', 78 - index, 'إدارة المشاريع') : qualification('not_qualified'),
+    ),
+    description: index < 2
+      ? 'دليل عربي مفصل يشرح إدارة المشاريع واختيار الأدوات المناسبة للشركات والفرق.'
+      : 'شرح عام لتطوير فرق الشركات وتحسين إجراءات العمل.',
+  }));
   const selection = analyzeAndSelectCompetitors({
     context: { query: 'إدارة المشاريع', primaryKeyword: 'إدارة المشاريع', language: 'ar' },
     candidates,
@@ -212,7 +290,10 @@ test('automatic selection safely falls back to unavailable prechecks when no can
     candidates: [
       candidate(1, 'blocked-one.example', 'دليل إدارة المشاريع للشركات', qualification('unavailable')),
       candidate(2, 'blocked-two.example', 'شرح إدارة المشاريع للفرق', qualification('unavailable')),
-      candidate(3, 'unrelated.example', 'دليل عام للشركات', qualification('not_qualified')),
+      {
+        ...candidate(3, 'unrelated.example', 'دليل عام للشركات', qualification('not_qualified')),
+        description: 'شرح عام لتطوير فرق الشركات وتحسين إجراءات العمل.',
+      },
     ],
     maxResults: 10,
     maxSelected: 5,
@@ -224,6 +305,143 @@ test('automatic selection safely falls back to unavailable prechecks when no can
   assert.ok(selected.every(row => row.contentQualification?.status === 'unavailable'));
   assert.ok(selected.every(row => row.eligible));
   assert.equal(selection.results.find(row => row.domain === 'unrelated.example')?.autoSelected, false);
+});
+
+test('SERP evidence confirms targeting independently when page extraction is unavailable', async () => {
+  const candidates: CompetitorSearchResult[] = [
+    {
+      url: 'https://title.example/report',
+      canonicalUrl: 'https://title.example/report',
+      domain: 'title.example',
+      title: 'أغلى جهاز كشف الذهب في العالم',
+      description: 'تقرير تقني مفصل.',
+      position: 1,
+    },
+    {
+      url: 'https://description.example/report',
+      canonicalUrl: 'https://description.example/report',
+      domain: 'description.example',
+      title: 'تقرير تقني جديد',
+      description: 'تعرف إلى أغلى جهاز كشف الذهب في العالم ومواصفاته.',
+      position: 2,
+    },
+    {
+      url: 'https://url.example/%D8%A3%D8%BA%D9%84%D9%89-%D8%AC%D9%87%D8%A7%D8%B2-%D9%83%D8%B4%D9%81-%D8%A7%D9%84%D8%B0%D9%87%D8%A8',
+      canonicalUrl: 'https://url.example/%D8%A3%D8%BA%D9%84%D9%89-%D8%AC%D9%87%D8%A7%D8%B2-%D9%83%D8%B4%D9%81-%D8%A7%D9%84%D8%B0%D9%87%D8%A8',
+      domain: 'url.example',
+      title: 'تقرير تقني جديد',
+      description: 'مواصفات وتجارب عملية.',
+      position: 3,
+    },
+  ];
+  const results = await qualifyCompetitorCandidates({
+    candidates,
+    primaryKeyword: 'أغلى جهاز كشف الذهب',
+    extractor: async () => {
+      throw new ProgrammaticCompetitorExtractionError({
+        code: 'programmatic_extraction_http_403',
+        message: 'Blocked.',
+        status: 403,
+      });
+    },
+  });
+
+  assert.ok(results.every(item => item.contentQualification?.status === 'unavailable'));
+  assert.ok(results.every(item => item.contentQualification?.targetingStatus === 'confirmed'));
+  assert.deepEqual(results.map(item => item.contentQualification?.evidence?.[0]?.source), [
+    'serp_title',
+    'serp_description',
+    'url',
+  ]);
+  assert.ok(results.every(item => item.contentQualification?.contentAvailability === 'unavailable'));
+  assert.ok(results.every(item => item.contentQualification?.contentUsability === 'not_assessed'));
+});
+
+test('confirmed metadata targeting is eligible despite unavailable content', () => {
+  const selection = analyzeAndSelectCompetitors({
+    context: {
+      query: 'أغلى جهاز كشف الذهب',
+      primaryKeyword: 'أغلى جهاز كشف الذهب',
+      language: 'ar',
+      pageType: 'article',
+      searchIntent: 'informational',
+    },
+    candidates: [{
+      ...candidate(
+        1,
+        'blocked-target.example',
+        'أغلى جهاز كشف الذهب في العالم',
+        qualification('unavailable'),
+      ),
+      description: 'تقرير عربي تقني مفصل عن المواصفات والأسعار والاستخدامات العملية.',
+    }],
+    maxResults: 10,
+    maxSelected: 5,
+  });
+
+  const result = selection.results[0];
+  assert.equal(result?.contentQualification?.status, 'unavailable');
+  assert.equal(result?.contentQualification?.targetingStatus, 'confirmed');
+  assert.equal(result?.eligible, true);
+  assert.equal(result?.autoSelected, true);
+  assert.ok(result?.reasonCodes.includes('targeting-evidence-confirmed'));
+  assert.ok(result?.reasonCodes.includes('keyword-in-serp-title'));
+  assert.equal(selection.summary.targetingConfirmedCount, 1);
+  assert.equal(selection.summary.contentUsableCount, 0);
+});
+
+test('matching SERP metadata confirms targeting even when the preliminary page check missed it', () => {
+  const selection = analyzeAndSelectCompetitors({
+    context: {
+      query: 'أغلى جهاز كشف الذهب',
+      primaryKeyword: 'أغلى جهاز كشف الذهب',
+      language: 'ar',
+    },
+    candidates: [{
+      ...candidate(
+        1,
+        'irrelevant.example',
+        'أغلى جهاز كشف الذهب في العالم',
+        qualification('not_qualified'),
+      ),
+      description: 'شرح عربي واضح ومفصل عن أجهزة الكشف والأسواق العالمية.',
+    }],
+    maxResults: 10,
+    maxSelected: 5,
+  });
+
+  const result = selection.results[0];
+  assert.equal(result?.eligible, true);
+  assert.equal(result?.autoSelected, true);
+  assert.equal(result?.contentQualification?.targetingStatus, 'confirmed');
+  assert.ok(result?.reasonCodes.includes('keyword-in-serp-title'));
+  assert.ok(result?.reasonCodes.includes('targeting-evidence-confirmed'));
+  assert.ok(result?.warningCodes.includes('keyword-not-found-in-content'));
+});
+
+test('the article title can confirm targeting from the Google description', () => {
+  const selection = analyzeAndSelectCompetitors({
+    context: {
+      query: 'أجهزة التنقيب الحديثة',
+      primaryKeyword: 'أجهزة التنقيب الحديثة',
+      articleTitle: 'أغلى جهاز كشف الذهب في العالم',
+      language: 'ar',
+      pageType: 'article',
+      searchIntent: 'informational',
+    },
+    candidates: [{
+      ...candidate(1, 'article-title.example', 'مراجعة تقنية مفصلة', qualification('unavailable')),
+      description: 'نشرح أغلى جهاز كشف الذهب في العالم ونقارن أهم مواصفاته.',
+    }],
+    maxResults: 10,
+    maxSelected: 5,
+  });
+
+  const result = selection.results[0];
+  assert.equal(result?.contentQualification?.targetingStatus, 'confirmed');
+  assert.ok(result?.reasonCodes.includes('article-title-targeting'));
+  assert.ok(result?.reasonCodes.includes('keyword-in-serp-description'));
+  assert.equal(result?.autoSelected, true);
 });
 
 test('one programmatic extraction failure does not fail or qualify the batch', async () => {

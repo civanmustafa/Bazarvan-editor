@@ -304,9 +304,10 @@ test('manual competitor search persists and enters automatic extraction before b
   assert.ok(panel.includes('بدأ سحب محتواها تلقائيًا'));
 });
 
-test('competitor Firecrawl operations resolve only user-owned or assigned vault credentials', async () => {
-  const [service, apiSource, settings, panel] = await Promise.all([
+test('competitor crawler operations resolve only authorized credentials without making Firecrawl the extraction gate', async () => {
+  const [service, browserlessExtractor, apiSource, settings, panel] = await Promise.all([
     readWorkspaceFile('server/firecrawlCompetitorService.ts'),
+    readWorkspaceFile('server/browserlessCompetitorExtractor.ts'),
     readWorkspaceFile('api/competitors.ts'),
     readWorkspaceFile('components/AdminProviderAccessSettings.tsx'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
@@ -315,8 +316,10 @@ test('competitor Firecrawl operations resolve only user-owned or assigned vault 
   assert.match(service, /resolveCrawlerProviderCredential\('firecrawl', userId\)/);
   assert.match(service, /reserveProviderRequest\(\{/);
   assert.match(service, /export const isFirecrawlConfigured = async/);
+  assert.match(browserlessExtractor, /resolveCrawlerProviderCredential/);
+  assert.match(browserlessExtractor, /reserveProviderRequest/);
   assert.match(apiSource, /providerConfigured: await isFirecrawlConfigured\(principal\.userId\)/);
-  assert.match(apiSource, /!\(await isFirecrawlConfigured\(principal\.userId\)\)/);
+  assert.doesNotMatch(apiSource, /if\s*\(!\(await isFirecrawlConfigured\(principal\.userId\)\)\)/);
   assert.match(settings, /Firecrawl/);
   assert.match(settings, /Browserless/);
   assert.match(settings, /حفظ دون تعيين/);
@@ -452,7 +455,7 @@ test('competitor discovery stop control requests durable cancellation and keeps 
   assert.match(executor, /signal: context\.signal/);
 });
 
-test('competitor extraction tries Firecrawl once and falls back programmatically without AI', async () => {
+test('competitor extraction tries each deterministic crawler once, then replaces or fails without AI', async () => {
   const [executor, panel] = await Promise.all([
     readWorkspaceFile('server/competitorExtractionExecutor.ts'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
@@ -461,7 +464,10 @@ test('competitor extraction tries Firecrawl once and falls back programmatically
   assert.equal(COMPETITOR_EXTRACTION_MAX_ATTEMPTS, 1);
   assert.match(executor, /getCompetitorPreview/);
   assert.match(executor, /getProgrammaticCompetitorContent/);
+  assert.match(executor, /getBrowserlessCompetitorContent/);
   assert.match(executor, /stage: 'programmatic_fallback'/);
+  assert.match(executor, /stage: 'rendered_browser_fallback'/);
+  assert.match(executor, /stage: 'replacing_competitor'/);
   assert.match(executor, /COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT/);
   assert.match(executor, /status: 'failed'/);
   assert.doesNotMatch(executor, /throw new ExternalAnalysisRetryError/);
@@ -471,11 +477,13 @@ test('competitor extraction tries Firecrawl once and falls back programmatically
   assert.match(panel, /hydratedCompetitorsRef/);
 });
 
-test('bulk competitor import uses Firecrawl then programmatic fallback and never Gemini', async () => {
-  const [executor, panel, sidebar] = await Promise.all([
+test('bulk competitor import uses Firecrawl, direct HTML, Browserless, and reserve replacement without Gemini', async () => {
+  const [executor, panel, sidebar, api, discoveryClient] = await Promise.all([
     readWorkspaceFile('server/competitorExtractionExecutor.ts'),
     readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx'),
     readWorkspaceFile('components/RightSidebar.tsx'),
+    readWorkspaceFile('api/competitors.ts'),
+    readWorkspaceFile('utils/competitorDiscovery.ts'),
   ]);
 
   assert.match(executor, /provider: 'firecrawl'/);
@@ -484,14 +492,26 @@ test('bulk competitor import uses Firecrawl then programmatic fallback and never
   assert.match(executor, /provider: 'programmatic'/);
   assert.match(executor, /model: PROGRAMMATIC_MODEL/);
   assert.match(executor, /programmatic_after_firecrawl/);
-  assert.match(executor, /isCompetitorLanguageCompatible\('ar', content\.text\)/);
+  assert.match(executor, /provider: 'browserless'/);
+  assert.match(executor, /model: BROWSERLESS_MODEL/);
+  assert.match(executor, /browserless_after_firecrawl_programmatic/);
+  assert.match(executor, /isCompetitorLanguageCompatible\('ar', options\.content\.text\)/);
   assert.match(executor, /competitor_language_mismatch/);
-  assert.match(executor, /\.select\('article_language,keywords'\)/);
+  assert.match(executor, /\.select\('article_language,title,keywords'\)/);
   assert.match(executor, /analyzeCompetitorKeywordTargeting/);
   assert.match(executor, /COMPETITOR_KEYWORD_TARGETING_WARNING_CODE/);
   assert.match(executor, /evaluateFinalKeywordTargeting/);
   assert.doesNotMatch(executor, /The final Firecrawl content did not contain the primary keyword/);
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
+  assert.match(executor, /loadReserveSources/);
+  assert.match(executor, /promoteReserveSource/);
+  assert.match(executor, /competitor_duplicate_canonical_url/);
+  assert.match(executor, /competitor_duplicate_domain/);
+  assert.match(api, /result,key_attempts/);
+  assert.match(api, /contentQualification: result\.contentQualification/);
+  assert.match(discoveryClient, /keyAttempts: Array\.isArray\(value\.key_attempts\)/);
+  assert.match(panel, /latestExtractionAttemptsByUrl/);
+  assert.match(panel, /state\.activeJob\?\.keyAttempts/);
   assert.match(panel, /سحب \$\{selectedResults\.length\} موقع/);
   assert.match(panel, /البحث وسحب المنافسين/);
   assert.match(panel, /حالة استخراج المحتوى/);

@@ -1014,7 +1014,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             if (row.status === 'failed' || row.status === 'cancelled') {
                 return {
                     status: 'error',
-                    source: row.extractionProvider === 'firecrawl_programmatic_failed'
+                    source: row.extractionProvider.includes('failed')
                         ? 'programmatic'
                         : 'url',
                     content: null,

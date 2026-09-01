@@ -70,7 +70,7 @@ test('final keyword rechecks are advisory so approved automatic sources continue
 
   assert.match(executor, /Deterministic qualification is the hard selection gate/);
   assert.match(executor, /COMPETITOR_KEYWORD_TARGETING_WARNING_CODE/);
-  assert.match(executor, /status: 'completed'[\s\S]*error_code: keywordTargeting\.warningCode \|\| null/);
+  assert.match(executor, /status: 'completed'[\s\S]*error_code: options\.keywordTargeting\.warningCode \|\| null/);
   assert.doesNotMatch(executor, /The final page content did not contain the primary keyword/);
   assert.match(content, /competitor_keyword_targeting_unconfirmed/);
   assert.match(panel, /isCompetitorKeywordTargetingWarning/);
@@ -88,4 +88,24 @@ test('ready-status meta-description automation is retired in favor of unified se
   assert.match(migration, /semantic_keywords_have_google_metadata/);
   assert.doesNotMatch(registry, /autoGenerateMetaDescription/);
   assert.doesNotMatch(settings, /عند تحويل المقالة إلى جاهز/);
+});
+
+test('competitor discovery UI separates targeting proof from text availability and exposes fallback paths', async () => {
+  const panel = await readWorkspaceFile('components/CompetitorDiscoveryPanel.tsx');
+
+  assert.match(panel, /data-testid="competitor-targeting-summary"/);
+  assert.match(panel, /منافس مؤكد/);
+  assert.match(panel, /نص مستخرج/);
+  assert.match(panel, /يحتاج بديل سحب/);
+  assert.match(panel, /أسباب اعتماد المنافس/);
+  assert.match(panel, /serp_title: \{ ar: 'عنوان جوجل'/);
+  assert.match(panel, /serp_description: \{ ar: 'وصف جوجل'/);
+  assert.match(panel, /url: \{ ar: 'الرابط'/);
+  assert.match(panel, /page_title: \{ ar: 'عنوان الصفحة'/);
+  assert.match(panel, /body: \{ ar: 'نص الصفحة'/);
+  assert.match(panel, /aria-label=\{isArabic \? 'مسار محاولات سحب النص'/);
+  assert.match(panel, /rendered_browser_fallback/);
+  assert.match(panel, /تعذر المساران؛ جارٍ السحب عبر متصفح مُصيَّر/);
+  assert.match(panel, /replacing_competitor/);
+  assert.match(panel, /جارٍ استبدال الرابط بمنافس مؤكد تالٍ/);
 });

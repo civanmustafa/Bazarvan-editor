@@ -117,6 +117,195 @@ const selectionWarningLabels: Record<string, { ar: string; en: string }> = {
   'content-qualification-unavailable': { ar: 'تعذر فحص النص برمجيًا', en: 'Content check unavailable' },
 };
 
+type CompetitorTargetingStatus = 'confirmed' | 'probable' | 'rejected' | 'unavailable';
+type CompetitorContentStatus = 'usable' | 'sparse' | 'unavailable' | 'failed' | 'pending';
+type CompetitorTargetingEvidence = {
+  term: string;
+  termKind: 'primary' | 'alternative' | 'article_title' | string;
+  source: 'serp_title' | 'serp_description' | 'url' | 'page_title' | 'h1' | 'headings' | 'introduction' | 'body' | string;
+  matchKind: 'exact' | 'ordered_near' | string;
+  score: number;
+};
+type CompetitorExtractionAttempt = {
+  provider: string;
+  status: string;
+};
+
+type EnrichedCompetitorSearchResult = CompetitorSearchResult & {
+  targetingEvidence?: unknown;
+  targetingStatus?: unknown;
+  contentStatus?: unknown;
+  extractionAttempts?: unknown;
+};
+
+const targetingEvidenceSourceLabels: Record<string, { ar: string; en: string }> = {
+  serp_title: { ar: 'عنوان جوجل', en: 'Google title' },
+  serp_description: { ar: 'وصف جوجل', en: 'Google description' },
+  url: { ar: 'الرابط', en: 'URL' },
+  page_title: { ar: 'عنوان الصفحة', en: 'Page title' },
+  h1: { ar: 'العنوان الرئيسي', en: 'Main heading' },
+  headings: { ar: 'عناوين الصفحة', en: 'Page headings' },
+  introduction: { ar: 'مقدمة الصفحة', en: 'Introduction' },
+  body: { ar: 'نص الصفحة', en: 'Page text' },
+};
+
+const targetingTermKindLabels: Record<string, { ar: string; en: string }> = {
+  primary: { ar: 'الكلمة الأساسية', en: 'Primary keyword' },
+  alternative: { ar: 'صيغة بديلة', en: 'Alternative phrase' },
+  article_title: { ar: 'عنوان المقالة', en: 'Article title' },
+};
+
+const targetingMatchKindLabels: Record<string, { ar: string; en: string }> = {
+  exact: { ar: 'تطابق تام', en: 'Exact match' },
+  ordered_near: { ar: 'كلمات متقاربة بالترتيب', en: 'Ordered nearby terms' },
+};
+
+const extractionProviderLabels: Record<string, { ar: string; en: string }> = {
+  cache: { ar: 'المحتوى المحفوظ', en: 'Cache' },
+  firecrawl: { ar: 'Firecrawl', en: 'Firecrawl' },
+  programmatic: { ar: 'استخراج برمجي', en: 'Programmatic' },
+  direct: { ar: 'استخراج مباشر', en: 'Direct fetch' },
+  browserless: { ar: 'Browserless', en: 'Browserless' },
+  canonical: { ar: 'الرابط الأساسي', en: 'Canonical URL' },
+};
+
+const isUiRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+const normalizedUiKey = (value: unknown): string => (
+  typeof value === 'string' ? value.trim().toLowerCase().replace(/[\s-]+/g, '_') : ''
+);
+
+const uiText = (value: unknown): string => (
+  typeof value === 'string' ? value.trim() : ''
+);
+
+const parseTargetingEvidence = (value: unknown): CompetitorTargetingEvidence[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(entry => {
+    if (!isUiRecord(entry)) return [];
+    const source = normalizedUiKey(entry.source);
+    const term = uiText(entry.term);
+    if (!source || !term) return [];
+    return [{
+      term,
+      termKind: normalizedUiKey(entry.termKind) || 'primary',
+      source,
+      matchKind: normalizedUiKey(entry.matchKind || entry.matchType) || 'exact',
+      score: Math.max(0, Math.min(100, Number(entry.score) || 0)),
+    }];
+  }).sort((first, second) => second.score - first.score);
+};
+
+const parseExtractionAttempts = (value: unknown): CompetitorExtractionAttempt[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(entry => {
+    if (typeof entry === 'string') {
+      const provider = normalizedUiKey(entry);
+      return provider ? [{ provider, status: '' }] : [];
+    }
+    if (!isUiRecord(entry)) return [];
+    const rawProvider = normalizedUiKey(entry.provider || entry.method || entry.model || entry.stage);
+    const provider = rawProvider.includes('v2/scrape')
+      ? 'firecrawl'
+      : rawProvider.includes('deterministic')
+        ? 'programmatic'
+        : rawProvider.includes('rendered')
+          ? 'browserless'
+          : rawProvider;
+    if (!provider) return [];
+    return [{
+      provider,
+      status: normalizedUiKey(entry.status || entry.outcome || entry.result),
+    }];
+  });
+};
+
+const resolvedTargetingStatus = (
+  result: CompetitorSearchResult,
+  evidence: CompetitorTargetingEvidence[],
+): CompetitorTargetingStatus => {
+  const qualification: Record<string, unknown> = isUiRecord(result.contentQualification)
+    ? result.contentQualification as unknown as Record<string, unknown>
+    : {};
+  const supplied = normalizedUiKey(
+    (result as EnrichedCompetitorSearchResult).targetingStatus || qualification.targetingStatus,
+  );
+  if (supplied === 'confirmed' || supplied === 'probable' || supplied === 'rejected' || supplied === 'unavailable') {
+    return supplied;
+  }
+  if (supplied === 'not_confirmed') return 'rejected';
+  if (supplied === 'unknown') return 'unavailable';
+  if (evidence.length > 0 || result.contentQualification?.status === 'qualified') return 'confirmed';
+  if (result.contentQualification?.status === 'not_qualified') return 'rejected';
+  if (result.contentQualification?.status === 'unavailable') return 'unavailable';
+  return result.eligible ? 'probable' : 'unavailable';
+};
+
+const resolvedContentStatus = (result: CompetitorSearchResult): CompetitorContentStatus => {
+  const qualification: Record<string, unknown> = isUiRecord(result.contentQualification)
+    ? result.contentQualification as unknown as Record<string, unknown>
+    : {};
+  const supplied = normalizedUiKey(
+    (result as EnrichedCompetitorSearchResult).contentStatus || qualification.contentUsability,
+  );
+  if (supplied === 'usable' || supplied === 'sparse' || supplied === 'unavailable' || supplied === 'failed' || supplied === 'pending') {
+    return supplied;
+  }
+  if (supplied === 'insufficient') return 'sparse';
+  if (normalizedUiKey(qualification.contentAvailability) === 'unavailable') return 'unavailable';
+  if (result.contentQualification?.status === 'qualified' || result.contentQualification?.status === 'not_qualified') return 'usable';
+  if (result.contentQualification?.status === 'unavailable') return 'unavailable';
+  return 'pending';
+};
+
+const targetingStatusLabel = (status: CompetitorTargetingStatus, locale: 'ar' | 'en'): string => ({
+  confirmed: { ar: 'منافس مؤكد', en: 'Confirmed competitor' },
+  probable: { ar: 'منافس محتمل', en: 'Probable competitor' },
+  rejected: { ar: 'غير مستهدف', en: 'Not targeted' },
+  unavailable: { ar: 'الاستهداف غير محسوم', en: 'Targeting unverified' },
+}[status][locale]);
+
+const contentStatusLabel = (status: CompetitorContentStatus, locale: 'ar' | 'en'): string => ({
+  usable: { ar: 'نص صالح', en: 'Usable text' },
+  sparse: { ar: 'نص ضعيف — يحتاج بديلًا', en: 'Sparse text — fallback needed' },
+  unavailable: { ar: 'يحتاج مسار سحب بديلًا', en: 'Extraction fallback needed' },
+  failed: { ar: 'تعذر النص — يحتاج بديلًا', en: 'Text failed — fallback needed' },
+  pending: { ar: 'بانتظار سحب النص', en: 'Text extraction pending' },
+}[status][locale]);
+
+const providerLabel = (provider: string, locale: 'ar' | 'en'): string => {
+  const normalized = normalizedUiKey(provider);
+  const knownKey = Object.keys(extractionProviderLabels).find(key => normalized.includes(key));
+  return (knownKey ? extractionProviderLabels[knownKey]?.[locale] : '') || provider;
+};
+
+const attemptStatusMark = (status: string): { mark: string; tone: string } => {
+  if (['success', 'succeeded', 'completed', 'usable', 'qualified'].includes(status)) {
+    return { mark: '✓', tone: 'text-emerald-700 dark:text-emerald-300' };
+  }
+  if (['failed', 'error', 'unavailable', 'sparse', 'rejected'].includes(status)) {
+    return { mark: '×', tone: 'text-red-600 dark:text-red-300' };
+  }
+  if (['running', 'extracting', 'pending', 'queued'].includes(status)) {
+    return { mark: '…', tone: 'text-amber-700 dark:text-amber-300' };
+  }
+  return { mark: '', tone: 'text-gray-500 dark:text-gray-400' };
+};
+
+const targetingStatusTone = (status: CompetitorTargetingStatus): string => {
+  if (status === 'confirmed') return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300';
+  if (status === 'rejected') return 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300';
+  return 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300';
+};
+
+const contentStatusTone = (status: CompetitorContentStatus): string => {
+  if (status === 'usable') return 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300';
+  if (status === 'pending') return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
+  return 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300';
+};
+
 type PreviewLocation = {
   source: 'search' | 'saved';
   index: number;
@@ -255,6 +444,52 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const selectedResults = useMemo(() => (
     searchResults.filter(result => selectedUrls.has(result.canonicalUrl))
   ), [searchResults, selectedUrls]);
+  const latestExtractionAttemptsByUrl = useMemo(() => {
+    const completedAttempts = Array.isArray(state.latestJob?.result?.extractionAttempts)
+      ? state.latestJob.result.extractionAttempts
+      : [];
+    const attempts = [
+      ...(state.activeJob?.keyAttempts || []),
+      ...completedAttempts,
+    ];
+    const grouped = new Map<string, unknown[]>();
+    attempts.forEach(attempt => {
+      if (!isUiRecord(attempt)) return;
+      const url = uiText(attempt.url);
+      if (!url) return;
+      grouped.set(url, [...(grouped.get(url) || []), attempt]);
+    });
+    return grouped;
+  }, [state.activeJob?.keyAttempts, state.latestJob]);
+  const resultPresentation = useMemo(() => searchResults.map(result => {
+    const enriched = result as EnrichedCompetitorSearchResult;
+    const qualification: Record<string, unknown> = isUiRecord(result.contentQualification)
+      ? result.contentQualification as unknown as Record<string, unknown>
+      : {};
+    const evidence = parseTargetingEvidence(enriched.targetingEvidence || qualification.evidence);
+    return {
+      canonicalUrl: result.canonicalUrl,
+      targetingStatus: resolvedTargetingStatus(result, evidence),
+      contentStatus: resolvedContentStatus(result),
+      evidence,
+      extractionAttempts: parseExtractionAttempts([
+        ...(Array.isArray(enriched.extractionAttempts) ? enriched.extractionAttempts : []),
+        ...(latestExtractionAttemptsByUrl.get(result.canonicalUrl) || []),
+        ...(result.url === result.canonicalUrl
+          ? []
+          : latestExtractionAttemptsByUrl.get(result.url) || []),
+      ]),
+    };
+  }), [latestExtractionAttemptsByUrl, searchResults]);
+  const resultPresentationByUrl = useMemo(() => new Map(
+    resultPresentation.map(item => [item.canonicalUrl, item]),
+  ), [resultPresentation]);
+  const confirmedTargetCount = resultPresentation.filter(item => item.targetingStatus === 'confirmed').length;
+  const probableTargetCount = resultPresentation.filter(item => item.targetingStatus === 'probable').length;
+  const usableContentCount = resultPresentation.filter(item => item.contentStatus === 'usable').length;
+  const fallbackContentCount = resultPresentation.filter(item => (
+    item.contentStatus === 'sparse' || item.contentStatus === 'unavailable' || item.contentStatus === 'failed'
+  )).length;
   const previewCollection = previewLocation?.source === 'saved'
     ? state.competitors
     : searchResults;
@@ -510,6 +745,9 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         query: query.trim(),
         queryType: mode,
         results: selectedResults,
+        reserveResults: searchResults.filter(result => (
+          !selectedUrls.has(result.canonicalUrl) && result.eligible
+        )),
       });
       setNotice(isArabic
         ? 'تمت إضافة مهمة السحب. ستستمر حتى عند مغادرة المقالة.'
@@ -593,6 +831,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const extractionPreparing = activeJob?.status === 'running'
     && progressStage !== 'extracting_competitor'
     && progressStage !== 'programmatic_fallback'
+    && progressStage !== 'rendered_browser_fallback'
+    && progressStage !== 'replacing_competitor'
     && progressStage !== 'competitor_processed';
   const displayedCurrent = Math.min(
     Math.max(0, current),
@@ -619,9 +859,17 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               ? isArabic
                 ? `فشلت خدمة السحب؛ جارٍ الاستخراج البرمجي ${Math.max(1, displayedCurrent)}/${total || 1}`
                 : `Firecrawl failed; running programmatic extraction ${Math.max(1, displayedCurrent)}/${total || 1}`
+            : progressStage === 'rendered_browser_fallback'
+              ? isArabic
+                ? `تعذر المساران؛ جارٍ السحب عبر متصفح مُصيَّر ${Math.max(1, displayedCurrent)}/${total || 1}`
+                : `Both paths failed; extracting through a rendered browser ${Math.max(1, displayedCurrent)}/${total || 1}`
+            : progressStage === 'replacing_competitor'
+              ? isArabic
+                ? `جارٍ استبدال الرابط بمنافس مؤكد تالٍ ${Math.max(1, displayedCurrent)}/${total || 1}`
+                : `Replacing the URL with the next confirmed competitor ${Math.max(1, displayedCurrent)}/${total || 1}`
             : isArabic
-              ? `سحب محتوى المنافس ${Math.max(1, displayedCurrent)}/${total || 1}`
-              : `Importing via Firecrawl ${Math.max(1, displayedCurrent)}/${total || 1}`
+              ? `تشغيل سلسلة سحب محتوى المنافس ${Math.max(1, displayedCurrent)}/${total || 1}`
+              : `Running the competitor extraction chain ${Math.max(1, displayedCurrent)}/${total || 1}`
     : '';
   const activeJobError = activeJob?.last_error?.trim() || '';
   const activeJobWarning = extractionQueueStalled
@@ -636,10 +884,18 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         ? isArabic
           ? 'فشلت خدمة السحب لهذا الرابط؛ بدأ الاستخراج البرمجي تلقائيًا دون إعادة محاولة الخدمة ودون استخدام الذكاء الاصطناعي.'
           : 'Firecrawl failed for this URL; programmatic extraction started automatically without retrying Firecrawl or using AI.'
+      : activeJob?.status === 'running' && progressStage === 'rendered_browser_fallback'
+        ? isArabic
+          ? 'تعذر السحب عبر الخدمة والاستخراج البرمجي؛ بدأ النظام فتح الصفحة عبر متصفح مُصيَّر وتشغيل محتواها الديناميكي تلقائيًا.'
+          : 'Provider and programmatic extraction failed; the system is automatically rendering the dynamic page in a browser.'
+      : activeJob?.status === 'running' && progressStage === 'replacing_competitor'
+        ? isArabic
+          ? 'لم ينتج الرابط نصًا صالحًا بعد استنفاد مسارات السحب؛ يجري استبداله تلقائيًا بالمنافس المؤكد التالي.'
+          : 'The URL produced no usable text after all extraction paths; it is being replaced automatically with the next confirmed competitor.'
       : activeJob?.status === 'running'
         ? isArabic
-          ? 'خدمة السحب تعمل الآن. قد يستغرق الرابط الواحد حتى 75 ثانية قبل نجاحه أو ظهور خطئه.'
-          : 'Firecrawl is running. One URL can take up to 75 seconds before it succeeds or reports an error.'
+          ? 'سلسلة السحب تعمل الآن، وستنتقل تلقائيًا بين الخدمة والسحب المباشر والمتصفح المُصيَّر ثم المنافس الاحتياطي عند الحاجة.'
+          : 'The extraction chain is running and will automatically advance through the provider, direct fetch, rendered browser, and reserve competitor when needed.'
         : '';
   const completedSourceCount = state.competitors.filter(row => row.status === 'completed').length;
   const inProgressSourceCount = state.competitors.filter(row => (
@@ -682,8 +938,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
             </h4>
             <p className="mt-0.5 text-[10px] leading-4 text-gray-500 dark:text-gray-400">
               {isArabic
-                ? `اختر حتى ${MAX_ARTICLE_COMPETITORS} مواقع. بعد اعتمادها يبدأ السحب تلقائيًا، ثم ينتقل النظام إلى الاستخراج البرمجي إذا لم تنجح خدمة السحب.`
-                : `Select up to ${MAX_ARTICLE_COMPETITORS} sites. Import starts after confirmation and automatically falls back to programmatic extraction if Firecrawl fails.`}
+                ? `اختر حتى ${MAX_ARTICLE_COMPETITORS} مواقع. بعد اعتمادها يبدأ السحب تلقائيًا، ويجرب النظام مسارات السحب البديلة عند تعذر أحدها.`
+                : `Select up to ${MAX_ARTICLE_COMPETITORS} sites. Import starts after confirmation and automatically tries alternate extraction paths when one fails.`}
             </p>
           </div>
         </div>
@@ -823,19 +1079,30 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 <span>{isArabic ? 'نوع الصفحة' : 'Page type'}: {pageTypeLabels[selectionSummary.targetPageType]?.[locale] || pageTypeLabels.unknown[locale]}</span>
                 <span>{isArabic ? 'الثقة' : 'Confidence'}: {selectionSummary.confidence}%</span>
                 <span>{isArabic ? 'فُحص' : 'Reviewed'}: {selectionSummary.reviewedCount}/{selectionSummary.candidateCount}</span>
-                {selectionSummary.contentQualificationAttempted && (
-                  <span className="text-emerald-700 dark:text-emerald-300">
-                    {isArabic ? 'مؤهل بالنص' : 'Content-qualified'}: {selectionSummary.contentQualifiedCount}
-                  </span>
-                )}
-                {selectionSummary.contentUnavailableCount > 0 && (
-                  <span className="text-amber-700 dark:text-amber-300">
-                    {isArabic ? 'تعذر فحصه' : 'Unavailable'}: {selectionSummary.contentUnavailableCount}
-                  </span>
-                )}
                 {articleLanguage === 'ar' && selectionSummary.languageFilteredCount > 0 && (
                   <span className="text-amber-700 dark:text-amber-300">
                     {isArabic ? 'لاتيني مستبعد' : 'Latin excluded'}: {selectionSummary.languageFilteredCount}
+                  </span>
+                )}
+              </div>
+              <div
+                data-testid="competitor-targeting-summary"
+                className="mt-2 flex flex-wrap gap-1 border-t border-[#d4af37]/20 pt-2 text-[9px] font-black"
+              >
+                <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                  {isArabic ? `منافس مؤكد: ${confirmedTargetCount}` : `Confirmed: ${confirmedTargetCount}`}
+                </span>
+                {probableTargetCount > 0 && (
+                  <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                    {isArabic ? `منافس محتمل: ${probableTargetCount}` : `Probable: ${probableTargetCount}`}
+                  </span>
+                )}
+                <span className="rounded bg-sky-50 px-1.5 py-0.5 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
+                  {isArabic ? `نص مستخرج: ${usableContentCount}` : `Extracted text: ${usableContentCount}`}
+                </span>
+                {fallbackContentCount > 0 && (
+                  <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                    {isArabic ? `يحتاج بديل سحب: ${fallbackContentCount}` : `Needs fallback: ${fallbackContentCount}`}
                   </span>
                 )}
               </div>
@@ -846,8 +1113,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                   <span>
                     {selectionSummary.autoSelectedCount > 0
                       ? (isArabic
-                          ? `لم تتوفر نتيجة مؤهلة نصيًا؛ اختيرت تلقائيًا ${selectionSummary.autoSelectedCount} نتيجة قوية تعذر فحص نصها، وسيُتحقق منها أثناء السحب.`
-                          : `No content-qualified result was available. ${selectionSummary.autoSelectedCount} strong result(s) whose text could not be prechecked were selected and will be verified during import.`)
+                          ? `لم يكتمل النص بعد؛ تم اعتماد ${selectionSummary.autoSelectedCount} نتيجة من أدلة الاستهداف المتاحة، وسيجرب النظام مسارات السحب البديلة تلقائيًا.`
+                          : `Full text is not available yet. ${selectionSummary.autoSelectedCount} result(s) were accepted from the available targeting evidence, and alternate extraction paths will be tried automatically.`)
                       : (isArabic
                           ? 'اكتمل البحث دون نتيجة مؤهلة أو بديل آمن للاختيار التلقائي. اختر نتيجة مناسبة يدويًا لبدء السحب.'
                           : 'Search completed without a content-qualified result or a safe automatic fallback. Select a suitable result manually to start import.')}
@@ -869,6 +1136,12 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 .slice(0, 2);
               const visibleWarning = result.warningCodes[0] || '';
               const qualification = result.contentQualification;
+              const presentation = resultPresentationByUrl.get(result.canonicalUrl);
+              const targetingStatus = presentation?.targetingStatus || 'unavailable';
+              const contentStatus = presentation?.contentStatus || 'pending';
+              const visibleEvidence = presentation?.evidence.slice(0, 3) || [];
+              const hiddenEvidenceCount = Math.max(0, (presentation?.evidence.length || 0) - visibleEvidence.length);
+              const extractionAttempts = presentation?.extractionAttempts.slice(0, 5) || [];
               return (
                 <div
                   key={result.canonicalUrl}
@@ -909,7 +1182,63 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                         <span className="text-gray-500 dark:text-gray-400">{intentLabels[result.inferredIntent]?.[locale] || intentLabels.unknown[locale]}</span>
                         <span className="text-gray-500 dark:text-gray-400">{pageTypeLabels[result.inferredPageType]?.[locale] || pageTypeLabels.unknown[locale]}</span>
                       </span>
-                      {qualification && (
+                      <span className="mt-1 flex flex-wrap gap-1" aria-label={isArabic ? 'حالة المنافس والنص' : 'Competitor and text status'}>
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${targetingStatusTone(targetingStatus)}`}>
+                          {targetingStatusLabel(targetingStatus, locale)}
+                        </span>
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${contentStatusTone(contentStatus)}`}>
+                          {contentStatusLabel(contentStatus, locale)}
+                        </span>
+                      </span>
+                      {visibleEvidence.length > 0 && (
+                        <span className="mt-1.5 block border-s border-emerald-300 ps-1.5 dark:border-emerald-700/70">
+                          <span className="block text-[9px] font-black text-emerald-700 dark:text-emerald-300">
+                            {isArabic ? 'أسباب اعتماد المنافس' : 'Why this competitor qualifies'}
+                          </span>
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            {visibleEvidence.map((evidence, evidenceIndex) => {
+                              const sourceLabel = targetingEvidenceSourceLabels[evidence.source]?.[locale] || evidence.source;
+                              const termKindLabel = targetingTermKindLabels[evidence.termKind]?.[locale] || evidence.termKind;
+                              const matchLabel = targetingMatchKindLabels[evidence.matchKind]?.[locale] || evidence.matchKind;
+                              return (
+                                <span
+                                  key={`${evidence.source}:${evidence.term}:${evidenceIndex}`}
+                                  title={`${sourceLabel} — ${termKindLabel}: ${evidence.term} — ${matchLabel} (${evidence.score}/100)`}
+                                  className="inline-flex max-w-full items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                                >
+                                  <span className="shrink-0">{sourceLabel} · {termKindLabel}</span>
+                                  <span className="max-w-32 truncate opacity-80" dir="auto">“{evidence.term}”</span>
+                                </span>
+                              );
+                            })}
+                            {hiddenEvidenceCount > 0 && (
+                              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[9px] font-bold text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                +{hiddenEvidenceCount} {isArabic ? 'أدلة' : 'more'}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                      )}
+                      {extractionAttempts.length > 0 && (
+                        <span
+                          className="mt-1.5 flex flex-wrap items-center gap-1 text-[9px] font-bold text-gray-500 dark:text-gray-400"
+                          aria-label={isArabic ? 'مسار محاولات سحب النص' : 'Text extraction attempt path'}
+                        >
+                          <span className="font-black text-gray-600 dark:text-gray-300">{isArabic ? 'مسار السحب:' : 'Extraction path:'}</span>
+                          {extractionAttempts.map((attempt, attemptIndex) => {
+                            const attemptStatus = attemptStatusMark(attempt.status);
+                            return (
+                              <React.Fragment key={`${attempt.provider}:${attemptIndex}`}>
+                                {attemptIndex > 0 && <span aria-hidden="true">←</span>}
+                                <span className={`rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-700 ${attemptStatus.tone}`}>
+                                  {providerLabel(attempt.provider, locale)}{attemptStatus.mark ? ` ${attemptStatus.mark}` : ''}
+                                </span>
+                              </React.Fragment>
+                            );
+                          })}
+                        </span>
+                      )}
+                      {qualification && visibleEvidence.length === 0 && (
                         <span className={`mt-1 inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-black ${
                           qualification.status === 'qualified'
                             ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
@@ -982,7 +1311,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
             {isStarting ? <LoaderCircle size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
             <span>{isArabic
               ? `سحب ${selectedResults.length} موقع`
-              : `Import ${selectedResults.length} site(s) via Firecrawl`}</span>
+              : `Import ${selectedResults.length} site(s) automatically`}</span>
           </button>
         </div>
       )}

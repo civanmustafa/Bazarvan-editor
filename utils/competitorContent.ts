@@ -1,11 +1,15 @@
+export const COMPETITOR_ALL_EXTRACTION_FAILURE_CODE =
+  'all_competitor_extraction_methods_failed';
+
+// Backward-compatible export retained for persisted consumers and older tests.
 export const COMPETITOR_DUAL_EXTRACTION_FAILURE_CODE =
-  'firecrawl_and_programmatic_extraction_failed';
+  COMPETITOR_ALL_EXTRACTION_FAILURE_CODE;
 
 export const COMPETITOR_DUAL_EXTRACTION_FAILURE_PREFIX =
   '[تعذر استخراج محتوى المنافس]';
 
 export const COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT =
-  `${COMPETITOR_DUAL_EXTRACTION_FAILURE_PREFIX} فشل سحب المحتوى عبر Firecrawl والاستخراج البرمجي. افتح الرابط والصق نص المقالة يدويًا بدل هذه الرسالة لاعتماده في التحليل والكتابة.`;
+  `${COMPETITOR_DUAL_EXTRACTION_FAILURE_PREFIX} تعذر سحب المحتوى عبر Firecrawl والاستخراج البرمجي وBrowserless، ولم يتوفر منافس احتياطي صالح. افتح الرابط والصق نص المقالة يدويًا بدل هذه الرسالة لاعتماده في التحليل والكتابة.`;
 
 // A source can pass the deterministic qualification used for selection, then
 // expose a slightly different main-content representation when it is fetched

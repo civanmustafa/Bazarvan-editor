@@ -26,10 +26,19 @@ export type CompetitorPageType =
 export type CompetitorSelectionReasonCode =
   | 'auto-selected'
   | 'content-keyword-qualified'
+  | 'targeting-evidence-confirmed'
+  | 'primary-keyword-targeting'
+  | 'alternative-keyword-targeting'
   | 'primary-keyword-in-content'
   | 'alternative-keyword-in-content'
+  | 'article-title-targeting'
+  | 'keyword-in-serp-title'
+  | 'keyword-in-serp-description'
+  | 'keyword-in-url'
+  | 'keyword-in-page-title'
   | 'keyword-in-heading'
   | 'keyword-in-introduction'
+  | 'keyword-in-body'
   | 'direct-intent-match'
   | 'page-type-match'
   | 'high-query-relevance'
@@ -50,18 +59,56 @@ export type CompetitorSelectionWarningCode =
   | 'utility-page'
   | 'own-domain';
 
+export type CompetitorTargetingStatus = 'confirmed' | 'not_confirmed' | 'unknown';
+
+export type CompetitorTargetingTermKind = 'primary' | 'alternative' | 'article_title';
+
+export type CompetitorTargetingEvidenceSource =
+  | 'serp_title'
+  | 'serp_description'
+  | 'url'
+  | 'page_title'
+  | 'h1'
+  | 'headings'
+  | 'introduction'
+  | 'body';
+
+export type CompetitorTargetingEvidence = {
+  term: string;
+  termKind: CompetitorTargetingTermKind;
+  source: CompetitorTargetingEvidenceSource;
+  matchType: 'exact' | 'ordered_near';
+  occurrences: number;
+  score: number;
+};
+
 export type CompetitorContentQualification = {
   status: 'qualified' | 'not_qualified' | 'unavailable';
   score: number;
   matchedKeyword: string;
-  matchKind: 'primary' | 'alternative' | 'ordered_primary' | 'ordered_alternative' | 'none';
-  locations: Array<'title' | 'h1' | 'headings' | 'introduction' | 'body'>;
+  matchKind:
+    | 'primary'
+    | 'alternative'
+    | 'article_title'
+    | 'ordered_primary'
+    | 'ordered_alternative'
+    | 'ordered_article_title'
+    | 'none';
+  locations: CompetitorTargetingEvidenceSource[];
   occurrences: number;
   wordCount: number;
   qualityScore: number;
   cacheHit: boolean;
   errorCode: string;
   version: string;
+  /** Independent from extraction success; older persisted payloads omit it. */
+  targetingStatus?: CompetitorTargetingStatus;
+  /** Exact, reviewable reasons that established keyword targeting. */
+  evidence?: CompetitorTargetingEvidence[];
+  /** Whether a page response was available to inspect. */
+  contentAvailability?: 'available' | 'unavailable';
+  /** Whether the extracted main text is usable for competitor analysis. */
+  contentUsability?: 'usable' | 'insufficient' | 'not_assessed';
 };
 
 export type ContentQualifiedCompetitorCandidate = CompetitorSearchResult & {
@@ -106,6 +153,8 @@ export type CompetitorSelectionSummary = {
   contentQualificationAttempted: boolean;
   contentQualifiedCount: number;
   contentUnavailableCount: number;
+  targetingConfirmedCount: number;
+  contentUsableCount: number;
   autoSelectedCount: number;
   autoSelectedUrls: string[];
 };
@@ -130,7 +179,7 @@ export type CompetitorSelectionContext = {
   ownDomains?: string[];
 };
 
-const ENGINE_VERSION = 'competitor-selection-v3-content-keyword-gate';
+const ENGINE_VERSION = 'competitor-selection-v4-multi-evidence-targeting';
 const INTENTS = ['informational', 'commercial', 'transactional', 'navigational', 'local', 'support'] as const;
 type RankedIntent = typeof INTENTS[number];
 type IntentVector = Record<RankedIntent, number>;
@@ -155,6 +204,166 @@ export const normalizeCompetitorText = (value: unknown): string => String(value 
   .replace(/[^\p{L}\p{N}]+/gu, ' ')
   .replace(/\s+/g, ' ')
   .trim();
+
+export type CompetitorTargetingTerm = {
+  term: string;
+  kind: CompetitorTargetingTermKind;
+};
+
+export type CompetitorTargetingSource = {
+  source: CompetitorTargetingEvidenceSource;
+  value: unknown;
+};
+
+const GENERIC_SINGLE_TARGET_TERMS = new Set([
+  'ذهب', 'جهاز', 'اجهزه', 'كشف', 'مقال', 'مقاله', 'دليل', 'شرح', 'معلومات', 'سعر', 'اسعار',
+  'افضل', 'شركه', 'شركات', 'خدمه', 'خدمات', 'منتج', 'منتجات', 'برنامج', 'برامج', 'موقع',
+  'مواقع', 'العالم', 'شراء', 'بيع', 'guide', 'article', 'best', 'price', 'product', 'service',
+].map(normalizeCompetitorText));
+
+const targetingTokens = (value: unknown): string[] => (
+  normalizeCompetitorText(value).split(' ').filter(Boolean)
+);
+
+const arabicTargetTokenVariants = (value: string): Set<string> => {
+  const variants = new Set([value]);
+  const queue = [value];
+  while (queue.length > 0) {
+    const token = queue.shift() || '';
+    const additions: string[] = [];
+    if (/^[وف][\u0621-\u064a]/.test(token) && token.length >= 5) additions.push(token.slice(1));
+    if (/^[بكل][\u0621-\u064a]/.test(token) && token.length >= 5) additions.push(token.slice(1));
+    if (token.startsWith('لل') && token.length >= 5) additions.push(`ال${token.slice(2)}`);
+    additions.forEach(addition => {
+      if (addition.length < 3 || variants.has(addition)) return;
+      variants.add(addition);
+      queue.push(addition);
+    });
+  }
+  return variants;
+};
+
+const targetingTokenMatches = (sourceToken: string, targetToken: string): boolean => (
+  sourceToken === targetToken || arabicTargetTokenVariants(sourceToken).has(targetToken)
+);
+
+const countContiguousTargetMatches = (sourceTokens: string[], targetTokens: string[]): number => {
+  if (targetTokens.length === 0 || sourceTokens.length < targetTokens.length) return 0;
+  let matches = 0;
+  for (let start = 0; start <= sourceTokens.length - targetTokens.length; start += 1) {
+    if (targetTokens.every((token, offset) => targetingTokenMatches(sourceTokens[start + offset], token))) {
+      matches += 1;
+      start += Math.max(0, targetTokens.length - 1);
+    }
+  }
+  return matches;
+};
+
+const hasOrderedNearTargetMatch = (sourceTokens: string[], targetTokens: string[]): boolean => {
+  if (targetTokens.length < 2 || sourceTokens.length < targetTokens.length) return false;
+  const maximumWindow = targetTokens.length + Math.max(2, Math.ceil(targetTokens.length * 0.35));
+  for (let start = 0; start < sourceTokens.length; start += 1) {
+    if (!targetingTokenMatches(sourceTokens[start], targetTokens[0])) continue;
+    let targetIndex = 1;
+    const end = Math.min(sourceTokens.length, start + maximumWindow);
+    for (let index = start + 1; index < end && targetIndex < targetTokens.length; index += 1) {
+      if (targetingTokenMatches(sourceTokens[index], targetTokens[targetIndex])) targetIndex += 1;
+    }
+    if (targetIndex === targetTokens.length) return true;
+  }
+  return false;
+};
+
+const isSpecificTargetingTerm = (term: string): boolean => {
+  const tokens = targetingTokens(term);
+  if (tokens.length >= 2) return true;
+  const token = tokens[0] || '';
+  if (!token || GENERIC_SINGLE_TARGET_TERMS.has(token)) return false;
+  // A lone term is only evidence when it is specific enough to behave like a
+  // name or specialist concept, rather than a broad topic word.
+  return /[a-z]/i.test(token) ? token.length >= 4 : token.length >= 5;
+};
+
+export const buildCompetitorTargetTerms = (context: Pick<
+  CompetitorSelectionContext,
+  'primaryKeyword' | 'alternativeKeywords' | 'articleTitle'
+>): CompetitorTargetingTerm[] => {
+  const values: CompetitorTargetingTerm[] = [
+    ...(context.primaryKeyword ? [{ term: context.primaryKeyword, kind: 'primary' as const }] : []),
+    ...(context.alternativeKeywords || []).map(term => ({ term, kind: 'alternative' as const })),
+    ...(context.articleTitle ? [{ term: context.articleTitle, kind: 'article_title' as const }] : []),
+  ];
+  const seen = new Set<string>();
+  return values.flatMap(value => {
+    const term = String(value.term || '').trim().slice(0, 300);
+    const normalized = normalizeCompetitorText(term);
+    if (!normalized || seen.has(normalized) || !isSpecificTargetingTerm(term)) return [];
+    seen.add(normalized);
+    return [{ term, kind: value.kind }];
+  }).slice(0, 16);
+};
+
+const TARGETING_SOURCE_SCORES: Record<CompetitorTargetingEvidenceSource, number> = {
+  serp_title: 93,
+  serp_description: 76,
+  url: 88,
+  page_title: 96,
+  h1: 96,
+  headings: 84,
+  introduction: 82,
+  body: 68,
+};
+
+const decodeTargetingSourceValue = (value: unknown): string => {
+  const text = String(value || '');
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+};
+
+/**
+ * Finds deterministic evidence for a complete target phrase. Token order must
+ * be preserved and only a small number of intervening words is tolerated.
+ */
+export const findCompetitorTargetingEvidence = (options: {
+  terms: CompetitorTargetingTerm[];
+  sources: CompetitorTargetingSource[];
+}): CompetitorTargetingEvidence[] => options.terms.flatMap(target => {
+  if (!isSpecificTargetingTerm(target.term)) return [];
+  const targetPhraseTokens = targetingTokens(target.term);
+  return options.sources.flatMap(({ source, value }) => {
+    const sourceTokens = targetingTokens(decodeTargetingSourceValue(value));
+    const occurrences = countContiguousTargetMatches(sourceTokens, targetPhraseTokens);
+    const exact = occurrences > 0;
+    const orderedNear = !exact && hasOrderedNearTargetMatch(sourceTokens, targetPhraseTokens);
+    if (!exact && !orderedNear) return [];
+    const kindBonus = target.kind === 'primary' ? 4 : target.kind === 'article_title' ? 2 : 0;
+    return [{
+      term: target.term,
+      termKind: target.kind,
+      source,
+      matchType: exact ? 'exact' as const : 'ordered_near' as const,
+      occurrences: exact ? occurrences : 1,
+      score: roundScore(TARGETING_SOURCE_SCORES[source] + kindBonus + (exact ? 2 : -8)),
+    }];
+  });
+}).sort((left, right) => (
+  right.score - left.score
+  || Number(right.matchType === 'exact') - Number(left.matchType === 'exact')
+  || left.source.localeCompare(right.source)
+));
+
+const legacyMatchKindFromEvidence = (
+  evidence?: CompetitorTargetingEvidence,
+): CompetitorContentQualification['matchKind'] => {
+  if (!evidence) return 'none';
+  const ordered = evidence.matchType === 'ordered_near';
+  if (evidence.termKind === 'primary') return ordered ? 'ordered_primary' : 'primary';
+  if (evidence.termKind === 'alternative') return ordered ? 'ordered_alternative' : 'alternative';
+  return ordered ? 'ordered_article_title' : 'article_title';
+};
 
 const normalizePhraseList = (values: string[]): string[] => (
   Array.from(new Set(values.map(normalizeCompetitorText).filter(Boolean)))
@@ -500,6 +709,7 @@ const queryRelevanceScore = (context: CompetitorSelectionContext, result: Compet
     context.query,
     context.primaryKeyword || '',
     ...(context.alternativeKeywords || []),
+    context.articleTitle || '',
   ].map(value => value.trim()).filter(Boolean);
   const normalizedTitle = normalizeCompetitorText(result.title);
   return Math.max(0, ...phrases.map(phrase => {
@@ -691,13 +901,22 @@ export const analyzeAndSelectCompetitors = (options: {
   maxSelected: number;
 }): CompetitorSelectionResult => {
   const context = options.context;
+  const targetingTerms = buildCompetitorTargetTerms(context);
   const targetPageType = normalizeTargetPageType(context.pageType);
   const candidateClassifications = options.candidates.map(candidate => {
     const pageType = inferPageType(candidate);
     const intentVector = emptyIntentVector();
     addIntentLexiconSignals(intentVector, `${candidate.title} ${candidate.description} ${candidate.canonicalUrl}`);
     addPageTypeIntentPrior(intentVector, pageType.type);
-    return { candidate, pageType, intentVector: normalizeIntentVector(intentVector) };
+    const metadataEvidence = findCompetitorTargetingEvidence({
+      terms: targetingTerms,
+      sources: [
+        { source: 'serp_title', value: candidate.title },
+        { source: 'serp_description', value: candidate.description },
+        { source: 'url', value: candidate.canonicalUrl || candidate.url },
+      ],
+    });
+    return { candidate, pageType, intentVector: normalizeIntentVector(intentVector), metadataEvidence };
   });
 
   const targetVector = emptyIntentVector();
@@ -728,7 +947,7 @@ export const analyzeAndSelectCompetitors = (options: {
   let filteredCount = 0;
   let languageFilteredCount = 0;
   const contentQualificationAttempted = options.candidates.some(candidate => Boolean(candidate.contentQualification));
-  const scored = candidateClassifications.flatMap(({ candidate, pageType, intentVector }) => {
+  const scored = candidateClassifications.flatMap(({ candidate, pageType, intentVector, metadataEvidence }) => {
     const ownDomain = domainMatches(candidate.domain, ownDomains);
     const utilityPage = hasUtilityPath(candidate);
     if (ownDomain || utilityPage) {
@@ -753,11 +972,47 @@ export const analyzeAndSelectCompetitors = (options: {
     const languageMatch = languageAssessment.score;
     const metadataQuality = metadataQualityScore(candidate);
     const locationMatch = locationMatchScore(context.targetCountry, candidate);
-    const contentTargeting = candidate.contentQualification?.score || 0;
+    const qualification = candidate.contentQualification;
+    const qualificationEvidence = qualification?.evidence || [];
+    // Every complete-phrase signal is first-class evidence. A legacy content
+    // precheck that did not see the phrase cannot invalidate a matching Google
+    // title/description or URL; the two observations describe different surfaces.
+    const combinedEvidence = Array.from(new Map(
+      [...qualificationEvidence, ...metadataEvidence].map(evidence => [
+        `${normalizeCompetitorText(evidence.term)}:${evidence.source}:${evidence.matchType}`,
+        evidence,
+      ]),
+    ).values()).sort((left, right) => right.score - left.score);
+    const targetingConfirmed = (
+      qualification?.status === 'qualified'
+      || qualification?.targetingStatus === 'confirmed'
+      || combinedEvidence.length > 0
+    );
+    const targetingRejected = qualification?.status === 'not_qualified' && !targetingConfirmed;
+    const strongestEvidence = combinedEvidence[0];
+    const contentTargeting = targetingConfirmed
+      ? Math.max(qualification?.score || 0, strongestEvidence?.score || 0)
+      : 0;
+    const effectiveQualification = qualification ? {
+      ...qualification,
+      score: contentTargeting,
+      matchedKeyword: qualification.matchedKeyword || strongestEvidence?.term || '',
+      matchKind: qualification.matchKind === 'none'
+        ? legacyMatchKindFromEvidence(strongestEvidence)
+        : qualification.matchKind,
+      targetingStatus: targetingConfirmed
+        ? 'confirmed' as const
+        : qualification.targetingStatus || (targetingRejected ? 'not_confirmed' as const : 'unknown' as const),
+      evidence: combinedEvidence,
+      locations: Array.from(new Set([
+        ...qualification.locations,
+        ...combinedEvidence.map(evidence => evidence.source),
+      ])),
+    } : undefined;
     const socialOrVideo = pageType.type === 'forum' || pageType.type === 'video' || SOCIAL_DOMAINS.has(candidate.domain);
     const homepage = pageType.type === 'homepage';
 
-    let selectionScore = candidate.contentQualification
+    let selectionScore = qualification
       ? (
           contentTargeting * 0.45
           + intentMatch * 0.20
@@ -781,22 +1036,62 @@ export const analyzeAndSelectCompetitors = (options: {
 
     const reasonCodes: CompetitorSelectionReasonCode[] = [];
     const warningCodes: CompetitorSelectionWarningCode[] = [];
-    if (candidate.contentQualification?.status === 'qualified') {
-      reasonCodes.push('content-keyword-qualified');
-      if (candidate.contentQualification.matchKind.includes('primary')) {
-        reasonCodes.push('primary-keyword-in-content');
-      } else {
-        reasonCodes.push('alternative-keyword-in-content');
+    const contentEvidence = combinedEvidence.filter(evidence => (
+      evidence.source !== 'serp_title'
+      && evidence.source !== 'serp_description'
+      && evidence.source !== 'url'
+    ));
+    if (targetingConfirmed) {
+      reasonCodes.push('targeting-evidence-confirmed');
+      if (qualification?.status === 'qualified' && (
+        qualification.evidence === undefined || contentEvidence.length > 0
+      )) reasonCodes.push('content-keyword-qualified');
+      if (combinedEvidence.some(evidence => evidence.termKind === 'primary')) {
+        reasonCodes.push('primary-keyword-targeting');
       }
-      if (candidate.contentQualification.locations.some(location => (
-        location === 'title' || location === 'h1' || location === 'headings'
+      if (combinedEvidence.some(evidence => evidence.termKind === 'alternative')) {
+        reasonCodes.push('alternative-keyword-targeting');
+      }
+      if (combinedEvidence.some(evidence => evidence.termKind === 'article_title')) {
+        reasonCodes.push('article-title-targeting');
+      }
+      if (combinedEvidence.some(evidence => evidence.source === 'serp_title')) {
+        reasonCodes.push('keyword-in-serp-title');
+      }
+      if (combinedEvidence.some(evidence => evidence.source === 'serp_description')) {
+        reasonCodes.push('keyword-in-serp-description');
+      }
+      if (combinedEvidence.some(evidence => evidence.source === 'url')) {
+        reasonCodes.push('keyword-in-url');
+      }
+      if (combinedEvidence.some(evidence => evidence.source === 'page_title')) {
+        reasonCodes.push('keyword-in-page-title');
+      }
+      if (combinedEvidence.some(evidence => (
+        evidence.source === 'h1' || evidence.source === 'headings'
       ))) reasonCodes.push('keyword-in-heading');
-      if (candidate.contentQualification.locations.includes('introduction')) {
+      if (combinedEvidence.some(evidence => evidence.source === 'introduction')) {
         reasonCodes.push('keyword-in-introduction');
       }
-    } else if (candidate.contentQualification?.status === 'not_qualified') {
+      if (combinedEvidence.some(evidence => evidence.source === 'body')) {
+        reasonCodes.push('keyword-in-body');
+      }
+    }
+    if (qualification?.status === 'qualified') {
+      if (qualification.evidence === undefined && qualification.matchKind.includes('primary')) {
+        reasonCodes.push('primary-keyword-in-content');
+      } else if (qualification.evidence === undefined && qualification.matchKind.includes('alternative')) {
+        reasonCodes.push('alternative-keyword-in-content');
+      }
+      if (contentEvidence.some(evidence => evidence.termKind === 'primary')) {
+        reasonCodes.push('primary-keyword-in-content');
+      }
+      if (contentEvidence.some(evidence => evidence.termKind === 'alternative')) {
+        reasonCodes.push('alternative-keyword-in-content');
+      }
+    } else if (qualification?.status === 'not_qualified') {
       warningCodes.push('keyword-not-found-in-content');
-    } else if (candidate.contentQualification?.status === 'unavailable') {
+    } else if (qualification?.status === 'unavailable') {
       warningCodes.push('content-qualification-unavailable');
     }
     if (intentMatch >= 76) reasonCodes.push('direct-intent-match');
@@ -818,7 +1113,8 @@ export const analyzeAndSelectCompetitors = (options: {
       && relevance >= 25
       && languageMatch >= 50
       && !socialOrVideo
-      && (!contentQualificationAttempted || candidate.contentQualification?.status === 'qualified')
+      && !targetingRejected
+      && (!contentQualificationAttempted || targetingConfirmed)
     );
     const confidence = roundScore(
       pageType.confidence * 0.35
@@ -837,7 +1133,7 @@ export const analyzeAndSelectCompetitors = (options: {
       inferredPageType: pageType.type,
       reasonCodes,
       warningCodes,
-      contentQualification: candidate.contentQualification,
+      contentQualification: effectiveQualification,
       signals: {
         contentTargeting,
         intentMatch,
@@ -888,6 +1184,15 @@ export const analyzeAndSelectCompetitors = (options: {
       contentQualificationAttempted,
       contentQualifiedCount: results.filter(result => result.contentQualification?.status === 'qualified').length,
       contentUnavailableCount: results.filter(result => result.contentQualification?.status === 'unavailable').length,
+      targetingConfirmedCount: results.filter(result => (
+        result.contentQualification?.targetingStatus === 'confirmed'
+        || result.contentQualification?.status === 'qualified'
+      )).length,
+      contentUsableCount: results.filter(result => (
+        result.contentQualification?.contentUsability === 'usable'
+        || result.contentQualification?.status === 'qualified'
+        || result.contentQualification?.status === 'not_qualified'
+      )).length,
       autoSelectedCount: autoSelectedUrls.size,
       autoSelectedUrls: Array.from(autoSelectedUrls),
     },

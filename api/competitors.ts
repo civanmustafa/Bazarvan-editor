@@ -125,7 +125,7 @@ const listCompetitors = async (
       .order('position', { ascending: true }),
     supabase
       .from('ai_external_analysis_jobs')
-      .select('id,article_id,job_type,status,progress,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,created_at,updated_at')
+      .select('id,article_id,job_type,status,progress,key_attempts,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,created_at,updated_at')
       .eq('article_id', articleId)
       .eq('job_type', 'competitor_extraction')
       .in('status', ACTIVE_JOB_STATUSES)
@@ -134,7 +134,7 @@ const listCompetitors = async (
       .maybeSingle(),
     supabase
       .from('ai_external_analysis_jobs')
-      .select('id,article_id,job_type,status,progress,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,completed_at,created_at,updated_at')
+      .select('id,article_id,job_type,status,progress,result,key_attempts,last_error,last_error_code,attempt_count,retry_count,next_attempt_at,completed_at,created_at,updated_at')
       .eq('article_id', articleId)
       .eq('job_type', 'competitor_extraction')
       .order('created_at', { ascending: false })
@@ -343,6 +343,65 @@ const normalizeSelectedResults = (value: unknown): CompetitorSearchResult[] => {
   return normalized;
 };
 
+type NormalizedReserveResult = CompetitorSearchResult & {
+  autoSelected: boolean;
+  eligible: boolean;
+  targetingStatus: string;
+  targetingEvidence: unknown[];
+  contentStatus: string;
+  contentQualification: Record<string, unknown>;
+};
+
+const normalizeReserveResults = (
+  value: unknown,
+  selectedResults: CompetitorSearchResult[],
+): NormalizedReserveResult[] => {
+  if (!Array.isArray(value)) return [];
+  const normalized: NormalizedReserveResult[] = [];
+  const seenUrls = new Set(selectedResults.map(result => result.canonicalUrl));
+  const seenDomains = new Set(selectedResults.map(result => result.domain));
+  value.slice(0, COMPETITOR_SEARCH_RESULT_LIMIT).forEach((entry, index) => {
+    if (!isRecord(entry)) return;
+    const qualification = isRecord(entry.contentQualification) ? entry.contentQualification : {};
+    const targetingStatus = toText(entry.targetingStatus) || toText(qualification.targetingStatus);
+    const qualificationStatus = toText(qualification.status);
+    const confirmed = targetingStatus === 'confirmed' || qualificationStatus === 'qualified';
+    if (!confirmed && entry.eligible !== true) return;
+    if (qualificationStatus === 'not_qualified' && targetingStatus !== 'confirmed') return;
+    const sourceUrl = toText(entry.url) || toText(entry.canonicalUrl);
+    if (!sourceUrl) return;
+    let canonicalUrl = '';
+    try {
+      canonicalUrl = canonicalizeCompetitorUrl(sourceUrl);
+    } catch {
+      return;
+    }
+    const domain = new URL(canonicalUrl).hostname.replace(/^www\./i, '');
+    if (seenUrls.has(canonicalUrl) || seenDomains.has(domain)) return;
+    seenUrls.add(canonicalUrl);
+    seenDomains.add(domain);
+    normalized.push({
+      url: canonicalUrl,
+      canonicalUrl,
+      domain,
+      title: (toText(entry.title) || domain).slice(0, 500),
+      description: toText(entry.description).slice(0, 2_000),
+      position: Number.isFinite(Number(entry.position)) ? Number(entry.position) : index + 1,
+      autoSelected: entry.autoSelected === true,
+      eligible: entry.eligible === true || confirmed,
+      targetingStatus,
+      targetingEvidence: Array.isArray(entry.targetingEvidence)
+        ? entry.targetingEvidence.slice(0, 40)
+        : Array.isArray(qualification.evidence)
+          ? qualification.evidence.slice(0, 40)
+          : [],
+      contentStatus: toText(entry.contentStatus) || toText(qualification.contentUsability),
+      contentQualification: qualification,
+    });
+  });
+  return normalized.slice(0, 10);
+};
+
 const normalizeSelectedQualifications = (value: unknown): Record<string, unknown> => {
   if (!Array.isArray(value)) return {};
   return Object.fromEntries(value.flatMap(entry => {
@@ -357,10 +416,18 @@ const normalizeSelectedQualifications = (value: unknown): Record<string, unknown
     }
     const qualification = isRecord(entry.contentQualification) ? entry.contentQualification : {};
     const status = toText(qualification.status);
+    const targetingStatus = toText(entry.targetingStatus) || toText(qualification.targetingStatus);
     return [[canonicalUrl, {
       autoSelected: entry.autoSelected === true,
-      qualificationRequired: status === 'qualified',
+      qualificationRequired: status === 'qualified' || targetingStatus === 'confirmed',
       status: ['qualified', 'not_qualified', 'unavailable'].includes(status) ? status : 'unavailable',
+      targetingStatus,
+      contentStatus: toText(entry.contentStatus) || toText(qualification.contentUsability),
+      targetingEvidence: Array.isArray(entry.targetingEvidence)
+        ? entry.targetingEvidence.slice(0, 40)
+        : Array.isArray(qualification.evidence)
+          ? qualification.evidence.slice(0, 40)
+          : [],
       score: Math.max(0, Math.min(100, Number(qualification.score) || 0)),
       matchedKeyword: toText(qualification.matchedKeyword).slice(0, 300),
       matchKind: toText(qualification.matchKind).slice(0, 40),
@@ -755,13 +822,9 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
   }
   if (action === 'extract') {
     consumeApiRateLimit('competitors-extract', principal.userId, 10);
-    if (!(await isFirecrawlConfigured(principal.userId))) {
-      throw new CompetitorApiError({
-        message: 'No Firecrawl key is authorized for this user in the encrypted dashboard vault.',
-        status: 503,
-        code: 'firecrawl_not_configured',
-      });
-    }
+    // Extraction is deliberately not gated on Firecrawl availability. The
+    // worker can continue with the direct extractor and the rendered-browser
+    // fallback when a Firecrawl credential is unavailable or a page rejects it.
     const queryText = toText(body.query);
     const ownDomains = await loadArticleClientOwnDomains(
       supabase,
@@ -770,7 +833,11 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     );
     const articleLanguage = await readArticleLanguage(supabase, articleId);
     const normalizedResults = normalizeSelectedResults(body.results);
-    const selectedQualifications = normalizeSelectedQualifications(body.results);
+    const normalizedReserves = normalizeReserveResults(body.reserveResults, normalizedResults);
+    const selectedQualifications = normalizeSelectedQualifications([
+      ...(Array.isArray(body.results) ? body.results : []),
+      ...(Array.isArray(body.reserveResults) ? body.reserveResults : []),
+    ]);
     const languageFilteredCount = articleLanguage === 'ar'
       ? normalizedResults.filter(result => !isCompetitorLanguageCompatible(
           'ar',
@@ -783,6 +850,26 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
         `${result.title} ${result.description}`,
       ))
       .filter(result => !isCompetitorOwnDomain(result.domain, ownDomains));
+    const reserveSources = normalizedReserves
+      .filter(result => articleLanguage !== 'ar' || isCompetitorLanguageCompatible(
+        'ar',
+        `${result.title} ${result.description}`,
+      ))
+      .filter(result => !isCompetitorOwnDomain(result.domain, ownDomains))
+      .map(result => ({
+        url: result.url,
+        canonicalUrl: result.canonicalUrl,
+        domain: result.domain,
+        title: result.title,
+        description: result.description,
+        searchPosition: result.position,
+        autoSelected: result.autoSelected,
+        eligible: result.eligible,
+        targetingStatus: result.targetingStatus,
+        targetingEvidence: result.targetingEvidence,
+        contentStatus: result.contentStatus,
+        contentQualification: result.contentQualification,
+      }));
     if (results.length === 0) {
       if (languageFilteredCount > 0) {
         throw new CompetitorApiError({
@@ -815,6 +902,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
           input_snapshot: {
             ...(isRecord(queuedJob.input_snapshot) ? queuedJob.input_snapshot : {}),
             ...(discoverySignature ? { discoverySignature } : {}),
+            reserveSources,
             selectedQualifications,
           },
         })

@@ -37,14 +37,25 @@ export type CompetitorContentQualification = {
   status: 'qualified' | 'not_qualified' | 'unavailable';
   score: number;
   matchedKeyword: string;
-  matchKind: 'primary' | 'alternative' | 'ordered_primary' | 'ordered_alternative' | 'none';
-  locations: Array<'title' | 'h1' | 'headings' | 'introduction' | 'body'>;
+  matchKind: 'primary' | 'alternative' | 'article_title' | 'ordered_primary' | 'ordered_alternative' | 'ordered_article_title' | 'none';
+  locations: Array<'serp_title' | 'serp_description' | 'url' | 'page_title' | 'h1' | 'headings' | 'introduction' | 'body'>;
   occurrences: number;
   wordCount: number;
   qualityScore: number;
   cacheHit: boolean;
   errorCode: string;
   version: string;
+  targetingStatus?: 'confirmed' | 'not_confirmed' | 'unknown';
+  evidence?: Array<{
+    term: string;
+    termKind: 'primary' | 'alternative' | 'article_title';
+    source: CompetitorContentQualification['locations'][number];
+    matchType: 'exact' | 'ordered_near';
+    occurrences: number;
+    score: number;
+  }>;
+  contentAvailability?: 'available' | 'unavailable';
+  contentUsability?: 'usable' | 'insufficient' | 'not_assessed';
 };
 
 export type CompetitorSearchResult = {
@@ -64,6 +75,10 @@ export type CompetitorSearchResult = {
   reasonCodes: string[];
   warningCodes: string[];
   contentQualification?: CompetitorContentQualification;
+  targetingStatus?: 'confirmed' | 'probable' | 'rejected' | 'unavailable';
+  targetingEvidence?: CompetitorContentQualification['evidence'];
+  contentStatus?: 'usable' | 'sparse' | 'unavailable' | 'failed' | 'pending';
+  extractionAttempts?: Array<Record<string, unknown> | string>;
   signals: {
     contentTargeting: number;
     intentMatch: number;
@@ -89,6 +104,8 @@ export type CompetitorSelectionSummary = {
   contentQualificationAttempted: boolean;
   contentQualifiedCount: number;
   contentUnavailableCount: number;
+  targetingConfirmedCount: number;
+  contentUsableCount: number;
   autoSelectedCount: number;
   autoSelectedUrls: string[];
 };
@@ -143,6 +160,7 @@ export type CompetitorExtractionJob = {
   readiness_signature?: string | null;
   input_snapshot?: Record<string, unknown>;
   result?: Record<string, unknown> | null;
+  keyAttempts?: Array<Record<string, unknown> | string>;
 };
 
 export type CompetitorDiscoveryReadiness = {
@@ -243,6 +261,9 @@ const toJob = (value: unknown): CompetitorExtractionJob | null => {
     readiness_signature: value.readiness_signature ? String(value.readiness_signature) : null,
     input_snapshot: isRecord(value.input_snapshot) ? value.input_snapshot : {},
     result: isRecord(value.result) ? value.result : null,
+    keyAttempts: Array.isArray(value.key_attempts)
+      ? value.key_attempts as CompetitorExtractionJob['keyAttempts']
+      : [],
   };
 };
 
@@ -305,6 +326,22 @@ const parseCompetitorSearchResults = (value: unknown): CompetitorSearchResult[] 
         if (!canonicalUrl) return [];
         const signals = isRecord(entry.signals) ? entry.signals : {};
         const qualification = isRecord(entry.contentQualification) ? entry.contentQualification : null;
+        const evidence = qualification && Array.isArray(qualification.evidence)
+          ? qualification.evidence.flatMap(item => {
+              if (!isRecord(item)) return [];
+              const source = toText(item.source) as NonNullable<CompetitorContentQualification['evidence']>[number]['source'];
+              const term = toText(item.term);
+              if (!source || !term) return [];
+              return [{
+                term,
+                termKind: (toText(item.termKind) || 'primary') as NonNullable<CompetitorContentQualification['evidence']>[number]['termKind'],
+                source,
+                matchType: (toText(item.matchType) || 'exact') as NonNullable<CompetitorContentQualification['evidence']>[number]['matchType'],
+                occurrences: Math.max(0, Number(item.occurrences) || 0),
+                score: Math.max(0, Math.min(100, Number(item.score) || 0)),
+              }];
+            })
+          : [];
         return [{
           url: toText(entry.url) || canonicalUrl,
           canonicalUrl,
@@ -321,6 +358,14 @@ const parseCompetitorSearchResults = (value: unknown): CompetitorSearchResult[] 
           inferredPageType: (toText(entry.inferredPageType) || 'unknown') as CompetitorSearchResult['inferredPageType'],
           reasonCodes: toStringList(entry.reasonCodes),
           warningCodes: toStringList(entry.warningCodes),
+          targetingStatus: toText(entry.targetingStatus) as CompetitorSearchResult['targetingStatus'] || undefined,
+          targetingEvidence: Array.isArray(entry.targetingEvidence)
+            ? entry.targetingEvidence as CompetitorSearchResult['targetingEvidence']
+            : evidence,
+          contentStatus: toText(entry.contentStatus) as CompetitorSearchResult['contentStatus'] || undefined,
+          extractionAttempts: Array.isArray(entry.extractionAttempts)
+            ? entry.extractionAttempts as CompetitorSearchResult['extractionAttempts']
+            : undefined,
           contentQualification: qualification ? {
             status: ['qualified', 'not_qualified', 'unavailable'].includes(toText(qualification.status))
               ? toText(qualification.status) as CompetitorContentQualification['status']
@@ -335,6 +380,16 @@ const parseCompetitorSearchResults = (value: unknown): CompetitorSearchResult[] 
             cacheHit: qualification.cacheHit === true,
             errorCode: toText(qualification.errorCode),
             version: toText(qualification.version),
+            targetingStatus: ['confirmed', 'not_confirmed', 'unknown'].includes(toText(qualification.targetingStatus))
+              ? toText(qualification.targetingStatus) as CompetitorContentQualification['targetingStatus']
+              : undefined,
+            evidence,
+            contentAvailability: ['available', 'unavailable'].includes(toText(qualification.contentAvailability))
+              ? toText(qualification.contentAvailability) as CompetitorContentQualification['contentAvailability']
+              : undefined,
+            contentUsability: ['usable', 'insufficient', 'not_assessed'].includes(toText(qualification.contentUsability))
+              ? toText(qualification.contentUsability) as CompetitorContentQualification['contentUsability']
+              : undefined,
           } : undefined,
           signals: {
             contentTargeting: Math.max(0, Math.min(100, Number(signals.contentTargeting) || 0)),
@@ -369,6 +424,8 @@ const parseCompetitorSelectionSummary = (
     contentQualificationAttempted: selection.contentQualificationAttempted === true,
     contentQualifiedCount: Math.max(0, Number(selection.contentQualifiedCount) || 0),
     contentUnavailableCount: Math.max(0, Number(selection.contentUnavailableCount) || 0),
+    targetingConfirmedCount: Math.max(0, Number(selection.targetingConfirmedCount) || 0),
+    contentUsableCount: Math.max(0, Number(selection.contentUsableCount) || 0),
     autoSelectedCount: Math.max(0, Number(selection.autoSelectedCount) || 0),
     autoSelectedUrls: toStringList(selection.autoSelectedUrls),
   };
@@ -496,6 +553,7 @@ export const enqueueArticleCompetitorExtraction = async (options: {
   query: string;
   queryType: CompetitorSearchMode;
   results: CompetitorSearchResult[];
+  reserveResults?: CompetitorSearchResult[];
 }): Promise<void> => {
   await requestCompetitors({ action: 'extract', ...options });
 };

@@ -271,7 +271,8 @@ const loadPreparation = async (state: any) => loadRuntime('server/contentWriting
     export const registerExternalAnalysisJobExecutor = (_type, execute) => { s.prepare = execute; };`,
   competitorPreparationCoordinator: `export const enqueueCompetitorPreparationDiscovery = async input => { s.discovered.push(input); return "discovery-1"; };
     export const enqueueCompetitorPreparationExtraction = async input => { s.extracted.push(input); return "extraction-1"; };
-    export const selectCompetitorPreparationSources = () => [{ url: "https://example.com/page" }];`,
+    export const selectCompetitorPreparationSources = () => [{ url: "https://example.com/page" }];
+    export const selectCompetitorPreparationReserveSources = () => [];`,
 });
 
 test('automatic preparation rechecks extraction after discovery and never enables a disabled child stage', async () => {

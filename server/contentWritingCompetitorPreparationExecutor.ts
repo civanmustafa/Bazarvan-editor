@@ -15,6 +15,7 @@ import { readArticleAutomationPolicy } from './articleAutomationPolicy';
 import {
   enqueueCompetitorPreparationDiscovery,
   enqueueCompetitorPreparationExtraction,
+  selectCompetitorPreparationReserveSources,
   selectCompetitorPreparationSources,
 } from './competitorPreparationCoordinator';
 
@@ -337,6 +338,10 @@ const executeContentWritingCompetitorPreparation = async (
       });
       activeChildJobId = '';
       const sources = selectCompetitorPreparationSources(discovery.result, desiredCount);
+      const reserveSources = selectCompetitorPreparationReserveSources(
+        discovery.result,
+        sources,
+      );
       if (sources.length === 0) {
         preparationRetry({
           code: 'content_writing_no_competitors_found',
@@ -364,6 +369,7 @@ const executeContentWritingCompetitorPreparation = async (
             queryType: text(discoveryResult.queryType) || 'primary_keyword',
             queryText: text(discoveryResult.query),
             sources,
+            reserveSources,
           });
         activeChildJobId = extractionJobId;
         await waitForChildJob({

@@ -28,6 +28,7 @@ export type CompetitorPreparationExtractionRequest = {
   queryType: string;
   queryText: string;
   sources: ExternalAnalysisJson[];
+  reserveSources?: ExternalAnalysisJson[];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -78,6 +79,49 @@ export const selectCompetitorPreparationSources = (
       contentQualification: isRecord(row.contentQualification) ? row.contentQualification : {},
     }];
   }).slice(0, boundedCount(desiredCount, 5));
+};
+
+/**
+ * Keeps the remaining confirmed discovery results available to the extraction
+ * worker. They are not inserted as article competitors up front; the worker
+ * promotes one into a failed slot only when every extraction provider for the
+ * original source has been exhausted.
+ */
+export const selectCompetitorPreparationReserveSources = (
+  result: ExternalAnalysisJson | null,
+  selectedSources: ExternalAnalysisJson[],
+  maximum = 10,
+): ExternalAnalysisJson[] => {
+  const rows = Array.isArray(result?.results) ? result.results : [];
+  const selectedUrls = new Set(selectedSources.map(source => (
+    text(source.canonicalUrl) || text(source.url)
+  )).filter(Boolean));
+  const selectedDomains = new Set(selectedSources.map(source => text(source.domain)).filter(Boolean));
+  const seenUrls = new Set(selectedUrls);
+  const seenDomains = new Set(selectedDomains);
+  return rows
+    .filter(isRecord)
+    .filter(row => row.eligible !== false && Boolean(text(row.canonicalUrl) || text(row.url)))
+    .flatMap(row => {
+      const url = text(row.canonicalUrl) || text(row.url);
+      const domain = text(row.domain);
+      if (!url || seenUrls.has(url) || (domain && seenDomains.has(domain))) return [];
+      seenUrls.add(url);
+      if (domain) seenDomains.add(domain);
+      return [{
+        url,
+        canonicalUrl: url,
+        domain,
+        title: text(row.title),
+        description: text(row.description),
+        autoSelected: row.autoSelected === true,
+        targetingStatus: text(row.targetingStatus),
+        contentStatus: text(row.contentStatus),
+        targetingEvidence: Array.isArray(row.targetingEvidence) ? row.targetingEvidence : [],
+        contentQualification: isRecord(row.contentQualification) ? row.contentQualification : {},
+      }];
+    })
+    .slice(0, Math.max(0, Math.min(Math.round(maximum), 15)));
 };
 
 /**
@@ -165,7 +209,11 @@ export const enqueueCompetitorPreparationExtraction = async (
     .update({
       input_snapshot: {
         ...(isRecord(job.input_snapshot) ? job.input_snapshot : {}),
-        selectedQualifications: buildSelectedQualifications(request.sources),
+        reserveSources: request.reserveSources || [],
+        selectedQualifications: buildSelectedQualifications([
+          ...request.sources,
+          ...(request.reserveSources || []),
+        ]),
       },
     })
     .eq('id', jobId);

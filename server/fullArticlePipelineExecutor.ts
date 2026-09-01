@@ -42,6 +42,7 @@ import {
 import {
   enqueueCompetitorPreparationDiscovery,
   enqueueCompetitorPreparationExtraction,
+  selectCompetitorPreparationReserveSources,
   selectCompetitorPreparationSources,
 } from './competitorPreparationCoordinator';
 import { readManagedArticleCompetitors } from './articleCompetitorRepository';
@@ -752,6 +753,10 @@ const executeFullArticlePipeline = async (
     });
     activeExternalChildId = '';
     const sources = selectCompetitorPreparationSources(discovery.result, competitorCount);
+    const reserveSources = selectCompetitorPreparationReserveSources(
+      discovery.result,
+      sources,
+    );
     if (sources.length === 0) {
       retryError({
         code: 'full_pipeline_no_competitors_found',
@@ -780,6 +785,7 @@ const executeFullArticlePipeline = async (
         queryType,
         queryText,
         sources,
+        reserveSources,
       });
     }
     activeExternalChildId = extractionJobId;
@@ -798,7 +804,7 @@ const executeFullArticlePipeline = async (
     if (numberValue(extraction.result?.successfulCount, 0) < 1) {
       retryError({
         code: 'full_pipeline_no_competitor_content',
-        message: 'Firecrawl and programmatic extraction did not produce usable text for any selected competitor.',
+        message: 'Firecrawl, direct extraction, rendered-browser fallback, and reserve replacement did not produce usable text for any selected competitor.',
         stage: 'competitor_extraction',
         stageIndex: 4,
         details: { extractionJobId },
