@@ -30,7 +30,7 @@ import {
 } from '../utils/contentWritingQuality';
 import {
   normalizeContentWritingKnowledgeBase,
-  normalizeContentWritingSourceChunks,
+  resolveContentWritingSourceChunksSnapshot,
 } from '../utils/contentWritingKnowledge';
 import { htmlToTipTapJson, preserveExistingArticleLinks } from '../utils/editorHtmlContent';
 import {
@@ -513,7 +513,7 @@ const getContentWritingSourceAccuracyInput = async (
   session: ContentWritingSession,
   baselineMarkdown: string,
 ): Promise<ContentWritingSourceAccuracyInput> => {
-  const chunks = normalizeContentWritingSourceChunks(session.context_snapshot?.competitorChunks);
+  const chunks = resolveContentWritingSourceChunksSnapshot(session.context_snapshot);
   const steps = await getContentWritingSteps(session.id, { includeMetadata: true });
   const knowledgeStep = steps.find(step => (
     step.step_key === 'competitor-index'

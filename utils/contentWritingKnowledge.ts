@@ -272,6 +272,19 @@ export const normalizeContentWritingSourceChunks = (
   }).slice(0, 5_000);
 };
 
+export const resolveContentWritingSourceChunksSnapshot = (
+  value: unknown,
+): ContentWritingSourceChunk[] => {
+  const snapshot = isRecord(value) ? value : {};
+  const chunks = Array.isArray(snapshot.sourceChunks)
+    ? snapshot.sourceChunks
+    : [
+        ...(Array.isArray(snapshot.writingSourceChunks) ? snapshot.writingSourceChunks : []),
+        ...(Array.isArray(snapshot.competitorChunks) ? snapshot.competitorChunks : []),
+      ];
+  return normalizeContentWritingSourceChunks(chunks);
+};
+
 const normalizePriority = (value: unknown): ContentWritingKnowledgeItem['priority'] => {
   if (value === 'high' || value === 'low') return value;
   return 'medium';

@@ -33,10 +33,10 @@ import {
   buildContentWritingKnowledgeEnsembleSummary,
   normalizeContentWritingKnowledgeBase,
   normalizeContentWritingSectionCoverage,
-  normalizeContentWritingSourceChunks,
   parseContentWritingCoverageAudit,
   parseContentWritingKnowledgeBase,
   parseContentWritingSectionResult,
+  resolveContentWritingSourceChunksSnapshot,
   selectRelevantContentWritingChunks,
   summarizeContentWritingCoverage,
   type ContentWritingCoverageAudit,
@@ -227,17 +227,7 @@ const getArticleSnapshot = (session: ContentWritingSession): { title: string; la
 };
 
 const getCompetitorChunks = (session: ContentWritingSession): ContentWritingSourceChunk[] => (
-  normalizeContentWritingSourceChunks(
-    session.context_snapshot?.sourceChunks
-    || [
-      ...(Array.isArray(session.context_snapshot?.writingSourceChunks)
-        ? session.context_snapshot.writingSourceChunks
-        : []),
-      ...(Array.isArray(session.context_snapshot?.competitorChunks)
-        ? session.context_snapshot.competitorChunks
-        : []),
-    ],
-  )
+  resolveContentWritingSourceChunksSnapshot(session.context_snapshot)
 );
 
 const getCompetitorPhraseIntelligence = (

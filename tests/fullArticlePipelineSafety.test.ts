@@ -110,6 +110,12 @@ test('generated draft is audited before the final reviewed application', async (
   assert.match(executor, /sourceAccuracy,/);
   assert.match(executor, /plainText: prepared\.markdown/);
   assert.match(executor, /getContentWritingSourceAccuracyInput/);
+  assert.match(executor, /resolveContentWritingSourceChunksSnapshot\(session\.context_snapshot\)/);
+  const sourceAccuracyInput = executor.slice(
+    executor.indexOf('const getContentWritingSourceAccuracyInput'),
+    executor.indexOf('const enqueueComprehensiveAnalysis'),
+  );
+  assert.doesNotMatch(sourceAccuracyInput, /context_snapshot\?\.competitorChunks/);
   assert.match(executor, /patchApplication\.rejected\.length > 0/);
   assert.doesNotMatch(executor, /evaluateContentWritingEditorSourceCoverage/);
   assert.doesNotMatch(executor, /evaluateContentWritingEditorStructureCoverage/);

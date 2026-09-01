@@ -68,6 +68,47 @@ test('source chunk normalization preserves competitors beyond the previous three
   assert.equal(chunks[0].competitorNumber, 5);
 });
 
+test('source snapshot resolution keeps writing sources in final-pipeline accuracy checks', async () => {
+  const { resolveContentWritingSourceChunksSnapshot } = await importKnowledge();
+  const writingSource = {
+    id: 'Rofficial-price-S001',
+    competitorNumber: 10_001,
+    title: 'Official device price',
+    url: 'https://manufacturer.example/device',
+    text: 'The current official device price is 12,500 USD.',
+    sourceKind: 'writing_source',
+    sourceRole: 'primary',
+    sourceId: 'official-price',
+  };
+  const competitor = {
+    id: 'C1-S001',
+    competitorNumber: 1,
+    title: 'Competitor',
+    url: 'https://competitor.example/article',
+    text: 'Competitor reference text.',
+  };
+
+  const canonical = resolveContentWritingSourceChunksSnapshot({
+    sourceChunks: [writingSource, competitor],
+    competitorChunks: [competitor],
+  });
+  assert.deepEqual(canonical.map((chunk: { id: string }) => chunk.id), [
+    writingSource.id,
+    competitor.id,
+  ]);
+  assert.equal(canonical[0].sourceKind, 'writing_source');
+  assert.equal(canonical[0].sourceRole, 'primary');
+
+  const legacy = resolveContentWritingSourceChunksSnapshot({
+    writingSourceChunks: [writingSource],
+    competitorChunks: [competitor],
+  });
+  assert.deepEqual(legacy.map((chunk: { id: string }) => chunk.id), [
+    writingSource.id,
+    competitor.id,
+  ]);
+});
+
 test('knowledge normalization deterministically covers chunks omitted by the model', async () => {
   const {
     chunkContentWritingCompetitor,
