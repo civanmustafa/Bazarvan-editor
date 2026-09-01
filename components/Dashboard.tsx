@@ -215,6 +215,14 @@ const isPublicClaimOpportunity = (article: RemoteArticleActivity): boolean => (
 type N8nSettingFieldKey = keyof Pick<RemoteArticleSettingsPatch, 'visibility' | 'accessRole' | 'articleLanguage' | 'status'>;
 type N8nDisplayFieldKey = N8nSettingFieldKey | 'visibleToEmailsCsv';
 
+const N8N_SETTING_LABELS: Record<N8nDisplayFieldKey, string> = {
+  status: 'الحالة',
+  visibility: 'الظهور',
+  accessRole: 'الصلاحية',
+  visibleToEmailsCsv: 'المستخدمون',
+  articleLanguage: 'اللغة',
+};
+
 const isEditableN8nSettingField = (field: N8nDisplayFieldKey): field is N8nSettingFieldKey => (
   field !== 'visibleToEmailsCsv'
 );
@@ -246,23 +254,23 @@ type ArticleStatusTone = {
 
 const ARTICLE_STATUS_TONES: Record<ArticleStatus, ArticleStatusTone> = {
   content_preparation: {
-    container: 'border-violet-300 bg-violet-50 text-violet-700 ring-violet-200/70 dark:border-violet-700/70 dark:bg-violet-500/15 dark:text-violet-200 dark:ring-violet-500/20',
+    container: 'text-violet-700 dark:text-violet-300',
     dot: 'bg-violet-500 shadow-[0_0_0_3px_rgba(139,92,246,0.16)]',
   },
   draft: {
-    container: 'border-amber-300 bg-amber-50 text-amber-800 ring-amber-200/80 dark:border-amber-700/70 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/20',
+    container: 'text-amber-700 dark:text-amber-300',
     dot: 'bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.18)]',
   },
   in_review: {
-    container: 'border-emerald-300 bg-emerald-50 text-emerald-800 ring-emerald-200/80 dark:border-emerald-700/70 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-500/20',
+    container: 'text-emerald-700 dark:text-emerald-300',
     dot: 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]',
   },
   published: {
-    container: 'border-sky-300 bg-sky-50 text-sky-800 ring-sky-200/80 dark:border-sky-700/70 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-500/20',
+    container: 'text-sky-700 dark:text-sky-300',
     dot: 'bg-sky-500 shadow-[0_0_0_3px_rgba(14,165,233,0.18)]',
   },
   archived: {
-    container: 'border-slate-300 bg-slate-100 text-slate-700 ring-slate-200/80 dark:border-slate-600 dark:bg-slate-500/15 dark:text-slate-200 dark:ring-slate-500/20',
+    container: 'text-slate-600 dark:text-slate-300',
     dot: 'bg-slate-500 shadow-[0_0_0_3px_rgba(100,116,139,0.18)]',
   },
 };
@@ -280,7 +288,7 @@ const ArticleStatusControl: React.FC<{
   return (
     <label
       data-article-status={status}
-      className={`inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-black shadow-sm ring-1 ring-inset ${tone.container}`}
+      className={`article-list-field inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-[10px] font-black ${tone.container}`}
       title={`حالة المقالة: ${label}`}
       onClick={event => event.stopPropagation()}
     >
@@ -294,7 +302,7 @@ const ArticleStatusControl: React.FC<{
             aria-label={`حالة المقالة: ${label}`}
             onClick={event => event.stopPropagation()}
             onChange={event => onChange(event.target.value)}
-            className="min-w-0 cursor-pointer appearance-none bg-transparent text-[10px] font-black text-current outline-none disabled:cursor-wait disabled:opacity-60"
+            className="article-list-select min-w-0 cursor-pointer appearance-none text-[10px] font-black text-current outline-none disabled:cursor-wait disabled:opacity-60"
           >
             {N8N_SETTING_OPTIONS.status.map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
@@ -327,10 +335,10 @@ const getArticleCompetitors = (
   })).filter(item => item.url.trim() || item.text.trim() || item.html.trim());
 };
 
-const N8nSettingChip: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-  <span className="inline-flex min-w-0 max-w-[180px] shrink-0 items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]" title={String(value || '-')}>
-    <span className="shrink-0 text-gray-500 dark:text-gray-400">{label}:</span>
-    <span className="min-w-0 truncate">{value || '-'}</span>
+const N8nSettingChip: React.FC<{ label: N8nDisplayFieldKey; value: React.ReactNode }> = ({ label, value }) => (
+  <span className="article-list-field inline-flex min-h-7 min-w-0 max-w-[180px] shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-bold text-gray-700 dark:text-gray-200" title={`${label}: ${String(value || '-')}`}>
+    <span className="shrink-0 font-medium text-gray-400 dark:text-gray-500">{N8N_SETTING_LABELS[label]}</span>
+    <span className="min-w-0 truncate font-black">{value || '-'}</span>
   </span>
 );
 
@@ -341,17 +349,18 @@ const EditableN8nSettingField: React.FC<{
   onChange: (field: N8nSettingFieldKey, value: string) => void;
 }> = ({ field, value, disabled, onChange }) => (
   <label
-    className="inline-flex min-w-[104px] max-w-[150px] shrink-0 items-center gap-1 rounded-md bg-[#d4af37]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675]"
+    className="article-list-field inline-flex min-h-7 min-w-[104px] max-w-[156px] shrink-0 items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-bold text-gray-700 dark:text-gray-200"
     onClick={event => event.stopPropagation()}
+    title={field}
   >
-    <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
+    <span className="shrink-0 font-medium text-gray-400 dark:text-gray-500">{N8N_SETTING_LABELS[field]}</span>
     <AppSelect
       size="compact"
       value={value || ''}
       disabled={disabled}
       onClick={event => event.stopPropagation()}
       onChange={event => onChange(field, event.target.value)}
-      className="min-w-0 flex-1 cursor-pointer rounded border border-transparent bg-transparent text-[10px] font-black text-[#8a6f1d] outline-none focus:border-[#d4af37] disabled:cursor-wait disabled:opacity-60 dark:text-[#f2d675]"
+      className="article-list-select min-w-0 flex-1 cursor-pointer text-[10px] font-black text-gray-700 outline-none disabled:cursor-wait disabled:opacity-60 dark:text-gray-200"
     >
       {!value && <option value="">-</option>}
       {N8N_SETTING_OPTIONS[field].map(option => (
@@ -423,12 +432,13 @@ const EditableN8nUsersField: React.FC<{
       }}
     >
       <summary
-        className={`inline-flex min-w-[170px] max-w-[230px] list-none items-center gap-1 rounded-md bg-[#d4af37]/10 px-2 py-1 text-[10px] font-bold text-[#8a6f1d] dark:bg-[#d4af37]/15 dark:text-[#f2d675] ${disabled ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
+        className={`article-list-field inline-flex min-h-7 min-w-[148px] max-w-[210px] list-none items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-bold text-gray-700 dark:text-gray-200 ${disabled ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
         title={draftEmails.join(', ') || 'اختيار المستخدمين'}
       >
         <Users size={12} className="shrink-0" />
-        <span className="shrink-0 text-gray-500 dark:text-gray-400">{field}:</span>
-        <span className="min-w-0 truncate">{selectedCount > 0 ? `${selectedCount} مستخدم` : 'اختيار المستخدمين'}</span>
+        <span className="shrink-0 font-medium text-gray-400 dark:text-gray-500">{N8N_SETTING_LABELS[field]}</span>
+        <span className="min-w-0 flex-1 truncate font-black">{selectedCount > 0 ? `${selectedCount} مستخدم` : 'اختيار'}</span>
+        <ChevronDown size={11} className="shrink-0 text-gray-400 transition-transform group-open/users:rotate-180" aria-hidden="true" />
       </summary>
       <div className="editor-menu absolute end-0 top-full z-40 mt-1 w-72 rounded-md border border-gray-200 bg-white p-2 shadow-xl dark:border-[#3C3C3C] dark:bg-[#242424]">
         <div className="mb-2 text-xs font-black text-gray-700 dark:text-gray-200">المستخدمون المسموح لهم</div>
@@ -776,7 +786,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     
     if (isRenaming) {
       return (
-          <li className="p-2.5 bg-gray-100 dark:bg-[#3C3C3C] rounded-md ring-2 ring-[#d4af37]">
+          <li className="bg-transparent px-1.5 py-3 ring-1 ring-inset ring-[#d4af37]">
               <form onSubmit={handleRenameSubmit}>
                   <input
                       ref={inputRef}
@@ -841,7 +851,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
 
     return (
         <li
-            className="group flex items-center gap-2 p-2 bg-white dark:bg-[#2A2A2A] rounded-md transition-all duration-200 hover:shadow-md hover:border-gray-300 dark:hover:border-[#4A4A4A] cursor-pointer border border-gray-200 dark:border-[#3C3C3C]"
+            className="group relative flex cursor-pointer items-start gap-3 bg-transparent px-1.5 py-3 transition-colors duration-150 hover:bg-gray-900/[0.025] focus-visible:bg-gray-900/[0.025] focus-visible:outline-none dark:hover:bg-white/[0.025] dark:focus-visible:bg-white/[0.025]"
             onClick={onLoad}
             role="button"
             tabIndex={0}
@@ -860,10 +870,10 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     aria-label="تحديد المقالة"
                 />
             )}
-            <div className="min-w-0 flex-grow space-y-0.5">
+            <div className="min-w-0 flex-grow space-y-1.5">
                 <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <h4 className="min-w-0 flex-1 truncate text-[13px] font-bold text-[#333333] dark:text-gray-200" title={untranslatedTitle}>
+                        <h4 className="min-w-0 flex-1 truncate text-sm font-bold leading-7 text-[#333333] dark:text-gray-100" title={untranslatedTitle}>
                             {untranslatedTitle}
                         </h4>
                         {showArticleStatus && (
@@ -946,7 +956,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         ) : null}
                     </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] leading-5 text-gray-500 dark:text-gray-400">
                     {remoteActivity.createdAt && (
                          <span className="flex items-center gap-1.5" title="تاريخ الإنشاء">
                             <Calendar size={12} />
@@ -987,7 +997,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                     )}
                 </div>
                 {shouldShowN8nSettings && (
-                    <div className="relative flex flex-wrap items-center gap-1 overflow-visible border-t border-gray-100 pt-1 dark:border-[#3a3a3a]">
+                    <div className="relative flex flex-wrap items-center gap-x-1 gap-y-1 overflow-visible border-t border-gray-200/70 pt-1.5 dark:border-[#303030]">
                         {secondaryFieldsToShow.map(field => {
                             const isEditable = Boolean(onUpdateSettings && editableSettingFields.includes(field));
                             if (field === 'visibleToEmailsCsv' && canClaimArticle) {
@@ -2137,7 +2147,7 @@ const Dashboard: React.FC = () => {
                 </div>
 
                 {filteredArticles.length > 0 ? (
-                    <ul className="space-y-2">
+                    <ul className="divide-y divide-gray-200 border-y border-gray-200 dark:divide-[#303030] dark:border-[#303030]">
                           {[...filteredArticles]
                             .sort((a, b) => getArticleSortTime(b) - getArticleSortTime(a))
                             .map((activity) => {
