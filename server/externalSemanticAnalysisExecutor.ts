@@ -341,6 +341,7 @@ const executeExternalSemanticAnalysis = async (
     : null;
   let initialTargets = getRequestedTargetState(context, articleInput.keywords, automationSettings);
   const scoped = automationSettings?.scope === 'creator';
+  const scopedTargets = scoped || context.job.input_snapshot?.manualTarget === 'google_metadata';
   if (!initialTargets.needsSecondaries && !initialTargets.needsLsi && !initialTargets.needsGoogleMetadata) {
     const missing = getTargetState(articleInput.keywords);
     const status = missing.needsSecondaries || missing.needsLsi || missing.needsGoogleMetadata
@@ -379,7 +380,7 @@ const executeExternalSemanticAnalysis = async (
       initialTargets.needsSecondaries,
       initialTargets.needsLsi,
       initialTargets.needsGoogleMetadata,
-      scoped,
+      scopedTargets,
     ),
     model: aiSettings.model,
     allowModelFallback: aiSettings.allowModelFallback,
@@ -404,7 +405,7 @@ const executeExternalSemanticAnalysis = async (
   let terms = keepRequestedTerms(
     parseExternalSemanticTerms(finalCall.text, articleInput),
     initialTargets,
-    scoped,
+    scopedTargets,
   );
 
   if (!hasUsableExternalSemanticTerms(
@@ -439,7 +440,7 @@ const executeExternalSemanticAnalysis = async (
         initialTargets.needsSecondaries,
         initialTargets.needsLsi,
         initialTargets.needsGoogleMetadata,
-        scoped,
+        scopedTargets,
       ),
       model: aiSettings.model,
       allowModelFallback: aiSettings.allowModelFallback,
@@ -464,7 +465,7 @@ const executeExternalSemanticAnalysis = async (
     terms = keepRequestedTerms(
       parseExternalSemanticTerms(finalCall.text, articleInput),
       initialTargets,
-      scoped,
+      scopedTargets,
     );
   }
 

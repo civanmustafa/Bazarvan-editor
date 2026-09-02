@@ -56,6 +56,8 @@ export type ContentWritingAutomationItem = {
   lastErrorCode: string | null;
   lastError: string | null;
   updatedAt: string;
+  resolvedBySessionId?: string | null;
+  resolvedAt?: string | null;
 };
 
 export type ContentWritingAutomationCandidate = {
@@ -187,6 +189,8 @@ const normalizeItem = (value: unknown): ContentWritingAutomationItem | null => {
     completedAt: nullableText(source.completedAt),
     lastErrorCode: nullableText(source.lastErrorCode),
     lastError: nullableText(source.lastError),
+    resolvedBySessionId: nullableText(source.resolvedBySessionId),
+    resolvedAt: nullableText(source.resolvedAt),
     updatedAt: text(source.updatedAt),
   };
 };

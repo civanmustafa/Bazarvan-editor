@@ -85,6 +85,60 @@ const createFixture = () => {
   return state;
 };
 
+test('manual Google generation persists only validated Google fields and preserves alternatives and LSI', async () => {
+  const state = createFixture();
+  const keyword = 'جهاز كشف الذهب';
+  const keywords = {
+    primary: keyword, company: 'بازارفان', secondaries: ['صيغة محفوظة'], lsi: ['دلالة محفوظة'],
+    googleTitles: [] as string[], googleDescriptions: [] as unknown[], clientId: 'client-1',
+  };
+  state.readPolicy = async () => { throw new Error('Manual requests do not depend on automatic switches'); };
+  state.readQuery = (query: any) => query.table === 'articles'
+    ? { id: 'article-1', title: keyword, plain_text: '', keywords, updated_at: '2026-09-02T10:00:00Z', article_language: 'ar' }
+    : { article_id: 'article-1', semantic_ready: true, semantic_readiness_signature: 'current' };
+  state.prompts = [];
+  const description = (prefix: string) => `${keyword} ${prefix} دليل عملي للاختيار والاستخدام وأهم المعايير وفق هدف الصفحة`.padEnd(145, 'ا');
+  state.response = JSON.stringify({
+    secondaries: ['غير مطلوبة'], lsi: ['غير مطلوبة'],
+    googleTitles: [`${keyword}: دليل الاختيار`, `${keyword}: المميزات والاستخدام`],
+    googleDescriptions: [
+      { text: description('اكتشف'), callToAction: 'اكتشف' },
+      { text: description('تعرف'), callToAction: 'تعرف' },
+    ],
+  });
+  await loadRuntime('server/externalSemanticAnalysisExecutor.ts', state, {
+    externalAnalysisExecutor: `
+      export class ExternalAnalysisRetryError extends Error { constructor(input) { super(input.message); Object.assign(this, input); } }
+      export class ExternalAnalysisTerminalError extends ExternalAnalysisRetryError {}
+      export const registerExternalAnalysisJobExecutor = (_type, execute) => { s.semantic = execute; };`,
+    externalAnalysisSettings: 'export const readExternalGeminiSettings = async () => ({ enabled: true, model: "test" });',
+    promptRegistrySettings: 'export const readPromptRegistrySettings = async () => ({ templates: {} });',
+    externalGeminiRunner: `
+      export const reportExternalGeminiCall = async () => {};
+      export const runExternalGeminiCall = async input => { s.prompts.push(input.prompt); return {
+        ok: true, status: 200, text: s.response, attempts: [], provider: 'gemini', model: 'test', keySuffix: 'test'
+      }; };`,
+  });
+  const context = { job: { article_id: 'article-1', origin: 'manual', readiness_signature: 'current',
+    input_snapshot: { manualTarget: 'google_metadata', forceRegenerateSemantic: true,
+      needsSecondaries: false, needsLsi: false, needsGoogleMetadata: true } }, reportProgress: async () => {} };
+  const result = await state.semantic(context);
+  assert.equal(result.result.status, 'applied');
+  assert.deepEqual(result.result.appliedFields, ['googleTitles', 'googleDescriptions']);
+  assert.deepEqual(state.updates[0].patch.keywords.secondaries, keywords.secondaries);
+  assert.deepEqual(state.updates[0].patch.keywords.lsi, keywords.lsi);
+  assert.equal(state.updates[0].patch.keywords.clientId, keywords.clientId);
+  assert.equal(state.updates[0].patch.keywords.googleTitles.length, 2);
+  assert.equal(state.updates[0].patch.keywords.googleDescriptions.length, 2);
+  assert.match(state.prompts[0], /secondaries غير مطلوبة/);
+  assert.match(state.prompts[0], /lsi غير مطلوبة/);
+  state.updates.length = 0;
+  state.response = '{}';
+  await assert.rejects(() => state.semantic(context), { code: 'semantic_response_invalid' });
+  assert.equal(state.updates.length, 0, 'Invalid responses must not persist or complete the task.');
+  assert.match(state.prompts.at(-1), /secondaries غير مطلوبة/);
+});
+
 test('creator scheduler cancels only its claimed item when policy or creator identity forbids writing', async () => {
   const state = createFixture();
   const runtime = await loadRuntime('server/contentWritingAutomation.ts', state);

@@ -351,7 +351,11 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             <span className="line-clamp-2">{presentation.label[isArabic ? 0 : 1]}</span>
           </span>
           <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-black ${OPERATION_STATUS_STYLE[operation.status]}`}>
-            {getOperationStatusLabel(operation.status, isArabic)}
+            {operation.retryScheduled
+              ? (isArabic ? 'إعادة محاولة مجدولة' : 'Retry scheduled')
+              : operation.attemptsExhausted
+                ? (isArabic ? 'استُنفدت المحاولات' : 'Attempts exhausted')
+                : getOperationStatusLabel(operation.status, isArabic)}
           </span>
         </span>
         <span className="mt-1.5 block text-[9px] font-semibold leading-4 text-gray-500 dark:text-gray-400">
@@ -362,7 +366,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             {operation.runningCount > 0 && <span className="text-blue-600 dark:text-blue-300">{isArabic ? 'يعمل' : 'Running'} {operation.runningCount}</span>}
             {operation.waitingCount > 0 && <span className="text-amber-600 dark:text-amber-300">{isArabic ? 'ينتظر' : 'Waiting'} {operation.waitingCount}</span>}
             {operation.completedCount > 0 && <span className="text-emerald-600 dark:text-emerald-300">{isArabic ? 'اكتمل' : 'Done'} {operation.completedCount}</span>}
-            {operation.failedCount > 0 && <span className="text-red-600 dark:text-red-300">{isArabic ? 'تعذر' : 'Failed'} {operation.failedCount}</span>}
+            {operation.failedCount > 0 && <span className="text-red-600 dark:text-red-300">{isArabic ? 'مهام متعثرة' : 'Failed tasks'} {operation.failedCount}</span>}
           </span>
         ) : (
           <span className="mt-2 block text-[9px] font-bold text-gray-400 dark:text-gray-500">
@@ -376,10 +380,33 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             {isArabic ? `نصوص المنافسين الجاهزة ${competitorProgress}` : `Ready competitor texts ${competitorProgress}`}
           </span>
         )}
+        {(operation.completedLinkCount || 0) > 0 && (
+          <span className="mt-1.5 block text-[9px] font-bold text-emerald-600 dark:text-emerald-300">
+            {isArabic ? `روابط مطبّقة ومحفوظة: ${operation.completedLinkCount}` : `Applied and saved links: ${operation.completedLinkCount}`}
+          </span>
+        )}
         {operation.articleTitle && (
           <span className="mt-1.5 flex items-center gap-1 truncate text-[9px] font-bold text-gray-500 dark:text-gray-400">
             <ExternalLink size={9} className="shrink-0" />
             <span className="truncate">{operation.articleTitle}</span>
+          </span>
+        )}
+        {operation.attemptCount !== undefined && operation.maxAttempts !== undefined && (
+          <span className="mt-1.5 block text-[9px] font-bold text-gray-500 dark:text-gray-400">
+            {isArabic ? `المحاولة ${operation.attemptCount}/${operation.maxAttempts}` : `Attempt ${operation.attemptCount}/${operation.maxAttempts}`}
+          </span>
+        )}
+        {operation.retryScheduled && operation.retryAt && (
+          <span className="mt-1.5 block text-[9px] font-bold leading-4 text-amber-600 dark:text-amber-300">
+            {Date.parse(operation.retryAt) > now
+              ? (isArabic ? 'الإعادة متاحة بعد ' : 'Retry eligible in ') + formatCountdown(Date.parse(operation.retryAt) - now, isArabic)
+              : (isArabic ? 'انتهت التهدئة؛ بانتظار دورها وتوفر المزود.' : 'Cooldown finished; waiting for its turn and provider availability.')}
+            <span className="block">{new Date(operation.retryAt).toLocaleString(isArabic ? 'ar' : 'en')}</span>
+          </span>
+        )}
+        {operation.attemptsExhausted && (
+          <span className="mt-1.5 block text-[9px] text-red-600 dark:text-red-300">
+            {isArabic ? 'لن تُعاد تلقائيًا؛ افتح المقالة وأعد المحاولة يدويًا بعد معالجة السبب.' : 'No automatic retry remains. Open the article to retry after addressing the cause.'}
           </span>
         )}
         {operation.status === 'attention' && (

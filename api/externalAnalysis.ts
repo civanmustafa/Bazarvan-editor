@@ -305,6 +305,7 @@ const enqueueSemanticJob = async (
   supabase: SupabaseAdmin,
   article: ArticleRow,
   state: AnalysisStateRow,
+  googleMetadataOnly = false,
 ): Promise<EnqueueSemanticJobResult> => {
   if (!state.semantic_ready || !state.semantic_readiness_signature) {
     throw new ExternalAnalysisApiError({
@@ -316,12 +317,15 @@ const enqueueSemanticJob = async (
   }
 
   const { data: jobId, error: enqueueError } = await supabase.rpc(
-    'enqueue_external_semantic_analysis_job_controlled',
-    {
-      p_article_id: article.id,
-      p_origin: 'manual_regenerate',
-    },
+    googleMetadataOnly ? 'enqueue_manual_google_metadata_job' : 'enqueue_external_semantic_analysis_job_controlled',
+    googleMetadataOnly ? { p_article_id: article.id } : { p_article_id: article.id, p_origin: 'manual_regenerate' },
   );
+  if (enqueueError?.message?.includes('semantic_already_active')) {
+    throw new ExternalAnalysisApiError({
+      message: 'A semantic generation task is already active. Wait for it to finish before regenerating Google suggestions.',
+      status: 409, code: 'semantic_already_active',
+    });
+  }
   if (enqueueError) throw enqueueError;
   const normalizedJobId = toTrimmedString(Array.isArray(jobId) ? jobId[0] : jobId);
   if (!normalizedJobId) {
@@ -766,8 +770,8 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
     return { status: 200, body: { ok: true, action, jobs: jobs || [] } };
   }
 
-  if (action === 'semantic') {
-    const result = await enqueueSemanticJob(supabase, article, state);
+  if (action === 'semantic' || action === 'google_metadata') {
+    const result = await enqueueSemanticJob(supabase, article, state, action === 'google_metadata');
     return { status: result.job && !result.alreadyActive ? 201 : 200, body: { ok: true, action, ...result } };
   }
   if (action === 'full_pipeline') {

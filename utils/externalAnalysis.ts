@@ -90,6 +90,9 @@ export type ExternalAnalysisDashboardSummary = {
   completedTaskCount: number;
   retryingEngineeringCount: number;
   latestEngineeringJob: ExternalAnalysisJobRow | null;
+  currentEngineeringJobs?: ExternalAnalysisJobRow[];
+  savedInternalLinkCount?: number;
+  completedWritingSession?: { id: string; completedAt: string } | null;
   activeEngineeringRootJob?: ExternalAnalysisJobRow | null;
   latestAutomaticSemanticJob: ExternalAnalysisJobRow | null;
   latestAutomaticCompetitorDiscoveryJob: ExternalAnalysisJobRow | null;
@@ -205,8 +208,12 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   command_label: row.command_label || null,
   depends_on_job_id: row.depends_on_job_id || null,
   readiness_signature: row.readiness_signature || null,
-  input_snapshot: isRecord(row.input_snapshot) ? row.input_snapshot : {},
-  result: isRecord(row.result) ? row.result : null,
+  input_snapshot: isRecord(row.input_snapshot) ? row.input_snapshot : {
+    needsSecondaries: row.needs_secondaries,
+    needsLsi: row.needs_lsi,
+    needsGoogleMetadata: row.needs_google_metadata,
+  },
+  result: isRecord(row.result) ? row.result : (row.result_status ? { status: row.result_status } : null),
   progress: isRecord(row.progress) ? row.progress : {},
   last_error: row.last_error || null,
   last_error_code: row.last_error_code || null,
@@ -228,6 +235,10 @@ const SUMMARY_JOB_SELECT = [
   'status',
   'batch_key',
   'sequence_number',
+  'needs_secondaries:input_snapshot->needsSecondaries',
+  'needs_lsi:input_snapshot->needsLsi',
+  'needs_google_metadata:input_snapshot->needsGoogleMetadata',
+  'result_status:result->>status',
   'command_id',
   'command_label',
   'depends_on_job_id',
@@ -312,7 +323,7 @@ export const listExternalAnalysisDashboardSummaries = async (
   const ids = Array.from(new Set(articleIds.map(item => item.trim()).filter(Boolean)));
   if (ids.length === 0) return {};
   const supabase = getSupabaseClient();
-  const [stateResult, jobsResult, competitorsResult] = await Promise.all([
+  const [stateResult, jobsResult, competitorsResult, savedResults] = await Promise.all([
     supabase
       .from('ai_external_analysis_article_state')
       .select('article_id,semantic_ready,external_analysis_ready,competitor_discovery_ready,semantic_readiness_signature,external_analysis_readiness_signature,competitor_discovery_signature,semantic_missing_fields,external_analysis_missing_fields,competitor_discovery_missing_fields,engineering_command_mode,custom_engineering_command_ids,external_analysis_effective_command_ids,engineering_command_selection_updated_at,updated_at')
@@ -327,10 +338,17 @@ export const listExternalAnalysisDashboardSummaries = async (
       .from('article_competitors')
       .select('article_id,status,discovery_signature')
       .in('article_id', ids),
+    supabase.rpc('dashboard_saved_automation_results', { p_article_ids: ids.slice(0, 100) }),
   ]);
   if (stateResult.error) throw stateResult.error;
   if (jobsResult.error) throw jobsResult.error;
   if (competitorsResult.error) throw competitorsResult.error;
+  // Older deployments can still show the existing queue while the additive
+  // completion-evidence migration is being rolled out. Never invent success.
+  if (savedResults.error && !['PGRST202', '42883'].includes(savedResults.error.code)) throw savedResults.error;
+  const savedByArticle = new Map<string, Record<string, any>>(
+    (savedResults.data || []).map((row: Record<string, any>) => [String(row.article_id), row]),
+  );
 
   const stateByArticle = new Map<string, ExternalAnalysisArticleState>();
   (stateResult.data || []).forEach(row => {
@@ -374,6 +392,7 @@ export const listExternalAnalysisDashboardSummaries = async (
   });
 
   return Object.fromEntries(ids.map(articleId => {
+    const saved = savedByArticle.get(articleId);
     const jobs = jobsByArticle.get(articleId) || [];
     const state = stateByArticle.get(articleId) || null;
     const effectiveCommandIds = new Set(state?.external_analysis_effective_command_ids || []);
@@ -445,6 +464,10 @@ export const listExternalAnalysisDashboardSummaries = async (
       completedTaskCount,
       retryingEngineeringCount: activeEngineeringJobs.filter(job => job.status === 'retry_scheduled').length,
       latestEngineeringJob: engineeringJobs[0] || null,
+      currentEngineeringJobs: engineeringJobs,
+      savedInternalLinkCount: Math.max(0, Number(saved?.internal_link_count) || 0),
+      completedWritingSession: saved?.writing_session_id && saved.writing_completed_at
+        ? { id: String(saved.writing_session_id), completedAt: String(saved.writing_completed_at) } : null,
       activeEngineeringRootJob,
       latestAutomaticSemanticJob: automaticSemanticJobs[0] || null,
       latestAutomaticCompetitorDiscoveryJob: automaticCompetitorDiscoveryJobs[0] || null,
@@ -741,6 +764,10 @@ export const listExternalAnalysisJobsViaApi = async (
 
 export const enqueueExternalSemanticAnalysis = (articleId: string) => (
   requestExternalAnalysis(articleId, { action: 'semantic' })
+);
+
+export const enqueueGoogleMetadataGeneration = (articleId: string) => (
+  requestExternalAnalysis(articleId, { action: 'google_metadata' })
 );
 
 export const enqueueFullArticlePipeline = (options: {

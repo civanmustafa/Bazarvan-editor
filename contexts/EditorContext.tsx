@@ -18,6 +18,7 @@ import { INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAF
 import { CONTENT_SUMMARY_STORAGE_KEY } from '../constants/engineeringPrompts';
 import { useUser } from './UserContext';
 import { normalizeGoalContext } from '../utils/goalContext';
+import { mergeSavedSemanticKeywords } from '../utils/semanticKeywordMerge';
 import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT, readStoredCompetitorInputs, writeStoredCompetitorInputs } from '../utils/competitorStorage';
 import {
     type ArticleImportOrigin,
@@ -714,6 +715,7 @@ interface EditorContextType {
         markdown: string;
     }) => Promise<GeneratedContentApplicationResult>;
     reloadActiveArticleFromRemote: (expectedArticleId: string) => Promise<boolean>;
+    reloadSavedGoogleMetadata: (expectedArticleId: string) => Promise<boolean>;
     reloadActiveGoalContextFromRemote: (expectedArticleId: string) => Promise<boolean>;
     handleRestoreDraft: () => void;
     handleNewArticle: (
@@ -925,13 +927,9 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                             && !saveInFlightRef.current
                         );
                         if (isSemanticTermsOnlyUpdate) {
-                            setKeywords(current => ({
-                                ...current,
-                                secondaries: remoteKeywords.secondaries,
-                                lsi: remoteKeywords.lsi,
-                                googleTitles: remoteKeywords.googleTitles,
-                                googleDescriptions: remoteKeywords.googleDescriptions,
-                            }));
+                            setKeywords(current => mergeSavedSemanticKeywords(
+                                current, lastSavedArticleSignatureRef.current, remoteKeywords,
+                            ));
                             loadedArticleExpectedLastSavedAtRef.current = serverLastSavedAt;
                             setConcurrentEditConflict(null);
                             return;
@@ -1927,6 +1925,25 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         title,
     ]);
 
+    const reloadSavedGoogleMetadata = useCallback(async (expectedArticleId: string): Promise<boolean> => {
+        if (!expectedArticleId || activeArticleId !== expectedArticleId || isArticleContentLoadingRef.current) return false;
+        const loadVersion = articleLoadRequestIdRef.current;
+        const { data, error } = await getSupabaseClient().from('articles')
+            .select('keywords,last_saved_at,save_count').eq('id', expectedArticleId).maybeSingle();
+        if (error) throw error;
+        if (!data || articleLoadRequestIdRef.current !== loadVersion || saveInFlightRef.current || isArticleContentLoadingRef.current) return false;
+        // A background semantic write does not increment save_count. Never
+        // acknowledge another editor's revision or reload the unsaved body.
+        if (Number(data.save_count || 0) !== loadedArticleSaveCountRef.current) return false;
+        const savedKeywords = normalizeKeywords(data.keywords);
+        if (savedKeywords.googleTitles.length !== 2 || savedKeywords.googleDescriptions.length !== 2) return false;
+        const merged = mergeSavedSemanticKeywords(latestDraftMetaRef.current.keywords, lastSavedArticleSignatureRef.current, savedKeywords, true);
+        setKeywords(current => mergeSavedSemanticKeywords(current, lastSavedArticleSignatureRef.current, savedKeywords, true));
+        loadedArticleExpectedLastSavedAtRef.current = data.last_saved_at || loadedArticleExpectedLastSavedAtRef.current;
+        return JSON.stringify(merged.googleTitles) === JSON.stringify(savedKeywords.googleTitles)
+            && JSON.stringify(merged.googleDescriptions) === JSON.stringify(savedKeywords.googleDescriptions);
+    }, [activeArticleId]);
+
     const reloadActiveGoalContextFromRemote = useCallback(async (
         expectedArticleId: string,
     ): Promise<boolean> => {
@@ -2370,6 +2387,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleSaveDraft,
         applyGeneratedArticleContent,
         reloadActiveArticleFromRemote,
+        reloadSavedGoogleMetadata,
         reloadActiveGoalContextFromRemote,
         handleRestoreDraft,
         handleNewArticle,
@@ -2401,6 +2419,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         handleSaveDraft,
         applyGeneratedArticleContent,
         reloadActiveArticleFromRemote,
+        reloadSavedGoogleMetadata,
         reloadActiveGoalContextFromRemote,
         handleRestoreDraft,
         handleNewArticle,

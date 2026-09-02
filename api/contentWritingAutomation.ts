@@ -127,7 +127,25 @@ const readItemById = async (
     String(data.article_id),
     userId,
   );
-  return access === 'none' ? null : publicItem(data);
+  if (access === 'none') return null;
+  const item = publicItem(data);
+  if (!item || !['blocked', 'cancelled', 'ready'].includes(String(item.status))) return item;
+  // A later successful manual session resolves the old automatic failure.
+  // Merely having some editor text (or an older successful session) does not.
+  const failureAt = text(item.completedAt) || text(item.updatedAt);
+  if (!Number.isFinite(Date.parse(failureAt))) return item;
+  const { data: completed, error: completedError } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_sessions')
+    .select('id,completed_at')
+    .eq('article_id', String(item.articleId))
+    .eq('status', 'completed')
+    .neq('result_text', '')
+    .gt('completed_at', failureAt)
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (completedError) throw completedError;
+  return completed ? { ...item, resolvedBySessionId: completed.id, resolvedAt: completed.completed_at } : item;
 };
 
 const readActiveItem = async (userId: string): Promise<Record<string, unknown> | null> => {

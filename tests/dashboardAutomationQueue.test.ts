@@ -325,3 +325,101 @@ test('disabled stages do not contribute issues to the attention badge', () => {
   });
   assert.equal(countDashboardAutomationIssues(operations), 0);
 });
+
+test('manual Google-only work does not run or complete missing alternatives and LSI', () => {
+  const options = semanticOptions('failed');
+  const manual = job({ origin: 'manual', status: 'completed',
+    input_snapshot: { needsSecondaries: false, needsLsi: false, needsGoogleMetadata: true } });
+  const operations = buildDashboardAutomationOperations({ ...options,
+    summaries: { 'article-1': { ...summary, latestSemanticJob: manual } as any },
+    articleSnapshots: { 'article-1': { ...readySnapshot, alternativeKeywordsReady: false, lsiKeywordsReady: false } },
+  });
+  assert.equal(operations[0].status, 'ready');
+  assert.equal(operations[1].completedCount, 0);
+  assert.equal(operations[2].status, 'completed');
+  assert.equal(operations[2].errorMessage, '');
+});
+
+test('a completed job without saved Google results is not reported as successful generation', () => {
+  const operations = buildDashboardAutomationOperations({ ...semanticOptions('completed'),
+    articleSnapshots: { 'article-1': { ...readySnapshot, googleMetadataReady: false } },
+  });
+  assert.equal(operations[2].completedCount, 0);
+});
+
+test('engineering recognizes canonical manual success but retains an unrelated command failure', () => {
+  const operations = buildDashboardAutomationOperations({ ...semanticOptions(),
+    summaries: { 'article-1': { ...summary,
+      currentEngineeringJobs: [
+        job({ id: 'manual-ok', job_type: 'engineering_command', command_id: 'one', origin: 'manual', status: 'completed' }),
+        job({ id: 'auto-failed', job_type: 'engineering_command', command_id: 'two', status: 'failed', last_error: 'still unresolved' }),
+      ],
+    } as any },
+  });
+  const operation = operations[5];
+  assert.equal(operation.completedCount, 1);
+  assert.equal(operation.failedCount, 1);
+  assert.equal(operation.errorMessage, 'still unresolved');
+  assert.deepEqual(operation.issueIds, ['external:auto-failed']);
+});
+
+test('writing retry exposes attempts and the later of item eligibility and global cooldown', () => {
+  const item = { ...writingItem('ready'), attemptCount: 1, eligibleAt: '2026-09-02T11:00:00Z' };
+  const overview = writingOverview(item);
+  overview.state!.nextAllowedAt = '2026-09-02T11:15:00Z';
+  overview.candidates = [{ articleId: item.articleId, articleTitle: item.articleTitle,
+    itemId: item.id, eligibleAt: item.eligibleAt } as any];
+  const operation = buildDashboardAutomationOperations({ ...semanticOptions(), writingOverview: overview })[6];
+  assert.equal(operation.status, 'waiting');
+  assert.equal(operation.retryScheduled, true);
+  assert.equal(operation.retryAt, '2026-09-02T11:15:00.000Z');
+  assert.equal(operation.attemptCount, 1);
+  assert.equal(operation.maxAttempts, 3);
+  assert.equal(operation.failedCount, 0);
+  assert.equal(operation.errorMessage, '');
+});
+
+test('exhausted writing attempts stay blocked until a verified later session completes', () => {
+  const item = writingItem('blocked');
+  const buildWriting = () => buildDashboardAutomationOperations({
+    ...semanticOptions(), writingOverview: writingOverview(item),
+  })[6];
+  assert.equal(buildWriting().attemptsExhausted, true);
+  item.resolvedBySessionId = 'completed-manual-session';
+  item.resolvedAt = '2026-09-02T12:00:00Z';
+  const completed = buildWriting();
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.errorMessage, '');
+  assert.equal(completed.retryScheduled, false);
+  assert.deepEqual(completed.issueIds, []);
+});
+
+test('a different active article never inherits the last failed articles attempt counts', () => {
+  const overview = writingOverview(writingItem('blocked'));
+  overview.active = { ...writingItem('writing'), id: 'writing-2', articleId: 'article-2', articleTitle: 'Active title', attemptCount: 1 };
+  const operation = buildDashboardAutomationOperations({ ...semanticOptions(), writingOverview: overview })[6];
+  assert.equal(operation.articleTitle, 'Active title');
+  assert.equal(operation.attemptCount, 1);
+  assert.equal(operation.attemptsExhausted, false);
+});
+
+test('saved manual writing and currently applied internal links complete their own cards', () => {
+  const operations = buildDashboardAutomationOperations({ ...semanticOptions(), summaries: { 'article-1': {
+    ...summary, savedInternalLinkCount: 2,
+    completedWritingSession: { id: 'session-1', completedAt: '2026-09-02T12:00:00Z' },
+  } as any } });
+  assert.equal(operations[6].completedCount, 1);
+  assert.equal(operations[6].articleId, 'article-1');
+  assert.equal(operations[7].status, 'completed');
+  assert.equal(operations[7].completedLinkCount, 2);
+});
+
+test('historical completed tasks do not stand in for competitor texts or links that were removed', () => {
+  const operations = buildDashboardAutomationOperations({ ...semanticOptions(), summaries: { 'article-1': {
+    ...summary, savedInternalLinkCount: 0, competitorReadyCount: 0, competitorTotalCount: 0,
+    latestCompetitorExtractionJob: job({ job_type: 'competitor_extraction', status: 'completed' }),
+  } as any } });
+  assert.equal(operations[3].completedCount, 0);
+  assert.equal(operations[4].completedCount, 0);
+  assert.equal(operations[7].status, 'ready');
+});

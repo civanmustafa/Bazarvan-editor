@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { mergeSavedSemanticKeywords } from '../utils/semanticKeywordMerge.ts';
+import type { Keywords } from '../types';
 import {
   buildMetaDescriptionGenerationPrompt,
   buildMetaDescriptionPrompt,
@@ -17,6 +19,43 @@ import {
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
 );
+
+test('a background Google result never overwrites newer unsaved semantic edits', () => {
+  const baseline: Keywords = { primary: 'ذهب', company: 'شركة', secondaries: ['بديل'], lsi: ['دلالة'], googleTitles: [], googleDescriptions: [] };
+  const remote = { ...baseline, googleTitles: ['عنوان محفوظ'], googleDescriptions: [{ text: 'وصف محفوظ', callToAction: '' }] };
+  const local = { ...baseline, lsi: ['تعديل يدوي جديد'] };
+  const merged = mergeSavedSemanticKeywords(local, JSON.stringify({ keywords: baseline }), remote);
+  assert.deepEqual(merged.lsi, local.lsi);
+  assert.deepEqual(merged.googleTitles, remote.googleTitles);
+  const editedGoogle = { ...local, googleTitles: ['عنوان يدوي جديد'] };
+  assert.deepEqual(mergeSavedSemanticKeywords(editedGoogle, JSON.stringify({ keywords: baseline }), remote, true).googleTitles, editedGoogle.googleTitles);
+  const changedPrimary = { ...local, primary: 'فضة' };
+  assert.deepEqual(mergeSavedSemanticKeywords(changedPrimary, JSON.stringify({ keywords: baseline }), remote), changedPrimary);
+});
+
+test('manual Google action is durable, access-checked, scoped and confirmed only after saving', async () => {
+  const [migration, api, component, summary] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260903000000_manual_google_metadata.sql'),
+    readWorkspaceFile('api/externalAnalysis.ts'),
+    readWorkspaceFile('components/GoogleMetadataSuggestions.tsx'),
+    readWorkspaceFile('utils/externalAnalysis.ts'),
+  ]);
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /order by job.id for update/);
+  assert.match(migration, /raise exception 'semantic_already_active'/);
+  assert.match(migration, /'needsSecondaries', false, 'needsLsi', false, 'needsGoogleMetadata', true/);
+  assert.match(migration, /enqueue_manual_google_metadata_job\(uuid\) from public, anon, authenticated/);
+  assert.match(migration, /language sql stable security invoker/);
+  assert.match(migration, /jsonb_path_exists/);
+  assert.match(migration, /nullif\(btrim\(session.result_text\), ''\) is not null/);
+  assert.match(api, /requireArticleWriteAccess[\s\S]*action === 'google_metadata'/);
+  assert.match(component, /const saved = await handleSaveDraft\(\)/);
+  assert.match(component, /if \(!saved\) throw[\s\S]*enqueueGoogleMetadataGeneration/);
+  assert.match(component, /job\?\.status === 'completed'/);
+  assert.match(component, /reloadSavedGoogleMetadata\(articleId\)/);
+  assert.match(component, /requestVersion.current !== version/);
+  assert.match(summary, /currentEngineeringJobs: engineeringJobs/);
+});
 
 test('meta description validation enforces 140–150 characters and the exact primary keyword', () => {
   const keyword = 'جهاز كشف الذهب';
@@ -171,7 +210,7 @@ test('background semantic Google suggestions update the open article without a f
 
   assert.match(editor, /const remoteKeywords = normalizeKeywords\(row\.keywords\)/);
   assert.match(editor, /hasCompleteGoogleMetadata/);
-  assert.match(editor, /setKeywords\(current => \(\{[\s\S]*googleTitles: remoteKeywords\.googleTitles,[\s\S]*googleDescriptions: remoteKeywords\.googleDescriptions,/);
+  assert.match(editor, /setKeywords\(current => mergeSavedSemanticKeywords\([\s\S]*lastSavedArticleSignatureRef\.current, remoteKeywords/);
   assert.match(editor, /setConcurrentEditConflict\(null\)/);
   assert.match(suggestions, /googleMetadataSuggestionsPending/);
   assert.match(translations, /ستظهر هنا عنوانان ووصفان بعد اكتمال التوليد التلقائي/);

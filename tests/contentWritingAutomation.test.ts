@@ -9,11 +9,12 @@ const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
 );
 
-const loadOverviewApi = async (access: string) => {
+const loadOverviewApi = async (access: string, completedAt = '') => {
   const stateKey = `writing-overview-${randomUUID()}`;
   const itemId = '11111111-1111-4111-8111-111111111111';
   const articleId = '22222222-2222-4222-8222-222222222222';
   const checks: string[] = [];
+  const sessionReads: Record<string, unknown>[] = [];
   const state = {
     access,
     checks,
@@ -23,22 +24,26 @@ const loadOverviewApi = async (access: string) => {
         const filters: Record<string, unknown> = {};
         const query: any = {};
         for (const method of ['select', 'order', 'limit']) query[method] = () => query;
-        for (const method of ['eq', 'in']) query[method] = (key: string, value: unknown) => {
+        for (const method of ['eq', 'in', 'neq', 'gt']) query[method] = (key: string, value: unknown) => {
           filters[key] = value;
           return query;
         };
-        query.maybeSingle = async (): Promise<{ data: Record<string, unknown> | null; error: null }> => ({
+        query.maybeSingle = async (): Promise<{ data: Record<string, unknown> | null; error: null }> => {
+          if (table === 'content_writing_sessions' && filters.article_id) sessionReads.push(filters);
+          return ({
           data: table === 'content_writing_automation_state' ? {
             last_item_id: itemId, last_article_id: articleId, last_outcome: 'failed',
             next_allowed_at: '', updated_at: '2026-09-02T10:00:00Z',
           } : table === 'content_writing_automation_items' && filters.id === itemId ? {
             id: itemId, article_id: articleId, status: 'blocked',
+            completed_at: '2026-09-02T10:00:00Z',
             last_error_code: 'gemini_http_429', last_error: 'Quota exhausted',
             articles: { title: 'أغلى جهاز كشف الذهب في العالم', status: 'draft' },
             content_writing_sessions: { status: 'failed' },
-          } : null,
+          } : table === 'content_writing_sessions' && filters.article_id === articleId
+            && completedAt > String(filters.completed_at) ? { id: 'manual-session', completed_at: completedAt } : null,
           error: null,
-        });
+        }); };
         return query;
       },
     },
@@ -88,7 +93,7 @@ const loadOverviewApi = async (access: string) => {
       }],
     });
     const module = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
-    return { handler: module.default, checks, articleId, itemId };
+    return { handler: module.default, checks, articleId, itemId, sessionReads };
   } finally {
     delete (globalThis as any)[stateKey];
   }
@@ -105,6 +110,17 @@ test('writing overview returns the last accessible item title and error after ch
   assert.equal(payload.overview.lastItem.lastErrorCode, 'gemini_http_429');
   assert.equal(payload.overview.state.lastItemId, api.itemId);
   assert.deepEqual(api.checks, [`${api.articleId}:viewer`]);
+  assert.equal(api.sessionReads.length, 1);
+});
+
+test('writing failure resolves only through a later completed nonempty session on the same accessible article', async () => {
+  for (const completedAt of ['2026-09-02T09:00:00Z', '2026-09-02T11:00:00Z']) {
+    const api = await loadOverviewApi('read', completedAt);
+    const response = await api.handler({ method: 'POST', headers: { 'content-type': 'application/json' }, body: { action: 'status' } });
+    const payload = await response.json();
+    assert.equal(Boolean(payload.overview.lastItem.resolvedBySessionId), completedAt.includes('11:00'));
+    assert.deepEqual(api.sessionReads, [{ article_id: api.articleId, status: 'completed', result_text: '', completed_at: '2026-09-02T10:00:00Z' }]);
+  }
 });
 
 test('writing overview never exposes another users inaccessible last item or failure', async () => {
@@ -119,6 +135,7 @@ test('writing overview never exposes another users inaccessible last item or fai
   assert.equal(payload.overview.state.lastArticleId, null);
   assert.equal(payload.overview.state.lastOutcome, null);
   assert.deepEqual(api.checks, [`${api.articleId}:viewer`]);
+  assert.equal(api.sessionReads.length, 0);
 });
 
 test('automatic writing readiness exposes every administrator prerequisite in plain Arabic', async () => {

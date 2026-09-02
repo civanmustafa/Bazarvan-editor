@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-105}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-106}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-60}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -125,6 +125,13 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 (( AUTOMATIC_WRITING_SCHEMA_VERSION >= 2 )) || fail "Automatic content-writing empty-editor guard version is missing."
 [[ "${AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER}" == "t" ]] || fail "Automatic content-writing empty-editor trigger is missing."
 [[ "${CONTENT_WRITING_META_DESCRIPTION_STEP}" == "t" ]] || fail "Content-writing step preparation does not allow meta descriptions."
+
+readonly GOOGLE_METADATA_MANUAL_FUNCTION="$(sql_scalar "select to_regprocedure('public.enqueue_manual_google_metadata_job(uuid)') is not null and to_regprocedure('public.dashboard_saved_automation_results(uuid[])') is not null")"
+[[ "${GOOGLE_METADATA_MANUAL_FUNCTION}" == "t" ]] || fail "Manual Google metadata and saved completion evidence functions are missing."
+readonly GOOGLE_METADATA_MANUAL_PRIVILEGES="$(sql_scalar "select has_function_privilege('authenticated', 'public.enqueue_manual_google_metadata_job(uuid)', 'execute') or has_function_privilege('anon', 'public.enqueue_manual_google_metadata_job(uuid)', 'execute') or has_function_privilege('anon', 'public.dashboard_saved_automation_results(uuid[])', 'execute')")"
+[[ "${GOOGLE_METADATA_MANUAL_PRIVILEGES}" == "f" ]] || fail "Manual generation must remain behind the authenticated write-access API."
+readonly SAVED_AUTOMATION_RESULTS_INVOKER="$(sql_scalar "select not prosecdef from pg_proc where oid = 'public.dashboard_saved_automation_results(uuid[])'::regprocedure")"
+[[ "${SAVED_AUTOMATION_RESULTS_INVOKER}" == "t" ]] || fail "Saved completion evidence must respect caller RLS."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"
