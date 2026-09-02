@@ -90,6 +90,7 @@ export type ContentWritingAutomationOverview = {
     updatedAt: string;
   } | null;
   active: ContentWritingAutomationItem | null;
+  lastItem: ContentWritingAutomationItem | null;
   globalBlocker: ContentWritingAutomationGlobalBlocker | null;
   candidates: ContentWritingAutomationCandidate[];
 };
@@ -206,6 +207,7 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
       updatedAt: text(state.updatedAt),
     } : null,
     active: normalizeItem(source.active),
+    lastItem: normalizeItem(source.lastItem),
     globalBlocker: globalBlocker ? {
       type: text(globalBlocker.type || globalBlocker.kind || globalBlocker.code),
       articleId: nullableText(globalBlocker.articleId || globalBlocker.article_id),

@@ -28,6 +28,7 @@ test('queue and AI monitor are rendered before the single activity summary card'
   assert.ok(summaryIndex > monitorIndex);
   assert.match(dashboard, /externalAnalysisSummaries=\{externalAnalysisSummaries\}/);
   assert.match(dashboard, /articleTitles=\{dashboardArticleTitles\}/);
+  assert.match(dashboard, /articleSnapshots=\{dashboardAutomationArticleSnapshots\}/);
 });
 
 test('the automation queue keeps every user-controlled operation visible in one box', async () => {
@@ -40,6 +41,8 @@ test('the automation queue keeps every user-controlled operation visible in one 
   assert.match(component, /طابور العمليات المؤتمتة/);
   assert.match(component, /حالة جميع مراحل الأتمتة/);
   assert.match(component, /operations\.map\(renderOperation\)/);
+  assert.match(component, /attention: countDashboardAutomationIssues\(operations\)/);
+  assert.match(component, /getOperationErrorMessage\(operation, isArabic\)/);
   assert.match(component, /إدارة الأتمتة/);
   for (const operation of [
     'alternative_keywords',

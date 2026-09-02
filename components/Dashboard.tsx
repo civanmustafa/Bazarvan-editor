@@ -52,6 +52,7 @@ import {
     type ArticleStatusFilter,
 } from '../constants/articleStatuses';
 import AutomaticContentWritingQueuePanel from './AutomaticContentWritingQueuePanel';
+import type { DashboardAutomationArticleSnapshot } from '../utils/dashboardAutomationQueue';
 import { DashboardAiExecutionMonitor } from './AiKeyUsageToast';
 import DashboardActivitySummary from './DashboardActivitySummary';
 import {
@@ -1165,6 +1166,21 @@ const Dashboard: React.FC = () => {
     () => Object.fromEntries(remoteArticles.map(article => [article.id, article.title || article.id])),
     [remoteArticles],
   );
+  const dashboardAutomationArticleSnapshots = useMemo<Record<string, DashboardAutomationArticleSnapshot>>(
+    () => Object.fromEntries(remoteArticles.map(article => {
+      const googleTitleCount = (article.keywords.googleTitles || [])
+        .filter(value => value.trim().length > 0).length;
+      const googleDescriptionCount = (article.keywords.googleDescriptions || [])
+        .filter(value => value.text.trim().length > 0).length;
+      return [article.id, {
+        title: article.title || article.id,
+        alternativeKeywordsReady: article.keywords.secondaries.some(value => value.trim().length > 0),
+        lsiKeywordsReady: article.keywords.lsi.some(value => value.trim().length > 0),
+        googleMetadataReady: googleTitleCount >= 2 && googleDescriptionCount >= 2,
+      }];
+    })),
+    [remoteArticles],
+  );
   const articlesPageOptions = useMemo<RemoteArticlesPageOptions>(() => ({
     page: articlesPage,
     pageSize: DASHBOARD_ARTICLES_PAGE_SIZE,
@@ -2224,7 +2240,10 @@ const Dashboard: React.FC = () => {
                 isAdmin={isAdmin}
                 externalAnalysisSummaries={externalAnalysisSummaries}
                 articleTitles={dashboardArticleTitles}
-                onRefreshExternalAnalysis={refreshExternalAnalysisSummaries}
+                articleSnapshots={dashboardAutomationArticleSnapshots}
+                onRefreshExternalAnalysis={async () => {
+                  await Promise.all([refreshData(), refreshExternalAnalysisSummaries()]);
+                }}
               />
               <DashboardAiExecutionMonitor />
               <DashboardActivitySummary

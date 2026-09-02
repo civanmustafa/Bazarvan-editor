@@ -25,8 +25,17 @@ export type DashboardAutomationOperationStatus =
   | 'disabled'
   | 'unknown';
 
+export type DashboardAutomationArticleSnapshot = {
+  title: string;
+  alternativeKeywordsReady: boolean;
+  lsiKeywordsReady: boolean;
+  googleMetadataReady: boolean;
+};
+
 export type DashboardAutomationOperation = {
   key: DashboardAutomationOperationKey;
+  issueGroup: string;
+  issueIds: string[];
   enabled: boolean | null;
   status: DashboardAutomationOperationStatus;
   runningCount: number;
@@ -36,6 +45,8 @@ export type DashboardAutomationOperation = {
   articleId: string | null;
   articleTitle: string;
   latestJobStatus: string;
+  errorCode: string;
+  errorMessage: string;
   readyItemCount?: number;
   totalItemCount?: number;
 };
@@ -45,6 +56,19 @@ type BuildOptions = {
   writingOverview: ContentWritingAutomationOverview | null;
   effectivePreferences: UserAutomationPreferences | null;
   articleTitles: Record<string, string>;
+  articleSnapshots?: Record<string, DashboardAutomationArticleSnapshot>;
+};
+
+type JobEntry = {
+  articleId: string;
+  job: ExternalAnalysisJobRow | null;
+};
+
+type JobSummaryOptions = {
+  issueGroup?: string;
+  isResolved?: (articleId: string) => boolean;
+  overrides?: Partial<Pick<DashboardAutomationOperation,
+    'runningCount' | 'waitingCount' | 'completedCount' | 'failedCount' | 'readyItemCount' | 'totalItemCount'>>;
 };
 
 const RUNNING_STATUSES = new Set<ExternalAnalysisJobStatus>(['running']);
@@ -54,7 +78,7 @@ const WAITING_STATUSES = new Set<ExternalAnalysisJobStatus>([
   'retry_scheduled',
   'paused',
 ]);
-const FAILED_STATUSES = new Set<ExternalAnalysisJobStatus>(['failed', 'blocked', 'cancelled']);
+const FAILED_STATUSES = new Set<ExternalAnalysisJobStatus>(['failed', 'blocked']);
 
 const jobTime = (job: ExternalAnalysisJobRow): number => {
   const parsed = new Date(job.updated_at || job.created_at).getTime();
@@ -80,28 +104,67 @@ const operationStatus = (values: {
 const summarizeJobs = (
   key: DashboardAutomationOperationKey,
   enabled: boolean | null,
-  jobs: Array<ExternalAnalysisJobRow | null>,
+  entries: JobEntry[],
   articleTitles: Record<string, string>,
-  overrides: Partial<Pick<DashboardAutomationOperation,
-    'runningCount' | 'waitingCount' | 'completedCount' | 'failedCount' | 'readyItemCount' | 'totalItemCount'>> = {},
+  articleSnapshots: Record<string, DashboardAutomationArticleSnapshot>,
+  options: JobSummaryOptions = {},
 ): DashboardAutomationOperation => {
-  const availableJobs = jobs.filter((job): job is ExternalAnalysisJobRow => Boolean(job));
-  const latest = [...availableJobs].sort((left, right) => jobTime(right) - jobTime(left))[0] || null;
-  const counts = {
-    runningCount: availableJobs.filter(job => RUNNING_STATUSES.has(job.status)).length,
-    waitingCount: availableJobs.filter(job => WAITING_STATUSES.has(job.status)).length,
-    completedCount: availableJobs.filter(job => job.status === 'completed').length,
-    failedCount: availableJobs.filter(job => FAILED_STATUSES.has(job.status)).length,
-    ...overrides,
+  const isResolved = options.isResolved || (() => false);
+  const availableEntries = entries.filter(
+    (entry): entry is JobEntry & { job: ExternalAnalysisJobRow } => Boolean(entry.job),
+  );
+  const resolvedCount = entries.filter(entry => isResolved(entry.articleId)).length;
+  const failedEntries = availableEntries.filter(entry => (
+    !isResolved(entry.articleId) && FAILED_STATUSES.has(entry.job.status)
+  ));
+  const isActive = (job: ExternalAnalysisJobRow | null): boolean => Boolean(
+    job && (RUNNING_STATUSES.has(job.status) || WAITING_STATUSES.has(job.status)),
+  );
+  const baseCounts = {
+    runningCount: availableEntries.filter(entry => RUNNING_STATUSES.has(entry.job.status)).length,
+    waitingCount: availableEntries.filter(entry => WAITING_STATUSES.has(entry.job.status)).length,
+    completedCount: availableEntries.filter(entry => entry.job.status === 'completed').length
+      + entries.filter(entry => (
+        isResolved(entry.articleId) && entry.job?.status !== 'completed' && !isActive(entry.job)
+      )).length,
+    failedCount: failedEntries.length,
   };
+  const counts = { ...baseCounts, ...(options.overrides || {}) };
+  const status = operationStatus({ enabled, ...counts });
+  const matchesStatus = (entry: JobEntry & { job: ExternalAnalysisJobRow }): boolean => {
+    if (status === 'running') return RUNNING_STATUSES.has(entry.job.status);
+    if (status === 'waiting') return WAITING_STATUSES.has(entry.job.status);
+    if (status === 'attention') return !isResolved(entry.articleId) && FAILED_STATUSES.has(entry.job.status);
+    if (status === 'completed') return isResolved(entry.articleId) || entry.job.status === 'completed';
+    return true;
+  };
+  const latestEntry = [...availableEntries]
+    .filter(matchesStatus)
+    .sort((left, right) => jobTime(right.job) - jobTime(left.job))[0]
+    || [...availableEntries].sort((left, right) => jobTime(right.job) - jobTime(left.job))[0]
+    || null;
+  const resolvedEntry = entries.find(entry => isResolved(entry.articleId)) || null;
+  const articleId = latestEntry?.articleId || resolvedEntry?.articleId || null;
+  const latestResolved = Boolean(latestEntry && isResolved(latestEntry.articleId));
+
   return {
     key,
+    issueGroup: options.issueGroup || key,
+    issueIds: failedEntries.map(entry => `external:${entry.job.id}`),
     enabled,
-    status: operationStatus({ enabled, ...counts }),
+    status,
     ...counts,
-    articleId: latest?.article_id || null,
-    articleTitle: latest ? articleTitles[latest.article_id] || latest.article_id : '',
-    latestJobStatus: latest?.status || '',
+    articleId,
+    articleTitle: articleId
+      ? articleSnapshots[articleId]?.title || articleTitles[articleId] || articleId
+      : '',
+    latestJobStatus: latestEntry
+      ? (latestResolved && FAILED_STATUSES.has(latestEntry.job.status)
+        ? 'resolved_current_state'
+        : latestEntry.job.status)
+      : (resolvedCount > 0 ? 'resolved_current_state' : ''),
+    errorCode: status === 'attention' ? latestEntry?.job.last_error_code || '' : '',
+    errorMessage: status === 'attention' ? latestEntry?.job.last_error || '' : '',
   };
 };
 
@@ -110,8 +173,10 @@ const preference = (
   key: keyof UserAutomationPreferences,
 ): boolean | null => preferences ? preferences[key] === true : null;
 
-const outcomeCount = (value: string | null | undefined, pattern: RegExp): number => (
-  pattern.test(String(value || '').trim().toLowerCase()) ? 1 : 0
+export const countDashboardAutomationIssues = (operations: DashboardAutomationOperation[]): number => (
+  new Set(operations
+    .filter(operation => operation.enabled !== false)
+    .flatMap(operation => operation.issueIds)).size
 );
 
 export const buildDashboardAutomationOperations = ({
@@ -119,12 +184,23 @@ export const buildDashboardAutomationOperations = ({
   writingOverview,
   effectivePreferences,
   articleTitles,
+  articleSnapshots = {},
 }: BuildOptions): DashboardAutomationOperation[] => {
   const values = Object.values(summaries);
-  const semanticJobs = values.map(summary => summary.latestAutomaticSemanticJob);
-  const discoveryJobs = values.map(summary => summary.latestAutomaticCompetitorDiscoveryJob);
-  const extractionJobs = values.map(summary => summary.latestAutomaticCompetitorExtractionJob);
-  const engineeringJobs = values.map(summary => summary.latestAutomaticEngineeringJob);
+  const jobEntries = (
+    selector: (summary: ExternalAnalysisDashboardSummary) => ExternalAnalysisJobRow | null,
+  ): JobEntry[] => values.map(summary => ({
+    articleId: summary.articleId,
+    job: selector(summary),
+  }));
+  const semanticJobs = jobEntries(summary => summary.latestAutomaticSemanticJob);
+  const summarizedArticleIds = new Set(semanticJobs.map(entry => entry.articleId));
+  Object.keys(articleSnapshots).forEach(articleId => {
+    if (!summarizedArticleIds.has(articleId)) semanticJobs.push({ articleId, job: null });
+  });
+  const discoveryJobs = jobEntries(summary => summary.latestAutomaticCompetitorDiscoveryJob);
+  const extractionJobs = jobEntries(summary => summary.latestAutomaticCompetitorExtractionJob);
+  const engineeringJobs = jobEntries(summary => summary.latestAutomaticEngineeringJob);
   const semanticEnabled = {
     alternative_keywords: preference(effectivePreferences, 'autoGenerateAlternativeKeywords'),
     lsi_keywords: preference(effectivePreferences, 'autoGenerateLsiKeywords'),
@@ -144,68 +220,132 @@ export const buildDashboardAutomationOperations = ({
   );
   const competitorReadyCount = values.reduce((sum, summary) => sum + summary.competitorReadyCount, 0);
   const competitorTotalCount = values.reduce((sum, summary) => sum + summary.competitorTotalCount, 0);
+  const competitorSummaryByArticle = new Map(values.map(summary => [summary.articleId, summary]));
 
   const writingEnabledPreference = preference(effectivePreferences, 'contentWritingAutomationEnabled');
   const writingEnabled = writingEnabledPreference === null
     ? (writingOverview ? writingOverview.settings.enabled : null)
     : writingEnabledPreference && (writingOverview?.settings.enabled ?? true);
-  const writingLastOutcome = writingOverview?.state?.lastOutcome;
+  const writingLastItem = writingOverview?.lastItem || null;
+  // A partial editor body is not proof that a failed writing session completed.
+  const writingLastItemResolved = writingLastItem?.status === 'completed';
   const writingCounts = {
     runningCount: writingOverview?.active ? 1 : 0,
     waitingCount: writingOverview?.candidates.length || 0,
-    completedCount: outcomeCount(writingLastOutcome, /complete|success/),
-    failedCount: outcomeCount(writingLastOutcome, /fail|block|error/),
+    completedCount: writingLastItemResolved ? 1 : 0,
+    failedCount: writingLastItem?.status === 'blocked' && !writingLastItemResolved ? 1 : 0,
   };
+  const writingStatus = operationStatus({ enabled: writingEnabled, ...writingCounts });
   const writingArticleId = writingOverview?.active?.articleId
     || writingOverview?.candidates[0]?.articleId
+    || writingLastItem?.articleId
     || writingOverview?.state?.lastArticleId
     || null;
   const writingOperation: DashboardAutomationOperation = {
     key: 'content_writing',
+    issueGroup: 'content_writing',
+    issueIds: writingLastItem?.status === 'blocked' ? [`writing:${writingLastItem.id}`] : [],
     enabled: writingEnabled,
-    status: operationStatus({ enabled: writingEnabled, ...writingCounts }),
+    status: writingStatus,
     ...writingCounts,
     articleId: writingArticleId,
     articleTitle: writingOverview?.active?.articleTitle
       || writingOverview?.candidates[0]?.articleTitle
-      || (writingArticleId ? articleTitles[writingArticleId] || writingArticleId : ''),
+      || writingLastItem?.articleTitle
+      || (writingArticleId
+        ? articleSnapshots[writingArticleId]?.title || articleTitles[writingArticleId] || writingArticleId
+        : ''),
     latestJobStatus: writingOverview?.active?.sessionStatus
       || writingOverview?.active?.status
-      || String(writingLastOutcome || ''),
+      || writingLastItem?.sessionStatus
+      || writingLastItem?.status
+      || String(writingOverview?.state?.lastOutcome || ''),
+    errorCode: writingStatus === 'attention' ? writingLastItem?.lastErrorCode || '' : '',
+    errorMessage: writingStatus === 'attention' ? writingLastItem?.lastError || '' : '',
   };
 
   return [
-    summarizeJobs('alternative_keywords', semanticEnabled.alternative_keywords, semanticJobs, articleTitles),
-    summarizeJobs('lsi_keywords', semanticEnabled.lsi_keywords, semanticJobs, articleTitles),
-    summarizeJobs('google_metadata', semanticEnabled.google_metadata, semanticJobs, articleTitles),
+    summarizeJobs(
+      'alternative_keywords',
+      semanticEnabled.alternative_keywords,
+      semanticJobs,
+      articleTitles,
+      articleSnapshots,
+      {
+        issueGroup: 'semantic_generation',
+        isResolved: articleId => articleSnapshots[articleId]?.alternativeKeywordsReady === true,
+      },
+    ),
+    summarizeJobs(
+      'lsi_keywords',
+      semanticEnabled.lsi_keywords,
+      semanticJobs,
+      articleTitles,
+      articleSnapshots,
+      {
+        issueGroup: 'semantic_generation',
+        isResolved: articleId => articleSnapshots[articleId]?.lsiKeywordsReady === true,
+      },
+    ),
+    summarizeJobs(
+      'google_metadata',
+      semanticEnabled.google_metadata,
+      semanticJobs,
+      articleTitles,
+      articleSnapshots,
+      {
+        issueGroup: 'semantic_generation',
+        isResolved: articleId => articleSnapshots[articleId]?.googleMetadataReady === true,
+      },
+    ),
     summarizeJobs(
       'competitor_discovery',
       preference(effectivePreferences, 'autoDiscoverCompetitors'),
       discoveryJobs,
       articleTitles,
-      { readyItemCount: competitorReadyCount, totalItemCount: competitorTotalCount },
+      articleSnapshots,
+      {
+        isResolved: articleId => (competitorSummaryByArticle.get(articleId)?.competitorTotalCount || 0) > 0,
+        overrides: { readyItemCount: competitorReadyCount, totalItemCount: competitorTotalCount },
+      },
     ),
     summarizeJobs(
       'competitor_extraction',
       preference(effectivePreferences, 'autoExtractCompetitorContent'),
       extractionJobs,
       articleTitles,
-      { readyItemCount: competitorReadyCount, totalItemCount: competitorTotalCount },
+      articleSnapshots,
+      {
+        isResolved: articleId => {
+          const summary = competitorSummaryByArticle.get(articleId);
+          return Boolean(
+            summary
+            && summary.competitorTotalCount > 0
+            && summary.competitorReadyCount >= summary.competitorTotalCount,
+          );
+        },
+        overrides: { readyItemCount: competitorReadyCount, totalItemCount: competitorTotalCount },
+      },
     ),
     summarizeJobs(
       'external_analysis',
       preference(effectivePreferences, 'autoRunReadyEngineeringCommands'),
       engineeringJobs,
       articleTitles,
+      articleSnapshots,
       {
-        runningCount: runningEngineeringCount,
-        waitingCount: waitingEngineeringCount,
-        completedCount: completedEngineeringCount,
+        overrides: {
+          runningCount: runningEngineeringCount,
+          waitingCount: waitingEngineeringCount,
+          completedCount: completedEngineeringCount,
+        },
       },
     ),
     writingOperation,
     {
       key: 'internal_linking',
+      issueGroup: 'internal_linking',
+      issueIds: [],
       enabled: preference(effectivePreferences, 'autoApplyStrongInternalLinkSuggestions'),
       status: preference(effectivePreferences, 'autoApplyStrongInternalLinkSuggestions') === false
         ? 'disabled'
@@ -219,6 +359,8 @@ export const buildDashboardAutomationOperations = ({
       articleId: null,
       articleTitle: '',
       latestJobStatus: '',
+      errorCode: '',
+      errorMessage: '',
     },
   ];
 };

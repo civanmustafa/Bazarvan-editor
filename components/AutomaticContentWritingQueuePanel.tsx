@@ -27,6 +27,8 @@ import {
 } from '../utils/contentWritingAutomation';
 import {
   buildDashboardAutomationOperations,
+  countDashboardAutomationIssues,
+  type DashboardAutomationArticleSnapshot,
   type DashboardAutomationOperation,
   type DashboardAutomationOperationKey,
   type DashboardAutomationOperationStatus,
@@ -48,6 +50,7 @@ type Props = {
   isAdmin: boolean;
   externalAnalysisSummaries?: Record<string, ExternalAnalysisDashboardSummary>;
   articleTitles?: Record<string, string>;
+  articleSnapshots?: Record<string, DashboardAutomationArticleSnapshot>;
   onRefreshExternalAnalysis?: () => Promise<void> | void;
 };
 
@@ -121,6 +124,31 @@ const getOperationStatusLabel = (
   unknown: isArabic ? 'جار التحقق' : 'Checking',
 })[status];
 
+const getOperationErrorMessage = (
+  operation: DashboardAutomationOperation,
+  isArabic: boolean,
+): string => {
+  const raw = String(operation.errorMessage || operation.errorCode || '').trim();
+  const normalized = `${operation.errorCode} ${raw}`.toLowerCase();
+  if (/429|cooldown|quota|rate.?limit/.test(normalized)) {
+    return isArabic
+      ? 'بلغ مزود الذكاء الاصطناعي حد الاستخدام. راجع الحصة وأعد المحاولة بعد التهدئة.'
+      : 'The AI provider reached its usage limit. Check the quota and retry after cooldown.';
+  }
+  if (/timeout|timed.?out/.test(normalized)) {
+    return isArabic
+      ? 'انتهت مهلة الاتصال بالمزود قبل اكتمال الطلب. افتح المقالة لإعادة المحاولة.'
+      : 'The provider timed out before completion. Open the article to retry.';
+  }
+  if (operation.key === 'content_writing') {
+    return getContentWritingAutomationErrorMessage(raw, isArabic);
+  }
+  if (raw) return raw;
+  return isArabic
+    ? 'لم تكتمل آخر محاولة وما زالت النتيجة المطلوبة ناقصة.'
+    : 'The latest attempt did not complete and the required result is still missing.';
+};
+
 const formatCountdown = (milliseconds: number, isArabic: boolean): string => {
   const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);
@@ -138,6 +166,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   isAdmin,
   externalAnalysisSummaries = {},
   articleTitles = {},
+  articleSnapshots = {},
   onRefreshExternalAnalysis,
 }) => {
   const [overview, setOverview] = useState<ContentWritingAutomationOverview | null>(null);
@@ -190,7 +219,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   }, [refresh]);
 
   useEffect(() => {
-    const handleAutomationChange = () => void refresh(true);
+    const handleAutomationChange = (): void => { void refresh(true); };
     window.addEventListener(USER_AUTOMATION_CHANGED_EVENT, handleAutomationChange);
     return () => window.removeEventListener(USER_AUTOMATION_CHANGED_EVENT, handleAutomationChange);
   }, [refresh]);
@@ -284,11 +313,12 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     writingOverview: overview,
     effectivePreferences,
     articleTitles,
-  }), [articleTitles, effectivePreferences, externalAnalysisSummaries, overview]);
+    articleSnapshots,
+  }), [articleSnapshots, articleTitles, effectivePreferences, externalAnalysisSummaries, overview]);
   const operationCounts = useMemo(() => ({
     running: operations.filter(operation => operation.status === 'running').length,
     waiting: operations.filter(operation => operation.status === 'waiting').length,
-    attention: operations.filter(operation => operation.status === 'attention').length,
+    attention: countDashboardAutomationIssues(operations),
     enabled: operations.filter(operation => operation.enabled === true).length,
   }), [operations]);
 
@@ -352,6 +382,11 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             <span className="truncate">{operation.articleTitle}</span>
           </span>
         )}
+        {operation.status === 'attention' && (
+          <span className="mt-1.5 line-clamp-2 block text-[9px] font-bold leading-4 text-red-600 dark:text-red-300">
+            {getOperationErrorMessage(operation, isArabic)}
+          </span>
+        )}
       </button>
     );
   };
@@ -366,7 +401,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
               {isArabic ? 'طابور العمليات المؤتمتة' : 'Automated operations queue'}
             </h3>
             <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
-              {isArabic ? 'الصيغ وLSI وGoogle والمنافسون والتحليل والكتابة والربط الداخلي في صندوق واحد.' : 'Semantics, Google metadata, competitors, analysis, writing, and internal links in one place.'}
+              {isArabic ? 'مراحل مقالات الصفحة الحالية، وطابور الكتابة المتاح لحسابك. تُحسب المشكلة المشتركة مرة واحدة.' : 'Stages for articles on this page and your accessible writing queue. Shared issues are counted once.'}
             </p>
           </div>
         </div>

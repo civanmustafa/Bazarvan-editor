@@ -107,6 +107,29 @@ const readItem = async (articleId: string): Promise<Record<string, unknown> | nu
   return publicItem(data);
 };
 
+const readItemById = async (
+  itemId: string,
+  userId: string,
+): Promise<Record<string, unknown> | null> => {
+  if (!UUID_PATTERN.test(itemId)) return null;
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_automation_items')
+    .select('*,articles(title,status),content_writing_sessions(status,quality_score,quality_report)')
+    .eq('id', itemId)
+    .maybeSingle();
+  if (error) {
+    if (isContentWritingAutomationSchemaUnavailableError(error)) return null;
+    throw error;
+  }
+  if (!data?.article_id) return null;
+  const access = await getArticleAccessLevelForUser(
+    getExternalAnalysisSupabaseAdmin(),
+    String(data.article_id),
+    userId,
+  );
+  return access === 'none' ? null : publicItem(data);
+};
+
 const readActiveItem = async (userId: string): Promise<Record<string, unknown> | null> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('content_writing_automation_items')
@@ -128,7 +151,7 @@ const readActiveItem = async (userId: string): Promise<Record<string, unknown> |
   return access === 'none' ? null : publicItem(data);
 };
 
-const readOverview = async (userId: string, isAdmin: boolean) => {
+const readOverview = async (userId: string) => {
   const settings = await readContentWritingAutomationSettings();
   const supabase = getExternalAnalysisSupabaseAdmin();
   const [
@@ -181,6 +204,11 @@ const readOverview = async (userId: string, isAdmin: boolean) => {
   if (globalWritingError) throw globalWritingError;
   if (globalPipelineError) throw globalPipelineError;
 
+  const stateLastItemId = isRecord(state) ? text(state.last_item_id) : '';
+  const lastItem = stateLastItemId
+    ? await readItemById(stateLastItemId, userId)
+    : null;
+
   const cooldownAt = isRecord(state) ? text(state.next_allowed_at) : '';
   const cooldownActive = Boolean(cooldownAt && new Date(cooldownAt).getTime() > Date.now());
   const globalBlocker = !settings.enabled
@@ -202,16 +230,15 @@ const readOverview = async (userId: string, isAdmin: boolean) => {
     settings,
     state: isRecord(state) ? {
       nextAllowedAt: cooldownAt,
-      ...(isAdmin ? {
-        lastItemId: text(state.last_item_id) || null,
-        lastSessionId: text(state.last_session_id) || null,
-        lastArticleId: text(state.last_article_id) || null,
-      } : {}),
-      lastOutcome: text(state.last_outcome) || null,
+      lastItemId: text(lastItem?.id) || null,
+      lastSessionId: text(lastItem?.sessionId) || null,
+      lastArticleId: text(lastItem?.articleId) || null,
+      lastOutcome: lastItem ? text(state.last_outcome) || null : null,
       updatedAt: text(state.updated_at),
     } : null,
     globalBlocker,
     active,
+    lastItem,
     candidates: Array.isArray(candidates) ? candidates.map((candidate, index) => {
       const source = isRecord(candidate) ? candidate : {};
       const readiness = isRecord(source.readiness) ? source.readiness : {};
@@ -295,7 +322,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
     const articleId = text(body.articleId);
     if (articleId) await requireArticleReadAccess(supabase, requireUuid(articleId, 'articleId'), principal.userId);
     const [overview, article] = await Promise.all([
-      readOverview(principal.userId, principal.role === 'admin'),
+      readOverview(principal.userId),
       articleId ? readArticleStatus(articleId) : Promise.resolve(null),
     ]);
     return { status: 200, body: { ok: true, overview, article } };
@@ -332,7 +359,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
         ok: true,
         action,
         item: publicItem(firstRow(data)),
-        overview: await readOverview(principal.userId, principal.role === 'admin'),
+        overview: await readOverview(principal.userId),
       },
     };
   }

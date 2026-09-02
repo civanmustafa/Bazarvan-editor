@@ -1,10 +1,125 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { build } from 'esbuild';
 
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
 );
+
+const loadOverviewApi = async (access: string) => {
+  const stateKey = `writing-overview-${randomUUID()}`;
+  const itemId = '11111111-1111-4111-8111-111111111111';
+  const articleId = '22222222-2222-4222-8222-222222222222';
+  const checks: string[] = [];
+  const state = {
+    access,
+    checks,
+    client: {
+      rpc: async (): Promise<{ data: unknown[]; error: null }> => ({ data: [], error: null }),
+      from: (table: string) => {
+        const filters: Record<string, unknown> = {};
+        const query: any = {};
+        for (const method of ['select', 'order', 'limit']) query[method] = () => query;
+        for (const method of ['eq', 'in']) query[method] = (key: string, value: unknown) => {
+          filters[key] = value;
+          return query;
+        };
+        query.maybeSingle = async (): Promise<{ data: Record<string, unknown> | null; error: null }> => ({
+          data: table === 'content_writing_automation_state' ? {
+            last_item_id: itemId, last_article_id: articleId, last_outcome: 'failed',
+            next_allowed_at: '', updated_at: '2026-09-02T10:00:00Z',
+          } : table === 'content_writing_automation_items' && filters.id === itemId ? {
+            id: itemId, article_id: articleId, status: 'blocked',
+            last_error_code: 'gemini_http_429', last_error: 'Quota exhausted',
+            articles: { title: 'أغلى جهاز كشف الذهب في العالم', status: 'draft' },
+            content_writing_sessions: { status: 'failed' },
+          } : null,
+          error: null,
+        });
+        return query;
+      },
+    },
+  };
+  (globalThis as any)[stateKey] = state;
+  const stubs: Record<string, string> = {
+    apiSecurity: `
+      export const assertAllowedOrigin = () => {};
+      export const assertRequestContentLength = () => {};
+      export const authenticateApiRequest = async () => ({ userId: 'viewer', role: 'user' });
+      export const consumeApiRateLimit = () => {};
+      export const getCorsPreflightHeaders = () => ({});
+      export const getCorsResponseHeaders = () => ({});
+      export const getPositiveIntegerEnv = (name, fallback) => fallback;
+      export const toApiSecurityResult = () => null;
+    `,
+    articleAccessPolicy: `
+      export const getArticleAccessLevelForUser = async (client, articleId, userId) => {
+        s.checks.push(articleId + ':' + userId); return s.access;
+      };
+      export const requireArticleReadAccess = async () => {};
+      export const requireArticleWriteAccess = async () => {};
+    `,
+    externalAnalysisQueue: 'export const getExternalAnalysisSupabaseAdmin = () => s.client;',
+    contentWritingAutomation: `
+      export const isContentWritingAutomationSchemaUnavailableError = () => false;
+      export const readContentWritingAutomationSettings = async () => ({ enabled: true, minimumCompetitors: 1 });
+    `,
+  };
+  try {
+    const result = await build({
+      entryPoints: [fileURLToPath(new URL('../api/contentWritingAutomation.ts', import.meta.url))],
+      bundle: true, format: 'esm', platform: 'node', target: 'node22', write: false,
+      plugins: [{
+        name: 'isolated-writing-overview',
+        setup(plugin) {
+          plugin.onResolve({ filter: /.*/ }, args => {
+            if (args.kind === 'entry-point') return undefined;
+            const name = args.path.split('/').pop()!.replace(/\.ts$/, '');
+            return name in stubs ? { path: name, namespace: 'overview-test' } : undefined;
+          });
+          plugin.onLoad({ filter: /.*/, namespace: 'overview-test' }, args => ({
+            contents: `const s = globalThis[${JSON.stringify(stateKey)}];\n${stubs[args.path]}`,
+            loader: 'js',
+          }));
+        },
+      }],
+    });
+    const module = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+    return { handler: module.default, checks, articleId, itemId };
+  } finally {
+    delete (globalThis as any)[stateKey];
+  }
+};
+
+test('writing overview returns the last accessible item title and error after checking article access', async () => {
+  const api = await loadOverviewApi('read');
+  const response = await api.handler({
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: { action: 'status' },
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.overview.lastItem.articleTitle, 'أغلى جهاز كشف الذهب في العالم');
+  assert.equal(payload.overview.lastItem.lastErrorCode, 'gemini_http_429');
+  assert.equal(payload.overview.state.lastItemId, api.itemId);
+  assert.deepEqual(api.checks, [`${api.articleId}:viewer`]);
+});
+
+test('writing overview never exposes another users inaccessible last item or failure', async () => {
+  const api = await loadOverviewApi('none');
+  const response = await api.handler({
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: { action: 'status' },
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.overview.lastItem, null);
+  assert.equal(payload.overview.state.lastItemId, null);
+  assert.equal(payload.overview.state.lastArticleId, null);
+  assert.equal(payload.overview.state.lastOutcome, null);
+  assert.deepEqual(api.checks, [`${api.articleId}:viewer`]);
+});
 
 test('automatic writing readiness exposes every administrator prerequisite in plain Arabic', async () => {
   const client = await readWorkspaceFile('utils/contentWritingAutomation.ts');
