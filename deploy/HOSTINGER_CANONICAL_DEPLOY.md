@@ -13,11 +13,20 @@ Supabase Cloud، وحُفظت قائمة PM2 الجديدة عبر `pm2 save`. �
 عبارة **Supabase SQL Editor** في هذا الدليل تعني قاعدة Supabase الذاتية على VPS،
 وليس مشروع Cloud.
 
+## إصلاح مرحلة وصف الميتا في الكتابة التلقائية (2026-09-02)
+
+طبّق `supabase/migrations/20260902000000_allow_content_writing_meta_description_step.sql`
+قبل استئناف أي جلسة توقفت بعد إنشاء المخطط برسالة
+`Unsupported content writing step type`. يضيف الترحيل مرحلة `meta_description`
+إلى القائمة المسموحة داخل `ensure_content_writing_step` دون تغيير المراحل المكتملة.
+أصبح العدد المتوقع 105 ترحيلات و60 جدولًا عامًا، ويتحقق
+`verify-project-schema.sh` من تعريف الدالة قبل إعادة تشغيل العمال.
+
 ## أتمتة المقالات وفق منشئها (2026-08-31)
 
 قبل تشغيل هذا الإصدار طبّق `supabase/migrations/20260831000000_creator_article_automation.sql`
 باستخدام سكربت `hostinger-supabase/apply-project-migrations.sh` بعد أخذ النسخة الاحتياطية.
-أصبح العدد المتوقع 104 ترحيلات و60 جدولًا عامًا. يفحص `verify-project-schema.sh`
+كان العدد المتوقع عند هذا الإصدار 104 ترحيلات و60 جدولًا عامًا. يفحص `verify-project-schema.sh`
 خصوصية جدول التفضيلات ودواله، وتفحص `/readyz` جاهزية `userAutomation` بالإصدار 1.
 
 تُحفظ تفضيلات كل مستخدم في `user_automation_settings` عبر `/api/user/automation` الذي

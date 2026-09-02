@@ -234,6 +234,7 @@ test('manual, write-article, full-pipeline, and automatic writing share the stri
     panel,
     promptRegistry,
     migration,
+    stepTypeMigration,
   ] = await Promise.all([
     readWorkspaceFile('contexts/AIContext.tsx'),
     readWorkspaceFile('server/contentWritingWorkflow.ts'),
@@ -241,6 +242,7 @@ test('manual, write-article, full-pipeline, and automatic writing share the stri
     readWorkspaceFile('components/ContentWritingPanel.tsx'),
     readWorkspaceFile('constants/promptRegistry.ts'),
     readWorkspaceFile('supabase/migrations/20260829010000_content_writing_two_meta_descriptions.sql'),
+    readWorkspaceFile('supabase/migrations/20260902000000_allow_content_writing_meta_description_step.sql'),
   ]);
 
   assert.match(aiContext, /getValidMetaDescriptionSuggestionPair/);
@@ -257,4 +259,9 @@ test('manual, write-article, full-pipeline, and automatic writing share the stri
   assert.match(promptRegistry, /contentWriting\.metaDescriptionSuggestions/);
   assert.match(migration, /'meta_description'/);
   assert.match(migration, /manual, full-pipeline, and automatic content-writing sessions/);
+  assert.match(stepTypeMigration, /create or replace function public\.ensure_content_writing_step/);
+  assert.match(stepTypeMigration, /'quality_repair',\s*'meta_description'\s*\)/);
+  assert.match(stepTypeMigration, /notify pgrst, 'reload schema'/);
+  assert.doesNotMatch(stepTypeMigration, /api_key|key_fingerprint/i);
+  assert.equal((stepTypeMigration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
 });

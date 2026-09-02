@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-104}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-105}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-60}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -80,6 +80,7 @@ readonly READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED="$(sql_scalar "select not
 readonly READY_STATUS_META_DESCRIPTION_SETTING_RETIRED="$(sql_scalar "select coalesce(not (value ? 'autoGenerateMetaDescription'), true) from public.app_settings where key = 'system' and not is_secret limit 1")"
 readonly AUTOMATIC_WRITING_SCHEMA_VERSION="$(sql_scalar "select coalesce(public.content_writing_automation_schema_version(), 0)")"
 readonly AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER="$(sql_scalar "select exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'content_writing_sessions' and t.tgname = 'guard_automatic_content_writing_empty_editor' and not t.tgisinternal)")"
+readonly CONTENT_WRITING_META_DESCRIPTION_STEP="$(sql_scalar "select position('meta_description' in pg_get_functiondef('public.ensure_content_writing_step(uuid,text,text,text,integer,text,jsonb)'::regprocedure)) > 0")"
 
 readonly CREATOR_AUTOMATION_SCHEMA_VERSION="$(sql_scalar "select public.creator_article_automation_schema_version()")"
 readonly CREATOR_AUTOMATION_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.user_automation_settings', 'select') or has_table_privilege('authenticated', 'public.user_automation_settings', 'select') or has_function_privilege('authenticated', 'public.save_user_automation_settings(uuid,jsonb)', 'execute') or has_function_privilege('anon', 'public.article_automation_policy(uuid)', 'execute')")"
@@ -123,6 +124,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
 (( AUTOMATIC_WRITING_SCHEMA_VERSION >= 2 )) || fail "Automatic content-writing empty-editor guard version is missing."
 [[ "${AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER}" == "t" ]] || fail "Automatic content-writing empty-editor trigger is missing."
+[[ "${CONTENT_WRITING_META_DESCRIPTION_STEP}" == "t" ]] || fail "Content-writing step preparation does not allow meta descriptions."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"
