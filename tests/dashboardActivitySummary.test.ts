@@ -26,6 +26,33 @@ test('queue and AI monitor are rendered before the single activity summary card'
   assert.ok(queueIndex > 0);
   assert.ok(monitorIndex > queueIndex);
   assert.ok(summaryIndex > monitorIndex);
+  assert.match(dashboard, /externalAnalysisSummaries=\{externalAnalysisSummaries\}/);
+  assert.match(dashboard, /articleTitles=\{dashboardArticleTitles\}/);
+});
+
+test('the automation queue keeps every user-controlled operation visible in one box', async () => {
+  const [component, queue] = await Promise.all([
+    readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx'),
+    readWorkspaceFile('utils/dashboardAutomationQueue.ts'),
+  ]);
+
+  assert.match(component, /data-automation-operations-queue="true"/);
+  assert.match(component, /طابور العمليات المؤتمتة/);
+  assert.match(component, /حالة جميع مراحل الأتمتة/);
+  assert.match(component, /operations\.map\(renderOperation\)/);
+  assert.match(component, /إدارة الأتمتة/);
+  for (const operation of [
+    'alternative_keywords',
+    'lsi_keywords',
+    'google_metadata',
+    'competitor_discovery',
+    'competitor_extraction',
+    'external_analysis',
+    'content_writing',
+    'internal_linking',
+  ]) {
+    assert.match(queue, new RegExp(`'${operation}'`));
+  }
 });
 
 test('activity summary exposes global status and per-user article/time metrics', async () => {

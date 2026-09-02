@@ -1161,6 +1161,10 @@ const Dashboard: React.FC = () => {
     [remoteArticles],
   );
   const dashboardArticleIdsKey = dashboardArticleIds.join('|');
+  const dashboardArticleTitles = useMemo(
+    () => Object.fromEntries(remoteArticles.map(article => [article.id, article.title || article.id])),
+    [remoteArticles],
+  );
   const articlesPageOptions = useMemo<RemoteArticlesPageOptions>(() => ({
     page: articlesPage,
     pageSize: DASHBOARD_ARTICLES_PAGE_SIZE,
@@ -2218,6 +2222,9 @@ const Dashboard: React.FC = () => {
               <AutomaticContentWritingQueuePanel
                 isArabic={uiLanguage !== 'en'}
                 isAdmin={isAdmin}
+                externalAnalysisSummaries={externalAnalysisSummaries}
+                articleTitles={dashboardArticleTitles}
+                onRefreshExternalAnalysis={refreshExternalAnalysisSummaries}
               />
               <DashboardAiExecutionMonitor />
               <DashboardActivitySummary

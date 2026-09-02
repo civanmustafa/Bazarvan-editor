@@ -91,6 +91,15 @@ export type ExternalAnalysisDashboardSummary = {
   retryingEngineeringCount: number;
   latestEngineeringJob: ExternalAnalysisJobRow | null;
   activeEngineeringRootJob?: ExternalAnalysisJobRow | null;
+  latestAutomaticSemanticJob: ExternalAnalysisJobRow | null;
+  latestAutomaticCompetitorDiscoveryJob: ExternalAnalysisJobRow | null;
+  latestAutomaticCompetitorExtractionJob: ExternalAnalysisJobRow | null;
+  activeAutomaticEngineeringCount: number;
+  runningAutomaticEngineeringCount: number;
+  waitingAutomaticEngineeringCount: number;
+  completedAutomaticEngineeringCount: number;
+  retryingAutomaticEngineeringCount: number;
+  latestAutomaticEngineeringJob: ExternalAnalysisJobRow | null;
   latestUpdatedAt: string | null;
 };
 
@@ -403,7 +412,14 @@ export const listExternalAnalysisDashboardSummaries = async (
       ? competitorRows.filter(row => row.discoverySignature === state.competitor_discovery_signature)
       : competitorRows;
     const latestSemanticJob = semanticJobs[0] || null;
+    const automaticSemanticJobs = semanticJobs.filter(job => job.origin === 'auto');
+    const automaticCompetitorDiscoveryJobs = competitorDiscoveryJobs.filter(job => job.origin === 'auto');
+    const automaticCompetitorExtractionJobs = competitorExtractionJobs.filter(job => job.origin === 'auto');
+    const automaticEngineeringJobs = engineeringJobs.filter(job => job.origin === 'auto');
     const activeEngineeringJobs = engineeringJobs.filter(job => EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status));
+    const activeAutomaticEngineeringJobs = automaticEngineeringJobs.filter(
+      job => EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status),
+    );
     const activeEngineeringIds = new Set(activeEngineeringJobs.map(job => job.id));
     const activeEngineeringRootJob = activeEngineeringJobs.find(job => (
       !job.depends_on_job_id || !activeEngineeringIds.has(job.depends_on_job_id)
@@ -430,6 +446,21 @@ export const listExternalAnalysisDashboardSummaries = async (
       retryingEngineeringCount: activeEngineeringJobs.filter(job => job.status === 'retry_scheduled').length,
       latestEngineeringJob: engineeringJobs[0] || null,
       activeEngineeringRootJob,
+      latestAutomaticSemanticJob: automaticSemanticJobs[0] || null,
+      latestAutomaticCompetitorDiscoveryJob: automaticCompetitorDiscoveryJobs[0] || null,
+      latestAutomaticCompetitorExtractionJob: automaticCompetitorExtractionJobs[0] || null,
+      activeAutomaticEngineeringCount: activeAutomaticEngineeringJobs.length,
+      runningAutomaticEngineeringCount: activeAutomaticEngineeringJobs.filter(
+        job => job.status === 'running',
+      ).length,
+      waitingAutomaticEngineeringCount: activeAutomaticEngineeringJobs.filter(
+        job => job.status !== 'running',
+      ).length,
+      completedAutomaticEngineeringCount: automaticEngineeringJobs.filter(job => job.status === 'completed').length,
+      retryingAutomaticEngineeringCount: activeAutomaticEngineeringJobs.filter(
+        job => job.status === 'retry_scheduled',
+      ).length,
+      latestAutomaticEngineeringJob: automaticEngineeringJobs[0] || null,
       latestUpdatedAt,
     } satisfies ExternalAnalysisDashboardSummary];
   }));

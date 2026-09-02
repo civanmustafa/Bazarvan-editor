@@ -1,5 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Bot, Clock3, ExternalLink, Loader2, PauseCircle, RefreshCw } from 'lucide-react';
+import {
+  AlertCircle,
+  Bot,
+  ChartNoAxesCombined,
+  Clock3,
+  Download,
+  ExternalLink,
+  FilePenLine,
+  Link2,
+  Loader2,
+  PauseCircle,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Tags,
+  Workflow,
+  type LucideIcon,
+} from 'lucide-react';
+import type { UserAutomationPreferences } from '../constants/userAutomation';
 import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
 import {
   getContentWritingAutomationErrorMessage,
@@ -8,16 +26,100 @@ import {
   type ContentWritingAutomationOverview,
 } from '../utils/contentWritingAutomation';
 import {
+  buildDashboardAutomationOperations,
+  type DashboardAutomationOperation,
+  type DashboardAutomationOperationKey,
+  type DashboardAutomationOperationStatus,
+} from '../utils/dashboardAutomationQueue';
+import type { ExternalAnalysisDashboardSummary } from '../utils/externalAnalysis';
+import {
   beginAiExecutionActivity,
   finishAiExecutionActivity,
   getAiExecutionActivities,
   removeAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
+import {
+  loadUserAutomationPreferences,
+  USER_AUTOMATION_CHANGED_EVENT,
+} from '../utils/userAutomation';
 
 type Props = {
   isArabic: boolean;
   isAdmin: boolean;
+  externalAnalysisSummaries?: Record<string, ExternalAnalysisDashboardSummary>;
+  articleTitles?: Record<string, string>;
+  onRefreshExternalAnalysis?: () => Promise<void> | void;
 };
+
+const OPERATION_PRESENTATION: Record<DashboardAutomationOperationKey, {
+  icon: LucideIcon;
+  label: [string, string];
+  description: [string, string];
+}> = {
+  alternative_keywords: {
+    icon: Sparkles,
+    label: ['الصيغ البديلة', 'Alternative forms'],
+    description: ['ضمن مهمة الدلالات الموحدة', 'Part of the unified semantic job'],
+  },
+  lsi_keywords: {
+    icon: Tags,
+    label: ['كلمات LSI', 'LSI keywords'],
+    description: ['كلمات الموضوع والارتباط الدلالي', 'Topic and semantic terms'],
+  },
+  google_metadata: {
+    icon: FilePenLine,
+    label: ['عناوين وأوصاف Google', 'Google titles and descriptions'],
+    description: ['اقتراحان للعنوان والوصف', 'Two title and description suggestions'],
+  },
+  competitor_discovery: {
+    icon: Search,
+    label: ['بحث المنافسين', 'Competitor discovery'],
+    description: ['اكتشاف الروابط والتحقق من الاستهداف', 'Find links and verify targeting'],
+  },
+  competitor_extraction: {
+    icon: Download,
+    label: ['سحب نصوص المنافسين', 'Competitor text import'],
+    description: ['السحب المباشر والمسارات الاحتياطية', 'Direct and fallback extraction paths'],
+  },
+  external_analysis: {
+    icon: ChartNoAxesCombined,
+    label: ['التحليل الخارجي', 'External analysis'],
+    description: ['الأوامر الهندسية الجاهزة المختارة', 'Selected ready engineering commands'],
+  },
+  content_writing: {
+    icon: Bot,
+    label: ['كتابة المقالات', 'Article writing'],
+    description: ['التجهيز والكتابة والمراجعة المرحلية', 'Preparation, writing, and staged review'],
+  },
+  internal_linking: {
+    icon: Link2,
+    label: ['الربط الداخلي المؤكد', 'Confirmed internal linking'],
+    description: ['يُطبّق داخل المحرر عند تحقق شروط الثقة', 'Applied in the editor when confidence rules pass'],
+  },
+};
+
+const OPERATION_STATUS_STYLE: Record<DashboardAutomationOperationStatus, string> = {
+  running: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200',
+  waiting: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200',
+  attention: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-200',
+  completed: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200',
+  ready: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-200',
+  disabled: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  unknown: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+};
+
+const getOperationStatusLabel = (
+  status: DashboardAutomationOperationStatus,
+  isArabic: boolean,
+): string => ({
+  running: isArabic ? 'يعمل الآن' : 'Running',
+  waiting: isArabic ? 'في الانتظار' : 'Waiting',
+  attention: isArabic ? 'يحتاج مراجعة' : 'Needs review',
+  completed: isArabic ? 'مكتمل' : 'Completed',
+  ready: isArabic ? 'جاهز تلقائيًا' : 'Automation ready',
+  disabled: isArabic ? 'متوقف' : 'Disabled',
+  unknown: isArabic ? 'جار التحقق' : 'Checking',
+})[status];
 
 const formatCountdown = (milliseconds: number, isArabic: boolean): string => {
   const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -31,8 +133,16 @@ const formatCountdown = (milliseconds: number, isArabic: boolean): string => {
   ].join(' ');
 };
 
-const AutomaticContentWritingQueuePanel: React.FC<Props> = ({ isArabic, isAdmin }) => {
+const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
+  isArabic,
+  isAdmin,
+  externalAnalysisSummaries = {},
+  articleTitles = {},
+  onRefreshExternalAnalysis,
+}) => {
   const [overview, setOverview] = useState<ContentWritingAutomationOverview | null>(null);
+  const [effectivePreferences, setEffectivePreferences] = useState<UserAutomationPreferences | null>(null);
+  const [preferencesError, setPreferencesError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -43,17 +153,29 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({ isArabic, isAdmin 
     refreshRequestRef.current = requestId;
     if (!silent) setLoading(true);
     try {
-      const result = await loadContentWritingAutomationStatus();
+      const [statusResult, preferencesResult] = await Promise.allSettled([
+        loadContentWritingAutomationStatus(),
+        loadUserAutomationPreferences(),
+      ]);
       if (refreshRequestRef.current !== requestId) return;
-      setOverview(result.overview);
-      setError('');
-    } catch (requestError) {
-      if (refreshRequestRef.current !== requestId) return;
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
+      if (statusResult.status === 'fulfilled') {
+        setOverview(statusResult.value.overview);
+        setError('');
+      } else {
+        setError(statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason));
+      }
+      if (preferencesResult.status === 'fulfilled') {
+        setEffectivePreferences(preferencesResult.value.effectivePreferences);
+        setPreferencesError('');
+      } else {
+        setPreferencesError(isArabic
+          ? 'تعذر تحديث تفضيلات بعض العمليات؛ ستبقى حالاتها الحية ظاهرة.'
+          : 'Some automation preferences could not be refreshed; live task states remain visible.');
+      }
     } finally {
       if (refreshRequestRef.current === requestId) setLoading(false);
     }
-  }, []);
+  }, [isArabic]);
 
   useEffect(() => {
     void refresh();
@@ -65,6 +187,12 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({ isArabic, isAdmin 
       window.clearInterval(poll);
       window.clearInterval(clock);
     };
+  }, [refresh]);
+
+  useEffect(() => {
+    const handleAutomationChange = () => void refresh(true);
+    window.addEventListener(USER_AUTOMATION_CHANGED_EVENT, handleAutomationChange);
+    return () => window.removeEventListener(USER_AUTOMATION_CHANGED_EVENT, handleAutomationChange);
   }, [refresh]);
 
   useEffect(() => {
@@ -151,24 +279,100 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({ isArabic, isAdmin 
       return !Number.isFinite(eligibleAt) || eligibleAt <= now;
     }).length
   ), [now, overview?.candidates]);
+  const operations = useMemo(() => buildDashboardAutomationOperations({
+    summaries: externalAnalysisSummaries,
+    writingOverview: overview,
+    effectivePreferences,
+    articleTitles,
+  }), [articleTitles, effectivePreferences, externalAnalysisSummaries, overview]);
+  const operationCounts = useMemo(() => ({
+    running: operations.filter(operation => operation.status === 'running').length,
+    waiting: operations.filter(operation => operation.status === 'waiting').length,
+    attention: operations.filter(operation => operation.status === 'attention').length,
+    enabled: operations.filter(operation => operation.enabled === true).length,
+  }), [operations]);
+
+  const handleRefresh = () => {
+    void refresh();
+    void onRefreshExternalAnalysis?.();
+  };
+
+  const renderOperation = (operation: DashboardAutomationOperation) => {
+    const presentation = OPERATION_PRESENTATION[operation.key];
+    const OperationIcon = presentation.icon;
+    const hasCounts = operation.runningCount > 0
+      || operation.waitingCount > 0
+      || operation.completedCount > 0
+      || operation.failedCount > 0;
+    const competitorProgress = operation.readyItemCount !== undefined && operation.totalItemCount !== undefined
+      ? `${operation.readyItemCount}/${operation.totalItemCount}`
+      : '';
+    return (
+      <button
+        key={operation.key}
+        type="button"
+        disabled={!operation.articleId}
+        onClick={() => operation.articleId && navigateToAppPath(buildEditorArticlePath(operation.articleId))}
+        className="min-w-0 rounded-lg border border-gray-200 p-2.5 text-start transition enabled:hover:border-blue-300 enabled:hover:bg-blue-50/60 disabled:cursor-default dark:border-[#444] dark:enabled:hover:border-blue-800 dark:enabled:hover:bg-blue-900/10"
+      >
+        <span className="flex items-start justify-between gap-1.5">
+          <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-black text-gray-800 dark:text-gray-100">
+            <OperationIcon size={14} className="shrink-0 text-blue-600 dark:text-blue-300" />
+            <span className="line-clamp-2">{presentation.label[isArabic ? 0 : 1]}</span>
+          </span>
+          <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-black ${OPERATION_STATUS_STYLE[operation.status]}`}>
+            {getOperationStatusLabel(operation.status, isArabic)}
+          </span>
+        </span>
+        <span className="mt-1.5 block text-[9px] font-semibold leading-4 text-gray-500 dark:text-gray-400">
+          {presentation.description[isArabic ? 0 : 1]}
+        </span>
+        {hasCounts ? (
+          <span className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-[9px] font-black">
+            {operation.runningCount > 0 && <span className="text-blue-600 dark:text-blue-300">{isArabic ? 'يعمل' : 'Running'} {operation.runningCount}</span>}
+            {operation.waitingCount > 0 && <span className="text-amber-600 dark:text-amber-300">{isArabic ? 'ينتظر' : 'Waiting'} {operation.waitingCount}</span>}
+            {operation.completedCount > 0 && <span className="text-emerald-600 dark:text-emerald-300">{isArabic ? 'اكتمل' : 'Done'} {operation.completedCount}</span>}
+            {operation.failedCount > 0 && <span className="text-red-600 dark:text-red-300">{isArabic ? 'تعذر' : 'Failed'} {operation.failedCount}</span>}
+          </span>
+        ) : (
+          <span className="mt-2 block text-[9px] font-bold text-gray-400 dark:text-gray-500">
+            {operation.enabled === false
+              ? (isArabic ? 'موقوف وفق إعدادات الأتمتة' : 'Disabled in automation settings')
+              : (isArabic ? 'لا توجد مهمة نشطة الآن' : 'No active task right now')}
+          </span>
+        )}
+        {competitorProgress && (
+          <span className="mt-1.5 block text-[9px] font-black text-violet-600 dark:text-violet-300">
+            {isArabic ? `نصوص المنافسين الجاهزة ${competitorProgress}` : `Ready competitor texts ${competitorProgress}`}
+          </span>
+        )}
+        {operation.articleTitle && (
+          <span className="mt-1.5 flex items-center gap-1 truncate text-[9px] font-bold text-gray-500 dark:text-gray-400">
+            <ExternalLink size={9} className="shrink-0" />
+            <span className="truncate">{operation.articleTitle}</span>
+          </span>
+        )}
+      </button>
+    );
+  };
 
   return (
-    <section className="rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900/50 dark:bg-[#2A2A2A]">
+    <section data-automation-operations-queue="true" className="rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900/50 dark:bg-[#2A2A2A]">
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-start gap-2">
-          <Bot size={19} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" />
+          <Workflow size={19} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" />
           <div>
             <h3 className="text-sm font-black text-gray-800 dark:text-gray-100">
-              {isArabic ? 'طابور الكتابة التلقائية' : 'Automatic writing queue'}
+              {isArabic ? 'طابور العمليات المؤتمتة' : 'Automated operations queue'}
             </h3>
             <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
-              {isArabic ? 'مقالة واحدة في كل مرة، مع أولوية الطلبات اليدوية والإنشاء الشامل.' : 'One article at a time, with manual requests and the full workflow taking priority.'}
+              {isArabic ? 'الصيغ وLSI وGoogle والمنافسون والتحليل والكتابة والربط الداخلي في صندوق واحد.' : 'Semantics, Google metadata, competitors, analysis, writing, and internal links in one place.'}
             </p>
           </div>
         </div>
         <button
           type="button"
-          onClick={() => void refresh()}
+          onClick={handleRefresh}
           disabled={loading}
           className="rounded-md border border-gray-200 p-1.5 text-gray-500 hover:text-blue-600 disabled:opacity-40 dark:border-[#444]"
           title={isArabic ? 'تحديث' : 'Refresh'}
@@ -177,10 +381,46 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({ isArabic, isAdmin 
         </button>
       </div>
 
+      <div className="mt-3 rounded-lg border border-gray-200 p-2.5 dark:border-[#444]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-[11px] font-black text-gray-700 dark:text-gray-200">
+            {isArabic ? 'حالة جميع مراحل الأتمتة' : 'All automation stages'}
+          </h4>
+          <div className="flex flex-wrap gap-1 text-[8px] font-black">
+            <span className="rounded-full bg-blue-100 px-2 py-1 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200">
+              {operationCounts.running} {isArabic ? 'تعمل' : 'running'}
+            </span>
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
+              {operationCounts.waiting} {isArabic ? 'تنتظر' : 'waiting'}
+            </span>
+            <span className="rounded-full bg-red-100 px-2 py-1 text-red-700 dark:bg-red-900/30 dark:text-red-200">
+              {operationCounts.attention} {isArabic ? 'للمراجعة' : 'to review'}
+            </span>
+          </div>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {operations.map(renderOperation)}
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2 text-[9px] font-bold text-gray-400 dark:text-gray-500">
+          <span>{isArabic ? `${operationCounts.enabled}/8 أنواع مفعّلة لحسابك` : `${operationCounts.enabled}/8 types enabled for your account`}</span>
+          <button
+            type="button"
+            onClick={() => navigateToAppPath('/settings/automation')}
+            className="font-black text-blue-600 hover:underline dark:text-blue-300"
+          >
+            {isArabic ? 'إدارة الأتمتة' : 'Manage automation'}
+          </button>
+        </div>
+      </div>
+
+      {preferencesError && (
+        <div className="mt-2 text-[10px] font-bold text-amber-600 dark:text-amber-300">{preferencesError}</div>
+      )}
+
       {loading && !overview ? (
         <div className="mt-3 flex items-center gap-2 rounded-md bg-blue-50 p-2 text-xs font-bold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
           <Loader2 size={15} className="shrink-0 animate-spin" />
-          {isArabic ? 'جار تحميل حالة الطابور...' : 'Loading queue status...'}
+          {isArabic ? 'جار تحميل تفاصيل طابور كتابة المقالات...' : 'Loading article-writing queue details...'}
         </div>
       ) : error && !overview ? (
         <div className="mt-3 flex items-start gap-2 rounded-md bg-red-50 p-2 text-xs font-bold text-red-700 dark:bg-red-900/20 dark:text-red-300">
@@ -238,6 +478,10 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({ isArabic, isAdmin 
             </div>
           ) : (
             <>
+              <div className="mt-3 flex items-center gap-1.5 text-[11px] font-black text-gray-700 dark:text-gray-200">
+                <Bot size={13} />
+                {isArabic ? 'تفاصيل طابور كتابة المقالات' : 'Article-writing queue details'}
+              </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-center">
                 <div className="rounded-md bg-blue-50 p-2 dark:bg-blue-900/15">
                   <div className="text-lg font-black text-blue-700 dark:text-blue-200">{availableCandidateCount}</div>
