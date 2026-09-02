@@ -172,6 +172,33 @@ test('a broad single word is not sufficient targeting evidence', () => {
   assert.deepEqual(result.evidence, []);
 });
 
+test('Arabic detector singular and plural phrasing is treated as the same complete target phrase', () => {
+  const result = analyzeCompetitorKeywordTargeting({
+    content: content({
+      title: 'أغلى كاشفات الذهب 2026',
+      text: 'يعرض الدليل أغلى كاشفات الذهب 2026 مع مقارنة المواصفات والأسعار للمشترين.',
+    }),
+    primaryKeyword: 'أغلى جهاز كشف الذهب في العالم',
+  });
+
+  assert.equal(result.status, 'qualified');
+  assert.equal(result.targetingStatus, 'confirmed');
+  assert.equal(result.matchKind, 'primary');
+  assert.ok(result.evidence?.some(item => (
+    item.term === 'أغلى جهاز كشف الذهب في العالم'
+    && item.matchType === 'equivalent_variant'
+  )));
+
+  const unrelated = analyzeCompetitorKeywordTargeting({
+    content: content({
+      title: 'أفضل أجهزة كشف الذهب للمبتدئين',
+      text: 'دليل عام يشرح أفضل أجهزة كشف الذهب للمبتدئين دون استهداف السعر الأعلى.',
+    }),
+    primaryKeyword: 'أغلى جهاز كشف الذهب في العالم',
+  });
+  assert.equal(unrelated.targetingStatus, 'not_confirmed');
+});
+
 test('scattered topic words and unrelated semantic terms do not qualify a page', () => {
   const result = analyzeCompetitorKeywordTargeting({
     content: content({
@@ -278,7 +305,7 @@ test('automatic selection never backfills five slots with pages that have no tar
   )));
 });
 
-test('automatic selection safely falls back to unavailable prechecks when no candidate qualifies', () => {
+test('automatic selection accepts unavailable prechecks only when SERP evidence confirms targeting', () => {
   const selection = analyzeAndSelectCompetitors({
     context: {
       query: 'إدارة المشاريع',
@@ -303,8 +330,33 @@ test('automatic selection safely falls back to unavailable prechecks when no can
   assert.equal(selection.summary.contentQualifiedCount, 0);
   assert.ok(selected.length > 0);
   assert.ok(selected.every(row => row.contentQualification?.status === 'unavailable'));
+  assert.ok(selected.every(row => row.contentQualification?.targetingStatus === 'confirmed'));
   assert.ok(selected.every(row => row.eligible));
   assert.equal(selection.results.find(row => row.domain === 'unrelated.example')?.autoSelected, false);
+});
+
+test('an unavailable page without targeting evidence is never auto-selected', () => {
+  const selection = analyzeAndSelectCompetitors({
+    context: {
+      query: 'أغلى جهاز كشف الذهب في العالم',
+      primaryKeyword: 'أغلى جهاز كشف الذهب في العالم',
+      language: 'ar',
+      pageType: 'article',
+      searchIntent: 'commercial',
+    },
+    candidates: [candidate(
+      1,
+      'blocked-unrelated.example',
+      'دليل عام لأجهزة كشف المعادن',
+      qualification('unavailable'),
+    )],
+    maxResults: 10,
+    maxSelected: 5,
+  });
+
+  assert.equal(selection.summary.targetingConfirmedCount, 0);
+  assert.equal(selection.summary.autoSelectedCount, 0);
+  assert.equal(selection.results[0]?.eligible, false);
 });
 
 test('SERP evidence confirms targeting independently when page extraction is unavailable', async () => {
@@ -464,9 +516,9 @@ test('one programmatic extraction failure does not fail or qualify the batch', a
   assert.equal(results[1].contentQualification?.errorCode, 'programmatic_extraction_http_403');
 });
 
-test('programmatic prequalification is capped at twelve candidates', async () => {
+test('programmatic prequalification covers all fifteen review candidates', async () => {
   let calls = 0;
-  const candidates: CompetitorSearchResult[] = Array.from({ length: 15 }, (_, index) => ({
+  const candidates: CompetitorSearchResult[] = Array.from({ length: 18 }, (_, index) => ({
     url: `https://site-${index}.example/guide`,
     canonicalUrl: `https://site-${index}.example/guide`,
     domain: `site-${index}.example`,
@@ -482,6 +534,6 @@ test('programmatic prequalification is capped at twelve candidates', async () =>
       return content({ text: 'شرح مفصل عن إدارة المشاريع.' });
     },
   });
-  assert.equal(results.length, 12);
-  assert.equal(calls, 12);
+  assert.equal(results.length, 15);
+  assert.equal(calls, 15);
 });

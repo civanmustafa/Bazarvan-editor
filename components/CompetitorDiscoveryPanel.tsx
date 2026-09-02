@@ -157,6 +157,7 @@ const targetingTermKindLabels: Record<string, { ar: string; en: string }> = {
 
 const targetingMatchKindLabels: Record<string, { ar: string; en: string }> = {
   exact: { ar: 'تطابق تام', en: 'Exact match' },
+  equivalent_variant: { ar: 'صيغة مكافئة', en: 'Equivalent phrase' },
   ordered_near: { ar: 'كلمات متقاربة بالترتيب', en: 'Ordered nearby terms' },
 };
 

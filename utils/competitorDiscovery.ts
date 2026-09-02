@@ -50,7 +50,7 @@ export type CompetitorContentQualification = {
     term: string;
     termKind: 'primary' | 'alternative' | 'article_title';
     source: CompetitorContentQualification['locations'][number];
-    matchType: 'exact' | 'ordered_near';
+    matchType: 'exact' | 'equivalent_variant' | 'ordered_near';
     occurrences: number;
     score: number;
   }>;

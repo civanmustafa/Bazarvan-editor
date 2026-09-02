@@ -77,7 +77,7 @@ export type CompetitorTargetingEvidence = {
   term: string;
   termKind: CompetitorTargetingTermKind;
   source: CompetitorTargetingEvidenceSource;
-  matchType: 'exact' | 'ordered_near';
+  matchType: 'exact' | 'equivalent_variant' | 'ordered_near';
   occurrences: number;
   score: number;
 };
@@ -179,7 +179,7 @@ export type CompetitorSelectionContext = {
   ownDomains?: string[];
 };
 
-const ENGINE_VERSION = 'competitor-selection-v4-multi-evidence-targeting';
+const ENGINE_VERSION = 'competitor-selection-v5-arabic-phrase-variants';
 const INTENTS = ['informational', 'commercial', 'transactional', 'navigational', 'local', 'support'] as const;
 type RankedIntent = typeof INTENTS[number];
 type IntentVector = Record<RankedIntent, number>;
@@ -224,6 +224,44 @@ const GENERIC_SINGLE_TARGET_TERMS = new Set([
 const targetingTokens = (value: unknown): string[] => (
   normalizeCompetitorText(value).split(' ').filter(Boolean)
 );
+
+const targetingTokenSequences = (value: unknown): string[][] => {
+  const rawTokens = targetingTokens(value);
+  const withoutWorldSuffix = rawTokens.length >= 2
+    && rawTokens[rawTokens.length - 1] === 'العالم'
+    && (rawTokens[rawTokens.length - 2] === 'في' || rawTokens[rawTokens.length - 2] === 'حول')
+    ? rawTokens.slice(0, -2)
+    : rawTokens;
+  const collapseDetectorPhrase = (source: string[]): string[] => {
+    const tokens: string[] = [];
+    for (let index = 0; index < source.length; index += 1) {
+      const token = source[index];
+      const next = source[index + 1];
+      // Treat the normal Arabic singular/plural spellings as one phrase unit:
+      // "جهاز كشف", "أجهزة كشف", "كاشف", and "كاشفات" all describe a detector.
+      if ((token === 'جهاز' || token === 'اجهزه') && (next === 'كشف' || next === 'الكشف')) {
+        tokens.push('كاشف');
+        index += 1;
+        continue;
+      }
+      tokens.push(token === 'كاشفات' ? 'كاشف' : token);
+    }
+    return tokens;
+  };
+  const candidates = [
+    rawTokens,
+    withoutWorldSuffix,
+    collapseDetectorPhrase(rawTokens),
+    collapseDetectorPhrase(withoutWorldSuffix),
+  ];
+  const seen = new Set<string>();
+  return candidates.filter(tokens => {
+    const key = tokens.join(' ');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
 
 const arabicTargetTokenVariants = (value: string): Set<string> => {
   const variants = new Set([value]);
@@ -332,26 +370,43 @@ export const findCompetitorTargetingEvidence = (options: {
   sources: CompetitorTargetingSource[];
 }): CompetitorTargetingEvidence[] => options.terms.flatMap(target => {
   if (!isSpecificTargetingTerm(target.term)) return [];
-  const targetPhraseTokens = targetingTokens(target.term);
+  const targetSequences = targetingTokenSequences(target.term);
+  const rawTargetTokens = targetingTokens(target.term);
   return options.sources.flatMap(({ source, value }) => {
-    const sourceTokens = targetingTokens(decodeTargetingSourceValue(value));
-    const occurrences = countContiguousTargetMatches(sourceTokens, targetPhraseTokens);
-    const exact = occurrences > 0;
-    const orderedNear = !exact && hasOrderedNearTargetMatch(sourceTokens, targetPhraseTokens);
-    if (!exact && !orderedNear) return [];
+    const decodedSource = decodeTargetingSourceValue(value);
+    const sourceSequences = targetingTokenSequences(decodedSource);
+    const rawOccurrences = countContiguousTargetMatches(targetingTokens(decodedSource), rawTargetTokens);
+    const occurrences = Math.max(0, ...targetSequences.flatMap(targetTokens => (
+      sourceSequences.map(sourceTokens => countContiguousTargetMatches(sourceTokens, targetTokens))
+    )));
+    const exact = rawOccurrences > 0;
+    const equivalentVariant = !exact && occurrences > 0;
+    const orderedNear = !exact && !equivalentVariant && targetSequences.some(targetTokens => (
+      sourceSequences.some(sourceTokens => hasOrderedNearTargetMatch(sourceTokens, targetTokens))
+    ));
+    if (!exact && !equivalentVariant && !orderedNear) return [];
     const kindBonus = target.kind === 'primary' ? 4 : target.kind === 'article_title' ? 2 : 0;
     return [{
       term: target.term,
       termKind: target.kind,
       source,
-      matchType: exact ? 'exact' as const : 'ordered_near' as const,
-      occurrences: exact ? occurrences : 1,
-      score: roundScore(TARGETING_SOURCE_SCORES[source] + kindBonus + (exact ? 2 : -8)),
+      matchType: exact
+        ? 'exact' as const
+        : equivalentVariant
+          ? 'equivalent_variant' as const
+          : 'ordered_near' as const,
+      occurrences: exact ? rawOccurrences : equivalentVariant ? occurrences : 1,
+      score: roundScore(
+        TARGETING_SOURCE_SCORES[source]
+        + kindBonus
+        + (exact ? 2 : equivalentVariant ? 0 : -8),
+      ),
     }];
   });
 }).sort((left, right) => (
   right.score - left.score
   || Number(right.matchType === 'exact') - Number(left.matchType === 'exact')
+  || Number(right.matchType === 'equivalent_variant') - Number(left.matchType === 'equivalent_variant')
   || left.source.localeCompare(right.source)
 ));
 
@@ -704,6 +759,23 @@ const coverage = (queryTokens: string[], value: unknown): number => {
   return matched / queryTokens.length;
 };
 
+const targetingVariantCoverage = (phrase: string, value: unknown): number => {
+  const sourceSequences = targetingTokenSequences(decodeTargetingSourceValue(value));
+  return Math.max(0, ...targetingTokenSequences(phrase).flatMap(targetSequence => {
+    const queryTokens = Array.from(new Set(
+      targetSequence.filter(token => token.length >= 2 && !STOP_WORDS.has(token)),
+    ));
+    return sourceSequences.map(sourceSequence => coverage(queryTokens, sourceSequence.join(' ')));
+  }));
+};
+
+const hasTargetingVariantPhrase = (phrase: string, value: unknown): boolean => {
+  const sourceSequences = targetingTokenSequences(decodeTargetingSourceValue(value));
+  return targetingTokenSequences(phrase).some(targetSequence => (
+    sourceSequences.some(sourceSequence => countContiguousTargetMatches(sourceSequence, targetSequence) > 0)
+  ));
+};
+
 const queryRelevanceScore = (context: CompetitorSelectionContext, result: CompetitorSearchResult): number => {
   const phrases = [
     context.query,
@@ -711,16 +783,13 @@ const queryRelevanceScore = (context: CompetitorSelectionContext, result: Compet
     ...(context.alternativeKeywords || []),
     context.articleTitle || '',
   ].map(value => value.trim()).filter(Boolean);
-  const normalizedTitle = normalizeCompetitorText(result.title);
   return Math.max(0, ...phrases.map(phrase => {
-    const phraseTokens = Array.from(new Set(tokenize(phrase)));
-    const titleCoverage = coverage(phraseTokens, result.title);
-    const descriptionCoverage = coverage(phraseTokens, result.description);
-    const urlCoverage = coverage(phraseTokens, result.canonicalUrl || result.url);
+    const titleCoverage = targetingVariantCoverage(phrase, result.title);
+    const descriptionCoverage = targetingVariantCoverage(phrase, result.description);
+    const urlCoverage = targetingVariantCoverage(phrase, result.canonicalUrl || result.url);
     let score = titleCoverage * 55 + descriptionCoverage * 30 + urlCoverage * 15;
-    const normalizedPhrase = normalizeCompetitorText(phrase);
-    if (normalizedPhrase.length >= 3 && normalizedTitle.includes(normalizedPhrase)) score += 18;
-    if (phraseTokens.length > 0 && titleCoverage === 1) score += 8;
+    if (hasTargetingVariantPhrase(phrase, result.title)) score += 18;
+    if (targetingTokens(phrase).length > 0 && titleCoverage === 1) score += 8;
     return roundScore(score);
   }));
 };
@@ -849,27 +918,19 @@ const selectDiverseCandidates = (
   const selected: ScoredCompetitorSearchResult[] = [];
   const preferred = results.filter(result => result.eligible);
   const contentQualificationAttempted = results.some(result => Boolean(result.contentQualification));
-  const metadataFallback = (result: ScoredCompetitorSearchResult): boolean => (
-    !result.warningCodes.includes('language-mismatch')
-    && !result.warningCodes.includes('forum-or-video-result')
-    && result.selectionScore >= 45
-  );
-  const safeUnavailableFallback = (result: ScoredCompetitorSearchResult): boolean => (
-    metadataFallback(result)
-    && !result.warningCodes.includes('intent-mismatch')
-    && !result.warningCodes.includes('page-type-mismatch')
-    && !result.warningCodes.includes('low-query-relevance')
-  );
-  const fallback = contentQualificationAttempted
-    ? (preferred.length === 0
-        ? results.filter(result => (
-            result.contentQualification?.status === 'unavailable'
-            && safeUnavailableFallback(result)
-          ))
-        : [])
-    : results.filter(metadataFallback);
+  const metadataEvidenceOnly = contentQualificationAttempted
+    ? []
+    : results.filter(result => (
+        result.reasonCodes.includes('targeting-evidence-confirmed')
+        && !result.warningCodes.includes('language-mismatch')
+        && !result.warningCodes.includes('forum-or-video-result')
+        && result.selectionScore >= 45
+      ));
+  // A blocked page may still be selected from Google title/description/URL
+  // evidence, because that evidence makes it eligible above. Never fill an
+  // empty slot with a page that has neither page evidence nor SERP evidence.
   const pool = Array.from(
-    new Map([...preferred, ...fallback].map(result => [result.canonicalUrl, result])).values(),
+    new Map([...preferred, ...metadataEvidenceOnly].map(result => [result.canonicalUrl, result])).values(),
   );
 
   while (selected.length < Math.min(maximum, pool.length)) {
@@ -1095,11 +1156,11 @@ export const analyzeAndSelectCompetitors = (options: {
       warningCodes.push('content-qualification-unavailable');
     }
     if (intentMatch >= 76) reasonCodes.push('direct-intent-match');
-    else if (intentMatch < 52) warningCodes.push('intent-mismatch');
+    else if (intentMatch < 52 && !targetingConfirmed) warningCodes.push('intent-mismatch');
     if (pageMatch >= 80) reasonCodes.push('page-type-match');
-    else if (pageMatch < 52) warningCodes.push('page-type-mismatch');
+    else if (pageMatch < 52 && !targetingConfirmed) warningCodes.push('page-type-mismatch');
     if (relevance >= 68) reasonCodes.push('high-query-relevance');
-    else if (relevance < 34) warningCodes.push('low-query-relevance');
+    else if (relevance < 34 && !targetingConfirmed) warningCodes.push('low-query-relevance');
     if (candidate.position <= 5) reasonCodes.push('strong-search-position');
     if (locationMatch >= 95) reasonCodes.push('target-location-match');
     if (metadataQuality >= 78) reasonCodes.push('complete-search-metadata');
@@ -1107,14 +1168,14 @@ export const analyzeAndSelectCompetitors = (options: {
     if (homepage) warningCodes.push('homepage-result');
     if (socialOrVideo) warningCodes.push('forum-or-video-result');
 
+    // A complete target phrase on any accepted surface is the hard relevance
+    // gate requested by the editor workflow. Intent, page type, SERP position,
+    // and score rank confirmed competitors; they do not veto that evidence.
     const eligible = (
-      selectionScore >= 52
-      && intentMatch >= 45
-      && relevance >= 25
+      targetingConfirmed
       && languageMatch >= 50
       && !socialOrVideo
       && !targetingRejected
-      && (!contentQualificationAttempted || targetingConfirmed)
     );
     const confidence = roundScore(
       pageType.confidence * 0.35
@@ -1154,15 +1215,12 @@ export const analyzeAndSelectCompetitors = (options: {
   const autoSelectedUrls = selectDiverseCandidates(reviewed, Math.max(1, options.maxSelected));
   const results = reviewed.map(result => {
     const autoSelected = autoSelectedUrls.has(result.canonicalUrl);
-    const unavailableFallbackAccepted = autoSelected
-      && result.contentQualification?.status === 'unavailable';
     return {
       ...result,
       autoSelected,
-      // `eligible` is also the durable extraction gate. An unavailable content
-      // precheck may be accepted only when no qualified candidate exists; pages
-      // proven not to target the keyword remain ineligible.
-      eligible: result.eligible || unavailableFallbackAccepted,
+      // `eligible` is also the durable extraction gate. An unavailable page is
+      // accepted only when Google/page evidence already confirmed targeting.
+      eligible: result.eligible,
       reasonCodes: autoSelected
         ? [...result.reasonCodes, 'auto-selected' as const, 'diverse-source' as const]
         : result.reasonCodes,
