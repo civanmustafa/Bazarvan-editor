@@ -39,6 +39,7 @@ import {
   type ExplicitContentWritingIntent,
 } from '../server/contentWritingAutomation';
 import { toPublicContentWritingSession } from '../server/contentWritingPresenter';
+import { presentContentWritingSession, presentContentWritingSessions } from '../server/contentWritingQueueState';
 import {
   evaluateContentWritingQuality,
   normalizeContentWritingQualityReport,
@@ -427,7 +428,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         accepted: true,
         created: queued.created,
         reusedActive: queued.reusedActive === true,
-        session: toPublicContentWritingSession(queued.session),
+        session: await presentContentWritingSession(queued.session, principal.userId),
       },
     };
   }
@@ -508,7 +509,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         ...(session ? {
           created: result.created === true || recoveredCreated,
           reusedActive: result.reusedActive === true || recoveredReusedActive,
-          session: toPublicContentWritingSession(session),
+          session: await presentContentWritingSession(session, principal.userId),
         } : {}),
       },
     };
@@ -576,7 +577,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
       status: 200,
       body: {
         ok: true,
-        session: toPublicContentWritingSession(session, { includeResult: true }),
+        session: await presentContentWritingSession(session, principal.userId, { includeResult: true }),
         ...(messages ? {
           messages: messages.map(message => ({
             id: message.id,
@@ -607,7 +608,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     await requireArticleReadAccess(supabase, articleId, principal.userId);
     const limit = Math.max(1, Math.min(Number(body.limit) || 20, 50));
     const sessions = await listContentWritingSessions({ articleId, limit });
-    return { status: 200, body: { ok: true, sessions: sessions.map(session => toPublicContentWritingSession(session)) } };
+    return { status: 200, body: { ok: true, sessions: await presentContentWritingSessions(sessions, principal.userId) } };
   }
 
   if (action === 'cancel') {
@@ -695,7 +696,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         code: 'content_writing_resume_conflict',
       });
     }
-    return { status: 202, body: { ok: true, accepted: true, session: toPublicContentWritingSession(resumed) } };
+    return { status: 202, body: { ok: true, accepted: true, session: await presentContentWritingSession(resumed, principal.userId) } };
   }
 
   if (action === 'recordApplication') {

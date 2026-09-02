@@ -1,4 +1,5 @@
 import AppSelect from './AppSelect';
+import { getContentWritingQueueMessage } from '../utils/contentWritingQueueMessage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -804,6 +805,7 @@ const ContentWritingPanel: React.FC = () => {
       contentWritingActivityIdsRef.current.set(started.session.id, activityId);
       const activityOptions = {
         activityId,
+        isArabic,
         action: isArabic ? 'كتابة المقالة' : 'Article writing',
         articleId,
         articleTitle,
@@ -957,6 +959,7 @@ const ContentWritingPanel: React.FC = () => {
       setSelectedDetail(current => current ? { ...current, session: { ...current.session, ...resumed } } : current);
       const activityOptions = {
         activityId,
+        isArabic,
         action: isArabic ? 'استئناف كتابة المقالة' : 'Resume article writing',
         articleId,
         articleTitle,
@@ -1157,7 +1160,8 @@ const ContentWritingPanel: React.FC = () => {
   };
 
   const progress = selectedSession?.progress || {};
-  const progressMessage = typeof progress.message === 'string' ? progress.message.trim() : '';
+  const progressMessage = getContentWritingQueueMessage(selectedSession, isArabic)
+    || (typeof progress.message === 'string' ? progress.message.trim() : '');
   const keyIndex = Number(progress.currentKeyIndex) || 0;
   const keyCount = Number(progress.keyCount) || 0;
   const modelIndex = Number(progress.currentModelIndex) || 0;
@@ -1246,6 +1250,7 @@ const ContentWritingPanel: React.FC = () => {
     contentWritingActivityIdsRef.current.set(selectedSession.id, activityId);
     const activityOptions = {
       activityId,
+      isArabic,
       action: isArabic ? 'كتابة المقالة' : 'Article writing',
       articleId,
       articleTitle,
@@ -1574,7 +1579,7 @@ const ContentWritingPanel: React.FC = () => {
               <div className="mt-3 space-y-2 rounded-md bg-gray-50 p-2 text-[11px] dark:bg-[#1F1F1F]">
                 <div className="flex items-center gap-2 font-bold text-gray-700 dark:text-gray-200">
                   <Loader2 size={13} className="shrink-0 animate-spin text-[#d4af37]" />
-                  <span className="min-w-0 truncate">{progressMessage || (isArabic ? 'جار تجهيز المحادثة...' : 'Preparing conversation...')}</span>
+                  <span className="min-w-0 whitespace-normal break-words leading-relaxed" role="status">{progressMessage || (isArabic ? 'جار تجهيز المحادثة...' : 'Preparing conversation...')}</span>
                 </div>
                 {(workflowStepCount > 0 || keyCount > 0 || modelCount > 0) && (
                   <div className="flex flex-wrap gap-1 text-[10px] font-bold text-gray-500 dark:text-gray-400">

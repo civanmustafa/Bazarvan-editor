@@ -40,6 +40,7 @@ import {
     getUsableCompetitorText,
     isCompetitorExtractionFailureText,
 } from '../utils/competitorContent';
+import { fillEmptyCompetitorTextSlots, fillEmptyCompetitorUrlSlots } from '../utils/competitorTextSlots';
 import {
     COMPETITOR_COMPARISON_COMMAND_ID,
     type CompetitorComparisonMapResult,
@@ -172,7 +173,7 @@ const splitBulkCompetitorTexts = (value: string): string[] => {
     const lastSection = current.join('\n').trim();
     if (lastSection) sections.push(lastSection);
 
-    return sections.slice(0, MAX_ARTICLE_COMPETITORS);
+    return sections;
 };
 
 const countPromptWords = (value: string): number => value.split(/\s+/).filter(Boolean).length;
@@ -795,6 +796,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     const [aiSubTab, setAiSubTab] = useState<'new' | 'history' | 'external'>('new');
     const [aiCommand, setAiCommand] = useState('');
     const [bulkCompetitorText, setBulkCompetitorText] = useState('');
+    const [competitorImportNotice, setCompetitorImportNotice] = useState('');
     const [competitorUrls, setCompetitorUrls] = useState<string[]>(() => loadStoredCompetitorUrls());
     const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
     const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => loadStoredCompetitorTexts());
@@ -948,26 +950,31 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     useEffect(() => {
         const handleAutoDistributedCompetitors = (event: Event) => {
             const urls = (event as CustomEvent<{ urls?: string[] }>).detail?.urls || [];
-            const normalizedUrls = urls.map(url => url.trim()).filter(Boolean).slice(0, MAX_ARTICLE_COMPETITORS);
+            const normalizedUrls = urls.map(url => url.trim()).filter(Boolean);
             if (normalizedUrls.length === 0) return;
 
-            managedCompetitorPositionsRef.current = new Set();
-            setCompetitorUrls(prev => createDefaultCompetitorUrls().map((_, index) => normalizedUrls[index] || prev[index] || ''));
-            setCompetitorExtractions(prev => createDefaultCompetitorExtractions().map((emptyState, index) => (
-                normalizedUrls[index] ? emptyState : prev[index] || emptyState
+            const result = fillEmptyCompetitorUrlSlots(competitorUrls, competitorTexts, normalizedUrls,
+                competitorExtractions.flatMap((item, index) => item.status === 'loading' ? [index] : []));
+            setCompetitorUrls(result.urls);
+            setCompetitorExtractions(prev => prev.map((item, index) => (
+                result.inserted.includes(index) ? createEmptyCompetitorState() : item
             )));
+            setCompetitorImportNotice(result.remaining.length > 0
+                ? (t.locale === 'ar'
+                    ? `لم تتسع الخانات لهذه الروابط، ولم يتم استبدال أي منافس:\n${result.remaining.join('\n')}`
+                    : `No empty slots for these links; existing competitors were preserved:\n${result.remaining.join('\n')}`)
+                : '');
         };
 
         window.addEventListener('bazarvan:auto-distribute-competitors', handleAutoDistributedCompetitors);
         return () => {
             window.removeEventListener('bazarvan:auto-distribute-competitors', handleAutoDistributedCompetitors);
         };
-    }, []);
+    }, [competitorUrls, competitorTexts, competitorExtractions, t.locale]);
 
     const handleDiscoveredCompetitors = useCallback((rows: CompetitorDiscoveryRow[]) => {
         const rowsByPosition = new Map(rows.map(row => [row.position, row]));
         managedCompetitorPositionsRef.current = new Set(rows.map(row => row.position));
-        setBulkCompetitorText('');
         setCompetitorUrls(createDefaultCompetitorUrls().map((_, index) => {
             const row = rowsByPosition.get(index + 1);
             return row?.canonicalUrl || row?.sourceUrl || '';
@@ -1057,6 +1064,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             const restoredInputs = (event as CustomEvent<StoredCompetitorInputs | undefined>).detail;
             managedCompetitorPositionsRef.current = new Set();
             setBulkCompetitorText('');
+            setCompetitorImportNotice('');
             setCompetitorUrls(normalizeStoredList(restoredInputs?.urls, createDefaultCompetitorUrls()));
             setCompetitorHtmls(normalizeStoredList(restoredInputs?.htmls, createDefaultCompetitorHtmls()));
             setCompetitorTexts(normalizeStoredList(restoredInputs?.texts, createDefaultCompetitorTexts()));
@@ -1441,8 +1449,8 @@ ${readyCommandCompetitorBlocks}`;
         ));
     };
 
-    const handleCompetitorTextCommit = async (index: number) => {
-        const contentText = getUsableCompetitorText(competitorTexts[index]);
+    const handleCompetitorTextCommit = async (index: number, value = competitorTexts[index]) => {
+        const contentText = getUsableCompetitorText(value);
         if (
             !activeArticleId
             || !contentText
@@ -1501,14 +1509,21 @@ ${readyCommandCompetitorBlocks}`;
         const sections = splitBulkCompetitorTexts(value);
         if (sections.length === 0) return;
 
-        setCompetitorTexts(prev => createDefaultCompetitorTexts().map((_, index) => sections[index] || prev[index] || ''));
+        const result = fillEmptyCompetitorTextSlots(competitorTexts, sections,
+            competitorExtractions.flatMap((item, index) => item.status === 'loading' ? [index] : []));
+        setCompetitorTexts(result.texts);
+        setCompetitorExtractions(prev => prev.map((item, index) => result.inserted.includes(index)
+            ? { status: 'success', source: 'text', content: null, error: '', notice: '' }
+            : item));
+        // Keep overflow visible for the user instead of silently dropping it.
+        setBulkCompetitorText(result.remaining.join('\n--\n'));
+        result.inserted.forEach(index => void handleCompetitorTextCommit(index, result.texts[index]));
     };
 
     const handleBulkCompetitorTextPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
         event.preventDefault();
         const pastedText = event.clipboardData.getData('text');
         handleBulkCompetitorTextDistribute(pastedText);
-        setBulkCompetitorText('');
     };
 
     const runCompetitorExtraction = async (
@@ -2417,6 +2432,11 @@ ${readyCommandCompetitorBlocks}`;
                 </div>
 
                 <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                    {competitorImportNotice && (
+                        <p role="status" className="mb-2 whitespace-pre-wrap break-words text-xs text-amber-700 dark:text-amber-300" dir="auto">
+                            {competitorImportNotice}
+                        </p>
+                    )}
                     <textarea
                         value={bulkCompetitorText}
                         onChange={(event) => setBulkCompetitorText(event.target.value)}
@@ -2432,14 +2452,18 @@ ${readyCommandCompetitorBlocks}`;
                         type="button"
                         onClick={() => {
                             handleBulkCompetitorTextDistribute(bulkCompetitorText);
-                            setBulkCompetitorText('');
                         }}
                         disabled={!bulkCompetitorText.trim()}
                         className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-[#d4af37]/40 bg-[#d4af37]/10 px-3 py-2 text-xs font-bold text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#f2d675]"
                     >
                         <FileText size={14} />
-                        <span>{t.locale === 'ar' ? 'تعبئة النصوص المعتمدة' : 'Fill canonical analysis texts'}</span>
+                        <span>{t.locale === 'ar' ? 'تعبئة الخانات الفارغة فقط' : 'Fill empty text slots only'}</span>
                     </button>
+                    <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+                        {t.locale === 'ar'
+                            ? 'تُحفظ النصوص الموجودة كما هي، وتبقى النصوص الزائدة هنا عند امتلاء الخانات.'
+                            : 'Existing texts stay unchanged; overflow remains here when the slots are full.'}
+                    </p>
                 </div>
 
                 {competitorUrls.map((url, index) => {

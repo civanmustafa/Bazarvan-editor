@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-106}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-108}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-60}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -132,6 +132,15 @@ readonly GOOGLE_METADATA_MANUAL_PRIVILEGES="$(sql_scalar "select has_function_pr
 [[ "${GOOGLE_METADATA_MANUAL_PRIVILEGES}" == "f" ]] || fail "Manual generation must remain behind the authenticated write-access API."
 readonly SAVED_AUTOMATION_RESULTS_INVOKER="$(sql_scalar "select not prosecdef from pg_proc where oid = 'public.dashboard_saved_automation_results(uuid[])'::regprocedure")"
 [[ "${SAVED_AUTOMATION_RESULTS_INVOKER}" == "t" ]] || fail "Saved completion evidence must respect caller RLS."
+readonly MANUAL_COMPETITOR_EXTRACTION_FUNCTION="$(sql_scalar "select to_regprocedure('public.enqueue_manual_competitor_extraction_job(uuid,uuid,text,text,jsonb)') is not null")"
+[[ "${MANUAL_COMPETITOR_EXTRACTION_FUNCTION}" == "t" ]] || fail "Non-destructive manual competitor extraction function is missing."
+readonly MANUAL_COMPETITOR_EXTRACTION_PRIVILEGES="$(sql_scalar "select has_function_privilege('anon', 'public.enqueue_manual_competitor_extraction_job(uuid,uuid,text,text,jsonb)', 'execute') or has_function_privilege('authenticated', 'public.enqueue_manual_competitor_extraction_job(uuid,uuid,text,text,jsonb)', 'execute')")"
+[[ "${MANUAL_COMPETITOR_EXTRACTION_PRIVILEGES}" == "f" ]] || fail "Manual competitor extraction must remain behind the write-access API."
+
+readonly MANUAL_WRITING_PRIORITY_FUNCTION="$(sql_scalar "select to_regprocedure('public.get_content_writing_queue_state(uuid[],uuid)') is not null and position('content_writing_queue_priority' in pg_get_functiondef('public.claim_next_content_writing_session(text,integer)'::regprocedure)) > 0")"
+[[ "${MANUAL_WRITING_PRIORITY_FUNCTION}" == "t" ]] || fail "Manual writing priority and queue diagnostics are missing."
+readonly MANUAL_WRITING_QUEUE_PRIVILEGES="$(sql_scalar "select has_function_privilege('anon', 'public.get_content_writing_queue_state(uuid[],uuid)', 'execute') or has_function_privilege('authenticated', 'public.get_content_writing_queue_state(uuid[],uuid)', 'execute')")"
+[[ "${MANUAL_WRITING_QUEUE_PRIVILEGES}" == "f" ]] || fail "Writing queue diagnostics must remain behind the article-access API."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"

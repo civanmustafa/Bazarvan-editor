@@ -9,12 +9,14 @@ import {
   finishAiExecutionActivity,
   updateAiExecutionActivity,
 } from './aiExecutionActivity';
+import { getContentWritingQueueMessage } from './contentWritingQueueMessage';
 
 type ContentWritingActivityOptions = {
   activityId: string;
   action?: string;
   articleId?: string;
   articleTitle?: string;
+  isArabic?: boolean;
 };
 
 type ActiveMonitor = {
@@ -69,9 +71,9 @@ export const syncContentWritingSessionActivity = (
     articleTitle: options.articleTitle,
     surface: 'content_writing',
     action: options.action,
-    message: typeof session.progress.message === 'string'
+    message: getContentWritingQueueMessage(session, options.isArabic ?? true) || (typeof session.progress.message === 'string'
       ? session.progress.message
-      : session.lastError || undefined,
+      : session.lastError || undefined),
   };
   if (isContentWritingSessionActive(session)) {
     updateAiExecutionActivity(options.activityId, {

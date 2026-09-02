@@ -741,7 +741,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     setIsStarting(true);
     setError('');
     try {
-      await enqueueArticleCompetitorExtraction({
+      const extraction = await enqueueArticleCompetitorExtraction({
         articleId,
         query: query.trim(),
         queryType: mode,
@@ -750,12 +750,20 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           !selectedUrls.has(result.canonicalUrl) && result.eligible
         )),
       });
-      setNotice(isArabic
-        ? 'تمت إضافة مهمة السحب. ستستمر حتى عند مغادرة المقالة.'
-        : 'Extraction was queued and will continue after leaving the article.');
+      setNotice(extraction.queuedCount > 0
+        ? (isArabic
+          ? 'بدأ سحب النصوص الناقصة إلى الخانات المتاحة مع الحفاظ على النصوص السابقة. ستستمر المهمة حتى عند مغادرة المقالة.'
+          : 'Missing texts were queued into available slots; existing texts were preserved. Extraction continues after leaving the article.')
+        : (isArabic
+          ? 'نصوص المنافسين المختارين محفوظة بالفعل؛ لم يتم استبدالها أو تكرار سحبها.'
+          : 'The selected competitor texts are already saved; nothing was replaced or extracted again.'));
       await refresh(false);
     } catch (startError) {
-      setError(requestErrorMessage(startError, isArabic, 'Could not start competitor extraction.'));
+      setError(startError instanceof CompetitorDiscoveryRequestError && startError.code === 'competitor_slots_full'
+        ? (isArabic
+          ? 'الخانات المتاحة لا تكفي للمنافسين الجدد. لم يتغير أي نص محفوظ؛ اختر عددًا أقل أو احذف منافسًا بنفسك أولًا.'
+          : 'Not enough empty slots. No saved text was changed; select fewer new sources or remove a competitor first.')
+        : requestErrorMessage(startError, isArabic, 'Could not start competitor extraction.'));
     } finally {
       setIsStarting(false);
     }

@@ -554,8 +554,13 @@ export const enqueueArticleCompetitorExtraction = async (options: {
   queryType: CompetitorSearchMode;
   results: CompetitorSearchResult[];
   reserveResults?: CompetitorSearchResult[];
-}): Promise<void> => {
-  await requestCompetitors({ action: 'extract', ...options });
+}): Promise<{ queuedCount: number; preservedCount: number }> => {
+  const payload = await requestCompetitors({ action: 'extract', ...options });
+  const queued = isRecord(payload.queued) ? payload.queued : {};
+  return {
+    queuedCount: Math.max(0, Number(queued.queuedCount) || 0),
+    preservedCount: Math.max(0, Number(queued.preservedCount) || 0),
+  };
 };
 
 export const cancelArticleCompetitorExtraction = async (articleId: string): Promise<void> => {

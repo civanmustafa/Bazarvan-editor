@@ -475,13 +475,20 @@ const enqueueExtraction = async (
     description: result.description,
     searchPosition: result.position,
   }));
-  const { data, error } = await supabase.rpc('enqueue_competitor_extraction_job', {
+  const { data, error } = await supabase.rpc('enqueue_manual_competitor_extraction_job', {
     p_article_id: options.articleId,
     p_requested_by: options.userId,
     p_query_type: options.queryType,
     p_query_text: options.queryText,
     p_sources: sources,
   });
+  if (error?.code === 'P0001' && error.message?.includes('competitor_slots_full')) {
+    throw new CompetitorApiError({
+      message: 'No empty competitor slots remain. Existing texts were preserved; select fewer new sources or remove a competitor explicitly.',
+      status: 409,
+      code: 'competitor_slots_full',
+    });
+  }
   if (error?.code === 'P0001' && /active/i.test(error.message || '')) {
     throw new CompetitorApiError({
       message: 'A competitor extraction task is already active for this article.',
@@ -931,17 +938,25 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
         .eq('id', extractionJobId);
       if (jobMetadataError) throw jobMetadataError;
     }
-    if (discoverySignature) {
+    if (discoverySignature && extractionJobId) {
+      const queuedIds = isRecord(queuedJob.input_snapshot) && Array.isArray(queuedJob.input_snapshot.competitorIds)
+        ? queuedJob.input_snapshot.competitorIds.filter((id): id is string => typeof id === 'string')
+        : [];
       const { error: signatureError } = await supabase
         .from('article_competitors')
         .update({ discovery_signature: discoverySignature })
-        .eq('article_id', articleId);
+        .eq('article_id', articleId)
+        .in('id', queuedIds);
       if (signatureError) throw signatureError;
+    }
+    if (discoverySignature) {
       await markCompetitorSelectionAccepted(supabase, {
         articleId,
         userId: principal.userId,
         discoverySignature,
-        selectedUrls: results.map(result => result.canonicalUrl),
+        selectedUrls: isRecord(queued) && Array.isArray(queued.competitors)
+          ? queued.competitors.map(row => toText(row.canonical_url)).filter(url => /^https?:\/\//i.test(url))
+          : results.map(result => result.canonicalUrl),
       });
     }
     return {

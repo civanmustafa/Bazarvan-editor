@@ -814,13 +814,20 @@ const executeCompetitorExtraction = async (
   context: ExternalAnalysisExecutionContext,
 ) => {
   await assertAutomaticCompetitorResearchAllowed(context.job);
-  const [rows, articleTargeting] = await Promise.all([
+  const [allRows, articleTargeting] = await Promise.all([
     readCompetitors(context.job.article_id),
     readArticleTargetingContext(context.job.article_id),
   ]);
   const inputSnapshot = isRecord(context.job.input_snapshot)
     ? { ...context.job.input_snapshot }
     : {};
+  const requestedIds = new Set(Array.isArray(inputSnapshot.competitorIds)
+    ? inputSnapshot.competitorIds.filter((id): id is string => typeof id === 'string')
+    : []);
+  const isRequestedRow = (row: { id: string }) => (
+    inputSnapshot.preserveExisting !== true || requestedIds.has(row.id)
+  );
+  const rows = allRows.filter(isRequestedRow);
   if (rows.length === 0) {
     return {
       result: {
@@ -833,17 +840,17 @@ const executeCompetitorExtraction = async (
     };
   }
 
-  const reserves = await loadReserveSources({ context, snapshot: inputSnapshot, rows });
+  const reserves = await loadReserveSources({ context, snapshot: inputSnapshot, rows: allRows });
   const attempts: ExternalAnalysisJson[] = [];
   const failures: CompetitorFailure[] = [];
   const replacements: CompetitorReplacement[] = [];
   const currentAttempt = Math.max(1, Number(context.job.attempt_count) || 1);
-  const acceptedFingerprints = new Set(rows
+  const acceptedFingerprints = new Set(allRows
     .filter(row => row.status === 'completed' && Boolean(row.content_text))
     .map(row => competitorContentFingerprint(row.content_text))
     .filter(Boolean));
-  const claimedUrls = new Set(rows.flatMap(row => [row.canonical_url, row.source_url]).filter(Boolean));
-  const claimedDomains = new Set(rows.map(row => row.domain).filter(Boolean));
+  const claimedUrls = new Set(allRows.flatMap(row => [row.canonical_url, row.source_url]).filter(Boolean));
+  const claimedDomains = new Set(allRows.map(row => row.domain).filter(Boolean));
   let successfulCount = rows.filter(row => row.status === 'completed').length;
 
   for (const row of rows) {
@@ -913,7 +920,7 @@ const executeCompetitorExtraction = async (
     await context.reportProgress({
       progress: {
         stage: 'competitor_processed',
-        current: row.position,
+        current: successfulCount + failures.length,
         total: rows.length,
         successfulCount,
         failedCount: failures.length,
@@ -934,7 +941,7 @@ const executeCompetitorExtraction = async (
   }
 
   await syncArticleCompetitors(context.job.article_id);
-  const finalRows = await readCompetitors(context.job.article_id);
+  const finalRows = (await readCompetitors(context.job.article_id)).filter(isRequestedRow);
   successfulCount = finalRows.filter(row => row.status === 'completed').length;
   const persistedFailures: CompetitorFailure[] = finalRows
     .filter(row => row.status === 'failed')

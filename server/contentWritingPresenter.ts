@@ -5,7 +5,7 @@ import type {
 
 export const toPublicContentWritingSession = (
   session: ContentWritingSession | ContentWritingSessionSummary,
-  options: { includeResult?: boolean } = {},
+  options: { includeResult?: boolean; queueState?: Record<string, unknown> } = {},
 ): Record<string, unknown> => ({
   id: session.id,
   articleId: session.article_id,
@@ -19,7 +19,7 @@ export const toPublicContentWritingSession = (
   estimatedInputTokens: session.estimated_input_tokens,
   maxInputTokens: session.max_input_tokens,
   contextSnapshot: session.context_snapshot,
-  progress: session.progress,
+  progress: { ...session.progress, queue: options.queueState ?? null },
   ...(options.includeResult && 'result_text' in session ? { resultText: session.result_text } : {}),
   conversationId: session.conversation_id,
   keySuffix: session.key_suffix,
