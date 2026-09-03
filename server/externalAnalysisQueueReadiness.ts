@@ -2,7 +2,28 @@ import { COMPETITOR_QUEUE_STALL_MS } from '../constants/competitors.ts';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 import { isFirecrawlConfigured } from './firecrawlCompetitorService.ts';
 
-const WORKER_COMPETITOR_JOB_TYPES = ['competitor_discovery', 'competitor_extraction'];
+type ExternalAnalysisWorkerGroupId =
+  | 'competitor'
+  | 'ai'
+  | 'fullArticlePipeline'
+  | 'contentWritingPreparation';
+
+const EXTERNAL_ANALYSIS_WORKER_GROUPS: Record<ExternalAnalysisWorkerGroupId, readonly string[]> = {
+  competitor: ['competitor_discovery', 'competitor_extraction'],
+  ai: [
+    'semantic_keywords_lsi',
+    'content_brief_generation',
+    'meta_description_generation',
+    'engineering_command',
+  ],
+  fullArticlePipeline: ['full_article_pipeline'],
+  contentWritingPreparation: ['content_writing_preparation'],
+};
+const EXTERNAL_ANALYSIS_WORKER_GROUP_IDS = Object.keys(
+  EXTERNAL_ANALYSIS_WORKER_GROUPS,
+) as ExternalAnalysisWorkerGroupId[];
+const MONITORED_EXTERNAL_ANALYSIS_JOB_TYPES = EXTERNAL_ANALYSIS_WORKER_GROUP_IDS
+  .flatMap(groupId => [...EXTERNAL_ANALYSIS_WORKER_GROUPS[groupId]]);
 
 type QueueJobRow = {
   job_type?: string | null;
@@ -41,7 +62,17 @@ export type ExternalAnalysisQueueReadinessResult = {
     queueTable: boolean;
     firecrawlConfigured: boolean;
     noStalledCompetitorJobs: boolean;
+    noStalledAiJobs: boolean;
+    noStalledFullArticlePipelineJobs: boolean;
+    noStalledContentWritingPreparationJobs: boolean;
   };
+  workerGroups: Record<ExternalAnalysisWorkerGroupId, {
+    ok: boolean;
+    queuedCount: number;
+    runningCount: number;
+    stalledQueuedCount: number;
+    expiredRunningCount: number;
+  }>;
   queuedCount: number;
   runningCount: number;
   stalledQueuedCount: number;
@@ -60,6 +91,66 @@ let cachedReadiness: CachedReadiness | null = null;
 const timestamp = (value: unknown): number => {
   const parsed = Date.parse(typeof value === 'string' ? value : '');
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const createEmptyWorkerGroups = (): ExternalAnalysisQueueReadinessResult['workerGroups'] => ({
+  competitor: {
+    ok: false,
+    queuedCount: 0,
+    runningCount: 0,
+    stalledQueuedCount: 0,
+    expiredRunningCount: 0,
+  },
+  ai: {
+    ok: false,
+    queuedCount: 0,
+    runningCount: 0,
+    stalledQueuedCount: 0,
+    expiredRunningCount: 0,
+  },
+  fullArticlePipeline: {
+    ok: false,
+    queuedCount: 0,
+    runningCount: 0,
+    stalledQueuedCount: 0,
+    expiredRunningCount: 0,
+  },
+  contentWritingPreparation: {
+    ok: false,
+    queuedCount: 0,
+    runningCount: 0,
+    stalledQueuedCount: 0,
+    expiredRunningCount: 0,
+  },
+});
+
+const summarizeWorkerGroup = (
+  rows: QueueJobRow[],
+  jobTypes: readonly string[],
+  now: number,
+): ExternalAnalysisQueueReadinessResult['workerGroups'][ExternalAnalysisWorkerGroupId] => {
+  const groupRows = rows.filter(row => jobTypes.includes(row.job_type || ''));
+  const queuedRows = groupRows.filter(row => row.status === 'queued');
+  const runningRows = groupRows.filter(row => row.status === 'running');
+  const expiredRunningCount = runningRows.filter(row => {
+    const leaseExpiresAt = timestamp(row.lease_expires_at);
+    return !leaseExpiresAt || leaseExpiresAt <= now;
+  }).length;
+  const hasHealthyRunningJob = runningRows.length > expiredRunningCount;
+  const stalledQueuedCount = hasHealthyRunningJob
+    ? 0
+    : queuedRows.filter(row => {
+        const createdAt = timestamp(row.created_at);
+        return createdAt > 0 && now - createdAt >= COMPETITOR_QUEUE_STALL_MS;
+      }).length;
+
+  return {
+    ok: stalledQueuedCount === 0 && expiredRunningCount === 0,
+    queuedCount: queuedRows.length,
+    runningCount: runningRows.length,
+    stalledQueuedCount,
+    expiredRunningCount,
+  };
 };
 
 const withTimeout = async <T>(promise: PromiseLike<T>, timeoutMs: number): Promise<T> => {
@@ -97,7 +188,11 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
     queueTable: false,
     firecrawlConfigured,
     noStalledCompetitorJobs: true,
+    noStalledAiJobs: true,
+    noStalledFullArticlePipelineJobs: true,
+    noStalledContentWritingPreparationJobs: true,
   };
+  const workerGroups = createEmptyWorkerGroups();
   let queuedCount = 0;
   let runningCount = 0;
   let stalledQueuedCount = 0;
@@ -111,10 +206,10 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
       client
         .from('ai_external_analysis_jobs')
         .select('job_type,status,created_at,lease_expires_at')
-        .in('job_type', WORKER_COMPETITOR_JOB_TYPES)
+        .in('job_type', MONITORED_EXTERNAL_ANALYSIS_JOB_TYPES)
         .in('status', ['queued', 'running'])
         .order('created_at', { ascending: true })
-        .limit(50),
+        .limit(250),
       Math.max(500, Math.min(options.timeoutMs || 5_000, 15_000)),
     );
     if (result.error) {
@@ -124,28 +219,45 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
     }
     checks.queueTable = true;
     const rows = result.data || [];
-    const queuedRows = rows.filter(row => row.status === 'queued');
-    const runningRows = rows.filter(row => row.status === 'running');
-    queuedCount = queuedRows.length;
-    runningCount = runningRows.length;
-    expiredRunningCount = runningRows.filter(row => {
-      const leaseExpiresAt = timestamp(row.lease_expires_at);
-      return !leaseExpiresAt || leaseExpiresAt <= now;
-    }).length;
-    const hasHealthyRunningJob = runningCount > expiredRunningCount;
-    stalledQueuedCount = hasHealthyRunningJob
-      ? 0
-      : queuedRows.filter(row => {
-        const createdAt = timestamp(row.created_at);
-        return createdAt > 0 && now - createdAt >= COMPETITOR_QUEUE_STALL_MS;
-      }).length;
-    checks.noStalledCompetitorJobs = stalledQueuedCount === 0 && expiredRunningCount === 0;
-    if (!checks.noStalledCompetitorJobs) {
-      detail = `competitor worker queue stalled: queued=${stalledQueuedCount}, expired=${expiredRunningCount}`;
-    }
+    EXTERNAL_ANALYSIS_WORKER_GROUP_IDS.forEach(groupId => {
+      workerGroups[groupId] = summarizeWorkerGroup(
+        rows,
+        EXTERNAL_ANALYSIS_WORKER_GROUPS[groupId],
+        now,
+      );
+    });
+    queuedCount = EXTERNAL_ANALYSIS_WORKER_GROUP_IDS.reduce(
+      (total, groupId) => total + workerGroups[groupId].queuedCount,
+      0,
+    );
+    runningCount = EXTERNAL_ANALYSIS_WORKER_GROUP_IDS.reduce(
+      (total, groupId) => total + workerGroups[groupId].runningCount,
+      0,
+    );
+    stalledQueuedCount = EXTERNAL_ANALYSIS_WORKER_GROUP_IDS.reduce(
+      (total, groupId) => total + workerGroups[groupId].stalledQueuedCount,
+      0,
+    );
+    expiredRunningCount = EXTERNAL_ANALYSIS_WORKER_GROUP_IDS.reduce(
+      (total, groupId) => total + workerGroups[groupId].expiredRunningCount,
+      0,
+    );
+    checks.noStalledCompetitorJobs = workerGroups.competitor.ok;
+    checks.noStalledAiJobs = workerGroups.ai.ok;
+    checks.noStalledFullArticlePipelineJobs = workerGroups.fullArticlePipeline.ok;
+    checks.noStalledContentWritingPreparationJobs = workerGroups.contentWritingPreparation.ok;
+    const stalledGroupDetails = EXTERNAL_ANALYSIS_WORKER_GROUP_IDS.flatMap(groupId => {
+      const group = workerGroups[groupId];
+      if (group.ok) return [];
+      return [`${groupId} worker queue stalled: queued=${group.stalledQueuedCount}, expired=${group.expiredRunningCount}`];
+    });
+    detail = stalledGroupDetails.join('; ');
   } catch (error) {
     checks.queueTable = false;
     checks.noStalledCompetitorJobs = false;
+    checks.noStalledAiJobs = false;
+    checks.noStalledFullArticlePipelineJobs = false;
+    checks.noStalledContentWritingPreparationJobs = false;
     detail = error instanceof Error ? error.message : String(error);
   }
 
@@ -158,6 +270,7 @@ export const checkExternalAnalysisQueueReadiness = async (options: {
     checkedAt: new Date(now).toISOString(),
     stallAfterSeconds: Math.round(COMPETITOR_QUEUE_STALL_MS / 1_000),
     checks,
+    workerGroups,
     queuedCount,
     runningCount,
     stalledQueuedCount,
@@ -181,6 +294,7 @@ export const toPublicExternalAnalysisQueueReadiness = (
   checkedAt: result.checkedAt,
   stallAfterSeconds: result.stallAfterSeconds,
   checks: result.checks,
+  workerGroups: result.workerGroups,
   queuedCount: result.queuedCount,
   runningCount: result.runningCount,
   stalledQueuedCount: result.stalledQueuedCount,

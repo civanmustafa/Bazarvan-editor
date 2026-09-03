@@ -80,6 +80,8 @@ type AiExecutionActivityInput = {
   completed?: boolean;
   outcome?: AiKeyUsageOutcome | 'cancelled';
   startedAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
   cancel?: AiExecutionCancelHandler | null;
 };
 
@@ -363,6 +365,8 @@ const createInitialActivity = (
 ): AiExecutionActivity => {
   const now = new Date().toISOString();
   const provider = toText(input.provider) || 'AI';
+  const state = input.state || 'running';
+  const updatedAt = toText(input.updatedAt) || now;
   return {
     id,
     articleId: toText(input.articleId),
@@ -374,7 +378,7 @@ const createInitialActivity = (
     model: toText(input.model),
     requestedModel: toText(input.requestedModel) || toText(input.model),
     credentialTier: input.credentialTier || resolveAiCredentialTier(provider),
-    state: input.state || 'running',
+    state,
     stage: toText(input.stage) || 'queued',
     surface: toText(input.surface),
     action: toText(input.action),
@@ -390,7 +394,10 @@ const createInitialActivity = (
     cancellable: false,
     entries: input.entries || [],
     startedAt: toText(input.startedAt) || now,
-    updatedAt: now,
+    updatedAt,
+    ...(state !== 'running' ? {
+      completedAt: toText(input.completedAt) || updatedAt,
+    } : {}),
   };
 };
 
@@ -471,6 +478,7 @@ export const updateAiExecutionActivity = (
     mergeEntries(mergedInput.entries || [], payloadEntries),
   );
   const now = new Date().toISOString();
+  const observedUpdatedAt = toText(mergedInput.updatedAt);
   let state = getActivityState(current.state, mergedInput, stage);
   let message = toText(mergedInput.message) || current.message;
   if (
@@ -510,8 +518,14 @@ export const updateAiExecutionActivity = (
     ...(toPositiveNumber(mergedInput.totalAttemptCount) ? { totalAttemptCount: toPositiveNumber(mergedInput.totalAttemptCount) } : {}),
     ...(toPositiveNumber(mergedInput.httpStatus) ? { httpStatus: toPositiveNumber(mergedInput.httpStatus) } : {}),
     entries,
-    updatedAt: now,
-    ...(state !== 'running' ? { completedAt: current.completedAt || now } : { completedAt: undefined }),
+    startedAt: toText(mergedInput.startedAt) || current.startedAt,
+    updatedAt: observedUpdatedAt || now,
+    ...(state !== 'running' ? {
+      completedAt: toText(mergedInput.completedAt)
+        || current.completedAt
+        || observedUpdatedAt
+        || now,
+    } : { completedAt: undefined }),
   };
   syncCancelHandler(normalizedId, mergedInput, state);
   return publishActivity(activity);

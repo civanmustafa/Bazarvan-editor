@@ -30,6 +30,8 @@ export type ExternalAnalysisActivityProjection = {
   totalAttemptCount?: number;
   httpStatus?: number;
   startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
   payload: Record<string, unknown>;
 };
 
@@ -154,6 +156,8 @@ export const projectExternalAnalysisActivity = (
     ...(toPositiveNumber(gemini.totalAttemptCount) ? { totalAttemptCount: toPositiveNumber(gemini.totalAttemptCount) } : {}),
     ...(toPositiveNumber(gemini.status) ? { httpStatus: toPositiveNumber(gemini.status) } : {}),
     startedAt: job.started_at || job.created_at,
+    updatedAt: job.updated_at,
+    ...(job.completed_at ? { completedAt: job.completed_at } : {}),
     payload: {
       progress,
       result: compactResult,

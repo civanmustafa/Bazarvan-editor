@@ -198,6 +198,9 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
               ? 'competitor_discovery'
               : 'competitor_extraction'),
         action,
+        startedAt: job.started_at || job.created_at,
+        updatedAt: job.updated_at,
+        ...(job.completed_at ? { completedAt: job.completed_at } : {}),
       };
       if (active) {
         if (existingActivity && existingActivity.state !== 'running' && !serverRevisionIsNewer) return;

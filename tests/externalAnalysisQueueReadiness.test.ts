@@ -29,7 +29,16 @@ const createProbeClient = (
         return {
           in: (jobTypeColumn: string, jobTypes: string[]) => {
             assert.equal(jobTypeColumn, 'job_type');
-            assert.deepEqual(jobTypes, ['competitor_discovery', 'competitor_extraction']);
+            assert.deepEqual(jobTypes, [
+              'competitor_discovery',
+              'competitor_extraction',
+              'semantic_keywords_lsi',
+              'content_brief_generation',
+              'meta_description_generation',
+              'engineering_command',
+              'full_article_pipeline',
+              'content_writing_preparation',
+            ]);
             return {
               in: (statusColumn: string, statuses: string[]) => {
                 assert.equal(statusColumn, 'status');
@@ -99,11 +108,13 @@ test('a healthy running lease prevents a queued backlog from being labeled as a 
   const result = await readiness.checkExternalAnalysisQueueReadiness({
     client: createProbeClient([
       {
+        job_type: 'competitor_extraction',
         status: 'queued',
         created_at: '2026-07-25T11:50:00.000Z',
         lease_expires_at: null,
       },
       {
+        job_type: 'competitor_discovery',
         status: 'running',
         created_at: '2026-07-25T11:59:00.000Z',
         lease_expires_at: '2026-07-25T12:05:00.000Z',
@@ -119,6 +130,77 @@ test('a healthy running lease prevents a queued backlog from being labeled as a 
   assert.equal(result.runningCount, 1);
   assert.equal(result.stalledQueuedCount, 0);
   assert.equal(result.expiredRunningCount, 0);
+});
+
+test('readiness detects an unclaimed Gemini queue independently from competitor health', async () => {
+  const readiness = await importReadiness();
+  readiness.__resetExternalAnalysisQueueReadinessForTests();
+  const now = Date.parse('2026-09-03T12:00:00.000Z');
+  const result = await readiness.checkExternalAnalysisQueueReadiness({
+    client: createProbeClient([
+      {
+        job_type: 'competitor_discovery',
+        status: 'running',
+        created_at: '2026-09-03T11:59:00.000Z',
+        lease_expires_at: '2026-09-03T12:05:00.000Z',
+      },
+      {
+        job_type: 'semantic_keywords_lsi',
+        status: 'queued',
+        created_at: '2026-09-02T08:00:00.000Z',
+        lease_expires_at: null,
+      },
+      {
+        job_type: 'engineering_command',
+        status: 'queued',
+        created_at: '2026-09-02T08:01:00.000Z',
+        lease_expires_at: null,
+      },
+    ]),
+    now,
+    force: true,
+    firecrawlConfigured: true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.checks.noStalledCompetitorJobs, true);
+  assert.equal(result.checks.noStalledAiJobs, false);
+  assert.equal(result.workerGroups.competitor.ok, true);
+  assert.equal(result.workerGroups.ai.queuedCount, 2);
+  assert.equal(result.workerGroups.ai.stalledQueuedCount, 2);
+  assert.equal(result.stalledQueuedCount, 2);
+  assert.match(result.detail, /ai worker queue stalled: queued=2, expired=0/);
+});
+
+test('a live Gemini lease prevents its own queued work from being reported as stalled', async () => {
+  const readiness = await importReadiness();
+  readiness.__resetExternalAnalysisQueueReadinessForTests();
+  const now = Date.parse('2026-09-03T12:00:00.000Z');
+  const result = await readiness.checkExternalAnalysisQueueReadiness({
+    client: createProbeClient([
+      {
+        job_type: 'semantic_keywords_lsi',
+        status: 'queued',
+        created_at: '2026-09-02T08:00:00.000Z',
+        lease_expires_at: null,
+      },
+      {
+        job_type: 'engineering_command',
+        status: 'running',
+        created_at: '2026-09-03T11:59:00.000Z',
+        lease_expires_at: '2026-09-03T12:05:00.000Z',
+      },
+    ]),
+    now,
+    force: true,
+    firecrawlConfigured: true,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.checks.noStalledAiJobs, true);
+  assert.equal(result.workerGroups.ai.queuedCount, 1);
+  assert.equal(result.workerGroups.ai.runningCount, 1);
+  assert.equal(result.workerGroups.ai.stalledQueuedCount, 0);
 });
 
 test('public readiness exposes safe diagnostics without internal database errors', async () => {
@@ -137,6 +219,7 @@ test('public readiness exposes safe diagnostics without internal database errors
   assert.equal(result.ok, false);
   assert.equal(publicResult.code, 'external_analysis_worker_unavailable');
   assert.equal('detail' in publicResult, false);
+  assert.equal(publicResult.workerGroups.ai.ok, false);
   assert.doesNotMatch(JSON.stringify(publicResult), /Private database connection detail|PGRST204/);
 });
 

@@ -249,6 +249,36 @@ test('unified AI activity follows live key, model, and paid-to-free fallback sta
   assert.equal(getAiExecutionActivities()[0].id, 'activity-test');
 });
 
+test('durable AI activity keeps authoritative server timestamps across polling', () => {
+  resetAiExecutionActivitiesForTests();
+  const started = beginAiExecutionActivity({
+    id: 'durable-timestamps',
+    state: 'running',
+    stage: 'queued',
+    startedAt: '2026-09-02T08:00:00.000Z',
+    updatedAt: '2026-09-02T08:00:05.000Z',
+  });
+  assert.equal(started.startedAt, '2026-09-02T08:00:00.000Z');
+  assert.equal(started.updatedAt, '2026-09-02T08:00:05.000Z');
+
+  const polled = updateAiExecutionActivity(started.id, {
+    completed: false,
+    stage: 'queued',
+    startedAt: '2026-09-02T08:00:00.000Z',
+    updatedAt: '2026-09-02T08:00:05.000Z',
+  });
+  assert.equal(polled.startedAt, '2026-09-02T08:00:00.000Z');
+  assert.equal(polled.updatedAt, '2026-09-02T08:00:05.000Z');
+
+  const completed = finishAiExecutionActivity(started.id, {
+    outcome: 'success',
+    updatedAt: '2026-09-02T08:04:00.000Z',
+    completedAt: '2026-09-02T08:03:59.000Z',
+  });
+  assert.equal(completed.updatedAt, '2026-09-02T08:04:00.000Z');
+  assert.equal(completed.completedAt, '2026-09-02T08:03:59.000Z');
+});
+
 test('expanded AI activity summarizes successful and failed attempts by model', () => {
   const models = summarizeAiExecutionModelAttempts({
     requestedModel: 'gemini-pro-test',

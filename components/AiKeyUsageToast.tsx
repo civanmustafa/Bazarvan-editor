@@ -164,7 +164,11 @@ const formatDuration = (startedAt: string, completedAt: string | undefined, now:
   const seconds = Math.max(0, Math.round((ended - started) / 1_000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${seconds % 60}s`;
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
 };
 
 const formatLastUpdateAge = (updatedAt: string, now: number, isArabic: boolean): string => {
@@ -173,7 +177,11 @@ const formatLastUpdateAge = (updatedAt: string, now: number, isArabic: boolean):
   if (seconds < 5) return isArabic ? 'الآن' : 'now';
   if (seconds < 60) return isArabic ? `منذ ${seconds} ث` : `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
-  return isArabic ? `منذ ${minutes} د` : `${minutes}m ago`;
+  if (minutes < 60) return isArabic ? `منذ ${minutes} د` : `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return isArabic ? `منذ ${hours} س` : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return isArabic ? `منذ ${days} ي` : `${days}d ago`;
 };
 
 const StatusIcon: React.FC<{ state: AiExecutionState }> = ({ state }) => {
@@ -443,7 +451,7 @@ export const DashboardAiExecutionMonitor: React.FC = () => {
             : 'bg-gray-100 text-gray-500 dark:bg-[#222] dark:text-gray-400'
         }`}>
           {runningActivities.length > 0
-            ? (isArabic ? `${runningActivities.length} جارية` : `${runningActivities.length} running`)
+            ? (isArabic ? `${runningActivities.length} نشطة` : `${runningActivities.length} active`)
             : (isArabic ? 'لا توجد مهام' : 'Idle')}
         </span>
       </header>
@@ -472,6 +480,7 @@ export const DashboardAiExecutionMonitor: React.FC = () => {
               <div
                 key={activity.id}
                 data-ai-execution-article-id={activity.articleId || undefined}
+                data-ai-execution-stale={isStale || undefined}
                 className="rounded-lg border border-blue-100 bg-blue-50/70 p-2.5 text-[11px] text-gray-600 dark:border-blue-900/50 dark:bg-blue-900/15 dark:text-gray-300"
               >
                 <div className="flex min-w-0 items-center gap-1.5">
@@ -509,6 +518,17 @@ export const DashboardAiExecutionMonitor: React.FC = () => {
                     {formatLastUpdateAge(activity.updatedAt, now, isArabic)}
                   </span>
                 </div>
+                {isStale && (
+                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold leading-5 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                    {activity.stage === 'queued'
+                      ? (isArabic
+                          ? 'بقيت المهمة في الصف بلا تحديث من الخادم؛ تحقّق من عامل التنفيذ.'
+                          : 'The task has remained queued without a server update; check its worker.')
+                      : (isArabic
+                          ? 'لم تصل تحديثات حديثة من الخادم؛ قد يكون التنفيذ متوقفًا.'
+                          : 'No recent server updates were received; execution may be stalled.')}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -518,8 +538,8 @@ export const DashboardAiExecutionMonitor: React.FC = () => {
       {runningActivities.length > 0 && (
         <div className="mt-2 text-[10px] font-bold text-gray-400 dark:text-gray-500">
           {isArabic
-            ? `${runningArticleCount} ${runningArticleCount === 1 ? 'مقالة' : 'مقالات'} قيد المعالجة`
-            : `${runningArticleCount} ${runningArticleCount === 1 ? 'article' : 'articles'} in progress`}
+            ? `${runningArticleCount} ${runningArticleCount === 1 ? 'مقالة' : 'مقالات'} ضمن المهام النشطة`
+            : `${runningArticleCount} ${runningArticleCount === 1 ? 'article' : 'articles'} with active tasks`}
         </div>
       )}
     </section>

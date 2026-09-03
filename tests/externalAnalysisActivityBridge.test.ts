@@ -106,6 +106,8 @@ test('running external competitor analysis projects into the unified live activi
   assert.equal(projection.currentKeyIndex, 1);
   assert.equal(projection.keyCount, 13);
   assert.equal(projection.keySuffix, 'YbAY');
+  assert.equal(projection.startedAt, '2026-07-27T08:00:00.000Z');
+  assert.equal(projection.updatedAt, '2026-07-27T08:01:00.000Z');
   assert.match(projection.message, /المنافس 3/);
 });
 
@@ -132,6 +134,8 @@ test('projected external progress populates the same activity store used by the 
   assert.equal(stored.keySuffix, 'YbAY');
   assert.equal(stored.currentKeyIndex, 1);
   assert.equal(stored.keyCount, 13);
+  assert.equal(stored.startedAt, '2026-07-27T08:00:00.000Z');
+  assert.equal(stored.updatedAt, '2026-07-27T08:01:00.000Z');
   resetAiExecutionActivitiesForTests();
 });
 
@@ -149,6 +153,7 @@ test('terminal external jobs close the same unified activity with the correct ou
 
   assert.equal(completed.state, 'success');
   assert.equal(completed.outcome, 'success');
+  assert.equal(completed.completedAt, '2026-07-27T08:03:00.000Z');
   assert.equal(failed.state, 'failed');
   assert.equal(failed.outcome, 'failed');
   assert.equal(failed.message, 'تعذر تنفيذ المهمة.');
