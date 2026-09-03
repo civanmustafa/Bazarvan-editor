@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { PGlite } from '@electric-sql/pglite';
 
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
@@ -192,6 +193,132 @@ test('unified semantic targets are reconciled for ready articles without opening
   assert.match(migration, /article UPDATE/);
   assert.match(migration, /editor's first save after opening it/);
   assert.match(migration, /commit;\s*$/);
+});
+
+test('schedulable external-analysis jobs cannot retain terminal dead-letter state', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260906000000_external_analysis_requeue_invariant.sql',
+  );
+
+  const normalizer = sliceFunction(
+    migration,
+    'normalize_external_analysis_requeue_state',
+    'drop trigger if exists normalize_external_analysis_requeue_state',
+  );
+  assert.match(normalizer, /new\.status in \([\s\S]*'waiting_for_prerequisites'[\s\S]*'queued'[\s\S]*'retry_scheduled'/);
+  assert.match(normalizer, /new\.dead_lettered_at := null/);
+  assert.match(normalizer, /new\.dead_letter_reason := null/);
+  assert.match(normalizer, /old\.status in \('completed', 'failed', 'blocked', 'cancelled'\)/);
+  assert.match(normalizer, /new\.max_attempts := greatest\(new\.max_attempts, new\.attempt_count \+ 1\)/);
+
+  assert.match(migration, /before insert or update\s+on public\.ai_external_analysis_jobs/);
+  assert.match(migration, /where job\.status in \([\s\S]*and job\.dead_lettered_at is not null/);
+  assert.match(migration, /live_descendant_waiting_on_exhausted_dependency/);
+  assert.match(migration, /dependency\.last_error_code\)[\s\S]*external_analysis_attempt_budget_exhausted/);
+  assert.match(migration, /child\.depends_on_job_id = dependency\.id/);
+  assert.match(migration, /ai_external_analysis_jobs_schedulable_not_dead/);
+  assert.match(migration, /validate constraint ai_external_analysis_jobs_schedulable_not_dead/);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
+  assert.match(migration.trim(), /commit;$/);
+});
+
+test('requeue migration repairs live jobs and exhausted dependencies without reviving cancellation requests', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon; create role authenticated; create role service_role;
+      create table public.ai_external_analysis_jobs (
+        id uuid primary key,
+        article_id uuid not null,
+        job_type text not null,
+        command_id text,
+        origin text not null,
+        pipeline_parent_job_id uuid,
+        depends_on_job_id uuid references public.ai_external_analysis_jobs(id),
+        status text not null,
+        result jsonb,
+        progress jsonb not null default '{}'::jsonb,
+        last_error text,
+        last_error_code text,
+        attempt_count integer not null default 0,
+        max_attempts integer not null default 1,
+        next_attempt_at timestamptz,
+        locked_by text,
+        locked_at timestamptz,
+        lease_expires_at timestamptz,
+        cancel_requested_at timestamptz,
+        completed_at timestamptz,
+        dead_lettered_at timestamptz,
+        dead_letter_reason text,
+        updated_at timestamptz not null default now()
+      );
+      create function public.article_automatic_job_allowed(uuid, text, text)
+      returns boolean language sql immutable as 'select true';
+
+      insert into public.ai_external_analysis_jobs (
+        id, article_id, job_type, origin, status, attempt_count, max_attempts,
+        next_attempt_at, completed_at, dead_lettered_at, dead_letter_reason
+      ) values
+        ('00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010',
+          'semantic_keywords_lsi', 'manual', 'queued', 1, 1, now(), now(), now(),
+          'external_analysis_attempt_budget_exhausted'),
+        ('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000020',
+          'engineering_command', 'auto', 'blocked', 1, 1, null, now(), now(),
+          'external_analysis_attempt_budget_exhausted'),
+        ('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000030',
+          'semantic_keywords_lsi', 'manual', 'queued', 1, 1, now(), now(), now(),
+          'external_analysis_attempt_budget_exhausted');
+      update public.ai_external_analysis_jobs
+      set cancel_requested_at = now()
+      where id = '00000000-0000-4000-8000-000000000004';
+      insert into public.ai_external_analysis_jobs (
+        id, article_id, job_type, origin, status, depends_on_job_id
+      ) values (
+        '00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000020',
+        'engineering_command', 'auto', 'waiting_for_prerequisites',
+        '00000000-0000-4000-8000-000000000002'
+      );
+    `);
+
+    await db.exec(await readWorkspaceFile(
+      'supabase/migrations/20260906000000_external_analysis_requeue_invariant.sql',
+    ));
+
+    const rows = await db.query<{
+      id: string;
+      status: string;
+      attempt_count: number;
+      max_attempts: number;
+      dead_lettered_at: string | null;
+      cancel_requested_at: string | null;
+    }>('select id, status, attempt_count, max_attempts, dead_lettered_at, cancel_requested_at from public.ai_external_analysis_jobs order by id');
+    const byId = new Map(rows.rows.map(row => [row.id, row]));
+    assert.equal(byId.get('00000000-0000-4000-8000-000000000001')?.dead_lettered_at, null);
+    assert.equal(byId.get('00000000-0000-4000-8000-000000000001')?.max_attempts, 2);
+    assert.equal(byId.get('00000000-0000-4000-8000-000000000002')?.status, 'queued');
+    assert.equal(byId.get('00000000-0000-4000-8000-000000000002')?.dead_lettered_at, null);
+    assert.equal(byId.get('00000000-0000-4000-8000-000000000002')?.max_attempts, 2);
+    assert.ok(byId.get('00000000-0000-4000-8000-000000000004')?.cancel_requested_at);
+    assert.equal(byId.get('00000000-0000-4000-8000-000000000004')?.max_attempts, 1);
+
+    await db.exec(`
+      update public.ai_external_analysis_jobs
+      set status = 'blocked', dead_lettered_at = now(),
+        dead_letter_reason = 'external_analysis_attempt_budget_exhausted', max_attempts = 1
+      where id = '00000000-0000-4000-8000-000000000001';
+      update public.ai_external_analysis_jobs set status = 'queued'
+      where id = '00000000-0000-4000-8000-000000000001';
+    `);
+    const normalized = (await db.query<{
+      status: string; max_attempts: number; dead_lettered_at: string | null;
+    }>(`select status, max_attempts, dead_lettered_at from public.ai_external_analysis_jobs
+      where id = '00000000-0000-4000-8000-000000000001'`)).rows[0];
+    assert.equal(normalized.status, 'queued');
+    assert.equal(normalized.dead_lettered_at, null);
+    assert.equal(normalized.max_attempts, 2);
+  } finally {
+    await db.close();
+  }
 });
 
 test('only a started prior attempt blocks the same automatic command, regardless of outcome or origin', () => {
