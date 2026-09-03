@@ -31,6 +31,7 @@ import {
   COMPETITOR_COMPARISON_WORKFLOW_VERSION,
   createCompetitorComparisonBatches,
   getCompetitorComparisonExpectedItemIds,
+  getCompetitorComparisonExpectedItems,
   parseCompetitorComparisonMapResponse,
   validateCompetitorComparisonSynthesisResponse,
   type CompetitorComparisonMapResult,
@@ -425,9 +426,10 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
   }
 
   const expectedItemIds = getCompetitorComparisonExpectedItemIds(mapResults);
+  const expectedItems = getCompetitorComparisonExpectedItems(mapResults);
   let validation = validateCompetitorComparisonSynthesisResponse({
     responseText: finalCall.text,
-    expectedItemIds,
+    expectedItems,
   });
   let parsed = parseExternalEngineeringResult(
     finalCall.text,
@@ -469,7 +471,7 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
     }
     validation = validateCompetitorComparisonSynthesisResponse({
       responseText: finalCall.text,
-      expectedItemIds,
+      expectedItems,
     });
     parsed = parseExternalEngineeringResult(
       finalCall.text,
@@ -516,6 +518,7 @@ export const executeExternalCompetitorComparisonWorkflow = async (options: {
       mapRequestCount,
       synthesisRequestCount: requestIndex - mapRequestCount,
       itemDispositions: validation.dispositions,
+      clusters: validation.clusters,
     },
   };
 };

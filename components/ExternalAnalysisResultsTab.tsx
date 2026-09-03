@@ -106,6 +106,9 @@ type VisibleCompetitorComparisonItem = {
   importance: string;
   articleEvidence: string;
   competitorEvidence: Array<{ chunkId: string; excerpt: string }>;
+  disposition: string;
+  clusterId: string;
+  dispositionReason: string;
 };
 
 type VisibleCompetitorComparisonResult = {
@@ -130,6 +133,19 @@ const COMPARISON_CATEGORY_LABELS: Record<string, { ar: string; en: string }> = {
 const toVisibleCompetitorComparisonResults = (
   job: ExternalAnalysisJobRow,
 ): VisibleCompetitorComparisonResult[] => {
+  const workflow = isRecord(job.result?.competitorWorkflow) ? job.result.competitorWorkflow : {};
+  const dispositions = new Map(
+    (Array.isArray(workflow.itemDispositions) ? workflow.itemDispositions : [])
+      .flatMap(value => {
+        if (!isRecord(value)) return [];
+        const itemId = toTrimmedString(value.itemId);
+        return itemId ? [[itemId, {
+          disposition: toTrimmedString(value.disposition),
+          clusterId: toTrimmedString(value.clusterId),
+          reason: toTrimmedString(value.reason),
+        }] as const] : [];
+      }),
+  );
   const source = Array.isArray(job.result?.independentCompetitorResults)
     ? job.result.independentCompetitorResults
     : Array.isArray(job.progress.independentCompetitorResults)
@@ -152,14 +168,19 @@ const toVisibleCompetitorComparisonResults = (
                   : []
               ))
             : [];
+          const id = toTrimmedString(item.id) || `competitor_${competitorNumber}_item`;
+          const disposition = dispositions.get(id);
           return [{
-            id: toTrimmedString(item.id) || `competitor_${competitorNumber}_item`,
+            id,
             category: toTrimmedString(item.category),
             topic: toTrimmedString(item.topic),
             summary: toTrimmedString(item.summary),
             importance: toTrimmedString(item.importance),
             articleEvidence: toTrimmedString(item.articleEvidence),
             competitorEvidence,
+            disposition: disposition?.disposition || '',
+            clusterId: disposition?.clusterId || '',
+            dispositionReason: disposition?.reason || '',
           }];
         })
       : [];
@@ -171,6 +192,10 @@ const toVisibleCompetitorComparisonResults = (
     }];
   }).sort((left, right) => left.competitorNumber - right.competitorNumber);
 };
+
+const toPatchDomId = (patchId: string): string => (
+  `external-analysis-patch-${patchId.replace(/[^a-zA-Z0-9_-]+/g, '-')}`
+);
 
 const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   articleId,
@@ -472,7 +497,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
       : patch.contentMarkdown;
 
     return (
-      <div key={patch.id} className="my-3 rounded-md border border-[#d4af37]/25 bg-white/80 p-2 dark:border-[#d4af37]/30 dark:bg-[#1F1F1F]/80">
+      <div id={toPatchDomId(patch.id)} key={patch.id} className="my-3 scroll-mt-4 rounded-md border border-[#d4af37]/25 bg-white/80 p-2 dark:border-[#d4af37]/30 dark:bg-[#1F1F1F]/80">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-xs font-black text-gray-800 dark:text-gray-100">{actionLabel} - {cleanTitle}</div>
@@ -578,6 +603,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
 
   const renderIndependentCompetitorResults = (
     results: VisibleCompetitorComparisonResult[],
+    patches: AiContentPatch[],
   ) => {
     if (results.length === 0) return null;
     return (
@@ -606,7 +632,14 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
             </div>
             {result.items.length > 0 ? (
               <div className="mt-2 space-y-1.5">
-                {result.items.map((item, index) => (
+                {result.items.map((item, index) => {
+                  const linkedPatch = patches.find(patch => (
+                    patch.sourceItemIds?.includes(item.id)
+                    || Boolean(item.clusterId && patch.clusterId === item.clusterId)
+                  ));
+                  const isExcluded = item.disposition === 'excluded';
+                  const expectsPatch = item.disposition === 'retained' || item.disposition === 'merged';
+                  return (
                   <article key={`${result.competitorNumber}-${item.id}-${index}`} className="rounded border border-gray-200 bg-white p-2 dark:border-[#3C3C3C] dark:bg-[#242424]">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-[10px] font-black text-gray-800 dark:text-gray-100">{item.topic}</span>
@@ -618,6 +651,22 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                           {locale === 'ar' ? 'الأهمية' : 'Importance'}: {item.importance}
                         </span>
                       )}
+                      {linkedPatch ? (
+                        <a
+                          href={`#${toPatchDomId(linkedPatch.id)}`}
+                          className="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] font-black text-emerald-700 hover:underline dark:bg-emerald-500/15 dark:text-emerald-300"
+                        >
+                          {locale === 'ar' ? 'مغطاة ببطاقة جاهزة' : 'Covered by a ready card'}
+                        </a>
+                      ) : isExcluded ? (
+                        <span title={item.dispositionReason} className="rounded bg-gray-100 px-1.5 py-0.5 text-[8px] font-black text-gray-500 dark:bg-[#333] dark:text-gray-300">
+                          {locale === 'ar' ? 'لا تحتاج تعديلًا' : 'No editor change needed'}
+                        </span>
+                      ) : expectsPatch ? (
+                        <span className="rounded bg-red-100 px-1.5 py-0.5 text-[8px] font-black text-red-700 dark:bg-red-500/15 dark:text-red-300">
+                          {locale === 'ar' ? 'بطاقة التنفيذ مفقودة' : 'Missing action card'}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-1 text-[10px] leading-5 text-gray-700 dark:text-gray-200">{item.summary}</div>
                     {item.articleEvidence && (
@@ -633,7 +682,8 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                       </div>
                     ))}
                   </article>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="mt-2 text-[9px] text-gray-500 dark:text-gray-400">
@@ -983,7 +1033,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                       {job.last_error && <div className="mb-2 border-s-2 border-red-500 bg-red-50 px-2 py-1.5 text-[10px] leading-5 text-red-700 dark:bg-red-900/10 dark:text-red-300">{job.last_error}</div>}
                       <div className="mb-2 flex justify-end">{renderJobControls(job)}</div>
                       {specificResult}
-                      {renderIndependentCompetitorResults(independentCompetitorResults)}
+                      {renderIndependentCompetitorResults(independentCompetitorResults, patches)}
                       {competitorWorkflow && (
                         <div className="mb-2 flex flex-wrap gap-1.5 text-[9px] font-bold text-gray-500 dark:text-gray-400">
                           <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">

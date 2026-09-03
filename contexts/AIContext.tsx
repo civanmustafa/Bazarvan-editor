@@ -67,7 +67,7 @@ import {
     buildCompetitorComparisonSynthesisRepairPrompt,
     combineCompetitorComparisonMapResults,
     createCompetitorComparisonBatches,
-    getCompetitorComparisonExpectedItemIds,
+    getCompetitorComparisonExpectedItems,
     isCompetitorComparisonCommand,
     parseCompetitorComparisonMapResponse,
     validateCompetitorComparisonSynthesisResponse,
@@ -3187,6 +3187,10 @@ const normalizeAiPatches = (rawPatches: unknown, provider: AiPatchProvider): AiC
             return {
                 id: `${provider}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
                 provider,
+                clusterId: asTrimmedString(record.clusterId),
+                sourceItemIds: Array.isArray(record.sourceItemIds)
+                    ? Array.from(new Set(record.sourceItemIds.map(asTrimmedString).filter(Boolean)))
+                    : undefined,
                 operation: inferPatchOperation(operation, record, targetText),
                 title: asTrimmedString(record.title) || `تعديل ${index + 1}`,
                 marker: asTrimmedString(record.marker) || `patch_${index + 1}`,
@@ -5834,10 +5838,10 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 action: 'ai_semantic_synthesis',
             },
         );
-        const expectedItemIds = getCompetitorComparisonExpectedItemIds(mapResults);
+        const expectedItems = getCompetitorComparisonExpectedItems(mapResults);
         let validation = validateCompetitorComparisonSynthesisResponse({
             responseText: finalResponse,
-            expectedItemIds,
+            expectedItems,
         });
         if (!validation.ok) {
             finalResponse = await callWorkflowProvider(
@@ -5855,7 +5859,7 @@ export const AIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             );
             validation = validateCompetitorComparisonSynthesisResponse({
                 responseText: finalResponse,
-                expectedItemIds,
+                expectedItems,
             });
         }
         if (!validation.ok) {

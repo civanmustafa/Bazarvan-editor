@@ -7,6 +7,7 @@ import {
   createCompetitorComparisonBatches,
   createCompetitorComparisonChunks,
   getCompetitorComparisonExpectedItemIds,
+  getCompetitorComparisonExpectedItems,
   parseCompetitorComparisonMapResponse,
   validateCompetitorComparisonSynthesisResponse,
   type CompetitorComparisonSource,
@@ -116,15 +117,20 @@ test('AI synthesis is accepted only when every independent item is dispositioned
   assert.ok(first);
   const combined = combineCompetitorComparisonMapResults(1, [first!]);
   const expectedItemIds = getCompetitorComparisonExpectedItemIds([combined]);
+  const expectedItems = getCompetitorComparisonExpectedItems([combined]);
   const valid = validateCompetitorComparisonSynthesisResponse({
-    expectedItemIds,
+    expectedItems,
     responseText: JSON.stringify({
       analysisMarkdown: '',
       patches: [{
         marker: 'patch_1',
         operation: 'append_to_article',
         title: 'Ready editor change',
+        placementLabel: 'At the end of the article',
         contentMarkdown: 'Directly applicable content.',
+        reason: 'Covers competitor_1_chunk_1.',
+        clusterId: 'cluster_1',
+        sourceItemIds: expectedItemIds,
       }],
       itemDispositions: expectedItemIds.map(itemId => ({
         itemId,
@@ -132,13 +138,20 @@ test('AI synthesis is accepted only when every independent item is dispositioned
         clusterId: 'cluster_1',
         reason: 'Important unique result.',
       })),
-      clusters: [],
+      clusters: [{
+        clusterId: 'cluster_1',
+        title: 'Coverage depth',
+        category: 'partial_idea',
+        itemIds: expectedItemIds,
+        competitors: [1],
+        decision: 'Expand the article coverage.',
+      }],
     }),
   });
   assert.equal(valid.ok, true);
 
   const narrativeOnly = validateCompetitorComparisonSynthesisResponse({
-    expectedItemIds,
+    expectedItems,
     responseText: JSON.stringify({
       analysisMarkdown: 'Generic narrative report.',
       patches: [],
@@ -148,22 +161,109 @@ test('AI synthesis is accepted only when every independent item is dispositioned
         clusterId: 'cluster_1',
         reason: 'Important unique result.',
       })),
+      clusters: [{
+        clusterId: 'cluster_1',
+        title: 'Coverage depth',
+        category: 'partial_idea',
+        itemIds: expectedItemIds,
+        competitors: [1],
+        decision: 'Expand the article coverage.',
+      }],
     }),
   });
   assert.equal(narrativeOnly.ok, false);
   assert.match(narrativeOnly.errors.join(','), /analysis_markdown_must_be_empty/);
-  assert.match(narrativeOnly.errors.join(','), /missing_patch_cards/);
+  assert.match(narrativeOnly.errors.join(','), /missing_patch_for_cluster/);
 
   const missing = validateCompetitorComparisonSynthesisResponse({
-    expectedItemIds,
+    expectedItems,
     responseText: JSON.stringify({
       analysisMarkdown: 'Incomplete report.',
       patches: [],
       itemDispositions: [],
+      clusters: [],
     }),
   });
   assert.equal(missing.ok, false);
   assert.deepEqual(missing.missingItemIds, expectedItemIds);
+});
+
+test('synthesis rejects excluded actionable ideas and incomplete or unlinked patch cards', () => {
+  const batch = createCompetitorComparisonBatches(source())[0];
+  const result = parseCompetitorComparisonMapResponse({
+    batch,
+    responseText: JSON.stringify({
+      competitorId: 'competitor_1',
+      processedChunkIds: batch.chunks.map(chunk => chunk.id),
+      items: [{
+        category: 'missing_idea',
+        topic: 'Missing buying criterion',
+        summary: 'A useful buying criterion is absent.',
+        articleStatus: 'missing',
+        importance: 'high',
+        entities: [],
+        articleEvidence: '',
+        competitorEvidence: [{
+          chunkId: batch.chunks[0].id,
+          excerpt: 'BEGINNING unique idea and evidence.',
+        }],
+        confidence: 0.9,
+      }],
+    }),
+  }).result!;
+  const expectedItems = getCompetitorComparisonExpectedItems([result]);
+  const itemId = expectedItems[0].id;
+
+  const excluded = validateCompetitorComparisonSynthesisResponse({
+    expectedItems,
+    responseText: JSON.stringify({
+      analysisMarkdown: '',
+      patches: [],
+      itemDispositions: [{
+        itemId,
+        disposition: 'excluded',
+        clusterId: '',
+        reason: 'Reducing the number of cards.',
+      }],
+      clusters: [],
+    }),
+  });
+  assert.equal(excluded.ok, false);
+  assert.match(excluded.errors.join(','), /actionable_item_excluded/);
+
+  const incomplete = validateCompetitorComparisonSynthesisResponse({
+    expectedItems,
+    responseText: JSON.stringify({
+      analysisMarkdown: '',
+      patches: [{
+        marker: 'patch_1',
+        operation: 'append_to_article',
+        title: 'Ready change',
+        contentMarkdown: '## First section\nText.\n\n## Second section\nText.',
+        clusterId: 'cluster_1',
+        sourceItemIds: [],
+      }],
+      itemDispositions: [{
+        itemId,
+        disposition: 'retained',
+        clusterId: 'cluster_1',
+        reason: 'Unique result.',
+      }],
+      clusters: [{
+        clusterId: 'cluster_1',
+        title: 'Missing buying criterion',
+        category: 'missing_idea',
+        itemIds: [itemId],
+        competitors: [1],
+        decision: 'Add it.',
+      }],
+    }),
+  });
+  assert.equal(incomplete.ok, false);
+  assert.match(incomplete.errors.join(','), /missing_placement_label/);
+  assert.match(incomplete.errors.join(','), /missing_reason/);
+  assert.match(incomplete.errors.join(','), /source_items_mismatch/);
+  assert.match(incomplete.errors.join(','), /multiple_h2_sections/);
 });
 
 test('overlapping commands are retired from new execution but keep historical labels', async () => {
@@ -226,6 +326,7 @@ test('only the comprehensive competitor command remains active and covers retire
     'صيغة النتيجة النهائية المباشرة',
     'analysisMarkdown سلسلة فارغة',
     'بطاقة patch مستقلة',
+    'sourceItemIds',
   ].forEach(requiredScope => assert.match(prompt, new RegExp(requiredScope)));
 });
 
@@ -257,6 +358,9 @@ test('server workflow persists per-competitor maps without modifying content-wri
   assert.match(resumeMigration, /status = 'queued'/);
   assert.match(resumeMigration, /source', 'manual_resume'/);
   assert.match(resultsTab, /نتيجة كل مقارنة مستقلة/);
+  assert.match(resultsTab, /مغطاة ببطاقة جاهزة/);
+  assert.match(resultsTab, /بطاقة التنفيذ مفقودة/);
+  assert.match(resultsTab, /sourceItemIds/);
   assert.match(resultsTab, /استئناف الآن/);
   assert.match(resultsTab, /COMPETITOR_COMPARISON_COMMAND_ID/);
   assert.match(aiContext, /runCompetitorComparisonReadyCommand/);

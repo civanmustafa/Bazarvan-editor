@@ -305,6 +305,10 @@ export interface AiContentPatch {
   id: string;
   provider: AiPatchProvider;
   commandId?: string;
+  /** Links a comprehensive competitor-analysis card to its semantic idea cluster. */
+  clusterId?: string;
+  /** Independent competitor result IDs that this card turns into an editor-ready change. */
+  sourceItemIds?: string[];
   operation: AiContentPatchOperation;
   title: string;
   marker?: string;

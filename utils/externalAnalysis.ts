@@ -841,6 +841,10 @@ export const toExternalAiPatches = (
       id: `${job.id}:${marker}`,
       provider: 'gemini',
       commandId: toTrimmedString(value.commandId) || job.command_id || undefined,
+      clusterId: toTrimmedString(value.clusterId) || undefined,
+      sourceItemIds: Array.isArray(value.sourceItemIds)
+        ? Array.from(new Set(value.sourceItemIds.map(toTrimmedString).filter(Boolean)))
+        : undefined,
       operation,
       title: toTrimmedString(value.title) || `Suggestion ${index + 1}`,
       marker,

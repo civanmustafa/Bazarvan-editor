@@ -29,6 +29,39 @@ const ARTICLE_STATUSES = new Set([
 
 const IMPORTANCE_LEVELS = new Set(['high', 'medium', 'low']);
 const SYNTHESIS_DISPOSITIONS = new Set(['merged', 'retained', 'excluded']);
+const ACTIONABLE_CATEGORIES = new Set<CompetitorComparisonCategory>([
+  'missing_idea',
+  'partial_idea',
+  'structure_opportunity',
+  'trust_gap',
+  'conversion_opportunity',
+]);
+const NON_ACTIONABLE_CATEGORIES = new Set<CompetitorComparisonCategory>([
+  'article_advantage',
+  'duplicate',
+  'irrelevant',
+]);
+const PATCH_OPERATIONS = new Set([
+  'replace_block',
+  'replace_text',
+  'delete_block',
+  'insert_after_heading',
+  'insert_before_heading',
+  'append_to_section',
+  'insert_before_faq',
+  'insert_before_conclusion',
+  'append_to_article',
+]);
+const PATCH_OPERATIONS_REQUIRING_TARGET = new Set([
+  'replace_block',
+  'replace_text',
+  'delete_block',
+]);
+const PATCH_OPERATIONS_REQUIRING_ANCHOR = new Set([
+  'insert_after_heading',
+  'insert_before_heading',
+  'append_to_section',
+]);
 
 export type CompetitorComparisonCategory =
   | 'missing_idea'
@@ -109,6 +142,15 @@ export type CompetitorComparisonDisposition = {
   reason: string;
 };
 
+export type CompetitorComparisonSynthesisCluster = {
+  clusterId: string;
+  title: string;
+  category: string;
+  itemIds: string[];
+  competitors: number[];
+  decision: string;
+};
+
 export type CompetitorComparisonSynthesisValidation = {
   ok: boolean;
   errors: string[];
@@ -116,6 +158,7 @@ export type CompetitorComparisonSynthesisValidation = {
   unknownItemIds: string[];
   duplicateItemIds: string[];
   dispositions: CompetitorComparisonDisposition[];
+  clusters: CompetitorComparisonSynthesisCluster[];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -481,13 +524,19 @@ export const buildCompetitorComparisonSynthesisPrompt = (options: {
     '- يجب أن يظهر كل itemId مدخل مرة واحدة فقط داخل itemDispositions.',
     '- القيم المسموحة لـ disposition هي merged أو retained أو excluded.',
     '- عند excluded اكتب سببًا محددًا، ومن أسبابه الصحيحة أن النتيجة لا تحتاج تعديلًا أو لا يتوفر لها نص نهائي آمن. لا تستبعد عنصرًا لمجرد تقليل عدد البطاقات.',
+    '- لا يجوز استبعاد missing_idea أو partial_idea أو structure_opportunity أو trust_gap أو conversion_opportunity؛ حوّل كل فكرة فريدة منها إلى بطاقة جاهزة. يجوز استبعاد conflicting_claim فقط عندما لا توجد صياغة نهائية آمنة دون تحقق خارجي.',
+    '- يجب استبعاد article_advantage وduplicate وirrelevant لأنها معلومات تفسيرية وليست تعديلات مطلوبة في المحرر.',
     '- عند merged أو retained ضع clusterId غير فارغ يربطه ببطاقة التعديل النهائية.',
-    '- أنشئ بطاقة patch مستقلة واحدة على الأقل لكل clusterId غير مستبعد، واجعل reason يذكر أرقام المنافسين ومعرفات الأدلة وسبب التعديل المباشر.',
+    '- لا تدمج فكرتين مستقلتين داخل cluster واحد. الدمج مسموح فقط عندما تصف العناصر الفكرة نفسها دلاليًا.',
+    '- أنشئ بطاقة patch مستقلة واحدة على الأقل لكل clusterId غير مستبعد. ضع clusterId نفسه وsourceItemIds الكاملة داخل البطاقة، واجعل reason يذكر أرقام المنافسين ومعرفات الأدلة وسبب التعديل المباشر.',
+    '- كل بطاقة مكتملة إلزاميًا: marker وoperation وtitle وplacementLabel وcontentMarkdown وreason وclusterId وsourceItemIds. أضف targetText الحرفي لعمليات الاستبدال أو الحذف، وأضف anchorText الحرفي لعمليات الإضافة المرتبطة بعنوان أو قسم.',
+    '- لا تضع أكثر من عنوان H2 مستقل واحد داخل contentMarkdown للبطاقة؛ إذا احتاجت النتيجة قسمين مستقلين فقسّمها إلى بطاقتين وclusterين.',
     '- اجعل analysisMarkdown سلسلة فارغة حرفيًا. كل ما يراه المستخدم ويطبقه يجب أن يكون داخل patches فقط.',
     '',
     'أضف إلى كائن JSON النهائي الحقلين التاليين مع إبقاء analysisMarkdown فارغًا ووضع النتيجة القابلة للتطبيق في patches:',
     '"itemDispositions":[{"itemId":"competitor_1_item_1","disposition":"merged","clusterId":"cluster_1","reason":"..."}]',
     '"clusters":[{"clusterId":"cluster_1","title":"...","category":"missing_idea","itemIds":["competitor_1_item_1"],"competitors":[1],"decision":"..."}]',
+    'ويجب أن تضيف داخل كل عنصر patches: "clusterId":"cluster_1","sourceItemIds":["competitor_1_item_1"].',
     '',
     `معرفات العناصر المطلوب تغطيتها حرفيًا (${itemIds.length}): ${JSON.stringify(itemIds)}`,
     '',
@@ -502,21 +551,24 @@ export const buildCompetitorComparisonSynthesisPrompt = (options: {
 
 export const validateCompetitorComparisonSynthesisResponse = (options: {
   responseText: string;
-  expectedItemIds: string[];
+  expectedItems: CompetitorComparisonMapItem[];
 }): CompetitorComparisonSynthesisValidation => {
+  const expectedItemIds = options.expectedItems.map(item => item.id);
   const parsed = parseJsonRecord(options.responseText);
   if (!parsed) {
     return {
       ok: false,
       errors: ['response_is_not_json_object'],
-      missingItemIds: options.expectedItemIds,
+      missingItemIds: expectedItemIds,
       unknownItemIds: [],
       duplicateItemIds: [],
       dispositions: [],
+      clusters: [],
     };
   }
 
-  const expectedSet = new Set(options.expectedItemIds);
+  const expectedSet = new Set(expectedItemIds);
+  const expectedItemById = new Map(options.expectedItems.map(item => [item.id, item]));
   const sourceDispositions = Array.isArray(parsed.itemDispositions) ? parsed.itemDispositions : [];
   const errors: string[] = [];
   if (!Array.isArray(parsed.itemDispositions)) errors.push('itemDispositions_is_not_array');
@@ -543,11 +595,21 @@ export const validateCompetitorComparisonSynthesisResponse = (options: {
     if (disposition !== 'excluded' && !clusterId) {
       errors.push(`disposition_${index + 1}_missing_cluster`);
     }
+    if (disposition === 'excluded' && clusterId) {
+      errors.push(`disposition_${index + 1}_excluded_has_cluster`);
+    }
     if (!reason) errors.push(`disposition_${index + 1}_missing_reason`);
+    const expectedItem = expectedItemById.get(itemId);
+    if (expectedItem && ACTIONABLE_CATEGORIES.has(expectedItem.category) && disposition === 'excluded') {
+      errors.push(`actionable_item_excluded:${itemId}`);
+    }
+    if (expectedItem && NON_ACTIONABLE_CATEGORIES.has(expectedItem.category) && disposition !== 'excluded') {
+      errors.push(`non_actionable_item_not_excluded:${itemId}`);
+    }
     dispositions.push({ itemId, disposition, clusterId, reason });
   });
 
-  const missingItemIds = options.expectedItemIds.filter(itemId => !seen.has(itemId));
+  const missingItemIds = expectedItemIds.filter(itemId => !seen.has(itemId));
   if (missingItemIds.length > 0) errors.push(`missing_items:${missingItemIds.join(',')}`);
   if (unknownItemIds.length > 0) errors.push(`unknown_items:${unknownItemIds.join(',')}`);
   if (duplicateItemIds.length > 0) errors.push(`duplicate_items:${duplicateItemIds.join(',')}`);
@@ -555,6 +617,35 @@ export const validateCompetitorComparisonSynthesisResponse = (options: {
   if (toTrimmedString(parsed.analysisMarkdown || parsed.analysis || parsed.report)) {
     errors.push('analysis_markdown_must_be_empty');
   }
+  const sourceClusters = Array.isArray(parsed.clusters) ? parsed.clusters : [];
+  if (!Array.isArray(parsed.clusters)) errors.push('clusters_is_not_array');
+  const clusterIdsSeen = new Set<string>();
+  const clusters = sourceClusters.flatMap((value, index) => {
+    if (!isRecord(value)) {
+      errors.push(`cluster_${index + 1}_is_not_object`);
+      return [];
+    }
+    const clusterId = toTrimmedString(value.clusterId, 200);
+    const itemIds = toStringList(value.itemIds, expectedItemIds.length + 10);
+    if (!clusterId) errors.push(`cluster_${index + 1}_missing_id`);
+    if (clusterIdsSeen.has(clusterId)) errors.push(`duplicate_cluster:${clusterId}`);
+    clusterIdsSeen.add(clusterId);
+    itemIds.filter(itemId => !expectedSet.has(itemId)).forEach(itemId => {
+      errors.push(`cluster_${clusterId || index + 1}_unknown_item:${itemId}`);
+    });
+    return [{
+      clusterId,
+      title: toTrimmedString(value.title, 300),
+      category: toTrimmedString(value.category, 100),
+      itemIds,
+      competitors: Array.isArray(value.competitors)
+        ? Array.from(new Set(value.competitors.map(Number).filter(Number.isFinite)))
+        : [],
+      decision: toTrimmedString(value.decision, 1_000),
+    }];
+  });
+  const clusterById = new Map(clusters.map(cluster => [cluster.clusterId, cluster]));
+
   const patches = Array.isArray(parsed.patches) ? parsed.patches : [];
   if (!Array.isArray(parsed.patches)) errors.push('patches_is_not_array');
   const actionableClusterIds = new Set(
@@ -562,9 +653,82 @@ export const validateCompetitorComparisonSynthesisResponse = (options: {
       .filter(item => item.disposition !== 'excluded' && item.clusterId)
       .map(item => item.clusterId),
   );
-  if (patches.length < actionableClusterIds.size) {
-    errors.push(`missing_patch_cards:${actionableClusterIds.size - patches.length}`);
-  }
+  const dispositionItemsByCluster = new Map<string, string[]>();
+  dispositions.forEach(disposition => {
+    if (disposition.disposition === 'excluded' || !disposition.clusterId) return;
+    dispositionItemsByCluster.set(disposition.clusterId, [
+      ...(dispositionItemsByCluster.get(disposition.clusterId) || []),
+      disposition.itemId,
+    ]);
+  });
+  actionableClusterIds.forEach(clusterId => {
+    const cluster = clusterById.get(clusterId);
+    if (!cluster) {
+      errors.push(`missing_cluster_definition:${clusterId}`);
+      return;
+    }
+    const expectedClusterItems = new Set(dispositionItemsByCluster.get(clusterId) || []);
+    const actualClusterItems = new Set(cluster.itemIds);
+    if (
+      expectedClusterItems.size !== actualClusterItems.size
+      || Array.from(expectedClusterItems).some(itemId => !actualClusterItems.has(itemId))
+    ) {
+      errors.push(`cluster_item_mismatch:${clusterId}`);
+    }
+  });
+  clusters.forEach(cluster => {
+    if (cluster.clusterId && !actionableClusterIds.has(cluster.clusterId)) {
+      errors.push(`unused_cluster:${cluster.clusterId}`);
+    }
+  });
+
+  const patchCountByCluster = new Map<string, number>();
+  patches.forEach((value, index) => {
+    if (!isRecord(value)) {
+      errors.push(`patch_${index + 1}_is_not_object`);
+      return;
+    }
+    const patchNumber = index + 1;
+    const clusterId = toTrimmedString(value.clusterId, 200);
+    const operation = toTrimmedString(value.operation);
+    const marker = toTrimmedString(value.marker, 200);
+    const title = toTrimmedString(value.title, 300);
+    const placementLabel = toTrimmedString(value.placementLabel, 500);
+    const contentMarkdown = toTrimmedString(value.contentMarkdown);
+    const reason = toTrimmedString(value.reason, 2_000);
+    const targetText = toTrimmedString(value.targetText);
+    const anchorText = toTrimmedString(value.anchorText);
+    const sourceItemIds = toStringList(value.sourceItemIds, expectedItemIds.length + 10);
+    if (!clusterId) errors.push(`patch_${patchNumber}_missing_cluster_id`);
+    if (clusterId && !actionableClusterIds.has(clusterId)) errors.push(`patch_${patchNumber}_unknown_cluster:${clusterId}`);
+    if (clusterId) patchCountByCluster.set(clusterId, (patchCountByCluster.get(clusterId) || 0) + 1);
+    if (!marker) errors.push(`patch_${patchNumber}_missing_marker`);
+    if (!PATCH_OPERATIONS.has(operation)) errors.push(`patch_${patchNumber}_invalid_operation`);
+    if (!title) errors.push(`patch_${patchNumber}_missing_title`);
+    if (!placementLabel) errors.push(`patch_${patchNumber}_missing_placement_label`);
+    if (!reason) errors.push(`patch_${patchNumber}_missing_reason`);
+    if (operation !== 'delete_block' && !contentMarkdown) errors.push(`patch_${patchNumber}_missing_content`);
+    if (PATCH_OPERATIONS_REQUIRING_TARGET.has(operation) && !targetText) {
+      errors.push(`patch_${patchNumber}_missing_target_text`);
+    }
+    if (PATCH_OPERATIONS_REQUIRING_ANCHOR.has(operation) && !anchorText) {
+      errors.push(`patch_${patchNumber}_missing_anchor_text`);
+    }
+    const expectedClusterItems = new Set(dispositionItemsByCluster.get(clusterId) || []);
+    const actualSourceItems = new Set(sourceItemIds);
+    if (
+      expectedClusterItems.size !== actualSourceItems.size
+      || Array.from(expectedClusterItems).some(itemId => !actualSourceItems.has(itemId))
+    ) {
+      errors.push(`patch_${patchNumber}_source_items_mismatch:${clusterId || 'missing'}`);
+    }
+    const h2Count = (contentMarkdown.match(/^\s*##(?!#)\s+\S/gm) || []).length
+      + (contentMarkdown.match(/<h2(?:\s|>)/gi) || []).length;
+    if (h2Count > 1) errors.push(`patch_${patchNumber}_multiple_h2_sections`);
+  });
+  actionableClusterIds.forEach(clusterId => {
+    if (!patchCountByCluster.has(clusterId)) errors.push(`missing_patch_for_cluster:${clusterId}`);
+  });
 
   return {
     ok: errors.length === 0,
@@ -573,6 +737,7 @@ export const validateCompetitorComparisonSynthesisResponse = (options: {
     unknownItemIds,
     duplicateItemIds,
     dispositions,
+    clusters,
   };
 };
 
@@ -588,7 +753,7 @@ export const buildCompetitorComparisonSynthesisRepairPrompt = (options: {
   `العناصر المفقودة: ${JSON.stringify(options.validation.missingItemIds)}`,
   `العناصر غير المعروفة: ${JSON.stringify(options.validation.unknownItemIds)}`,
   `العناصر المكررة: ${JSON.stringify(options.validation.duplicateItemIds)}`,
-  'أعد إنشاء كائن JSON كامل وصالح، وعالج كل itemId مرة واحدة فقط. اجعل analysisMarkdown فارغًا، وأنشئ بطاقة patch مستقلة لكل clusterId غير مستبعد. لا تضف ادعاءات جديدة.',
+  'أعد إنشاء كائن JSON كامل وصالح، وعالج كل itemId مرة واحدة فقط. اجعل analysisMarkdown فارغًا، وأنشئ بطاقة patch مكتملة ومستقلة لكل clusterId غير مستبعد. اربط كل بطاقة بحقلَي clusterId وsourceItemIds، ولا تجمع أكثر من H2 مستقل في بطاقة واحدة. لا تضف ادعاءات جديدة.',
   '',
   '<previous_invalid_response>',
   options.previousResponse.slice(0, 20_000),
@@ -598,6 +763,10 @@ export const buildCompetitorComparisonSynthesisRepairPrompt = (options: {
 export const getCompetitorComparisonExpectedItemIds = (
   results: CompetitorComparisonMapResult[],
 ): string[] => results.flatMap(result => result.items.map(item => item.id));
+
+export const getCompetitorComparisonExpectedItems = (
+  results: CompetitorComparisonMapResult[],
+): CompetitorComparisonMapItem[] => results.flatMap(result => result.items);
 
 export const isCompetitorComparisonCommand = (commandId: string | undefined | null): boolean => (
   commandId === COMPETITOR_COMPARISON_COMMAND_ID

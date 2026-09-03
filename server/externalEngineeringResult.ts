@@ -27,6 +27,12 @@ const toTrimmedString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
 
+const toTrimmedStringList = (value: unknown): string[] => (
+  Array.isArray(value)
+    ? Array.from(new Set(value.map(toTrimmedString).filter(Boolean)))
+    : []
+);
+
 const parseJsonRecord = (text: string): Record<string, unknown> | null => {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -112,6 +118,8 @@ const normalizePatches = (
     return [{
       marker,
       commandId,
+      clusterId: toTrimmedString(patch.clusterId),
+      sourceItemIds: toTrimmedStringList(patch.sourceItemIds),
       operation,
       title: toTrimmedString(patch.title) || `Suggestion ${index + 1}`,
       anchorText: toTrimmedString(patch.anchorText),
