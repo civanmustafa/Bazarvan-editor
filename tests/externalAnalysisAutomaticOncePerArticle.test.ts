@@ -321,6 +321,79 @@ test('requeue migration repairs live jobs and exhausted dependencies without rev
   }
 });
 
+test('terminal dependency migration cascades failure and cancellation instead of stranding descendants', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260907000000_external_analysis_dependency_terminal.sql',
+  );
+  assert.match(migration, /after update of status\s+on public\.ai_external_analysis_jobs/);
+  assert.match(migration, /child\.depends_on_job_id = new\.id/);
+  assert.match(migration, /external_analysis_dependency_terminal/);
+  assert.match(migration, /external_analysis_dependency_cancelled/);
+  assert.match(migration, /child\.status = 'running'[\s\S]*cancel_requested_at/);
+  assert.match(migration.trim(), /commit;$/);
+
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon; create role authenticated; create role service_role;
+      create table public.ai_external_analysis_jobs (
+        id uuid primary key,
+        article_id uuid not null,
+        status text not null,
+        depends_on_job_id uuid references public.ai_external_analysis_jobs(id),
+        result jsonb,
+        progress jsonb not null default '{}'::jsonb,
+        last_error text,
+        last_error_code text,
+        next_attempt_at timestamptz,
+        locked_by text,
+        locked_at timestamptz,
+        lease_expires_at timestamptz,
+        cancel_requested_at timestamptz,
+        completed_at timestamptz,
+        dead_lettered_at timestamptz,
+        dead_letter_reason text,
+        updated_at timestamptz not null default now()
+      );
+      insert into public.ai_external_analysis_jobs (id,article_id,status,depends_on_job_id,next_attempt_at) values
+        ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000010','blocked',null,null),
+        ('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000010','queued','00000000-0000-4000-8000-000000000001',now()),
+        ('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000010','waiting_for_prerequisites','00000000-0000-4000-8000-000000000002',null),
+        ('00000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000020','queued',null,now()),
+        ('00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000020','running','00000000-0000-4000-8000-000000000004',now());
+    `);
+    await db.exec(migration);
+
+    let rows = await db.query<{
+      id: string; status: string; last_error_code: string | null; dead_lettered_at: string | null;
+    }>('select id,status,last_error_code,dead_lettered_at from public.ai_external_analysis_jobs order by id');
+    const reconciled = new Map(rows.rows.map(row => [row.id, row]));
+    for (const id of [
+      '00000000-0000-4000-8000-000000000002',
+      '00000000-0000-4000-8000-000000000003',
+    ]) {
+      assert.equal(reconciled.get(id)?.status, 'blocked');
+      assert.equal(reconciled.get(id)?.last_error_code, 'external_analysis_dependency_terminal');
+      assert.ok(reconciled.get(id)?.dead_lettered_at);
+    }
+
+    await db.exec(`update public.ai_external_analysis_jobs
+      set status='cancelled' where id='00000000-0000-4000-8000-000000000004'`);
+    const running = (await db.query<{
+      status: string; cancel_requested_at: string | null; last_error_code: string | null;
+    }>(`select status,cancel_requested_at,last_error_code from public.ai_external_analysis_jobs
+      where id='00000000-0000-4000-8000-000000000005'`)).rows[0];
+    assert.equal(running.status, 'running');
+    assert.ok(running.cancel_requested_at);
+    assert.equal(running.last_error_code, 'external_analysis_dependency_cancelled');
+
+    rows = await db.query('select * from public.ai_external_analysis_jobs');
+    assert.equal(rows.rows.length, 5);
+  } finally {
+    await db.close();
+  }
+});
+
 test('only a started prior attempt blocks the same automatic command, regardless of outcome or origin', () => {
   const previous: Array<{
     commandId: string;

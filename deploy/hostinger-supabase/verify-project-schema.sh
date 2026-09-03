@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-109}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-110}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-60}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -82,6 +82,7 @@ readonly AUTOMATIC_WRITING_SCHEMA_VERSION="$(sql_scalar "select coalesce(public.
 readonly AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER="$(sql_scalar "select exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'content_writing_sessions' and t.tgname = 'guard_automatic_content_writing_empty_editor' and not t.tgisinternal)")"
 readonly CONTENT_WRITING_META_DESCRIPTION_STEP="$(sql_scalar "select position('meta_description' in pg_get_functiondef('public.ensure_content_writing_step(uuid,text,text,text,integer,text,jsonb)'::regprocedure)) > 0")"
 readonly EXTERNAL_ANALYSIS_REQUEUE_INVARIANT="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'normalize_external_analysis_requeue_state' and not tgisinternal) and exists(select 1 from pg_constraint where conname = 'ai_external_analysis_jobs_schedulable_not_dead' and convalidated) and not exists(select 1 from public.ai_external_analysis_jobs where dead_lettered_at is not null and status in ('waiting_for_prerequisites','queued','running','retry_scheduled','paused'))")"
+readonly EXTERNAL_ANALYSIS_DEPENDENCY_INVARIANT="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'propagate_external_analysis_dependency_terminal' and not tgisinternal) and not exists(select 1 from public.ai_external_analysis_jobs child join public.ai_external_analysis_jobs dependency on dependency.id = child.depends_on_job_id where dependency.status in ('failed','blocked','cancelled') and child.status in ('waiting_for_prerequisites','queued','retry_scheduled','paused'))")"
 
 readonly CREATOR_AUTOMATION_SCHEMA_VERSION="$(sql_scalar "select public.creator_article_automation_schema_version()")"
 readonly CREATOR_AUTOMATION_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.user_automation_settings', 'select') or has_table_privilege('authenticated', 'public.user_automation_settings', 'select') or has_function_privilege('authenticated', 'public.save_user_automation_settings(uuid,jsonb)', 'execute') or has_function_privilege('anon', 'public.article_automation_policy(uuid)', 'execute')")"
@@ -127,6 +128,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER}" == "t" ]] || fail "Automatic content-writing empty-editor trigger is missing."
 [[ "${CONTENT_WRITING_META_DESCRIPTION_STEP}" == "t" ]] || fail "Content-writing step preparation does not allow meta descriptions."
 [[ "${EXTERNAL_ANALYSIS_REQUEUE_INVARIANT}" == "t" ]] || fail "External-analysis requeue invariant is missing or violated."
+[[ "${EXTERNAL_ANALYSIS_DEPENDENCY_INVARIANT}" == "t" ]] || fail "Terminal external-analysis dependencies still have schedulable descendants."
 
 readonly GOOGLE_METADATA_MANUAL_FUNCTION="$(sql_scalar "select to_regprocedure('public.enqueue_manual_google_metadata_job(uuid)') is not null and to_regprocedure('public.dashboard_saved_automation_results(uuid[])') is not null")"
 [[ "${GOOGLE_METADATA_MANUAL_FUNCTION}" == "t" ]] || fail "Manual Google metadata and saved completion evidence functions are missing."
