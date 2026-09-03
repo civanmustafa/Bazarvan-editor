@@ -166,12 +166,13 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   );
   assert.match(editorApp, /import AiExecutionMonitor from '\.\/AiKeyUsageToast'/);
   assert.match(monitor, /getAiExecutionActivitiesForArticle\(activities, articleId, articleKey\)/);
-  assert.match(dashboard, /<DashboardAiExecutionMonitor\s*\/>/);
+  assert.doesNotMatch(dashboard, /DashboardAiExecutionMonitor/);
   assert.match(
-    dashboard,
-    /<AutomaticContentWritingQueuePanel[\s\S]*?<DashboardAiExecutionMonitor\s*\/>/,
+    automaticQueue,
+    /<DashboardAiExecutionMonitor\s+embedded\s+isArabic=\{isArabic\}\s*\/>/,
   );
   assert.match(monitor, /data-ai-execution-monitor="dashboard"/);
+  assert.match(monitor, /data-ai-execution-monitor-embedded=\{embedded \|\| undefined\}/);
   assert.match(monitor, /rounded-xl border border-blue-200 bg-white p-4/);
   assert.match(monitor, /ستظهر هنا أي مهمة جارية فور تشغيلها/);
   assert.match(monitor, /runningActivities\.map\(activity =>/);

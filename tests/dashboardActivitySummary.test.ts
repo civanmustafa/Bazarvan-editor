@@ -17,15 +17,18 @@ test('dashboard header actions share one size contract and data tools leave the 
   assert.doesNotMatch(dashboard, /setIsConfirmModalOpen/);
 });
 
-test('queue and AI monitor are rendered before the single activity summary card', async () => {
-  const dashboard = await readWorkspaceFile('components/Dashboard.tsx');
+test('the unified AI and automation card is rendered before the single activity summary card', async () => {
+  const [dashboard, queue] = await Promise.all([
+    readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx'),
+  ]);
   const queueIndex = dashboard.lastIndexOf('<AutomaticContentWritingQueuePanel');
-  const monitorIndex = dashboard.lastIndexOf('<DashboardAiExecutionMonitor');
   const summaryIndex = dashboard.lastIndexOf('<DashboardActivitySummary');
 
   assert.ok(queueIndex > 0);
-  assert.ok(monitorIndex > queueIndex);
-  assert.ok(summaryIndex > monitorIndex);
+  assert.ok(summaryIndex > queueIndex);
+  assert.doesNotMatch(dashboard, /DashboardAiExecutionMonitor/);
+  assert.match(queue, /<DashboardAiExecutionMonitor\s+embedded\s+isArabic=\{isArabic\}\s*\/>/);
   assert.match(dashboard, /externalAnalysisSummaries=\{externalAnalysisSummaries\}/);
   assert.match(dashboard, /articleTitles=\{dashboardArticleTitles\}/);
   assert.match(dashboard, /articleSnapshots=\{dashboardAutomationArticleSnapshots\}/);
@@ -37,8 +40,10 @@ test('the automation queue keeps every user-controlled operation visible in one 
     readWorkspaceFile('utils/dashboardAutomationQueue.ts'),
   ]);
 
+  assert.match(component, /data-ai-automation-status="true"/);
   assert.match(component, /data-automation-operations-queue="true"/);
-  assert.match(component, /طابور العمليات المؤتمتة/);
+  assert.match(component, /حالة الذكاء الاصطناعي وطابور العمليات/);
+  assert.match(component, /المهام الحية للذكاء الاصطناعي|DashboardAiExecutionMonitor/);
   assert.match(component, /حالة جميع مراحل الأتمتة/);
   assert.match(component, /operations\.map\(renderOperation\)/);
   assert.match(component, /attention: countDashboardAutomationIssues\(operations\)/);

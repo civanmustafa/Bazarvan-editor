@@ -44,6 +44,7 @@ import {
   loadUserAutomationPreferences,
   USER_AUTOMATION_CHANGED_EVENT,
 } from '../utils/userAutomation';
+import { DashboardAiExecutionMonitor } from './AiKeyUsageToast';
 
 type Props = {
   isArabic: boolean;
@@ -419,16 +420,23 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   };
 
   return (
-    <section data-automation-operations-queue="true" className="rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900/50 dark:bg-[#2A2A2A]">
+    <section
+      data-ai-automation-status="true"
+      data-automation-operations-queue="true"
+      className="rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900/50 dark:bg-[#2A2A2A]"
+      dir={isArabic ? 'rtl' : 'ltr'}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-start gap-2">
           <Workflow size={19} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" />
           <div>
             <h3 className="text-sm font-black text-gray-800 dark:text-gray-100">
-              {isArabic ? 'طابور العمليات المؤتمتة' : 'Automated operations queue'}
+              {isArabic ? 'حالة الذكاء الاصطناعي وطابور العمليات' : 'AI status and automation queue'}
             </h3>
             <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
-              {isArabic ? 'مراحل مقالات الصفحة الحالية، وطابور الكتابة المتاح لحسابك. تُحسب المشكلة المشتركة مرة واحدة.' : 'Stages for articles on this page and your accessible writing queue. Shared issues are counted once.'}
+              {isArabic
+                ? 'عرض موحّد للتنفيذ الحي، ومراحل مقالات الصفحة الحالية، وطابور الكتابة المتاح لحسابك. تُحسب المشكلة المشتركة مرة واحدة.'
+                : 'A unified view of live execution, stages for articles on this page, and your accessible writing queue. Shared issues are counted once.'}
             </p>
           </div>
         </div>
@@ -442,6 +450,8 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
         </button>
       </div>
+
+      <DashboardAiExecutionMonitor embedded isArabic={isArabic} />
 
       <div className="mt-3 rounded-lg border border-gray-200 p-2.5 dark:border-[#444]">
         <div className="flex flex-wrap items-center justify-between gap-2">

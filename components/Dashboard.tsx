@@ -53,7 +53,6 @@ import {
 } from '../constants/articleStatuses';
 import AutomaticContentWritingQueuePanel from './AutomaticContentWritingQueuePanel';
 import type { DashboardAutomationArticleSnapshot } from '../utils/dashboardAutomationQueue';
-import { DashboardAiExecutionMonitor } from './AiKeyUsageToast';
 import DashboardActivitySummary from './DashboardActivitySummary';
 import {
     beginAiExecutionActivity,
@@ -2245,7 +2244,6 @@ const Dashboard: React.FC = () => {
                   await Promise.all([refreshData(), refreshExternalAnalysisSummaries()]);
                 }}
               />
-              <DashboardAiExecutionMonitor />
               <DashboardActivitySummary
                 summary={activitySummary}
                 isLoading={isActivitySummaryLoading}

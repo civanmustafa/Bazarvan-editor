@@ -346,9 +346,17 @@ const useAiExecutionActivityFeed = (
   return { activities, setActivities, now };
 };
 
-export const DashboardAiExecutionMonitor: React.FC = () => {
+type DashboardAiExecutionMonitorProps = {
+  embedded?: boolean;
+  isArabic?: boolean;
+};
+
+export const DashboardAiExecutionMonitor: React.FC<DashboardAiExecutionMonitorProps> = ({
+  embedded = false,
+  isArabic: isArabicOverride,
+}) => {
   const { uiLanguage } = useUser();
-  const isArabic = uiLanguage !== 'en';
+  const isArabic = isArabicOverride ?? uiLanguage !== 'en';
   const { activities, now } = useAiExecutionActivityFeed();
   const runningActivities = getRunningAiExecutionActivities(activities);
   const runningArticleCount = new Set(runningActivities.map(activity => (
@@ -423,12 +431,17 @@ export const DashboardAiExecutionMonitor: React.FC = () => {
     };
   }, [externalJobIdsKey]);
 
+  const Root = embedded ? 'div' : 'section';
+
   return (
-    <section
+    <Root
       data-ai-execution-monitor="dashboard"
-      className="rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900/50 dark:bg-[#2A2A2A]"
+      data-ai-execution-monitor-embedded={embedded || undefined}
+      className={embedded
+        ? 'mt-3 border-t border-gray-200 pt-3 dark:border-[#444]'
+        : 'rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900/50 dark:bg-[#2A2A2A]'}
       dir={isArabic ? 'rtl' : 'ltr'}
-      role="status"
+      role={embedded ? 'group' : 'status'}
       aria-live="polite"
     >
       <header className="flex items-start justify-between gap-2">
@@ -436,12 +449,18 @@ export const DashboardAiExecutionMonitor: React.FC = () => {
           <Activity size={19} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" />
           <div>
             <h3 className="text-sm font-black text-gray-800 dark:text-gray-100">
-              {isArabic ? 'حالة الذكاء الاصطناعي' : 'AI task status'}
+              {embedded
+                ? (isArabic ? 'المهام الحية للذكاء الاصطناعي' : 'Live AI tasks')
+                : (isArabic ? 'حالة الذكاء الاصطناعي' : 'AI task status')}
             </h3>
             <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
-              {isArabic
-                ? 'يعرض مهام اللوحة، بما فيها الأوامر الجاهزة وبحث وسحب المنافسين.'
-                : 'Shows dashboard tasks, including ready commands and competitor discovery/import.'}
+              {embedded
+                ? (isArabic
+                    ? 'التنفيذ الفعلي الآن: المقالة، المهمة، المرحلة، خدمة التنفيذ، الموديل، المدة وآخر تحديث.'
+                    : 'Current execution details: article, task, stage, provider, model, duration, and last update.')
+                : (isArabic
+                    ? 'يعرض مهام اللوحة، بما فيها الأوامر الجاهزة وبحث وسحب المنافسين.'
+                    : 'Shows dashboard tasks, including ready commands and competitor discovery/import.')}
             </p>
           </div>
         </div>
@@ -542,7 +561,7 @@ export const DashboardAiExecutionMonitor: React.FC = () => {
             : `${runningArticleCount} ${runningArticleCount === 1 ? 'article' : 'articles'} with active tasks`}
         </div>
       )}
-    </section>
+    </Root>
   );
 };
 
