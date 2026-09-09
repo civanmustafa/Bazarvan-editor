@@ -6,6 +6,30 @@ export type AppRoute =
   | { name: 'guide' }
   | { name: 'notFound' };
 
+export type ArticleSaveRouteBlockReason =
+  | 'article_loading'
+  | 'not_editor_route'
+  | 'article_route_mismatch'
+  | 'new_article_intent_required';
+
+export const getArticleSaveRouteBlockReason = (options: {
+  route: AppRoute;
+  activeArticleId: string | null;
+  isArticleContentLoading: boolean;
+  newArticleCreationAuthorized: boolean;
+}): ArticleSaveRouteBlockReason | null => {
+  if (options.isArticleContentLoading) return 'article_loading';
+  if (options.route.name !== 'editor') return 'not_editor_route';
+
+  const routedArticleId = options.route.articleId;
+  if (routedArticleId) {
+    return options.activeArticleId === routedArticleId ? null : 'article_route_mismatch';
+  }
+
+  if (options.activeArticleId) return null;
+  return options.newArticleCreationAuthorized ? null : 'new_article_intent_required';
+};
+
 export type AdminRouteSection =
   | 'overview'
   | 'articles'

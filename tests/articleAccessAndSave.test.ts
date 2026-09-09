@@ -84,8 +84,11 @@ test('article save transaction is atomic and idempotent', async () => {
   assert.match(migration, /insert into public\.article_versions/);
   assert.match(migration, /insert into public\.article_save_requests/);
   assert.match(articleApi, /rpc\('save_article_snapshot_with_content_policy'/);
+  assert.match(articleApi, /if \(!articleId && !createArticle\)/);
+  assert.match(articleApi, /ARTICLE_CREATION_INTENT_REQUIRED/);
   assert.doesNotMatch(articleApi, /\.from\('article_competitors'\)/);
   assert.match(articleClient, /saveRemoteArticleSnapshotViaServer\(snapshot, options\)/);
+  assert.match(articleClient, /createArticle: options\.allowCreate === true/);
 
   const publicSaveStart = articleClient.indexOf('export const saveRemoteArticleSnapshot = async');
   const publicSaveEnd = articleClient.indexOf('export const renameRemoteArticle', publicSaveStart);

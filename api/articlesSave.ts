@@ -250,6 +250,21 @@ const handleArticleSaveRequest = async (req: any): Promise<ApiResult> => {
 
   let snapshot = sanitizeSnapshot(body.snapshot);
   const articleId = normalizeArticleId(body.articleId);
+  const createArticle = body.createArticle === true;
+  if (!articleId && !createArticle) {
+    throw new ArticleSaveError(
+      'Creating an article requires an explicit new-article intent.',
+      409,
+      'ARTICLE_CREATION_INTENT_REQUIRED',
+    );
+  }
+  if (articleId && createArticle) {
+    throw new ArticleSaveError(
+      'A save request cannot update an article and create a new one at the same time.',
+      400,
+      'ARTICLE_CREATION_INTENT_CONFLICT',
+    );
+  }
   const saveReason = normalizeSaveReason(body.saveReason);
   const clearContent = body.clearContent === true;
   const forceOverwrite = body.forceOverwrite === true

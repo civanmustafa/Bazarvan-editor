@@ -48,7 +48,13 @@ import {
     type RemoteArticleStatus,
 } from '../utils/supabaseArticles';
 import { getSupabaseClient } from '../utils/supabaseClient';
-import { buildEditorArticlePath, navigateToAppPath, peekNewEditorArticleRequest } from '../utils/appRoutes';
+import {
+    buildEditorArticlePath,
+    getArticleSaveRouteBlockReason,
+    navigateToAppPath,
+    parseAppRoute,
+    peekNewEditorArticleRequest,
+} from '../utils/appRoutes';
 import { recordAppActivity } from '../utils/appActivity';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 import { shouldClearArticleAiResults } from '../constants/articleStatuses';
@@ -746,6 +752,7 @@ export const useEditorSelector = <Selected,>(
 
 export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { currentUser, currentUserId, currentView, setCurrentView, preferredLanguage, uiLanguage, isIdle } = useUser();
+    const initialEditorRouteRef = useRef(currentView === 'editor' ? parseAppRoute() : null);
     // A queued "new article" request must start from an isolated blank document.
     // Do not let the editor bootstrap the previous active article or auto-draft while
     // EditorRouteContent is still waiting to consume that request.
@@ -753,13 +760,23 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         currentView === 'editor' ? peekNewEditorArticleRequest() : null,
     );
     const isInitializingNewArticle = initialNewArticleRequestRef.current !== null;
-    const initialActiveArticleTitleRef = useRef<string | null>(
-        currentView === 'editor' && !isInitializingNewArticle ? readActiveArticleTitle() : null,
-    );
-    const initialActiveArticleIdRef = useRef<string | null>(
+    const initialRoutedArticleId = initialEditorRouteRef.current?.name === 'editor'
+        ? initialEditorRouteRef.current.articleId
+        : null;
+    const storedActiveArticleIdRef = useRef<string | null>(
         currentView === 'editor' && !isInitializingNewArticle ? readActiveArticleId() : null,
     );
-    const initialAutoDraftTitle = currentView === 'editor' && !isInitializingNewArticle && !initialActiveArticleTitleRef.current
+    const shouldIsolateRoutedArticle = Boolean(
+        initialRoutedArticleId && storedActiveArticleIdRef.current !== initialRoutedArticleId,
+    );
+    const shouldStartWithIsolatedDocument = isInitializingNewArticle || shouldIsolateRoutedArticle;
+    const initialActiveArticleTitleRef = useRef<string | null>(
+        currentView === 'editor' && !shouldStartWithIsolatedDocument ? readActiveArticleTitle() : null,
+    );
+    const initialActiveArticleIdRef = useRef<string | null>(
+        currentView === 'editor' && !shouldStartWithIsolatedDocument ? storedActiveArticleIdRef.current : null,
+    );
+    const initialAutoDraftTitle = currentView === 'editor' && !shouldStartWithIsolatedDocument && !initialActiveArticleTitleRef.current
         ? readStorageValue(AUTO_DRAFT_TITLE_KEY) || ''
         : '';
     const [title, setTitle] = useState<string>(() => initialActiveArticleTitleRef.current || initialAutoDraftTitle);
@@ -775,7 +792,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [editorState, setEditorState] = useState<any | null>(null);
     const [text, setText] = useState<string>('');
     const [keywords, setKeywords] = useState<Keywords>(() => {
-        if (isInitializingNewArticle) return normalizeKeywords(INITIAL_KEYWORDS);
+        if (shouldStartWithIsolatedDocument) return normalizeKeywords(INITIAL_KEYWORDS);
         try {
           const saved = readStorageValue(AUTO_DRAFT_KEYWORDS_KEY);
           return saved ? normalizeKeywords(JSON.parse(saved)) : INITIAL_KEYWORDS;
@@ -783,7 +800,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
     const [articleLanguage, setArticleLanguage] = useState<'ar' | 'en'>(() => initialNewArticleRequestRef.current || 'ar');
     const [goalContext, setGoalContext] = useState<GoalContext>(() => (
-        isInitializingNewArticle ? normalizeGoalContext() : getStoredGoalContext(AUTO_DRAFT_GOAL_CONTEXT_KEY)
+        shouldStartWithIsolatedDocument ? normalizeGoalContext() : getStoredGoalContext(AUTO_DRAFT_GOAL_CONTEXT_KEY)
     ));
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
     const [saveError, setSaveError] = useState('');
@@ -800,7 +817,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const editorSnapshotTimerRef = useRef<number | null>(null);
     const draftPersistTimerRef = useRef<number | null>(null);
     const articleLoadRequestIdRef = useRef(0);
-    const isArticleContentLoadingRef = useRef(false);
+    const isArticleContentLoadingRef = useRef(Boolean(initialRoutedArticleId));
+    const newArticleCreationAuthorizedRef = useRef(isInitializingNewArticle);
     const hasEditorChangedAfterArticleLoadRef = useRef(false);
     const loadedArticleExpectedLastSavedAtRef = useRef('');
     const loadedArticleSaveCountRef = useRef(0);
@@ -814,7 +832,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const pendingInitialArticleRestoreRef = useRef<string | null>(initialActiveArticleTitleRef.current);
     const pendingAutoDraftRestoreRef = useRef(
         currentView === 'editor' &&
-        !isInitializingNewArticle &&
+        !shouldStartWithIsolatedDocument &&
         !initialActiveArticleTitleRef.current &&
         Boolean(readStoredContentReference(AUTO_DRAFT_KEY))
     );
@@ -1506,7 +1524,16 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const forceSave = options.force ?? reason === 'manual';
         const showStatus = reason === 'manual';
         if (!editor || !currentUser || !currentUserId) return false;
-        if (isArticleContentLoadingRef.current) return false;
+        const saveRouteBlockReason = getArticleSaveRouteBlockReason({
+            route: parseAppRoute(),
+            activeArticleId,
+            isArticleContentLoading: isArticleContentLoadingRef.current,
+            newArticleCreationAuthorized: newArticleCreationAuthorizedRef.current,
+        });
+        if (saveRouteBlockReason) {
+            if (showStatus) setSaveStatus('error');
+            return false;
+        }
         if (activeArticleId && concurrentEditConflict && !options.overwriteConflict) {
             if (showStatus) {
                 setSaveError('توجد نسخة أحدث محفوظة بواسطة محرر آخر. اختر تحميلها أو اعتماد نسختك الحالية أولًا.');
@@ -1631,6 +1658,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             pendingRemoteSaveRequestRef.current = pendingRequest;
             const savedArticle = await saveRemoteArticleSnapshot(articleSnapshot, {
                 articleId: activeArticleId,
+                allowCreate: !activeArticleId && newArticleCreationAuthorizedRef.current,
                 idempotencyKey: pendingRequest.idempotencyKey,
                 saveReason: reason,
                 clearContent,
@@ -1645,6 +1673,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 });
             }
             pendingRemoteSaveRequestRef.current = null;
+            newArticleCreationAuthorizedRef.current = false;
             setActiveArticleId(savedArticle.id);
             loadedArticleExpectedLastSavedAtRef.current = savedArticle.lastSaved || '';
             loadedArticleSaveCountRef.current = Number(savedArticle.saveCount || 0);
@@ -2103,6 +2132,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             pendingImportedSaveRef.current = false;
             queuedForcedSaveRef.current = null;
             pendingRemoteSaveRequestRef.current = null;
+            newArticleCreationAuthorizedRef.current = true;
             initialActiveArticleTitleRef.current = null;
             initialActiveArticleIdRef.current = null;
             isArticleContentLoadingRef.current = false;
@@ -2257,6 +2287,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const requestId = articleLoadRequestIdRef.current + 1;
             articleLoadRequestIdRef.current = requestId;
             isArticleContentLoadingRef.current = true;
+            newArticleCreationAuthorizedRef.current = false;
             setIsArticleContentSettledForAutomation(false);
             skipNextAutoDraftMetadataWriteRef.current = true;
             const remoteArticleId = getRemoteArticleId(article);

@@ -617,6 +617,7 @@ const saveRemoteArticleSnapshotViaServer = async (
   snapshot: ArticleStorageSnapshot,
   options: {
     articleId?: string | null;
+    allowCreate?: boolean;
     idempotencyKey: string;
     saveReason?: 'manual' | 'auto' | 'lifecycle' | 'recovery';
     clearContent?: boolean;
@@ -633,6 +634,7 @@ const saveRemoteArticleSnapshotViaServer = async (
 
   const requestBody = JSON.stringify({
     articleId: options.articleId || null,
+    createArticle: options.allowCreate === true,
     idempotencyKey: options.idempotencyKey,
     saveReason: options.saveReason || 'manual',
     clearContent: options.clearContent === true,
@@ -1225,6 +1227,7 @@ export const saveRemoteArticleSnapshot = async (
   snapshot: ArticleStorageSnapshot,
   options: {
     articleId?: string | null;
+    allowCreate?: boolean;
     idempotencyKey: string;
     saveReason?: 'manual' | 'auto' | 'lifecycle' | 'recovery';
     clearContent?: boolean;

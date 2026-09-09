@@ -352,6 +352,9 @@ const EditorRouteContent: React.FC<{ articleId: string | null }> = ({ articleId 
   }, [activeArticleId, articleId, currentUser, editor, handleLoadArticle]);
 
   const loadError = newArticleError || articleLoadError;
+  const isRoutedArticlePending = Boolean(
+    articleId && (loadingArticleId === articleId || activeArticleId !== articleId),
+  );
   if (loadError) {
     return (
       <EditorRouteMessage
@@ -361,15 +364,19 @@ const EditorRouteContent: React.FC<{ articleId: string | null }> = ({ articleId 
       />
     );
   }
+  if (isRoutedArticlePending) {
+    return (
+      <EditorRouteMessage
+        title="جار تحميل المقالة..."
+        body=""
+        onAction={() => navigateToAppPath('/dashboard')}
+      />
+    );
+  }
 
   return (
     <>
       <EditorView />
-      {loadingArticleId && (
-        <div className="fixed left-1/2 top-4 z-[10000] -translate-x-1/2 rounded-md border border-[#d4af37]/30 bg-white px-4 py-2 text-sm font-bold text-[#8a6f1d] shadow-lg dark:bg-[#2A2A2A] dark:text-[#f2d675]">
-          جار تحديث المقالة من خادم Hostinger...
-        </div>
-      )}
     </>
   );
 };
