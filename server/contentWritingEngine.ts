@@ -67,6 +67,12 @@ import {
 } from './articleCompetitorRepository';
 import { listArticleWritingSources } from './contentWritingSources';
 import { readArticleAutomationPolicy } from './articleAutomationPolicy';
+import { readUserAiRoutingPreferences } from './userAiRoutingPreferences';
+import {
+  mergeProviderFallbackResult,
+  shouldAttemptAiFallback,
+} from './aiProviderFallbackPolicy';
+import { resolveEffectiveProviderPolicy } from './providerAccessControl';
 
 type JsonObject = Record<string, unknown>;
 
@@ -596,18 +602,36 @@ export const queueContentWritingSession = async (input: {
   allowMissingCompany?: boolean;
   allowMissingGoalContext?: boolean;
 }): Promise<QueuedContentWritingSession> => {
-  const [conversation, model] = await Promise.all([
+  const [conversation, model, routingPreferences] = await Promise.all([
     prepareContentWritingConversation(input.articleId, {
       allowMissingCompany: input.allowMissingCompany,
       allowMissingGoalContext: input.allowMissingGoalContext,
     }),
     selectProviderModel(input.provider, input.model, input.createdBy),
+    readUserAiRoutingPreferences(input.createdBy),
   ]);
+  const freeFirstRequested = input.provider === 'gemini'
+    && routingPreferences.freeFirstFallbackEnabled;
+  const fallbackCapabilities = freeFirstRequested
+    ? await readAiProviderCapabilities(input.createdBy)
+    : null;
+  const paidFallbackProvider = routingPreferences.paidFallbackProvider;
+  const paidFallbackCapability = fallbackCapabilities?.providers[paidFallbackProvider];
+  const providerRouting = freeFirstRequested && paidFallbackCapability?.available
+    ? {
+        mode: 'free_first',
+        paidFallbackProvider,
+        paidFallbackModel: paidFallbackCapability.model,
+      }
+    : {
+        mode: 'selected_only',
+        ...(freeFirstRequested ? { unavailablePaidFallbackProvider: paidFallbackProvider } : {}),
+      };
 
   const inputHash = createContentWritingSessionInputHash(
     input.provider,
     model,
-    conversation.messages.map(message => message.content),
+    [JSON.stringify(providerRouting), ...conversation.messages.map(message => message.content)],
   );
   try {
     return await createContentWritingSession({
@@ -624,6 +648,7 @@ export const queueContentWritingSession = async (input: {
         ...conversation.contextSnapshot,
         ...(isRecord(input.contextSnapshotPatch) ? input.contextSnapshotPatch : {}),
         allowModelFallback: input.provider === 'gemini' && conversation.allowModelFallback,
+        providerRouting,
       },
       messages: conversation.messages.map(message => ({ content: message.content })),
     });
@@ -765,36 +790,78 @@ export const executeContentWritingTurn = async (options: {
   const credentialPurpose = options.session.progress?.resumed === true
     ? 'content_writing_resume' as const
     : 'standard' as const;
-  const rawResult = options.session.provider === 'openai'
-    ? await executeOpenAiRequest({
+  const runProvider = async (
+    provider: ContentWritingProvider,
+    model: string,
+    allowProviderFallback: boolean,
+  ) => provider === 'openai'
+    ? executeOpenAiRequest({
       instructions: currentSystemInstructions,
       messages: [
         ...baseHistory,
         { role: 'user', content: options.prompt },
       ],
-      model: options.session.model,
+      model,
       requestId,
       maxOutputTokens: options.maxOutputTokens || 8_000,
       conversationMode: 'independent',
       promptCacheKey: `content-writing:${options.session.id}`.slice(0, 200),
-    }, { signal: options.signal, telemetry, credentialPurpose })
-    : await aiExecutionEngine.executeGemini({
+    }, {
+      signal: options.signal,
+      telemetry,
+      credentialPurpose,
+      allowProviderFallback,
+    })
+    : aiExecutionEngine.executeGemini({
       systemInstruction: currentSystemInstructions,
       history: baseHistory.map(message => ({
         role: message.role === 'assistant' ? 'model' : 'user',
         text: message.content,
       })),
       prompt: options.prompt,
-      provider: options.session.provider,
-      model: options.session.model,
-      allowModelFallback,
+      provider,
+      model,
+      allowModelFallback: provider === 'gemini' && allowModelFallback,
       progressId: requestId,
     }, {
       signal: options.signal,
       telemetry,
       onProgress: options.onProgress,
       credentialPurpose,
+      allowProviderFallback,
     });
+  const routing = isRecord(options.session.context_snapshot?.providerRouting)
+    ? options.session.context_snapshot.providerRouting
+    : {};
+  const freeFirst = options.session.provider === 'gemini'
+    && routing.mode === 'free_first'
+    && (routing.paidFallbackProvider === 'geminiPaid' || routing.paidFallbackProvider === 'openai')
+    && toText(routing.paidFallbackModel);
+  const primaryResult = await runProvider(
+    options.session.provider,
+    options.session.model,
+    !freeFirst,
+  );
+  let rawResult = primaryResult;
+  if (freeFirst && shouldAttemptAiFallback(primaryResult)) {
+    const primaryPolicy = await resolveEffectiveProviderPolicy(
+      options.session.created_by,
+      'gemini_free',
+    );
+    if (primaryPolicy.allowProviderFallback) {
+      const paidFallbackProvider = routing.paidFallbackProvider as 'geminiPaid' | 'openai';
+      const fallbackResult = await runProvider(
+        paidFallbackProvider,
+        toText(routing.paidFallbackModel),
+        false,
+      );
+      rawResult = mergeProviderFallbackResult({
+        previous: primaryResult,
+        next: fallbackResult,
+        requestedProvider: 'gemini',
+      });
+    }
+  }
   const publicResult = options.session.provider === 'openai'
     ? { ...rawResult, body: rawResult.body || {} }
     : sanitizeAiExecutionResult({ status: rawResult.status, body: rawResult.body || {} });

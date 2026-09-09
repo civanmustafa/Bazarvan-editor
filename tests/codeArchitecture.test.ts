@@ -960,7 +960,9 @@ test('content writing editor UI runs through durable authenticated sessions', as
   assert.match(panel, /startInFlightRef\.current/);
   assert.match(panel, /pendingStartRef\.current/);
   assert.match(panel, /createContentWritingIdempotencyKey\(articleId\)/);
-  assert.match(panel, /setProvider\(aiProviderCapabilities\.defaultProvider\)/);
+  assert.match(panel, /routingPreferences\.contentWritingProvider/);
+  assert.match(panel, /saveCurrentUserPreferencesPatch/);
+  assert.match(panel, /freeFirstFallbackEnabled/);
   assert.match(panel, /startContentWritingSession\(/);
   assert.match(panel, /listContentWritingSessions\(/);
   assert.match(panel, /getContentWritingSessionDetail\(/);

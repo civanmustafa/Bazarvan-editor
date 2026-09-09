@@ -13,6 +13,8 @@ import type {
 } from './contentWritingSessionService';
 import { readContentResearchAutomationSettings } from './externalAnalysisSettings';
 import { readArticleAutomationPolicy } from './articleAutomationPolicy';
+import { readAiProviderCapabilities } from './aiProviderCapabilities';
+import { readUserAiRoutingPreferences } from './userAiRoutingPreferences';
 
 export class AutomaticContentWritingPolicyError extends Error {
   readonly code: string;
@@ -381,6 +383,27 @@ export const scheduleNextAutomaticContentWritingSession = async (
   }
 
   try {
+    const routingPreferences = await readUserAiRoutingPreferences(item.requested_by);
+    if (routingPreferences.automaticContentWritingProvider !== 'system') {
+      const preferredProvider = routingPreferences.automaticContentWritingProvider;
+      const capabilities = await readAiProviderCapabilities(item.requested_by);
+      const capability = capabilities.providers[preferredProvider];
+      if (!capability.available) {
+        throw new AutomaticContentWritingPolicyError(
+          'creator_writing_provider_unavailable',
+          'The article creator\'s preferred automatic-writing provider is unavailable.',
+        );
+      }
+      item.provider = preferredProvider;
+      item.model = capability.model;
+      const { error: routingUpdateError } = await getExternalAnalysisSupabaseAdmin()
+        .from('content_writing_automation_items')
+        .update({ provider: item.provider, model: item.model })
+        .eq('id', item.id)
+        .eq('status', 'claiming')
+        .eq('locked_by', workerId);
+      if (routingUpdateError) throw routingUpdateError;
+    }
     const queued = await queueContentWritingSession({
       articleId: item.article_id,
       createdBy: item.requested_by,

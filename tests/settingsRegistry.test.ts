@@ -164,6 +164,41 @@ test('Gemini free model upgrade starts existing users on the new strongest model
   assert.equal(currentUser.ai.defaultGeminiModel, 'gemini-2.5-pro');
 });
 
+test('personal AI routing is normalized without silently opting users into paid fallback', async () => {
+  const registry = await importSettingsRegistry();
+  const defaults = registry.normalizeUserPreferences({});
+  assert.equal(defaults.ai.contentWritingProvider, 'gemini');
+  assert.equal(defaults.ai.automaticContentWritingProvider, 'system');
+  assert.equal(defaults.ai.freeFirstFallbackEnabled, false);
+  assert.equal(defaults.ai.paidFallbackProvider, 'geminiPaid');
+
+  const normalized = registry.normalizeUserPreferences({
+    ai: {
+      contentWritingProvider: 'openai',
+      automaticContentWritingProvider: 'geminiPaid',
+      freeFirstFallbackEnabled: true,
+      paidFallbackProvider: 'openai',
+    },
+  });
+  assert.equal(normalized.ai.contentWritingProvider, 'openai');
+  assert.equal(normalized.ai.automaticContentWritingProvider, 'geminiPaid');
+  assert.equal(normalized.ai.freeFirstFallbackEnabled, true);
+  assert.equal(normalized.ai.paidFallbackProvider, 'openai');
+
+  const invalid = registry.normalizeUserPreferences({
+    ai: {
+      contentWritingProvider: 'other',
+      automaticContentWritingProvider: 'other',
+      freeFirstFallbackEnabled: 'yes',
+      paidFallbackProvider: 'gemini',
+    },
+  });
+  assert.equal(invalid.ai.contentWritingProvider, 'gemini');
+  assert.equal(invalid.ai.automaticContentWritingProvider, 'system');
+  assert.equal(invalid.ai.freeFirstFallbackEnabled, false);
+  assert.equal(invalid.ai.paidFallbackProvider, 'geminiPaid');
+});
+
 test('SettingsRegistry validates system settings and discards unknown fields', async () => {
   const registry = await importSettingsRegistry();
   const normalized = registry.normalizeSystemSettingsMap({

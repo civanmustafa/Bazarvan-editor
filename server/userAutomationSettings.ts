@@ -7,12 +7,15 @@ import {
 import { normalizeSystemSettingsMap } from '../constants/settingsRegistry';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 import { readUserProviderAccessOverview, type UserProviderAccessOverview } from './providerAccessControl';
+import type { UserAiRoutingPreferences } from '../constants/userAiRouting';
+import { readUserAiRoutingPreferences } from './userAiRoutingPreferences';
 
 export const computeEffectiveUserAutomation = (
   preferences: UserAutomationPreferences,
   adminLimits: UserAutomationPreferences,
   providers: UserProviderAccessOverview,
   ai: Record<string, any>,
+  routingPreferences?: UserAiRoutingPreferences,
 ): { effectivePreferences: UserAutomationPreferences; blockedReasons: UserAutomationBlockedReasons } => {
   const effectivePreferences = normalizeUserAutomationPreferences(preferences);
   const blockedReasons: UserAutomationBlockedReasons = {};
@@ -33,8 +36,12 @@ export const computeEffectiveUserAutomation = (
       blockedReasons[key] ||= 'Gemini المجاني غير متاح لحسابك حاليًا أو وصلت إلى حد الاستخدام.';
     }
   }
-  const writingProvider = ai.contentWritingAutomationProvider === 'openai' ? 'openai'
-    : ai.contentWritingAutomationProvider === 'geminiPaid' ? 'gemini_paid' : 'gemini_free';
+  const requestedWritingProvider = routingPreferences?.automaticContentWritingProvider
+    && routingPreferences.automaticContentWritingProvider !== 'system'
+    ? routingPreferences.automaticContentWritingProvider
+    : ai.contentWritingAutomationProvider;
+  const writingProvider = requestedWritingProvider === 'openai' ? 'openai'
+    : requestedWritingProvider === 'geminiPaid' ? 'gemini_paid' : 'gemini_free';
   if ((writingProvider === 'openai' ? ai.openAiEnabled === false
     : writingProvider === 'gemini_paid' ? ai.geminiProEnabled === false : ai.geminiFreeEnabled === false)
     || providerUnavailable(writingProvider)) {
@@ -47,12 +54,13 @@ export const computeEffectiveUserAutomation = (
 
 export const readOrSaveUserAutomationSettings = async (userId: string, preferences?: UserAutomationPreferences) => {
   const admin = getExternalAnalysisSupabaseAdmin();
-  const [settings, providers, aiResult] = await Promise.all([
+  const [settings, providers, aiResult, routingPreferences] = await Promise.all([
     preferences
       ? admin.rpc('save_user_automation_settings', { p_user_id: userId, p_preferences: preferences })
       : admin.rpc('get_user_automation_settings', { p_user_id: userId }),
     readUserProviderAccessOverview(userId),
     admin.from('app_settings').select('value').eq('key', 'ai').eq('is_secret', false).maybeSingle(),
+    readUserAiRoutingPreferences(userId),
   ]);
   if (settings.error || aiResult.error) {
     throw new Error('تعذر قراءة إعدادات أتمتة المستخدم. تحقق من اكتمال تحديث قاعدة البيانات.');
@@ -66,7 +74,7 @@ export const readOrSaveUserAutomationSettings = async (userId: string, preferenc
   return {
     preferences: normalized,
     ...computeEffectiveUserAutomation(normalized, normalizeUserAutomationPreferences(data.adminLimits), providers,
-      normalizeSystemSettingsMap({ ai: aiResult.data?.value || {} }).ai),
+      normalizeSystemSettingsMap({ ai: aiResult.data?.value || {} }).ai, routingPreferences),
     eligibleArticleCount: Number(data.eligibleArticleCount) || 0,
     ...(typeof data.initializedAt === 'string' ? { initializedAt: data.initializedAt } : {}),
   };

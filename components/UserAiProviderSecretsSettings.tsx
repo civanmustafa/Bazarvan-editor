@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Eye,
   EyeOff,
+  FlaskConical,
   KeyRound,
   LoaderCircle,
+  Power,
   Save,
   Trash2,
 } from 'lucide-react';
@@ -11,11 +13,23 @@ import {
   clearUserAiProviderKeys,
   loadUserAiProviderSecrets,
   saveUserAiProviderKeys,
+  setUserAiProviderKeysEnabled,
+  testUserAiProviderKeys,
   type UserAiProviderSecretStatus,
   type UserAiProviderSecretsResponse,
   type UserAiSecretProvider,
 } from '../utils/userAiProviderSecrets';
 import { notifyAiProviderCapabilitiesChanged } from '../utils/aiProviderCapabilities';
+import AppSelect from './AppSelect';
+import {
+  normalizeUserAiRoutingPreferences,
+  type UserAiRoutingPreferences,
+} from '../constants/userAiRouting';
+import {
+  getCachedUserPreferences,
+  saveCurrentUserPreferencesPatch,
+  USER_PREFERENCES_CHANGED_EVENT,
+} from '../utils/userPreferences';
 
 const PROVIDERS: Array<{
   id: UserAiSecretProvider;
@@ -76,6 +90,10 @@ const UserAiProviderSecretsSettings: React.FC = () => {
   });
   const [busyProvider, setBusyProvider] = useState<UserAiSecretProvider | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSavingRouting, setIsSavingRouting] = useState(false);
+  const [routing, setRouting] = useState<UserAiRoutingPreferences>(() => (
+    normalizeUserAiRoutingPreferences(getCachedUserPreferences().ai)
+  ));
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -97,10 +115,37 @@ const UserAiProviderSecretsSettings: React.FC = () => {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const synchronizeRouting = () => {
+      setRouting(normalizeUserAiRoutingPreferences(getCachedUserPreferences().ai));
+    };
+    synchronizeRouting();
+    window.addEventListener(USER_PREFERENCES_CHANGED_EVENT, synchronizeRouting);
+    return () => window.removeEventListener(USER_PREFERENCES_CHANGED_EVENT, synchronizeRouting);
+  }, []);
+
+  const updateRouting = async (patch: Partial<UserAiRoutingPreferences>) => {
+    const next = { ...routing, ...patch };
+    setRouting(next);
+    setIsSavingRouting(true);
+    setError('');
+    setMessage('');
+    try {
+      await saveCurrentUserPreferencesPatch({ ai: next });
+      setMessage('تم حفظ طريقة استخدام مزودي الكتابة لحسابك.');
+    } catch (routingError) {
+      setRouting(normalizeUserAiRoutingPreferences(getCachedUserPreferences().ai));
+      setError(routingError instanceof Error ? routingError.message : 'تعذر حفظ طريقة استخدام المزودات.');
+    } finally {
+      setIsSavingRouting(false);
+    }
+  };
+
   const runMutation = async (
     provider: UserAiSecretProvider,
     mutation: () => Promise<UserAiProviderSecretsResponse>,
     successMessage: string,
+    clearInput = true,
   ) => {
     setBusyProvider(provider);
     setError('');
@@ -108,8 +153,10 @@ const UserAiProviderSecretsSettings: React.FC = () => {
     try {
       const result = await mutation();
       setOverview(result);
-      setInputs(current => ({ ...current, [provider]: '' }));
-      setVisible(current => ({ ...current, [provider]: false }));
+      if (clearInput) {
+        setInputs(current => ({ ...current, [provider]: '' }));
+        setVisible(current => ({ ...current, [provider]: false }));
+      }
       notifyAiProviderCapabilitiesChanged();
       setMessage(successMessage);
     } catch (mutationError) {
@@ -141,6 +188,39 @@ const UserAiProviderSecretsSettings: React.FC = () => {
     );
   };
 
+  const handleToggle = (provider: UserAiSecretProvider, enabled: boolean) => {
+    void runMutation(
+      provider,
+      () => setUserAiProviderKeysEnabled(provider, enabled),
+      enabled ? 'تم تفعيل المفاتيح لحسابك.' : 'تم إيقاف المفاتيح مع الاحتفاظ بها مشفّرة.',
+      false,
+    );
+  };
+
+  const handleTest = async (provider: UserAiSecretProvider) => {
+    setBusyProvider(provider);
+    setError('');
+    setMessage('');
+    try {
+      const result = await testUserAiProviderKeys(provider, inputs[provider]);
+      setOverview(result);
+      const valid = result.tests.filter(test => test.status === 'valid').length;
+      const quota = result.tests.filter(test => test.status === 'quota_exhausted').length;
+      const failed = result.tests.length - valid - quota;
+      if (failed > 0) {
+        setError(`نجح ${valid} مفتاح، ووصل ${quota} إلى حد الحصة، وتعذر اعتماد ${failed} مفتاح.`);
+      } else if (quota > 0) {
+        setMessage(`تم التحقق: ${valid} صالح، و${quota} صحيح الاتصال لكنه تجاوز الحصة الحالية.`);
+      } else {
+        setMessage(`تم اختبار ${valid} ${valid === 1 ? 'مفتاح' : 'مفاتيح'} بنجاح.`);
+      }
+    } catch (testError) {
+      setError(testError instanceof Error ? testError.message : 'تعذر اختبار المفاتيح.');
+    } finally {
+      setBusyProvider(null);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-24 items-center justify-center gap-2 text-sm font-bold text-gray-500 dark:text-gray-300">
@@ -169,6 +249,77 @@ const UserAiProviderSecretsSettings: React.FC = () => {
       )}
       {error && <div className="text-sm font-bold text-red-700 dark:text-red-300">{error}</div>}
       {message && <div className="text-sm font-bold text-green-700 dark:text-green-300">{message}</div>}
+
+      <section className="rounded-lg border border-[#d4af37]/35 bg-[#d4af37]/5 p-3 dark:bg-[#d4af37]/10">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-black text-gray-800 dark:text-gray-100">طريقة استخدام مزودي الكتابة</div>
+            <p className="mt-1 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
+              يطبق الاختيار اليدوي على «كتابة المقالة» و«بدء الإنشاء الشامل». ويمكن للأتمتة استخدام مزود مختلف خاص بك.
+            </p>
+          </div>
+          {isSavingRouting && <LoaderCircle size={18} className="animate-spin text-[#b8922e]" />}
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-black text-gray-600 dark:text-gray-300">المزود الافتراضي للكتابة اليدوية والشاملة</span>
+            <AppSelect
+              value={routing.contentWritingProvider}
+              onChange={event => void updateRouting({
+                contentWritingProvider: event.target.value as UserAiRoutingPreferences['contentWritingProvider'],
+              })}
+              disabled={isSavingRouting}
+              className="h-10 w-full rounded-md border border-gray-300 bg-white px-2 text-sm font-bold dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+            >
+              <option value="gemini">Gemini المجاني</option>
+              <option value="geminiPaid">Gemini المدفوع</option>
+              <option value="openai">OpenAI API</option>
+            </AppSelect>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-black text-gray-600 dark:text-gray-300">مزود الكتابة التلقائية</span>
+            <AppSelect
+              value={routing.automaticContentWritingProvider}
+              onChange={event => void updateRouting({
+                automaticContentWritingProvider: event.target.value as UserAiRoutingPreferences['automaticContentWritingProvider'],
+              })}
+              disabled={isSavingRouting}
+              className="h-10 w-full rounded-md border border-gray-300 bg-white px-2 text-sm font-bold dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+            >
+              <option value="system">إعداد النظام</option>
+              <option value="gemini">Gemini المجاني</option>
+              <option value="geminiPaid">Gemini المدفوع</option>
+              <option value="openai">OpenAI API</option>
+            </AppSelect>
+          </label>
+        </div>
+        <div className="mt-3 flex items-start gap-3 rounded-md border border-gray-200 bg-white/80 p-3 dark:border-[#3C3C3C] dark:bg-[#202020]">
+          <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={routing.freeFirstFallbackEnabled}
+              onChange={event => void updateRouting({ freeFirstFallbackEnabled: event.target.checked })}
+              disabled={isSavingRouting}
+              className="mt-1 size-4 shrink-0 rounded border-gray-300 accent-[#d4af37]"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-black text-gray-800 dark:text-gray-100">جرّب Gemini المجاني أولًا ثم انتقل إلى المدفوع عند فشل قابل لإعادة المحاولة</span>
+              <span className="mt-1 block text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">لا يحدث الانتقال عند رفض المحتوى أو خطأ المدخلات، ولا يُفعّل افتراضيًا لتجنب تكلفة غير متوقعة.</span>
+            </span>
+          </label>
+          <AppSelect
+            value={routing.paidFallbackProvider}
+            onChange={event => void updateRouting({
+              paidFallbackProvider: event.target.value as UserAiRoutingPreferences['paidFallbackProvider'],
+            })}
+            disabled={isSavingRouting || !routing.freeFirstFallbackEnabled}
+            className="h-9 w-36 shrink-0 rounded-md border border-gray-300 bg-white px-2 text-xs font-bold dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-100"
+          >
+            <option value="geminiPaid">Gemini المدفوع</option>
+            <option value="openai">OpenAI API</option>
+          </AppSelect>
+        </div>
+      </section>
 
       {PROVIDERS.map((definition, index) => {
         const status = overview?.providers[definition.id] || emptyStatus(definition.id);
@@ -205,6 +356,19 @@ const UserAiProviderSecretsSettings: React.FC = () => {
                     <span className="text-gray-500 dark:text-gray-400">لا توجد مفاتيح محفوظة</span>
                   )}
                 </div>
+                {status.configured && (
+                  <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs font-black text-gray-600 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={status.enabled}
+                      onChange={event => handleToggle(definition.id, event.target.checked)}
+                      disabled={isBusy}
+                      className="size-4 rounded border-gray-300 accent-[#d4af37]"
+                    />
+                    <Power size={13} />
+                    {status.enabled ? 'مفعّلة' : 'متوقفة مع الاحتفاظ بها'}
+                  </label>
+                )}
               </div>
             </div>
 
@@ -246,6 +410,17 @@ const UserAiProviderSecretsSettings: React.FC = () => {
                 {isBusy ? <LoaderCircle size={16} className="animate-spin" /> : <Save size={16} />}
                 <span>حفظ واستبدال</span>
               </button>
+              {['gemini_free', 'gemini_paid', 'openai'].includes(definition.id) && (
+                <button
+                  type="button"
+                  onClick={() => void handleTest(definition.id)}
+                  disabled={isBusy || (!inputs[definition.id].trim() && !status.configured)}
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-blue-200 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-900/60 dark:text-blue-300 dark:hover:bg-blue-950/30"
+                >
+                  {isBusy ? <LoaderCircle size={16} className="animate-spin" /> : <FlaskConical size={16} />}
+                  <span>اختبار</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => handleClear(definition.id)}

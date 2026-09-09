@@ -151,6 +151,7 @@ export type AiExecutionOptions = {
   telemetry?: AiExecutionTelemetryContext;
   suppressTelemetry?: boolean;
   credentialPurpose?: 'standard' | 'content_writing_resume';
+  allowProviderFallback?: boolean;
 };
 
 export type GeminiExecutionOptions = AiExecutionOptions;
@@ -1553,6 +1554,7 @@ const executeGeminiRequestInternal = async (
   );
   if (
     requestedProvider !== 'geminiPaid'
+    || options.allowProviderFallback === false
     || !shouldAttemptAiFallback(primaryResult)
     || !capabilities.providers.gemini.available
     || !requestedAccessPolicy.allowProviderFallback

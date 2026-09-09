@@ -65,6 +65,7 @@ export type OpenAiExecutionOptions = {
   signal?: AbortSignal;
   telemetry?: AiExecutionTelemetryContext;
   credentialPurpose?: 'standard' | 'content_writing_resume';
+  allowProviderFallback?: boolean;
 };
 
 class OpenAiRequestError extends Error {
@@ -279,7 +280,9 @@ const executeOpenAiProviderFallback = async (options: {
   signal?: AbortSignal;
   telemetry: AiExecutionTelemetryContext;
   credentialPurpose?: 'standard' | 'content_writing_resume';
+  allowProviderFallback?: boolean;
 }): Promise<ApiResult> => {
+  if (options.allowProviderFallback === false) return options.primaryResult;
   if (!shouldAttemptAiFallback(options.primaryResult)) return options.primaryResult;
   const accessPolicy = await resolveEffectiveProviderPolicy(
     options.telemetry.actorUserId,
@@ -402,6 +405,7 @@ export const executeOpenAiRequest = async (
         signal: options.signal,
         telemetry,
         credentialPurpose: options.credentialPurpose,
+        allowProviderFallback: options.allowProviderFallback,
       }));
     }
 
@@ -430,6 +434,7 @@ export const executeOpenAiRequest = async (
         signal: options.signal,
         telemetry,
         credentialPurpose: options.credentialPurpose,
+        allowProviderFallback: options.allowProviderFallback,
       }));
     }
 
@@ -547,6 +552,7 @@ export const executeOpenAiRequest = async (
       signal: options.signal,
       telemetry,
       credentialPurpose: options.credentialPurpose,
+      allowProviderFallback: options.allowProviderFallback,
     }));
   } catch (error) {
     if (error instanceof ProviderAccessError) {

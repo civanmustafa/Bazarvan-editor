@@ -35,6 +35,14 @@ export type UserAiProviderSecretsOverview = {
   providers: Record<UserAiSecretProvider, UserAiProviderSecretStatus>;
 };
 
+export type UserAiProviderKeyTestStatus = 'valid' | 'quota_exhausted' | 'invalid' | 'unavailable';
+
+export type UserAiProviderKeyTestResult = {
+  keySuffix: string;
+  status: UserAiProviderKeyTestStatus;
+  httpStatus: number | null;
+};
+
 export class UserAiProviderSecretError extends Error {
   readonly status: number;
   readonly code: string;
@@ -241,6 +249,108 @@ export const saveUserAiProviderKeys = async (options: {
     enabled: true,
     updatedBy: userId,
   });
+};
+
+export const setUserAiProviderKeysEnabled = async (options: {
+  actorUserId: string;
+  ownerUserId: string;
+  provider: UserAiSecretProvider;
+  enabled: boolean;
+}): Promise<void> => {
+  const userId = assertPersonalCredentialOwner(options.actorUserId, options.ownerUserId);
+  const provider = normalizeUserAiSecretProvider(options.provider);
+  const row = await readSecretRow(userId, provider);
+  if (!row) {
+    throw new UserAiProviderSecretError(
+      'Save at least one personal API key before changing its state.',
+      404,
+      'USER_AI_SECRET_NOT_FOUND',
+    );
+  }
+  await saveProviderCredentialVaultRow({
+    id: row.id,
+    vaultKey: getPersonalVaultKey(userId, provider),
+    credentialType: 'personal',
+    provider: toVaultProvider(provider),
+    purpose: row.purpose,
+    ownerUserId: userId,
+    label: row.label,
+    enabled: options.enabled,
+    expiresAt: row.expires_at,
+    updatedBy: userId,
+  });
+};
+
+const testSingleAiProviderKey = async (
+  provider: Extract<UserAiSecretProvider, 'gemini_free' | 'gemini_paid' | 'openai'>,
+  apiKey: string,
+): Promise<UserAiProviderKeyTestResult> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  let httpStatus: number | null = null;
+  try {
+    const response = provider === 'openai'
+      ? await fetch('https://api.openai.com/v1/models', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal,
+        })
+      : await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
+          method: 'GET',
+          headers: { 'x-goog-api-key': apiKey },
+          signal: controller.signal,
+        });
+    httpStatus = response.status;
+    const status: UserAiProviderKeyTestStatus = response.ok
+      ? 'valid'
+      : response.status === 429
+        ? 'quota_exhausted'
+        : response.status === 401 || response.status === 403
+          ? 'invalid'
+          : 'unavailable';
+    return { keySuffix: apiKey.slice(-4), status, httpStatus };
+  } catch {
+    return { keySuffix: apiKey.slice(-4), status: 'unavailable', httpStatus };
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const testUserAiProviderKeys = async (options: {
+  actorUserId: string;
+  ownerUserId: string;
+  provider: UserAiSecretProvider;
+  apiKeys?: unknown;
+}): Promise<UserAiProviderKeyTestResult[]> => {
+  const userId = assertPersonalCredentialOwner(options.actorUserId, options.ownerUserId);
+  const provider = normalizeUserAiSecretProvider(options.provider);
+  if (provider !== 'gemini_free' && provider !== 'gemini_paid' && provider !== 'openai') {
+    throw new UserAiProviderSecretError(
+      'Connection testing is available for Gemini and OpenAI keys.',
+      400,
+      'USER_AI_SECRET_TEST_UNSUPPORTED',
+    );
+  }
+  const keys: string[] = options.apiKeys === undefined
+    ? []
+    : normalizeApiKeyList(options.apiKeys);
+  if (options.apiKeys === undefined) {
+    const row = await readSecretRow(userId, provider);
+    if (!row) {
+      throw new UserAiProviderSecretError(
+        'Save or enter at least one API key before testing.',
+        404,
+        'USER_AI_SECRET_NOT_FOUND',
+      );
+    }
+    keys.push(...decryptProviderCredentialKeys(row));
+  }
+  const results: UserAiProviderKeyTestResult[] = [];
+  for (const key of keys) {
+    // Sequential checks avoid turning a multi-key validation into a rate spike.
+    results.push(await testSingleAiProviderKey(provider, key));
+  }
+  return results;
 };
 
 export const deleteUserAiProviderKeys = async (options: {

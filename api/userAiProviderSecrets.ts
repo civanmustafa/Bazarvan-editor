@@ -19,6 +19,8 @@ import {
   normalizeUserAiSecretProvider,
   readUserAiProviderSecretsOverview,
   saveUserAiProviderKeys,
+  setUserAiProviderKeysEnabled,
+  testUserAiProviderKeys,
 } from '../server/userAiProviderSecrets';
 import {
   ProviderAccessError,
@@ -62,11 +64,11 @@ const handleUserAiProviderSecretsRequest = async (req: any): Promise<ApiResult> 
     return {
       status: 204,
       body: {},
-      headers: getCorsPreflightHeaders(req, 'GET, PUT, DELETE, OPTIONS'),
+      headers: getCorsPreflightHeaders(req, 'GET, PUT, PATCH, POST, DELETE, OPTIONS'),
     };
   }
-  if (!['GET', 'PUT', 'DELETE'].includes(req.method)) {
-    return { status: 405, body: { error: 'Method not allowed. Use GET, PUT, or DELETE.' } };
+  if (!['GET', 'PUT', 'PATCH', 'POST', 'DELETE'].includes(req.method)) {
+    return { status: 405, body: { error: 'Method not allowed.' } };
   }
 
   const principal = await authenticateApiRequest(req);
@@ -88,6 +90,44 @@ const handleUserAiProviderSecretsRequest = async (req: any): Promise<ApiResult> 
       provider,
     });
     return readOverviewResult(principal.userId);
+  }
+  if (req.method === 'PATCH') {
+    if (typeof body.enabled !== 'boolean' || Object.keys(body).some(key => !['provider', 'enabled'].includes(key))) {
+      return { status: 400, body: { error: 'enabled must be a boolean.' } };
+    }
+    await setUserAiProviderKeysEnabled({
+      actorUserId: principal.userId,
+      ownerUserId: principal.userId,
+      provider,
+      enabled: body.enabled,
+    });
+    return readOverviewResult(principal.userId);
+  }
+  if (req.method === 'POST') {
+    if (Object.keys(body).some(key => !['provider', 'apiKeys'].includes(key)) || (
+      body.apiKeys !== undefined
+      && typeof body.apiKeys !== 'string'
+      && (!Array.isArray(body.apiKeys) || body.apiKeys.some(item => typeof item !== 'string'))
+    )) {
+      return { status: 400, body: { error: 'apiKeys must be a string or a string array.' } };
+    }
+    const tests = await testUserAiProviderKeys({
+      actorUserId: principal.userId,
+      ownerUserId: principal.userId,
+      provider,
+      ...(body.apiKeys === undefined ? {} : { apiKeys: body.apiKeys }),
+    });
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        tests,
+        ...await readUserAiProviderSecretsOverview({
+          actorUserId: principal.userId,
+          ownerUserId: principal.userId,
+        }),
+      },
+    };
   }
   const accessProvider: ProviderAccessProvider = provider;
   const policy = await resolveEffectiveProviderPolicy(principal.userId, accessProvider);

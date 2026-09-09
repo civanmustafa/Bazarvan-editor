@@ -30,6 +30,10 @@ import {
   normalizePromptRegistrySettings,
   PROMPT_REGISTRY_VERSION,
 } from './promptRegistry';
+import {
+  normalizeUserAiRoutingPreferences,
+  USER_AI_ROUTING_DEFAULTS,
+} from './userAiRouting';
 
 export const SYSTEM_SETTING_KEYS = ['ai', 'prompts', 'n8n', 'articles', 'roles', 'system'] as const;
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
@@ -435,6 +439,10 @@ export type UserPreferences = {
   ai: {
     defaultGeminiModel: string;
     allowGeminiModelFallback: boolean;
+    contentWritingProvider: 'gemini' | 'geminiPaid' | 'openai';
+    automaticContentWritingProvider: 'system' | 'gemini' | 'geminiPaid' | 'openai';
+    freeFirstFallbackEnabled: boolean;
+    paidFallbackProvider: 'geminiPaid' | 'openai';
   };
   clientGoalContexts: Record<string, unknown>;
   engineeringPrompts: Record<string, unknown>;
@@ -464,6 +472,7 @@ export const USER_PREFERENCES_DEFAULTS: UserPreferences = {
   ai: {
     defaultGeminiModel: GEMINI_ANALYSIS_MODEL,
     allowGeminiModelFallback: true,
+    ...USER_AI_ROUTING_DEFAULTS,
   },
   clientGoalContexts: {},
   engineeringPrompts: {},
@@ -498,6 +507,7 @@ export const normalizeUserPreferences = (
         ? GEMINI_ANALYSIS_MODEL
         : normalizeGeminiFreeModelId(ai.defaultGeminiModel, allowedGeminiModels),
       allowGeminiModelFallback: normalizeBoolean(ai.allowGeminiModelFallback, USER_PREFERENCES_DEFAULTS.ai.allowGeminiModelFallback),
+      ...normalizeUserAiRoutingPreferences(ai),
     },
     clientGoalContexts: isSettingsRecord(source.clientGoalContexts) ? source.clientGoalContexts : {},
     engineeringPrompts: isSettingsRecord(source.engineeringPrompts) ? source.engineeringPrompts : {},

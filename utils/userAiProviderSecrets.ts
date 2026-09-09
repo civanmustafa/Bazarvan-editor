@@ -18,8 +18,18 @@ export type UserAiProviderSecretsResponse = {
   providers: Record<UserAiSecretProvider, UserAiProviderSecretStatus>;
 };
 
+export type UserAiProviderKeyTestResult = {
+  keySuffix: string;
+  status: 'valid' | 'quota_exhausted' | 'invalid' | 'unavailable';
+  httpStatus: number | null;
+};
+
+export type UserAiProviderKeyTestResponse = UserAiProviderSecretsResponse & {
+  tests: UserAiProviderKeyTestResult[];
+};
+
 const requestUserAiProviderSecrets = async (options: {
-  method?: 'GET' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'PUT' | 'PATCH' | 'POST' | 'DELETE';
   body?: Record<string, unknown>;
 } = {}): Promise<UserAiProviderSecretsResponse> => {
   const accessToken = await getAuthenticatedApiToken();
@@ -59,3 +69,19 @@ export const clearUserAiProviderKeys = (
   method: 'DELETE',
   body: { provider },
 });
+
+export const setUserAiProviderKeysEnabled = (
+  provider: UserAiSecretProvider,
+  enabled: boolean,
+): Promise<UserAiProviderSecretsResponse> => requestUserAiProviderSecrets({
+  method: 'PATCH',
+  body: { provider, enabled },
+});
+
+export const testUserAiProviderKeys = async (
+  provider: UserAiSecretProvider,
+  apiKeys?: string,
+): Promise<UserAiProviderKeyTestResponse> => requestUserAiProviderSecrets({
+  method: 'POST',
+  body: { provider, ...(apiKeys?.trim() ? { apiKeys } : {}) },
+}) as Promise<UserAiProviderKeyTestResponse>;

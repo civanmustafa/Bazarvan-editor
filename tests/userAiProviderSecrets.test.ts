@@ -9,6 +9,8 @@ import {
   readUserAiProviderSecretsOverview,
   resolveUserAiProviderKeys,
   saveUserAiProviderKeys,
+  setUserAiProviderKeysEnabled,
+  testUserAiProviderKeys,
 } from '../server/userAiProviderSecrets.ts';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -113,6 +115,18 @@ test('personal AI key storage and execution reject every actor other than the ke
     provider: 'gemini_free',
   }));
   await assertOwnerMismatch(saveUserAiProviderKeys({
+    actorUserId: otherUserId,
+    ownerUserId: USER_ID,
+    provider: 'gemini_free',
+    apiKeys: ['personal-gemini-key-1234567890'],
+  }));
+  await assertOwnerMismatch(setUserAiProviderKeysEnabled({
+    actorUserId: otherUserId,
+    ownerUserId: USER_ID,
+    provider: 'gemini_free',
+    enabled: false,
+  }));
+  await assertOwnerMismatch(testUserAiProviderKeys({
     actorUserId: otherUserId,
     ownerUserId: USER_ID,
     provider: 'gemini_free',

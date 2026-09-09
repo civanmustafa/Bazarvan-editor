@@ -83,6 +83,15 @@ import {
   type ContentWritingStepStatus,
   type ExternalContentWritingConversation,
 } from '../utils/contentWritingSessions';
+import {
+  normalizeUserAiRoutingPreferences,
+  type UserAiRoutingPreferences,
+} from '../constants/userAiRouting';
+import {
+  getCachedUserPreferences,
+  saveCurrentUserPreferencesPatch,
+  USER_PREFERENCES_CHANGED_EVENT,
+} from '../utils/userPreferences';
 
 type ActionState = 'idle' | 'starting' | 'cancelling' | 'resuming';
 
@@ -344,7 +353,12 @@ const ContentWritingPanel: React.FC = () => {
   const reloadActiveGoalContextFromRemote = useEditorSelector(context => context.reloadActiveGoalContextFromRemote);
   const saveStatus = useEditorSelector(context => context.saveStatus);
   const isArabic = t.locale !== 'en';
-  const [provider, setProvider] = useState<ContentWritingProvider>(aiProviderCapabilities.defaultProvider);
+  const [routingPreferences, setRoutingPreferences] = useState<UserAiRoutingPreferences>(() => (
+    normalizeUserAiRoutingPreferences(getCachedUserPreferences().ai)
+  ));
+  const [provider, setProvider] = useState<ContentWritingProvider>(() => (
+    normalizeUserAiRoutingPreferences(getCachedUserPreferences().ai).contentWritingProvider
+  ));
   const [modelByProvider, setModelByProvider] = useState<Record<ContentWritingProvider, string>>(() => ({
     gemini: aiProviderCapabilities.providers.gemini.model,
     geminiPaid: aiProviderCapabilities.providers.geminiPaid.model,
@@ -412,6 +426,28 @@ const ContentWritingPanel: React.FC = () => {
   }, [articleId]);
 
   useEffect(() => {
+    const synchronizeRoutingPreferences = () => {
+      const next = normalizeUserAiRoutingPreferences(getCachedUserPreferences().ai);
+      setRoutingPreferences(next);
+      if (!providerTouchedRef.current) setProvider(next.contentWritingProvider);
+    };
+    synchronizeRoutingPreferences();
+    window.addEventListener(USER_PREFERENCES_CHANGED_EVENT, synchronizeRoutingPreferences);
+    return () => window.removeEventListener(
+      USER_PREFERENCES_CHANGED_EVENT,
+      synchronizeRoutingPreferences,
+    );
+  }, []);
+
+  const saveRoutingPreferences = useCallback((patch: Partial<UserAiRoutingPreferences>) => {
+    const next = { ...routingPreferences, ...patch };
+    setRoutingPreferences(next);
+    void saveCurrentUserPreferencesPatch({ ai: next }).catch(error => {
+      console.error('Failed to save content-writing provider preference:', error);
+    });
+  }, [routingPreferences]);
+
+  useEffect(() => {
     const synchronizeActivity = () => {
       setHasRunningWritingActivity(getAiExecutionActivities().some(activity => (
         activity.state === 'running'
@@ -429,21 +465,21 @@ const ContentWritingPanel: React.FC = () => {
       id: 'gemini' as const,
       enabled: isAiProviderEnabled('gemini'),
       available: isAiProviderAvailable('gemini'),
-      label: 'Gemini',
+      label: 'Gemini مجاني',
       icon: Sparkles,
     },
     {
       id: 'geminiPaid' as const,
       enabled: isAiProviderEnabled('geminiPaid'),
       available: isAiProviderAvailable('geminiPaid'),
-      label: 'Gemini Pro',
+      label: 'Gemini مدفوع',
       icon: BadgeDollarSign,
     },
     {
       id: 'openai' as const,
       enabled: isAiProviderEnabled('chatgpt'),
       available: isAiProviderAvailable('chatgpt'),
-      label: 'OpenAI',
+      label: 'OpenAI API',
       icon: Wand2,
     },
   ]), [isAiProviderAvailable, isAiProviderEnabled]);
@@ -543,9 +579,12 @@ const ContentWritingPanel: React.FC = () => {
       ]),
     ) as Record<ContentWritingProvider, string>);
     if (!providerTouchedRef.current) {
-      setProvider(aiProviderCapabilities.defaultProvider);
+      const preferred = routingPreferences.contentWritingProvider;
+      setProvider(aiProviderCapabilities.providers[preferred].available
+        ? preferred
+        : aiProviderCapabilities.defaultProvider);
     }
-  }, [aiProviderCapabilities]);
+  }, [aiProviderCapabilities, routingPreferences.contentWritingProvider]);
 
   useEffect(() => {
     if (selectedProviderConfig?.enabled && selectedProviderConfig.available) return;
@@ -1336,6 +1375,7 @@ const ContentWritingPanel: React.FC = () => {
                     onClick={() => {
                       providerTouchedRef.current = true;
                       setProvider(item.id);
+                      saveRoutingPreferences({ contentWritingProvider: item.id });
                     }}
                     disabled={!item.available}
                     title={!item.available
@@ -1359,6 +1399,31 @@ const ContentWritingPanel: React.FC = () => {
               <span>{isArabic ? 'جميع مزودي الكتابة معطلون.' : 'All writing providers are disabled.'}</span>
             </div>
           )}
+
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-gray-50 p-2 dark:border-[#3C3C3C] dark:bg-[#1F1F1F]">
+            <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 text-[10px] font-bold leading-5 text-gray-600 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={routingPreferences.freeFirstFallbackEnabled}
+                onChange={event => saveRoutingPreferences({ freeFirstFallbackEnabled: event.target.checked })}
+                disabled={hasActiveSession || hasActiveAutomaticWriting || hasActiveFullPipeline}
+                className="mt-0.5 size-4 shrink-0 rounded border-gray-300 accent-[#d4af37]"
+              />
+              <span>عند اختيار Gemini المجاني: انتقل تلقائيًا إلى المدفوع إذا انتهت الحصة أو تعطلت الخدمة.</span>
+            </label>
+            <AppSelect
+              size="compact"
+              value={routingPreferences.paidFallbackProvider}
+              onChange={event => saveRoutingPreferences({
+                paidFallbackProvider: event.target.value as UserAiRoutingPreferences['paidFallbackProvider'],
+              })}
+              disabled={!routingPreferences.freeFirstFallbackEnabled || hasActiveSession || hasActiveAutomaticWriting || hasActiveFullPipeline}
+              className="h-8 w-32 rounded-md border border-gray-300 bg-white px-2 text-[10px] font-bold dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-100"
+            >
+              <option value="geminiPaid">Gemini مدفوع</option>
+              <option value="openai">OpenAI API</option>
+            </AppSelect>
+          </div>
 
           {modelOptions.length > 0 ? (
             <label className="block">
