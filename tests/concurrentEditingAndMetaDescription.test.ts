@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { mergeSavedSemanticKeywords } from '../utils/semanticKeywordMerge.ts';
+import {
+  mergeSavedSemanticKeywords,
+  semanticKeywordUpdateWasAccepted,
+} from '../utils/semanticKeywordMerge.ts';
 import type { Keywords } from '../types';
 import {
   buildMetaDescriptionGenerationPrompt,
@@ -31,6 +34,45 @@ test('a background Google result never overwrites newer unsaved semantic edits',
   assert.deepEqual(mergeSavedSemanticKeywords(editedGoogle, JSON.stringify({ keywords: baseline }), remote, true).googleTitles, editedGoogle.googleTitles);
   const changedPrimary = { ...local, primary: 'فضة' };
   assert.deepEqual(mergeSavedSemanticKeywords(changedPrimary, JSON.stringify({ keywords: baseline }), remote), changedPrimary);
+});
+
+test('background semantic revisions are acknowledged only after every generated field was merged', () => {
+  const baseline: Keywords = {
+    primary: 'شركات بيع اجهزة كشف المعادن',
+    company: 'المجموعة الأوروبية للتكنولوجيا',
+    secondaries: ['', '', '', ''],
+    lsi: [],
+    googleTitles: [],
+    googleDescriptions: [],
+  };
+  const remote: Keywords = {
+    ...baseline,
+    secondaries: ['شركات بيع كواشف المعادن'],
+    lsi: ['تقنيات الحث المغناطيسي'],
+    googleTitles: ['عنوان أول', 'عنوان ثان'],
+    googleDescriptions: [
+      { text: 'وصف أول', callToAction: 'تواصل معنا' },
+      { text: 'وصف ثان', callToAction: 'اعرف المزيد' },
+    ],
+  };
+
+  const merged = mergeSavedSemanticKeywords(
+    baseline,
+    JSON.stringify({ keywords: baseline }),
+    remote,
+  );
+  assert.equal(semanticKeywordUpdateWasAccepted(merged, remote), true);
+  assert.deepEqual(merged.secondaries, remote.secondaries);
+  assert.deepEqual(merged.lsi, remote.lsi);
+
+  const locallyEdited = { ...baseline, lsi: ['تعديل المستخدم'] };
+  const partiallyMerged = mergeSavedSemanticKeywords(
+    locallyEdited,
+    JSON.stringify({ keywords: baseline }),
+    remote,
+  );
+  assert.equal(semanticKeywordUpdateWasAccepted(partiallyMerged, remote), false);
+  assert.deepEqual(partiallyMerged.lsi, locallyEdited.lsi);
 });
 
 test('manual Google action is durable, access-checked, scoped and confirmed only after saving', async () => {
@@ -209,8 +251,9 @@ test('background semantic Google suggestions update the open article without a f
   ]);
 
   assert.match(editor, /const remoteKeywords = normalizeKeywords\(row\.keywords\)/);
-  assert.match(editor, /hasCompleteGoogleMetadata/);
-  assert.match(editor, /setKeywords\(current => mergeSavedSemanticKeywords\([\s\S]*lastSavedArticleSignatureRef\.current, remoteKeywords/);
+  assert.match(editor, /semanticFieldsChanged/);
+  assert.match(editor, /semanticKeywordUpdateWasAccepted\(mergedKeywords, remoteKeywords\)/);
+  assert.match(editor, /setKeywords\(mergedKeywords\)/);
   assert.match(editor, /setConcurrentEditConflict\(null\)/);
   assert.match(suggestions, /googleMetadataSuggestionsPending/);
   assert.match(translations, /ستظهر هنا عنوانان ووصفان بعد اكتمال التوليد التلقائي/);

@@ -18,7 +18,10 @@ import { INITIAL_KEYWORDS, MANUAL_DRAFT_KEY, MANUAL_DRAFT_TITLE_KEY, MANUAL_DRAF
 import { CONTENT_SUMMARY_STORAGE_KEY } from '../constants/engineeringPrompts';
 import { useUser } from './UserContext';
 import { normalizeGoalContext } from '../utils/goalContext';
-import { mergeSavedSemanticKeywords } from '../utils/semanticKeywordMerge';
+import {
+    mergeSavedSemanticKeywords,
+    semanticKeywordUpdateWasAccepted,
+} from '../utils/semanticKeywordMerge';
 import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT, readStoredCompetitorInputs, writeStoredCompetitorInputs } from '../utils/competitorStorage';
 import {
     type ArticleImportOrigin,
@@ -930,27 +933,33 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         // worker has completed them.
                         const remoteKeywords = normalizeKeywords(row.keywords);
                         const localKeywords = latestDraftMetaRef.current.keywords;
-                        const hasCompleteGoogleMetadata = (
-                            remoteKeywords.googleTitles.length === 2
-                            && (remoteKeywords.googleDescriptions?.length || 0) === 2
-                        );
-                        const googleMetadataChanged = (
-                            JSON.stringify(remoteKeywords.googleTitles) !== JSON.stringify(localKeywords.googleTitles || [])
+                        const semanticFieldsChanged = (
+                            JSON.stringify(remoteKeywords.secondaries) !== JSON.stringify(localKeywords.secondaries || [])
+                            || JSON.stringify(remoteKeywords.lsi) !== JSON.stringify(localKeywords.lsi || [])
+                            || JSON.stringify(remoteKeywords.googleTitles) !== JSON.stringify(localKeywords.googleTitles || [])
                             || JSON.stringify(remoteKeywords.googleDescriptions) !== JSON.stringify(localKeywords.googleDescriptions || [])
                         );
                         const isSemanticTermsOnlyUpdate = Boolean(
-                            hasCompleteGoogleMetadata
-                            && googleMetadataChanged
+                            semanticFieldsChanged
                             && serverSaveCount === loadedArticleSaveCountRef.current
                             && !saveInFlightRef.current
                         );
                         if (isSemanticTermsOnlyUpdate) {
-                            setKeywords(current => mergeSavedSemanticKeywords(
-                                current, lastSavedArticleSignatureRef.current, remoteKeywords,
-                            ));
-                            loadedArticleExpectedLastSavedAtRef.current = serverLastSavedAt;
-                            setConcurrentEditConflict(null);
-                            return;
+                            const mergedKeywords = mergeSavedSemanticKeywords(
+                                localKeywords,
+                                lastSavedArticleSignatureRef.current,
+                                remoteKeywords,
+                            );
+                            if (semanticKeywordUpdateWasAccepted(mergedKeywords, remoteKeywords)) {
+                                latestDraftMetaRef.current = {
+                                    ...latestDraftMetaRef.current,
+                                    keywords: mergedKeywords,
+                                };
+                                setKeywords(mergedKeywords);
+                                loadedArticleExpectedLastSavedAtRef.current = serverLastSavedAt;
+                                setConcurrentEditConflict(null);
+                                return;
+                            }
                         }
 
                         // A row-level event may arrive just before this tab receives
@@ -1967,10 +1976,14 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const savedKeywords = normalizeKeywords(data.keywords);
         if (savedKeywords.googleTitles.length !== 2 || savedKeywords.googleDescriptions.length !== 2) return false;
         const merged = mergeSavedSemanticKeywords(latestDraftMetaRef.current.keywords, lastSavedArticleSignatureRef.current, savedKeywords, true);
-        setKeywords(current => mergeSavedSemanticKeywords(current, lastSavedArticleSignatureRef.current, savedKeywords, true));
+        if (!semanticKeywordUpdateWasAccepted(merged, savedKeywords, true)) return false;
+        latestDraftMetaRef.current = {
+            ...latestDraftMetaRef.current,
+            keywords: merged,
+        };
+        setKeywords(merged);
         loadedArticleExpectedLastSavedAtRef.current = data.last_saved_at || loadedArticleExpectedLastSavedAtRef.current;
-        return JSON.stringify(merged.googleTitles) === JSON.stringify(savedKeywords.googleTitles)
-            && JSON.stringify(merged.googleDescriptions) === JSON.stringify(savedKeywords.googleDescriptions);
+        return true;
     }, [activeArticleId]);
 
     const reloadActiveGoalContextFromRemote = useCallback(async (
