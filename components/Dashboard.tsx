@@ -58,6 +58,9 @@ import {
     beginAiExecutionActivity,
     finishAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
+import { getArticleAccessBadges } from '../utils/articleAccessBadges';
+import { useDashboardArticleEditorPresence, type ArticlePresenceLoadStatus } from '../hooks/useArticleEditorPresence';
+import type { ArticleEditorPresence } from '../utils/articleEditorPresence';
 
 const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
 
@@ -668,6 +671,9 @@ interface ArticleItemProps {
     onUpdateSettings?: (articleId: string, patch: RemoteArticleSettingsPatch) => Promise<boolean>;
     onClaim?: (articleId: string) => Promise<boolean>;
     profiles?: RemoteProfile[];
+    activeEditors?: ArticleEditorPresence[];
+    articlePresenceStatus?: ArticlePresenceLoadStatus;
+    currentUserId?: string | null;
     visibleSettingFields?: N8nDisplayFieldKey[];
     editableSettingFields?: N8nDisplayFieldKey[];
     isTrashView?: boolean;
@@ -696,6 +702,9 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     onUpdateSettings,
     onClaim,
     profiles = [],
+    activeEditors = [],
+    articlePresenceStatus = 'loading',
+    currentUserId,
     visibleSettingFields = [],
     editableSettingFields = [],
     isTrashView = false,
@@ -813,8 +822,13 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const untranslatedTitle = title || t.untitled;
     const n8nSettings = getN8nSettings(activity as RemoteArticleActivity);
     const remoteActivity = activity as RemoteArticleActivity;
+    const articleAccessBadges = getArticleAccessBadges(remoteActivity, profiles);
     const articleStatus = normalizeArticleStatus(remoteActivity.status || n8nSettings.status);
     const articleId = typeof remoteActivity.id === 'string' ? remoteActivity.id : '';
+    const otherActiveEditors = activeEditors.filter(editorPresence => editorPresence.userId !== currentUserId);
+    const activeEditorNames = activeEditors.map(editorPresence => editorPresence.displayName);
+    const visibleActiveEditorNames = activeEditorNames.slice(0, 2).join('، ');
+    const activeEditorOverflow = activeEditorNames.length > 2 ? ` +${activeEditorNames.length - 2}` : '';
     const articlePath = articleId ? buildEditorArticlePath(articleId) : '';
     const absoluteArticleUrl = articlePath ? `${window.location.origin}${articlePath}` : '';
     const canClaimArticle = Boolean(
@@ -832,7 +846,14 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
           : [];
     const showArticleStatus = fieldsToShow.includes('status');
     const canEditArticleStatus = Boolean(onUpdateSettings && editableSettingFields.includes('status'));
-    const secondaryFieldsToShow = fieldsToShow.filter(field => field !== 'status');
+    const secondaryFieldsToShow = fieldsToShow.filter(field => (
+        field !== 'status'
+        && (
+            field !== 'visibleToEmailsCsv'
+            || editableSettingFields.includes(field)
+            || canClaimArticle
+        )
+    ));
     const shouldShowN8nSettings = secondaryFieldsToShow.some(field => Boolean(n8nSettings[field]));
     const handleCopyArticleLink = async (event: React.MouseEvent) => {
         event.stopPropagation();
@@ -844,6 +865,16 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
         if (!absoluteArticleUrl) return;
         window.open(absoluteArticleUrl, '_blank', 'noopener,noreferrer');
     };
+    const handleOpenArticle = () => {
+        if (otherActiveEditors.length > 0) {
+            const names = otherActiveEditors.map(editorPresence => editorPresence.displayName).join('، ');
+            const confirmed = window.confirm(
+                `المقالة مفتوحة الآن لدى ${names}. يمكنك الدخول للمعاينة، لكن قد يحدث تعارض إذا عدّلتها بالتزامن. هل تريد المتابعة؟`,
+            );
+            if (!confirmed) return;
+        }
+        onLoad();
+    };
     const hasAlternativeKeywords = Array.isArray(remoteActivity.keywords?.secondaries)
         && remoteActivity.keywords.secondaries.some((item: unknown) => typeof item === 'string' && item.trim());
     const hasLsiKeywords = Array.isArray(remoteActivity.keywords?.lsi)
@@ -852,10 +883,10 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     return (
         <li
             className="group relative flex cursor-pointer items-start gap-3 bg-transparent px-1.5 py-3 transition-colors duration-150 hover:bg-gray-900/[0.025] focus-visible:bg-gray-900/[0.025] focus-visible:outline-none dark:hover:bg-white/[0.025] dark:focus-visible:bg-white/[0.025]"
-            onClick={onLoad}
+            onClick={handleOpenArticle}
             role="button"
             tabIndex={0}
-            onKeyPress={(e) => e.key === 'Enter' && onLoad()}
+            onKeyPress={(e) => e.key === 'Enter' && handleOpenArticle()}
         >
             {isSelectable && (
                 <input
@@ -883,6 +914,51 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                                 disabled={savingSettingField !== null}
                                 onChange={value => handleSettingChange('status', value)}
                             />
+                        )}
+                        {articleId && !isTrashView && (
+                            <span
+                                className={`inline-flex min-h-6 shrink-0 items-center gap-1.5 rounded-full border px-2 text-[10px] font-black ${articlePresenceStatus === 'error'
+                                  ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
+                                  : activeEditors.length > 0
+                                    ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'
+                                    : articlePresenceStatus === 'ready'
+                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200'
+                                      : 'border-gray-200 bg-gray-50 text-gray-500 dark:border-gray-600 dark:bg-gray-700/30 dark:text-gray-300'
+                                }`}
+                                title={articlePresenceStatus === 'error'
+                                  ? 'تعذر التحقق من المستخدمين داخل المقالة'
+                                  : activeEditors.length > 0
+                                    ? `داخل المقالة الآن: ${activeEditorNames.join('، ')}`
+                                    : articlePresenceStatus === 'ready'
+                                      ? 'لا يوجد مستخدم داخل المقالة الآن'
+                                      : 'جار التحقق من وجود مستخدم داخل المقالة'}
+                                aria-label={articlePresenceStatus === 'error'
+                                  ? 'تعذر التحقق من حالة دخول المقالة'
+                                  : activeEditors.length > 0
+                                    ? `داخل المقالة الآن: ${activeEditorNames.join('، ')}`
+                                    : articlePresenceStatus === 'ready'
+                                      ? 'لا أحد داخل المقالة'
+                                      : 'جار التحقق من حالة دخول المقالة'}
+                            >
+                                <span
+                                    className={`h-1.5 w-1.5 rounded-full ${articlePresenceStatus === 'error'
+                                      ? 'bg-red-500'
+                                      : activeEditors.length > 0
+                                        ? 'bg-amber-500 animate-pulse'
+                                        : articlePresenceStatus === 'ready'
+                                          ? 'bg-emerald-500'
+                                          : 'bg-gray-400 animate-pulse'
+                                    }`}
+                                    aria-hidden="true"
+                                />
+                                {articlePresenceStatus === 'error'
+                                  ? 'تعذر التحقق'
+                                  : activeEditors.length > 0
+                                    ? `داخلها: ${visibleActiveEditorNames}${activeEditorOverflow}`
+                                    : articlePresenceStatus === 'ready'
+                                      ? 'لا أحد داخلها'
+                                      : 'جار التحقق'}
+                            </span>
                         )}
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-0.5 opacity-80 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
@@ -956,6 +1032,35 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         ) : null}
                     </div>
                 </div>
+                {articleAccessBadges.length > 0 && (
+                    <div
+                        className="flex flex-wrap items-center gap-1.5"
+                        aria-label="المستخدمون القادرون على الوصول إلى المقالة"
+                    >
+                        <Users size={12} className="shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
+                        {articleAccessBadges.map(access => {
+                            const isEditor = access.role === 'editor';
+                            return (
+                                <span
+                                    key={access.key}
+                                    className={`inline-flex min-h-6 items-center overflow-hidden rounded-full border text-[10px] font-black ${isEditor
+                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200'
+                                      : 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200'
+                                    }`}
+                                    title={`${access.name} — ${isEditor ? 'محرر' : 'معاينة'}`}
+                                >
+                                    <span className="px-2" dir="auto">{access.name}</span>
+                                    <span className={`self-stretch px-1.5 py-1 text-[9px] text-white ${isEditor
+                                      ? 'bg-emerald-600 dark:bg-emerald-500'
+                                      : 'bg-sky-600 dark:bg-sky-500'
+                                    }`}>
+                                        {isEditor ? 'محرر' : 'معاينة'}
+                                    </span>
+                                </span>
+                            );
+                        })}
+                    </div>
+                )}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] leading-5 text-gray-500 dark:text-gray-400">
                     {remoteActivity.createdAt && (
                          <span className="flex items-center gap-1.5" title="تاريخ الإنشاء">
@@ -1161,6 +1266,13 @@ const Dashboard: React.FC = () => {
     [remoteArticles],
   );
   const dashboardArticleIdsKey = dashboardArticleIds.join('|');
+  const {
+    presenceByArticleId,
+    status: articlePresenceStatus,
+  } = useDashboardArticleEditorPresence(
+    dashboardArticleIds,
+    Boolean(currentUser && !isTrashVisible),
+  );
   const dashboardArticleTitles = useMemo(
     () => Object.fromEntries(remoteArticles.map(article => [article.id, article.title || article.id])),
     [remoteArticles],
@@ -2191,6 +2303,9 @@ const Dashboard: React.FC = () => {
                                     onUpdateSettings={handleUpdateArticleSettings}
                                     onClaim={handleClaimArticle}
                                     profiles={profiles}
+                                    activeEditors={presenceByArticleId[activity.id] || []}
+                                    articlePresenceStatus={articlePresenceStatus}
+                                    currentUserId={currentUserId}
                                     visibleSettingFields={isAdmin
                                       ? ['status', 'visibility', 'accessRole', 'visibleToEmailsCsv', 'articleLanguage']
                                       : ['status', 'accessRole', 'visibleToEmailsCsv']}

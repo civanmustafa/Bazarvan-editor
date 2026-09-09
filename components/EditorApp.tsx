@@ -20,6 +20,7 @@ import {
 import EditorToolbar from './EditorToolbar';
 import InternalLinkAutomation from './InternalLinkAutomation';
 import ConcurrentEditConflictBanner from './ConcurrentEditConflictBanner';
+import ArticleEditorPresenceBanner from './ArticleEditorPresenceBanner';
 import GoogleMetadataSuggestions from './GoogleMetadataSuggestions';
 import AiExecutionMonitor from './AiKeyUsageToast';
 import LeftSidebar from './LeftSidebar';
@@ -177,6 +178,7 @@ const EditorView: React.FC = () => {
             onOpenInternalLinking={openInternalLinking}
           />
           <InternalLinkAutomation />
+          <ArticleEditorPresenceBanner />
           <ConcurrentEditConflictBanner />
           <div
             ref={scrollContainerRef}
