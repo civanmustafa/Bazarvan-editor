@@ -39,14 +39,17 @@ test('article access badges combine owners and explicit grants with clear roles'
   assert.equal(badges.some(badge => badge.name.includes('@')), false);
 });
 
-test('dashboard cards render one visible editor or preview badge per access user', async () => {
+test('dashboard cards merge access badges into the existing users field without a duplicate row', async () => {
   const dashboard = await readFile(
     new URL('../components/Dashboard.tsx', import.meta.url),
     'utf8',
   );
 
   assert.match(dashboard, /getArticleAccessBadges\(remoteActivity, profiles\)/);
+  assert.match(dashboard, /const ArticleAccessBadgesInline/);
+  assert.match(dashboard, /<ArticleAccessUsersField[\s\S]*badges=\{articleAccessBadges\}/);
+  assert.match(dashboard, /<EditableN8nUsersField[\s\S]*accessBadges=\{articleAccessBadges\}/);
   assert.match(dashboard, /المستخدمون القادرون على الوصول إلى المقالة/);
   assert.match(dashboard, /isEditor \? 'محرر' : 'معاينة'/);
-  assert.match(dashboard, /field !== 'visibleToEmailsCsv'/);
+  assert.doesNotMatch(dashboard, /\{articleAccessBadges\.length > 0 && \(\s*<div/);
 });

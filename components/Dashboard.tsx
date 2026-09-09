@@ -58,7 +58,7 @@ import {
     beginAiExecutionActivity,
     finishAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
-import { getArticleAccessBadges } from '../utils/articleAccessBadges';
+import { getArticleAccessBadges, type ArticleAccessBadge } from '../utils/articleAccessBadges';
 import { useDashboardArticleEditorPresence, type ArticlePresenceLoadStatus } from '../hooks/useArticleEditorPresence';
 import type { ArticleEditorPresence } from '../utils/articleEditorPresence';
 
@@ -382,13 +382,58 @@ const parseVisibleUserEmails = (value: string): string[] => (
     .filter(Boolean)))
 );
 
+const ArticleAccessBadgesInline: React.FC<{
+  badges: ArticleAccessBadge[];
+}> = ({ badges }) => (
+  <>
+    <Users size={12} className="shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
+    {badges.length > 0 ? badges.map(access => {
+      const isEditor = access.role === 'editor';
+      return (
+        <span
+          key={access.key}
+          className={`inline-flex min-h-5 items-center overflow-hidden rounded-full border text-[9px] font-black ${isEditor
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200'
+            : 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200'
+          }`}
+          title={`${access.name} — ${isEditor ? 'محرر' : 'معاينة'}`}
+        >
+          <span className="px-1.5" dir="auto">{access.name}</span>
+          <span className={`self-stretch px-1 py-0.5 text-[8px] text-white ${isEditor
+            ? 'bg-emerald-600 dark:bg-emerald-500'
+            : 'bg-sky-600 dark:bg-sky-500'
+          }`}>
+            {isEditor ? 'محرر' : 'معاينة'}
+          </span>
+        </span>
+      );
+    }) : (
+      <span className="font-bold text-gray-400 dark:text-gray-500">لا مستخدمين محددين</span>
+    )}
+  </>
+);
+
+const ArticleAccessUsersField: React.FC<{
+  badges: ArticleAccessBadge[];
+}> = ({ badges }) => (
+  <span
+    className="article-list-field inline-flex min-h-7 min-w-0 max-w-full shrink-0 flex-wrap items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-[10px] text-gray-700 dark:text-gray-200"
+    title={badges.map(access => `${access.name} — ${access.role === 'editor' ? 'محرر' : 'معاينة'}`).join('، ') || 'لا مستخدمين محددين'
+    }
+    aria-label="المستخدمون القادرون على الوصول إلى المقالة"
+  >
+    <ArticleAccessBadgesInline badges={badges} />
+  </span>
+);
+
 const EditableN8nUsersField: React.FC<{
   field: 'visibleToEmailsCsv';
   value?: string;
   profiles: RemoteProfile[];
+  accessBadges: ArticleAccessBadge[];
   disabled: boolean;
   onChange: (field: 'visibleToEmailsCsv', value: string) => void;
-}> = ({ field, value = '', profiles, disabled, onChange }) => {
+}> = ({ field, value = '', profiles, accessBadges, disabled, onChange }) => {
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const [draftEmails, setDraftEmails] = useState<string[]>(() => parseVisibleUserEmails(value));
   const availableProfiles = useMemo(() => (
@@ -404,7 +449,6 @@ const EditableN8nUsersField: React.FC<{
   const savedEmails = parseVisibleUserEmails(value);
   const savedSignature = [...savedEmails].sort().join(',');
   const draftSignature = [...draftEmails].sort().join(',');
-  const selectedCount = draftEmails.length;
   const toggleEmail = (email: string) => {
     const normalizedEmail = email.trim().toLowerCase();
     setDraftEmails(current => current.includes(normalizedEmail)
@@ -435,12 +479,11 @@ const EditableN8nUsersField: React.FC<{
       }}
     >
       <summary
-        className={`article-list-field inline-flex min-h-7 min-w-[148px] max-w-[210px] list-none items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-bold text-gray-700 dark:text-gray-200 ${disabled ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
-        title={draftEmails.join(', ') || 'اختيار المستخدمين'}
+        className={`article-list-field inline-flex min-h-7 min-w-[148px] max-w-full list-none flex-wrap items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-bold text-gray-700 dark:text-gray-200 ${disabled ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
+        title={accessBadges.map(access => `${access.name} — ${access.role === 'editor' ? 'محرر' : 'معاينة'}`).join('، ') || 'اختيار المستخدمين'}
+        aria-label="المستخدمون القادرون على الوصول إلى المقالة — اضغط للتعديل"
       >
-        <Users size={12} className="shrink-0" />
-        <span className="shrink-0 font-medium text-gray-400 dark:text-gray-500">{N8N_SETTING_LABELS[field]}</span>
-        <span className="min-w-0 flex-1 truncate font-black">{selectedCount > 0 ? `${selectedCount} مستخدم` : 'اختيار'}</span>
+        <ArticleAccessBadgesInline badges={accessBadges} />
         <ChevronDown size={11} className="shrink-0 text-gray-400 transition-transform group-open/users:rotate-180" aria-hidden="true" />
       </summary>
       <div className="editor-menu absolute end-0 top-full z-40 mt-1 w-72 rounded-md border border-gray-200 bg-white p-2 shadow-xl dark:border-[#3C3C3C] dark:bg-[#242424]">
@@ -846,15 +889,12 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
           : [];
     const showArticleStatus = fieldsToShow.includes('status');
     const canEditArticleStatus = Boolean(onUpdateSettings && editableSettingFields.includes('status'));
-    const secondaryFieldsToShow = fieldsToShow.filter(field => (
-        field !== 'status'
-        && (
-            field !== 'visibleToEmailsCsv'
-            || editableSettingFields.includes(field)
-            || canClaimArticle
-        )
+    const secondaryFieldsToShow = fieldsToShow.filter(field => field !== 'status');
+    const shouldShowN8nSettings = secondaryFieldsToShow.some(field => (
+        field === 'visibleToEmailsCsv'
+          ? articleAccessBadges.length > 0 || editableSettingFields.includes(field) || canClaimArticle
+          : Boolean(n8nSettings[field])
     ));
-    const shouldShowN8nSettings = secondaryFieldsToShow.some(field => Boolean(n8nSettings[field]));
     const handleCopyArticleLink = async (event: React.MouseEvent) => {
         event.stopPropagation();
         if (!absoluteArticleUrl) return;
@@ -1032,35 +1072,6 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         ) : null}
                     </div>
                 </div>
-                {articleAccessBadges.length > 0 && (
-                    <div
-                        className="flex flex-wrap items-center gap-1.5"
-                        aria-label="المستخدمون القادرون على الوصول إلى المقالة"
-                    >
-                        <Users size={12} className="shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
-                        {articleAccessBadges.map(access => {
-                            const isEditor = access.role === 'editor';
-                            return (
-                                <span
-                                    key={access.key}
-                                    className={`inline-flex min-h-6 items-center overflow-hidden rounded-full border text-[10px] font-black ${isEditor
-                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200'
-                                      : 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200'
-                                    }`}
-                                    title={`${access.name} — ${isEditor ? 'محرر' : 'معاينة'}`}
-                                >
-                                    <span className="px-2" dir="auto">{access.name}</span>
-                                    <span className={`self-stretch px-1.5 py-1 text-[9px] text-white ${isEditor
-                                      ? 'bg-emerald-600 dark:bg-emerald-500'
-                                      : 'bg-sky-600 dark:bg-sky-500'
-                                    }`}>
-                                        {isEditor ? 'محرر' : 'معاينة'}
-                                    </span>
-                                </span>
-                            );
-                        })}
-                    </div>
-                )}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] leading-5 text-gray-500 dark:text-gray-400">
                     {remoteActivity.createdAt && (
                          <span className="flex items-center gap-1.5" title="تاريخ الإنشاء">
@@ -1115,7 +1126,8 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                                         className="inline-flex shrink-0 items-center gap-1 rounded-md bg-green-100 px-2 py-0.5 text-[10px] font-black text-green-700 hover:bg-green-200 disabled:cursor-wait disabled:opacity-60 dark:bg-green-500/15 dark:text-green-300 dark:hover:bg-green-500/25"
                                         title="حجز المقالة وتحويلها إلى حسابك"
                                     >
-                                        visibleToEmailsCsv: احجز
+                                        <Users size={12} aria-hidden="true" />
+                                        احجز المقالة
                                     </button>
                                 );
                             }
@@ -1137,8 +1149,17 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                                         field={field}
                                         value={n8nSettings.visibleToEmailsCsv}
                                         profiles={profiles}
+                                        accessBadges={articleAccessBadges}
                                         disabled={savingSettingField !== null}
                                         onChange={handleSettingChange}
+                                    />
+                                );
+                            }
+                            if (field === 'visibleToEmailsCsv') {
+                                return (
+                                    <ArticleAccessUsersField
+                                        key={field}
+                                        badges={articleAccessBadges}
                                     />
                                 );
                             }
