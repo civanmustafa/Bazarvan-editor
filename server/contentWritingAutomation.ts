@@ -401,6 +401,26 @@ const reconcileBlockedPrerequisiteItems = async (
       && usableCompetitorCount >= settings.minimumCompetitors
       && (!settings.requireCompetitorTerminalState || processingComplete);
 
+    if (
+      item.attempt_count !== 0
+      || item.max_attempts !== settings.maxAttempts
+      || item.usable_competitor_count !== usableCompetitorCount
+      || item.pending_competitor_count !== pendingCompetitorCount
+    ) {
+      const { error: normalizeError } = await supabase
+        .from('content_writing_automation_items')
+        .update({
+          attempt_count: 0,
+          max_attempts: settings.maxAttempts,
+          usable_competitor_count: usableCompetitorCount,
+          pending_competitor_count: pendingCompetitorCount,
+        })
+        .eq('id', item.id)
+        .eq('status', 'blocked')
+        .eq('last_error_code', 'content_writing_prerequisites_missing');
+      if (normalizeError) throw normalizeError;
+    }
+
     if (ready && textValue(readiness.signature) !== item.readiness_signature) {
       const { error: updateError } = await supabase
         .from('content_writing_automation_items')

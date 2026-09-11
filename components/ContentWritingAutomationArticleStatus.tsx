@@ -327,7 +327,11 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
             <div className="mt-0.5 text-[10px] font-semibold leading-5 opacity-80">{presentation.detail}</div>
             {item && (
               <div className="mt-1 flex flex-wrap gap-1 text-[9px] font-black opacity-80">
-                <span>{isArabic ? 'المحاولة' : 'Attempt'} {item.attemptCount}/{item.maxAttempts}</span>
+                <span>
+                  {item.lastErrorCode === 'content_writing_prerequisites_missing'
+                    ? (isArabic ? 'لم تبدأ محاولة ذكاء اصطناعي' : 'No AI attempt started')
+                    : <>{isArabic ? 'المحاولة' : 'Attempt'} {item.attemptCount}/{item.maxAttempts}</>}
+                </span>
                 <span>·</span>
                 <span>{getContentWritingAutomationProviderLabel(item.provider, isArabic)}{item.model ? ` · ${item.model}` : ''}</span>
                 {item.qualityScore !== null && <><span>·</span><span>{isArabic ? 'الجودة' : 'Quality'} {item.qualityScore}/100</span></>}

@@ -89,6 +89,7 @@ test('dashboard automation queue exposes every user-controlled automation stage'
         requireCompetitorTerminalState: true,
         maxAttempts: 3,
         retryMinutes: 15,
+        autoApplyPassedContent: false,
       },
       state: null,
       active: null,
@@ -269,6 +270,7 @@ const writingOverview = (lastItem: ContentWritingAutomationItem | null): Content
   settings: {
     enabled: true, intervalMinutes: 15, provider: 'gemini', model: '', minimumCompetitors: 1,
     requireCompetitorTerminalState: true, maxAttempts: 3, retryMinutes: 15,
+    autoApplyPassedContent: false,
   },
   state: {
     nextAllowedAt: '', lastItemId: 'writing-1', lastArticleId: 'article-1',

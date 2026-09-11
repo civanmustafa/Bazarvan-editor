@@ -346,30 +346,34 @@ const readArticleSummaries = async (
     latestSessions.set(text(value.article_id), value);
   }
   const sessionIds = Array.from(latestSessions.values()).map(session => text(session.id)).filter(Boolean);
-  const [fullDraftResult, partialStepsResult] = sessionIds.length > 0
-    ? await Promise.all([
-        supabase
-          .from('content_writing_sessions')
-          .select('id')
-          .in('id', sessionIds)
-          .not('result_text', 'is', null)
-          .neq('result_text', ''),
-        supabase
-          .from('content_writing_steps')
-          .select('session_id,step_type')
-          .in('session_id', sessionIds)
-          .eq('status', 'completed')
-          .in('step_type', ['section', 'introduction', 'conclusion', 'call_to_action', 'faq', 'section_repair'])
-          .not('output_text', 'is', null)
-          .neq('output_text', ''),
-      ])
-    : [{ data: [], error: null }, { data: [], error: null }];
-  if (fullDraftResult.error) throw fullDraftResult.error;
-  if (partialStepsResult.error) throw partialStepsResult.error;
+  let fullDraftRows: Record<string, unknown>[] = [];
+  let partialStepRows: Record<string, unknown>[] = [];
+  if (sessionIds.length > 0) {
+    const [fullDraftResult, partialStepsResult] = await Promise.all([
+      supabase
+        .from('content_writing_sessions')
+        .select('id')
+        .in('id', sessionIds)
+        .not('result_text', 'is', null)
+        .neq('result_text', ''),
+      supabase
+        .from('content_writing_steps')
+        .select('session_id,step_type')
+        .in('session_id', sessionIds)
+        .eq('status', 'completed')
+        .in('step_type', ['section', 'introduction', 'conclusion', 'call_to_action', 'faq', 'section_repair'])
+        .not('output_text', 'is', null)
+        .neq('output_text', ''),
+    ]);
+    if (fullDraftResult.error) throw fullDraftResult.error;
+    if (partialStepsResult.error) throw partialStepsResult.error;
+    fullDraftRows = (fullDraftResult.data || []).filter(isRecord);
+    partialStepRows = (partialStepsResult.data || []).filter(isRecord);
+  }
 
-  const fullDraftSessionIds = new Set((fullDraftResult.data || []).map(row => text(row.id)).filter(Boolean));
+  const fullDraftSessionIds = new Set(fullDraftRows.map(row => text(row.id)).filter(Boolean));
   const partialStepCounts = new Map<string, number>();
-  for (const row of partialStepsResult.data || []) {
+  for (const row of partialStepRows) {
     const sessionId = text(row.session_id);
     if (sessionId) partialStepCounts.set(sessionId, (partialStepCounts.get(sessionId) || 0) + 1);
   }
