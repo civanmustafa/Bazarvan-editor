@@ -17,6 +17,7 @@ export type ContentWritingAutomationSettings = {
   requireCompetitorTerminalState: boolean;
   maxAttempts: number;
   retryMinutes: number;
+  autoApplyPassedContent: boolean;
 };
 
 export type ContentWritingAutomationReadiness = {
@@ -112,6 +113,37 @@ export type ContentWritingAutomationStatus = {
   } | null;
 };
 
+export type ContentWritingArticleSummaryState =
+  | 'queued'
+  | 'writing'
+  | 'waiting_prerequisites'
+  | 'partial'
+  | 'written'
+  | 'written_quality_failed'
+  | 'written_quality_passed'
+  | 'applied'
+  | 'failed'
+  | 'cancelled';
+
+export type ContentWritingArticleSummary = {
+  articleId: string;
+  state: ContentWritingArticleSummaryState;
+  sessionId: string | null;
+  sessionStatus: string | null;
+  qualityScore: number | null;
+  qualityMinimumScore: number | null;
+  qualityPassed: boolean | null;
+  hasFullDraft: boolean;
+  partialStepCount: number;
+  appliedAt: string | null;
+  automaticApplicationStatus: string | null;
+  usableCompetitorCount: number;
+  minimumCompetitorCount: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  updatedAt: string;
+};
+
 const isRecord = (value: unknown): value is Record<string, any> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -133,10 +165,11 @@ const normalizeSettings = (value: unknown): ContentWritingAutomationSettings => 
     intervalMinutes: Math.max(1, integer(source.intervalMinutes, 15)),
     provider,
     model: text(source.model),
-    minimumCompetitors: Math.max(1, Math.min(5, integer(source.minimumCompetitors, 1))),
+    minimumCompetitors: Math.max(3, Math.min(5, integer(source.minimumCompetitors, 3))),
     requireCompetitorTerminalState: source.requireCompetitorTerminalState !== false,
     maxAttempts: Math.max(1, integer(source.maxAttempts, 3)),
     retryMinutes: Math.max(1, integer(source.retryMinutes, 30)),
+    autoApplyPassedContent: source.autoApplyPassedContent === true,
   };
 };
 
@@ -282,6 +315,71 @@ export const loadContentWritingAutomationStatus = async (
   };
 };
 
+const normalizeArticleSummary = (value: unknown): ContentWritingArticleSummary | null => {
+  const source = isRecord(value) ? value : null;
+  const articleId = text(source?.articleId);
+  const state = text(source?.state) as ContentWritingArticleSummaryState;
+  if (!source || !articleId || ![
+    'queued',
+    'writing',
+    'waiting_prerequisites',
+    'partial',
+    'written',
+    'written_quality_failed',
+    'written_quality_passed',
+    'applied',
+    'failed',
+    'cancelled',
+  ].includes(state)) return null;
+  const qualityScore = typeof source.qualityScore === 'number' && Number.isFinite(source.qualityScore)
+    ? source.qualityScore
+    : null;
+  const qualityMinimumScore = typeof source.qualityMinimumScore === 'number'
+    && Number.isFinite(source.qualityMinimumScore)
+    ? source.qualityMinimumScore
+    : null;
+  return {
+    articleId,
+    state,
+    sessionId: nullableText(source.sessionId),
+    sessionStatus: nullableText(source.sessionStatus),
+    qualityScore,
+    qualityMinimumScore,
+    qualityPassed: typeof source.qualityPassed === 'boolean' ? source.qualityPassed : null,
+    hasFullDraft: source.hasFullDraft === true,
+    partialStepCount: integer(source.partialStepCount),
+    appliedAt: nullableText(source.appliedAt),
+    automaticApplicationStatus: nullableText(source.automaticApplicationStatus),
+    usableCompetitorCount: integer(source.usableCompetitorCount),
+    minimumCompetitorCount: Math.max(3, integer(source.minimumCompetitorCount, 3)),
+    errorCode: nullableText(source.errorCode),
+    errorMessage: nullableText(source.errorMessage),
+    updatedAt: text(source.updatedAt),
+  };
+};
+
+export const loadContentWritingArticleSummaries = async (
+  articleIds: string[],
+  options: { signal?: AbortSignal } = {},
+): Promise<Record<string, ContentWritingArticleSummary>> => {
+  const normalizedIds = Array.from(new Set(articleIds.map(text).filter(Boolean)));
+  if (normalizedIds.length === 0) return {};
+  const chunks = Array.from(
+    { length: Math.ceil(normalizedIds.length / 50) },
+    (_value, index) => normalizedIds.slice(index * 50, (index + 1) * 50),
+  );
+  const payloads = await Promise.all(chunks.map(chunk => (
+    requestAutomation({ action: 'summaries', articleIds: chunk }, options.signal)
+  )));
+  const summaries = payloads.flatMap(payload => (
+    Array.isArray(payload.summaries) ? payload.summaries : []
+  ));
+  return Object.fromEntries(summaries.flatMap(value => {
+    const summary = normalizeArticleSummary(value);
+    return summary ? [[summary.articleId, summary]] : [];
+  }));
+};
+
 const mutateItem = async (
   action: 'retry' | 'cancel',
   itemId: string,
@@ -310,7 +408,7 @@ const READINESS_LABELS: Record<string, [string, string]> = {
   'goal_context.objective': ['هدف الصفحة', 'Page objective'],
   'goal_context.audienceScope': ['نطاق الجمهور', 'Audience scope'],
   'goal_context.searchIntent': ['نية البحث', 'Search intent'],
-  competitors: ['نص منافس صالح واحد على الأقل', 'At least one usable competitor text'],
+  competitors: ['ثلاثة نصوص منافسة مؤهلة على الأقل', 'At least three qualified competitor texts'],
 };
 
 export const getContentWritingAutomationReadinessLabel = (

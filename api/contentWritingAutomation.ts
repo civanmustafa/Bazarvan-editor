@@ -80,7 +80,9 @@ const publicItem = (value: unknown): Record<string, unknown> | null => {
     model: text(value.model),
     sessionId: text(value.content_writing_session_id) || null,
     sessionStatus: text(session.status) || null,
-    qualityScore: Number.isFinite(Number(session.quality_score)) ? Number(session.quality_score) : null,
+    qualityScore: typeof session.quality_score === 'number' && Number.isFinite(session.quality_score)
+      ? session.quality_score
+      : null,
     qualityPassed: isRecord(session.quality_report) ? session.quality_report.passed === true : null,
     attemptCount: Math.max(0, Number(value.attempt_count) || 0),
     maxAttempts: Math.max(1, Number(value.max_attempts) || 1),
@@ -318,6 +320,116 @@ const readArticleStatus = async (articleId: string) => {
   };
 };
 
+const readArticleSummaries = async (
+  articleIds: string[],
+  minimumCompetitorCount: number,
+): Promise<Record<string, unknown>[]> => {
+  const supabase = getExternalAnalysisSupabaseAdmin();
+  const [{ data: items, error: itemError }, { data: sessions, error: sessionError }] = await Promise.all([
+    supabase
+      .from('content_writing_automation_items')
+      .select('article_id,status,content_writing_session_id,usable_competitor_count,pending_competitor_count,last_error_code,last_error,updated_at')
+      .in('article_id', articleIds),
+    supabase
+      .from('content_writing_sessions')
+      .select('id,article_id,status,quality_score,quality_report,applied_at,last_error_code,last_error,progress,created_at,updated_at')
+      .in('article_id', articleIds)
+      .order('created_at', { ascending: false })
+      .limit(Math.min(500, articleIds.length * 20)),
+  ]);
+  if (itemError) throw itemError;
+  if (sessionError) throw sessionError;
+
+  const latestSessions = new Map<string, Record<string, any>>();
+  for (const value of sessions || []) {
+    if (!isRecord(value) || !text(value.article_id) || latestSessions.has(text(value.article_id))) continue;
+    latestSessions.set(text(value.article_id), value);
+  }
+  const sessionIds = Array.from(latestSessions.values()).map(session => text(session.id)).filter(Boolean);
+  const [fullDraftResult, partialStepsResult] = sessionIds.length > 0
+    ? await Promise.all([
+        supabase
+          .from('content_writing_sessions')
+          .select('id')
+          .in('id', sessionIds)
+          .not('result_text', 'is', null)
+          .neq('result_text', ''),
+        supabase
+          .from('content_writing_steps')
+          .select('session_id,step_type')
+          .in('session_id', sessionIds)
+          .eq('status', 'completed')
+          .in('step_type', ['section', 'introduction', 'conclusion', 'call_to_action', 'faq', 'section_repair'])
+          .not('output_text', 'is', null)
+          .neq('output_text', ''),
+      ])
+    : [{ data: [], error: null }, { data: [], error: null }];
+  if (fullDraftResult.error) throw fullDraftResult.error;
+  if (partialStepsResult.error) throw partialStepsResult.error;
+
+  const fullDraftSessionIds = new Set((fullDraftResult.data || []).map(row => text(row.id)).filter(Boolean));
+  const partialStepCounts = new Map<string, number>();
+  for (const row of partialStepsResult.data || []) {
+    const sessionId = text(row.session_id);
+    if (sessionId) partialStepCounts.set(sessionId, (partialStepCounts.get(sessionId) || 0) + 1);
+  }
+  const itemsByArticle = new Map(
+    (items || []).filter(isRecord).map(item => [text(item.article_id), item] as const),
+  );
+
+  return articleIds.flatMap(articleId => {
+    const item = itemsByArticle.get(articleId) || null;
+    const session = latestSessions.get(articleId) || null;
+    if (!item && !session) return [];
+    const sessionId = text(session?.id);
+    const hasFullDraft = Boolean(sessionId && fullDraftSessionIds.has(sessionId));
+    const partialStepCount = sessionId ? partialStepCounts.get(sessionId) || 0 : 0;
+    const qualityReport = isRecord(session?.quality_report) ? session.quality_report : {};
+    const qualityScore = typeof session?.quality_score === 'number' && Number.isFinite(session.quality_score)
+      ? session.quality_score
+      : null;
+    const qualityMinimumScore = typeof qualityReport.minimumScore === 'number'
+      && Number.isFinite(qualityReport.minimumScore)
+      ? qualityReport.minimumScore
+      : null;
+    const qualityPassed = typeof qualityReport.passed === 'boolean' ? qualityReport.passed : null;
+    const sessionStatus = text(session?.status);
+    const itemStatus = text(item?.status);
+    const errorCode = text(session?.last_error_code) || text(item?.last_error_code) || null;
+    const errorMessage = text(session?.last_error) || text(item?.last_error) || null;
+    const progress = isRecord(session?.progress) ? session.progress : {};
+    let state = 'failed';
+    if (text(session?.applied_at)) state = 'applied';
+    else if (hasFullDraft && qualityPassed === false) state = 'written_quality_failed';
+    else if (hasFullDraft && qualityPassed === true) state = 'written_quality_passed';
+    else if (hasFullDraft) state = 'written';
+    else if (partialStepCount > 0) state = 'partial';
+    else if (['queued', 'retry_scheduled'].includes(sessionStatus) || itemStatus === 'ready' || itemStatus === 'claiming') state = 'queued';
+    else if (sessionStatus === 'running' || itemStatus === 'writing') state = 'writing';
+    else if (errorCode === 'content_writing_prerequisites_missing') state = 'waiting_prerequisites';
+    else if (sessionStatus === 'cancelled' || itemStatus === 'cancelled') state = 'cancelled';
+
+    return [{
+      articleId,
+      state,
+      sessionId: sessionId || null,
+      sessionStatus: sessionStatus || null,
+      qualityScore,
+      qualityMinimumScore,
+      qualityPassed,
+      hasFullDraft,
+      partialStepCount,
+      appliedAt: text(session?.applied_at) || null,
+      automaticApplicationStatus: text(progress.automaticApplicationStatus) || null,
+      usableCompetitorCount: Math.max(0, Number(item?.usable_competitor_count) || 0),
+      minimumCompetitorCount,
+      errorCode,
+      errorMessage,
+      updatedAt: text(session?.updated_at) || text(item?.updated_at),
+    }];
+  });
+};
+
 const handleRequest = async (req: any): Promise<ApiResult> => {
   assertAllowedOrigin(req);
   if (req.method === 'OPTIONS') {
@@ -330,6 +442,36 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
   const body = await requireBody(req);
   const action = text(body.action) || 'status';
   const supabase = getExternalAnalysisSupabaseAdmin();
+
+  if (action === 'summaries') {
+    consumeApiRateLimit(
+      'content-writing-automation:summaries',
+      principal.userId,
+      getPositiveIntegerEnv('CONTENT_WRITING_AUTOMATION_STATUS_RATE_LIMIT_PER_MINUTE', 180),
+    );
+    const articleIds = Array.from(new Set(
+      (Array.isArray(body.articleIds) ? body.articleIds : [])
+        .map((value: unknown) => requireUuid(value, 'articleId')),
+    ));
+    if (articleIds.length === 0 || articleIds.length > 50) {
+      throw new ContentWritingAutomationApiError(
+        'articleIds must contain between 1 and 50 article identifiers.',
+        400,
+        'content_writing_article_ids_invalid',
+      );
+    }
+    await Promise.all(articleIds.map(articleId => (
+      requireArticleReadAccess(supabase, articleId, principal.userId)
+    )));
+    const settings = await readContentWritingAutomationSettings();
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        summaries: await readArticleSummaries(articleIds, settings.minimumCompetitors),
+      },
+    };
+  }
 
   if (action === 'status') {
     consumeApiRateLimit(
@@ -383,7 +525,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new ContentWritingAutomationApiError(
-    'action must be status, retry, or cancel.',
+    'action must be status, summaries, retry, or cancel.',
     400,
     'content_writing_automation_action_invalid',
   );

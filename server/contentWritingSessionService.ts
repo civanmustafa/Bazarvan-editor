@@ -564,3 +564,24 @@ export const recordContentWritingApplication = async (options: {
   if (error) throwServiceError('application recording', error);
   return firstRow<ContentWritingSession>(data);
 };
+
+export const applyAutomaticContentWritingSession = async (options: {
+  sessionId: string;
+  expectedArticleUpdatedAt: string;
+  contentJson: Record<string, unknown>;
+  contentHtml: string;
+  plainText: string;
+}): Promise<Record<string, unknown> | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'apply_automatic_content_writing_session',
+    {
+      p_session_id: options.sessionId,
+      p_expected_article_updated_at: options.expectedArticleUpdatedAt,
+      p_content_json: options.contentJson,
+      p_content_html: options.contentHtml,
+      p_plain_text: options.plainText,
+    },
+  );
+  if (error) throwServiceError('automatic content application', error);
+  return isRecord(data) ? data : null;
+};

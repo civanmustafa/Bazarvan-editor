@@ -38,7 +38,8 @@ type ContentWritingPromptSettingsProps = {
       | 'contentWritingAutomationMinimumCompetitors'
       | 'contentWritingAutomationRequireCompetitorTerminalState'
       | 'contentWritingAutomationMaxAttempts'
-      | 'contentWritingAutomationRetryMinutes',
+      | 'contentWritingAutomationRetryMinutes'
+      | 'contentWritingAutomationAutoApplyPassedContent',
     value: string | number | boolean,
   ) => void;
 };

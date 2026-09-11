@@ -186,12 +186,15 @@ test('queued creator writing is cancelled before AI calls while manual sessions 
     loadEnv: '',
     contentWritingAutomation: `export const AutomaticContentWritingPolicyError = s.writing.AutomaticContentWritingPolicyError;
       export const assertAutomaticContentWritingAllowed = s.writing.assertAutomaticContentWritingAllowed;
+      export const readContentWritingAutomationSettings = async () => ({ autoApplyPassedContent: false });
       export const scheduleNextAutomaticContentWritingSession = async () => null;`,
     adaptiveQueueWorker: 'export class AdaptiveQueueWorker { constructor(config) { s.worker = config; } async run() {} wake() {} stop() {} }',
     leaseHeartbeatController: 'export class LeaseHeartbeatController { start() { return () => {}; } }',
     workerQueueWakeSignal: 'export const subscribeToWorkerQueueWakeSignal = () => () => {};',
-    contentWritingWorkflow: 'export const executeStructuredContentWritingWorkflow = async () => { s.workflowCalls++; return { ok: true, text: "result", metadata: {} }; };',
+    contentWritingWorkflow: `export const executeStructuredContentWritingWorkflow = async () => { s.workflowCalls++; return { ok: true, text: "result", metadata: {} }; };
+      export const contentWritingMarkdownToPlainText = value => value;`,
     contentWritingSessionService: `export const claimNextContentWritingSession = async () => null;
+      export const applyAutomaticContentWritingSession = async () => null;
       export const completeContentWritingSession = async () => true;
       export const failContentWritingSession = async value => { s.failures.push(value); };
       export const getContentWritingMessages = async () => [];

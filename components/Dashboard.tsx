@@ -1,7 +1,7 @@
 import AppSelect from './AppSelect';
 ﻿
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy, ChevronDown } from 'lucide-react';
+import { LogOut, Edit, RefreshCw, Clock, Key, Save, Book, Trash2, AlertCircle, Repeat, FileText, PlusSquare, Filter, X, Calendar, Settings, Languages, AppWindow, NotebookTabs, ExternalLink, Users, Eye, Shield, Copy, ChevronDown, Bot } from 'lucide-react';
 import { ArticleActivity } from '../hooks/useUserActivity';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
@@ -52,6 +52,10 @@ import {
     type ArticleStatusFilter,
 } from '../constants/articleStatuses';
 import AutomaticContentWritingQueuePanel from './AutomaticContentWritingQueuePanel';
+import {
+    loadContentWritingArticleSummaries,
+    type ContentWritingArticleSummary,
+} from '../utils/contentWritingAutomation';
 import type { DashboardAutomationArticleSnapshot } from '../utils/dashboardAutomationQueue';
 import DashboardActivitySummary from './DashboardActivitySummary';
 import {
@@ -426,6 +430,54 @@ const ArticleAccessUsersField: React.FC<{
   </span>
 );
 
+const ContentWritingSummaryChip: React.FC<{
+  summary: ContentWritingArticleSummary;
+}> = ({ summary }) => {
+  const score = summary.qualityScore !== null
+    ? `${summary.qualityScore}/100${summary.qualityMinimumScore !== null ? ` (المطلوب ${summary.qualityMinimumScore})` : ''}`
+    : '';
+  const presentation = summary.state === 'applied'
+    ? { label: `أُدرج المحتوى تلقائيًا${score ? ` · الجودة ${score}` : ''}`, tone: 'green' }
+    : summary.state === 'written_quality_failed'
+      ? { label: `المقالة مكتوبة · لم تجتز الجودة${score ? ` ${score}` : ''} · بانتظار المراجعة أو التجاوز اليدوي`, tone: 'amber' }
+      : summary.state === 'written_quality_passed'
+        ? { label: `المقالة مكتوبة واجتازت الجودة${score ? ` ${score}` : ''} · بانتظار الإدراج`, tone: 'green' }
+        : summary.state === 'written'
+          ? { label: 'المقالة مكتوبة · بانتظار المراجعة والإدراج', tone: 'amber' }
+          : summary.state === 'partial'
+            ? { label: `محتوى جزئي محفوظ${summary.partialStepCount > 0 ? ` · ${summary.partialStepCount} مراحل` : ''} · بانتظار الاستئناف`, tone: 'amber' }
+            : summary.state === 'waiting_prerequisites'
+              ? { label: `لم تبدأ الكتابة · المتوفر ${summary.usableCompetitorCount}/${summary.minimumCompetitorCount} منافسين مؤهلين`, tone: 'violet' }
+              : summary.state === 'writing'
+                ? { label: 'تُكتب المقالة تلقائيًا الآن', tone: 'blue' }
+                : summary.state === 'queued'
+                  ? { label: 'بانتظار دورها في طابور الكتابة', tone: 'blue' }
+                  : summary.state === 'cancelled'
+                    ? { label: 'أُوقفت الكتابة التلقائية', tone: 'gray' }
+                    : { label: 'تعذرت الكتابة · تحتاج مراجعة', tone: 'red' };
+  const toneClass = presentation.tone === 'green'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200'
+    : presentation.tone === 'amber'
+      ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'
+      : presentation.tone === 'blue'
+        ? 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200'
+        : presentation.tone === 'violet'
+          ? 'border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200'
+          : presentation.tone === 'red'
+            ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
+            : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-600 dark:bg-gray-700/30 dark:text-gray-300';
+  return (
+    <span
+      className={`article-list-field inline-flex min-h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-black ${toneClass}`}
+      title={presentation.label}
+      aria-label={`حالة كتابة المحتوى: ${presentation.label}`}
+    >
+      <Bot size={12} className={summary.state === 'writing' ? 'animate-pulse' : ''} aria-hidden="true" />
+      <span>{presentation.label}</span>
+    </span>
+  );
+};
+
 const EditableN8nUsersField: React.FC<{
   field: 'visibleToEmailsCsv';
   value?: string;
@@ -723,6 +775,7 @@ interface ArticleItemProps {
     showAdminMetadata?: boolean;
     showExternalAnalysisControls?: boolean;
     externalAnalysisSummary?: ExternalAnalysisDashboardSummary;
+    contentWritingSummary?: ContentWritingArticleSummary;
     onRefreshExternalAnalysis?: () => Promise<void> | void;
     t: typeof translations.ar;
 }
@@ -754,6 +807,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     showAdminMetadata = false,
     showExternalAnalysisControls = false,
     externalAnalysisSummary,
+    contentWritingSummary,
     onRefreshExternalAnalysis,
     t,
 }) => {
@@ -890,7 +944,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const showArticleStatus = fieldsToShow.includes('status');
     const canEditArticleStatus = Boolean(onUpdateSettings && editableSettingFields.includes('status'));
     const secondaryFieldsToShow = fieldsToShow.filter(field => field !== 'status');
-    const shouldShowN8nSettings = secondaryFieldsToShow.some(field => (
+    const shouldShowN8nSettings = Boolean(contentWritingSummary) || secondaryFieldsToShow.some(field => (
         field === 'visibleToEmailsCsv'
           ? articleAccessBadges.length > 0 || editableSettingFields.includes(field) || canClaimArticle
           : Boolean(n8nSettings[field])
@@ -1171,6 +1225,9 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                                 />
                             );
                         })}
+                        {contentWritingSummary && (
+                            <ContentWritingSummaryChip summary={contentWritingSummary} />
+                        )}
                     </div>
                 )}
                 {showExternalAnalysisControls && articleId && onRefreshExternalAnalysis && (
@@ -1229,6 +1286,7 @@ const Dashboard: React.FC = () => {
   const [isArticlesPageFromCache, setIsArticlesPageFromCache] = useState(false);
   const [isNewArticleLanguageModalOpen, setIsNewArticleLanguageModalOpen] = useState(false);
   const [externalAnalysisSummaries, setExternalAnalysisSummaries] = useState<Record<string, ExternalAnalysisDashboardSummary>>({});
+  const [contentWritingArticleSummaries, setContentWritingArticleSummaries] = useState<Record<string, ContentWritingArticleSummary>>({});
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isTrashVisible, setIsTrashVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1268,6 +1326,7 @@ const Dashboard: React.FC = () => {
   const isAdmin = currentUserRole === 'admin';
   const dashboardRefreshRequestRef = useRef(0);
   const externalAnalysisRefreshRequestRef = useRef(0);
+  const contentWritingSummariesRequestRef = useRef(0);
   const activitySummaryRequestRef = useRef(0);
   const prefetchedDashboardScopesRef = useRef(new Set<string>());
   const dashboardFiltersInitializedRef = useRef(false);
@@ -1371,6 +1430,23 @@ const Dashboard: React.FC = () => {
       console.error('Failed to load external analysis summaries:', error);
     }
   }, [currentUser, dashboardArticleIdsKey]);
+
+  const refreshContentWritingSummaries = useCallback(async () => {
+    const requestId = contentWritingSummariesRequestRef.current + 1;
+    contentWritingSummariesRequestRef.current = requestId;
+    if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0 || isTrashVisible) {
+      if (contentWritingSummariesRequestRef.current === requestId) setContentWritingArticleSummaries({});
+      return;
+    }
+    try {
+      const summaries = await loadContentWritingArticleSummaries(dashboardArticleIds);
+      if (contentWritingSummariesRequestRef.current === requestId) {
+        setContentWritingArticleSummaries(summaries);
+      }
+    } catch (error) {
+      console.error('Failed to load content-writing article summaries:', error);
+    }
+  }, [currentUser, dashboardArticleIdsKey, isTrashVisible]);
 
   const refreshActivitySummary = useCallback(async (silent = false) => {
     const requestId = activitySummaryRequestRef.current + 1;
@@ -1811,6 +1887,40 @@ const Dashboard: React.FC = () => {
     }, 20_000);
     return () => window.clearInterval(intervalId);
   }, [currentUser, dashboardArticleIdsKey, refreshExternalAnalysisSummaries]);
+
+  useEffect(() => {
+    void refreshContentWritingSummaries();
+    if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0 || isTrashVisible) return;
+
+    const intervalId = window.setInterval(() => {
+      void refreshContentWritingSummaries();
+    }, 20_000);
+    return () => window.clearInterval(intervalId);
+  }, [currentUser, dashboardArticleIdsKey, isTrashVisible, refreshContentWritingSummaries]);
+
+  useEffect(() => {
+    if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0 || isTrashVisible) return;
+    const supabase = getSupabaseClient();
+    let refreshTimer: number | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refreshContentWritingSummaries();
+      }, 350);
+    };
+    const channel = supabase
+      .channel(`dashboard-content-writing-${currentUserId || 'profile'}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'content_writing_sessions' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'content_writing_steps' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'content_writing_automation_items' }, scheduleRefresh)
+      .subscribe();
+
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      void supabase.removeChannel(channel);
+    };
+  }, [currentUser, currentUserId, dashboardArticleIdsKey, isTrashVisible, refreshContentWritingSummaries]);
 
   useEffect(() => {
     if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0) return;
@@ -2339,6 +2449,7 @@ const Dashboard: React.FC = () => {
                                       isAdmin || activity.ownerId === currentUserId || activity.assignedTo === currentUserId
                                     )}
                                     externalAnalysisSummary={externalAnalysisSummaries[activity.id]}
+                                    contentWritingSummary={contentWritingArticleSummaries[activity.id]}
                                     onRefreshExternalAnalysis={refreshExternalAnalysisSummaries}
                                     t={t}
                                 />
@@ -2377,7 +2488,11 @@ const Dashboard: React.FC = () => {
                 articleTitles={dashboardArticleTitles}
                 articleSnapshots={dashboardAutomationArticleSnapshots}
                 onRefreshExternalAnalysis={async () => {
-                  await Promise.all([refreshData(), refreshExternalAnalysisSummaries()]);
+                  await Promise.all([
+                    refreshData(),
+                    refreshExternalAnalysisSummaries(),
+                    refreshContentWritingSummaries(),
+                  ]);
                 }}
               />
               <DashboardActivitySummary

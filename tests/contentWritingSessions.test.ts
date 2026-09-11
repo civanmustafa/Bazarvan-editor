@@ -501,3 +501,28 @@ test('content-writing worker keeps leases alive and is built and managed by PM2'
   assert.match(ecosystem, /bazarvan-content-writing-worker/);
   assert.match(ecosystem, /CONTENT_WRITING_WORKER_CONCURRENCY/);
 });
+
+test('automatic quality-passed insertion is administrator-controlled and safely fenced', async () => {
+  const [migration, worker, service, settings] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20260911000000_automatic_content_writing_safe_apply.sql'),
+    readWorkspaceFile('server/contentWritingWorker.ts'),
+    readWorkspaceFile('server/contentWritingSessionService.ts'),
+    readWorkspaceFile('components/ContentWritingAutomationSettings.tsx'),
+  ]);
+
+  assert.match(migration, /create or replace function public\.apply_automatic_content_writing_session/);
+  assert.match(migration, /contentWritingAutomationAutoApplyPassedContent/);
+  assert.match(migration, /quality_report->>'passed'/);
+  assert.match(migration, /blockingFailureCount/);
+  assert.match(migration, /v_article\.updated_at is distinct from v_frozen_updated_at/);
+  assert.match(migration, /article_editor_has_text\(v_article\.plain_text\)/);
+  assert.match(migration, /article_editor_presence/);
+  assert.match(migration, /to service_role/);
+  assert.doesNotMatch(migration, /to authenticated/);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+  assert.match(worker, /applyPassedAutomaticResult/);
+  assert.match(worker, /settings\.autoApplyPassedContent/);
+  assert.match(service, /apply_automatic_content_writing_session/);
+  assert.match(settings, /إدراج المحتوى تلقائيًا عند اجتياز الجودة/);
+});

@@ -15,7 +15,8 @@ export type ContentWritingAutomationSettingField =
   | 'contentWritingAutomationMinimumCompetitors'
   | 'contentWritingAutomationRequireCompetitorTerminalState'
   | 'contentWritingAutomationMaxAttempts'
-  | 'contentWritingAutomationRetryMinutes';
+  | 'contentWritingAutomationRetryMinutes'
+  | 'contentWritingAutomationAutoApplyPassedContent';
 
 type Props = {
   values: Record<string, unknown>;
@@ -53,7 +54,7 @@ const ContentWritingAutomationSettings: React.FC<Props> = ({ values, onChange })
                 السماح العام بالكتابة التلقائية للمقالات الجاهزة
               </h4>
               <p className="mt-1 text-xs font-semibold leading-6 text-gray-500 dark:text-gray-400">
-                تعطيل هذا المفتاح يمنع الكتابة التلقائية للجميع. عند السماح بها، تُراعى رغبة منشئ المقالة في «أتمتة مقالاتي» للمقالات الجديدة المشمولة. يكتب الخادم مقالة واحدة كل مرة؛ للطلب اليدوي والإنشاء الشامل النشط الأولوية، وتُحفظ النتيجة للمراجعة دون إدراج تلقائي.
+                تعطيل هذا المفتاح يمنع الكتابة التلقائية للجميع. عند السماح بها، تُراعى رغبة منشئ المقالة في «أتمتة مقالاتي» للمقالات الجديدة المشمولة. يكتب الخادم مقالة واحدة كل مرة؛ وللطلب اليدوي والإنشاء الشامل النشط الأولوية.
               </p>
             </div>
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700 dark:border-blue-900/60 dark:bg-[#202020] dark:text-blue-200">
@@ -111,10 +112,10 @@ const ContentWritingAutomationSettings: React.FC<Props> = ({ values, onChange })
               <span className="mb-2 block text-xs font-black text-gray-600 dark:text-gray-300">الحد الأدنى للمنافسين الصالحين</span>
               <input
                 type="number"
-                min={1}
+                min={3}
                 max={5}
-                value={Number(values.contentWritingAutomationMinimumCompetitors || 1)}
-                onChange={event => onChange('contentWritingAutomationMinimumCompetitors', Number(event.target.value))}
+                value={Math.max(3, Number(values.contentWritingAutomationMinimumCompetitors || 3))}
+                onChange={event => onChange('contentWritingAutomationMinimumCompetitors', Math.max(3, Number(event.target.value)))}
                 className={inputClass}
               />
             </label>
@@ -153,6 +154,21 @@ const ContentWritingAutomationSettings: React.FC<Props> = ({ values, onChange })
               <span className="block text-xs font-black text-gray-700 dark:text-gray-200">انتظار انتهاء معالجة جميع المنافسين المحددين</span>
               <span className="mt-1 block text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
                 لا يشترط نجاحهم جميعًا؛ يكفي انتهاء كل منافس بنجاح أو فشل نهائي، مع توفر الحد الأدنى من النصوص الصالحة. تُرسل جميع النصوص الناجحة من 1 إلى 5.
+              </span>
+            </span>
+          </label>
+
+          <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50/80 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/15">
+            <input
+              type="checkbox"
+              checked={values.contentWritingAutomationAutoApplyPassedContent === true}
+              onChange={event => onChange('contentWritingAutomationAutoApplyPassedContent', event.target.checked)}
+              className="mt-1 size-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span>
+              <span className="block text-xs font-black text-gray-700 dark:text-gray-200">إدراج المحتوى تلقائيًا عند اجتياز الجودة</span>
+              <span className="mt-1 block text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+                لا يتم الإدراج إلا لنتيجة كاملة اجتازت بوابة الجودة، وبشرط بقاء المحرر فارغًا وعدم وجود مستخدم داخل المقالة أو تغييرها بعد بدء الجلسة. وإلا تُحفظ النتيجة للمراجعة دون استبدال أي محتوى.
               </span>
             </span>
           </label>

@@ -224,6 +224,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
       contentWritingAutomationRequireCompetitorTerminalState: false,
       contentWritingAutomationMaxAttempts: 99,
       contentWritingAutomationRetryMinutes: 0,
+      contentWritingAutomationAutoApplyPassedContent: true,
       unknownSecret: 'must-not-survive',
     },
     articles: {
@@ -267,6 +268,7 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
   assert.equal(normalized.ai.contentWritingAutomationRequireCompetitorTerminalState, false);
   assert.equal(normalized.ai.contentWritingAutomationMaxAttempts, 10);
   assert.equal(normalized.ai.contentWritingAutomationRetryMinutes, 1);
+  assert.equal(normalized.ai.contentWritingAutomationAutoApplyPassedContent, true);
   assert.equal(normalized.ai.unknownSecret, undefined);
   assert.equal(normalized.articles.trashRetentionDays, 3_650);
   assert.equal(normalized.articles.defaultLanguage, 'ar');

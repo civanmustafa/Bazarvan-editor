@@ -9,6 +9,7 @@ import { executeStructuredContentWritingWorkflow } from './contentWritingWorkflo
 import {
   claimNextContentWritingSession,
   completeContentWritingSession,
+  applyAutomaticContentWritingSession,
   failContentWritingSession,
   getContentWritingMessages,
   heartbeatContentWritingSession,
@@ -22,8 +23,12 @@ import { subscribeToWorkerQueueWakeSignal } from './workerQueueWakeSignal';
 import {
   AutomaticContentWritingPolicyError,
   assertAutomaticContentWritingAllowed,
+  readContentWritingAutomationSettings,
   scheduleNextAutomaticContentWritingSession,
 } from './contentWritingAutomation';
+import { contentWritingMarkdownToPlainText } from '../utils/contentWritingWorkflow';
+import { parseMarkdownToArticleHtml } from '../utils/editorUtils';
+import { htmlToTipTapJson } from '../utils/editorHtmlContent';
 
 const boundedInteger = (
   value: string | undefined,
@@ -93,6 +98,96 @@ const getFailureProgress = (result: ContentWritingExecutionResult): Record<strin
   message: result.errorMessage || 'Content writing failed.',
   completed: true,
 });
+
+const markAutomaticApplicationWaiting = async (
+  sessionId: string,
+  progress: Record<string, unknown>,
+  reason: string,
+): Promise<void> => {
+  const { error } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_sessions')
+    .update({
+      progress: {
+        ...progress,
+        automaticApplicationStatus: 'waiting_review',
+        automaticApplicationError: reason.slice(0, 1_000),
+      },
+    })
+    .eq('id', sessionId)
+    .eq('status', 'completed')
+    .is('applied_at', null);
+  if (error) logThrottledError(`Could not record automatic application outcome for ${sessionId}`, error);
+};
+
+const applyPassedAutomaticResult = async (options: {
+  session: ContentWritingSession;
+  markdown: string;
+  qualityReport: Record<string, unknown>;
+  progress: Record<string, unknown>;
+}): Promise<void> => {
+  if (options.session.context_snapshot?.triggerSource !== 'automatic_ready') return;
+  const settings = await readContentWritingAutomationSettings();
+  if (!settings.autoApplyPassedContent) {
+    await markAutomaticApplicationWaiting(
+      options.session.id,
+      options.progress,
+      'Automatic insertion is disabled by the administrator.',
+    );
+    return;
+  }
+  if (
+    options.qualityReport.passed !== true
+    || Math.max(0, Number(options.qualityReport.blockingFailureCount) || 0) > 0
+  ) {
+    await markAutomaticApplicationWaiting(
+      options.session.id,
+      options.progress,
+      'The generated draft did not pass the mandatory quality gate.',
+    );
+    return;
+  }
+
+  const articleSnapshot = options.session.context_snapshot?.article
+    && typeof options.session.context_snapshot.article === 'object'
+    && !Array.isArray(options.session.context_snapshot.article)
+    ? options.session.context_snapshot.article as Record<string, unknown>
+    : {};
+  const articleLanguage = articleSnapshot.language === 'en' ? 'en' : 'ar';
+  const expectedArticleUpdatedAt = typeof articleSnapshot.updatedAt === 'string'
+    ? articleSnapshot.updatedAt
+    : '';
+  if (!expectedArticleUpdatedAt) {
+    await markAutomaticApplicationWaiting(
+      options.session.id,
+      options.progress,
+      'The article baseline is unavailable; the generated draft was kept for review.',
+    );
+    return;
+  }
+
+  const contentHtml = parseMarkdownToArticleHtml(options.markdown, articleLanguage);
+  const plainText = contentWritingMarkdownToPlainText(options.markdown);
+  const contentJson = htmlToTipTapJson(contentHtml, articleLanguage);
+  try {
+    const application = await applyAutomaticContentWritingSession({
+      sessionId: options.session.id,
+      expectedArticleUpdatedAt,
+      contentJson,
+      contentHtml,
+      plainText,
+    });
+    console.log(
+      `[content-writing-worker] Automatically applied ${options.session.id}`
+      + ` to article ${options.session.article_id}; result=${JSON.stringify(application || {})}.`,
+    );
+  } catch (error) {
+    const reason = errorMessage(error);
+    await markAutomaticApplicationWaiting(options.session.id, options.progress, reason);
+    console.warn(
+      `[content-writing-worker] Kept completed session ${options.session.id} for review instead of auto-applying: ${reason}`,
+    );
+  }
+};
 
 const requestOwnedSessionCancellation = async (sessionId: string, worker: string): Promise<void> => {
   const { error } = await getExternalAnalysisSupabaseAdmin()
@@ -252,7 +347,17 @@ const executeClaimedSession = async (
         responseMetadata: result.metadata,
         progress,
       });
-      if (completed) console.log(`[content-writing-worker] Completed ${session.id}.`);
+      if (completed) {
+        console.log(`[content-writing-worker] Completed ${session.id}.`);
+        if (qualityReport) {
+          await applyPassedAutomaticResult({
+            session,
+            markdown: result.text,
+            qualityReport,
+            progress,
+          });
+        }
+      }
       return;
     }
 

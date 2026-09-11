@@ -15,6 +15,7 @@ import { readContentResearchAutomationSettings } from './externalAnalysisSetting
 import { readArticleAutomationPolicy } from './articleAutomationPolicy';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
 import { readUserAiRoutingPreferences } from './userAiRoutingPreferences';
+import { CONTENT_WRITING_MIN_COMPETITOR_COUNT } from '../utils/contentWritingContext';
 
 export class AutomaticContentWritingPolicyError extends Error {
   readonly code: string;
@@ -54,6 +55,7 @@ export type ContentWritingAutomationSettings = {
   requireCompetitorTerminalState: boolean;
   maxAttempts: number;
   retryMinutes: number;
+  autoApplyPassedContent: boolean;
 };
 
 export type ContentWritingAutomationItemRow = {
@@ -227,10 +229,16 @@ export const readContentWritingAutomationSettings = async (): Promise<ContentWri
     model: typeof ai.contentWritingAutomationModel === 'string'
       ? ai.contentWritingAutomationModel.trim().slice(0, 256)
       : '',
-    minimumCompetitors: boundedInteger(ai.contentWritingAutomationMinimumCompetitors, 1, 1, 5),
+    minimumCompetitors: boundedInteger(
+      ai.contentWritingAutomationMinimumCompetitors,
+      CONTENT_WRITING_MIN_COMPETITOR_COUNT,
+      CONTENT_WRITING_MIN_COMPETITOR_COUNT,
+      5,
+    ),
     requireCompetitorTerminalState: ai.contentWritingAutomationRequireCompetitorTerminalState !== false,
     maxAttempts: boundedInteger(ai.contentWritingAutomationMaxAttempts, 3, 1, 10),
     retryMinutes: boundedInteger(ai.contentWritingAutomationRetryMinutes, 30, 1, 1_440),
+    autoApplyPassedContent: ai.contentWritingAutomationAutoApplyPassedContent === true,
   };
 };
 
@@ -322,6 +330,27 @@ const releaseClaim = async (
   const code = isRecord(error) && typeof error.code === 'string'
     ? error.code
     : 'automatic_content_writing_prepare_failed';
+  if (code === 'content_writing_prerequisites_missing') {
+    const { error: releaseError } = await getExternalAnalysisSupabaseAdmin()
+      .from('content_writing_automation_items')
+      .update({
+        status: 'blocked',
+        attempt_count: Math.max(0, item.attempt_count - 1),
+        max_attempts: settings.maxAttempts,
+        content_writing_session_id: null,
+        locked_by: null,
+        locked_at: null,
+        lease_expires_at: null,
+        completed_at: null,
+        last_error_code: code,
+        last_error: message.slice(0, 4_000),
+      })
+      .eq('id', item.id)
+      .eq('status', 'claiming')
+      .eq('locked_by', workerId);
+    if (releaseError) throw releaseError;
+    return;
+  }
   const { error: releaseError } = await getExternalAnalysisSupabaseAdmin().rpc(
     'release_content_writing_automation_claim',
     {
@@ -335,6 +364,92 @@ const releaseClaim = async (
   if (releaseError) throw releaseError;
 };
 
+let lastPrerequisiteReconciliationAt = 0;
+
+const reconcileBlockedPrerequisiteItems = async (
+  settings: ContentWritingAutomationSettings,
+): Promise<void> => {
+  const now = Date.now();
+  if (now - lastPrerequisiteReconciliationAt < 30_000) return;
+  lastPrerequisiteReconciliationAt = now;
+
+  const supabase = getExternalAnalysisSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('content_writing_automation_items')
+    .select('*')
+    .eq('status', 'blocked')
+    .eq('last_error_code', 'content_writing_prerequisites_missing')
+    .order('updated_at', { ascending: true })
+    .limit(10);
+  if (error) throw error;
+
+  for (const rawItem of data || []) {
+    const item = rawItem as ContentWritingAutomationItemRow;
+    const { data: readinessData, error: readinessError } = await supabase.rpc(
+      'evaluate_content_writing_automation_readiness',
+      { p_article_id: item.article_id },
+    );
+    if (readinessError) throw readinessError;
+    const readiness = isRecord(readinessData) ? readinessData : {};
+    const missingFields = Array.isArray(readiness.missingFields)
+      ? readiness.missingFields.map(textValue).filter(Boolean)
+      : [];
+    const usableCompetitorCount = boundedInteger(readiness.usableCompetitorCount, 0, 0, 5);
+    const pendingCompetitorCount = boundedInteger(readiness.pendingCompetitorCount, 0, 0, 5);
+    const processingComplete = readiness.processingComplete === true;
+    const ready = readiness.ready === true
+      && usableCompetitorCount >= settings.minimumCompetitors
+      && (!settings.requireCompetitorTerminalState || processingComplete);
+
+    if (ready && textValue(readiness.signature) !== item.readiness_signature) {
+      const { error: updateError } = await supabase
+        .from('content_writing_automation_items')
+        .update({
+          status: 'ready',
+          readiness_signature: textValue(readiness.signature),
+          usable_competitor_count: usableCompetitorCount,
+          pending_competitor_count: pendingCompetitorCount,
+          attempt_count: 0,
+          max_attempts: settings.maxAttempts,
+          ready_at: new Date().toISOString(),
+          eligible_at: new Date().toISOString(),
+          started_at: null,
+          completed_at: null,
+          last_error_code: null,
+          last_error: null,
+        })
+        .eq('id', item.id)
+        .eq('status', 'blocked')
+        .eq('last_error_code', 'content_writing_prerequisites_missing');
+      if (updateError) throw updateError;
+      continue;
+    }
+
+    const onlyCompetitorsMissing = missingFields.every(field => field === 'competitors')
+      && (missingFields.includes('competitors') || usableCompetitorCount < settings.minimumCompetitors);
+    if (!onlyCompetitorsMissing || pendingCompetitorCount > 0) continue;
+    const { error: preparationError } = await supabase.rpc(
+      'enqueue_content_writing_competitor_preparation',
+      {
+        p_article_id: item.article_id,
+        p_requested_by: item.requested_by,
+        p_origin: 'auto',
+        p_provider: settings.provider,
+        p_model: settings.model,
+        p_content_writing_idempotency_key: '',
+        p_min_competitor_count: settings.minimumCompetitors,
+        p_start_writing: false,
+      },
+    );
+    if (preparationError && !isContentWritingAutomationSchemaUnavailableError(preparationError)) {
+      console.warn(
+        `[content-writing-automation] Could not prepare missing competitors for ${item.article_id}:`,
+        preparationError,
+      );
+    }
+  }
+};
+
 export const scheduleNextAutomaticContentWritingSession = async (
   workerId: string,
 ): Promise<QueuedContentWritingSession | null> => {
@@ -343,6 +458,8 @@ export const scheduleNextAutomaticContentWritingSession = async (
     readContentResearchAutomationSettings(),
   ]);
   if (!settings.enabled) return null;
+
+  await reconcileBlockedPrerequisiteItems(settings);
 
   const item = await claimNextItem(workerId, settings);
   if (!item) {
@@ -419,7 +536,9 @@ export const scheduleNextAutomaticContentWritingSession = async (
         automationAttempt: item.attempt_count,
         automationUsableCompetitorCount: item.usable_competitor_count,
         automationPendingCompetitorCount: item.pending_competitor_count,
-        automationReviewPolicy: 'review_only',
+        automationReviewPolicy: settings.autoApplyPassedContent
+          ? 'auto_apply_if_quality_passes'
+          : 'review_only',
       },
     });
     await attachSession(item, queued.session, workerId);

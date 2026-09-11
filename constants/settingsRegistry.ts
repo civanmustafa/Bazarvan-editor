@@ -39,7 +39,7 @@ export const SYSTEM_SETTING_KEYS = ['ai', 'prompts', 'n8n', 'articles', 'roles',
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
 export type SystemSettingsMap = Record<SystemSettingKey, Record<string, any>>;
 
-export const SETTINGS_REGISTRY_VERSION = 5;
+export const SETTINGS_REGISTRY_VERSION = 6;
 export const USER_PREFERENCES_SCHEMA_VERSION = 2;
 
 const ALLOWED_EXTERNAL_COMMAND_IDS = new Set(
@@ -77,10 +77,11 @@ export const SYSTEM_SETTINGS_DEFAULTS: SystemSettingsMap = {
     contentWritingAutomationIntervalMinutes: 15,
     contentWritingAutomationProvider: 'gemini',
     contentWritingAutomationModel: '',
-    contentWritingAutomationMinimumCompetitors: 1,
+    contentWritingAutomationMinimumCompetitors: 3,
     contentWritingAutomationRequireCompetitorTerminalState: true,
     contentWritingAutomationMaxAttempts: 3,
     contentWritingAutomationRetryMinutes: 30,
+    contentWritingAutomationAutoApplyPassedContent: false,
   },
   prompts: normalizePromptRegistrySettings({
     registryVersion: PROMPT_REGISTRY_VERSION,
@@ -299,7 +300,7 @@ const normalizeSystemSection = (
     setWhenPresent('contentWritingAutomationMinimumCompetitors', field => normalizeInteger(
       field,
       defaults.contentWritingAutomationMinimumCompetitors,
-      1,
+      3,
       5,
     ));
     setWhenPresent('contentWritingAutomationRequireCompetitorTerminalState', field => normalizeBoolean(
@@ -317,6 +318,10 @@ const normalizeSystemSection = (
       defaults.contentWritingAutomationRetryMinutes,
       1,
       1_440,
+    ));
+    setWhenPresent('contentWritingAutomationAutoApplyPassedContent', field => normalizeBoolean(
+      field,
+      defaults.contentWritingAutomationAutoApplyPassedContent,
     ));
     return normalized;
   }

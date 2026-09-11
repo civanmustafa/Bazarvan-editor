@@ -137,7 +137,7 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
   const readiness = article?.readiness || null;
   const hasCompletedContentWritingSession = article?.hasCompletedContentWritingSession === true;
   const globalBlocker = status?.overview.globalBlocker || null;
-  const configuredMinimum = status?.overview.settings.minimumCompetitors || 1;
+  const configuredMinimum = status?.overview.settings.minimumCompetitors || 3;
   const competitorMinimumMet = (readiness?.usableCompetitorCount || 0) >= configuredMinimum;
   const terminalStateMet = status?.overview.settings.requireCompetitorTerminalState === false
     || readiness?.processingComplete === true;
@@ -176,7 +176,11 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
         ? (isArabic
           ? 'تستمر الجلسة التي بدأت قبل الإيقاف حتى تُحفظ للمراجعة؛ لن تبدأ مقالات جديدة.'
           : 'The session that started before automation was paused will continue to review; no new articles will start.')
-        : (isArabic ? 'ستُحفظ النتيجة للمراجعة دون إدراج تلقائي.' : 'The result will be saved for review without automatic insertion.'),
+        : status?.overview.settings.autoApplyPassedContent
+          ? (isArabic
+            ? 'ستُدرج النتيجة تلقائيًا إذا اجتازت الجودة وبقيت المقالة آمنة للإدراج.'
+            : 'The result will be inserted automatically if it passes quality and the article remains safe to update.')
+          : (isArabic ? 'ستُحفظ النتيجة للمراجعة دون إدراج تلقائي.' : 'The result will be saved for review without automatic insertion.'),
     };
     if (activeFullPipeline) return {
       tone: 'blue',
@@ -184,9 +188,20 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
       detail: isArabic ? 'لن يبدأ الطابور التلقائي جلسة أخرى لهذه المقالة.' : 'The automatic queue will not start another session for this article.',
     };
     if (item?.status === 'completed') return {
-      tone: 'green',
-      label: isArabic ? 'اكتملت وبانتظار المراجعة' : 'Completed and awaiting review',
-      detail: isArabic ? 'لن تعيد الأتمتة كتابة هذه المقالة إلا بطلب إعادة صريح.' : 'Automation will not rewrite this article without an explicit retry.',
+      tone: item.qualityPassed === false ? 'amber' : 'green',
+      label: item.qualityPassed === false
+        ? (isArabic ? 'اكتملت ولم تجتز الجودة' : 'Completed but did not pass quality')
+        : (isArabic ? 'اكتملت وبانتظار المراجعة' : 'Completed and awaiting review'),
+      detail: item.qualityPassed === false
+        ? (isArabic ? 'حُفظت المقالة للمراجعة ويمكن إدراجها بتجاوز يدوي صريح.' : 'The article was saved for review and can be inserted with an explicit manual override.')
+        : (isArabic ? 'لن تعيد الأتمتة كتابة هذه المقالة إلا بطلب إعادة صريح.' : 'Automation will not rewrite this article without an explicit retry.'),
+    };
+    if (item?.status === 'blocked' && item.lastErrorCode === 'content_writing_prerequisites_missing') return {
+      tone: 'amber',
+      label: isArabic ? 'بانتظار استكمال متطلبات الكتابة' : 'Waiting for writing prerequisites',
+      detail: isArabic
+        ? `لم تبدأ جلسة ذكاء اصطناعي ولم تُحتسب محاولة. المنافسون المؤهلون ${item.usableCompetitorCount}/${configuredMinimum}، وستعود المقالة للطابور تلقائيًا بعد اكتمال المتطلبات.`
+        : `No AI session started and no attempt was consumed. Qualified competitors: ${item.usableCompetitorCount}/${configuredMinimum}. The article will return to the queue when prerequisites are complete.`,
     };
     if (item?.status === 'blocked') return {
       tone: 'red',
@@ -248,6 +263,7 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
   }, [
     activeFullPipeline,
     competitorMinimumMet,
+    configuredMinimum,
     cooldownMs,
     error,
     globalBlocker,

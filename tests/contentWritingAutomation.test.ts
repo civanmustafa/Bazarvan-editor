@@ -182,7 +182,7 @@ test('automatic writing is a durable one-at-a-time server queue with cooldown an
   assert.match(migration, /session_sequence integer not null default 1/);
   assert.match(migration, /reserve_article_for_explicit_content_writing/);
   assert.match(scheduler, /auto-ready:\$\{item\.id\}:\$\{Math\.max\(1, item\.run_generation\)\}:\$\{Math\.max\(1, item\.session_sequence\)\}/);
-  assert.match(scheduler, /automationReviewPolicy: 'review_only'/);
+  assert.match(scheduler, /automationReviewPolicy: settings\.autoApplyPassedContent/);
   assert.match(worker, /beforeClaim:[\s\S]*scheduleNextAutomaticContentWritingSession/);
   assert.match(routeRegistry, /\/api\/content-writing\/automation/);
   assert.match(API, /list_content_writing_automation_candidates/);
@@ -201,6 +201,26 @@ test('automatic writing requires an empty saved editor and cancels invalid activ
   assert.match(migration, /Automatic content writing requires an empty article editor/);
   assert.match(migration, /cancel_requested_at = coalesce\(session\.cancel_requested_at, now\(\)\)/);
   assert.match(client, /article_editor_empty: \['المحرر خالٍ من نص سابق'/);
+});
+
+test('automatic writing does not spend an AI attempt on missing prerequisites and requeues after preparation', async () => {
+  const [scheduler, settings, dashboard, API] = await Promise.all([
+    readWorkspaceFile('server/contentWritingAutomation.ts'),
+    readWorkspaceFile('constants/settingsRegistry.ts'),
+    readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('api/contentWritingAutomation.ts'),
+  ]);
+
+  assert.match(settings, /contentWritingAutomationMinimumCompetitors: 3/);
+  assert.match(scheduler, /CONTENT_WRITING_MIN_COMPETITOR_COUNT/);
+  assert.match(scheduler, /code === 'content_writing_prerequisites_missing'[\s\S]*attempt_count: Math\.max\(0, item\.attempt_count - 1\)/);
+  assert.match(scheduler, /reconcileBlockedPrerequisiteItems/);
+  assert.match(scheduler, /enqueue_content_writing_competitor_preparation/);
+  assert.match(scheduler, /status: 'ready'[\s\S]*attempt_count: 0/);
+  assert.match(API, /typeof session\.quality_score === 'number'/);
+  assert.match(API, /action === 'summaries'/);
+  assert.match(dashboard, /المقالة مكتوبة · لم تجتز الجودة/);
+  assert.match(dashboard, /محتوى جزئي محفوظ/);
 });
 
 test('manual writing and the full workflow explicitly arbitrate with the automatic queue', async () => {
