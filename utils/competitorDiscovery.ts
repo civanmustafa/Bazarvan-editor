@@ -539,12 +539,14 @@ export const saveArticleCompetitorManualText = async (options: {
   articleId: string;
   position: number;
   contentText: string;
+  sourceUrl?: string;
 }): Promise<void> => {
   await requestCompetitors({
     action: 'save_manual_text',
     articleId: options.articleId,
     position: options.position,
     contentText: options.contentText,
+    sourceUrl: options.sourceUrl || '',
   });
 };
 

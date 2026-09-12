@@ -565,6 +565,8 @@ const saveManualCompetitorText = async (
   articleId: string,
   position: number,
   rawContentText: unknown,
+  rawSourceUrl: unknown,
+  selectedBy: string,
 ) => {
   if (!Number.isInteger(position) || position < 1 || position > MAX_ARTICLE_COMPETITORS) {
     throw new CompetitorApiError({
@@ -587,28 +589,57 @@ const saveManualCompetitorText = async (
     });
   }
 
-  const { data, error } = await supabase
+  const savedAt = new Date().toISOString();
+  const updateFields: Record<string, unknown> = {
+    content_text: contentText,
+    word_count: contentText.split(/\s+/u).filter(Boolean).length,
+    status: 'completed',
+    extraction_provider: 'manual',
+    error_code: null,
+    error_message: null,
+    fetched_at: savedAt,
+    selected_by: selectedBy,
+  };
+  const updateExisting = () => supabase
     .from('article_competitors')
-    .update({
-      content_text: contentText,
-      word_count: contentText.split(/\s+/u).filter(Boolean).length,
-      status: 'completed',
-      extraction_provider: 'manual',
-      error_code: null,
-      error_message: null,
-      fetched_at: new Date().toISOString(),
-    })
+    .update(updateFields)
     .eq('article_id', articleId)
     .eq('position', position)
     .select('id')
     .maybeSingle();
+
+  const { data, error } = await updateExisting();
   if (error) throw error;
   if (!data) {
-    throw new CompetitorApiError({
-      message: 'Competitor source was not found.',
-      status: 404,
-      code: 'competitor_not_found',
-    });
+    const manualInputUrl = `manual-input:${articleId}:${position}`;
+    let sourceUrl = manualInputUrl;
+    let domain = '';
+    try {
+      sourceUrl = canonicalizeCompetitorUrl(toText(rawSourceUrl));
+      domain = new URL(sourceUrl).hostname.replace(/^www\./i, '');
+    } catch {
+      // A manually entered text is valid without a URL. The internal marker is
+      // deliberately not exposed by the editor as a navigable competitor link.
+    }
+
+    const { error: insertError } = await supabase
+      .from('article_competitors')
+      .insert({
+        article_id: articleId,
+        position,
+        source_url: sourceUrl,
+        canonical_url: sourceUrl,
+        domain,
+        ...updateFields,
+      });
+    if (insertError) {
+      if (insertError.code !== '23505') throw insertError;
+      // A concurrent save may have created this position after the initial
+      // update. Retry the update without replacing its real source URL.
+      const { data: concurrentlyCreated, error: retryError } = await updateExisting();
+      if (retryError) throw retryError;
+      if (!concurrentlyCreated) throw insertError;
+    }
   }
 
   const { error: syncError } = await supabase.rpc('sync_article_competitors_metadata', {
@@ -681,6 +712,8 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       articleId,
       Number(body.position),
       body.contentText,
+      body.sourceUrl,
+      principal.userId,
     );
     return {
       status: 200,

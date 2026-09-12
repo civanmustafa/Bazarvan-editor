@@ -1,7 +1,7 @@
 import AppSelect from './AppSelect';
 ﻿
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, ChevronLeft, ChevronRight, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2, Code2, X, ExternalLink } from 'lucide-react';
+import { BadgeDollarSign, LayoutTemplate, Sparkles, ChevronDown, ChevronLeft, ChevronRight, BrainCircuit, Wand2, FileSearch, ShieldAlert, Lightbulb, Users, Command, Copy, FilePlus2, LocateFixed, CheckCircle2, AlertTriangle, FileText, Trash2, PenLine, Link2, Code2, X, ExternalLink, Loader2, Save } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import { useAISelector } from '../contexts/AIContext';
 import { useEditorSelector } from '../contexts/EditorContext';
@@ -50,6 +50,7 @@ import {
     createCompetitorTextStats,
     createSharedCompetitorPhrases,
 } from '../utils/competitorPhraseAnalysis';
+import { registerArticleSupplementalSaveHandler } from '../utils/articleSupplementalSave';
 import { IconTooltip } from './toolbar/ToolbarItems';
 
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
@@ -97,6 +98,10 @@ type CompetitorExtractionState = {
     error: string;
     notice?: string;
 };
+
+type CompetitorTextSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
+
+const COMPETITOR_TEXT_AUTOSAVE_DELAY_MS = 700;
 
 const COMPETITOR_COMPARISON_CATEGORY_LABELS: Record<string, { ar: string; en: string }> = {
     missing_idea: { ar: 'فكرة ناقصة', en: 'Missing idea' },
@@ -801,6 +806,19 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
     const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => loadStoredCompetitorTexts());
     const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => loadStoredCompetitorExtractions());
+    const [competitorTextSaveStatuses, setCompetitorTextSaveStatuses] = useState<CompetitorTextSaveStatus[]>(() => (
+        Array.from({ length: MAX_ARTICLE_COMPETITORS }, () => 'idle')
+    ));
+    const competitorUrlsRef = useRef(competitorUrls);
+    const competitorTextsRef = useRef(competitorTexts);
+    const savedCompetitorTextsRef = useRef(createDefaultCompetitorTexts());
+    const competitorTextSaveStatusesRef = useRef<CompetitorTextSaveStatus[]>(
+        Array.from({ length: MAX_ARTICLE_COMPETITORS }, () => 'idle'),
+    );
+    const activeArticleIdRef = useRef(activeArticleId);
+    activeArticleIdRef.current = activeArticleId;
+    const competitorTextSaveTimersRef = useRef<Map<number, number>>(new Map());
+    const competitorTextSavePromisesRef = useRef<Map<number, Promise<void>>>(new Map());
     const programmaticExtractionControllersRef = useRef<Record<number, AbortController>>({});
     const managedCompetitorPositionsRef = useRef<Set<number>>(new Set());
     const [selectedReadyCommandIds, setSelectedReadyCommandIds] = useState<string[]>([]);
@@ -877,6 +895,164 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         } : {}),
     };
     const competitorActionText = competitorText;
+    const competitorTextSaveUi = competitorIsArabic
+        ? {
+            dirty: 'بانتظار الحفظ',
+            saving: 'جارٍ حفظ النص…',
+            saved: 'محفوظ على الخادم',
+            error: 'تعذر حفظ النص',
+            action: 'حفظ النص',
+        }
+        : {
+            dirty: 'Waiting to save',
+            saving: 'Saving text…',
+            saved: 'Saved on the server',
+            error: 'Text save failed',
+            action: 'Save text',
+        };
+
+    const updateCompetitorTextSaveStatus = useCallback((
+        index: number,
+        status: CompetitorTextSaveStatus,
+    ) => {
+        competitorTextSaveStatusesRef.current = competitorTextSaveStatusesRef.current.map((current, itemIndex) => (
+            itemIndex === index ? status : current
+        ));
+        setCompetitorTextSaveStatuses(current => current.map((currentStatus, itemIndex) => (
+            itemIndex === index ? status : currentStatus
+        )));
+    }, []);
+
+    const flushCompetitorText = useCallback(async (index: number): Promise<void> => {
+        const timer = competitorTextSaveTimersRef.current.get(index);
+        if (timer !== undefined) {
+            window.clearTimeout(timer);
+            competitorTextSaveTimersRef.current.delete(index);
+        }
+
+        const activeSave = competitorTextSavePromisesRef.current.get(index);
+        if (activeSave) {
+            await activeSave;
+            return;
+        }
+
+        const savingArticleId = activeArticleId;
+        const savePromise = (async () => {
+            while (true) {
+                const contentText = getUsableCompetitorText(competitorTextsRef.current[index]);
+                const savedText = getUsableCompetitorText(savedCompetitorTextsRef.current[index]);
+                if (
+                    !savingArticleId
+                    || activeArticleIdRef.current !== savingArticleId
+                    || !contentText
+                    || contentText === savedText
+                ) {
+                    if (contentText && contentText === savedText) {
+                        updateCompetitorTextSaveStatus(index, 'saved');
+                    }
+                    return;
+                }
+
+                updateCompetitorTextSaveStatus(index, 'saving');
+                try {
+                    await saveArticleCompetitorManualText({
+                        articleId: savingArticleId,
+                        position: index + 1,
+                        contentText,
+                        sourceUrl: competitorUrlsRef.current[index] || '',
+                    });
+                    if (activeArticleIdRef.current !== savingArticleId) return;
+                    savedCompetitorTextsRef.current = savedCompetitorTextsRef.current.map((text, itemIndex) => (
+                        itemIndex === index ? contentText : text
+                    ));
+                    managedCompetitorPositionsRef.current.add(index + 1);
+                    const latestText = getUsableCompetitorText(competitorTextsRef.current[index]);
+                    updateCompetitorTextSaveStatus(index, latestText === contentText ? 'saved' : 'dirty');
+                    setCompetitorExtractions(current => current.map((item, itemIndex) => itemIndex === index
+                        ? {
+                            ...item,
+                            status: 'success',
+                            source: 'text',
+                            error: '',
+                            notice: '',
+                        }
+                        : item
+                    ));
+                } catch (error) {
+                    if (activeArticleIdRef.current === savingArticleId) {
+                        updateCompetitorTextSaveStatus(index, 'error');
+                        setCompetitorExtractions(current => current.map((item, itemIndex) => itemIndex === index
+                            ? {
+                                ...item,
+                                status: 'error',
+                                source: 'text',
+                                error: error instanceof Error
+                                    ? error.message
+                                    : competitorActionText.manualCompetitorTextSaveFailed,
+                                notice: '',
+                            }
+                            : item
+                        ));
+                    }
+                    throw error;
+                }
+            }
+        })().finally(() => {
+            if (competitorTextSavePromisesRef.current.get(index) === savePromise) {
+                competitorTextSavePromisesRef.current.delete(index);
+            }
+        });
+
+        competitorTextSavePromisesRef.current.set(index, savePromise);
+        await savePromise;
+    }, [activeArticleId, competitorActionText.manualCompetitorTextSaveFailed, updateCompetitorTextSaveStatus]);
+
+    const flushAllCompetitorTexts = useCallback(async (): Promise<void> => {
+        for (let index = 0; index < MAX_ARTICLE_COMPETITORS; index += 1) {
+            const hasPendingSave = competitorTextSavePromisesRef.current.has(index);
+            const currentText = getUsableCompetitorText(competitorTextsRef.current[index]);
+            const savedText = getUsableCompetitorText(savedCompetitorTextsRef.current[index]);
+            if (hasPendingSave || (currentText && currentText !== savedText)) {
+                await flushCompetitorText(index);
+            }
+        }
+    }, [flushCompetitorText]);
+
+    const scheduleCompetitorTextSave = useCallback((index: number) => {
+        const currentTimer = competitorTextSaveTimersRef.current.get(index);
+        if (currentTimer !== undefined) window.clearTimeout(currentTimer);
+        const timer = window.setTimeout(() => {
+            competitorTextSaveTimersRef.current.delete(index);
+            void flushCompetitorText(index).catch((): void => undefined);
+        }, COMPETITOR_TEXT_AUTOSAVE_DELAY_MS);
+        competitorTextSaveTimersRef.current.set(index, timer);
+    }, [flushCompetitorText]);
+
+    useEffect(() => (
+        activeArticleId
+            ? registerArticleSupplementalSaveHandler(activeArticleId, flushAllCompetitorTexts)
+            : undefined
+    ), [activeArticleId, flushAllCompetitorTexts]);
+
+    useEffect(() => {
+        competitorUrlsRef.current = competitorUrls;
+    }, [competitorUrls]);
+
+    useEffect(() => {
+        competitorTextsRef.current = competitorTexts;
+    }, [competitorTexts]);
+
+    useEffect(() => {
+        for (const timer of competitorTextSaveTimersRef.current.values()) window.clearTimeout(timer);
+        competitorTextSaveTimersRef.current.clear();
+        competitorTextSavePromisesRef.current.clear();
+    }, [activeArticleId]);
+
+    useEffect(() => () => {
+        for (const timer of competitorTextSaveTimersRef.current.values()) window.clearTimeout(timer);
+        competitorTextSaveTimersRef.current.clear();
+    }, []);
+
     useEffect(() => {
         const currentProviderAvailable = competitorGeminiProvider === 'geminiPaid'
             ? isGeminiPaidAvailable
@@ -974,13 +1150,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
 
     const handleDiscoveredCompetitors = useCallback((rows: CompetitorDiscoveryRow[]) => {
         const rowsByPosition = new Map(rows.map(row => [row.position, row]));
-        managedCompetitorPositionsRef.current = new Set(rows.map(row => row.position));
-        setCompetitorUrls(createDefaultCompetitorUrls().map((_, index) => {
-            const row = rowsByPosition.get(index + 1);
-            return row?.canonicalUrl || row?.sourceUrl || '';
-        }));
-        setCompetitorHtmls(createDefaultCompetitorHtmls());
-        setCompetitorTexts(createDefaultCompetitorTexts().map((_, index) => {
+        const serverTexts = createDefaultCompetitorTexts().map((_, index) => {
             const row = rowsByPosition.get(index + 1);
             return row && (
                 row.status === 'completed'
@@ -988,7 +1158,31 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             )
                 ? row.contentText
                 : '';
+        });
+        const currentStatuses = competitorTextSaveStatusesRef.current;
+        const nextTexts = serverTexts.map((serverText, index) => {
+            const currentText = competitorTextsRef.current[index] || '';
+            const hasUnsavedLocalChange = ['dirty', 'saving', 'error'].includes(currentStatuses[index])
+                && getUsableCompetitorText(currentText) !== getUsableCompetitorText(serverText);
+            return hasUnsavedLocalChange ? currentText : serverText;
+        });
+        const nextStatuses = currentStatuses.map((status, index): CompetitorTextSaveStatus => (
+            nextTexts[index] !== serverTexts[index] ? status : 'idle'
+        ));
+
+        managedCompetitorPositionsRef.current = new Set(rows.map(row => row.position));
+        setCompetitorUrls(createDefaultCompetitorUrls().map((_, index) => {
+            const row = rowsByPosition.get(index + 1);
+            return toSafeCompetitorSourceUrl(row?.canonicalUrl)
+                || toSafeCompetitorSourceUrl(row?.sourceUrl)
+                || '';
         }));
+        setCompetitorHtmls(createDefaultCompetitorHtmls());
+        savedCompetitorTextsRef.current = serverTexts;
+        competitorTextsRef.current = nextTexts;
+        competitorTextSaveStatusesRef.current = nextStatuses;
+        setCompetitorTexts(nextTexts);
+        setCompetitorTextSaveStatuses(nextStatuses);
         setCompetitorExtractions(createDefaultCompetitorExtractions().map((emptyState, index) => {
             const row = rowsByPosition.get(index + 1);
             if (!row) return emptyState;
@@ -1062,12 +1256,25 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
 
         const resetCompetitors = (event: Event) => {
             const restoredInputs = (event as CustomEvent<StoredCompetitorInputs | undefined>).detail;
+            const restoredUrls = normalizeStoredList(restoredInputs?.urls, createDefaultCompetitorUrls());
+            const restoredTexts = normalizeStoredList(restoredInputs?.texts, createDefaultCompetitorTexts());
+            const idleStatuses = Array.from(
+                { length: MAX_ARTICLE_COMPETITORS },
+                (): CompetitorTextSaveStatus => 'idle',
+            );
+            for (const timer of competitorTextSaveTimersRef.current.values()) window.clearTimeout(timer);
+            competitorTextSaveTimersRef.current.clear();
             managedCompetitorPositionsRef.current = new Set();
+            competitorUrlsRef.current = restoredUrls;
+            competitorTextsRef.current = restoredTexts;
+            savedCompetitorTextsRef.current = restoredTexts;
+            competitorTextSaveStatusesRef.current = idleStatuses;
             setBulkCompetitorText('');
             setCompetitorImportNotice('');
-            setCompetitorUrls(normalizeStoredList(restoredInputs?.urls, createDefaultCompetitorUrls()));
+            setCompetitorUrls(restoredUrls);
             setCompetitorHtmls(normalizeStoredList(restoredInputs?.htmls, createDefaultCompetitorHtmls()));
-            setCompetitorTexts(normalizeStoredList(restoredInputs?.texts, createDefaultCompetitorTexts()));
+            setCompetitorTexts(restoredTexts);
+            setCompetitorTextSaveStatuses(idleStatuses);
             setCompetitorExtractions(createDefaultCompetitorExtractions());
         };
 
@@ -1427,6 +1634,9 @@ ${readyCommandCompetitorBlocks}`;
     };
 
     const handleCompetitorUrlChange = (index: number, value: string) => {
+        competitorUrlsRef.current = competitorUrlsRef.current.map((url, urlIndex) => (
+            urlIndex === index ? value : url
+        ));
         setCompetitorUrls(prev => prev.map((url, urlIndex) => urlIndex === index ? value : url));
     };
 
@@ -1436,7 +1646,13 @@ ${readyCommandCompetitorBlocks}`;
     };
 
     const handleCompetitorTextChange = (index: number, value: string) => {
+        competitorTextsRef.current = competitorTextsRef.current.map((text, textIndex) => (
+            textIndex === index ? value : text
+        ));
         setCompetitorTexts(prev => prev.map((text, textIndex) => textIndex === index ? value : text));
+        const contentText = getUsableCompetitorText(value);
+        const savedText = getUsableCompetitorText(savedCompetitorTextsRef.current[index]);
+        updateCompetitorTextSaveStatus(index, contentText === savedText ? 'saved' : 'dirty');
         setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index
             ? {
                 status: value.trim() ? 'success' : 'idle',
@@ -1447,48 +1663,19 @@ ${readyCommandCompetitorBlocks}`;
             }
             : item
         ));
+        if (contentText && contentText !== savedText) scheduleCompetitorTextSave(index);
     };
 
     const handleCompetitorTextCommit = async (index: number, value = competitorTexts[index]) => {
-        const contentText = getUsableCompetitorText(value);
-        if (
-            !activeArticleId
-            || !contentText
-            || !managedCompetitorPositionsRef.current.has(index + 1)
-        ) {
-            return;
-        }
-
-        try {
-            await saveArticleCompetitorManualText({
-                articleId: activeArticleId,
-                position: index + 1,
-                contentText,
-            });
-            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index
-                ? {
-                    ...item,
-                    status: 'success',
-                    source: 'text',
-                    error: '',
-                    notice: competitorActionText.manualCompetitorTextSaved,
-                }
-                : item
+        if (value !== competitorTextsRef.current[index]) {
+            competitorTextsRef.current = competitorTextsRef.current.map((text, itemIndex) => (
+                itemIndex === index ? value : text
             ));
-        } catch (error) {
-            setCompetitorExtractions(prev => prev.map((item, itemIndex) => itemIndex === index
-                ? {
-                    ...item,
-                    status: 'error',
-                    source: 'text',
-                    error: error instanceof Error
-                        ? error.message
-                        : competitorActionText.manualCompetitorTextSaveFailed,
-                    notice: '',
-                }
-                : item
-            ));
+            setCompetitorTexts(current => current.map((text, itemIndex) => (
+                itemIndex === index ? value : text
+            )));
         }
+        await flushCompetitorText(index);
     };
 
     const setCompetitorPlainTextFromExtraction = (
@@ -1500,9 +1687,14 @@ ${readyCommandCompetitorBlocks}`;
         // and content writing never consume a separate preview card.
         const extractedText = normalizePlainCompetitorText(content.text);
         if (!extractedText) return;
+        competitorTextsRef.current = competitorTextsRef.current.map((text, textIndex) => (
+            textIndex === index ? extractedText : text
+        ));
         setCompetitorTexts(prev => prev.map((text, textIndex) => (
             textIndex === index ? extractedText : text
         )));
+        updateCompetitorTextSaveStatus(index, 'dirty');
+        scheduleCompetitorTextSave(index);
     };
 
     const handleBulkCompetitorTextDistribute = (value: string) => {
@@ -1511,13 +1703,17 @@ ${readyCommandCompetitorBlocks}`;
 
         const result = fillEmptyCompetitorTextSlots(competitorTexts, sections,
             competitorExtractions.flatMap((item, index) => item.status === 'loading' ? [index] : []));
+        competitorTextsRef.current = result.texts;
         setCompetitorTexts(result.texts);
+        result.inserted.forEach(index => updateCompetitorTextSaveStatus(index, 'dirty'));
         setCompetitorExtractions(prev => prev.map((item, index) => result.inserted.includes(index)
             ? { status: 'success', source: 'text', content: null, error: '', notice: '' }
             : item));
         // Keep overflow visible for the user instead of silently dropping it.
         setBulkCompetitorText(result.remaining.join('\n--\n'));
-        result.inserted.forEach(index => void handleCompetitorTextCommit(index, result.texts[index]));
+        result.inserted.forEach(index => {
+            void handleCompetitorTextCommit(index, result.texts[index]).catch((): void => undefined);
+        });
     };
 
     const handleBulkCompetitorTextPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -2476,6 +2672,16 @@ ${readyCommandCompetitorBlocks}`;
                         ? null
                         : extraction.content;
                     const plainText = competitorTexts[index] || '';
+                    const textSaveStatus = competitorTextSaveStatuses[index] || 'idle';
+                    const textSaveStatusLabel = textSaveStatus === 'dirty'
+                        ? competitorTextSaveUi.dirty
+                        : textSaveStatus === 'saving'
+                            ? competitorTextSaveUi.saving
+                            : textSaveStatus === 'saved'
+                                ? competitorTextSaveUi.saved
+                                : textSaveStatus === 'error'
+                                    ? competitorTextSaveUi.error
+                                    : '';
                     const competitorStats = competitorTextStatsBySlot[index];
                     const repeatedPhrases = competitorStats?.repeatedPhrases || [];
                     const competitorWordCount = competitorStats?.totalWords || 0;
@@ -2564,7 +2770,10 @@ ${readyCommandCompetitorBlocks}`;
                                                 event.currentTarget.select();
                                             }
                                         }}
-                                        onBlur={() => void handleCompetitorTextCommit(index)}
+                                        onBlur={(event) => {
+                                            void handleCompetitorTextCommit(index, event.currentTarget.value)
+                                                .catch((): void => undefined);
+                                        }}
                                         placeholder={tRs.competitorPlainTextPlaceholder}
                                         rows={5}
                                         className={`w-full resize-y rounded-md border px-2 py-2 text-xs leading-5 outline-none placeholder:text-gray-400 focus:ring-1 dark:bg-[#1F1F1F] dark:text-gray-100 dark:placeholder:text-gray-500 ${
@@ -2574,6 +2783,31 @@ ${readyCommandCompetitorBlocks}`;
                                         }`}
                                         dir="auto"
                                     />
+                                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                                        <span className={`min-w-0 text-[10px] font-semibold ${
+                                            textSaveStatus === 'error'
+                                                ? 'text-red-600 dark:text-red-300'
+                                                : textSaveStatus === 'saved'
+                                                    ? 'text-emerald-600 dark:text-emerald-300'
+                                                    : 'text-gray-500 dark:text-gray-400'
+                                        }`}>
+                                            {textSaveStatusLabel}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                void handleCompetitorTextCommit(index, plainText)
+                                                    .catch((): void => undefined);
+                                            }}
+                                            disabled={!activeArticleId || !getUsableCompetitorText(plainText) || textSaveStatus === 'saving'}
+                                            className="flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-[10px] font-bold text-gray-600 transition hover:border-[#d4af37] hover:text-[#8a6f1d] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3C3C3C] dark:bg-[#1F1F1F] dark:text-gray-300 dark:hover:text-[#f2d675]"
+                                        >
+                                            {textSaveStatus === 'saving'
+                                                ? <Loader2 size={12} className="animate-spin" />
+                                                : <Save size={12} />}
+                                            <span>{competitorTextSaveUi.action}</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 

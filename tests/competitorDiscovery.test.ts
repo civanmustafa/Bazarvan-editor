@@ -566,6 +566,28 @@ test('dual extraction failure is excluded until the canonical marker is manually
   assert.match(writingContext, /getUsableCompetitorText/);
 });
 
+test('manual competitor text is durably saved for new slots and flushed with article saves', async () => {
+  const [api, client, sidebar, editorContext] = await Promise.all([
+    readWorkspaceFile('api/competitors.ts'),
+    readWorkspaceFile('utils/competitorDiscovery.ts'),
+    readWorkspaceFile('components/RightSidebar.tsx'),
+    readWorkspaceFile('contexts/EditorContext.tsx'),
+  ]);
+
+  assert.match(api, /const manualInputUrl = `manual-input:\$\{articleId\}:\$\{position\}`/);
+  assert.match(api, /\.from\('article_competitors'\)[\s\S]*?\.insert\(\{/);
+  assert.match(api, /const \{ data: concurrentlyCreated, error: retryError \} = await updateExisting\(\)/);
+  assert.match(api, /body\.sourceUrl,[\s\S]*?principal\.userId/);
+  assert.match(client, /sourceUrl\?: string/);
+  assert.match(client, /sourceUrl: options\.sourceUrl \|\| ''/);
+  assert.match(sidebar, /COMPETITOR_TEXT_AUTOSAVE_DELAY_MS = 700/);
+  assert.match(sidebar, /registerArticleSupplementalSaveHandler\(activeArticleId, flushAllCompetitorTexts\)/);
+  assert.match(sidebar, /sourceUrl: competitorUrlsRef\.current\[index\] \|\| ''/);
+  assert.match(sidebar, /handleCompetitorTextCommit\(index, event\.currentTarget\.value\)/);
+  assert.doesNotMatch(sidebar, /managedCompetitorPositionsRef\.current\.has\(index \+ 1\)/);
+  assert.match(editorContext, /await flushArticleSupplementalSaves\(activeArticleId\)/);
+});
+
 test('competitor sidebar keeps one unlabeled canonical text box and no Firecrawl or AI result card', async () => {
   const [sidebar, translations, writingContext, engineeringExecutor] = await Promise.all([
     readWorkspaceFile('components/RightSidebar.tsx'),
