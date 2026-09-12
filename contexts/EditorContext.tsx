@@ -67,6 +67,7 @@ import { canPersistArticleDraft, shouldClearPersistedArticleBody } from '../util
 import { hasMeaningfulArticleContent } from '../utils/articleContent.ts';
 import { handleEditorLinkClick } from '../utils/editorLinkInteraction';
 import { saveArticleClientSelection } from '../utils/articleClientContext';
+import { flushArticleSupplementalSaves } from '../utils/articleSupplementalSave';
 import {
     createEditorContentFromPlainText,
     getSafeEditorContent,
@@ -1573,6 +1574,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
 
         try {
+            await flushArticleSupplementalSaves(activeArticleId);
             clearEditorSnapshotTimer();
             clearDraftPersistTimer();
             setEditorState(contentJSON);

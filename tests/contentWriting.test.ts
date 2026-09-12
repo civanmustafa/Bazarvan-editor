@@ -4,6 +4,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { COMPETITOR_DUAL_EXTRACTION_FAILURE_TEXT } from '../utils/competitorContent.ts';
+import {
+  flushArticleSupplementalSaves,
+  registerArticleSupplementalSaveHandler,
+} from '../utils/articleSupplementalSave.ts';
 
 const importContentWriting = async (): Promise<any> => {
   const result = await build({
@@ -264,6 +268,31 @@ test('writing source fields explain that focus and other AI instructions are acc
   assert.match(panel, /اكتب تعليمات التركيز لهذا المصدر أو أي تعليمات أخرى تريد من الذكاء الاصطناعي مراعاتها \(اختياري\)/);
   assert.match(panel, /Enter focus instructions for this source or any other instructions you want the AI to consider \(optional\)/);
   assert.equal((panel.match(/placeholder=\{sourceInstructionsPlaceholder\}/g) || []).length, 2);
+});
+
+test('writing source instructions auto-save and flush before the article save completes', async () => {
+  const [panel, editorContext] = await Promise.all([
+    readFile(new URL('../components/ContentWritingSourcesPanel.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../contexts/EditorContext.tsx', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(panel, /value=\{instructionDrafts\[source\.id\] \?\? source\.focusInstructions\}/);
+  assert.match(panel, /scheduleSourceInstructionsSave\(source\.id\)/);
+  assert.match(panel, /onBlur=\{\(\) => void flushSourceInstructions\(source\.id\)/);
+  assert.match(panel, /registerArticleSupplementalSaveHandler\(articleId, flushAllSourceInstructions\)/);
+  assert.doesNotMatch(panel, /defaultValue=\{source\.focusInstructions\}/);
+  assert.match(editorContext, /await flushArticleSupplementalSaves\(activeArticleId\)/);
+
+  let flushCount = 0;
+  const unregister = registerArticleSupplementalSaveHandler('article-source-save-test', async () => {
+    await Promise.resolve();
+    flushCount += 1;
+  });
+  await flushArticleSupplementalSaves('article-source-save-test');
+  assert.equal(flushCount, 1);
+  unregister();
+  await flushArticleSupplementalSaves('article-source-save-test');
+  assert.equal(flushCount, 1);
 });
 
 test('content writing blocks an enabled primary source until extraction is ready', async () => {

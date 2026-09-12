@@ -1,5 +1,5 @@
 import AppSelect from './AppSelect';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -21,6 +21,11 @@ import {
   type ContentWritingSourceRole,
   type ContentWritingSourceType,
 } from '../utils/contentWritingSources';
+import { registerArticleSupplementalSaveHandler } from '../utils/articleSupplementalSave';
+
+type InstructionSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
+
+const INSTRUCTION_AUTOSAVE_DELAY_MS = 700;
 
 type Props = {
   articleId: string;
@@ -45,12 +50,35 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
   const [busyId, setBusyId] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [instructionDrafts, setInstructionDrafts] = useState<Record<string, string>>({});
+  const [instructionSaveStatuses, setInstructionSaveStatuses] = useState<Record<string, InstructionSaveStatus>>({});
+  const instructionDraftsRef = useRef<Record<string, string>>({});
+  const savedInstructionsRef = useRef<Record<string, string>>({});
+  const instructionSaveTimersRef = useRef<Map<string, number>>(new Map());
+  const instructionSavePromisesRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const load = useCallback(async () => {
     setIsLoading(true);
     setError('');
     try {
-      setSources(await listContentWritingSources(articleId));
+      const loadedSources = await listContentWritingSources(articleId);
+      const currentDrafts = instructionDraftsRef.current;
+      const previousSaved = savedInstructionsRef.current;
+      const nextDrafts: Record<string, string> = {};
+      const nextSaved: Record<string, string> = {};
+      const nextStatuses: Record<string, InstructionSaveStatus> = {};
+      for (const source of loadedSources) {
+        const currentDraft = currentDrafts[source.id];
+        const wasDirty = currentDraft !== undefined && currentDraft !== previousSaved[source.id];
+        nextDrafts[source.id] = wasDirty ? currentDraft : source.focusInstructions;
+        nextSaved[source.id] = source.focusInstructions;
+        nextStatuses[source.id] = wasDirty ? 'dirty' : 'idle';
+      }
+      instructionDraftsRef.current = nextDrafts;
+      savedInstructionsRef.current = nextSaved;
+      setInstructionDrafts(nextDrafts);
+      setInstructionSaveStatuses(nextStatuses);
+      setSources(loadedSources);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : (isArabic ? 'تعذر تحميل المصادر.' : 'Could not load sources.'));
     } finally {
@@ -81,6 +109,100 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
     setSources(current => current.map(source => source.id === incoming.id ? incoming : source));
   };
 
+  const flushSourceInstructions = useCallback(async (sourceId: string): Promise<void> => {
+    const timer = instructionSaveTimersRef.current.get(sourceId);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      instructionSaveTimersRef.current.delete(sourceId);
+    }
+
+    const activeSave = instructionSavePromisesRef.current.get(sourceId);
+    if (activeSave) {
+      await activeSave;
+      return;
+    }
+
+    const savePromise = (async () => {
+      while (true) {
+        const currentDraft = instructionDraftsRef.current[sourceId] || '';
+        const instructionsToSave = currentDraft.trim();
+        const savedInstructions = savedInstructionsRef.current[sourceId] || '';
+        if (instructionsToSave === savedInstructions) {
+          if (currentDraft !== savedInstructions) {
+            instructionDraftsRef.current = {
+              ...instructionDraftsRef.current,
+              [sourceId]: savedInstructions,
+            };
+            setInstructionDrafts(current => ({ ...current, [sourceId]: savedInstructions }));
+          }
+          break;
+        }
+        setInstructionSaveStatuses(current => ({ ...current, [sourceId]: 'saving' }));
+        try {
+          const updated = await updateContentWritingSource({
+            articleId,
+            sourceId,
+            focusInstructions: instructionsToSave,
+          });
+          savedInstructionsRef.current = {
+            ...savedInstructionsRef.current,
+            [sourceId]: updated.focusInstructions,
+          };
+          if ((instructionDraftsRef.current[sourceId] || '') === currentDraft) {
+            instructionDraftsRef.current = {
+              ...instructionDraftsRef.current,
+              [sourceId]: updated.focusInstructions,
+            };
+            setInstructionDrafts(current => ({ ...current, [sourceId]: updated.focusInstructions }));
+          }
+          setSources(current => current.map(source => source.id === updated.id ? updated : source));
+          setError('');
+        } catch (saveError) {
+          const message = saveError instanceof Error
+            ? saveError.message
+            : (isArabic ? 'تعذر حفظ تعليمات المصدر.' : 'Could not save source instructions.');
+          setInstructionSaveStatuses(current => ({ ...current, [sourceId]: 'error' }));
+          setError(message);
+          throw saveError;
+        }
+      }
+      setInstructionSaveStatuses(current => ({ ...current, [sourceId]: 'saved' }));
+    })().finally(() => {
+      instructionSavePromisesRef.current.delete(sourceId);
+    });
+
+    instructionSavePromisesRef.current.set(sourceId, savePromise);
+    await savePromise;
+  }, [articleId, isArabic]);
+
+  const flushAllSourceInstructions = useCallback(async (): Promise<void> => {
+    const dirtySourceIds = Object.keys(instructionDraftsRef.current).filter(sourceId => (
+      (instructionDraftsRef.current[sourceId] || '') !== (savedInstructionsRef.current[sourceId] || '')
+      || instructionSavePromisesRef.current.has(sourceId)
+    ));
+    await Promise.all(dirtySourceIds.map(sourceId => flushSourceInstructions(sourceId)));
+  }, [flushSourceInstructions]);
+
+  const scheduleSourceInstructionsSave = useCallback((sourceId: string) => {
+    const currentTimer = instructionSaveTimersRef.current.get(sourceId);
+    if (currentTimer !== undefined) window.clearTimeout(currentTimer);
+    const timer = window.setTimeout(() => {
+      instructionSaveTimersRef.current.delete(sourceId);
+      void flushSourceInstructions(sourceId).catch((): void => undefined);
+    }, INSTRUCTION_AUTOSAVE_DELAY_MS);
+    instructionSaveTimersRef.current.set(sourceId, timer);
+  }, [flushSourceInstructions]);
+
+  useEffect(() => (
+    registerArticleSupplementalSaveHandler(articleId, flushAllSourceInstructions)
+  ), [articleId, flushAllSourceInstructions]);
+
+  useEffect(() => () => {
+    for (const timer of instructionSaveTimersRef.current.values()) window.clearTimeout(timer);
+    instructionSaveTimersRef.current.clear();
+    void flushAllSourceInstructions().catch((): void => undefined);
+  }, [flushAllSourceInstructions]);
+
   const handleCreate = async () => {
     if (disabled || busyId || (sourceType === 'url' ? !url.trim() : rawText.trim().split(/\s+/).length < 5)) return;
     setBusyId('create');
@@ -96,6 +218,10 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
         focusInstructions,
       });
       setSources(current => [...current, source]);
+      instructionDraftsRef.current = { ...instructionDraftsRef.current, [source.id]: source.focusInstructions };
+      savedInstructionsRef.current = { ...savedInstructionsRef.current, [source.id]: source.focusInstructions };
+      setInstructionDrafts(current => ({ ...current, [source.id]: source.focusInstructions }));
+      setInstructionSaveStatuses(current => ({ ...current, [source.id]: 'saved' }));
       setTitle('');
       setUrl('');
       setRawText('');
@@ -322,6 +448,21 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
                     setBusyId(source.id);
                     try {
                       await deleteContentWritingSource(articleId, source.id);
+                      const timer = instructionSaveTimersRef.current.get(source.id);
+                      if (timer !== undefined) window.clearTimeout(timer);
+                      instructionSaveTimersRef.current.delete(source.id);
+                      delete instructionDraftsRef.current[source.id];
+                      delete savedInstructionsRef.current[source.id];
+                      setInstructionDrafts(current => {
+                        const next = { ...current };
+                        delete next[source.id];
+                        return next;
+                      });
+                      setInstructionSaveStatuses(current => {
+                        const next = { ...current };
+                        delete next[source.id];
+                        return next;
+                      });
                       setSources(current => current.filter(item => item.id !== source.id));
                     } catch (deleteError) {
                       setError(deleteError instanceof Error ? deleteError.message : 'Delete failed.');
@@ -337,26 +478,46 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
 
             <div className="mt-1.5 flex items-end gap-1">
               <textarea
-                defaultValue={source.focusInstructions}
+                value={instructionDrafts[source.id] ?? source.focusInstructions}
                 id={`writing-source-focus-${source.id}`}
                 rows={3}
                 maxLength={2000}
                 disabled={disabled || busyId === source.id}
+                onChange={event => {
+                  const nextValue = event.target.value;
+                  instructionDraftsRef.current = { ...instructionDraftsRef.current, [source.id]: nextValue };
+                  setInstructionDrafts(current => ({ ...current, [source.id]: nextValue }));
+                  setInstructionSaveStatuses(current => ({ ...current, [source.id]: 'dirty' }));
+                  scheduleSourceInstructionsSave(source.id);
+                }}
+                onBlur={() => void flushSourceInstructions(source.id).catch((): void => undefined)}
                 placeholder={sourceInstructionsPlaceholder}
                 className="min-w-0 flex-1 resize-y rounded border border-gray-200 bg-white p-1.5 text-[10px] leading-4 dark:border-[#444] dark:bg-[#1f1f1f]"
               />
               <button
                 type="button"
                 disabled={disabled || busyId === source.id}
-                onClick={() => {
-                  const input = document.getElementById(`writing-source-focus-${source.id}`) as HTMLTextAreaElement | null;
-                  void updateSource(source, { articleId, sourceId: source.id, focusInstructions: input?.value || '' });
-                }}
+                onClick={() => void flushSourceInstructions(source.id).catch((): void => undefined)}
                 className="flex size-7 items-center justify-center rounded border border-[#d4af37]/40 text-[#8a6f1d]"
                 title={isArabic ? 'حفظ تعليمات المصدر' : 'Save source instructions'}
               >
-                {busyId === source.id ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                {busyId === source.id || instructionSaveStatuses[source.id] === 'saving'
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : <Save size={12} />}
               </button>
+            </div>
+            <div className={`mt-1 text-[9px] font-bold ${instructionSaveStatuses[source.id] === 'error'
+              ? 'text-red-600 dark:text-red-300'
+              : instructionSaveStatuses[source.id] === 'dirty'
+                ? 'text-amber-600 dark:text-amber-300'
+                : 'text-gray-400'}`}>
+              {instructionSaveStatuses[source.id] === 'saving'
+                ? (isArabic ? 'جار حفظ التعليمات...' : 'Saving instructions...')
+                : instructionSaveStatuses[source.id] === 'dirty'
+                  ? (isArabic ? 'سيتم الحفظ تلقائيًا' : 'Will be saved automatically')
+                  : instructionSaveStatuses[source.id] === 'error'
+                    ? (isArabic ? 'تعذر الحفظ — أعد المحاولة' : 'Save failed — try again')
+                    : (isArabic ? 'تُحفظ التعليمات تلقائيًا ومع حفظ المقالة' : 'Instructions save automatically and with the article')}
             </div>
           </div>
         ))}
