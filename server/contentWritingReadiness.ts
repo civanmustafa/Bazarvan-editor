@@ -28,6 +28,11 @@ export const CONTENT_WRITING_SCHEMA_PROBES = [
     columns: 'id,article_id,source_type,source_role,status,enabled,content_hash,word_count',
   },
   {
+    id: 'writingSourceDrafts',
+    table: 'article_writing_source_drafts',
+    columns: 'article_id,source_type,source_role,title,source_url,raw_text,focus_instructions,updated_by,updated_at',
+  },
+  {
     id: 'fullPipelineJobs',
     table: 'ai_external_analysis_jobs',
     columns: 'id,article_id,job_type,status,pipeline_parent_job_id,lease_generation,max_attempts,dead_lettered_at,dead_letter_reason',

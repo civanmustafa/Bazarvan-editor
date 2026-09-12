@@ -271,17 +271,29 @@ test('writing source fields explain that focus and other AI instructions are acc
 });
 
 test('writing source instructions auto-save and flush before the article save completes', async () => {
-  const [panel, editorContext] = await Promise.all([
+  const [panel, editorContext, client, api, server, migration] = await Promise.all([
     readFile(new URL('../components/ContentWritingSourcesPanel.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../contexts/EditorContext.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../utils/contentWritingSources.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../api/contentWritingSources.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../server/contentWritingSources.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260912000000_article_writing_source_drafts.sql', import.meta.url), 'utf8'),
   ]);
 
+  assert.match(panel, /updateNewSourceDraft\(\{ focusInstructions: event\.target\.value \}\)/);
+  assert.match(panel, /onBlur=\{\(\) => void flushNewSourceDraft\(\)/);
+  assert.match(panel, /saveContentWritingSourceDraft/);
+  assert.match(panel, /readContentWritingSourcesState/);
   assert.match(panel, /value=\{instructionDrafts\[source\.id\] \?\? source\.focusInstructions\}/);
   assert.match(panel, /scheduleSourceInstructionsSave\(source\.id\)/);
   assert.match(panel, /onBlur=\{\(\) => void flushSourceInstructions\(source\.id\)/);
-  assert.match(panel, /registerArticleSupplementalSaveHandler\(articleId, flushAllSourceInstructions\)/);
+  assert.match(panel, /registerArticleSupplementalSaveHandler\(articleId, flushAllWritingSourceChanges\)/);
   assert.doesNotMatch(panel, /defaultValue=\{source\.focusInstructions\}/);
   assert.match(editorContext, /await flushArticleSupplementalSaves\(activeArticleId\)/);
+  assert.match(client, /action: 'save_draft'/);
+  assert.match(api, /saveArticleWritingSourceDraft/);
+  assert.match(server, /article_writing_source_drafts/);
+  assert.match(migration, /revoke all on table public\.article_writing_source_drafts from public, anon, authenticated/);
 
   let flushCount = 0;
   const unregister = registerArticleSupplementalSaveHandler('article-source-save-test', async () => {

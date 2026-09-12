@@ -12,20 +12,52 @@ import {
   Trash2,
 } from 'lucide-react';
 import {
+  clearContentWritingSourceDraft,
   createContentWritingSource,
   deleteContentWritingSource,
-  listContentWritingSources,
+  readContentWritingSourcesState,
   refreshContentWritingSource,
+  saveContentWritingSourceDraft,
   updateContentWritingSource,
   type ContentWritingSource,
+  type ContentWritingSourceDraft,
   type ContentWritingSourceRole,
   type ContentWritingSourceType,
 } from '../utils/contentWritingSources';
 import { registerArticleSupplementalSaveHandler } from '../utils/articleSupplementalSave';
 
 type InstructionSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
+type EditableSourceDraft = Omit<ContentWritingSourceDraft, 'articleId' | 'updatedAt'>;
 
 const INSTRUCTION_AUTOSAVE_DELAY_MS = 700;
+const NEW_SOURCE_DRAFT_AUTOSAVE_DELAY_MS = 700;
+
+const emptyEditableSourceDraft = (): EditableSourceDraft => ({
+  sourceType: 'url',
+  sourceRole: 'primary',
+  title: '',
+  url: '',
+  rawText: '',
+  focusInstructions: '',
+});
+
+const normalizeEditableSourceDraft = (draft: EditableSourceDraft): EditableSourceDraft => ({
+  sourceType: draft.sourceType === 'raw' ? 'raw' : 'url',
+  sourceRole: draft.sourceRole === 'supporting' ? 'supporting' : 'primary',
+  title: draft.title.trim().slice(0, 500),
+  url: draft.url.trim().slice(0, 2_048),
+  rawText: draft.rawText.trim().slice(0, 120_000),
+  focusInstructions: draft.focusInstructions.trim().slice(0, 2_000),
+});
+
+const sameEditableSourceDraft = (left: EditableSourceDraft, right: EditableSourceDraft): boolean => (
+  left.sourceType === right.sourceType
+  && left.sourceRole === right.sourceRole
+  && left.title === right.title
+  && left.url === right.url
+  && left.rawText === right.rawText
+  && left.focusInstructions === right.focusInstructions
+);
 
 type Props = {
   articleId: string;
@@ -52,16 +84,48 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
   const [error, setError] = useState('');
   const [instructionDrafts, setInstructionDrafts] = useState<Record<string, string>>({});
   const [instructionSaveStatuses, setInstructionSaveStatuses] = useState<Record<string, InstructionSaveStatus>>({});
+  const [newSourceDraftSaveStatus, setNewSourceDraftSaveStatus] = useState<InstructionSaveStatus>('idle');
   const instructionDraftsRef = useRef<Record<string, string>>({});
   const savedInstructionsRef = useRef<Record<string, string>>({});
   const instructionSaveTimersRef = useRef<Map<string, number>>(new Map());
   const instructionSavePromisesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const newSourceDraftRef = useRef<EditableSourceDraft>(emptyEditableSourceDraft());
+  const savedNewSourceDraftRef = useRef<EditableSourceDraft>(emptyEditableSourceDraft());
+  const newSourceDraftSaveTimerRef = useRef<number | null>(null);
+  const newSourceDraftSavePromiseRef = useRef<Promise<void> | null>(null);
+
+  const applyNewSourceDraftState = useCallback((draft: EditableSourceDraft) => {
+    newSourceDraftRef.current = draft;
+    setSourceType(draft.sourceType);
+    setSourceRole(draft.sourceRole);
+    setTitle(draft.title);
+    setUrl(draft.url);
+    setRawText(draft.rawText);
+    setFocusInstructions(draft.focusInstructions);
+  }, []);
 
   const load = useCallback(async () => {
     setIsLoading(true);
     setError('');
     try {
-      const loadedSources = await listContentWritingSources(articleId);
+      const loaded = await readContentWritingSourcesState(articleId);
+      const loadedSources = loaded.sources;
+      const serverDraft: EditableSourceDraft = {
+        sourceType: loaded.draft.sourceType,
+        sourceRole: loaded.draft.sourceRole,
+        title: loaded.draft.title,
+        url: loaded.draft.url,
+        rawText: loaded.draft.rawText,
+        focusInstructions: loaded.draft.focusInstructions,
+      };
+      const currentNewSourceDraft = newSourceDraftRef.current;
+      const newSourceDraftWasDirty = !sameEditableSourceDraft(
+        normalizeEditableSourceDraft(currentNewSourceDraft),
+        savedNewSourceDraftRef.current,
+      );
+      savedNewSourceDraftRef.current = serverDraft;
+      if (!newSourceDraftWasDirty) applyNewSourceDraftState(serverDraft);
+      setNewSourceDraftSaveStatus(newSourceDraftWasDirty ? 'dirty' : 'idle');
       const currentDrafts = instructionDraftsRef.current;
       const previousSaved = savedInstructionsRef.current;
       const nextDrafts: Record<string, string> = {};
@@ -84,18 +148,16 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [articleId, isArabic]);
+  }, [applyNewSourceDraftState, articleId, isArabic]);
 
   useEffect(() => {
     setSources([]);
-    setSourceType('url');
-    setSourceRole('primary');
-    setTitle('');
-    setUrl('');
-    setRawText('');
-    setFocusInstructions('');
+    const emptyDraft = emptyEditableSourceDraft();
+    savedNewSourceDraftRef.current = emptyDraft;
+    applyNewSourceDraftState(emptyDraft);
+    setNewSourceDraftSaveStatus('idle');
     void load();
-  }, [load]);
+  }, [applyNewSourceDraftState, load]);
 
   const blockingCount = useMemo(() => sources.filter(source => (
     source.enabled && source.sourceRole === 'primary' && source.status !== 'ready'
@@ -108,6 +170,81 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
   const merge = (incoming: ContentWritingSource) => {
     setSources(current => current.map(source => source.id === incoming.id ? incoming : source));
   };
+
+  const flushNewSourceDraft = useCallback(async (): Promise<void> => {
+    if (newSourceDraftSaveTimerRef.current !== null) {
+      window.clearTimeout(newSourceDraftSaveTimerRef.current);
+      newSourceDraftSaveTimerRef.current = null;
+    }
+
+    const activeSave = newSourceDraftSavePromiseRef.current;
+    if (activeSave) {
+      await activeSave;
+      return;
+    }
+
+    const savePromise = (async () => {
+      while (true) {
+        const currentDraft = newSourceDraftRef.current;
+        const draftToSave = normalizeEditableSourceDraft(currentDraft);
+        if (sameEditableSourceDraft(draftToSave, savedNewSourceDraftRef.current)) {
+          if (!sameEditableSourceDraft(currentDraft, draftToSave)) applyNewSourceDraftState(draftToSave);
+          break;
+        }
+
+        setNewSourceDraftSaveStatus('saving');
+        try {
+          const savedDraft = await saveContentWritingSourceDraft({
+            articleId,
+            ...draftToSave,
+          });
+          const normalizedSavedDraft: EditableSourceDraft = {
+            sourceType: savedDraft.sourceType,
+            sourceRole: savedDraft.sourceRole,
+            title: savedDraft.title,
+            url: savedDraft.url,
+            rawText: savedDraft.rawText,
+            focusInstructions: savedDraft.focusInstructions,
+          };
+          savedNewSourceDraftRef.current = normalizedSavedDraft;
+          if (sameEditableSourceDraft(newSourceDraftRef.current, currentDraft)) {
+            applyNewSourceDraftState(normalizedSavedDraft);
+          }
+          setError('');
+        } catch (saveError) {
+          const message = saveError instanceof Error
+            ? saveError.message
+            : (isArabic ? 'تعذر حفظ مسودة المصدر.' : 'Could not save the source draft.');
+          setNewSourceDraftSaveStatus('error');
+          setError(message);
+          throw saveError;
+        }
+      }
+      setNewSourceDraftSaveStatus('saved');
+    })().finally(() => {
+      newSourceDraftSavePromiseRef.current = null;
+    });
+
+    newSourceDraftSavePromiseRef.current = savePromise;
+    await savePromise;
+  }, [applyNewSourceDraftState, articleId, isArabic]);
+
+  const scheduleNewSourceDraftSave = useCallback(() => {
+    if (newSourceDraftSaveTimerRef.current !== null) {
+      window.clearTimeout(newSourceDraftSaveTimerRef.current);
+    }
+    newSourceDraftSaveTimerRef.current = window.setTimeout(() => {
+      newSourceDraftSaveTimerRef.current = null;
+      void flushNewSourceDraft().catch((): void => undefined);
+    }, NEW_SOURCE_DRAFT_AUTOSAVE_DELAY_MS);
+  }, [flushNewSourceDraft]);
+
+  const updateNewSourceDraft = useCallback((patch: Partial<EditableSourceDraft>) => {
+    const nextDraft = { ...newSourceDraftRef.current, ...patch };
+    applyNewSourceDraftState(nextDraft);
+    setNewSourceDraftSaveStatus('dirty');
+    scheduleNewSourceDraftSave();
+  }, [applyNewSourceDraftState, scheduleNewSourceDraftSave]);
 
   const flushSourceInstructions = useCallback(async (sourceId: string): Promise<void> => {
     const timer = instructionSaveTimersRef.current.get(sourceId);
@@ -183,6 +320,13 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
     await Promise.all(dirtySourceIds.map(sourceId => flushSourceInstructions(sourceId)));
   }, [flushSourceInstructions]);
 
+  const flushAllWritingSourceChanges = useCallback(async (): Promise<void> => {
+    await Promise.all([
+      flushNewSourceDraft(),
+      flushAllSourceInstructions(),
+    ]);
+  }, [flushAllSourceInstructions, flushNewSourceDraft]);
+
   const scheduleSourceInstructionsSave = useCallback((sourceId: string) => {
     const currentTimer = instructionSaveTimersRef.current.get(sourceId);
     if (currentTimer !== undefined) window.clearTimeout(currentTimer);
@@ -194,39 +338,54 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
   }, [flushSourceInstructions]);
 
   useEffect(() => (
-    registerArticleSupplementalSaveHandler(articleId, flushAllSourceInstructions)
-  ), [articleId, flushAllSourceInstructions]);
+    registerArticleSupplementalSaveHandler(articleId, flushAllWritingSourceChanges)
+  ), [articleId, flushAllWritingSourceChanges]);
 
   useEffect(() => () => {
     for (const timer of instructionSaveTimersRef.current.values()) window.clearTimeout(timer);
     instructionSaveTimersRef.current.clear();
-    void flushAllSourceInstructions().catch((): void => undefined);
-  }, [flushAllSourceInstructions]);
+    if (newSourceDraftSaveTimerRef.current !== null) {
+      window.clearTimeout(newSourceDraftSaveTimerRef.current);
+      newSourceDraftSaveTimerRef.current = null;
+    }
+    void flushAllWritingSourceChanges().catch((): void => undefined);
+  }, [flushAllWritingSourceChanges]);
 
   const handleCreate = async () => {
-    if (disabled || busyId || (sourceType === 'url' ? !url.trim() : rawText.trim().split(/\s+/).length < 5)) return;
+    const pendingDraft = normalizeEditableSourceDraft(newSourceDraftRef.current);
+    if (disabled || busyId || (pendingDraft.sourceType === 'url'
+      ? !pendingDraft.url
+      : pendingDraft.rawText.split(/\s+/).length < 5)) return;
     setBusyId('create');
     setError('');
     try {
+      await flushNewSourceDraft();
+      const draftToCreate = normalizeEditableSourceDraft(newSourceDraftRef.current);
       const source = await createContentWritingSource({
         articleId,
-        sourceType,
-        sourceRole,
-        title,
-        url,
-        rawText,
-        focusInstructions,
+        ...draftToCreate,
       });
       setSources(current => [...current, source]);
       instructionDraftsRef.current = { ...instructionDraftsRef.current, [source.id]: source.focusInstructions };
       savedInstructionsRef.current = { ...savedInstructionsRef.current, [source.id]: source.focusInstructions };
       setInstructionDrafts(current => ({ ...current, [source.id]: source.focusInstructions }));
       setInstructionSaveStatuses(current => ({ ...current, [source.id]: 'saved' }));
-      setTitle('');
-      setUrl('');
-      setRawText('');
-      setFocusInstructions('');
-      setSourceRole('primary');
+      const emptyDraft = emptyEditableSourceDraft();
+      savedNewSourceDraftRef.current = emptyDraft;
+      applyNewSourceDraftState(emptyDraft);
+      setNewSourceDraftSaveStatus('saved');
+      try {
+        await clearContentWritingSourceDraft(articleId);
+      } catch {
+        try {
+          await saveContentWritingSourceDraft({ articleId, ...emptyDraft });
+        } catch (clearError) {
+          setNewSourceDraftSaveStatus('error');
+          setError(clearError instanceof Error
+            ? clearError.message
+            : (isArabic ? 'تمت إضافة المصدر، لكن تعذر تنظيف مسودته.' : 'The source was added, but its draft could not be cleared.'));
+        }
+      }
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : (isArabic ? 'تعذر إضافة المصدر.' : 'Could not add source.'));
       await load();
@@ -291,7 +450,8 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
           <button
             key={type}
             type="button"
-            onClick={() => setSourceType(type)}
+            onClick={() => updateNewSourceDraft({ sourceType: type })}
+            disabled={disabled || Boolean(busyId)}
             className={`flex h-8 items-center justify-center gap-1 rounded text-[11px] font-bold ${sourceType === type
               ? 'bg-[#d4af37] text-white'
               : 'text-gray-500 hover:bg-[#d4af37]/10 dark:text-gray-300'}`}
@@ -305,7 +465,9 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
       <div className="mt-2 space-y-1.5">
         <input
           value={title}
-          onChange={event => setTitle(event.target.value)}
+          onChange={event => updateNewSourceDraft({ title: event.target.value })}
+          onBlur={() => void flushNewSourceDraft().catch((): void => undefined)}
+          disabled={disabled || Boolean(busyId)}
           maxLength={500}
           placeholder={isArabic ? 'عنوان اختياري للمصدر' : 'Optional source title'}
           className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-[11px] outline-none focus:border-[#d4af37] dark:border-[#444] dark:bg-[#1f1f1f]"
@@ -313,7 +475,9 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
         {sourceType === 'url' ? (
           <input
             value={url}
-            onChange={event => setUrl(event.target.value)}
+            onChange={event => updateNewSourceDraft({ url: event.target.value })}
+            onBlur={() => void flushNewSourceDraft().catch((): void => undefined)}
+            disabled={disabled || Boolean(busyId)}
             dir="ltr"
             inputMode="url"
             placeholder="https://example.com/article"
@@ -322,7 +486,9 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
         ) : (
           <textarea
             value={rawText}
-            onChange={event => setRawText(event.target.value)}
+            onChange={event => updateNewSourceDraft({ rawText: event.target.value })}
+            onBlur={() => void flushNewSourceDraft().catch((): void => undefined)}
+            disabled={disabled || Boolean(busyId)}
             maxLength={120000}
             rows={5}
             placeholder={isArabic ? 'الصق النص الذي تريد التركيز عليه أثناء الكتابة...' : 'Paste the text to focus on while writing...'}
@@ -331,17 +497,43 @@ const ContentWritingSourcesPanel: React.FC<Props> = ({
         )}
         <textarea
           value={focusInstructions}
-          onChange={event => setFocusInstructions(event.target.value)}
+          onChange={event => updateNewSourceDraft({ focusInstructions: event.target.value })}
+          onBlur={() => void flushNewSourceDraft().catch((): void => undefined)}
+          disabled={disabled || Boolean(busyId)}
           maxLength={2000}
           rows={3}
           placeholder={sourceInstructionsPlaceholder}
           className="w-full resize-y rounded-md border border-gray-200 bg-white p-2 text-[11px] leading-5 outline-none focus:border-[#d4af37] dark:border-[#444] dark:bg-[#1f1f1f]"
         />
+        <div className={`flex items-center gap-1 text-[9px] font-bold ${newSourceDraftSaveStatus === 'error'
+          ? 'text-red-600 dark:text-red-300'
+          : newSourceDraftSaveStatus === 'dirty'
+            ? 'text-amber-600 dark:text-amber-300'
+            : newSourceDraftSaveStatus === 'saved'
+              ? 'text-emerald-600 dark:text-emerald-300'
+              : 'text-gray-400'}`}>
+          {newSourceDraftSaveStatus === 'saving' && <Loader2 size={10} className="animate-spin" />}
+          {newSourceDraftSaveStatus === 'saved' && <CheckCircle2 size={10} />}
+          <span>
+            {newSourceDraftSaveStatus === 'saving'
+              ? (isArabic ? 'جار حفظ مسودة المصدر...' : 'Saving source draft...')
+              : newSourceDraftSaveStatus === 'dirty'
+                ? (isArabic ? 'سيتم حفظ مسودة المصدر تلقائيًا' : 'The source draft will be saved automatically')
+                : newSourceDraftSaveStatus === 'error'
+                  ? (isArabic ? 'تعذر حفظ مسودة المصدر — أعد المحاولة' : 'Source draft save failed — try again')
+                  : (isArabic
+                    ? 'المسودة محفوظة، ولن تدخل في الكتابة حتى الضغط على «إضافة وتجهيز»'
+                    : 'Draft saved; it will not be used until you select “Add and prepare”')}
+          </span>
+        </div>
         <div className="flex items-center gap-1">
           <AppSelect
             size="compact"
             value={sourceRole}
-            onChange={event => setSourceRole(event.target.value === 'supporting' ? 'supporting' : 'primary')}
+            disabled={disabled || Boolean(busyId)}
+            onChange={event => updateNewSourceDraft({
+              sourceRole: event.target.value === 'supporting' ? 'supporting' : 'primary',
+            })}
             className="h-8 flex-1 rounded-md border border-gray-200 bg-white px-2 text-[11px] font-bold dark:border-[#444] dark:bg-[#1f1f1f]"
           >
             <option value="primary">{isArabic ? 'أساسي — افتراضي' : 'Primary — default'}</option>

@@ -29,6 +29,17 @@ export type ContentWritingSource = {
   updatedAt: string;
 };
 
+export type ContentWritingSourceDraft = {
+  articleId: string;
+  sourceType: ContentWritingSourceType;
+  sourceRole: ContentWritingSourceRole;
+  title: string;
+  url: string;
+  rawText: string;
+  focusInstructions: string;
+  updatedAt: string | null;
+};
+
 type SourceRow = {
   id: string;
   article_id: string;
@@ -49,7 +60,19 @@ type SourceRow = {
   updated_at: string;
 };
 
+type SourceDraftRow = {
+  article_id: string;
+  source_type: ContentWritingSourceType;
+  source_role: ContentWritingSourceRole;
+  title: string | null;
+  source_url: string | null;
+  raw_text: string | null;
+  focus_instructions: string | null;
+  updated_at: string;
+};
+
 const SOURCE_COLUMNS = 'id,article_id,source_type,source_role,title,source_url,content_text,focus_instructions,status,extraction_method,content_hash,word_count,enabled,last_error,fetched_at,created_at,updated_at';
+const SOURCE_DRAFT_COLUMNS = 'article_id,source_type,source_role,title,source_url,raw_text,focus_instructions,updated_at';
 const MAX_SOURCES_PER_ARTICLE = 10;
 const MAX_SOURCE_TEXT_CHARS = 120_000;
 
@@ -95,6 +118,28 @@ const toSource = (row: SourceRow): ContentWritingSource => ({
   updatedAt: row.updated_at,
 });
 
+const emptySourceDraft = (articleId: string): ContentWritingSourceDraft => ({
+  articleId,
+  sourceType: 'url',
+  sourceRole: 'primary',
+  title: '',
+  url: '',
+  rawText: '',
+  focusInstructions: '',
+  updatedAt: null,
+});
+
+const toSourceDraft = (row: SourceDraftRow): ContentWritingSourceDraft => ({
+  articleId: row.article_id,
+  sourceType: row.source_type === 'raw' ? 'raw' : 'url',
+  sourceRole: row.source_role === 'supporting' ? 'supporting' : 'primary',
+  title: row.title || '',
+  url: row.source_url || '',
+  rawText: row.raw_text || '',
+  focusInstructions: row.focus_instructions || '',
+  updatedAt: row.updated_at,
+});
+
 const readSourceRow = async (sourceId: string, articleId: string): Promise<SourceRow> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('article_writing_sources')
@@ -115,6 +160,54 @@ export const listArticleWritingSources = async (articleId: string): Promise<Cont
     .order('created_at', { ascending: true });
   if (error) throw error;
   return (data || []).map(row => toSource(row as SourceRow));
+};
+
+export const readArticleWritingSourceDraft = async (
+  articleId: string,
+): Promise<ContentWritingSourceDraft> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('article_writing_source_drafts')
+    .select(SOURCE_DRAFT_COLUMNS)
+    .eq('article_id', articleId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? toSourceDraft(data as SourceDraftRow) : emptySourceDraft(articleId);
+};
+
+export const saveArticleWritingSourceDraft = async (options: {
+  articleId: string;
+  userId: string;
+  sourceType?: ContentWritingSourceType;
+  sourceRole?: ContentWritingSourceRole;
+  title?: string;
+  url?: string;
+  rawText?: string;
+  focusInstructions?: string;
+}): Promise<ContentWritingSourceDraft> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('article_writing_source_drafts')
+    .upsert({
+      article_id: options.articleId,
+      source_type: options.sourceType === 'raw' ? 'raw' : 'url',
+      source_role: options.sourceRole === 'supporting' ? 'supporting' : 'primary',
+      title: text(options.title, 500),
+      source_url: text(options.url, 2_048),
+      raw_text: text(options.rawText, MAX_SOURCE_TEXT_CHARS),
+      focus_instructions: text(options.focusInstructions, 2_000),
+      updated_by: options.userId,
+    }, { onConflict: 'article_id' })
+    .select(SOURCE_DRAFT_COLUMNS)
+    .single();
+  if (error) throw error;
+  return toSourceDraft(data as SourceDraftRow);
+};
+
+export const deleteArticleWritingSourceDraft = async (articleId: string): Promise<void> => {
+  const { error } = await getExternalAnalysisSupabaseAdmin()
+    .from('article_writing_source_drafts')
+    .delete()
+    .eq('article_id', articleId);
+  if (error) throw error;
 };
 
 export const readReadyArticleWritingSources = async (articleId: string): Promise<ContentWritingSource[]> => (

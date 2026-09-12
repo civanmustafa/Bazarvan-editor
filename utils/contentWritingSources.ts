@@ -24,6 +24,22 @@ export type ContentWritingSource = {
   updatedAt: string;
 };
 
+export type ContentWritingSourceDraft = {
+  articleId: string;
+  sourceType: ContentWritingSourceType;
+  sourceRole: ContentWritingSourceRole;
+  title: string;
+  url: string;
+  rawText: string;
+  focusInstructions: string;
+  updatedAt: string | null;
+};
+
+export type ContentWritingSourcesState = {
+  sources: ContentWritingSource[];
+  draft: ContentWritingSourceDraft;
+};
+
 export class ContentWritingSourcesRequestError extends Error {
   readonly code: string;
   readonly status: number;
@@ -67,6 +83,20 @@ const normalizeSource = (value: unknown): ContentWritingSource | null => {
   };
 };
 
+const normalizeDraft = (value: unknown, articleId: string): ContentWritingSourceDraft => {
+  const record = isRecord(value) ? value : {};
+  return {
+    articleId: typeof record.articleId === 'string' ? record.articleId : articleId,
+    sourceType: record.sourceType === 'raw' ? 'raw' : 'url',
+    sourceRole: record.sourceRole === 'supporting' ? 'supporting' : 'primary',
+    title: typeof record.title === 'string' ? record.title : '',
+    url: typeof record.url === 'string' ? record.url : '',
+    rawText: typeof record.rawText === 'string' ? record.rawText : '',
+    focusInstructions: typeof record.focusInstructions === 'string' ? record.focusInstructions : '',
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : null,
+  };
+};
+
 const request = async (body: Record<string, unknown>): Promise<Record<string, any>> => {
   const token = await getAuthenticatedApiToken();
   const response = await fetch('/api/content-writing/sources', {
@@ -80,11 +110,36 @@ const request = async (body: Record<string, unknown>): Promise<Record<string, an
   return normalized;
 };
 
-export const listContentWritingSources = async (articleId: string): Promise<ContentWritingSource[]> => {
+export const readContentWritingSourcesState = async (
+  articleId: string,
+): Promise<ContentWritingSourcesState> => {
   const payload = await request({ action: 'list', articleId });
-  return Array.isArray(payload.sources)
+  const sources = Array.isArray(payload.sources)
     ? payload.sources.map(normalizeSource).filter((source): source is ContentWritingSource => Boolean(source))
     : [];
+  return { sources, draft: normalizeDraft(payload.draft, articleId) };
+};
+
+export const listContentWritingSources = async (articleId: string): Promise<ContentWritingSource[]> => {
+  const state = await readContentWritingSourcesState(articleId);
+  return state.sources;
+};
+
+export const saveContentWritingSourceDraft = async (input: {
+  articleId: string;
+  sourceType: ContentWritingSourceType;
+  sourceRole: ContentWritingSourceRole;
+  title: string;
+  url: string;
+  rawText: string;
+  focusInstructions: string;
+}): Promise<ContentWritingSourceDraft> => {
+  const payload = await request({ action: 'save_draft', ...input });
+  return normalizeDraft(payload.draft, input.articleId);
+};
+
+export const clearContentWritingSourceDraft = async (articleId: string): Promise<void> => {
+  await request({ action: 'clear_draft', articleId });
 };
 
 export const createContentWritingSource = async (input: {

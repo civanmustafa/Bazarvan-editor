@@ -17,9 +17,12 @@ import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueu
 import {
   ContentWritingSourceError,
   createArticleWritingSource,
+  deleteArticleWritingSourceDraft,
   deleteArticleWritingSource,
   listArticleWritingSources,
+  readArticleWritingSourceDraft,
   refreshArticleWritingSource,
+  saveArticleWritingSourceDraft,
   updateArticleWritingSource,
   type ContentWritingSourceRole,
   type ContentWritingSourceType,
@@ -71,11 +74,35 @@ const handleContentWritingSourcesRequest = async (req: any): Promise<ApiResult> 
 
   if (action === 'list') {
     await requireArticleReadAccess(supabase, articleId, principal.userId);
-    const sources = await listArticleWritingSources(articleId);
-    return { status: 200, body: { ok: true, sources } };
+    const [sources, draft] = await Promise.all([
+      listArticleWritingSources(articleId),
+      readArticleWritingSourceDraft(articleId),
+    ]);
+    return { status: 200, body: { ok: true, sources, draft } };
   }
 
   await requireArticleWriteAccess(supabase, articleId, principal.userId);
+  if (action === 'save_draft') {
+    const sourceType = text(body.sourceType) as ContentWritingSourceType;
+    if (sourceType !== 'url' && sourceType !== 'raw') {
+      throw new ContentWritingSourcesApiError('sourceType must be url or raw.', 400, 'content_writing_source_type_invalid');
+    }
+    const draft = await saveArticleWritingSourceDraft({
+      articleId,
+      userId: principal.userId,
+      sourceType,
+      sourceRole: text(body.sourceRole) === 'supporting' ? 'supporting' : 'primary',
+      title: text(body.title),
+      url: text(body.url),
+      rawText: typeof body.rawText === 'string' ? body.rawText : '',
+      focusInstructions: text(body.focusInstructions),
+    });
+    return { status: 200, body: { ok: true, draft } };
+  }
+  if (action === 'clear_draft') {
+    await deleteArticleWritingSourceDraft(articleId);
+    return { status: 200, body: { ok: true } };
+  }
   if (action === 'create') {
     const sourceType = text(body.sourceType) as ContentWritingSourceType;
     if (sourceType !== 'url' && sourceType !== 'raw') {
@@ -122,7 +149,7 @@ const handleContentWritingSourcesRequest = async (req: any): Promise<ApiResult> 
     return { status: 200, body: { ok: true } };
   }
   throw new ContentWritingSourcesApiError(
-    'action must be list, create, update, refresh, or delete.',
+    'action must be list, save_draft, clear_draft, create, update, refresh, or delete.',
     400,
     'content_writing_sources_action_invalid',
   );
