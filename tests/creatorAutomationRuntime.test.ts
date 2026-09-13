@@ -170,6 +170,28 @@ test('creator scheduler uses creator credentials, retains legacy actors, and fai
   assert.equal(state.rpcCalls.at(-1).name, 'release_content_writing_automation_claim');
 });
 
+test('creator scheduler ignores the all-null composite returned when no queue item is claimable', async () => {
+  const state = createFixture();
+  let policyReads = 0;
+  state.item = { id: null, article_id: null, requested_by: null };
+  state.readPolicy = async () => {
+    policyReads += 1;
+    return state.policy;
+  };
+  const runtime = await loadRuntime('server/contentWritingAutomation.ts', state);
+
+  assert.equal(await runtime.scheduleNextAutomaticContentWritingSession('worker-1'), null);
+  assert.equal(policyReads, 0);
+  assert.equal(state.queued.length, 0);
+  assert.deepEqual(
+    state.rpcCalls.map((call: any) => call.name),
+    [
+      'claim_next_content_writing_automation_item',
+      'enqueue_next_automatic_writing_competitor_preparation',
+    ],
+  );
+});
+
 test('queued creator writing is cancelled before AI calls while manual sessions bypass personal switches', async t => {
   const state = createFixture();
   state.writing = await loadRuntime('server/contentWritingAutomation.ts', state);

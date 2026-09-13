@@ -261,7 +261,20 @@ const claimNextItem = async (
     if (isContentWritingAutomationSchemaUnavailableError(error)) return null;
     throw error;
   }
-  return firstRow<ContentWritingAutomationItemRow>(data);
+  const item = firstRow<ContentWritingAutomationItemRow>(data);
+  // PostgreSQL functions returning a composite row can be serialized by
+  // PostgREST as an object whose every field is null when the function returns
+  // SQL NULL. Do not mistake that placeholder for a claimed queue item.
+  if (
+    !item
+    || typeof item.id !== 'string'
+    || !item.id.trim()
+    || typeof item.article_id !== 'string'
+    || !item.article_id.trim()
+    || typeof item.requested_by !== 'string'
+    || !item.requested_by.trim()
+  ) return null;
+  return item;
 };
 
 const enqueueNextAutomaticCompetitorPreparation = async (
