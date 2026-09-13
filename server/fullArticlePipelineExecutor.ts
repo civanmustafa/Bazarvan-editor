@@ -520,6 +520,9 @@ const resumeContentWritingAfterScheduledRetry = async (
     model: session.model,
     inputHash: session.input_hash,
     allowModelFallback: session.context_snapshot?.allowModelFallback === true,
+    providerRouting: isRecord(session.context_snapshot?.providerRouting)
+      ? session.context_snapshot.providerRouting
+      : { mode: 'selected_only' },
   });
   if (!resumed) throw new Error('The failed content-writing session could not be resumed.');
   return resumed;

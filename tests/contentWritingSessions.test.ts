@@ -244,6 +244,24 @@ test('content-writing resume migration applies the user-selected provider and pr
   assertBalancedSqlParentheses(migration);
 });
 
+test('content-writing resume v2 atomically persists current paid-provider routing', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20260913120916_content_writing_resume_provider_routing.sql',
+  );
+
+  assert.match(migration, /resume_content_writing_session_v2/);
+  assert.match(migration, /p_provider_routing jsonb/);
+  assert.match(migration, /jsonb_typeof\(v_provider_routing\) <> 'object'/);
+  assert.match(migration, /'\{providerRouting\}'/);
+  assert.match(migration, /'paidFallbackProvider'/);
+  assert.match(migration, /'paidFallbackModel'/);
+  assert.match(migration, /revoke all on function public\.resume_content_writing_session_v2/);
+  assert.match(migration, /grant execute on function public\.resume_content_writing_session_v2[\s\S]*?to service_role/);
+  assert.doesNotMatch(migration, /api_key|key_fingerprint/i);
+  assert.equal((migration.match(/\$\$/g) || []).length % 2, 0, 'SQL has an unbalanced dollar quote.');
+  assertBalancedSqlParentheses(migration);
+});
+
 test('dynamic final-section migration enables a durable call-to-action workflow step', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260728000000_dynamic_content_writing_final_section.sql',
@@ -322,10 +340,11 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.doesNotMatch(workflowBuilder, /competitor.*slice/i);
   assert.match(service, /create_content_writing_session/);
   assert.match(service, /complete_content_writing_session/);
-  assert.match(service, /resume_content_writing_session/);
+  assert.match(service, /resume_content_writing_session_v2/);
   assert.match(service, /p_provider: options\.provider/);
   assert.match(service, /p_model: options\.model/);
   assert.match(service, /p_input_hash: options\.inputHash/);
+  assert.match(service, /p_provider_routing: options\.providerRouting/);
   assert.match(service, /ContentWritingSessionSummary/);
   assert.doesNotMatch(service.match(/export const listContentWritingSessions[\s\S]*?export const cancelContentWritingSession/)?.[0] || '', /\.select\('\*'\)/);
   assert.match(geminiEngine, /systemInstruction: normalizedSystemInstruction/);
@@ -358,6 +377,7 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /createContentWritingSessionInputHash/);
   assert.match(api, /provider: preference\.provider/);
   assert.match(api, /model: preference\.model/);
+  assert.match(api, /content_writing_paid_fallback_unavailable/);
   assert.match(api, /action === 'recordApplication'/);
   assert.match(api, /recordContentWritingApplication/);
   assert.match(api, /resolveSessionQualityReport/);
@@ -384,7 +404,12 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(panel, /selectedDetail\?\.session\.id === selectedSessionId/);
   assert.match(panel, /getModelPreferenceHint/);
   assert.match(panel, /isModelFallbackActive/);
+  assert.match(panel, /content_writing_paid_fallback_unavailable/);
   assert.match(panel, /resumeContentWritingSession\(\{/);
+  assert.ok(
+    (panel.match(/await routingPreferenceSaveRef\.current/g) || []).length >= 2,
+    'starting and resuming must both wait for the latest routing preference save',
+  );
   assert.match(panel, /provider,/);
   assert.match(panel, /model: selectedModel/);
   assert.doesNotMatch(panel, /setProvider\(selectedSession\.provider\)/);

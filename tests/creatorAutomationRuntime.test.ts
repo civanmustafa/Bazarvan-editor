@@ -280,6 +280,49 @@ test('a writing response already in flight is retained, but the next paid stage 
   assert.equal(state.calls.length, 2);
 });
 
+test('resuming free Gemini rebuilds paid-provider routing from the saved user preference', async () => {
+  const state = createFixture();
+  state.routing = {
+    contentWritingProvider: 'gemini',
+    automaticContentWritingProvider: 'system',
+    freeFirstFallbackEnabled: true,
+    paidFallbackProvider: 'geminiPaid',
+  };
+  state.capabilities = {
+    providers: {
+      gemini: { enabled: true, configured: true, available: true, model: 'gemini-free-model' },
+      geminiPaid: { enabled: true, configured: true, available: true, model: 'gemini-paid-model' },
+      openai: { enabled: false, configured: false, available: false, model: 'openai-model' },
+    },
+  };
+  const engine = await loadRuntime('server/contentWritingEngine.ts', state, {
+    aiProviderCapabilities: 'export const readAiProviderCapabilities = async () => s.capabilities;',
+    userAiRoutingPreferences: 'export const readUserAiRoutingPreferences = async () => s.routing;',
+    promptRegistrySettings: 'export const readPromptRegistrySettings = async () => ({ templates: {}, registryVersion: 1 });',
+    aiExecutionEngine: 'export const aiExecutionEngine = {}; export const sanitizeAiExecutionResult = value => value;',
+    openAiExecutionEngine: 'export const executeOpenAiRequest = async () => ({ status: 500, body: {} });',
+  });
+
+  const preference = await engine.resolveContentWritingResumePreference(
+    'gemini',
+    'gemini-free-model',
+    'creator-a',
+  );
+  assert.deepEqual(preference.providerRouting, {
+    mode: 'free_first',
+    paidFallbackProvider: 'geminiPaid',
+    paidFallbackModel: 'gemini-paid-model',
+  });
+
+  state.routing.freeFirstFallbackEnabled = false;
+  const selectedOnly = await engine.resolveContentWritingResumePreference(
+    'gemini',
+    'gemini-free-model',
+    'creator-a',
+  );
+  assert.deepEqual(selectedOnly.providerRouting, { mode: 'selected_only' });
+});
+
 test('resumed writing restores frozen source instructions once for old, current, and overridden contexts', async () => {
   const state = createFixture();
   state.calls = [];

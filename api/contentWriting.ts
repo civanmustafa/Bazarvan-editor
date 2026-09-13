@@ -673,6 +673,17 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
       toText(body.model) || (provider === session.provider ? session.model : undefined),
       session.created_by,
     );
+    const unavailablePaidFallbackProvider = typeof preference.providerRouting.unavailablePaidFallbackProvider === 'string'
+      ? preference.providerRouting.unavailablePaidFallbackProvider
+      : '';
+    if (preference.provider === 'gemini' && unavailablePaidFallbackProvider) {
+      throw new ContentWritingApiError({
+        message: 'The selected paid fallback provider is unavailable or not configured.',
+        status: 503,
+        code: 'content_writing_paid_fallback_unavailable',
+        details: { provider: unavailablePaidFallbackProvider },
+      });
+    }
     await reserveExplicitContentWritingOrThrow({
       articleId: session.article_id,
       requestedBy: principal.userId,
@@ -685,7 +696,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
     const inputHash = createContentWritingSessionInputHash(
       preference.provider,
       preference.model,
-      messages.map(message => message.content),
+      [JSON.stringify(preference.providerRouting), ...messages.map(message => message.content)],
     );
     const resumed = await resumeContentWritingSession({
       sessionId: session.id,
@@ -694,6 +705,7 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
       model: preference.model,
       inputHash,
       allowModelFallback: preference.allowModelFallback,
+      providerRouting: preference.providerRouting,
     });
     if (!resumed) {
       throw new ContentWritingApiError({

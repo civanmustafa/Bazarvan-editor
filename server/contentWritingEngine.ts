@@ -314,6 +314,30 @@ export const createContentWritingSessionInputHash = (
   messages: readonly string[],
 ): string => createInputHash([provider, model, ...messages]);
 
+export const resolveContentWritingProviderRouting = async (
+  provider: ContentWritingProvider,
+  userId?: string,
+): Promise<JsonObject> => {
+  if (provider !== 'gemini') return { mode: 'selected_only' };
+
+  const routingPreferences = await readUserAiRoutingPreferences(userId);
+  if (!routingPreferences.freeFirstFallbackEnabled) return { mode: 'selected_only' };
+
+  const paidFallbackProvider = routingPreferences.paidFallbackProvider;
+  const capabilities = await readAiProviderCapabilities(userId);
+  const paidFallbackCapability = capabilities.providers[paidFallbackProvider];
+  return paidFallbackCapability?.available
+    ? {
+        mode: 'free_first',
+        paidFallbackProvider,
+        paidFallbackModel: paidFallbackCapability.model,
+      }
+    : {
+        mode: 'selected_only',
+        unavailablePaidFallbackProvider: paidFallbackProvider,
+      };
+};
+
 export const resolveContentWritingResumePreference = async (
   provider: ContentWritingProvider,
   requestedModel?: string,
@@ -322,15 +346,18 @@ export const resolveContentWritingResumePreference = async (
   provider: ContentWritingProvider;
   model: string;
   allowModelFallback: boolean;
+  providerRouting: JsonObject;
 }> => {
-  const [model, settings] = await Promise.all([
+  const [model, settings, providerRouting] = await Promise.all([
     selectProviderModel(provider, requestedModel, userId),
     getContentWritingSettings(),
+    resolveContentWritingProviderRouting(provider, userId),
   ]);
   return {
     provider,
     model,
     allowModelFallback: provider === 'gemini' && settings.allowModelFallback,
+    providerRouting,
   };
 };
 
@@ -608,31 +635,14 @@ export const queueContentWritingSession = async (input: {
   allowMissingCompany?: boolean;
   allowMissingGoalContext?: boolean;
 }): Promise<QueuedContentWritingSession> => {
-  const [conversation, model, routingPreferences] = await Promise.all([
+  const [conversation, model, providerRouting] = await Promise.all([
     prepareContentWritingConversation(input.articleId, {
       allowMissingCompany: input.allowMissingCompany,
       allowMissingGoalContext: input.allowMissingGoalContext,
     }),
     selectProviderModel(input.provider, input.model, input.createdBy),
-    readUserAiRoutingPreferences(input.createdBy),
+    resolveContentWritingProviderRouting(input.provider, input.createdBy),
   ]);
-  const freeFirstRequested = input.provider === 'gemini'
-    && routingPreferences.freeFirstFallbackEnabled;
-  const fallbackCapabilities = freeFirstRequested
-    ? await readAiProviderCapabilities(input.createdBy)
-    : null;
-  const paidFallbackProvider = routingPreferences.paidFallbackProvider;
-  const paidFallbackCapability = fallbackCapabilities?.providers[paidFallbackProvider];
-  const providerRouting = freeFirstRequested && paidFallbackCapability?.available
-    ? {
-        mode: 'free_first',
-        paidFallbackProvider,
-        paidFallbackModel: paidFallbackCapability.model,
-      }
-    : {
-        mode: 'selected_only',
-        ...(freeFirstRequested ? { unavailablePaidFallbackProvider: paidFallbackProvider } : {}),
-      };
 
   const inputHash = createContentWritingSessionInputHash(
     input.provider,

@@ -234,6 +234,7 @@ const getErrorPresentation = (error: unknown, isArabic: boolean): ErrorPresentat
     content_writing_prerequisites_missing: ['بيانات المقالة المطلوبة غير مكتملة.', 'Required article data is incomplete.'],
     content_writing_templates_invalid: ['قوالب كتابة المحتوى غير صالحة.', 'Content writing templates are invalid.'],
     content_writing_input_too_large: ['حجم سياق المقالة يتجاوز الحد المحدد.', 'The article context exceeds the configured limit.'],
+    content_writing_paid_fallback_unavailable: ['المزوّد المدفوع المحدد غير متاح أو لم تتم تهيئة مفتاحه في لوحة المسؤول.', 'The selected paid fallback provider is unavailable or has no configured credential in the admin dashboard.'],
     AI_PROVIDER_DISABLED: ['قام الأدمن بتعطيل هذا المزود.', 'This provider is disabled by the administrator.'],
     AI_PROVIDER_NOT_CONFIGURED: ['المزود مفعّل ولكن لا يوجد له مفتاح مسموح في خزنة اللوحة.', 'The provider is enabled but no permitted credential exists in the dashboard vault.'],
     article_access_denied: ['لا تملك صلاحية كتابة هذه المقالة.', 'You cannot write this article.'],
@@ -392,6 +393,7 @@ const ContentWritingPanel: React.FC = () => {
   const providerTouchedRef = useRef(false);
   const touchedModelsRef = useRef<Set<ContentWritingProvider>>(new Set());
   const resumeSelectionSessionRef = useRef('');
+  const routingPreferenceSaveRef = useRef<Promise<unknown>>(Promise.resolve());
   const trackedKeyFeedbackSessionsRef = useRef<Set<string>>(new Set());
   const contentWritingActivityIdsRef = useRef<Map<string, string>>(new Map());
 
@@ -442,9 +444,12 @@ const ContentWritingPanel: React.FC = () => {
   const saveRoutingPreferences = useCallback((patch: Partial<UserAiRoutingPreferences>) => {
     const next = { ...routingPreferences, ...patch };
     setRoutingPreferences(next);
-    void saveCurrentUserPreferencesPatch({ ai: next }).catch(error => {
+    const operation = saveCurrentUserPreferencesPatch({ ai: next });
+    routingPreferenceSaveRef.current = operation;
+    void operation.catch(error => {
       console.error('Failed to save content-writing provider preference:', error);
     });
+    return operation;
   }, [routingPreferences]);
 
   useEffect(() => {
@@ -800,6 +805,7 @@ const ContentWritingPanel: React.FC = () => {
     setActionState('starting');
     setErrorPresentation(null);
     try {
+      await routingPreferenceSaveRef.current;
       const saved = await handleSaveDraft({ reason: 'manual', force: true });
       if (!saved) {
         throw new Error(isArabic
@@ -988,6 +994,7 @@ const ContentWritingPanel: React.FC = () => {
       message: isArabic ? 'جار استئناف الجلسة من آخر مرحلة ناجحة...' : 'Resuming from the last successful step...',
     });
     try {
+      await routingPreferenceSaveRef.current;
       const resumed = await resumeContentWritingSession({
         sessionId: selectedSession.id,
         provider,

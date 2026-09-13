@@ -532,9 +532,10 @@ export const resumeContentWritingSession = async (options: {
   model: string;
   inputHash: string;
   allowModelFallback: boolean;
+  providerRouting: Record<string, unknown>;
 }): Promise<ContentWritingSession | null> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'resume_content_writing_session',
+    'resume_content_writing_session_v2',
     {
       p_session_id: options.sessionId,
       p_requested_by: options.requestedBy,
@@ -542,6 +543,7 @@ export const resumeContentWritingSession = async (options: {
       p_model: options.model,
       p_input_hash: options.inputHash,
       p_allow_model_fallback: options.allowModelFallback,
+      p_provider_routing: options.providerRouting,
     },
   );
   if (error) throwServiceError('session resume', error);
