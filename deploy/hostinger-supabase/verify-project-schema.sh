@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-113}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-114}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-62}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -93,6 +93,8 @@ readonly ARTICLE_EDITOR_PRESENCE_FUNCTIONS="$(sql_scalar "select to_regprocedure
 readonly ARTICLE_EDITOR_PRESENCE_ANON_EXECUTE="$(sql_scalar "select has_function_privilege('anon', 'public.list_article_editor_presence(uuid[])', 'execute') or has_function_privilege('anon', 'public.heartbeat_article_editor_presence(uuid,uuid)', 'execute') or has_function_privilege('anon', 'public.leave_article_editor_presence(uuid,uuid)', 'execute')")"
 readonly AUTOMATIC_WRITING_SAFE_APPLY_FUNCTION="$(sql_scalar "select to_regprocedure('public.apply_automatic_content_writing_session(uuid,timestamptz,jsonb,text,text)') is not null")"
 readonly AUTOMATIC_WRITING_SAFE_APPLY_PRIVILEGES="$(sql_scalar "select has_function_privilege('anon', 'public.apply_automatic_content_writing_session(uuid,timestamptz,jsonb,text,text)', 'execute') or has_function_privilege('authenticated', 'public.apply_automatic_content_writing_session(uuid,timestamptz,jsonb,text,text)', 'execute')")"
+readonly CONTENT_WRITING_RESUME_V2_FUNCTION="$(sql_scalar "select to_regprocedure('public.resume_content_writing_session_v2(uuid,uuid,text,text,text,boolean,jsonb)') is not null")"
+readonly CONTENT_WRITING_RESUME_V2_ACCESS="$(sql_scalar "select not has_function_privilege('anon', 'public.resume_content_writing_session_v2(uuid,uuid,text,text,text,boolean,jsonb)', 'execute') and not has_function_privilege('authenticated', 'public.resume_content_writing_session_v2(uuid,uuid,text,text,text,boolean,jsonb)', 'execute') and has_function_privilege('service_role', 'public.resume_content_writing_session_v2(uuid,uuid,text,text,text,boolean,jsonb)', 'execute')")"
 
 readonly CREATOR_AUTOMATION_SCHEMA_VERSION="$(sql_scalar "select public.creator_article_automation_schema_version()")"
 readonly CREATOR_AUTOMATION_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.user_automation_settings', 'select') or has_table_privilege('authenticated', 'public.user_automation_settings', 'select') or has_function_privilege('authenticated', 'public.save_user_automation_settings(uuid,jsonb)', 'execute') or has_function_privilege('anon', 'public.article_automation_policy(uuid)', 'execute')")"
@@ -149,6 +151,8 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${ARTICLE_EDITOR_PRESENCE_ANON_EXECUTE}" == "f" ]] || fail "Anonymous users can execute article editor presence functions."
 [[ "${AUTOMATIC_WRITING_SAFE_APPLY_FUNCTION}" == "t" ]] || fail "Safe automatic content-writing apply function is missing."
 [[ "${AUTOMATIC_WRITING_SAFE_APPLY_PRIVILEGES}" == "f" ]] || fail "Browser roles can execute automatic content-writing apply directly."
+[[ "${CONTENT_WRITING_RESUME_V2_FUNCTION}" == "t" ]] || fail "Provider-aware content-writing resume function is missing."
+[[ "${CONTENT_WRITING_RESUME_V2_ACCESS}" == "t" ]] || fail "Provider-aware content-writing resume access is unsafe or incomplete."
 
 readonly GOOGLE_METADATA_MANUAL_FUNCTION="$(sql_scalar "select to_regprocedure('public.enqueue_manual_google_metadata_job(uuid)') is not null and to_regprocedure('public.dashboard_saved_automation_results(uuid[])') is not null")"
 [[ "${GOOGLE_METADATA_MANUAL_FUNCTION}" == "t" ]] || fail "Manual Google metadata and saved completion evidence functions are missing."

@@ -66,7 +66,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 24);
+  assert.equal(result.requiredMigrationCount, 25);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
@@ -76,6 +76,7 @@ test('content-writing readiness checks every required schema surface', async () 
     writingSourceDrafts: true,
     fullPipelineJobs: true,
     keyCoordinator: true,
+    resumeCoordinator: true,
     automationEvaluator: true,
     automationVersion: true,
     competitorPreparationCoordinator: true,
@@ -89,6 +90,7 @@ test('content-writing readiness checks every required schema surface', async () 
     'evaluate_content_writing_automation_readiness',
     'full_article_pipeline_schema_version',
     'inspect_gemini_api_key_availability',
+    'resume_content_writing_session_v2',
   ]);
   assert.deepEqual(calls.map(call => call.table).sort(), [
     'ai_external_analysis_jobs',
@@ -171,6 +173,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260830030000_automatic_content_writing_empty_editor_guard\.sql/);
   assert.match(releaseRegistry, /20260911000000_automatic_content_writing_safe_apply\.sql/);
   assert.match(releaseRegistry, /20260912000000_article_writing_source_drafts\.sql/);
+  assert.match(releaseRegistry, /20260913120916_content_writing_resume_provider_routing\.sql/);
   assert.match(releaseRegistry, /20260728030000_full_article_pipeline\.sql/);
   assert.match(releaseRegistry, /20260824010000_full_article_pipeline_safety\.sql/);
   assert.match(releaseRegistry, /20260824020000_full_article_pipeline_optional_prerequisites\.sql/);

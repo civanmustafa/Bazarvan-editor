@@ -63,6 +63,7 @@ export type ContentWritingReadinessResult = {
   checks: Record<
     (typeof CONTENT_WRITING_SCHEMA_PROBES)[number]['id']
       | 'keyCoordinator'
+      | 'resumeCoordinator'
       | 'automationEvaluator'
       | 'automationVersion'
       | 'competitorPreparationCoordinator'
@@ -116,6 +117,7 @@ export const checkContentWritingReadiness = async (options: {
     [
       ...CONTENT_WRITING_SCHEMA_PROBES.map(probe => [probe.id, false] as const),
       ['keyCoordinator', false] as const,
+      ['resumeCoordinator', false] as const,
       ['automationEvaluator', false] as const,
       ['automationVersion', false] as const,
       ['competitorPreparationCoordinator', false] as const,
@@ -170,6 +172,25 @@ export const checkContentWritingReadiness = async (options: {
       checks.keyCoordinator = true;
     } catch (error) {
       failures.push(`keyCoordinator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
+    }
+  })(), (async () => {
+    try {
+      const result = await withTimeout(client.rpc('resume_content_writing_session_v2', {
+        p_session_id: null,
+        p_requested_by: null,
+        p_provider: 'gemini',
+        p_model: 'readiness-probe',
+        p_input_hash: '0'.repeat(64),
+        p_allow_model_fallback: false,
+        p_provider_routing: { mode: 'selected_only' },
+      }), timeoutMs);
+      if (result.error) {
+        failures.push(describeProbeFailure('resumeCoordinator', result.error));
+        return;
+      }
+      checks.resumeCoordinator = true;
+    } catch (error) {
+      failures.push(`resumeCoordinator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
     }
   })(), (async () => {
     try {

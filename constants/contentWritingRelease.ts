@@ -18,6 +18,7 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20260830030000_automatic_content_writing_empty_editor_guard.sql',
   '20260911000000_automatic_content_writing_safe_apply.sql',
   '20260912000000_article_writing_source_drafts.sql',
+  '20260913120916_content_writing_resume_provider_routing.sql',
 ] as const;
 
 export const FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS = [

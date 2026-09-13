@@ -58,6 +58,7 @@ const requiredServerMarkers = [
   '/api/content-writing/automation',
   'content_writing_automation_items',
   'enqueue_content_writing_competitor_preparation',
+  'resume_content_writing_session_v2',
 ];
 for (const marker of requiredServerMarkers) {
   if (!serverBundle.includes(marker)) {

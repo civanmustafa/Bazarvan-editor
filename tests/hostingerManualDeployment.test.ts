@@ -40,8 +40,8 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-113/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-113/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-114/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-114/);
   assert.match(guide, /20260911000000_automatic_content_writing_safe_apply\.sql/);
   assert.match(verifyScript, /AUTOMATIC_WRITING_SAFE_APPLY_FUNCTION/);
   assert.match(verifyScript, /AUTOMATIC_WRITING_SAFE_APPLY_PRIVILEGES/);
@@ -74,6 +74,9 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20260829040000_provider_credentials_explicit_grants\.sql/);
   assert.match(guide, /20260829050000_article_writing_sources\.sql/);
   assert.match(guide, /20260912000000_article_writing_source_drafts\.sql/);
+  assert.match(guide, /20260913120916_content_writing_resume_provider_routing\.sql/);
+  assert.match(verifyScript, /CONTENT_WRITING_RESUME_V2_FUNCTION/);
+  assert.match(verifyScript, /CONTENT_WRITING_RESUME_V2_ACCESS/);
   assert.match(guide, /20260829060000_publisher_user_article_visibility\.sql/);
   assert.match(guide, /20260829070000_automatic_competitor_content_extraction\.sql/);
   assert.match(guide, /20260829080000_unified_semantic_google_metadata\.sql/);
