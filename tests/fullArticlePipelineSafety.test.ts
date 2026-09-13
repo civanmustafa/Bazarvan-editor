@@ -161,6 +161,8 @@ test('coordinator waits and competitor inputs have bounded professional gates', 
   assert.match(executor, /competitorQualityAudit/);
   assert.match(executor, /replacementNeededCount/);
   assert.match(executor, /competitorInputsMustBeReplaced/);
+  assert.match(executor, /saved_competitor_texts_sufficient/);
+  assert.match(executor, /existingCompetitorsAreSufficient/);
   assert.match(executor, /enqueueCompetitorPreparationDiscovery/);
   assert.match(executor, /enqueueCompetitorPreparationExtraction/);
   assert.match(executor, /selectCompetitorPreparationSources/);

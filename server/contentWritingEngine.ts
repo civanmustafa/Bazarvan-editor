@@ -33,6 +33,7 @@ import {
   type ContentWritingPromptBundle,
   type ContentWritingPromptMessage,
 } from '../utils/contentWritingContext';
+import { normalizeContentWritingMinimumCompetitors } from '../constants/competitors';
 import { normalizeGoalContext } from '../utils/goalContext';
 import { buildContentWritingSourceInstructionsBlock } from '../utils/contentWritingSourceInstructions';
 import {
@@ -158,6 +159,7 @@ const getContentWritingSettings = async (): Promise<{
   competitorPhraseIntelligenceEnabled: boolean;
   dualKnowledgeExtractionEnabled: boolean;
   multiCandidateGenerationEnabled: boolean;
+  minimumCompetitors: number;
 }> => {
   const [{ data, error }, promptRegistry] = await Promise.all([
     getExternalAnalysisSupabaseAdmin()
@@ -198,6 +200,9 @@ const getContentWritingSettings = async (): Promise<{
       ai.contentWritingDualKnowledgeExtractionEnabled !== false,
     multiCandidateGenerationEnabled:
       ai.contentWritingMultiCandidateGenerationEnabled !== false,
+    minimumCompetitors: normalizeContentWritingMinimumCompetitors(
+      ai.contentWritingAutomationMinimumCompetitors,
+    ),
   };
 };
 
@@ -375,6 +380,7 @@ export const prepareContentWritingConversation = async (
     maxInputTokens: settings.maxInputTokens,
     requireCompany: options.allowMissingCompany !== true,
     requireGoalContext: options.allowMissingGoalContext !== true,
+    minimumCompetitors: settings.minimumCompetitors,
   });
   assertContentWritingBundleReady(bundle);
   const normalizedGoalContext = normalizeGoalContext(articleSource.input.goalContext);

@@ -1,4 +1,14 @@
 export const MAX_ARTICLE_COMPETITORS = 5;
+export const CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT = 2;
+
+export const normalizeContentWritingMinimumCompetitors = (value: unknown): number => {
+  const parsed = Number(value);
+  const normalized = Number.isFinite(parsed) ? Math.round(parsed) : 3;
+  return Math.max(
+    CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT,
+    Math.min(MAX_ARTICLE_COMPETITORS, normalized),
+  );
+};
 export const COMPETITOR_SEARCH_RESULT_LIMIT = 15;
 export const COMPETITOR_SEARCH_CANDIDATE_LIMIT = 20;
 export const COMPETITOR_CONTENT_QUALIFICATION_CANDIDATE_LIMIT = 15;

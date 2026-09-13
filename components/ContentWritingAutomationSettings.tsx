@@ -6,6 +6,7 @@ import {
   GEMINI_PAID_MODEL_OPTIONS,
   MODEL_REGISTRY,
 } from '../constants/modelRegistry';
+import { CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT } from '../constants/competitors';
 
 export type ContentWritingAutomationSettingField =
   | 'contentWritingAutomationEnabled'
@@ -112,10 +113,13 @@ const ContentWritingAutomationSettings: React.FC<Props> = ({ values, onChange })
               <span className="mb-2 block text-xs font-black text-gray-600 dark:text-gray-300">الحد الأدنى للمنافسين الصالحين</span>
               <input
                 type="number"
-                min={3}
+                min={CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT}
                 max={5}
-                value={Math.max(3, Number(values.contentWritingAutomationMinimumCompetitors || 3))}
-                onChange={event => onChange('contentWritingAutomationMinimumCompetitors', Math.max(3, Number(event.target.value)))}
+                value={Math.max(CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT, Number(values.contentWritingAutomationMinimumCompetitors || 3))}
+                onChange={event => onChange(
+                  'contentWritingAutomationMinimumCompetitors',
+                  Math.max(CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT, Number(event.target.value)),
+                )}
                 className={inputClass}
               />
             </label>

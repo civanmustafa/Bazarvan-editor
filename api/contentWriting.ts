@@ -34,6 +34,7 @@ import {
   type ContentWritingStep,
 } from '../server/contentWritingSessionService';
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
+import { readContentWritingMinimumCompetitors } from '../server/contentWritingCompetitorPolicy';
 import {
   reserveArticleForExplicitContentWriting,
   type ExplicitContentWritingIntent,
@@ -111,6 +112,7 @@ const enqueueContentWritingCompetitorPreparation = async (input: {
   provider: ContentWritingProvider;
   model: string;
   idempotencyKey: string;
+  minimumCompetitors: number;
 }): Promise<Record<string, any> | null> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
     'enqueue_content_writing_competitor_preparation',
@@ -121,7 +123,7 @@ const enqueueContentWritingCompetitorPreparation = async (input: {
       p_provider: input.provider,
       p_model: input.model,
       p_content_writing_idempotency_key: input.idempotencyKey,
-      p_min_competitor_count: 1,
+      p_min_competitor_count: input.minimumCompetitors,
       p_start_writing: true,
     },
   );
@@ -372,7 +374,10 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
       provider,
       model: toText(body.model),
     });
-    const readiness = await readContentWritingInputReadiness(articleId);
+    const [readiness, minimumCompetitors] = await Promise.all([
+      readContentWritingInputReadiness(articleId),
+      readContentWritingMinimumCompetitors(),
+    ]);
     const otherMissingFields = readiness.missingFields.filter(field => field !== 'competitors');
     if (otherMissingFields.length > 0) {
       throw new ContentWritingApiError({
@@ -387,13 +392,14 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         },
       });
     }
-    if (readiness.usableCompetitorCount < 1 || !readiness.processingComplete) {
+    if (readiness.usableCompetitorCount < minimumCompetitors || !readiness.processingComplete) {
       const preparationJob = await enqueueContentWritingCompetitorPreparation({
         articleId,
         requestedBy: principal.userId,
         provider,
         model: toText(body.model),
         idempotencyKey,
+        minimumCompetitors,
       });
       if (preparationJob) {
         return {

@@ -212,7 +212,8 @@ test('automatic writing does not spend an AI attempt on missing prerequisites an
   ]);
 
   assert.match(settings, /contentWritingAutomationMinimumCompetitors: 3/);
-  assert.match(scheduler, /CONTENT_WRITING_MIN_COMPETITOR_COUNT/);
+  assert.match(scheduler, /normalizeContentWritingMinimumCompetitors/);
+  assert.match(settings, /CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT/);
   assert.match(scheduler, /code === 'content_writing_prerequisites_missing'[\s\S]*attempt_count: Math\.max\(0, item\.attempt_count - 1\)/);
   assert.match(scheduler, /reconcileBlockedPrerequisiteItems/);
   assert.match(scheduler, /enqueue_content_writing_competitor_preparation/);

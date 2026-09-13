@@ -15,7 +15,7 @@ import { readContentResearchAutomationSettings } from './externalAnalysisSetting
 import { readArticleAutomationPolicy } from './articleAutomationPolicy';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
 import { readUserAiRoutingPreferences } from './userAiRoutingPreferences';
-import { CONTENT_WRITING_MIN_COMPETITOR_COUNT } from '../utils/contentWritingContext';
+import { normalizeContentWritingMinimumCompetitors } from '../constants/competitors';
 
 export class AutomaticContentWritingPolicyError extends Error {
   readonly code: string;
@@ -229,11 +229,8 @@ export const readContentWritingAutomationSettings = async (): Promise<ContentWri
     model: typeof ai.contentWritingAutomationModel === 'string'
       ? ai.contentWritingAutomationModel.trim().slice(0, 256)
       : '',
-    minimumCompetitors: boundedInteger(
+    minimumCompetitors: normalizeContentWritingMinimumCompetitors(
       ai.contentWritingAutomationMinimumCompetitors,
-      CONTENT_WRITING_MIN_COMPETITOR_COUNT,
-      CONTENT_WRITING_MIN_COMPETITOR_COUNT,
-      5,
     ),
     requireCompetitorTerminalState: ai.contentWritingAutomationRequireCompetitorTerminalState !== false,
     maxAttempts: boundedInteger(ai.contentWritingAutomationMaxAttempts, 3, 1, 10),

@@ -148,6 +148,30 @@ test('content-writing readiness requires three substantial competitors and repor
   assert.ok(noCompetitors.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
 });
 
+test('configured minimum two accepts two substantial manual competitor slots without URLs', async () => {
+  const { buildContentWritingPromptBundle } = await importContentWriting();
+  const input = createReadyArticle(['قصير', 'مصدر يدوي ثان', 'مصدر يدوي ثالث']);
+  input.competitors[0].content = 'نص قصير لا يكفي للجودة';
+  input.competitors.forEach(competitor => {
+    competitor.url = '';
+  });
+
+  const bundle = buildContentWritingPromptBundle(input, {
+    minimumCompetitors: 2,
+  });
+
+  assert.equal(bundle.ready, true);
+  assert.equal(bundle.competitorQualityAudit.minimumCompetitors, 2);
+  assert.equal(bundle.competitorQualityAudit.acceptedCount, 2);
+  assert.equal(bundle.competitorQualityAudit.distinctDomainCount, 2);
+  assert.equal(bundle.competitorQualityAudit.replacementNeededCount, 0);
+  assert.ok(bundle.competitorQualityAudit.items[0].reasons.includes('content_too_short'));
+  assert.ok(bundle.competitorQualityAudit.items[1].sourceIdentity.startsWith('manual:'));
+  assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => (
+    issue.code === 'competitors' || issue.code === 'competitors.source_diversity'
+  )));
+});
+
 test('content-writing rejects thin or repetitive competitor text and requires source diversity', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const input = createReadyArticle(['صالح 1', 'صالح 2', 'صالح 3']);

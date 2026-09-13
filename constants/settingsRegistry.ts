@@ -34,6 +34,7 @@ import {
   normalizeUserAiRoutingPreferences,
   USER_AI_ROUTING_DEFAULTS,
 } from './userAiRouting';
+import { CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT } from './competitors';
 
 export const SYSTEM_SETTING_KEYS = ['ai', 'prompts', 'n8n', 'articles', 'roles', 'system'] as const;
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
@@ -300,7 +301,7 @@ const normalizeSystemSection = (
     setWhenPresent('contentWritingAutomationMinimumCompetitors', field => normalizeInteger(
       field,
       defaults.contentWritingAutomationMinimumCompetitors,
-      3,
+      CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT,
       5,
     ));
     setWhenPresent('contentWritingAutomationRequireCompetitorTerminalState', field => normalizeBoolean(

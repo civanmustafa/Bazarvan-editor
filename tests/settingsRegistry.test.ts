@@ -872,3 +872,12 @@ test('administrator AI secret migration keeps encrypted values server-only', asy
   assert.equal((migration.match(/\$\$/g) || []).length % 2, 0);
   assertBalancedSqlParentheses(migration);
 });
+
+test('SettingsRegistry permits two as the configured writing competitor minimum', async () => {
+  const registry = await importSettingsRegistry();
+  const normalized = registry.normalizeSystemSettingsMap({
+    ai: { contentWritingAutomationMinimumCompetitors: 1 },
+  });
+
+  assert.equal(normalized.ai.contentWritingAutomationMinimumCompetitors, 2);
+});

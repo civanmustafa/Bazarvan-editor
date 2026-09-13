@@ -39,6 +39,7 @@ import {
   selectQualityContentWritingCompetitors,
   type ContentWritingCompetitorInput,
 } from '../utils/contentWritingContext';
+import { readContentWritingMinimumCompetitors } from './contentWritingCompetitorPolicy';
 import {
   enqueueCompetitorPreparationDiscovery,
   enqueueCompetitorPreparationExtraction,
@@ -416,13 +417,27 @@ const enqueueBrief = async (
   return id;
 };
 
-const readQualityCompetitors = async (articleId: string): Promise<{
+const readQualityCompetitors = async (
+  articleId: string,
+  minimumCompetitors: number,
+): Promise<{
   competitors: ContentWritingCompetitorInput[];
   audit: ReturnType<typeof selectQualityContentWritingCompetitors>['audit'];
 }> => {
   const snapshot = await readManagedArticleCompetitors(articleId);
-  return selectQualityContentWritingCompetitors(snapshot.competitors);
+  return selectQualityContentWritingCompetitors(
+    snapshot.competitors,
+    undefined,
+    minimumCompetitors,
+  );
 };
+
+const competitorQualityIsSufficient = (
+  audit: ReturnType<typeof selectQualityContentWritingCompetitors>['audit'],
+): boolean => (
+  audit.acceptedCount >= audit.minimumCompetitors
+  && audit.distinctDomainCount >= CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS
+);
 
 const waitForContentWriting = async (options: {
   context: ExternalAnalysisExecutionContext;
@@ -626,6 +641,7 @@ const executeFullArticlePipeline = async (
   const input = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
   const provider = text(input.provider) as ContentWritingProvider;
   const model = text(input.model);
+  const minimumCompetitors = await readContentWritingMinimumCompetitors();
   const competitorCount = Math.max(
     CONTENT_WRITING_MIN_COMPETITOR_COUNT,
     Math.min(5, Math.round(numberValue(input.competitorCount, 5))),
@@ -721,7 +737,14 @@ const executeFullArticlePipeline = async (
     });
     activeExternalChildId = '';
 
-    const competitorInputsMustBeReplaced = [
+    const existingCompetitorQuality = await readQualityCompetitors(
+      context.job.article_id,
+      minimumCompetitors,
+    );
+    const existingCompetitorsAreSufficient = competitorQualityIsSufficient(
+      existingCompetitorQuality.audit,
+    );
+    const competitorInputsMustBeReplaced = !existingCompetitorsAreSufficient && [
       text(savedProgress.retryReason),
       text(savedProgress.resumeReason),
     ].some(reason => (
@@ -729,104 +752,120 @@ const executeFullArticlePipeline = async (
       || reason === 'full_pipeline_insufficient_competitor_content'
       || reason === 'full_pipeline_no_competitors_found'
     ));
-    await reportStage(context, 'competitor_discovery', 3, {
-      forceRefresh: competitorInputsMustBeReplaced,
-    });
-    const discoveryJobId = (!competitorInputsMustBeReplaced
-      ? text(savedProgress.discoveryJobId)
-      : '') || await enqueueCompetitorPreparationDiscovery({
-      mode: 'full_article_pipeline',
-      pipelineJobId: context.job.id,
-      requestedBy,
-      workerId: context.workerId,
-      leaseGeneration,
-      forceRefresh: competitorInputsMustBeReplaced,
-    });
-    activeExternalChildId = discoveryJobId;
-    await attachExternalChild({ context, jobId: discoveryJobId, kind: 'discovery', leaseGeneration });
-    await reportStage(context, 'competitor_discovery', 3, { discoveryJobId });
-    const discovery = await waitForExternalJob({
-      context,
-      jobId: discoveryJobId,
-      stage: 'competitor_discovery',
-      stageIndex: 3,
-    });
-    activeExternalChildId = '';
-    const sources = selectCompetitorPreparationSources(discovery.result, competitorCount);
-    const reserveSources = selectCompetitorPreparationReserveSources(
-      discovery.result,
-      sources,
-    );
-    if (sources.length === 0) {
-      retryError({
-        code: 'full_pipeline_no_competitors_found',
-        message: 'No valid competitor pages were available after discovery and deterministic filtering.',
+    let sources: ReturnType<typeof selectCompetitorPreparationSources> = [];
+    let extractionJobId = '';
+    let competitorQuality = existingCompetitorQuality;
+    if (existingCompetitorsAreSufficient) {
+      await reportStage(context, 'competitor_discovery', 3, {
+        skipped: true,
+        reason: 'saved_competitor_texts_sufficient',
+        acceptedCompetitorCount: competitorQuality.audit.acceptedCount,
+      });
+      await reportStage(context, 'competitor_extraction', 4, {
+        skipped: true,
+        reason: 'saved_competitor_texts_sufficient',
+        selectedCompetitorCount: competitorQuality.audit.acceptedCount,
+      });
+    } else {
+      await reportStage(context, 'competitor_discovery', 3, {
+        forceRefresh: competitorInputsMustBeReplaced,
+      });
+      const discoveryJobId = (!competitorInputsMustBeReplaced
+        ? text(savedProgress.discoveryJobId)
+        : '') || await enqueueCompetitorPreparationDiscovery({
+        mode: 'full_article_pipeline',
+        pipelineJobId: context.job.id,
+        requestedBy,
+        workerId: context.workerId,
+        leaseGeneration,
+        forceRefresh: competitorInputsMustBeReplaced,
+      });
+      activeExternalChildId = discoveryJobId;
+      await attachExternalChild({ context, jobId: discoveryJobId, kind: 'discovery', leaseGeneration });
+      await reportStage(context, 'competitor_discovery', 3, { discoveryJobId });
+      const discovery = await waitForExternalJob({
+        context,
+        jobId: discoveryJobId,
         stage: 'competitor_discovery',
         stageIndex: 3,
-        details: { discoveryJobId },
       });
-    }
-    const discoveryInput = isRecord(discovery.result) ? discovery.result : {};
-    const queryType = text(discoveryInput.queryType) || 'primary_keyword';
-    const queryText = text(discoveryInput.query) || text(input.articleTitle);
-
-    await reportStage(context, 'competitor_extraction', 4, {
-      selectedCompetitorCount: sources.length,
-    });
-    const extractionMustBeReplaced = competitorInputsMustBeReplaced;
-    let extractionJobId = extractionMustBeReplaced
-      ? ''
-      : text(savedProgress.extractionJobId);
-    if (!extractionJobId) {
-      extractionJobId = await enqueueCompetitorPreparationExtraction({
-        articleId: context.job.article_id,
-        requestedBy,
-        origin: 'full_article_pipeline',
-        queryType,
-        queryText,
+      activeExternalChildId = '';
+      sources = selectCompetitorPreparationSources(discovery.result, competitorCount);
+      const reserveSources = selectCompetitorPreparationReserveSources(
+        discovery.result,
         sources,
-        reserveSources,
+      );
+      if (sources.length === 0) {
+        retryError({
+          code: 'full_pipeline_no_competitors_found',
+          message: 'No valid competitor pages were available after discovery and deterministic filtering.',
+          stage: 'competitor_discovery',
+          stageIndex: 3,
+          details: { discoveryJobId },
+        });
+      }
+      const discoveryInput = isRecord(discovery.result) ? discovery.result : {};
+      const queryType = text(discoveryInput.queryType) || 'primary_keyword';
+      const queryText = text(discoveryInput.query) || text(input.articleTitle);
+
+      await reportStage(context, 'competitor_extraction', 4, {
+        selectedCompetitorCount: sources.length,
       });
-    }
-    activeExternalChildId = extractionJobId;
-    await attachExternalChild({ context, jobId: extractionJobId, kind: 'extraction', leaseGeneration });
-    await reportStage(context, 'competitor_extraction', 4, {
-      extractionJobId,
-      selectedCompetitorCount: sources.length,
-    });
-    const extraction = await waitForExternalJob({
-      context,
-      jobId: extractionJobId,
-      stage: 'competitor_extraction',
-      stageIndex: 4,
-    });
-    activeExternalChildId = '';
-    if (numberValue(extraction.result?.successfulCount, 0) < 1) {
-      retryError({
-        code: 'full_pipeline_no_competitor_content',
-        message: 'Firecrawl, direct extraction, rendered-browser fallback, and reserve replacement did not produce usable text for any selected competitor.',
+      const extractionMustBeReplaced = competitorInputsMustBeReplaced;
+      extractionJobId = extractionMustBeReplaced
+        ? ''
+        : text(savedProgress.extractionJobId);
+      if (!extractionJobId) {
+        extractionJobId = await enqueueCompetitorPreparationExtraction({
+          articleId: context.job.article_id,
+          requestedBy,
+          origin: 'full_article_pipeline',
+          queryType,
+          queryText,
+          sources,
+          reserveSources,
+        });
+      }
+      activeExternalChildId = extractionJobId;
+      await attachExternalChild({ context, jobId: extractionJobId, kind: 'extraction', leaseGeneration });
+      await reportStage(context, 'competitor_extraction', 4, {
+        extractionJobId,
+        selectedCompetitorCount: sources.length,
+      });
+      const extraction = await waitForExternalJob({
+        context,
+        jobId: extractionJobId,
         stage: 'competitor_extraction',
         stageIndex: 4,
-        details: { extractionJobId },
       });
+      activeExternalChildId = '';
+      if (numberValue(extraction.result?.successfulCount, 0) < 1) {
+        retryError({
+          code: 'full_pipeline_no_competitor_content',
+          message: 'Firecrawl, direct extraction, rendered-browser fallback, and reserve replacement did not produce usable text for any selected competitor.',
+          stage: 'competitor_extraction',
+          stageIndex: 4,
+          details: { extractionJobId },
+        });
+      }
+      competitorQuality = await readQualityCompetitors(
+        context.job.article_id,
+        minimumCompetitors,
+      );
     }
-    const competitorQuality = await readQualityCompetitors(context.job.article_id);
     await reportStage(context, 'competitor_extraction', 4, {
       extractionJobId,
-      selectedCompetitorCount: sources.length,
+      selectedCompetitorCount: competitorQuality.audit.acceptedCount,
       competitorQualityAudit: competitorQuality.audit as unknown as ExternalAnalysisJson,
       acceptedCompetitorCount: competitorQuality.audit.acceptedCount,
       distinctCompetitorDomainCount: competitorQuality.audit.distinctDomainCount,
       rejectedCompetitorCount: competitorQuality.audit.rejectedCount,
       replacementNeededCount: competitorQuality.audit.replacementNeededCount,
     });
-    if (
-      competitorQuality.audit.acceptedCount < CONTENT_WRITING_MIN_COMPETITOR_COUNT
-      || competitorQuality.audit.distinctDomainCount < CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS
-    ) {
+    if (!competitorQualityIsSufficient(competitorQuality.audit)) {
       retryError({
         code: 'full_pipeline_insufficient_competitor_content',
-        message: `Only ${competitorQuality.audit.acceptedCount} quality competitors across ${competitorQuality.audit.distinctDomainCount} domains were available; at least ${CONTENT_WRITING_MIN_COMPETITOR_COUNT} competitors across ${CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS} domains are required.`,
+        message: `Only ${competitorQuality.audit.acceptedCount} quality competitors across ${competitorQuality.audit.distinctDomainCount} independent sources were available; at least ${minimumCompetitors} competitors across ${CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS} sources are required.`,
         stage: 'competitor_extraction',
         stageIndex: 4,
         details: {
@@ -1153,7 +1192,7 @@ const executeFullArticlePipeline = async (
         qualityGatePolicy: 'review_required',
         qualityGatePassed: true,
         qualityScore: reviewedQuality.score,
-        selectedCompetitorCount: sources.length,
+        selectedCompetitorCount: competitorQuality.audit.acceptedCount,
         analysisJobId,
         analysisCompleted: true,
         appliedPatchCount: externalReview.patchApplication.applied.length,

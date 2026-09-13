@@ -1,4 +1,5 @@
 import { getAuthenticatedApiHeaders, getAuthenticatedApiToken } from './authenticatedApi';
+import { normalizeContentWritingMinimumCompetitors } from '../constants/competitors';
 
 export type ContentWritingAutomationItemStatus =
   | 'ready'
@@ -165,7 +166,7 @@ const normalizeSettings = (value: unknown): ContentWritingAutomationSettings => 
     intervalMinutes: Math.max(1, integer(source.intervalMinutes, 15)),
     provider,
     model: text(source.model),
-    minimumCompetitors: Math.max(3, Math.min(5, integer(source.minimumCompetitors, 3))),
+    minimumCompetitors: normalizeContentWritingMinimumCompetitors(source.minimumCompetitors),
     requireCompetitorTerminalState: source.requireCompetitorTerminalState !== false,
     maxAttempts: Math.max(1, integer(source.maxAttempts, 3)),
     retryMinutes: Math.max(1, integer(source.retryMinutes, 30)),
@@ -351,7 +352,9 @@ const normalizeArticleSummary = (value: unknown): ContentWritingArticleSummary |
     appliedAt: nullableText(source.appliedAt),
     automaticApplicationStatus: nullableText(source.automaticApplicationStatus),
     usableCompetitorCount: integer(source.usableCompetitorCount),
-    minimumCompetitorCount: Math.max(3, integer(source.minimumCompetitorCount, 3)),
+    minimumCompetitorCount: normalizeContentWritingMinimumCompetitors(
+      source.minimumCompetitorCount,
+    ),
     errorCode: nullableText(source.errorCode),
     errorMessage: nullableText(source.errorMessage),
     updatedAt: text(source.updatedAt),

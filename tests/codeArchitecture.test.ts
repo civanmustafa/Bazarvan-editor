@@ -699,9 +699,10 @@ test('each user can manage encrypted personal AI key groups without exposing raw
 });
 
 test('content writing has one template registry and one context builder', async () => {
-  const [registry, builder, settingsRegistry, settingsPage] = await Promise.all([
+  const [registry, builder, competitorConstants, settingsRegistry, settingsPage] = await Promise.all([
     readWorkspaceFile('constants/contentWriting.ts'),
     readWorkspaceFile('utils/contentWritingContext.ts'),
+    readWorkspaceFile('constants/competitors.ts'),
     readWorkspaceFile('constants/settingsRegistry.ts'),
     readWorkspaceFile('components/SettingsPage.tsx'),
   ]);
@@ -710,6 +711,7 @@ test('content writing has one template registry and one context builder', async 
   assert.match(registry, /CONTENT_WRITING_TEMPLATE_FIELDS/);
   assert.match(builder, /buildContentWritingPromptBundle/);
   assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_COUNT = 3/);
+  assert.match(competitorConstants, /CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT = 2/);
   assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_WORDS = 250/);
   assert.match(builder, /CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS = 2/);
   assert.match(builder, /CONTENT_WRITING_MAX_COMPETITOR_COUNT = MAX_ARTICLE_COMPETITORS/);
