@@ -1,9 +1,7 @@
 import {
-  getContentWritingCompetitorsFromMetadata,
   normalizeContentWritingCompetitors,
   type ContentWritingCompetitorInput,
 } from '../utils/contentWritingContext';
-import { resolveCompetitorCanonicalSource } from '../utils/competitorContent';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 
 export type ManagedArticleCompetitorRow = {
@@ -14,42 +12,18 @@ export type ManagedArticleCompetitorRow = {
   title: string | null;
   content_text: string | null;
   status: string;
+  source_origin?: string | null;
 };
 
 export type ArticleCompetitorRepositorySnapshot = {
-  source: 'managed_rows' | 'manual_metadata' | 'none';
+  source: 'managed_rows' | 'none';
   hasManagedRows: boolean;
   competitors: ContentWritingCompetitorInput[];
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-);
-
 const text = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
-
-const metadataCompetitorEnvelope = (metadata: unknown): Record<string, unknown> => {
-  const root = isRecord(metadata) ? metadata : {};
-  const attachments = isRecord(root.attachments) ? root.attachments : {};
-  return isRecord(attachments.competitors)
-    ? attachments.competitors
-    : isRecord(root.competitors)
-      ? root.competitors
-      : {};
-};
-
-/**
- * Metadata without a provenance marker predates managed competitor rows and is
- * therefore treated as a legacy manual input. A competitor_discovery projection
- * must never be resurrected after its managed rows have been removed.
- */
-export const isManualCompetitorMetadata = (metadata: unknown): boolean => {
-  const envelope = metadataCompetitorEnvelope(metadata);
-  const manager = text(envelope.managedBy).toLocaleLowerCase();
-  return manager !== 'competitor_discovery';
-};
 
 const normalizeManagedRows = (
   rows: readonly ManagedArticleCompetitorRow[],
@@ -66,25 +40,14 @@ const normalizeManagedRows = (
 );
 
 /**
- * Resolves one canonical competitor source. The presence of any managed row is
- * authoritative, including queued/failed rows, so stale metadata cannot fill a
- * managed slot or silently mix two generations of competitor content. Metadata
- * is retained only as a lossless compatibility source for manual/legacy inputs
- * when no managed rows exist.
+ * Resolves the canonical competitor source. article_competitors is the only
+ * persisted repository; browser/article metadata copies are intentionally
+ * ignored even when no managed row exists.
  */
 export const resolveArticleCompetitorRepositorySnapshot = (options: {
   rows: readonly ManagedArticleCompetitorRow[];
-  metadata: unknown;
 }): ArticleCompetitorRepositorySnapshot => {
-  const metadataCompetitors = isManualCompetitorMetadata(options.metadata)
-    ? getContentWritingCompetitorsFromMetadata(options.metadata)
-    : [];
-  const source = resolveCompetitorCanonicalSource({
-    managedRowCount: options.rows.length,
-    metadataManagedBy: metadataCompetitorEnvelope(options.metadata).managedBy,
-    metadataTextCount: metadataCompetitors.length,
-  });
-  if (source === 'managed_rows') {
+  if (options.rows.length > 0) {
     return {
       source: 'managed_rows',
       hasManagedRows: true,
@@ -93,9 +56,9 @@ export const resolveArticleCompetitorRepositorySnapshot = (options: {
   }
 
   return {
-    source,
+    source: 'none',
     hasManagedRows: false,
-    competitors: source === 'manual_metadata' ? metadataCompetitors : [],
+    competitors: [],
   };
 };
 
@@ -104,7 +67,7 @@ export const readManagedArticleCompetitorRows = async (
 ): Promise<ManagedArticleCompetitorRow[]> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('article_competitors')
-    .select('id,position,source_url,canonical_url,title,content_text,status')
+    .select('id,position,source_url,canonical_url,title,content_text,status,source_origin')
     .eq('article_id', articleId)
     .order('position', { ascending: true });
   if (error) throw error;
@@ -115,5 +78,5 @@ export const readManagedArticleCompetitors = async (
   articleId: string,
 ): Promise<ArticleCompetitorRepositorySnapshot> => {
   const rows = await readManagedArticleCompetitorRows(articleId);
-  return resolveArticleCompetitorRepositorySnapshot({ rows, metadata: {} });
+  return resolveArticleCompetitorRepositorySnapshot({ rows });
 };

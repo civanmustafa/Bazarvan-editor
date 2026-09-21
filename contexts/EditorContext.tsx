@@ -22,7 +22,7 @@ import {
     mergeSavedSemanticKeywords,
     semanticKeywordUpdateWasAccepted,
 } from '../utils/semanticKeywordMerge';
-import { clearStoredCompetitorInputs, COMPETITOR_RESET_EVENT, readStoredCompetitorInputs, writeStoredCompetitorInputs } from '../utils/competitorStorage';
+import { COMPETITOR_RESET_EVENT } from '../utils/competitorStorage';
 import {
     type ArticleImportOrigin,
     ArticleStorageSnapshot,
@@ -177,7 +177,6 @@ const readJsonStorageValue = (key: string): any | null => {
 const readCurrentArticleAttachments = (
     importOrigin?: ArticleImportOrigin | null,
 ): ArticleStorageSnapshot['attachments'] => ({
-    competitors: readStoredCompetitorInputs(),
     contentSummary: readJsonStorageValue(CONTENT_SUMMARY_STORAGE_KEY),
     ...(importOrigin ? { importOrigin } : {}),
 });
@@ -199,13 +198,10 @@ const dispatchSavedAiResults = (
 };
 
 const restoreArticleAttachments = (attachments?: ArticleStorageSnapshot['attachments']) => {
-    const competitors = attachments?.competitors;
-    if (competitors) {
-        writeStoredCompetitorInputs(competitors);
-    } else {
-        clearStoredCompetitorInputs();
-    }
-    window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT, { detail: competitors }));
+    // Competitors are article-scoped server records. Never restore them from a
+    // browser snapshot or article metadata, because those copies can belong to
+    // the article that was open immediately before this one.
+    window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT));
 
     const contentSummary = attachments?.contentSummary;
     if (contentSummary) {
@@ -2165,7 +2161,6 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             removeStorageValue(AUTO_DRAFT_KEYWORDS_KEY);
             removeStorageValue(AUTO_DRAFT_LANGUAGE_KEY);
             removeStorageValue(AUTO_DRAFT_GOAL_CONTEXT_KEY);
-            clearStoredCompetitorInputs();
             removeStorageValue(CONTENT_SUMMARY_STORAGE_KEY);
             window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT));
             setTitle('');

@@ -115,7 +115,7 @@ const listCompetitors = async (
   const competitorColumns = [
     'id,article_id,position,query_type,query_text,source_url,canonical_url,domain,title,description,headings',
     includeContent ? 'content_text' : '',
-    'word_count,status,extraction_provider,error_code,error_message,fetched_at,selected_by,created_at,updated_at',
+    'word_count,status,extraction_provider,source_origin,error_code,error_message,fetched_at,selected_by,created_at,updated_at',
   ].filter(Boolean).join(',');
   const [competitorsResult, activeJobResult, latestJobResult, discoveryStateResult, discoveryJobsResult] = await Promise.all([
     supabase
@@ -595,6 +595,7 @@ const saveManualCompetitorText = async (
     word_count: contentText.split(/\s+/u).filter(Boolean).length,
     status: 'completed',
     extraction_provider: 'manual',
+    source_origin: 'manual_text',
     error_code: null,
     error_message: null,
     fetched_at: savedAt,
@@ -956,6 +957,17 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
     });
     const queuedJob = isRecord(queued) && isRecord(queued.job) ? queued.job : {};
     const extractionJobId = toText(queuedJob.id);
+    const queuedIds = isRecord(queuedJob.input_snapshot) && Array.isArray(queuedJob.input_snapshot.competitorIds)
+      ? queuedJob.input_snapshot.competitorIds.filter((id): id is string => typeof id === 'string')
+      : [];
+    if (queuedIds.length > 0) {
+      const { error: provenanceError } = await supabase
+        .from('article_competitors')
+        .update({ source_origin: 'manual_selection' })
+        .eq('article_id', articleId)
+        .in('id', queuedIds);
+      if (provenanceError) throw provenanceError;
+    }
     if (extractionJobId) {
       const { error: jobMetadataError } = await supabase
         .from('ai_external_analysis_jobs')
@@ -972,9 +984,6 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       if (jobMetadataError) throw jobMetadataError;
     }
     if (discoverySignature && extractionJobId) {
-      const queuedIds = isRecord(queuedJob.input_snapshot) && Array.isArray(queuedJob.input_snapshot.competitorIds)
-        ? queuedJob.input_snapshot.competitorIds.filter((id): id is string => typeof id === 'string')
-        : [];
       const { error: signatureError } = await supabase
         .from('article_competitors')
         .update({ discovery_signature: discoverySignature })

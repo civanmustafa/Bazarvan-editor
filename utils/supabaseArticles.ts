@@ -3,6 +3,7 @@ import { normalizeKeywords } from '../hooks/useUserActivity';
 import {
   loadRemoteArticleSnapshotCache,
   saveRemoteArticleSnapshotCache,
+  type ArticleImportOrigin,
   type ArticleStorageSnapshot,
 } from './editorContentStore';
 import { getSupabaseClient } from './supabaseClient';
@@ -539,6 +540,7 @@ const toArticleStorageSnapshot = (
   username: string,
 ): ArticleStorageSnapshot => {
   const metadata = isRecord(row.metadata) ? row.metadata : {};
+  const metadataAttachments = isRecord(metadata.attachments) ? metadata.attachments : {};
   const aiResults = isRecord(metadata.aiResults) ? metadata.aiResults : {};
   const geminiPaidResults = isRecord(aiResults.geminiPaid) ? aiResults.geminiPaid : {};
   const geminiPaidLatest = isRecord(geminiPaidResults.latest) ? geminiPaidResults.latest : {};
@@ -560,7 +562,17 @@ const toArticleStorageSnapshot = (
     articleLanguage: row.article_language === 'en' ? 'en' : 'ar',
     analysisSummary: metadata.analysisSummary,
     analysis: row.analysis || undefined,
-    attachments: metadata.attachments,
+    // Competitors are hydrated from article_competitors by the competitor
+    // panel. Keeping them out of editor snapshots prevents cross-article cache
+    // restoration and makes the server repository the sole saved source.
+    attachments: {
+      ...(isRecord(metadataAttachments.contentSummary)
+        ? { contentSummary: metadataAttachments.contentSummary }
+        : {}),
+      ...(isRecord(metadataAttachments.importOrigin)
+        ? { importOrigin: metadataAttachments.importOrigin as ArticleImportOrigin }
+        : {}),
+    },
     savedAiResults: {
       geminiPaid: typeof geminiPaidLatest.result === 'string' ? geminiPaidLatest.result : '',
     },

@@ -7,13 +7,9 @@ import { useAISelector } from '../contexts/AIContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
 import {
-    COMPETITOR_HTML_STORAGE_KEY,
     COMPETITOR_RESET_EVENT,
-    COMPETITOR_TEXT_STORAGE_KEY,
     COMPETITOR_TEXTS_CHANGED_EVENT,
-    COMPETITOR_URLS_STORAGE_KEY,
 } from '../utils/competitorStorage';
-import type { StoredCompetitorInputs } from '../utils/competitorStorage';
 import type { AiAnalysisOptions, AiContentPatch, AiPatchProvider, ExternalAiBridgeProvider, ReadyCommandAnalysisBatchItem, ReadyCommandAnalysisHistoryMeta } from '../types';
 import { GEMINI_FREE_MODEL_VALUES, GEMINI_PAID_ANALYSIS_MODEL } from '../constants/aiModels';
 import {
@@ -226,36 +222,6 @@ const READY_COMMAND_DISPLAY_ORDER = [
 const getReadyCommandDisplayOrder = (id: string): number => {
     const index = READY_COMMAND_DISPLAY_ORDER.indexOf(id as typeof READY_COMMAND_DISPLAY_ORDER[number]);
     return index === -1 ? READY_COMMAND_DISPLAY_ORDER.length : index;
-};
-
-const loadStoredCompetitorUrls = (): string[] => {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(COMPETITOR_URLS_STORAGE_KEY) || '[]');
-        const urls = Array.isArray(parsed) ? parsed : [];
-        return createDefaultCompetitorUrls().map((_, index) => typeof urls[index] === 'string' ? urls[index] : '');
-    } catch {
-        return createDefaultCompetitorUrls();
-    }
-};
-
-const loadStoredCompetitorHtmls = (): string[] => {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(COMPETITOR_HTML_STORAGE_KEY) || '[]');
-        const snippets = Array.isArray(parsed) ? parsed : [];
-        return createDefaultCompetitorHtmls().map((_, index) => typeof snippets[index] === 'string' ? snippets[index] : '');
-    } catch {
-        return createDefaultCompetitorHtmls();
-    }
-};
-
-const loadStoredCompetitorTexts = (): string[] => {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(COMPETITOR_TEXT_STORAGE_KEY) || '[]');
-        const snippets = Array.isArray(parsed) ? parsed : [];
-        return createDefaultCompetitorTexts().map((_, index) => typeof snippets[index] === 'string' ? snippets[index] : '');
-    } catch {
-        return createDefaultCompetitorTexts();
-    }
 };
 
 const extractJsonFromGeminiText = (value: string): any | null => {
@@ -607,8 +573,8 @@ const collectCompetitorStatTexts = (
     plainTexts: string[],
     extractions: CompetitorExtractionState[],
 ): string[] => {
-    // competitorTexts is the canonical editor surface used by stats, ready commands,
-    // saved article attachments, external analysis, and content writing. Extraction
+    // competitorTexts is the article-scoped editor surface hydrated from the
+    // canonical server rows and used by stats and ready commands. Extraction
     // content is retained only as a loss-prevention fallback and preview payload.
     const texts: string[] = [];
     const slotCount = Math.max(plainTexts.length, extractions.length);
@@ -618,10 +584,6 @@ const collectCompetitorStatTexts = (
     }
 
     return texts.filter(Boolean);
-};
-
-const loadStoredCompetitorExtractions = (): CompetitorExtractionState[] => {
-    return createDefaultCompetitorExtractions();
 };
 
 const buildReadyCommandCompetitorBlocks = (
@@ -802,10 +764,10 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     const [aiCommand, setAiCommand] = useState('');
     const [bulkCompetitorText, setBulkCompetitorText] = useState('');
     const [competitorImportNotice, setCompetitorImportNotice] = useState('');
-    const [competitorUrls, setCompetitorUrls] = useState<string[]>(() => loadStoredCompetitorUrls());
-    const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(() => loadStoredCompetitorHtmls());
-    const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => loadStoredCompetitorTexts());
-    const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(() => loadStoredCompetitorExtractions());
+    const [competitorUrls, setCompetitorUrls] = useState<string[]>(createDefaultCompetitorUrls);
+    const [competitorHtmls, setCompetitorHtmls] = useState<string[]>(createDefaultCompetitorHtmls);
+    const [competitorTexts, setCompetitorTexts] = useState<string[]>(createDefaultCompetitorTexts);
+    const [competitorExtractions, setCompetitorExtractions] = useState<CompetitorExtractionState[]>(createDefaultCompetitorExtractions);
     const [competitorTextSaveStatuses, setCompetitorTextSaveStatuses] = useState<CompetitorTextSaveStatus[]>(() => (
         Array.from({ length: MAX_ARTICLE_COMPETITORS }, () => 'idle')
     ));
@@ -1046,6 +1008,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         for (const timer of competitorTextSaveTimersRef.current.values()) window.clearTimeout(timer);
         competitorTextSaveTimersRef.current.clear();
         competitorTextSavePromisesRef.current.clear();
+        // Clear the previous article synchronously. The discovery panel then
+        // hydrates this article from article_competitors.
+        window.dispatchEvent(new CustomEvent(COMPETITOR_RESET_EVENT));
     }, [activeArticleId]);
 
     useEffect(() => () => {
@@ -1114,14 +1079,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             document.removeEventListener("mousedown", handleClickOutside);
         };
     }, []);
-
-    useEffect(() => {
-        try {
-            localStorage.setItem(COMPETITOR_URLS_STORAGE_KEY, JSON.stringify(competitorUrls));
-        } catch (error) {
-            console.error('Could not save competitor links:', error);
-        }
-    }, [competitorUrls]);
 
     useEffect(() => {
         const handleAutoDistributedCompetitors = (event: Event) => {
@@ -1232,32 +1189,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     }, []);
 
     useEffect(() => {
-        try {
-            localStorage.setItem(COMPETITOR_HTML_STORAGE_KEY, JSON.stringify(competitorHtmls));
-        } catch (error) {
-            console.error('Could not save competitor HTML snippets:', error);
-        }
-    }, [competitorHtmls]);
-
-    useEffect(() => {
-        try {
-            localStorage.setItem(COMPETITOR_TEXT_STORAGE_KEY, JSON.stringify(competitorTexts));
-        } catch (error) {
-            console.error('Could not save competitor text snippets:', error);
-        }
-    }, [competitorTexts]);
-
-    useEffect(() => {
-        const normalizeStoredList = (items: unknown, fallback: string[]) => (
-            fallback.map((emptyValue, index) => (
-                Array.isArray(items) && typeof items[index] === 'string' ? items[index] : emptyValue
-            ))
-        );
-
-        const resetCompetitors = (event: Event) => {
-            const restoredInputs = (event as CustomEvent<StoredCompetitorInputs | undefined>).detail;
-            const restoredUrls = normalizeStoredList(restoredInputs?.urls, createDefaultCompetitorUrls());
-            const restoredTexts = normalizeStoredList(restoredInputs?.texts, createDefaultCompetitorTexts());
+        const resetCompetitors = () => {
+            const restoredUrls = createDefaultCompetitorUrls();
+            const restoredTexts = createDefaultCompetitorTexts();
             const idleStatuses = Array.from(
                 { length: MAX_ARTICLE_COMPETITORS },
                 (): CompetitorTextSaveStatus => 'idle',
@@ -1272,7 +1206,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             setBulkCompetitorText('');
             setCompetitorImportNotice('');
             setCompetitorUrls(restoredUrls);
-            setCompetitorHtmls(normalizeStoredList(restoredInputs?.htmls, createDefaultCompetitorHtmls()));
+            setCompetitorHtmls(createDefaultCompetitorHtmls());
             setCompetitorTexts(restoredTexts);
             setCompetitorTextSaveStatuses(idleStatuses);
             setCompetitorExtractions(createDefaultCompetitorExtractions());

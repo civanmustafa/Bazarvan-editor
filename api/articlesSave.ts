@@ -91,6 +91,16 @@ const normalizeSaveReason = (value: unknown): ArticleSaveReason => {
   return 'manual';
 };
 
+const sanitizeArticleAttachments = (value: unknown): ArticleStorageSnapshot['attachments'] | undefined => {
+  if (!isRecord(value)) return undefined;
+  const attachments: NonNullable<ArticleStorageSnapshot['attachments']> = {};
+  if (isRecord(value.contentSummary)) attachments.contentSummary = value.contentSummary;
+  if (isRecord(value.importOrigin)) {
+    attachments.importOrigin = value.importOrigin as NonNullable<ArticleStorageSnapshot['attachments']>['importOrigin'];
+  }
+  return Object.keys(attachments).length > 0 ? attachments : undefined;
+};
+
 const sanitizeSnapshot = (value: unknown): ArticleStorageSnapshot => {
   if (!isRecord(value)) throw new ArticleSaveError('snapshot is required.', 400);
 
@@ -109,7 +119,9 @@ const sanitizeSnapshot = (value: unknown): ArticleStorageSnapshot => {
     goalContext: isRecord(value.goalContext) ? value.goalContext : {},
     articleLanguage: normalizeLanguage(value.articleLanguage),
     analysisSummary: isRecord(value.analysisSummary) ? value.analysisSummary : undefined,
-    attachments: isRecord(value.attachments) ? value.attachments : undefined,
+    // Competitors are persisted through /api/competitors into
+    // article_competitors. Never accept a browser attachment copy here.
+    attachments: sanitizeArticleAttachments(value.attachments),
     savedAt: typeof value.savedAt === 'string' && value.savedAt.trim()
       ? value.savedAt
       : new Date().toISOString(),

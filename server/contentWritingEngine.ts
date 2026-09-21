@@ -82,7 +82,6 @@ type ArticleRow = {
   title: string | null;
   keywords: unknown;
   goal_context: unknown;
-  metadata: unknown;
   article_language: string | null;
   updated_at: string;
 };
@@ -214,7 +213,7 @@ const readArticleInput = async (articleId: string): Promise<{
   const [articleResult, competitorResult, writingSources] = await Promise.all([
     supabase
       .from('articles')
-      .select('id,title,keywords,goal_context,metadata,article_language,updated_at')
+      .select('id,title,keywords,goal_context,article_language,updated_at')
       .eq('id', articleId)
       .maybeSingle(),
     readManagedArticleCompetitorRows(articleId),
@@ -232,7 +231,6 @@ const readArticleInput = async (articleId: string): Promise<{
   const article = articleResult.data as ArticleRow;
   const competitorSnapshot = resolveArticleCompetitorRepositorySnapshot({
     rows: competitorResult,
-    metadata: article.metadata,
   });
 
   return {

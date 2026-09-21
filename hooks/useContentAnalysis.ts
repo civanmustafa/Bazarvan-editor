@@ -9,7 +9,6 @@ import {
 } from '../utils/contentWritingTargets';
 import {
   COMPETITOR_TEXTS_CHANGED_EVENT,
-  readStoredCompetitorInputs,
   type CompetitorTextsChangedDetail,
 } from '../utils/competitorStorage';
 import { getUsableCompetitorText } from '../utils/competitorContent';
@@ -236,11 +235,7 @@ export const useContentAnalysis = (
   enabled = true,
   articleTitle = '',
 ): FullAnalysis => {
-  const [competitorTexts, setCompetitorTexts] = useState<string[]>(() => (
-    readStoredCompetitorInputs().texts
-      .map(getUsableCompetitorText)
-      .filter(Boolean)
-  ));
+  const [competitorTexts, setCompetitorTexts] = useState<string[]>([]);
   const lengthTarget = useMemo(() => {
     const resolved = resolveContentWritingLengthTarget({
       manualRange: goalContext.targetWordRange,
@@ -285,7 +280,7 @@ export const useContentAnalysis = (
       const detail = (event as CustomEvent<CompetitorTextsChangedDetail>).detail;
       const texts = Array.isArray(detail?.texts)
         ? detail.texts.map(getUsableCompetitorText).filter(Boolean)
-        : readStoredCompetitorInputs().texts.map(getUsableCompetitorText).filter(Boolean);
+        : [];
       setCompetitorTexts(texts);
     };
     window.addEventListener(COMPETITOR_TEXTS_CHANGED_EVENT, handleCompetitorTextsChanged);

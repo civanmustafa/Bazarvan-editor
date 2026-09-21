@@ -40,8 +40,14 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-115/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-115/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-116/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-116/);
+  assert.match(guide, /20260921010000_article_competitor_repository_and_semantic_partial_recovery\.sql/);
+  assert.match(verifyScript, /ARTICLE_COMPETITOR_SOURCE_ORIGIN/);
+  assert.match(verifyScript, /ARTICLE_COMPETITOR_CANONICAL_PROJECTION/);
+  assert.match(verifyScript, /CONTENT_WRITING_CANONICAL_COMPETITOR_READINESS/);
+  assert.match(verifyScript, /SEMANTIC_SUPERSEDED_RECOVERY/);
+  assert.match(verifyScript, /SEMANTIC_SUPERSEDED_RECOVERY_PRIVILEGES/);
   assert.match(guide, /20260921000000_automation_retry_recovery\.sql/);
   assert.match(verifyScript, /AUTOMATION_RECOVERY_FUNCTIONS/);
   assert.match(verifyScript, /AUTOMATION_RECOVERY_PRIVILEGES/);

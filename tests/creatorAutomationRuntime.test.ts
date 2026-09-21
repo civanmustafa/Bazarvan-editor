@@ -73,7 +73,10 @@ const createFixture = () => {
       };
       query.update = (patch: unknown) => { query.patch = patch; return query; };
       const finish = async (): Promise<{ data: unknown; error: null }> => {
-        if (query.patch) state.updates.push({ table, patch: query.patch, filters: query.filters });
+        if (query.patch) {
+          state.updates.push({ table, patch: query.patch, filters: query.filters });
+          state.onUpdate?.(query);
+        }
         return { data: state.readQuery(query), error: null };
       };
       query.maybeSingle = finish;
@@ -137,6 +140,71 @@ test('manual Google generation persists only validated Google fields and preserv
   await assert.rejects(() => state.semantic(context), { code: 'semantic_response_invalid' });
   assert.equal(state.updates.length, 0, 'Invalid responses must not persist or complete the task.');
   assert.match(state.prompts.at(-1), /secondaries غير مطلوبة/);
+});
+
+test('semantic generation commits valid alternatives and LSI before retrying invalid Google metadata', async () => {
+  const state = createFixture();
+  const keyword = 'شركة برمجيات خاصة في الامارات';
+  state.article = {
+    id: 'article-1', status: 'draft', title: keyword, plain_text: '', article_language: 'ar',
+    updated_at: '2026-09-21T10:00:00Z', goal_context: { pageType: 'service', objective: 'convert' },
+    keywords: {
+      primary: keyword, company: 'برو 71', secondaries: [], lsi: [],
+      googleTitles: [], googleDescriptions: [],
+    },
+  };
+  state.readQuery = (query: any) => query.table === 'articles'
+    ? state.article
+    : { article_id: 'article-1', semantic_ready: true, semantic_readiness_signature: 'current' };
+  state.onUpdate = (query: any) => {
+    if (query.table !== 'articles') return;
+    state.article = {
+      ...state.article,
+      ...query.patch,
+      updated_at: '2026-09-21T10:01:00Z',
+    };
+  };
+  state.responses = [
+    JSON.stringify({
+      secondaries: ['شركة تطوير برامج مخصصة في الامارات'],
+      lsi: ['هندسة البرمجيات', 'تكامل الأنظمة'],
+      googleTitles: ['عنوان غير مطابق'],
+      googleDescriptions: [],
+    }),
+    JSON.stringify({ googleTitles: ['ما زال غير مطابق'], googleDescriptions: [] }),
+  ];
+  await loadRuntime('server/externalSemanticAnalysisExecutor.ts', state, {
+    externalAnalysisExecutor: `
+      export class ExternalAnalysisRetryError extends Error { constructor(input) { super(input.message); Object.assign(this, input); } }
+      export class ExternalAnalysisTerminalError extends ExternalAnalysisRetryError {}
+      export const registerExternalAnalysisJobExecutor = (_type, execute) => { s.semantic = execute; };`,
+    externalAnalysisSettings: 'export const readExternalGeminiSettings = async () => ({ enabled: true, model: "test" });',
+    promptRegistrySettings: 'export const readPromptRegistrySettings = async () => ({ templates: {} });',
+    externalGeminiRunner: `
+      export const reportExternalGeminiCall = async () => {};
+      export const runExternalGeminiCall = async input => ({
+        ok: true, status: 200, text: s.responses.shift() || '{}', attempts: [],
+        provider: 'gemini', model: 'test', keySuffix: 'test'
+      });`,
+  });
+  const context = {
+    job: {
+      article_id: 'article-1', origin: 'auto', readiness_signature: 'current',
+      input_snapshot: {
+        title: keyword, plainText: '', articleLanguage: 'ar',
+        keywords: state.article.keywords, goalContext: state.article.goal_context,
+        needsSecondaries: true, needsLsi: true, needsGoogleMetadata: true,
+      },
+    },
+    reportProgress: async () => {},
+  };
+
+  await assert.rejects(() => state.semantic(context), { code: 'semantic_response_invalid' });
+  assert.equal(state.updates.length, 1, 'Valid semantic lists must be committed once before the Google-only retry fails.');
+  assert.deepEqual(state.article.keywords.secondaries, ['شركة تطوير برامج مخصصة في الامارات']);
+  assert.deepEqual(state.article.keywords.lsi, ['هندسة البرمجيات', 'تكامل الأنظمة']);
+  assert.deepEqual(state.article.keywords.googleTitles, []);
+  assert.deepEqual(state.article.keywords.googleDescriptions, []);
 });
 
 test('creator scheduler cancels only its claimed item when policy or creator identity forbids writing', async () => {

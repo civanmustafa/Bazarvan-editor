@@ -147,6 +147,75 @@ const keepRequestedTerms = (
   googleDescriptions: targets.needsGoogleMetadata ? terms.googleDescriptions : [],
 } : terms;
 
+const canonicalJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+};
+
+/**
+ * A background article save can change updated_at/readiness_signature without
+ * changing the semantic inputs. Such a save must not discard generated terms.
+ */
+const semanticSourceStillMatches = (
+  context: ExternalAnalysisExecutionContext,
+  article: ExternalSemanticArticleRow,
+): boolean => {
+  const snapshot = isRecord(context.job.input_snapshot) ? context.job.input_snapshot : {};
+  const snapshotKeywords = normalizeKeywords(snapshot.keywords);
+  const currentKeywords = normalizeKeywords(article.keywords);
+  if (!toTrimmedString(snapshot.title) || !snapshotKeywords.primary) return false;
+  return toTrimmedString(snapshot.title) === toTrimmedString(article.title)
+    && toTrimmedString(snapshot.plainText) === toTrimmedString(article.plain_text)
+    && (snapshot.articleLanguage === 'en' ? 'en' : 'ar') === (article.article_language === 'en' ? 'en' : 'ar')
+    && snapshotKeywords.primary === currentKeywords.primary
+    && snapshotKeywords.company === currentKeywords.company
+    && canonicalJson(isRecord(snapshot.goalContext) ? snapshot.goalContext : {})
+      === canonicalJson(isRecord(article.goal_context) ? article.goal_context : {});
+};
+
+const canApplySemanticJob = (
+  context: ExternalAnalysisExecutionContext,
+  article: ExternalSemanticArticleRow,
+  state: ExternalSemanticStateRow,
+): boolean => isCurrentSemanticJob(context, state) || semanticSourceStillMatches(context, article);
+
+const missingSemanticTargets = (
+  terms: ExternalSemanticTerms,
+  targets: SemanticTargetState,
+): SemanticTargetState => ({
+  needsSecondaries: targets.needsSecondaries && terms.secondaries.length === 0,
+  needsLsi: targets.needsLsi && terms.lsi.length === 0,
+  needsGoogleMetadata: targets.needsGoogleMetadata && (
+    terms.googleTitles.length !== 2 || terms.googleDescriptions.length !== 2
+  ),
+});
+
+const hasApplicableSemanticTerms = (
+  terms: ExternalSemanticTerms,
+  targets: SemanticTargetState,
+): boolean => (
+  (targets.needsSecondaries && terms.secondaries.length > 0)
+  || (targets.needsLsi && terms.lsi.length > 0)
+  || (targets.needsGoogleMetadata
+    && terms.googleTitles.length === 2
+    && terms.googleDescriptions.length === 2)
+);
+
+const mergeSemanticTerms = (
+  current: ExternalSemanticTerms,
+  incoming: ExternalSemanticTerms,
+): ExternalSemanticTerms => ({
+  secondaries: incoming.secondaries.length > 0 ? incoming.secondaries : current.secondaries,
+  lsi: incoming.lsi.length > 0 ? incoming.lsi : current.lsi,
+  googleTitles: incoming.googleTitles.length === 2 ? incoming.googleTitles : current.googleTitles,
+  googleDescriptions: incoming.googleDescriptions.length === 2
+    ? incoming.googleDescriptions
+    : current.googleDescriptions,
+});
+
 const isCurrentSemanticJob = (
   context: ExternalAnalysisExecutionContext,
   state: ExternalSemanticStateRow,
@@ -221,7 +290,7 @@ const applySemanticTerms = async (options: {
   articleUpdatedAt: string;
 }> => {
   const latest = await readArticleAndState(options.context.job.article_id);
-  if (!isCurrentSemanticJob(options.context, latest.state)) {
+  if (!canApplySemanticJob(options.context, latest.article, latest.state)) {
     return {
       status: 'superseded',
       appliedFields: [],
@@ -249,17 +318,12 @@ const applySemanticTerms = async (options: {
     };
   }
 
-  if (!hasUsableExternalSemanticTerms(
-    options.terms,
-    targets.needsSecondaries,
-    targets.needsLsi,
-    targets.needsGoogleMetadata,
-  )) {
-    throw createRetryError({
-      code: 'semantic_response_missing_current_target',
-      message: 'Gemini did not return the semantic list that is currently empty.',
-      progress: { stage: 'retry_scheduled', reason: 'missing_current_target' },
-    });
+  if (!hasApplicableSemanticTerms(options.terms, targets)) {
+    return {
+      status: 'already_populated',
+      appliedFields: [],
+      articleUpdatedAt: latest.article.updated_at,
+    };
   }
 
   const rawKeywords = isRecord(latest.article.keywords) ? latest.article.keywords : {};
@@ -324,7 +388,7 @@ const executeExternalSemanticAnalysis = async (
   });
 
   const initial = await readArticleAndState(context.job.article_id);
-  if (!isCurrentSemanticJob(context, initial.state)) {
+  if (!canApplySemanticJob(context, initial.article, initial.state)) {
     return {
       result: {
         status: 'superseded',
@@ -408,14 +472,45 @@ const executeExternalSemanticAnalysis = async (
     scopedTargets,
   );
 
+  const appliedFields = new Set<string>();
+  let appliedArticleUpdatedAt = initial.article.updated_at;
+
+  const persistAvailableTerms = async (
+    candidate: ExternalSemanticTerms,
+  ): Promise<Awaited<ReturnType<typeof applySemanticTerms>> | null> => {
+    if (!hasApplicableSemanticTerms(candidate, initialTargets)) return null;
+    const application = await applySemanticTerms({ context, terms: candidate });
+    application.appliedFields.forEach(field => appliedFields.add(field));
+    appliedArticleUpdatedAt = application.articleUpdatedAt;
+    return application;
+  };
+
   if (!hasUsableExternalSemanticTerms(
     terms,
     initialTargets.needsSecondaries,
     initialTargets.needsLsi,
     initialTargets.needsGoogleMetadata,
   )) {
+    const partialApplication = await persistAvailableTerms(terms);
+    if (partialApplication?.status === 'superseded') {
+      return {
+        result: {
+          status: 'superseded',
+          reason: 'semantic_source_changed_before_partial_apply',
+          generated: terms,
+          appliedFields: [...appliedFields],
+          articleUpdatedAt: partialApplication.articleUpdatedAt,
+        },
+        progress: { stage: 'superseded' },
+      };
+    }
     if (scoped) {
-      const current = getRequestedTargetState(context, articleInput.keywords, await readArticleAutomationPolicy(context.job.article_id));
+      const latestBeforeRepair = await readArticleAndState(context.job.article_id);
+      const current = getRequestedTargetState(
+        context,
+        normalizeKeywords(latestBeforeRepair.article.keywords),
+        await readArticleAutomationPolicy(context.job.article_id),
+      );
       initialTargets = {
         needsSecondaries: initialTargets.needsSecondaries && current.needsSecondaries,
         needsLsi: initialTargets.needsLsi && current.needsLsi,
@@ -425,8 +520,13 @@ const executeExternalSemanticAnalysis = async (
         throw new ExternalAnalysisTerminalError({ code: 'creator_automation_disabled', message: 'The creator disabled semantic automation before repair.' });
       }
     }
+    const repairTargets = missingSemanticTargets(terms, initialTargets);
     await context.reportProgress({
-      progress: { stage: 'repairing_semantic_response' },
+      progress: {
+        stage: 'repairing_semantic_response',
+        appliedFields: [...appliedFields],
+        repairTargets,
+      },
       provider: finalCall.provider,
       model: finalCall.model,
       keyAttempts: attempts,
@@ -437,10 +537,10 @@ const executeExternalSemanticAnalysis = async (
         articleInput,
         finalCall.text,
         semanticPromptTemplate,
-        initialTargets.needsSecondaries,
-        initialTargets.needsLsi,
-        initialTargets.needsGoogleMetadata,
-        scopedTargets,
+        repairTargets.needsSecondaries,
+        repairTargets.needsLsi,
+        repairTargets.needsGoogleMetadata,
+        true,
       ),
       model: aiSettings.model,
       allowModelFallback: aiSettings.allowModelFallback,
@@ -458,14 +558,18 @@ const executeExternalSemanticAnalysis = async (
           provider: finalCall.provider,
           model: finalCall.model,
           keyAttemptCount: attempts.length,
+          appliedFields: [...appliedFields],
         },
       });
     }
 
-    terms = keepRequestedTerms(
-      parseExternalSemanticTerms(finalCall.text, articleInput),
-      initialTargets,
-      scopedTargets,
+    terms = mergeSemanticTerms(
+      terms,
+      keepRequestedTerms(
+        parseExternalSemanticTerms(finalCall.text, articleInput),
+        repairTargets,
+        true,
+      ),
     );
   }
 
@@ -475,6 +579,19 @@ const executeExternalSemanticAnalysis = async (
     initialTargets.needsLsi,
     initialTargets.needsGoogleMetadata,
   )) {
+    const partialApplication = await persistAvailableTerms(terms);
+    if (partialApplication?.status === 'superseded') {
+      return {
+        result: {
+          status: 'superseded',
+          reason: 'semantic_source_changed_before_final_partial_apply',
+          generated: terms,
+          appliedFields: [...appliedFields],
+          articleUpdatedAt: partialApplication.articleUpdatedAt,
+        },
+        progress: { stage: 'superseded' },
+      };
+    }
     throw createRetryError({
       code: 'semantic_response_invalid',
       message: describeExternalSemanticValidationFailure(
@@ -488,6 +605,8 @@ const executeExternalSemanticAnalysis = async (
         stage: 'retry_scheduled',
         reason: 'semantic_response_invalid',
         keyAttemptCount: attempts.length,
+        appliedFields: [...appliedFields],
+        missingTargets: missingSemanticTargets(terms, initialTargets),
       },
     });
   }
@@ -499,18 +618,20 @@ const executeExternalSemanticAnalysis = async (
     keyAttempts: attempts,
   });
   const application = await applySemanticTerms({ context, terms });
+  application.appliedFields.forEach(field => appliedFields.add(field));
+  appliedArticleUpdatedAt = application.articleUpdatedAt;
 
   return {
     result: {
       status: application.status,
       generated: terms,
-      appliedFields: application.appliedFields,
+      appliedFields: [...appliedFields],
       provider: finalCall.provider,
       model: finalCall.model,
       keySuffix: finalCall.keySuffix,
       keyAttempts: attempts,
       sourceArticleUpdatedAt: initial.article.updated_at,
-      articleUpdatedAt: application.articleUpdatedAt,
+      articleUpdatedAt: appliedArticleUpdatedAt,
       completedAt: new Date().toISOString(),
     },
     progress: {

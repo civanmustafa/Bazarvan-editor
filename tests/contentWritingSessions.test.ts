@@ -306,10 +306,10 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(engine, /readManagedArticleCompetitorRows/);
   assert.match(engine, /resolveArticleCompetitorRepositorySnapshot/);
   assert.match(competitorRepository, /from\('article_competitors'\)/);
-  assert.match(competitorRepository, /getContentWritingCompetitorsFromMetadata/);
-  assert.match(competitorRepository, /resolveCompetitorCanonicalSource/);
-  assert.match(competitorRepository, /source === 'managed_rows'/);
-  assert.match(competitorRepository, /source === 'manual_metadata'/);
+  assert.doesNotMatch(competitorRepository, /getContentWritingCompetitorsFromMetadata/);
+  assert.doesNotMatch(competitorRepository, /manual_metadata/);
+  assert.match(competitorRepository, /source: 'managed_rows'/);
+  assert.match(competitorRepository, /source: 'none'/);
   assert.match(engine, /buildContentWritingPromptBundle/);
   assert.match(engine, /prepareContentWritingConversation/);
   assert.match(engine, /createContentWritingSessionInputHash/);

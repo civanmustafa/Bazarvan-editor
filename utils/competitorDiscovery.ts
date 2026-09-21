@@ -25,6 +25,7 @@ export type CompetitorDiscoveryRow = {
   wordCount: number;
   status: CompetitorDiscoveryStatus;
   extractionProvider: string;
+  sourceOrigin: 'automatic_discovery' | 'manual_selection' | 'manual_text' | 'legacy_import';
   errorCode: string;
   errorMessage: string;
   fetchedAt: string | null;
@@ -234,6 +235,9 @@ const toCompetitorRow = (value: unknown): CompetitorDiscoveryRow | null => {
       ? status
       : 'queued',
     extractionProvider: toText(value.extraction_provider),
+    sourceOrigin: ['manual_selection', 'manual_text', 'legacy_import'].includes(toText(value.source_origin))
+      ? toText(value.source_origin) as CompetitorDiscoveryRow['sourceOrigin']
+      : 'automatic_discovery',
     errorCode: toText(value.error_code),
     errorMessage: toText(value.error_message),
     fetchedAt: value.fetched_at ? String(value.fetched_at) : null,

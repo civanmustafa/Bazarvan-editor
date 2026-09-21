@@ -54,6 +54,7 @@ const createJob = (
   last_error: null,
   last_error_code: null,
   attempt_count: 1,
+  max_attempts: 5,
   retry_count: 0,
   next_attempt_at: null,
   cancel_requested_at: null,

@@ -17,11 +17,6 @@ import {
     MANUAL_DRAFT_TITLE_KEY,
 } from './constants';
 import { CONTENT_SUMMARY_STORAGE_KEY } from './constants/engineeringPrompts';
-import {
-    COMPETITOR_HTML_STORAGE_KEY,
-    COMPETITOR_TEXT_STORAGE_KEY,
-    COMPETITOR_URLS_STORAGE_KEY,
-} from './utils/competitorStorage';
 import './styles/global.css';
 import './styles/components.css';
 import './styles/menus.css';
@@ -56,9 +51,6 @@ const RECOVERY_STORAGE_KEYS = [
     MANUAL_DRAFT_LANGUAGE_KEY,
     MANUAL_DRAFT_GOAL_CONTEXT_KEY,
     CONTENT_SUMMARY_STORAGE_KEY,
-    COMPETITOR_URLS_STORAGE_KEY,
-    COMPETITOR_HTML_STORAGE_KEY,
-    COMPETITOR_TEXT_STORAGE_KEY,
 ];
 
 const RECOVERY_STORAGE_PREFIXES = [
