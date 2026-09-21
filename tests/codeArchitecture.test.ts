@@ -160,11 +160,11 @@ test('all editor AI execution paths publish to one inline live activity monitor'
     readWorkspaceFile('components/InternalLinkingPanel.tsx'),
   ]);
 
-  assert.match(
-    editorApp,
-    /<TipsCarousel\s*\/>\s*<AiExecutionMonitor\s+articleId=\{activeArticleId\}\s+articleKey=\{articleKey\}\s*\/>\s*<EditorToolbar\s+isFocusMode=\{isFocusMode\}\s+onToggleFocusMode=\{toggleFocusMode\}\s+onOpenInternalLinking=\{openInternalLinking\}\s*\/>/,
-  );
-  assert.match(editorApp, /import AiExecutionMonitor from '\.\/AiKeyUsageToast'/);
+  const tipsPosition = editorApp.indexOf('<TipsCarousel />');
+  const monitorPosition = editorApp.indexOf('<AiExecutionMonitor articleId={activeArticleId} articleKey={articleKey} />');
+  const toolbarPosition = editorApp.indexOf('<EditorToolbar');
+  assert.ok(tipsPosition >= 0 && tipsPosition < monitorPosition && monitorPosition < toolbarPosition);
+  assert.match(editorApp, /const AiExecutionMonitor = React\.lazy\(\(\) => import\('\.\/AiKeyUsageToast'\)\)/);
   assert.match(monitor, /getAiExecutionActivitiesForArticle\(activities, articleId, articleKey\)/);
   assert.doesNotMatch(dashboard, /DashboardAiExecutionMonitor/);
   assert.match(

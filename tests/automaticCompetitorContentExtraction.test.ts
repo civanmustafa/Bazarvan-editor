@@ -107,5 +107,5 @@ test('competitor discovery UI separates targeting proof from text availability a
   assert.match(panel, /rendered_browser_fallback/);
   assert.match(panel, /تعذر المساران؛ جارٍ السحب عبر متصفح مُصيَّر/);
   assert.match(panel, /replacing_competitor/);
-  assert.match(panel, /جارٍ استبدال الرابط بمنافس مؤكد تالٍ/);
+  assert.match(panel, /جارٍ استبدال الرابط بمنافس قوي أو دلالي تالٍ/);
 });

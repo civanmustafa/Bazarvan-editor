@@ -48,3 +48,21 @@ test('recoverable admin action remains server-only and excludes permanent failur
   assert.match(migration, /grant execute on function public\.requeue_recoverable_automation_failures[\s\S]*service_role/);
   assert.match(api, /action === 'retry_recoverable'[\s\S]*principal\.role !== 'admin'/);
 });
+
+test('durable master coordinator tracks independent stages and is reconciled by the worker', async () => {
+  const [migration, worker, queue] = await Promise.all([
+    readFile(path.join(root, 'supabase', 'migrations', '20260922000000_durable_automation_coordinator_and_competitor_tiers.sql'), 'utf8'),
+    readFile(path.join(root, 'server', 'externalAnalysisWorker.ts'), 'utf8'),
+    readFile(path.join(root, 'server', 'externalAnalysisQueue.ts'), 'utf8'),
+  ]);
+
+  assert.match(migration, /create table if not exists public\.article_automation_stage_states/);
+  assert.match(migration, /semantic_keywords_lsi'[\s\S]*competitor_discovery'[\s\S]*competitor_extraction'[\s\S]*content_writing'/);
+  assert.match(migration, /attempt_count[\s\S]*retry_count[\s\S]*max_attempts[\s\S]*next_attempt_at/);
+  assert.match(migration, /create or replace function public\.reconcile_article_automation_coordinator/);
+  assert.match(migration, /enqueue_external_semantic_analysis_job_controlled/);
+  assert.match(migration, /enqueue_automatic_competitor_extraction_for_discovery/);
+  assert.match(migration, /enqueue_next_automatic_writing_competitor_preparation/);
+  assert.match(queue, /reconcileArticleAutomationCoordinator/);
+  assert.match(worker, /await reconcileArticleAutomationCoordinator\(\)/);
+});

@@ -35,9 +35,10 @@ import { isCompetitorLanguageCompatible } from './competitorSelectionEngine.ts';
 import { analyzeCompetitorKeywordTargeting } from './competitorContentQualification.ts';
 import { assertAutomaticCompetitorResearchAllowed } from './contentResearchAutomationGuard.ts';
 import {
-  CONTENT_WRITING_MIN_COMPETITOR_UNIQUE_TOKENS,
-  CONTENT_WRITING_MIN_COMPETITOR_WORDS,
-} from '../utils/contentWritingContext.ts';
+  resolveCompetitorSourcePolicy,
+  type CompetitorSourceClass,
+  type CompetitorSourcePolicy,
+} from '../utils/competitorSourcePolicy.ts';
 
 /**
  * Architecture boundary:
@@ -63,6 +64,8 @@ type CompetitorRow = {
   content_text: string;
   word_count: number;
   extraction_provider: string;
+  source_class: CompetitorSourceClass;
+  content_weight: number;
   status: 'queued' | 'extracting' | 'retry_scheduled' | 'completed' | 'failed' | 'cancelled';
   error_code: string | null;
   error_message: string | null;
@@ -101,7 +104,7 @@ const getFirecrawlKeySuffix = async (userId?: string | null): Promise<string> =>
 const readCompetitors = async (articleId: string): Promise<CompetitorRow[]> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('article_competitors')
-    .select('id,article_id,position,canonical_url,source_url,domain,title,description,content_text,word_count,status,extraction_provider,error_code,error_message')
+    .select('id,article_id,position,canonical_url,source_url,domain,title,description,content_text,word_count,status,extraction_provider,source_class,content_weight,error_code,error_message')
     .eq('article_id', articleId)
     .order('position', { ascending: true });
   if (error) throw error;
@@ -253,15 +256,16 @@ const assertUsableCompetitorContent = (options: {
   content: Pick<ProgrammaticCompetitorContent, 'text' | 'wordCount'>;
   articleLanguage: 'ar' | 'en';
   acceptedFingerprints: Set<string>;
+  sourcePolicy: CompetitorSourcePolicy;
 }): string => {
-  if (options.content.wordCount < CONTENT_WRITING_MIN_COMPETITOR_WORDS) {
+  if (options.content.wordCount < options.sourcePolicy.minimumWordCount) {
     throw new CompetitorContentUsabilityError(
       'competitor_content_too_short',
-      `Competitor content contains ${options.content.wordCount} words; at least ${CONTENT_WRITING_MIN_COMPETITOR_WORDS} are required.`,
+      `Competitor content contains ${options.content.wordCount} words; at least ${options.sourcePolicy.minimumWordCount} are required for ${options.sourcePolicy.sourceClass} sources.`,
     );
   }
   const informationTokens = competitorInformationTokens(options.content.text);
-  if (new Set(informationTokens).size < CONTENT_WRITING_MIN_COMPETITOR_UNIQUE_TOKENS) {
+  if (new Set(informationTokens).size < options.sourcePolicy.minimumUniqueTokenCount) {
     throw new CompetitorContentUsabilityError(
       'competitor_content_low_information_density',
       'The extracted competitor text does not contain enough distinct informational terms.',
@@ -465,7 +469,9 @@ const promoteReserveSource = async (options: {
     content_text: '',
     word_count: 0,
     status: 'extracting',
-    extraction_provider: 'confirmed_reserve_replacement',
+    extraction_provider: 'tiered_reserve_replacement',
+    source_class: resolveCompetitorSourcePolicy(replacement.canonicalUrl).sourceClass,
+    content_weight: resolveCompetitorSourcePolicy(replacement.canonicalUrl).contentWeight,
     error_code: null,
     error_message: null,
     fetched_at: null,
@@ -476,6 +482,9 @@ const promoteReserveSource = async (options: {
   options.row.title = replacement.title;
   options.row.description = replacement.description;
   options.row.status = 'extracting';
+  const replacementPolicy = resolveCompetitorSourcePolicy(replacement.canonicalUrl);
+  options.row.source_class = replacementPolicy.sourceClass;
+  options.row.content_weight = replacementPolicy.contentWeight;
   options.row.content_text = '';
   options.row.word_count = 0;
   return true;
@@ -533,6 +542,7 @@ const persistCompletedCompetitor = async (options: {
   content: ExtractedCompetitorPayload;
   extractionProvider: string;
   keywordTargeting: FinalKeywordTargetingOutcome;
+  sourcePolicy: CompetitorSourcePolicy;
 }): Promise<void> => {
   await updateCompetitor(options.row.id, {
     source_url: options.content.url,
@@ -545,6 +555,8 @@ const persistCompletedCompetitor = async (options: {
     word_count: options.content.wordCount,
     status: 'completed',
     extraction_provider: options.extractionProvider,
+    source_class: options.sourcePolicy.sourceClass,
+    content_weight: options.sourcePolicy.contentWeight,
     error_code: options.keywordTargeting.warningCode || null,
     error_message: options.keywordTargeting.warningMessage || null,
     fetched_at: options.content.fetchedAt || new Date().toISOString(),
@@ -557,6 +569,8 @@ const persistCompletedCompetitor = async (options: {
   options.row.content_text = options.content.text;
   options.row.word_count = options.content.wordCount;
   options.row.extraction_provider = options.extractionProvider;
+  options.row.source_class = options.sourcePolicy.sourceClass;
+  options.row.content_weight = options.sourcePolicy.contentWeight;
   options.row.status = 'completed';
 };
 
@@ -606,6 +620,7 @@ const extractCompetitorCandidate = async (options: {
     const previousDomain = options.row.domain;
     const nextUrls = [content.canonicalUrl, content.url].filter(Boolean);
     const nextDomain = content.domain.toLocaleLowerCase().replace(/^www\./, '');
+    const sourcePolicy = resolveCompetitorSourcePolicy(content.canonicalUrl || content.domain);
     if (nextUrls.some(url => options.claimedUrls.has(url) && !previousUrls.has(url))) {
       throw new CompetitorContentUsabilityError(
         'competitor_duplicate_canonical_url',
@@ -626,6 +641,7 @@ const extractCompetitorCandidate = async (options: {
       content,
       articleLanguage: options.articleTargeting.language,
       acceptedFingerprints: options.acceptedFingerprints,
+      sourcePolicy,
     });
     const keywordTargeting = evaluateFinalKeywordTargeting({
       snapshot: options.snapshot,
@@ -648,6 +664,7 @@ const extractCompetitorCandidate = async (options: {
       content,
       extractionProvider,
       keywordTargeting,
+      sourcePolicy,
     });
     previousUrls.forEach(url => options.claimedUrls.delete(url));
     if (previousDomain && previousDomain !== nextDomain) {

@@ -526,6 +526,8 @@ export const prepareContentWritingConversation = async (
         url: competitor.url || null,
         contentLength: competitor.content.length,
         wordCount: countContentWritingTargetWords(competitor.content),
+        sourceClass: competitor.sourceClass || 'commercial',
+        contentWeight: competitor.contentWeight ?? 1,
       })),
       competitorQualityAudit: bundle.competitorQualityAudit,
       competitorChunks: bundle.competitorChunks,

@@ -23,7 +23,6 @@ import { DEFAULT_SMART_ANALYSIS_OPTIONS, ENGINEERING_PROMPT_DEFINITIONS, ENGINEE
 import { isRetiredEngineeringCommandId } from '../constants/externalAnalysisCommands';
 import { truncatePromptTextDistributed } from '../utils/promptText';
 import ExternalAiBridgePanel from './ExternalAiBridgePanel';
-import CompetitorDiscoveryPanel from './CompetitorDiscoveryPanel';
 import { runGeminiAnalysisEngine } from '../utils/geminiAnalysisEngine';
 import { createEmptyCompetitorSlots, MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
 import {
@@ -42,6 +41,7 @@ import {
     type CompetitorComparisonMapResult,
     type CompetitorComparisonSource,
 } from '../utils/competitorComparisonWorkflow';
+
 import {
     createCompetitorTextStats,
     createSharedCompetitorPhrases,
@@ -51,6 +51,7 @@ import { IconTooltip } from './toolbar/ToolbarItems';
 
 const AIHistoryTab = React.lazy(() => import('./AIHistoryTab'));
 const ExternalAnalysisResultsTab = React.lazy(() => import('./ExternalAnalysisResultsTab'));
+const CompetitorDiscoveryPanel = React.lazy(() => import('./CompetitorDiscoveryPanel'));
 const ContentWritingPanel = React.lazy(() => import('./ContentWritingPanel'));
 const InternalLinkingPanel = React.lazy(() => import('./InternalLinkingPanel'));
 const CompetitorPhraseIntelligencePanel = React.lazy(() => import('./CompetitorPhraseIntelligencePanel'));
@@ -2505,17 +2506,19 @@ ${readyCommandCompetitorBlocks}`;
         return (
         <div className="flex h-full flex-col">
             <div className="flex-grow overflow-y-auto custom-scrollbar p-[0.25rem] space-y-[0.25rem]">
-                <CompetitorDiscoveryPanel
-                    articleId={activeArticleId}
-                    articleTitle={articleTitle}
-                    primaryKeyword={articleKeywords.primary}
-                    alternativeKeywords={articleKeywords.secondaries}
-                    articleLanguage={articleLanguage}
-                    goalContext={articleGoalContext}
-                    companyName={articleKeywords.company}
-                    locale={competitorLocale}
-                    onCompetitorsChange={handleDiscoveredCompetitors}
-                />
+                <React.Suspense fallback={<div className="p-4 text-center text-xs font-bold text-gray-400">{competitorIsArabic ? 'جارٍ تحميل المنافسين...' : 'Loading competitors...'}</div>}>
+                    <CompetitorDiscoveryPanel
+                        articleId={activeArticleId}
+                        articleTitle={articleTitle}
+                        primaryKeyword={articleKeywords.primary}
+                        alternativeKeywords={articleKeywords.secondaries}
+                        articleLanguage={articleLanguage}
+                        goalContext={articleGoalContext}
+                        companyName={articleKeywords.company}
+                        locale={competitorLocale}
+                        onCompetitorsChange={handleDiscoveredCompetitors}
+                    />
+                </React.Suspense>
 
                 <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
                     <div className="mb-2 text-xs font-bold text-gray-700 dark:text-gray-200">

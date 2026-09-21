@@ -13,6 +13,8 @@ export type ManagedArticleCompetitorRow = {
   content_text: string | null;
   status: string;
   source_origin?: string | null;
+  source_class?: 'commercial' | 'government' | null;
+  content_weight?: number | null;
 };
 
 export type ArticleCompetitorRepositorySnapshot = {
@@ -36,6 +38,8 @@ const normalizeManagedRows = (
       title: row.title || '',
       url: row.canonical_url || row.source_url || '',
       content: row.content_text || '',
+      sourceClass: row.source_class === 'government' ? 'government' : 'commercial',
+      contentWeight: Number.isFinite(Number(row.content_weight)) ? Number(row.content_weight) : 1,
     })),
 );
 
@@ -67,7 +71,7 @@ export const readManagedArticleCompetitorRows = async (
 ): Promise<ManagedArticleCompetitorRow[]> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('article_competitors')
-    .select('id,position,source_url,canonical_url,title,content_text,status,source_origin')
+    .select('id,position,source_url,canonical_url,title,content_text,status,source_origin,source_class,content_weight')
     .eq('article_id', articleId)
     .order('position', { ascending: true });
   if (error) throw error;

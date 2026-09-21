@@ -17,6 +17,9 @@ export const COMPETITOR_CONTENT_QUALIFICATION_TIMEOUT_MS = 12_000;
 export const COMPETITOR_ALTERNATIVE_SEARCH_LIMIT = 3;
 export const COMPETITOR_CONTENT_MAX_CHARS = 120_000;
 export const COMPETITOR_REPLACEMENT_RESERVE_LIMIT = 10;
+export const TRUSTED_GOVERNMENT_COMPETITOR_MIN_WORDS = 130;
+export const TRUSTED_GOVERNMENT_COMPETITOR_MIN_UNIQUE_TOKENS = 20;
+export const TRUSTED_GOVERNMENT_COMPETITOR_WEIGHT = 0.65;
 export const COMPETITOR_RENDERED_EXTRACTION_TIMEOUT_MS = 70_000;
 // Firecrawl is attempted once. A deterministic programmatic extractor takes over
 // immediately on provider failure, followed by one rendered-browser attempt.

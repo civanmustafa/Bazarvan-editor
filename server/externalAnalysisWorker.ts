@@ -21,6 +21,7 @@ import {
   heartbeatExternalAnalysisJob,
   getExternalAnalysisSupabaseAdmin,
   recoverStaleExternalAnalysisJobs,
+  reconcileArticleAutomationCoordinator,
   renewExternalAnalysisJobLease,
   scheduleExternalAnalysisJobRetry,
   updateExternalAnalysisJobProgress,
@@ -142,6 +143,12 @@ const recoverStaleJobsIfDue = async (): Promise<void> => {
   const recovered = await recoverStaleExternalAnalysisJobs(administratorRetryMinutes);
   if (recovered > 0) {
     console.log(`[external-analysis-worker] Recovered ${recovered} stale job(s).`);
+  }
+  const coordinated = await reconcileArticleAutomationCoordinator();
+  if (!coordinated.skipped && (coordinated.processedArticles > 0 || coordinated.errorCount > 0)) {
+    console.log(
+      `[external-analysis-worker] Coordinator reconciled ${coordinated.processedArticles} article(s); errors=${coordinated.errorCount}.`,
+    );
   }
 };
 

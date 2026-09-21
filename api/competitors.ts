@@ -115,7 +115,7 @@ const listCompetitors = async (
   const competitorColumns = [
     'id,article_id,position,query_type,query_text,source_url,canonical_url,domain,title,description,headings',
     includeContent ? 'content_text' : '',
-    'word_count,status,extraction_provider,source_origin,error_code,error_message,fetched_at,selected_by,created_at,updated_at',
+    'word_count,status,extraction_provider,source_origin,source_class,content_weight,error_code,error_message,fetched_at,selected_by,created_at,updated_at',
   ].filter(Boolean).join(',');
   const [competitorsResult, activeJobResult, latestJobResult, discoveryStateResult, discoveryJobsResult] = await Promise.all([
     supabase
@@ -314,14 +314,18 @@ const markCompetitorSelectionAccepted = async (
   if (updateError) throw updateError;
 };
 
-const normalizeSelectedResults = (value: unknown): CompetitorSearchResult[] => {
+type NormalizedSelectedResult = CompetitorSearchResult & {
+  matchTier: 'strong' | 'semantic' | 'review_reserve';
+};
+
+const normalizeSelectedResults = (value: unknown): NormalizedSelectedResult[] => {
   if (!Array.isArray(value)) {
     throw new CompetitorApiError({
       message: 'Select at least one competitor result.',
       code: 'competitor_selection_required',
     });
   }
-  const normalized: CompetitorSearchResult[] = [];
+  const normalized: NormalizedSelectedResult[] = [];
   const seenUrls = new Set<string>();
   const seenDomains = new Set<string>();
 
@@ -347,6 +351,9 @@ const normalizeSelectedResults = (value: unknown): CompetitorSearchResult[] => {
       title: (toText(entry.title) || domain).slice(0, 500),
       description: toText(entry.description).slice(0, 2_000),
       position: Number.isFinite(Number(entry.position)) ? Number(entry.position) : index + 1,
+      matchTier: ['strong', 'semantic', 'review_reserve'].includes(toText(entry.matchTier))
+        ? toText(entry.matchTier) as NormalizedSelectedResult['matchTier']
+        : entry.eligible === true ? 'semantic' : 'review_reserve',
     });
   });
 
@@ -372,11 +379,12 @@ type NormalizedReserveResult = CompetitorSearchResult & {
   targetingEvidence: unknown[];
   contentStatus: string;
   contentQualification: Record<string, unknown>;
+  matchTier: 'strong' | 'semantic' | 'review_reserve';
 };
 
 const normalizeReserveResults = (
   value: unknown,
-  selectedResults: CompetitorSearchResult[],
+  selectedResults: NormalizedSelectedResult[],
 ): NormalizedReserveResult[] => {
   if (!Array.isArray(value)) return [];
   const normalized: NormalizedReserveResult[] = [];
@@ -388,7 +396,10 @@ const normalizeReserveResults = (
     const targetingStatus = toText(entry.targetingStatus) || toText(qualification.targetingStatus);
     const qualificationStatus = toText(qualification.status);
     const confirmed = targetingStatus === 'confirmed' || qualificationStatus === 'qualified';
-    if (!confirmed && entry.eligible !== true) return;
+    const matchTier = ['strong', 'semantic', 'review_reserve'].includes(toText(entry.matchTier))
+      ? toText(entry.matchTier) as NormalizedReserveResult['matchTier']
+      : confirmed ? 'strong' : entry.eligible === true ? 'semantic' : 'review_reserve';
+    if (matchTier === 'review_reserve' || (!confirmed && entry.eligible !== true)) return;
     if (qualificationStatus === 'not_qualified' && targetingStatus !== 'confirmed') return;
     const sourceUrl = toText(entry.url) || toText(entry.canonicalUrl);
     if (!sourceUrl) return;
@@ -411,6 +422,7 @@ const normalizeReserveResults = (
       position: Number.isFinite(Number(entry.position)) ? Number(entry.position) : index + 1,
       autoSelected: entry.autoSelected === true,
       eligible: entry.eligible === true || confirmed,
+      matchTier,
       targetingStatus,
       targetingEvidence: Array.isArray(entry.targetingEvidence)
         ? entry.targetingEvidence.slice(0, 40)
@@ -453,6 +465,7 @@ const normalizeSelectedQualifications = (value: unknown): Record<string, unknown
       score: Math.max(0, Math.min(100, Number(qualification.score) || 0)),
       matchedKeyword: toText(qualification.matchedKeyword).slice(0, 300),
       matchKind: toText(qualification.matchKind).slice(0, 40),
+      matchTier: toText(entry.matchTier) || (entry.eligible === true ? 'semantic' : 'review_reserve'),
     }]];
   }));
 };
@@ -464,7 +477,8 @@ const enqueueExtraction = async (
     userId: string;
     queryType: CompetitorSearchMode;
     queryText: string;
-    results: CompetitorSearchResult[];
+    results: NormalizedSelectedResult[];
+    replaceExisting: boolean;
   },
 ) => {
   const sources = options.results.map(result => ({
@@ -474,6 +488,7 @@ const enqueueExtraction = async (
     title: result.title,
     description: result.description,
     searchPosition: result.position,
+    matchTier: result.matchTier,
   }));
   const { data, error } = await supabase.rpc('enqueue_manual_competitor_extraction_job', {
     p_article_id: options.articleId,
@@ -481,6 +496,7 @@ const enqueueExtraction = async (
     p_query_type: options.queryType,
     p_query_text: options.queryText,
     p_sources: sources,
+    p_replace_existing: options.replaceExisting,
   });
   if (error?.code === 'P0001' && error.message?.includes('competitor_slots_full')) {
     throw new CompetitorApiError({
@@ -928,6 +944,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
         searchPosition: result.position,
         autoSelected: result.autoSelected,
         eligible: result.eligible,
+        matchTier: result.matchTier,
         targetingStatus: result.targetingStatus,
         targetingEvidence: result.targetingEvidence,
         contentStatus: result.contentStatus,
@@ -954,6 +971,7 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       queryType: normalizeSearchMode(body.queryType),
       queryText,
       results,
+      replaceExisting: body.replaceExisting === true,
     });
     const queuedJob = isRecord(queued) && isRecord(queued.job) ? queued.job : {};
     const extractionJobId = toText(queuedJob.id);

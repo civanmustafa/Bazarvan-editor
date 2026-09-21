@@ -173,7 +173,7 @@ test('competitor selection normalizes Arabic context, countries, and owned domai
   assert.equal(isCompetitorOwnDomain('example.com.evil.test', ['example.com']), false);
 });
 
-test('central competitor engine selects only commercial results with explicit targeting evidence', () => {
+test('central competitor engine selects strong and semantic commercial results while excluding review reserves', () => {
   const candidates = [
     searchResult('compare-one.com', 'أفضل برامج إدارة المشاريع: مقارنة شاملة', 'مقارنة أفضل برامج إدارة المشاريع مع المميزات والأسعار وتجارب المستخدمين.', 1, 'comparison'),
     searchResult('review-two.com', 'مراجعة أفضل أدوات إدارة المشاريع', 'تقييم ومقارنة أدوات إدارة المشاريع ومميزات وعيوب كل برنامج.', 2, 'reviews'),
@@ -207,13 +207,14 @@ test('central competitor engine selects only commercial results with explicit ta
   assert.equal(selection.summary.strategy, 'automatic_review');
   assert.equal(selection.summary.targetIntent, 'commercial');
   assert.equal(selection.summary.targetPageType, 'comparison');
-  assert.equal(selection.summary.autoSelectedCount, 3);
+  assert.equal(selection.summary.autoSelectedCount, 5);
   assert.ok(selection.summary.confidence >= 70);
   assert.ok(selection.results[0].selectionScore >= selection.results[1].selectionScore);
   assert.ok(selection.results.some(result => result.domain === 'compare-one.com' && result.autoSelected));
   assert.ok(selection.results.filter(result => result.autoSelected).every(result => (
-    result.reasonCodes.includes('targeting-evidence-confirmed')
+    result.matchTier === 'strong' || result.matchTier === 'semantic'
   )));
+  assert.ok(selection.results.filter(result => result.matchTier === 'review_reserve').every(result => !result.autoSelected));
   assert.ok(selection.results.every(result => result.domain !== 'mybrand.com'));
   assert.ok(selection.results.every(result => !result.canonicalUrl.endsWith('/login')));
   assert.ok(selection.results.filter(result => result.autoSelected).every(result => result.inferredPageType !== 'video'));

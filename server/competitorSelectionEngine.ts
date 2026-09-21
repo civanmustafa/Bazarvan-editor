@@ -60,6 +60,7 @@ export type CompetitorSelectionWarningCode =
   | 'own-domain';
 
 export type CompetitorTargetingStatus = 'confirmed' | 'not_confirmed' | 'unknown';
+export type CompetitorMatchTier = 'strong' | 'semantic' | 'review_reserve';
 
 export type CompetitorTargetingTermKind = 'primary' | 'alternative' | 'article_title';
 
@@ -132,6 +133,7 @@ export type ScoredCompetitorSearchResult = CompetitorSearchResult & {
   confidence: number;
   autoSelected: boolean;
   eligible: boolean;
+  matchTier: CompetitorMatchTier;
   inferredIntent: CompetitorIntent;
   inferredPageType: CompetitorPageType;
   reasonCodes: CompetitorSelectionReasonCode[];
@@ -155,6 +157,9 @@ export type CompetitorSelectionSummary = {
   contentUnavailableCount: number;
   targetingConfirmedCount: number;
   contentUsableCount: number;
+  strongMatchCount: number;
+  semanticMatchCount: number;
+  reviewReserveCount: number;
   autoSelectedCount: number;
   autoSelectedUrls: string[];
 };
@@ -179,7 +184,7 @@ export type CompetitorSelectionContext = {
   ownDomains?: string[];
 };
 
-const ENGINE_VERSION = 'competitor-selection-v5-arabic-phrase-variants';
+const ENGINE_VERSION = 'competitor-selection-v6-tiered-relevance';
 const INTENTS = ['informational', 'commercial', 'transactional', 'navigational', 'local', 'support'] as const;
 type RankedIntent = typeof INTENTS[number];
 type IntentVector = Record<RankedIntent, number>;
@@ -1073,7 +1078,7 @@ export const analyzeAndSelectCompetitors = (options: {
     const socialOrVideo = pageType.type === 'forum' || pageType.type === 'video' || SOCIAL_DOMAINS.has(candidate.domain);
     const homepage = pageType.type === 'homepage';
 
-    let selectionScore = qualification
+    let selectionScore = targetingConfirmed
       ? (
           contentTargeting * 0.45
           + intentMatch * 0.20
@@ -1168,15 +1173,26 @@ export const analyzeAndSelectCompetitors = (options: {
     if (homepage) warningCodes.push('homepage-result');
     if (socialOrVideo) warningCodes.push('forum-or-video-result');
 
-    // A complete target phrase on any accepted surface is the hard relevance
-    // gate requested by the editor workflow. Intent, page type, SERP position,
-    // and score rank confirmed competitors; they do not veto that evidence.
-    const eligible = (
-      targetingConfirmed
+    // Exact phrase evidence remains the strongest tier. Pages that miss the
+    // phrase can still qualify semantically when several independent signals
+    // agree; everything else stays visible as a review-only reserve.
+    const strongMatch = targetingConfirmed
       && languageMatch >= 50
       && !socialOrVideo
-      && !targetingRejected
-    );
+      && !targetingRejected;
+    const semanticMatch = !strongMatch
+      && languageMatch >= 50
+      && !socialOrVideo
+      && !homepage
+      && relevance >= 20
+      && pageMatch >= 42
+      && selectionScore >= 42;
+    const matchTier: CompetitorMatchTier = strongMatch
+      ? 'strong'
+      : semanticMatch
+        ? 'semantic'
+        : 'review_reserve';
+    const eligible = matchTier !== 'review_reserve';
     const confidence = roundScore(
       pageType.confidence * 0.35
       + summaryConfidence * 0.30
@@ -1190,6 +1206,7 @@ export const analyzeAndSelectCompetitors = (options: {
       confidence,
       autoSelected: false,
       eligible,
+      matchTier,
       inferredIntent: dominantIntent(intentVector),
       inferredPageType: pageType.type,
       reasonCodes,
@@ -1251,6 +1268,9 @@ export const analyzeAndSelectCompetitors = (options: {
         || result.contentQualification?.status === 'qualified'
         || result.contentQualification?.status === 'not_qualified'
       )).length,
+      strongMatchCount: results.filter(result => result.matchTier === 'strong').length,
+      semanticMatchCount: results.filter(result => result.matchTier === 'semantic').length,
+      reviewReserveCount: results.filter(result => result.matchTier === 'review_reserve').length,
       autoSelectedCount: autoSelectedUrls.size,
       autoSelectedUrls: Array.from(autoSelectedUrls),
     },

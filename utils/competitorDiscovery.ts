@@ -26,6 +26,8 @@ export type CompetitorDiscoveryRow = {
   status: CompetitorDiscoveryStatus;
   extractionProvider: string;
   sourceOrigin: 'automatic_discovery' | 'manual_selection' | 'manual_text' | 'legacy_import';
+  sourceClass: 'commercial' | 'government';
+  contentWeight: number;
   errorCode: string;
   errorMessage: string;
   fetchedAt: string | null;
@@ -71,6 +73,7 @@ export type CompetitorSearchResult = {
   confidence: number;
   autoSelected: boolean;
   eligible: boolean;
+  matchTier: 'strong' | 'semantic' | 'review_reserve';
   inferredIntent: 'informational' | 'commercial' | 'transactional' | 'navigational' | 'local' | 'support' | 'unknown';
   inferredPageType: 'article' | 'guide' | 'comparison' | 'service' | 'product' | 'category' | 'landing' | 'news' | 'forum' | 'video' | 'homepage' | 'unknown';
   reasonCodes: string[];
@@ -107,6 +110,9 @@ export type CompetitorSelectionSummary = {
   contentUnavailableCount: number;
   targetingConfirmedCount: number;
   contentUsableCount: number;
+  strongMatchCount: number;
+  semanticMatchCount: number;
+  reviewReserveCount: number;
   autoSelectedCount: number;
   autoSelectedUrls: string[];
 };
@@ -238,6 +244,10 @@ const toCompetitorRow = (value: unknown): CompetitorDiscoveryRow | null => {
     sourceOrigin: ['manual_selection', 'manual_text', 'legacy_import'].includes(toText(value.source_origin))
       ? toText(value.source_origin) as CompetitorDiscoveryRow['sourceOrigin']
       : 'automatic_discovery',
+    sourceClass: value.source_class === 'government' ? 'government' : 'commercial',
+    contentWeight: Number.isFinite(Number(value.content_weight))
+      ? Math.max(0.1, Math.min(1, Number(value.content_weight)))
+      : 1,
     errorCode: toText(value.error_code),
     errorMessage: toText(value.error_message),
     fetchedAt: value.fetched_at ? String(value.fetched_at) : null,
@@ -358,6 +368,9 @@ const parseCompetitorSearchResults = (value: unknown): CompetitorSearchResult[] 
           confidence: Math.max(0, Math.min(100, Number(entry.confidence) || 0)),
           autoSelected: entry.autoSelected === true,
           eligible: entry.eligible === true,
+          matchTier: ['strong', 'semantic', 'review_reserve'].includes(toText(entry.matchTier))
+            ? toText(entry.matchTier) as CompetitorSearchResult['matchTier']
+            : entry.eligible === true ? 'strong' : 'review_reserve',
           inferredIntent: (toText(entry.inferredIntent) || 'unknown') as CompetitorSearchResult['inferredIntent'],
           inferredPageType: (toText(entry.inferredPageType) || 'unknown') as CompetitorSearchResult['inferredPageType'],
           reasonCodes: toStringList(entry.reasonCodes),
@@ -430,6 +443,9 @@ const parseCompetitorSelectionSummary = (
     contentUnavailableCount: Math.max(0, Number(selection.contentUnavailableCount) || 0),
     targetingConfirmedCount: Math.max(0, Number(selection.targetingConfirmedCount) || 0),
     contentUsableCount: Math.max(0, Number(selection.contentUsableCount) || 0),
+    strongMatchCount: Math.max(0, Number(selection.strongMatchCount) || results.filter(result => result.matchTier === 'strong').length),
+    semanticMatchCount: Math.max(0, Number(selection.semanticMatchCount) || results.filter(result => result.matchTier === 'semantic').length),
+    reviewReserveCount: Math.max(0, Number(selection.reviewReserveCount) || results.filter(result => result.matchTier === 'review_reserve').length),
     autoSelectedCount: Math.max(0, Number(selection.autoSelectedCount) || 0),
     autoSelectedUrls: toStringList(selection.autoSelectedUrls),
   };
@@ -560,12 +576,14 @@ export const enqueueArticleCompetitorExtraction = async (options: {
   queryType: CompetitorSearchMode;
   results: CompetitorSearchResult[];
   reserveResults?: CompetitorSearchResult[];
-}): Promise<{ queuedCount: number; preservedCount: number }> => {
+  replaceExisting?: boolean;
+}): Promise<{ queuedCount: number; preservedCount: number; replacedCount: number }> => {
   const payload = await requestCompetitors({ action: 'extract', ...options });
   const queued = isRecord(payload.queued) ? payload.queued : {};
   return {
     queuedCount: Math.max(0, Number(queued.queuedCount) || 0),
     preservedCount: Math.max(0, Number(queued.preservedCount) || 0),
+    replacedCount: Math.max(0, Number(queued.replacedCount) || 0),
   };
 };
 

@@ -309,3 +309,19 @@ export const recoverStaleExternalAnalysisJobs = async (
   });
   return Number.isFinite(Number(recovered)) ? Number(recovered) : 0;
 };
+
+export const reconcileArticleAutomationCoordinator = async (
+  limit = 100,
+): Promise<{ skipped: boolean; processedArticles: number; errorCount: number }> => {
+  const value = await callQueueRpc<unknown>('reconcile_article_automation_coordinator', {
+    p_limit: Math.max(1, Math.min(Math.round(limit), 500)),
+  });
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    skipped: source.skipped === true,
+    processedArticles: Math.max(0, Number(source.processedArticles) || 0),
+    errorCount: Math.max(0, Number(source.errorCount) || 0),
+  };
+};

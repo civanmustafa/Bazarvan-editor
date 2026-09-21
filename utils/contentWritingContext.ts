@@ -24,6 +24,10 @@ import {
   countContentWritingTargetWords,
   parseContentWritingTargetWordRange,
 } from './contentWritingTargets';
+import {
+  resolveCompetitorSourcePolicy,
+  type CompetitorSourceClass,
+} from './competitorSourcePolicy';
 
 export const CONTENT_WRITING_MIN_COMPETITOR_COUNT = 3;
 export { CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT };
@@ -39,6 +43,8 @@ export type ContentWritingCompetitorInput = {
   title?: string;
   url?: string;
   content: string;
+  sourceClass?: CompetitorSourceClass;
+  contentWeight?: number;
 };
 
 export type ContentWritingArticleInput = {
@@ -107,6 +113,10 @@ export type ContentWritingCompetitorQualityItem = {
   sourceIdentity: string;
   wordCount: number;
   uniqueTokenCount: number;
+  minimumWordCount: number;
+  minimumUniqueTokenCount: number;
+  sourceClass: CompetitorSourceClass;
+  contentWeight: number;
   accepted: boolean;
   reasons: ContentWritingCompetitorQualityReason[];
 };
@@ -188,13 +198,16 @@ export const selectQualityContentWritingCompetitors = (
   const normalizedMinimumCompetitors = normalizeContentWritingMinimumCompetitors(minimumCompetitors);
   const seenFingerprints = new Set<string>();
   const items = normalized.map((competitor, index): ContentWritingCompetitorQualityItem => {
+    const sourcePolicy = competitor.sourceClass === 'government'
+      ? resolveCompetitorSourcePolicy(competitor.url || 'u.ae')
+      : resolveCompetitorSourcePolicy(competitor.url);
     const tokens = competitorContentTokens(competitor.content);
     const wordCount = countContentWritingTargetWords(competitor.content);
     const uniqueTokenCount = new Set(tokens).size;
     const fingerprint = competitorContentFingerprint(competitor.content);
     const reasons: ContentWritingCompetitorQualityReason[] = [];
-    if (wordCount < CONTENT_WRITING_MIN_COMPETITOR_WORDS) reasons.push('content_too_short');
-    if (uniqueTokenCount < CONTENT_WRITING_MIN_COMPETITOR_UNIQUE_TOKENS) {
+    if (wordCount < sourcePolicy.minimumWordCount) reasons.push('content_too_short');
+    if (uniqueTokenCount < sourcePolicy.minimumUniqueTokenCount) {
       reasons.push('low_information_density');
     }
     if (fingerprint && seenFingerprints.has(fingerprint)) reasons.push('duplicate_content');
@@ -207,6 +220,12 @@ export const selectQualityContentWritingCompetitors = (
       sourceIdentity: competitorSourceIdentity(competitor, index),
       wordCount,
       uniqueTokenCount,
+      minimumWordCount: sourcePolicy.minimumWordCount,
+      minimumUniqueTokenCount: sourcePolicy.minimumUniqueTokenCount,
+      sourceClass: sourcePolicy.sourceClass,
+      contentWeight: Number.isFinite(Number(competitor.contentWeight))
+        ? Math.max(0.1, Math.min(1, Number(competitor.contentWeight)))
+        : sourcePolicy.contentWeight,
       accepted: reasons.length === 0,
       reasons,
     };
@@ -269,6 +288,12 @@ export const normalizeContentWritingCompetitor = (
     title: toText(value.title).trim() || undefined,
     url: toText(value.url ?? value.sourceUrl ?? value.source_url ?? value.canonicalUrl ?? value.canonical_url).trim() || undefined,
     content,
+    sourceClass: value.sourceClass === 'government' || value.source_class === 'government'
+      ? 'government'
+      : 'commercial',
+    contentWeight: Number.isFinite(Number(value.contentWeight ?? value.content_weight))
+      ? Math.max(0.1, Math.min(1, Number(value.contentWeight ?? value.content_weight)))
+      : undefined,
   };
 };
 
@@ -433,6 +458,11 @@ const createCompetitorsValue = (
     competitorNumber: index + 1,
     title: competitor.title || '',
     url: competitor.url || '',
+    sourceClass: competitor.sourceClass || 'commercial',
+    contentWeight: competitor.contentWeight ?? 1,
+    usageGuidance: (competitor.contentWeight ?? 1) < 1
+      ? 'Trusted government reference accepted at the reduced source threshold; use as supporting evidence with lower comparative weight.'
+      : 'Full-weight competitor source.',
     chunks: chunks
       .filter(chunk => chunk.competitorNumber === index + 1)
       .map(chunk => ({ sourceId: chunk.id, text: chunk.text })),

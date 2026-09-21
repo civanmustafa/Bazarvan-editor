@@ -305,6 +305,39 @@ test('automatic selection never backfills five slots with pages that have no tar
   )));
 });
 
+test('selection exposes strong, semantic, and review-reserve tiers', () => {
+  const selection = analyzeAndSelectCompetitors({
+    context: {
+      query: 'خدمات الحوسبة السحابية في الامارات',
+      primaryKeyword: 'خدمات الحوسبة السحابية في الامارات',
+      language: 'ar',
+      pageType: 'service',
+      searchIntent: 'transactional',
+      targetCountry: 'الامارات',
+    },
+    candidates: [
+      candidate(1, 'strong.example', 'خدمات الحوسبة السحابية في الامارات', qualification('qualified', 90, 'خدمات الحوسبة السحابية في الامارات')),
+      {
+        ...candidate(2, 'semantic.example', 'حلول سحابية آمنة للشركات في الإمارات', qualification('not_qualified')),
+        description: 'خدمة للشركات توفر بنية حوسبة وإدارة سحابية محلية مع الاستضافة والدعم في الإمارات.',
+      },
+      {
+        ...candidate(3, 'reserve.example', 'أخبار التقنية العالمية', qualification('not_qualified')),
+        description: 'أخبار عامة ومنتجات متنوعة.',
+      },
+    ],
+    maxResults: 10,
+    maxSelected: 5,
+  });
+
+  assert.equal(selection.results.find(row => row.domain === 'strong.example')?.matchTier, 'strong');
+  assert.equal(selection.results.find(row => row.domain === 'semantic.example')?.matchTier, 'semantic');
+  assert.equal(selection.results.find(row => row.domain === 'reserve.example')?.matchTier, 'review_reserve');
+  assert.equal(selection.summary.strongMatchCount, 1);
+  assert.equal(selection.summary.semanticMatchCount, 1);
+  assert.equal(selection.summary.reviewReserveCount, 1);
+});
+
 test('automatic selection accepts unavailable prechecks only when SERP evidence confirms targeting', () => {
   const selection = analyzeAndSelectCompetitors({
     context: {

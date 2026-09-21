@@ -22,15 +22,15 @@ import InternalLinkAutomation from './InternalLinkAutomation';
 import ConcurrentEditConflictBanner from './ConcurrentEditConflictBanner';
 import ArticleEditorPresenceBanner from './ArticleEditorPresenceBanner';
 import GoogleMetadataSuggestions from './GoogleMetadataSuggestions';
-import AiExecutionMonitor from './AiKeyUsageToast';
 import LeftSidebar from './LeftSidebar';
 import ModalManager from './ModalManager';
 import SelectionToolbar from './SelectionToolbar';
-import SpotlightSearch from './SpotlightSearch';
-import TipsCarousel from './TipsCarousel';
 import '../styles/editor.css';
 
 const RightSidebar = React.lazy(() => import('./RightSidebar'));
+const AiExecutionMonitor = React.lazy(() => import('./AiKeyUsageToast'));
+const SpotlightSearch = React.lazy(() => import('./SpotlightSearch'));
+const TipsCarousel = React.lazy(() => import('./TipsCarousel'));
 
 const EDITOR_WORKSPACE_PREFERENCES_KEY = 'bazarvan-editor-workspace-preferences-v1';
 
@@ -170,8 +170,12 @@ const EditorView: React.FC = () => {
           onToggleCollapsed={toggleKeywordsPanel}
         />
         <div className="relative flex h-full min-w-0 flex-1 basis-[60.73%] flex-col transition-[flex-basis] duration-150">
-          <TipsCarousel />
-          <AiExecutionMonitor articleId={activeArticleId} articleKey={articleKey} />
+          <React.Suspense fallback={null}>
+            <TipsCarousel />
+          </React.Suspense>
+          <React.Suspense fallback={null}>
+            <AiExecutionMonitor articleId={activeArticleId} articleKey={articleKey} />
+          </React.Suspense>
           <EditorToolbar
             isFocusMode={isFocusMode}
             onToggleFocusMode={toggleFocusMode}
@@ -248,7 +252,9 @@ const EditorView: React.FC = () => {
           </div>
         )}
 
-        <SpotlightSearch />
+        <React.Suspense fallback={null}>
+          <SpotlightSearch />
+        </React.Suspense>
       </main>
     </div>
   );

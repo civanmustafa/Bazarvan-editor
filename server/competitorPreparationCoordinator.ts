@@ -76,6 +76,7 @@ export const selectCompetitorPreparationSources = (
       title: text(row.title),
       description: text(row.description),
       autoSelected: row.autoSelected === true,
+      matchTier: text(row.matchTier) || 'strong',
       contentQualification: isRecord(row.contentQualification) ? row.contentQualification : {},
     }];
   }).slice(0, boundedCount(desiredCount, 5));
@@ -115,6 +116,7 @@ export const selectCompetitorPreparationReserveSources = (
         title: text(row.title),
         description: text(row.description),
         autoSelected: row.autoSelected === true,
+        matchTier: text(row.matchTier) || 'semantic',
         targetingStatus: text(row.targetingStatus),
         contentStatus: text(row.contentStatus),
         targetingEvidence: Array.isArray(row.targetingEvidence) ? row.targetingEvidence : [],
@@ -169,6 +171,7 @@ const buildSelectedQualifications = (
   return [url, {
     autoSelected: source.autoSelected === true,
     qualificationRequired: text(qualification.status) === 'qualified',
+    matchTier: text(source.matchTier) || 'strong',
     status: text(qualification.status),
     matchedKeyword: text(qualification.matchedKeyword),
     matchKind: text(qualification.matchKind),

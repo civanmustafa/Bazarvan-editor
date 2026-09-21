@@ -172,6 +172,36 @@ test('configured minimum two accepts two substantial manual competitor slots wit
   )));
 });
 
+test('trusted government sources use the 130-word threshold and reduced writing weight', async () => {
+  const { selectQualityContentWritingCompetitors } = await importContentWriting();
+  const concise = Array.from({ length: 140 }, (_, index) => `سياسةحكومية${index + 1}`).join(' ');
+  const result = selectQualityContentWritingCompetitors([
+    {
+      id: 'government',
+      position: 1,
+      title: 'Official service policy',
+      url: 'https://u.ae/ar/information-and-services/service',
+      content: concise,
+      sourceClass: 'government',
+      contentWeight: 0.65,
+    },
+    {
+      id: 'commercial',
+      position: 2,
+      title: 'Commercial page',
+      url: 'https://vendor.example/service',
+      content: concise,
+    },
+  ], 5, 2);
+
+  assert.equal(result.audit.items[0].accepted, true);
+  assert.equal(result.audit.items[0].minimumWordCount, 130);
+  assert.equal(result.audit.items[0].contentWeight, 0.65);
+  assert.equal(result.audit.items[1].accepted, false);
+  assert.equal(result.audit.items[1].minimumWordCount, 250);
+  assert.ok(result.audit.items[1].reasons.includes('content_too_short'));
+});
+
 test('content-writing rejects thin or repetitive competitor text and requires source diversity', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const input = createReadyArticle(['صالح 1', 'صالح 2', 'صالح 3']);

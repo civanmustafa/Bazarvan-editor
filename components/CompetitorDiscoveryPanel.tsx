@@ -38,7 +38,10 @@ import {
   type CompetitorSearchResult,
   type CompetitorSelectionSummary,
 } from '../utils/competitorDiscovery';
-import { isCompetitorKeywordTargetingWarning } from '../utils/competitorContent';
+import {
+  isCompetitorExtractionFailureText,
+  isCompetitorKeywordTargetingWarning,
+} from '../utils/competitorContent';
 
 const CompetitorPreviewModal = React.lazy(() => import('./CompetitorPreviewModal'));
 
@@ -406,6 +409,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const [searchResults, setSearchResults] = useState<CompetitorSearchResult[]>([]);
   const [selectionSummary, setSelectionSummary] = useState<CompetitorSelectionSummary | null>(null);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(() => new Set());
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const [state, setState] = useState<CompetitorDiscoveryState>(EMPTY_STATE);
   const [isLoadingState, setIsLoadingState] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -445,6 +449,12 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const selectedResults = useMemo(() => (
     searchResults.filter(result => selectedUrls.has(result.canonicalUrl))
   ), [searchResults, selectedUrls]);
+  const preservedSourceCount = state.competitors.filter(row => (
+    Boolean(row.contentText.trim())
+    && !isCompetitorExtractionFailureText(row.contentText)
+  )).length;
+  const availableSlotCount = Math.max(0, MAX_ARTICLE_COMPETITORS - preservedSourceCount);
+  const selectionLimit = replaceExisting ? MAX_ARTICLE_COMPETITORS : availableSlotCount;
   const latestExtractionAttemptsByUrl = useMemo(() => {
     const completedAttempts = Array.isArray(state.latestJob?.result?.extractionAttempts)
       ? state.latestJob.result.extractionAttempts
@@ -485,8 +495,6 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const resultPresentationByUrl = useMemo(() => new Map(
     resultPresentation.map(item => [item.canonicalUrl, item]),
   ), [resultPresentation]);
-  const confirmedTargetCount = resultPresentation.filter(item => item.targetingStatus === 'confirmed').length;
-  const probableTargetCount = resultPresentation.filter(item => item.targetingStatus === 'probable').length;
   const usableContentCount = resultPresentation.filter(item => item.contentStatus === 'usable').length;
   const fallbackContentCount = resultPresentation.filter(item => (
     item.contentStatus === 'sparse' || item.contentStatus === 'unavailable' || item.contentStatus === 'failed'
@@ -569,6 +577,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     setSearchResults([]);
     setSelectionSummary(null);
     setSelectedUrls(new Set<string>());
+    setReplaceExisting(false);
     setNotice('');
     setPreviewLocation(null);
     setPreviewByUrl({});
@@ -598,12 +607,12 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     const acceptedUrls = Array.isArray(state.discoveryJob?.result?.selectedUrls)
       ? state.discoveryJob!.result!.selectedUrls.filter((value): value is string => typeof value === 'string')
       : [];
-    setSelectedUrls(new Set(
+    setSelectedUrls(new Set((
       acceptedUrls.length > 0
         ? acceptedUrls
-        : persisted.results.filter(result => result.autoSelected).map(result => result.canonicalUrl),
-    ));
-  }, [state]);
+        : persisted.results.filter(result => result.autoSelected).map(result => result.canonicalUrl)
+    ).slice(0, selectionLimit)));
+  }, [selectionLimit, state]);
 
   useEffect(() => {
     if (previewLocation && !previewSourceItem) setPreviewLocation(null);
@@ -644,7 +653,10 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
       const rows = response.results;
       setSearchResults(rows);
       setSelectionSummary(response.selection);
-      setSelectedUrls(new Set(rows.filter(row => row.autoSelected).map(row => row.canonicalUrl)));
+      setSelectedUrls(new Set(rows
+        .filter(row => row.autoSelected)
+        .slice(0, selectionLimit)
+        .map(row => row.canonicalUrl)));
       if (rows.length === 0) {
         setNotice(isArabic
           ? `لم يعثر محرك البحث على نتائج عربية مناسبة.${response.selection.languageFilteredCount > 0 ? ` استُبعدت ${response.selection.languageFilteredCount} نتيجة لاتينية لأنها لا تطابق لغة المقالة.` : ''}`
@@ -678,10 +690,14 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         next.delete(result.canonicalUrl);
         return next;
       }
-      if (next.size >= MAX_ARTICLE_COMPETITORS) {
+      if (next.size >= selectionLimit) {
         setError(isArabic
-          ? `يمكن اختيار ${MAX_ARTICLE_COMPETITORS} مواقع كحد أقصى.`
-          : `You can select up to ${MAX_ARTICLE_COMPETITORS} websites.`);
+          ? replaceExisting
+            ? `يمكن اختيار ${MAX_ARTICLE_COMPETITORS} مواقع كحد أقصى عند الاستبدال.`
+            : `متاح ${availableSlotCount === 1 ? 'خانة واحدة فقط' : `${availableSlotCount} خانات فقط`}. فعّل الاستبدال لاختيار مصادر إضافية.`
+          : replaceExisting
+            ? `You can select up to ${MAX_ARTICLE_COMPETITORS} websites when replacing.`
+            : `Only ${availableSlotCount} slot(s) are available. Enable replacement to select more.`);
         return current;
       }
       next.add(result.canonicalUrl);
@@ -732,6 +748,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     setSelectedUrls(new Set(
       searchResults
         .filter(result => result.autoSelected)
+        .slice(0, selectionLimit)
         .map(result => result.canonicalUrl),
     ));
   };
@@ -749,11 +766,16 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
         reserveResults: searchResults.filter(result => (
           !selectedUrls.has(result.canonicalUrl) && result.eligible
         )),
+        replaceExisting,
       });
       setNotice(extraction.queuedCount > 0
         ? (isArabic
-          ? 'بدأ سحب النصوص الناقصة إلى الخانات المتاحة مع الحفاظ على النصوص السابقة. ستستمر المهمة حتى عند مغادرة المقالة.'
-          : 'Missing texts were queued into available slots; existing texts were preserved. Extraction continues after leaving the article.')
+          ? extraction.replacedCount > 0
+            ? `بدأ السحب، وسيتم استبدال ${extraction.replacedCount} من المصادر المحفوظة الأضعف باختيارك الصريح.`
+            : 'بدأ سحب النصوص الناقصة إلى الخانات المتاحة مع الحفاظ على النصوص السابقة. ستستمر المهمة حتى عند مغادرة المقالة.'
+          : extraction.replacedCount > 0
+            ? `Extraction started and ${extraction.replacedCount} weaker saved source(s) were explicitly replaced.`
+            : 'Missing texts were queued into available slots; existing texts were preserved. Extraction continues after leaving the article.')
         : (isArabic
           ? 'نصوص المنافسين المختارين محفوظة بالفعل؛ لم يتم استبدالها أو تكرار سحبها.'
           : 'The selected competitor texts are already saved; nothing was replaced or extracted again.'));
@@ -761,8 +783,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
     } catch (startError) {
       setError(startError instanceof CompetitorDiscoveryRequestError && startError.code === 'competitor_slots_full'
         ? (isArabic
-          ? 'الخانات المتاحة لا تكفي للمنافسين الجدد. لم يتغير أي نص محفوظ؛ اختر عددًا أقل أو احذف منافسًا بنفسك أولًا.'
-          : 'Not enough empty slots. No saved text was changed; select fewer new sources or remove a competitor first.')
+          ? `متاح ${availableSlotCount === 1 ? 'خانة واحدة فقط' : `${availableSlotCount} خانات فقط`}. لم يتغير أي نص محفوظ؛ اختر عددًا أقل أو فعّل خيار الاستبدال الصريح.`
+          : `Only ${availableSlotCount} slot(s) are available. No saved text was changed; select fewer sources or explicitly enable replacement.`)
         : requestErrorMessage(startError, isArabic, 'Could not start competitor extraction.'));
     } finally {
       setIsStarting(false);
@@ -874,8 +896,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 : `Both paths failed; extracting through a rendered browser ${Math.max(1, displayedCurrent)}/${total || 1}`
             : progressStage === 'replacing_competitor'
               ? isArabic
-                ? `جارٍ استبدال الرابط بمنافس مؤكد تالٍ ${Math.max(1, displayedCurrent)}/${total || 1}`
-                : `Replacing the URL with the next confirmed competitor ${Math.max(1, displayedCurrent)}/${total || 1}`
+                ? `جارٍ استبدال الرابط بمنافس قوي أو دلالي تالٍ ${Math.max(1, displayedCurrent)}/${total || 1}`
+                : `Replacing the URL with the next strong or semantic competitor ${Math.max(1, displayedCurrent)}/${total || 1}`
             : isArabic
               ? `تشغيل سلسلة سحب محتوى المنافس ${Math.max(1, displayedCurrent)}/${total || 1}`
               : `Running the competitor extraction chain ${Math.max(1, displayedCurrent)}/${total || 1}`
@@ -899,8 +921,8 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           : 'Provider and programmatic extraction failed; the system is automatically rendering the dynamic page in a browser.'
       : activeJob?.status === 'running' && progressStage === 'replacing_competitor'
         ? isArabic
-          ? 'لم ينتج الرابط نصًا صالحًا بعد استنفاد مسارات السحب؛ يجري استبداله تلقائيًا بالمنافس المؤكد التالي.'
-          : 'The URL produced no usable text after all extraction paths; it is being replaced automatically with the next confirmed competitor.'
+          ? 'لم ينتج الرابط نصًا صالحًا بعد استنفاد مسارات السحب؛ يجري استبداله تلقائيًا بالمنافس القوي أو الدلالي التالي.'
+          : 'The URL produced no usable text after all extraction paths; it is being replaced automatically with the next strong or semantic competitor.'
       : activeJob?.status === 'running'
         ? isArabic
           ? 'سلسلة السحب تعمل الآن، وستنتقل تلقائيًا بين الخدمة والسحب المباشر والمتصفح المُصيَّر ثم المنافس الاحتياطي عند الحاجة.'
@@ -1099,11 +1121,16 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                 className="mt-2 flex flex-wrap gap-1 border-t border-[#d4af37]/20 pt-2 text-[9px] font-black"
               >
                 <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-                  {isArabic ? `منافس مؤكد: ${confirmedTargetCount}` : `Confirmed: ${confirmedTargetCount}`}
+                  {isArabic ? `تطابق قوي: ${selectionSummary.strongMatchCount}` : `Strong matches: ${selectionSummary.strongMatchCount}`}
                 </span>
-                {probableTargetCount > 0 && (
+                {selectionSummary.semanticMatchCount > 0 && (
                   <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-                    {isArabic ? `منافس محتمل: ${probableTargetCount}` : `Probable: ${probableTargetCount}`}
+                    {isArabic ? `تطابق دلالي: ${selectionSummary.semanticMatchCount}` : `Semantic matches: ${selectionSummary.semanticMatchCount}`}
+                  </span>
+                )}
+                {selectionSummary.reviewReserveCount > 0 && (
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                    {isArabic ? `احتياطي للمراجعة: ${selectionSummary.reviewReserveCount}` : `Review reserve: ${selectionSummary.reviewReserveCount}`}
                   </span>
                 )}
                 <span className="rounded bg-sky-50 px-1.5 py-0.5 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
@@ -1134,8 +1161,37 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
           )}
           <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 dark:text-gray-400">
             <span>{isArabic ? 'نتائج البحث' : 'Search results'}: {searchResults.length}</span>
-            <span>{isArabic ? 'المحدد' : 'Selected'}: {selectedResults.length}/{MAX_ARTICLE_COMPETITORS}</span>
+            <span>
+              {isArabic ? 'المحدد' : 'Selected'}: {selectedResults.length}/{selectionLimit}
+              {' · '}
+              {isArabic
+                ? `متاح ${availableSlotCount === 1 ? 'خانة واحدة فقط' : `${availableSlotCount} خانات فقط`}`
+                : `Only ${availableSlotCount} slot(s) available`}
+            </span>
           </div>
+          {preservedSourceCount > 0 && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-200 bg-amber-50/70 px-2.5 py-2 text-[10px] font-bold leading-4 text-amber-800 dark:border-amber-800/60 dark:bg-amber-500/10 dark:text-amber-300">
+              <input
+                type="checkbox"
+                checked={replaceExisting}
+                disabled={Boolean(activeJob) || isStarting}
+                onChange={event => {
+                  const enabled = event.target.checked;
+                  setReplaceExisting(enabled);
+                  setError('');
+                  if (!enabled) {
+                    setSelectedUrls(current => new Set(Array.from(current).slice(0, availableSlotCount)));
+                  }
+                }}
+                className="mt-0.5 size-3.5 accent-[#d4af37]"
+              />
+              <span>
+                {isArabic
+                  ? 'السماح باستبدال المصادر الحالية عند الحاجة. يبدأ النظام بالمصدر الفاشل أو الأقصر، ولن يستبدل شيئًا دون تفعيل هذا الخيار.'
+                  : 'Allow replacing current sources when needed. Failed or shortest sources are replaced first, and nothing is replaced unless this is enabled.'}
+              </span>
+            </label>
+          )}
           <div className="max-h-80 space-y-1.5 overflow-y-auto pe-1 custom-scrollbar">
             {searchResults.map((result, index) => {
               const selected = selectedUrls.has(result.canonicalUrl);
@@ -1163,8 +1219,9 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                   <button
                     type="button"
                     aria-pressed={selected}
+                    disabled={!selected && selectedResults.length >= selectionLimit}
                     onClick={() => toggleResult(result)}
-                    className="flex min-w-0 flex-1 items-start gap-2 px-2 py-2 text-start"
+                    className="flex min-w-0 flex-1 items-start gap-2 px-2 py-2 text-start disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <span className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border ${
                       selected ? 'border-[#d4af37] bg-[#d4af37] text-white' : 'border-gray-300 dark:border-gray-600'
@@ -1192,6 +1249,19 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                         <span className="text-gray-500 dark:text-gray-400">{pageTypeLabels[result.inferredPageType]?.[locale] || pageTypeLabels.unknown[locale]}</span>
                       </span>
                       <span className="mt-1 flex flex-wrap gap-1" aria-label={isArabic ? 'حالة المنافس والنص' : 'Competitor and text status'}>
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${
+                          result.matchTier === 'strong'
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                            : result.matchTier === 'semantic'
+                              ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                        }`}>
+                          {result.matchTier === 'strong'
+                            ? (isArabic ? 'تطابق قوي' : 'Strong match')
+                            : result.matchTier === 'semantic'
+                              ? (isArabic ? 'تطابق دلالي' : 'Semantic match')
+                              : (isArabic ? 'احتياطي للمراجعة' : 'Review reserve')}
+                        </span>
                         <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${targetingStatusTone(targetingStatus)}`}>
                           {targetingStatusLabel(targetingStatus, locale)}
                         </span>
@@ -1461,6 +1531,11 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                             ? 'استخراج برمجي'
                             : row.extractionProvider || 'Unknown'}
                       </span>
+                      {row.sourceClass === 'government' && (
+                        <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[9px] text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
+                          {isArabic ? `مصدر حكومي · وزن ${Math.round(row.contentWeight * 100)}%` : `Government · ${Math.round(row.contentWeight * 100)}% weight`}
+                        </span>
+                      )}
                     </div>
                   )}
                   {row.errorMessage && (

@@ -30,6 +30,15 @@ test('manual extraction executes non-destructively in PostgreSQL', async t => {
     await db.exec(original.slice(original.indexOf('create table if not exists public.article_competitors'), original.indexOf('create index if not exists article_competitors_article_status_idx')));
     await db.exec(original.slice(original.indexOf('create or replace function public.merge_article_competitors_metadata'), original.indexOf('create or replace function public.enqueue_competitor_extraction_job')));
     await db.exec(await read('supabase/migrations/20260904000000_preserve_manual_competitor_extraction.sql'));
+    const coordinatorMigration = await read('supabase/migrations/20260922000000_durable_automation_coordinator_and_competitor_tiers.sql');
+    await db.exec(coordinatorMigration.slice(
+      coordinatorMigration.indexOf('alter table public.article_competitors'),
+      coordinatorMigration.indexOf('create or replace function public.merge_article_competitors_metadata'),
+    ));
+    await db.exec(coordinatorMigration.slice(
+      coordinatorMigration.indexOf('-- Six-argument overload.'),
+      coordinatorMigration.indexOf('-- The coordinator is a durable projection'),
+    ));
     await db.query('insert into profiles values ($1)', [userId]);
     const reset = async (metadata = {}) => {
       await db.exec('truncate ai_external_analysis_jobs, article_competitors, articles;');
@@ -39,12 +48,12 @@ test('manual extraction executes non-destructively in PostgreSQL', async t => {
       const url = source(name).url;
       await db.query(`insert into article_competitors
         (article_id, position, source_url, canonical_url, domain, content_text, word_count, status)
-        values ($1, $2, $3, $3, $4, $5, $6, $7)`, [articleId, position, url, `${name}.example`, text, text ? 10 : 0, status]);
+        values ($1, $2, $3, $3, $4, $5, $6, $7)`, [articleId, position, url, `${name}.example`, text, text ? text.trim().split(/\s+/u).length : 0, status]);
     };
     const rows = async () => (await db.query<any>('select * from article_competitors order by position')).rows;
-    const enqueue = async (names: string[], requester = userId) => (await db.query<{ result: any }>(
-      'select public.enqueue_manual_competitor_extraction_job($1, $2, $3, $4, $5) as result',
-      [articleId, requester, 'title', 'عنوان المقالة', names.map(source)],
+    const enqueue = async (names: string[], requester = userId, replaceExisting = false) => (await db.query<{ result: any }>(
+      'select public.enqueue_manual_competitor_extraction_job($1, $2, $3, $4, $5, $6) as result',
+      [articleId, requester, 'title', 'عنوان المقالة', names.map(source), replaceExisting],
     )).rows[0].result;
     const expectFailure = async (names: string[], pattern: RegExp, requester = userId) => {
       const before = await rows();
@@ -94,6 +103,17 @@ test('manual extraction executes non-destructively in PostgreSQL', async t => {
       await save(5, 'saved5', 'text 5');
       await expectFailure(['new1'], /competitor_slots_full/);
     });
+    await t.test('explicit replacement removes the shortest saved sources first', async () => {
+      await reset();
+      for (let i = 1; i <= 5; i++) await save(i, `saved${i}`, `text ${i} `.repeat(i));
+      const result = await enqueue(['new1', 'new2'], userId, true);
+      const after = await rows();
+      assert.equal(result.replacedCount, 2);
+      assert.deepEqual(result.replacedCompetitors.map((row: any) => row.position).sort(), [1, 2]);
+      assert.ok(after.some(row => row.canonical_url === source('new1').url));
+      assert.ok(after.some(row => row.canonical_url === source('new2').url));
+      assert.equal(after.length, 5);
+    });
     await t.test('duplicate selected URLs consume one slot and one extraction', async () => {
       await reset(); const result = await enqueue(['new', 'new']);
       assert.equal(result.queuedCount, 1); assert.equal((await rows()).length, 1);
@@ -116,8 +136,8 @@ test('manual extraction executes non-destructively in PostgreSQL', async t => {
     });
     await t.test('browser database roles cannot bypass the authenticated API', async () => {
       const result = await db.query<{ allowed: boolean }>(`select
-        has_function_privilege('anon', 'public.enqueue_manual_competitor_extraction_job(uuid,uuid,text,text,jsonb)', 'execute')
-        or has_function_privilege('authenticated', 'public.enqueue_manual_competitor_extraction_job(uuid,uuid,text,text,jsonb)', 'execute') as allowed`);
+        has_function_privilege('anon', 'public.enqueue_manual_competitor_extraction_job(uuid,uuid,text,text,jsonb,boolean)', 'execute')
+        or has_function_privilege('authenticated', 'public.enqueue_manual_competitor_extraction_job(uuid,uuid,text,text,jsonb,boolean)', 'execute') as allowed`);
       assert.equal(result.rows[0].allowed, false);
     });
   } finally {
@@ -142,6 +162,7 @@ test('manual API and worker use additive allocation and scoped extraction', asyn
   const worker = await read('server/competitorExtractionExecutor.ts');
   const sidebar = await read('components/RightSidebar.tsx');
   assert.match(api, /rpc\('enqueue_manual_competitor_extraction_job'/);
+  assert.match(api, /p_replace_existing: options\.replaceExisting/);
   assert.doesNotMatch(api, /rpc\('enqueue_competitor_extraction_job'/);
   assert.match(worker, /const rows = allRows\.filter\(isRequestedRow\)/);
   assert.match(worker, /inputSnapshot\.preserveExisting !== true \|\| requestedIds\.has\(row\.id\)/);
