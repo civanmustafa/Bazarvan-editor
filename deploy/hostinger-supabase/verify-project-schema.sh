@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-117}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-118}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-64}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -109,6 +109,8 @@ readonly ARTICLE_COMPETITOR_SOURCE_POLICY="$(sql_scalar "select count(*) = 2 fro
 readonly AUTOMATION_COORDINATOR_TABLES="$(sql_scalar "select to_regclass('public.article_automation_stage_states') is not null and to_regclass('public.article_automation_coordinator_runtime') is not null")"
 readonly AUTOMATION_COORDINATOR_FUNCTION="$(sql_scalar "select to_regprocedure('public.reconcile_article_automation_coordinator(integer)') is not null")"
 readonly AUTOMATION_COORDINATOR_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.reconcile_article_automation_coordinator(integer)', 'execute') and not has_function_privilege('authenticated', 'public.reconcile_article_automation_coordinator(integer)', 'execute') and has_function_privilege('service_role', 'public.reconcile_article_automation_coordinator(integer)', 'execute')")"
+readonly EXTERNAL_DEPENDENCY_CHILD_GUARD="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'enforce_external_analysis_dependency_on_child' and not tgisinternal) and to_regprocedure('public.enforce_external_analysis_dependency_on_child()') is not null")"
+readonly EXTERNAL_DEPENDENCY_CHILD_GUARD_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.enforce_external_analysis_dependency_on_child()', 'execute') and not has_function_privilege('authenticated', 'public.enforce_external_analysis_dependency_on_child()', 'execute') and has_function_privilege('service_role', 'public.enforce_external_analysis_dependency_on_child()', 'execute')")"
 
 readonly CREATOR_AUTOMATION_SCHEMA_VERSION="$(sql_scalar "select public.creator_article_automation_schema_version()")"
 readonly CREATOR_AUTOMATION_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.user_automation_settings', 'select') or has_table_privilege('authenticated', 'public.user_automation_settings', 'select') or has_function_privilege('authenticated', 'public.save_user_automation_settings(uuid,jsonb)', 'execute') or has_function_privilege('anon', 'public.article_automation_policy(uuid)', 'execute')")"
@@ -181,6 +183,8 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${AUTOMATION_COORDINATOR_TABLES}" == "t" ]] || fail "Durable automation coordinator tables are missing."
 [[ "${AUTOMATION_COORDINATOR_FUNCTION}" == "t" ]] || fail "Durable automation coordinator function is missing."
 [[ "${AUTOMATION_COORDINATOR_PRIVILEGES}" == "t" ]] || fail "Durable automation coordinator has unsafe browser privileges."
+[[ "${EXTERNAL_DEPENDENCY_CHILD_GUARD}" == "t" ]] || fail "Child-side terminal dependency guard is missing."
+[[ "${EXTERNAL_DEPENDENCY_CHILD_GUARD_PRIVILEGES}" == "t" ]] || fail "Child-side terminal dependency guard has unsafe browser privileges."
 
 readonly GOOGLE_METADATA_MANUAL_FUNCTION="$(sql_scalar "select to_regprocedure('public.enqueue_manual_google_metadata_job(uuid)') is not null and to_regprocedure('public.dashboard_saved_automation_results(uuid[])') is not null")"
 [[ "${GOOGLE_METADATA_MANUAL_FUNCTION}" == "t" ]] || fail "Manual Google metadata and saved completion evidence functions are missing."

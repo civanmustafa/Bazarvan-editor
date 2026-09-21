@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { PGlite } from '@electric-sql/pglite';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -65,4 +66,83 @@ test('durable master coordinator tracks independent stages and is reconciled by 
   assert.match(migration, /enqueue_next_automatic_writing_competitor_preparation/);
   assert.match(queue, /reconcileArticleAutomationCoordinator/);
   assert.match(worker, /await reconcileArticleAutomationCoordinator\(\)/);
+});
+
+test('terminal dependency guard covers children created or requeued after the parent stopped', async () => {
+  const migration = await readFile(
+    path.join(root, 'supabase', 'migrations', '20260922010000_enforce_external_dependency_on_child.sql'),
+    'utf8',
+  );
+
+  assert.match(migration, /before insert or update of status, depends_on_job_id/);
+  assert.match(migration, /create index if not exists ai_external_analysis_jobs_dependency_idx/);
+  assert.match(migration, /v_dependency\.status not in \('failed', 'blocked', 'cancelled'\)/);
+  assert.match(migration, /external_analysis_dependency_terminal/);
+  assert.match(migration, /from public\.ai_external_analysis_jobs as dependency[\s\S]*child\.depends_on_job_id = dependency\.id/);
+  assert.match(migration, /revoke all on function public\.enforce_external_analysis_dependency_on_child\(\)/);
+});
+
+test('terminal dependency child guard executes in PostgreSQL and repairs old rows', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon; create role authenticated; create role service_role;
+      create table public.ai_external_analysis_jobs (
+        id uuid primary key default gen_random_uuid(),
+        depends_on_job_id uuid references public.ai_external_analysis_jobs(id),
+        status text not null,
+        cancel_requested_at timestamptz,
+        next_attempt_at timestamptz,
+        locked_by text,
+        locked_at timestamptz,
+        lease_expires_at timestamptz,
+        completed_at timestamptz,
+        last_error_code text,
+        last_error text,
+        dead_letter_reason text,
+        progress jsonb not null default '{}'::jsonb,
+        updated_at timestamptz not null default now()
+      );
+      insert into public.ai_external_analysis_jobs(id, status, last_error_code)
+      values ('00000000-0000-4000-8000-000000000001', 'blocked', 'upstream_failed');
+      insert into public.ai_external_analysis_jobs(id, depends_on_job_id, status)
+      values (
+        '00000000-0000-4000-8000-000000000002',
+        '00000000-0000-4000-8000-000000000001',
+        'waiting_for_prerequisites'
+      );
+    `);
+    const migration = await readFile(
+      path.join(root, 'supabase', 'migrations', '20260922010000_enforce_external_dependency_on_child.sql'),
+      'utf8',
+    );
+    await db.exec(migration);
+    const repaired = await db.query<{ status: string; last_error_code: string }>(`
+      select status, last_error_code from public.ai_external_analysis_jobs
+      where id = '00000000-0000-4000-8000-000000000002'
+    `);
+    assert.deepEqual(repaired.rows[0], {
+      status: 'blocked',
+      last_error_code: 'external_analysis_dependency_terminal',
+    });
+
+    await db.exec(`
+      insert into public.ai_external_analysis_jobs(id, depends_on_job_id, status)
+      values (
+        '00000000-0000-4000-8000-000000000003',
+        '00000000-0000-4000-8000-000000000001',
+        'queued'
+      );
+    `);
+    const guarded = await db.query<{ status: string; last_error_code: string }>(`
+      select status, last_error_code from public.ai_external_analysis_jobs
+      where id = '00000000-0000-4000-8000-000000000003'
+    `);
+    assert.deepEqual(guarded.rows[0], {
+      status: 'blocked',
+      last_error_code: 'external_analysis_dependency_terminal',
+    });
+  } finally {
+    await db.close();
+  }
 });
