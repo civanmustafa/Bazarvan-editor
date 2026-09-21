@@ -203,6 +203,17 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
         ? `لم تبدأ جلسة ذكاء اصطناعي ولم تُحتسب محاولة. المنافسون المؤهلون ${item.usableCompetitorCount}/${configuredMinimum}، وستعود المقالة للطابور تلقائيًا بعد اكتمال المتطلبات.`
         : `No AI session started and no attempt was consumed. Qualified competitors: ${item.usableCompetitorCount}/${configuredMinimum}. The article will return to the queue when prerequisites are complete.`,
     };
+    if (item?.status === 'blocked' && item.failureClass === 'transient' && item.nextRecoveryAt) return {
+      tone: 'amber',
+      label: isArabic ? 'إعادة محاولة تلقائية مجدولة' : 'Automatic retry scheduled',
+      detail: new Date(item.nextRecoveryAt).getTime() > now
+        ? (isArabic
+          ? `حدث خطأ مؤقت. ستعود المقالة إلى الطابور بعد ${formatDuration(new Date(item.nextRecoveryAt).getTime() - now, true)}.`
+          : `A transient error occurred. The article will return to the queue in ${formatDuration(new Date(item.nextRecoveryAt).getTime() - now, false)}.`)
+        : (isArabic
+          ? 'حان موعد الاسترداد، وستعود المقالة عند فحص العامل التالي.'
+          : 'Recovery is due and the next worker check will return the article to the queue.'),
+    };
     if (item?.status === 'blocked') return {
       tone: 'red',
       label: isArabic ? 'تحتاج تدخلًا يدويًا' : 'Needs manual attention',
@@ -335,6 +346,7 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
                 <span>·</span>
                 <span>{getContentWritingAutomationProviderLabel(item.provider, isArabic)}{item.model ? ` · ${item.model}` : ''}</span>
                 {item.qualityScore !== null && <><span>·</span><span>{isArabic ? 'الجودة' : 'Quality'} {item.qualityScore}/100</span></>}
+                {item.recoveryCount > 0 && <><span>·</span><span>{isArabic ? 'دورة الاسترداد' : 'Recovery cycle'} {item.recoveryCount}/3</span></>}
               </div>
             )}
           </div>

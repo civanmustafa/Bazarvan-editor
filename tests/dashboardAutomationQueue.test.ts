@@ -38,6 +38,7 @@ const job = (overrides: Partial<ExternalAnalysisJobRow> = {}): ExternalAnalysisJ
   last_error: null,
   last_error_code: null,
   attempt_count: 1,
+  max_attempts: 6,
   retry_count: 0,
   next_attempt_at: null,
   cancel_requested_at: null,
@@ -289,6 +290,89 @@ const writingItem = (status: ContentWritingAutomationItem['status']): ContentWri
   sessionStatus: null, qualityScore: null, qualityPassed: null, attemptCount: 3, maxAttempts: 3,
   readyAt: '', eligibleAt: '', startedAt: null, completedAt: null,
   lastErrorCode: 'gemini_http_429', lastError: 'Provider quota exhausted', updatedAt: '',
+  failureClass: status === 'blocked' ? 'terminal' : null, recoveryCount: 0, nextRecoveryAt: null,
+});
+
+test('writing card includes competitor preparation retries and their attempt schedule', () => {
+  const preparation = job({
+    id: 'preparation-1',
+    job_type: 'content_writing_preparation',
+    status: 'retry_scheduled',
+    attempt_count: 3,
+    max_attempts: 6,
+    next_attempt_at: '2026-09-02T13:00:00Z',
+  });
+  const operations = buildDashboardAutomationOperations({
+    ...semanticOptions('completed'),
+    summaries: {
+      'article-1': {
+        ...summary,
+        competitorReadyCount: 0,
+        latestContentWritingPreparationJob: preparation,
+      } as any,
+    },
+    writingOverview: writingOverview(null),
+  });
+  const writing = operations[6];
+  assert.equal(writing.status, 'waiting');
+  assert.equal(writing.articleId, 'article-1');
+  assert.equal(writing.retryScheduled, true);
+  assert.equal(writing.retryAt, '2026-09-02T13:00:00.000Z');
+  assert.equal(writing.attemptCount, 3);
+  assert.equal(writing.maxAttempts, 6);
+});
+
+test('transient blocked writing appears as a scheduled recovery instead of permanent attention', () => {
+  const item = {
+    ...writingItem('blocked'),
+    failureClass: 'transient' as const,
+    recoveryCount: 1,
+    nextRecoveryAt: '2026-09-02T14:00:00Z',
+  };
+  const writing = buildDashboardAutomationOperations({
+    ...semanticOptions('completed'),
+    summaries: {},
+    writingOverview: writingOverview(item),
+  })[6];
+  assert.equal(writing.status, 'waiting');
+  assert.equal(writing.retryScheduled, true);
+  assert.equal(writing.retryAt, '2026-09-02T14:00:00.000Z');
+  assert.equal(writing.failedCount, 0);
+  assert.deepEqual(writing.issueIds, []);
+});
+
+test('qualified manual competitor text resolves an old preparation failure on the writing card', () => {
+  const failedPreparation = job({
+    id: 'preparation-failed',
+    job_type: 'content_writing_preparation',
+    status: 'blocked',
+    attempt_count: 6,
+    max_attempts: 6,
+    last_error: 'No valid competitor pages were available',
+  });
+  const readyItem = { ...writingItem('ready'), attemptCount: 0, usableCompetitorCount: 2 };
+  const overview = writingOverview(readyItem);
+  overview.candidates = [{
+    articleId: readyItem.articleId,
+    articleTitle: readyItem.articleTitle,
+    itemId: readyItem.id,
+    eligibleAt: readyItem.eligibleAt,
+    readiness: { usableCompetitorCount: 2 },
+  } as any];
+  const writing = buildDashboardAutomationOperations({
+    ...semanticOptions('completed'),
+    summaries: {
+      'article-1': {
+        ...summary,
+        competitorReadyCount: 0,
+        latestContentWritingPreparationJob: failedPreparation,
+      } as any,
+    },
+    writingOverview: overview,
+  })[6];
+  assert.equal(writing.status, 'waiting');
+  assert.equal(writing.failedCount, 0);
+  assert.deepEqual(writing.issueIds, []);
 });
 
 test('writing shows the accessible item title and exact unresolved error, not a global old outcome', () => {

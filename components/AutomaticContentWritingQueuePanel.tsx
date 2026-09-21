@@ -11,6 +11,7 @@ import {
   Loader2,
   PauseCircle,
   RefreshCw,
+  RotateCcw,
   Search,
   Sparkles,
   Tags,
@@ -23,6 +24,7 @@ import {
   getContentWritingAutomationErrorMessage,
   getContentWritingAutomationProviderLabel,
   loadContentWritingAutomationStatus,
+  retryRecoverableAutomationFailures,
   type ContentWritingAutomationOverview,
 } from '../utils/contentWritingAutomation';
 import {
@@ -175,6 +177,8 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   const [preferencesError, setPreferencesError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
   const [now, setNow] = useState(Date.now());
   const refreshRequestRef = useRef(0);
 
@@ -328,6 +332,24 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     void onRefreshExternalAnalysis?.();
   };
 
+  const handleRecoverableRetry = async () => {
+    if (!isAdmin || recovering) return;
+    setRecovering(true);
+    setRecoveryMessage('');
+    try {
+      const result = await retryRecoverableAutomationFailures();
+      setOverview(result.overview);
+      setRecoveryMessage(isArabic
+        ? `أُعيدت ${result.requeued.total} مهمة قابلة للاسترداد إلى الطابور (${result.requeued.externalAnalysis} تحليل، ${result.requeued.contentWriting} كتابة).`
+        : `${result.requeued.total} recoverable tasks returned to the queue (${result.requeued.externalAnalysis} analysis, ${result.requeued.contentWriting} writing).`);
+      await onRefreshExternalAnalysis?.();
+    } catch (requestError) {
+      setRecoveryMessage(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setRecovering(false);
+    }
+  };
+
   const renderOperation = (operation: DashboardAutomationOperation) => {
     const presentation = OPERATION_PRESENTATION[operation.key];
     const OperationIcon = presentation.icon;
@@ -475,14 +497,32 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         </div>
         <div className="mt-2 flex items-center justify-between gap-2 text-[9px] font-bold text-gray-400 dark:text-gray-500">
           <span>{isArabic ? `${operationCounts.enabled}/8 أنواع مفعّلة لحسابك` : `${operationCounts.enabled}/8 types enabled for your account`}</span>
-          <button
-            type="button"
-            onClick={() => navigateToAppPath('/settings/automation')}
-            className="font-black text-blue-600 hover:underline dark:text-blue-300"
-          >
-            {isArabic ? 'إدارة الأتمتة' : 'Manage automation'}
-          </button>
+          <span className="flex flex-wrap items-center gap-2">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => void handleRecoverableRetry()}
+                disabled={recovering}
+                className="inline-flex items-center gap-1 font-black text-amber-600 hover:underline disabled:opacity-50 dark:text-amber-300"
+              >
+                {recovering ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
+                {isArabic ? 'إعادة المهام القابلة للاسترداد' : 'Retry recoverable tasks'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => navigateToAppPath('/settings/automation')}
+              className="font-black text-blue-600 hover:underline dark:text-blue-300"
+            >
+              {isArabic ? 'إدارة الأتمتة' : 'Manage automation'}
+            </button>
+          </span>
         </div>
+        {recoveryMessage && (
+          <div className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-[9px] font-bold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+            {recoveryMessage}
+          </div>
+        )}
       </div>
 
       {preferencesError && (

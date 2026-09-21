@@ -49,6 +49,7 @@ export type ExternalAnalysisJobRow = {
   last_error: string | null;
   last_error_code: string | null;
   attempt_count: number;
+  max_attempts: number;
   retry_count: number;
   next_attempt_at: string | null;
   cancel_requested_at: string | null;
@@ -97,6 +98,8 @@ export type ExternalAnalysisDashboardSummary = {
   latestAutomaticSemanticJob: ExternalAnalysisJobRow | null;
   latestAutomaticCompetitorDiscoveryJob: ExternalAnalysisJobRow | null;
   latestAutomaticCompetitorExtractionJob: ExternalAnalysisJobRow | null;
+  latestContentWritingPreparationJob: ExternalAnalysisJobRow | null;
+  latestAutomaticContentWritingPreparationJob: ExternalAnalysisJobRow | null;
   activeAutomaticEngineeringCount: number;
   runningAutomaticEngineeringCount: number;
   waitingAutomaticEngineeringCount: number;
@@ -218,6 +221,7 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   last_error: row.last_error || null,
   last_error_code: row.last_error_code || null,
   attempt_count: toNumber(row.attempt_count),
+  max_attempts: Math.max(1, toNumber(row.max_attempts, 1)),
   retry_count: toNumber(row.retry_count),
   next_attempt_at: row.next_attempt_at || null,
   cancel_requested_at: row.cancel_requested_at || null,
@@ -247,6 +251,7 @@ const SUMMARY_JOB_SELECT = [
   'last_error',
   'last_error_code',
   'attempt_count',
+  'max_attempts',
   'retry_count',
   'next_attempt_at',
   'cancel_requested_at',
@@ -426,6 +431,9 @@ export const listExternalAnalysisDashboardSummaries = async (
         || job.readiness_signature === state.competitor_discovery_signature
       )
     ));
+    const contentWritingPreparationJobs = jobs.filter(
+      job => job.job_type === 'content_writing_preparation',
+    );
     const competitorRows = competitorsByArticle.get(articleId) || [];
     const currentCompetitorRows = state?.competitor_discovery_signature
       ? competitorRows.filter(row => row.discoverySignature === state.competitor_discovery_signature)
@@ -434,6 +442,9 @@ export const listExternalAnalysisDashboardSummaries = async (
     const automaticSemanticJobs = semanticJobs.filter(job => job.origin === 'auto');
     const automaticCompetitorDiscoveryJobs = competitorDiscoveryJobs.filter(job => job.origin === 'auto');
     const automaticCompetitorExtractionJobs = competitorExtractionJobs.filter(job => job.origin === 'auto');
+    const automaticContentWritingPreparationJobs = contentWritingPreparationJobs.filter(
+      job => job.origin === 'auto',
+    );
     const automaticEngineeringJobs = engineeringJobs.filter(job => job.origin === 'auto');
     const activeEngineeringJobs = engineeringJobs.filter(job => EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status));
     const activeAutomaticEngineeringJobs = automaticEngineeringJobs.filter(
@@ -472,6 +483,8 @@ export const listExternalAnalysisDashboardSummaries = async (
       latestAutomaticSemanticJob: automaticSemanticJobs[0] || null,
       latestAutomaticCompetitorDiscoveryJob: automaticCompetitorDiscoveryJobs[0] || null,
       latestAutomaticCompetitorExtractionJob: automaticCompetitorExtractionJobs[0] || null,
+      latestContentWritingPreparationJob: contentWritingPreparationJobs[0] || null,
+      latestAutomaticContentWritingPreparationJob: automaticContentWritingPreparationJobs[0] || null,
       activeAutomaticEngineeringCount: activeAutomaticEngineeringJobs.length,
       runningAutomaticEngineeringCount: activeAutomaticEngineeringJobs.filter(
         job => job.status === 'running',

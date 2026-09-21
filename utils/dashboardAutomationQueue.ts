@@ -210,6 +210,10 @@ export const buildDashboardAutomationOperations = ({
   }));
   const discoveryJobs = jobEntries(summary => summary.latestCompetitorDiscoveryJob || summary.latestAutomaticCompetitorDiscoveryJob);
   const extractionJobs = jobEntries(summary => summary.latestCompetitorExtractionJob || summary.latestAutomaticCompetitorExtractionJob);
+  const preparationJobs = jobEntries(summary => (
+    summary.latestContentWritingPreparationJob
+    || summary.latestAutomaticContentWritingPreparationJob
+  ));
   // Current-signature tasks include manual results and are deduplicated by
   // article + command. A success for a different command cannot clear a failure.
   const engineeringJobs: JobEntry[] = values.flatMap(summary => (
@@ -253,6 +257,10 @@ export const buildDashboardAutomationOperations = ({
   // A partial editor body is not proof that a failed writing session completed.
   const writingLastItemResolved = writingLastItem?.status === 'completed'
     || Boolean(writingLastItem?.resolvedBySessionId && writingLastItem.resolvedAt);
+  const writingRecoveryScheduled = !writingLastItemResolved
+    && writingLastItem?.status === 'blocked'
+    && writingLastItem.failureClass === 'transient'
+    && Boolean(writingLastItem.nextRecoveryAt);
   const writingCandidates = (writingOverview?.candidates || []).filter(candidate => (
     !writingLastItemResolved || candidate.articleId !== writingLastItem?.articleId
   ));
@@ -261,18 +269,49 @@ export const buildDashboardAutomationOperations = ({
     return summary.articleId !== writingLastItem?.articleId || writingLastItemResolved;
   }).map(summary => summary.articleId));
   if (writingLastItemResolved && writingLastItem) completedWritingArticles.add(writingLastItem.articleId);
+  const minimumCompetitors = writingOverview?.settings.minimumCompetitors || 1;
+  const writingCompetitorsReady = new Set(
+    (writingOverview?.candidates || [])
+      .filter(candidate => (candidate.readiness?.usableCompetitorCount || 0) >= minimumCompetitors)
+      .map(candidate => candidate.articleId),
+  );
+  for (const item of [writingOverview?.active, writingLastItem]) {
+    if (item && item.usableCompetitorCount >= minimumCompetitors) writingCompetitorsReady.add(item.articleId);
+  }
+  const unresolvedPreparationJobs = preparationJobs.filter(entry => {
+    if (!entry.job) return false;
+    const summary = competitorSummaryByArticle.get(entry.articleId);
+    return !completedWritingArticles.has(entry.articleId)
+      && !writingCompetitorsReady.has(entry.articleId)
+      && (summary?.competitorReadyCount || 0) < minimumCompetitors;
+  }) as Array<JobEntry & { job: ExternalAnalysisJobRow }>;
+  const runningPreparationJobs = unresolvedPreparationJobs.filter(entry => RUNNING_STATUSES.has(entry.job.status));
+  const waitingPreparationJobs = unresolvedPreparationJobs.filter(entry => WAITING_STATUSES.has(entry.job.status));
+  const failedPreparationJobs = unresolvedPreparationJobs.filter(entry => FAILED_STATUSES.has(entry.job.status));
   const writingCounts = {
-    runningCount: writingOverview?.active ? 1 : 0,
-    waitingCount: writingCandidates.length,
+    runningCount: (writingOverview?.active ? 1 : 0) + runningPreparationJobs.length,
+    waitingCount: writingCandidates.length + waitingPreparationJobs.length + (writingRecoveryScheduled ? 1 : 0),
     completedCount: completedWritingArticles.size,
-    failedCount: writingLastItem?.status === 'blocked' && !writingLastItemResolved ? 1 : 0,
+    failedCount: (
+      writingLastItem?.status === 'blocked' && !writingLastItemResolved && !writingRecoveryScheduled ? 1 : 0
+    ) + failedPreparationJobs.length,
   };
   const writingStatus = operationStatus({ enabled: writingEnabled, ...writingCounts });
   const retryCandidate = !writingLastItemResolved && writingLastItem?.status === 'ready'
     ? writingCandidates.find(candidate => candidate.itemId === writingLastItem.id)
     : null;
   const writingCandidate = retryCandidate || writingCandidates[0];
+  const preparationForStatus = [...unresolvedPreparationJobs]
+    .filter(entry => {
+      if (writingStatus === 'running') return RUNNING_STATUSES.has(entry.job.status);
+      if (writingStatus === 'waiting') return WAITING_STATUSES.has(entry.job.status);
+      if (writingStatus === 'attention') return FAILED_STATUSES.has(entry.job.status);
+      return true;
+    })
+    .sort((left, right) => jobTime(right.job) - jobTime(left.job))[0]
+    || null;
   const writingArticleId = writingOverview?.active?.articleId
+    || preparationForStatus?.articleId
     || writingCandidate?.articleId
     || writingLastItem?.articleId
     || writingOverview?.state?.lastArticleId
@@ -280,22 +319,41 @@ export const buildDashboardAutomationOperations = ({
     || null;
   const displayedWritingItem = writingOverview?.active
     || (writingLastItem?.articleId === writingArticleId ? writingLastItem : null);
-  const retryScheduled = writingStatus === 'waiting' && Boolean(retryCandidate)
-    && (displayedWritingItem?.attemptCount || 0) > 0
-    && displayedWritingItem!.attemptCount < displayedWritingItem!.maxAttempts;
+  const displayedPreparationJob = !displayedWritingItem ? preparationForStatus?.job || null : null;
+  const displayedWritingRecoveryScheduled = displayedWritingItem?.status === 'blocked'
+    && displayedWritingItem.failureClass === 'transient'
+    && Boolean(displayedWritingItem.nextRecoveryAt);
+  const retryScheduled = writingStatus === 'waiting' && (
+    Boolean(displayedPreparationJob?.status === 'retry_scheduled')
+    || displayedWritingRecoveryScheduled
+    || (Boolean(retryCandidate)
+      && (displayedWritingItem?.attemptCount || 0) > 0
+      && displayedWritingItem!.attemptCount < displayedWritingItem!.maxAttempts)
+  );
   const retryTime = Math.max(
-    Date.parse(displayedWritingItem?.eligibleAt || '') || 0,
+    Date.parse(displayedPreparationJob?.next_attempt_at || '') || 0,
+    Date.parse(displayedWritingItem?.nextRecoveryAt || displayedWritingItem?.eligibleAt || '') || 0,
     Date.parse(writingOverview?.state?.nextAllowedAt || '') || 0,
   );
   const writingOperation: DashboardAutomationOperation = {
     key: 'content_writing',
     issueGroup: 'content_writing',
-    issueIds: writingCounts.failedCount ? [`writing:${writingLastItem!.id}`] : [],
+    issueIds: [
+      ...(!writingRecoveryScheduled && writingLastItem?.status === 'blocked' && !writingLastItemResolved
+        ? [`writing:${writingLastItem.id}`]
+        : []),
+      ...failedPreparationJobs.map(entry => `external:${entry.job.id}`),
+    ],
     enabled: writingEnabled,
     status: writingStatus,
     ...writingCounts,
     articleId: writingArticleId,
     articleTitle: writingOverview?.active?.articleTitle
+      || (preparationForStatus?.articleId
+        ? articleSnapshots[preparationForStatus.articleId]?.title
+          || articleTitles[preparationForStatus.articleId]
+          || preparationForStatus.articleId
+        : '')
       || writingCandidate?.articleTitle
       || writingLastItem?.articleTitle
       || (writingArticleId
@@ -305,17 +363,26 @@ export const buildDashboardAutomationOperations = ({
       ? 'resolved_current_state'
       : writingOverview?.active?.sessionStatus
       || writingOverview?.active?.status
+      || displayedPreparationJob?.status
       || writingLastItem?.sessionStatus
       || writingLastItem?.status
       || String(writingOverview?.state?.lastOutcome || ''),
-    errorCode: writingStatus === 'attention' ? writingLastItem?.lastErrorCode || '' : '',
-    errorMessage: writingStatus === 'attention' ? writingLastItem?.lastError || '' : '',
-    attemptCount: displayedWritingItem?.attemptCount,
-    maxAttempts: displayedWritingItem?.maxAttempts,
+    errorCode: writingStatus === 'attention'
+      ? displayedPreparationJob?.last_error_code || writingLastItem?.lastErrorCode || ''
+      : '',
+    errorMessage: writingStatus === 'attention'
+      ? displayedPreparationJob?.last_error || writingLastItem?.lastError || ''
+      : '',
+    attemptCount: displayedPreparationJob?.attempt_count ?? displayedWritingItem?.attemptCount,
+    maxAttempts: displayedPreparationJob?.max_attempts ?? displayedWritingItem?.maxAttempts,
     retryScheduled,
     retryAt: retryScheduled && retryTime > 0 ? new Date(retryTime).toISOString() : null,
-    attemptsExhausted: writingStatus === 'attention' && Boolean(displayedWritingItem)
-      && displayedWritingItem!.attemptCount >= displayedWritingItem!.maxAttempts,
+    attemptsExhausted: writingStatus === 'attention' && (
+      Boolean(displayedPreparationJob
+        && displayedPreparationJob.attempt_count >= displayedPreparationJob.max_attempts)
+      || Boolean(displayedWritingItem
+        && displayedWritingItem.attemptCount >= displayedWritingItem.maxAttempts)
+    ),
   };
   const linkedArticles = values.filter(summary => (summary.savedInternalLinkCount || 0) > 0);
   const linkingEnabled = preference(effectivePreferences, 'autoApplyStrongInternalLinkSuggestions');

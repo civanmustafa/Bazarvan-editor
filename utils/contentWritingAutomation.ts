@@ -57,6 +57,9 @@ export type ContentWritingAutomationItem = {
   completedAt: string | null;
   lastErrorCode: string | null;
   lastError: string | null;
+  failureClass: 'transient' | 'waiting_input' | 'terminal' | null;
+  recoveryCount: number;
+  nextRecoveryAt: string | null;
   updatedAt: string;
   resolvedBySessionId?: string | null;
   resolvedAt?: string | null;
@@ -223,6 +226,11 @@ const normalizeItem = (value: unknown): ContentWritingAutomationItem | null => {
     completedAt: nullableText(source.completedAt),
     lastErrorCode: nullableText(source.lastErrorCode),
     lastError: nullableText(source.lastError),
+    failureClass: ['transient', 'waiting_input', 'terminal'].includes(text(source.failureClass))
+      ? text(source.failureClass) as ContentWritingAutomationItem['failureClass']
+      : null,
+    recoveryCount: integer(source.recoveryCount),
+    nextRecoveryAt: nullableText(source.nextRecoveryAt),
     resolvedBySessionId: nullableText(source.resolvedBySessionId),
     resolvedAt: nullableText(source.resolvedAt),
     updatedAt: text(source.updatedAt),
@@ -398,6 +406,28 @@ export const retryContentWritingAutomationItem = (
 export const cancelContentWritingAutomationItem = (
   itemId: string,
 ): Promise<ContentWritingAutomationOverview> => mutateItem('cancel', itemId);
+
+export type RecoverableAutomationResult = {
+  overview: ContentWritingAutomationOverview;
+  requeued: {
+    externalAnalysis: number;
+    contentWriting: number;
+    total: number;
+  };
+};
+
+export const retryRecoverableAutomationFailures = async (): Promise<RecoverableAutomationResult> => {
+  const payload = await requestAutomation({ action: 'retry_recoverable' });
+  const requeued = isRecord(payload.requeued) ? payload.requeued : {};
+  return {
+    overview: normalizeOverview(payload.overview),
+    requeued: {
+      externalAnalysis: integer(requeued.externalAnalysis),
+      contentWriting: integer(requeued.contentWriting),
+      total: integer(requeued.total),
+    },
+  };
+};
 
 const READINESS_LABELS: Record<string, [string, string]> = {
   draft_status: ['حالة المقالة تسمح بالكتابة', 'Article status allows writing'],

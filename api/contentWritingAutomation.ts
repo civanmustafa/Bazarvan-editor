@@ -92,6 +92,9 @@ const publicItem = (value: unknown): Record<string, unknown> | null => {
     completedAt: text(value.completed_at) || null,
     lastErrorCode: text(value.last_error_code) || null,
     lastError: text(value.last_error) || null,
+    failureClass: text(value.failure_class) || null,
+    recoveryCount: Math.max(0, Number(value.recovery_count) || 0),
+    nextRecoveryAt: text(value.next_recovery_at) || null,
     updatedAt: text(value.updated_at),
   };
 };
@@ -492,6 +495,35 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
     return { status: 200, body: { ok: true, overview, article } };
   }
 
+  if (action === 'retry_recoverable') {
+    consumeApiRateLimit(
+      'content-writing-automation:recoverable-retry',
+      principal.userId,
+      getPositiveIntegerEnv('CONTENT_WRITING_AUTOMATION_MUTATION_RATE_LIMIT_PER_MINUTE', 30),
+    );
+    if (principal.role !== 'admin') {
+      throw new ContentWritingAutomationApiError(
+        'Administrator access is required.',
+        403,
+        'administrator_access_required',
+      );
+    }
+    const { data, error } = await supabase.rpc('requeue_recoverable_automation_failures', {
+      p_requested_by: principal.userId,
+      p_limit: 100,
+    });
+    if (error) throw error;
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        action,
+        requeued: isRecord(data) ? data : {},
+        overview: await readOverview(principal.userId),
+      },
+    };
+  }
+
   if (action === 'retry' || action === 'cancel') {
     consumeApiRateLimit(
       'content-writing-automation:mutation',
@@ -529,7 +561,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new ContentWritingAutomationApiError(
-    'action must be status, summaries, retry, or cancel.',
+    'action must be status, summaries, retry, cancel, or retry_recoverable.',
     400,
     'content_writing_automation_action_invalid',
   );

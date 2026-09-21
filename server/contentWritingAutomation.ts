@@ -375,6 +375,24 @@ const releaseClaim = async (
 };
 
 let lastPrerequisiteReconciliationAt = 0;
+let lastTransientRecoveryAt = 0;
+
+const recoverDueTransientItems = async (
+  settings: ContentWritingAutomationSettings,
+): Promise<void> => {
+  const now = Date.now();
+  if (now - lastTransientRecoveryAt < 60_000) return;
+  lastTransientRecoveryAt = now;
+
+  const { error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'recover_due_content_writing_automation_items',
+    {
+      p_max_attempts: settings.maxAttempts,
+      p_limit: 5,
+    },
+  );
+  if (error && !isContentWritingAutomationSchemaUnavailableError(error)) throw error;
+};
 
 const reconcileBlockedPrerequisiteItems = async (
   settings: ContentWritingAutomationSettings,
@@ -489,6 +507,7 @@ export const scheduleNextAutomaticContentWritingSession = async (
   ]);
   if (!settings.enabled) return null;
 
+  await recoverDueTransientItems(settings);
   await reconcileBlockedPrerequisiteItems(settings);
 
   const item = await claimNextItem(workerId, settings);
