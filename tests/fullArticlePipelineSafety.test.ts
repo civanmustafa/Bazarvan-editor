@@ -156,7 +156,7 @@ test('coordinator waits and competitor inputs have bounded professional gates', 
   assert.match(executor, /full_pipeline_content_writing_timeout/);
   assert.match(executor, /selectQualityContentWritingCompetitors/);
   assert.match(executor, /CONTENT_WRITING_MIN_COMPETITOR_COUNT/);
-  assert.match(executor, /CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS/);
+  assert.doesNotMatch(executor, /CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS/);
   assert.match(executor, /full_pipeline_insufficient_competitor_content/);
   assert.match(executor, /competitorQualityAudit/);
   assert.match(executor, /replacementNeededCount/);

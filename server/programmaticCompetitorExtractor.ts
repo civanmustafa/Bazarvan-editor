@@ -319,9 +319,6 @@ const collectContentBlocks = (html: string): ContentBlock[] => {
     const raw = match[2] || '';
     const text = normalizeText(raw, type.startsWith('h') ? 1_000 : 12_000);
     if (!text || text.length < 2 || BOILERPLATE_TEXT_PATTERN.test(text)) continue;
-    const words = countWords(text);
-    if (type === 'p' && text.length < 24 && words < 5) continue;
-    if (type === 'li' && text.length < 8 && words < 3) continue;
     const fullLength = Math.max(1, normalizeText(raw).length);
     const linkLength = [...raw.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a\s*>/gi)]
       .reduce((sum, link) => sum + normalizeText(link[1] || '').length, 0);
@@ -341,7 +338,7 @@ const findArticleBodyInJson = (value: unknown): string => {
     return value.map(findArticleBodyInJson).sort((a, b) => b.length - a.length)[0] || '';
   }
   const record = value as Record<string, unknown>;
-  if (typeof record.articleBody === 'string' && normalizeText(record.articleBody).length >= 120) {
+  if (typeof record.articleBody === 'string' && normalizeText(record.articleBody)) {
     return normalizeText(record.articleBody);
   }
   return Object.values(record).map(findArticleBodyInJson).sort((a, b) => b.length - a.length)[0] || '';
@@ -365,7 +362,7 @@ const splitFallbackParagraphs = (value: string): string[] => (
   value
     .split(/\n{2,}|(?<=[.!?؟])\s+(?=[\p{Lu}\u0600-\u06ff])/gu)
     .map(item => normalizeText(item, 12_000))
-    .filter(item => item.length >= 24 && countWords(item) >= 5)
+    .filter(Boolean)
     .slice(0, 120)
 );
 
@@ -393,9 +390,9 @@ export const extractProgrammaticCompetitorContentFromHtml = (options: {
   const articleRoot = extractLongestElementBody(options.html, 'article');
   const mainRoot = extractLongestElementBody(options.html, 'main');
   const bodyRoot = extractLongestElementBody(options.html, 'body') || options.html;
-  const selectedRoot = normalizeText(articleRoot).length >= 120
+  const selectedRoot = normalizeText(articleRoot)
     ? articleRoot
-    : normalizeText(mainRoot).length >= 120
+    : normalizeText(mainRoot)
       ? mainRoot
       : bodyRoot;
   let blocks = collectContentBlocks(stripNoiseElements(selectedRoot));
@@ -418,10 +415,10 @@ export const extractProgrammaticCompetitorContentFromHtml = (options: {
   const listItems = blocks.filter(block => block.type === 'li').map(block => block.text).slice(0, 120);
   const text = blocks.map(block => block.text).join('\n\n').slice(0, MAX_CONTENT_TEXT_LENGTH).trim();
   const wordCount = countWords(text);
-  if (wordCount < 25 || text.length < 120 || paragraphs.length === 0) {
+  if (!text) {
     throw new ProgrammaticCompetitorExtractionError({
       code: 'programmatic_content_not_found',
-      message: 'No sufficiently clear editorial content was found in the downloaded HTML.',
+      message: 'No readable text was found in the downloaded HTML.',
       status: 422,
     });
   }

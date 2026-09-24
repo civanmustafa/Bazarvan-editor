@@ -95,6 +95,16 @@ test('programmatic extraction keeps article order and removes navigation and pag
   assert.equal(extracted.redirectCount, 1);
 });
 
+test('programmatic extraction accepts any non-empty readable competitor text', () => {
+  const extracted = extractProgrammaticCompetitorContentFromHtml({
+    sourceUrl: 'https://example.com/short-source',
+    html: '<html><body><article><p>نص قصير.</p></article></body></html>',
+  });
+
+  assert.equal(extracted.text, 'نص قصير.');
+  assert.equal(extracted.wordCount, 2);
+});
+
 test('JSON-LD articleBody provides a deterministic fallback for script-rendered article pages', () => {
   const articleBody = [
     'تشرح هذه المقالة كيفية بناء خطة محتوى قوية تبدأ بفهم نية البحث وتحديد الأسئلة التي يحتاج القارئ إلى إجابات عملية عنها.',

@@ -54,12 +54,13 @@ test('content writing accepts only article-scoped server competitor rows', async
 });
 
 test('browser saves and readiness cannot use competitor metadata as a fallback', async () => {
-  const [storage, editor, saveApi, repository, migration] = await Promise.all([
+  const [storage, editor, saveApi, repository, migration, acceptanceMigration] = await Promise.all([
     readFile(new URL('../utils/competitorStorage.ts', import.meta.url), 'utf8'),
     readFile(new URL('../contexts/EditorContext.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../api/articlesSave.ts', import.meta.url), 'utf8'),
     readFile(new URL('../server/articleCompetitorRepository.ts', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/migrations/20260921010000_article_competitor_repository_and_semantic_partial_recovery.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260924000000_remove_competitor_content_acceptance_gates.sql', import.meta.url), 'utf8'),
   ]);
 
   assert.doesNotMatch(storage, /localStorage|bazarvan-competitor-links|bazarvan-competitor-text-snippets/);
@@ -71,4 +72,9 @@ test('browser saves and readiness cannot use competitor metadata as a fallback',
   assert.match(migration, /greatest\(2, least\(5, v_minimum_competitors\)\)/);
   assert.match(migration, /competitor\.article_id = v_article\.id/);
   assert.match(migration, /source_origin/);
+  assert.doesNotMatch(acceptanceMigration, /competitor\.word_count\s*>\s*=|competitor\.word_count\s*>=/);
+  assert.doesNotMatch(acceptanceMigration, /when competitor\.source_class = 'government'/);
+  assert.match(acceptanceMigration, /drop constraint if exists article_competitors_article_id_canonical_url_key/);
+  assert.match(acceptanceMigration, /source_class = 'commercial'/);
+  assert.match(acceptanceMigration, /content_weight = 1\.000/);
 });

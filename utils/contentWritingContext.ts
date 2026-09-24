@@ -25,7 +25,6 @@ import {
   parseContentWritingTargetWordRange,
 } from './contentWritingTargets';
 import {
-  resolveCompetitorSourcePolicy,
   type CompetitorSourceClass,
 } from './competitorSourcePolicy';
 
@@ -33,9 +32,9 @@ export const CONTENT_WRITING_MIN_COMPETITOR_COUNT = 3;
 export { CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT };
 export { normalizeContentWritingMinimumCompetitors };
 export const CONTENT_WRITING_MAX_COMPETITOR_COUNT = MAX_ARTICLE_COMPETITORS;
-export const CONTENT_WRITING_MIN_COMPETITOR_WORDS = 250;
-export const CONTENT_WRITING_MIN_COMPETITOR_UNIQUE_TOKENS = 35;
-export const CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS = 2;
+export const CONTENT_WRITING_MIN_COMPETITOR_WORDS = 0;
+export const CONTENT_WRITING_MIN_COMPETITOR_UNIQUE_TOKENS = 0;
+export const CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS = 0;
 
 export type ContentWritingCompetitorInput = {
   id?: string;
@@ -171,8 +170,8 @@ const competitorSourceIdentity = (
   if (hostname) return `domain:${hostname}`;
   const stableSlot = toText(competitor.id).trim()
     || String(Math.max(1, Math.round(Number(competitor.position) || index + 1)));
-  // A manually pasted competitor has no domain. Its persisted row/slot is still
-  // an independent source; exact duplicate text is rejected separately below.
+  // A manually pasted competitor has no domain. Its persisted row/slot remains
+  // useful for audit display, but source diversity is not an acceptance gate.
   return `manual:${stableSlot}`;
 };
 
@@ -181,10 +180,6 @@ const competitorContentTokens = (value: string): string[] => String(value || '')
   .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
   .split(/\s+/u)
   .filter(token => token.length >= 3);
-
-const competitorContentFingerprint = (value: string): string => competitorContentTokens(value)
-  .slice(0, 2_000)
-  .join(' ');
 
 export const selectQualityContentWritingCompetitors = (
   values: readonly ContentWritingCompetitorInput[],
@@ -196,22 +191,11 @@ export const selectQualityContentWritingCompetitors = (
 } => {
   const normalized = normalizeContentWritingCompetitors(values);
   const normalizedMinimumCompetitors = normalizeContentWritingMinimumCompetitors(minimumCompetitors);
-  const seenFingerprints = new Set<string>();
   const items = normalized.map((competitor, index): ContentWritingCompetitorQualityItem => {
-    const sourcePolicy = competitor.sourceClass === 'government'
-      ? resolveCompetitorSourcePolicy(competitor.url || 'u.ae')
-      : resolveCompetitorSourcePolicy(competitor.url);
     const tokens = competitorContentTokens(competitor.content);
     const wordCount = countContentWritingTargetWords(competitor.content);
     const uniqueTokenCount = new Set(tokens).size;
-    const fingerprint = competitorContentFingerprint(competitor.content);
     const reasons: ContentWritingCompetitorQualityReason[] = [];
-    if (wordCount < sourcePolicy.minimumWordCount) reasons.push('content_too_short');
-    if (uniqueTokenCount < sourcePolicy.minimumUniqueTokenCount) {
-      reasons.push('low_information_density');
-    }
-    if (fingerprint && seenFingerprints.has(fingerprint)) reasons.push('duplicate_content');
-    if (fingerprint) seenFingerprints.add(fingerprint);
     return {
       position: Math.max(1, Math.round(Number(competitor.position) || index + 1)),
       title: toText(competitor.title).trim(),
@@ -220,33 +204,15 @@ export const selectQualityContentWritingCompetitors = (
       sourceIdentity: competitorSourceIdentity(competitor, index),
       wordCount,
       uniqueTokenCount,
-      minimumWordCount: sourcePolicy.minimumWordCount,
-      minimumUniqueTokenCount: sourcePolicy.minimumUniqueTokenCount,
-      sourceClass: sourcePolicy.sourceClass,
-      contentWeight: Number.isFinite(Number(competitor.contentWeight))
-        ? Math.max(0.1, Math.min(1, Number(competitor.contentWeight)))
-        : sourcePolicy.contentWeight,
-      accepted: reasons.length === 0,
+      minimumWordCount: 0,
+      minimumUniqueTokenCount: 0,
+      sourceClass: 'commercial',
+      contentWeight: 1,
+      accepted: true,
       reasons,
     };
   });
-  const eligible = normalized.filter((_competitor, index) => items[index]?.accepted === true);
-  const selected: ContentWritingCompetitorInput[] = [];
-  const selectedIndexes = new Set<number>();
-  const selectedSources = new Set<string>();
-  eligible.forEach((competitor, index) => {
-    const sourceIdentity = competitorSourceIdentity(competitor, index);
-    if (selectedSources.has(sourceIdentity) || selected.length >= maximum) return;
-    selected.push(competitor);
-    selectedIndexes.add(index);
-    selectedSources.add(sourceIdentity);
-  });
-  eligible.forEach((competitor, index) => {
-    if (selected.length >= maximum || selectedIndexes.has(index)) return;
-    selected.push(competitor);
-    selectedIndexes.add(index);
-  });
-  selected.sort((left, right) => (left.position || 0) - (right.position || 0));
+  const selected = normalized.slice(0, Math.max(0, maximum));
   const distinctDomainCount = new Set(
     selected.map((competitor, index) => competitorSourceIdentity(competitor, index)),
   ).size;
@@ -255,8 +221,8 @@ export const selectQualityContentWritingCompetitors = (
     audit: {
       version: 1,
       minimumCompetitors: normalizedMinimumCompetitors,
-      minimumWordsPerCompetitor: CONTENT_WRITING_MIN_COMPETITOR_WORDS,
-      minimumDistinctDomains: CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS,
+      minimumWordsPerCompetitor: 0,
+      minimumDistinctDomains: 0,
       inputCount: normalized.length,
       acceptedCount: selected.length,
       rejectedCount: Math.max(0, normalized.length - selected.length),
@@ -288,12 +254,8 @@ export const normalizeContentWritingCompetitor = (
     title: toText(value.title).trim() || undefined,
     url: toText(value.url ?? value.sourceUrl ?? value.source_url ?? value.canonicalUrl ?? value.canonical_url).trim() || undefined,
     content,
-    sourceClass: value.sourceClass === 'government' || value.source_class === 'government'
-      ? 'government'
-      : 'commercial',
-    contentWeight: Number.isFinite(Number(value.contentWeight ?? value.content_weight))
-      ? Math.max(0.1, Math.min(1, Number(value.contentWeight ?? value.content_weight)))
-      : undefined,
+    sourceClass: 'commercial',
+    contentWeight: 1,
   };
 };
 
@@ -385,12 +347,6 @@ export const validateContentWritingReadiness = (
     issues.push({
       code: 'competitors',
       label: `نصوص المنافسين المؤهلة: ${competitors.length}/${minimumCompetitors} على الأقل`,
-    });
-  }
-  if (qualitySelection.audit.distinctDomainCount < CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS) {
-    issues.push({
-      code: 'competitors.source_diversity',
-      label: `مصدران مستقلان على الأقل (${qualitySelection.audit.distinctDomainCount}/${CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS})`,
     });
   }
   const blockedPrimarySources = (input.writingSources || []).filter(source => (

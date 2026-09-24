@@ -712,8 +712,9 @@ test('content writing has one template registry and one context builder', async 
   assert.match(builder, /buildContentWritingPromptBundle/);
   assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_COUNT = 3/);
   assert.match(competitorConstants, /CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT = 2/);
-  assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_WORDS = 250/);
-  assert.match(builder, /CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS = 2/);
+  assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_WORDS = 0/);
+  assert.match(builder, /CONTENT_WRITING_MIN_COMPETITOR_UNIQUE_TOKENS = 0/);
+  assert.match(builder, /CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS = 0/);
   assert.match(builder, /CONTENT_WRITING_MAX_COMPETITOR_COUNT = MAX_ARTICLE_COMPETITORS/);
   assert.doesNotMatch(builder, /content\.slice\(/);
   assert.match(settingsRegistry, /CONTENT_WRITING_TEMPLATE_FIELDS/);

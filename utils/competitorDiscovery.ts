@@ -244,10 +244,8 @@ const toCompetitorRow = (value: unknown): CompetitorDiscoveryRow | null => {
     sourceOrigin: ['manual_selection', 'manual_text', 'legacy_import'].includes(toText(value.source_origin))
       ? toText(value.source_origin) as CompetitorDiscoveryRow['sourceOrigin']
       : 'automatic_discovery',
-    sourceClass: value.source_class === 'government' ? 'government' : 'commercial',
-    contentWeight: Number.isFinite(Number(value.content_weight))
-      ? Math.max(0.1, Math.min(1, Number(value.content_weight)))
-      : 1,
+    sourceClass: 'commercial',
+    contentWeight: 1,
     errorCode: toText(value.error_code),
     errorMessage: toText(value.error_message),
     fetchedAt: value.fetched_at ? String(value.fetched_at) : null,

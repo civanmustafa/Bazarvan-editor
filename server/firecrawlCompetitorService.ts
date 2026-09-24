@@ -433,8 +433,6 @@ export const searchCompetitorWeb = async (options: {
     operation: 'competitor_search',
   });
 
-  const seenUrls = new Set<string>();
-  const seenDomains = new Set<string>();
   const results: CompetitorSearchResult[] = [];
   readSearchItems(payload).forEach((item, index) => {
     const row = toRecord(item);
@@ -443,9 +441,6 @@ export const searchCompetitorWeb = async (options: {
     try {
       const canonicalUrl = canonicalizeCompetitorUrl(rawUrl);
       const domain = new URL(canonicalUrl).hostname.replace(/^www\./i, '');
-      if (seenUrls.has(canonicalUrl) || seenDomains.has(domain)) return;
-      seenUrls.add(canonicalUrl);
-      seenDomains.add(domain);
       results.push({
         url: rawUrl,
         canonicalUrl,

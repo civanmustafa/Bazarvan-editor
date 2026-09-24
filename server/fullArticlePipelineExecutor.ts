@@ -35,7 +35,6 @@ import {
 import { htmlToTipTapJson, preserveExistingArticleLinks } from '../utils/editorHtmlContent';
 import {
   CONTENT_WRITING_MIN_COMPETITOR_COUNT,
-  CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS,
   selectQualityContentWritingCompetitors,
   type ContentWritingCompetitorInput,
 } from '../utils/contentWritingContext';
@@ -436,7 +435,6 @@ const competitorQualityIsSufficient = (
   audit: ReturnType<typeof selectQualityContentWritingCompetitors>['audit'],
 ): boolean => (
   audit.acceptedCount >= audit.minimumCompetitors
-  && audit.distinctDomainCount >= CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS
 );
 
 const waitForContentWriting = async (options: {
@@ -868,16 +866,13 @@ const executeFullArticlePipeline = async (
     if (!competitorQualityIsSufficient(competitorQuality.audit)) {
       retryError({
         code: 'full_pipeline_insufficient_competitor_content',
-        message: `Only ${competitorQuality.audit.acceptedCount} quality competitors across ${competitorQuality.audit.distinctDomainCount} independent sources were available; at least ${minimumCompetitors} competitors across ${CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS} sources are required.`,
+        message: `Only ${competitorQuality.audit.acceptedCount} extracted competitor texts were available; at least ${minimumCompetitors} are required.`,
         stage: 'competitor_extraction',
         stageIndex: 4,
         details: {
           extractionJobId,
           competitorQualityAudit: competitorQuality.audit as unknown as ExternalAnalysisJson,
-          replacementNeededCount: Math.max(
-            competitorQuality.audit.replacementNeededCount,
-            competitorQuality.audit.distinctDomainCount < CONTENT_WRITING_MIN_DISTINCT_SOURCE_DOMAINS ? 1 : 0,
-          ),
+          replacementNeededCount: competitorQuality.audit.replacementNeededCount,
         },
       });
     }

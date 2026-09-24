@@ -927,21 +927,16 @@ const selectDiverseCandidates = (
     ? []
     : results.filter(result => (
         result.reasonCodes.includes('targeting-evidence-confirmed')
-        && !result.warningCodes.includes('language-mismatch')
         && !result.warningCodes.includes('forum-or-video-result')
         && result.selectionScore >= 45
       ));
   // A blocked page may still be selected from Google title/description/URL
   // evidence, because that evidence makes it eligible above. Never fill an
   // empty slot with a page that has neither page evidence nor SERP evidence.
-  const pool = Array.from(
-    new Map([...preferred, ...metadataEvidenceOnly].map(result => [result.canonicalUrl, result])).values(),
-  );
+  const pool = [...preferred, ...metadataEvidenceOnly];
 
   while (selected.length < Math.min(maximum, pool.length)) {
-    const remaining = pool.filter(result => !selected.some(item => (
-      item.canonicalUrl === result.canonicalUrl || item.domain === result.domain
-    )));
+    const remaining = pool.filter(result => !selected.includes(result));
     if (remaining.length === 0) break;
     const best = remaining
       .map(candidate => {
@@ -1025,12 +1020,6 @@ export const analyzeAndSelectCompetitors = (options: {
       context.language === 'en' ? 'en' : 'ar',
       `${candidate.title} ${candidate.description}`,
     );
-    if (context.language !== 'en' && !languageAssessment.compatible) {
-      filteredCount += 1;
-      languageFilteredCount += 1;
-      return [];
-    }
-
     const intentMatch = roundScore(cosineSimilarity(normalizedTargetVector, intentVector) * 100);
     const relevance = queryRelevanceScore(context, candidate);
     const searchStrength = roundScore(105 - Math.max(1, candidate.position) * 7);
@@ -1177,11 +1166,9 @@ export const analyzeAndSelectCompetitors = (options: {
     // phrase can still qualify semantically when several independent signals
     // agree; everything else stays visible as a review-only reserve.
     const strongMatch = targetingConfirmed
-      && languageMatch >= 50
       && !socialOrVideo
       && !targetingRejected;
     const semanticMatch = !strongMatch
-      && languageMatch >= 50
       && !socialOrVideo
       && !homepage
       && relevance >= 20
@@ -1239,7 +1226,7 @@ export const analyzeAndSelectCompetitors = (options: {
       // accepted only when Google/page evidence already confirmed targeting.
       eligible: result.eligible,
       reasonCodes: autoSelected
-        ? [...result.reasonCodes, 'auto-selected' as const, 'diverse-source' as const]
+        ? [...result.reasonCodes, 'auto-selected' as const]
         : result.reasonCodes,
     };
   });

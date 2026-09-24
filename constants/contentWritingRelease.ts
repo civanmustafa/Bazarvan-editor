@@ -22,6 +22,7 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20260921010000_article_competitor_repository_and_semantic_partial_recovery.sql',
   '20260922000000_durable_automation_coordinator_and_competitor_tiers.sql',
   '20260922010000_enforce_external_dependency_on_child.sql',
+  '20260924000000_remove_competitor_content_acceptance_gates.sql',
 ] as const;
 
 export const FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS = [

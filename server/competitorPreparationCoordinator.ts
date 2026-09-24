@@ -94,21 +94,13 @@ export const selectCompetitorPreparationReserveSources = (
   maximum = 10,
 ): ExternalAnalysisJson[] => {
   const rows = Array.isArray(result?.results) ? result.results : [];
-  const selectedUrls = new Set(selectedSources.map(source => (
-    text(source.canonicalUrl) || text(source.url)
-  )).filter(Boolean));
-  const selectedDomains = new Set(selectedSources.map(source => text(source.domain)).filter(Boolean));
-  const seenUrls = new Set(selectedUrls);
-  const seenDomains = new Set(selectedDomains);
   return rows
     .filter(isRecord)
     .filter(row => row.eligible !== false && Boolean(text(row.canonicalUrl) || text(row.url)))
     .flatMap(row => {
       const url = text(row.canonicalUrl) || text(row.url);
       const domain = text(row.domain);
-      if (!url || seenUrls.has(url) || (domain && seenDomains.has(domain))) return [];
-      seenUrls.add(url);
-      if (domain) seenDomains.add(domain);
+      if (!url) return [];
       return [{
         url,
         canonicalUrl: url,

@@ -220,7 +220,7 @@ test('central competitor engine selects strong and semantic commercial results w
   assert.ok(selection.results.filter(result => result.autoSelected).every(result => result.inferredPageType !== 'video'));
 });
 
-test('Arabic competitor selection fully excludes Latin pages while allowing natural brand names', () => {
+test('Arabic competitor selection records language mismatch without rejecting the result', () => {
   const latinAssessment = assessCompetitorLanguage(
     'ar',
     'Best Branding Companies in the UAE. Compare leading branding agencies, services, pricing, and portfolios.',
@@ -268,12 +268,13 @@ test('Arabic competitor selection fully excludes Latin pages while allowing natu
     maxSelected: 5,
   });
 
-  assert.equal(selection.summary.languageFilteredCount, 1);
-  assert.equal(selection.summary.filteredCount, 1);
-  assert.equal(selection.results.some(result => result.domain === 'english-first.example'), false);
+  assert.equal(selection.summary.languageFilteredCount, 0);
+  assert.equal(selection.summary.filteredCount, 0);
+  assert.equal(selection.results.some(result => result.domain === 'english-first.example'), true);
   assert.equal(selection.results.some(result => result.domain === 'arabic-brand.example'), true);
-  assert.ok(selection.results.filter(result => result.autoSelected).every(result => (
-    result.signals.languageMatch >= 50
+  assert.ok(selection.results.some(result => (
+    result.domain === 'english-first.example'
+    && result.warningCodes.includes('language-mismatch')
   )));
 });
 
@@ -499,8 +500,8 @@ test('bulk competitor import uses Firecrawl, direct HTML, Browserless, and reser
   assert.match(executor, /provider: 'browserless'/);
   assert.match(executor, /model: BROWSERLESS_MODEL/);
   assert.match(executor, /browserless_after_firecrawl_programmatic/);
-  assert.match(executor, /isCompetitorLanguageCompatible\('ar', options\.content\.text\)/);
-  assert.match(executor, /competitor_language_mismatch/);
+  assert.doesNotMatch(executor, /isCompetitorLanguageCompatible/);
+  assert.doesNotMatch(executor, /competitor_language_mismatch/);
   assert.match(executor, /\.select\('article_language,title,keywords'\)/);
   assert.match(executor, /analyzeCompetitorKeywordTargeting/);
   assert.match(executor, /COMPETITOR_KEYWORD_TARGETING_WARNING_CODE/);
@@ -509,8 +510,10 @@ test('bulk competitor import uses Firecrawl, direct HTML, Browserless, and reser
   assert.doesNotMatch(executor, /runGeminiAnalysisEngine|executeOpenAiRequest|geminiPaid/);
   assert.match(executor, /loadReserveSources/);
   assert.match(executor, /promoteReserveSource/);
-  assert.match(executor, /competitor_duplicate_canonical_url/);
-  assert.match(executor, /competitor_duplicate_domain/);
+  assert.doesNotMatch(executor, /competitor_duplicate_canonical_url/);
+  assert.doesNotMatch(executor, /competitor_duplicate_domain/);
+  assert.doesNotMatch(executor, /competitor_duplicate_content/);
+  assert.doesNotMatch(api, /competitor_language_mismatch/);
   assert.doesNotMatch(api, /ai_external_analysis_jobs'[\s\S]{0,400}key_attempts/);
   assert.match(api, /from\('ai_external_analysis_runs'\)/);
   assert.match(api, /select\('job_id,run_number,key_attempts'\)/);

@@ -136,7 +136,7 @@ test('content-writing competitor instructions stay escaped inside one untrusted-
   assert.match(bundle.messages[0].content, /قواعد نظام ثابتة مرفقة تلقائيًا/);
 });
 
-test('content-writing readiness requires three substantial competitors and reports replacement demand', async () => {
+test('content-writing readiness requires three non-empty competitors and reports replacement demand', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const oneCompetitor = buildContentWritingPromptBundle(createReadyArticle(['واحد']));
   const noCompetitors = buildContentWritingPromptBundle(createReadyArticle([]));
@@ -148,7 +148,7 @@ test('content-writing readiness requires three substantial competitors and repor
   assert.ok(noCompetitors.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
 });
 
-test('configured minimum two accepts two substantial manual competitor slots without URLs', async () => {
+test('configured minimum two accepts short manual competitor slots without URLs', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const input = createReadyArticle(['قصير', 'مصدر يدوي ثان', 'مصدر يدوي ثالث']);
   input.competitors[0].content = 'نص قصير لا يكفي للجودة';
@@ -162,17 +162,19 @@ test('configured minimum two accepts two substantial manual competitor slots wit
 
   assert.equal(bundle.ready, true);
   assert.equal(bundle.competitorQualityAudit.minimumCompetitors, 2);
-  assert.equal(bundle.competitorQualityAudit.acceptedCount, 2);
-  assert.equal(bundle.competitorQualityAudit.distinctDomainCount, 2);
+  assert.equal(bundle.competitorQualityAudit.acceptedCount, 3);
+  assert.equal(bundle.competitorQualityAudit.distinctDomainCount, 3);
   assert.equal(bundle.competitorQualityAudit.replacementNeededCount, 0);
-  assert.ok(bundle.competitorQualityAudit.items[0].reasons.includes('content_too_short'));
+  assert.equal(bundle.competitorQualityAudit.items[0].accepted, true);
+  assert.equal(bundle.competitorQualityAudit.items[0].minimumWordCount, 0);
+  assert.deepEqual(bundle.competitorQualityAudit.items[0].reasons, []);
   assert.ok(bundle.competitorQualityAudit.items[1].sourceIdentity.startsWith('manual:'));
   assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => (
     issue.code === 'competitors' || issue.code === 'competitors.source_diversity'
   )));
 });
 
-test('trusted government sources use the 130-word threshold and reduced writing weight', async () => {
+test('all competitor sources use neutral acceptance thresholds and writing weight', async () => {
   const { selectQualityContentWritingCompetitors } = await importContentWriting();
   const concise = Array.from({ length: 140 }, (_, index) => `سياسةحكومية${index + 1}`).join(' ');
   const result = selectQualityContentWritingCompetitors([
@@ -195,27 +197,28 @@ test('trusted government sources use the 130-word threshold and reduced writing 
   ], 5, 2);
 
   assert.equal(result.audit.items[0].accepted, true);
-  assert.equal(result.audit.items[0].minimumWordCount, 130);
-  assert.equal(result.audit.items[0].contentWeight, 0.65);
-  assert.equal(result.audit.items[1].accepted, false);
-  assert.equal(result.audit.items[1].minimumWordCount, 250);
-  assert.ok(result.audit.items[1].reasons.includes('content_too_short'));
+  assert.equal(result.audit.items[0].minimumWordCount, 0);
+  assert.equal(result.audit.items[0].minimumUniqueTokenCount, 0);
+  assert.equal(result.audit.items[0].sourceClass, 'commercial');
+  assert.equal(result.audit.items[0].contentWeight, 1);
+  assert.equal(result.audit.items[1].accepted, true);
+  assert.equal(result.audit.items[1].minimumWordCount, 0);
+  assert.equal(result.audit.items[1].contentWeight, 1);
+  assert.deepEqual(result.audit.items[1].reasons, []);
 });
 
-test('content-writing rejects thin or repetitive competitor text and requires source diversity', async () => {
+test('content-writing accepts short, repetitive, and same-domain competitor text', async () => {
   const { buildContentWritingPromptBundle } = await importContentWriting();
   const input = createReadyArticle(['صالح 1', 'صالح 2', 'صالح 3']);
   input.competitors[1].content = 'حشو '.repeat(400);
   input.competitors[2].url = input.competitors[0].url;
   const bundle = buildContentWritingPromptBundle(input);
 
-  assert.equal(bundle.ready, false);
-  assert.equal(bundle.competitorQualityAudit.acceptedCount, 2);
-  assert.ok(bundle.competitorQualityAudit.items[1].reasons.includes('low_information_density'));
-  assert.ok(bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
-  assert.ok(bundle.readinessIssues.some(
-    (issue: { code: string }) => issue.code === 'competitors.source_diversity',
-  ));
+  assert.equal(bundle.ready, true);
+  assert.equal(bundle.competitorQualityAudit.acceptedCount, 3);
+  assert.deepEqual(bundle.competitorQualityAudit.items[1].reasons, []);
+  assert.equal(bundle.competitorQualityAudit.minimumDistinctDomains, 0);
+  assert.ok(!bundle.readinessIssues.some((issue: { code: string }) => issue.code === 'competitors'));
 });
 
 test('content writing excludes a competitor carrying the dual extraction failure marker', async () => {

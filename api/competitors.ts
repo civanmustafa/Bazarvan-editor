@@ -18,7 +18,6 @@ import {
 import {
   extractCompetitorOwnDomains,
   isCompetitorOwnDomain,
-  isCompetitorLanguageCompatible,
   resolveCompetitorCountryCode,
 } from '../server/competitorSelectionEngine.ts';
 import { discoverAndSelectCompetitors } from '../server/competitorDiscoveryService.ts';
@@ -326,8 +325,6 @@ const normalizeSelectedResults = (value: unknown): NormalizedSelectedResult[] =>
     });
   }
   const normalized: NormalizedSelectedResult[] = [];
-  const seenUrls = new Set<string>();
-  const seenDomains = new Set<string>();
 
   value.slice(0, MAX_ARTICLE_COMPETITORS + 1).forEach((entry, index) => {
     if (!isRecord(entry)) return;
@@ -341,9 +338,6 @@ const normalizeSelectedResults = (value: unknown): NormalizedSelectedResult[] =>
       throw error;
     }
     const domain = new URL(canonicalUrl).hostname.replace(/^www\./i, '');
-    if (seenUrls.has(canonicalUrl) || seenDomains.has(domain)) return;
-    seenUrls.add(canonicalUrl);
-    seenDomains.add(domain);
     normalized.push({
       url: canonicalUrl,
       canonicalUrl,
@@ -384,12 +378,10 @@ type NormalizedReserveResult = CompetitorSearchResult & {
 
 const normalizeReserveResults = (
   value: unknown,
-  selectedResults: NormalizedSelectedResult[],
+  _selectedResults: NormalizedSelectedResult[],
 ): NormalizedReserveResult[] => {
   if (!Array.isArray(value)) return [];
   const normalized: NormalizedReserveResult[] = [];
-  const seenUrls = new Set(selectedResults.map(result => result.canonicalUrl));
-  const seenDomains = new Set(selectedResults.map(result => result.domain));
   value.slice(0, COMPETITOR_SEARCH_RESULT_LIMIT).forEach((entry, index) => {
     if (!isRecord(entry)) return;
     const qualification = isRecord(entry.contentQualification) ? entry.contentQualification : {};
@@ -410,9 +402,6 @@ const normalizeReserveResults = (
       return;
     }
     const domain = new URL(canonicalUrl).hostname.replace(/^www\./i, '');
-    if (seenUrls.has(canonicalUrl) || seenDomains.has(domain)) return;
-    seenUrls.add(canonicalUrl);
-    seenDomains.add(domain);
     normalized.push({
       url: canonicalUrl,
       canonicalUrl,
@@ -910,30 +899,15 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
       articleId,
       toText(body.companyName),
     );
-    const articleLanguage = await readArticleLanguage(supabase, articleId);
     const normalizedResults = normalizeSelectedResults(body.results);
     const normalizedReserves = normalizeReserveResults(body.reserveResults, normalizedResults);
     const selectedQualifications = normalizeSelectedQualifications([
       ...(Array.isArray(body.results) ? body.results : []),
       ...(Array.isArray(body.reserveResults) ? body.reserveResults : []),
     ]);
-    const languageFilteredCount = articleLanguage === 'ar'
-      ? normalizedResults.filter(result => !isCompetitorLanguageCompatible(
-          'ar',
-          `${result.title} ${result.description}`,
-        )).length
-      : 0;
     const results = normalizedResults
-      .filter(result => articleLanguage !== 'ar' || isCompetitorLanguageCompatible(
-        'ar',
-        `${result.title} ${result.description}`,
-      ))
       .filter(result => !isCompetitorOwnDomain(result.domain, ownDomains));
     const reserveSources = normalizedReserves
-      .filter(result => articleLanguage !== 'ar' || isCompetitorLanguageCompatible(
-        'ar',
-        `${result.title} ${result.description}`,
-      ))
       .filter(result => !isCompetitorOwnDomain(result.domain, ownDomains))
       .map(result => ({
         url: result.url,
@@ -951,13 +925,6 @@ const handleCompetitorsRequest = async (req: any): Promise<ApiResult> => {
         contentQualification: result.contentQualification,
       }));
     if (results.length === 0) {
-      if (languageFilteredCount > 0) {
-        throw new CompetitorApiError({
-          message: 'لا يمكن اعتماد صفحة لاتينية كمنافس لمقالة عربية. اختر نتائج عربية ثم أعد المحاولة.',
-          code: 'competitor_language_mismatch',
-          details: { languageFilteredCount },
-        });
-      }
       throw new CompetitorApiError({
         message: 'The selected URL belongs to the client domain and cannot be added as a competitor.',
         code: 'client_domain_not_a_competitor',

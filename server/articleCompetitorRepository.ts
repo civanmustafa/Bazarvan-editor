@@ -38,8 +38,8 @@ const normalizeManagedRows = (
       title: row.title || '',
       url: row.canonical_url || row.source_url || '',
       content: row.content_text || '',
-      sourceClass: row.source_class === 'government' ? 'government' : 'commercial',
-      contentWeight: Number.isFinite(Number(row.content_weight)) ? Number(row.content_weight) : 1,
+      sourceClass: 'commercial',
+      contentWeight: 1,
     })),
 );
 

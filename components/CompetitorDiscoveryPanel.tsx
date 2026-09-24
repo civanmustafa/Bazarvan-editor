@@ -1531,11 +1531,6 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
                             ? 'استخراج برمجي'
                             : row.extractionProvider || 'Unknown'}
                       </span>
-                      {row.sourceClass === 'government' && (
-                        <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[9px] text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
-                          {isArabic ? `مصدر حكومي · وزن ${Math.round(row.contentWeight * 100)}%` : `Government · ${Math.round(row.contentWeight * 100)}% weight`}
-                        </span>
-                      )}
                     </div>
                   )}
                   {row.errorMessage && (

@@ -31,7 +31,6 @@ import {
   getExternalAnalysisSupabaseAdmin,
   type ExternalAnalysisJson,
 } from './externalAnalysisQueue';
-import { isCompetitorLanguageCompatible } from './competitorSelectionEngine.ts';
 import { analyzeCompetitorKeywordTargeting } from './competitorContentQualification.ts';
 import { assertAutomaticCompetitorResearchAllowed } from './contentResearchAutomationGuard.ts';
 import {
@@ -89,7 +88,6 @@ type ArticleTargetingContext = {
 type FinalKeywordTargetingOutcome = {
   warningCode: string;
   warningMessage: string;
-  contentTooShort: boolean;
 };
 
 const FIRECRAWL_MODEL = 'v2/scrape';
@@ -165,7 +163,7 @@ const evaluateFinalKeywordTargeting = (options: {
   content: Parameters<typeof analyzeCompetitorKeywordTargeting>[0]['content'];
 }): FinalKeywordTargetingOutcome => {
   if (!requiresKeywordTargeting(options.snapshot, options.row)) {
-    return { warningCode: '', warningMessage: '', contentTooShort: false };
+    return { warningCode: '', warningMessage: '' };
   }
   const targeting = analyzeCompetitorKeywordTargeting({
     content: options.content,
@@ -180,15 +178,14 @@ const evaluateFinalKeywordTargeting = (options: {
     },
   });
   if (targeting.status === 'unavailable') {
-    return { warningCode: '', warningMessage: '', contentTooShort: true };
+    return { warningCode: '', warningMessage: '' };
   }
   if (targeting.status === 'qualified') {
-    return { warningCode: '', warningMessage: '', contentTooShort: false };
+    return { warningCode: '', warningMessage: '' };
   }
   return {
     warningCode: COMPETITOR_KEYWORD_TARGETING_WARNING_CODE,
     warningMessage: COMPETITOR_KEYWORD_TARGETING_WARNING_TEXT,
-    contentTooShort: false,
   };
 };
 
@@ -228,63 +225,6 @@ type CompetitorReplacement = {
   previousUrl: string;
   replacementUrl: string;
   reasonCode: string;
-};
-
-class CompetitorContentUsabilityError extends Error {
-  readonly code: string;
-  readonly status: number;
-
-  constructor(code: string, message: string, status = 422) {
-    super(message);
-    this.name = 'CompetitorContentUsabilityError';
-    this.code = code;
-    this.status = status;
-  }
-}
-
-const competitorInformationTokens = (value: string): string[] => String(value || '')
-  .toLocaleLowerCase()
-  .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
-  .split(/\s+/u)
-  .filter(token => token.length >= 3);
-
-const competitorContentFingerprint = (value: string): string => (
-  competitorInformationTokens(value).slice(0, 2_000).join(' ')
-);
-
-const assertUsableCompetitorContent = (options: {
-  content: Pick<ProgrammaticCompetitorContent, 'text' | 'wordCount'>;
-  articleLanguage: 'ar' | 'en';
-  acceptedFingerprints: Set<string>;
-  sourcePolicy: CompetitorSourcePolicy;
-}): string => {
-  if (options.content.wordCount < options.sourcePolicy.minimumWordCount) {
-    throw new CompetitorContentUsabilityError(
-      'competitor_content_too_short',
-      `Competitor content contains ${options.content.wordCount} words; at least ${options.sourcePolicy.minimumWordCount} are required for ${options.sourcePolicy.sourceClass} sources.`,
-    );
-  }
-  const informationTokens = competitorInformationTokens(options.content.text);
-  if (new Set(informationTokens).size < options.sourcePolicy.minimumUniqueTokenCount) {
-    throw new CompetitorContentUsabilityError(
-      'competitor_content_low_information_density',
-      'The extracted competitor text does not contain enough distinct informational terms.',
-    );
-  }
-  if (options.articleLanguage === 'ar' && !isCompetitorLanguageCompatible('ar', options.content.text)) {
-    throw new CompetitorContentUsabilityError(
-      'competitor_language_mismatch',
-      'The extracted competitor page is Latin-language content and was excluded from the Arabic article.',
-    );
-  }
-  const fingerprint = competitorContentFingerprint(options.content.text);
-  if (fingerprint && options.acceptedFingerprints.has(fingerprint)) {
-    throw new CompetitorContentUsabilityError(
-      'competitor_duplicate_content',
-      'The extracted text duplicates an already accepted competitor source.',
-    );
-  }
-  return fingerprint;
 };
 
 const normalizeReserveSource = (value: unknown): ReserveCompetitorSource | null => {
@@ -370,10 +310,6 @@ const loadReserveSources = async (options: {
     ? options.snapshot.reserveSources
     : [];
   const discoveryValues = await readDiscoveryReserveValues(options.context, options.snapshot);
-  const selectedUrls = new Set(options.rows.flatMap(row => [row.canonical_url, row.source_url]).filter(Boolean));
-  const selectedDomains = new Set(options.rows.map(row => row.domain).filter(Boolean));
-  const seenUrls = new Set(selectedUrls);
-  const seenDomains = new Set(selectedDomains);
   const reserves = [...snapshotValues, ...discoveryValues].flatMap(value => {
     if (isRecord(value) && value.eligible === false) return [];
     const qualification = isRecord(value) && isRecord(value.contentQualification)
@@ -384,10 +320,7 @@ const loadReserveSources = async (options: {
       || (isRecord(value) && value.eligible === true);
     if (!confirmed) return [];
     const source = normalizeReserveSource(value);
-    if (!source || seenUrls.has(source.canonicalUrl) || seenDomains.has(source.domain)) return [];
-    seenUrls.add(source.canonicalUrl);
-    seenDomains.add(source.domain);
-    return [source];
+    return source ? [source] : [];
   }).slice(0, COMPETITOR_REPLACEMENT_RESERVE_LIMIT);
 
   if (reserves.length > 0) {
@@ -414,31 +347,18 @@ const promoteReserveSource = async (options: {
   context: ExternalAnalysisExecutionContext;
   row: CompetitorRow;
   reserves: ReserveCompetitorSource[];
-  claimedUrls: Set<string>;
-  claimedDomains: Set<string>;
   reasonCode: string;
   replacements: CompetitorReplacement[];
   successfulCount: number;
   failedCount: number;
   total: number;
 }): Promise<boolean> => {
-  options.claimedUrls.delete(options.row.canonical_url);
-  options.claimedUrls.delete(options.row.source_url);
-  options.claimedDomains.delete(options.row.domain);
   let replacement: ReserveCompetitorSource | undefined;
   while (options.reserves.length > 0 && !replacement) {
-    const candidate = options.reserves.shift()!;
-    if (options.claimedUrls.has(candidate.canonicalUrl) || options.claimedDomains.has(candidate.domain)) continue;
-    replacement = candidate;
+    replacement = options.reserves.shift();
   }
-  if (!replacement) {
-    options.claimedUrls.add(options.row.canonical_url);
-    if (options.row.domain) options.claimedDomains.add(options.row.domain);
-    return false;
-  }
+  if (!replacement) return false;
   const previousUrl = options.row.canonical_url || options.row.source_url;
-  options.claimedUrls.add(replacement.canonicalUrl);
-  options.claimedDomains.add(replacement.domain);
   options.replacements.push({
     position: options.row.position,
     previousUrl,
@@ -507,9 +427,6 @@ const providerFailureDetails = async (
   provider: 'firecrawl' | 'programmatic' | 'browserless',
   userId?: string | null,
 ): Promise<ProviderFailureDetails> => {
-  if (error instanceof CompetitorContentUsabilityError) {
-    return { code: error.code, message: error.message, status: error.status, keySuffix: '' };
-  }
   if (error instanceof FirecrawlCompetitorError) {
     return {
       code: error.code,
@@ -579,15 +496,12 @@ const extractCompetitorCandidate = async (options: {
   row: CompetitorRow;
   snapshot: Record<string, unknown>;
   articleTargeting: ArticleTargetingContext;
-  acceptedFingerprints: Set<string>;
-  claimedUrls: Set<string>;
-  claimedDomains: Set<string>;
   attempts: ExternalAnalysisJson[];
   currentAttempt: number;
   successfulCount: number;
   failedCount: number;
   total: number;
-}): Promise<{ fingerprint: string } | { failure: ProviderFailureDetails; message: string }> => {
+}): Promise<{ success: true } | { failure: ProviderFailureDetails; message: string }> => {
   const failures: Array<{ provider: string; details: ProviderFailureDetails }> = [];
   const recordFailure = async (
     provider: 'firecrawl' | 'programmatic' | 'browserless',
@@ -615,34 +529,8 @@ const extractCompetitorCandidate = async (options: {
   const validateAndPersist = async (
     content: ExtractedCompetitorPayload,
     extractionProvider: string,
-  ): Promise<string> => {
-    const previousUrls = new Set([options.row.canonical_url, options.row.source_url].filter(Boolean));
-    const previousDomain = options.row.domain;
-    const nextUrls = [content.canonicalUrl, content.url].filter(Boolean);
-    const nextDomain = content.domain.toLocaleLowerCase().replace(/^www\./, '');
+  ): Promise<void> => {
     const sourcePolicy = resolveCompetitorSourcePolicy(content.canonicalUrl || content.domain);
-    if (nextUrls.some(url => options.claimedUrls.has(url) && !previousUrls.has(url))) {
-      throw new CompetitorContentUsabilityError(
-        'competitor_duplicate_canonical_url',
-        'The extracted page redirects to a competitor URL that is already used by another slot.',
-      );
-    }
-    if (
-      nextDomain
-      && nextDomain !== options.row.domain
-      && options.claimedDomains.has(nextDomain)
-    ) {
-      throw new CompetitorContentUsabilityError(
-        'competitor_duplicate_domain',
-        'The extracted page redirects to a competitor domain that is already used by another slot.',
-      );
-    }
-    const fingerprint = assertUsableCompetitorContent({
-      content,
-      articleLanguage: options.articleTargeting.language,
-      acceptedFingerprints: options.acceptedFingerprints,
-      sourcePolicy,
-    });
     const keywordTargeting = evaluateFinalKeywordTargeting({
       snapshot: options.snapshot,
       row: options.row,
@@ -653,12 +541,6 @@ const extractCompetitorCandidate = async (options: {
         cacheHit: content.cacheHit,
       },
     });
-    if (keywordTargeting.contentTooShort) {
-      throw new CompetitorContentUsabilityError(
-        'competitor_content_too_short',
-        'The final extracted content is too short to preserve the approved competitor source.',
-      );
-    }
     await persistCompletedCompetitor({
       row: options.row,
       content,
@@ -666,13 +548,6 @@ const extractCompetitorCandidate = async (options: {
       keywordTargeting,
       sourcePolicy,
     });
-    previousUrls.forEach(url => options.claimedUrls.delete(url));
-    if (previousDomain && previousDomain !== nextDomain) {
-      options.claimedDomains.delete(previousDomain);
-    }
-    nextUrls.forEach(url => options.claimedUrls.add(url));
-    if (nextDomain) options.claimedDomains.add(nextDomain);
-    return fingerprint;
   };
 
   await options.context.reportProgress({
@@ -702,7 +577,7 @@ const extractCompetitorCandidate = async (options: {
       signal: options.context.signal,
       userId: options.context.job.requested_by,
     });
-    const fingerprint = await validateAndPersist(
+    await validateAndPersist(
       content,
       content.cacheHit ? 'firecrawl_cache' : 'firecrawl',
     );
@@ -717,7 +592,7 @@ const extractCompetitorCandidate = async (options: {
       attempt: options.currentAttempt,
       url: options.row.canonical_url,
     });
-    return { fingerprint };
+    return { success: true };
   } catch (error) {
     if (options.context.signal.aborted) throw options.context.signal.reason ?? error;
     await recordFailure('firecrawl', FIRECRAWL_MODEL, error);
@@ -753,7 +628,7 @@ const extractCompetitorCandidate = async (options: {
     const extractionProvider = content.cacheHit
       ? 'programmatic_after_firecrawl_cache'
       : 'programmatic_after_firecrawl';
-    const fingerprint = await validateAndPersist(content, extractionProvider);
+    await validateAndPersist(content, extractionProvider);
     options.attempts.push({
       requestIndex: options.row.position,
       outcome: 'success',
@@ -765,7 +640,7 @@ const extractCompetitorCandidate = async (options: {
       attempt: options.currentAttempt,
       url: options.row.canonical_url,
     });
-    return { fingerprint };
+    return { success: true };
   } catch (error) {
     if (options.context.signal.aborted) throw options.context.signal.reason ?? error;
     await recordFailure('programmatic', PROGRAMMATIC_MODEL, error);
@@ -799,7 +674,7 @@ const extractCompetitorCandidate = async (options: {
       userId: options.context.job.requested_by,
       timeoutMs: COMPETITOR_RENDERED_EXTRACTION_TIMEOUT_MS,
     });
-    const fingerprint = await validateAndPersist(
+    await validateAndPersist(
       content,
       'browserless_after_firecrawl_programmatic',
     );
@@ -814,7 +689,7 @@ const extractCompetitorCandidate = async (options: {
       attempt: options.currentAttempt,
       url: options.row.canonical_url,
     });
-    return { fingerprint };
+    return { success: true };
   } catch (error) {
     if (options.context.signal.aborted) throw options.context.signal.reason ?? error;
     const finalFailure = await recordFailure('browserless', BROWSERLESS_MODEL, error);
@@ -862,12 +737,6 @@ const executeCompetitorExtraction = async (
   const failures: CompetitorFailure[] = [];
   const replacements: CompetitorReplacement[] = [];
   const currentAttempt = Math.max(1, Number(context.job.attempt_count) || 1);
-  const acceptedFingerprints = new Set(allRows
-    .filter(row => row.status === 'completed' && Boolean(row.content_text))
-    .map(row => competitorContentFingerprint(row.content_text))
-    .filter(Boolean));
-  const claimedUrls = new Set(allRows.flatMap(row => [row.canonical_url, row.source_url]).filter(Boolean));
-  const claimedDomains = new Set(allRows.map(row => row.domain).filter(Boolean));
   let successfulCount = rows.filter(row => row.status === 'completed').length;
 
   for (const row of rows) {
@@ -883,17 +752,13 @@ const executeCompetitorExtraction = async (
         row,
         snapshot: inputSnapshot,
         articleTargeting,
-        acceptedFingerprints,
-        claimedUrls,
-        claimedDomains,
         attempts,
         currentAttempt,
         successfulCount,
         failedCount: failures.length,
         total: rows.length,
       });
-      if ('fingerprint' in extraction) {
-        if (extraction.fingerprint) acceptedFingerprints.add(extraction.fingerprint);
+      if ('success' in extraction) {
         successfulCount += 1;
         processed = true;
       } else {
@@ -901,8 +766,6 @@ const executeCompetitorExtraction = async (
           context,
           row,
           reserves,
-          claimedUrls,
-          claimedDomains,
           reasonCode: extraction.failure.code,
           replacements,
           successfulCount,
