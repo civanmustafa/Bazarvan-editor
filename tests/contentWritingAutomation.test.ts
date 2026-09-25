@@ -221,7 +221,9 @@ test('automatic writing does not spend an AI attempt on missing prerequisites an
   assert.match(scheduler, /status: 'ready'[\s\S]*attempt_count: 0/);
   assert.match(API, /typeof session\.quality_score === 'number'/);
   assert.match(API, /action === 'summaries'/);
-  assert.match(dashboard, /المقالة مكتوبة · لم تجتز الجودة/);
+  assert.match(dashboard, /label: 'أدرج المحتوى تلقائيا'/);
+  assert.match(dashboard, /label: 'بانتظار دورها في طابور الكتابة'/);
+  assert.match(dashboard, /label: 'لم تتجاوز سياسة الجودة\.'/);
   assert.match(dashboard, /محتوى جزئي محفوظ/);
 });
 

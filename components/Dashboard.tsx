@@ -437,9 +437,9 @@ const ContentWritingSummaryChip: React.FC<{
     ? `${summary.qualityScore}/100${summary.qualityMinimumScore !== null ? ` (المطلوب ${summary.qualityMinimumScore})` : ''}`
     : '';
   const presentation = summary.state === 'applied'
-    ? { label: `أُدرج المحتوى تلقائيًا${score ? ` · الجودة ${score}` : ''}`, tone: 'green' }
+    ? { label: 'أدرج المحتوى تلقائيا', tone: 'green' }
     : summary.state === 'written_quality_failed'
-      ? { label: `المقالة مكتوبة · لم تجتز الجودة${score ? ` ${score}` : ''} · بانتظار المراجعة أو التجاوز اليدوي`, tone: 'amber' }
+      ? { label: 'لم تتجاوز سياسة الجودة.', tone: 'amber' }
       : summary.state === 'written_quality_passed'
         ? { label: `المقالة مكتوبة واجتازت الجودة${score ? ` ${score}` : ''} · بانتظار الإدراج`, tone: 'green' }
         : summary.state === 'written'
