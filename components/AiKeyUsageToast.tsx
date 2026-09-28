@@ -10,7 +10,6 @@ import {
   KeyRound,
   Loader2,
   Square,
-  X,
   XCircle,
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
@@ -573,7 +572,7 @@ type AiExecutionMonitorProps = {
 const AiExecutionMonitor: React.FC<AiExecutionMonitorProps> = ({ articleId, articleKey = '' }) => {
   const { uiLanguage } = useUser();
   const isArabic = uiLanguage !== 'en';
-  const { activities, setActivities, now } = useAiExecutionActivityFeed(articleId, articleKey);
+  const { activities, now } = useAiExecutionActivityFeed(articleId, articleKey);
   const [cancellingId, setCancellingId] = useState('');
   const [cancelError, setCancelError] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -589,12 +588,53 @@ const AiExecutionMonitor: React.FC<AiExecutionMonitorProps> = ({ articleId, arti
   }, []);
 
   const scopedActivities = getAiExecutionActivitiesForArticle(activities, articleId, articleKey);
+  const retainedScopedActivities = getAiExecutionActivitiesForArticle(
+    getAiExecutionActivities(),
+    articleId,
+    articleKey,
+  );
+  const displayActivities = [
+    ...scopedActivities,
+    ...retainedScopedActivities.filter(activity => (
+      !scopedActivities.some(scopedActivity => scopedActivity.id === activity.id)
+    )),
+  ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   // The first scoped activity is the latest update for the open article. Keeping
-  // it in one row prevents the monitor from covering editor controls.
-  const selected = scopedActivities.find(activity => activity.state === 'running') || scopedActivities[0];
-  if (!selected) return null;
+  // it in one row prevents the monitor from covering editor controls. Terminal
+  // activities stay available as the last task after their short live notice ends.
+  const selected = displayActivities.find(activity => activity.state === 'running') || displayActivities[0];
 
-  const activeCount = scopedActivities.filter(activity => activity.state === 'running').length;
+  if (!selected) {
+    return (
+      <div
+        data-ai-execution-monitor="inline"
+        data-ai-execution-empty="true"
+        className="shrink-0 border-x border-b border-gray-300 bg-white text-[10px] font-bold text-gray-600 dark:border-[#3C3C3C] dark:bg-[#242424] dark:text-gray-300"
+        dir={isArabic ? 'rtl' : 'ltr'}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="flex min-h-10 min-w-0 items-center gap-1.5 overflow-hidden px-2 py-1.5 whitespace-nowrap">
+          <span
+            className="inline-flex shrink-0 items-center text-gray-800 dark:text-gray-100"
+            title={isArabic ? 'حالة الذكاء الاصطناعي' : 'AI status'}
+            aria-label={isArabic ? 'حالة الذكاء الاصطناعي' : 'AI status'}
+          >
+            <Activity size={14} className="text-[#b8922e]" />
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-gray-100 px-1.5 py-1 font-black text-gray-500 dark:border-gray-500/30 dark:bg-gray-500/10 dark:text-gray-300">
+            <Clock3 size={12} />
+            {isArabic ? 'لا توجد مهمة بعد' : 'No task yet'}
+          </span>
+          <span className="min-w-0 truncate text-gray-400 dark:text-gray-500">
+            {isArabic ? 'ستظهر آخر مهمة هنا عند تشغيلها.' : 'The latest task will remain visible here after it runs.'}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const activeCount = displayActivities.filter(activity => activity.state === 'running').length;
   const succeededKeys = selected.entries.filter(entry => entry.outcome === 'success').length;
   const failedKeys = selected.entries.filter(entry => entry.outcome === 'failed').length;
   const tierLabel = selected.credentialTier === 'free'
@@ -663,25 +703,28 @@ const AiExecutionMonitor: React.FC<AiExecutionMonitorProps> = ({ articleId, arti
       aria-live="polite"
     >
       <div className="flex min-h-10 items-center px-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto whitespace-nowrap py-1.5 custom-scrollbar">
-          <span className="inline-flex shrink-0 items-center gap-1 font-black text-gray-800 dark:text-gray-100">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden whitespace-nowrap py-1.5">
+          <span
+            className="inline-flex shrink-0 items-center font-black text-gray-800 dark:text-gray-100"
+            title={isArabic ? 'حالة الذكاء الاصطناعي' : 'AI status'}
+            aria-label={isArabic ? 'حالة الذكاء الاصطناعي' : 'AI status'}
+          >
             <Activity size={14} className="text-[#b8922e]" />
-            {isArabic ? 'الذكاء الاصطناعي' : 'AI'}
           </span>
 
-          <span className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 font-black ${stateStyles[selected.state]}`}>
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-1 font-black ${stateStyles[selected.state]}`}>
             <StatusIcon state={selected.state} />
             {stageLabel}
           </span>
 
-          <span className="inline-flex min-w-0 max-w-56 shrink items-center gap-1 font-black text-gray-800 dark:text-gray-100" title={articleLabel}>
+          <span className="inline-flex min-w-0 max-w-48 basis-28 grow items-center gap-1 font-black text-gray-800 dark:text-gray-100" title={articleLabel}>
             <FileText size={11} className="shrink-0 text-[#b8922e]" />
             <span className="truncate">{articleLabel}</span>
           </span>
 
           <span className="shrink-0 text-gray-300 dark:text-gray-600">|</span>
-          <span className="max-w-52 shrink-0 truncate font-black text-gray-700 dark:text-gray-100" title={`${actionLabel} · ${sourceLabel}`}>
-            {isArabic ? 'المهمة' : 'Task'}: {actionLabel}
+          <span className="min-w-0 max-w-48 basis-32 grow truncate font-black text-gray-700 dark:text-gray-100" title={`${actionLabel} · ${sourceLabel}`}>
+            {actionLabel}
             {actionLabel !== sourceLabel ? ` · ${sourceLabel}` : ''}
             {activeCount > 1 ? ` · +${activeCount - 1}` : ''}
           </span>
@@ -705,9 +748,9 @@ const AiExecutionMonitor: React.FC<AiExecutionMonitorProps> = ({ articleId, arti
           )}
 
           <span className="shrink-0 text-gray-300 dark:text-gray-600">|</span>
-          <span className="inline-flex shrink-0 items-center gap-1" dir="ltr">
+          <span className="inline-flex min-w-0 max-w-40 shrink items-center gap-1 truncate" dir="ltr">
             <Cpu size={10} />
-            <strong>{selected.model || selected.requestedModel || (isArabic ? 'بانتظار الموديل' : 'Model pending')}</strong>
+            <strong className="truncate">{selected.model || selected.requestedModel || (isArabic ? 'بانتظار الموديل' : 'Model pending')}</strong>
             {requestedModelChanged ? ` ← ${selected.requestedModel}` : ''}
             {selected.currentModelIndex && selected.modelCount
               ? ` (${selected.currentModelIndex}/${selected.modelCount})`
@@ -781,15 +824,6 @@ const AiExecutionMonitor: React.FC<AiExecutionMonitorProps> = ({ articleId, arti
           <ChevronDown size={13} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActivities(current => current.filter(activity => activity.id !== selected.id))}
-          className="ms-1 flex size-6 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-[#333] dark:hover:text-gray-100"
-          aria-label={isArabic ? 'إخفاء الإشعار فقط' : 'Hide notification only'}
-          title={isArabic ? 'إخفاء الإشعار فقط؛ لا يوقف العملية' : 'Hide notification only; the operation keeps running'}
-        >
-          <X size={12} />
-        </button>
       </div>
 
       {expanded && (

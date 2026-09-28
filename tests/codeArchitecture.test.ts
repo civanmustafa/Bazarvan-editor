@@ -184,6 +184,19 @@ test('all editor AI execution paths publish to one inline live activity monitor'
   assert.doesNotMatch(monitor, /\.slice\(0, 24\)/);
   assert.match(monitor, /data-ai-execution-article-id=\{activity\.articleId \|\| undefined\}/);
   assert.match(monitor, /data-ai-execution-monitor="inline"/);
+  assert.match(monitor, /data-ai-execution-empty="true"/);
+  assert.match(editorApp, /data-ai-execution-monitor-loading="true"/);
+  assert.match(editorApp, /data-ai-execution-monitor-loading="true"[\s\S]*?min-h-10/);
+  assert.match(
+    monitor,
+    /getAiExecutionActivitiesForArticle\(\s*getAiExecutionActivities\(\),\s*articleId,\s*articleKey,/,
+  );
+  assert.doesNotMatch(monitor, /if \(!selected\) return null/);
+  assert.match(monitor, /overflow-hidden whitespace-nowrap py-1\.5/);
+  assert.doesNotMatch(monitor, /overflow-x-auto whitespace-nowrap py-1\.5 custom-scrollbar/);
+  assert.doesNotMatch(monitor, /\{isArabic \? 'الذكاء الاصطناعي' : 'AI'\}/);
+  assert.doesNotMatch(monitor, /\{isArabic \? 'المهمة' : 'Task'\}/);
+  assert.doesNotMatch(monitor, /إخفاء الإشعار فقط/);
   assert.doesNotMatch(monitor, /fixed bottom-4 left-4/);
   assert.match(monitor, /AI_EXECUTION_ACTIVITY_EVENT/);
   assert.match(monitor, /articleLabel/);

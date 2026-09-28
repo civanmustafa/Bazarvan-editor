@@ -173,7 +173,13 @@ const EditorView: React.FC = () => {
           <React.Suspense fallback={null}>
             <TipsCarousel />
           </React.Suspense>
-          <React.Suspense fallback={null}>
+          <React.Suspense fallback={(
+            <div
+              data-ai-execution-monitor-loading="true"
+              className="min-h-10 shrink-0 border-x border-b border-gray-300 bg-white dark:border-[#3C3C3C] dark:bg-[#242424]"
+              aria-hidden="true"
+            />
+          )}>
             <AiExecutionMonitor articleId={activeArticleId} articleKey={articleKey} />
           </React.Suspense>
           <EditorToolbar
