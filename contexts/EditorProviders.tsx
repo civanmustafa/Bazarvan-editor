@@ -3,7 +3,7 @@ import { AIProvider } from './AIContext';
 import { EditorProvider } from './EditorContext';
 import { InteractionProvider } from './InteractionContext';
 import { ModalProvider } from './ModalContext';
-import { DuplicateCleanupProvider } from './DuplicateCleanupContext';
+const DuplicateCleanupProvider = React.lazy(() => import('./DuplicateCleanupProvider'));
 
 // These providers own editor-only state and must never mount on dashboard/admin routes.
 export const EditorProviders: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -11,7 +11,9 @@ export const EditorProviders: React.FC<{ children: React.ReactNode }> = ({ child
     <ModalProvider>
       <AIProvider>
         <InteractionProvider>
-          <DuplicateCleanupProvider>{children}</DuplicateCleanupProvider>
+          <React.Suspense fallback={null}>
+            <DuplicateCleanupProvider>{children}</DuplicateCleanupProvider>
+          </React.Suspense>
         </InteractionProvider>
       </AIProvider>
     </ModalProvider>

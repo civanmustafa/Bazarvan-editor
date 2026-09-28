@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import type { Keywords } from '../../types';
-import { useDuplicateCleanupController } from '../../contexts/DuplicateCleanupContext';
+import { useDuplicateCleanupController } from '../../contexts/DuplicateCleanupProvider';
 import { DuplicateCleanupReviewView, DuplicateCleanupStatusView } from '../../components/DuplicateCleanupReview';
 import '../../styles/global.css';
 
