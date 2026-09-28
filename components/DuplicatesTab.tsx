@@ -57,12 +57,14 @@ const PhraseList: React.FC<PhraseListProps> = React.memo(({
           return (
             <li
               key={phrase.text}
+              className={category ? 'border-b border-gray-200 pb-1 ps-1 dark:border-[#3C3C3C]' : undefined}
+              style={category ? { borderInlineStart: `3px solid ${accentColor}` } : undefined}
             >
-              <div onClick={() => onPhraseClick(phrase, accentColor)} className={`group relative flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${uiLanguage === 'ar' ? 'pr-5' : 'pl-5'} ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/30' : 'bg-gray-50 dark:bg-[#2A2A2A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}>
-              <div
+              <div onClick={() => onPhraseClick(phrase, accentColor)} className={`group relative flex justify-between items-center p-2 ${category ? 'rounded-t-md' : 'rounded-md'} cursor-pointer transition-colors ${category ? '' : uiLanguage === 'ar' ? 'pr-5' : 'pl-5'} ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/30' : 'bg-gray-50 dark:bg-[#2A2A2A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}>
+              {!category && <div
                 className={`absolute top-0 h-full w-1.5 ${uiLanguage === 'ar' ? 'right-0 rounded-r-md' : 'left-0 rounded-l-md'}`}
                 style={{ backgroundColor: accentColor }}
-              ></div>
+              ></div>}
 
               <span className="text-[#333333] dark:text-[#8d8d8d] text-sm font-medium flex-grow">{phrase.text}</span>
 
