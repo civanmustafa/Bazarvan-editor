@@ -169,6 +169,13 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
           : 'This reservation started before automation was paused and will finish safely; no new articles will start.')
         : (isArabic ? 'يُعاد فحص المدخلات قبل إنشاء الجلسة.' : 'Inputs are being revalidated before the session is created.'),
     };
+    if (item?.status === 'writing' && item.sessionStatus === 'retry_scheduled') return {
+      tone: 'blue',
+      label: isArabic ? 'جار استئناف الكتابة تلقائيًا' : 'Resuming automatic writing',
+      detail: isArabic
+        ? 'ستُستكمل الجلسة نفسها من المرحلة التي فشلت، مع الاحتفاظ بجميع المراحل المكتملة.'
+        : 'The same session will continue from the failed step while preserving every completed step.',
+    };
     if (item?.status === 'writing') return {
       tone: 'blue',
       label: isArabic ? 'تُكتب تلقائيًا الآن' : 'Writing automatically now',
@@ -190,7 +197,7 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
     if (item?.status === 'completed') return {
       tone: item.qualityPassed === false ? 'amber' : 'green',
       label: item.qualityPassed === false
-        ? (isArabic ? 'اكتملت ولم تجتز الجودة' : 'Completed but did not pass quality')
+        ? (isArabic ? 'لم تتجاوز سياسة الجودة.' : 'Did not pass the quality policy')
         : (isArabic ? 'اكتملت وبانتظار المراجعة' : 'Completed and awaiting review'),
       detail: item.qualityPassed === false
         ? (isArabic ? 'حُفظت المقالة للمراجعة ويمكن إدراجها بتجاوز يدوي صريح.' : 'The article was saved for review and can be inserted with an explicit manual override.')

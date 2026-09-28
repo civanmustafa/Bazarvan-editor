@@ -36,6 +36,218 @@ test('automation recovery migration restores readiness and prevents preparation 
   assert.match(migration, /greatest\(coalesce\(new\.max_attempts, 1\)[\s\S]*6\)/);
 });
 
+test('automatic writing retries resume the same safe session before claiming a replacement', async () => {
+  const [migration, scheduler, presentation] = await Promise.all([
+    readFile(path.join(root, 'supabase', 'migrations', '20260930000000_automatic_content_writing_session_resume.sql'), 'utf8'),
+    readFile(path.join(root, 'server', 'contentWritingAutomation.ts'), 'utf8'),
+    readFile(path.join(root, 'components', 'ContentWritingAutomationArticleStatus.tsx'), 'utf8'),
+  ]);
+
+  assert.match(migration, /resume_next_automatic_content_writing_session/);
+  assert.match(migration, /step\.status in \('running', 'failed'\)/);
+  assert.match(migration, /automationReadinessSignature/);
+  assert.match(migration, /v_readiness[\s\S]*readiness_signature/);
+  assert.doesNotMatch(migration, /session_sequence\s*=\s*[^,;]+\+/);
+  assert.ok(
+    scheduler.indexOf('resumeDueAutomaticContentWritingSession()')
+      < scheduler.indexOf('claimNextItem(workerId, settings)'),
+  );
+  assert.match(presentation, /جار استئناف الكتابة تلقائيًا/);
+  assert.match(presentation, /لم تتجاوز سياسة الجودة\./);
+});
+
+test('automatic writing resume preserves completed steps and rejects changed inputs', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon; create role authenticated; create role service_role;
+      create table public.content_writing_automation_state (
+        singleton boolean primary key,
+        next_allowed_at timestamptz,
+        last_item_id uuid,
+        last_session_id uuid,
+        last_article_id uuid,
+        last_outcome text,
+        updated_at timestamptz default now()
+      );
+      create table public.content_writing_sessions (
+        id uuid primary key,
+        article_id uuid not null,
+        created_by uuid not null,
+        provider text not null,
+        model text not null default '',
+        status text not null,
+        execution_mode text not null default 'api',
+        idempotency_key text not null,
+        context_snapshot jsonb not null default '{}'::jsonb,
+        progress jsonb not null default '{}'::jsonb,
+        response_metadata jsonb not null default '{}'::jsonb,
+        last_error_code text,
+        last_error text,
+        next_attempt_at timestamptz default now(),
+        locked_by text,
+        locked_at timestamptz,
+        lease_expires_at timestamptz,
+        cancel_requested_at timestamptz,
+        completed_at timestamptz
+      );
+      create table public.content_writing_automation_items (
+        id uuid primary key,
+        article_id uuid not null,
+        requested_by uuid not null,
+        status text not null,
+        readiness_signature text not null,
+        provider text not null,
+        model text not null default '',
+        content_writing_session_id uuid,
+        run_generation integer not null,
+        session_sequence integer not null,
+        attempt_count integer not null,
+        max_attempts integer not null,
+        ready_at timestamptz not null,
+        eligible_at timestamptz not null,
+        locked_by text,
+        locked_at timestamptz,
+        lease_expires_at timestamptz,
+        last_error_code text,
+        last_error text,
+        completed_at timestamptz
+      );
+      create table public.content_writing_steps (
+        id uuid primary key,
+        session_id uuid not null,
+        step_key text not null,
+        status text not null,
+        output_text text,
+        last_error_code text,
+        last_error text,
+        completed_at timestamptz
+      );
+      create table public.ai_external_analysis_jobs (
+        id uuid primary key,
+        job_type text not null,
+        status text not null,
+        next_attempt_at timestamptz
+      );
+      create table public.resume_readiness_control (
+        signature text not null,
+        ready boolean not null
+      );
+      insert into public.resume_readiness_control values ('stable-signature', true);
+      create function public.article_automatic_job_allowed(uuid, text, text default null)
+      returns boolean language sql stable as $$ select true $$;
+      create function public.evaluate_content_writing_automation_readiness(uuid)
+      returns jsonb language sql stable as $$
+        select jsonb_build_object('ready', ready, 'signature', signature)
+        from public.resume_readiness_control limit 1
+      $$;
+
+      insert into public.content_writing_automation_state(singleton, next_allowed_at)
+      values (true, now() - interval '1 minute');
+      insert into public.content_writing_sessions(
+        id, article_id, created_by, provider, status, idempotency_key,
+        context_snapshot, last_error_code, last_error, completed_at
+      ) values (
+        '00000000-0000-4000-8000-000000000010',
+        '00000000-0000-4000-8000-000000000020',
+        '00000000-0000-4000-8000-000000000030',
+        'gemini', 'failed',
+        'auto-ready:00000000-0000-4000-8000-000000000040:1:1',
+        jsonb_build_object(
+          'triggerSource', 'automatic_ready',
+          'automationItemId', '00000000-0000-4000-8000-000000000040',
+          'automationRunGeneration', 1,
+          'automationSessionSequence', 1,
+          'automationReadinessSignature', 'stable-signature'
+        ),
+        'content_writing_step_output_invalid', 'Invalid JSON', now()
+      );
+      insert into public.content_writing_automation_items(
+        id, article_id, requested_by, status, readiness_signature, provider,
+        content_writing_session_id, run_generation, session_sequence,
+        attempt_count, max_attempts, ready_at, eligible_at,
+        last_error_code, last_error
+      ) values (
+        '00000000-0000-4000-8000-000000000040',
+        '00000000-0000-4000-8000-000000000020',
+        '00000000-0000-4000-8000-000000000030',
+        'ready', 'stable-signature', 'gemini',
+        '00000000-0000-4000-8000-000000000010', 1, 1,
+        1, 3, now() - interval '10 minutes', now() - interval '1 minute',
+        'content_writing_step_output_invalid', 'Invalid JSON'
+      );
+      insert into public.content_writing_steps(
+        id, session_id, step_key, status, output_text, last_error_code, last_error, completed_at
+      ) values
+        ('00000000-0000-4000-8000-000000000050', '00000000-0000-4000-8000-000000000010',
+          'outline', 'completed', 'saved outline', null, null, now()),
+        ('00000000-0000-4000-8000-000000000060', '00000000-0000-4000-8000-000000000010',
+          'competitor_index', 'failed', 'malformed raw output', 'content_writing_step_output_invalid', 'Invalid JSON', now());
+    `);
+
+    const migration = await readFile(
+      path.join(root, 'supabase', 'migrations', '20260930000000_automatic_content_writing_session_resume.sql'),
+      'utf8',
+    );
+    await db.exec(migration);
+
+    const resumed = await db.query<{ session_id: string | null }>(`
+      select public.resume_next_automatic_content_writing_session()::text as session_id
+    `);
+    assert.equal(resumed.rows[0].session_id, '00000000-0000-4000-8000-000000000010');
+
+    const session = await db.query<{
+      status: string;
+      automatic_resume: string;
+      previous_error: string;
+    }>(`
+      select status,
+        progress ->> 'automaticResume' as automatic_resume,
+        response_metadata #>> '{automaticResume,previousErrorCode}' as previous_error
+      from public.content_writing_sessions
+      where id = '00000000-0000-4000-8000-000000000010'
+    `);
+    assert.deepEqual(session.rows[0], {
+      status: 'retry_scheduled',
+      automatic_resume: 'true',
+      previous_error: 'content_writing_step_output_invalid',
+    });
+
+    const item = await db.query<{ status: string; attempt_count: number; session_sequence: number }>(`
+      select status, attempt_count, session_sequence
+      from public.content_writing_automation_items
+      where id = '00000000-0000-4000-8000-000000000040'
+    `);
+    assert.deepEqual(item.rows[0], { status: 'writing', attempt_count: 2, session_sequence: 1 });
+
+    const steps = await db.query<{ step_key: string; status: string; output_text: string }>(`
+      select step_key, status, output_text
+      from public.content_writing_steps order by step_key
+    `);
+    assert.deepEqual(steps.rows, [
+      { step_key: 'competitor_index', status: 'pending', output_text: 'malformed raw output' },
+      { step_key: 'outline', status: 'completed', output_text: 'saved outline' },
+    ]);
+
+    await db.exec(`
+      update public.resume_readiness_control set signature = 'changed-signature';
+      update public.content_writing_sessions
+      set status = 'failed', last_error_code = 'content_writing_step_output_invalid',
+          last_error = 'Invalid JSON', completed_at = now()
+      where id = '00000000-0000-4000-8000-000000000010';
+      update public.content_writing_automation_items
+      set status = 'ready', eligible_at = now() - interval '1 minute'
+      where id = '00000000-0000-4000-8000-000000000040';
+    `);
+    const changedInput = await db.query<{ session_id: string | null }>(`
+      select public.resume_next_automatic_content_writing_session()::text as session_id
+    `);
+    assert.equal(changedInput.rows[0].session_id, null);
+  } finally {
+    await db.close();
+  }
+});
+
 test('recoverable admin action remains server-only and excludes permanent failures', async () => {
   const migration = await readFile(
     path.join(root, 'supabase', 'migrations', '20260921000000_automation_retry_recovery.sql'),

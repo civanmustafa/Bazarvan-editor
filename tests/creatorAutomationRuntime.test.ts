@@ -255,6 +255,7 @@ test('creator scheduler ignores the all-null composite returned when no queue it
     state.rpcCalls.map((call: any) => call.name),
     [
       'recover_due_content_writing_automation_items',
+      'resume_next_automatic_content_writing_session',
       'claim_next_content_writing_automation_item',
       'enqueue_next_automatic_writing_competitor_preparation',
     ],

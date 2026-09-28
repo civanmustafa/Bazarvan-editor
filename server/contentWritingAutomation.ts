@@ -277,6 +277,20 @@ const claimNextItem = async (
   return item;
 };
 
+const resumeDueAutomaticContentWritingSession = async (): Promise<string | null> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'resume_next_automatic_content_writing_session',
+  );
+  if (error) {
+    // During a rolling deployment the old scheduler can safely keep using its
+    // new-session retry path until the resume migration reaches PostgreSQL.
+    if (isContentWritingAutomationSchemaUnavailableError(error)) return null;
+    throw error;
+  }
+  const sessionId = Array.isArray(data) ? textValue(data[0]) : textValue(data);
+  return sessionId || null;
+};
+
 const enqueueNextAutomaticCompetitorPreparation = async (
   settings: ContentWritingAutomationSettings,
 ): Promise<void> => {
@@ -509,6 +523,15 @@ export const scheduleNextAutomaticContentWritingSession = async (
 
   await recoverDueTransientItems(settings);
   await reconcileBlockedPrerequisiteItems(settings);
+
+  const resumedSessionId = await resumeDueAutomaticContentWritingSession();
+  if (resumedSessionId) {
+    console.log(
+      `[content-writing-automation] Resumed automatic session ${resumedSessionId}`
+      + ' from its failed step; completed steps were preserved.',
+    );
+    return null;
+  }
 
   const item = await claimNextItem(workerId, settings);
   if (!item) {

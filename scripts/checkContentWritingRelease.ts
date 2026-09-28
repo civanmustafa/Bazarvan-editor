@@ -81,6 +81,7 @@ const requiredWorkerMarkers = [
   'call_to_action',
   'faqIndependenceGuard',
   'finalSectionStructureGuard',
+  'resume_next_automatic_content_writing_session',
   'claim_next_content_writing_automation_item',
   'automatic_ready',
 ];

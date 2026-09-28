@@ -40,8 +40,8 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-121/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-121/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-122/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-122/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_FUNCTIONS/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_CLIENT_PRIVILEGES/);
   assert.match(guide, /20260929000000_unified_duplicate_cleanup\.sql/);
@@ -49,6 +49,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20260922000000_durable_automation_coordinator_and_competitor_tiers\.sql/);
   assert.match(guide, /20260922010000_enforce_external_dependency_on_child\.sql/);
   assert.match(guide, /20260924000000_remove_competitor_content_acceptance_gates\.sql/);
+  assert.match(guide, /20260930000000_automatic_content_writing_session_resume\.sql/);
   assert.match(verifyScript, /ARTICLE_COMPETITOR_SOURCE_ORIGIN/);
   assert.match(verifyScript, /ARTICLE_COMPETITOR_CANONICAL_PROJECTION/);
   assert.match(verifyScript, /CONTENT_WRITING_CANONICAL_COMPETITOR_READINESS/);
@@ -132,5 +133,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(verifyScript, /UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP/);
   assert.match(verifyScript, /READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED/);
   assert.match(verifyScript, /AUTOMATIC_WRITING_SCHEMA_VERSION/);
+  assert.match(verifyScript, /AUTOMATIC_WRITING_SESSION_RESUME_FUNCTION/);
+  assert.match(verifyScript, /AUTOMATIC_WRITING_SESSION_RESUME_ACCESS/);
   assert.match(verifyScript, /AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER/);
 });
