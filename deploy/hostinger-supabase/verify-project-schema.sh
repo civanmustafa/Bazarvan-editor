@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-119}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-120}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-64}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -205,6 +205,11 @@ readonly MANUAL_WRITING_PRIORITY_FUNCTION="$(sql_scalar "select to_regprocedure(
 [[ "${MANUAL_WRITING_PRIORITY_FUNCTION}" == "t" ]] || fail "Manual writing priority and queue diagnostics are missing."
 readonly MANUAL_WRITING_QUEUE_PRIVILEGES="$(sql_scalar "select has_function_privilege('anon', 'public.get_content_writing_queue_state(uuid[],uuid)', 'execute') or has_function_privilege('authenticated', 'public.get_content_writing_queue_state(uuid[],uuid)', 'execute')")"
 [[ "${MANUAL_WRITING_QUEUE_PRIVILEGES}" == "f" ]] || fail "Writing queue diagnostics must remain behind the article-access API."
+
+readonly DUPLICATE_CLEANUP_QUEUE="$(sql_scalar "select to_regprocedure('public.enqueue_duplicate_cleanup(uuid,uuid,text,jsonb)') is not null and position('duplicate_cleanup' in pg_get_constraintdef(oid)) > 0 from pg_constraint where conrelid = 'public.ai_external_analysis_jobs'::regclass and conname = 'ai_external_analysis_jobs_job_type_check'")"
+[[ "${DUPLICATE_CLEANUP_QUEUE}" == "t" ]] || fail "External duplicate cleanup queue is missing."
+readonly DUPLICATE_CLEANUP_PRIVILEGES="$(sql_scalar "select has_function_privilege('authenticated', 'public.enqueue_duplicate_cleanup(uuid,uuid,text,jsonb)', 'execute') or has_function_privilege('anon', 'public.enqueue_duplicate_cleanup(uuid,uuid,text,jsonb)', 'execute')")"
+[[ "${DUPLICATE_CLEANUP_PRIVILEGES}" == "f" ]] || fail "Duplicate cleanup must remain behind the write-access API."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"

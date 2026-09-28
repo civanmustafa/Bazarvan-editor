@@ -5,27 +5,25 @@ import type { Editor } from '@tiptap/core';
 import type { Keywords } from '../types';
 import { useEditorSelector } from './EditorContext';
 import { useAISelector } from './AIContext';
+import { enqueueDuplicateCleanup, loadDuplicateCleanupJobs, cancelExternalAnalysisJob, type ExternalAnalysisJobRow } from '../utils/externalAnalysis';
+import { restoreCleanupJob, type CleanupSession } from '../utils/duplicateCleanupSession';
+export type { CleanupSession } from '../utils/duplicateCleanupSession';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 import {
   batchCleanupSnapshot, buildCleanupPrompt, cleanupPhraseCounts, cleanupRangeMatches,
   collectCleanupSnapshot, inspectCleanupImpact, mapCleanupRange, parseCleanupPlan, simulateCleanup,
-  type CleanupDecision, type CleanupPatch, type CleanupSnapshot, type CleanupUndo,
+  type CleanupPatch, type CleanupUndo,
 } from '../utils/duplicateCleanup';
 
-export type CleanupSession = {
-  id: number;
-  snapshot: CleanupSnapshot;
-  patches: CleanupPatch[];
-  decisions: CleanupDecision[];
-  running: boolean;
-  completed: number;
-  total: number;
-  errors: string[];
-  counts: Map<string, number>;
-  predicted: Map<string, number>;
-  wordsRemoved: number;
-  stopping: boolean;
-  undo: { patches: string[]; ranges: CleanupUndo[]; wordsRemoved: number }[];
+export type CleanupTransport = {
+  enqueue: (articleId: string, input: Record<string, unknown>) => Promise<{ job: ExternalAnalysisJobRow }>;
+  load: (articleId: string, versions?: Record<string, string>) => Promise<ExternalAnalysisJobRow[]>;
+  cancel: (articleId: string, jobId: string) => Promise<unknown>;
+};
+const externalTransport: CleanupTransport = {
+  enqueue: async (articleId, input) => { const result = await enqueueDuplicateCleanup(articleId, input); return { job: result.job }; },
+  load: loadDuplicateCleanupJobs,
+  cancel: cancelExternalAnalysisJob,
 };
 
 export type CleanupContextValue = {
@@ -53,11 +51,12 @@ export const DuplicateCleanupProvider: React.FC<{ children: React.ReactNode }> =
   const keywords = useEditorSelector(value => value.keywords);
   const title = useEditorSelector(value => value.title);
   const runAi = useAISelector(value => value.runPlainAiAnalysis);
-  const value = useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi });
+  const ready = useEditorSelector(value => value.isArticleContentSettledForAutomation);
+  const value = useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external: externalTransport, ready });
   return <CleanupContext.Provider value={value}>{children}</CleanupContext.Provider>;
 };
 
-export function useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi }: {
+export function useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external, ready = true }: {
   editor: Editor | null;
   articleKey: string;
   articleId: string | null;
@@ -65,6 +64,8 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   keywords: Keywords;
   title: string;
   runAi: (prompt: string, options?: { source?: string; commandId?: string; commandLabel?: string; action?: string }) => Promise<string>;
+  external?: CleanupTransport;
+  ready?: boolean;
 }): CleanupContextValue {
   const [sessions, setSessions] = useState<Record<number, CleanupSession>>({});
   const [busy, setBusy] = useState(false);
@@ -92,6 +93,45 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
     publish({});
     return () => { generation.current++; };
   }, [scope, editor]);
+
+  useEffect(() => {
+    if (!external || !articleId || !editor || !ready) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let failures = 0;
+    const refresh = async () => {
+      try {
+        const versions = Object.fromEntries(Object.values(sessionsRef.current).filter(session => session.externalJobId)
+          .map(session => [session.externalJobId!, session.externalUpdatedAt || '']));
+        const jobs = await external.load(articleId, versions);
+        if (disposed || editor.isDestroyed) return;
+        failures = 0;
+        const next = { ...sessionsRef.current };
+        for (const job of jobs) {
+          if (job.input_snapshot?.language !== language || job.input_snapshot?.version !== 1) continue;
+          const category = Number(job.input_snapshot.category);
+          const previous = next[category];
+          if (previous?.externalJobId && previous.externalJobId !== job.id
+            && Date.parse(previous.externalCreatedAt || '') >= Date.parse(job.created_at)) continue;
+          if (previous?.externalJobId === job.id && previous.externalUpdatedAt === job.updated_at) continue;
+          // Never overwrite a locally submitted start with an older response.
+          if (previous && !previous.externalJobId && running.current) continue;
+          next[category] = restoreCleanupJob(job, editor.state.doc, previous);
+        }
+        publish(next);
+        setBusy(running.current || Object.values(next).some(session => session.running));
+      } catch {
+        if (disposed) return;
+        failures++;
+        if (failures === 3) for (const category of Object.keys(sessionsRef.current)) update(Number(category), session => ({ ...session,
+          errors: [...session.errors, language === 'ar' ? 'تعذر متابعة الخادم مؤقتًا؛ المهمة تستمر خارجيًا.' : 'Connection interrupted; the job continues on the server.'] }));
+      } finally {
+        if (!disposed) timer = setTimeout(refresh, Object.values(sessionsRef.current).some(session => session.running) ? 2000 : 15000);
+      }
+    };
+    void refresh();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [scope, editor, external, ready]);
 
   useEffect(() => {
     if (!editor) return;
@@ -133,14 +173,15 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   }, [editor]);
 
   const generate = async (category: number) => {
-    if (!editor || editor.isDestroyed || !editor.isEditable || running.current) return;
+    if (!editor || editor.isDestroyed || !editor.isEditable || running.current || !ready
+      || Object.values(sessionsRef.current).some(session => session.running)) return;
     const requestScope = scope;
     const requestId = ++generation.current;
     stopped.current = false;
     running.current = true;
     setBusy(true);
     const doc = editor.state.doc;
-    const analysis = runDuplicateAnalysis(editor.getText(), keywords, 0, language);
+    const analysis = runDuplicateAnalysis(doc.textBetween(0, doc.content.size, '\n\n', '\uFFFC'), keywords, 0, language);
     const phrases = analysis.duplicateAnalysis[category as keyof typeof analysis.duplicateAnalysis] || [];
     const snapshot = collectCleanupSnapshot(doc, phrases, category, language);
     const batches = batchCleanupSnapshot(snapshot);
@@ -150,6 +191,35 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
       wordsRemoved: sessionsRef.current[category]?.wordsRemoved || 0,
       undo: sessionsRef.current[category]?.undo || [] } });
     const isCurrent = () => generation.current === requestId && scopeRef.current === requestScope && !editor.isDestroyed;
+    if (external) {
+      try {
+        if (!articleId) throw new Error(language === 'ar' ? 'احفظ المقالة قبل تشغيل التوليد الخارجي.' : 'Save the article before external generation.');
+        const { job } = await external.enqueue(articleId, { requestId: crypto.randomUUID(), category, language,
+          document: doc.toJSON(), keywords, title });
+        if (!isCurrent()) return;
+        const current = sessionsRef.current[category];
+        const sameSource = JSON.stringify(job.input_snapshot?.document) === JSON.stringify(doc.toJSON());
+        publish({ ...sessionsRef.current, [category]: restoreCleanupJob(job, editor.state.doc,
+          sameSource ? { ...current, externalJobId: job.id } : undefined) });
+        if (stopped.current) {
+          update(category, session => ({ ...session, stopping: true }));
+          try { await external.cancel(articleId, job.id); }
+          catch (error) {
+            if (isCurrent()) update(category, session => ({ ...session, stopping: false,
+              errors: [error instanceof Error ? error.message : String(error)] }));
+          }
+        }
+      } catch (error) {
+        if (isCurrent()) update(category, current => ({ ...current, running: false,
+          errors: [error instanceof Error ? error.message : String(error)] }));
+      } finally {
+        if (isCurrent()) {
+          running.current = false;
+          setBusy(Object.values(sessionsRef.current).some(session => session.running));
+        }
+      }
+      return;
+    }
     const accepted: CleanupPatch[] = [];
     try {
       for (const batch of batches) {
@@ -289,5 +359,11 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   return { sessions, busy, generate, apply, skip, locate, undo, stop: () => {
     stopped.current = true;
     publish(Object.fromEntries(Object.entries(sessionsRef.current).map(([key, session]) => [key, session.running ? { ...session, stopping: true } : session])));
+    if (external && articleId) for (const [category, session] of Object.entries(sessionsRef.current)) {
+      if (session.running && session.externalJobId) void external.cancel(articleId, session.externalJobId).catch(error => {
+        if (scopeRef.current === scope) update(Number(category), current => ({ ...current, stopping: false,
+          errors: [...current.errors, error instanceof Error ? error.message : String(error)] }));
+      });
+    }
   } };
 }

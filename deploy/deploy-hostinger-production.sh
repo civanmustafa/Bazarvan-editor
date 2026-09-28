@@ -87,7 +87,7 @@ npm run build
 
 for app_name in "${PM2_APPS[@]}"; do
   if [[ "${app_name}" == "bazarvan-staging-ai-worker" ]]; then
-    EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command \
+    EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup \
       pm2 restart "${app_name}" --update-env
   else
     pm2 restart "${app_name}" --update-env

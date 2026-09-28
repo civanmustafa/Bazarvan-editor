@@ -36,6 +36,7 @@ const createProbeClient = (
               'content_brief_generation',
               'meta_description_generation',
               'engineering_command',
+              'duplicate_cleanup',
               'full_article_pipeline',
               'content_writing_preparation',
             ]);
@@ -170,6 +171,17 @@ test('readiness detects an unclaimed Gemini queue independently from competitor 
   assert.equal(result.workerGroups.ai.stalledQueuedCount, 2);
   assert.equal(result.stalledQueuedCount, 2);
   assert.match(result.detail, /ai worker queue stalled: queued=2, expired=0/);
+});
+
+test('generic phrase cleanup is monitored by the external Gemini worker', async () => {
+  const readiness = await importReadiness();
+  readiness.__resetExternalAnalysisQueueReadinessForTests();
+  const result = await readiness.checkExternalAnalysisQueueReadiness({
+    client: createProbeClient([{ job_type: 'duplicate_cleanup', status: 'queued', created_at: '2026-09-28T11:00:00.000Z' }]),
+    now: Date.parse('2026-09-28T12:00:00.000Z'), force: true, firecrawlConfigured: true,
+  });
+  assert.equal(result.workerGroups.ai.stalledQueuedCount, 1);
+  assert.equal(result.checks.noStalledAiJobs, false);
 });
 
 test('a live Gemini lease prevents its own queued work from being reported as stalled', async () => {

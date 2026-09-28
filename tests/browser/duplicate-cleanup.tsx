@@ -4,7 +4,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import type { Keywords } from '../../types';
 import { useDuplicateCleanupController } from '../../contexts/DuplicateCleanupContext';
-import { DuplicateCleanupReviewView } from '../../components/DuplicateCleanupReview';
+import { DuplicateCleanupReviewView, DuplicateCleanupStatusView } from '../../components/DuplicateCleanupReview';
 import '../../styles/global.css';
 
 const prefix = 'من المهم أن نلاحظ أن ';
@@ -52,7 +52,9 @@ function Fixture() {
     <p role="status">الطلبات: {requests}، المواضع المرسلة: {sent}</p>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 24, alignItems: 'start' }}>
       <div style={{ borderTop: '1px solid #ddd', paddingTop: 12, lineHeight: 2 }}><EditorContent editor={editor} /></div>
-      <DuplicateCleanupReviewView category={4} controller={controller} ar />
+      <div><DuplicateCleanupStatusView session={controller.sessions[4]} ar /><DuplicateCleanupReviewView category={4} controller={controller} ar />
+        {controller.sessions[4]?.snapshot.phrases.map(phrase => <div key={phrase.id} data-phrase-row={phrase.key}><h2 className="mt-4 text-sm font-bold">{phrase.text}</h2><DuplicateCleanupReviewView category={4} phraseKey={phrase.key} controller={controller} ar /></div>)}
+      </div>
     </div>
   </main>;
 }

@@ -4,6 +4,7 @@ import { useDuplicateCleanup } from '../contexts/DuplicateCleanupContext';
 import type { CleanupContextValue } from '../contexts/DuplicateCleanupContext';
 import { useUser } from '../contexts/UserContext';
 import type { CleanupPatch } from '../utils/duplicateCleanup';
+import { cleanupGenerationState } from '../utils/duplicateCleanupSession';
 
 const iconClass = 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[#d4af37]/15 disabled:opacity-40 disabled:cursor-not-allowed';
 
@@ -13,19 +14,42 @@ export const DuplicateCleanupReview: React.FC<{ category: number }> = ({ categor
   return <DuplicateCleanupReviewView category={category} controller={controller} ar={uiLanguage === 'ar'} />;
 };
 
-export const DuplicateCleanupReviewView: React.FC<{ category: number; controller: CleanupContextValue; ar: boolean }> = ({ category, controller, ar }) => {
+export const DuplicateCleanupPhraseReview: React.FC<{ category: number; phraseKey: string }> = ({ category, phraseKey }) => {
+  const controller = useDuplicateCleanup();
+  const { uiLanguage } = useUser();
+  return <DuplicateCleanupReviewView category={category} phraseKey={phraseKey} controller={controller} ar={uiLanguage === 'ar'} />;
+};
+
+export const DuplicateCleanupStatus: React.FC<{ category: number; ar: boolean }> = ({ category, ar }) => {
+  const session = useDuplicateCleanup().sessions[category];
+  return <DuplicateCleanupStatusView session={session} ar={ar} />;
+};
+export const DuplicateCleanupStatusView: React.FC<{ session?: CleanupContextValue['sessions'][number]; ar: boolean }> = ({ session, ar }) => {
+  const state = cleanupGenerationState(session);
+  const label = { not_started: ar ? 'لم تتم' : 'Not generated', partial: ar ? 'تمت جزئيًا' : 'Partial', completed: ar ? 'اكتملت' : 'Complete' }[state];
+  return <span className={`inline-flex items-center gap-1 text-[10px] ${state === 'completed' ? 'text-emerald-700 dark:text-emerald-300' : state === 'partial' ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`} role="status" aria-label={ar ? `حالة التوليد: ${label}` : `Generation status: ${label}`}>
+    {session?.running && <RefreshCw size={11} className="animate-spin" />}{label}
+    {session?.running && <span>{session.externalStatus === 'queued' ? (ar ? 'في الطابور' : 'Queued') : (ar ? 'جارٍ التوليد' : 'Generating')}</span>}
+  </span>;
+};
+
+export const DuplicateCleanupReviewView: React.FC<{ category: number; controller: CleanupContextValue; ar: boolean; phraseKey?: string }> = ({ category, controller, ar, phraseKey }) => {
   const { sessions, busy, generate, apply, skip, locate, undo, stop } = controller;
   const session = sessions[category];
   const [selected, setSelected] = useState<Set<string>>(new Set());
   useEffect(() => { setSelected(new Set()); }, [session?.id]);
   if (!session) return null;
-  const pending = session.patches.filter(patch => patch.status === 'pending');
+  const phrase = phraseKey ? session.snapshot.phrases.find(item => item.key === phraseKey) : undefined;
+  if (phraseKey && !phrase) return null;
+  const visiblePatches = phrase ? session.patches.filter(patch => patch.occurrenceIds.some(id => phrase.occurrenceIds.includes(id))) : [];
+  const pending = (phrase ? visiblePatches : session.patches).filter(patch => patch.status === 'pending');
   const selectedIds = pending.filter(patch => selected.has(patch.id)).map(patch => patch.id);
   const unresolved = session.snapshot.phrases.filter(phrase => (session.predicted.get(phrase.id) || 0) > 1).length;
   const label = (patch: CleanupPatch) => ({ pending: ar ? 'بانتظار المراجعة' : 'Pending', applied: ar ? 'مطبّق' : 'Applied',
     stale: ar ? 'يحتاج إلى تحديث' : 'Needs refresh', skipped: ar ? 'متجاهَل' : 'Skipped', unnecessary: ar ? 'لم يعد لازمًا' : 'No longer needed' }[patch.status]);
   return (
-    <section className="mt-2 border-t border-gray-200 pt-2 text-xs text-gray-800 dark:border-[#3C3C3C] dark:text-gray-200" aria-label={ar ? 'اقتراحات تنقية العبارات' : 'Phrase cleanup suggestions'}>
+    <section className="mt-2 border-t border-gray-200 pt-2 text-xs text-gray-800 dark:border-[#3C3C3C] dark:text-gray-200" data-cleanup-phrase={phrase?.key} aria-label={phrase ? (ar ? `اقتراحات: ${phrase.text}` : `Suggestions: ${phrase.text}`) : (ar ? 'متابعة تنقية العبارات' : 'Phrase cleanup progress')}>
+      {!phrase && <>
       <div className="flex flex-wrap items-center justify-between gap-1">
         <strong>{ar ? 'تنقية العبارات العامة' : 'General phrase cleanup'}</strong>
         <div className="flex items-center">
@@ -38,13 +62,17 @@ export const DuplicateCleanupReviewView: React.FC<{ category: number; controller
         {ar ? `المواضع المحللة: ${session.decisions.length} من ${session.snapshot.occurrences.length}` : `Reviewed occurrences: ${session.decisions.length} of ${session.snapshot.occurrences.length}`}
         {session.running && <span className="block">{session.stopping ? (ar ? 'إيقاف بعد انتهاء الطلب الجاري' : 'Stopping after the current request') : ar ? `جارٍ التوليد (${session.completed}/${session.total})` : `Generating (${session.completed}/${session.total})`}</span>}
         <span className="block">{ar ? `عبارات ستبقى مكررة بعد الاقتراحات: ${unresolved}` : `Phrases still repeated after proposals: ${unresolved}`}</span>
+        <span className="block">{ar ? `عبارات مكررة حاليًا: ${session.snapshot.phrases.filter(phrase => (session.counts.get(phrase.id) || 0) > 1).length}` : `Currently repeated: ${session.snapshot.phrases.filter(phrase => (session.counts.get(phrase.id) || 0) > 1).length}`}</span>
         <span className="block">{ar ? `صافي الكلمات المحذوفة بالتطبيق: ${session.wordsRemoved}` : `Net words removed by applied edits: ${session.wordsRemoved}`}</span>
       </p>
       {session.errors.length > 0 && <div role="alert" className="my-2 space-y-1 break-words text-red-700 dark:text-red-300">{session.errors.map((error, index) => <p key={index}>{error}</p>)}</div>}
+      {pending.length > 0 && <button type="button" className="my-2 inline-flex items-center gap-1 rounded-md bg-[#d4af37] px-2 py-1.5 font-semibold text-black disabled:opacity-40" disabled={session.running} onClick={() => apply(category, pending.map(patch => patch.id))}><Check size={14} />{ar ? `تطبيق كل الاقتراحات (${pending.length})` : `Apply all suggestions (${pending.length})`}</button>}
+      </>}
+      {phrase && <>
       <div className="divide-y divide-gray-200 dark:divide-[#3C3C3C]">
-        {session.snapshot.phrases.map(phrase => (
+        {[phrase].map(phrase => (
           <details key={phrase.id} className="py-2">
-            <summary className="cursor-pointer break-words font-semibold">{phrase.text}
+            <summary className="cursor-pointer break-words font-semibold">{ar ? 'تفاصيل المواضع' : 'Occurrence details'}
               <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">{ar ? `حاليًا: ${session.counts.get(phrase.id) ?? 0} · بعد الاقتراحات: ${session.predicted.get(phrase.id) ?? 0}` : `Current: ${session.counts.get(phrase.id) ?? 0} · Proposed: ${session.predicted.get(phrase.id) ?? 0}`}</span>
             </summary>
             {phrase.occurrenceIds.map(id => {
@@ -66,7 +94,7 @@ export const DuplicateCleanupReviewView: React.FC<{ category: number; controller
         <button type="button" className="inline-flex items-center gap-1 rounded-md bg-[#d4af37] px-2 py-1.5 font-semibold text-black disabled:opacity-40" disabled={!selectedIds.length || session.running} onClick={() => apply(category, selectedIds)}><Check size={14} />{ar ? `تطبيق المحدد (${selectedIds.length})` : `Apply selected (${selectedIds.length})`}</button>
       </div>}
       <div className="space-y-2">
-        {session.patches.map(patch => {
+        {visiblePatches.map(patch => {
           const unit = session.snapshot.units.find(item => item.id === patch.unitId)!;
           const prefix = unit.text.slice(0, patch.unitOffset);
           const suffix = unit.text.slice(patch.unitOffset + patch.original.length);
@@ -92,6 +120,7 @@ export const DuplicateCleanupReviewView: React.FC<{ category: number; controller
           </article>;
         })}
       </div>
+      </>}
     </section>
   );
 };

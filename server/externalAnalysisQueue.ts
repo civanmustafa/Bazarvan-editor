@@ -7,6 +7,7 @@ export type ExternalAnalysisJobType =
   | 'full_article_pipeline'
   | 'content_writing_preparation'
   | 'engineering_command'
+  | 'duplicate_cleanup'
   | 'competitor_discovery'
   | 'competitor_extraction';
 

@@ -6,6 +6,7 @@ import './metaDescriptionGenerationExecutor';
 import './fullArticlePipelineExecutor';
 import './contentWritingCompetitorPreparationExecutor';
 import './externalEngineeringAnalysisExecutor';
+import './duplicateCleanupExecutor';
 import './competitorDiscoveryExecutor';
 import './competitorExtractionExecutor';
 

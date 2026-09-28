@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { prepareCleanupJobInput } from '../server/duplicateCleanupJob';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireArticleWriteAccess } from './articleAccessPolicy';
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
@@ -758,6 +759,38 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
   await requireArticleWriteAccess(supabase, article.id, profile.id);
   const action = toTrimmedString(body.action);
 
+  if (action === 'duplicate_cleanup_status') {
+    const { data: jobs, error } = await supabase.from('ai_external_analysis_jobs').select('id,category:input_snapshot->category,updated_at')
+      .eq('article_id', article.id).eq('job_type', 'duplicate_cleanup')
+      .order('created_at', { ascending: false }).limit(70);
+    if (error) throw error;
+    const categories = new Set<number>();
+    const latest = ((jobs || []) as unknown as Array<Record<string, any>>).filter(job => {
+      const category = Number(job.category);
+      if (categories.has(category)) return false;
+      categories.add(category); return true;
+    });
+    const known = isRecord(body.versions) ? body.versions : {};
+    const changed = latest.filter(job => known[job.id] !== job.updated_at).map(job => job.id);
+    if (!changed.length) return { status: 200, body: { ok: true, jobs: [] } };
+    const { data: changedJobs, error: readError } = await supabase.from('ai_external_analysis_jobs')
+      .select(FULL_JOB_SELECT).in('id', changed).eq('article_id', article.id);
+    if (readError) throw readError;
+    return { status: 200, body: { ok: true, jobs: changedJobs || [] } };
+  }
+  if (action === 'duplicate_cleanup') {
+    let input;
+    try { input = prepareCleanupJobInput(body); }
+    catch (error) { throw new ExternalAnalysisApiError({ message: error instanceof Error ? error.message : 'Invalid cleanup input.', code: 'invalid_cleanup_input' }); }
+    const requestId = toTrimmedString(body.requestId);
+    if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new ExternalAnalysisApiError({ message: 'A cleanup request ID is required.' });
+    const { data, error } = await supabase.rpc('enqueue_duplicate_cleanup', {
+      p_article_id: article.id, p_requested_by: profile.id, p_request_id: requestId, p_input: input,
+    });
+    if (error) throw error;
+    return { status: 202, body: { ok: true, job: Array.isArray(data) ? data[0] : data } };
+  }
+
   if (action === 'list') {
     const limit = Math.max(1, Math.min(250, Math.round(Number(body.limit) || 100)));
     const { data: jobs, error } = await supabase
@@ -890,7 +923,7 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
   }
 
   throw new ExternalAnalysisApiError({
-    message: 'action must be list, semantic, full_pipeline, engineering, use_default_commands, cancel, cancel_all, or retry.',
+    message: 'action must be list, semantic, full_pipeline, engineering, duplicate_cleanup, duplicate_cleanup_status, use_default_commands, cancel, cancel_all, or retry.',
     code: 'invalid_action',
   });
 };

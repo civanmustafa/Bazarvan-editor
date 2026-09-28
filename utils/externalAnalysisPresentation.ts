@@ -23,6 +23,7 @@ const JOB_TYPE_LABELS: Record<string, { ar: string; en: string }> = {
   semantic_keywords_lsi: { ar: 'الصيغ البديلة وLSI ومقترحات Google', en: 'Alternatives, LSI, and Google suggestions' },
   content_brief_generation: { ar: 'توليد موجز المقالة الذكي', en: 'Smart article brief generation' },
   meta_description_generation: { ar: 'كتابة وصف الميتا', en: 'Meta description generation' },
+  duplicate_cleanup: { ar: 'تنقية العبارات العامة المكررة', en: 'General phrase cleanup' },
   full_article_pipeline: { ar: 'إنشاء المقالة بالكامل', en: 'Complete article workflow' },
   content_writing_preparation: { ar: 'تجهيز منافسي كتابة المقالة', en: 'Writing competitor preparation' },
   engineering_command: { ar: 'تحليل أمر هندسي', en: 'Engineering command analysis' },

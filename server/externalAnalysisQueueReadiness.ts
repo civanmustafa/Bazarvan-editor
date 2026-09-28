@@ -15,6 +15,7 @@ const EXTERNAL_ANALYSIS_WORKER_GROUPS: Record<ExternalAnalysisWorkerGroupId, rea
     'content_brief_generation',
     'meta_description_generation',
     'engineering_command',
+    'duplicate_cleanup',
   ],
   fullArticlePipeline: ['full_article_pipeline'],
   contentWritingPreparation: ['content_writing_preparation'],

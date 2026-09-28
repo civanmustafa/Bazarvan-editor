@@ -7,7 +7,8 @@ import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { useInteractionSelector } from '../contexts/InteractionContext';
 import { useDuplicateCleanup } from '../contexts/DuplicateCleanupContext';
-import { DuplicateCleanupReview } from './DuplicateCleanupReview';
+import { DuplicateCleanupReview, DuplicateCleanupPhraseReview, DuplicateCleanupStatus } from './DuplicateCleanupReview';
+import { duplicatePhraseKey } from '../utils/analysis/runDuplicateAnalysis';
 
 const INITIAL_VISIBLE_PHRASES = 80;
 const PHRASE_BATCH_SIZE = 80;
@@ -18,6 +19,8 @@ type PhraseListProps = {
   uiLanguage: 'ar' | 'en';
   copyTitle: string;
   onPhraseClick: (phrase: DuplicatePhrase, color: string) => void;
+  category?: number;
+  language?: 'ar' | 'en';
 };
 
 const PhraseList: React.FC<PhraseListProps> = React.memo(({
@@ -26,6 +29,8 @@ const PhraseList: React.FC<PhraseListProps> = React.memo(({
   uiLanguage,
   copyTitle,
   onPhraseClick,
+  category,
+  language = 'ar',
 }) => {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_PHRASES);
   const phraseSignature = useMemo(
@@ -52,9 +57,8 @@ const PhraseList: React.FC<PhraseListProps> = React.memo(({
           return (
             <li
               key={phrase.text}
-              onClick={() => onPhraseClick(phrase, accentColor)}
-              className={`group relative flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${uiLanguage === 'ar' ? 'pr-5' : 'pl-5'} ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/30' : 'bg-gray-50 dark:bg-[#2A2A2A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}
             >
+              <div onClick={() => onPhraseClick(phrase, accentColor)} className={`group relative flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${uiLanguage === 'ar' ? 'pr-5' : 'pl-5'} ${isHighlighted ? 'bg-[#d4af37]/10 dark:bg-[#d4af37]/30' : 'bg-gray-50 dark:bg-[#2A2A2A] hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20'}`}>
               <div
                 className={`absolute top-0 h-full w-1.5 ${uiLanguage === 'ar' ? 'right-0 rounded-r-md' : 'left-0 rounded-l-md'}`}
                 style={{ backgroundColor: accentColor }}
@@ -78,6 +82,8 @@ const PhraseList: React.FC<PhraseListProps> = React.memo(({
                   <Copy size={14} />
                 </button>
               </div>
+              </div>
+              {category && <DuplicateCleanupPhraseReview category={category} phraseKey={duplicatePhraseKey(phrase.text, language)} />}
             </li>
           )
         })}
@@ -110,6 +116,7 @@ const DuplicatesTab: React.FC = () => {
   const cleanup = useDuplicateCleanup();
   const { uiLanguage } = useUser();
   const editor = useEditorSelector(context => context.editor);
+  const articleLanguage = useEditorSelector(context => context.articleLanguage);
   const analysisResults = useEditorSelector(context => context.analysisResults);
   const clearAllHighlights = useInteractionSelector(context => context.clearAllHighlights);
   const applyHighlights = useInteractionSelector(context => context.applyHighlights);
@@ -219,6 +226,12 @@ const DuplicatesTab: React.FC = () => {
                 highlightedItem.length === totalPhrases &&
                 phrases.every(p => (highlightedItem as any[]).some(h => h.text === p.text));
             const commonPhrases = phrases.filter(p => !p.containsKeyword);
+            const reviewPhrases = [...commonPhrases];
+            for (const phrase of cleanup.sessions[Number(key)]?.snapshot.phrases || []) {
+              if (!reviewPhrases.some(item => duplicatePhraseKey(item.text, articleLanguage) === phrase.key)) {
+                reviewPhrases.push({ text: phrase.text, count: cleanup.sessions[Number(key)].counts.get(phrase.id) || 0, containsKeyword: false, locations: [] });
+              }
+            }
             const keywordPhrases = phrases.filter(p => p.containsKeyword);
 
             return (
@@ -228,7 +241,7 @@ const DuplicatesTab: React.FC = () => {
                         className="w-full p-[0.1875rem] transition cursor-pointer hover:bg-[#d4af37]/10 dark:hover:bg-[#d4af37]/20"
                     >
                         <div className="flex justify-between items-center">
-                            <span className="font-bold text-sm text-[#333333] dark:text-[#C7C7C7]">{`${t.phrases} ${nGramMap[key]}`}</span>
+                            <div className="min-w-0"><span className="block font-bold text-sm text-[#333333] dark:text-[#C7C7C7]">{`${t.phrases} ${nGramMap[key]}`}</span><DuplicateCleanupStatus category={Number(key)} ar={uiLanguage === 'ar'} /></div>
                             <div className="flex items-center gap-2">
                                 <button
                                     type="button"
@@ -270,9 +283,11 @@ const DuplicatesTab: React.FC = () => {
                     {openSections[key] && (
                         <div className="p-[0.1875rem] border-t border-gray-200 dark:border-[#3C3C3C] bg-gray-50/50 dark:bg-[#1F1F1F]">
                           <DuplicateCleanupReview category={Number(key)} />
-                          {commonPhrases.length > 0 && (
+                          {reviewPhrases.length > 0 && (
                             <PhraseList
-                              phrases={commonPhrases}
+                              phrases={reviewPhrases}
+                              category={Number(key)}
+                              language={articleLanguage}
                               highlightedItem={highlightedItem}
                               uiLanguage={uiLanguage}
                               copyTitle={t.copyAll}

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Keywords } from '../types.ts';
 
 const bundle = await build({ stdin: {
-  contents: `export * from './utils/duplicateCleanup'; export * from './utils/analysis/runDuplicateAnalysis'; export { Schema } from '@tiptap/pm/model'; export { Transform } from '@tiptap/pm/transform';`,
+  contents: `export * from './utils/duplicateCleanup'; export * from './utils/duplicateCleanupSession'; export * from './utils/duplicateCleanupWorkflow'; export * from './server/duplicateCleanupJob'; export * from './utils/analysis/runDuplicateAnalysis'; export { Schema } from '@tiptap/pm/model'; export { Transform } from '@tiptap/pm/transform';`,
   resolveDir: fileURLToPath(new URL('..', import.meta.url)), loader: 'ts',
 }, bundle: true, format: 'esm', platform: 'node', target: 'node22', write: false });
 const engine = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
@@ -21,6 +21,118 @@ const makeSnapshot = (doc: any, text = phrase, language = 'ar') => engine.collec
 const makeResponse = (snapshot: any, keep = 0) => JSON.stringify({
   edits: snapshot.occurrences.filter((_: unknown, i: number) => i !== keep).map((item: any, i: number) => ({ id: `e${i}`, unitId: item.unitIds[0], original: `${phrase} أن `, replacement: '', reason: 'حذف تمهيد دون فقد معلومة' })),
   decisions: snapshot.occurrences.map((item: any, i: number) => ({ occurrenceId: item.id, action: i === keep ? 'keep' : 'edit', reason: i === keep ? 'الأصعب تعديلًا' : 'حذف تمهيد' })),
+});
+
+const jobFor = (doc: any, snapshot: any, plan: any, status = 'completed') => ({
+  id: 'job-1', status, updated_at: '2026-09-28T10:00:00Z', created_at: '2026-09-28T09:00:00Z',
+  input_snapshot: { version: 1, document: doc.toJSON(), snapshot },
+  result: status === 'completed' ? { cleanup: { ...plan, completed: 1, total: 1, errors: [] } } : null,
+  progress: status !== 'completed' ? { cleanup: { ...plan, completed: 0, total: 1, errors: [] } } : {},
+});
+
+test('external generation reviews all occurrences and resumes without repeating completed batches', async () => {
+  const doc = makeDoc(['التقرير متاح للتصدير.', 'الجدول يحتوي خمسة أعمدة.', 'المسودة تحفظ تلقائيًا.', 'الروابط تحتفظ بعناوينها.', 'القائمة مرتبة أبجديًا.', 'نتيجة البحث فورية.', 'الصور تعرض النص البديل.'].map(fact => `${phrase} أن ${fact}`));
+  const snapshot = makeSnapshot(doc);
+  const checkpoints: any[] = [];
+  let calls = 0;
+  const options = { doc, snapshot, keywords, title: 'اختبار', signal: new AbortController().signal,
+    run: async (prompt: string) => { calls++; assert.ok(prompt.includes('p1-o7')); return makeResponse(snapshot, 3); },
+    checkpoint: async (state: any) => { checkpoints.push(structuredClone(state)); } };
+  const state = await engine.runCleanupWorkflow(options);
+  assert.equal(state.patches.length, 6, state.errors.join('\n'));
+  assert.equal(state.decisions.length, 7);
+  assert.equal(checkpoints.at(-1).processed[0], 0);
+  await engine.runCleanupWorkflow({ ...options, saved: state });
+  assert.equal(calls, 1);
+});
+
+test('provider retries retain the successful batch checkpoint and resume only unfinished work', async () => {
+  const doc = makeDoc(['Generally speaking reports export as PDF.', 'Generally speaking tables have five columns.', 'Furthermore note drafts save automatically.', 'Furthermore note images retain alternate text.']);
+  const snapshot = engine.collectCleanupSnapshot(doc, [{ text: 'Generally speaking' }, { text: 'Furthermore note' }], 2, 'en');
+  assert.equal(engine.batchCleanupSnapshot(snapshot).length, 2);
+  let saved: any;
+  const calls: number[] = [];
+  const respond = async (prompt: string, index: number) => {
+    calls.push(index);
+    const data = JSON.parse(prompt.split('SOURCE_DATA=')[1]);
+    const first = data.occurrences[0];
+    return JSON.stringify({ edits: [{ unitId: first.unitIds[0], original: `${data.phrases[0].text} `, replacement: '', reason: 'Remove filler.' }],
+      decisions: data.occurrences.map((item: any) => ({ occurrenceId: item.id, action: item.id === first.id ? 'edit' : 'keep', reason: 'Compared both contexts.' })) });
+  };
+  const options = { doc, snapshot, keywords, title: '', signal: new AbortController().signal,
+    checkpoint: async (state: any) => { saved = structuredClone(state); } };
+  await assert.rejects(engine.runCleanupWorkflow({ ...options, run: async (prompt: string, index: number) => {
+    if (index > 1) throw new Error('Provider unavailable');
+    return respond(prompt, index);
+  } }), /Provider unavailable/);
+  assert.deepEqual(saved.processed, [0]);
+  assert.equal(saved.patches.length, 1);
+  const result = await engine.runCleanupWorkflow({ ...options, saved, run: respond });
+  assert.deepEqual(calls, [1, 3]);
+  assert.equal(result.patches.length, 2);
+  assert.equal(result.decisions.length, 4);
+});
+
+test('malformed external results are bounded, persisted as partial and never applied', async () => {
+  const doc = makeDoc([`${phrase} أن أ مختلف.`, `${phrase} أن ب مختلف.`]);
+  let calls = 0;
+  const state = await engine.runCleanupWorkflow({ doc, snapshot: makeSnapshot(doc), keywords, title: '', signal: new AbortController().signal,
+    run: async () => { calls++; return '{}'; }, checkpoint: async () => {} });
+  assert.equal(calls, 2);
+  assert.equal(state.errors.length, 1);
+  assert.equal(state.patches.length, 0);
+  assert.equal(state.processed.length, 1);
+});
+
+test('cancellation discards the current response and never checkpoints its patches', async () => {
+  const doc = makeDoc([`${phrase} أن أ مختلف.`, `${phrase} أن ب مختلف.`]);
+  const snapshot = makeSnapshot(doc);
+  const abort = new AbortController();
+  const checkpoints: any[] = [];
+  await assert.rejects(engine.runCleanupWorkflow({ doc, snapshot, keywords, title: '', signal: abort.signal,
+    run: async () => { abort.abort(); return makeResponse(snapshot); },
+    checkpoint: async (state: any) => { checkpoints.push(structuredClone(state)); } }), /abort/i);
+  assert.equal(checkpoints.at(-1).patches.length, 0);
+});
+
+test('server rebuilds safe snapshots and excludes protected phrases rather than trusting browser phrases', () => {
+  const doc = makeDoc([`${phrase} أن أ مختلف.`, `${phrase} أن ب مختلف.`]);
+  const input = { category: 4, language: 'ar', document: doc.toJSON(), keywords, title: 'اختبار' };
+  const prepared = engine.prepareCleanupJobInput(input);
+  assert.ok(prepared.snapshot.phrases.some((item: any) => item.text === phrase));
+  const protectedInput = engine.prepareCleanupJobInput({ ...input, keywords: { ...keywords, primary: phrase } });
+  assert.ok(!protectedInput.snapshot.phrases.some((item: any) => item.text === phrase));
+  assert.throws(() => engine.prepareCleanupJobInput({ ...input, category: 9 }));
+  assert.throws(() => engine.prepareCleanupJobInput({ ...input, document: { type: 'unknown' } }));
+});
+
+test('persisted proposals restore exact positions, but changed documents never use a string fallback', () => {
+  const doc = makeDoc(Array.from({ length: 7 }, (_, i) => `${phrase} أن القياس ${i + 1} مختلف.`));
+  const snapshot = makeSnapshot(doc);
+  const plan = engine.parseCleanupPlan(makeResponse(snapshot, 3), snapshot);
+  const job = jobFor(doc, snapshot, plan);
+  const restored = engine.restoreCleanupJob(job, doc);
+  assert.equal(restored.patches.filter((patch: any) => patch.status === 'pending').length, 6);
+  const moved = new engine.Transform(doc).insert(1, schema.text('مقدمة. ')).doc;
+  const stale = engine.restoreCleanupJob(job, moved);
+  assert.equal(stale.patches.filter((patch: any) => patch.status === 'pending').length, 0);
+  assert.ok(stale.patches.every((patch: any) => patch.status === 'stale'));
+  assert.equal(engine.cleanupGenerationState(restored), 'completed');
+  assert.equal(engine.cleanupGenerationState(stale), 'partial');
+  assert.equal(engine.cleanupGenerationState(), 'not_started');
+});
+
+test('polling preserves applied and skipped patch states and keeps header completion honest', () => {
+  const doc = makeDoc(Array.from({ length: 7 }, (_, i) => `${phrase} أن القياس ${i + 1} مختلف.`));
+  const snapshot = makeSnapshot(doc);
+  const plan = engine.parseCleanupPlan(makeResponse(snapshot, 3), snapshot);
+  const job = jobFor(doc, snapshot, plan);
+  const previous = engine.restoreCleanupJob(job, doc);
+  previous.patches[0].status = 'applied'; previous.patches[1].status = 'skipped';
+  const next = engine.restoreCleanupJob(job, doc, previous);
+  assert.equal(next.patches[0].status, 'applied'); assert.equal(next.patches[1].status, 'skipped');
+  const partial = engine.restoreCleanupJob(jobFor(doc, snapshot, { patches: plan.patches.slice(0, 2), decisions: plan.decisions.slice(0, 2) }, 'running'), doc);
+  assert.equal(engine.cleanupGenerationState(partial), 'partial');
 });
 
 test('all seven occurrences are supplied; six exact local edits preserve the chosen hardest occurrence', () => {

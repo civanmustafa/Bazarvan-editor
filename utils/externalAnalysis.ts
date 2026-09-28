@@ -779,6 +779,14 @@ export const enqueueExternalSemanticAnalysis = (articleId: string) => (
   requestExternalAnalysis(articleId, { action: 'semantic' })
 );
 
+export const enqueueDuplicateCleanup = (articleId: string, input: Record<string, unknown>) => (
+  requestExternalAnalysis(articleId, { ...input, action: 'duplicate_cleanup' })
+);
+export const loadDuplicateCleanupJobs = async (articleId: string, versions: Record<string, string> = {}): Promise<ExternalAnalysisJobRow[]> => {
+  const payload = await requestExternalAnalysis(articleId, { action: 'duplicate_cleanup_status', versions });
+  return (Array.isArray(payload.jobs) ? payload.jobs : []).filter(isRecord).map(toJobRow);
+};
+
 export const enqueueGoogleMetadataGeneration = (articleId: string) => (
   requestExternalAnalysis(articleId, { action: 'google_metadata' })
 );
