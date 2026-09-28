@@ -72,7 +72,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20260904000000_preserve_manual_competitor_extraction\.sql/);
   assert.match(verifyScript, /MANUAL_COMPETITOR_EXTRACTION_PRIVILEGES/);
   assert.match(guide, /20260903000000_manual_google_metadata\.sql/);
-  assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-64/);
+  assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-65/);
   assert.match(verifyScript, /ARTICLE_COMPETITOR_SOURCE_POLICY/);
   assert.match(verifyScript, /AUTOMATION_COORDINATOR_TABLES/);
   assert.match(verifyScript, /AUTOMATION_COORDINATOR_FUNCTION/);
