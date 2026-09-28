@@ -7,6 +7,12 @@ import type { CleanupPatch } from '../utils/duplicateCleanup';
 import { cleanupGenerationState } from '../utils/duplicateCleanupSession';
 
 const iconClass = 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[#d4af37]/15 disabled:opacity-40 disabled:cursor-not-allowed';
+const activityLabel = (status: string | undefined, ar: boolean) => {
+  if (status === 'queued') return ar ? 'في الطابور' : 'Queued';
+  if (status === 'retry_scheduled') return ar ? 'إعادة المحاولة مجدولة' : 'Retry scheduled';
+  if (status === 'paused') return ar ? 'متوقفة مؤقتًا' : 'Paused';
+  return ar ? 'جارٍ التوليد' : 'Generating';
+};
 
 export const DuplicateCleanupReview: React.FC<{ category: number }> = ({ category }) => {
   const controller = useDuplicateCleanup();
@@ -29,7 +35,7 @@ export const DuplicateCleanupStatusView: React.FC<{ session?: CleanupContextValu
   const label = { not_started: ar ? 'لم تتم' : 'Not generated', partial: ar ? 'تمت جزئيًا' : 'Partial', completed: ar ? 'اكتملت' : 'Complete' }[state];
   return <span className={`inline-flex items-center gap-1 text-[10px] ${state === 'completed' ? 'text-emerald-700 dark:text-emerald-300' : state === 'partial' ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`} role="status" aria-label={ar ? `حالة التوليد: ${label}` : `Generation status: ${label}`}>
     {session?.running && <RefreshCw size={11} className="animate-spin" />}{label}
-    {session?.running && <span>{session.externalStatus === 'queued' ? (ar ? 'في الطابور' : 'Queued') : (ar ? 'جارٍ التوليد' : 'Generating')}</span>}
+    {session?.running && <span>{activityLabel(session.externalStatus, ar)}</span>}
   </span>;
 };
 
@@ -60,7 +66,7 @@ export const DuplicateCleanupReviewView: React.FC<{ category: number; controller
       </div>
       <p className="my-2" role="status" aria-live="polite">
         {ar ? `المواضع المحللة: ${session.decisions.length} من ${session.snapshot.occurrences.length}` : `Reviewed occurrences: ${session.decisions.length} of ${session.snapshot.occurrences.length}`}
-        {session.running && <span className="block">{session.stopping ? (ar ? 'إيقاف بعد انتهاء الطلب الجاري' : 'Stopping after the current request') : ar ? `جارٍ التوليد (${session.completed}/${session.total})` : `Generating (${session.completed}/${session.total})`}</span>}
+        {session.running && <span className="block">{session.stopping ? (ar ? 'إيقاف بعد انتهاء الطلب الجاري' : 'Stopping after the current request') : `${activityLabel(session.externalStatus, ar)} (${session.completed}/${session.total})`}</span>}
         <span className="block">{ar ? `عبارات ستبقى مكررة بعد الاقتراحات: ${unresolved}` : `Phrases still repeated after proposals: ${unresolved}`}</span>
         <span className="block">{ar ? `عبارات مكررة حاليًا: ${session.snapshot.phrases.filter(phrase => (session.counts.get(phrase.id) || 0) > 1).length}` : `Currently repeated: ${session.snapshot.phrases.filter(phrase => (session.counts.get(phrase.id) || 0) > 1).length}`}</span>
         <span className="block">{ar ? `صافي الكلمات المحذوفة بالتطبيق: ${session.wordsRemoved}` : `Net words removed by applied edits: ${session.wordsRemoved}`}</span>
