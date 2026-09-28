@@ -1,6 +1,19 @@
 import type { Keywords, DuplicateAnalysis, DuplicateStats } from '../../types';
 import { normalizeArabicText } from './analysisUtils';
 
+export const normalizeDuplicateToken = (token: string, language: 'ar' | 'en'): string => {
+  if (language === 'ar') return normalizeArabicText(token.toLowerCase());
+  const normalized = token.toLowerCase().replace(/'s$/i, '');
+  if (normalized.length > 4 && normalized.endsWith('ies')) return `${normalized.slice(0, -3)}y`;
+  if (normalized.length > 4 && /(ches|shes|xes|zes|ses)$/.test(normalized)) return normalized.replace(/es$/, '');
+  if (normalized.length > 3 && normalized.endsWith('s') && !normalized.endsWith('ss')) return normalized.slice(0, -1);
+  return normalized;
+};
+
+export const duplicatePhraseKey = (text: string, language: 'ar' | 'en'): string => (
+  (text.match(/[\p{L}\p{N}]+/gu) || []).map(token => normalizeDuplicateToken(token, language)).filter(Boolean).join(' ')
+);
+
 const ENGLISH_TARGET_STOPWORDS = new Set([
   'a',
   'an',
@@ -52,12 +65,7 @@ export const runDuplicateAnalysis = (textContent: string, keywords: Keywords, to
       };
 
       const normalizeComparisonToken = (token: string): string => {
-        if (articleLanguage === 'ar') return normalizeArabicText(token.toLowerCase());
-        const normalized = token.toLowerCase().replace(/'s$/i, '');
-        if (normalized.length > 4 && normalized.endsWith('ies')) return `${normalized.slice(0, -3)}y`;
-        if (normalized.length > 4 && /(ches|shes|xes|zes|ses)$/.test(normalized)) return normalized.replace(/es$/, '');
-        if (normalized.length > 3 && normalized.endsWith('s') && !normalized.endsWith('ss')) return normalized.slice(0, -1);
-        return normalized;
+        return normalizeDuplicateToken(token, articleLanguage);
       };
 
       const getMeaningfulComparisonTokens = (value: string): string[] => (

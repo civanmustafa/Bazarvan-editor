@@ -1,11 +1,13 @@
 ﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { DuplicatePhrase } from '../types';
-import { ChevronDown, Eye, Copy, Key } from 'lucide-react';
+import { ChevronDown, Eye, Copy, Key, Sparkles } from 'lucide-react';
 import { SECONDARY_COLORS } from '../constants';
 import { translations } from './translations';
 import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { useInteractionSelector } from '../contexts/InteractionContext';
+import { useDuplicateCleanup } from '../contexts/DuplicateCleanupContext';
+import { DuplicateCleanupReview } from './DuplicateCleanupReview';
 
 const INITIAL_VISIBLE_PHRASES = 80;
 const PHRASE_BATCH_SIZE = 80;
@@ -105,6 +107,7 @@ const usePrevious = <T,>(value: T): T | undefined => {
 };
 
 const DuplicatesTab: React.FC = () => {
+  const cleanup = useDuplicateCleanup();
   const { uiLanguage } = useUser();
   const editor = useEditorSelector(context => context.editor);
   const analysisResults = useEditorSelector(context => context.analysisResults);
@@ -204,7 +207,7 @@ const DuplicatesTab: React.FC = () => {
     <div className="p-[0.1875rem]">
       {Object.entries(analysis)
         .reverse()
-        .filter(([_, phrases]) => (phrases as any[]).length > 0)
+        .filter(([key, phrases]) => (phrases as any[]).length > 0 || cleanup.sessions[Number(key)])
         .map(([key, phrases]: [string, DuplicatePhrase[]]) => {
             const totalPhrases = phrases.length;
             const keywordPhrasesCount = phrases.filter(p => p.containsKeyword).length;
@@ -227,6 +230,14 @@ const DuplicatesTab: React.FC = () => {
                         <div className="flex justify-between items-center">
                             <span className="font-bold text-sm text-[#333333] dark:text-[#C7C7C7]">{`${t.phrases} ${nGramMap[key]}`}</span>
                             <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={(event) => { event.stopPropagation(); setOpenSections(previous => ({ ...previous, [key]: true })); void cleanup.generate(Number(key)); }}
+                                    disabled={cleanup.busy || !commonPhrases.length || !editor?.isEditable}
+                                    className="p-1.5 rounded-md text-[#b8922e] hover:bg-[#d4af37]/15 disabled:opacity-40"
+                                    title={uiLanguage === 'ar' ? 'تنقية العبارات العامة' : 'Clean up general phrases'}
+                                    aria-label={uiLanguage === 'ar' ? `تنقية العبارات ${nGramMap[key]}` : `Clean up ${nGramMap[key]}`}
+                                ><Sparkles size={16} /></button>
                                 <button
                                     onClick={(e) => { e.stopPropagation(); handleHighlightAll(phrases); }}
                                     className="p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-[#d4af37]/15 dark:hover:bg-[#d4af37]/20"
@@ -258,6 +269,7 @@ const DuplicatesTab: React.FC = () => {
                     </div>
                     {openSections[key] && (
                         <div className="p-[0.1875rem] border-t border-gray-200 dark:border-[#3C3C3C] bg-gray-50/50 dark:bg-[#1F1F1F]">
+                          <DuplicateCleanupReview category={Number(key)} />
                           {commonPhrases.length > 0 && (
                             <PhraseList
                               phrases={commonPhrases}
