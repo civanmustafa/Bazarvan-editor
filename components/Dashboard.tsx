@@ -63,6 +63,7 @@ import {
     finishAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
 import { getArticleAccessBadges, type ArticleAccessBadge } from '../utils/articleAccessBadges';
+import type { DuplicateCleanupDashboardSummary } from '../utils/duplicateCleanupDashboard';
 import { useDashboardArticleEditorPresence, type ArticlePresenceLoadStatus } from '../hooks/useArticleEditorPresence';
 import type { ArticleEditorPresence } from '../utils/articleEditorPresence';
 
@@ -474,6 +475,35 @@ const ContentWritingSummaryChip: React.FC<{
     >
       <Bot size={12} className={summary.state === 'writing' ? 'animate-pulse' : ''} aria-hidden="true" />
       <span>{presentation.label}</span>
+    </span>
+  );
+};
+
+const DuplicateCleanupSummaryChip: React.FC<{
+  summary: DuplicateCleanupDashboardSummary;
+}> = ({ summary }) => {
+  const presentation = summary.state === 'completed'
+    ? { label: 'مكتمل', tone: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200' }
+    : summary.state === 'running'
+      ? { label: 'قيد التوليد', tone: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200' }
+      : summary.state === 'queued'
+        ? { label: 'بانتظار التوليد', tone: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200' }
+        : summary.state === 'partial'
+          ? { label: 'جزئي', tone: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200' }
+          : summary.state === 'failed'
+            ? { label: 'تعذّر', tone: 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200' }
+            : { label: 'لم يبدأ', tone: 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-600 dark:bg-gray-700/30 dark:text-gray-300' };
+  const details = summary.totalCount
+    ? `اكتمل توليد ${summary.completedCount} من ${summary.totalCount} تصنيفات بدأ توليدها`
+    : 'لم يبدأ توليد اقتراحات العبارات المكررة';
+  return (
+    <span
+      className={`article-list-field inline-flex min-h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-black ${presentation.tone}`}
+      title={details}
+      aria-label={`اقتراحات العبارات المكررة: ${presentation.label}. ${details}`}
+    >
+      <Repeat size={12} className={summary.state === 'running' ? 'animate-pulse' : ''} aria-hidden="true" />
+      <span>اقتراحات التكرار: {presentation.label}</span>
     </span>
   );
 };
@@ -944,7 +974,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     const showArticleStatus = fieldsToShow.includes('status');
     const canEditArticleStatus = Boolean(onUpdateSettings && editableSettingFields.includes('status'));
     const secondaryFieldsToShow = fieldsToShow.filter(field => field !== 'status');
-    const shouldShowN8nSettings = Boolean(contentWritingSummary) || secondaryFieldsToShow.some(field => (
+    const shouldShowN8nSettings = Boolean(contentWritingSummary || (!isTrashView && externalAnalysisSummary)) || secondaryFieldsToShow.some(field => (
         field === 'visibleToEmailsCsv'
           ? articleAccessBadges.length > 0 || editableSettingFields.includes(field) || canClaimArticle
           : Boolean(n8nSettings[field])
@@ -1227,6 +1257,9 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         })}
                         {contentWritingSummary && (
                             <ContentWritingSummaryChip summary={contentWritingSummary} />
+                        )}
+                        {!isTrashView && externalAnalysisSummary && (
+                            <DuplicateCleanupSummaryChip summary={externalAnalysisSummary.duplicateCleanup} />
                         )}
                     </div>
                 )}

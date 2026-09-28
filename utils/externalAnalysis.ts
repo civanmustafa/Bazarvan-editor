@@ -4,6 +4,7 @@ import type {
   AiContentPatchStatus,
 } from '../types';
 import { deduplicateExternalAnalysisTasks } from './externalAnalysisTaskRegistry';
+import { summarizeDuplicateCleanupJobs, type DuplicateCleanupDashboardSummary } from './duplicateCleanupDashboard';
 import { getSupabaseClient } from './supabaseClient';
 
 export type ExternalAnalysisJobType =
@@ -79,6 +80,7 @@ export type ExternalAnalysisArticleState = {
 
 export type ExternalAnalysisDashboardSummary = {
   articleId: string;
+  duplicateCleanup: DuplicateCleanupDashboardSummary;
   state: ExternalAnalysisArticleState | null;
   latestSemanticJob: ExternalAnalysisJobRow | null;
   latestMetaDescriptionJob: ExternalAnalysisJobRow | null;
@@ -212,6 +214,7 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   depends_on_job_id: row.depends_on_job_id || null,
   readiness_signature: row.readiness_signature || null,
   input_snapshot: isRecord(row.input_snapshot) ? row.input_snapshot : {
+    category: row.cleanup_category,
     needsSecondaries: row.needs_secondaries,
     needsLsi: row.needs_lsi,
     needsGoogleMetadata: row.needs_google_metadata,
@@ -242,6 +245,7 @@ const SUMMARY_JOB_SELECT = [
   'needs_secondaries:input_snapshot->needsSecondaries',
   'needs_lsi:input_snapshot->needsLsi',
   'needs_google_metadata:input_snapshot->needsGoogleMetadata',
+  'cleanup_category:input_snapshot->>category',
   'result_status:result->>status',
   'command_id',
   'command_label',
@@ -434,6 +438,9 @@ export const listExternalAnalysisDashboardSummaries = async (
     const contentWritingPreparationJobs = jobs.filter(
       job => job.job_type === 'content_writing_preparation',
     );
+    const duplicateCleanup = summarizeDuplicateCleanupJobs(
+      jobs.filter(job => job.job_type === 'duplicate_cleanup'),
+    );
     const competitorRows = competitorsByArticle.get(articleId) || [];
     const currentCompetitorRows = state?.competitor_discovery_signature
       ? competitorRows.filter(row => row.discoverySignature === state.competitor_discovery_signature)
@@ -463,6 +470,7 @@ export const listExternalAnalysisDashboardSummaries = async (
       .sort((left, right) => new Date(right!).getTime() - new Date(left!).getTime())[0] || null;
     return [articleId, {
       articleId,
+      duplicateCleanup,
       state,
       latestSemanticJob,
       latestMetaDescriptionJob: metaDescriptionJobs[0] || null,
