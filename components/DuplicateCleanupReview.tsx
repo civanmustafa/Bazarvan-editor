@@ -102,6 +102,8 @@ export const DuplicateCleanupReviewView: React.FC<{ category: number; controller
   const phrase = phraseKey ? session.snapshot.phrases.find(item => item.key === phraseKey) : undefined;
   if (phraseKey && !phrase) return null;
   const visiblePatches = phrase ? session.patches.filter(patch => patch.occurrenceIds.some(id => phrase.occurrenceIds.includes(id))) : [];
+  const hasPhraseReview = phrase ? session.decisions.some(decision => phrase.occurrenceIds.includes(decision.occurrenceId)) : false;
+  if (phrase && !visiblePatches.length && !hasPhraseReview) return null;
   const pending = (phrase ? visiblePatches : session.patches).filter(patch => patch.status === 'pending');
   const selectedIds = pending.filter(patch => selected.has(patch.id)).map(patch => patch.id);
   const label = (patch: CleanupPatch) => ({ pending: '', applied: ar ? 'مطبّق' : 'Applied',
