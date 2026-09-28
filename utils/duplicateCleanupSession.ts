@@ -1,6 +1,6 @@
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import type { ExternalAnalysisJobRow } from './externalAnalysis';
-import { cleanupPhraseCounts, cleanupRangeMatches, simulateCleanup,
+import { cleanupPhraseCounts, cleanupRangeMatches, isCleanupEditableRange, simulateCleanup,
   type CleanupDecision, type CleanupPatch, type CleanupSnapshot, type CleanupUndo } from './duplicateCleanup';
 
 export type CleanupSession = {
@@ -32,7 +32,8 @@ export function restoreCleanupJob(job: ExternalAnalysisJobRow, doc: ProseMirrorN
       const phraseId = source.occurrences.find(item => item.id === id)?.phraseId;
       return phraseId && (counts.get(phraseId) || 0) > 1;
     });
-    const status = !needed ? 'unnecessary' : unit.stale || !cleanupRangeMatches(doc, mapped, patch.original) ? 'stale' : 'pending';
+    const status = !isCleanupEditableRange(doc, mapped) || unit.stale || !cleanupRangeMatches(doc, mapped, patch.original)
+      ? 'stale' : !needed ? 'unnecessary' : 'pending';
     return { ...mapped, status } as CleanupPatch;
   });
   let predicted = counts;

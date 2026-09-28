@@ -249,6 +249,55 @@ test('edits touching links or inline objects are rejected', () => {
   assert.throws(() => engine.simulateCleanup(doc, plan.patches), /link/);
 });
 
+test('a phrase in a heading is retained while matching prose is repaired', () => {
+  const doc = schema.node('doc', null, [
+    schema.node('heading', null, schema.text(phrase)),
+    schema.node('paragraph', null, schema.text(`${phrase} أن التقرير جاهز.`)),
+    schema.node('paragraph', null, schema.text(`${phrase} أن الجدول مكتمل.`)),
+  ]);
+  const snapshot = makeSnapshot(doc);
+  assert.deepEqual(snapshot.occurrences.map((item: any) => snapshot.units.find((unit: any) => unit.id === item.unitIds[0]).editable), [false, true, true]);
+  const reply = {
+    edits: snapshot.occurrences.slice(1).map((item: any) => ({ unitId: item.unitIds[0], original: `${phrase} أن `, replacement: '', reason: 'حذف التمهيد' })),
+    decisions: snapshot.occurrences.map((item: any, index: number) => ({ occurrenceId: item.id, action: index ? 'edit' : 'keep', reason: index ? 'معالجة الفقرة' : 'العنوان محمي' })),
+  };
+  const plan = engine.parseCleanupPlan(JSON.stringify(reply), snapshot);
+  const after = engine.simulateCleanup(doc, plan.patches);
+  assert.equal(after.child(0).textContent, phrase);
+  assert.equal(engine.cleanupPhraseCounts(after, snapshot.phrases, 'ar').get('p1'), 1);
+  const headingEdit = { ...reply, edits: [{ unitId: snapshot.occurrences[0].unitIds[0], original: phrase, replacement: '', reason: 'حذف' }],
+    decisions: snapshot.occurrences.map((item: any, index: number) => ({ occurrenceId: item.id, action: index ? 'keep' : 'edit', reason: 'اختبار' })) };
+  assert.throws(() => engine.parseCleanupPlan(JSON.stringify(headingEdit), snapshot), /headings or tables/);
+  assert.throws(() => engine.simulateCleanup(doc, [{ ...plan.patches[0], from: snapshot.occurrences[0].from,
+    to: snapshot.occurrences[0].to, original: phrase }]), /headings or tables/);
+  const oldPatch = { ...plan.patches[0], id: 'old-heading-edit', from: snapshot.occurrences[0].from,
+    to: snapshot.occurrences[0].to, original: phrase, unitId: snapshot.occurrences[0].unitIds[0] };
+  assert.equal(engine.restoreCleanupJob(jobFor(doc, snapshot, { patches: [oldPatch], decisions: reply.decisions }), doc).patches[0].status, 'stale');
+  assert.match(engine.buildCleanupPrompt(snapshot, ''), /editable=false/);
+});
+
+test('table cells and headers remain immutable while prose occurrences can change', () => {
+  const doc = engine.readCleanupDocument({ type: 'doc', content: [
+    { type: 'table', content: [{ type: 'tableRow', content: [
+      { type: 'tableHeader', content: [{ type: 'paragraph', content: [{ type: 'text', text: phrase }] }] },
+      { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: phrase }] }] },
+    ] }] },
+    { type: 'paragraph', content: [{ type: 'text', text: `${phrase} أن التقرير جاهز.` }] },
+  ] });
+  const snapshot = makeSnapshot(doc);
+  assert.deepEqual(snapshot.occurrences.map((item: any) => snapshot.units.find((unit: any) => unit.id === item.unitIds[0]).editable), [false, false, true]);
+  const reply = { edits: [{ unitId: snapshot.occurrences[2].unitIds[0], original: `${phrase} أن `, replacement: '', reason: 'حذف' }],
+    decisions: snapshot.occurrences.map((item: any, index: number) => ({ occurrenceId: item.id,
+      action: index === 2 ? 'edit' : index === 0 ? 'keep' : 'unresolved', reason: 'الجدول محمي' })) };
+  const plan = engine.parseCleanupPlan(JSON.stringify(reply), snapshot);
+  const after = engine.simulateCleanup(doc, plan.patches);
+  assert.equal(after.firstChild!.firstChild!.firstChild!.textContent, phrase);
+  assert.equal(after.firstChild!.firstChild!.lastChild!.textContent, phrase);
+  assert.equal(after.lastChild!.textContent, 'التقرير جاهز.');
+  assert.throws(() => engine.simulateCleanup(doc, [{ ...plan.patches[0], from: snapshot.occurrences[1].from,
+    to: snapshot.occurrences[1].to, original: phrase }]), /headings or tables/);
+});
+
 test('ambiguous substrings within a sentence are rejected', () => {
   const doc = makeDoc([`${phrase} أن ${phrase} أن النتيجة واضحة.`]);
   const snapshot = makeSnapshot(doc);

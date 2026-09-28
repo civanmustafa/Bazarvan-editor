@@ -1,4 +1,6 @@
 import { runCleanupWorkflow, type CleanupJobProgress } from '../utils/duplicateCleanupWorkflow';
+import { collectCleanupSnapshot } from '../utils/duplicateCleanup';
+import type { DuplicatePhrase } from '../types';
 import { readCleanupDocument, type CleanupJobInput } from './duplicateCleanupJob';
 import { readExternalGeminiSettings } from './externalAnalysisSettings';
 import { runExternalGeminiCall } from './externalGeminiRunner';
@@ -11,8 +13,11 @@ export async function executeDuplicateCleanup(context: ExternalAnalysisExecution
   if (input.version !== 1 || !input.snapshot) throw new Error('Unsupported cleanup snapshot.');
   const settings = await readExternalGeminiSettings();
   if (!settings.enabled) throw new ExternalAnalysisRetryError({ code: 'gemini_free_disabled', message: 'External Gemini generation is disabled.' });
+  const doc = readCleanupDocument(input.document);
+  const snapshot = collectCleanupSnapshot(doc, input.snapshot.phrases.map((phrase): DuplicatePhrase => ({ text: phrase.text, count: phrase.occurrenceIds.length,
+    containsKeyword: false, locations: [] })), input.category, input.language);
   const state = await runCleanupWorkflow({
-    doc: readCleanupDocument(input.document), snapshot: input.snapshot, keywords: input.keywords, title: input.title,
+    doc, snapshot, keywords: input.keywords, title: input.title,
     saved: context.job.progress.cleanup as CleanupJobProgress | undefined, signal: context.signal,
     run: async (prompt, requestIndex) => {
       const call = await runExternalGeminiCall({ context, prompt, model: settings.model,

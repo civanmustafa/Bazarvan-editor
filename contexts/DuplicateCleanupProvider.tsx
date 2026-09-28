@@ -11,7 +11,7 @@ import { CleanupContext, type CleanupContextValue } from './DuplicateCleanupCont
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 import {
   batchCleanupSnapshot, buildCleanupPrompt, cleanupPhraseCounts, cleanupRangeMatches,
-  collectCleanupSnapshot, inspectCleanupImpact, mapCleanupRange, parseCleanupPlan, simulateCleanup,
+  collectCleanupSnapshot, inspectCleanupImpact, isCleanupEditableRange, mapCleanupRange, parseCleanupPlan, simulateCleanup,
   type CleanupPatch, type CleanupUndo,
 } from '../utils/duplicateCleanup';
 
@@ -132,7 +132,8 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
         const patches = session.patches.map(patch => {
           const mapped = mapCleanupRange(patch, transaction.mapping);
           if (patch.status !== 'pending' && patch.status !== 'unnecessary') return mapped;
-          if (units.find(unit => unit.id === patch.unitId)?.stale || !cleanupRangeMatches(transaction.doc, mapped, patch.original)) {
+          if (units.find(unit => unit.id === patch.unitId)?.stale || !isCleanupEditableRange(transaction.doc, mapped)
+            || !cleanupRangeMatches(transaction.doc, mapped, patch.original)) {
             return { ...mapped, status: 'stale' as const };
           }
           const needed = patch.occurrenceIds.some(id => {
