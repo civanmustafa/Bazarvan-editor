@@ -35,9 +35,11 @@ test('the unified AI and automation card is rendered before the single activity 
 });
 
 test('the automation queue keeps every user-controlled operation visible in one box', async () => {
-  const [component, queue] = await Promise.all([
+  const [component, queue, inventoryMigration, API] = await Promise.all([
     readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx'),
     readWorkspaceFile('utils/dashboardAutomationQueue.ts'),
+    readWorkspaceFile('supabase/migrations/20261004000000_draft_only_automation_stage_inventory.sql'),
+    readWorkspaceFile('api/contentWritingAutomation.ts'),
   ]);
 
   assert.match(component, /data-ai-automation-status="true"/);
@@ -54,6 +56,11 @@ test('the automation queue keeps every user-controlled operation visible in one 
   assert.match(component, /attention: countDashboardAutomationIssues\(operations\)/);
   assert.match(component, /getOperationErrorMessage\(operation, isArabic\)/);
   assert.match(component, /إدارة الأتمتة/);
+  assert.match(component, /loadContentWritingAutomationStatus\(undefined, \{ draftOnly: true \}\)/);
+  assert.match(queue, /status === 'draft'/);
+  assert.match(API, /body\.draftOnly === true/);
+  assert.match(inventoryMigration, /where evidence\.article_status = 'draft'/);
+  assert.match(inventoryMigration, /'articleStatus', filtered\.article_status/);
   for (const operation of [
     'alternative_keywords',
     'lsi_keywords',

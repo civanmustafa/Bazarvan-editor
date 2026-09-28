@@ -109,6 +109,7 @@ export type AutomationTaskInventoryItem = {
   operationKey: string;
   articleId: string;
   articleTitle: string;
+  articleStatus?: string;
   status: AutomationTaskStatus;
   scheduled: boolean;
   scheduleAt: string | null;
@@ -320,6 +321,7 @@ const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] =
       operationKey,
       articleId,
       articleTitle: text(entry.articleTitle),
+      articleStatus: text(entry.articleStatus),
       status,
       scheduled: entry.scheduled === true || status === 'scheduled',
       scheduleAt: nullableText(entry.scheduleAt),
@@ -357,11 +359,12 @@ const requestAutomation = async (
 
 export const loadContentWritingAutomationStatus = async (
   articleId?: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; draftOnly?: boolean } = {},
 ): Promise<ContentWritingAutomationStatus> => {
   const payload = await requestAutomation({
     action: 'status',
     ...(articleId ? { articleId } : {}),
+    ...(options.draftOnly ? { draftOnly: true } : {}),
   }, options.signal);
   const article = isRecord(payload.article) ? payload.article : null;
   return {
@@ -474,8 +477,13 @@ export type RecoverableAutomationResult = {
   };
 };
 
-export const retryRecoverableAutomationFailures = async (): Promise<RecoverableAutomationResult> => {
-  const payload = await requestAutomation({ action: 'retry_recoverable' });
+export const retryRecoverableAutomationFailures = async (
+  options: { draftOnly?: boolean } = {},
+): Promise<RecoverableAutomationResult> => {
+  const payload = await requestAutomation({
+    action: 'retry_recoverable',
+    ...(options.draftOnly ? { draftOnly: true } : {}),
+  });
   const requeued = isRecord(payload.requeued) ? payload.requeued : {};
   return {
     overview: normalizeOverview(payload.overview),

@@ -270,7 +270,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     if (!silent) setLoading(true);
     try {
       const [statusResult, preferencesResult] = await Promise.allSettled([
-        loadContentWritingAutomationStatus(),
+        loadContentWritingAutomationStatus(undefined, { draftOnly: true }),
         loadUserAutomationPreferences(),
       ]);
       if (refreshRequestRef.current !== requestId) return;
@@ -406,7 +406,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     setRecovering(true);
     setRecoveryMessage('');
     try {
-      const result = await retryRecoverableAutomationFailures();
+      const result = await retryRecoverableAutomationFailures({ draftOnly: true });
       setOverview(result.overview);
       setRecoveryMessage(isArabic
         ? `أُعيدت ${result.requeued.total} مهمة قابلة للاسترداد إلى الطابور (${result.requeued.externalAnalysis} تحليل، ${result.requeued.contentWriting} كتابة).`
@@ -547,11 +547,11 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
               {isArabic
                 ? (taskScope === 'system'
-                  ? 'مخزون موحّد لجميع مهام النظام الجارية والمجدولة وغير المكتملة.'
-                  : 'مخزون موحّد للمهام الجارية والمجدولة وغير المكتملة المرتبطة بالمقالات المتاحة لك فقط.')
+                  ? 'مخزون موحّد لمهام مقالات المسودة فقط على مستوى النظام كله.'
+                  : 'مخزون موحّد لمهام مقالات المسودة المتاحة لك فقط.')
                 : (taskScope === 'system'
-                  ? 'A unified inventory of every running, scheduled, and incomplete system task.'
-                  : 'A unified inventory limited to tasks for articles you can access.')}
+                  ? 'A unified inventory limited to draft-article tasks across the system.'
+                  : 'A unified inventory limited to draft-article tasks you can access.')}
             </p>
           </div>
         </div>
@@ -617,8 +617,8 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="rounded-full bg-gray-100 px-2 py-1 text-[9px] font-black text-gray-500 dark:bg-[#222] dark:text-gray-300">
                     {taskScope === 'system'
-                      ? (isArabic ? 'جميع مهام النظام' : 'All system tasks')
-                      : (isArabic ? 'المهام المرتبطة بك فقط' : 'Only tasks linked to you')}
+                      ? (isArabic ? 'مسودات النظام فقط' : 'System drafts only')
+                      : (isArabic ? 'مسوداتك المتاحة فقط' : 'Your accessible drafts only')}
                   </span>
                   <button
                     ref={modalCloseButtonRef}

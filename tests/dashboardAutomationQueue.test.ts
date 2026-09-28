@@ -146,6 +146,7 @@ test('a disabled automation remains visible instead of disappearing from the que
 
 const readySnapshot = {
   title: 'أغلى جهاز كشف الذهب في العالم',
+  status: 'draft',
   alternativeKeywordsReady: true,
   lsiKeywordsReady: true,
   googleMetadataReady: true,
@@ -597,4 +598,69 @@ test('saved results remove stale unscheduled inventory rows and rerank the remai
     articleId: task.articleId,
     priorityRank: task.priorityRank,
   })), [{ articleId: 'article-pending', priorityRank: 1 }]);
+});
+
+test('automation-stage cards exclude non-draft article summaries, writing items, and inventory tasks', () => {
+  const nonDraftWriting = {
+    ...writingItem('blocked'),
+    articleStatus: 'in_review',
+  };
+  const overview = writingOverview(nonDraftWriting);
+  overview.active = { ...nonDraftWriting, status: 'writing' };
+  overview.candidates = [{
+    articleId: nonDraftWriting.articleId,
+    articleTitle: nonDraftWriting.articleTitle,
+    articleStatus: 'in_review',
+    articleUpdatedAt: '2026-09-03T09:00:00Z',
+    itemId: nonDraftWriting.id,
+    itemStatus: 'ready',
+    eligibleAt: null,
+    position: 1,
+    readiness: {
+      ready: true,
+      missingFields: [],
+      signature: 'ready',
+      usableCompetitorCount: 2,
+      pendingCompetitorCount: 0,
+      processingComplete: true,
+      articleTitle: nonDraftWriting.articleTitle,
+      articleStatus: 'in_review',
+      articleUpdatedAt: '2026-09-03T09:00:00Z',
+    },
+  }];
+
+  const operations = buildDashboardAutomationOperations({
+    summaries: { 'article-1': summary as any },
+    writingOverview: overview,
+    effectivePreferences: automationDefaults,
+    articleTitles: { 'article-1': readySnapshot.title },
+    articleSnapshots: {
+      'article-1': { ...readySnapshot, status: 'in_review' },
+    },
+    taskInventory: [{
+      taskId: 'alternative_keywords:article-1',
+      operationKey: 'alternative_keywords',
+      articleId: 'article-1',
+      articleTitle: readySnapshot.title,
+      articleStatus: 'in_review',
+      status: 'running',
+      scheduled: true,
+      scheduleAt: null,
+      startedAt: '2026-09-03T09:00:00Z',
+      readyAt: '2026-09-03T09:00:00Z',
+      updatedAt: '2026-09-03T09:00:00Z',
+      sourceType: 'external_analysis',
+      sourceId: 'job-1',
+      priorityRank: 1,
+      reason: null,
+      attemptCount: 1,
+      maxAttempts: 6,
+    }],
+  });
+
+  assert.ok(operations.every(operation => operation.runningCount === 0));
+  assert.ok(operations.every(operation => operation.waitingCount === 0));
+  assert.ok(operations.every(operation => operation.failedCount === 0));
+  assert.ok(operations.every(operation => (operation.tasks || []).length === 0));
+  assert.equal(operations.find(operation => operation.key === 'content_writing')?.articleId, null);
 });

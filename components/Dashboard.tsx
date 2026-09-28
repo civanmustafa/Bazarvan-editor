@@ -1398,6 +1398,7 @@ const Dashboard: React.FC = () => {
         .filter(value => value.text.trim().length > 0).length;
       return [article.id, {
         title: article.title || article.id,
+        status: article.status,
         alternativeKeywordsReady: article.keywords.secondaries.some(value => value.trim().length > 0),
         lsiKeywordsReady: article.keywords.lsi.some(value => value.trim().length > 0),
         googleMetadataReady: googleTitleCount >= 2 && googleDescriptionCount >= 2,

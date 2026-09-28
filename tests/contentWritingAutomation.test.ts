@@ -9,7 +9,7 @@ const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
 );
 
-const loadOverviewApi = async (access: string, completedAt = '') => {
+const loadOverviewApi = async (access: string, completedAt = '', articleStatus = 'draft') => {
   const stateKey = `writing-overview-${randomUUID()}`;
   const itemId = '11111111-1111-4111-8111-111111111111';
   const articleId = '22222222-2222-4222-8222-222222222222';
@@ -38,7 +38,7 @@ const loadOverviewApi = async (access: string, completedAt = '') => {
             id: itemId, article_id: articleId, status: 'blocked',
             completed_at: '2026-09-02T10:00:00Z',
             last_error_code: 'gemini_http_429', last_error: 'Quota exhausted',
-            articles: { title: 'أغلى جهاز كشف الذهب في العالم', status: 'draft' },
+            articles: { title: 'أغلى جهاز كشف الذهب في العالم', status: articleStatus },
             content_writing_sessions: { status: 'failed' },
           } : table === 'content_writing_sessions' && filters.article_id === articleId
             && completedAt > String(filters.completed_at) ? { id: 'manual-session', completed_at: completedAt } : null,
@@ -136,6 +136,20 @@ test('writing overview never exposes another users inaccessible last item or fai
   assert.equal(payload.overview.state.lastOutcome, null);
   assert.deepEqual(api.checks, [`${api.articleId}:viewer`]);
   assert.equal(api.sessionReads.length, 0);
+});
+
+test('draft-only automation overview excludes a last writing item after its article leaves draft', async () => {
+  const api = await loadOverviewApi('read', '', 'in_review');
+  const response = await api.handler({
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: { action: 'status', draftOnly: true },
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.overview.lastItem, null);
+  assert.equal(payload.overview.active, null);
+  assert.equal(payload.overview.state.lastArticleId, null);
+  assert.deepEqual(payload.taskInventory, []);
 });
 
 test('automatic writing readiness exposes every administrator prerequisite in plain Arabic', async () => {

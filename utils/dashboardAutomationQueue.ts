@@ -31,6 +31,7 @@ export type DashboardAutomationOperationStatus =
 
 export type DashboardAutomationArticleSnapshot = {
   title: string;
+  status: string;
   alternativeKeywordsReady: boolean;
   lsiKeywordsReady: boolean;
   googleMetadataReady: boolean;
@@ -197,13 +198,51 @@ export const countDashboardAutomationIssues = (operations: DashboardAutomationOp
 
 export const buildDashboardAutomationOperations = ({
   summaries,
-  writingOverview,
+  writingOverview: unfilteredWritingOverview,
   effectivePreferences,
   articleTitles,
-  articleSnapshots = {},
-  taskInventory = [],
+  articleSnapshots: allArticleSnapshots = {},
+  taskInventory: allTaskInventory = [],
 }: BuildOptions): DashboardAutomationOperation[] => {
-  const values = Object.values(summaries);
+  const isDraftArticle = (articleId: string): boolean => {
+    const status = allArticleSnapshots[articleId]?.status;
+    return !status || status === 'draft';
+  };
+  const articleSnapshots = Object.fromEntries(
+    Object.entries(allArticleSnapshots).filter(([articleId]) => isDraftArticle(articleId)),
+  );
+  const values = Object.values(summaries).filter(summary => isDraftArticle(summary.articleId));
+  const taskInventory = allTaskInventory.filter(task => {
+    const status = task.articleStatus || allArticleSnapshots[task.articleId]?.status;
+    return !status || status === 'draft';
+  });
+  const draftWritingItem = <T extends { articleStatus: string }>(item: T | null): T | null => (
+    item && (!item.articleStatus || item.articleStatus === 'draft') ? item : null
+  );
+  const draftActiveWritingItem = draftWritingItem(unfilteredWritingOverview?.active || null);
+  const draftLastWritingItem = draftWritingItem(unfilteredWritingOverview?.lastItem || null);
+  const writingStateOutsideDraft = Boolean(
+    (unfilteredWritingOverview?.lastItem && !draftLastWritingItem)
+    || (unfilteredWritingOverview?.state?.lastArticleId
+      && !isDraftArticle(unfilteredWritingOverview.state.lastArticleId)),
+  );
+  const writingOverview = unfilteredWritingOverview ? {
+    ...unfilteredWritingOverview,
+    active: draftActiveWritingItem,
+    lastItem: draftLastWritingItem,
+    candidates: unfilteredWritingOverview.candidates.filter(candidate => (
+      !candidate.articleStatus || candidate.articleStatus === 'draft'
+    )),
+    state: writingStateOutsideDraft && unfilteredWritingOverview.state
+      ? {
+        ...unfilteredWritingOverview.state,
+        lastItemId: null,
+        lastSessionId: null,
+        lastArticleId: null,
+        lastOutcome: null,
+      }
+      : unfilteredWritingOverview.state,
+  } : null;
   const jobEntries = (
     selector: (summary: ExternalAnalysisDashboardSummary) => ExternalAnalysisJobRow | null,
   ): JobEntry[] => values.map(summary => ({

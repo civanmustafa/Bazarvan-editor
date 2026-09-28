@@ -14,6 +14,7 @@ test('automation task inventory is access-scoped and ranks running work first pe
       create role anon; create role authenticated; create role service_role;
       create table public.articles (
         id uuid primary key, title text, created_by uuid,
+        status text not null default 'draft',
         keywords jsonb not null default '{}'::jsonb
       );
       create function public.article_access_level_for_user(p_article_id uuid, p_user_id uuid)
@@ -84,12 +85,20 @@ test('automation task inventory is access-scoped and ranks running work first pe
       '../supabase/migrations/20261003000000_automation_inventory_completion_and_auto_recovery.sql',
       import.meta.url,
     ), 'utf8'));
+    await db.exec(await readFile(new URL(
+      '../supabase/migrations/20261004000000_draft_only_automation_stage_inventory.sql',
+      import.meta.url,
+    ), 'utf8'));
 
     const articleOne = '10000000-0000-4000-8000-000000000001';
     const articleTwo = '10000000-0000-4000-8000-000000000002';
+    const articleThree = '10000000-0000-4000-8000-000000000003';
     const jobOne = '20000000-0000-4000-8000-000000000001';
-    await db.query('insert into articles(id,title,created_by) values($1,$2,$3),($4,$5,$6)', [
-      articleOne, 'Owner running task', owner, articleTwo, 'Other scheduled task', other,
+    await db.query(`insert into articles(id,title,created_by,status) values
+      ($1,$2,$3,'draft'),($4,$5,$6,'in_review'),($7,$8,$9,'draft')`, [
+      articleOne, 'Owner running task', owner,
+      articleTwo, 'Other review task', other,
+      articleThree, 'Other draft task', other,
     ]);
     await db.query(`insert into ai_external_analysis_jobs(
       id,article_id,job_type,status,input_snapshot,started_at
@@ -101,7 +110,8 @@ test('automation task inventory is access-scoped and ranks running work first pe
     ) values
       ($1,'semantic_keywords_lsi','running','external_analysis',$2),
       ($1,'competitor_discovery','waiting_for_prerequisites',null,null),
-      ($3,'semantic_keywords_lsi','queued',null,null)`, [articleOne, jobOne, articleTwo]);
+      ($3,'semantic_keywords_lsi','queued',null,null),
+      ($4,'semantic_keywords_lsi','queued',null,null)`, [articleOne, jobOne, articleTwo, articleThree]);
     await db.query(`insert into duplicate_cleanup_schedule(article_id,signature,quiet_since)
       values($1,'owner-signature',now()-interval '5 minutes')`, [articleOne]);
 
@@ -118,7 +128,8 @@ test('automation task inventory is access-scoped and ranks running work first pe
       'select public.get_visible_automation_task_inventory($1) inventory', [admin],
     )).rows[0].inventory;
     const semanticRows = adminRows.filter((task: any) => task.operationKey === 'alternative_keywords');
-    assert.deepEqual(semanticRows.map((task: any) => task.articleId), [articleOne, articleTwo]);
+    assert.deepEqual(semanticRows.map((task: any) => task.articleId), [articleOne, articleThree]);
+    assert.ok(adminRows.every((task: any) => task.articleStatus === 'draft'));
     assert.deepEqual(semanticRows.map((task: any) => Number(task.priorityRank)), [1, 2]);
 
     await db.query(`update articles set keywords = $2 where id = $1`, [articleOne, {

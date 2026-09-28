@@ -174,7 +174,7 @@ const readActiveItem = async (userId: string): Promise<Record<string, unknown> |
   return access === 'none' ? null : publicItem(data);
 };
 
-const readOverview = async (userId: string) => {
+const readOverview = async (userId: string, draftOnly = false) => {
   const settings = await readContentWritingAutomationSettings();
   const supabase = getExternalAnalysisSupabaseAdmin();
   const [
@@ -231,6 +231,8 @@ const readOverview = async (userId: string) => {
   const lastItem = stateLastItemId
     ? await readItemById(stateLastItemId, userId)
     : null;
+  const visibleActive = !draftOnly || text(active?.articleStatus) === 'draft' ? active : null;
+  const visibleLastItem = !draftOnly || text(lastItem?.articleStatus) === 'draft' ? lastItem : null;
 
   const cooldownAt = isRecord(state) ? text(state.next_allowed_at) : '';
   const cooldownActive = Boolean(cooldownAt && new Date(cooldownAt).getTime() > Date.now());
@@ -248,35 +250,37 @@ const readOverview = async (userId: string) => {
               ? { kind: 'full_pipeline_active', status: text(globalPipeline.status) }
               : null;
 
+  const visibleCandidates = (Array.isArray(candidates) ? candidates.map((candidate, index) => {
+    const source = isRecord(candidate) ? candidate : {};
+    const readiness = isRecord(source.readiness) ? source.readiness : {};
+    return {
+      position: index + 1,
+      articleId: text(source.article_id),
+      articleTitle: text(source.article_title),
+      articleStatus: text(source.article_status),
+      articleUpdatedAt: text(source.article_updated_at),
+      itemId: text(source.item_id) || null,
+      itemStatus: text(source.item_status) || 'discovered_ready',
+      eligibleAt: text(source.eligible_at) || null,
+      readiness,
+    };
+  }) : []).filter(candidate => !draftOnly || candidate.articleStatus === 'draft');
+
   return {
     schemaAvailable: !schemaUnavailable,
     settings,
     state: isRecord(state) ? {
       nextAllowedAt: cooldownAt,
-      lastItemId: text(lastItem?.id) || null,
-      lastSessionId: text(lastItem?.sessionId) || null,
-      lastArticleId: text(lastItem?.articleId) || null,
-      lastOutcome: lastItem ? text(state.last_outcome) || null : null,
+      lastItemId: text(visibleLastItem?.id) || null,
+      lastSessionId: text(visibleLastItem?.sessionId) || null,
+      lastArticleId: text(visibleLastItem?.articleId) || null,
+      lastOutcome: visibleLastItem ? text(state.last_outcome) || null : null,
       updatedAt: text(state.updated_at),
     } : null,
     globalBlocker,
-    active,
-    lastItem,
-    candidates: Array.isArray(candidates) ? candidates.map((candidate, index) => {
-      const source = isRecord(candidate) ? candidate : {};
-      const readiness = isRecord(source.readiness) ? source.readiness : {};
-      return {
-        position: index + 1,
-        articleId: text(source.article_id),
-        articleTitle: text(source.article_title),
-        articleStatus: text(source.article_status),
-        articleUpdatedAt: text(source.article_updated_at),
-        itemId: text(source.item_id) || null,
-        itemStatus: text(source.item_status) || 'discovered_ready',
-        eligibleAt: text(source.eligible_at) || null,
-        readiness,
-      };
-    }) : [],
+    active: visibleActive,
+    lastItem: visibleLastItem,
+    candidates: visibleCandidates,
   };
 };
 
@@ -319,6 +323,7 @@ const readAutomationTaskInventory = async (
       operationKey: 'content_writing',
       articleId,
       articleTitle: text(value.articleTitle),
+      articleStatus: text(value.articleStatus),
       status: scheduled ? 'scheduled' : 'ready',
       scheduled,
       scheduleAt: eligibleAt || null,
@@ -344,6 +349,7 @@ const readAutomationTaskInventory = async (
       operationKey: 'content_writing',
       articleId,
       articleTitle: text(active.articleTitle),
+      articleStatus: text(active.articleStatus),
       status: 'running',
       scheduled: true,
       scheduleAt: text(active.eligibleAt) || null,
@@ -575,7 +581,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
     );
     const articleId = text(body.articleId);
     if (articleId) await requireArticleReadAccess(supabase, requireUuid(articleId, 'articleId'), principal.userId);
-    const overview = await readOverview(principal.userId);
+    const overview = await readOverview(principal.userId, body.draftOnly === true);
     const [taskInventory, article] = await Promise.all([
       readAutomationTaskInventory(principal.userId, overview),
       articleId ? readArticleStatus(articleId) : Promise.resolve(null),
@@ -616,7 +622,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
         ok: true,
         action,
         requeued: isRecord(data) ? data : {},
-        overview: await readOverview(principal.userId),
+        overview: await readOverview(principal.userId, body.draftOnly === true),
       },
     };
   }
