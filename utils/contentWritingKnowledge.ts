@@ -146,23 +146,96 @@ const stripCodeFence = (value: string): string => value
   .replace(/\s*```$/i, '')
   .trim();
 
-const parseJsonObject = (value: string): Record<string, unknown> | null => {
+const repairJsonStructuralPunctuation = (value: string): string => {
+  let output = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (inString) {
+      output += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      output += character;
+      continue;
+    }
+    if (character === ',' || character === '،' || character === '，') {
+      let nextIndex = index + 1;
+      while (nextIndex < value.length && /\s/.test(value[nextIndex])) nextIndex += 1;
+      if (value[nextIndex] === '}' || value[nextIndex] === ']') continue;
+      output += ',';
+      continue;
+    }
+    output += character;
+  }
+  return output;
+};
+
+type ParsedJsonObject = {
+  source: Record<string, unknown>;
+  output: string;
+  repaired: boolean;
+};
+
+const parseJsonObjectWithDetails = (value: string): ParsedJsonObject | null => {
   const normalized = stripCodeFence(value);
-  const candidates = [normalized];
+  const rawCandidates = [normalized];
   const firstBrace = normalized.indexOf('{');
   const lastBrace = normalized.lastIndexOf('}');
   if (firstBrace >= 0 && lastBrace > firstBrace) {
-    candidates.push(normalized.slice(firstBrace, lastBrace + 1));
+    rawCandidates.push(normalized.slice(firstBrace, lastBrace + 1));
   }
+  const candidates = rawCandidates.flatMap(candidate => {
+    const repaired = repairJsonStructuralPunctuation(candidate);
+    return repaired === candidate
+      ? [{ output: candidate, repaired: false }]
+      : [
+          { output: candidate, repaired: false },
+          { output: repaired, repaired: true },
+        ];
+  });
+  const seen = new Set<string>();
   for (const candidate of candidates) {
+    if (!candidate.output || seen.has(candidate.output)) continue;
+    seen.add(candidate.output);
     try {
-      const parsed = JSON.parse(candidate);
-      if (isRecord(parsed)) return parsed;
+      const parsed = JSON.parse(candidate.output);
+      if (isRecord(parsed)) {
+        return {
+          source: parsed,
+          output: candidate.output,
+          repaired: candidate.repaired,
+        };
+      }
     } catch {
       // Try the next bounded JSON candidate.
     }
   }
   return null;
+};
+
+const parseJsonObject = (value: string): Record<string, unknown> | null => (
+  parseJsonObjectWithDetails(value)?.source || null
+);
+
+export const normalizeContentWritingKnowledgeJsonOutput = (
+  value: string,
+): { output: string; repaired: boolean } | null => {
+  const parsed = parseJsonObjectWithDetails(value);
+  if (!parsed || !Array.isArray(parsed.source.items)) return null;
+  return {
+    output: parsed.output,
+    repaired: parsed.repaired,
+  };
 };
 
 const chooseChunkEnd = (value: string, start: number, maximum: number): number => {
@@ -443,10 +516,11 @@ export const parseContentWritingKnowledgeBase = (
   value: string,
   chunks: readonly ContentWritingSourceChunk[],
 ): ContentWritingKnowledgeBase => {
-  const source = parseJsonObject(value);
-  if (!source || !Array.isArray(source.items)) {
+  const normalized = normalizeContentWritingKnowledgeJsonOutput(value);
+  if (!normalized) {
     throw new Error('The competitor index must be valid JSON with an items array.');
   }
+  const source = JSON.parse(normalized.output) as Record<string, unknown>;
   const knowledge = normalizeContentWritingKnowledgeBase(source, chunks);
   if (knowledge.items.length === 0) {
     throw new Error('The competitor index did not return any usable knowledge items.');

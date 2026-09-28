@@ -32,6 +32,7 @@ import {
   contentWritingKnowledgeToPromptJson,
   buildContentWritingKnowledgeEnsembleSummary,
   normalizeContentWritingKnowledgeBase,
+  normalizeContentWritingKnowledgeJsonOutput,
   normalizeContentWritingSectionCoverage,
   parseContentWritingCoverageAudit,
   parseContentWritingKnowledgeBase,
@@ -285,10 +286,14 @@ const getWorkflowUsage = (steps: Iterable<ContentWritingStep>) => {
   const completedSteps = Array.from(steps).filter(step => step.status === 'completed');
   return {
     ...sumAiUsage(completedSteps.map(getStepUsage)),
-    apiRequestCount: completedSteps.filter(step => {
+    apiRequestCount: completedSteps.reduce((count, step) => {
+      const execution = isRecord(step.metadata?.execution) ? step.metadata.execution : {};
+      const providerMetadata = isRecord(execution.providerMetadata) ? execution.providerMetadata : {};
+      const recordedRequestCount = Math.max(0, Math.round(Number(providerMetadata.requestCount) || 0));
+      if (recordedRequestCount > 0) return count + recordedRequestCount;
       const usage = getStepUsage(step);
-      return isRecord(usage) && Number(usage.totalTokens) > 0;
-    }).length,
+      return count + (isRecord(usage) && Number(usage.totalTokens) > 0 ? 1 : 0);
+    }, 0),
   };
 };
 
@@ -352,6 +357,33 @@ const getExecutionMetadata = (
   ...extra,
 });
 
+const mergeStepExecutionAttempts = (
+  attempts: readonly ContentWritingExecutionResult[],
+): ContentWritingExecutionResult => {
+  const latest = attempts.at(-1);
+  if (!latest) throw new Error('A content-writing step did not execute any provider request.');
+  return {
+    ...latest,
+    metadata: {
+      ...latest.metadata,
+      usage: sumAiUsage(attempts.map(attempt => attempt.metadata.usage)),
+      requestCount: attempts.length,
+      outputValidationRetryCount: Math.max(0, attempts.length - 1),
+    },
+  };
+};
+
+const CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX = `
+
+<strict_json_output_retry>
+The preceding attempt for this same stage could not be accepted because its output was not valid JSON.
+Repeat this stage using the same source material and requirements above.
+Return exactly one JSON object and no prose, Markdown, or code fence.
+The top-level object must contain an "items" array.
+Use ASCII JSON punctuation outside strings: double quotes, commas, colons, square brackets, and braces.
+Do not use Arabic or full-width commas as JSON separators, and do not leave trailing commas.
+</strict_json_output_retry>`;
+
 export const executeStructuredContentWritingWorkflow = async (
   options: StructuredWorkflowOptions,
 ): Promise<ContentWritingExecutionResult> => {
@@ -412,6 +444,8 @@ export const executeStructuredContentWritingWorkflow = async (
     maxOutputTokens: number;
     articleContextOverride?: string;
     processOutput?: (output: string) => { output: string; metadata?: JsonObject };
+    invalidOutputRetryLimit?: number;
+    invalidOutputRetrySuffix?: string;
   }): Promise<StepRunResult> => {
     const definition = optionsForStep.definition;
     const existing = stepMap.get(definition.key) || await ensureStep(definition);
@@ -443,23 +477,33 @@ export const executeStructuredContentWritingWorkflow = async (
       completed: false,
     });
 
-    const execution = await executeContentWritingTurn({
-      session: options.session,
-      messages: options.messages,
-      prompt: optionsForStep.prompt,
-      stepKey: definition.key,
-      stepLabel: definition.title,
-      stepAttempt: running.attempt_count,
-      includeGenerationRequestInHistory: true,
-      articleContextOverride: optionsForStep.articleContextOverride,
-      maxOutputTokens: optionsForStep.maxOutputTokens,
-      signal: options.signal,
-      onProgress: progress => emitProgress(definition, optionsForStep.stepIndex, optionsForStep.stepCount, {
-        ...progress,
-        message: `${definition.title}: ${progress.message}`,
-      }),
-    });
+    const executions: ContentWritingExecutionResult[] = [];
+    const executeAttempt = async (retryNumber: number): Promise<ContentWritingExecutionResult> => {
+      const result = await executeContentWritingTurn({
+        session: options.session,
+        messages: options.messages,
+        prompt: retryNumber > 0
+          ? `${optionsForStep.prompt}${optionsForStep.invalidOutputRetrySuffix || ''}`
+          : optionsForStep.prompt,
+        stepKey: definition.key,
+        stepLabel: definition.title,
+        stepAttempt: (running.attempt_count * 10) + retryNumber,
+        includeGenerationRequestInHistory: true,
+        articleContextOverride: optionsForStep.articleContextOverride,
+        maxOutputTokens: optionsForStep.maxOutputTokens,
+        signal: options.signal,
+        onProgress: progress => emitProgress(definition, optionsForStep.stepIndex, optionsForStep.stepCount, {
+          ...progress,
+          message: `${definition.title}: ${progress.message}`,
+        }),
+      });
+      executions.push(result);
+      return result;
+    };
+
+    let execution = await executeAttempt(0);
     if (!execution.ok) {
+      execution = mergeStepExecutionAttempts(executions);
       await failContentWritingStep({
         sessionId: options.session.id,
         workerId: options.workerId,
@@ -471,36 +515,64 @@ export const executeStructuredContentWritingWorkflow = async (
       return { ok: false, execution };
     }
 
-    let processed: { output: string; metadata?: JsonObject };
-    try {
-      processed = optionsForStep.processOutput
-        ? optionsForStep.processOutput(execution.text)
-        : { output: execution.text };
-      if (!toText(processed.output)) {
-        throw new Error(`The ${definition.title} step returned an empty usable output.`);
+    let processed: { output: string; metadata?: JsonObject } | null = null;
+    let processingError: unknown = null;
+    const retryLimit = Math.max(0, Math.min(2, Math.round(optionsForStep.invalidOutputRetryLimit || 0)));
+    for (let retryNumber = 0; retryNumber <= retryLimit; retryNumber += 1) {
+      try {
+        processed = optionsForStep.processOutput
+          ? optionsForStep.processOutput(execution.text)
+          : { output: execution.text };
+        if (!toText(processed.output)) {
+          throw new Error(`The ${definition.title} step returned an empty usable output.`);
+        }
+        const isStructuredRevisionPayload = Boolean(definition.metadata.revisionPhase);
+        const isGeneratedArticleProse = !isStructuredRevisionPayload && (
+          definition.type === 'section'
+          || definition.type === 'introduction'
+          || definition.type === 'faq'
+          || definition.type === 'conclusion'
+          || definition.type === 'call_to_action'
+          || definition.type === 'section_repair'
+          || definition.type === 'final_review'
+          || definition.type === 'quality_repair'
+        );
+        // Keep every persisted and live-visible prose result identical to the
+        // editor import: normalize list markers and remove generated bold text.
+        processed.output = isGeneratedArticleProse
+          ? normalizeFinalContentWritingResult(processed.output)
+          : processed.output.trim();
+        processingError = null;
+        break;
+      } catch (error) {
+        processingError = error;
+        processed = null;
+        if (retryNumber >= retryLimit) break;
+        emitProgress(definition, optionsForStep.stepIndex, optionsForStep.stepCount, {
+          stage: 'workflow-step-output-retry',
+          provider: options.session.provider,
+          model: execution.model,
+          message: `Retrying ${definition.title} because the previous output was invalid.`,
+          outputValidationRetry: retryNumber + 1,
+          completed: false,
+        });
+        execution = await executeAttempt(retryNumber + 1);
+        if (!execution.ok) break;
       }
-      const isStructuredRevisionPayload = Boolean(definition.metadata.revisionPhase);
-      const isGeneratedArticleProse = !isStructuredRevisionPayload && (
-        definition.type === 'section'
-        || definition.type === 'introduction'
-        || definition.type === 'faq'
-        || definition.type === 'conclusion'
-        || definition.type === 'call_to_action'
-        || definition.type === 'section_repair'
-        || definition.type === 'final_review'
-        || definition.type === 'quality_repair'
-      );
-      // Keep every persisted and live-visible prose result identical to the
-      // editor import: normalize list markers and remove generated bold text.
-      processed.output = isGeneratedArticleProse
-        ? normalizeFinalContentWritingResult(processed.output)
-        : processed.output.trim();
-    } catch (error) {
+    }
+    execution = mergeStepExecutionAttempts(executions);
+    if (!processed || processingError || !execution.ok) {
       const failure = createWorkflowFailure({
         session: options.session,
-        status: 422,
-        code: 'content_writing_step_output_invalid',
-        message: error instanceof Error ? error.message : `Invalid output for ${definition.title}.`,
+        status: execution.ok ? 422 : execution.status,
+        code: execution.ok
+          ? 'content_writing_step_output_invalid'
+          : execution.errorCode || 'content_writing_step_failed',
+        message: execution.ok
+          ? processingError instanceof Error
+            ? processingError.message
+            : `Invalid output for ${definition.title}.`
+          : execution.errorMessage || `Content writing step ${definition.key} failed.`,
         step: definition,
       });
       await failContentWritingStep({
@@ -509,7 +581,7 @@ export const executeStructuredContentWritingWorkflow = async (
         stepKey: definition.key,
         errorCode: failure.errorCode || 'content_writing_step_output_invalid',
         errorMessage: failure.errorMessage || 'The content writing step returned invalid output.',
-        outputText: execution.text,
+        outputText: execution.text || executions.slice().reverse().find(attempt => Boolean(attempt.text))?.text,
         metadata: getExecutionMetadata(execution),
       });
       return { ok: false, execution: failure };
@@ -840,11 +912,16 @@ export const executeStructuredContentWritingWorkflow = async (
 
   await ensureStep(competitorIndexDefinition);
   const processKnowledgeOutput = (output: string): ProcessedStepOutput => {
-    const knowledge = parseContentWritingKnowledgeBase(output, competitorChunks);
+    const normalizedJson = normalizeContentWritingKnowledgeJsonOutput(output);
+    if (!normalizedJson) {
+      throw new Error('The competitor index must be valid JSON with an items array.');
+    }
+    const knowledge = parseContentWritingKnowledgeBase(normalizedJson.output, competitorChunks);
     return {
-      output,
+      output: normalizedJson.output,
       metadata: {
         knowledge,
+        structuralJsonRepairApplied: normalizedJson.repaired,
         sourceChunkCount: competitorChunks.length,
         modelIndexedChunkCount: knowledge.modelProcessedChunkIds.length,
         fallbackChunkCount: knowledge.fallbackChunkIds.length,
@@ -911,6 +988,8 @@ export const executeStructuredContentWritingWorkflow = async (
         stepCount: 2,
         maxOutputTokens: 16_000,
         processOutput: processKnowledgeOutput,
+        invalidOutputRetryLimit: 1,
+        invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
       })),
     );
     const failedKnowledgePass = knowledgePassResults.find(
@@ -947,6 +1026,8 @@ export const executeStructuredContentWritingWorkflow = async (
       stepIndex: competitorIndexDefinition.ordinal,
       stepCount: 2,
       maxOutputTokens: 20_000,
+      invalidOutputRetryLimit: 1,
+      invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
       processOutput: output => {
         const processed = processKnowledgeOutput(output);
         const finalKnowledge = normalizeContentWritingKnowledgeBase(
@@ -989,6 +1070,8 @@ export const executeStructuredContentWritingWorkflow = async (
       stepCount: 2,
       maxOutputTokens: 16_000,
       processOutput: processKnowledgeOutput,
+      invalidOutputRetryLimit: 1,
+      invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
     });
   }
   if (!competitorIndexResult.ok) return competitorIndexResult.execution;

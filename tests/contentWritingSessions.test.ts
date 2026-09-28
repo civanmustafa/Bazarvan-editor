@@ -329,6 +329,10 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(workflow, /completeContentWritingStep/);
   assert.match(workflow, /buildContentWritingFinalReviewPrompt/);
   assert.match(workflow, /buildContentWritingCompetitorIndexPrompt/);
+  assert.match(workflow, /workflow-step-output-retry/);
+  assert.match(workflow, /invalidOutputRetryLimit: 1/);
+  assert.match(workflow, /CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX/);
+  assert.match(workflow, /structuralJsonRepairApplied/);
   assert.match(workflow, /buildContentWritingCoverageAuditPrompt/);
   assert.match(workflow, /section-repair-/);
   assert.match(workflow, /evaluateContentWritingQuality/);

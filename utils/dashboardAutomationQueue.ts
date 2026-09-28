@@ -542,7 +542,7 @@ export const buildDashboardAutomationOperations = ({
       scheduledCount: 0,
       readyCount: 0,
       unscheduledCount: 0,
-      tasks: [],
+      tasks: [] as AutomationTaskInventoryItem[],
     }));
   }
 

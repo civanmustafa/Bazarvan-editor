@@ -140,6 +140,45 @@ test('knowledge normalization deterministically covers chunks omitted by the mod
   assert.deepEqual(restored.fallbackChunkIds, knowledge.fallbackChunkIds);
 });
 
+test('competitor-index JSON safely repairs structural Arabic commas without changing Arabic prose', async () => {
+  const {
+    normalizeContentWritingKnowledgeJsonOutput,
+    parseContentWritingKnowledgeBase,
+  } = await importKnowledge();
+  const chunks = [{
+    id: 'C1-S001',
+    competitorNumber: 1,
+    title: 'Competitor',
+    url: '',
+    text: 'Source text.',
+  }];
+  const malformed = `{
+    "processedChunkIds": ["C1-S001"]،
+    "items": [{
+      "id": "K001",
+      "topic": "تكامل الدفع، وأنظمة الشحن",
+      "detail": "تفصيل موثق",
+      "sourceChunkIds": ["C1-S001"]،
+    }]،
+  }`;
+
+  const normalized = normalizeContentWritingKnowledgeJsonOutput(malformed);
+  assert.ok(normalized);
+  assert.equal(normalized.repaired, true);
+  assert.equal(JSON.parse(normalized.output).items[0].topic, 'تكامل الدفع، وأنظمة الشحن');
+  const knowledge = parseContentWritingKnowledgeBase(malformed, chunks);
+  assert.equal(knowledge.items[0].topic, 'تكامل الدفع، وأنظمة الشحن');
+  assert.deepEqual(knowledge.items[0].sourceChunkIds, ['C1-S001']);
+});
+
+test('competitor-index parser still rejects prose instead of silently treating it as an index', async () => {
+  const { parseContentWritingKnowledgeBase } = await importKnowledge();
+  assert.throws(
+    () => parseContentWritingKnowledgeBase('مقالة كاملة وليست كائن JSON.', []),
+    /valid JSON with an items array/,
+  );
+});
+
 test('transparency snapshot exposes the validated matrix, source policy, claims, and original excerpts', async () => {
   const modules = await importTransparency();
   const { buildContentWritingTransparencySnapshot } = modules.find((module: any) => (
