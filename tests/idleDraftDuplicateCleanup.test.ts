@@ -18,7 +18,7 @@ test('idle draft scheduling is server-only, length-independent and editor-safe',
       create table public.articles (
         id uuid primary key default gen_random_uuid(), title text default 'Test',
         created_by uuid default '${owner}', owner_id uuid default '${owner}', automation_creator_id uuid default '${owner}',
-        deleted_at timestamptz, status text default 'draft', content_json jsonb, content_html text, plain_text text,
+        status text default 'draft', content_json jsonb, content_html text, plain_text text,
         keywords jsonb default '{"primary":"","company":"","secondaries":[],"lsi":[]}',
         article_language text default 'en', goal_context jsonb default '{}', analysis jsonb, stats jsonb default '{}',
         save_count integer default 0, metadata jsonb default '{}', last_saved_at timestamptz default now()
@@ -75,6 +75,10 @@ test('idle draft scheduling is server-only, length-independent and editor-safe',
     await db.query('delete from article_editor_presence where article_id=$1', [article.id]);
     await apply();
     assert.deepEqual((await one('select content_json from articles where id=$1', [article.id])).content_json, result);
+    await db.query("update ai_external_analysis_jobs set status='completed' where id=$1", [auto.id]);
+    await one('select revert_unified_duplicate_cleanup($1,$2,$3,$4,$5,$6)',
+      [auto.id, owner, 'all', source, '<p>Hi</p>', 'Hi']);
+    assert.deepEqual((await one('select content_json from articles where id=$1', [article.id])).content_json, source);
     const manual = await one('insert into articles(content_json,plain_text) values($1,$2) returning *', [source, 'Hi']);
     await db.query('insert into article_editor_presence(article_id) values($1)', [manual.id]);
     const manualJob = await one('select * from enqueue_unified_duplicate_cleanup($1,$2,false,$3)',
@@ -83,7 +87,7 @@ test('idle draft scheduling is server-only, length-independent and editor-safe',
     await db.query("update ai_external_analysis_jobs set status='running',locked_by='worker',lease_generation=1,lease_expires_at=now()+interval '1 hour' where id=$1", [manualJob.id]);
     await db.query("update articles set status='in_review' where id=$1", [manual.id]);
     await assert.rejects(one('select apply_unified_duplicate_cleanup($1,$2,$3,$4,$5,$6,$7)',
-      [manualJob.id, 'worker', 1, source, state, '<p>Hello</p>', 'Hello']), /draft articles only/);
+      [manualJob.id, 'worker', 1, source, state, '<p>Hello</p>', 'Hello']), /Article changed during cleanup/);
     assert.equal((await one('select * from enqueue_unified_duplicate_cleanup($1,$2,false,$3)',
       [manual.id, owner, 'second-request'])), undefined);
     assert.equal((await one('select * from duplicate_cleanup_schedule where article_id=$1', [manual.id])), undefined);

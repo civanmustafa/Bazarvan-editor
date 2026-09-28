@@ -17,10 +17,10 @@ export async function executeUnifiedDuplicateCleanup(context: ExternalAnalysisEx
   const assertCurrent = async () => {
     context.signal.throwIfAborted();
     await assertAutomaticArticlePolicy(context.job);
-    const { data, error } = await admin.from('articles').select('content_json,keywords,article_language,title,status,deleted_at')
+    const { data, error } = await admin.from('articles').select('content_json,keywords,article_language,title,status')
       .eq('id', context.job.article_id).single();
     if (error) throw error;
-    if (data.deleted_at || data.status !== 'draft'
+    if (data.status !== 'draft'
       || !isDeepStrictEqual(data.content_json, expectedDocument) || !isDeepStrictEqual(data.keywords, input.keywords)
       || data.article_language !== input.language || data.title !== input.title) {
       throw new ExternalAnalysisBlockedError({ code: 'duplicate_cleanup_article_changed',
