@@ -1,22 +1,54 @@
-import { getSchema } from '@tiptap/core';
+import { Extension, getSchema } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
+import Link from '@tiptap/extension-link';
 import Highlight from '@tiptap/extension-highlight';
+import TextAlign from '@tiptap/extension-text-align';
+import { DOMSerializer } from '@tiptap/pm/model';
+import { parseHTML } from 'linkedom';
 import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table';
 import type { Keywords } from '../types';
 import { collectCleanupSnapshot, type CleanupSnapshot } from '../utils/duplicateCleanup';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
 
-const schema = getSchema([StarterKit, Highlight, Table, TableRow, TableCell, TableHeader]);
+const Direction = Extension.create({ name: 'cleanupDirection', addGlobalAttributes() {
+  return [{ types: ['heading', 'paragraph', 'listItem', 'bulletList', 'orderedList'], attributes: {
+    dir: { default: null, renderHTML: attrs => attrs.dir ? { dir: attrs.dir } : {} },
+  } }];
+} });
+const CleanupHighlight = Highlight.extend({ addAttributes() { return { ...this.parent?.(),
+  violation: { default: null }, from: { default: null }, isViolation: { default: false }, highlightStyle: { default: 'background' },
+}; } }).configure({ multicolor: true });
+const schema = getSchema([StarterKit.configure({ link: false }), Link.configure({ HTMLAttributes: { rel: 'noopener', target: '_self' } }), CleanupHighlight, Direction,
+  TextAlign.configure({ types: ['heading', 'paragraph', 'listItem', 'tableCell', 'tableHeader'] }), Table, TableRow, TableCell, TableHeader]);
 export type CleanupJobInput = {
   version: 1; category: number; language: 'ar' | 'en'; title: string;
   document: Record<string, unknown>; keywords: Keywords; snapshot: CleanupSnapshot;
 };
 
 export function readCleanupDocument(document: unknown) {
+  const checkAttributes = (value: any, mark = false): void => {
+    if (!value || typeof value !== 'object') throw new Error('Invalid cleanup document.');
+    const type = mark ? schema.marks[value.type] : schema.nodes[value.type];
+    if (!type) throw new Error(`Unsupported editor element: ${value.type}`);
+    if (Object.keys(value.attrs || {}).some(key => !Object.hasOwn(type.spec.attrs || {}, key))) {
+      throw new Error('Unsupported editor formatting; automatic cleanup must preserve the original.');
+    }
+    for (const child of value.content || []) checkAttributes(child);
+    for (const child of value.marks || []) checkAttributes(child, true);
+  };
+  checkAttributes(document);
   const doc = schema.nodeFromJSON(document);
   doc.check();
   if (doc.type.name !== 'doc') throw new Error('A complete editor document is required.');
   return doc;
+}
+
+export function serializeCleanupDocument(json: unknown) {
+  const doc = readCleanupDocument(json);
+  const { document } = parseHTML('<html><body></body></html>');
+  document.body.appendChild(DOMSerializer.fromSchema(schema).serializeFragment(doc.content, { document: document as unknown as Document }));
+  return { document: doc.toJSON() as Record<string, unknown>, html: document.body.innerHTML,
+    text: doc.textBetween(0, doc.content.size, '\n\n', '\uFFFC') };
 }
 
 export function prepareCleanupJobInput(body: Record<string, unknown>): CleanupJobInput {

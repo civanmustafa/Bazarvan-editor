@@ -15,6 +15,16 @@ export type DuplicateCleanupDashboardSummary = {
 export function summarizeDuplicateCleanupJobs(
   jobs: DuplicateCleanupDashboardJob[],
 ): DuplicateCleanupDashboardSummary {
+  const unified = jobs.filter(job => Number(job.input_snapshot?.version) === 2).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  if (unified && !jobs.some(job => job.created_at > unified.created_at && Number(job.input_snapshot?.version) !== 2)) {
+    const progress = unified.progress?.unified as { phase?: string; appliedCount?: number; remaining?: Record<string, number> } | undefined;
+    const completedCount = progress?.phase === 'reverted' ? 0 : Object.values(progress?.remaining || {}).filter(count => count === 0).length;
+    const state = unified.status === 'running' ? 'running'
+      : ['queued', 'waiting_for_prerequisites', 'retry_scheduled', 'paused'].includes(unified.status) ? (progress?.appliedCount ? 'partial' : 'queued')
+      : unified.status === 'completed' && progress?.phase === 'completed' ? 'completed'
+      : progress ? 'partial' : 'failed';
+    return { state, completedCount, totalCount: 7 };
+  }
   const latestByCategory = new Map<number, DuplicateCleanupDashboardJob>();
   for (const job of jobs) {
     const category = Number(job.input_snapshot?.category);

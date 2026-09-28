@@ -1,4 +1,5 @@
 import { runCleanupWorkflow, type CleanupJobProgress } from '../utils/duplicateCleanupWorkflow';
+import { executeUnifiedDuplicateCleanup } from './unifiedDuplicateCleanupExecutor';
 import { collectCleanupSnapshot } from '../utils/duplicateCleanup';
 import type { DuplicatePhrase } from '../types';
 import { readCleanupDocument, type CleanupJobInput } from './duplicateCleanupJob';
@@ -9,6 +10,7 @@ import { ExternalAnalysisOwnershipLostError, ExternalAnalysisRetryError, registe
 
 // One durable job owns every batch; checkpoints prevent repeating successful AI calls after a retry.
 export async function executeDuplicateCleanup(context: ExternalAnalysisExecutionContext) {
+  if (context.job.input_snapshot.version === 2) return executeUnifiedDuplicateCleanup(context);
   const input = context.job.input_snapshot as unknown as CleanupJobInput;
   if (input.version !== 1 || !input.snapshot) throw new Error('Unsupported cleanup snapshot.');
   const settings = await readExternalGeminiSettings();

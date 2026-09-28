@@ -1,5 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { cleanupDocumentIdentity } from '../utils/cleanupDocumentIdentity';
 import { createContext, useContext, useContextSelector } from 'use-context-selector';
 import { useEditor as useTiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -720,7 +721,7 @@ interface EditorContextType {
         expectedArticleId: string;
         markdown: string;
     }) => Promise<GeneratedContentApplicationResult>;
-    reloadActiveArticleFromRemote: (expectedArticleId: string) => Promise<boolean>;
+    reloadActiveArticleFromRemote: (expectedArticleId: string, guard?: { localDocument: unknown; remoteDocument: unknown }) => Promise<boolean>;
     reloadSavedGoogleMetadata: (expectedArticleId: string) => Promise<boolean>;
     reloadActiveGoalContextFromRemote: (expectedArticleId: string) => Promise<boolean>;
     handleRestoreDraft: () => void;
@@ -829,6 +830,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const pendingRemoteSaveRequestRef = useRef<PendingRemoteSaveRequest | null>(null);
     const skipNextAutoDraftMetadataWriteRef = useRef(false);
     const latestDraftMetaRef = useRef({ title, keywords, articleLanguage, goalContext });
+    const cleanupReloadMetaRef = useRef({ title, keywords, articleLanguage, goalContext, metaDescription, importOrigin });
+    cleanupReloadMetaRef.current = { title, keywords, articleLanguage, goalContext, metaDescription, importOrigin };
     const pendingInitialArticleRestoreRef = useRef<string | null>(initialActiveArticleTitleRef.current);
     const pendingAutoDraftRestoreRef = useRef(
         currentView === 'editor' &&
@@ -1880,6 +1883,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const reloadActiveArticleFromRemote = useCallback(async (
         expectedArticleId: string,
+        guard?: { localDocument: unknown; remoteDocument: unknown },
     ): Promise<boolean> => {
         if (
             !editor
@@ -1889,6 +1893,21 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             || activeArticleId !== expectedArticleId
         ) {
             return false;
+        }
+
+        const guardMetadata = JSON.stringify(cleanupReloadMetaRef.current);
+        const guardSavedSignature = lastSavedArticleSignatureRef.current;
+        const sourceLoadId = articleLoadRequestIdRef.current;
+        const matchesGuard = () => !guard || (!saveInFlightRef.current
+            && cleanupDocumentIdentity(editor.getJSON()) === cleanupDocumentIdentity(guard.localDocument)
+            && JSON.stringify(cleanupReloadMetaRef.current) === guardMetadata
+            && lastSavedArticleSignatureRef.current === guardSavedSignature);
+        if (!matchesGuard()) return false;
+        if (guard) {
+            const currentSignature = createArticleSaveSignature({ ...cleanupReloadMetaRef.current,
+                content: editor.getJSON(), plainText: editor.getText(), attachments: readCurrentArticleAttachments(importOrigin) });
+            if (!guardSavedSignature || cleanupDocumentIdentity(JSON.parse(currentSignature))
+                !== cleanupDocumentIdentity(JSON.parse(guardSavedSignature))) return false;
         }
 
         try {
@@ -1916,6 +1935,7 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return false;
         }
 
+        if (editor.isDestroyed || articleLoadRequestIdRef.current !== sourceLoadId || !matchesGuard()) return false;
         const requestId = articleLoadRequestIdRef.current + 1;
         articleLoadRequestIdRef.current = requestId;
         isArticleContentLoadingRef.current = true;
@@ -1927,6 +1947,8 @@ export const EditorProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 || editor.isDestroyed
                 || activeArticleId !== expectedArticleId
                 || articleLoadRequestIdRef.current !== requestId
+                || !matchesGuard()
+                || (guard && cleanupDocumentIdentity(remoteSnapshot.content) !== cleanupDocumentIdentity(guard.remoteDocument))
             ) {
                 return false;
             }

@@ -9,6 +9,7 @@ import { enqueueDuplicateCleanup, loadDuplicateCleanupJobs, cancelExternalAnalys
 import { restoreCleanupJob, type CleanupSession } from '../utils/duplicateCleanupSession';
 import { CleanupContext, type CleanupContextValue } from './DuplicateCleanupContext';
 import { runDuplicateAnalysis } from '../utils/analysis/runDuplicateAnalysis';
+import { useUnifiedDuplicateCleanup } from '../hooks/useUnifiedDuplicateCleanup';
 import {
   batchCleanupSnapshot, buildCleanupPrompt, cleanupPhraseCounts, cleanupRangeMatches,
   collectCleanupSnapshot, inspectCleanupImpact, isCleanupEditableRange, mapCleanupRange, parseCleanupPlan, simulateCleanup,
@@ -35,11 +36,14 @@ export const DuplicateCleanupProvider: React.FC<{ children: React.ReactNode }> =
   const title = useEditorSelector(value => value.title);
   const runAi = useAISelector(value => value.runPlainAiAnalysis);
   const ready = useEditorSelector(value => value.isArticleContentSettledForAutomation);
-  const value = useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external: externalTransport, ready });
-  return <CleanupContext.Provider value={value}>{children}</CleanupContext.Provider>;
+  const save = useEditorSelector(value => value.handleSaveDraft);
+  const reload = useEditorSelector(value => value.reloadActiveArticleFromRemote);
+  const unified = useUnifiedDuplicateCleanup({ editor, articleId, ready, save: () => save({ reason: 'auto' }), reload });
+  const value = useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external: externalTransport, ready, observer: unified });
+  return <CleanupContext.Provider value={{ ...value, busy: value.busy || unified.controls.busy, unified: unified.controls }}>{children}</CleanupContext.Provider>;
 };
 
-export function useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external, ready = true }: {
+export function useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external, ready = true, observer }: {
   editor: Editor | null;
   articleKey: string;
   articleId: string | null;
@@ -49,7 +53,9 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   runAi: (prompt: string, options?: { source?: string; commandId?: string; commandLabel?: string; action?: string }) => Promise<string>;
   external?: CleanupTransport;
   ready?: boolean;
+  observer?: { receive: (jobs: ExternalAnalysisJobRow[]) => Promise<void>; versions: () => Record<string, string>; active: () => boolean };
 }): CleanupContextValue {
+  const observerRef = useRef(observer); observerRef.current = observer;
   const [sessions, setSessions] = useState<Record<number, CleanupSession>>({});
   const [busy, setBusy] = useState(false);
   const sessionsRef = useRef(sessions);
@@ -86,7 +92,9 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
       try {
         const versions = Object.fromEntries(Object.values(sessionsRef.current).filter(session => session.externalJobId)
           .map(session => [session.externalJobId!, session.externalUpdatedAt || '']));
-        const jobs = await external.load(articleId, versions);
+        const jobs = await external.load(articleId, { ...versions, ...observerRef.current?.versions() });
+        if (disposed || editor.isDestroyed) return;
+        await observerRef.current?.receive(jobs);
         if (disposed || editor.isDestroyed) return;
         failures = 0;
         const next = { ...sessionsRef.current };
@@ -109,7 +117,7 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
         if (failures === 3) for (const category of Object.keys(sessionsRef.current)) update(Number(category), session => ({ ...session,
           errors: [...session.errors, language === 'ar' ? 'تعذر متابعة الخادم مؤقتًا؛ المهمة تستمر خارجيًا.' : 'Connection interrupted; the job continues on the server.'] }));
       } finally {
-        if (!disposed) timer = setTimeout(refresh, Object.values(sessionsRef.current).some(session => session.running) ? 2000 : 15000);
+        if (!disposed) timer = setTimeout(refresh, observerRef.current?.active() || Object.values(sessionsRef.current).some(session => session.running) ? 2000 : 15000);
       }
     };
     void refresh();
@@ -157,7 +165,7 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   }, [editor]);
 
   const generate = async (category: number) => {
-    if (!editor || editor.isDestroyed || !editor.isEditable || running.current || !ready
+    if (!editor || editor.isDestroyed || !editor.isEditable || running.current || !ready || observerRef.current?.active()
       || Object.values(sessionsRef.current).some(session => session.running)) return;
     const requestScope = scope;
     const requestId = ++generation.current;
@@ -181,6 +189,12 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
         const { job } = await external.enqueue(articleId, { requestId: crypto.randomUUID(), category, language,
           document: doc.toJSON(), keywords, title });
         if (!isCurrent()) return;
+        if (job?.input_snapshot?.version === 2) {
+          await observerRef.current?.receive([job]);
+          update(category, current => ({ ...current, running: false, errors: [] }));
+          return;
+        }
+        if (!job) throw new Error('تعذر بدء التنقية لهذه المقالة.');
         const current = sessionsRef.current[category];
         const sameSource = JSON.stringify(job.input_snapshot?.document) === JSON.stringify(doc.toJSON());
         publish({ ...sessionsRef.current, [category]: restoreCleanupJob(job, editor.state.doc,
@@ -269,7 +283,7 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
 
   const apply = (category: number, ids: string[]) => {
     const session = sessionsRef.current[category];
-    if (!editor?.isEditable || !session || session.running) return;
+    if (!editor?.isEditable || !session || session.running || observerRef.current?.active()) return;
     const patches = session.patches.filter(patch => ids.includes(patch.id) && patch.status === 'pending');
     if (!patches.length) return;
     try {
@@ -311,7 +325,7 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   const undo = (category: number) => {
     const session = sessionsRef.current[category];
     const batch = session?.undo.at(-1);
-    if (!editor?.isEditable || !batch || session.running) return;
+    if (!editor?.isEditable || !batch || session.running || observerRef.current?.active()) return;
     if (batch.ranges.some(range => !cleanupRangeMatches(editor.state.doc, range, range.after))) {
       update(category, current => ({ ...current, errors: [language === 'ar' ? 'تغيّر النص بعد التطبيق؛ تعذر التراجع عن هذه الدفعة بدقة.' : 'Applied text changed; this batch cannot be safely reverted.'] }));
       return;

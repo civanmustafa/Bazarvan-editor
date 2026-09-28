@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { prepareCleanupJobInput } from '../server/duplicateCleanupJob';
+import { prepareCleanupJobInput, serializeCleanupDocument } from '../server/duplicateCleanupJob';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireArticleWriteAccess } from './articleAccessPolicy';
 import { getExternalEngineeringCommand } from '../server/externalEngineeringCommands';
@@ -779,6 +779,14 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
     return { status: 200, body: { ok: true, jobs: changedJobs || [] } };
   }
   if (action === 'duplicate_cleanup') {
+    if (body.version === 2) {
+      const { data, error } = await supabase.rpc('enqueue_unified_duplicate_cleanup', {
+        p_article_id: article.id, p_requested_by: profile.id, p_automatic: body.automatic === true,
+        p_request_id: toTrimmedString(body.requestId) || null,
+      });
+      if (error) throw error;
+      return { status: 202, body: { ok: true, job: Array.isArray(data) ? data[0] || null : data } };
+    }
     let input;
     try { input = prepareCleanupJobInput(body); }
     catch (error) { throw new ExternalAnalysisApiError({ message: error instanceof Error ? error.message : 'Invalid cleanup input.', code: 'invalid_cleanup_input' }); }
@@ -789,6 +797,24 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
     });
     if (error) throw error;
     return { status: 202, body: { ok: true, job: Array.isArray(data) ? data[0] : data } };
+  }
+
+  if (action === 'duplicate_cleanup_undo') {
+    const { data: job, error } = await supabase.from('ai_external_analysis_jobs').select('id,input_snapshot,progress,status')
+      .eq('id', toTrimmedString(body.jobId)).eq('article_id', article.id).eq('job_type', 'duplicate_cleanup').single();
+    if (error) throw error;
+    const state = job.progress?.unified;
+    if (!state || !['all', 'round'].includes(String(body.scope))) throw new ExternalAnalysisApiError({ message: 'Invalid cleanup undo request.' });
+    let index = (state.rounds || []).length - 1;
+    while (index > 0 && JSON.stringify(state.rounds[index].document) === JSON.stringify(state.document)) index--;
+    const document = body.scope === 'all' ? job.input_snapshot.document : state.rounds[index]?.document;
+    if (!document) throw new ExternalAnalysisApiError({ message: 'No cleanup round to undo.' });
+    const content = serializeCleanupDocument(document);
+    const { data, error: undoError } = await supabase.rpc('revert_unified_duplicate_cleanup', {
+      p_job_id: job.id, p_requested_by: profile.id, p_scope: body.scope, p_document: document, p_html: content.html, p_text: content.text,
+    });
+    if (undoError) throw undoError;
+    return { status: 200, body: { ok: true, ...data } };
   }
 
   if (action === 'list') {
@@ -923,7 +949,7 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
   }
 
   throw new ExternalAnalysisApiError({
-    message: 'action must be list, semantic, full_pipeline, engineering, duplicate_cleanup, duplicate_cleanup_status, use_default_commands, cancel, cancel_all, or retry.',
+    message: 'action must be list, semantic, full_pipeline, engineering, duplicate_cleanup, duplicate_cleanup_status, duplicate_cleanup_undo, use_default_commands, cancel, cancel_all, or retry.',
     code: 'invalid_action',
   });
 };

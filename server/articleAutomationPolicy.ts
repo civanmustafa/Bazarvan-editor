@@ -47,6 +47,7 @@ export const automaticJobAllowedByPolicy = (
   if (policy.scope === 'legacy') return true;
   if (!policy.enabled || !policy.creatorUserId || job.requested_by !== policy.creatorUserId) return false;
   switch (job.job_type) {
+    case 'duplicate_cleanup': return policy.enabled;
     case 'semantic_keywords_lsi':
       return policy.autoGenerateAlternativeKeywords || policy.autoGenerateLsiKeywords || policy.autoGenerateGoogleMetadata;
     case 'competitor_discovery': return policy.autoDiscoverCompetitors;

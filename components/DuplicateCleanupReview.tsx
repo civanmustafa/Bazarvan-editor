@@ -81,7 +81,16 @@ export const DuplicateCleanupPhraseReview: React.FC<{ category: number; phraseKe
 };
 
 export const DuplicateCleanupStatus: React.FC<{ category: number; ar: boolean }> = ({ category, ar }) => {
-  const session = useDuplicateCleanup().sessions[category];
+  const cleanup = useDuplicateCleanup();
+  const session = cleanup.sessions[category];
+  const unified = cleanup.unified;
+  if (unified?.job && (!session?.externalCreatedAt || unified.job.created_at >= session.externalCreatedAt)) {
+    const label = unified.busy ? (ar ? 'جارٍ التنقية' : 'Cleaning up') : unified.state?.phase === 'completed'
+      || (unified.state?.phase === 'partial' && unified.state.remaining[category] === 0) ? (ar ? 'اكتملت' : 'Complete')
+      : unified.state?.steps.length ? (ar ? 'تمت جزئيًا' : 'Partial') : (ar ? 'لم تتم' : 'Not generated');
+    return <span role="status" className="inline-flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400">
+      {unified.busy && <RefreshCw size={11} className="animate-spin" />}{label}</span>;
+  }
   return <DuplicateCleanupStatusView session={session} ar={ar} />;
 };
 export const DuplicateCleanupStatusView: React.FC<{ session?: CleanupContextValue['sessions'][number]; ar: boolean }> = ({ session, ar }) => {

@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-120}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-121}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-64}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -210,6 +210,21 @@ readonly DUPLICATE_CLEANUP_QUEUE="$(sql_scalar "select to_regprocedure('public.e
 [[ "${DUPLICATE_CLEANUP_QUEUE}" == "t" ]] || fail "External duplicate cleanup queue is missing."
 readonly DUPLICATE_CLEANUP_PRIVILEGES="$(sql_scalar "select has_function_privilege('authenticated', 'public.enqueue_duplicate_cleanup(uuid,uuid,text,jsonb)', 'execute') or has_function_privilege('anon', 'public.enqueue_duplicate_cleanup(uuid,uuid,text,jsonb)', 'execute')")"
 [[ "${DUPLICATE_CLEANUP_PRIVILEGES}" == "f" ]] || fail "Duplicate cleanup must remain behind the write-access API."
+readonly UNIFIED_CLEANUP_FUNCTIONS="$(sql_scalar "select
+  to_regprocedure('public.enqueue_unified_duplicate_cleanup(uuid,uuid,boolean,text)') is not null
+  and to_regprocedure('public.apply_unified_duplicate_cleanup(uuid,text,bigint,jsonb,jsonb,text,text)') is not null
+  and to_regprocedure('public.revert_unified_duplicate_cleanup(uuid,uuid,text,jsonb,text,text)') is not null
+  and exists(select 1 from pg_trigger where tgname = 'schedule_unified_duplicate_cleanup' and not tgisinternal)
+  and exists(select 1 from pg_trigger where tgname = 'reschedule_changed_duplicate_cleanup' and not tgisinternal)")"
+[[ "${UNIFIED_CLEANUP_FUNCTIONS}" == "t" ]] || fail "Unified duplicate cleanup functions or scheduling triggers are missing."
+readonly UNIFIED_CLEANUP_CLIENT_PRIVILEGES="$(sql_scalar "select
+  has_function_privilege('anon', 'public.enqueue_unified_duplicate_cleanup(uuid,uuid,boolean,text)', 'execute')
+  or has_function_privilege('authenticated', 'public.enqueue_unified_duplicate_cleanup(uuid,uuid,boolean,text)', 'execute')
+  or has_function_privilege('anon', 'public.apply_unified_duplicate_cleanup(uuid,text,bigint,jsonb,jsonb,text,text)', 'execute')
+  or has_function_privilege('authenticated', 'public.apply_unified_duplicate_cleanup(uuid,text,bigint,jsonb,jsonb,text,text)', 'execute')
+  or has_function_privilege('anon', 'public.revert_unified_duplicate_cleanup(uuid,uuid,text,jsonb,text,text)', 'execute')
+  or has_function_privilege('authenticated', 'public.revert_unified_duplicate_cleanup(uuid,uuid,text,jsonb,text,text)', 'execute')")"
+[[ "${UNIFIED_CLEANUP_CLIENT_PRIVILEGES}" == "f" ]] || fail "Unified duplicate cleanup must remain behind the write-access API."
 
 for container_name in supabase-db supabase-auth supabase-rest realtime-dev.supabase-realtime supabase-envoy; do
   state="$(docker inspect --format '{{.State.Running}}' "${container_name}")"

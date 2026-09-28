@@ -214,6 +214,7 @@ const toJobRow = (row: Record<string, any>): ExternalAnalysisJobRow => ({
   depends_on_job_id: row.depends_on_job_id || null,
   readiness_signature: row.readiness_signature || null,
   input_snapshot: isRecord(row.input_snapshot) ? row.input_snapshot : {
+    version: Number(row.cleanup_version),
     category: row.cleanup_category,
     needsSecondaries: row.needs_secondaries,
     needsLsi: row.needs_lsi,
@@ -246,6 +247,7 @@ const SUMMARY_JOB_SELECT = [
   'needs_lsi:input_snapshot->needsLsi',
   'needs_google_metadata:input_snapshot->needsGoogleMetadata',
   'cleanup_category:input_snapshot->>category',
+  'cleanup_version:input_snapshot->>version',
   'result_status:result->>status',
   'command_id',
   'command_label',
@@ -789,6 +791,9 @@ export const enqueueExternalSemanticAnalysis = (articleId: string) => (
 
 export const enqueueDuplicateCleanup = (articleId: string, input: Record<string, unknown>) => (
   requestExternalAnalysis(articleId, { ...input, action: 'duplicate_cleanup' })
+);
+export const undoUnifiedDuplicateCleanup = (articleId: string, jobId: string, scope: 'round' | 'all') => (
+  requestExternalAnalysis(articleId, { action: 'duplicate_cleanup_undo', jobId, scope })
 );
 export const loadDuplicateCleanupJobs = async (articleId: string, versions: Record<string, string> = {}): Promise<ExternalAnalysisJobRow[]> => {
   const payload = await requestExternalAnalysis(articleId, { action: 'duplicate_cleanup_status', versions });

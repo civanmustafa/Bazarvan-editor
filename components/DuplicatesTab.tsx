@@ -9,6 +9,8 @@ import { useInteractionSelector } from '../contexts/InteractionContext';
 import { useDuplicateCleanup } from '../contexts/DuplicateCleanupContext';
 import { DuplicateCleanupReview, DuplicateCleanupPhraseReview, DuplicateCleanupStatus } from './DuplicateCleanupReview';
 import { duplicatePhraseKey } from '../utils/analysis/runDuplicateAnalysis';
+import { cleanupPhraseCounts } from '../utils/duplicateCleanup';
+import { UnifiedCleanupToolbar, UnifiedCleanupPhraseHistory, unifiedHistoryPhrases } from './UnifiedDuplicateCleanupReview';
 
 const INITIAL_VISIBLE_PHRASES = 80;
 const PHRASE_BATCH_SIZE = 80;
@@ -32,6 +34,8 @@ const PhraseList: React.FC<PhraseListProps> = React.memo(({
   category,
   language = 'ar',
 }) => {
+  const cleanup = useDuplicateCleanup();
+  const editor = useEditorSelector(context => context.editor);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_PHRASES);
   const phraseSignature = useMemo(
     () => phrases.map(phrase => `${phrase.text}:${phrase.count}`).join('\u0001'),
@@ -86,6 +90,7 @@ const PhraseList: React.FC<PhraseListProps> = React.memo(({
               </div>
               </div>
               {category && <DuplicateCleanupPhraseReview category={category} phraseKey={duplicatePhraseKey(phrase.text, language)} />}
+              {category && <UnifiedCleanupPhraseHistory state={cleanup.unified?.state} phraseKey={duplicatePhraseKey(phrase.text, language)} ar={uiLanguage === 'ar'} editor={editor} />}
             </li>
           )
         })}
@@ -214,9 +219,10 @@ const DuplicatesTab: React.FC = () => {
 
   return (
     <div className="p-[0.1875rem]">
+      <UnifiedCleanupToolbar model={cleanup.unified} ar={uiLanguage === 'ar'} editable={Boolean(editor?.isEditable)} />
       {Object.entries(analysis)
         .reverse()
-        .filter(([key, phrases]) => (phrases as any[]).length > 0 || cleanup.sessions[Number(key)])
+        .filter(([key, phrases]) => (phrases as any[]).length > 0 || cleanup.sessions[Number(key)] || unifiedHistoryPhrases(cleanup.unified?.state, Number(key)).length)
         .map(([key, phrases]: [string, DuplicatePhrase[]]) => {
             const totalPhrases = phrases.length;
             const keywordPhrasesCount = phrases.filter(p => p.containsKeyword).length;
@@ -229,6 +235,13 @@ const DuplicatesTab: React.FC = () => {
                 phrases.every(p => (highlightedItem as any[]).some(h => h.text === p.text));
             const commonPhrases = phrases.filter(p => !p.containsKeyword);
             const reviewPhrases = [...commonPhrases];
+            const history = unifiedHistoryPhrases(cleanup.unified?.state, Number(key));
+            const historyCounts = editor ? cleanupPhraseCounts(editor.state.doc, history, articleLanguage) : new Map<string, number>();
+            for (const phrase of history) {
+              if (!reviewPhrases.some(item => duplicatePhraseKey(item.text, articleLanguage) === phrase.key)) {
+                reviewPhrases.push({ text: phrase.text, count: historyCounts.get(phrase.id) || 0, containsKeyword: false, locations: [] });
+              }
+            }
             for (const phrase of cleanup.sessions[Number(key)]?.snapshot.phrases || []) {
               if (!reviewPhrases.some(item => duplicatePhraseKey(item.text, articleLanguage) === phrase.key)) {
                 reviewPhrases.push({ text: phrase.text, count: cleanup.sessions[Number(key)].counts.get(phrase.id) || 0, containsKeyword: false, locations: [] });

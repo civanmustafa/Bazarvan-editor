@@ -7,7 +7,7 @@ import { duplicatePhraseKey, normalizeDuplicateToken, runDuplicateAnalysis } fro
 export type CleanupLanguage = 'ar' | 'en';
 export type CleanupRange = { from: number; to: number; stale?: boolean };
 export type CleanupUnit = CleanupRange & { id: string; blockId: string; text: string; heading: string; editable?: boolean };
-export type CleanupBlock = { id: string; text: string; heading: string };
+export type CleanupBlock = { id: string; text: string; heading: string; from?: number };
 export type CleanupOccurrence = CleanupRange & { id: string; phraseId: string; unitIds: string[]; ordinal: number };
 export type CleanupPhrase = { id: string; text: string; key: string; occurrenceIds: string[] };
 export type CleanupSnapshot = {
@@ -57,7 +57,7 @@ export function collectCleanupSnapshot(
     const text = node.textBetween(0, node.content.size, '', '\uFFFC');
     if (node.type.name === 'heading') heading = text;
     const blockId = `b${blocks.length + 1}`;
-    blocks.push({ id: blockId, text, heading });
+    blocks.push({ id: blockId, text, heading, from: pos + 1 });
     // One placeholder per inline leaf keeps UTF-16 offsets aligned with ProseMirror.
     const segmenter = new Intl.Segmenter(language, { granularity: 'sentence' });
     for (const segment of segmenter.segment(text)) {
