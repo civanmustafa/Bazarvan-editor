@@ -101,13 +101,13 @@ export const DuplicateCleanupReviewView: React.FC<{ category: number; controller
   if (!session) return null;
   const phrase = phraseKey ? session.snapshot.phrases.find(item => item.key === phraseKey) : undefined;
   if (phraseKey && !phrase) return null;
-  const visiblePatches = phrase ? session.patches.filter(patch => patch.occurrenceIds.some(id => phrase.occurrenceIds.includes(id))) : [];
+  const visiblePatches = phrase ? session.patches.filter(patch => patch.status !== 'stale' && patch.occurrenceIds.some(id => phrase.occurrenceIds.includes(id))) : [];
   const hasPhraseReview = phrase ? session.decisions.some(decision => phrase.occurrenceIds.includes(decision.occurrenceId)) : false;
   if (phrase && !visiblePatches.length && !hasPhraseReview) return null;
   const pending = (phrase ? visiblePatches : session.patches).filter(patch => patch.status === 'pending');
   const selectedIds = pending.filter(patch => selected.has(patch.id)).map(patch => patch.id);
   const label = (patch: CleanupPatch) => ({ pending: '', applied: ar ? 'مطبّق' : 'Applied',
-    stale: ar ? 'غير صالح' : 'Outdated', skipped: ar ? 'متجاهَل' : 'Skipped', unnecessary: ar ? 'لم يعد لازمًا' : 'No longer needed' }[patch.status]);
+    stale: '', skipped: ar ? 'متجاهَل' : 'Skipped', unnecessary: ar ? 'لم يعد لازمًا' : 'No longer needed' }[patch.status]);
   return (
     <section className={`${phrase ? 'bg-gray-50 px-2 pb-2 pt-1 dark:bg-[#2A2A2A]' : 'mb-1'} text-xs text-gray-800 dark:text-gray-200`} data-cleanup-phrase={phrase?.key} aria-label={phrase ? (ar ? `اقتراحات: ${phrase.text}` : `Suggestions: ${phrase.text}`) : (ar ? 'متابعة تنقية العبارات' : 'Phrase cleanup progress')}>
       {!phrase && <>
@@ -131,7 +131,7 @@ export const DuplicateCleanupReviewView: React.FC<{ category: number; controller
           const prefix = unit.text.slice(0, patch.unitOffset);
           const suffix = unit.text.slice(patch.unitOffset + patch.original.length);
           const action = !patch.replacement ? (ar ? 'حذف' : 'Delete') : !patch.original ? (ar ? 'إضافة' : 'Add') : (ar ? 'تعديل' : 'Edit');
-          return <article key={patch.id} className="rounded-md border border-gray-200 bg-white p-2 dark:border-[#3C3C3C] dark:bg-[#242424]" data-cleanup-patch={patch.id}>
+          return <article key={patch.id} className={`rounded-md border border-gray-200 bg-white p-2 transition-opacity dark:border-[#3C3C3C] dark:bg-[#242424] ${patch.status === 'applied' ? 'opacity-60' : ''}`} data-cleanup-patch={patch.id} data-cleanup-status={patch.status}>
             {patch.status !== 'pending' && <div className="text-end text-gray-500 dark:text-gray-400">{label(patch)}</div>}
             <div className="my-2 space-y-2 whitespace-pre-wrap break-words leading-relaxed" dir={session.snapshot.language === 'ar' ? 'rtl' : 'ltr'}>
               <p><span className="block font-semibold">{ar ? 'قبل' : 'Before'}</span>{prefix}<del className="bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200">{patch.original}</del>{suffix}</p>
