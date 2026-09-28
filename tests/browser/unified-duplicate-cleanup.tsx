@@ -67,7 +67,7 @@ function Fixture() {
     if (target) { editor.commands.setContent(target); setState({ ...state, document: target, phase: 'reverted', appliedCount: 0, steps: [] }); }
   };
   const job = state ? { id: 'fixture', status: busy ? 'running' : 'completed', input_snapshot: { version: 2 }, progress: { unified: state } } as unknown as ExternalAnalysisJobRow : null;
-  const model = { job, state, busy, error, run, stop: async () => { abort.current?.abort(new Error('تم الإيقاف.')); pending.current?.(); }, undo };
+  const model = { job, state, busy, error, articleStatus: 'draft', run, stop: async () => { abort.current?.abort(new Error('تم الإيقاف.')); pending.current?.(); }, undo };
   return <main dir="rtl" style={{ maxWidth: mobile ? 360 : 1100, margin: 'auto', padding: 12, fontFamily: 'Cairo, sans-serif' }}>
     <h1 className="text-lg font-bold">اختبار التنقية التلقائية</h1>
     <div className="my-3 flex flex-wrap gap-3 text-xs">

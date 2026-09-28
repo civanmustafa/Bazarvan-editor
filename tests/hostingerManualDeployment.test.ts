@@ -40,8 +40,8 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-122/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-122/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-123/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-123/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_FUNCTIONS/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_CLIENT_PRIVILEGES/);
   assert.match(guide, /20260929000000_unified_duplicate_cleanup\.sql/);

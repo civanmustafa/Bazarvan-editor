@@ -779,9 +779,12 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
     return { status: 200, body: { ok: true, jobs: changedJobs || [] } };
   }
   if (action === 'duplicate_cleanup') {
+    if (article.status !== 'draft') throw new ExternalAnalysisApiError({
+      message: 'Duplicate cleanup is available for draft articles only.', code: 'duplicate_cleanup_draft_only', status: 409,
+    });
     if (body.version === 2) {
       const { data, error } = await supabase.rpc('enqueue_unified_duplicate_cleanup', {
-        p_article_id: article.id, p_requested_by: profile.id, p_automatic: body.automatic === true,
+        p_article_id: article.id, p_requested_by: profile.id, p_automatic: false,
         p_request_id: toTrimmedString(body.requestId) || null,
       });
       if (error) throw error;
@@ -800,6 +803,9 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
   }
 
   if (action === 'duplicate_cleanup_undo') {
+    if (article.status !== 'draft') throw new ExternalAnalysisApiError({
+      message: 'Duplicate cleanup can modify draft articles only.', code: 'duplicate_cleanup_draft_only', status: 409,
+    });
     const { data: job, error } = await supabase.from('ai_external_analysis_jobs').select('id,input_snapshot,progress,status')
       .eq('id', toTrimmedString(body.jobId)).eq('article_id', article.id).eq('job_type', 'duplicate_cleanup').single();
     if (error) throw error;

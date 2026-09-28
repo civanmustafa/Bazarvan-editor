@@ -9,11 +9,11 @@ import type { UnifiedCleanupState } from '../utils/unifiedDuplicateCleanup';
 export const isCleanupJobActive = (job: ExternalAnalysisJobRow | null) => Boolean(job
   && ['queued', 'running', 'retry_scheduled', 'waiting_for_prerequisites', 'paused'].includes(job.status));
 export type UnifiedCleanupControls = {
-  job: ExternalAnalysisJobRow | null; state?: UnifiedCleanupState; busy: boolean; error: string;
+  job: ExternalAnalysisJobRow | null; state?: UnifiedCleanupState; busy: boolean; error: string; articleStatus: string;
   run: () => Promise<void>; stop: () => Promise<void>; undo: (scope: 'round' | 'all') => Promise<void>;
 };
 type Options = {
-  editor: Editor | null; articleId: string | null; ready: boolean;
+  editor: Editor | null; articleId: string | null; ready: boolean; articleStatus: string;
   save: () => Promise<boolean>;
   reload: (articleId: string, guard: { localDocument: unknown; remoteDocument: unknown }) => Promise<boolean>;
 };
@@ -26,13 +26,12 @@ export function useUnifiedDuplicateCleanup(options: Options) {
   const [pending, setPending] = useState(false);
   const submitting = useRef(false);
   const syncedDocument = useRef<unknown>(null);
-  const attempted = useRef(new Set<string>());
   const syncing = useRef(false);
   const scope = useRef(options.articleId); scope.current = options.articleId;
   const remember = (value: ExternalAnalysisJobRow) => { jobRef.current = value; setJob(value); };
   useEffect(() => {
     jobRef.current = null; setJob(null); setError(''); syncedDocument.current = null;
-    attempted.current.clear(); submitting.current = false; setPending(false);
+    submitting.current = false; setPending(false);
   }, [options.articleId, options.editor]);
 
   const receive = useCallback(async (jobs: ExternalAnalysisJobRow[]) => {
@@ -67,44 +66,31 @@ export function useUnifiedDuplicateCleanup(options: Options) {
     } finally { syncing.current = false; }
   }, []);
 
-  const start = useCallback(async (automatic: boolean) => {
-    const { editor, articleId, ready, save } = latest.current;
-    if (!articleId || !editor?.isEditable || !ready || submitting.current || isCleanupJobActive(jobRef.current)) return;
+  const start = useCallback(async () => {
+    const { editor, articleId, ready, save, articleStatus } = latest.current;
+    if (!articleId || !editor?.isEditable || !ready || articleStatus !== 'draft'
+      || submitting.current || isCleanupJobActive(jobRef.current)) return;
     submitting.current = true; setPending(true); setError('');
     try {
       if (!await save() || scope.current !== articleId) return;
-      const result = await enqueueDuplicateCleanup(articleId, { version: 2, automatic, requestId: crypto.randomUUID() });
+      const result = await enqueueDuplicateCleanup(articleId, { version: 2, automatic: false, requestId: crypto.randomUUID() });
       if (scope.current === articleId && result.job?.input_snapshot?.version === 2) await receive([result.job]);
     } catch (failure) { if (scope.current === articleId) setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { if (scope.current === articleId) { submitting.current = false; setPending(false); } }
   }, [receive]);
 
   useEffect(() => {
-    const { editor, articleId, ready } = options;
-    if (!editor || !articleId || !ready) return;
-    let timer: ReturnType<typeof setTimeout>;
-    const schedule = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (!editor.isEditable || syncing.current || isCleanupJobActive(jobRef.current)) return;
-        const identity = cleanupDocumentIdentity(editor.getJSON());
-        if (attempted.current.has(identity)) return;
-        attempted.current.add(identity);
-        void start(true);
-      }, 15000);
-    };
+    const { editor, articleId } = options;
+    if (!editor || !articleId) return;
     const onTransaction = ({ transaction }: { transaction: Transaction }) => {
-      if (!transaction.docChanged) return;
-      if (!syncing.current && isCleanupJobActive(jobRef.current)
-        && cleanupDocumentIdentity(transaction.before.toJSON()) !== cleanupDocumentIdentity(transaction.doc.toJSON())) {
-        setError('تغيّر النص محليًا؛ طُلب إيقاف التنقية لحماية تعديلاتك.');
-        void cancelExternalAnalysisJob(articleId, jobRef.current!.id).catch(failure => setError(String(failure)));
-      }
-      schedule();
+      if (!transaction.docChanged || syncing.current || !isCleanupJobActive(jobRef.current)) return;
+      if (cleanupDocumentIdentity(transaction.before.toJSON()) === cleanupDocumentIdentity(transaction.doc.toJSON())) return;
+      setError('تغيّر النص محليًا؛ طُلب إيقاف التنقية لحماية تعديلاتك.');
+      void cancelExternalAnalysisJob(articleId, jobRef.current!.id).catch(failure => setError(String(failure)));
     };
-    schedule(); editor.on('transaction', onTransaction);
-    return () => { clearTimeout(timer); editor.off('transaction', onTransaction); };
-  }, [options.editor, options.articleId, options.ready, start, job?.status]);
+    editor.on('transaction', onTransaction);
+    return () => { editor.off('transaction', onTransaction); };
+  }, [options.editor, options.articleId]);
 
   const stop = async () => {
     const articleId = latest.current.articleId; const current = jobRef.current;
@@ -113,8 +99,8 @@ export function useUnifiedDuplicateCleanup(options: Options) {
     catch (failure) { setError(String(failure)); }
   };
   const undo = async (undoScope: 'round' | 'all') => {
-    const { articleId, editor } = latest.current; const current = jobRef.current;
-    if (!articleId || !editor?.isEditable || !current || isCleanupJobActive(current) || submitting.current) return;
+    const { articleId, editor, articleStatus } = latest.current; const current = jobRef.current;
+    if (!articleId || !editor?.isEditable || articleStatus !== 'draft' || !current || isCleanupJobActive(current) || submitting.current) return;
     const document = (current.progress?.unified as UnifiedCleanupState | undefined)?.document;
     if (!document || cleanupDocumentIdentity(editor.getJSON()) !== cleanupDocumentIdentity(editor.schema.nodeFromJSON(document).toJSON())) {
       setError('تغيّر النص بعد التطبيق؛ لم يُنفّذ التراجع حفاظًا على تعديلاتك.'); return;
@@ -129,7 +115,7 @@ export function useUnifiedDuplicateCleanup(options: Options) {
   };
   return {
     controls: { job, state: job?.progress?.unified as UnifiedCleanupState | undefined,
-      busy: pending || isCleanupJobActive(job), error, run: () => start(false), stop, undo } satisfies UnifiedCleanupControls,
+      busy: pending || isCleanupJobActive(job), error, articleStatus: options.articleStatus, run: start, stop, undo } satisfies UnifiedCleanupControls,
     receive, versions: () => {
       const current = jobRef.current;
       const state = current?.progress?.unified as UnifiedCleanupState | undefined;

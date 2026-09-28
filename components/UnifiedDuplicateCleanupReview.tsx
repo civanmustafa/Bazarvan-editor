@@ -20,19 +20,25 @@ export function unifiedCleanupLabel(model: UnifiedCleanupControls, ar: boolean):
 export const UnifiedCleanupToolbar: React.FC<{ model?: UnifiedCleanupControls; ar: boolean; editable: boolean }> = ({ model, ar, editable }) => {
   if (!model) return null;
   const { state } = model;
+  const draft = model.articleStatus === 'draft';
   return <section className="mb-2 border-b border-gray-200 pb-2 text-xs dark:border-gray-700" aria-label={ar ? 'التنقية التلقائية' : 'Automatic cleanup'}>
     <div className="flex flex-wrap items-center gap-1">
       <strong className="min-w-0 flex-1">{ar ? 'تنقية العبارات العامة' : 'General phrase cleanup'}</strong>
       <span role="status" className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400">
         {model.busy && <RefreshCw size={12} className="animate-spin" />}{unifiedCleanupLabel(model, ar)}
       </span>
-      <button className={iconClass} disabled={model.busy || !editable} onClick={() => void model.run()}
-        title={ar ? 'تنقية جميع التصنيفات' : 'Clean up all categories'} aria-label={ar ? 'تنقية جميع التصنيفات' : 'Clean up all categories'}><Sparkles size={16} /></button>
+      <button className={iconClass} disabled={model.busy || !editable || !draft} onClick={() => void model.run()}
+        title={ar ? 'ابدأ تنقية جميع التصنيفات الآن' : 'Start cleanup now'} aria-label={ar ? 'ابدأ التنقية الآن' : 'Start cleanup now'}><Sparkles size={16} /></button>
+      {!model.busy && <span className="text-gray-500 dark:text-gray-400" title={draft
+        ? (ar ? 'لا تبدأ المعالجة تلقائيًا والمحرر مفتوح. يمكنك تشغيلها الآن بعد حفظ تعديلاتك.' : 'Automatic cleanup waits while the editor is open. You can start it now after saving.')
+        : (ar ? 'المعالجة متاحة للمقالات المسودة فقط.' : 'Cleanup is available for draft articles only.')}>
+        {draft ? (ar ? 'التلقائي مؤجل أثناء التحرير' : 'Auto deferred while editing') : (ar ? 'للمسودات فقط' : 'Drafts only')}
+      </span>}
       {model.busy && <button className={iconClass} onClick={() => void model.stop()} title={ar ? 'إيقاف' : 'Stop'} aria-label={ar ? 'إيقاف' : 'Stop'}><Square size={14} /></button>}
       {!!state?.appliedCount && <>
-        <button className={iconClass} disabled={model.busy || !editable} onClick={() => void model.undo('round')}
+        <button className={iconClass} disabled={model.busy || !editable || !draft} onClick={() => void model.undo('round')}
           title={ar ? 'التراجع عن آخر جولة' : 'Undo last round'} aria-label={ar ? 'التراجع عن آخر جولة' : 'Undo last round'}><Undo2 size={16} /></button>
-        <button className={iconClass} disabled={model.busy || !editable} onClick={() => void model.undo('all')}
+        <button className={iconClass} disabled={model.busy || !editable || !draft} onClick={() => void model.undo('all')}
           title={ar ? 'التراجع عن التنقية كاملة' : 'Undo all cleanup'} aria-label={ar ? 'التراجع عن التنقية كاملة' : 'Undo all cleanup'}><RotateCcw size={16} /></button>
       </>}
     </div>

@@ -36,14 +36,15 @@ export const DuplicateCleanupProvider: React.FC<{ children: React.ReactNode }> =
   const title = useEditorSelector(value => value.title);
   const runAi = useAISelector(value => value.runPlainAiAnalysis);
   const ready = useEditorSelector(value => value.isArticleContentSettledForAutomation);
+  const articleStatus = useEditorSelector(value => value.activeArticleSettings.status);
   const save = useEditorSelector(value => value.handleSaveDraft);
   const reload = useEditorSelector(value => value.reloadActiveArticleFromRemote);
-  const unified = useUnifiedDuplicateCleanup({ editor, articleId, ready, save: () => save({ reason: 'auto' }), reload });
-  const value = useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external: externalTransport, ready, observer: unified });
+  const unified = useUnifiedDuplicateCleanup({ editor, articleId, ready, articleStatus, save: () => save({ reason: 'auto' }), reload });
+  const value = useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external: externalTransport, ready, articleStatus, observer: unified });
   return <CleanupContext.Provider value={{ ...value, busy: value.busy || unified.controls.busy, unified: unified.controls }}>{children}</CleanupContext.Provider>;
 };
 
-export function useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external, ready = true, observer }: {
+export function useDuplicateCleanupController({ editor, articleKey, articleId, language, keywords, title, runAi, external, ready = true, articleStatus = 'draft', observer }: {
   editor: Editor | null;
   articleKey: string;
   articleId: string | null;
@@ -53,6 +54,7 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   runAi: (prompt: string, options?: { source?: string; commandId?: string; commandLabel?: string; action?: string }) => Promise<string>;
   external?: CleanupTransport;
   ready?: boolean;
+  articleStatus?: string;
   observer?: { receive: (jobs: ExternalAnalysisJobRow[]) => Promise<void>; versions: () => Record<string, string>; active: () => boolean };
 }): CleanupContextValue {
   const observerRef = useRef(observer); observerRef.current = observer;
@@ -165,7 +167,7 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   }, [editor]);
 
   const generate = async (category: number) => {
-    if (!editor || editor.isDestroyed || !editor.isEditable || running.current || !ready || observerRef.current?.active()
+    if (!editor || editor.isDestroyed || !editor.isEditable || articleStatus !== 'draft' || running.current || !ready || observerRef.current?.active()
       || Object.values(sessionsRef.current).some(session => session.running)) return;
     const requestScope = scope;
     const requestId = ++generation.current;
@@ -283,7 +285,7 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
 
   const apply = (category: number, ids: string[]) => {
     const session = sessionsRef.current[category];
-    if (!editor?.isEditable || !session || session.running || observerRef.current?.active()) return;
+    if (!editor?.isEditable || articleStatus !== 'draft' || !session || session.running || observerRef.current?.active()) return;
     const patches = session.patches.filter(patch => ids.includes(patch.id) && patch.status === 'pending');
     if (!patches.length) return;
     try {
@@ -325,7 +327,7 @@ export function useDuplicateCleanupController({ editor, articleKey, articleId, l
   const undo = (category: number) => {
     const session = sessionsRef.current[category];
     const batch = session?.undo.at(-1);
-    if (!editor?.isEditable || !batch || session.running || observerRef.current?.active()) return;
+    if (!editor?.isEditable || articleStatus !== 'draft' || !batch || session.running || observerRef.current?.active()) return;
     if (batch.ranges.some(range => !cleanupRangeMatches(editor.state.doc, range, range.after))) {
       update(category, current => ({ ...current, errors: [language === 'ar' ? 'تغيّر النص بعد التطبيق؛ تعذر التراجع عن هذه الدفعة بدقة.' : 'Applied text changed; this batch cannot be safely reverted.'] }));
       return;

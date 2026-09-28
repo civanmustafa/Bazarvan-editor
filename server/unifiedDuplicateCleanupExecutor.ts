@@ -20,11 +20,18 @@ export async function executeUnifiedDuplicateCleanup(context: ExternalAnalysisEx
     const { data, error } = await admin.from('articles').select('content_json,keywords,article_language,title,status,deleted_at')
       .eq('id', context.job.article_id).single();
     if (error) throw error;
-    if (data.deleted_at || ['published', 'archived'].includes(data.status)
+    if (data.deleted_at || data.status !== 'draft'
       || !isDeepStrictEqual(data.content_json, expectedDocument) || !isDeepStrictEqual(data.keywords, input.keywords)
       || data.article_language !== input.language || data.title !== input.title) {
       throw new ExternalAnalysisBlockedError({ code: 'duplicate_cleanup_article_changed',
         message: 'تغيّرت المقالة أثناء التنقية؛ توقف التطبيق لحماية التعديلات الجديدة.' });
+    }
+    if (context.job.origin === 'auto') {
+      const { data: ready, error: readinessError } = await admin.rpc('unified_duplicate_cleanup_auto_ready',
+        { p_article_id: context.job.article_id });
+      if (readinessError) throw readinessError;
+      if (!ready) throw new ExternalAnalysisBlockedError({ code: 'duplicate_cleanup_not_ready',
+        message: 'تأجلت المعالجة التلقائية لأن المقالة مفتوحة أو لم يستقر نصها بعد.' });
     }
   };
   await assertCurrent();
@@ -54,6 +61,9 @@ export async function executeUnifiedDuplicateCleanup(context: ExternalAnalysisEx
       const { error } = await admin.rpc('apply_unified_duplicate_cleanup', { p_job_id: context.job.id, p_worker_id: context.workerId,
         p_lease_generation: context.job.lease_generation, p_before: expectedDocument, p_state: unified, p_html: content.html, p_text: content.text });
       if (error?.code === '40001') throw new ExternalAnalysisBlockedError({ code: 'duplicate_cleanup_article_changed', message: 'تغيّرت المقالة قبل التطبيق؛ بقيت التعديلات الجديدة محفوظة.' });
+      if (error?.code === '55000' && error.message?.includes('Automatic cleanup is no longer ready'))
+        throw new ExternalAnalysisBlockedError({ code: 'duplicate_cleanup_not_ready',
+          message: 'فُتحت المقالة أو تغيّر وضعها قبل التطبيق؛ لم يُطبّق الاقتراح.' });
       if (error?.code === '55000') throw new ExternalAnalysisOwnershipLostError();
       if (error) throw error;
       expectedDocument = unified.document;

@@ -145,6 +145,12 @@ const recoverStaleJobsIfDue = async (): Promise<void> => {
   if (recovered > 0) {
     console.log(`[external-analysis-worker] Recovered ${recovered} stale job(s).`);
   }
+  if (workerJobTypes.includes('duplicate_cleanup')) {
+    const { data, error } = await getExternalAnalysisSupabaseAdmin()
+      .rpc('dispatch_due_unified_duplicate_cleanup', { p_limit: 20 });
+    if (error) throw error;
+    if (Number(data) > 0) console.log(`[external-analysis-worker] Scheduled ${data} idle draft cleanup(s).`);
+  }
   const coordinated = await reconcileArticleAutomationCoordinator();
   if (!coordinated.skipped && (coordinated.processedArticles > 0 || coordinated.errorCount > 0)) {
     console.log(
