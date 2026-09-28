@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   Bot,
@@ -16,6 +17,7 @@ import {
   Sparkles,
   Tags,
   Workflow,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import type { UserAutomationPreferences } from '../constants/userAutomation';
@@ -240,6 +242,27 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [now, setNow] = useState(Date.now());
   const refreshRequestRef = useRef(0);
+  const modalCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!expandedOperationKey) return undefined;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusTimer = window.setTimeout(() => modalCloseButtonRef.current?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setExpandedOperationKey(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [expandedOperationKey]);
 
   const refresh = useCallback(async (silent = false) => {
     const requestId = refreshRequestRef.current + 1;
@@ -430,6 +453,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
               onClick={() => setExpandedOperationKey(current => current === operation.key ? null : operation.key)}
               className="inline-flex items-center gap-0.5 rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[8px] font-black text-blue-600 hover:border-blue-300 dark:border-[#555] dark:bg-[#222] dark:text-blue-300"
               title={isArabic ? 'عرض المهام المتبقية وغير المكتملة' : 'Show remaining and incomplete tasks'}
+              aria-haspopup="dialog"
               aria-expanded={expandedOperationKey === operation.key}
             >
               <ListTree size={11} />
@@ -564,100 +588,137 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         <div className="mt-2 grid grid-cols-2 gap-2">
           {operations.map(renderOperation)}
         </div>
-        {expandedOperation && (
-          <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50/40 p-2.5 dark:border-blue-900/50 dark:bg-blue-900/10">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-black text-gray-800 dark:text-gray-100">
-                <ListTree size={13} className="text-blue-600 dark:text-blue-300" />
-                {isArabic ? 'المهام المتبقية وغير المكتملة:' : 'Remaining and incomplete tasks:'}
-                <span>{OPERATION_PRESENTATION[expandedOperation.key].label[isArabic ? 0 : 1]}</span>
-              </div>
-              <span className="rounded-full bg-white px-2 py-1 text-[8px] font-black text-gray-500 dark:bg-[#222] dark:text-gray-300">
-                {taskScope === 'system'
-                  ? (isArabic ? 'جميع مهام النظام' : 'All system tasks')
-                  : (isArabic ? 'المهام المرتبطة بك فقط' : 'Only tasks linked to you')}
-              </span>
-            </div>
-
-            {expandedOperation.key === 'content_writing' && overview && (
-              <div className="mt-2 space-y-1.5">
-                {!overview.settings.enabled && (
-                  <div className="rounded-md bg-gray-100 px-2 py-1.5 text-[9px] font-bold text-gray-600 dark:bg-[#222] dark:text-gray-300">
-                    {isArabic ? 'طلبات الكتابة الجديدة متوقفة من إعدادات المسؤول.' : 'New writing requests are paused in administrator settings.'}
-                  </div>
-                )}
-                {overview.globalBlocker && (
-                  <div className="flex items-start gap-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[9px] font-bold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                    <Clock3 size={11} className="mt-0.5 shrink-0" />
-                    <span>{isArabic
-                      ? `ينتظر طابور الكتابة انتهاء مسار أعلى أولوية${overview.globalBlocker.articleTitle ? `: ${overview.globalBlocker.articleTitle}` : ''}.`
-                      : `The writing queue is waiting for higher-priority work${overview.globalBlocker.articleTitle ? `: ${overview.globalBlocker.articleTitle}` : ''}.`}</span>
-                  </div>
-                )}
-                {cooldownMs > 0 && (
-                  <div className="rounded-md bg-amber-50 px-2 py-1.5 text-[9px] font-bold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                    {isArabic ? `الفاصل العالمي المتبقي: ${formatCountdown(cooldownMs, true)}` : `Global cooldown remaining: ${formatCountdown(cooldownMs, false)}`}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="mt-2 max-h-96 space-y-1.5 overflow-y-auto pe-1">
-              {(expandedOperation.tasks || []).length > 0 ? expandedOperation.tasks!.map(task => {
-                const dateDetails = taskDateDetails(task, isArabic);
-                const reason = getTaskReasonLabel(task.reason, isArabic);
-                return (
-                  <button
-                    key={task.taskId}
-                    type="button"
-                    onClick={() => navigateToAppPath(buildEditorArticlePath(task.articleId))}
-                    className="flex w-full items-start gap-2 rounded-md border border-gray-200 bg-white px-2 py-2 text-start hover:border-blue-300 hover:bg-blue-50 dark:border-[#444] dark:bg-[#252525] dark:hover:border-blue-800"
+        {expandedOperation && createPortal(
+          <div
+            className="fixed inset-0 z-[160] flex items-center justify-center bg-black/60 p-3 backdrop-blur-[1px] sm:p-6"
+            onMouseDown={event => {
+              if (event.target === event.currentTarget) setExpandedOperationKey(null);
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="automation-remaining-tasks-title"
+              className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-blue-200 bg-white shadow-2xl dark:border-blue-900/60 dark:bg-[#2A2A2A] sm:max-h-[calc(100vh-3rem)]"
+            >
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-[#444]">
+                <div className="min-w-0">
+                  <h4
+                    id="automation-remaining-tasks-title"
+                    className="flex items-center gap-1.5 text-sm font-black text-gray-800 dark:text-gray-100"
                   >
-                    <span
-                      className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${task.priorityRank <= 3
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300'}`}
-                      title={isArabic ? `الأولوية ${task.priorityRank} داخل هذا النوع` : `Priority ${task.priorityRank} within this task type`}
-                    >
-                      {task.priorityRank}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="min-w-0 flex-1 truncate text-[10px] font-black text-gray-800 dark:text-gray-100">
-                          {task.articleTitle || task.articleId}
-                        </span>
-                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-black ${TASK_STATUS_STYLE[task.status]}`}>
-                          {getTaskStatusLabel(task, isArabic)}
-                        </span>
-                      </span>
-                      {dateDetails && (
-                        <span className="mt-1 block text-[9px] font-bold text-gray-500 dark:text-gray-400">
-                          {dateDetails.label}: {dateDetails.value}
-                        </span>
-                      )}
-                      {reason && (
-                        <span className={`mt-1 block text-[9px] font-bold ${task.status === 'failed'
-                          ? 'text-red-600 dark:text-red-300'
-                          : 'text-gray-500 dark:text-gray-400'}`}>
-                          {reason}
-                        </span>
-                      )}
-                      {(task.attemptCount > 0 || task.status === 'failed') && (
-                        <span className="mt-1 block text-[8px] font-bold text-gray-400 dark:text-gray-500">
-                          {isArabic ? `المحاولة ${task.attemptCount}/${task.maxAttempts}` : `Attempt ${task.attemptCount}/${task.maxAttempts}`}
-                        </span>
-                      )}
-                    </span>
-                    <ExternalLink size={11} className="mt-1 shrink-0 text-gray-400" />
-                  </button>
-                );
-              }) : (
-                <div className="rounded-md border border-dashed border-gray-200 p-3 text-center text-[10px] font-bold text-gray-400 dark:border-[#444]">
-                  {isArabic ? 'لا توجد مهام متبقية أو غير مكتملة في هذه المرحلة.' : 'No remaining or incomplete tasks in this stage.'}
+                    <ListTree size={16} className="shrink-0 text-blue-600 dark:text-blue-300" />
+                    <span>{isArabic ? 'المهام المتبقية وغير المكتملة' : 'Remaining and incomplete tasks'}</span>
+                  </h4>
+                  <p className="mt-1 truncate text-[11px] font-black text-blue-600 dark:text-blue-300">
+                    {OPERATION_PRESENTATION[expandedOperation.key].label[isArabic ? 0 : 1]}
+                  </p>
                 </div>
-              )}
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[9px] font-black text-gray-500 dark:bg-[#222] dark:text-gray-300">
+                    {taskScope === 'system'
+                      ? (isArabic ? 'جميع مهام النظام' : 'All system tasks')
+                      : (isArabic ? 'المهام المرتبطة بك فقط' : 'Only tasks linked to you')}
+                  </span>
+                  <button
+                    ref={modalCloseButtonRef}
+                    type="button"
+                    onClick={() => setExpandedOperationKey(null)}
+                    className="rounded-md border border-gray-200 p-1.5 text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-[#555] dark:hover:border-red-900 dark:hover:bg-red-900/20 dark:hover:text-red-300"
+                    aria-label={isArabic ? 'إغلاق النافذة' : 'Close dialog'}
+                    title={isArabic ? 'إغلاق' : 'Close'}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {expandedOperation.key === 'content_writing' && overview && (
+                  <div className="mb-3 space-y-1.5">
+                    {!overview.settings.enabled && (
+                      <div className="rounded-md bg-gray-100 px-2 py-1.5 text-[10px] font-bold text-gray-600 dark:bg-[#222] dark:text-gray-300">
+                        {isArabic ? 'طلبات الكتابة الجديدة متوقفة من إعدادات المسؤول.' : 'New writing requests are paused in administrator settings.'}
+                      </div>
+                    )}
+                    {overview.globalBlocker && (
+                      <div className="flex items-start gap-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                        <Clock3 size={12} className="mt-0.5 shrink-0" />
+                        <span>{isArabic
+                          ? `ينتظر طابور الكتابة انتهاء مسار أعلى أولوية${overview.globalBlocker.articleTitle ? `: ${overview.globalBlocker.articleTitle}` : ''}.`
+                          : `The writing queue is waiting for higher-priority work${overview.globalBlocker.articleTitle ? `: ${overview.globalBlocker.articleTitle}` : ''}.`}</span>
+                      </div>
+                    )}
+                    {cooldownMs > 0 && (
+                      <div className="rounded-md bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                        {isArabic ? `الفاصل العالمي المتبقي: ${formatCountdown(cooldownMs, true)}` : `Global cooldown remaining: ${formatCountdown(cooldownMs, false)}`}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {(expandedOperation.tasks || []).length > 0 ? expandedOperation.tasks!.map(task => {
+                    const dateDetails = taskDateDetails(task, isArabic);
+                    const reason = getTaskReasonLabel(task.reason, isArabic);
+                    return (
+                      <button
+                        key={task.taskId}
+                        type="button"
+                        onClick={() => {
+                          setExpandedOperationKey(null);
+                          navigateToAppPath(buildEditorArticlePath(task.articleId));
+                        }}
+                        className="flex w-full items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-start hover:border-blue-300 hover:bg-blue-50 dark:border-[#444] dark:bg-[#252525] dark:hover:border-blue-800"
+                      >
+                        <span
+                          className={`flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-black ${task.priorityRank <= 3
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300'}`}
+                          title={isArabic ? `الأولوية ${task.priorityRank} داخل هذا النوع` : `Priority ${task.priorityRank} within this task type`}
+                        >
+                          {task.priorityRank}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <span className="min-w-0 flex-1 truncate text-[11px] font-black text-gray-800 dark:text-gray-100">
+                              {task.articleTitle || task.articleId}
+                            </span>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black ${TASK_STATUS_STYLE[task.status]}`}>
+                              {getTaskStatusLabel(task, isArabic)}
+                            </span>
+                          </span>
+                          {dateDetails && (
+                            <span className="mt-1 block text-[10px] font-bold text-gray-500 dark:text-gray-400">
+                              {dateDetails.label}: {dateDetails.value}
+                            </span>
+                          )}
+                          {reason && (
+                            <span className={`mt-1 block text-[10px] font-bold ${task.status === 'failed'
+                              ? 'text-red-600 dark:text-red-300'
+                              : 'text-gray-500 dark:text-gray-400'}`}>
+                              {reason}
+                            </span>
+                          )}
+                          {(task.attemptCount > 0 || task.status === 'failed') && (
+                            <span className="mt-1 block text-[9px] font-bold text-gray-400 dark:text-gray-500">
+                              {isArabic ? `المحاولة ${task.attemptCount}/${task.maxAttempts}` : `Attempt ${task.attemptCount}/${task.maxAttempts}`}
+                            </span>
+                          )}
+                        </span>
+                        <ExternalLink size={13} className="mt-1 shrink-0 text-gray-400" />
+                      </button>
+                    );
+                  }) : (
+                    <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center text-[11px] font-bold text-gray-400 dark:border-[#444]">
+                      {isArabic ? 'لا توجد مهام متبقية أو غير مكتملة في هذه المرحلة.' : 'No remaining or incomplete tasks in this stage.'}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
         <div className="mt-2 flex items-center justify-between gap-2 text-[9px] font-bold text-gray-400 dark:text-gray-500">
           <span>{isArabic ? `${operationCounts.enabled}/${operations.length} أنواع مفعّلة لحسابك` : `${operationCounts.enabled}/${operations.length} types enabled for your account`}</span>

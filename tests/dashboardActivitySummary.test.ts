@@ -46,6 +46,11 @@ test('the automation queue keeps every user-controlled operation visible in one 
   assert.match(component, /المهام الحية للذكاء الاصطناعي|DashboardAiExecutionMonitor/);
   assert.match(component, /حالة جميع مراحل الأتمتة/);
   assert.match(component, /operations\.map\(renderOperation\)/);
+  assert.match(component, /createPortal\(/);
+  assert.match(component, /role="dialog"/);
+  assert.match(component, /aria-modal="true"/);
+  assert.match(component, /event\.key === 'Escape'/);
+  assert.match(component, /document\.body\.style\.overflow = 'hidden'/);
   assert.match(component, /attention: countDashboardAutomationIssues\(operations\)/);
   assert.match(component, /getOperationErrorMessage\(operation, isArabic\)/);
   assert.match(component, /إدارة الأتمتة/);
