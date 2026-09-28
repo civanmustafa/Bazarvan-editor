@@ -407,6 +407,45 @@ export const buildDashboardAutomationOperations = ({
     summary.duplicateCleanup?.state !== 'not_started'
   ));
 
+  const inventoryTaskIsAlreadyComplete = (task: AutomationTaskInventoryItem): boolean => {
+    if (task.status === 'running' || task.status === 'scheduled') return false;
+    if (task.operationKey === 'alternative_keywords') {
+      return articleSnapshots[task.articleId]?.alternativeKeywordsReady === true;
+    }
+    if (task.operationKey === 'lsi_keywords') {
+      return articleSnapshots[task.articleId]?.lsiKeywordsReady === true;
+    }
+    if (task.operationKey === 'google_metadata') {
+      return articleSnapshots[task.articleId]?.googleMetadataReady === true;
+    }
+    if (task.operationKey === 'competitor_discovery') {
+      return (competitorSummaryByArticle.get(task.articleId)?.competitorTotalCount || 0) > 0;
+    }
+    if (task.operationKey === 'competitor_extraction') {
+      const summary = competitorSummaryByArticle.get(task.articleId);
+      return Boolean(
+        summary
+        && summary.competitorTotalCount > 0
+        && summary.competitorReadyCount >= summary.competitorTotalCount,
+      );
+    }
+    if (task.operationKey === 'external_analysis') {
+      return Boolean(competitorSummaryByArticle.get(task.articleId)?.currentEngineeringJobs?.some(job => (
+        job.id === task.sourceId && job.status === 'completed'
+      )));
+    }
+    if (task.operationKey === 'content_writing') {
+      return completedWritingArticles.has(task.articleId);
+    }
+    if (task.operationKey === 'duplicate_suggestions') {
+      return duplicateCompletedArticles.some(summary => summary.articleId === task.articleId);
+    }
+    if (task.operationKey === 'internal_linking') {
+      return linkedArticles.some(summary => summary.articleId === task.articleId);
+    }
+    return false;
+  };
+
   const operations: DashboardAutomationOperation[] = [
     summarizeJobs(
       'alternative_keywords',
@@ -548,8 +587,12 @@ export const buildDashboardAutomationOperations = ({
 
   return operations.map(operation => {
     const tasks = taskInventory
-      .filter(task => task.operationKey === operation.key)
-      .sort((left, right) => left.priorityRank - right.priorityRank);
+      .filter(task => (
+        task.operationKey === operation.key
+        && !inventoryTaskIsAlreadyComplete(task)
+      ))
+      .sort((left, right) => left.priorityRank - right.priorityRank)
+      .map((task, index) => ({ ...task, priorityRank: index + 1 }));
     if (tasks.length === 0) {
       return {
         ...operation,

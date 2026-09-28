@@ -262,6 +262,24 @@ test('recoverable admin action remains server-only and excludes permanent failur
   assert.match(api, /action === 'retry_recoverable'[\s\S]*principal\.role !== 'admin'/);
 });
 
+test('workers automatically requeue only bounded recoverable failures without an administrator click', async () => {
+  const [migration, worker, queue] = await Promise.all([
+    readFile(path.join(root, 'supabase', 'migrations', '20261003000000_automation_inventory_completion_and_auto_recovery.sql'), 'utf8'),
+    readFile(path.join(root, 'server', 'externalAnalysisWorker.ts'), 'utf8'),
+    readFile(path.join(root, 'server', 'externalAnalysisQueue.ts'), 'utf8'),
+  ]);
+
+  assert.match(migration, /auto_requeue_recoverable_automation_failures/);
+  assert.match(migration, /automation_failure_is_retryable/);
+  assert.match(migration, /automaticRecoveryCount'[\s\S]*< 3/);
+  assert.match(migration, /item\.failure_class = 'transient'[\s\S]*item\.recovery_count < 3/);
+  assert.match(migration, /job_type <> 'full_article_pipeline'/);
+  assert.match(migration, /revoke all on function public\.auto_requeue_recoverable_automation_failures[\s\S]*anon, authenticated/);
+  assert.match(migration, /grant execute on function public\.auto_requeue_recoverable_automation_failures[\s\S]*service_role/);
+  assert.match(queue, /autoRequeueRecoverableAutomationFailures/);
+  assert.match(worker, /await autoRequeueRecoverableAutomationFailures\(50\)/);
+});
+
 test('durable master coordinator tracks independent stages and is reconciled by the worker', async () => {
   const [migration, worker, queue] = await Promise.all([
     readFile(path.join(root, 'supabase', 'migrations', '20260922000000_durable_automation_coordinator_and_competitor_tiers.sql'), 'utf8'),

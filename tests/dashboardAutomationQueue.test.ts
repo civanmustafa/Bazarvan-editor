@@ -5,6 +5,7 @@ import {
   countDashboardAutomationIssues,
 } from '../utils/dashboardAutomationQueue.ts';
 import type { ContentWritingAutomationItem, ContentWritingAutomationOverview } from '../utils/contentWritingAutomation.ts';
+import type { AutomationTaskInventoryItem } from '../utils/contentWritingAutomation.ts';
 import type { UserAutomationPreferences } from '../constants/userAutomation.ts';
 import type { ExternalAnalysisJobRow, ExternalAnalysisJobStatus } from '../utils/externalAnalysis.ts';
 
@@ -540,4 +541,60 @@ test('server inventory replaces page-only counts and keeps priority within each 
   assert.equal(alternative?.scheduledCount, 1);
   assert.deepEqual(alternative?.tasks?.map(task => task.priorityRank), [1, 2]);
   assert.equal(alternative?.articleTitle, 'First task');
+});
+
+test('saved results remove stale unscheduled inventory rows and rerank the remaining tasks', () => {
+  const taskBase: Omit<
+    AutomationTaskInventoryItem,
+    'taskId' | 'articleId' | 'articleTitle' | 'status' | 'priorityRank'
+  > = {
+    operationKey: 'alternative_keywords' as const,
+    scheduled: false,
+    scheduleAt: null,
+    startedAt: null,
+    readyAt: '2026-09-03T09:00:00Z',
+    updatedAt: '2026-09-03T09:00:00Z',
+    sourceType: 'stage_state',
+    sourceId: null,
+    reason: null,
+    attemptCount: 0,
+    maxAttempts: 6,
+  };
+  const operations = buildDashboardAutomationOperations({
+    ...semanticOptions('completed'),
+    summaries: {},
+    articleSnapshots: {
+      'article-complete': { ...readySnapshot, title: 'Completed article' },
+      'article-pending': {
+        ...readySnapshot,
+        title: 'Pending article',
+        alternativeKeywordsReady: false,
+      },
+    },
+    taskInventory: [
+      {
+        ...taskBase,
+        taskId: 'alternative_keywords:article-complete',
+        articleId: 'article-complete',
+        articleTitle: 'Completed article',
+        status: 'unscheduled',
+        priorityRank: 4,
+      },
+      {
+        ...taskBase,
+        taskId: 'alternative_keywords:article-pending',
+        articleId: 'article-pending',
+        articleTitle: 'Pending article',
+        status: 'unscheduled',
+        priorityRank: 9,
+      },
+    ],
+  });
+
+  const alternative = operations.find(operation => operation.key === 'alternative_keywords');
+  assert.equal(alternative?.unscheduledCount, 1);
+  assert.deepEqual(alternative?.tasks?.map(task => ({
+    articleId: task.articleId,
+    priorityRank: task.priorityRank,
+  })), [{ articleId: 'article-pending', priorityRank: 1 }]);
 });

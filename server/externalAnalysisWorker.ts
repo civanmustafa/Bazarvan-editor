@@ -22,6 +22,7 @@ import {
   heartbeatExternalAnalysisJob,
   getExternalAnalysisSupabaseAdmin,
   recoverStaleExternalAnalysisJobs,
+  autoRequeueRecoverableAutomationFailures,
   reconcileArticleAutomationCoordinator,
   renewExternalAnalysisJobLease,
   scheduleExternalAnalysisJobRetry,
@@ -144,6 +145,13 @@ const recoverStaleJobsIfDue = async (): Promise<void> => {
   const recovered = await recoverStaleExternalAnalysisJobs(administratorRetryMinutes);
   if (recovered > 0) {
     console.log(`[external-analysis-worker] Recovered ${recovered} stale job(s).`);
+  }
+  const recoverable = await autoRequeueRecoverableAutomationFailures(50);
+  if (recoverable.total > 0) {
+    console.log(
+      `[external-analysis-worker] Automatically requeued ${recoverable.total} recoverable task(s);`
+      + ` external=${recoverable.externalAnalysis}, writing=${recoverable.contentWriting}.`,
+    );
   }
   if (workerJobTypes.includes('duplicate_cleanup')) {
     const { data, error } = await getExternalAnalysisSupabaseAdmin()

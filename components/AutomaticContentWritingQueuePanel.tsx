@@ -662,6 +662,10 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         <div className="mt-2 flex items-center justify-between gap-2 text-[9px] font-bold text-gray-400 dark:text-gray-500">
           <span>{isArabic ? `${operationCounts.enabled}/${operations.length} أنواع مفعّلة لحسابك` : `${operationCounts.enabled}/${operations.length} types enabled for your account`}</span>
           <span className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 font-black text-emerald-600 dark:text-emerald-300">
+              <RotateCcw size={10} />
+              {isArabic ? 'الاسترداد التلقائي مفعّل' : 'Automatic recovery enabled'}
+            </span>
             {isAdmin && (
               <button
                 type="button"
@@ -670,7 +674,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 className="inline-flex items-center gap-1 font-black text-amber-600 hover:underline disabled:opacity-50 dark:text-amber-300"
               >
                 {recovering ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
-                {isArabic ? 'إعادة المهام القابلة للاسترداد' : 'Retry recoverable tasks'}
+                {isArabic ? 'تشغيل الاسترداد الآن' : 'Run recovery now'}
               </button>
             )}
             <button

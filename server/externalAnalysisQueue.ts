@@ -311,6 +311,22 @@ export const recoverStaleExternalAnalysisJobs = async (
   return Number.isFinite(Number(recovered)) ? Number(recovered) : 0;
 };
 
+export const autoRequeueRecoverableAutomationFailures = async (
+  limit = 50,
+): Promise<{ externalAnalysis: number; contentWriting: number; total: number }> => {
+  const value = await callQueueRpc<unknown>('auto_requeue_recoverable_automation_failures', {
+    p_limit: Math.max(1, Math.min(Math.round(limit), 200)),
+  });
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    externalAnalysis: Math.max(0, Math.round(Number(source.externalAnalysis) || 0)),
+    contentWriting: Math.max(0, Math.round(Number(source.contentWriting) || 0)),
+    total: Math.max(0, Math.round(Number(source.total) || 0)),
+  };
+};
+
 export const reconcileArticleAutomationCoordinator = async (
   limit = 100,
 ): Promise<{ skipped: boolean; processedArticles: number; errorCount: number }> => {
