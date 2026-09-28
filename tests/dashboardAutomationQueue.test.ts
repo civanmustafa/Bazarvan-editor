@@ -110,6 +110,7 @@ test('dashboard automation queue exposes every user-controlled automation stage'
     'competitor_extraction',
     'external_analysis',
     'content_writing',
+    'duplicate_suggestions',
     'internal_linking',
   ]);
   assert.equal(operations.find(operation => operation.key === 'alternative_keywords')?.status, 'running');
@@ -121,6 +122,7 @@ test('dashboard automation queue exposes every user-controlled automation stage'
   );
   assert.equal(operations.find(operation => operation.key === 'external_analysis')?.runningCount, 1);
   assert.equal(operations.find(operation => operation.key === 'external_analysis')?.waitingCount, 1);
+  assert.equal(operations.find(operation => operation.key === 'duplicate_suggestions')?.status, 'ready');
   assert.equal(operations.find(operation => operation.key === 'internal_linking')?.status, 'ready');
 });
 
@@ -136,7 +138,7 @@ test('a disabled automation remains visible instead of disappearing from the que
     articleTitles: {},
   });
 
-  assert.equal(operations.length, 8);
+  assert.equal(operations.length, 9);
   assert.equal(operations.find(operation => operation.key === 'competitor_discovery')?.status, 'disabled');
   assert.equal(operations.find(operation => operation.key === 'internal_linking')?.status, 'disabled');
 });
@@ -496,8 +498,9 @@ test('saved manual writing and currently applied internal links complete their o
   } as any } });
   assert.equal(operations[6].completedCount, 1);
   assert.equal(operations[6].articleId, 'article-1');
-  assert.equal(operations[7].status, 'completed');
-  assert.equal(operations[7].completedLinkCount, 2);
+  const linking = operations.find(operation => operation.key === 'internal_linking');
+  assert.equal(linking?.status, 'completed');
+  assert.equal(linking?.completedLinkCount, 2);
 });
 
 test('historical completed tasks do not stand in for competitor texts or links that were removed', () => {
@@ -507,5 +510,34 @@ test('historical completed tasks do not stand in for competitor texts or links t
   } as any } });
   assert.equal(operations[3].completedCount, 0);
   assert.equal(operations[4].completedCount, 0);
-  assert.equal(operations[7].status, 'ready');
+  assert.equal(operations.find(operation => operation.key === 'internal_linking')?.status, 'ready');
+});
+
+test('server inventory replaces page-only counts and keeps priority within each task type', () => {
+  const operations = buildDashboardAutomationOperations({
+    ...semanticOptions('completed'),
+    summaries: {},
+    taskInventory: [
+      {
+        taskId: 'semantic:article-2', operationKey: 'alternative_keywords', articleId: 'article-2',
+        articleTitle: 'Second task', status: 'scheduled', scheduled: true,
+        scheduleAt: '2026-09-03T10:00:00Z', startedAt: null, readyAt: '2026-09-03T09:00:00Z',
+        updatedAt: '2026-09-03T09:00:00Z', sourceType: 'external_analysis', sourceId: 'job-2',
+        priorityRank: 2, reason: null, attemptCount: 0, maxAttempts: 6,
+      },
+      {
+        taskId: 'semantic:article-1', operationKey: 'alternative_keywords', articleId: 'article-1',
+        articleTitle: 'First task', status: 'running', scheduled: false,
+        scheduleAt: null, startedAt: '2026-09-03T08:00:00Z', readyAt: '2026-09-03T07:00:00Z',
+        updatedAt: '2026-09-03T08:00:00Z', sourceType: 'external_analysis', sourceId: 'job-1',
+        priorityRank: 1, reason: null, attemptCount: 1, maxAttempts: 6,
+      },
+    ],
+  });
+  const alternative = operations.find(operation => operation.key === 'alternative_keywords');
+  assert.equal(alternative?.status, 'running');
+  assert.equal(alternative?.runningCount, 1);
+  assert.equal(alternative?.scheduledCount, 1);
+  assert.deepEqual(alternative?.tasks?.map(task => task.priorityRank), [1, 2]);
+  assert.equal(alternative?.articleTitle, 'First task');
 });

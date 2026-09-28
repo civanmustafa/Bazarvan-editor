@@ -40,8 +40,11 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-123/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-123/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-124/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-124/);
+  assert.match(guide, /20261002000000_visible_automation_task_inventory\.sql/);
+  assert.match(verifyScript, /AUTOMATION_TASK_INVENTORY_FUNCTION/);
+  assert.match(verifyScript, /AUTOMATION_TASK_INVENTORY_PRIVILEGES/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_FUNCTIONS/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_CLIENT_PRIVILEGES/);
   assert.match(guide, /20260929000000_unified_duplicate_cleanup\.sql/);

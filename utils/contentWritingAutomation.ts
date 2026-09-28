@@ -102,8 +102,31 @@ export type ContentWritingAutomationOverview = {
   candidates: ContentWritingAutomationCandidate[];
 };
 
+export type AutomationTaskStatus = 'running' | 'scheduled' | 'ready' | 'unscheduled' | 'failed';
+
+export type AutomationTaskInventoryItem = {
+  taskId: string;
+  operationKey: string;
+  articleId: string;
+  articleTitle: string;
+  status: AutomationTaskStatus;
+  scheduled: boolean;
+  scheduleAt: string | null;
+  startedAt: string | null;
+  readyAt: string | null;
+  updatedAt: string;
+  sourceType: string;
+  sourceId: string | null;
+  priorityRank: number;
+  reason: string | null;
+  attemptCount: number;
+  maxAttempts: number;
+};
+
 export type ContentWritingAutomationStatus = {
   overview: ContentWritingAutomationOverview;
+  taskInventory: AutomationTaskInventoryItem[];
+  taskScope: 'system' | 'accessible';
   article: {
     readiness: ContentWritingAutomationReadiness | null;
     item: ContentWritingAutomationItem | null;
@@ -280,6 +303,39 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
   };
 };
 
+const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] => {
+  if (!Array.isArray(value)) return [];
+  const allowedStatuses = new Set<AutomationTaskStatus>([
+    'running', 'scheduled', 'ready', 'unscheduled', 'failed',
+  ]);
+  return value.flatMap(entry => {
+    if (!isRecord(entry)) return [];
+    const taskId = text(entry.taskId);
+    const operationKey = text(entry.operationKey);
+    const articleId = text(entry.articleId);
+    const status = text(entry.status) as AutomationTaskStatus;
+    if (!taskId || !operationKey || !articleId || !allowedStatuses.has(status)) return [];
+    return [{
+      taskId,
+      operationKey,
+      articleId,
+      articleTitle: text(entry.articleTitle),
+      status,
+      scheduled: entry.scheduled === true || status === 'scheduled',
+      scheduleAt: nullableText(entry.scheduleAt),
+      startedAt: nullableText(entry.startedAt),
+      readyAt: nullableText(entry.readyAt),
+      updatedAt: text(entry.updatedAt),
+      sourceType: text(entry.sourceType),
+      sourceId: nullableText(entry.sourceId),
+      priorityRank: Math.max(1, integer(entry.priorityRank, 1)),
+      reason: nullableText(entry.reason),
+      attemptCount: integer(entry.attemptCount),
+      maxAttempts: Math.max(1, integer(entry.maxAttempts, 1)),
+    }];
+  });
+};
+
 const requestAutomation = async (
   body: Record<string, unknown>,
   signal?: AbortSignal,
@@ -310,6 +366,8 @@ export const loadContentWritingAutomationStatus = async (
   const article = isRecord(payload.article) ? payload.article : null;
   return {
     overview: normalizeOverview(payload.overview),
+    taskInventory: normalizeTaskInventory(payload.taskInventory),
+    taskScope: payload.taskScope === 'system' ? 'system' : 'accessible',
     article: article ? {
       readiness: normalizeReadiness(article.readiness),
       item: normalizeItem(article.item),

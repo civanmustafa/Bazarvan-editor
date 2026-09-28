@@ -187,7 +187,7 @@ const readOverview = async (userId: string) => {
   ] = await Promise.all([
     supabase.rpc('list_content_writing_automation_candidates', {
       p_requested_by: userId,
-      p_limit: 10,
+      p_limit: 50,
       p_min_competitor_count: settings.minimumCompetitors,
       p_require_processing_complete: settings.requireCompetitorTerminalState,
     }),
@@ -278,6 +278,93 @@ const readOverview = async (userId: string) => {
       };
     }) : [],
   };
+};
+
+const readAutomationTaskInventory = async (
+  userId: string,
+  overview: Record<string, any>,
+): Promise<Record<string, unknown>[]> => {
+  const supabase = getExternalAnalysisSupabaseAdmin();
+  const { data, error } = await supabase.rpc('get_visible_automation_task_inventory', {
+    p_requested_by: userId,
+  });
+  if (error) {
+    if (isContentWritingAutomationSchemaUnavailableError(error)) return [];
+    throw error;
+  }
+
+  const tasks = Array.isArray(data) ? data.filter(isRecord) : [];
+  const byOperationAndArticle = new Map<string, Record<string, unknown>>();
+  for (const task of tasks) {
+    const operationKey = text(task.operationKey);
+    const articleId = text(task.articleId);
+    if (!operationKey || !articleId) continue;
+    byOperationAndArticle.set(`${operationKey}:${articleId}`, task);
+  }
+
+  // The writing candidate RPC is the source of truth for the queue order. It
+  // also includes newly eligible articles before a durable item is created.
+  const candidates = Array.isArray(overview.candidates) ? overview.candidates : [];
+  for (const value of candidates) {
+    if (!isRecord(value)) continue;
+    const articleId = text(value.articleId);
+    if (!articleId) continue;
+    const itemId = text(value.itemId);
+    const eligibleAt = text(value.eligibleAt);
+    const eligibleTime = Date.parse(eligibleAt);
+    const futureEligibility = Number.isFinite(eligibleTime) && eligibleTime > Date.now();
+    const scheduled = Boolean(itemId);
+    byOperationAndArticle.set(`content_writing:${articleId}`, {
+      taskId: `content_writing:${articleId}`,
+      operationKey: 'content_writing',
+      articleId,
+      articleTitle: text(value.articleTitle),
+      status: scheduled ? 'scheduled' : 'ready',
+      scheduled,
+      scheduleAt: eligibleAt || null,
+      startedAt: null,
+      readyAt: text(value.articleUpdatedAt) || null,
+      updatedAt: text(value.articleUpdatedAt),
+      sourceType: scheduled ? 'content_writing' : 'writing_candidate',
+      sourceId: itemId || null,
+      priorityRank: Math.max(1, Number(value.position) || 1),
+      reason: scheduled
+        ? (futureEligibility ? 'retry_scheduled' : 'waiting_for_queue_turn')
+        : 'eligible_not_scheduled',
+      attemptCount: 0,
+      maxAttempts: Math.max(1, Number(overview.settings?.maxAttempts) || 1),
+    });
+  }
+
+  const active = isRecord(overview.active) ? overview.active : null;
+  if (active && text(active.articleId)) {
+    const articleId = text(active.articleId);
+    byOperationAndArticle.set(`content_writing:${articleId}`, {
+      taskId: `content_writing:${articleId}`,
+      operationKey: 'content_writing',
+      articleId,
+      articleTitle: text(active.articleTitle),
+      status: 'running',
+      scheduled: true,
+      scheduleAt: text(active.eligibleAt) || null,
+      startedAt: text(active.startedAt) || text(active.readyAt) || null,
+      readyAt: text(active.readyAt) || null,
+      updatedAt: text(active.updatedAt),
+      sourceType: 'content_writing',
+      sourceId: text(active.id) || null,
+      priorityRank: 1,
+      reason: null,
+      attemptCount: Math.max(0, Number(active.attemptCount) || 0),
+      maxAttempts: Math.max(1, Number(active.maxAttempts) || 1),
+    });
+  }
+
+  return [...byOperationAndArticle.values()].sort((left, right) => {
+    const operation = text(left.operationKey).localeCompare(text(right.operationKey));
+    if (operation !== 0) return operation;
+    return (Number(left.priorityRank) || Number.MAX_SAFE_INTEGER)
+      - (Number(right.priorityRank) || Number.MAX_SAFE_INTEGER);
+  });
 };
 
 const readArticleStatus = async (articleId: string) => {
@@ -488,11 +575,21 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
     );
     const articleId = text(body.articleId);
     if (articleId) await requireArticleReadAccess(supabase, requireUuid(articleId, 'articleId'), principal.userId);
-    const [overview, article] = await Promise.all([
-      readOverview(principal.userId),
+    const overview = await readOverview(principal.userId);
+    const [taskInventory, article] = await Promise.all([
+      readAutomationTaskInventory(principal.userId, overview),
       articleId ? readArticleStatus(articleId) : Promise.resolve(null),
     ]);
-    return { status: 200, body: { ok: true, overview, article } };
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        overview,
+        taskInventory,
+        taskScope: principal.role === 'admin' ? 'system' : 'accessible',
+        article,
+      },
+    };
   }
 
   if (action === 'retry_recoverable') {

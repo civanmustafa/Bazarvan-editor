@@ -8,8 +8,8 @@ import {
   ExternalLink,
   FilePenLine,
   Link2,
+  ListTree,
   Loader2,
-  PauseCircle,
   RefreshCw,
   RotateCcw,
   Search,
@@ -22,9 +22,9 @@ import type { UserAutomationPreferences } from '../constants/userAutomation';
 import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
 import {
   getContentWritingAutomationErrorMessage,
-  getContentWritingAutomationProviderLabel,
   loadContentWritingAutomationStatus,
   retryRecoverableAutomationFailures,
+  type AutomationTaskInventoryItem,
   type ContentWritingAutomationOverview,
 } from '../utils/contentWritingAutomation';
 import {
@@ -97,6 +97,11 @@ const OPERATION_PRESENTATION: Record<DashboardAutomationOperationKey, {
     label: ['كتابة المقالات', 'Article writing'],
     description: ['التجهيز والكتابة والمراجعة المرحلية', 'Preparation, writing, and staged review'],
   },
+  duplicate_suggestions: {
+    icon: ListTree,
+    label: ['اقتراحات التكرار', 'Duplicate suggestions'],
+    description: ['فحص العبارات العامة واقتراح تنقيتها', 'Inspect repeated generic phrases and suggest cleanup'],
+  },
   internal_linking: {
     icon: Link2,
     label: ['الربط الداخلي المؤكد', 'Confirmed internal linking'],
@@ -152,6 +157,57 @@ const getOperationErrorMessage = (
     : 'The latest attempt did not complete and the required result is still missing.';
 };
 
+const TASK_STATUS_STYLE: Record<AutomationTaskInventoryItem['status'], string> = {
+  running: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200',
+  scheduled: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200',
+  ready: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-200',
+  unscheduled: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  failed: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-200',
+};
+
+const getTaskStatusLabel = (task: AutomationTaskInventoryItem, isArabic: boolean): string => ({
+  running: isArabic ? 'جارية الآن' : 'Running now',
+  scheduled: isArabic ? 'مجدولة' : 'Scheduled',
+  ready: isArabic ? 'جاهزة وغير مجدولة' : 'Ready, not scheduled',
+  unscheduled: isArabic ? 'غير مجدولة' : 'Not scheduled',
+  failed: isArabic ? 'متعثرة' : 'Failed',
+})[task.status];
+
+const getTaskReasonLabel = (reason: string | null, isArabic: boolean): string => {
+  const normalized = String(reason || '').trim();
+  if (!normalized) return '';
+  const known: Record<string, [string, string]> = {
+    waiting_for_prerequisites: ['بانتظار اكتمال المتطلبات', 'Waiting for prerequisites'],
+    waiting_for_editor_idle: ['بانتظار مرور 15 دقيقة دون تحرير', 'Waiting for 15 minutes of editor inactivity'],
+    waiting_for_queue_turn: ['بانتظار دورها في الطابور', 'Waiting for its queue turn'],
+    eligible_not_scheduled: ['مؤهلة ولم تُجدول بعد', 'Eligible but not scheduled yet'],
+    retry_scheduled: ['إعادة المحاولة مجدولة', 'Retry is scheduled'],
+  };
+  return known[normalized]?.[isArabic ? 0 : 1] || normalized;
+};
+
+const taskDateDetails = (
+  task: AutomationTaskInventoryItem,
+  isArabic: boolean,
+): { label: string; value: string } | null => {
+  const source = task.status === 'running'
+    ? task.startedAt
+    : task.status === 'scheduled'
+      ? task.scheduleAt
+      : task.status === 'ready'
+        ? task.readyAt
+        : task.updatedAt;
+  if (!source || !Number.isFinite(Date.parse(source))) return null;
+  const label = task.status === 'running'
+    ? (isArabic ? 'بدأت في' : 'Started at')
+    : task.status === 'scheduled'
+      ? (isArabic ? 'مؤهلة للتنفيذ في' : 'Eligible to run at')
+      : task.status === 'ready'
+        ? (isArabic ? 'جاهزة منذ' : 'Ready since')
+        : (isArabic ? 'آخر تحديث' : 'Last updated');
+  return { label, value: new Date(source).toLocaleString(isArabic ? 'ar' : 'en') };
+};
+
 const formatCountdown = (milliseconds: number, isArabic: boolean): string => {
   const seconds = Math.max(0, Math.ceil(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);
@@ -173,6 +229,9 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   onRefreshExternalAnalysis,
 }) => {
   const [overview, setOverview] = useState<ContentWritingAutomationOverview | null>(null);
+  const [taskInventory, setTaskInventory] = useState<AutomationTaskInventoryItem[]>([]);
+  const [taskScope, setTaskScope] = useState<'system' | 'accessible'>('accessible');
+  const [expandedOperationKey, setExpandedOperationKey] = useState<DashboardAutomationOperationKey | null>(null);
   const [effectivePreferences, setEffectivePreferences] = useState<UserAutomationPreferences | null>(null);
   const [preferencesError, setPreferencesError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -194,6 +253,8 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
       if (refreshRequestRef.current !== requestId) return;
       if (statusResult.status === 'fulfilled') {
         setOverview(statusResult.value.overview);
+        setTaskInventory(statusResult.value.taskInventory);
+        setTaskScope(statusResult.value.taskScope);
         setError('');
       } else {
         setError(statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason));
@@ -294,32 +355,17 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     const value = overview?.state?.nextAllowedAt;
     return value ? Math.max(0, new Date(value).getTime() - now) : 0;
   }, [now, overview?.state?.nextAllowedAt]);
-  const visibleCandidates = useMemo(() => (
-    [...(overview?.candidates || [])]
-      .sort((left, right) => {
-        const leftAt = left.eligibleAt ? new Date(left.eligibleAt).getTime() : 0;
-        const rightAt = right.eligibleAt ? new Date(right.eligibleAt).getTime() : 0;
-        const leftWaiting = Number.isFinite(leftAt) && leftAt > now;
-        const rightWaiting = Number.isFinite(rightAt) && rightAt > now;
-        if (leftWaiting !== rightWaiting) return leftWaiting ? 1 : -1;
-        return left.position - right.position;
-      })
-      .slice(0, 5)
-  ), [now, overview?.candidates]);
-  const availableCandidateCount = useMemo(() => (
-    (overview?.candidates || []).filter(candidate => {
-      if (!candidate.eligibleAt) return true;
-      const eligibleAt = new Date(candidate.eligibleAt).getTime();
-      return !Number.isFinite(eligibleAt) || eligibleAt <= now;
-    }).length
-  ), [now, overview?.candidates]);
   const operations = useMemo(() => buildDashboardAutomationOperations({
     summaries: externalAnalysisSummaries,
     writingOverview: overview,
     effectivePreferences,
     articleTitles,
     articleSnapshots,
-  }), [articleSnapshots, articleTitles, effectivePreferences, externalAnalysisSummaries, overview]);
+    taskInventory,
+  }), [articleSnapshots, articleTitles, effectivePreferences, externalAnalysisSummaries, overview, taskInventory]);
+  const expandedOperation = useMemo(() => (
+    operations.find(operation => operation.key === expandedOperationKey) || null
+  ), [expandedOperationKey, operations]);
   const operationCounts = useMemo(() => ({
     running: operations.filter(operation => operation.status === 'running').length,
     waiting: operations.filter(operation => operation.status === 'waiting').length,
@@ -343,6 +389,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         ? `أُعيدت ${result.requeued.total} مهمة قابلة للاسترداد إلى الطابور (${result.requeued.externalAnalysis} تحليل، ${result.requeued.contentWriting} كتابة).`
         : `${result.requeued.total} recoverable tasks returned to the queue (${result.requeued.externalAnalysis} analysis, ${result.requeued.contentWriting} writing).`);
       await onRefreshExternalAnalysis?.();
+      await refresh(true);
     } catch (requestError) {
       setRecoveryMessage(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -361,24 +408,33 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
       ? `${operation.readyItemCount}/${operation.totalItemCount}`
       : '';
     return (
-      <button
+      <div
         key={operation.key}
-        type="button"
-        disabled={!operation.articleId}
-        onClick={() => operation.articleId && navigateToAppPath(buildEditorArticlePath(operation.articleId))}
-        className="min-w-0 rounded-lg border border-gray-200 p-2.5 text-start transition enabled:hover:border-blue-300 enabled:hover:bg-blue-50/60 disabled:cursor-default dark:border-[#444] dark:enabled:hover:border-blue-800 dark:enabled:hover:bg-blue-900/10"
+        className={`min-w-0 rounded-lg border p-2.5 text-start transition dark:border-[#444] ${expandedOperationKey === operation.key
+          ? 'border-blue-400 bg-blue-50/60 dark:border-blue-700 dark:bg-blue-900/10'
+          : 'border-gray-200'}`}
       >
         <span className="flex items-start justify-between gap-1.5">
           <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-black text-gray-800 dark:text-gray-100">
             <OperationIcon size={14} className="shrink-0 text-blue-600 dark:text-blue-300" />
             <span className="line-clamp-2">{presentation.label[isArabic ? 0 : 1]}</span>
           </span>
-          <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-black ${OPERATION_STATUS_STYLE[operation.status]}`}>
-            {operation.retryScheduled
-              ? (isArabic ? 'إعادة محاولة مجدولة' : 'Retry scheduled')
-              : operation.attemptsExhausted
+          <span className="flex shrink-0 items-center gap-1">
+            <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-black ${OPERATION_STATUS_STYLE[operation.status]}`}>
+              {operation.attemptsExhausted
                 ? (isArabic ? 'استُنفدت المحاولات' : 'Attempts exhausted')
                 : getOperationStatusLabel(operation.status, isArabic)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setExpandedOperationKey(current => current === operation.key ? null : operation.key)}
+              className="inline-flex items-center gap-0.5 rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[8px] font-black text-blue-600 hover:border-blue-300 dark:border-[#555] dark:bg-[#222] dark:text-blue-300"
+              title={isArabic ? 'عرض المهام المتبقية وغير المكتملة' : 'Show remaining and incomplete tasks'}
+              aria-expanded={expandedOperationKey === operation.key}
+            >
+              <ListTree size={11} />
+              {operation.tasks?.length || 0}
+            </button>
           </span>
         </span>
         <span className="mt-1.5 block text-[9px] font-semibold leading-4 text-gray-500 dark:text-gray-400">
@@ -387,7 +443,12 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         {hasCounts ? (
           <span className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-[9px] font-black">
             {operation.runningCount > 0 && <span className="text-blue-600 dark:text-blue-300">{isArabic ? 'يعمل' : 'Running'} {operation.runningCount}</span>}
-            {operation.waitingCount > 0 && <span className="text-amber-600 dark:text-amber-300">{isArabic ? 'ينتظر' : 'Waiting'} {operation.waitingCount}</span>}
+            {(operation.scheduledCount || 0) > 0 && <span className="text-amber-600 dark:text-amber-300">{isArabic ? 'مجدولة' : 'Scheduled'} {operation.scheduledCount}</span>}
+            {(operation.readyCount || 0) > 0 && <span className="text-sky-600 dark:text-sky-300">{isArabic ? 'جاهزة' : 'Ready'} {operation.readyCount}</span>}
+            {(operation.unscheduledCount || 0) > 0 && <span className="text-gray-500 dark:text-gray-300">{isArabic ? 'غير مجدولة' : 'Unscheduled'} {operation.unscheduledCount}</span>}
+            {operation.waitingCount > 0
+              && !(operation.scheduledCount || operation.readyCount || operation.unscheduledCount)
+              && <span className="text-amber-600 dark:text-amber-300">{isArabic ? 'ينتظر' : 'Waiting'} {operation.waitingCount}</span>}
             {operation.completedCount > 0 && <span className="text-emerald-600 dark:text-emerald-300">{isArabic ? 'اكتمل' : 'Done'} {operation.completedCount}</span>}
             {operation.failedCount > 0 && <span className="text-red-600 dark:text-red-300">{isArabic ? 'مهام متعثرة' : 'Failed tasks'} {operation.failedCount}</span>}
           </span>
@@ -408,11 +469,15 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             {isArabic ? `روابط مطبّقة ومحفوظة: ${operation.completedLinkCount}` : `Applied and saved links: ${operation.completedLinkCount}`}
           </span>
         )}
-        {operation.articleTitle && (
-          <span className="mt-1.5 flex items-center gap-1 truncate text-[9px] font-bold text-gray-500 dark:text-gray-400">
+        {operation.articleTitle && operation.articleId && (
+          <button
+            type="button"
+            onClick={() => navigateToAppPath(buildEditorArticlePath(operation.articleId!))}
+            className="mt-1.5 flex max-w-full items-center gap-1 truncate text-[9px] font-bold text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300"
+          >
             <ExternalLink size={9} className="shrink-0" />
             <span className="truncate">{operation.articleTitle}</span>
-          </span>
+          </button>
         )}
         {operation.attemptCount !== undefined && operation.maxAttempts !== undefined && (
           <span className="mt-1.5 block text-[9px] font-bold text-gray-500 dark:text-gray-400">
@@ -437,7 +502,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             {getOperationErrorMessage(operation, isArabic)}
           </span>
         )}
-      </button>
+      </div>
     );
   };
 
@@ -457,8 +522,12 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             </h3>
             <p className="mt-1 text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
               {isArabic
-                ? 'عرض موحّد للتنفيذ الحي، ومراحل مقالات الصفحة الحالية، وطابور الكتابة المتاح لحسابك. تُحسب المشكلة المشتركة مرة واحدة.'
-                : 'A unified view of live execution, stages for articles on this page, and your accessible writing queue. Shared issues are counted once.'}
+                ? (taskScope === 'system'
+                  ? 'مخزون موحّد لجميع مهام النظام الجارية والمجدولة وغير المكتملة.'
+                  : 'مخزون موحّد للمهام الجارية والمجدولة وغير المكتملة المرتبطة بالمقالات المتاحة لك فقط.')
+                : (taskScope === 'system'
+                  ? 'A unified inventory of every running, scheduled, and incomplete system task.'
+                  : 'A unified inventory limited to tasks for articles you can access.')}
             </p>
           </div>
         </div>
@@ -495,8 +564,103 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         <div className="mt-2 grid grid-cols-2 gap-2">
           {operations.map(renderOperation)}
         </div>
+        {expandedOperation && (
+          <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50/40 p-2.5 dark:border-blue-900/50 dark:bg-blue-900/10">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-black text-gray-800 dark:text-gray-100">
+                <ListTree size={13} className="text-blue-600 dark:text-blue-300" />
+                {isArabic ? 'المهام المتبقية وغير المكتملة:' : 'Remaining and incomplete tasks:'}
+                <span>{OPERATION_PRESENTATION[expandedOperation.key].label[isArabic ? 0 : 1]}</span>
+              </div>
+              <span className="rounded-full bg-white px-2 py-1 text-[8px] font-black text-gray-500 dark:bg-[#222] dark:text-gray-300">
+                {taskScope === 'system'
+                  ? (isArabic ? 'جميع مهام النظام' : 'All system tasks')
+                  : (isArabic ? 'المهام المرتبطة بك فقط' : 'Only tasks linked to you')}
+              </span>
+            </div>
+
+            {expandedOperation.key === 'content_writing' && overview && (
+              <div className="mt-2 space-y-1.5">
+                {!overview.settings.enabled && (
+                  <div className="rounded-md bg-gray-100 px-2 py-1.5 text-[9px] font-bold text-gray-600 dark:bg-[#222] dark:text-gray-300">
+                    {isArabic ? 'طلبات الكتابة الجديدة متوقفة من إعدادات المسؤول.' : 'New writing requests are paused in administrator settings.'}
+                  </div>
+                )}
+                {overview.globalBlocker && (
+                  <div className="flex items-start gap-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[9px] font-bold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                    <Clock3 size={11} className="mt-0.5 shrink-0" />
+                    <span>{isArabic
+                      ? `ينتظر طابور الكتابة انتهاء مسار أعلى أولوية${overview.globalBlocker.articleTitle ? `: ${overview.globalBlocker.articleTitle}` : ''}.`
+                      : `The writing queue is waiting for higher-priority work${overview.globalBlocker.articleTitle ? `: ${overview.globalBlocker.articleTitle}` : ''}.`}</span>
+                  </div>
+                )}
+                {cooldownMs > 0 && (
+                  <div className="rounded-md bg-amber-50 px-2 py-1.5 text-[9px] font-bold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                    {isArabic ? `الفاصل العالمي المتبقي: ${formatCountdown(cooldownMs, true)}` : `Global cooldown remaining: ${formatCountdown(cooldownMs, false)}`}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-2 max-h-96 space-y-1.5 overflow-y-auto pe-1">
+              {(expandedOperation.tasks || []).length > 0 ? expandedOperation.tasks!.map(task => {
+                const dateDetails = taskDateDetails(task, isArabic);
+                const reason = getTaskReasonLabel(task.reason, isArabic);
+                return (
+                  <button
+                    key={task.taskId}
+                    type="button"
+                    onClick={() => navigateToAppPath(buildEditorArticlePath(task.articleId))}
+                    className="flex w-full items-start gap-2 rounded-md border border-gray-200 bg-white px-2 py-2 text-start hover:border-blue-300 hover:bg-blue-50 dark:border-[#444] dark:bg-[#252525] dark:hover:border-blue-800"
+                  >
+                    <span
+                      className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${task.priorityRank <= 3
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300'}`}
+                      title={isArabic ? `الأولوية ${task.priorityRank} داخل هذا النوع` : `Priority ${task.priorityRank} within this task type`}
+                    >
+                      {task.priorityRank}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className="min-w-0 flex-1 truncate text-[10px] font-black text-gray-800 dark:text-gray-100">
+                          {task.articleTitle || task.articleId}
+                        </span>
+                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-black ${TASK_STATUS_STYLE[task.status]}`}>
+                          {getTaskStatusLabel(task, isArabic)}
+                        </span>
+                      </span>
+                      {dateDetails && (
+                        <span className="mt-1 block text-[9px] font-bold text-gray-500 dark:text-gray-400">
+                          {dateDetails.label}: {dateDetails.value}
+                        </span>
+                      )}
+                      {reason && (
+                        <span className={`mt-1 block text-[9px] font-bold ${task.status === 'failed'
+                          ? 'text-red-600 dark:text-red-300'
+                          : 'text-gray-500 dark:text-gray-400'}`}>
+                          {reason}
+                        </span>
+                      )}
+                      {(task.attemptCount > 0 || task.status === 'failed') && (
+                        <span className="mt-1 block text-[8px] font-bold text-gray-400 dark:text-gray-500">
+                          {isArabic ? `المحاولة ${task.attemptCount}/${task.maxAttempts}` : `Attempt ${task.attemptCount}/${task.maxAttempts}`}
+                        </span>
+                      )}
+                    </span>
+                    <ExternalLink size={11} className="mt-1 shrink-0 text-gray-400" />
+                  </button>
+                );
+              }) : (
+                <div className="rounded-md border border-dashed border-gray-200 p-3 text-center text-[10px] font-bold text-gray-400 dark:border-[#444]">
+                  {isArabic ? 'لا توجد مهام متبقية أو غير مكتملة في هذه المرحلة.' : 'No remaining or incomplete tasks in this stage.'}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <div className="mt-2 flex items-center justify-between gap-2 text-[9px] font-bold text-gray-400 dark:text-gray-500">
-          <span>{isArabic ? `${operationCounts.enabled}/8 أنواع مفعّلة لحسابك` : `${operationCounts.enabled}/8 types enabled for your account`}</span>
+          <span>{isArabic ? `${operationCounts.enabled}/${operations.length} أنواع مفعّلة لحسابك` : `${operationCounts.enabled}/${operations.length} types enabled for your account`}</span>
           <span className="flex flex-wrap items-center gap-2">
             {isAdmin && (
               <button
@@ -529,141 +693,23 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         <div className="mt-2 text-[10px] font-bold text-amber-600 dark:text-amber-300">{preferencesError}</div>
       )}
 
-      {loading && !overview ? (
+      {loading && !overview && (
         <div className="mt-3 flex items-center gap-2 rounded-md bg-blue-50 p-2 text-xs font-bold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
           <Loader2 size={15} className="shrink-0 animate-spin" />
-          {isArabic ? 'جار تحميل تفاصيل طابور كتابة المقالات...' : 'Loading article-writing queue details...'}
+          {isArabic ? 'جار تحميل مخزون مهام الأتمتة...' : 'Loading the automation task inventory...'}
         </div>
-      ) : error && !overview ? (
-        <div className="mt-3 flex items-start gap-2 rounded-md bg-red-50 p-2 text-xs font-bold text-red-700 dark:bg-red-900/20 dark:text-red-300">
-          <AlertCircle size={15} className="mt-0.5 shrink-0" />
-          <span>{isArabic ? 'تعذر الاتصال بحالة الطابور. تحقق من الاتصال ثم أعد المحاولة.' : 'Queue status could not be reached. Check the connection and try again.'}</span>
-        </div>
-      ) : overview && !overview.schemaAvailable ? (
+      )}
+
+      {overview && !overview.schemaAvailable && (
         <div className="mt-3 rounded-md bg-amber-50 p-2 text-xs font-bold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-          {isArabic ? 'يلزم تطبيق ترحيل الطابور على قاعدة البيانات.' : 'The queue database migration must be applied.'}
+          {isArabic ? 'يلزم تطبيق ترحيل مخزون المهام على قاعدة البيانات.' : 'The task-inventory database migration must be applied.'}
         </div>
-      ) : overview ? (
-        <>
-          {overview.active && (
-            <button
-              type="button"
-              onClick={() => navigateToAppPath(buildEditorArticlePath(overview.active!.articleId))}
-              className="mt-3 w-full rounded-lg border border-blue-200 bg-blue-50 p-2 text-start hover:bg-blue-100 dark:border-blue-900/50 dark:bg-blue-900/15 dark:hover:bg-blue-900/25"
-            >
-              <div className="flex items-center justify-between gap-2 text-[10px] font-black text-blue-700 dark:text-blue-200">
-                <span>{overview.active.status === 'claiming'
-                  ? (isArabic ? 'جار حجز المقالة' : 'Reserving article')
-                  : (isArabic ? 'تُكتب الآن' : 'Writing now')}</span>
-                <ExternalLink size={12} />
-              </div>
-              <div className="mt-1 line-clamp-2 text-xs font-black text-gray-800 dark:text-gray-100">
-                {overview.active.articleTitle || overview.active.articleId}
-              </div>
-              <div className="mt-1 text-[10px] font-bold text-gray-500 dark:text-gray-400">
-                {getContentWritingAutomationProviderLabel(overview.active.provider, isArabic)}{overview.active.model ? ` · ${overview.active.model}` : ''}
-                {' · '}{isArabic ? `المحاولة ${overview.active.attemptCount}/${overview.active.maxAttempts}` : `Attempt ${overview.active.attemptCount}/${overview.active.maxAttempts}`}
-              </div>
-              {!overview.settings.enabled && (
-                <div className="mt-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                  {isArabic ? 'تستمر الجلسة الحالية بأمان، لكن لن تبدأ مقالات جديدة.' : 'The current session will finish safely, but no new articles will start.'}
-                </div>
-              )}
-            </button>
-          )}
+      )}
 
-          {!overview.settings.enabled ? (
-            <div className="mt-3 flex items-start gap-2 rounded-md bg-gray-50 p-2 text-xs font-bold text-gray-600 dark:bg-[#222] dark:text-gray-300">
-              <PauseCircle size={15} className="mt-0.5 shrink-0" />
-              <div>
-                <div>{isArabic ? 'الطلبات الجديدة متوقفة من إعدادات المسؤول.' : 'New queue requests are paused in administrator settings.'}</div>
-                <button
-                  type="button"
-                  onClick={() => navigateToAppPath(isAdmin ? '/settings/ai' : '/guide')}
-                  className="mt-1 text-[11px] font-black text-blue-600 hover:underline dark:text-blue-300"
-                >
-                  {isAdmin
-                    ? (isArabic ? 'فتح إعدادات كتابة المحتوى' : 'Open content-writing settings')
-                    : (isArabic ? 'قراءة دليل الكتابة التلقائية' : 'Read the automatic-writing guide')}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="mt-3 flex items-center gap-1.5 text-[11px] font-black text-gray-700 dark:text-gray-200">
-                <Bot size={13} />
-                {isArabic ? 'تفاصيل طابور كتابة المقالات' : 'Article-writing queue details'}
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-center">
-                <div className="rounded-md bg-blue-50 p-2 dark:bg-blue-900/15">
-                  <div className="text-lg font-black text-blue-700 dark:text-blue-200">{availableCandidateCount}</div>
-                  <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400">{isArabic ? 'مؤهلة الآن ومرئية لك' : 'Eligible now and visible to you'}</div>
-                </div>
-                <div className="rounded-md bg-amber-50 p-2 dark:bg-amber-900/15">
-                  <div className="text-sm font-black text-amber-700 dark:text-amber-200">
-                    {cooldownMs > 0 ? formatCountdown(cooldownMs, isArabic) : (isArabic ? 'متاح' : 'Available')}
-                  </div>
-                  <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400">{isArabic ? 'الفاصل العالمي' : 'Global cooldown'}</div>
-                </div>
-              </div>
-
-              {overview.globalBlocker && (
-                <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 p-2 text-[11px] font-bold leading-5 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                  <Clock3 size={14} className="mt-0.5 shrink-0" />
-                  <span>{isArabic
-                    ? `الطابور ينتظر انتهاء مسار أعلى أولوية${overview.globalBlocker.articleTitle ? `: ${overview.globalBlocker.articleTitle}` : ''}.`
-                    : `The queue is waiting for higher-priority work to finish${overview.globalBlocker.articleTitle ? `: ${overview.globalBlocker.articleTitle}` : ''}.`}</span>
-                </div>
-              )}
-
-              <div className="mt-3 space-y-1.5">
-                <div className="flex items-center gap-1.5 text-[11px] font-black text-gray-700 dark:text-gray-200">
-                  <Clock3 size={13} />
-                  {isArabic ? 'ترتيب تقريبي ضمن المقالات المتاحة لك' : 'Approximate order among articles available to you'}
-                </div>
-                {visibleCandidates.length > 0 ? visibleCandidates.map(candidate => {
-                  const eligibleAt = candidate.eligibleAt ? new Date(candidate.eligibleAt).getTime() : 0;
-                  const scheduled = Number.isFinite(eligibleAt) && eligibleAt > now;
-                  return (
-                    <button
-                      key={candidate.articleId}
-                      type="button"
-                      onClick={() => navigateToAppPath(buildEditorArticlePath(candidate.articleId))}
-                      className="flex w-full items-center gap-2 rounded-md border border-gray-100 bg-gray-50 px-2 py-2 text-start hover:border-blue-200 hover:bg-blue-50 dark:border-[#3b3b3b] dark:bg-[#222] dark:hover:border-blue-900/50"
-                    >
-                      <span
-                        className="flex size-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-black text-blue-700 dark:bg-blue-900/30 dark:text-blue-200"
-                        title={isArabic ? 'ترتيب ضمن العناصر المرئية لك، وليس ترتيبًا عالميًا' : 'Order among items visible to you, not a global rank'}
-                      >
-                        {candidate.position}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[11px] font-bold text-gray-700 dark:text-gray-200">
-                          {candidate.articleTitle || candidate.articleId}
-                        </span>
-                        {scheduled && (
-                          <span className="mt-0.5 block text-[9px] font-bold text-amber-600 dark:text-amber-300">
-                            {isArabic ? `إعادة مجدولة بعد ${formatCountdown(eligibleAt - now, true)}` : `Retry scheduled in ${formatCountdown(eligibleAt - now, false)}`}
-                          </span>
-                        )}
-                      </span>
-                      <ExternalLink size={11} className="shrink-0 text-gray-400" />
-                    </button>
-                  );
-                }) : (
-                  <div className="rounded-md border border-dashed border-gray-200 p-3 text-center text-[11px] font-bold text-gray-400 dark:border-[#444]">
-                    {isArabic ? 'لا توجد مقالات جاهزة حاليًا.' : 'No articles are ready right now.'}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </>
-      ) : null}
-
-      {error && overview && (
-        <div className="mt-2 text-[10px] font-bold text-red-600 dark:text-red-300">
-          {getContentWritingAutomationErrorMessage(error, isArabic)}
+      {error && (
+        <div className="mt-2 flex items-start gap-1.5 text-[10px] font-bold text-red-600 dark:text-red-300">
+          <AlertCircle size={12} className="mt-0.5 shrink-0" />
+          <span>{getContentWritingAutomationErrorMessage(error, isArabic)}</span>
         </div>
       )}
     </section>

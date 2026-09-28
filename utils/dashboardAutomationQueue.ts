@@ -1,5 +1,8 @@
 import type { UserAutomationPreferences } from '../constants/userAutomation';
-import type { ContentWritingAutomationOverview } from './contentWritingAutomation';
+import type {
+  AutomationTaskInventoryItem,
+  ContentWritingAutomationOverview,
+} from './contentWritingAutomation';
 import type {
   ExternalAnalysisDashboardSummary,
   ExternalAnalysisJobRow,
@@ -14,6 +17,7 @@ export type DashboardAutomationOperationKey =
   | 'competitor_extraction'
   | 'external_analysis'
   | 'content_writing'
+  | 'duplicate_suggestions'
   | 'internal_linking';
 
 export type DashboardAutomationOperationStatus =
@@ -55,6 +59,10 @@ export type DashboardAutomationOperation = {
   retryScheduled?: boolean;
   attemptsExhausted?: boolean;
   completedLinkCount?: number;
+  scheduledCount?: number;
+  readyCount?: number;
+  unscheduledCount?: number;
+  tasks?: AutomationTaskInventoryItem[];
 };
 
 type BuildOptions = {
@@ -63,6 +71,7 @@ type BuildOptions = {
   effectivePreferences: UserAutomationPreferences | null;
   articleTitles: Record<string, string>;
   articleSnapshots?: Record<string, DashboardAutomationArticleSnapshot>;
+  taskInventory?: AutomationTaskInventoryItem[];
 };
 
 type JobEntry = {
@@ -192,6 +201,7 @@ export const buildDashboardAutomationOperations = ({
   effectivePreferences,
   articleTitles,
   articleSnapshots = {},
+  taskInventory = [],
 }: BuildOptions): DashboardAutomationOperation[] => {
   const values = Object.values(summaries);
   const jobEntries = (
@@ -387,7 +397,17 @@ export const buildDashboardAutomationOperations = ({
   const linkedArticles = values.filter(summary => (summary.savedInternalLinkCount || 0) > 0);
   const linkingEnabled = preference(effectivePreferences, 'autoApplyStrongInternalLinkSuggestions');
 
-  return [
+  const duplicateCompletedArticles = values.filter(summary => (
+    summary.duplicateCleanup?.state === 'completed'
+  ));
+  const duplicateFailedArticles = values.filter(summary => (
+    summary.duplicateCleanup?.state === 'failed'
+  ));
+  const duplicateCurrent = values.find(summary => (
+    summary.duplicateCleanup?.state !== 'not_started'
+  ));
+
+  const operations: DashboardAutomationOperation[] = [
     summarizeJobs(
       'alternative_keywords',
       semanticEnabled.alternative_keywords,
@@ -471,6 +491,32 @@ export const buildDashboardAutomationOperations = ({
     ),
     writingOperation,
     {
+      key: 'duplicate_suggestions',
+      issueGroup: 'duplicate_suggestions',
+      issueIds: duplicateFailedArticles.map(summary => `duplicate:${summary.articleId}`),
+      enabled: true,
+      status: operationStatus({
+        enabled: true,
+        runningCount: 0,
+        waitingCount: 0,
+        completedCount: duplicateCompletedArticles.length,
+        failedCount: duplicateFailedArticles.length,
+      }),
+      runningCount: 0,
+      waitingCount: 0,
+      completedCount: duplicateCompletedArticles.length,
+      failedCount: duplicateFailedArticles.length,
+      articleId: duplicateCurrent?.articleId || null,
+      articleTitle: duplicateCurrent
+        ? articleSnapshots[duplicateCurrent.articleId]?.title
+          || articleTitles[duplicateCurrent.articleId]
+          || duplicateCurrent.articleId
+        : '',
+      latestJobStatus: duplicateCurrent?.duplicateCleanup?.state || '',
+      errorCode: '',
+      errorMessage: '',
+    },
+    {
       key: 'internal_linking',
       issueGroup: 'internal_linking',
       issueIds: [],
@@ -489,4 +535,67 @@ export const buildDashboardAutomationOperations = ({
       errorMessage: '',
     },
   ];
+
+  if (taskInventory.length === 0) {
+    return operations.map(operation => ({
+      ...operation,
+      scheduledCount: 0,
+      readyCount: 0,
+      unscheduledCount: 0,
+      tasks: [],
+    }));
+  }
+
+  return operations.map(operation => {
+    const tasks = taskInventory
+      .filter(task => task.operationKey === operation.key)
+      .sort((left, right) => left.priorityRank - right.priorityRank);
+    if (tasks.length === 0) {
+      return {
+        ...operation,
+        scheduledCount: 0,
+        readyCount: 0,
+        unscheduledCount: 0,
+        tasks,
+      };
+    }
+    const runningCount = tasks.filter(task => task.status === 'running').length;
+    const scheduledCount = tasks.filter(task => task.status === 'scheduled').length;
+    const readyCount = tasks.filter(task => task.status === 'ready').length;
+    const unscheduledCount = tasks.filter(task => task.status === 'unscheduled').length;
+    const failedTasks = tasks.filter(task => task.status === 'failed');
+    const waitingCount = scheduledCount + readyCount + unscheduledCount;
+    const leadTask = tasks[0];
+    const leadFailure = failedTasks[0];
+    const status = operationStatus({
+      enabled: operation.enabled,
+      runningCount,
+      waitingCount,
+      completedCount: operation.completedCount,
+      failedCount: failedTasks.length,
+    });
+    return {
+      ...operation,
+      status,
+      runningCount,
+      waitingCount,
+      failedCount: failedTasks.length,
+      scheduledCount,
+      readyCount,
+      unscheduledCount,
+      tasks,
+      issueIds: failedTasks.map(task => `inventory:${task.taskId}`),
+      articleId: leadTask.articleId,
+      articleTitle: leadTask.articleTitle || articleTitles[leadTask.articleId] || leadTask.articleId,
+      latestJobStatus: leadTask.status,
+      errorCode: leadFailure?.reason || '',
+      errorMessage: leadFailure?.reason || '',
+      attemptCount: leadTask.attemptCount,
+      maxAttempts: leadTask.maxAttempts,
+      retryScheduled: leadTask.status === 'scheduled',
+      retryAt: leadTask.scheduleAt,
+      attemptsExhausted: leadTask.status === 'failed'
+        && leadTask.attemptCount >= leadTask.maxAttempts,
+    };
+  });
 };
