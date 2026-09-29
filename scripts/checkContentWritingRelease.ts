@@ -16,7 +16,9 @@ for (const migration of CONTENT_WRITING_REQUIRED_MIGRATIONS) {
   if (!migrationInfo.isFile() || migrationInfo.size < 100) {
     throw new Error(`Required content-writing migration is missing or empty: ${migration}`);
   }
-  const position = deploymentGuide.indexOf(migration);
+  // The guide may mention the newest migration in its release note before the
+  // canonical ordered checklist. Validate the final checklist occurrence.
+  const position = deploymentGuide.lastIndexOf(migration);
   if (position < 0) {
     throw new Error(`Deployment guide does not include required migration: ${migration}`);
   }

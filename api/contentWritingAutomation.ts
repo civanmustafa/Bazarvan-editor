@@ -421,7 +421,11 @@ const readArticleSummaries = async (
   minimumCompetitorCount: number,
 ): Promise<Record<string, unknown>[]> => {
   const supabase = getExternalAnalysisSupabaseAdmin();
-  const [{ data: items, error: itemError }, { data: sessions, error: sessionError }] = await Promise.all([
+  const [
+    { data: items, error: itemError },
+    { data: sessions, error: sessionError },
+    { data: workReadiness, error: workReadinessError },
+  ] = await Promise.all([
     supabase
       .from('content_writing_automation_items')
       .select('article_id,status,content_writing_session_id,usable_competitor_count,pending_competitor_count,last_error_code,last_error,updated_at')
@@ -432,9 +436,13 @@ const readArticleSummaries = async (
       .in('article_id', articleIds)
       .order('created_at', { ascending: false })
       .limit(Math.min(500, articleIds.length * 20)),
+    supabase.rpc('get_articles_automation_work_readiness', {
+      p_article_ids: articleIds,
+    }),
   ]);
   if (itemError) throw itemError;
   if (sessionError) throw sessionError;
+  if (workReadinessError) throw workReadinessError;
 
   const latestSessions = new Map<string, Record<string, any>>();
   for (const value of sessions || []) {
@@ -476,6 +484,12 @@ const readArticleSummaries = async (
   const itemsByArticle = new Map(
     (items || []).filter(isRecord).map(item => [text(item.article_id), item] as const),
   );
+  const workReadinessByArticle = new Map(
+    (Array.isArray(workReadiness) ? workReadiness : [])
+      .filter(isRecord)
+      .map(readiness => [text(readiness.articleId), readiness] as const)
+      .filter(([articleId]) => Boolean(articleId)),
+  );
 
   return articleIds.flatMap(articleId => {
     const item = itemsByArticle.get(articleId) || null;
@@ -498,6 +512,7 @@ const readArticleSummaries = async (
     const errorCode = text(session?.last_error_code) || text(item?.last_error_code) || null;
     const errorMessage = text(session?.last_error) || text(item?.last_error) || null;
     const progress = isRecord(session?.progress) ? session.progress : {};
+    const articleWorkReadiness = workReadinessByArticle.get(articleId) || null;
     let state = 'failed';
     if (text(session?.applied_at)) state = 'applied';
     else if (hasFullDraft && qualityPassed === false) state = 'written_quality_failed';
@@ -521,6 +536,17 @@ const readArticleSummaries = async (
       partialStepCount,
       appliedAt: text(session?.applied_at) || null,
       automaticApplicationStatus: text(progress.automaticApplicationStatus) || null,
+      workReadiness: articleWorkReadiness ? {
+        state: text(articleWorkReadiness.state) || 'awaiting_writing',
+        ready: articleWorkReadiness.ready === true,
+        cleanupCurrent: articleWorkReadiness.cleanupCurrent === true,
+        cleanupActive: articleWorkReadiness.cleanupActive === true,
+        cleanupFailed: articleWorkReadiness.cleanupFailed === true,
+        requiredAuditCount: Math.max(0, Number(articleWorkReadiness.requiredAuditCount) || 0),
+        completedAuditCount: Math.max(0, Number(articleWorkReadiness.completedAuditCount) || 0),
+        activeAuditCount: Math.max(0, Number(articleWorkReadiness.activeAuditCount) || 0),
+        failedAuditCount: Math.max(0, Number(articleWorkReadiness.failedAuditCount) || 0),
+      } : null,
       usableCompetitorCount: Math.max(0, Number(item?.usable_competitor_count) || 0),
       minimumCompetitorCount,
       errorCode,

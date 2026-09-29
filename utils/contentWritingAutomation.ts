@@ -153,6 +153,15 @@ export type ContentWritingArticleSummaryState =
   | 'failed'
   | 'cancelled';
 
+export type ContentWritingWorkReadinessState =
+  | 'awaiting_writing'
+  | 'waiting_cleanup'
+  | 'cleaning'
+  | 'auditing'
+  | 'ready'
+  | 'partial'
+  | 'needs_attention';
+
 export type ContentWritingArticleSummary = {
   articleId: string;
   state: ContentWritingArticleSummaryState;
@@ -165,6 +174,17 @@ export type ContentWritingArticleSummary = {
   partialStepCount: number;
   appliedAt: string | null;
   automaticApplicationStatus: string | null;
+  workReadiness: {
+    state: ContentWritingWorkReadinessState;
+    ready: boolean;
+    cleanupCurrent: boolean;
+    cleanupActive: boolean;
+    cleanupFailed: boolean;
+    requiredAuditCount: number;
+    completedAuditCount: number;
+    activeAuditCount: number;
+    failedAuditCount: number;
+  } | null;
   usableCompetitorCount: number;
   minimumCompetitorCount: number;
   errorCode: string | null;
@@ -408,6 +428,27 @@ const normalizeArticleSummary = (value: unknown): ContentWritingArticleSummary |
     && Number.isFinite(source.qualityMinimumScore)
     ? source.qualityMinimumScore
     : null;
+  const readinessSource = isRecord(source.workReadiness) ? source.workReadiness : null;
+  const readinessState = text(readinessSource?.state);
+  const workReadiness = readinessSource && [
+    'awaiting_writing',
+    'waiting_cleanup',
+    'cleaning',
+    'auditing',
+    'ready',
+    'partial',
+    'needs_attention',
+  ].includes(readinessState) ? {
+      state: readinessState as ContentWritingWorkReadinessState,
+      ready: readinessSource.ready === true,
+      cleanupCurrent: readinessSource.cleanupCurrent === true,
+      cleanupActive: readinessSource.cleanupActive === true,
+      cleanupFailed: readinessSource.cleanupFailed === true,
+      requiredAuditCount: integer(readinessSource.requiredAuditCount),
+      completedAuditCount: integer(readinessSource.completedAuditCount),
+      activeAuditCount: integer(readinessSource.activeAuditCount),
+      failedAuditCount: integer(readinessSource.failedAuditCount),
+    } : null;
   return {
     articleId,
     state,
@@ -420,6 +461,7 @@ const normalizeArticleSummary = (value: unknown): ContentWritingArticleSummary |
     partialStepCount: integer(source.partialStepCount),
     appliedAt: nullableText(source.appliedAt),
     automaticApplicationStatus: nullableText(source.automaticApplicationStatus),
+    workReadiness,
     usableCompetitorCount: integer(source.usableCompetitorCount),
     minimumCompetitorCount: normalizeContentWritingMinimumCompetitors(
       source.minimumCompetitorCount,

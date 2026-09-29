@@ -437,8 +437,19 @@ const ContentWritingSummaryChip: React.FC<{
   const score = summary.qualityScore !== null
     ? `${summary.qualityScore}/100${summary.qualityMinimumScore !== null ? ` (المطلوب ${summary.qualityMinimumScore})` : ''}`
     : '';
+  const appliedPresentation = summary.workReadiness?.state === 'ready'
+    ? { label: 'أدرج المحتوى تلقائيا · جاهزة للعمل', tone: 'green' }
+    : summary.workReadiness?.state === 'cleaning' || summary.workReadiness?.state === 'waiting_cleanup'
+      ? { label: 'أدرج المحتوى تلقائيا · تنقية المحتوى', tone: 'blue' }
+      : summary.workReadiness?.state === 'auditing'
+        ? { label: 'أدرج المحتوى تلقائيا · تنفيذ التدقيقات الخارجية', tone: 'blue' }
+        : summary.workReadiness?.state === 'partial'
+          ? { label: 'أدرج المحتوى تلقائيا · جاهزة جزئيا', tone: 'amber' }
+          : summary.workReadiness?.state === 'needs_attention'
+            ? { label: 'أدرج المحتوى تلقائيا · تحتاج تدخلا', tone: 'red' }
+            : { label: 'أدرج المحتوى تلقائيا', tone: 'green' };
   const presentation = summary.state === 'applied'
-    ? { label: 'أدرج المحتوى تلقائيا', tone: 'green' }
+    ? appliedPresentation
     : summary.state === 'written_quality_failed'
       ? { label: 'لم تتجاوز سياسة الجودة.', tone: 'amber' }
       : summary.state === 'written_quality_passed'
