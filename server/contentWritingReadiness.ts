@@ -37,6 +37,11 @@ export const CONTENT_WRITING_SCHEMA_PROBES = [
     table: 'ai_external_analysis_jobs',
     columns: 'id,article_id,job_type,status,pipeline_parent_job_id,lease_generation,max_attempts,dead_lettered_at,dead_letter_reason',
   },
+  {
+    id: 'automaticArticleFocus',
+    table: 'automatic_article_focus',
+    columns: 'singleton,article_id,state,current_stage,acquired_at,last_progress_at,next_retry_at,last_article_id,last_release_reason',
+  },
 ] as const;
 
 type ProbeResult = {
@@ -66,6 +71,7 @@ export type ContentWritingReadinessResult = {
       | 'resumeCoordinator'
       | 'automationEvaluator'
       | 'automationVersion'
+      | 'automaticFocusCoordinator'
       | 'competitorPreparationCoordinator'
       | 'fullPipelineCoordinator'
       | 'fullPipelineVersion',
@@ -120,6 +126,7 @@ export const checkContentWritingReadiness = async (options: {
       ['resumeCoordinator', false] as const,
       ['automationEvaluator', false] as const,
       ['automationVersion', false] as const,
+      ['automaticFocusCoordinator', false] as const,
       ['competitorPreparationCoordinator', false] as const,
       ['fullPipelineCoordinator', false] as const,
       ['fullPipelineVersion', false] as const,
@@ -213,13 +220,24 @@ export const checkContentWritingReadiness = async (options: {
         return;
       }
       const version = Number(result.data);
-      if (!Number.isFinite(version) || version < 5) {
-        failures.push(`automationVersion: expected at least 5, received ${String(version)}.`);
+      if (!Number.isFinite(version) || version < 6) {
+        failures.push(`automationVersion: expected at least 6, received ${String(version)}.`);
         return;
       }
       checks.automationVersion = true;
     } catch (error) {
       failures.push(`automationVersion: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
+    }
+  })(), (async () => {
+    try {
+      const result = await withTimeout(client.rpc('get_automatic_article_focus', {}), timeoutMs);
+      if (result.error) {
+        failures.push(describeProbeFailure('automaticFocusCoordinator', result.error));
+        return;
+      }
+      checks.automaticFocusCoordinator = true;
+    } catch (error) {
+      failures.push(`automaticFocusCoordinator: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000));
     }
   })(), (async () => {
     try {

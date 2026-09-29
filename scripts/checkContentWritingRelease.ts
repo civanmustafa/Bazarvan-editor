@@ -61,6 +61,8 @@ const requiredServerMarkers = [
   'content_writing_automation_items',
   'enqueue_content_writing_competitor_preparation',
   'resume_content_writing_session_v2',
+  'get_automatic_article_focus',
+  'skip_automatic_article_focus',
 ];
 for (const marker of requiredServerMarkers) {
   if (!serverBundle.includes(marker)) {
@@ -86,6 +88,7 @@ const requiredWorkerMarkers = [
   'resume_next_automatic_content_writing_session',
   'claim_next_content_writing_automation_item',
   'automatic_ready',
+  'reconcile_automatic_article_focus',
 ];
 for (const marker of requiredWorkerMarkers) {
   if (!workerBundle.includes(marker)) {

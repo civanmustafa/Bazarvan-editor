@@ -85,6 +85,27 @@ export type ContentWritingAutomationGlobalBlocker = {
   message: string;
 };
 
+export type AutomaticArticleFocus = {
+  articleId: string | null;
+  articleTitle: string;
+  articleVisible: boolean;
+  state: 'idle' | 'active' | 'waiting_retry' | 'needs_attention';
+  currentStage: string | null;
+  acquiredAt: string | null;
+  lastProgressAt: string | null;
+  nextRetryAt: string | null;
+  attemptCount: number;
+  maxAttempts: number;
+  lastErrorCode: string | null;
+  lastError: string | null;
+  generation: number;
+  lastArticleId: string | null;
+  lastArticleTitle: string;
+  lastReleaseReason: string | null;
+  releasedAt: string | null;
+  canResume: boolean;
+};
+
 export type ContentWritingAutomationOverview = {
   schemaAvailable: boolean;
   settings: ContentWritingAutomationSettings;
@@ -99,6 +120,7 @@ export type ContentWritingAutomationOverview = {
   active: ContentWritingAutomationItem | null;
   lastItem: ContentWritingAutomationItem | null;
   globalBlocker: ContentWritingAutomationGlobalBlocker | null;
+  focus?: AutomaticArticleFocus | null;
   candidates: ContentWritingAutomationCandidate[];
 };
 
@@ -285,6 +307,8 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
   const source = isRecord(value) ? value : {};
   const state = isRecord(source.state) ? source.state : null;
   const globalBlocker = isRecord(source.globalBlocker) ? source.globalBlocker : null;
+  const focus = isRecord(source.focus) ? source.focus : null;
+  const focusState = text(focus?.state);
   return {
     schemaAvailable: source.schemaAvailable !== false,
     settings: normalizeSettings(source.settings),
@@ -304,6 +328,26 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
       articleTitle: text(globalBlocker.articleTitle || globalBlocker.article_title),
       status: text(globalBlocker.status),
       message: text(globalBlocker.message),
+    } : null,
+    focus: focus && ['idle', 'active', 'waiting_retry', 'needs_attention'].includes(focusState) ? {
+      articleId: nullableText(focus.articleId),
+      articleTitle: text(focus.articleTitle),
+      articleVisible: focus.articleVisible !== false,
+      state: focusState as AutomaticArticleFocus['state'],
+      currentStage: nullableText(focus.currentStage),
+      acquiredAt: nullableText(focus.acquiredAt),
+      lastProgressAt: nullableText(focus.lastProgressAt),
+      nextRetryAt: nullableText(focus.nextRetryAt),
+      attemptCount: integer(focus.attemptCount),
+      maxAttempts: integer(focus.maxAttempts),
+      lastErrorCode: nullableText(focus.lastErrorCode),
+      lastError: nullableText(focus.lastError),
+      generation: integer(focus.generation),
+      lastArticleId: nullableText(focus.lastArticleId),
+      lastArticleTitle: text(focus.lastArticleTitle),
+      lastReleaseReason: nullableText(focus.lastReleaseReason),
+      releasedAt: nullableText(focus.releasedAt),
+      canResume: focus.canResume === true,
     } : null,
     candidates: Array.isArray(source.candidates) ? source.candidates.flatMap(candidate => {
       if (!isRecord(candidate) || !text(candidate.articleId)) return [];
@@ -535,6 +579,29 @@ export const retryRecoverableAutomationFailures = async (
       total: integer(requeued.total),
     },
   };
+};
+
+export const skipAutomaticArticleFocus = async (
+  options: { draftOnly?: boolean; reason?: string } = {},
+): Promise<ContentWritingAutomationOverview> => {
+  const payload = await requestAutomation({
+    action: 'focus_skip',
+    reason: options.reason || 'administrator_skipped_focus',
+    ...(options.draftOnly ? { draftOnly: true } : {}),
+  });
+  return normalizeOverview(payload.overview);
+};
+
+export const resumeAutomaticArticleFocus = async (
+  articleId?: string | null,
+  options: { draftOnly?: boolean } = {},
+): Promise<ContentWritingAutomationOverview> => {
+  const payload = await requestAutomation({
+    action: 'focus_resume',
+    ...(articleId ? { articleId } : {}),
+    ...(options.draftOnly ? { draftOnly: true } : {}),
+  });
+  return normalizeOverview(payload.overview);
 };
 
 const READINESS_LABELS: Record<string, [string, string]> = {

@@ -254,6 +254,7 @@ test('creator scheduler ignores the all-null composite returned when no queue it
   assert.deepEqual(
     state.rpcCalls.map((call: any) => call.name),
     [
+      'reconcile_automatic_article_focus',
       'recover_due_content_writing_automation_items',
       'defer_due_automatic_content_writing_retry_for_fairness',
       'resume_next_automatic_content_writing_session',

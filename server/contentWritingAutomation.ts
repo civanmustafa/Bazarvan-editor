@@ -304,6 +304,13 @@ const deferDueAutomaticContentWritingRetryForFairness = async (): Promise<boolea
   return data === true || (Array.isArray(data) && data[0] === true);
 };
 
+const reconcileAutomaticArticleFocus = async (): Promise<void> => {
+  const { error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'reconcile_automatic_article_focus',
+  );
+  if (error && !isContentWritingAutomationSchemaUnavailableError(error)) throw error;
+};
+
 const enqueueNextAutomaticCompetitorPreparation = async (
   settings: ContentWritingAutomationSettings,
 ): Promise<void> => {
@@ -534,6 +541,7 @@ export const scheduleNextAutomaticContentWritingSession = async (
   ]);
   if (!settings.enabled) return null;
 
+  await reconcileAutomaticArticleFocus();
   await recoverDueTransientItems(settings);
   await reconcileBlockedPrerequisiteItems(settings);
 

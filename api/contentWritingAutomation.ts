@@ -174,6 +174,54 @@ const readActiveItem = async (userId: string): Promise<Record<string, unknown> |
   return access === 'none' ? null : publicItem(data);
 };
 
+const publicAutomaticArticleFocus = async (
+  value: unknown,
+  userId: string,
+  draftOnly = false,
+): Promise<Record<string, unknown> | null> => {
+  if (!isRecord(value)) return null;
+  const articleId = text(value.articleId);
+  const lastArticleId = text(value.lastArticleId);
+  const visibleTargetId = articleId || lastArticleId;
+  const access = visibleTargetId
+    ? await getArticleAccessLevelForUser(
+      getExternalAnalysisSupabaseAdmin(),
+      visibleTargetId,
+      userId,
+    )
+    : 'none';
+  let articleVisible = !visibleTargetId || access !== 'none';
+  if (articleVisible && draftOnly && visibleTargetId) {
+    const { data: article, error } = await getExternalAnalysisSupabaseAdmin()
+      .from('articles')
+      .select('status')
+      .eq('id', visibleTargetId)
+      .maybeSingle();
+    if (error) throw error;
+    articleVisible = text(article?.status) === 'draft';
+  }
+  return {
+    articleId: articleVisible ? articleId || null : null,
+    articleTitle: articleVisible ? text(value.articleTitle) : '',
+    articleVisible,
+    state: text(value.state) || 'idle',
+    currentStage: text(value.currentStage) || null,
+    acquiredAt: text(value.acquiredAt) || null,
+    lastProgressAt: text(value.lastProgressAt) || null,
+    nextRetryAt: text(value.nextRetryAt) || null,
+    attemptCount: Math.max(0, Number(value.attemptCount) || 0),
+    maxAttempts: Math.max(0, Number(value.maxAttempts) || 0),
+    lastErrorCode: articleVisible ? text(value.lastErrorCode) || null : null,
+    lastError: articleVisible ? text(value.lastError) || null : null,
+    generation: Math.max(0, Number(value.generation) || 0),
+    lastArticleId: articleVisible ? lastArticleId || null : null,
+    lastArticleTitle: articleVisible ? text(value.lastArticleTitle) : '',
+    lastReleaseReason: articleVisible ? text(value.lastReleaseReason) || null : null,
+    releasedAt: articleVisible ? text(value.releasedAt) || null : null,
+    canResume: articleVisible && value.canResume === true,
+  };
+};
+
 const readOverview = async (userId: string, draftOnly = false) => {
   const settings = await readContentWritingAutomationSettings();
   const supabase = getExternalAnalysisSupabaseAdmin();
@@ -184,6 +232,7 @@ const readOverview = async (userId: string, draftOnly = false) => {
     { data: globalAutomation, error: globalAutomationError },
     { data: globalWriting, error: globalWritingError },
     { data: globalPipeline, error: globalPipelineError },
+    { data: automaticFocus, error: automaticFocusError },
   ] = await Promise.all([
     supabase.rpc('list_content_writing_automation_candidates', {
       p_requested_by: userId,
@@ -217,15 +266,18 @@ const readOverview = async (userId: string, draftOnly = false) => {
       .in('status', ['queued', 'running', 'retry_scheduled'])
       .limit(1)
       .maybeSingle(),
+    supabase.rpc('get_automatic_article_focus'),
   ]);
   const schemaUnavailable = isContentWritingAutomationSchemaUnavailableError(candidateError)
     || isContentWritingAutomationSchemaUnavailableError(stateError)
-    || isContentWritingAutomationSchemaUnavailableError(globalAutomationError);
+    || isContentWritingAutomationSchemaUnavailableError(globalAutomationError)
+    || isContentWritingAutomationSchemaUnavailableError(automaticFocusError);
   if (candidateError && !schemaUnavailable) throw candidateError;
   if (stateError && !schemaUnavailable) throw stateError;
   if (globalAutomationError && !schemaUnavailable) throw globalAutomationError;
   if (globalWritingError) throw globalWritingError;
   if (globalPipelineError) throw globalPipelineError;
+  if (automaticFocusError && !schemaUnavailable) throw automaticFocusError;
 
   const stateLastItemId = isRecord(state) ? text(state.last_item_id) : '';
   const lastItem = stateLastItemId
@@ -265,6 +317,9 @@ const readOverview = async (userId: string, draftOnly = false) => {
       readiness,
     };
   }) : []).filter(candidate => !draftOnly || candidate.articleStatus === 'draft');
+  const focus = schemaUnavailable
+    ? null
+    : await publicAutomaticArticleFocus(automaticFocus, userId, draftOnly);
 
   return {
     schemaAvailable: !schemaUnavailable,
@@ -280,6 +335,7 @@ const readOverview = async (userId: string, draftOnly = false) => {
     globalBlocker,
     active: visibleActive,
     lastItem: visibleLastItem,
+    focus,
     candidates: visibleCandidates,
   };
 };
@@ -653,6 +709,43 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
     };
   }
 
+  if (action === 'focus_skip' || action === 'focus_resume') {
+    consumeApiRateLimit(
+      'content-writing-automation:focus-mutation',
+      principal.userId,
+      getPositiveIntegerEnv('CONTENT_WRITING_AUTOMATION_MUTATION_RATE_LIMIT_PER_MINUTE', 30),
+    );
+    if (principal.role !== 'admin') {
+      throw new ContentWritingAutomationApiError(
+        'Administrator access is required.',
+        403,
+        'administrator_access_required',
+      );
+    }
+    const rpc = action === 'focus_skip'
+      ? 'skip_automatic_article_focus'
+      : 'resume_automatic_article_focus';
+    const args = action === 'focus_skip'
+      ? {
+        p_requested_by: principal.userId,
+        p_reason: text(body.reason) || 'administrator_skipped_focus',
+      }
+      : {
+        p_requested_by: principal.userId,
+        p_article_id: text(body.articleId) ? requireUuid(body.articleId, 'articleId') : null,
+      };
+    const { error } = await supabase.rpc(rpc, args);
+    if (error) throw error;
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        action,
+        overview: await readOverview(principal.userId, body.draftOnly === true),
+      },
+    };
+  }
+
   if (action === 'retry' || action === 'cancel') {
     consumeApiRateLimit(
       'content-writing-automation:mutation',
@@ -690,7 +783,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
   }
 
   throw new ContentWritingAutomationApiError(
-    'action must be status, summaries, retry, cancel, or retry_recoverable.',
+    'action must be status, summaries, retry, cancel, retry_recoverable, focus_skip, or focus_resume.',
     400,
     'content_writing_automation_action_invalid',
   );

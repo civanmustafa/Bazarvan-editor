@@ -45,7 +45,7 @@ const createProbeClient = (options: {
       data: name === 'full_article_pipeline_schema_version'
         ? 6
         : name === 'content_writing_automation_schema_version'
-          ? 5
+          ? 6
           : [] as unknown[],
       error: name === options.failedRpc
         ? { code: 'PGRST202', message: 'Internal RPC schema detail that must stay private.' }
@@ -66,7 +66,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 32);
+  assert.equal(result.requiredMigrationCount, 33);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
@@ -75,10 +75,12 @@ test('content-writing readiness checks every required schema surface', async () 
     writingSources: true,
     writingSourceDrafts: true,
     fullPipelineJobs: true,
+    automaticArticleFocus: true,
     keyCoordinator: true,
     resumeCoordinator: true,
     automationEvaluator: true,
     automationVersion: true,
+    automaticFocusCoordinator: true,
     competitorPreparationCoordinator: true,
     fullPipelineCoordinator: true,
     fullPipelineVersion: true,
@@ -89,6 +91,7 @@ test('content-writing readiness checks every required schema surface', async () 
     'enqueue_full_article_pipeline',
     'evaluate_content_writing_automation_readiness',
     'full_article_pipeline_schema_version',
+    'get_automatic_article_focus',
     'inspect_gemini_api_key_availability',
     'resume_content_writing_session_v2',
   ]);
@@ -96,6 +99,7 @@ test('content-writing readiness checks every required schema surface', async () 
     'ai_external_analysis_jobs',
     'article_writing_source_drafts',
     'article_writing_sources',
+    'automatic_article_focus',
     'content_writing_automation_items',
     'content_writing_messages',
     'content_writing_sessions',
@@ -179,6 +183,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260922010000_enforce_external_dependency_on_child\.sql/);
   assert.match(releaseRegistry, /20260924000000_remove_competitor_content_acceptance_gates\.sql/);
   assert.match(releaseRegistry, /20260930000000_automatic_content_writing_session_resume\.sql/);
+  assert.match(releaseRegistry, /20261007000000_finish_focused_article_first\.sql/);
   assert.match(releaseRegistry, /20260728030000_full_article_pipeline\.sql/);
   assert.match(releaseRegistry, /20260824010000_full_article_pipeline_safety\.sql/);
   assert.match(releaseRegistry, /20260824020000_full_article_pipeline_optional_prerequisites\.sql/);

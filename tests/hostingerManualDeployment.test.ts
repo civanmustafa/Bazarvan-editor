@@ -40,9 +40,10 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-128/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-128/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-129/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-129/);
   assert.match(guide, /20261006000000_article_work_readiness_orchestration\.sql/);
+  assert.match(guide, /20261007000000_finish_focused_article_first\.sql/);
   assert.match(guide, /20261003000000_automation_inventory_completion_and_auto_recovery\.sql/);
   assert.match(guide, /20261002000000_visible_automation_task_inventory\.sql/);
   assert.match(verifyScript, /AUTOMATION_TASK_INVENTORY_FUNCTION/);
@@ -77,7 +78,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20260904000000_preserve_manual_competitor_extraction\.sql/);
   assert.match(verifyScript, /MANUAL_COMPETITOR_EXTRACTION_PRIVILEGES/);
   assert.match(guide, /20260903000000_manual_google_metadata\.sql/);
-  assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-65/);
+  assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-67/);
   assert.match(verifyScript, /ARTICLE_COMPETITOR_SOURCE_POLICY/);
   assert.match(verifyScript, /AUTOMATION_COORDINATOR_TABLES/);
   assert.match(verifyScript, /AUTOMATION_COORDINATOR_FUNCTION/);
