@@ -220,8 +220,8 @@ export const checkContentWritingReadiness = async (options: {
         return;
       }
       const version = Number(result.data);
-      if (!Number.isFinite(version) || version < 6) {
-        failures.push(`automationVersion: expected at least 6, received ${String(version)}.`);
+      if (!Number.isFinite(version) || version < 7) {
+        failures.push(`automationVersion: expected at least 7, received ${String(version)}.`);
         return;
       }
       checks.automationVersion = true;

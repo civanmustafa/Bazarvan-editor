@@ -26,6 +26,7 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20260930000000_automatic_content_writing_session_resume.sql',
   '20261006000000_article_work_readiness_orchestration.sql',
   '20261007000000_finish_focused_article_first.sql',
+  '20261008000000_complete_satisfied_competitor_preparation.sql',
 ] as const;
 
 export const FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS = [
