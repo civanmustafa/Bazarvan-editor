@@ -291,6 +291,19 @@ const resumeDueAutomaticContentWritingSession = async (): Promise<string | null>
   return sessionId || null;
 };
 
+const deferDueAutomaticContentWritingRetryForFairness = async (): Promise<boolean> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
+    'defer_due_automatic_content_writing_retry_for_fairness',
+  );
+  if (error) {
+    // The fairness coordinator is additive. During a rolling deployment, the
+    // existing retry delay remains safe until its migration is available.
+    if (isContentWritingAutomationSchemaUnavailableError(error)) return false;
+    throw error;
+  }
+  return data === true || (Array.isArray(data) && data[0] === true);
+};
+
 const enqueueNextAutomaticCompetitorPreparation = async (
   settings: ContentWritingAutomationSettings,
 ): Promise<void> => {
@@ -524,13 +537,16 @@ export const scheduleNextAutomaticContentWritingSession = async (
   await recoverDueTransientItems(settings);
   await reconcileBlockedPrerequisiteItems(settings);
 
-  const resumedSessionId = await resumeDueAutomaticContentWritingSession();
-  if (resumedSessionId) {
-    console.log(
-      `[content-writing-automation] Resumed automatic session ${resumedSessionId}`
-      + ' from its failed step; completed steps were preserved.',
-    );
-    return null;
+  const retryDeferredForFairness = await deferDueAutomaticContentWritingRetryForFairness();
+  if (!retryDeferredForFairness) {
+    const resumedSessionId = await resumeDueAutomaticContentWritingSession();
+    if (resumedSessionId) {
+      console.log(
+        `[content-writing-automation] Resumed automatic session ${resumedSessionId}`
+        + ' from its failed step; completed steps were preserved.',
+      );
+      return null;
+    }
   }
 
   const item = await claimNextItem(workerId, settings);

@@ -38,6 +38,7 @@ import {
   selectQualityContentWritingCompetitors,
   type ContentWritingCompetitorInput,
 } from '../utils/contentWritingContext';
+import { CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT } from '../constants/competitors';
 import { readContentWritingMinimumCompetitors } from './contentWritingCompetitorPolicy';
 import {
   enqueueCompetitorPreparationDiscovery,
@@ -644,7 +645,7 @@ const executeFullArticlePipeline = async (
   const model = text(input.model);
   const minimumCompetitors = await readContentWritingMinimumCompetitors();
   const competitorCount = Math.max(
-    CONTENT_WRITING_MIN_COMPETITOR_COUNT,
+    CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT,
     Math.min(5, Math.round(numberValue(input.competitorCount, 5))),
   );
   const leaseGeneration = getPipelineLeaseGeneration(context);

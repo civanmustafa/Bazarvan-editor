@@ -6,9 +6,11 @@ import { getExternalEngineeringCommand } from '../server/externalEngineeringComm
 import { getExternalAnalysisSupabaseAdmin } from '../server/externalAnalysisQueue';
 import { reserveArticleForExplicitContentWriting } from '../server/contentWritingAutomation';
 import type { ContentWritingProvider } from '../server/contentWritingSessionService';
-import { MAX_ARTICLE_COMPETITORS } from '../constants/competitors';
+import {
+  CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT,
+  MAX_ARTICLE_COMPETITORS,
+} from '../constants/competitors';
 import { sanitizeCompetitorSlots } from '../utils/competitorContent';
-import { CONTENT_WRITING_MIN_COMPETITOR_COUNT } from '../utils/contentWritingContext';
 import {
   EXTERNAL_ENGINEERING_MINIMUM_ARTICLE_WORDS,
   countExternalEngineeringArticleWords,
@@ -843,7 +845,7 @@ const handleExternalAnalysisRequest = async (req: any, requestId: string): Promi
     const provider = toTrimmedString(body.provider);
     const model = toTrimmedString(body.model);
     const competitorCount = Math.max(
-      CONTENT_WRITING_MIN_COMPETITOR_COUNT,
+      CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT,
       Math.min(5, Math.round(Number(body.competitorCount) || 5)),
     );
     if (!['gemini', 'geminiPaid', 'openai'].includes(provider) || !model) {

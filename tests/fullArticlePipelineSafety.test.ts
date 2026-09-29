@@ -170,8 +170,8 @@ test('coordinator waits and competitor inputs have bounded professional gates', 
   assert.match(competitorCoordinator, /p_worker_id: request\.workerId/);
   assert.match(competitorCoordinator, /p_lease_generation: request\.leaseGeneration/);
   assert.match(executor, /forceRefresh: competitorInputsMustBeReplaced/);
-  assert.match(executor, /Math\.max\(\s*CONTENT_WRITING_MIN_COMPETITOR_COUNT/);
-  assert.match(api, /Math\.max\(\s*CONTENT_WRITING_MIN_COMPETITOR_COUNT/);
+  assert.match(executor, /Math\.max\(\s*CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT/);
+  assert.match(api, /Math\.max\(\s*CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT/);
   assert.match(migration, /v_competitor_count integer := greatest\(3,/);
   assert.match(migration, /full-pipeline-discovery:[\s\S]*p_lease_generation/);
   assert.match(migration, /pipelineCompetitorRefresh', true/);

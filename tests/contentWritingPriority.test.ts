@@ -22,6 +22,11 @@ test('PostgreSQL manual writing priority and live queue diagnostics', async t =>
     const base = await read('supabase/migrations/20260722000000_content_writing_sessions.sql');
     await db.exec(base.slice(base.indexOf('create table if not exists public.content_writing_sessions'), base.indexOf('create table if not exists public.content_writing_messages')));
     await db.exec(await read('supabase/migrations/20260905000000_manual_content_writing_priority.sql'));
+    const fairness = await read('supabase/migrations/20261005000000_competitor_count_and_queue_fairness.sql');
+    await db.exec(fairness.slice(
+      fairness.indexOf('create or replace function public.content_writing_queue_priority'),
+      fairness.indexOf('-- A queue attempt covers'),
+    ));
     await db.query('insert into profiles values ($1)', [userId]);
     await db.query('insert into articles values ($1, $2)', [articleId, userId]);
     let sequence = 0;
@@ -87,11 +92,15 @@ test('PostgreSQL manual writing priority and live queue diagnostics', async t =>
       assert.equal(resumed.locked_by, 'test-worker'); assert.equal(resumed.attempt_count, 1);
       assert.equal(resumed.progress.step, 4);
     });
-    await t.test('legacy manual sessions and explicit resumes are prioritized; pipelines are not mislabeled', async () => {
-      await reset(); await enqueue('full_pipeline', 900); await enqueue('automatic_ready', 600);
+    await t.test('legacy manual sessions and explicit resumes are prioritized; automatic resumes stay standard', async () => {
+      await reset(); const pipeline = await enqueue('full_pipeline', 900);
+      const automatic = await enqueue('automatic_ready', 600);
+      const automaticResume = await enqueue('automatic_ready', 300, { progress: { resumed: true, automaticResume: true } });
       const resumed = await enqueue('automatic_ready', 100, { progress: { resumed: true } });
       const legacy = await enqueue(null, 50);
       assert.equal((await claim()).id, resumed.id); assert.equal((await claim()).id, legacy.id);
+      assert.equal((await claim()).id, pipeline.id); assert.equal((await claim()).id, automatic.id);
+      assert.equal((await claim()).id, automaticResume.id);
     });
     await t.test('diagnostics expose no other article data and require article access', async () => {
       await reset(); const session = await enqueue('manual', 1);

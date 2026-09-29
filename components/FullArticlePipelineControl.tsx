@@ -31,7 +31,7 @@ import {
   FULL_ARTICLE_PIPELINE_STAGES,
   getFullArticlePipelineProgressView,
 } from '../utils/fullArticlePipelineProgress';
-import { CONTENT_WRITING_MIN_COMPETITOR_COUNT } from '../utils/contentWritingContext';
+import { CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT } from '../constants/competitors';
 
 type Props = {
   articleId: string;
@@ -367,8 +367,8 @@ const FullArticlePipelineControl: React.FC<Props> = ({
             className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-xs font-bold text-gray-800 outline-none dark:border-[#444] dark:bg-[#242424] dark:text-gray-100"
           >
             {Array.from(
-              { length: 6 - CONTENT_WRITING_MIN_COMPETITOR_COUNT },
-              (_, index) => CONTENT_WRITING_MIN_COMPETITOR_COUNT + index,
+              { length: 6 - CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT },
+              (_, index) => CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT + index,
             ).map(value => (
               <option key={value} value={value}>{value}</option>
             ))}
