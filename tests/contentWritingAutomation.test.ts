@@ -229,10 +229,9 @@ test('automatic writing does not spend an AI attempt on missing prerequisites an
   assert.match(scheduler, /normalizeContentWritingMinimumCompetitors/);
   assert.match(settings, /CONTENT_WRITING_MIN_CONFIGURABLE_COMPETITOR_COUNT/);
   assert.match(scheduler, /code === 'content_writing_prerequisites_missing'[\s\S]*attempt_count: Math\.max\(0, item\.attempt_count - 1\)/);
-  assert.match(scheduler, /reconcileBlockedPrerequisiteItems/);
-  assert.match(scheduler, /enqueue_content_writing_competitor_preparation/);
-  assert.match(scheduler, /attempt_count !== 0[\s\S]*attempt_count: 0/);
-  assert.match(scheduler, /status: 'ready'[\s\S]*attempt_count: 0/);
+  assert.doesNotMatch(scheduler, /reconcileBlockedPrerequisiteItems/);
+  assert.doesNotMatch(scheduler, /enqueue_content_writing_competitor_preparation/);
+  assert.doesNotMatch(scheduler, /enqueueNextAutomaticCompetitorPreparation/);
   assert.match(API, /typeof session\.quality_score === 'number'/);
   assert.match(API, /action === 'summaries'/);
   assert.match(dashboard, /label: 'أدرج المحتوى تلقائيا'/);
@@ -296,6 +295,7 @@ test('Write article durably discovers and extracts competitor prose before queui
   assert.match(manualAPI, /action === 'getPreparation'/);
   assert.match(manualAPI, /preparingCompetitors: true/);
   assert.match(browserClient, /onPreparationProgress/);
-  assert.match(scheduler, /enqueueNextAutomaticCompetitorPreparation/);
+  assert.doesNotMatch(scheduler, /enqueueNextAutomaticCompetitorPreparation/);
+  assert.match(worker, /EXTERNAL_ANALYSIS_AUTOMATION_MASTER/);
   assert.match(guide, /لا تبدأ الكتابة قبل وجود نص منافس فعلي/);
 });

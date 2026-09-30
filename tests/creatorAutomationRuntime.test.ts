@@ -254,14 +254,16 @@ test('creator scheduler ignores the all-null composite returned when no queue it
   assert.deepEqual(
     state.rpcCalls.map((call: any) => call.name),
     [
-      'reconcile_automatic_article_focus',
-      'recover_due_content_writing_automation_items',
       'defer_due_automatic_content_writing_retry_for_fairness',
       'resume_next_automatic_content_writing_session',
       'claim_next_content_writing_automation_item',
-      'enqueue_next_automatic_writing_competitor_preparation',
     ],
   );
+  assert.ok(state.rpcCalls.every((call: any) => ![
+    'reconcile_automatic_article_focus',
+    'recover_due_content_writing_automation_items',
+    'enqueue_next_automatic_writing_competitor_preparation',
+  ].includes(call.name)));
 });
 
 test('queued creator writing is cancelled before AI calls while manual sessions bypass personal switches', async t => {

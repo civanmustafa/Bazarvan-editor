@@ -180,7 +180,8 @@ test('content research automation is server-owned, settings-aware, and preserves
   assert.doesNotMatch(engineeringHandler, /activeCommands\.some\(command => command\.options\.targetKeywords\)/);
   assert.match(preparationExecutor, /enqueueCompetitorPreparationExtraction/);
   assert.match(competitorCoordinator, /enqueue_competitor_extraction_job_controlled/);
-  assert.match(writingAutomation, /researchAutomation\.autoDiscoverCompetitors/);
+  assert.doesNotMatch(writingAutomation, /researchAutomation\.autoDiscoverCompetitors/);
+  assert.doesNotMatch(writingAutomation, /enqueue_next_automatic_writing_competitor_preparation/);
   assert.match(workerGuard, /readArticleAutomationPolicy/);
   assert.match(workerGuard, /semantic_keywords_lsi/);
   assert.match(workerGuard, /content_research_automation_changed/);

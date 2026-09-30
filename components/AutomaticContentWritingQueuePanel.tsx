@@ -171,26 +171,55 @@ const TASK_STATUS_STYLE: Record<AutomationTaskInventoryItem['status'], string> =
   failed: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-200',
 };
 
-const getTaskStatusLabel = (task: AutomationTaskInventoryItem, isArabic: boolean): string => ({
-  running: isArabic ? 'جارية الآن' : 'Running now',
-  scheduled: isArabic ? 'مجدولة' : 'Scheduled',
-  ready: isArabic ? 'جاهزة وغير مجدولة' : 'Ready, not scheduled',
-  unscheduled: isArabic ? 'غير مجدولة' : 'Not scheduled',
-  failed: isArabic ? 'متعثرة' : 'Failed',
-})[task.status];
+const getTaskStatusLabel = (task: AutomationTaskInventoryItem, isArabic: boolean): string => {
+  if (task.manualReview && task.status === 'failed') {
+    return isArabic ? 'تحتاج مراجعة' : 'Needs review';
+  }
+  return ({
+    running: isArabic ? 'جارية الآن' : 'Running now',
+    scheduled: isArabic ? 'مجدولة' : 'Scheduled',
+    ready: isArabic ? 'جاهزة للتنفيذ' : 'Ready to run',
+    unscheduled: isArabic ? 'بانتظار متطلبات' : 'Waiting for requirements',
+    failed: isArabic ? 'متعثرة' : 'Failed',
+  })[task.status];
+};
 
-const getTaskReasonLabel = (reason: string | null, isArabic: boolean): string => {
-  const normalized = String(reason || '').trim();
-  if (!normalized) return '';
+const getTaskReasonLabel = (task: AutomationTaskInventoryItem, isArabic: boolean): string => {
+  const reasonCode = String(task.reasonCode || '').trim();
   const known: Record<string, [string, string]> = {
+    execution_in_progress: ['يتم تنفيذ هذه المهمة الآن.', 'This task is running now.'],
     waiting_for_prerequisites: ['بانتظار اكتمال المتطلبات', 'Waiting for prerequisites'],
     waiting_for_editor_idle: ['بانتظار مرور 15 دقيقة دون تحرير', 'Waiting for 15 minutes of editor inactivity'],
     waiting_for_queue_turn: ['بانتظار دورها في الطابور', 'Waiting for its queue turn'],
-    eligible_not_scheduled: ['مؤهلة ولم تُجدول بعد', 'Eligible but not scheduled yet'],
+    eligible_not_scheduled: ['مستوفية للشروط وسيحجزها المحرك الرئيسي في الدورة التالية.', 'Eligible; the master engine will claim it on the next cycle.'],
     retry_scheduled: ['إعادة المحاولة مجدولة', 'Retry is scheduled'],
     automatic_article_focus: ['بانتظار اكتمال المقالة ذات الأولوية', 'Waiting for the focused article to finish'],
+    automation_disabled: ['الأتمتة معطلة لهذه المقالة أو لمنشئها.', 'Automation is disabled for this article or its creator.'],
+    manual_review_required: ['أوقفت تلقائيًا ونُقلت إلى المراجعة اليدوية. عالج السبب ثم استخدم الاستئناف.', 'Automatically paused for manual review. Resolve the cause, then resume it.'],
+    automatic_recovery_exhausted: [
+      `استنفدت دورات الاسترداد التلقائي (${task.recoveryCount}/${Math.max(task.maxRecoveries, task.recoveryCount)}). تحتاج مراجعة يدوية.`,
+      `Automatic recovery cycles are exhausted (${task.recoveryCount}/${Math.max(task.maxRecoveries, task.recoveryCount)}). Manual review is required.`,
+    ],
+    retry_limit_reached: [
+      `استنفدت محاولات التنفيذ (${task.attemptCount}/${task.maxAttempts}). عالج السبب ثم أعد المحاولة يدويًا.`,
+      `Execution attempts are exhausted (${task.attemptCount}/${task.maxAttempts}). Resolve the cause, then retry manually.`,
+    ],
+    recovery_due: ['حان موعد الاسترداد؛ بانتظار دورة المحرك الرئيسي.', 'Recovery is due and is waiting for the master-engine cycle.'],
+    competitor_preparation_running: ['يجري الآن تجهيز المنافسين المطلوبين للكتابة.', 'Required competitors are being prepared now.'],
+    competitor_preparation_scheduled: ['تجهيز المنافسين مجدول ولم يبدأ بعد.', 'Competitor preparation is scheduled and has not started yet.'],
+    competitor_preparation_exhausted: [
+      `لم يُعثر على العدد المطلوب من المنافسين بعد ${task.attemptCount}/${task.maxAttempts} محاولات. أضف منافسًا صالحًا أو راجع المقالة يدويًا.`,
+      `The required competitors were not found after ${task.attemptCount}/${task.maxAttempts} attempts. Add a valid competitor or review the article manually.`,
+    ],
+    missing_competitors: [
+      `ينقص المقالة ${Math.max(0, task.minimumCompetitorCount - task.usableCompetitorCount)} منافس صالح (${task.usableCompetitorCount}/${task.minimumCompetitorCount}).`,
+      `The article needs ${Math.max(0, task.minimumCompetitorCount - task.usableCompetitorCount)} more valid competitor(s) (${task.usableCompetitorCount}/${task.minimumCompetitorCount}).`,
+    ],
+    task_failed: ['فشلت آخر محاولة ولم تعد هناك جدولة فعالة.', 'The last attempt failed and no active schedule remains.'],
   };
-  return known[normalized]?.[isArabic ? 0 : 1] || normalized;
+  if (known[reasonCode]) return known[reasonCode][isArabic ? 0 : 1];
+  const rawReason = String(task.reason || '').trim();
+  return rawReason;
 };
 
 const getFocusStageLabel = (stage: string | null, isArabic: boolean): string => {
@@ -426,6 +455,9 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     attention: countDashboardAutomationIssues(operations),
     enabled: operations.filter(operation => operation.enabled === true).length,
   }), [operations]);
+  const hasRunnableWritingTask = useMemo(() => taskInventory.some(task => (
+    task.operationKey === 'content_writing' && task.runnable && task.status === 'ready'
+  )), [taskInventory]);
 
   const handleRefresh = () => {
     void refresh();
@@ -696,8 +728,16 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 <span className="truncate">{overview.focus.lastArticleTitle || overview.focus.lastArticleId}</span>
               </button>
             ) : (
-              <span className="mt-2 block text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
-                {isArabic ? 'لا توجد مقالة تلقائية ممسوكة الآن؛ ستُختار أقدم مقالة جاهزة.' : 'No automatic article owns the lane; the oldest ready article will be selected.'}
+              <span className={`mt-2 block text-[10px] font-bold ${hasRunnableWritingTask
+                ? 'text-emerald-700 dark:text-emerald-300'
+                : 'text-amber-700 dark:text-amber-300'}`}>
+                {hasRunnableWritingTask
+                  ? (isArabic
+                    ? 'لا توجد مقالة ممسوكة الآن؛ سيختار المحرك الرئيسي أقدم مقالة مستوفية للشروط.'
+                    : 'No article owns the lane; the master engine will select the oldest eligible article.')
+                  : (isArabic
+                    ? 'المسار متاح، لكن لا توجد مهمة مستوفية لشروط التنفيذ الآن. افتح قائمة كتابة المقالات لمعرفة سبب توقف كل مقالة.'
+                    : 'The lane is available, but no task currently satisfies the execution requirements. Open the writing-task list to see each blocker.')}
               </span>
             )}
 
@@ -830,7 +870,8 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 <div className="space-y-2">
                   {(expandedOperation.tasks || []).length > 0 ? expandedOperation.tasks!.map(task => {
                     const dateDetails = taskDateDetails(task, isArabic);
-                    const reason = getTaskReasonLabel(task.reason, isArabic);
+                    const reason = getTaskReasonLabel(task, isArabic);
+                    const rawReason = String(task.reason || '').trim();
                     return (
                       <button
                         key={task.taskId}
@@ -868,6 +909,11 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                               ? 'text-red-600 dark:text-red-300'
                               : 'text-gray-500 dark:text-gray-400'}`}>
                               {reason}
+                            </span>
+                          )}
+                          {rawReason && rawReason !== reason && (
+                            <span className="mt-1 line-clamp-3 block text-[9px] font-semibold leading-4 text-gray-400 dark:text-gray-500">
+                              {isArabic ? 'تفصيل آخر محاولة: ' : 'Last-attempt detail: '}{rawReason}
                             </span>
                           )}
                           {(task.attemptCount > 0 || task.status === 'failed') && (

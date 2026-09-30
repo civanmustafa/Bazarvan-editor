@@ -88,7 +88,6 @@ const requiredWorkerMarkers = [
   'resume_next_automatic_content_writing_session',
   'claim_next_content_writing_automation_item',
   'automatic_ready',
-  'reconcile_automatic_article_focus',
 ];
 for (const marker of requiredWorkerMarkers) {
   if (!workerBundle.includes(marker)) {
@@ -100,6 +99,9 @@ const requiredPreparationWorkerMarkers = [
   'minimumCompetitorCount',
   'competitor_discovery',
   'competitor_extraction',
+  'EXTERNAL_ANALYSIS_AUTOMATION_MASTER',
+  'reconcile_article_automation_coordinator',
+  'auto_requeue_recoverable_automation_failures',
 ];
 for (const marker of requiredPreparationWorkerMarkers) {
   if (!preparationWorkerBundle.includes(marker)) {

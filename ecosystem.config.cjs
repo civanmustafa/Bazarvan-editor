@@ -25,6 +25,7 @@ module.exports = {
       kill_timeout: 10000,
       env: {
         NODE_ENV: 'production',
+        EXTERNAL_ANALYSIS_AUTOMATION_MASTER: 'false',
         EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'competitor_discovery,competitor_extraction',
         EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.COMPETITOR_WORKER_POLL_MS || '3000',
         EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.COMPETITOR_WORKER_IDLE_MAX_MS || '30000',
@@ -46,6 +47,7 @@ module.exports = {
       kill_timeout: 10000,
       env: {
         NODE_ENV: 'production',
+        EXTERNAL_ANALYSIS_AUTOMATION_MASTER: 'true',
         EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup',
         EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.EXTERNAL_ANALYSIS_WORKER_POLL_MS || '5000',
         EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS || '30000',
@@ -70,6 +72,7 @@ module.exports = {
       kill_timeout: 15000,
       env: {
         NODE_ENV: 'production',
+        EXTERNAL_ANALYSIS_AUTOMATION_MASTER: 'false',
         EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'full_article_pipeline',
         EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.FULL_ARTICLE_PIPELINE_WORKER_POLL_MS || '5000',
         EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.FULL_ARTICLE_PIPELINE_WORKER_IDLE_MAX_MS || '30000',
@@ -92,6 +95,7 @@ module.exports = {
       kill_timeout: 15000,
       env: {
         NODE_ENV: 'production',
+        EXTERNAL_ANALYSIS_AUTOMATION_MASTER: 'false',
         EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'content_writing_preparation',
         EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.CONTENT_WRITING_PREPARATION_WORKER_POLL_MS || '5000',
         EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.CONTENT_WRITING_PREPARATION_WORKER_IDLE_MAX_MS || '30000',

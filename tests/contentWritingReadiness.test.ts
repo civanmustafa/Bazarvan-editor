@@ -66,7 +66,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 34);
+  assert.equal(result.requiredMigrationCount, 35);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,
@@ -185,6 +185,7 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseRegistry, /20260930000000_automatic_content_writing_session_resume\.sql/);
   assert.match(releaseRegistry, /20261007000000_finish_focused_article_first\.sql/);
   assert.match(releaseRegistry, /20261008000000_complete_satisfied_competitor_preparation\.sql/);
+  assert.match(releaseRegistry, /20261009000000_unify_automation_master_and_truthful_queue_inventory\.sql/);
   assert.match(releaseRegistry, /20260728030000_full_article_pipeline\.sql/);
   assert.match(releaseRegistry, /20260824010000_full_article_pipeline_safety\.sql/);
   assert.match(releaseRegistry, /20260824020000_full_article_pipeline_optional_prerequisites\.sql/);

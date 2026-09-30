@@ -11,7 +11,6 @@ import type {
   ContentWritingProvider,
   ContentWritingSession,
 } from './contentWritingSessionService';
-import { readContentResearchAutomationSettings } from './externalAnalysisSettings';
 import { readArticleAutomationPolicy } from './articleAutomationPolicy';
 import { readAiProviderCapabilities } from './aiProviderCapabilities';
 import { readUserAiRoutingPreferences } from './userAiRoutingPreferences';
@@ -304,25 +303,6 @@ const deferDueAutomaticContentWritingRetryForFairness = async (): Promise<boolea
   return data === true || (Array.isArray(data) && data[0] === true);
 };
 
-const reconcileAutomaticArticleFocus = async (): Promise<void> => {
-  const { error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'reconcile_automatic_article_focus',
-  );
-  if (error && !isContentWritingAutomationSchemaUnavailableError(error)) throw error;
-};
-
-const enqueueNextAutomaticCompetitorPreparation = async (
-  settings: ContentWritingAutomationSettings,
-): Promise<void> => {
-  const { error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'enqueue_next_automatic_writing_competitor_preparation',
-    { p_min_competitor_count: settings.minimumCompetitors },
-  );
-  // Rolling deployment compatibility: the existing writing queue must keep
-  // operating while the new preparation migration is being applied.
-  if (error && !isContentWritingAutomationSchemaUnavailableError(error)) throw error;
-};
-
 const createAutomationSessionIdempotencyKey = (
   item: ContentWritingAutomationItemRow,
 ): string => (
@@ -408,142 +388,11 @@ const releaseClaim = async (
   if (releaseError) throw releaseError;
 };
 
-let lastPrerequisiteReconciliationAt = 0;
-let lastTransientRecoveryAt = 0;
-
-const recoverDueTransientItems = async (
-  settings: ContentWritingAutomationSettings,
-): Promise<void> => {
-  const now = Date.now();
-  if (now - lastTransientRecoveryAt < 60_000) return;
-  lastTransientRecoveryAt = now;
-
-  const { error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'recover_due_content_writing_automation_items',
-    {
-      p_max_attempts: settings.maxAttempts,
-      p_limit: 5,
-    },
-  );
-  if (error && !isContentWritingAutomationSchemaUnavailableError(error)) throw error;
-};
-
-const reconcileBlockedPrerequisiteItems = async (
-  settings: ContentWritingAutomationSettings,
-): Promise<void> => {
-  const now = Date.now();
-  if (now - lastPrerequisiteReconciliationAt < 30_000) return;
-  lastPrerequisiteReconciliationAt = now;
-
-  const supabase = getExternalAnalysisSupabaseAdmin();
-  const { data, error } = await supabase
-    .from('content_writing_automation_items')
-    .select('*')
-    .eq('status', 'blocked')
-    .eq('last_error_code', 'content_writing_prerequisites_missing')
-    .order('updated_at', { ascending: true })
-    .limit(10);
-  if (error) throw error;
-
-  for (const rawItem of data || []) {
-    const item = rawItem as ContentWritingAutomationItemRow;
-    const { data: readinessData, error: readinessError } = await supabase.rpc(
-      'evaluate_content_writing_automation_readiness',
-      { p_article_id: item.article_id },
-    );
-    if (readinessError) throw readinessError;
-    const readiness = isRecord(readinessData) ? readinessData : {};
-    const missingFields = Array.isArray(readiness.missingFields)
-      ? readiness.missingFields.map(textValue).filter(Boolean)
-      : [];
-    const usableCompetitorCount = boundedInteger(readiness.usableCompetitorCount, 0, 0, 5);
-    const pendingCompetitorCount = boundedInteger(readiness.pendingCompetitorCount, 0, 0, 5);
-    const processingComplete = readiness.processingComplete === true;
-    const ready = readiness.ready === true
-      && usableCompetitorCount >= settings.minimumCompetitors
-      && (!settings.requireCompetitorTerminalState || processingComplete);
-
-    if (
-      item.attempt_count !== 0
-      || item.max_attempts !== settings.maxAttempts
-      || item.usable_competitor_count !== usableCompetitorCount
-      || item.pending_competitor_count !== pendingCompetitorCount
-    ) {
-      const { error: normalizeError } = await supabase
-        .from('content_writing_automation_items')
-        .update({
-          attempt_count: 0,
-          max_attempts: settings.maxAttempts,
-          usable_competitor_count: usableCompetitorCount,
-          pending_competitor_count: pendingCompetitorCount,
-        })
-        .eq('id', item.id)
-        .eq('status', 'blocked')
-        .eq('last_error_code', 'content_writing_prerequisites_missing');
-      if (normalizeError) throw normalizeError;
-    }
-
-    if (ready && textValue(readiness.signature) !== item.readiness_signature) {
-      const { error: updateError } = await supabase
-        .from('content_writing_automation_items')
-        .update({
-          status: 'ready',
-          readiness_signature: textValue(readiness.signature),
-          usable_competitor_count: usableCompetitorCount,
-          pending_competitor_count: pendingCompetitorCount,
-          attempt_count: 0,
-          max_attempts: settings.maxAttempts,
-          ready_at: new Date().toISOString(),
-          eligible_at: new Date().toISOString(),
-          started_at: null,
-          completed_at: null,
-          last_error_code: null,
-          last_error: null,
-        })
-        .eq('id', item.id)
-        .eq('status', 'blocked')
-        .eq('last_error_code', 'content_writing_prerequisites_missing');
-      if (updateError) throw updateError;
-      continue;
-    }
-
-    const onlyCompetitorsMissing = missingFields.every(field => field === 'competitors')
-      && (missingFields.includes('competitors') || usableCompetitorCount < settings.minimumCompetitors);
-    if (!onlyCompetitorsMissing || pendingCompetitorCount > 0) continue;
-    const { error: preparationError } = await supabase.rpc(
-      'enqueue_content_writing_competitor_preparation',
-      {
-        p_article_id: item.article_id,
-        p_requested_by: item.requested_by,
-        p_origin: 'auto',
-        p_provider: settings.provider,
-        p_model: settings.model,
-        p_content_writing_idempotency_key: '',
-        p_min_competitor_count: settings.minimumCompetitors,
-        p_start_writing: false,
-      },
-    );
-    if (preparationError && !isContentWritingAutomationSchemaUnavailableError(preparationError)) {
-      console.warn(
-        `[content-writing-automation] Could not prepare missing competitors for ${item.article_id}:`,
-        preparationError,
-      );
-    }
-  }
-};
-
 export const scheduleNextAutomaticContentWritingSession = async (
   workerId: string,
 ): Promise<QueuedContentWritingSession | null> => {
-  const [settings, researchAutomation] = await Promise.all([
-    readContentWritingAutomationSettings(),
-    readContentResearchAutomationSettings(),
-  ]);
+  const settings = await readContentWritingAutomationSettings();
   if (!settings.enabled) return null;
-
-  await reconcileAutomaticArticleFocus();
-  await recoverDueTransientItems(settings);
-  await reconcileBlockedPrerequisiteItems(settings);
 
   const retryDeferredForFairness = await deferDueAutomaticContentWritingRetryForFairness();
   if (!retryDeferredForFairness) {
@@ -558,12 +407,7 @@ export const scheduleNextAutomaticContentWritingSession = async (
   }
 
   const item = await claimNextItem(workerId, settings);
-  if (!item) {
-    if (researchAutomation.autoDiscoverCompetitors) {
-      await enqueueNextAutomaticCompetitorPreparation(settings);
-    }
-    return null;
-  }
+  if (!item) return null;
 
   const idempotencyKey = createAutomationSessionIdempotencyKey(item);
 

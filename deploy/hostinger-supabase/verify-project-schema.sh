@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-130}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-131}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-67}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -113,6 +113,7 @@ readonly AUTOMATION_COORDINATOR_FUNCTION="$(sql_scalar "select to_regprocedure('
 readonly AUTOMATION_COORDINATOR_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.reconcile_article_automation_coordinator(integer)', 'execute') and not has_function_privilege('authenticated', 'public.reconcile_article_automation_coordinator(integer)', 'execute') and has_function_privilege('service_role', 'public.reconcile_article_automation_coordinator(integer)', 'execute')")"
 readonly AUTOMATION_TASK_INVENTORY_FUNCTION="$(sql_scalar "select to_regprocedure('public.get_visible_automation_task_inventory(uuid)') is not null and to_regprocedure('public.get_visible_automation_task_inventory_raw(uuid)') is not null")"
 readonly AUTOMATION_TASK_INVENTORY_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.get_visible_automation_task_inventory(uuid)', 'execute') and not has_function_privilege('authenticated', 'public.get_visible_automation_task_inventory(uuid)', 'execute') and has_function_privilege('service_role', 'public.get_visible_automation_task_inventory(uuid)', 'execute')")"
+readonly AUTOMATION_SINGLE_MASTER_SCHEMA="$(sql_scalar "select position('article-automation-master-engine' in pg_get_functiondef('public.auto_requeue_recoverable_automation_failures(integer)'::regprocedure)) > 0 and position('reasonCode' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0")"
 readonly EXTERNAL_DEPENDENCY_CHILD_GUARD="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'enforce_external_analysis_dependency_on_child' and not tgisinternal) and to_regprocedure('public.enforce_external_analysis_dependency_on_child()') is not null")"
 readonly EXTERNAL_DEPENDENCY_CHILD_GUARD_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.enforce_external_analysis_dependency_on_child()', 'execute') and not has_function_privilege('authenticated', 'public.enforce_external_analysis_dependency_on_child()', 'execute') and has_function_privilege('service_role', 'public.enforce_external_analysis_dependency_on_child()', 'execute')")"
 
@@ -159,7 +160,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
 [[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
-(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 5 )) || fail "Article work-readiness orchestration version is missing."
+(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 8 )) || fail "Truthful single-master article automation schema is missing."
 [[ "${AUTOMATIC_WRITING_EMPTY_EDITOR_TRIGGER}" == "t" ]] || fail "Automatic content-writing empty-editor trigger is missing."
 [[ "${CONTENT_WRITING_META_DESCRIPTION_STEP}" == "t" ]] || fail "Content-writing step preparation does not allow meta descriptions."
 [[ "${EXTERNAL_ANALYSIS_REQUEUE_INVARIANT}" == "t" ]] || fail "External-analysis requeue invariant is missing or violated."
@@ -191,6 +192,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${AUTOMATION_COORDINATOR_PRIVILEGES}" == "t" ]] || fail "Durable automation coordinator has unsafe browser privileges."
 [[ "${AUTOMATION_TASK_INVENTORY_FUNCTION}" == "t" ]] || fail "Permission-aware automation task inventory function is missing."
 [[ "${AUTOMATION_TASK_INVENTORY_PRIVILEGES}" == "t" ]] || fail "Automation task inventory privileges are unsafe or incomplete."
+[[ "${AUTOMATION_SINGLE_MASTER_SCHEMA}" == "t" ]] || fail "Single-master automation or truthful queue reasons are missing."
 [[ "${EXTERNAL_DEPENDENCY_CHILD_GUARD}" == "t" ]] || fail "Child-side terminal dependency guard is missing."
 [[ "${EXTERNAL_DEPENDENCY_CHILD_GUARD_PRIVILEGES}" == "t" ]] || fail "Child-side terminal dependency guard has unsafe browser privileges."
 

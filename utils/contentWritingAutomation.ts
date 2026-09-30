@@ -141,9 +141,17 @@ export type AutomationTaskInventoryItem = {
   sourceType: string;
   sourceId: string | null;
   priorityRank: number;
+  reasonCode: string | null;
   reason: string | null;
   attemptCount: number;
   maxAttempts: number;
+  missingFields: string[];
+  usableCompetitorCount: number;
+  minimumCompetitorCount: number;
+  recoveryCount: number;
+  maxRecoveries: number;
+  manualReview: boolean;
+  runnable: boolean;
 };
 
 export type ContentWritingAutomationStatus = {
@@ -395,9 +403,19 @@ const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] =
       sourceType: text(entry.sourceType),
       sourceId: nullableText(entry.sourceId),
       priorityRank: Math.max(1, integer(entry.priorityRank, 1)),
+      reasonCode: nullableText(entry.reasonCode),
       reason: nullableText(entry.reason),
       attemptCount: integer(entry.attemptCount),
       maxAttempts: Math.max(1, integer(entry.maxAttempts, 1)),
+      missingFields: Array.isArray(entry.missingFields)
+        ? entry.missingFields.map(text).filter(Boolean)
+        : [],
+      usableCompetitorCount: Math.max(0, integer(entry.usableCompetitorCount)),
+      minimumCompetitorCount: Math.max(0, integer(entry.minimumCompetitorCount)),
+      recoveryCount: Math.max(0, integer(entry.recoveryCount)),
+      maxRecoveries: Math.max(0, integer(entry.maxRecoveries)),
+      manualReview: entry.manualReview === true,
+      runnable: entry.runnable === true || status === 'ready',
     }];
   });
 };

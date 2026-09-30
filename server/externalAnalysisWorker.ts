@@ -100,6 +100,9 @@ const configuredJobTypes = new Set(
 // semantic/engineering AI jobs even though both processes share the worker binary.
 const workerJobTypes: ExternalAnalysisJobType[] = getSupportedExternalAnalysisJobTypes()
   .filter(jobType => configuredJobTypes.size === 0 || configuredJobTypes.has(jobType));
+const automationMasterEnabled = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.EXTERNAL_ANALYSIS_AUTOMATION_MASTER || '').trim().toLowerCase(),
+);
 const recoveryIntervalMs = 60_000;
 const workerId = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
@@ -136,6 +139,7 @@ const logThrottledError = (scope: string, error: unknown): void => {
 };
 
 const recoverStaleJobsIfDue = async (): Promise<void> => {
+  if (!automationMasterEnabled) return;
   const now = Date.now();
   if (now - lastRecoveryAt < recoveryIntervalMs) return;
   lastRecoveryAt = now;
@@ -427,7 +431,7 @@ const queueWorker = new AdaptiveQueueWorker<ExternalAnalysisJob>({
 
 const runWorker = async (): Promise<void> => {
   console.log(
-    `[external-analysis-worker] Started ${workerId}; jobTypes=${workerJobTypes.join(',') || 'none'}; concurrency=${workerConcurrency}, idlePoll=${pollIntervalMs}-${maximumIdlePollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m, maxRetries=${maximumRetryCount} (global setting takes precedence).`,
+    `[external-analysis-worker] Started ${workerId}; jobTypes=${workerJobTypes.join(',') || 'none'}; automationMaster=${automationMasterEnabled ? 'enabled' : 'disabled'}; concurrency=${workerConcurrency}, idlePoll=${pollIntervalMs}-${maximumIdlePollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m, maxRetries=${maximumRetryCount} (global setting takes precedence).`,
   );
 
   const unsubscribeWakeSignal: () => void = workerJobTypes.length > 0

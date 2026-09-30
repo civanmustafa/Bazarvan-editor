@@ -87,7 +87,12 @@ npm run build
 
 for app_name in "${PM2_APPS[@]}"; do
   if [[ "${app_name}" == "bazarvan-staging-ai-worker" ]]; then
-    EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup \
+    EXTERNAL_ANALYSIS_AUTOMATION_MASTER=true \
+      EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup \
+      pm2 restart "${app_name}" --update-env
+  elif [[ "${app_name}" == "bazarvan-staging-competitor-worker" \
+       || "${app_name}" == "bazarvan-staging-full-article-pipeline-worker" ]]; then
+    EXTERNAL_ANALYSIS_AUTOMATION_MASTER=false \
       pm2 restart "${app_name}" --update-env
   else
     pm2 restart "${app_name}" --update-env
@@ -95,9 +100,11 @@ for app_name in "${PM2_APPS[@]}"; do
 done
 
 if pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null 2>&1; then
-  pm2 restart "${CONTENT_WRITING_PREPARATION_APP}" --update-env
+  EXTERNAL_ANALYSIS_AUTOMATION_MASTER=false \
+    pm2 restart "${CONTENT_WRITING_PREPARATION_APP}" --update-env
 else
   NODE_ENV=production \
+  EXTERNAL_ANALYSIS_AUTOMATION_MASTER=false \
   EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=content_writing_preparation \
   EXTERNAL_ANALYSIS_WORKER_POLL_MS="${CONTENT_WRITING_PREPARATION_WORKER_POLL_MS:-5000}" \
   EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS="${CONTENT_WRITING_PREPARATION_WORKER_IDLE_MAX_MS:-30000}" \

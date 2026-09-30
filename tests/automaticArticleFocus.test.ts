@@ -10,12 +10,13 @@ const readWorkspaceFile = (relativePath: string): Promise<string> => (
 const migrationPath = 'supabase/migrations/20261007000000_finish_focused_article_first.sql';
 
 test('finish-first migration contains one shared automatic article lane', async () => {
-  const [migration, api, client, panel, worker] = await Promise.all([
+  const [migration, api, client, panel, writingWorker, masterWorker] = await Promise.all([
     readWorkspaceFile(migrationPath),
     readWorkspaceFile('api/contentWritingAutomation.ts'),
     readWorkspaceFile('utils/contentWritingAutomation.ts'),
     readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx'),
     readWorkspaceFile('server/contentWritingAutomation.ts'),
+    readWorkspaceFile('server/externalAnalysisWorker.ts'),
   ]);
 
   assert.match(migration, /create table if not exists public\.automatic_article_focus/);
@@ -28,7 +29,9 @@ test('finish-first migration contains one shared automatic article lane', async 
   assert.match(api, /skip_automatic_article_focus/);
   assert.match(client, /AutomaticArticleFocus/);
   assert.match(panel, /أولوية إنهاء المقالة الحالية/);
-  assert.match(worker, /reconcile_automatic_article_focus/);
+  assert.doesNotMatch(writingWorker, /reconcile_automatic_article_focus/);
+  assert.match(masterWorker, /reconcileArticleAutomationCoordinator/);
+  assert.match(masterWorker, /EXTERNAL_ANALYSIS_AUTOMATION_MASTER/);
 });
 
 test('finish-first focus serializes articles, survives retry, and supports manual review', async () => {

@@ -15,7 +15,8 @@ test('automation task inventory is access-scoped and ranks running work first pe
       create table public.articles (
         id uuid primary key, title text, created_by uuid,
         status text not null default 'draft',
-        keywords jsonb not null default '{}'::jsonb
+        keywords jsonb not null default '{}'::jsonb,
+        plain_text text not null default ''
       );
       create function public.article_access_level_for_user(p_article_id uuid, p_user_id uuid)
       returns text language sql stable as $$
@@ -41,13 +42,16 @@ test('automation task inventory is access-scoped and ranks running work first pe
         cancel_requested_at timestamptz, locked_by text, locked_at timestamptz,
         lease_expires_at timestamptz, completed_at timestamptz,
         dead_lettered_at timestamptz, dead_letter_reason text
+        ,readiness_signature text, pipeline_parent_job_id uuid
       );
       create table public.ai_external_analysis_runs (
         id uuid primary key default gen_random_uuid(), job_id uuid references public.ai_external_analysis_jobs(id),
         run_number integer default 1, error_code text, error_message text
       );
       create table public.content_writing_automation_items (
-        id uuid primary key, article_id uuid references public.articles(id), status text,
+        id uuid primary key, article_id uuid references public.articles(id), requested_by uuid, status text,
+        readiness_signature text, usable_competitor_count integer default 0,
+        pending_competitor_count integer default 0,
         ready_at timestamptz, eligible_at timestamptz, started_at timestamptz,
         next_recovery_at timestamptz, failure_class text, recovery_count integer default 0,
         content_writing_session_id uuid, run_generation integer default 1,
@@ -68,14 +72,54 @@ test('automation task inventory is access-scoped and ranks running work first pe
       );
       create table public.app_settings (key text primary key, value jsonb not null);
       create table public.worker_queue_signals (queue_name text);
+      create table public.automatic_article_focus_pauses (
+        article_id uuid primary key references public.articles(id), reason text,
+        error_code text, error_message text
+      );
       create function public.automation_failure_is_retryable(text, text)
       returns boolean language sql immutable as $$
         select lower(coalesce($1, '') || ' ' || coalesce($2, '')) ~ '(503|timeout|quota)'
       $$;
       create function public.article_automatic_job_allowed(uuid, text, text default null)
       returns boolean language sql stable as $$ select true $$;
+      create function public.article_automatic_policy_allows(uuid, text, text default null)
+      returns boolean language sql stable as $$ select true $$;
+      create function public.automatic_article_focus_allows(uuid, text)
+      returns boolean language sql stable as $$ select true $$;
+      create function public.article_editor_has_text(value text)
+      returns boolean language sql immutable as $$ select nullif(btrim(coalesce(value, '')), '') is not null $$;
+      create function public.evaluate_content_writing_automation_readiness(p_article_id uuid)
+      returns jsonb language sql stable as $$
+        with evidence as (
+          select article.id, public.article_editor_has_text(article.plain_text) editor_has_text,
+            count(competitor.id) filter (
+              where competitor.status = 'completed'
+                and nullif(btrim(competitor.content_text), '') is not null
+            )::integer competitors
+          from public.articles article
+          left join public.article_competitors competitor on competitor.article_id = article.id
+          where article.id = p_article_id
+          group by article.id, article.plain_text
+        )
+        select jsonb_build_object(
+          'ready', not editor_has_text and competitors >= 2,
+          'signature', md5(id::text || ':' || competitors::text || ':' || editor_has_text::text),
+          'missingFields', case
+            when editor_has_text and competitors < 2 then '["article_editor_empty","competitors"]'::jsonb
+            when editor_has_text then '["article_editor_empty"]'::jsonb
+            when competitors < 2 then '["competitors"]'::jsonb
+            else '[]'::jsonb
+          end,
+          'usableCompetitorCount', competitors,
+          'minimumCompetitorCount', 2,
+          'pendingCompetitorCount', 0,
+          'processingComplete', true
+        ) from evidence
+      $$;
+      create function public.initialize_article_automation_stage_states(uuid)
+      returns void language sql as $$ select $$;
       insert into public.app_settings(key,value)
-      values('ai', '{"contentWritingAutomationMaxAttempts":3}');
+      values('ai', '{"contentWritingAutomationMaxAttempts":3,"contentWritingAutomationMinimumCompetitors":2}');
     `);
     await db.exec(await readFile(new URL(
       '../supabase/migrations/20261002000000_visible_automation_task_inventory.sql',
@@ -87,6 +131,10 @@ test('automation task inventory is access-scoped and ranks running work first pe
     ), 'utf8'));
     await db.exec(await readFile(new URL(
       '../supabase/migrations/20261004000000_draft_only_automation_stage_inventory.sql',
+      import.meta.url,
+    ), 'utf8'));
+    await db.exec(await readFile(new URL(
+      '../supabase/migrations/20261009000000_unify_automation_master_and_truthful_queue_inventory.sql',
       import.meta.url,
     ), 'utf8'));
 
@@ -159,7 +207,7 @@ test('automation task inventory is access-scoped and ranks running work first pe
     const recoverableWriting = '30000000-0000-4000-8000-000000000001';
     await db.query(`insert into ai_external_analysis_jobs(
       id,article_id,job_type,status,last_error_code,last_error,completed_at
-    ) values($1,$2,'competitor_extraction','failed','provider_503','Temporary provider outage',now())`, [
+    ) values($1,$2,'competitor_extraction','failed','provider_503','Temporary provider outage',now()-interval '2 hours')`, [
       recoverableJob, articleOne,
     ]);
     await db.query(`insert into ai_external_analysis_runs(job_id,error_code,error_message)
@@ -169,10 +217,14 @@ test('automation task inventory is access-scoped and ranks running work first pe
     ) values($1,$2,'blocked','transient','provider_503','Temporary provider outage',now(),now(),now())`, [
       recoverableWriting, articleOne,
     ]);
+    await db.query(`update content_writing_automation_items
+      set next_recovery_at=now()-interval '1 minute' where id=$1`, [recoverableWriting]);
     const recovered = (await db.query<any>(
       'select public.auto_requeue_recoverable_automation_failures(50) value',
     )).rows[0].value;
-    assert.deepEqual(recovered, { externalAnalysis: 1, contentWriting: 1, total: 2 });
+    assert.deepEqual(recovered, {
+      externalAnalysis: 1, contentWriting: 1, total: 2, skipped: false,
+    });
     const recoveredJob = (await db.query<any>(
       'select status, progress->>\'automaticRecoveryCount\' recovery_count from ai_external_analysis_jobs where id=$1',
       [recoverableJob],

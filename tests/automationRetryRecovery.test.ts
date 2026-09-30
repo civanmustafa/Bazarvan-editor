@@ -263,8 +263,9 @@ test('recoverable admin action remains server-only and excludes permanent failur
 });
 
 test('workers automatically requeue only bounded recoverable failures without an administrator click', async () => {
-  const [migration, worker, queue] = await Promise.all([
+  const [migration, unifiedMasterMigration, worker, queue] = await Promise.all([
     readFile(path.join(root, 'supabase', 'migrations', '20261003000000_automation_inventory_completion_and_auto_recovery.sql'), 'utf8'),
+    readFile(path.join(root, 'supabase', 'migrations', '20261009000000_unify_automation_master_and_truthful_queue_inventory.sql'), 'utf8'),
     readFile(path.join(root, 'server', 'externalAnalysisWorker.ts'), 'utf8'),
     readFile(path.join(root, 'server', 'externalAnalysisQueue.ts'), 'utf8'),
   ]);
@@ -277,7 +278,13 @@ test('workers automatically requeue only bounded recoverable failures without an
   assert.match(migration, /revoke all on function public\.auto_requeue_recoverable_automation_failures[\s\S]*anon, authenticated/);
   assert.match(migration, /grant execute on function public\.auto_requeue_recoverable_automation_failures[\s\S]*service_role/);
   assert.match(queue, /autoRequeueRecoverableAutomationFailures/);
-  assert.match(worker, /await autoRequeueRecoverableAutomationFailures\(50\)/);
+  assert.match(worker, /automationMasterEnabled[\s\S]*await autoRequeueRecoverableAutomationFailures\(50\)/);
+  assert.match(worker, /EXTERNAL_ANALYSIS_AUTOMATION_MASTER/);
+  assert.match(unifiedMasterMigration, /sole terminal-recovery[\s\S]*recover_stale_external_analysis_jobs[\s\S]*auto_requeue_recoverable_automation_failures/);
+  const leaseRecoveryDefinition = unifiedMasterMigration.match(
+    /create or replace function public\.recover_stale_external_analysis_jobs[\s\S]*?\$\$;/,
+  )?.[0] || '';
+  assert.doesNotMatch(leaseRecoveryDefinition, /job\.status in \('failed', 'blocked'\)/);
 });
 
 test('durable master coordinator tracks independent stages and is reconciled by the worker', async () => {
@@ -295,7 +302,7 @@ test('durable master coordinator tracks independent stages and is reconciled by 
   assert.match(migration, /enqueue_automatic_competitor_extraction_for_discovery/);
   assert.match(migration, /enqueue_next_automatic_writing_competitor_preparation/);
   assert.match(queue, /reconcileArticleAutomationCoordinator/);
-  assert.match(worker, /await reconcileArticleAutomationCoordinator\(\)/);
+  assert.match(worker, /automationMasterEnabled[\s\S]*await reconcileArticleAutomationCoordinator\(\)/);
 });
 
 test('terminal dependency guard covers children created or requeued after the parent stopped', async () => {

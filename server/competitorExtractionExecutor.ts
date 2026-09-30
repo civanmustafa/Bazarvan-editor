@@ -306,6 +306,10 @@ const loadReserveSources = async (options: {
   snapshot: Record<string, unknown>;
   rows: CompetitorRow[];
 }): Promise<ReserveCompetitorSource[]> => {
+  const { rows: allRows } = options;
+  const occupiedUrls = new Set(allRows.flatMap(row => (
+    [text(row.canonical_url), text(row.source_url)].filter(Boolean)
+  )));
   const snapshotValues = Array.isArray(options.snapshot.reserveSources)
     ? options.snapshot.reserveSources
     : [];
@@ -320,7 +324,10 @@ const loadReserveSources = async (options: {
       || (isRecord(value) && value.eligible === true);
     if (!confirmed) return [];
     const source = normalizeReserveSource(value);
-    return source ? [source] : [];
+    if (!source || occupiedUrls.has(source.canonicalUrl) || occupiedUrls.has(source.url)) return [];
+    occupiedUrls.add(source.canonicalUrl);
+    occupiedUrls.add(source.url);
+    return [source];
   }).slice(0, COMPETITOR_REPLACEMENT_RESERVE_LIMIT);
 
   if (reserves.length > 0) {
